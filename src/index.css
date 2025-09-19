@@ -1,0 +1,308 @@
+/* Tailwind v4: define color tokens with @theme so utilities like bg-primary, text-primary-foreground, ring-ring, etc. are available */
+@theme {
+  --radius: 0.5rem;
+
+  --color-background: 0 0% 100%;
+  --color-foreground: 240 10% 3.9%;
+
+  --color-muted: 240 4.8% 95.9%;
+  --color-muted-foreground: 240 3.8% 46.1%;
+
+  --color-popover: 0 0% 100%;
+  --color-popover-foreground: 240 10% 3.9%;
+
+  --color-border: 240 5.9% 90%;
+  --color-input: 240 5.9% 90%;
+
+  --color-card: 0 0% 100%;
+  --color-card-foreground: 240 10% 3.9%;
+
+  --color-primary: 240 5.9% 10%;
+  --color-primary-foreground: 0 0% 98%;
+
+  --color-secondary: 240 4.8% 95.9%;
+  --color-secondary-foreground: 240 5.9% 10%;
+
+  --color-accent: 240 4.8% 95.9%;
+  --color-accent-foreground: 240 5.9% 10%;
+
+  --color-destructive: 0 84.2% 60.2%;
+  --color-destructive-foreground: 0 0% 98%;
+
+  --color-info: 204 94% 94%;
+  --color-info-foreground: 199 89% 48%;
+
+  --color-success: 149 80% 90%;
+  --color-success-foreground: 160 84% 39%;
+
+  --color-warning: 48 96% 89%;
+  --color-warning-foreground: 25 95% 53%;
+
+  --color-error: 0 93% 94%;
+  --color-error-foreground: 0 84% 60%;
+
+  --color-ring: 240 5.9% 10%;
+}
+
+@theme .dark {
+  --color-background: 240 10% 3.9%;
+  --color-foreground: 0 0% 98%;
+
+  --color-muted: 240 3.7% 15.9%;
+  --color-muted-foreground: 240 5% 64.9%;
+
+  --color-accent: 240 3.7% 15.9%;
+  --color-accent-foreground: 0 0% 98%;
+
+  --color-popover: 240 10% 3.9%;
+  --color-popover-foreground: 0 0% 98%;
+
+  --color-border: 240 3.7% 15.9%;
+  --color-input: 240 3.7% 15.9%;
+
+  --color-card: 240 10% 3.9%;
+  --color-card-foreground: 0 0% 98%;
+
+  --color-primary: 0 0% 98%;
+  --color-primary-foreground: 240 5.9% 10%;
+
+  --color-secondary: 240 3.7% 15.9%;
+  --color-secondary-foreground: 0 0% 98%;
+
+  --color-destructive: 0 62.8% 30.6%;
+  --color-destructive-foreground: 0 0% 98%;
+
+  --color-info: 204 94% 94%;
+  --color-info-foreground: 199 89% 48%;
+
+  --color-success: 149 80% 90%;
+  --color-success-foreground: 160 84% 39%;
+
+  --color-warning: 48 96% 89%;
+  --color-warning-foreground: 25 95% 53%;
+
+  --color-error: 0 93% 94%;
+  --color-error-foreground: 0 84% 60%;
+
+  --color-ring: 240 4.9% 83.9%;
+  --radius: 0.5rem;
+}
+
+@theme [data-kb-theme="dark"] {
+  --color-background: 240 10% 3.9%;
+  --color-foreground: 0 0% 98%;
+  --color-muted: 240 3.7% 15.9%;
+  --color-muted-foreground: 240 5% 64.9%;
+  --color-accent: 240 3.7% 15.9%;
+  --color-accent-foreground: 0 0% 98%;
+  --color-popover: 240 10% 3.9%;
+  --color-popover-foreground: 0 0% 98%;
+  --color-border: 240 3.7% 15.9%;
+  --color-input: 240 3.7% 15.9%;
+  --color-card: 240 10% 3.9%;
+  --color-card-foreground: 0 0% 98%;
+  --color-primary: 0 0% 98%;
+  --color-primary-foreground: 240 5.9% 10%;
+  --color-secondary: 240 3.7% 15.9%;
+  --color-secondary-foreground: 0 0% 98%;
+  --color-destructive: 0 62.8% 30.6%;
+  --color-destructive-foreground: 0 0% 98%;
+  --color-info: 204 94% 94%;
+  --color-info-foreground: 199 89% 48%;
+  --color-success: 149 80% 90%;
+  --color-success-foreground: 160 84% 39%;
+  --color-warning: 48 96% 89%;
+  --color-warning-foreground: 25 95% 53%;
+  --color-error: 0 93% 94%;
+  --color-error-foreground: 0 84% 60%;
+  --color-ring: 240 4.9% 83.9%;
+  --radius: 0.5rem;
+}
+
+/* Import Tailwind AFTER @theme so tokens are known at generation time */
+@import 'tailwindcss';
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --info: 204 94% 94%;
+    --info-foreground: 199 89% 48%;
+
+    --success: 149 80% 90%;
+    --success-foreground: 160 84% 39%;
+
+    --warning: 48 96% 89%;
+    --warning-foreground: 25 95% 53%;
+
+    --error: 0 93% 94%;
+    --error-foreground: 0 84% 60%;
+
+    --ring: 240 5.9% 10%;
+
+    --radius: 0.5rem;
+  }
+
+  .dark,
+  [data-kb-theme="dark"] {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --info: 204 94% 94%;
+    --info-foreground: 199 89% 48%;
+
+    --success: 149 80% 90%;
+    --success-foreground: 160 84% 39%;
+
+    --warning: 48 96% 89%;
+    --warning-foreground: 25 95% 53%;
+
+    --error: 0 93% 94%;
+    --error-foreground: 0 84% 60%;
+
+    --ring: 240 4.9% 83.9%;
+
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    /* Tailwind v4 may not generate `border-border` if the theme doesn't expose it.
+       Set the base border color directly from our CSS variable instead. */
+    border-color: hsl(var(--border));
+  }
+  body {
+    /* Use CSS variables directly to avoid relying on generated utilities */
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-feature-settings:
+      "rlig" 1,
+      "calt" 1;
+  }
+}
+
+@layer utilities {
+  .step {
+    counter-increment: step;
+  }
+
+  .step:before {
+    @apply absolute w-9 h-9 bg-muted rounded-full font-mono font-medium text-center text-base inline-flex items-center justify-center -indent-px border-4;
+    /* Set border color directly using our token variable */
+    border-color: hsl(var(--background));
+    @apply ml-[-50px] mt-[-4px];
+    content: counter(step);
+  }
+}
+
+@media (max-width: 640px) {
+  .container {
+    @apply px-4;
+  }
+}
+
+/* Bridge utilities: map token classes to our HSL variables so v4 variants render */
+@layer utilities {
+  /* Filled buttons */
+  .bg-primary { background-color: hsl(var(--primary)); }
+  .text-primary-foreground { color: hsl(var(--primary-foreground)); }
+  .text-primary { color: hsl(var(--primary)); }
+
+  .bg-secondary { background-color: hsl(var(--secondary)); }
+  .text-secondary-foreground { color: hsl(var(--secondary-foreground)); }
+
+  .bg-destructive { background-color: hsl(var(--destructive)); }
+  .text-destructive-foreground { color: hsl(var(--destructive-foreground)); }
+
+  /* Outline + ghost helpers */
+  .border-input { border-color: hsl(var(--input)); }
+  .bg-accent { background-color: hsl(var(--accent)); }
+  .text-accent-foreground { color: hsl(var(--accent-foreground)); }
+  .hover\:bg-accent:hover { background-color: hsl(var(--accent)); }
+  .hover\:text-accent-foreground:hover { color: hsl(var(--accent-foreground)); }
+
+  /* Rings */
+  .ring-ring { --tw-ring-color: hsl(var(--ring)); }
+  .ring-offset-background { --tw-ring-offset-color: hsl(var(--background)); }
+
+  /* Hover opacity variants used by cva */
+  .hover\:bg-primary\/90:hover { background-color: hsl(var(--primary) / 0.9); }
+  .hover\:bg-secondary\/80:hover { background-color: hsl(var(--secondary) / 0.8); }
+  .hover\:bg-destructive\/90:hover { background-color: hsl(var(--destructive) / 0.9); }
+
+  /* Core tokens used by dialogs and overlays */
+  .bg-background { background-color: hsl(var(--background)); }
+  .text-foreground { color: hsl(var(--foreground)); }
+  .text-muted-foreground { color: hsl(var(--muted-foreground)); }
+  .bg-popover { background-color: hsl(var(--popover)); }
+  .text-popover-foreground { color: hsl(var(--popover-foreground)); }
+  /* Escaped slash class to support bg-background/80 used by overlays */
+  .bg-background\/80 { background-color: hsl(var(--background) / 0.8); }
+  /* Common alternative opacity */
+  .bg-background\/50 { background-color: hsl(var(--background) / 0.5); }
+}
+
+::-webkit-scrollbar {
+  width: 16px;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  border: 4px solid transparent;
+  background-clip: content-box;
+  @apply bg-accent;
+}
+
+::-webkit-scrollbar-corner {
+  display: none;
+}

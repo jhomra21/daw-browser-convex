@@ -1,0 +1,40 @@
+{
+  "name": "mediabunny-first-test",
+  "version": "0.0.0",
+  "description": "",
+  "type": "module",
+  "scripts": {
+    "start": "vite",
+    "dev": "vite",
+    "build": "vite build",
+    "serve": "vite preview"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.13.0",
+    "@cloudflare/workers-types": "^4.20250912.0",
+    "@tailwindcss/vite": "^4.1.13",
+    "@types/node": "^24.3.2",
+    "solid-devtools": "^0.34.3",
+    "tailwindcss": "^4.1.13",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.5",
+    "vite-plugin-solid": "^2.11.8",
+    "wrangler": "^4.36.0"
+  },
+  "dependencies": {
+    "@kobalte/core": "^0.13.11",
+    "@openrouter/ai-sdk-provider": "^1.2.0",
+    "@tanstack/solid-query": "^5.87.4",
+    "ai": "^5.0.44",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "convex": "^1.27.1",
+    "hono": "^4.9.7",
+    "mediabunny": "^1.15.2",
+    "solid-js": "^1.9.9",
+    "tailwind-merge": "^3.3.1",
+    "tailwindcss-animate": "^1.0.7",
+    "zod": "^4.1.8"
+  }
+}

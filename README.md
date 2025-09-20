@@ -19,6 +19,7 @@ A modern, collaborative digital audio workstation (DAW) built with SolidJS, feat
 - **Hono Framework**: Lightweight API framework for backend services
 - **TailwindCSS**: Modern styling with utility-first approach
 - **TypeScript**: Full type safety throughout the application
+- **Cloudflare Vite Plugin**: Vite plugin to have server and client on single worker and ease of development
 
 ## 🏗️ Architecture
 
@@ -62,6 +63,9 @@ A modern, collaborative digital audio workstation (DAW) built with SolidJS, feat
 │   └── App.tsx            # Main application component
 ├── package.json           # Dependencies and scripts
 └── wrangler.jsonc         # Cloudflare Workers configuration
+                            # - Defines R2 bucket bindings for audio storage
+                            # - Configures deployment settings
+                            # - Sets up SPA routing for the frontend
 ```
 
 ## 🚀 Getting Started
@@ -77,7 +81,7 @@ A modern, collaborative digital audio workstation (DAW) built with SolidJS, feat
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
-   cd mediabunny-first-test
+   cd <folder-name>
    ```
 
 2. **Install dependencies**
@@ -87,9 +91,23 @@ A modern, collaborative digital audio workstation (DAW) built with SolidJS, feat
    ```
 
 3. **Environment Setup**
+
+   **Cloudflare R2 Setup:**
+   - Create R2 bucket for audio storage:
+     ```bash
+     wrangler r2 bucket create daw-audio-samples
+     ```
+   - Generate Cloudflare Workers types:
+     ```bash
+     wrangler types ./api/worker-configuration.d.ts
+     ```
+
+   **Database & Environment:**
    - Copy `example.env` to `.env` and configure your environment variables
    - Set up Convex deployment
-   - Configure Cloudflare Workers bindings
+   - Configure Cloudflare Workers bindings in `wrangler.jsonc`:
+     - R2 bucket binding: `daw_audio_samples` (matches the bucket name created above)
+     - Ensure `nodejs_compat` is enabled
 
 4. **Development**
    ```bash

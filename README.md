@@ -43,7 +43,7 @@ A modern, collaborative digital audio workstation (DAW) built with SolidJS, feat
 ## 📁 Project Structure
 
 ```
-mediabunny-first-test/
+<root>/
 ├── api/                    # Cloudflare Workers API
 │   └── index.ts           # Hono API routes for audio upload/storage
 ├── convex/                # Database schema and functions

@@ -29,6 +29,50 @@ const Timeline: Component = () => {
   const [roomId, setRoomId] = createSignal<string>('')
   const [sessionId, setSessionId] = createSignal<string>('')
 
+  // Track clip loading state to avoid duplicate fetches/decodes
+  const loadingClipIds = new Set<string>()
+
+  async function uploadToR2(room: string, clip: string, file: File, durationSec?: number): Promise<string | null> {
+    try {
+      const fd = new FormData()
+      fd.append('roomId', room)
+      fd.append('clipId', clip)
+      fd.append('file', file, file.name)
+      if (typeof durationSec === 'number' && isFinite(durationSec)) {
+        fd.append('duration', String(durationSec))
+      }
+      const res = await fetch('/api/samples', { method: 'POST', body: fd })
+      if (!res.ok) return null
+      const data: any = await res.json().catch(() => null as any)
+      return data?.url ?? null
+    } catch {
+      return null
+    }
+  }
+
+  async function ensureClipBuffer(clipId: string, sampleUrl?: string) {
+    if (audioBufferCache.has(clipId) || loadingClipIds.has(clipId)) return
+    loadingClipIds.add(clipId)
+    try {
+      if (sampleUrl) {
+        const res = await fetch(sampleUrl)
+        if (res.ok) {
+          const ab = await res.arrayBuffer()
+          const decoded = await audioEngine.decodeAudioData(ab)
+          audioBufferCache.set(clipId, decoded)
+          setTracks(ts => ts.map(t => ({
+            ...t,
+            clips: t.clips.map(c => c.id === clipId ? { ...c, buffer: decoded } : c)
+          })))
+        }
+      }
+    } catch {
+      // Ignore errors; buffer remains unset
+    } finally {
+      loadingClipIds.delete(clipId)
+    }
+  }
+
   onMount(() => {
     // Resolve roomId from URL or create a new one
     try {
@@ -52,10 +96,11 @@ const Timeline: Component = () => {
       }
       setSessionId(sid)
     } catch {}
+
+    // Cloud-only mode: no local clip name cache
   })
-  // Local caches for responsiveness and non-shared data
+  // Local caches for responsiveness
   const audioBufferCache = new Map<string, AudioBuffer>()
-  const clipNameCache = new Map<string, string>()
   const volumeTimers = new Map<string, number>()
   
   // Playback hook
@@ -151,7 +196,7 @@ const Timeline: Component = () => {
       const prevTrack = oldTrackMap.get(trackId)
       const prevClip = prevTrack?.clips.find(cc => cc.id === (c._id as string))
       const buffer = audioBufferCache.get(c._id as string) ?? prevClip?.buffer ?? null
-      const name = clipNameCache.get(c._id as string) ?? prevClip?.name ?? 'Clip'
+      const name = (c as any).name ?? prevClip?.name ?? 'Clip'
       const color = prevClip?.color ?? '#22c55e'
       t.clips.push({
         id: c._id as string,
@@ -160,6 +205,7 @@ const Timeline: Component = () => {
         startSec: c.startSec as number,
         duration: c.duration as number,
         color,
+        sampleUrl: (c as any).sampleUrl as string | undefined,
       })
     }
 
@@ -192,6 +238,8 @@ const Timeline: Component = () => {
     const file = e.dataTransfer?.files?.[0]
     if (!file || !file.type.startsWith('audio')) return
 
+    // We no longer capture or persist FileSystemFileHandle; rely on cloud URL (R2)
+
     const ab = await file.arrayBuffer()
     const decoded = await audioEngine.decodeAudioData(ab)
 
@@ -223,10 +271,22 @@ const Timeline: Component = () => {
       startSec,
       duration: decoded.duration,
       sessionId: sessionId(),
+      name: file.name,
     }) as any as string
 
     audioBufferCache.set(createdClipId, decoded)
-    clipNameCache.set(createdClipId, file.name)
+    // No local file handle persistence
+    ;(async () => {
+      const url = await uploadToR2(roomId(), createdClipId, file, decoded.duration)
+      if (url) {
+        try { await convexClient.mutation(convexApi.clips.setSampleUrl, { clipId: createdClipId as any, sampleUrl: url }) } catch {}
+        // Update local state with sampleUrl
+        setTracks(ts => ts.map(t => ({
+          ...t,
+          clips: t.clips.map(c => c.id === createdClipId ? { ...c, sampleUrl: url } : c)
+        })))
+      }
+    })()
     // Optimistic local insert so playback works immediately (de-duped)
     setTracks(ts => {
       const idx = ts.findIndex(t => t.id === targetTrackId)
@@ -286,10 +346,21 @@ const Timeline: Component = () => {
       startSec,
       duration: decoded.duration,
       sessionId: sessionId(),
+      name: file.name,
     }) as any as string
 
     audioBufferCache.set(createdClipId, decoded)
-    clipNameCache.set(createdClipId, file.name)
+    // Upload to R2 in background and set sampleUrl
+    ;(async () => {
+      const url = await uploadToR2(roomId(), createdClipId, file, decoded.duration)
+      if (url) {
+        try { await convexClient.mutation(convexApi.clips.setSampleUrl, { clipId: createdClipId as any, sampleUrl: url }) } catch {}
+        setTracks(ts => ts.map(t => ({
+          ...t,
+          clips: t.clips.map(c => c.id === createdClipId ? { ...c, sampleUrl: url } : c)
+        })))
+      }
+    })()
     // Optimistic local insert so playback works immediately (de-duped)
     setTracks(ts => {
       const idx = ts.findIndex(t => t.id === targetTrackId)
@@ -318,6 +389,106 @@ const Timeline: Component = () => {
     const input = e.currentTarget as HTMLInputElement
     await handleFiles(input.files)
     input.value = ''
+  }
+
+  // Add audio via persistent file handle when supported, otherwise fall back to <input type="file">
+  async function handleAddAudio() {
+    const w: any = window as any
+    if (typeof w.showOpenFilePicker === 'function') {
+      try {
+        const handles: any[] = await w.showOpenFilePicker({
+          multiple: false,
+          types: [
+            {
+              description: 'Audio files',
+              accept: { 'audio/*': ['.wav', '.mp3', '.ogg', '.flac', '.m4a', '.webm'] },
+            },
+          ],
+        })
+        const fileHandle: any = Array.isArray(handles) ? handles[0] : handles
+        if (!fileHandle) return
+
+        const file: File = await fileHandle.getFile?.()
+        if (!file) return
+
+        const ab = await file.arrayBuffer()
+        const decoded = await audioEngine.decodeAudioData(ab)
+
+        // Determine target track
+        let targetTrackId = selectedTrackId()
+        if (!targetTrackId) {
+          targetTrackId = await convexClient.mutation(convexApi.tracks.create, { roomId: roomId(), sessionId: sessionId() }) as any as string
+          setSelectedTrackId(targetTrackId)
+          setSelectedFXTarget(targetTrackId)
+        }
+
+        // Compute start position avoiding overlap
+        const ts0 = tracks()
+        const tIdx = ts0.findIndex(t => t.id === targetTrackId)
+        let startSec = Math.max(0, playheadSec())
+        if (tIdx >= 0) {
+          const tgt = ts0[tIdx]
+          if (willOverlap(tgt.clips, null, startSec, decoded.duration)) {
+            startSec = calcNonOverlapStart(tgt.clips, null, startSec, decoded.duration)
+          }
+        }
+
+        // Create clip on server
+        const createdClipId = await convexClient.mutation(convexApi.clips.create, {
+          roomId: roomId(),
+          trackId: targetTrackId as any,
+          startSec,
+          duration: decoded.duration,
+          sessionId: sessionId(),
+          name: file.name,
+        }) as any as string
+
+        audioBufferCache.set(createdClipId, decoded)
+        // No local file handle persistence
+
+        // Upload to R2 in background and set sampleUrl
+        ;(async () => {
+          const url = await uploadToR2(roomId(), createdClipId, file, decoded.duration)
+          if (url) {
+            try { await convexClient.mutation(convexApi.clips.setSampleUrl, { clipId: createdClipId as any, sampleUrl: url }) } catch {}
+            setTracks(ts => ts.map(t => ({
+              ...t,
+              clips: t.clips.map(c => c.id === createdClipId ? { ...c, sampleUrl: url } : c)
+            })))
+          }
+        })()
+
+        // Optimistic local insert
+        setTracks(ts => {
+          const idx = ts.findIndex(t => t.id === targetTrackId)
+          if (idx === -1) {
+            const newTrack: Track = { id: targetTrackId, name: `Track ${ts.length + 1}` , volume: 0.8, clips: [] }
+            const newClip: Clip = { id: createdClipId, name: file.name, buffer: decoded, startSec, duration: decoded.duration, color: '#22c55e' }
+            return [...ts, { ...newTrack, clips: [newClip] }]
+          }
+          const track = ts[idx]
+          const existsIdx = track.clips.findIndex(c => c.id === createdClipId)
+          if (existsIdx >= 0) {
+            const updatedClips = track.clips.map(c => c.id === createdClipId ? { ...c, name: file.name, buffer: decoded } : c)
+            return ts.map((t, i) => i !== idx ? t : { ...t, clips: updatedClips })
+          } else {
+            const newClip: Clip = { id: createdClipId, name: file.name, buffer: decoded, startSec, duration: decoded.duration, color: '#22c55e' }
+            return ts.map((t, i) => i !== idx ? t : { ...t, clips: [...t.clips, newClip] })
+          }
+        })
+        batch(() => {
+          setSelectedClip({ trackId: targetTrackId!, clipId: createdClipId })
+          setSelectedFXTarget(targetTrackId!)
+        })
+        return
+      } catch (err) {
+        // If user cancels the picker, just return; otherwise fall back
+        // @ts-ignore
+        if (err && (err.name === 'AbortError' || err.code === 20)) return
+      }
+    }
+    // Fallback: file input
+    fileInputRef?.click()
   }
 
   // Drag a clip (allow vertical track reassign)
@@ -503,7 +674,7 @@ const Timeline: Component = () => {
   }
 
   useTimelineKeyboard({
-    onSpace: () => isPlaying() ? handlePause() : handlePlay(tracks()),
+    onSpace: () => isPlaying() ? handlePause() : requestPlay(),
     onDelete: handleKeyboardAction
   })
 
@@ -533,7 +704,33 @@ const Timeline: Component = () => {
     window.removeEventListener('mouseup', onSidebarMouseUp)
   }
 
+  // Duration helper
   const duration = () => timelineDurationSec(tracks())
+
+  // Ensure missing clip buffers are loaded (local handle first, then R2)
+  createEffect(() => {
+    const ts = tracks()
+    for (const t of ts) {
+      for (const c of t.clips) {
+        if (!c.buffer) {
+          void ensureClipBuffer(c.id, c.sampleUrl)
+        }
+      }
+    }
+  })
+
+  // Before starting playback, try to (re)load any missing buffers in a user-gesture context.
+  async function requestPlay() {
+    const ts = tracks()
+    for (const t of ts) {
+      for (const c of t.clips) {
+        if (!c.buffer) {
+          await ensureClipBuffer(c.id, c.sampleUrl)
+        }
+      }
+    }
+    await handlePlay(tracks())
+  }
 
   return (
     <div class="h-full w-full flex flex-col bg-neutral-950 text-neutral-200" onDragOver={onDragOver} onDrop={onDrop}>
@@ -542,10 +739,10 @@ const Timeline: Component = () => {
       <TransportControls
         isPlaying={isPlaying()}
         playheadSec={playheadSec()}
-        onPlay={() => handlePlay(tracks())}
+        onPlay={() => requestPlay()}
         onPause={handlePause}
         onStop={handleStop}
-        onAddAudio={() => fileInputRef?.click()}
+        onAddAudio={() => handleAddAudio()}
         onShare={handleShare}
         onMasterFX={() => { setSelectedFXTarget('master'); setBottomFXOpen(true) }}
       />
@@ -647,6 +844,8 @@ const Timeline: Component = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Cloud-only mode: no browser capability notice needed */}
     </div>
   )
 }

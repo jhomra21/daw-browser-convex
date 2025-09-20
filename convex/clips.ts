@@ -18,13 +18,14 @@ export const create = mutation({
     startSec: v.number(),
     duration: v.number(),
     sessionId: v.string(),
+    name: v.optional(v.string()),
   },
-  handler: async (ctx, { roomId, trackId, startSec, duration, sessionId }) => {
+  handler: async (ctx, { roomId, trackId, startSec, duration, sessionId, name }) => {
     // Validate that the track belongs to the same room
     const track = await ctx.db.get(trackId);
     if (!track || track.roomId !== roomId) return;
 
-    const clipId = await ctx.db.insert("clips", { roomId, trackId, startSec, duration });
+    const clipId = await ctx.db.insert("clips", { roomId, trackId, startSec, duration, name });
 
     // Record ownership
     await ctx.db.insert("ownerships", {
@@ -76,6 +77,26 @@ export const remove = mutation({
     // Delete ownership then the clip
     await ctx.db.delete(owner._id);
     await ctx.db.delete(clipId);
+  },
+});
+
+// Update a clip's sampleUrl (R2-backed URL)
+export const setSampleUrl = mutation({
+  args: { clipId: v.id("clips"), sampleUrl: v.string() },
+  handler: async (ctx, { clipId, sampleUrl }) => {
+    const clip = await ctx.db.get(clipId);
+    if (!clip) return;
+    await ctx.db.patch(clipId, { sampleUrl });
+  },
+});
+
+// Optionally update a clip's shared name
+export const setName = mutation({
+  args: { clipId: v.id("clips"), name: v.string() },
+  handler: async (ctx, { clipId, name }) => {
+    const clip = await ctx.db.get(clipId);
+    if (!clip) return;
+    await ctx.db.patch(clipId, { name });
   },
 });
 

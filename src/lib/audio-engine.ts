@@ -88,8 +88,13 @@ export class AudioEngine {
   }
 
   async decodeAudioData(arrayBuffer: ArrayBuffer) {
-    this.ensureAudio()
-    return this.audioCtx!.decodeAudioData(arrayBuffer)
+    // Avoid creating a real AudioContext during decode to prevent
+    // autoplay policy warnings before a user gesture occurs.
+    if (this.audioCtx) {
+      return this.audioCtx.decodeAudioData(arrayBuffer)
+    }
+    const offline = new OfflineAudioContext(2, 1, 44100)
+    return offline.decodeAudioData(arrayBuffer)
   }
 
   close() {

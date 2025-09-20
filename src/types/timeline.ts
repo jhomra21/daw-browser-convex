@@ -5,6 +5,7 @@ export type Clip = {
   startSec: number
   duration: number
   color: string
+  sampleUrl?: string
 }
 
 export type Track = {

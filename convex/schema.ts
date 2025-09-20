@@ -18,6 +18,10 @@ export default defineSchema({
     trackId: v.id("tracks"),
     startSec: v.number(),
     duration: v.number(),
+    // Optional shared display name for the clip (e.g., original filename)
+    name: v.optional(v.string()),
+    // Optional URL where the audio sample is stored (e.g. R2-backed endpoint)
+    sampleUrl: v.optional(v.string()),
   })
     .index("by_room", ["roomId"]) // list clips in a room
     .index("by_track", ["trackId"]), // list clips per track
@@ -34,3 +38,4 @@ export default defineSchema({
     .index("by_track", ["trackId"]) // find owner for a track
     .index("by_room", ["roomId"]), // list ownerships in a room (optional utility)
 });
+

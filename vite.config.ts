@@ -6,7 +6,7 @@ import { cloudflare } from '@cloudflare/vite-plugin';
 import path from 'path';
 
 export default defineConfig({
-  plugins: [devtools(), solidPlugin(), tailwindcss(), cloudflare()],
+  plugins: [devtools(), solidPlugin(), tailwindcss(), cloudflare()], //{experimental: { remoteBindings: true }}
   server: {
     port: 3000,
   },

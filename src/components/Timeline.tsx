@@ -189,6 +189,20 @@ const Timeline: Component = () => {
 
     const projectedMap = new Map(projected.map(t => [t.id, t]))
 
+    // If we've created a track during drag that hasn't arrived from the server yet,
+    // inject a placeholder so the UI remains stable while dragging.
+    if (addedTrackDuringDrag && !projectedMap.has(addedTrackDuringDrag)) {
+      const prev = oldTrackMap.get(addedTrackDuringDrag)
+      const placeholder: Track = {
+        id: addedTrackDuringDrag,
+        name: prev?.name ?? `Track ${projected.length + 1}`,
+        volume: prev?.volume ?? 0.8,
+        clips: []
+      }
+      projected.push(placeholder)
+      projectedMap.set(placeholder.id, placeholder)
+    }
+
     for (const c of data.clips as any[]) {
       const trackId = c.trackId as string
       const t = projectedMap.get(trackId)
@@ -207,6 +221,32 @@ const Timeline: Component = () => {
         color,
         sampleUrl: (c as any).sampleUrl as string | undefined,
       })
+    }
+
+    // If a drag is in progress, override the dragged clip's projected location with the local (optimistic) one
+    if (draggingIds) {
+      const localTracks = untrack(() => tracks())
+      const localTrack = localTracks.find(tt => tt.clips.some(cc => cc.id === draggingIds!.clipId))
+      const localClip = localTrack?.clips.find(cc => cc.id === draggingIds!.clipId)
+      if (localClip) {
+        // Remove the dragged clip from any projected track to avoid duplicates
+        for (const t of projected) {
+          t.clips = t.clips.filter(cc => cc.id !== localClip.id)
+        }
+        // Place it into the projected target track according to current draggingIds
+        const targetProjected = projectedMap.get(draggingIds!.trackId)
+        if (targetProjected) {
+          targetProjected.clips.push({
+            id: localClip.id,
+            name: localClip.name,
+            buffer: localClip.buffer ?? null,
+            startSec: localClip.startSec,
+            duration: localClip.duration,
+            color: localClip.color,
+            sampleUrl: localClip.sampleUrl,
+          })
+        }
+      }
     }
 
     setTracks(projected)
@@ -496,6 +536,7 @@ const Timeline: Component = () => {
   let dragDeltaX = 0
   let draggingIds: { trackId: string; clipId: string } | null = null
   let addedTrackDuringDrag: string | null = null
+  let creatingTrackDuringDrag = false
 
   function onClipMouseDown(trackId: string, clipId: string, e: MouseEvent) {
     e.preventDefault()
@@ -511,6 +552,7 @@ const Timeline: Component = () => {
       setSelectedClip({ trackId, clipId })
     })
     addedTrackDuringDrag = null
+    creatingTrackDuringDrag = false
 
     const rect = scrollRef!.getBoundingClientRect()
     const leftPx = c.startSec * PPS - (scrollRef?.scrollLeft || 0)
@@ -520,7 +562,7 @@ const Timeline: Component = () => {
     window.addEventListener('mouseup', onWindowMouseUp)
   }
 
-  function onWindowMouseMove(e: MouseEvent) {
+  async function onWindowMouseMove(e: MouseEvent) {
     if (!dragging || !draggingIds) return
     
     const rect = scrollRef!.getBoundingClientRect()
@@ -528,66 +570,133 @@ const Timeline: Component = () => {
     const desiredStart = Math.max(0, x / PPS)
     let laneIdx = yToLaneIndex(e.clientY, scrollRef!)
 
-    // Add a new track if dragging below last lane
+    // If dragging below the last lane, create a new track during drag (once)
     if (laneIdx >= tracks().length) {
-      // Do not create a new track during drag; clamp to last existing lane
-      laneIdx = Math.max(0, tracks().length - 1)
+      if (!addedTrackDuringDrag && !creatingTrackDuringDrag) {
+        creatingTrackDuringDrag = true
+        try {
+          const newTrackId = await convexClient.mutation(convexApi.tracks.create, { roomId: roomId(), sessionId: sessionId() }) as any as string
+          addedTrackDuringDrag = newTrackId
+          // Optimistically ensure the new track exists locally for immediate visual feedback
+          setTracks(ts => ts.some(t => t.id === newTrackId)
+            ? ts
+            : [...ts, { id: newTrackId, name: `Track ${ts.length + 1}`, volume: 0.8, clips: [] }])
+        } finally {
+          creatingTrackDuringDrag = false
+        }
+      }
     }
-    laneIdx = Math.max(0, Math.min(laneIdx, tracks().length - 1))
 
-    const tsNow = tracks()
-    const targetTrack = tsNow[laneIdx]
-    if (!targetTrack) return
+    // Resolve target track id (prefer newly created one)
+    let targetId: string | undefined
+    {
+      const tsSnap = tracks()
+      if (laneIdx >= tsSnap.length && addedTrackDuringDrag) {
+        targetId = addedTrackDuringDrag
+      } else {
+        laneIdx = Math.max(0, Math.min(laneIdx, tsSnap.length - 1))
+        targetId = tsSnap[laneIdx]?.id
+      }
+    }
+    if (!targetId) return
 
-    // Locate moving clip and its source track
-    let srcIdx = tsNow.findIndex(t => t.clips.some(c => c.id === draggingIds!.clipId))
-    if (srcIdx < 0) return
-    const movingClip = tsNow[srcIdx].clips.find(c => c.id === draggingIds!.clipId)!
-    const duration = movingClip.duration
+    const movingClipId = draggingIds!.clipId
 
-    if (targetTrack.id === tsNow[srcIdx].id) {
-      // Same track: prevent overlap
-      const overlap = willOverlap(targetTrack.clips, movingClip.id, desiredStart, duration)
-      const newStart = overlap ? calcNonOverlapStart(targetTrack.clips, movingClip.id, desiredStart, duration) : desiredStart
-      setTracks(ts => ts.map((t, i) => i !== srcIdx ? t : ({
-        ...t,
-        clips: t.clips.map(c => c.id === movingClip.id ? { ...c, startSec: newStart } : c)
-      })))
-    } else {
-      // Different track: move clip
-      const overlap = willOverlap(targetTrack.clips, null, desiredStart, duration)
-      const newStart = overlap ? calcNonOverlapStart(targetTrack.clips, null, desiredStart, duration) : desiredStart
-      const targetId = targetTrack.id
-      const clipId = movingClip.id
-      setTracks(ts => ts.map((t, i) => {
-        if (i === srcIdx) return { ...t, clips: t.clips.filter(c => c.id !== clipId) }
-        if (t.id === targetId) return { ...t, clips: [...t.clips, { ...movingClip, startSec: newStart }] }
-        return t
-      }))
+    // Apply the move using the latest state to avoid stale snapshots and duplicates
+    setTracks(ts => {
+      const srcIdx = ts.findIndex(t => t.clips.some(c => c.id === movingClipId))
+      if (srcIdx < 0) return ts
+      const movingClip = ts[srcIdx].clips.find(c => c.id === movingClipId)!
+      const duration = movingClip.duration
+      const targetIdx = ts.findIndex(t => t.id === targetId)
+      if (targetIdx < 0) return ts
+      const targetTrack = ts[targetIdx]
+
+      if (srcIdx === targetIdx) {
+        // Same track: prevent overlap and update startSec in place
+        const overlap = willOverlap(targetTrack.clips, movingClip.id, desiredStart, duration)
+        const newStart = overlap ? calcNonOverlapStart(targetTrack.clips, movingClip.id, desiredStart, duration) : desiredStart
+        return ts.map((t, i) => i !== srcIdx ? t : ({
+          ...t,
+          clips: t.clips.map(c => c.id === movingClip.id ? { ...c, startSec: newStart } : c)
+        }))
+      } else {
+        // Different track: move clip across tracks, deduping in target
+        const overlap = willOverlap(targetTrack.clips, null, desiredStart, duration)
+        const newStart = overlap ? calcNonOverlapStart(targetTrack.clips, null, desiredStart, duration) : desiredStart
+        const prunedTargetClips = targetTrack.clips.filter(c => c.id !== movingClip.id)
+        return ts.map((t, i) => {
+          if (i === srcIdx) return { ...t, clips: t.clips.filter(c => c.id !== movingClip.id) }
+          if (i === targetIdx) return { ...t, clips: [...prunedTargetClips, { ...movingClip, startSec: newStart }] }
+          return t
+        })
+      }
+    })
+
+    // Update drag tracking and selection if track changed
+    if (draggingIds.trackId !== targetId) {
+      const clipId = draggingIds.clipId
       draggingIds = { trackId: targetId, clipId }
       batch(() => {
-        setSelectedTrackId(targetId)
-        setSelectedFXTarget(targetId)
-        setSelectedClip({ trackId: targetId, clipId })
+        setSelectedTrackId(targetId!)
+        setSelectedFXTarget(targetId!)
+        setSelectedClip({ trackId: targetId!, clipId })
       })
     }
   }
 
-  function onWindowMouseUp() {
-    // Commit final clip position to server if applicable
-    if (draggingIds) {
-      const t = tracks().find(tt => tt.id === draggingIds!.trackId)
-      const c = t?.clips.find(cc => cc.id === draggingIds!.clipId)
-      if (c) {
-        void convexClient.mutation(convexApi.clips.move, {
-          clipId: c.id as any,
-          startSec: c.startSec,
-          toTrackId: t?.id as any,
+  async function onWindowMouseUp(e: MouseEvent) {
+    // Commit final clip position to server; fallback-create a track only if none was created during drag
+    if (dragging && draggingIds && scrollRef) {
+      const rect = scrollRef.getBoundingClientRect()
+      const x = e.clientX - rect.left - dragDeltaX + (scrollRef?.scrollLeft || 0)
+      const desiredStart = Math.max(0, x / PPS)
+      const laneIdx = yToLaneIndex(e.clientY, scrollRef)
+
+      if (laneIdx >= tracks().length && !addedTrackDuringDrag) {
+        // Fallback: create a new track on drop if drag-time creation didn't happen
+        const newTrackId = await convexClient.mutation(convexApi.tracks.create, { roomId: roomId(), sessionId: sessionId() }) as any as string
+        const moving = draggingIds
+        setTracks(ts => {
+          const srcIdx = ts.findIndex(t => t.clips.some(c => c.id === moving.clipId))
+          if (srcIdx < 0) return ts
+          const movingClip = ts[srcIdx].clips.find(c => c.id === moving.clipId)!
+          const newClip = { ...movingClip, startSec: desiredStart }
+          const hasNew = ts.some(t => t.id === newTrackId)
+          const newTrack: Track = { id: newTrackId, name: `Track ${ts.length + 1}`, volume: 0.8, clips: [] }
+          const base = hasNew ? ts : [...ts, newTrack]
+          return base.map((t, i) => {
+            if (i === srcIdx) return { ...t, clips: t.clips.filter(c => c.id !== moving.clipId) }
+            if (t.id === newTrackId) return { ...t, clips: [...t.clips, newClip] }
+            return t
+          })
         })
+        batch(() => {
+          setSelectedTrackId(newTrackId)
+          setSelectedFXTarget(newTrackId)
+          setSelectedClip({ trackId: newTrackId, clipId: moving.clipId })
+        })
+        void convexClient.mutation(convexApi.clips.move, {
+          clipId: moving.clipId as any,
+          startSec: desiredStart,
+          toTrackId: newTrackId as any,
+        })
+      } else {
+        // Commit final clip position to server in the resolved target track
+        const t = tracks().find(tt => tt.id === draggingIds!.trackId)
+        const c = t?.clips.find(cc => cc.id === draggingIds!.clipId)
+        if (c) {
+          void convexClient.mutation(convexApi.clips.move, {
+            clipId: c.id as any,
+            startSec: c.startSec,
+            toTrackId: t?.id as any,
+          })
+        }
       }
     }
     dragging = false
     addedTrackDuringDrag = null
+    creatingTrackDuringDrag = false
     draggingIds = null
     window.removeEventListener('mousemove', onWindowMouseMove)
     window.removeEventListener('mouseup', onWindowMouseUp)

@@ -1,0 +1,91 @@
+import { mutation, query } from "./_generated/server";
+import { v } from "convex/values";
+
+export const listByRoom = query({
+  args: { roomId: v.string() },
+  handler: async (ctx, { roomId }) => {
+    const tracks = await ctx.db
+      .query("tracks")
+      .withIndex("by_room", q => q.eq("roomId", roomId))
+      .collect();
+    tracks.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    return tracks;
+  },
+});
+
+export const create = mutation({
+  args: { roomId: v.string(), sessionId: v.string() },
+  handler: async (ctx, { roomId, sessionId }) => {
+    // Compute next index in room
+    const existing = await ctx.db
+      .query("tracks")
+      .withIndex("by_room", q => q.eq("roomId", roomId))
+      .collect();
+    const nextIndex = existing.length;
+
+    const trackId = await ctx.db.insert("tracks", {
+      roomId,
+      index: nextIndex,
+      volume: 0.8,
+    });
+    // Record ownership
+    await ctx.db.insert("ownerships", {
+      roomId,
+      ownerSessionId: sessionId,
+      trackId,
+    });
+    return trackId;
+  },
+});
+
+export const setVolume = mutation({
+  args: { trackId: v.id("tracks"), volume: v.number() },
+  handler: async (ctx, { trackId, volume }) => {
+    await ctx.db.patch(trackId, { volume });
+  },
+});
+
+export const remove = mutation({
+  args: { trackId: v.id("tracks"), sessionId: v.string() },
+  handler: async (ctx, { trackId, sessionId }) => {
+    const track = await ctx.db.get(trackId);
+    if (!track) return;
+    // Verify track ownership
+    const owners = await ctx.db
+      .query("ownerships")
+      .withIndex("by_track", q => q.eq("trackId", trackId))
+      .collect();
+    const owner = owners[0];
+    if (!owner || owner.ownerSessionId !== sessionId) return;
+
+    // Ensure all clips on this track are owned by the same session
+    const clips = await ctx.db
+      .query("clips")
+      .withIndex("by_track", q => q.eq("trackId", trackId))
+      .collect();
+    for (const c of clips) {
+      const cOwners = await ctx.db
+        .query("ownerships")
+        .withIndex("by_clip", q => q.eq("clipId", c._id))
+        .collect();
+      const cOwner = cOwners[0];
+      if (!cOwner || cOwner.ownerSessionId !== sessionId) {
+        return; // contains clips not owned by requester; abort
+      }
+    }
+
+    // Delete all clip ownerships and clips
+    for (const c of clips) {
+      const cOwners = await ctx.db
+        .query("ownerships")
+        .withIndex("by_clip", q => q.eq("clipId", c._id))
+        .collect();
+      const cOwner = cOwners[0];
+      if (cOwner) await ctx.db.delete(cOwner._id);
+      await ctx.db.delete(c._id);
+    }
+    // Delete track ownership then the track
+    await ctx.db.delete(owner._id);
+    await ctx.db.delete(trackId);
+  },
+});

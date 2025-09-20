@@ -1,7 +1,7 @@
 export type Clip = {
   id: string
   name: string
-  buffer: AudioBuffer
+  buffer?: AudioBuffer | null
   startSec: number
   duration: number
   color: string

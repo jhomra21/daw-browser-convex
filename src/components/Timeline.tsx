@@ -1,4 +1,4 @@
-import { type Component, Show, For, createEffect, createSignal, onCleanup, onMount, batch } from 'solid-js'
+import { type Component, Show, For, createEffect, createSignal, onCleanup, onMount, batch, untrack } from 'solid-js'
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from '~/components/ui/dialog'
 import type { Track, Clip, SelectedClip } from '~/types/timeline'
 import { AudioEngine } from '~/lib/audio-engine'
@@ -11,12 +11,11 @@ import TrackLane from './timeline/TrackLane'
 import TrackSidebar from './timeline/TrackSidebar'
 import EffectsPanel from './timeline/EffectsPanel'
 import { Button } from './ui/button'
+import { useConvexQuery, convexClient, convexApi } from '~/lib/convex'
 const Timeline: Component = () => {
   // State
-  const [tracks, setTracks] = createSignal<Track[]>([
-    { id: 't1', name: 'Track 1', volume: 0.8, clips: [] },
-  ])
-  const [selectedTrackId, setSelectedTrackId] = createSignal('t1')
+  const [tracks, setTracks] = createSignal<Track[]>([])
+  const [selectedTrackId, setSelectedTrackId] = createSignal('')
   const [selectedClip, setSelectedClip] = createSignal<SelectedClip>(null)
   const [bottomFXOpen, setBottomFXOpen] = createSignal(true)
   const [selectedFXTarget, setSelectedFXTarget] = createSignal<string>('master')
@@ -26,9 +25,55 @@ const Timeline: Component = () => {
 
   // Audio engine
   const audioEngine = new AudioEngine()
+  // Collaboration: roomId from ?roomId=; sessionId persisted in localStorage
+  const [roomId, setRoomId] = createSignal<string>('')
+  const [sessionId, setSessionId] = createSignal<string>('')
+
+  onMount(() => {
+    // Resolve roomId from URL or create a new one
+    try {
+      const url = new URL(window.location.href)
+      let rid = url.searchParams.get('roomId')
+      if (!rid) {
+        rid = crypto.randomUUID()
+        url.searchParams.set('roomId', rid)
+        history.replaceState(null, '', url.toString())
+      }
+      setRoomId(rid)
+    } catch {
+      setRoomId('default')
+    }
+    // Ensure a persistent per-browser sessionId
+    try {
+      let sid = localStorage.getItem('sessionId')
+      if (!sid) {
+        sid = crypto.randomUUID()
+        localStorage.setItem('sessionId', sid)
+      }
+      setSessionId(sid)
+    } catch {}
+  })
+  // Local caches for responsiveness and non-shared data
+  const audioBufferCache = new Map<string, AudioBuffer>()
+  const clipNameCache = new Map<string, string>()
+  const volumeTimers = new Map<string, number>()
   
   // Playback hook
   const { isPlaying, playheadSec, handlePlay, handlePause, handleStop, setPlayhead } = useTimelinePlayback(audioEngine)
+
+  // Share current URL with ?roomId=
+  async function handleShare() {
+    try {
+      const url = new URL(window.location.href)
+      let rid = url.searchParams.get('roomId')
+      if (!rid) {
+        rid = roomId() || crypto.randomUUID()
+        url.searchParams.set('roomId', rid)
+        history.replaceState(null, '', url.toString())
+        setRoomId(rid)
+      }
+    } catch {}
+  }
 
   // DOM refs
   let scrollRef: HTMLDivElement | undefined
@@ -69,6 +114,64 @@ const Timeline: Component = () => {
     audioEngine.updateTrackGains(tracks())
   })
 
+  // Subscribe to Convex shared state (tracks + clips) for this room
+  const fullView = useConvexQuery(
+    convexApi.timeline.fullView,
+    () => roomId() ? ({ roomId: roomId() }) : null,
+    () => ['timeline', roomId()]
+  )
+
+  // Project server state into local Track[] while preserving ephemeral fields
+  createEffect(() => {
+    const raw = (fullView as any).data
+    const data = typeof raw === 'function' ? raw() : raw
+    if (!data) return
+
+    // Read old tracks without tracking to avoid creating a feedback loop
+    const oldTracks = untrack(() => tracks())
+    const oldTrackMap = new Map(oldTracks.map(t => [t.id, t]))
+
+    const projected: Track[] = data.tracks.map((t: any, idx: number) => {
+      const id = t._id as string
+      const prev = oldTrackMap.get(id)
+      return {
+        id,
+        name: prev?.name ?? `Track ${idx + 1}`,
+        volume: typeof t.volume === 'number' ? t.volume : 0.8,
+        clips: []
+      }
+    })
+
+    const projectedMap = new Map(projected.map(t => [t.id, t]))
+
+    for (const c of data.clips as any[]) {
+      const trackId = c.trackId as string
+      const t = projectedMap.get(trackId)
+      if (!t) continue
+      const prevTrack = oldTrackMap.get(trackId)
+      const prevClip = prevTrack?.clips.find(cc => cc.id === (c._id as string))
+      const buffer = audioBufferCache.get(c._id as string) ?? prevClip?.buffer ?? null
+      const name = clipNameCache.get(c._id as string) ?? prevClip?.name ?? 'Clip'
+      const color = prevClip?.color ?? '#22c55e'
+      t.clips.push({
+        id: c._id as string,
+        name,
+        buffer,
+        startSec: c.startSec as number,
+        duration: c.duration as number,
+        color,
+      })
+    }
+
+    setTracks(projected)
+    if (!selectedTrackId() && projected.length > 0) {
+      batch(() => {
+        setSelectedTrackId(projected[0].id)
+        setSelectedFXTarget(projected[0].id)
+      })
+    }
+  })
+
   onCleanup(() => {
     try { window.removeEventListener('mousemove', onScrubMove) } catch {}
     try { window.removeEventListener('mouseup', onScrubEnd) } catch {}
@@ -97,46 +200,58 @@ const Timeline: Component = () => {
 
     const ts0 = tracks()
     let targetTrackId: string
-    
-    if (laneIdx >= ts0.length) {
-      targetTrackId = `t${ts0.length + 1}`
-      const newClip: Clip = {
-        id: String(Date.now()),
-        name: file.name,
-        buffer: decoded,
-        startSec: desiredStart,
-        duration: decoded.duration,
-        color: '#22c55e',
-      }
-      setTracks(ts => [...ts, { id: targetTrackId, name: `Track ${ts.length + 1}`, volume: 0.8, clips: [newClip] }])
-      batch(() => {
-        setSelectedTrackId(targetTrackId)
-        setSelectedClip({ trackId: targetTrackId, clipId: newClip.id })
-        setSelectedFXTarget(targetTrackId)
-      })
+    if (ts0.length === 0 || laneIdx >= ts0.length || laneIdx < 0) {
+      // Create a new shared track on the server
+      const createdId = await convexClient.mutation(convexApi.tracks.create, { roomId: roomId(), sessionId: sessionId() }) as any as string
+      targetTrackId = createdId
     } else {
       laneIdx = Math.max(0, Math.min(laneIdx, ts0.length - 1))
-      const targetTrack = ts0[laneIdx]
-      let startSec = desiredStart
-      if (willOverlap(targetTrack.clips, null, startSec, decoded.duration)) {
-        startSec = calcNonOverlapStart(targetTrack.clips, null, startSec, decoded.duration)
-      }
-      const newClip: Clip = {
-        id: String(Date.now()),
-        name: file.name,
-        buffer: decoded,
-        startSec,
-        duration: decoded.duration,
-        color: '#22c55e',
-      }
-      targetTrackId = targetTrack.id
-      setTracks(ts => ts.map((t, i) => i !== laneIdx ? t : { ...t, clips: [...t.clips, newClip] }))
-      batch(() => {
-        setSelectedTrackId(targetTrackId)
-        setSelectedClip({ trackId: targetTrackId, clipId: newClip.id })
-        setSelectedFXTarget(targetTrackId)
-      })
+      targetTrackId = ts0[laneIdx]?.id || ''
     }
+
+    // Resolve non-overlapping start against current local clips of the target track
+    let startSec = desiredStart
+    const targetTrack = tracks().find(t => t.id === targetTrackId)
+    if (targetTrack && willOverlap(targetTrack.clips, null, startSec, decoded.duration)) {
+      startSec = calcNonOverlapStart(targetTrack.clips, null, startSec, decoded.duration)
+    }
+
+    // Create a shared clip on the server and attach the decoded buffer locally
+    const createdClipId = await convexClient.mutation(convexApi.clips.create, {
+      roomId: roomId(),
+      trackId: targetTrackId as any,
+      startSec,
+      duration: decoded.duration,
+      sessionId: sessionId(),
+    }) as any as string
+
+    audioBufferCache.set(createdClipId, decoded)
+    clipNameCache.set(createdClipId, file.name)
+    // Optimistic local insert so playback works immediately (de-duped)
+    setTracks(ts => {
+      const idx = ts.findIndex(t => t.id === targetTrackId)
+      if (idx === -1) {
+        // Add local placeholder track then insert the clip
+        const newTrack: Track = { id: targetTrackId, name: `Track ${ts.length + 1}` , volume: 0.8, clips: [] }
+        const newClip: Clip = { id: createdClipId, name: file.name, buffer: decoded, startSec, duration: decoded.duration, color: '#22c55e' }
+        return [...ts, { ...newTrack, clips: [newClip] }]
+      }
+      const track = ts[idx]
+      const existsIdx = track.clips.findIndex(c => c.id === createdClipId)
+      if (existsIdx >= 0) {
+        // Update existing clip in place (name/buffer) to avoid duplicate overlay
+        const updatedClips = track.clips.map(c => c.id === createdClipId ? { ...c, name: file.name, buffer: decoded } : c)
+        return ts.map((t, i) => i !== idx ? t : { ...t, clips: updatedClips })
+      } else {
+        const newClip: Clip = { id: createdClipId, name: file.name, buffer: decoded, startSec, duration: decoded.duration, color: '#22c55e' }
+        return ts.map((t, i) => i !== idx ? t : { ...t, clips: [...t.clips, newClip] })
+      }
+    })
+    batch(() => {
+      setSelectedTrackId(targetTrackId)
+      setSelectedClip({ trackId: targetTrackId, clipId: createdClipId })
+      setSelectedFXTarget(targetTrackId)
+    })
   }
 
   async function handleFiles(files: FileList | null) {
@@ -146,7 +261,13 @@ const Timeline: Component = () => {
     
     const ab = await file.arrayBuffer()
     const decoded = await audioEngine.decodeAudioData(ab)
-    const targetTrackId = selectedTrackId()
+    let targetTrackId = selectedTrackId()
+    if (!targetTrackId) {
+      // Ensure at least one track exists
+      targetTrackId = await convexClient.mutation(convexApi.tracks.create, { roomId: roomId(), sessionId: sessionId() }) as any as string
+      setSelectedTrackId(targetTrackId)
+      setSelectedFXTarget(targetTrackId)
+    }
     const ts0 = tracks()
     const tIdx = ts0.findIndex(t => t.id === targetTrackId)
     let startSec = Math.max(0, playheadSec())
@@ -157,19 +278,38 @@ const Timeline: Component = () => {
         startSec = calcNonOverlapStart(tgt.clips, null, startSec, decoded.duration)
       }
     }
-    
-    const newClip: Clip = {
-      id: String(Date.now()),
-      name: file.name,
-      buffer: decoded,
+
+    // Create a shared clip on the server and attach buffer locally
+    const createdClipId = await convexClient.mutation(convexApi.clips.create, {
+      roomId: roomId(),
+      trackId: targetTrackId as any,
       startSec,
       duration: decoded.duration,
-      color: '#22c55e',
-    }
-    
-    setTracks(ts => ts.map(t => t.id === targetTrackId ? { ...t, clips: [...t.clips, newClip] } : t))
+      sessionId: sessionId(),
+    }) as any as string
+
+    audioBufferCache.set(createdClipId, decoded)
+    clipNameCache.set(createdClipId, file.name)
+    // Optimistic local insert so playback works immediately (de-duped)
+    setTracks(ts => {
+      const idx = ts.findIndex(t => t.id === targetTrackId)
+      if (idx === -1) {
+        const newTrack: Track = { id: targetTrackId, name: `Track ${ts.length + 1}` , volume: 0.8, clips: [] }
+        const newClip: Clip = { id: createdClipId, name: file.name, buffer: decoded, startSec, duration: decoded.duration, color: '#22c55e' }
+        return [...ts, { ...newTrack, clips: [newClip] }]
+      }
+      const track = ts[idx]
+      const existsIdx = track.clips.findIndex(c => c.id === createdClipId)
+      if (existsIdx >= 0) {
+        const updatedClips = track.clips.map(c => c.id === createdClipId ? { ...c, name: file.name, buffer: decoded } : c)
+        return ts.map((t, i) => i !== idx ? t : { ...t, clips: updatedClips })
+      } else {
+        const newClip: Clip = { id: createdClipId, name: file.name, buffer: decoded, startSec, duration: decoded.duration, color: '#22c55e' }
+        return ts.map((t, i) => i !== idx ? t : { ...t, clips: [...t.clips, newClip] })
+      }
+    })
     batch(() => {
-      setSelectedClip({ trackId: targetTrackId, clipId: newClip.id })
+      setSelectedClip({ trackId: targetTrackId, clipId: createdClipId })
       setSelectedFXTarget(targetTrackId)
     })
   }
@@ -219,11 +359,7 @@ const Timeline: Component = () => {
 
     // Add a new track if dragging below last lane
     if (laneIdx >= tracks().length) {
-      if (!addedTrackDuringDrag) {
-        const newId = `t${tracks().length + 1}`
-        setTracks(ts => [...ts, { id: newId, name: `Track ${ts.length + 1}`, volume: 0.8, clips: [] }])
-        addedTrackDuringDrag = newId
-      }
+      // Do not create a new track during drag; clamp to last existing lane
       laneIdx = Math.max(0, tracks().length - 1)
     }
     laneIdx = Math.max(0, Math.min(laneIdx, tracks().length - 1))
@@ -267,6 +403,18 @@ const Timeline: Component = () => {
   }
 
   function onWindowMouseUp() {
+    // Commit final clip position to server if applicable
+    if (draggingIds) {
+      const t = tracks().find(tt => tt.id === draggingIds!.trackId)
+      const c = t?.clips.find(cc => cc.id === draggingIds!.clipId)
+      if (c) {
+        void convexClient.mutation(convexApi.clips.move, {
+          clipId: c.id as any,
+          startSec: c.startSec,
+          toTrackId: t?.id as any,
+        })
+      }
+    }
     dragging = false
     addedTrackDuringDrag = null
     draggingIds = null
@@ -305,27 +453,30 @@ const Timeline: Component = () => {
   function deleteSelectedClip() {
     const sel = selectedClip()
     if (!sel) return
+    // Optimistic local removal
     setTracks(ts => ts.map(t => t.id !== sel.trackId ? t : ({
       ...t,
       clips: t.clips.filter(c => c.id !== sel.clipId)
     })))
+    // Server removal
+    void convexClient.mutation(convexApi.clips.remove, { clipId: sel.clipId as any, sessionId: sessionId() })
     setSelectedClip(null)
   }
 
   function performDeleteTrack(id: string) {
-    setTracks(ts => {
-      const next = ts.filter(t => t.id !== id)
-      batch(() => {
-        setSelectedClip(null)
-        if (next.length > 0) {
-          setSelectedTrackId(next[0].id)
-          setSelectedFXTarget(next[0].id)
-        } else {
-          setSelectedTrackId('')
-          setSelectedFXTarget('master')
-        }
-      })
-      return next
+    // Server removal
+    void convexClient.mutation(convexApi.tracks.remove, { trackId: id as any, sessionId: sessionId() })
+    // Local selection updates
+    const next = tracks().filter(t => t.id !== id)
+    batch(() => {
+      setSelectedClip(null)
+      if (next.length > 0) {
+        setSelectedTrackId(next[0].id)
+        setSelectedFXTarget(next[0].id)
+      } else {
+        setSelectedTrackId('')
+        setSelectedFXTarget('master')
+      }
     })
   }
 
@@ -395,6 +546,7 @@ const Timeline: Component = () => {
         onPause={handlePause}
         onStop={handleStop}
         onAddAudio={() => fileInputRef?.click()}
+        onShare={handleShare}
         onMasterFX={() => { setSelectedFXTarget('master'); setBottomFXOpen(true) }}
       />
 
@@ -438,17 +590,24 @@ const Timeline: Component = () => {
               setBottomFXOpen(true)
             })
           }}
-          onAddTrack={() => {
-            const idx = tracks().length + 1
-            const id = `t${idx}`
-            setTracks(ts => [...ts, { id, name: `Track ${idx}`, volume: 0.8, clips: [] }])
+          onAddTrack={async () => {
+            const id = await convexClient.mutation(convexApi.tracks.create, { roomId: roomId(), sessionId: sessionId() }) as any as string
             batch(() => {
               setSelectedTrackId(id)
               setSelectedFXTarget(id)
             })
           }}
           onVolumeChange={(trackId, volume) => {
+            // Local immediate update for responsive audio engine
             setTracks(ts => ts.map(t => t.id === trackId ? { ...t, volume } : t))
+            // Debounced server update (last-write-wins)
+            const prev = volumeTimers.get(trackId)
+            if (prev) clearTimeout(prev)
+            const timer = window.setTimeout(() => {
+              void convexClient.mutation(convexApi.tracks.setVolume, { trackId: trackId as any, volume })
+              volumeTimers.delete(trackId)
+            }, 150)
+            volumeTimers.set(trackId, timer)
           }}
           onSidebarMouseDown={onSidebarMouseDown}
         />

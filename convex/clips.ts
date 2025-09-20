@@ -1,0 +1,81 @@
+import { mutation, query } from "./_generated/server";
+import { v } from "convex/values";
+
+export const listByRoom = query({
+  args: { roomId: v.string() },
+  handler: async (ctx, { roomId }) => {
+    return await ctx.db
+      .query("clips")
+      .withIndex("by_room", q => q.eq("roomId", roomId))
+      .collect();
+  },
+});
+
+export const create = mutation({
+  args: {
+    roomId: v.string(),
+    trackId: v.id("tracks"),
+    startSec: v.number(),
+    duration: v.number(),
+    sessionId: v.string(),
+  },
+  handler: async (ctx, { roomId, trackId, startSec, duration, sessionId }) => {
+    // Validate that the track belongs to the same room
+    const track = await ctx.db.get(trackId);
+    if (!track || track.roomId !== roomId) return;
+
+    const clipId = await ctx.db.insert("clips", { roomId, trackId, startSec, duration });
+
+    // Record ownership
+    await ctx.db.insert("ownerships", {
+      roomId,
+      ownerSessionId: sessionId,
+      clipId,
+    });
+
+    return clipId;
+  },
+});
+
+export const move = mutation({
+  args: {
+    clipId: v.id("clips"),
+    startSec: v.number(),
+    toTrackId: v.optional(v.id("tracks")),
+  },
+  handler: async (ctx, { clipId, startSec, toTrackId }) => {
+    const clip = await ctx.db.get(clipId);
+    if (!clip) return;
+    // If moving across tracks, ensure target track is in the same room
+    if (toTrackId) {
+      const targetTrack = await ctx.db.get(toTrackId);
+      if (!targetTrack || targetTrack.roomId !== clip.roomId) {
+        return; // ignore cross-room moves
+      }
+    }
+    await ctx.db.patch(clipId, {
+      startSec,
+      trackId: toTrackId ?? clip.trackId,
+    });
+  },
+});
+
+export const remove = mutation({
+  args: { clipId: v.id("clips"), sessionId: v.string() },
+  handler: async (ctx, { clipId, sessionId }) => {
+    const clip = await ctx.db.get(clipId);
+    if (!clip) return;
+    // Lookup ownership and enforce owner-only delete
+    const owners = await ctx.db
+      .query("ownerships")
+      .withIndex("by_clip", q => q.eq("clipId", clipId))
+      .collect();
+    const owner = owners[0];
+    if (!owner || owner.ownerSessionId !== sessionId) return;
+
+    // Delete ownership then the clip
+    await ctx.db.delete(owner._id);
+    await ctx.db.delete(clipId);
+  },
+});
+

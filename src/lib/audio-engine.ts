@@ -62,6 +62,8 @@ export class AudioEngine {
       }
 
       for (const c of t.clips) {
+        // Skip clips that do not have a decoded AudioBuffer yet
+        if (!c.buffer) continue
         const offset = Math.max(0, playheadSec - c.startSec)
         const when = Math.max(0, c.startSec - playheadSec)
         if (offset >= c.duration) continue

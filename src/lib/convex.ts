@@ -1,6 +1,7 @@
 import { ConvexClient } from "convex/browser";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/solid-query";
-import { createEffect, onCleanup } from "solid-js";
+import { createEffect, onCleanup, untrack } from "solid-js";
+
 import { api } from "../../convex/_generated/api";
 import type {
   FunctionReference,
@@ -53,12 +54,17 @@ export function useConvexQuery<
         currentArgs as any,
         (newData: any) => {
           // Update TanStack Query cache with new data from Convex
-          queryClient.setQueryData(['convex', ...queryKey()], newData);
+          // Wrap in untrack to avoid Solid tracking these writes and re-running this effect
+          untrack(() => {
+            queryClient.setQueryData(['convex', ...queryKey()], newData);
+          });
         },
         (error: Error) => {
           // Handle subscription errors by invalidating the query
           console.warn('Convex subscription error:', error);
-          queryClient.invalidateQueries({ queryKey: ['convex', ...queryKey()] });
+          untrack(() => {
+            queryClient.invalidateQueries({ queryKey: ['convex', ...queryKey()] });
+          });
         }
       );
     } catch (error) {

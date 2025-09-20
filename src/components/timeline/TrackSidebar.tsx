@@ -20,36 +20,78 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
       {/* Track list */}
       <div 
-        class="bg-neutral-900 border-l border-neutral-800 p-3 overflow-y-auto" 
+        class="bg-neutral-900 border-l border-neutral-800 p-0 overflow-y-auto" 
         style={{ width: `${props.sidebarWidth}px`, 'min-width': '220px' }}
       >
-        <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center justify-between p-1">
           <div class="font-semibold">Tracks</div>
-          <Button size="sm" variant="outline" onClick={props.onAddTrack}>Add Track</Button>
+          <button class="text-sm text-neutral-400 hover:text-neutral-300 
+           cursor-pointer active:scale-97 transition-transform ease-out" onClick={props.onAddTrack}>Add Track</button>
         </div>
 
         <For each={props.tracks}>
           {(track) => (
             <div 
-              class={`mb-4 rounded p-2 ${props.selectedTrackId === track.id ? 'bg-neutral-800' : 'bg-neutral-900 border border-neutral-800'}`} 
+              class={`${props.selectedTrackId === track.id ? 'bg-neutral-800' : 'bg-neutral-900 border border-neutral-800'}`} 
+              style={{ height: '96px' }}
               onClick={() => props.onTrackClick(track.id)}
             >
-              <div class="font-semibold mb-2">{track.name}</div>
-              <label class="flex items-center gap-2 text-sm text-neutral-300">
-                Volume
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={track.volume}
-                  onInput={(e) => {
-                    const v = parseFloat((e.currentTarget as HTMLInputElement).value)
-                    props.onVolumeChange(track.id, v)
-                  }}
-                  class="w-full accent-green-500"
-                />
-              </label>
+              <div class="flex items-center gap-3 h-full px-3 py-2">
+                {/* Track name */}
+                <div class="font-semibold text-sm flex-1">{track.name}</div>
+                
+                {/* Vertical volume slider */}
+                <div class="flex flex-col items-center gap-1">
+                  <div class="text-xs text-neutral-400">Vol</div>
+                  <div class="relative h-16 w-6">
+                    {/* Custom slider track */}
+                    <div class="absolute inset-0 w-1 bg-neutral-700 rounded-full left-1/2 transform -translate-x-1/2">
+                      <div 
+                        class="w-full bg-green-500 rounded-full transition-all duration-150"
+                        style={{ 
+                          height: `${track.volume * 100}%`,
+                          position: 'absolute',
+                          bottom: 0
+                        }}
+                      />
+                    </div>
+                    {/* Slider handle */}
+                    <div 
+                      class="absolute w-4 h-4 bg-neutral-300 border-2 border-neutral-500 rounded-full left-1/2 transform -translate-x-1/2 transition-all duration-150 cursor-pointer"
+                      style={{ bottom: `${track.volume * 100}%` }}
+                    />
+                    {/* Invisible vertical slider input */}
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={track.volume}
+                      onInput={(e) => {
+                        const v = parseFloat((e.currentTarget as HTMLInputElement).value)
+                        props.onVolumeChange(track.id, v)
+                      }}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const handleMouseMove = (moveEvent: MouseEvent) => {
+                          const y = moveEvent.clientY - rect.top
+                          const height = rect.height
+                          const volume = Math.max(0, Math.min(1, 1 - (y / height)))
+                          props.onVolumeChange(track.id, volume)
+                        }
+                        const handleMouseUp = () => {
+                          document.removeEventListener('mousemove', handleMouseMove)
+                          document.removeEventListener('mouseup', handleMouseUp)
+                        }
+                        document.addEventListener('mousemove', handleMouseMove)
+                        document.addEventListener('mouseup', handleMouseUp)
+                      }}
+                      class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </For>

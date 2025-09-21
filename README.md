@@ -1,3 +1,5 @@
+> **Last Updated**: 09/20/2025
+
 # Collaborative Realtime DAW
 
 A modern, collaborative digital audio workstation (DAW) built with SolidJS, featuring real-time collaboration, drag-and-drop audio editing, and cloud-based audio storage.
@@ -45,26 +47,26 @@ A modern, collaborative digital audio workstation (DAW) built with SolidJS, feat
 
 ```
 <root>/
-├── api/                    # Cloudflare Workers API
-│   └── index.ts           # Hono API routes for audio upload/storage
-├── convex/                # Database schema and functions
-│   ├── schema.ts          # Database schema definition
-│   ├── timeline.ts        # Timeline-related queries
-│   ├── tracks.ts          # Track management functions
-│   └── clips.ts           # Clip management functions
-├── src/
-│   ├── components/        # SolidJS components
-│   │   ├── timeline/      # Timeline-specific components
-│   │   ├── ui/            # Reusable UI components
-│   │   └── *.tsx          # Main components
-│   ├── hooks/             # Custom SolidJS hooks
-│   ├── lib/               # Utility libraries
+├── api/                    # Cloudflare Workers API entry point
+│   └── index.ts           # Hono API routes for audio upload/storage to R2
+├── convex/                # Convex database schema and functions
+│   ├── schema.ts          # Defines the data model for tracks, clips, and ownership
+│   ├── timeline.ts        # Backend logic for timeline operations
+│   ├── tracks.ts          # Backend logic for track management
+│   └── clips.ts           # Backend logic for clip management
+├── src/                    # SolidJS frontend application
+│   ├── components/        # Reusable SolidJS components
+│   │   ├── timeline/      # Components specific to the audio timeline
+│   │   ├── ui/            # Generic UI components (buttons, dialogs, etc.)
+│   │   └── *.tsx          # Main application components like AudioRecorder
+│   ├── hooks/             # Custom SolidJS hooks for managing state and side effects
+│   ├── lib/               # Utility functions and libraries (e.g., audio engine, convex client)
 │   ├── types/             # TypeScript type definitions
-│   └── App.tsx            # Main application component
-├── package.json           # Dependencies and scripts
+│   └── App.tsx            # Main application component that ties everything together
+├── package.json           # Project dependencies and scripts
 └── wrangler.jsonc         # Cloudflare Workers configuration
                             # - Defines R2 bucket bindings for audio storage
-                            # - Configures deployment settings
+                            # - Configures deployment settings for Cloudflare
                             # - Sets up SPA routing for the frontend
 ```
 
@@ -108,6 +110,7 @@ A modern, collaborative digital audio workstation (DAW) built with SolidJS, feat
    - Configure Cloudflare Workers bindings in `wrangler.jsonc`:
      - R2 bucket binding: `daw_audio_samples` (matches the bucket name created above)
      - Ensure `nodejs_compat` is enabled
+     - The `compatibility_date` is set to `2025-09-12`. It's recommended to keep this up to date with the latest Cloudflare Workers runtime version.
 
 4. **Development**
    ```bash
@@ -150,15 +153,16 @@ A modern, collaborative digital audio workstation (DAW) built with SolidJS, feat
 
 ## 🔧 Development
 
-### Key Technologies
-- **SolidJS**: Reactive frontend framework
-- **Hono**: Lightweight web framework for Workers
-- **Convex**: Real-time database
-- **Cloudflare Workers**: Serverless platform
-- **R2**: Object storage for audio files
-- **TailwindCSS**: Utility-first CSS framework
-- **Web Audio API**: Browser audio processing
-- **MediaBunny**: Web Audio Utilities
+### Tools & Technologies
+- **SolidJS**: A declarative and efficient JavaScript library for building user interfaces. Used for the core frontend framework.
+- **Hono**: A small, simple, and ultrafast web framework for the edge. Used for the Cloudflare Workers API.
+- **Convex**: A backend platform with a real-time database, used for collaborative state management.
+- **Cloudflare Workers**: A serverless platform for running backend code.
+- **R2**: Cloudflare's S3-compatible object storage, used for storing audio samples.
+- **TailwindCSS**: A utility-first CSS framework for rapid UI development.
+- **`mediabunny`**: A library for client-side audio processing, used for recording, encoding, and analyzing audio files.
+- **`solid-devtools`**: A browser extension for debugging SolidJS applications.
+- **Web Audio API**: The standard browser API for processing and synthesizing audio.
 
 ### Development Guidelines
 - Use `~` alias for `./src` directory imports
@@ -168,6 +172,7 @@ A modern, collaborative digital audio workstation (DAW) built with SolidJS, feat
 
 ### Scripts
 ```bash
+bun start        # Start development server (alias for dev)
 bun dev          # Start development server
 bun run build    # Build for production
 bun run serve    # Preview production build

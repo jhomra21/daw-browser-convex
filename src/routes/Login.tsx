@@ -1,12 +1,17 @@
-import { type Component, Show } from 'solid-js';
+import { type Component, Show, createSignal } from 'solid-js';
 import { Link, createFileRoute } from '@tanstack/solid-router';
 import { authClient } from '~/lib/auth-client';
+import { LoginMethodButton } from '~/components/LoginMethodButton';
+import { useSessionQuery } from '~/lib/session';
+import { queryClient } from '~/lib/query-client';
 
 const Login: Component = () => {
-  const session = authClient.useSession();
+  const session = useSessionQuery();
+  const [loadingGoogle, setLoadingGoogle] = createSignal(false);
 
   async function signInWithGoogle() {
     try {
+      setLoadingGoogle(true);
       await authClient.signIn.social({
         provider: 'google',
         callbackURL: '/',
@@ -18,11 +23,14 @@ const Login: Component = () => {
       // This is a safety net in case something throws.
       console.error('Google sign-in error:', err);
       alert('Failed to start Google sign-in. Please try again.');
+      setLoadingGoogle(false);
     }
   }
 
   async function signOut() {
     await authClient.signOut();
+    // Immediately reflect logout in the cache to avoid stale session usage
+    queryClient.setQueryData(['session'], null);
   }
 
   return (
@@ -36,15 +44,17 @@ const Login: Component = () => {
         <Show
           when={session()?.data}
           fallback={
-            <button
+            <LoginMethodButton
+              label="Continue with Google"
               onClick={signInWithGoogle}
-              class="w-full inline-flex items-center justify-center gap-2 rounded-md bg-white text-neutral-900 px-4 py-2 font-medium hover:bg-neutral-200 transition-colors"
-            >
-              <svg aria-hidden="true" viewBox="0 0 24 24" class="h-5 w-5">
-                <path fill="#EA4335" d="M12 11h11c.1.6.1 1.1.1 1.7 0 6-4 10.3-11.1 10.3A11.9 11.9 0 0 1 0 12 11.9 11.9 0 0 1 12 0a11.3 11.3 0 0 1 7.7 3l-3.2 3.1A6.7 6.7 0 0 0 12 3.6c-4.2 0-7.6 3.5-7.6 7.7s3.4 7.7 7.6 7.7c4 0 6.7-2.3 7.2-5.5H12V11Z" />
-              </svg>
-              Continue with Google
-            </button>
+              loading={loadingGoogle()}
+              disabled={loadingGoogle()}
+              icon={
+                <svg aria-hidden="true" viewBox="0 0 24 24" class="h-5 w-5">
+                  <path fill="#EA4335" d="M12 11h11c.1.6.1 1.1.1 1.7 0 6-4 10.3-11.1 10.3A11.9 11.9 0 0 1 0 12 11.9 11.9 0 0 1 12 0a11.3 11.3 0 0 1 7.7 3l-3.2 3.1A6.7 6.7 0 0 0 12 3.6c-4.2 0-7.6 3.5-7.6 7.7s3.4 7.7 7.6 7.7c4 0 6.7-2.3 7.2-5.5H12V11Z" />
+                </svg>
+              }
+            />
           }
         >
           <div class="space-y-4">

@@ -1,5 +1,5 @@
 import { type Component, Show } from 'solid-js'
-import { useNavigate } from '@tanstack/solid-router'
+import { Link, useNavigate } from '@tanstack/solid-router'
 import { authClient } from '~/lib/auth-client'
 import { Button } from '~/components/ui/button'
 import {
@@ -9,9 +9,11 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '~/components/ui/dropdown-menu'
+import { useSessionQuery } from '~/lib/session'
+import { queryClient } from '~/lib/query-client'
 
 const UserInfoDropdown: Component = () => {
-  const session = authClient.useSession()
+  const session = useSessionQuery()
   const navigate = useNavigate()
 
   const email = () => session()?.data?.user?.email as string | undefined
@@ -20,6 +22,8 @@ const UserInfoDropdown: Component = () => {
     try {
       await authClient.signOut()
     } finally {
+      // immediately reflect logout in cache
+      queryClient.setQueryData(['session'], null)
       // Ensure the auth-guard reruns by navigating to /Login
       navigate({ to: '/Login' })
     }
@@ -47,7 +51,7 @@ const UserInfoDropdown: Component = () => {
           </DropdownMenuItem>
           <DropdownMenuSeparator />
         </Show>
-        <DropdownMenuItem class="text-xs text-neutral-400 cursor-default duration-0" onSelect={() => navigate({ to: '/Login' })}>Login</DropdownMenuItem>
+        <DropdownMenuItem as={Link} to="/Login" class="text-xs text-neutral-400 cursor-default duration-0">Account</DropdownMenuItem>
         <DropdownMenuItem class="text-xs text-neutral-400 cursor-default duration-0" onSelect={handleSignOut}>Logout</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

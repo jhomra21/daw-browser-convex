@@ -1,20 +1,93 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { createAuth, type Session } from '../auth'
 
-const app = new Hono<{ Bindings: Env }>()
+type Variables = {
+  user: Session['user'] | null;
+  session: Session['session'] | null;
+}
 
-// Add CORS middleware
-app.use('*', cors({
-  origin: '*',
-  allowMethods: ['GET', 'POST', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Accept'],
+const app = new Hono<{
+  Bindings: Env;
+  Variables: Variables;
+}>()
+
+// CORS middleware must be registered before routes
+app.use('/api/auth/*', cors({
+  origin: (origin) => origin || '*', // Allow all origins for now, restrict in production
+  allowHeaders: ['Content-Type', 'Authorization'],
+  allowMethods: ['POST', 'GET', 'OPTIONS'],
+  exposeHeaders: ['Content-Length'],
+  maxAge: 600,
+  credentials: true,
 }));
+
+// Session middleware - adds user and session to context
+app.use('*', async (c, next) => {
+  // Skip auth middleware for auth routes to avoid circular calls
+  if (c.req.path.startsWith('/api/auth/')) {
+    return next();
+  }
+
+  try {
+    const auth = createAuth(c.env);
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+
+    if (!session) {
+      c.set('user', null);
+      c.set('session', null);
+    } else {
+      c.set('user', session.user);
+      c.set('session', session.session);
+    }
+  } catch (error) {
+    console.error('Session middleware error:', error);
+    c.set('user', null);
+    c.set('session', null);
+  }
+
+  return next();
+});
+
+// Better Auth routes - use on() method as recommended
+app.on(['POST', 'GET'], '/api/auth/*', async (c) => {
+  const auth = createAuth(c.env);
+  return auth.handler(c.req.raw);
+});
 
 app.get('/api/test', (c) => c.text('Hono!'))
 
-// Upload a sample to R2
+// Session endpoint to check current user
+app.get('/api/session', (c) => {
+  const session = c.get('session');
+  const user = c.get('user');
+
+  if (!user) {
+    return c.json({ user: null, session: null }, 200);
+  }
+
+  return c.json({ session, user });
+})
+
+// Protected route example
+app.get('/api/protected', (c) => {
+  const user = c.get('user');
+
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  return c.json({ message: 'This is a protected route', user });
+})
+
+// Upload a sample to R2 (protected route)
 app.post('/api/samples', async (c) => {
   try {
+    const user = c.get('user');
+    if (!user) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
     const form = await c.req.formData()
     const roomId = form.get('roomId')?.toString()
     const clipId = form.get('clipId')?.toString()
@@ -73,6 +146,7 @@ app.post('/api/samples', async (c) => {
         mimeType: file.type || 'application/octet-stream',
         durationSec: durationStr || '',
         uploadedAt: new Date().toISOString(),
+        uploadedBy: user.id,
       },
     })
 
@@ -99,6 +173,7 @@ app.get('/api/samples/:roomId/:clipId', async (c) => {
     headers.set('Content-Type', obj.httpMetadata?.contentType || 'application/octet-stream')
     headers.set('Cache-Control', 'public, max-age=31536000, immutable')
     headers.set('Access-Control-Allow-Origin', '*')
+    headers.set('Access-Control-Allow-Credentials', 'true')
     if (obj.httpMetadata?.contentDisposition) {
       headers.set('Content-Disposition', obj.httpMetadata.contentDisposition)
     }

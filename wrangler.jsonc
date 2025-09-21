@@ -20,5 +20,18 @@
 			"binding": "daw_audio_samples",
 			"remote": true
 		}
+	],
+	"d1_databases": [
+		{
+			"binding": "daw_convex_auth",
+			"database_name": "daw-convex-auth",
+			"database_id": "b0c71972-0d8e-4975-860f-3d38eb323549"
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "daw_convex_auth_kv",
+			"id": "f5b72c238c4e42219a7fb9cad9303761"
+		}
 	]
 }

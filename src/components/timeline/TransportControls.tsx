@@ -1,6 +1,7 @@
 import { type Component, createSignal } from 'solid-js'
 import { Button } from '~/components/ui/button'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent } from '~/components/ui/dropdown-menu'
+import UserInfoDropdown from '~/components/UserInfoDropdown'
 
 type TransportControlsProps = {
   isPlaying: boolean
@@ -113,6 +114,8 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
           <span class="text-sm text-neutral-400">Playhead</span>
           <span class="text-sm tabular-nums">{props.playheadSec.toFixed(2)}s</span>
         </div>
+        {/* User info dropdown at the far right */}
+        <UserInfoDropdown />
       </div>
     </div>
   )

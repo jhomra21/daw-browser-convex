@@ -12,18 +12,20 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
     
     if (e.code === 'Space') {
       e.preventDefault()
+      e.stopPropagation()
       handlers.onSpace()
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault()
+      e.stopPropagation()
       handlers.onDelete()
     }
   }
 
   onMount(() => {
-    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keydown', onKeyDown, { capture: true })
   })
 
   onCleanup(() => {
-    window.removeEventListener('keydown', onKeyDown)
+    window.removeEventListener('keydown', onKeyDown, { capture: true } as EventListenerOptions)
   })
 }

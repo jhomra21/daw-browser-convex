@@ -17,10 +17,10 @@ export const create = mutation({
     trackId: v.id("tracks"),
     startSec: v.number(),
     duration: v.number(),
-    sessionId: v.string(),
+    userId: v.string(),
     name: v.optional(v.string()),
   },
-  handler: async (ctx, { roomId, trackId, startSec, duration, sessionId, name }) => {
+  handler: async (ctx, { roomId, trackId, startSec, duration, userId, name }) => {
     // Validate that the track belongs to the same room
     const track = await ctx.db.get(trackId);
     if (!track || track.roomId !== roomId) return;
@@ -30,7 +30,7 @@ export const create = mutation({
     // Record ownership
     await ctx.db.insert("ownerships", {
       roomId,
-      ownerSessionId: sessionId,
+      ownerUserId: userId,
       clipId,
     });
 
@@ -62,8 +62,8 @@ export const move = mutation({
 });
 
 export const remove = mutation({
-  args: { clipId: v.id("clips"), sessionId: v.string() },
-  handler: async (ctx, { clipId, sessionId }) => {
+  args: { clipId: v.id("clips"), userId: v.string() },
+  handler: async (ctx, { clipId, userId }) => {
     const clip = await ctx.db.get(clipId);
     if (!clip) return;
     // Lookup ownership and enforce owner-only delete
@@ -72,7 +72,7 @@ export const remove = mutation({
       .withIndex("by_clip", q => q.eq("clipId", clipId))
       .collect();
     const owner = owners[0];
-    if (!owner || owner.ownerSessionId !== sessionId) return;
+    if (!owner || owner.ownerUserId !== userId) return;
 
     // Delete ownership then the clip
     await ctx.db.delete(owner._id);

@@ -30,12 +30,13 @@ export default defineSchema({
   // Exactly one of clipId or trackId will be set for each row.
   ownerships: defineTable({
     roomId: v.string(),
-    ownerSessionId: v.string(),
+    ownerUserId: v.string(),
     clipId: v.optional(v.id("clips")),
     trackId: v.optional(v.id("tracks")),
   })
     .index("by_clip", ["clipId"]) // find owner for a clip
     .index("by_track", ["trackId"]) // find owner for a track
-    .index("by_room", ["roomId"]), // list ownerships in a room (optional utility)
+    .index("by_room", ["roomId"]) // list ownerships in a room (optional utility)
+    .index("by_owner", ["ownerUserId"]), // list ownerships by owner (for projects)
 });
 

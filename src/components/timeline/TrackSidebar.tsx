@@ -23,9 +23,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         class="bg-neutral-900 border-l border-neutral-800 p-0 overflow-y-auto" 
         style={{ width: `${props.sidebarWidth}px`, 'min-width': '220px' }}
       >
-        <div class="flex items-center justify-between p-1">
-          <div class="font-semibold">Tracks</div>
-          <button class="text-sm text-neutral-400 hover:text-neutral-300 
+        <div class="flex items-center justify-end p-1">
+          <button class="text-sm text-neutral-400 hover:text-neutral-300 pr-2
            cursor-pointer active:scale-97 transition-transform ease-out" onClick={props.onAddTrack}>Add Track</button>
         </div>
 

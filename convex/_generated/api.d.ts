@@ -14,6 +14,7 @@ import type {
   FunctionReference,
 } from "convex/server";
 import type * as clips from "../clips.js";
+import type * as projects from "../projects.js";
 import type * as timeline from "../timeline.js";
 import type * as tracks from "../tracks.js";
 
@@ -27,6 +28,7 @@ import type * as tracks from "../tracks.js";
  */
 declare const fullApi: ApiFromModules<{
   clips: typeof clips;
+  projects: typeof projects;
   timeline: typeof timeline;
   tracks: typeof tracks;
 }>;

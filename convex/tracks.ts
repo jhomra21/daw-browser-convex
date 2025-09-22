@@ -14,8 +14,8 @@ export const listByRoom = query({
 });
 
 export const create = mutation({
-  args: { roomId: v.string(), sessionId: v.string() },
-  handler: async (ctx, { roomId, sessionId }) => {
+  args: { roomId: v.string(), userId: v.string() },
+  handler: async (ctx, { roomId, userId }) => {
     // Compute next index in room
     const existing = await ctx.db
       .query("tracks")
@@ -31,7 +31,7 @@ export const create = mutation({
     // Record ownership
     await ctx.db.insert("ownerships", {
       roomId,
-      ownerSessionId: sessionId,
+      ownerUserId: userId,
       trackId,
     });
     return trackId;
@@ -46,8 +46,8 @@ export const setVolume = mutation({
 });
 
 export const remove = mutation({
-  args: { trackId: v.id("tracks"), sessionId: v.string() },
-  handler: async (ctx, { trackId, sessionId }) => {
+  args: { trackId: v.id("tracks"), userId: v.string() },
+  handler: async (ctx, { trackId, userId }) => {
     const track = await ctx.db.get(trackId);
     if (!track) return;
     // Verify track ownership
@@ -56,7 +56,7 @@ export const remove = mutation({
       .withIndex("by_track", q => q.eq("trackId", trackId))
       .collect();
     const owner = owners[0];
-    if (!owner || owner.ownerSessionId !== sessionId) return;
+    if (!owner || owner.ownerUserId !== userId) return;
 
     // Ensure all clips on this track are owned by the same session
     const clips = await ctx.db
@@ -69,7 +69,7 @@ export const remove = mutation({
         .withIndex("by_clip", q => q.eq("clipId", c._id))
         .collect();
       const cOwner = cOwners[0];
-      if (!cOwner || cOwner.ownerSessionId !== sessionId) {
+      if (!cOwner || cOwner.ownerUserId !== userId) {
         return; // contains clips not owned by requester; abort
       }
     }
@@ -89,3 +89,4 @@ export const remove = mutation({
     await ctx.db.delete(trackId);
   },
 });
+

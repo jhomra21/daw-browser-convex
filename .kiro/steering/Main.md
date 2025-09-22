@@ -8,8 +8,12 @@ Think carefully and only action the specific task I have given you with the most
 This project uses a specific tech stack. Only use these technologies:
 - **Bun** - Package manager and runtime
 - **SolidJS** - Frontend framework
+- **TanStack Solid Query** - Data fetching and state management
+- **TanStack Router** - Routing and navigation
 - **Hono** - Backend API framework
 - **Cloudflare Workers** - Serverless deployment platform
+- **Convex** - Database and state management
+- **Better Auth** - Authentication and authorization
 - **TailwindCSS** - Styling framework
 - **TypeScript** - Primary language
 

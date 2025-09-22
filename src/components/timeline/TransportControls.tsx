@@ -1,7 +1,9 @@
-import { type Component, createSignal } from 'solid-js'
+import { type Component, createSignal, For } from 'solid-js'
 import { Button } from '~/components/ui/button'
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent } from '~/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '~/components/ui/dropdown-menu'
 import UserInfoDropdown from '~/components/UserInfoDropdown'
+import { useConvexQuery, convexApi } from '~/lib/convex'
+import { useSessionQuery } from '~/lib/session'
 
 type TransportControlsProps = {
   isPlaying: boolean
@@ -12,11 +14,29 @@ type TransportControlsProps = {
   onAddAudio: () => void
   onMasterFX: () => void
   onShare?: () => void
+  // Projects controls
+  currentRoomId: string
+  onOpenProject: (roomId: string) => void
+  onCreateProject: () => void | Promise<void>
+  onDeleteProject: (roomId: string) => void | Promise<void>
 }
 
 const TransportControls: Component<TransportControlsProps> = (props) => {
   const [shareOpen, setShareOpen] = createSignal(false)
   const [copied, setCopied] = createSignal(false)
+
+  // Projects data
+  const session = useSessionQuery()
+  const userId = () => (session()?.data?.user as any)?.id ?? ''
+  const myRooms = useConvexQuery(
+    convexApi.projects.listMine,
+    () => userId() ? ({ userId: userId() }) : null,
+    () => ['projects', 'mine', userId()]
+  )
+  const rooms = () => {
+    const raw: any = (myRooms as any).data
+    return (typeof raw === 'function' ? raw() : raw) as string[] | undefined
+  }
 
   const handleOpenShare = async () => {
     try {
@@ -56,8 +76,66 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
         <Button onClick={props.onStop} variant="outline">Stop</Button>
       </div>
 
-      {/* Right: Share + Master FX + Playhead */}
+      {/* Right: Projects + Share + Master FX + Playhead */}
       <div class="justify-self-end flex items-center gap-3">
+        {/* Projects Dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger>
+            <Button variant="outline" size="sm">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4 mr-1">
+                <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                <title>Projects</title>
+              </svg>
+              Projects
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent class="w-full bg-neutral-900" style={{ width: 'min(92vw, 24rem)' }}>
+            <div class="p-2 w-full">
+              <div class="flex items-center justify-between px-1 pb-2">
+                <span class="text-sm font-semibold text-neutral-100">My Projects</span>
+                <Button variant="default" size="sm" onClick={() => props.onCreateProject()}>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4 mr-1">
+                    <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 5v14m-7-7h14" />
+                    <title>New</title>
+                  </svg>
+                  New
+                </Button>
+              </div>
+              <DropdownMenuSeparator />
+              <div class="max-h-72 overflow-y-auto">
+                <For each={rooms() ?? []}>
+                  {(rid) => (
+                    <DropdownMenuItem
+                      class={`group flex items-center justify-between gap-2 cursor-pointer hover:bg-neutral-800 hover:text-neutral-100 ${props.currentRoomId === rid ? 'text-green-400' : ''}`}
+                      onSelect={() => props.onOpenProject(rid)}
+                    >
+                      <div class="flex items-center gap-2 min-w-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4 text-neutral-400 group-hover:text-neutral-200">
+                          <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                          <title>Project</title>
+                        </svg>
+                        <span class={`font-mono text-xs truncate max-w-[14rem] ${props.currentRoomId === rid ? 'text-green-400 group-hover:text-green-300' : 'text-neutral-200 group-hover:text-neutral-400'}`} title={rid}>{rid}</span>
+                      </div>
+                      <button
+                        class="opacity-0 group-hover:opacity-100 transition-opacity text-neutral-400 hover:text-red-500 p-1"
+                        aria-label="Delete project"
+                        onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); if (window.confirm(`Delete project \"${rid}\"? This cannot be undone.`)) props.onDeleteProject(rid) }}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
+                          <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m-1 0v14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V6m3 4v8m4-8v8" />
+                          <title>Delete</title>
+                        </svg>
+                      </button>
+                    </DropdownMenuItem>
+                  )}
+                </For>
+                {((rooms() ?? []).length === 0) && (
+                  <div class="px-2 py-2 text-xs text-neutral-500">No projects yet</div>
+                )}
+              </div>
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <DropdownMenu open={shareOpen()} onOpenChange={onShareMenuOpenChange}>
           <DropdownMenuTrigger>
             <Button variant="outline" size="sm" onClick={handleOpenShare}>Share</Button>

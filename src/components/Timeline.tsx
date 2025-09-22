@@ -30,6 +30,8 @@ const Timeline: Component = () => {
   const [roomId, setRoomId] = createSignal<string>('')
   const session = useSessionQuery()
   const userId = () => (session()?.data?.user as any)?.id ?? ''
+  // Track if we auto-generated a roomId before the user signed in
+  const [ridAutoCreated, setRidAutoCreated] = createSignal(false)
 
   // Track clip loading state to avoid duplicate fetches/decodes
   const loadingClipIds = new Set<string>()
@@ -84,22 +86,63 @@ const Timeline: Component = () => {
         rid = crypto.randomUUID()
         url.searchParams.set('roomId', rid)
         history.replaceState(null, '', url.toString())
+        setRoomId(rid)
+        setRidAutoCreated(true)
+      } else {
+        setRoomId(rid)
+        setRidAutoCreated(false)
       }
-      setRoomId(rid)
     } catch {
       setRoomId('default')
+      setRidAutoCreated(true)
     }
 
     // Cloud-only mode: no local clip name cache
   })
 
-  // Ensure the current room appears in the user's project list
+  // Query the user's existing projects (roomId + name) when signed in
+  const myProjects = useConvexQuery(
+    convexApi.projects.listMineDetailed,
+    () => userId() ? ({ userId: userId() }) : null,
+    () => ['my-projects', userId()]
+  )
+
+  // Ensure the current room appears in the user's project list, but
+  // if we auto-created a room before sign-in and the user has existing projects,
+  // redirect to the first existing project instead of creating a new one.
   createEffect(() => {
-    const rid = roomId()
     const uid = userId()
-    if (!rid || !uid) return
-    // Fire and forget; if it already exists, this is a no-op
-    void convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: rid, userId: uid })
+    if (!uid) return
+    const rid = roomId()
+    const projectsRaw = (myProjects as any)?.data
+    const projects = typeof projectsRaw === 'function' ? projectsRaw() : projectsRaw
+
+    // If we generated a temporary roomId earlier and the user already has projects,
+    // prefer redirecting to an existing project rather than creating a new Untitled one.
+    if (ridAutoCreated()) {
+      // Wait until projects are loaded before deciding to create or redirect
+      if (!Array.isArray(projects)) return
+      if (projects.length > 0) {
+        const target = projects[0]?.roomId
+        if (target && target !== rid) {
+          navigateToRoom(target)
+        }
+        setRidAutoCreated(false)
+        return
+      } else {
+        // No existing projects: create ownership for the auto-created rid
+        if (rid) {
+          void convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: rid, userId: uid })
+        }
+        setRidAutoCreated(false)
+        return
+      }
+    }
+
+    // URL-provided roomId or already decided path: ensure ownership
+    if (rid) {
+      void convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: rid, userId: uid })
+    }
   })
 
   function navigateToRoom(rid: string) {

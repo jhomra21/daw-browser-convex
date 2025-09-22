@@ -23,15 +23,15 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         class="bg-neutral-900 border-l border-neutral-800 p-0 overflow-y-auto" 
         style={{ width: `${props.sidebarWidth}px`, 'min-width': '220px' }}
       >
-        <div class="flex items-center justify-end p-1">
-          <button class="text-sm text-neutral-400 hover:text-neutral-300 pr-2
+        <div class="flex items-center justify-end p-1 -mb-[1.5px]">
+          <button class="text-base text-neutral-400 hover:text-neutral-300 pr-2
            cursor-pointer active:scale-97 transition-transform ease-out" onClick={props.onAddTrack}>Add Track</button>
         </div>
 
         <For each={props.tracks}>
           {(track) => (
             <div 
-              class={`${props.selectedTrackId === track.id ? 'bg-neutral-800' : 'bg-neutral-900 border border-neutral-800'}`} 
+              class={`${props.selectedTrackId === track.id ? 'bg-neutral-800' : 'bg-neutral-900 border-t border-neutral-800'}`} 
               style={{ height: '96px' }}
               onClick={() => props.onTrackClick(track.id)}
             >

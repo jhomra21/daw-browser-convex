@@ -1,4 +1,4 @@
-> **Last Updated**: 09/20/2025
+> **Last Updated**: 09/22/2025
 
 # Collaborative Realtime DAW
 
@@ -54,15 +54,28 @@ A modern, collaborative digital audio workstation (DAW) built with SolidJS, feat
 │   ├── timeline.ts        # Backend logic for timeline operations
 │   ├── tracks.ts          # Backend logic for track management
 │   └── clips.ts           # Backend logic for clip management
+├── migrations/            # Database migration files
+│   └── *.sql              # SQL files for database schema changes
 ├── src/                    # SolidJS frontend application
 │   ├── components/        # Reusable SolidJS components
 │   │   ├── timeline/      # Components specific to the audio timeline
 │   │   ├── ui/            # Generic UI components (buttons, dialogs, etc.)
 │   │   └── *.tsx          # Main application components like AudioRecorder
 │   ├── hooks/             # Custom SolidJS hooks for managing state and side effects
-│   ├── lib/               # Utility functions and libraries (e.g., audio engine, convex client)
+│   ├── lib/               # Utility functions and libraries
+│   │   ├── auth-client.ts # Client-side authentication logic
+│   │   ├── convex.ts      # Convex client setup
+│   │   ├── query-client.ts# TanStack Query client setup
+│   │   ├── session.ts     # Session management utilities
+│   │   └── waveform.ts    # Waveform generation logic
+│   ├── routes/            # Application routes
+│   │   ├── __root.tsx     # Root layout
+│   │   ├── index.tsx      # Home page
+│   │   ├── Login.tsx      # Login page
+│   │   └── about.tsx      # About page
 │   ├── types/             # TypeScript type definitions
-│   └── App.tsx            # Main application component that ties everything together
+│   └── main.tsx           # Main application entry point
+├── auth.ts                # Authentication configuration
 ├── package.json           # Project dependencies and scripts
 └── wrangler.jsonc         # Cloudflare Workers configuration
                             # - Defines R2 bucket bindings for audio storage
@@ -151,14 +164,26 @@ A modern, collaborative digital audio workstation (DAW) built with SolidJS, feat
 - **Ownership Tracking**: Users can only delete items they created
 - **Optimistic Updates**: Local changes appear immediately, sync to server
 
+## 🔐 Authentication
+
+The application uses `better-auth` to handle authentication, supporting various providers like Google and GitHub. The authentication flow is handled by the `auth.ts` file and the `src/lib/auth-client.ts` file.
+
+- **Database Migrations**: The `migrations` directory contains SQL scripts for setting up and updating the database schema to support user authentication and sessions.
+- **Login**: The `/login` route provides the user interface for logging in with different authentication providers.
+
+
 ## 🔧 Development
 
 ### Tools & Technologies
 - **SolidJS**: A declarative and efficient JavaScript library for building user interfaces. Used for the core frontend framework.
+- **`@tanstack/solid-router`**: A fully type-safe router for SolidJS applications.
 - **Hono**: A small, simple, and ultrafast web framework for the edge. Used for the Cloudflare Workers API.
 - **Convex**: A backend platform with a real-time database, used for collaborative state management.
 - **Cloudflare Workers**: A serverless platform for running backend code.
 - **R2**: Cloudflare's S3-compatible object storage, used for storing audio samples.
+- **`better-auth`**: A library for handling authentication with different providers.
+- **`kysely-d1`**: A type-safe SQL query builder for Cloudflare D1.
+- **Zod**: A TypeScript-first schema declaration and validation library.
 - **TailwindCSS**: A utility-first CSS framework for rapid UI development.
 - **`mediabunny`**: A library for client-side audio processing, used for recording, encoding, and analyzing audio files.
 - **`solid-devtools`**: A browser extension for debugging SolidJS applications.
@@ -172,7 +197,7 @@ A modern, collaborative digital audio workstation (DAW) built with SolidJS, feat
 
 ### Scripts
 ```bash
-bun start        # Start development server (alias for dev)
+bun start        # Start development server
 bun dev          # Start development server
 bun run build    # Build for production
 bun run serve    # Preview production build

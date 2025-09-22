@@ -3,6 +3,7 @@ import { Link, createFileRoute } from '@tanstack/solid-router';
 import { authClient } from '~/lib/auth-client';
 import { LoginMethodButton } from '~/components/LoginMethodButton';
 import { useSessionQuery } from '~/lib/session';
+import { Button } from '~/components/ui/button';
 import { queryClient } from '~/lib/query-client';
 
 const Login: Component = () => {
@@ -63,12 +64,12 @@ const Login: Component = () => {
               <div class="font-medium">{session()?.data?.user?.email}</div>
             </div>
             <div class="flex gap-2">
-              <Link to="/" class="inline-flex items-center justify-center rounded-md bg-neutral-800 px-4 py-2 hover:bg-neutral-700">
+              <Button as={Link} to="/" class="inline-flex items-center justify-center rounded-md bg-neutral-800 px-4 py-2 hover:bg-neutral-700">
                 Go to app
-              </Link>
-              <button onClick={signOut} class="inline-flex items-center justify-center rounded-md border border-neutral-700 px-4 py-2 hover:bg-neutral-800">
+              </Button>
+              <Button onClick={signOut} class="inline-flex items-center justify-center rounded-md border border-neutral-700 px-4 py-2 hover:bg-neutral-800">
                 Sign out
-              </button>
+              </Button>
             </div>
           </div>
         </Show>

@@ -890,6 +890,11 @@ const Timeline: Component = () => {
             await convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: fresh, userId: uid })
           }
         }}
+        onRenameProject={async (rid, name) => {
+          const uid = userId()
+          if (!uid) return
+          await convexClient.mutation((convexApi as any).projects.setName, { roomId: rid, userId: uid, name })
+        }}
       />
 
       <div class="flex-1 flex min-h-0" ref={el => (containerRef = el!)}>

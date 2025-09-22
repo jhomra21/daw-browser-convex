@@ -26,6 +26,18 @@ export default defineSchema({
     .index("by_room", ["roomId"]) // list clips in a room
     .index("by_track", ["trackId"]), // list clips per track
 
+  // Per-user project metadata (e.g., project names). Each owner has their own
+  // label for a roomId.
+  projects: defineTable({
+    roomId: v.string(),
+    ownerUserId: v.string(),
+    name: v.string(),
+    createdAt: v.number(), // epoch millis
+  })
+    .index("by_owner", ["ownerUserId"]) // list projects by owner
+    .index("by_room", ["roomId"]) // find all owners for a room (rarely used)
+    .index("by_room_owner", ["roomId", "ownerUserId"]), // upsert/find by pair
+
   // Ownership mappings to enforce owner-only deletions.
   // Exactly one of clipId or trackId will be set for each row.
   ownerships: defineTable({
@@ -39,4 +51,5 @@ export default defineSchema({
     .index("by_room", ["roomId"]) // list ownerships in a room (optional utility)
     .index("by_owner", ["ownerUserId"]), // list ownerships by owner (for projects)
 });
+
 

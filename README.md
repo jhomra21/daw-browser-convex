@@ -14,35 +14,6 @@ A modern, collaborative digital audio workstation (DAW) built with SolidJS, feat
 - **Visual Equalizer**: Built-in audio effects and visualization
 - **Audio Recording**: Integrated audio recording capabilities
 
-### Technical Highlights
-- **SolidJS Reactivity**: Built with SolidJS for optimal performance and reactivity
-- **Convex Database**: Real-time database for collaborative state management
-- **Cloudflare Workers**: Serverless backend with R2 storage for audio samples
-- **Hono Framework**: Lightweight API framework for backend services
-- **TailwindCSS**: Modern styling with utility-first approach
-- **TypeScript**: Full type safety throughout the application
-- **Cloudflare Vite Plugin**: Vite plugin to have server and client on single worker and ease of development
-
-## 🏗️ Architecture
-
-### Frontend (SolidJS)
-- **Framework**: SolidJS with TypeScript
-- **State Management**: SolidJS signals and stores with TanStack Solid Query
-- **UI Components**: Custom components with @kobalte/core for accessibility
-- **Styling**: TailwindCSS v4 with class-variance-authority for component variants
-- **Audio Engine**: Custom Web Audio API implementation
-
-### Backend (Hono + Cloudflare Workers)
-- **API Framework**: Hono for lightweight, fast API endpoints
-- **Deployment**: Cloudflare Workers for serverless deployment
-- **Storage**: R2 (Cloudflare's S3-compatible storage) for audio samples
-- **Database**: Convex for real-time collaborative state
-
-### Data Layer
-- **Schema**: Minimal collaborative model with tracks, clips, and ownership
-- **Real-time Sync**: Convex provides real-time synchronization across clients
-- **Audio Storage**: R2 buckets for scalable audio file storage
-
 ## 📁 Project Structure
 
 ```

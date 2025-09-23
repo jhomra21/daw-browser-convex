@@ -12,6 +12,7 @@ export type KnobProps = {
   onValueChange: (value: number) => void
   logarithmic?: boolean
   bipolar?: boolean
+  showValue?: boolean
 }
 
 export default function Knob(props: KnobProps) {
@@ -215,11 +216,13 @@ export default function Knob(props: KnobProps) {
       </div>
       
       {/* Value Display */}
-      <div class={`text-xs font-mono text-center min-w-[3rem] ${
-        isDragging() ? 'text-gray-200' : 'text-gray-400'
-      } transition-colors duration-150`}>
-        {formatValue()}
-      </div>
+      {props.showValue !== false && (
+        <div class={`text-xs font-mono text-center min-w-[3rem] ${
+          isDragging() ? 'text-gray-200' : 'text-gray-400'
+        } transition-colors duration-150`}>
+          {formatValue()}
+        </div>
+      )}
     </div>
   )
 }

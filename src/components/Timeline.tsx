@@ -1077,6 +1077,9 @@ const Timeline: Component = () => {
         tracks={tracks()}
         onClose={() => setBottomFXOpen(false)}
         onOpen={() => setBottomFXOpen(true)}
+        audioEngine={audioEngine}
+        roomId={roomId()}
+        userId={userId()}
       />
 
       <Dialog open={confirmOpen()} onOpenChange={setConfirmOpen}>

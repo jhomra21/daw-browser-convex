@@ -132,7 +132,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
             <div class="p-2 w-full">
               <div class="flex items-center justify-between px-1 pb-2">
                 <span class="text-sm font-semibold text-neutral-100">My Projects</span>
-                <Button variant="default" size="sm" onClick={() => props.onCreateProject()}>
+                <Button variant="default" class="text-neutral-100" size="sm" onClick={() => props.onCreateProject()}>
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4 mr-1">
                     <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 5v14m-7-7h14" />
                     <title>New</title>
@@ -308,7 +308,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                       }>
                         <DropdownMenuItem
                           data-project-rid={rid}
-                          class={`group relative w-full flex items-center justify-between gap-2 cursor-pointer hover:bg-neutral-800 hover:text-neutral-100 pr-12 ${props.currentRoomId === rid ? 'text-green-400' : ''}`}
+                          class={`group relative w-full flex items-center justify-between gap-2 cursor-pointer hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100 pr-12 ${props.currentRoomId === rid ? 'text-green-400' : ''}`}
                           onSelect={() => { setConfirmingProjectId(null); props.onOpenProject(rid) }}
                         >
                           <div class="flex items-center gap-2 min-w-0 flex-1">
@@ -316,11 +316,11 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                               <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
                               <title>Project</title>
                             </svg>
-                            <span class={`font-mono text-xs truncate max-w-[14rem] ${props.currentRoomId === rid ? 'text-green-400 group-hover:text-green-300' : 'text-neutral-200 group-hover:text-neutral-400'}`} title={proj.name}>{proj.name}</span>
+                            <span class={`font-mono text-xs truncate max-w-[14rem] ${props.currentRoomId === rid ? 'text-green-400 group-hover:text-green-300' : 'text-neutral-200 group-hover:text-neutral-100'}`} title={proj.name}>{proj.name}</span>
                           </div>
                           <div class="absolute right-2 top-1/2 -translate-y-1/2" data-project-controls>
                             {/* Triggers: Edit + Delete (hidden during rename/delete confirm) */}
-                            <div class={`flex items-center gap-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity duration-150`}>
+                            <div class={`flex items-center gap-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto`}>
                               <button
                                 class="p-1 cursor-pointer text-neutral-400 hover:text-neutral-200"
                                 aria-label="Edit project name"

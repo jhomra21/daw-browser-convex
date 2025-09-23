@@ -960,12 +960,37 @@ const Timeline: Component = () => {
         onDeleteProject={async (rid) => {
           const uid = userId()
           if (!uid) return
-          await convexClient.mutation(convexApi.projects.deleteOwnedInRoom, { roomId: rid, userId: uid })
+          // If deleting the active project, navigate to an existing other project FIRST
+          // (if any), otherwise create a fresh one. Only then delete the old project
+          // to avoid the ensureOwnedRoom effect re-adding it.
           if (rid === roomId()) {
-            // Move to a fresh empty room after deleting current project
-            const fresh = crypto.randomUUID()
-            navigateToRoom(fresh)
-            await convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: fresh, userId: uid })
+            const old = rid
+            // Snapshot current projects and pick another one, if available
+            const projectsRaw: any = (myProjects as any)?.data
+            const projectsLocal = typeof projectsRaw === 'function' ? projectsRaw() : projectsRaw
+            let other: string | undefined = Array.isArray(projectsLocal)
+              ? (projectsLocal.find((p: any) => p?.roomId && p.roomId !== old)?.roomId as string | undefined)
+              : undefined
+            // If local cache isn't ready, fetch a fresh snapshot to avoid creating an unnecessary new project
+            if (!other) {
+              try {
+                const freshList: any[] = await convexClient.query((convexApi as any).projects.listMineDetailed, { userId: uid } as any)
+                other = freshList?.find?.((p: any) => p?.roomId && p.roomId !== old)?.roomId
+              } catch {}
+            }
+
+            if (other) {
+              navigateToRoom(other)
+              await convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: other, userId: uid })
+              await convexClient.mutation(convexApi.projects.deleteOwnedInRoom, { roomId: old, userId: uid })
+            } else {
+              const fresh = crypto.randomUUID()
+              navigateToRoom(fresh)
+              await convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: fresh, userId: uid })
+              await convexClient.mutation(convexApi.projects.deleteOwnedInRoom, { roomId: old, userId: uid })
+            }
+          } else {
+            await convexClient.mutation(convexApi.projects.deleteOwnedInRoom, { roomId: rid, userId: uid })
           }
         }}
         onRenameProject={async (rid, name) => {

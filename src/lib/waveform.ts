@@ -11,7 +11,6 @@ export function computePeaks(buffer: AudioBuffer, bins: number): Float32Array {
     byRes = new Map<number, Float32Array>()
     bufferCache.set(buffer, byRes)
   }
-
   const cached = byRes.get(b)
   if (cached) return cached
 

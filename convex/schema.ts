@@ -21,6 +21,8 @@ export default defineSchema({
     trackId: v.id("tracks"),
     startSec: v.number(),
     duration: v.number(),
+    // Optional left padding (seconds) before audio begins within the clip window
+    leftPadSec: v.optional(v.number()),
     // Optional shared display name for the clip (e.g., original filename)
     name: v.optional(v.string()),
     // Optional URL where the audio sample is stored (e.g. R2-backed endpoint)

@@ -4,6 +4,8 @@ export type Clip = {
   buffer?: AudioBuffer | null
   startSec: number
   duration: number
+  /** Seconds of silence before audio begins within the clip window */
+  leftPadSec?: number
   color: string
   sampleUrl?: string
 }

@@ -212,47 +212,6 @@
   }
 }
 
-/* Bridge utilities: map token classes to our HSL variables so v4 variants render */
-@layer utilities {
-  /* Filled buttons */
-  .bg-primary { background-color: hsl(var(--primary)); }
-  .text-primary-foreground { color: hsl(var(--primary-foreground)); }
-  .text-primary { color: hsl(var(--primary)); }
-
-  .bg-secondary { background-color: hsl(var(--secondary)); }
-  .text-secondary-foreground { color: hsl(var(--secondary-foreground)); }
-
-  .bg-destructive { background-color: hsl(var(--destructive)); }
-  .text-destructive-foreground { color: hsl(var(--destructive-foreground)); }
-
-  /* Outline + ghost helpers */
-  .border-input { border-color: hsl(var(--input)); }
-  .bg-accent { background-color: hsl(var(--accent)); }
-  .text-accent-foreground { color: hsl(var(--accent-foreground)); }
-  .hover\:bg-accent:hover { background-color: hsl(var(--accent)); }
-  .hover\:text-accent-foreground:hover { color: hsl(var(--accent-foreground)); }
-
-  /* Rings */
-  .ring-ring { --tw-ring-color: hsl(var(--ring)); }
-  .ring-offset-background { --tw-ring-offset-color: hsl(var(--background)); }
-
-  /* Hover opacity variants used by cva */
-  .hover\:bg-primary\/90:hover { background-color: hsl(var(--primary) / 0.9); }
-  .hover\:bg-secondary\/80:hover { background-color: hsl(var(--secondary) / 0.8); }
-  .hover\:bg-destructive\/90:hover { background-color: hsl(var(--destructive) / 0.9); }
-
-  /* Core tokens used by dialogs and overlays */
-  .bg-background { background-color: hsl(var(--background)); }
-  .text-foreground { color: hsl(var(--foreground)); }
-  .text-muted-foreground { color: hsl(var(--muted-foreground)); }
-  .bg-popover { background-color: hsl(var(--popover)); }
-  .text-popover-foreground { color: hsl(var(--popover-foreground)); }
-  /* Escaped slash class to support bg-background/80 used by overlays */
-  .bg-background\/80 { background-color: hsl(var(--background) / 0.8); }
-  /* Common alternative opacity */
-  .bg-background\/50 { background-color: hsl(var(--background) / 0.5); }
-}
-
 ::-webkit-scrollbar {
   width: 16px;
 }
@@ -266,4 +225,9 @@
 
 ::-webkit-scrollbar-corner {
   display: none;
+}
+
+
+html {
+  overscroll-behavior: none;
 }

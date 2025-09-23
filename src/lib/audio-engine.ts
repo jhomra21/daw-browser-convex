@@ -209,17 +209,32 @@ export class AudioEngine {
 
       const input = this.ensureTrackNodes(t.id)
       for (const c of t.clips) {
-        // Skip clips that do not have a decoded AudioBuffer yet
+        // Skip clips without audio
         if (!c.buffer) continue
-        const offset = Math.max(0, playheadSec - c.startSec)
-        const when = Math.max(0, c.startSec - playheadSec)
-        if (offset >= c.duration) continue
+        const leftPad = Math.max(0, c.leftPadSec ?? 0)
+        const windowStart = c.startSec
+        const windowEnd = c.startSec + c.duration
+        const audioStart = windowStart + leftPad
+        const bufferDur = c.buffer.duration
+        const audioEnd = Math.min(windowEnd, audioStart + bufferDur)
+
+        // If playhead is outside the audio window, nothing to schedule
+        if (playheadSec >= audioEnd) continue
+
+        const when = Math.max(0, audioStart - playheadSec)
+        const offset = Math.max(0, playheadSec - audioStart)
+        if (offset >= bufferDur) continue
+
+        // How long can we play starting from offset within clip and buffer
+        const maxPlayableFromOffset = Math.max(0, bufferDur - offset)
+        const clipWindowRemaining = Math.max(0, audioEnd - Math.max(playheadSec, audioStart))
+        const playDur = Math.min(maxPlayableFromOffset, clipWindowRemaining)
+        if (playDur <= 0) continue
 
         const s = this.audioCtx.createBufferSource()
         s.buffer = c.buffer
-        // Route through track input so effects apply
         s.connect(input)
-        s.start(now + when, offset)
+        s.start(now + when, offset, playDur)
         this.activeSources.push(s)
       }
     }

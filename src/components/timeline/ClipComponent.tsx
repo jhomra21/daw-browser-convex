@@ -9,6 +9,7 @@ type ClipComponentProps = {
   isSelected: boolean
   onMouseDown: (trackId: string, clipId: string, e: MouseEvent) => void
   onClick: (trackId: string, clipId: string, e: MouseEvent) => void
+  onResizeStart: (trackId: string, clipId: string, edge: 'left' | 'right', e: MouseEvent) => void
 }
 
 const ClipComponent: Component<ClipComponentProps> = (props) => {
@@ -59,8 +60,12 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       return
     }
 
-    const bins = Math.max(1, Math.floor(cssW))
+    // Fix waveform horizontal scale to real time based on buffer length (no stretch with clip resize)
+    const bufferPxW = Math.max(1, Math.floor(buffer.duration * PPS))
+    const bins = bufferPxW
     const peaks = computePeaks(buffer, bins)
+    const padPx = Math.max(0, Math.floor((props.clip.leftPadSec ?? 0) * PPS))
+    const drawCols = Math.max(0, Math.min(cssW - padPx, bins))
     const color = props.isSelected ? 'rgba(59,130,246,0.9)' : 'rgba(34,197,94,0.85)'
 
     // Auto-gain normalization so waveform nearly fills inner area
@@ -75,7 +80,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const gain = Math.min(0.98 / (peak || 1), 4.0) // cap gain to avoid extreme zoom
 
     // Draw mirrored filled bars per pixel column with high-contrast fill
-    for (let i = 0; i < bins; i++) {
+    for (let i = 0; i < drawCols; i++) {
       const min = peaks[i * 2]
       const max = peaks[i * 2 + 1]
       const a = Math.max(Math.abs(min), Math.abs(max))
@@ -83,31 +88,31 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       if (h <= 0.5) continue
       // top half (bright)
       ctx.fillStyle = 'rgba(255,255,255,0.55)'
-      ctx.fillRect(i, midY - h, 1, h)
+      ctx.fillRect(padPx + i, midY - h, 1, h)
       // bottom half (bright)
       ctx.fillStyle = 'rgba(255,255,255,0.55)'
-      ctx.fillRect(i, midY, 1, h)
+      ctx.fillRect(padPx + i, midY, 1, h)
     }
 
     // Optional outlines (top and bottom) for clarity
     ctx.strokeStyle = 'rgba(255,255,255,0.95)'
     ctx.lineWidth = 1.5
     ctx.beginPath()
-    for (let i = 0; i < bins; i++) {
+    for (let i = 0; i < drawCols; i++) {
       const min = peaks[i * 2]
       const max = peaks[i * 2 + 1]
       const a = Math.max(Math.abs(min), Math.abs(max))
-      const x = i + 0.5
+      const x = padPx + i + 0.5
       const yTop = midY - Math.min(a * amp * gain, innerH / 2)
       if (i === 0) ctx.moveTo(x, yTop); else ctx.lineTo(x, yTop)
     }
     ctx.stroke()
     ctx.beginPath()
-    for (let i = 0; i < bins; i++) {
+    for (let i = 0; i < drawCols; i++) {
       const min = peaks[i * 2]
       const max = peaks[i * 2 + 1]
       const a = Math.max(Math.abs(min), Math.abs(max))
-      const x = i + 0.5
+      const x = padPx + i + 0.5
       const yBottom = midY + Math.min(a * amp * gain, innerH / 2)
       if (i === 0) ctx.moveTo(x, yBottom); else ctx.lineTo(x, yBottom)
     }
@@ -120,6 +125,18 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     ctx.moveTo(0, Math.floor(midY) + 0.5)
     ctx.lineTo(cssW, Math.floor(midY) + 0.5)
     ctx.stroke()
+
+    // Mark end of audio if clip extends beyond buffer (account for left padding)
+    const audioEndX = padPx + bufferPxW
+    if (cssW > audioEndX && audioEndX >= 0) {
+      const x = Math.min(cssW, audioEndX)
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(x + 0.5, 0)
+      ctx.lineTo(x + 0.5, cssH)
+      ctx.stroke()
+    }
   }
 
   onMount(() => {
@@ -139,7 +156,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
 
   return (
     <div
-      class={`absolute top-2 rounded border ${props.isSelected ? 'border-blue-400 bg-blue-500/25' : 'border-green-500/60 bg-green-500/20'} hover:bg-green-500/25 cursor-grab select-none overflow-hidden`}
+      class={`group absolute top-2 rounded border ${props.isSelected ? 'border-blue-400 bg-blue-500/25' : 'border-green-500/60 bg-green-500/20'} hover:bg-green-500/25 cursor-grab select-none overflow-hidden`}
       style={{ 
         left: `${props.clip.startSec * PPS}px`, 
         width: `${Math.max(20, props.clip.duration * PPS)}px`, 
@@ -149,6 +166,21 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       onClick={(e) => props.onClick(props.trackId, props.clip.id, e)}
       title={`${props.clip.name} (${props.clip.duration.toFixed(2)}s)`}
     >
+      {/* Left resize handle */}
+      <div
+        class="absolute inset-y-0 left-0 w-2 cursor-ew-resize z-20 flex items-center justify-center text-[11px] text-neutral-200/80 select-none"
+        onMouseDown={(e) => { e.stopPropagation(); props.onResizeStart(props.trackId, props.clip.id, 'left', e) }}
+      >
+        <span class="opacity-0 group-hover:opacity-100 pointer-events-none">[</span>
+      </div>
+      {/* Right resize handle */}
+      <div
+        class="absolute inset-y-0 right-0 w-2 cursor-ew-resize z-20 flex items-center justify-center text-[11px] text-neutral-200/80 select-none"
+        onMouseDown={(e) => { e.stopPropagation(); props.onResizeStart(props.trackId, props.clip.id, 'right', e) }}
+      >
+        <span class="opacity-0 group-hover:opacity-100 pointer-events-none">]</span>
+      </div>
+
       <canvas ref={(el) => (canvasRef = el || undefined)} class="absolute inset-0 rounded pointer-events-none z-0" />
       <div class="px-2 py-1 text-xs truncate relative z-10">{props.clip.name}</div>
       <div class="absolute bottom-1 right-2 text-[10px] text-neutral-300 relative z-10">

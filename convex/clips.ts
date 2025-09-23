@@ -100,3 +100,18 @@ export const setName = mutation({
   },
 });
 
+
+// Update timing (startSec and duration) for a clip
+export const setTiming = mutation({
+  args: { clipId: v.id("clips"), startSec: v.number(), duration: v.number(), leftPadSec: v.optional(v.number()) },
+  handler: async (ctx, { clipId, startSec, duration, leftPadSec }) => {
+    const clip = await ctx.db.get(clipId)
+    if (!clip) return
+    // Sanity clamps
+    const safeStart = Math.max(0, startSec)
+    const safeDuration = Math.max(0, duration)
+    const safePad = typeof leftPadSec === 'number' && isFinite(leftPadSec) ? Math.max(0, leftPadSec) : undefined
+    await ctx.db.patch(clipId, { startSec: safeStart, duration: safeDuration, ...(safePad !== undefined ? { leftPadSec: safePad } : {}) })
+  },
+});
+

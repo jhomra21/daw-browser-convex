@@ -209,6 +209,17 @@ const Timeline: Component = () => {
   let resizeStartX = 0
   let resizeStartWidth = 0
 
+  // Clip resize state
+  const MIN_CLIP_SEC = 0.05
+  let clipResizing = false
+  let resizingIds: { trackId: string; clipId: string; edge: 'left' | 'right' } | null = null
+  let resizeOrigStart = 0
+  let resizeOrigDuration = 0
+  let resizeOrigPad = 0
+  let resizeAudioStart = 0
+  let resizeFixedLeft = 0
+  let resizeFixedRight = 0
+
   // Scrubbing helpers
   let scrubbing = false
 
@@ -309,6 +320,7 @@ const Timeline: Component = () => {
         buffer,
         startSec: c.startSec as number,
         duration: c.duration as number,
+        leftPadSec: (c as any).leftPadSec ?? prevClip?.leftPadSec ?? 0,
         color,
         sampleUrl: (c as any).sampleUrl as string | undefined,
       })
@@ -333,6 +345,7 @@ const Timeline: Component = () => {
             buffer: localClip.buffer ?? null,
             startSec: localClip.startSec,
             duration: localClip.duration,
+            leftPadSec: localClip.leftPadSec ?? 0,
             color: localClip.color,
             sampleUrl: localClip.sampleUrl,
           })
@@ -356,6 +369,8 @@ const Timeline: Component = () => {
     try { window.removeEventListener('mouseup', onWindowMouseUp) } catch {}
     try { window.removeEventListener('mousemove', onSidebarMouseMove) } catch {}
     try { window.removeEventListener('mouseup', onSidebarMouseUp) } catch {}
+    try { window.removeEventListener('mousemove', onResizeMouseMove) } catch {}
+    try { window.removeEventListener('mouseup', onResizeMouseUp) } catch {}
     audioEngine.close()
   })
 
@@ -793,6 +808,104 @@ const Timeline: Component = () => {
     window.removeEventListener('mouseup', onWindowMouseUp)
   }
 
+  // --- Clip edge resize ---
+  function onClipResizeStart(trackId: string, clipId: string, edge: 'left' | 'right', e: MouseEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    const t = tracks().find(t => t.id === trackId)
+    const c = t?.clips.find(c => c.id === clipId)
+    if (!t || !c) return
+    // Do not allow simultaneous drag
+    dragging = false
+    draggingIds = null
+    // Select
+    batch(() => {
+      setSelectedTrackId(trackId)
+      setSelectedClip({ trackId, clipId })
+    })
+    // Capture original
+    clipResizing = true
+    resizingIds = { trackId, clipId, edge }
+    resizeOrigStart = c.startSec
+    resizeOrigDuration = c.duration
+    resizeOrigPad = c.leftPadSec ?? 0
+    resizeAudioStart = resizeOrigStart + resizeOrigPad
+    resizeFixedLeft = c.startSec
+    resizeFixedRight = c.startSec + c.duration
+
+    window.addEventListener('mousemove', onResizeMouseMove)
+    window.addEventListener('mouseup', onResizeMouseUp)
+  }
+
+  function onResizeMouseMove(e: MouseEvent) {
+    if (!clipResizing || !resizingIds || !scrollRef) return
+    const ids = resizingIds!
+    const t = tracks().find(tt => tt.id === ids.trackId)
+    if (!t) return
+    const rect = scrollRef.getBoundingClientRect()
+    const x = e.clientX - rect.left + (scrollRef?.scrollLeft || 0)
+    const sec = Math.max(0, x / PPS)
+    const others = t.clips.filter(cc => cc.id !== ids.clipId)
+    const edge = ids.edge
+
+    if (edge === 'left') {
+      // Keep right edge fixed
+      const right = resizeFixedRight
+      const maxStartByLen = right - MIN_CLIP_SEC
+      // Nearest left neighbor end
+      let neighborEnd = 0
+      for (const oc of others) {
+        const end = oc.startSec + oc.duration
+        if (end <= resizeOrigStart && end > neighborEnd) neighborEnd = end
+      }
+      const minStartBound = Math.max(0, neighborEnd + 0.0001)
+      const maxStartBound = Math.min(resizeAudioStart, maxStartByLen)
+      const newStart = Math.max(minStartBound, Math.min(sec, maxStartBound))
+      const newDuration = Math.max(MIN_CLIP_SEC, right - newStart)
+      const newLeftPad = Math.max(0, resizeAudioStart - newStart)
+      setTracks(ts => ts.map(tr => tr.id !== t.id ? tr : ({
+        ...tr,
+        clips: tr.clips.map(cc => cc.id !== ids.clipId ? cc : ({ ...cc, startSec: newStart, duration: newDuration, leftPadSec: newLeftPad }))
+      })))
+    } else {
+      // edge === 'right', keep left edge fixed
+      const left = resizeFixedLeft
+      const minRightByLen = left + MIN_CLIP_SEC
+      // Nearest right neighbor start (>= original start)
+      let neighborStart = Number.POSITIVE_INFINITY
+      for (const oc of others) {
+        if (oc.startSec >= resizeOrigStart && oc.startSec < neighborStart) neighborStart = oc.startSec
+      }
+      let newRight = Math.max(sec, minRightByLen)
+      if (Number.isFinite(neighborStart)) newRight = Math.min(newRight, neighborStart - 0.0001)
+      const newDuration = Math.max(MIN_CLIP_SEC, newRight - left)
+      setTracks(ts => ts.map(tr => tr.id !== t.id ? tr : ({
+        ...tr,
+        clips: tr.clips.map(cc => cc.id !== ids.clipId ? cc : ({ ...cc, duration: newDuration }))
+      })))
+    }
+  }
+
+  function onResizeMouseUp() {
+    if (!clipResizing || !resizingIds) return
+    const ids = resizingIds!
+    const t = tracks().find(tt => tt.id === ids.trackId)
+    const c = t?.clips.find(cc => cc.id === ids.clipId)
+    clipResizing = false
+    resizingIds = null
+    window.removeEventListener('mousemove', onResizeMouseMove)
+    window.removeEventListener('mouseup', onResizeMouseUp)
+    if (t && c) {
+      // Persist
+      void convexClient.mutation((convexApi as any).clips.setTiming, {
+        clipId: c.id as any,
+        startSec: c.startSec,
+        duration: c.duration,
+        leftPadSec: c.leftPadSec ?? 0,
+      })
+    }
+  }
+
   function onRulerMouseDown(e: MouseEvent) {
     e.preventDefault()
     startScrub(e.clientX)
@@ -832,6 +945,69 @@ const Timeline: Component = () => {
     // Server removal
     void convexClient.mutation(convexApi.clips.remove, { clipId: sel.clipId as any, userId: userId() })
     setSelectedClip(null)
+  }
+
+  // Duplicate the currently selected clip on the same track, placing it to the right
+  async function duplicateSelectedClip() {
+    const sel = selectedClip()
+    if (!sel) return
+    const t = tracks().find(tt => tt.id === sel.trackId)
+    const c = t?.clips.find(cc => cc.id === sel.clipId)
+    if (!t || !c) return
+
+    // Compute a non-overlapping start to the right of the current clip
+    let desiredStart = c.startSec + c.duration + 0.0001
+    let startSec = desiredStart
+    if (willOverlap(t.clips, null, startSec, c.duration)) {
+      startSec = calcNonOverlapStart(t.clips, null, startSec, c.duration)
+    }
+
+    // Create on server with identical params except position
+    const createdClipId = await convexClient.mutation(convexApi.clips.create, {
+      roomId: roomId(),
+      trackId: t.id as any,
+      startSec,
+      duration: c.duration,
+      userId: userId(),
+      name: c.name,
+    }) as any as string
+
+    // Optimistic local insert with same buffer/sampleUrl/leftPad/color
+    if (c.buffer) {
+      audioBufferCache.set(createdClipId, c.buffer)
+    }
+    setTracks(ts => ts.map(tr => tr.id !== t.id ? tr : ({
+      ...tr,
+      clips: [...tr.clips, {
+        id: createdClipId,
+        name: c.name,
+        buffer: c.buffer ?? null,
+        startSec,
+        duration: c.duration,
+        leftPadSec: c.leftPadSec ?? 0,
+        color: c.color,
+        sampleUrl: c.sampleUrl,
+      }]
+    })))
+
+    // Persist sampleUrl and leftPadSec if present
+    if (c.sampleUrl) {
+      void convexClient.mutation(convexApi.clips.setSampleUrl, { clipId: createdClipId as any, sampleUrl: c.sampleUrl })
+    }
+    if (typeof c.leftPadSec === 'number' && isFinite(c.leftPadSec)) {
+      void convexClient.mutation((convexApi as any).clips.setTiming, {
+        clipId: createdClipId as any,
+        startSec,
+        duration: c.duration,
+        leftPadSec: c.leftPadSec ?? 0,
+      })
+    }
+
+    batch(() => {
+      setSelectedTrackId(t.id)
+      setSelectedClip({ trackId: t.id, clipId: createdClipId })
+      setSelectedFXTarget(t.id)
+    })
   }
 
   function performDeleteTrack(id: string) {
@@ -875,7 +1051,8 @@ const Timeline: Component = () => {
 
   useTimelineKeyboard({
     onSpace: () => isPlaying() ? handlePause() : requestPlay(),
-    onDelete: handleKeyboardAction
+    onDelete: handleKeyboardAction,
+    onDuplicate: () => { void duplicateSelectedClip() }
   })
 
   // Sidebar resizer
@@ -1018,6 +1195,7 @@ const Timeline: Component = () => {
                     selectedClip={selectedClip()}
                     onClipMouseDown={onClipMouseDown}
                     onClipClick={onClipClick}
+                    onClipResizeStart={onClipResizeStart}
                   />
                 )}
               </For>

@@ -1,4 +1,4 @@
-import { createRootRoute, Outlet } from '@tanstack/solid-router'
+import { createRootRoute, Outlet, HeadContent } from '@tanstack/solid-router'
 import { TanStackRouterDevtools } from '@tanstack/solid-router-devtools'
 
 export const Route = createRootRoute({
@@ -10,8 +10,17 @@ export const Route = createRootRoute({
       </pre>
     </div>
   ),
+  head: () => ({
+    meta: [
+      { title: 'Realtime Collaborative DAW - Convex, Solid, TanStack, MediaBunny' },
+    ],
+    links: [
+      { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml', sizes: 'any' },
+    ],
+  }),
   component: () => (
     <>
+      <HeadContent />
       <Outlet />
       <TanStackRouterDevtools />
     </>

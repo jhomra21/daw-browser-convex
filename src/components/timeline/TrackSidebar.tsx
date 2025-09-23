@@ -10,6 +10,10 @@ type TrackSidebarProps = {
   onAddTrack: () => void
   onVolumeChange: (trackId: string, volume: number) => void
   onSidebarMouseDown: (e: MouseEvent) => void
+  onToggleMute: (trackId: string) => void
+  onToggleSolo: (trackId: string) => void
+  syncMix: boolean
+  onToggleSyncMix: () => void
 }
 
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
@@ -23,7 +27,18 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         class="bg-neutral-900 border-l border-neutral-800 p-0 overflow-y-auto" 
         style={{ width: `${props.sidebarWidth}px`, 'min-width': '220px' }}
       >
-        <div class="flex items-center justify-end p-1 -mb-[1.5px]">
+        <div class="flex items-center justify-between p-1">
+          <div>
+            <button
+              class={`text-xs font-medium p-0.5 rounded-md active:scale-97 transition-transform ease-out
+                ${props.syncMix ? 'bg-blue-500/15 text-blue-300 ring-1 ring-blue-400/30' : 'text-neutral-400 hover:text-neutral-300 hover:bg-neutral-800'}
+              `}
+              onClick={() => props.onToggleSyncMix()}
+              title="Toggle syncing mute/solo across users"
+            >
+              Sync Mix
+            </button>
+          </div>
           <button class="text-base text-neutral-400 hover:text-neutral-300 pr-2
            cursor-pointer active:scale-97 transition-transform ease-out" onClick={props.onAddTrack}>Add Track</button>
         </div>
@@ -36,8 +51,25 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               onClick={() => props.onTrackClick(track.id)}
             >
               <div class="flex items-center gap-3 h-full px-3 py-2">
-                {/* Track name */}
-                <div class="font-semibold text-sm flex-1">{track.name}</div>
+                {/* Track name (Mute toggle) */}
+                <button
+                  class={`font-semibold text-sm flex-1 text-left px-2 py-1 rounded cursor-pointer transition-colors
+                    ${track.muted ? 'bg-amber-500 text-black ring-1 ring-amber-300' : 'hover:bg-neutral-800'}`}
+                  onClick={(e) => { e.stopPropagation(); props.onToggleMute(track.id) }}
+                  title={track.muted ? 'Unmute track' : 'Mute track'}
+                >
+                  {track.name}
+                </button>
+
+                {/* Solo button */}
+                <button
+                  class={`px-2 py-1 text-xs font-semibold rounded
+                    ${track.soloed ? 'bg-blue-500/90 text-black ring-1 ring-blue-300' : 'bg-neutral-700 text-neutral-200 hover:bg-neutral-600'}`}
+                  onClick={(e) => { e.stopPropagation(); props.onToggleSolo(track.id) }}
+                  title={track.soloed ? 'Unsolo' : 'Solo'}
+                >
+                  S
+                </button>
                 
                 {/* Vertical volume slider */}
                 <div class="flex flex-col items-center gap-1">

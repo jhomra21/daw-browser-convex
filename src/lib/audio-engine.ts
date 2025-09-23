@@ -18,6 +18,8 @@ export class AudioEngine {
   updateTrackGains(tracks: Track[]) {
     if (!this.audioCtx || !this.masterGain) return
 
+    const anySoloed = tracks.some(tt => tt.soloed)
+
     // Update existing gains and create new ones
     for (const t of tracks) {
       let g = this.trackGains.get(t.id)
@@ -26,7 +28,9 @@ export class AudioEngine {
         g.connect(this.masterGain)
         this.trackGains.set(t.id, g)
       }
-      g.gain.value = t.volume
+      const audible = (!t.muted) && (!anySoloed || !!t.soloed)
+      const effective = audible ? t.volume : 0
+      g.gain.value = effective
     }
 
     // Clean up removed tracks
@@ -51,15 +55,21 @@ export class AudioEngine {
     
     this.stopAllSources()
     const now = this.audioCtx.currentTime
+    const anySoloed = tracks.some(t => t.soloed)
 
     for (const t of tracks) {
       let g = this.trackGains.get(t.id)
       if (!g) {
         g = this.audioCtx.createGain()
-        g.gain.value = t.volume
+        const audible0 = (!t.muted) && (!anySoloed || !!t.soloed)
+        g.gain.value = audible0 ? t.volume : 0
         g.connect(this.masterGain!)
         this.trackGains.set(t.id, g)
       }
+      // Ensure gain reflects current mute/solo state
+      const audible = (!t.muted) && (!anySoloed || !!t.soloed)
+      const effective = audible ? t.volume : 0
+      g.gain.value = effective
 
       for (const c of t.clips) {
         // Skip clips that do not have a decoded AudioBuffer yet

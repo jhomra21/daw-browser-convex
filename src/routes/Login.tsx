@@ -5,6 +5,7 @@ import { LoginMethodButton } from '~/components/LoginMethodButton';
 import { useSessionQuery } from '~/lib/session';
 import { Button } from '~/components/ui/button';
 import { queryClient } from '~/lib/query-client';
+import Icon from '~/components/ui/Icon';
 
 const Login: Component = () => {
   const session = useSessionQuery();
@@ -50,11 +51,7 @@ const Login: Component = () => {
               onClick={signInWithGoogle}
               loading={loadingGoogle()}
               disabled={loadingGoogle()}
-              icon={
-                <svg aria-hidden="true" viewBox="0 0 24 24" class="h-5 w-5">
-                  <path fill="#EA4335" d="M12 11h11c.1.6.1 1.1.1 1.7 0 6-4 10.3-11.1 10.3A11.9 11.9 0 0 1 0 12 11.9 11.9 0 0 1 12 0a11.3 11.3 0 0 1 7.7 3l-3.2 3.1A6.7 6.7 0 0 0 12 3.6c-4.2 0-7.6 3.5-7.6 7.7s3.4 7.7 7.6 7.7c4 0 6.7-2.3 7.2-5.5H12V11Z" />
-                </svg>
-              }
+              icon={<Icon name="google" size={20} class="mr-2" ariaLabel="Google" />}
             />
           }
         >

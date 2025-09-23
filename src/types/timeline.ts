@@ -13,6 +13,10 @@ export type Track = {
   name: string
   volume: number
   clips: Clip[]
+  /** Local-only mute toggle (not persisted) */
+  muted?: boolean
+  /** Local-only solo toggle (not persisted) */
+  soloed?: boolean
 }
 
 export type SelectedClip = {

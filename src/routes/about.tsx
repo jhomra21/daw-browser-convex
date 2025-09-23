@@ -1,6 +1,12 @@
 import { createFileRoute } from '@tanstack/solid-router'
 
 export const Route = createFileRoute('/about')({
+  head: () => ({
+    meta: [
+      { title: 'About – Mediabunny' },
+      { name: 'description', content: 'About page' },
+    ],
+  }),
   component: About,
 })
 

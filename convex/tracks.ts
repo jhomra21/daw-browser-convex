@@ -45,6 +45,25 @@ export const setVolume = mutation({
   },
 });
 
+export const setMix = mutation({
+  args: { trackId: v.id("tracks"), muted: v.optional(v.boolean()), soloed: v.optional(v.boolean()), userId: v.string() },
+  handler: async (ctx, { trackId, muted, soloed, userId }) => {
+    // Only the owner of the track may update shared mix state
+    const owners = await ctx.db
+      .query("ownerships")
+      .withIndex("by_track", q => q.eq("trackId", trackId))
+      .collect();
+    const owner = owners[0];
+    if (!owner || owner.ownerUserId !== userId) return;
+    const patch: any = {};
+    if (typeof muted === 'boolean') patch.muted = muted;
+    if (typeof soloed === 'boolean') patch.soloed = soloed;
+    if (Object.keys(patch).length > 0) {
+      await ctx.db.patch(trackId, patch);
+    }
+  },
+});
+
 export const remove = mutation({
   args: { trackId: v.id("tracks"), userId: v.string() },
   handler: async (ctx, { trackId, userId }) => {

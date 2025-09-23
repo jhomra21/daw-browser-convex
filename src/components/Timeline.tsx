@@ -23,6 +23,8 @@ const Timeline: Component = () => {
   const [sidebarWidth, setSidebarWidth] = createSignal(260)
   const [confirmOpen, setConfirmOpen] = createSignal(false)
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<string | null>(null)
+  // Mix sync toggle (per room, persisted locally)
+  const [syncMix, setSyncMix] = createSignal(false)
 
   // Audio engine
   const audioEngine = new AudioEngine()
@@ -98,6 +100,27 @@ const Timeline: Component = () => {
     }
 
     // Cloud-only mode: no local clip name cache
+  })
+
+  // Local storage helpers for mix persistence
+  function mixKey(rid: string) { return `mb:mix:${rid}` }
+  function mixSyncKey(rid: string) { return `mb:mix-sync:${rid}` }
+  function loadLocalMixMap(rid: string): Record<string, { muted?: boolean; soloed?: boolean }> {
+    try { return JSON.parse(localStorage.getItem(mixKey(rid)) || '{}') } catch { return {} }
+  }
+  function saveLocalMix(rid: string, trackId: string, update: Partial<{ muted: boolean; soloed: boolean }>) {
+    const map = loadLocalMixMap(rid)
+    map[trackId] = { ...(map[trackId] || {}), ...update }
+    try { localStorage.setItem(mixKey(rid), JSON.stringify(map)) } catch {}
+  }
+  // Load syncMix per room
+  createEffect(() => {
+    const rid = roomId()
+    if (!rid) return
+    try {
+      const stored = localStorage.getItem(mixSyncKey(rid))
+      setSyncMix(stored === '1')
+    } catch {}
   })
 
   // Query the user's existing projects (roomId + name) when signed in
@@ -232,14 +255,24 @@ const Timeline: Component = () => {
     const oldTracks = untrack(() => tracks())
     const oldTrackMap = new Map(oldTracks.map(t => [t.id, t]))
 
+    const sm = syncMix()
+    const localMix = loadLocalMixMap(roomId())
     const projected: Track[] = data.tracks.map((t: any, idx: number) => {
       const id = t._id as string
       const prev = oldTrackMap.get(id)
+      const serverMuted = (t as any).muted as boolean | undefined
+      const serverSoloed = (t as any).soloed as boolean | undefined
       return {
         id,
         name: prev?.name ?? `Track ${idx + 1}`,
         volume: typeof t.volume === 'number' ? t.volume : 0.8,
-        clips: []
+        clips: [],
+        muted: sm
+          ? (typeof serverMuted === 'boolean' ? serverMuted : (prev?.muted ?? localMix[id]?.muted ?? false))
+          : (prev?.muted ?? localMix[id]?.muted ?? false),
+        soloed: sm
+          ? (typeof serverSoloed === 'boolean' ? serverSoloed : (prev?.soloed ?? localMix[id]?.soloed ?? false))
+          : (prev?.soloed ?? localMix[id]?.soloed ?? false),
       }
     })
 
@@ -253,7 +286,9 @@ const Timeline: Component = () => {
         id: addedTrackDuringDrag,
         name: prev?.name ?? `Track ${projected.length + 1}`,
         volume: prev?.volume ?? 0.8,
-        clips: []
+        clips: [],
+        muted: prev?.muted ?? false,
+        soloed: prev?.soloed ?? false,
       }
       projected.push(placeholder)
       projectedMap.set(placeholder.id, placeholder)
@@ -388,7 +423,7 @@ const Timeline: Component = () => {
       const idx = ts.findIndex(t => t.id === targetTrackId)
       if (idx === -1) {
         // Add local placeholder track then insert the clip
-        const newTrack: Track = { id: targetTrackId, name: `Track ${ts.length + 1}` , volume: 0.8, clips: [] }
+        const newTrack: Track = { id: targetTrackId, name: `Track ${ts.length + 1}` , volume: 0.8, clips: [], muted: false, soloed: false }
         const newClip: Clip = { id: createdClipId, name: file.name, buffer: decoded, startSec, duration: decoded.duration, color: '#22c55e' }
         return [...ts, { ...newTrack, clips: [newClip] }]
       }
@@ -461,7 +496,7 @@ const Timeline: Component = () => {
     setTracks(ts => {
       const idx = ts.findIndex(t => t.id === targetTrackId)
       if (idx === -1) {
-        const newTrack: Track = { id: targetTrackId, name: `Track ${ts.length + 1}` , volume: 0.8, clips: [] }
+        const newTrack: Track = { id: targetTrackId, name: `Track ${ts.length + 1}` , volume: 0.8, clips: [], muted: false, soloed: false }
         const newClip: Clip = { id: createdClipId, name: file.name, buffer: decoded, startSec, duration: decoded.duration, color: '#22c55e' }
         return [...ts, { ...newTrack, clips: [newClip] }]
       }
@@ -558,7 +593,7 @@ const Timeline: Component = () => {
         setTracks(ts => {
           const idx = ts.findIndex(t => t.id === targetTrackId)
           if (idx === -1) {
-            const newTrack: Track = { id: targetTrackId, name: `Track ${ts.length + 1}` , volume: 0.8, clips: [] }
+            const newTrack: Track = { id: targetTrackId, name: `Track ${ts.length + 1}` , volume: 0.8, clips: [], muted: false, soloed: false }
             const newClip: Clip = { id: createdClipId, name: file.name, buffer: decoded, startSec, duration: decoded.duration, color: '#22c55e' }
             return [...ts, { ...newTrack, clips: [newClip] }]
           }
@@ -636,7 +671,7 @@ const Timeline: Component = () => {
           // Optimistically ensure the new track exists locally for immediate visual feedback
           setTracks(ts => ts.some(t => t.id === newTrackId)
             ? ts
-            : [...ts, { id: newTrackId, name: `Track ${ts.length + 1}`, volume: 0.8, clips: [] }])
+            : [...ts, { id: newTrackId, name: `Track ${ts.length + 1}`, volume: 0.8, clips: [], muted: false, soloed: false }])
         } finally {
           creatingTrackDuringDrag = false
         }
@@ -719,7 +754,7 @@ const Timeline: Component = () => {
           const movingClip = ts[srcIdx].clips.find(c => c.id === moving.clipId)!
           const newClip = { ...movingClip, startSec: desiredStart }
           const hasNew = ts.some(t => t.id === newTrackId)
-          const newTrack: Track = { id: newTrackId, name: `Track ${ts.length + 1}`, volume: 0.8, clips: [] }
+          const newTrack: Track = { id: newTrackId, name: `Track ${ts.length + 1}`, volume: 0.8, clips: [], muted: false, soloed: false }
           const base = hasNew ? ts : [...ts, newTrack]
           return base.map((t, i) => {
             if (i === srcIdx) return { ...t, clips: t.clips.filter(c => c.id !== moving.clipId) }
@@ -994,6 +1029,43 @@ const Timeline: Component = () => {
               volumeTimers.delete(trackId)
             }, 150)
             volumeTimers.set(trackId, timer)
+          }}
+          onToggleMute={(trackId) => {
+            const rid = roomId()
+            let nextMuted = false
+            setTracks(ts => ts.map(t => {
+              if (t.id !== trackId) return t
+              nextMuted = !t.muted
+              return { ...t, muted: nextMuted }
+            }))
+            if (rid) saveLocalMix(rid, trackId, { muted: nextMuted })
+            if (syncMix()) {
+              const uid = userId()
+              if (uid) void convexClient.mutation(convexApi.tracks.setMix, { trackId: trackId as any, muted: nextMuted, userId: uid })
+            }
+          }}
+          onToggleSolo={(trackId) => {
+            const rid = roomId()
+            let nextSoloed = false
+            setTracks(ts => ts.map(t => {
+              if (t.id !== trackId) return t
+              nextSoloed = !t.soloed
+              return { ...t, soloed: nextSoloed }
+            }))
+            if (rid) saveLocalMix(rid, trackId, { soloed: nextSoloed })
+            if (syncMix()) {
+              const uid = userId()
+              if (uid) void convexClient.mutation(convexApi.tracks.setMix, { trackId: trackId as any, soloed: nextSoloed, userId: uid })
+            }
+          }}
+          syncMix={syncMix()}
+          onToggleSyncMix={() => {
+            const rid = roomId()
+            if (rid) {
+              const next = !syncMix()
+              setSyncMix(next)
+              try { localStorage.setItem(mixSyncKey(rid), next ? '1' : '0') } catch {}
+            }
           }}
           onSidebarMouseDown={onSidebarMouseDown}
         />

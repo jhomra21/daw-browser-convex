@@ -1109,6 +1109,33 @@ const Timeline: Component = () => {
     await handlePlay(tracks())
   }
 
+  // Jump to a specific clip (from Samples dropdown): select it, move playhead, and scroll into view
+  function jumpToClip(trackId: string, clipId: string, startSec: number) {
+    // Ensure selection states are consistent
+    batch(() => {
+      setSelectedTrackId(trackId)
+      setSelectedClip({ trackId, clipId })
+      setSelectedFXTarget(trackId)
+    })
+    // Move playhead to the start of the clip
+    setPlayhead(Math.max(0, startSec), tracks())
+    // Try to load buffer if missing
+    try {
+      const t = tracks().find(tt => tt.id === trackId)
+      const c = t?.clips.find(cc => cc.id === clipId)
+      if (c && !c.buffer) {
+        void ensureClipBuffer(clipId, c.sampleUrl)
+      }
+    } catch {}
+    // Center the clip horizontally in view
+    try {
+      if (scrollRef) {
+        const centerLeft = Math.max(0, startSec * PPS - (scrollRef.clientWidth / 2))
+        scrollRef.scrollLeft = Math.floor(centerLeft)
+      }
+    } catch {}
+  }
+
   return (
     <div class="h-full w-full flex flex-col bg-neutral-950 text-neutral-200" onDragOver={onDragOver} onDrop={onDrop}>
       <input ref={el => (fileInputRef = el!)} type="file" accept="audio/*" class="hidden" onChange={onFileInput} />
@@ -1122,6 +1149,7 @@ const Timeline: Component = () => {
         onAddAudio={() => handleAddAudio()}
         onShare={handleShare}
         onMasterFX={() => { setSelectedFXTarget('master'); setBottomFXOpen(true) }}
+        onJumpToClip={(clipId, trackId, startSec) => jumpToClip(trackId, clipId, startSec)}
         currentRoomId={roomId()}
         onOpenProject={(rid) => {
           navigateToRoom(rid)

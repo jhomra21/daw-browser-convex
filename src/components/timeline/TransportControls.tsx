@@ -1,5 +1,6 @@
 import { type Component, createSignal, For, onMount, onCleanup, Show, createEffect } from 'solid-js'
 import { Button } from '~/components/ui/button'
+import Icon from '~/components/ui/Icon'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '~/components/ui/dropdown-menu'
 import UserInfoDropdown from '~/components/UserInfoDropdown'
 import { useConvexQuery, convexApi } from '~/lib/convex'
@@ -14,6 +15,8 @@ type TransportControlsProps = {
   onAddAudio: () => void
   onMasterFX: () => void
   onShare?: () => void
+  // Samples controls
+  onJumpToClip: (clipId: string, trackId: string, startSec: number) => void
   // Projects controls
   currentRoomId: string
   onOpenProject: (roomId: string) => void
@@ -47,6 +50,40 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
     const raw: any = (myProjects as any).data
     const data = (typeof raw === 'function' ? raw() : raw)
     return Array.isArray(data) ? data as { roomId: string, name: string }[] : undefined
+  }
+
+  // Clips in current room (for Samples list)
+  const roomClips = useConvexQuery(
+    (convexApi as any).clips.listByRoom,
+    () => props.currentRoomId ? ({ roomId: props.currentRoomId }) : null,
+    () => ['clips', 'by_room', props.currentRoomId]
+  )
+
+  // Build a unique samples list (dedupe by sampleUrl; fallback to name+duration)
+  const samplesList = () => {
+    const raw: any = (roomClips as any).data
+    const data = (typeof raw === 'function' ? raw() : raw)
+    const clips = Array.isArray(data) ? (data as any[]) : []
+    const map = new Map<string, { key: string, name: string, url?: string, count: number, earliest: any }>()
+    for (const c of clips) {
+      const name = (c as any).name || 'Sample'
+      const duration = Math.max(0, Number((c as any).duration || 0))
+      const key = (c as any).sampleUrl || `${name}|${Math.round(duration * 1000)}`
+      const existing = map.get(key)
+      if (!existing) {
+        map.set(key, { key, name, url: (c as any).sampleUrl, count: 1, earliest: c })
+      } else {
+        existing.count++
+        const cStart = Number((c as any).startSec || 0)
+        const prevStart = Number((existing.earliest as any)?.startSec || Infinity)
+        if (cStart < prevStart) {
+          existing.earliest = c
+          if ((c as any).name) existing.name = (c as any).name
+          if ((c as any).sampleUrl) existing.url = (c as any).sampleUrl
+        }
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => (Number((a.earliest as any)?.startSec || 0) - Number((b.earliest as any)?.startSec || 0)))
   }
 
   const handleOpenShare = async () => {
@@ -359,6 +396,71 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                 </For>
                 {((projects() ?? []).length === 0) && (
                   <div class="px-2 py-2 text-xs text-neutral-500">No projects yet</div>
+                )}
+              </div>
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Samples Dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger>
+            <Button variant="outline" size="sm">
+              <Icon name="file-audio" class="h-4 w-4 mr-1" />
+              Samples
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent class="w-full bg-neutral-900" style={{ width: 'min(92vw, 26rem)' }}>
+            <div class="p-2 w-full">
+              <div class="flex items-center justify-between px-1 pb-2">
+                <span class="text-sm font-semibold text-neutral-100">Samples in Project</span>
+              </div>
+              <DropdownMenuSeparator />
+              <div class="max-h-72 overflow-y-auto">
+                <For each={samplesList()}>
+                  {(s) => (
+                    <DropdownMenuItem
+                      class={`group relative w-full flex items-center justify-between gap-2 cursor-pointer hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100 pr-10`}
+                      onSelect={() => {
+                        const earliest: any = (s as any).earliest
+                        props.onJumpToClip(earliest?._id as string, earliest?.trackId as string, Number(earliest?.startSec || 0))
+                      }}
+                    >
+                      <div class="flex items-center gap-2 min-w-0 flex-1">
+                        <Icon name="file-audio" class="h-4 w-4 text-neutral-400 group-hover:text-neutral-200" />
+                        <span class={`font-mono text-xs truncate max-w-[14rem] text-neutral-200 group-hover:text-neutral-100`} title={(s as any).name}>{(s as any).name}</span>
+                        <span class="text-[10px] text-neutral-400 shrink-0">x{(s as any).count}</span>
+                      </div>
+                      <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                        <button
+                          class="p-1 cursor-pointer text-neutral-400 hover:text-neutral-200 disabled:opacity-50"
+                          aria-label="Copy sample URL"
+                          disabled={!((s as any).url)}
+                          onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                          onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                          onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                          onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                          onClick={async (ev) => {
+                            ev.stopPropagation(); ev.preventDefault();
+                            const url = (s as any).url as string | undefined
+                            if (url && navigator.clipboard?.writeText) {
+                              try { await navigator.clipboard.writeText(url) } catch {}
+                            }
+                          }}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
+                            <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                              <rect width="8" height="8" x="8" y="8" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+                            </g>
+                            <title>Copy URL</title>
+                          </svg>
+                        </button>
+                      </div>
+                    </DropdownMenuItem>
+                  )}
+                </For>
+                {samplesList().length === 0 && (
+                  <div class="px-2 py-2 text-xs text-neutral-500">No samples yet</div>
                 )}
               </div>
             </div>

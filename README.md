@@ -1,4 +1,4 @@
-> **Last Updated**: 09/23/2025
+> **Last Updated**: 09/24/2025
 
 # Collaborative Realtime DAW
 
@@ -131,23 +131,33 @@ A modern, collaborative digital audio workstation (DAW) built with SolidJS, feat
    ```
 
 ## 🎛️ Usage
-
+ 
 ### Creating a Project
 1. **Start a new session**: The app automatically creates a unique room ID
 2. **Share the URL**: Copy the URL with `?roomId=` to collaborate with others
 3. **Add audio files**: Drag and drop audio files or use the file picker
 
-### Working with Audio
-- **Adding Tracks**: Click "Add Track" or drag audio below existing tracks
-- **Moving Clips**: Drag clips between tracks or within tracks
-- **Timeline Scrubbing**: Click and drag on the timeline ruler to scrub playback
-- **Playback Control**: Use spacebar to play/pause, click ruler for seeking
-- **Volume Control**: Adjust track volume in the sidebar
+  ### Working with Audio
+  - **Adding Tracks**: Click "Add Track" or drag audio below existing tracks
+  - **Moving clips**: Drag clips between tracks or within tracks
+  - **Timeline Scrubbing**: Click and drag on the timeline ruler to scrub playback
+  - **Playback Control**: Use spacebar to play/pause, click ruler for seeking
+  - **Volume Control**: Adjust track volume in the sidebar
 
-### Collaboration Features
-- **Real-time Sync**: All changes sync instantly across connected clients
-- **Session Management**: Each user has a persistent session ID
-- **Ownership Tracking**: Users can only delete items they created
+### Multi-Selection (09/24/2025)
+ 
+ - **Select one clip**: Click a clip. Selection becomes that single clip.
+ - **Add to selection**: Hold Shift and click additional clips to add them to the selection (additive).
+ - **Marquee selection**: Click and drag on empty lane space to draw a selection rectangle. All clips intersecting the marquee are selected.
+   - Hold Shift while marquee-dragging to add to the current selection (additive marquee).
+ - **Clear selection**: Click empty lane space without Shift to clear the selection.
+ - **Move selected clips together**: When multiple clips are selected, dragging any selected clip moves the entire group together.
+   - Horizontal moves preserve each clip’s relative offset; vertical moves shift the group by the same track delta.
+   - Dragging below the last lane creates a new track; the group drops onto that new track.
+ - **Duplicate / Delete (operate on selection)**
+   - Ctrl+D duplicates all selected clips. Duplicates are placed to the right per-track with non-overlapping placement.
+   - Delete or Backspace removes all selected clips.
+ - **Resize**: Edge-resize acts on the specific clip you grab. Group resize is not supported.
 - **Optimistic Updates**: Local changes appear immediately, sync to server
 
 ## 🔐 Authentication

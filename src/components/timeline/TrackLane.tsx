@@ -1,12 +1,12 @@
 import { type Component, For } from 'solid-js'
-import type { Track, SelectedClip } from '~/types/timeline'
+import type { Track } from '~/types/timeline'
 import { LANE_HEIGHT } from '~/lib/timeline-utils'
 import ClipComponent from './ClipComponent'
 
 type TrackLaneProps = {
   track: Track
   index: number
-  selectedClip: SelectedClip
+  selectedClipIds: Set<string>
   onClipMouseDown: (trackId: string, clipId: string, e: MouseEvent) => void
   onClipClick: (trackId: string, clipId: string, e: MouseEvent) => void
   onClipResizeStart: (trackId: string, clipId: string, edge: 'left' | 'right', e: MouseEvent) => void
@@ -24,7 +24,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
           <ClipComponent
             clip={clip}
             trackId={props.track.id}
-            isSelected={props.selectedClip?.clipId === clip.id}
+            isSelected={props.selectedClipIds.has(clip.id)}
             onMouseDown={props.onClipMouseDown}
             onClick={props.onClipClick}
             onResizeStart={props.onClipResizeStart}

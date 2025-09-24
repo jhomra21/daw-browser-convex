@@ -470,16 +470,27 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
 
       {/* Center: Transport */}
       <div class="justify-self-center flex items-center gap-2">
-        <Button size="sm" onClick={props.onPlay} disabled={props.isPlaying}>Play</Button>
-        <Button size="sm" onClick={props.onPause} variant="outline" disabled={!props.isPlaying}>Pause</Button>
-        <Button size="sm" onClick={props.onStop} variant="outline">Stop</Button>
+        <Button variant="ghost" size="sm" onClick={props.onPlay} disabled={props.isPlaying} aria-label="Play">
+          <Icon name="play" class="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="sm" onClick={props.onPause} disabled={!props.isPlaying} aria-label="Pause">
+          <Icon name="pause" class="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="sm" onClick={props.onStop} aria-label="Stop">
+          <Icon name="stop" class="h-4 w-4" />
+        </Button>
       </div>
 
       {/* Right: Share + Master FX + Playhead */}
       <div class="justify-self-end flex items-center gap-3">
+        <Button variant="outline" size="sm" onClick={props.onMasterFX}>Master FX</Button>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-neutral-400">Playhead</span>
+          <span class="text-sm tabular-nums">{props.playheadSec.toFixed(2)}s</span>
+        </div>
         <DropdownMenu open={shareOpen()} onOpenChange={onShareMenuOpenChange}>
           <DropdownMenuTrigger>
-            <Button variant="outline" size="sm" onClick={handleOpenShare}>Share</Button>
+            <Button variant="default" size="sm" onClick={handleOpenShare}>Share</Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent class="w-full bg-neutral-900" style={{ width: 'min(92vw, 24rem)' }}>
             <div class="p-3 w-full">
@@ -528,11 +539,6 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
             </div>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="outline" size="sm" onClick={props.onMasterFX}>Master FX</Button>
-        <div class="flex items-center gap-2">
-          <span class="text-sm text-neutral-400">Playhead</span>
-          <span class="text-sm tabular-nums">{props.playheadSec.toFixed(2)}s</span>
-        </div>
         {/* User info dropdown at the far right */}
         <UserInfoDropdown />
       </div>

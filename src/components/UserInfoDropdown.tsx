@@ -32,7 +32,7 @@ const UserInfoDropdown: Component = () => {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger>
-        <Button variant="outline" size="sm" aria-label="User menu" class="flex items-center gap-2">
+        <Button variant="default" size="sm" aria-label="User menu" class="flex items-center gap-2">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
             <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M18 20a6 6 0 0 0-12 0" /><circle cx="12" cy="10" r="4" />

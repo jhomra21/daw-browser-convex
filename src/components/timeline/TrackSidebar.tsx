@@ -1,4 +1,4 @@
-import { type Component, For } from 'solid-js'
+import { type Component, For, onCleanup } from 'solid-js'
 import type { Track } from '~/types/timeline'
 import { Button } from '~/components/ui/button'
 
@@ -17,6 +17,24 @@ type TrackSidebarProps = {
 }
 
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
+  let activeMove: ((event: MouseEvent) => void) | null = null
+  let activeUp: (() => void) | null = null
+
+  const detachDragListeners = () => {
+    if (activeMove) {
+      document.removeEventListener('mousemove', activeMove)
+      activeMove = null
+    }
+    if (activeUp) {
+      document.removeEventListener('mouseup', activeUp)
+      activeUp = null
+    }
+  }
+
+  onCleanup(() => {
+    detachDragListeners()
+  })
+
   return (
     <>
       {/* Resizer handle */}
@@ -105,6 +123,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       onMouseDown={(e) => {
                         e.preventDefault()
                         const rect = e.currentTarget.getBoundingClientRect()
+                        detachDragListeners()
                         const handleMouseMove = (moveEvent: MouseEvent) => {
                           const y = moveEvent.clientY - rect.top
                           const height = rect.height
@@ -112,9 +131,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           props.onVolumeChange(track.id, volume)
                         }
                         const handleMouseUp = () => {
-                          document.removeEventListener('mousemove', handleMouseMove)
-                          document.removeEventListener('mouseup', handleMouseUp)
+                          detachDragListeners()
                         }
+                        activeMove = handleMouseMove
+                        activeUp = handleMouseUp
                         document.addEventListener('mousemove', handleMouseMove)
                         document.addEventListener('mouseup', handleMouseUp)
                       }}

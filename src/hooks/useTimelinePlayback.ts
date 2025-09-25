@@ -1,55 +1,66 @@
 import { createSignal, onCleanup } from 'solid-js'
+
 import type { AudioEngine } from '~/lib/audio-engine'
 import type { Track } from '~/types/timeline'
 
 export function useTimelinePlayback(audioEngine: AudioEngine) {
   const [isPlaying, setIsPlaying] = createSignal(false)
   const [playheadSec, setPlayheadSec] = createSignal(0)
-  
-  let rafId = 0
-  let startedCtxTime = 0
-  let startedPlayheadSec = 0
 
-  function tick() {
-    if (!isPlaying()) return
-    const elapsed = audioEngine.currentTime - startedCtxTime
-    setPlayheadSec(startedPlayheadSec + elapsed)
-    rafId = requestAnimationFrame(tick)
+  const [rafId, setRafId] = createSignal<number | null>(null)
+  const [startedCtxTime, setStartedCtxTime] = createSignal(0)
+  const [startedPlayheadSec, setStartedPlayheadSec] = createSignal(0)
+
+  const cancelRaf = () => {
+    const id = rafId()
+    if (id !== null) {
+      cancelAnimationFrame(id)
+      setRafId(null)
+    }
   }
 
-  async function handlePlay(tracks: Track[]) {
+  const tick = () => {
+    if (!isPlaying()) return
+    const elapsed = audioEngine.currentTime - startedCtxTime()
+    setPlayheadSec(startedPlayheadSec() + elapsed)
+    setRafId(requestAnimationFrame(tick))
+  }
+
+  const handlePlay = async (tracks: Track[]) => {
     audioEngine.ensureAudio()
     await audioEngine.resume()
     setIsPlaying(true)
-    startedCtxTime = audioEngine.currentTime
-    startedPlayheadSec = playheadSec()
+    setStartedCtxTime(audioEngine.currentTime)
+    setStartedPlayheadSec(playheadSec())
     audioEngine.scheduleAllClipsFromPlayhead(tracks, playheadSec())
-    rafId = requestAnimationFrame(tick)
+    setRafId(requestAnimationFrame(tick))
   }
 
-  function handlePause() {
+  const handlePause = () => {
     if (!isPlaying()) return
     setIsPlaying(false)
     audioEngine.stopAllSources()
-    cancelAnimationFrame(rafId)
+    cancelRaf()
   }
 
-  function handleStop() {
+  const handleStop = () => {
     handlePause()
     setPlayheadSec(0)
+    setStartedCtxTime(audioEngine.currentTime)
+    setStartedPlayheadSec(0)
   }
 
-  function setPlayhead(sec: number, tracks: Track[]) {
+  const setPlayhead = (sec: number, tracks: Track[]) => {
     setPlayheadSec(sec)
     if (isPlaying()) {
-      startedCtxTime = audioEngine.currentTime
-      startedPlayheadSec = sec
+      setStartedCtxTime(audioEngine.currentTime)
+      setStartedPlayheadSec(sec)
       audioEngine.scheduleAllClipsFromPlayhead(tracks, sec)
     }
   }
 
   onCleanup(() => {
-    cancelAnimationFrame(rafId)
+    cancelRaf()
   })
 
   return {

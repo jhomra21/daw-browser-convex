@@ -7,6 +7,8 @@ type KeyboardHandlers = {
 }
 
 export function useTimelineKeyboard(handlers: KeyboardHandlers) {
+  const captureOptions = { capture: true } as const
+
   function onKeyDown(e: KeyboardEvent) {
     const target = e.target as HTMLElement | null
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
@@ -31,10 +33,10 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
   }
 
   onMount(() => {
-    window.addEventListener('keydown', onKeyDown, { capture: true })
+    window.addEventListener('keydown', onKeyDown, captureOptions)
   })
 
   onCleanup(() => {
-    window.removeEventListener('keydown', onKeyDown, { capture: true } as EventListenerOptions)
+    window.removeEventListener('keydown', onKeyDown, captureOptions)
   })
 }

@@ -1,25 +1,53 @@
-import { type Component, Show, For, createEffect, createSignal, onCleanup, onMount, batch, untrack } from 'solid-js'
+import { type Component, type JSX, Show, For, createEffect, createSignal, onCleanup, batch, untrack } from 'solid-js'
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from '~/components/ui/dialog'
 import type { Track, Clip, SelectedClip } from '~/types/timeline'
 import { AudioEngine } from '~/lib/audio-engine'
 import { timelineDurationSec, clientXToSec, yToLaneIndex, willOverlap, calcNonOverlapStart, PPS, RULER_HEIGHT, LANE_HEIGHT } from '~/lib/timeline-utils'
 import { useTimelineKeyboard } from '~/hooks/useTimelineKeyboard'
-import { useTimelinePlayback } from '~/hooks/useTimelinePlayback'
 import TransportControls from './timeline/TransportControls'
 import TimelineRuler from './timeline/TimelineRuler'
 import TrackLane from './timeline/TrackLane'
 import TrackSidebar from './timeline/TrackSidebar'
 import EffectsPanel from './timeline/EffectsPanel'
 import { Button } from './ui/button'
-import { useConvexQuery, convexClient, convexApi } from '~/lib/convex'
-import { useSessionQuery } from '~/lib/session'
+import { convexClient, convexApi } from '~/lib/convex'
+import { useTimelineData } from '~/hooks/useTimelineData'
+import { usePlayheadControls } from '~/hooks/usePlayheadControls'
+import { useClipDrag } from '~/hooks/useClipDrag'
+import { useClipResize } from '~/hooks/useClipResize'
+import { useTimelineSelection } from '~/hooks/useTimelineSelection'
+
+let audioEngineSingleton: AudioEngine | null = null
+const audioBufferCache = new Map<string, AudioBuffer>()
+const volumeTimers = new Map<string, number>()
+const optimisticMoves = new Map<string, { trackId: string; startSec: number }>()
+const loadingClipIds = new Set<string>()
+
+const getAudioEngine = () => {
+  if (!audioEngineSingleton) {
+    audioEngineSingleton = new AudioEngine()
+  }
+  return audioEngineSingleton
+}
+
+const canUseLocalStorage = () => {
+  if (typeof window === 'undefined') return false
+  try {
+    const storage = window.localStorage
+    if (!storage) return false
+    return true
+  } catch {
+    return false
+  }
+}
+
 const Timeline: Component = () => {
   // Stateasa
   const [tracks, setTracks] = createSignal<Track[]>([])
   const [selectedTrackId, setSelectedTrackId] = createSignal('')
   const [selectedClip, setSelectedClip] = createSignal<SelectedClip>(null)
   // Multi-selection: set of selected clip IDs (selectedClip is the primary/last-selected)
-  const [selectedClipIds, setSelectedClipIds] = createSignal<Set<string>>(new Set<string>())
+  const [selectedClipIds, setSelectedClipIds] = createSignal<Set<string>>(new Set<string>(), { equals: false })
   const [bottomFXOpen, setBottomFXOpen] = createSignal(true)
   const [selectedFXTarget, setSelectedFXTarget] = createSignal<string>('master')
   const [sidebarWidth, setSidebarWidth] = createSignal(260)
@@ -29,16 +57,11 @@ const Timeline: Component = () => {
   const [syncMix, setSyncMix] = createSignal(false)
 
   // Audio engine
-  const audioEngine = new AudioEngine()
+  const audioEngine = getAudioEngine()
   // Collaboration: roomId from ?roomId=; ownership tied to Better Auth userId
-  const [roomId, setRoomId] = createSignal<string>('')
-  const session = useSessionQuery()
-  const userId = () => (session()?.data?.user as any)?.id ?? ''
-  // Track if we auto-generated a roomId before the user signed in
-  const [ridAutoCreated, setRidAutoCreated] = createSignal(false)
+  const { roomId, setRoomId, userId, myProjects, fullView, navigateToRoom } = useTimelineData()
 
   // Track clip loading state to avoid duplicate fetches/decodes
-  const loadingClipIds = new Set<string>()
 
   async function uploadToR2(room: string, clip: string, file: File, durationSec?: number): Promise<string | null> {
     try {
@@ -81,42 +104,25 @@ const Timeline: Component = () => {
     }
   }
 
-  onMount(() => {
-    // Resolve roomId from URL or create a new one
-    try {
-      const url = new URL(window.location.href)
-      let rid = url.searchParams.get('roomId')
-      if (!rid) {
-        rid = crypto.randomUUID()
-        url.searchParams.set('roomId', rid)
-        history.replaceState(null, '', url.toString())
-        setRoomId(rid)
-        setRidAutoCreated(true)
-      } else {
-        setRoomId(rid)
-        setRidAutoCreated(false)
-      }
-    } catch {
-      setRoomId('default')
-      setRidAutoCreated(true)
-    }
-
-    // Cloud-only mode: no local clip name cache
-  })
-
   // Local storage helpers for mix persistence
   function mixKey(rid: string) { return `mb:mix:${rid}` }
   function mixSyncKey(rid: string) { return `mb:mix-sync:${rid}` }
   function loadLocalMixMap(rid: string): Record<string, { muted?: boolean; soloed?: boolean }> {
+    if (!canUseLocalStorage()) return {}
     try { return JSON.parse(localStorage.getItem(mixKey(rid)) || '{}') } catch { return {} }
   }
   function saveLocalMix(rid: string, trackId: string, update: Partial<{ muted: boolean; soloed: boolean }>) {
+    if (!canUseLocalStorage()) return
     const map = loadLocalMixMap(rid)
     map[trackId] = { ...(map[trackId] || {}), ...update }
     try { localStorage.setItem(mixKey(rid), JSON.stringify(map)) } catch {}
   }
   // Load syncMix per room
   createEffect(() => {
+    if (!canUseLocalStorage()) {
+      setSyncMix(false)
+      return
+    }
     const rid = roomId()
     if (!rid) return
     try {
@@ -125,70 +131,23 @@ const Timeline: Component = () => {
     } catch {}
   })
 
-  // Query the user's existing projects (roomId + name) when signed in
-  const myProjects = useConvexQuery(
-    convexApi.projects.listMineDetailed,
-    () => userId() ? ({ userId: userId() }) : null,
-    () => ['my-projects', userId()]
-  )
-
-  // Ensure the current room appears in the user's project list, but
-  // if we auto-created a room before sign-in and the user has existing projects,
-  // redirect to the first existing project instead of creating a new one.
-  createEffect(() => {
-    const uid = userId()
-    if (!uid) return
-    const rid = roomId()
-    const projectsRaw = (myProjects as any)?.data
-    const projects = typeof projectsRaw === 'function' ? projectsRaw() : projectsRaw
-
-    // If we generated a temporary roomId earlier and the user already has projects,
-    // prefer redirecting to an existing project rather than creating a new Untitled one.
-    if (ridAutoCreated()) {
-      // Wait until projects are loaded before deciding to create or redirect
-      if (!Array.isArray(projects)) return
-      if (projects.length > 0) {
-        const target = projects[0]?.roomId
-        if (target && target !== rid) {
-          navigateToRoom(target)
-        }
-        setRidAutoCreated(false)
-        return
-      } else {
-        // No existing projects: create ownership for the auto-created rid
-        if (rid) {
-          void convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: rid, userId: uid })
-        }
-        setRidAutoCreated(false)
-        return
-      }
-    }
-
-    // URL-provided roomId or already decided path: ensure ownership
-    if (rid) {
-      void convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: rid, userId: uid })
-    }
-  })
-
-  function navigateToRoom(rid: string) {
-    try {
-      const url = new URL(window.location.href)
-      url.searchParams.set('roomId', rid)
-      history.pushState(null, '', url.toString())
-      setRoomId(rid)
-    } catch {
-      setRoomId(rid)
-    }
-  }
   // Local caches for responsiveness
-  const audioBufferCache = new Map<string, AudioBuffer>()
-  const volumeTimers = new Map<string, number>()
   // Optimistic positions for clips that have been moved locally but the server
   // hasn't reflected the change yet. Prevents revert-then-flash on drop.
-  const optimisticMoves = new Map<string, { trackId: string; startSec: number }>()
   
-  // Playback hook
-  const { isPlaying, playheadSec, handlePlay, handlePause, handleStop, setPlayhead } = useTimelinePlayback(audioEngine)
+  // Playback & playhead controls
+  const {
+    isPlaying,
+    playheadSec,
+    handlePlay,
+    handlePause,
+    handleStop,
+    setPlayhead,
+    requestPlay,
+    startScrub,
+    stopScrub,
+    setScrollElement,
+  } = usePlayheadControls({ audioEngine, tracks, ensureClipBuffer })
 
   // Share current URL with ?roomId=
   async function handleShare() {
@@ -214,58 +173,65 @@ const Timeline: Component = () => {
   let resizeStartX = 0
   let resizeStartWidth = 0
 
-  // Clip resize state
-  const MIN_CLIP_SEC = 0.05
-  let clipResizing = false
-  let resizingIds: { trackId: string; clipId: string; edge: 'left' | 'right' } | null = null
-  let resizeOrigStart = 0
-  let resizeOrigDuration = 0
-  let resizeOrigPad = 0
-  let resizeAudioStart = 0
-  let resizeFixedLeft = 0
-  let resizeFixedRight = 0
+  const { onClipMouseDown, activeDrag } = useClipDrag({
+    tracks,
+    setTracks,
+    selectedClipIds,
+    setSelectedClipIds,
+    setSelectedTrackId,
+    setSelectedClip,
+    setSelectedFXTarget,
+    roomId,
+    userId,
+    convexClient,
+    convexApi,
+    optimisticMoves,
+    getScrollElement: () => scrollRef,
+  })
 
-  // Scrubbing helpers
-  let scrubbing = false
-  // Marquee selection helpers
-  let marqueeActive = false
-  let marqueeAdditive = false
-  let mStartX = 0
-  let mStartY = 0
-  const [marqueeRect, setMarqueeRect] = createSignal<{ x: number; y: number; width: number; height: number } | null>(null)
+  const {
+    onClipResizeStart,
+    onResizeMouseMove,
+    onResizeMouseUp,
+  } = useClipResize({
+    tracks,
+    setTracks,
+    setSelectedTrackId,
+    setSelectedClip,
+    setSelectedClipIds,
+    setSelectedFXTarget,
+    convexClient,
+    convexApi,
+    getScrollElement: () => scrollRef,
+  })
 
-  function startScrub(clientX: number) {
-    const sec = clientXToSec(clientX, scrollRef!)
-    setPlayhead(sec, tracks())
-    scrubbing = true
-    window.addEventListener('mousemove', onScrubMove)
-    window.addEventListener('mouseup', onScrubEnd)
+  const {
+    marqueeRect,
+    onLaneMouseDown,
+    onLaneDragUp,
+  } = useTimelineSelection({
+    tracks,
+    setSelectedTrackId,
+    setSelectedClip,
+    setSelectedClipIds,
+    setSelectedFXTarget,
+    startScrub,
+    stopScrub,
+  })
+
+  const handleLaneMouseDown: JSX.EventHandler<HTMLDivElement, MouseEvent> = (event) => {
+    onLaneMouseDown(event, scrollRef)
   }
 
-  function onScrubMove(e: MouseEvent) {
-    if (!scrubbing) return
-    const sec = clientXToSec(e.clientX, scrollRef!)
-    setPlayhead(sec, tracks())
-  }
-
-  function onScrubEnd() {
-    if (!scrubbing) return
-    scrubbing = false
-    window.removeEventListener('mousemove', onScrubMove)
-    window.removeEventListener('mouseup', onScrubEnd)
+  const onRulerMouseDown = (event: MouseEvent) => {
+    event.preventDefault()
+    startScrub(event.clientX)
   }
 
   // Keep audio engine synced with tracks
   createEffect(() => {
     audioEngine.updateTrackGains(tracks())
   })
-
-  // Subscribe to Convex shared state (tracks + clips) for this room
-  const fullView = useConvexQuery(
-    convexApi.timeline.fullView,
-    () => roomId() ? ({ roomId: roomId() }) : null,
-    () => ['timeline', roomId()]
-  )
 
   // Project server state into local Track[] while preserving ephemeral fields
   createEffect(() => {
@@ -278,6 +244,8 @@ const Timeline: Component = () => {
     const oldTrackMap = new Map(oldTracks.map(t => [t.id, t]))
 
     const sm = syncMix()
+    const dragSnapshot = activeDrag()
+    const addedTrackDuringDrag = dragSnapshot?.addedTrackDuringDrag
     const localMix = loadLocalMixMap(roomId())
     const projected: Track[] = data.tracks.map((t: any, idx: number) => {
       const id = t._id as string
@@ -340,39 +308,6 @@ const Timeline: Component = () => {
       })
     }
 
-    // If a drag is in progress, overlay the currently dragged clips' local positions
-    if (draggingIds) {
-      const localTracks = untrack(() => tracks())
-      const sel = untrack(() => selectedClipIds())
-      const idsToOverlay = sel && sel.size > 0 ? Array.from(sel) : [draggingIds.clipId]
-      for (const id of idsToOverlay) {
-        let localClip: Clip | undefined
-        let localTid: string | undefined
-        for (const lt of localTracks) {
-          const found = lt.clips.find(cc => cc.id === id)
-          if (found) { localClip = found; localTid = lt.id; break }
-        }
-        if (!localClip || !localTid) continue
-        // Remove from all projected tracks to avoid duplicates
-        for (const t of projected) {
-          t.clips = t.clips.filter(cc => cc.id !== id)
-        }
-        const targetProjected = projectedMap.get(localTid)
-        if (targetProjected) {
-          targetProjected.clips.push({
-            id: localClip.id,
-            name: localClip.name,
-            buffer: localClip.buffer ?? null,
-            startSec: localClip.startSec,
-            duration: localClip.duration,
-            leftPadSec: localClip.leftPadSec ?? 0,
-            color: localClip.color,
-            sampleUrl: localClip.sampleUrl,
-          })
-        }
-      }
-    }
-
     // Apply optimistic post-drop moves to prevent revert-then-flash while server catches up
     if (optimisticMoves.size > 0) {
       const localTracks = untrack(() => tracks())
@@ -420,20 +355,22 @@ const Timeline: Component = () => {
   })
 
   onCleanup(() => {
-    try { window.removeEventListener('mousemove', onScrubMove) } catch {}
-    try { window.removeEventListener('mouseup', onScrubEnd) } catch {}
-    try { window.removeEventListener('mousemove', onWindowMouseMove) } catch {}
-    try { window.removeEventListener('mouseup', onWindowMouseUp) } catch {}
-    try { window.removeEventListener('mousemove', onLaneDragMove) } catch {}
-    try { window.removeEventListener('mouseup', onLaneDragUp) } catch {}
+    try { onLaneDragUp() } catch {}
     try { window.removeEventListener('mousemove', onSidebarMouseMove) } catch {}
     try { window.removeEventListener('mouseup', onSidebarMouseUp) } catch {}
     try { window.removeEventListener('mousemove', onResizeMouseMove) } catch {}
     try { window.removeEventListener('mouseup', onResizeMouseUp) } catch {}
     audioEngine.close()
+    audioEngineSingleton = null
+    for (const timer of volumeTimers.values()) {
+      clearTimeout(timer)
+    }
+    volumeTimers.clear()
+    loadingClipIds.clear()
+    audioBufferCache.clear()
+    optimisticMoves.clear()
   })
 
-  // Drag & drop
   function onDragOver(e: DragEvent) {
     e.preventDefault()
   }
@@ -699,533 +636,6 @@ const Timeline: Component = () => {
     fileInputRef?.click()
   }
 
-  // Drag a clip (allow vertical track reassign)
-  let dragging = false
-  let dragDeltaX = 0
-  let draggingIds: { trackId: string; clipId: string } | null = null
-  let addedTrackDuringDrag: string | null = null
-  let creatingTrackDuringDrag = false
-  // Multi-drag snapshot captured on mouse down
-  let multiDragging: null | {
-    anchorClipId: string
-    anchorOrigTrackIdx: number
-    anchorOrigStartSec: number
-    items: Array<{ clipId: string; origTrackIdx: number; origStartSec: number; duration: number }>
-  } = null
-
-  function onClipMouseDown(trackId: string, clipId: string, e: MouseEvent) {
-    e.preventDefault()
-    e.stopPropagation()
-    const t = tracks().find(t => t.id === trackId)
-    const c = t?.clips.find(c => c.id === clipId)
-    if (!t || !c) return
-    // Shift-click should add to selection rather than start a drag
-    if (e.shiftKey) {
-      batch(() => {
-        setSelectedTrackId(trackId)
-        setSelectedClip({ trackId, clipId })
-        setSelectedClipIds(prev => { const next = new Set(prev); next.add(clipId); return next })
-      })
-      return
-    }
-    const sel = selectedClipIds()
-    const isMultiDrag = sel.has(clipId) && sel.size > 1
-
-    dragging = true
-    draggingIds = { trackId, clipId }
-    batch(() => {
-      setSelectedTrackId(trackId)
-      setSelectedClip({ trackId, clipId })
-      if (!isMultiDrag) {
-        // Replace multi-selection with this single clip when starting a drag
-        setSelectedClipIds(new Set([clipId]))
-      }
-    })
-
-    // Capture multi-drag snapshot if applicable
-    if (isMultiDrag) {
-      const ts = tracks()
-      const anchorTrackIdx = ts.findIndex(tt => tt.id === trackId)
-      const items: Array<{ clipId: string; origTrackIdx: number; origStartSec: number; duration: number }> = []
-      for (const id of sel) {
-        for (let i = 0; i < ts.length; i++) {
-          const found = ts[i].clips.find(cc => cc.id === id)
-          if (found) {
-            items.push({ clipId: id, origTrackIdx: i, origStartSec: found.startSec, duration: found.duration })
-            break
-          }
-        }
-      }
-      multiDragging = {
-        anchorClipId: clipId,
-        anchorOrigTrackIdx: anchorTrackIdx,
-        anchorOrigStartSec: c.startSec,
-        items,
-      }
-    } else {
-      multiDragging = null
-    }
-
-    addedTrackDuringDrag = null
-    creatingTrackDuringDrag = false
-
-    const rect = scrollRef!.getBoundingClientRect()
-    const leftPx = c.startSec * PPS - (scrollRef?.scrollLeft || 0)
-    dragDeltaX = e.clientX - (rect.left + leftPx)
-
-    window.addEventListener('mousemove', onWindowMouseMove)
-    window.addEventListener('mouseup', onWindowMouseUp)
-  }
-
-  async function onWindowMouseMove(e: MouseEvent) {
-    if (!dragging || !draggingIds) return
-    
-    const rect = scrollRef!.getBoundingClientRect()
-    const x = e.clientX - rect.left - dragDeltaX + (scrollRef?.scrollLeft || 0)
-    const desiredStart = Math.max(0, x / PPS)
-    let laneIdx = yToLaneIndex(e.clientY, scrollRef!)
-
-    // If dragging below the last lane, create a new track during drag (once)
-    if (laneIdx >= tracks().length) {
-      if (!addedTrackDuringDrag && !creatingTrackDuringDrag) {
-        creatingTrackDuringDrag = true
-        try {
-          const newTrackId = await convexClient.mutation(convexApi.tracks.create, { roomId: roomId(), userId: userId() }) as any as string
-          addedTrackDuringDrag = newTrackId
-          // Optimistically ensure the new track exists locally for immediate visual feedback
-          setTracks(ts => ts.some(t => t.id === newTrackId)
-            ? ts
-            : [...ts, { id: newTrackId, name: `Track ${ts.length + 1}`, volume: 0.8, clips: [], muted: false, soloed: false }])
-        } finally {
-          creatingTrackDuringDrag = false
-        }
-      }
-    }
-
-    // Resolve target track id (prefer newly created one)
-    let targetId: string | undefined
-    {
-      const tsSnap = tracks()
-      if (laneIdx >= tsSnap.length && addedTrackDuringDrag) {
-        targetId = addedTrackDuringDrag
-      } else {
-        laneIdx = Math.max(0, Math.min(laneIdx, tsSnap.length - 1))
-        targetId = tsSnap[laneIdx]?.id
-      }
-    }
-    if (!targetId) return
-
-    const movingClipId = draggingIds!.clipId
-
-    // Apply the move using the latest state to avoid stale snapshots and duplicates
-    if (multiDragging) {
-      const snapshot = multiDragging!
-      const selIds = new Set(snapshot.items.map(it => it.clipId))
-      setTracks(ts => {
-        const targetIdx = ts.findIndex(t => t.id === targetId)
-        if (targetIdx < 0) return ts
-        const deltaIdx = targetIdx - snapshot.anchorOrigTrackIdx
-
-        // Remove all moving clips from their current tracks
-        const base = ts.map(t => ({ ...t, clips: t.clips.filter(c => !selIds.has(c.id)) }))
-
-        // Build additions per track index
-        const adds: Map<number, Clip[]> = new Map()
-        const findClip = (id: string): Clip | null => {
-          for (const t of ts) {
-            const f = t.clips.find(c => c.id === id)
-            if (f) return f
-          }
-          return null
-        }
-        for (const it of snapshot.items) {
-          const orig = findClip(it.clipId)
-          if (!orig) continue
-          const targetIndex = Math.max(0, Math.min(base.length - 1, it.origTrackIdx + deltaIdx))
-          const newStart = Math.max(0, desiredStart + (it.origStartSec - snapshot.anchorOrigStartSec))
-          const arr = adds.get(targetIndex) ?? []
-          arr.push({ ...orig, startSec: newStart })
-          adds.set(targetIndex, arr)
-        }
-        return base.map((t, i) => ({ ...t, clips: [...t.clips, ...(adds.get(i) ?? [])] }))
-      })
-    } else {
-      setTracks(ts => {
-        const srcIdx = ts.findIndex(t => t.clips.some(c => c.id === movingClipId))
-        if (srcIdx < 0) return ts
-        const movingClip = ts[srcIdx].clips.find(c => c.id === movingClipId)!
-        const duration = movingClip.duration
-        const targetIdx = ts.findIndex(t => t.id === targetId)
-        if (targetIdx < 0) return ts
-        const targetTrack = ts[targetIdx]
-
-        if (srcIdx === targetIdx) {
-          // Same track: prevent overlap and update startSec in place
-          const overlap = willOverlap(targetTrack.clips, movingClip.id, desiredStart, duration)
-          const newStart = overlap ? calcNonOverlapStart(targetTrack.clips, movingClip.id, desiredStart, duration) : desiredStart
-          return ts.map((t, i) => i !== srcIdx ? t : ({
-            ...t,
-            clips: t.clips.map(c => c.id === movingClip.id ? { ...c, startSec: newStart } : c)
-          }))
-        } else {
-          // Different track: move clip across tracks, deduping in target
-          const overlap = willOverlap(targetTrack.clips, null, desiredStart, duration)
-          const newStart = overlap ? calcNonOverlapStart(targetTrack.clips, null, desiredStart, duration) : desiredStart
-          const prunedTargetClips = targetTrack.clips.filter(c => c.id !== movingClip.id)
-          return ts.map((t, i) => {
-            if (i === srcIdx) return { ...t, clips: t.clips.filter(c => c.id !== movingClip.id) }
-            if (i === targetIdx) return { ...t, clips: [...prunedTargetClips, { ...movingClip, startSec: newStart }] }
-            return t
-          })
-        }
-      })
-    }
-
-    // Update drag tracking and selection if track changed
-    if (draggingIds.trackId !== targetId) {
-      const clipId = draggingIds.clipId
-      draggingIds = { trackId: targetId, clipId }
-      batch(() => {
-        setSelectedTrackId(targetId!)
-        setSelectedFXTarget(targetId!)
-        setSelectedClip({ trackId: targetId!, clipId })
-        if (!multiDragging) setSelectedClipIds(new Set([clipId]))
-      })
-    }
-  }
-
-  async function onWindowMouseUp(e: MouseEvent) {
-    // Commit final clip position to server; fallback-create a track only if none was created during drag
-    if (dragging && draggingIds && scrollRef) {
-      const rect = scrollRef.getBoundingClientRect()
-      const x = e.clientX - rect.left - dragDeltaX + (scrollRef?.scrollLeft || 0)
-      const desiredStart = Math.max(0, x / PPS)
-      const laneIdx = yToLaneIndex(e.clientY, scrollRef)
-
-      if (laneIdx >= tracks().length && !addedTrackDuringDrag) {
-        // Fallback: create a new track on drop if drag-time creation didn't happen
-        const newTrackId = await convexClient.mutation(convexApi.tracks.create, { roomId: roomId(), userId: userId() }) as any as string
-        const moving = draggingIds
-        const mdOuter = multiDragging
-        setTracks(ts => {
-          const hasNew = ts.some(t => t.id === newTrackId)
-          const newTrack: Track = { id: newTrackId, name: `Track ${ts.length + 1}`, volume: 0.8, clips: [], muted: false, soloed: false }
-          const base = hasNew ? ts : [...ts, newTrack]
-          if (mdOuter) {
-            const md = mdOuter
-            const selIds = new Set(md.items.map(it => it.clipId))
-            // Remove all moving clips
-            const cleared = base.map(t => ({ ...t, clips: t.clips.filter(c => !selIds.has(c.id)) }))
-            // Add all to their target tracks (offset by delta from anchor), clamped into bounds
-            const anchorTargetIdx = cleared.findIndex(t => t.id === newTrackId)
-            const adds: Map<number, Clip[]> = new Map()
-            const findClip = (id: string): Clip | null => {
-              for (const t of base) {
-                const f = t.clips.find(c => c.id === id)
-                if (f) return f
-              }
-              return null
-            }
-            for (const it of md.items) {
-              const orig = findClip(it.clipId)
-              if (!orig) continue
-              const targetIndex = Math.max(0, Math.min(cleared.length - 1, anchorTargetIdx + (it.origTrackIdx - md.anchorOrigTrackIdx)))
-              const newStart = Math.max(0, desiredStart + (it.origStartSec - md.anchorOrigStartSec))
-              const arr = adds.get(targetIndex) ?? []
-              arr.push({ ...orig, startSec: newStart })
-              adds.set(targetIndex, arr)
-            }
-            return cleared.map((t, i) => ({ ...t, clips: [...t.clips, ...(adds.get(i) ?? [])] }))
-          } else {
-            // Single drag
-            return base.map((t, i) => {
-              const srcIdx = t.clips.some(c => c.id === moving.clipId) ? i : -1
-              if (srcIdx === i) return { ...t, clips: t.clips.filter(c => c.id !== moving.clipId) }
-              if (t.id === newTrackId) {
-                // Find original clip in pre-base tracks
-                for (const tt of ts) {
-                  const moved = tt.clips.find(c => c.id === moving.clipId)
-                  if (moved) return { ...t, clips: [...t.clips, { ...moved, startSec: desiredStart }] }
-                }
-              }
-              return t
-            })
-          }
-        })
-        // Persist all moved clips
-        if (multiDragging) {
-          const md = multiDragging!
-          const anchorTargetIdx = tracks().findIndex(tt => tt.id === newTrackId)
-          for (const it of md.items) {
-            const targetIndex = Math.max(0, Math.min(tracks().length - 1, anchorTargetIdx + (it.origTrackIdx - md.anchorOrigTrackIdx)))
-            const targetTid = tracks()[targetIndex]?.id || newTrackId
-            const newStart = Math.max(0, desiredStart + (it.origStartSec - md.anchorOrigStartSec))
-            void convexClient.mutation(convexApi.clips.move, { clipId: it.clipId as any, startSec: newStart, toTrackId: targetTid as any })
-            // Optimistic: hold new position until server reflects it
-            optimisticMoves.set(it.clipId, { trackId: targetTid, startSec: newStart })
-          }
-          // Keep selection; focus anchor
-          batch(() => {
-            setSelectedTrackId(newTrackId)
-            setSelectedFXTarget(newTrackId)
-            setSelectedClip({ trackId: newTrackId, clipId: moving.clipId })
-          })
-        } else {
-          batch(() => {
-            setSelectedTrackId(newTrackId)
-            setSelectedFXTarget(newTrackId)
-            setSelectedClip({ trackId: newTrackId, clipId: moving.clipId })
-            setSelectedClipIds(new Set([moving.clipId]))
-          })
-          void convexClient.mutation(convexApi.clips.move, {
-            clipId: moving.clipId as any,
-            startSec: desiredStart,
-            toTrackId: newTrackId as any,
-          })
-          // Optimistic single-clip move
-          optimisticMoves.set(moving.clipId, { trackId: newTrackId, startSec: desiredStart })
-        }
-      } else {
-        // Commit final clip position to server in the resolved target track
-        if (multiDragging) {
-          const md = multiDragging!
-          const ts = tracks()
-          // Resolve target track index from pointer
-          let targetIdx = yToLaneIndex(e.clientY, scrollRef)
-          targetIdx = Math.max(0, Math.min(targetIdx, ts.length - 1))
-          const deltaIdx = targetIdx - md.anchorOrigTrackIdx
-          for (const it of md.items) {
-            const newStart = Math.max(0, desiredStart + (it.origStartSec - md.anchorOrigStartSec))
-            const idx = Math.max(0, Math.min(ts.length - 1, it.origTrackIdx + deltaIdx))
-            const tid = ts[idx].id
-            void convexClient.mutation(convexApi.clips.move, { clipId: it.clipId as any, startSec: newStart, toTrackId: tid as any })
-            // Optimistic: hold new position until server reflects it
-            optimisticMoves.set(it.clipId, { trackId: tid, startSec: newStart })
-          }
-          // Keep selection; focus anchor
-          const anchorIdx = Math.max(0, Math.min(ts.length - 1, md.anchorOrigTrackIdx + deltaIdx))
-          const anchorTid = ts[anchorIdx].id
-          batch(() => {
-            setSelectedTrackId(anchorTid)
-            setSelectedFXTarget(anchorTid)
-            setSelectedClip({ trackId: anchorTid, clipId: md.anchorClipId })
-          })
-        } else {
-          const t = tracks().find(tt => tt.id === draggingIds!.trackId)
-          const c = t?.clips.find(cc => cc.id === draggingIds!.clipId)
-          if (c) {
-            void convexClient.mutation(convexApi.clips.move, {
-              clipId: c.id as any,
-              startSec: c.startSec,
-              toTrackId: t?.id as any,
-            })
-            // Optimistic single-clip move
-            optimisticMoves.set(c.id, { trackId: t!.id, startSec: c.startSec })
-            batch(() => {
-              setSelectedClip({ trackId: t!.id, clipId: c.id })
-              setSelectedClipIds(new Set([c.id]))
-            })
-          }
-        }
-      }
-    }
-    dragging = false
-    multiDragging = null
-    addedTrackDuringDrag = null
-    creatingTrackDuringDrag = false
-    draggingIds = null
-    window.removeEventListener('mousemove', onWindowMouseMove)
-    window.removeEventListener('mouseup', onWindowMouseUp)
-  }
-
-  // --- Clip edge resize ---
-  function onClipResizeStart(trackId: string, clipId: string, edge: 'left' | 'right', e: MouseEvent) {
-    e.preventDefault()
-    e.stopPropagation()
-    const t = tracks().find(t => t.id === trackId)
-    const c = t?.clips.find(c => c.id === clipId)
-    if (!t || !c) return
-    // Do not allow simultaneous drag
-    dragging = false
-    draggingIds = null
-    // Select
-    batch(() => {
-      setSelectedTrackId(trackId)
-      setSelectedClip({ trackId, clipId })
-      setSelectedClipIds(new Set([clipId]))
-    })
-    // Capture original
-    clipResizing = true
-    resizingIds = { trackId, clipId, edge }
-    resizeOrigStart = c.startSec
-    resizeOrigDuration = c.duration
-    resizeOrigPad = c.leftPadSec ?? 0
-    resizeAudioStart = resizeOrigStart + resizeOrigPad
-    resizeFixedLeft = c.startSec
-    resizeFixedRight = c.startSec + c.duration
-
-    window.addEventListener('mousemove', onResizeMouseMove)
-    window.addEventListener('mouseup', onResizeMouseUp)
-  }
-
-  function onResizeMouseMove(e: MouseEvent) {
-    if (!clipResizing || !resizingIds || !scrollRef) return
-    const ids = resizingIds!
-    const t = tracks().find(tt => tt.id === ids.trackId)
-    if (!t) return
-    const rect = scrollRef.getBoundingClientRect()
-    const x = e.clientX - rect.left + (scrollRef?.scrollLeft || 0)
-    const sec = Math.max(0, x / PPS)
-    const others = t.clips.filter(cc => cc.id !== ids.clipId)
-    const edge = ids.edge
-
-    if (edge === 'left') {
-      // Keep right edge fixed
-      const right = resizeFixedRight
-      const maxStartByLen = right - MIN_CLIP_SEC
-      // Nearest left neighbor end
-      let neighborEnd = 0
-      for (const oc of others) {
-        const end = oc.startSec + oc.duration
-        if (end <= resizeOrigStart && end > neighborEnd) neighborEnd = end
-      }
-      const minStartBound = Math.max(0, neighborEnd + 0.0001)
-      const maxStartBound = Math.min(resizeAudioStart, maxStartByLen)
-      const newStart = Math.max(minStartBound, Math.min(sec, maxStartBound))
-      const newDuration = Math.max(MIN_CLIP_SEC, right - newStart)
-      const newLeftPad = Math.max(0, resizeAudioStart - newStart)
-      setTracks(ts => ts.map(tr => tr.id !== t.id ? tr : ({
-        ...tr,
-        clips: tr.clips.map(cc => cc.id !== ids.clipId ? cc : ({ ...cc, startSec: newStart, duration: newDuration, leftPadSec: newLeftPad }))
-      })))
-    } else {
-      // edge === 'right', keep left edge fixed
-      const left = resizeFixedLeft
-      const minRightByLen = left + MIN_CLIP_SEC
-      // Nearest right neighbor start (>= original start)
-      let neighborStart = Number.POSITIVE_INFINITY
-      for (const oc of others) {
-        if (oc.startSec >= resizeOrigStart && oc.startSec < neighborStart) neighborStart = oc.startSec
-      }
-      let newRight = Math.max(sec, minRightByLen)
-      if (Number.isFinite(neighborStart)) newRight = Math.min(newRight, neighborStart - 0.0001)
-      const newDuration = Math.max(MIN_CLIP_SEC, newRight - left)
-      setTracks(ts => ts.map(tr => tr.id !== t.id ? tr : ({
-        ...tr,
-        clips: tr.clips.map(cc => cc.id !== ids.clipId ? cc : ({ ...cc, duration: newDuration }))
-      })))
-    }
-  }
-
-  function onResizeMouseUp() {
-    if (!clipResizing || !resizingIds) return
-    const ids = resizingIds!
-    const t = tracks().find(tt => tt.id === ids.trackId)
-    const c = t?.clips.find(cc => cc.id === ids.clipId)
-    clipResizing = false
-    resizingIds = null
-    window.removeEventListener('mousemove', onResizeMouseMove)
-    window.removeEventListener('mouseup', onResizeMouseUp)
-    if (t && c) {
-      // Persist
-      void convexClient.mutation((convexApi as any).clips.setTiming, {
-        clipId: c.id as any,
-        startSec: c.startSec,
-        duration: c.duration,
-        leftPadSec: c.leftPadSec ?? 0,
-      })
-    }
-  }
-
-  function onRulerMouseDown(e: MouseEvent) {
-    e.preventDefault()
-    startScrub(e.clientX)
-  }
-
-  function onLaneMouseDown(e: MouseEvent) {
-    e.preventDefault()
-    let trackIdx = yToLaneIndex(e.clientY, scrollRef!)
-    trackIdx = Math.max(0, Math.min(trackIdx, tracks().length - 1))
-    const id = tracks()[trackIdx]?.id
-    if (id) {
-      batch(() => {
-        setSelectedTrackId(id)
-        setSelectedFXTarget(id)
-        setSelectedClip(null)
-        // If not additive drag, clear selection on background click
-        if (!e.shiftKey) setSelectedClipIds(new Set<string>())
-      })
-    }
-
-    // Prepare for marquee selection; start scrubbing by default and switch to marquee on drag beyond threshold
-    marqueeAdditive = !!e.shiftKey
-    const rect = scrollRef!.getBoundingClientRect()
-    mStartX = e.clientX - rect.left + (scrollRef?.scrollLeft || 0)
-    mStartY = e.clientY - rect.top
-    marqueeActive = false
-    window.addEventListener('mousemove', onLaneDragMove)
-    window.addEventListener('mouseup', onLaneDragUp)
-    startScrub(e.clientX)
-  }
-
-  function onLaneDragMove(e: MouseEvent) {
-    if (!scrollRef) return
-    const rect = scrollRef.getBoundingClientRect()
-    const currX = e.clientX - rect.left + (scrollRef?.scrollLeft || 0)
-    const currY = e.clientY - rect.top
-    const dx = Math.abs(currX - mStartX)
-    const dy = Math.abs(currY - mStartY)
-    if (!marqueeActive && (dx > 4 || dy > 4)) {
-      // Activate marquee; stop scrubbing if it was started
-      marqueeActive = true
-      try { onScrubEnd() } catch {}
-    }
-    if (!marqueeActive) return
-    const x = Math.min(mStartX, currX)
-    const y = Math.min(mStartY, currY) - RULER_HEIGHT
-    const width = Math.abs(currX - mStartX)
-    const height = Math.abs(currY - mStartY)
-    const normY = Math.max(0, y)
-    setMarqueeRect({ x, y: normY, width, height })
-
-    // Compute selected clips intersecting the marquee
-    const selected = new Set<string>()
-    const ts = tracks()
-    for (let i = 0; i < ts.length; i++) {
-      const laneTop = i * LANE_HEIGHT
-      const laneBottom = laneTop + LANE_HEIGHT
-      const rTop = normY
-      const rBottom = normY + height
-      const verticalOverlap = !(laneBottom <= rTop || laneTop >= rBottom)
-      if (!verticalOverlap) continue
-      const t = ts[i]
-      for (const c of t.clips) {
-        const cx1 = c.startSec * PPS
-        const cx2 = cx1 + c.duration * PPS
-        const rx1 = x
-        const rx2 = x + width
-        const horizontalOverlap = !(cx2 <= rx1 || cx1 >= rx2)
-        if (horizontalOverlap) selected.add(c.id)
-      }
-    }
-    if (marqueeAdditive) {
-      setSelectedClipIds(prev => {
-        const next = new Set(prev)
-        for (const id of selected) next.add(id)
-        return next
-      })
-    } else {
-      setSelectedClipIds(selected)
-    }
-  }
-
-  function onLaneDragUp() {
-    window.removeEventListener('mousemove', onLaneDragMove)
-    window.removeEventListener('mouseup', onLaneDragUp)
-    setMarqueeRect(null)
-    marqueeActive = false
-  }
-
   function onClipClick(trackId: string, clipId: string, e: MouseEvent) {
     e.stopPropagation()
     batch(() => {
@@ -1413,18 +823,6 @@ const Timeline: Component = () => {
   })
 
   // Before starting playback, try to (re)load any missing buffers in a user-gesture context.
-  async function requestPlay() {
-    const ts = tracks()
-    for (const t of ts) {
-      for (const c of t.clips) {
-        if (!c.buffer) {
-          await ensureClipBuffer(c.id, c.sampleUrl)
-        }
-      }
-    }
-    await handlePlay(tracks())
-  }
-
   // Jump to a specific clip (from Samples dropdown): select it, move playhead, and scroll into view
   function jumpToClip(trackId: string, clipId: string, startSec: number) {
     // Ensure selection states are consistent
@@ -1523,11 +921,17 @@ const Timeline: Component = () => {
       />
 
       <div class="flex-1 flex min-h-0" ref={el => (containerRef = el!)}>
-        <div class="flex-1 relative overflow-x-auto" ref={el => (scrollRef = el!)}>
+        <div
+        class="flex-1 relative overflow-x-auto"
+        ref={el => {
+          scrollRef = el!
+          setScrollElement(el || undefined)
+        }}
+      >
           <div 
             class="relative select-none" 
             style={{ width: `${duration() * PPS}px`, height: `${RULER_HEIGHT + tracks().length * LANE_HEIGHT}px` }} 
-            onMouseDown={onLaneMouseDown}
+            onMouseDown={handleLaneMouseDown}
           >
             <TimelineRuler durationSec={duration()} onMouseDown={onRulerMouseDown} />
             

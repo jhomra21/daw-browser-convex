@@ -16,12 +16,11 @@ import { usePlayheadControls } from '~/hooks/usePlayheadControls'
 import { useClipDrag } from '~/hooks/useClipDrag'
 import { useClipResize } from '~/hooks/useClipResize'
 import { useTimelineSelection } from '~/hooks/useTimelineSelection'
+import { useClipBuffers } from '~/hooks/useClipBuffers'
 
 let audioEngineSingleton: AudioEngine | null = null
-const audioBufferCache = new Map<string, AudioBuffer>()
 const volumeTimers = new Map<string, number>()
 const optimisticMoves = new Map<string, { trackId: string; startSec: number }>()
-const loadingClipIds = new Set<string>()
 
 const getAudioEngine = () => {
   if (!audioEngineSingleton) {
@@ -61,48 +60,12 @@ const Timeline: Component = () => {
   // Collaboration: roomId from ?roomId=; ownership tied to Better Auth userId
   const { roomId, setRoomId, userId, myProjects, fullView, navigateToRoom } = useTimelineData()
 
-  // Track clip loading state to avoid duplicate fetches/decodes
-
-  async function uploadToR2(room: string, clip: string, file: File, durationSec?: number): Promise<string | null> {
-    try {
-      const fd = new FormData()
-      fd.append('roomId', room)
-      fd.append('clipId', clip)
-      fd.append('file', file, file.name)
-      if (typeof durationSec === 'number' && isFinite(durationSec)) {
-        fd.append('duration', String(durationSec))
-      }
-      const res = await fetch('/api/samples', { method: 'POST', body: fd })
-      if (!res.ok) return null
-      const data: any = await res.json().catch(() => null as any)
-      return data?.url ?? null
-    } catch {
-      return null
-    }
-  }
-
-  async function ensureClipBuffer(clipId: string, sampleUrl?: string) {
-    if (audioBufferCache.has(clipId) || loadingClipIds.has(clipId)) return
-    loadingClipIds.add(clipId)
-    try {
-      if (sampleUrl) {
-        const res = await fetch(sampleUrl)
-        if (res.ok) {
-          const ab = await res.arrayBuffer()
-          const decoded = await audioEngine.decodeAudioData(ab)
-          audioBufferCache.set(clipId, decoded)
-          setTracks(ts => ts.map(t => ({
-            ...t,
-            clips: t.clips.map(c => c.id === clipId ? { ...c, buffer: decoded } : c)
-          })))
-        }
-      }
-    } catch {
-      // Ignore errors; buffer remains unset
-    } finally {
-      loadingClipIds.delete(clipId)
-    }
-  }
+  const {
+    audioBufferCache,
+    ensureClipBuffer,
+    uploadToR2,
+    clearClipBufferCaches,
+  } = useClipBuffers({ audioEngine, tracks, setTracks })
 
   // Local storage helpers for mix persistence
   function mixKey(rid: string) { return `mb:mix:${rid}` }
@@ -252,9 +215,10 @@ const Timeline: Component = () => {
       const prev = oldTrackMap.get(id)
       const serverMuted = (t as any).muted as boolean | undefined
       const serverSoloed = (t as any).soloed as boolean | undefined
+      const serverName = typeof (t as any).name === 'string' ? (t as any).name : undefined
       return {
         id,
-        name: prev?.name ?? `Track ${idx + 1}`,
+        name: serverName ?? prev?.name ?? `Track ${idx + 1}`,
         volume: typeof t.volume === 'number' ? t.volume : 0.8,
         clips: [],
         muted: sm
@@ -366,8 +330,7 @@ const Timeline: Component = () => {
       clearTimeout(timer)
     }
     volumeTimers.clear()
-    loadingClipIds.clear()
-    audioBufferCache.clear()
+    clearClipBufferCaches()
     optimisticMoves.clear()
   })
 

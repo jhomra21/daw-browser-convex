@@ -51,12 +51,16 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer }: O
 
   const requestPlay = async () => {
     const ts = tracks()
+    const pendingBuffers: Promise<void>[] = []
     for (const track of ts) {
       for (const clip of track.clips) {
         if (!clip.buffer) {
-          await ensureClipBuffer(clip.id, clip.sampleUrl)
+          pendingBuffers.push(ensureClipBuffer(clip.id, clip.sampleUrl))
         }
       }
+    }
+    if (pendingBuffers.length) {
+      await Promise.all(pendingBuffers)
     }
     await playback.handlePlay(ts)
   }

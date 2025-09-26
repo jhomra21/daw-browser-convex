@@ -301,129 +301,161 @@ export const Route = createFileRoute('/')({
 ```
 
 ### Collaborative timeline syncing (`src/components/Timeline.tsx`)
-The main timeline component subscribes to Convex queries, projects server state into local Solid signals, and keeps optimistically updated tracks in sync with audio buffers and R2 uploads.
+`Timeline.tsx` now composes dedicated hooks for room state, playback, clip import, and selection. `useTimelineData()` supplies the current room and Convex queries, `useClipBuffers()` hydrates missing audio buffers, and `useTimelineClipActions()` centralises keyboard-driven edits. A guarded projection effect keeps Convex state and local optimistic changes aligned while respecting per-user mix preferences.
 
 ```ts
 // src/components/Timeline.tsx
-const fullView = useConvexQuery(
-  convexApi.timeline.fullView,
-  () => roomId() ? ({ roomId: roomId() }) : null,
-  () => ['timeline', roomId()]
-);
+const { roomId, userId, fullView } = useTimelineData()
+const { audioBufferCache, ensureClipBuffer, uploadToR2 } = useClipBuffers({ audioEngine, tracks, setTracks })
 
 createEffect(() => {
-  const raw = (fullView as any).data;
-  const data = typeof raw === 'function' ? raw() : raw;
-  if (!data) return;
+  const raw = (fullView as any).data
+  const data = typeof raw === 'function' ? raw() : raw
+  if (!data) return
 
-  const oldTracks = untrack(() => tracks());
-  const oldTrackMap = new Map(oldTracks.map(t => [t.id, t]));
+  const oldTracks = untrack(() => tracks())
+  const oldTrackMap = new Map(oldTracks.map(t => [t.id, t]))
+  const sm = syncMix()
+  const dragSnapshot = activeDrag()
+  const addedTrackDuringDrag = dragSnapshot?.addedTrackDuringDrag
+  const localMix = loadLocalMixMap(roomId())
 
-  const projected: Track[] = data.tracks.map((t: any, idx: number) => ({
-    id: t._id as string,
-    name: oldTrackMap.get(t._id as string)?.name ?? `Track ${idx + 1}`,
-    volume: typeof t.volume === 'number' ? t.volume : 0.8,
-    clips: [],
-    muted: false,
-    soloed: false,
-  }));
+  const projected: Track[] = data.tracks.map((t: any, idx: number) => {
+    const id = t._id as string
+    const prev = oldTrackMap.get(id)
+    const serverMuted = (t as any).muted as boolean | undefined
+    const serverSoloed = (t as any).soloed as boolean | undefined
+    return {
+      id,
+      name: (t as any).name ?? prev?.name ?? `Track ${idx + 1}`,
+      volume: typeof t.volume === 'number' ? t.volume : 0.8,
+      clips: [],
+      muted: sm
+        ? (typeof serverMuted === 'boolean' ? serverMuted : prev?.muted ?? localMix[id]?.muted ?? false)
+        : (prev?.muted ?? localMix[id]?.muted ?? false),
+      soloed: sm
+        ? (typeof serverSoloed === 'boolean' ? serverSoloed : prev?.soloed ?? localMix[id]?.soloed ?? false)
+        : (prev?.soloed ?? localMix[id]?.soloed ?? false),
+    }
+  })
 
-  setTracks(projected);
-});
+  // inject drag placeholders, hydrate clips, honour optimisticMoves, seed selection...
+  setTracks(projected)
+})
 ```
 
-```ts
-async function onDrop(e: DragEvent) {
-  e.preventDefault();
-  const file = e.dataTransfer?.files?.[0];
-  if (!file || !file.type.startsWith('audio')) return;
-
-  const ab = await file.arrayBuffer();
-  const decoded = await audioEngine.decodeAudioData(ab);
-
-  const createdClipId = await convexClient.mutation(convexApi.clips.create, {
-    roomId: roomId(),
-    trackId: targetTrackId as any,
-    startSec,
-    duration: decoded.duration,
-    userId: userId(),
-    name: file.name,
-  });
-
-  audioBufferCache.set(createdClipId, decoded);
-  const url = await uploadToR2(roomId(), createdClipId, file, decoded.duration);
-  if (url) {
-    await convexClient.mutation(convexApi.clips.setSampleUrl, { clipId: createdClipId as any, sampleUrl: url });
-  }
-}
-```
+Clip imports are handled in `useTimelineClipImport.ts`, which decodes audio, creates Convex records, pushes buffers into the cache, and uploads samples to R2—supporting drag-and-drop, file pickers, per-lane hit testing, overlap avoidance, optimistic placeholders, and empty-lane auto track creation.
 
 ### Audio engine architecture (`src/lib/audio-engine.ts`)
-The custom `AudioEngine` wraps the Web Audio API to provide per-track gain staging, optional EQ chains, and precise clip scheduling without blocking Solid's reactive updates. The context is created lazily to comply with browser autoplay rules, and it maintains internal maps for track inputs, gains, and EQ nodes.
+The custom `AudioEngine` wraps the Web Audio API but now adds master routing, pending EQ hydration, and offline decoding safeguards. It coordinates master/track EQ chains, mute/solo precedence, and clip scheduling without blocking Solid's reactive updates.
 
 ```ts
 // src/lib/audio-engine.ts
 export class AudioEngine {
-  private audioCtx: AudioContext | null = null;
-  private masterGain: GainNode | null = null;
-  private trackGains = new Map<string, GainNode>();
-  private trackInputs = new Map<string, GainNode>();
-  private eqChains = new Map<string, BiquadFilterNode[]>();
+  private audioCtx: AudioContext | null = null
+  private masterGain: GainNode | null = null
+  private destination: AudioDestinationNode | null = null
+  private trackGains = new Map<string, GainNode>()
+  private activeSources: AudioBufferSourceNode[] = []
+  private trackInputs = new Map<string, GainNode>()
+  private eqChains = new Map<string, BiquadFilterNode[]>()
+  private pendingEqParams = new Map<string, EqParamsLite>()
+  private masterEqChain: BiquadFilterNode[] = []
 
   ensureAudio() {
     if (!this.audioCtx) {
-      this.audioCtx = new AudioContext();
-      this.masterGain = this.audioCtx.createGain();
-      this.masterGain.gain.value = 1.0;
-      this.rebuildMasterRouting();
+      this.audioCtx = new AudioContext()
+      this.masterGain = this.audioCtx.createGain()
+      this.destination = this.audioCtx.destination
+      this.masterGain.gain.value = 1.0
+      this.rebuildMasterRouting()
     }
   }
 
   setTrackEq(trackId: string, params: EqParamsLite) {
     if (!this.audioCtx) {
-      this.pendingEqParams.set(trackId, params);
-      return;
+      this.pendingEqParams.set(trackId, params)
+      return
     }
-    this.ensureTrackNodes(trackId);
-    const nodes: BiquadFilterNode[] = [];
+    this.ensureTrackNodes(trackId)
+    const old = this.eqChains.get(trackId)
+    if (old) {
+      for (const n of old) { try { n.disconnect() } catch {} }
+    }
+    const nodes: BiquadFilterNode[] = []
     if (params.enabled) {
-      for (const band of params.bands) {
-        if (!band.enabled) continue;
-        const filter = this.audioCtx.createBiquadFilter();
-        filter.type = band.type;
-        filter.frequency.value = Math.max(20, Math.min(20000, band.frequency));
-        filter.Q.value = Math.max(0.001, band.q);
-        filter.gain.value = this.supportsGain(band.type) ? band.gainDb : 0;
-        nodes.push(filter);
+      for (const b of params.bands) {
+        if (!b.enabled) continue
+        const f = this.audioCtx.createBiquadFilter()
+        f.type = b.type
+        f.frequency.value = Math.max(20, Math.min(20000, b.frequency))
+        f.Q.value = Math.max(0.001, b.q)
+        f.gain.value = this.supportsGain(b.type) ? b.gainDb : 0
+        nodes.push(f)
       }
     }
-    this.eqChains.set(trackId, nodes);
-    this.rebuildTrackRouting(trackId);
+    this.eqChains.set(trackId, nodes)
+    this.rebuildTrackRouting(trackId)
+  }
+
+  updateTrackGains(tracks: Track[]) {
+    if (!this.audioCtx || !this.masterGain) return
+    const anySoloed = tracks.some(tt => tt.soloed)
+    for (const t of tracks) {
+      this.ensureTrackNodes(t.id)
+      const gain = this.trackGains.get(t.id)!
+      gain.gain.value = (!t.muted && (!anySoloed || t.soloed)) ? t.volume : 0
+    }
+    for (const [id, g] of Array.from(this.trackGains.entries())) {
+      if (!tracks.find(t => t.id === id)) {
+        try { g.disconnect() } catch {}
+        this.trackGains.delete(id)
+        const input = this.trackInputs.get(id)
+        if (input) {
+          try { input.disconnect() } catch {}
+          this.trackInputs.delete(id)
+        }
+        const nodes = this.eqChains.get(id)
+        if (nodes) {
+          for (const n of nodes) { try { n.disconnect() } catch {} }
+          this.eqChains.delete(id)
+        }
+        this.pendingEqParams.delete(id)
+      }
+    }
   }
 
   scheduleAllClipsFromPlayhead(tracks: Track[], playheadSec: number) {
-    if (!this.audioCtx) return;
-    this.stopAllSources();
-    const now = this.audioCtx.currentTime;
-    const anySoloed = tracks.some(t => t.soloed);
+    if (!this.audioCtx) return
+    this.stopAllSources()
+    const now = this.audioCtx.currentTime
+    const anySoloed = tracks.some(t => t.soloed)
 
-    for (const track of tracks) {
-      this.ensureTrackNodes(track.id);
-      const gain = this.trackGains.get(track.id)!;
-      gain.gain.value = (!track.muted && (!anySoloed || track.soloed)) ? track.volume : 0;
+    for (const t of tracks) {
+      this.ensureTrackNodes(t.id)
+      const input = this.trackInputs.get(t.id)!
+      const gain = this.trackGains.get(t.id)!
+      gain.gain.value = (!t.muted && (!anySoloed || t.soloed)) ? t.volume : 0
 
-      for (const clip of track.clips) {
-        if (!clip.buffer) continue;
-        const source = this.audioCtx.createBufferSource();
-        source.buffer = clip.buffer;
-        source.connect(this.trackInputs.get(track.id)!);
-        const when = Math.max(0, (clip.startSec + (clip.leftPadSec ?? 0)) - playheadSec);
-        const offset = Math.max(0, playheadSec - (clip.startSec + (clip.leftPadSec ?? 0)));
-        const duration = Math.min(clip.buffer.duration - offset, clip.duration - Math.max(0, playheadSec - clip.startSec));
-        if (duration > 0) {
-          source.start(now + when, offset, duration);
-          this.activeSources.push(source);
-        }
+      for (const c of t.clips) {
+        if (!c.buffer) continue
+        const leftPad = Math.max(0, c.leftPadSec ?? 0)
+        const audioStart = c.startSec + leftPad
+        if (playheadSec >= audioStart + c.buffer.duration) continue
+
+        const when = Math.max(0, audioStart - playheadSec)
+        const offset = Math.max(0, playheadSec - audioStart)
+        const playDur = Math.min(
+          c.buffer.duration - offset,
+          (c.startSec + c.duration) - Math.max(playheadSec, audioStart),
+        )
+        if (playDur <= 0) continue
+
+        const source = this.audioCtx.createBufferSource()
+        source.buffer = c.buffer
+        source.connect(input)
+        source.start(now + when, offset, playDur)
+        this.activeSources.push(source)
       }
     }
   }
@@ -432,11 +464,11 @@ export class AudioEngine {
 
 Key behaviors:
 
-- **Lazy initialization**: `ensureAudio()` postpones `AudioContext` creation until playback, avoiding browser autoplay warnings during page load.
-- **Per-track routing**: `ensureTrackNodes()` wires a dedicated input `GainNode` per track so EQ chains (`setTrackEq()`) can slot between the input and the shared master bus.
-- **Mute/solo logic**: `updateTrackGains()` applies solo precedence across all tracks before each playback pass, muting non-soloed tracks automatically.
-- **Clip scheduling**: `scheduleAllClipsFromPlayhead()` restarts all active `AudioBufferSourceNode`s relative to the current playhead, respecting clip padding (`leftPadSec`), duration windows, and partially played buffers.
-- **Master EQ**: `setMasterEq()` rebuilds an optional Biquad chain on the master bus, reconnecting the final node to the `AudioDestinationNode` to keep global effects isolated from track-specific EQ.
+- **Lazy initialization**: `ensureAudio()` wires the master bus only after a user gesture, avoiding autoplay violations while remembering the intended destination.
+- **Per-track routing**: `ensureTrackNodes()` provisions dedicated input and gain nodes so `setTrackEq()` can insert user-configured EQ chains between them.
+- **Mute/solo and cleanup**: `updateTrackGains()` applies solo precedence, synchronises gain values, and tears down nodes, EQ chains, and pending parameters when tracks disappear.
+- **Clip scheduling**: `scheduleAllClipsFromPlayhead()` recreates `AudioBufferSourceNode`s relative to the current playhead, respecting clip padding, window duration, and partially consumed buffers.
+- **Master processing**: `setMasterEq()` rebuilds a Biquad chain on the master bus, while `decodeAudioData()` falls back to an `OfflineAudioContext` until the live context is user-activated and `resume()` has been called.
 
 ### Sample storage API (`api/index.ts`)
 The Hono worker enforces authentication, streams uploads to Cloudflare R2 with collision handling, and exposes a signed fetch endpoint for playback.

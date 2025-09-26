@@ -10,12 +10,13 @@ type TrackLaneProps = {
   onClipMouseDown: (trackId: string, clipId: string, e: MouseEvent) => void
   onClipClick: (trackId: string, clipId: string, e: MouseEvent) => void
   onClipResizeStart: (trackId: string, clipId: string, edge: 'left' | 'right', e: MouseEvent) => void
+  isDropTarget?: boolean
 }
 
 const TrackLane: Component<TrackLaneProps> = (props) => {
   return (
     <div 
-      class="absolute left-0 right-0 bg-neutral-950" 
+      class={`absolute left-0 right-0 ${props.isDropTarget ? 'bg-green-500/10' : 'bg-neutral-950'}`} 
       style={{ top: `${props.index * LANE_HEIGHT}px`, height: `${LANE_HEIGHT}px` }}
     >
       <div class="absolute left-0 right-0 bottom-0 h-px bg-neutral-800" />

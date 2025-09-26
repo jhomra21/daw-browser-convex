@@ -3,8 +3,9 @@ import { Button } from '~/components/ui/button'
 import Icon from '~/components/ui/Icon'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '~/components/ui/dropdown-menu'
 import UserInfoDropdown from '~/components/UserInfoDropdown'
-import { useConvexQuery, convexApi } from '~/lib/convex'
+import { useConvexQuery, convexApi, convexClient } from '~/lib/convex'
 import { useSessionQuery } from '~/lib/session'
+import { useProjectSamples } from '~/hooks/useProjectSamples'
 
 type TransportControlsProps = {
   isPlaying: boolean
@@ -17,6 +18,7 @@ type TransportControlsProps = {
   onShare?: () => void
   // Samples controls
   onJumpToClip: (clipId: string, trackId: string, startSec: number) => void
+  onInsertSample: (input: { url: string; name?: string; duration?: number }) => void | Promise<void>
   // Projects controls
   currentRoomId: string
   onOpenProject: (roomId: string) => void
@@ -36,6 +38,12 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
   const [editingProjectId, setEditingProjectId] = createSignal<string | null>(null)
   const [editingName, setEditingName] = createSignal<string>('')
   const [renamingProjectId, setRenamingProjectId] = createSignal<string | null>(null)
+  // Samples actions state
+  const [confirmingSampleUrl, setConfirmingSampleUrl] = createSignal<string | null>(null)
+  const [deletingSampleUrl, setDeletingSampleUrl] = createSignal<string | null>(null)
+  const [insertingSampleUrl, setInsertingSampleUrl] = createSignal<string | null>(null)
+  const [samplesOpen, setSamplesOpen] = createSignal(false)
+  const [isDraggingSample, setIsDraggingSample] = createSignal(false)
 
   // Projects data
   const session = useSessionQuery()
@@ -52,38 +60,31 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
     return Array.isArray(data) ? data as { roomId: string, name: string }[] : undefined
   }
 
-  // Clips in current room (for Samples list)
-  const roomClips = useConvexQuery(
-    (convexApi as any).clips.listByRoom,
-    () => props.currentRoomId ? ({ roomId: props.currentRoomId }) : null,
-    () => ['clips', 'by_room', props.currentRoomId]
-  )
+  const samples = useProjectSamples({ roomId: () => props.currentRoomId })
+  const samplesList = () => samples.samples()
 
-  // Build a unique samples list (dedupe by sampleUrl; fallback to name+duration)
-  const samplesList = () => {
-    const raw: any = (roomClips as any).data
-    const data = (typeof raw === 'function' ? raw() : raw)
-    const clips = Array.isArray(data) ? (data as any[]) : []
-    const map = new Map<string, { key: string, name: string, url?: string, count: number, earliest: any }>()
-    for (const c of clips) {
-      const name = (c as any).name || 'Sample'
-      const duration = Math.max(0, Number((c as any).duration || 0))
-      const key = (c as any).sampleUrl || `${name}|${Math.round(duration * 1000)}`
-      const existing = map.get(key)
-      if (!existing) {
-        map.set(key, { key, name, url: (c as any).sampleUrl, count: 1, earliest: c })
-      } else {
-        existing.count++
-        const cStart = Number((c as any).startSec || 0)
-        const prevStart = Number((existing.earliest as any)?.startSec || Infinity)
-        if (cStart < prevStart) {
-          existing.earliest = c
-          if ((c as any).name) existing.name = (c as any).name
-          if ((c as any).sampleUrl) existing.url = (c as any).sampleUrl
-        }
-      }
+  const handleInsertSampleItem = async (sample: ReturnType<typeof samplesList>[number]) => {
+    if (!sample?.url) return
+    setInsertingSampleUrl(sample.url)
+    try {
+      await Promise.resolve(props.onInsertSample({ url: sample.url, name: sample.name, duration: sample.duration }))
+    } finally {
+      setInsertingSampleUrl(null)
     }
-    return Array.from(map.values()).sort((a, b) => (Number((a.earliest as any)?.startSec || 0) - Number((b.earliest as any)?.startSec || 0)))
+  }
+
+  const handleDeleteSampleItem = async (sample: ReturnType<typeof samplesList>[number]) => {
+    if (!sample?.url) return
+    const rid = props.currentRoomId
+    const uid = userId()
+    if (!rid || !uid) return
+    setDeletingSampleUrl(sample.url)
+    try {
+      await convexClient.mutation((convexApi as any).samples.removeFromRoom, { roomId: rid, url: sample.url, userId: uid })
+      setConfirmingSampleUrl(null)
+    } finally {
+      setDeletingSampleUrl(null)
+    }
   }
 
   const handleOpenShare = async () => {
@@ -114,16 +115,19 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
   const handleDocMouseDown = (e: MouseEvent) => {
     const cid = confirmingProjectId()
     const eid = editingProjectId()
-    if (!cid && !eid) return
+    const sid = confirmingSampleUrl()
+    if (!cid && !eid && !sid) return
     const t = e.target as HTMLElement | null
     if (!t) return
     if (cid && !t.closest(`[data-project-rid="${cid}"]`)) setConfirmingProjectId(null)
     if (eid && !t.closest(`[data-project-rid="${eid}"]`)) setEditingProjectId(null)
+    if (sid && !t.closest(`[data-sample-url="${sid}"]`)) setConfirmingSampleUrl(null)
   }
   const handleEscKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       if (confirmingProjectId()) setConfirmingProjectId(null)
       if (editingProjectId()) setEditingProjectId(null)
+      if (confirmingSampleUrl()) setConfirmingSampleUrl(null)
     }
   }
   onMount(() => {
@@ -403,69 +407,167 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
         </DropdownMenu>
 
         {/* Samples Dropdown */}
-        <DropdownMenu>
+        <DropdownMenu open={samplesOpen()} onOpenChange={setSamplesOpen}>
           <DropdownMenuTrigger>
             <Button variant="outline" size="sm">
               <Icon name="file-audio" class="h-4 w-4 mr-1" />
               Samples
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent class="w-full bg-neutral-900" style={{ width: 'min(92vw, 26rem)' }}>
+          <DropdownMenuContent class="w-full bg-neutral-900" style={{ width: 'min(92vw, 26rem)', 'pointer-events': isDraggingSample() ? 'none' : undefined }}>
             <div class="p-2 w-full">
               <div class="flex items-center justify-between px-1 pb-2">
                 <span class="text-sm font-semibold text-neutral-100">Samples in Project</span>
               </div>
               <DropdownMenuSeparator />
               <div class="max-h-72 overflow-y-auto">
-                <For each={samplesList()}>
-                  {(s) => (
-                    <DropdownMenuItem
-                      class={`group relative w-full flex items-center justify-between gap-2 cursor-pointer hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100 pr-10`}
-                      onSelect={() => {
-                        const earliest: any = (s as any).earliest
-                        props.onJumpToClip(earliest?._id as string, earliest?.trackId as string, Number(earliest?.startSec || 0))
-                      }}
-                    >
-                      <div class="flex items-center gap-2 min-w-0 flex-1">
-                        <Icon name="file-audio" class="h-4 w-4 text-neutral-400 group-hover:text-neutral-200" />
-                        <span class={`font-mono text-xs truncate max-w-[14rem] text-neutral-200 group-hover:text-neutral-100`} title={(s as any).name}>{(s as any).name}</span>
-                        <span class="text-[10px] text-neutral-400 shrink-0">x{(s as any).count}</span>
-                      </div>
-                      <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                        <button
-                          class="p-1 cursor-pointer text-neutral-400 hover:text-neutral-200 disabled:opacity-50"
-                          aria-label="Copy sample URL"
-                          disabled={!((s as any).url)}
-                          onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                          onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                          onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                          onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                          onClick={async (ev) => {
-                            ev.stopPropagation(); ev.preventDefault();
-                            const url = (s as any).url as string | undefined
-                            if (url && navigator.clipboard?.writeText) {
-                              try { await navigator.clipboard.writeText(url) } catch {}
-                            }
+                <For each={samplesList()} fallback={<div class="px-2 py-2 text-xs text-neutral-500">No samples yet</div>}>
+                  {(sample) => {
+                    const url = sample.url
+                    const count = sample.count
+                    const earliest = sample.earliestClip
+                    const isConfirming = () => confirmingSampleUrl() === url
+                    const isDeleting = () => deletingSampleUrl() === url
+                    const isInserting = () => insertingSampleUrl() === url
+                    return (
+                      <DropdownMenuItem
+                        data-sample-url={url}
+                        class="group relative w-full flex items-center justify-between gap-2 pr-20 cursor-pointer hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100"
+                        onSelect={() => {
+                          if (!earliest) return
+                          props.onJumpToClip(earliest.clipId, earliest.trackId, earliest.startSec)
+                        }}
+                      >
+                        <div
+                          class="flex items-center gap-2 min-w-0 flex-1"
+                          draggable={!!url}
+                          onDragStart={(ev) => {
+                            try {
+                              const payload = JSON.stringify({ url, name: sample.name, duration: sample.duration })
+                              ev.dataTransfer?.setData('application/x-mediabunny-sample', payload)
+                              if (url) {
+                                ev.dataTransfer?.setData('text/uri-list', url)
+                                ev.dataTransfer?.setData('text/plain', url)
+                              }
+                              if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'copy'
+                            } catch {}
+                            setIsDraggingSample(true)
                           }}
+                          onDragEnd={() => setIsDraggingSample(false)}
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
-                            <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                              <rect width="8" height="8" x="8" y="8" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
-                            </g>
-                            <title>Copy URL</title>
-                          </svg>
-                        </button>
-                      </div>
-                    </DropdownMenuItem>
-                  )}
+                          <Icon name="file-audio" class="h-4 w-4 text-neutral-400 group-hover:text-neutral-200" />
+                          <span class="font-mono text-xs truncate max-w-[12rem] text-neutral-200 group-hover:text-neutral-100" title={sample.name}>{sample.name}</span>
+                          <span class="text-[10px] text-neutral-400 shrink-0">x{count}</span>
+                        </div>
+                        <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                          <button
+                            class="p-1 cursor-pointer text-neutral-400 hover:text-neutral-200 disabled:opacity-50"
+                            aria-label="Copy sample URL"
+                            disabled={!url}
+                            onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                            onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                            onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                            onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                            onClick={async (ev) => {
+                              ev.stopPropagation(); ev.preventDefault()
+                              if (url && navigator.clipboard?.writeText) {
+                                try { await navigator.clipboard.writeText(url) } catch {}
+                              }
+                            }}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
+                              <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect width="8" height="8" x="8" y="8" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+                              </g>
+                              <title>Copy URL</title>
+                            </svg>
+                          </button>
+                          <button
+                            class={`p-1 cursor-pointer text-neutral-400 hover:text-neutral-100 disabled:opacity-50 ${isInserting() ? 'opacity-60 cursor-not-allowed' : ''}`}
+                            aria-label="Insert sample"
+                            disabled={!url || isInserting()}
+                            onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                            onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                            onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                            onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                            onClick={async (ev) => {
+                              ev.stopPropagation(); ev.preventDefault()
+                              await handleInsertSampleItem(sample)
+                            }}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
+                              <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 11h16M12 4v16" />
+                              <title>Insert</title>
+                            </svg>
+                          </button>
+                          <Show when={isConfirming()} fallback={
+                            <button
+                              class={`p-1 cursor-pointer ${count > 0 ? 'text-neutral-500 cursor-not-allowed' : 'text-red-500 hover:text-red-400'} ${count > 0 ? 'opacity-50' : ''}`}
+                              aria-label={count > 0 ? 'Cannot delete sample in use' : 'Delete sample'}
+                              disabled={count > 0}
+                              onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                              onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                              onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                              onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                              onClick={(ev) => {
+                                ev.stopPropagation(); ev.preventDefault()
+                                if (count === 0) setConfirmingSampleUrl(url)
+                              }}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
+                                <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m-1 0v14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V6m3 4v8m4-8v8" />
+                                <title>Delete</title>
+                              </svg>
+                            </button>
+                          }>
+                            <div class="flex items-center gap-1">
+                              <button
+                                class={`p-1 cursor-pointer ${isDeleting() ? 'opacity-60 cursor-not-allowed text-neutral-400' : 'text-green-500 hover:text-green-400'}`}
+                                aria-label={isDeleting() ? 'Deleting…' : 'Confirm delete'}
+                                disabled={isDeleting()}
+                                onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                                onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                                onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                                onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                                onClick={async (ev) => {
+                                  ev.stopPropagation(); ev.preventDefault()
+                                  await handleDeleteSampleItem(sample)
+                                }}
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
+                                  <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m5 12l5 5L20 7" />
+                                  <title>Confirm</title>
+                                </svg>
+                              </button>
+                              <button
+                                class="p-1 cursor-pointer text-neutral-400 hover:text-neutral-300"
+                                aria-label="Cancel delete"
+                                onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                                onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                                onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                                onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                                onClick={(ev) => {
+                                  ev.stopPropagation(); ev.preventDefault()
+                                  setConfirmingSampleUrl(null)
+                                }}
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
+                                  <path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m7 7l10 10M17 7L7 17" />
+                                  <title>Cancel</title>
+                                </svg>
+                              </button>
+                            </div>
+                          </Show>
+                        </div>
+                      </DropdownMenuItem>
+                    )
+                  }}
                 </For>
-                {samplesList().length === 0 && (
-                  <div class="px-2 py-2 text-xs text-neutral-500">No samples yet</div>
-                )}
               </div>
             </div>
           </DropdownMenuContent>
         </DropdownMenu>
+
       </div>
 
       {/* Center: Transport */}

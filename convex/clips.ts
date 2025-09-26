@@ -86,7 +86,43 @@ export const setSampleUrl = mutation({
   handler: async (ctx, { clipId, sampleUrl }) => {
     const clip = await ctx.db.get(clipId);
     if (!clip) return;
+
     await ctx.db.patch(clipId, { sampleUrl });
+
+    const owners = await ctx.db
+      .query("ownerships")
+      .withIndex("by_clip", q => q.eq("clipId", clipId))
+      .collect();
+    const owner = owners[0];
+    if (!owner) return;
+
+    const existingSamples = await ctx.db
+      .query("samples")
+      .withIndex("by_room_url", q => q.eq("roomId", clip.roomId).eq("url", sampleUrl))
+      .collect();
+
+    const sampleRow = existingSamples[0];
+    if (sampleRow) {
+      const patch: Partial<typeof sampleRow> = {};
+      if (!sampleRow.name && clip.name) {
+        patch.name = clip.name;
+      }
+      if (sampleRow.duration === undefined && typeof clip.duration === "number") {
+        patch.duration = clip.duration;
+      }
+      if (Object.keys(patch).length > 0) {
+        await ctx.db.patch(sampleRow._id, patch);
+      }
+    } else {
+      await ctx.db.insert("samples", {
+        roomId: clip.roomId,
+        url: sampleUrl,
+        name: clip.name,
+        duration: clip.duration,
+        ownerUserId: owner.ownerUserId,
+        createdAt: Date.now(),
+      });
+    }
   },
 });
 

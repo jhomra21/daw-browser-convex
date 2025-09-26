@@ -39,6 +39,7 @@ type TimelineClipImportHandlers = {
   handleDrop: (event: DragEvent) => Promise<void>
   handleFiles: (files: FileList | null) => Promise<void>
   handleAddAudio: () => Promise<void>
+  handleInsertSample: (input: { url: string; name?: string; duration?: number }) => Promise<void>
 }
 
 export function useTimelineClipImport(options: TimelineClipImportOptions): TimelineClipImportHandlers {
@@ -181,7 +182,108 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
 
   const handleDrop = async (event: DragEvent) => {
     event.preventDefault()
-    const file = event.dataTransfer?.files?.[0]
+    const dt = event.dataTransfer
+
+    // 1) Try custom sample payload first
+    const samplePayload = dt?.getData('application/x-mediabunny-sample')
+    if (samplePayload) {
+      try {
+        const parsed = JSON.parse(samplePayload) as { url?: string; name?: string; duration?: number }
+        const url = parsed?.url
+        if (url) {
+          const scroll = getScrollElement()
+          if (!scroll) return
+          const desiredStart = clientXToSec(event.clientX, scroll)
+          let laneIdx = yToLaneIndex(event.clientY, scroll)
+
+          const ts0 = tracks()
+          let targetTrackId: string | undefined
+          if (ts0.length === 0 || laneIdx >= ts0.length || laneIdx < 0) {
+            targetTrackId = await createServerTrack()
+          } else {
+            laneIdx = Math.max(0, Math.min(laneIdx, ts0.length - 1))
+            targetTrackId = ts0[laneIdx]?.id
+          }
+          if (!targetTrackId) return
+
+          // Compute non-overlapping start and base duration
+          const targetTrack = ts0.find(t => t.id === targetTrackId)
+          const baseDuration = typeof parsed.duration === 'number' && parsed.duration > 0 ? parsed.duration : 1
+          let startSec = Math.max(0, desiredStart)
+          startSec = ensureNonOverlappingStart(targetTrack, startSec, baseDuration)
+
+          const clipName = parsed.name?.trim()?.length ? parsed.name! : 'Sample'
+
+          const createdClipId = await createServerClip(targetTrackId, startSec, baseDuration, clipName)
+          if (!createdClipId) return
+
+          insertOptimisticClip(targetTrackId, {
+            id: createdClipId,
+            name: clipName,
+            buffer: null,
+            startSec,
+            duration: baseDuration,
+            color: '#22c55e',
+            sampleUrl: url,
+          })
+
+          await convexClient.mutation(convexApi.clips.setSampleUrl, { clipId: createdClipId as any, sampleUrl: url })
+
+          applySelectionAfterCreate(targetTrackId, createdClipId)
+          return
+        }
+      } catch {}
+    }
+
+    // 2) Fallback to plain URL drops (text/uri-list or text/plain)
+    const uriList = dt?.getData('text/uri-list')
+    const textPlain = dt?.getData('text/plain')
+    const urlFromText = (uriList && uriList.trim()) || (textPlain && textPlain.trim()) || ''
+    const looksLikeUrl = /^https?:\/\//i.test(urlFromText) || urlFromText.startsWith('blob:')
+    if (looksLikeUrl) {
+      const url = urlFromText
+      const scroll = getScrollElement()
+      if (!scroll) return
+      const desiredStart = clientXToSec(event.clientX, scroll)
+      let laneIdx = yToLaneIndex(event.clientY, scroll)
+
+      const ts0 = tracks()
+      let targetTrackId: string | undefined
+      if (ts0.length === 0 || laneIdx >= ts0.length || laneIdx < 0) {
+        targetTrackId = await createServerTrack()
+      } else {
+        laneIdx = Math.max(0, Math.min(laneIdx, ts0.length - 1))
+        targetTrackId = ts0[laneIdx]?.id
+      }
+      if (!targetTrackId) return
+
+      const targetTrack = ts0.find(t => t.id === targetTrackId)
+      const baseDuration = 1
+      let startSec = Math.max(0, desiredStart)
+      startSec = ensureNonOverlappingStart(targetTrack, startSec, baseDuration)
+
+      const clipName = 'Sample'
+      const createdClipId = await createServerClip(targetTrackId, startSec, baseDuration, clipName)
+      if (!createdClipId) return
+
+      insertOptimisticClip(targetTrackId, {
+        id: createdClipId,
+        name: clipName,
+        buffer: null,
+        startSec,
+        duration: baseDuration,
+        color: '#22c55e',
+        sampleUrl: url,
+      })
+
+      await convexClient.mutation(convexApi.clips.setSampleUrl, { clipId: createdClipId as any, sampleUrl: url })
+
+      applySelectionAfterCreate(targetTrackId, createdClipId)
+      return
+    }
+
+    // 3) Fallback to file drop
+    const file = dt?.files?.[0]
     if (!file || !file.type.startsWith('audio')) return
 
     const scroll = getScrollElement()
@@ -238,9 +340,48 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     getFileInput()?.click()
   }
 
+  const handleInsertSample = async (input: { url: string; name?: string; duration?: number }) => {
+    const { url, name, duration } = input
+    if (!url) return
+
+    let trackId = selectedTrackId()
+    if (!trackId) {
+      trackId = await createServerTrack()
+      if (!trackId) return
+      setSelectedTrackId(trackId)
+      setSelectedFXTarget(trackId)
+    }
+
+    const tsSnapshot = tracks()
+    const targetTrack = tsSnapshot.find(t => t.id === trackId)
+    const baseDuration = typeof duration === 'number' && duration > 0 ? duration : 1
+    let startSec = Math.max(0, playheadSec())
+    startSec = ensureNonOverlappingStart(targetTrack, startSec, baseDuration)
+
+    const clipName = name?.trim()?.length ? name : 'Sample'
+
+    const createdClipId = await createServerClip(trackId, startSec, baseDuration, clipName)
+    if (!createdClipId) return
+
+    insertOptimisticClip(trackId, {
+      id: createdClipId,
+      name: clipName,
+      buffer: null,
+      startSec,
+      duration: baseDuration,
+      color: '#22c55e',
+      sampleUrl: url,
+    })
+
+    await convexClient.mutation(convexApi.clips.setSampleUrl, { clipId: createdClipId as any, sampleUrl: url })
+
+    applySelectionAfterCreate(trackId, createdClipId)
+  }
+
   return {
     handleDrop,
     handleFiles,
     handleAddAudio,
+    handleInsertSample,
   }
 }

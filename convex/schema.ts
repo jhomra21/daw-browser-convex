@@ -31,6 +31,17 @@ export default defineSchema({
     .index("by_room", ["roomId"]) // list clips in a room
     .index("by_track", ["trackId"]), // list clips per track
 
+  samples: defineTable({
+    roomId: v.string(),
+    url: v.string(),
+    name: v.optional(v.string()),
+    duration: v.optional(v.number()),
+    ownerUserId: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_room", ["roomId"])
+    .index("by_room_url", ["roomId", "url"]),
+
   // Per-user project metadata (e.g., project names). Each owner has their own
   // label for a roomId.
   projects: defineTable({

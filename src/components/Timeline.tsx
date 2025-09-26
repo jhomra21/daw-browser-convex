@@ -1,8 +1,8 @@
-import { type Component, type JSX, For, createEffect, createSignal, onCleanup, batch, untrack } from 'solid-js'
+import { type Component, type JSX, For, createEffect, createSignal, onCleanup, onMount, batch, untrack } from 'solid-js'
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from '~/components/ui/dialog'
 import type { Track, Clip, SelectedClip } from '~/types/timeline'
 import { getAudioEngine, resetAudioEngine } from '~/lib/audio-engine-singleton'
-import { timelineDurationSec, PPS, RULER_HEIGHT, LANE_HEIGHT } from '~/lib/timeline-utils'
+import { timelineDurationSec, PPS, RULER_HEIGHT, LANE_HEIGHT, yToLaneIndex } from '~/lib/timeline-utils'
 import { canUseLocalStorage, loadLocalMixMap, saveLocalMix, loadMixSyncFlag, saveMixSyncFlag } from '~/lib/timeline-storage'
 import { ensureRoomShareLink } from '~/lib/timeline-share'
 import { useTimelineKeyboard } from '~/hooks/useTimelineKeyboard'
@@ -39,6 +39,10 @@ const Timeline: Component = () => {
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<string | null>(null)
   // Mix sync toggle (per room, persisted locally)
   const [syncMix, setSyncMix] = createSignal(false)
+
+  // Drag-drop visual target lane
+  const [dropTargetLane, setDropTargetLane] = createSignal<number | null>(null)
+  const [dropAtNewTrack, setDropAtNewTrack] = createSignal(false)
 
   // Audio engine
   const audioEngine = getAudioEngine()
@@ -89,6 +93,7 @@ const Timeline: Component = () => {
   let scrollRef: HTMLDivElement | undefined
   let fileInputRef: HTMLInputElement | undefined
   let containerRef: HTMLDivElement | undefined
+  let rootRef: HTMLDivElement | undefined
   // Sidebar resize state
   let resizing = false
   let resizeStartX = 0
@@ -98,6 +103,7 @@ const Timeline: Component = () => {
     handleDrop: onDrop,
     handleFiles,
     handleAddAudio,
+    handleInsertSample,
   } = useTimelineClipImport({
     audioEngine,
     tracks,
@@ -346,7 +352,83 @@ const Timeline: Component = () => {
 
   function onDragOver(e: DragEvent) {
     e.preventDefault()
+    try { if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy' } catch {}
+    // Update target lane highlight
+    if (scrollRef) {
+      const idx = yToLaneIndex(e.clientY, scrollRef)
+      const len = tracks().length
+      if (idx >= 0 && idx < len) {
+        setDropTargetLane(idx)
+        setDropAtNewTrack(false)
+      } else if (idx >= len) {
+        setDropTargetLane(null)
+        setDropAtNewTrack(true)
+      } else {
+        setDropTargetLane(null)
+        setDropAtNewTrack(false)
+      }
+    }
   }
+
+  // Global fallback to ensure drops are received when dragging from floating menus
+  function onDragOverGlobal(e: DragEvent) {
+    const dt = e.dataTransfer
+    const types = Array.from(dt?.types ?? [])
+    const hasCustom = types.includes('application/x-mediabunny-sample')
+    const urlText = dt?.getData('text/uri-list') || dt?.getData('text/plain')
+    const looksLikeUrl = !!urlText && (/^https?:\/\//i.test(urlText) || urlText.startsWith('blob:'))
+    if (!hasCustom && !looksLikeUrl) return
+    // Only signal copy inside our app root
+    const root = rootRef
+    if (!root) return
+    const r = root.getBoundingClientRect()
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return
+    e.preventDefault()
+    try { if (dt) dt.dropEffect = 'copy' } catch {}
+    // Update lane highlight using global handler as well
+    if (scrollRef) {
+      const idx = yToLaneIndex(e.clientY, scrollRef)
+      const len = tracks().length
+      if (idx >= 0 && idx < len) {
+        setDropTargetLane(idx)
+        setDropAtNewTrack(false)
+      } else if (idx >= len) {
+        setDropTargetLane(null)
+        setDropAtNewTrack(true)
+      } else {
+        setDropTargetLane(null)
+        setDropAtNewTrack(false)
+      }
+    }
+  }
+
+  function onWindowDrop(e: DragEvent) {
+    const dt = e.dataTransfer
+    const types = Array.from(dt?.types ?? [])
+    const hasCustom = types.includes('application/x-mediabunny-sample')
+    const urlText = dt?.getData('text/uri-list') || dt?.getData('text/plain')
+    const looksLikeUrl = !!urlText && (/^https?:\/\//i.test(urlText) || urlText.startsWith('blob:'))
+    if (!hasCustom && !looksLikeUrl) return
+    // Only handle drops inside our app root
+    const root = rootRef
+    if (!root) return
+    const r = root.getBoundingClientRect()
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return
+    // Prevent default navigation and delegate to normal handler
+    e.preventDefault()
+    void onDrop(e)
+    setDropTargetLane(null)
+    setDropAtNewTrack(false)
+  }
+
+  onMount(() => {
+    window.addEventListener('dragover', onDragOverGlobal, { capture: true })
+    window.addEventListener('drop', onWindowDrop as any, { capture: true })
+  })
+  onCleanup(() => {
+    window.removeEventListener('dragover', onDragOverGlobal, { capture: true } as any)
+    window.removeEventListener('drop', onWindowDrop as any, { capture: true } as any)
+  })
 
   async function onFileInput(e: Event) {
     const input = e.currentTarget as HTMLInputElement
@@ -431,7 +513,7 @@ const Timeline: Component = () => {
   }
 
   return (
-    <div class="h-full w-full flex flex-col bg-neutral-950 text-neutral-200" onDragOver={onDragOver} onDrop={onDrop}>
+    <div ref={el => (rootRef = el!)} class="h-full w-full flex flex-col bg-neutral-950 text-neutral-200" onDragOver={onDragOver} onDrop={async (e) => { if (e.defaultPrevented) return; await onDrop(e); setDropTargetLane(null); setDropAtNewTrack(false) }} onDragLeave={() => { setDropTargetLane(null); setDropAtNewTrack(false) }}>
       <input ref={el => (fileInputRef = el!)} type="file" accept="audio/*" class="hidden" onChange={onFileInput} />
       
       <TransportControls
@@ -444,6 +526,7 @@ const Timeline: Component = () => {
         onShare={handleShare}
         onMasterFX={() => { setSelectedFXTarget('master'); setBottomFXOpen(true) }}
         onJumpToClip={(clipId, trackId, startSec) => jumpToClip(trackId, clipId, startSec)}
+        onInsertSample={(payload) => { void handleInsertSample(payload) }}
         currentRoomId={roomId()}
         onOpenProject={(rid) => {
           navigateToRoom(rid)
@@ -509,17 +592,18 @@ const Timeline: Component = () => {
       >
           <div 
             class="relative select-none" 
-            style={{ width: `${duration() * PPS}px`, height: `${RULER_HEIGHT + tracks().length * LANE_HEIGHT}px` }} 
+            style={{ width: `${duration() * PPS}px`, height: `${RULER_HEIGHT + (tracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}px` }} 
             onMouseDown={handleLaneMouseDown}
           >
             <TimelineRuler durationSec={duration()} onMouseDown={onRulerMouseDown} />
             
-            <div class="absolute left-0 right-0" style={{ top: `${RULER_HEIGHT}px`, height: `${tracks().length * LANE_HEIGHT}px` }}>
+            <div class="absolute left-0 right-0" style={{ top: `${RULER_HEIGHT}px`, height: `${(tracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}px` }}>
               <For each={tracks()}>
                 {(track, i) => (
                   <TrackLane
                     track={track}
                     index={i()}
+                    isDropTarget={dropTargetLane() === i()}
                     selectedClipIds={selectedClipIds()}
                     onClipMouseDown={onClipMouseDown}
                     onClipClick={onClipClick}
@@ -527,6 +611,12 @@ const Timeline: Component = () => {
                   />
                 )}
               </For>
+              {dropAtNewTrack() && (
+                <div
+                  class="absolute left-0 right-0 border-t border-green-500/40 bg-green-500/10 pointer-events-none"
+                  style={{ top: `${tracks().length * LANE_HEIGHT}px`, height: `${LANE_HEIGHT}px` }}
+                />
+              )}
               {(() => {
                 const r = marqueeRect()
                 if (!r) return null

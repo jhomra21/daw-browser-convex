@@ -1,4 +1,4 @@
-import { type Component, createSignal, For, onMount, onCleanup, Show, createEffect } from 'solid-js'
+import { type Component, createSignal, For, onMount, onCleanup, Show, createEffect, on, untrack } from 'solid-js'
 import { Button } from '~/components/ui/button'
 import Icon from '~/components/ui/Icon'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '~/components/ui/dropdown-menu'
@@ -16,6 +16,10 @@ type TransportControlsProps = {
   onAddAudio: () => void
   onMasterFX: () => void
   onShare?: () => void
+  bpm: number
+  onChangeBpm: (next: number) => void
+  metronomeEnabled: boolean
+  onToggleMetronome: () => void
   // Samples controls
   onJumpToClip: (clipId: string, trackId: string, startSec: number) => void
   onInsertSample: (input: { url: string; name?: string; duration?: number }) => void | Promise<void>
@@ -44,6 +48,76 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
   const [insertingSampleUrl, setInsertingSampleUrl] = createSignal<string | null>(null)
   const [samplesOpen, setSamplesOpen] = createSignal(false)
   const [isDraggingSample, setIsDraggingSample] = createSignal(false)
+  const [tempoDraft, setTempoDraft] = createSignal(String(props.bpm))
+  const [tempoEditing, setTempoEditing] = createSignal(false)
+  const [tempoDragActive, setTempoDragActive] = createSignal(false)
+  let tempoDragStartY = 0
+  let tempoDragStartValue = 0
+
+  createEffect(on(() => props.bpm, (value) => {
+    if (!untrack(() => tempoEditing())) {
+      setTempoDraft(String(value))
+    }
+  }))
+
+  const sanitizeTempo = (value: number) => {
+    if (!Number.isFinite(value)) return props.bpm
+    return Math.min(300, Math.max(30, Math.round(value)))
+  }
+
+  const commitTempo = () => {
+    const raw = tempoDraft().trim()
+    if (!raw) {
+      setTempoDraft(String(props.bpm))
+      return
+    }
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed)) {
+      setTempoDraft(String(props.bpm))
+      return
+    }
+    const sanitized = sanitizeTempo(parsed)
+    setTempoDraft(String(sanitized))
+    if (sanitized !== props.bpm) {
+      props.onChangeBpm(sanitized)
+    }
+  }
+
+  const beginTempoDrag = (event: PointerEvent) => {
+    const target = event.currentTarget as HTMLInputElement | null
+    if (!target || tempoDragActive()) return
+    const parsedDraft = Number(tempoDraft())
+    tempoDragStartValue = Number.isFinite(parsedDraft) ? sanitizeTempo(parsedDraft) : props.bpm
+    tempoDragStartY = event.clientY
+    setTempoDragActive(true)
+    setTempoEditing(true)
+    try { target.setPointerCapture(event.pointerId) } catch {}
+    target.classList.add('cursor-ns-resize')
+  }
+
+  const updateTempoDrag = (event: PointerEvent) => {
+    if (!tempoDragActive()) return
+    event.preventDefault()
+    const deltaY = tempoDragStartY - event.clientY
+    const sensitivity = event.shiftKey ? 0.2 : 0.8
+    const change = deltaY * sensitivity
+    const next = sanitizeTempo(tempoDragStartValue + change)
+    if (next === props.bpm) return
+    setTempoDraft(String(next))
+    props.onChangeBpm(next)
+  }
+
+  const endTempoDrag = (event: PointerEvent) => {
+    if (!tempoDragActive()) return
+    const target = event.currentTarget as HTMLInputElement | null
+    if (target) {
+      try { target.releasePointerCapture(event.pointerId) } catch {}
+      target.classList.remove('cursor-ns-resize')
+    }
+    setTempoDragActive(false)
+    commitTempo()
+    setTempoEditing(false)
+  }
 
   // Projects data
   const session = useSessionQuery()
@@ -571,7 +645,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
       </div>
 
       {/* Center: Transport */}
-      <div class="justify-self-center flex items-center gap-2">
+      <div class="justify-self-center flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={props.onPlay} disabled={props.isPlaying} aria-label="Play">
           <Icon name="play" class="h-4 w-4" />
         </Button>
@@ -581,6 +655,59 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
         <Button variant="ghost" size="sm" onClick={props.onStop} aria-label="Stop">
           <Icon name="stop" class="h-4 w-4" />
         </Button>
+        <div class="flex items-center gap-2">
+          <label class="flex items-center gap-1 text-xs text-neutral-400">
+            <span>Tempo</span>
+            <input
+              type="text"
+              value={tempoDraft()}
+              class="w-16 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 focus:border-neutral-500 focus:outline-none appearance-none"
+              inputmode="numeric"
+              pattern="[0-9]*"
+              onFocus={() => setTempoEditing(true)}
+              onBlur={() => {
+                if (tempoEditing()) {
+                  commitTempo()
+                }
+                setTempoEditing(false)
+              }}
+              onInput={(event) => {
+                setTempoDraft((event.currentTarget as HTMLInputElement).value)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  commitTempo()
+                  setTempoEditing(false)
+                  event.currentTarget.blur()
+                } else if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setTempoDraft(String(props.bpm))
+                  setTempoEditing(false)
+                  event.currentTarget.blur()
+                }
+              }}
+              onPointerDown={(event) => {
+                if (event.button !== 0) return
+                beginTempoDrag(event)
+              }}
+              onPointerMove={updateTempoDrag}
+              onPointerUp={endTempoDrag}
+              onPointerCancel={endTempoDrag}
+            />
+            <span class="text-[10px] text-neutral-500">BPM</span>
+          </label>
+          <Button
+            variant={props.metronomeEnabled ? 'default' : 'outline'}
+            size="sm"
+            onClick={props.onToggleMetronome}
+            aria-pressed={props.metronomeEnabled}
+            aria-label="Toggle metronome"
+          >
+            <Icon name="metronome" class="h-4 w-4 mr-1" />
+            {props.metronomeEnabled ? 'Metronome On' : 'Metronome Off'}
+          </Button>
+        </div>
       </div>
 
       {/* Right: Share + Master FX + Playhead */}

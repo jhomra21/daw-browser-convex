@@ -32,6 +32,7 @@ export function useTimelinePlayback(audioEngine: AudioEngine) {
     setIsPlaying(true)
     setStartedCtxTime(audioEngine.currentTime)
     setStartedPlayheadSec(playheadSec())
+    audioEngine.onTransportStart(playheadSec())
     audioEngine.scheduleAllClipsFromPlayhead(tracks, playheadSec())
     setRafId(requestAnimationFrame(tick))
   }
@@ -40,6 +41,7 @@ export function useTimelinePlayback(audioEngine: AudioEngine) {
     if (!isPlaying()) return
     setIsPlaying(false)
     audioEngine.stopAllSources()
+    audioEngine.onTransportPause()
     cancelRaf()
   }
 
@@ -48,6 +50,7 @@ export function useTimelinePlayback(audioEngine: AudioEngine) {
     setPlayheadSec(0)
     setStartedCtxTime(audioEngine.currentTime)
     setStartedPlayheadSec(0)
+    audioEngine.onTransportStop()
   }
 
   const setPlayhead = (sec: number, tracks: Track[]) => {
@@ -56,6 +59,7 @@ export function useTimelinePlayback(audioEngine: AudioEngine) {
       setStartedCtxTime(audioEngine.currentTime)
       setStartedPlayheadSec(sec)
       audioEngine.scheduleAllClipsFromPlayhead(tracks, sec)
+      audioEngine.onTransportSeek(sec)
     }
   }
 

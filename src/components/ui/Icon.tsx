@@ -1,6 +1,6 @@
 import { Component, JSX, splitProps, createUniqueId } from "solid-js";
 
-export type IconName = "google" | "solidjs" | "file-audio" | "play" | "pause" | "stop";
+export type IconName = "google" | "solidjs" | "file-audio" | "play" | "pause" | "stop" | "metronome";
 
 type BaseIconProps = {
   size?: number | string;
@@ -207,6 +207,36 @@ const StopIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> =
   );
 };
 
+const MetronomeIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
+  const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
+  const s = normalizeSize(local.size);
+
+  return (
+    <svg
+      {...rest}
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      class={local.class}
+      role={local.ariaLabel ? "img" : undefined}
+      aria-label={local.ariaLabel}
+      aria-hidden={local.ariaLabel ? undefined : "true"}
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      {local.title ? <title>{local.title}</title> : null}
+      <path d="M6 19h12l-5-15h-2l-5 15Z" />
+      <path d="m12 9 2 5" />
+      <path d="M8 19v2" />
+      <path d="M16 19v2" />
+    </svg>
+  );
+};
+
 const registry: Record<IconName, Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>>> = {
   google: GoogleIcon,
   solidjs: SolidJSIcon,
@@ -214,6 +244,7 @@ const registry: Record<IconName, Component<BaseIconProps & JSX.SvgSVGAttributes<
   play: PlayIcon,
   pause: PauseIcon,
   stop: StopIcon,
+  metronome: MetronomeIcon,
 };
 
 const Icon: Component<IconProps> = (allProps) => {

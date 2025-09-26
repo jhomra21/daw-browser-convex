@@ -19,12 +19,25 @@ export class AudioEngine {
   private destination: AudioDestinationNode | null = null
   private trackGains = new Map<string, GainNode>()
   private activeSources: AudioBufferSourceNode[] = []
+  private metronomeSources: AudioBufferSourceNode[] = []
   // New: per-track input prior to effects, and EQ chains
   private trackInputs = new Map<string, GainNode>()
   private eqChains = new Map<string, BiquadFilterNode[]>()
   private pendingEqParams = new Map<string, EqParamsLite>()
   // Master EQ chain
   private masterEqChain: BiquadFilterNode[] = []
+  // Metronome & tempo
+  private bpm = 120
+  private metronomeEnabled = false
+  private metronomeGain: GainNode | null = null
+  private metronomeBuffer: AudioBuffer | null = null
+  private metronomeSchedulerId: number | null = null
+  private nextMetronomeBeatTimelineSec: number | null = null
+  private transportEpochCtxTime = 0
+  private transportEpochTimelineSec = 0
+  private transportRunning = false
+  private readonly metronomeLookaheadSec = 0.25
+  private readonly metronomeIntervalMs = 50
 
   ensureAudio() {
     if (!this.audioCtx) {
@@ -34,6 +47,188 @@ export class AudioEngine {
       this.masterGain.gain.value = 1.0
       // Connect master routing initially (no EQ)
       this.rebuildMasterRouting()
+      this.ensureMetronomeNodes()
+    }
+  }
+
+  private ensureMetronomeNodes() {
+    if (!this.audioCtx || !this.masterGain) return
+    if (!this.metronomeGain) {
+      const gain = this.audioCtx.createGain()
+      gain.gain.value = 0.35
+      gain.connect(this.masterGain)
+      this.metronomeGain = gain
+    }
+    if (!this.metronomeBuffer) {
+      this.metronomeBuffer = this.createMetronomeBuffer(this.audioCtx)
+    }
+  }
+
+  private createMetronomeBuffer(ctx: AudioContext) {
+    const durationSec = 0.06
+    const sampleRate = ctx.sampleRate
+    const totalSamples = Math.max(1, Math.floor(durationSec * sampleRate))
+    const buffer = ctx.createBuffer(1, totalSamples, sampleRate)
+    const data = buffer.getChannelData(0)
+    const attackSamples = Math.floor(sampleRate * 0.002)
+    const decaySamples = totalSamples - attackSamples
+    for (let i = 0; i < totalSamples; i++) {
+      if (i < attackSamples) {
+        data[i] = i / Math.max(1, attackSamples)
+      } else {
+        const t = (i - attackSamples) / Math.max(1, decaySamples)
+        data[i] = Math.pow(1 - t, 3)
+      }
+    }
+    return buffer
+  }
+
+  private setMetronomeInterval() {
+    if (this.metronomeSchedulerId !== null) return
+    this.metronomeSchedulerId = setInterval(() => {
+      try {
+        this.scheduleMetronomeTicks()
+      } catch (err) {
+        console.error('[AudioEngine] metronome scheduling error', err)
+      }
+    }, this.metronomeIntervalMs) as unknown as number
+  }
+
+  private clearMetronomeInterval() {
+    if (this.metronomeSchedulerId !== null) {
+      clearInterval(this.metronomeSchedulerId)
+      this.metronomeSchedulerId = null
+    }
+  }
+
+  private secondsPerBeat() {
+    return 60 / Math.max(1, this.bpm)
+  }
+
+  private timelineToCtxTime(timelineSec: number) {
+    if (!this.audioCtx) return 0
+    const delta = timelineSec - this.transportEpochTimelineSec
+    return this.transportEpochCtxTime + Math.max(0, delta)
+  }
+
+  private ctxTimeToTimeline(ctxTime: number) {
+    const delta = ctxTime - this.transportEpochCtxTime
+    return this.transportEpochTimelineSec + Math.max(0, delta)
+  }
+
+  private computeNextBeatTimelineSec(fromTimelineSec: number) {
+    const epsilon = 1e-6
+    const spb = this.secondsPerBeat()
+    if (!isFinite(spb) || spb <= 0) return fromTimelineSec
+    const beats = Math.ceil((fromTimelineSec - epsilon) / spb)
+    return Math.max(0, beats) * spb
+  }
+
+  private scheduleMetronomeTicks() {
+    if (!this.audioCtx || !this.metronomeEnabled || !this.transportRunning) return
+    if (!this.metronomeGain || !this.metronomeBuffer) return
+    const nowCtx = this.audioCtx.currentTime
+    const scheduleUntil = nowCtx + this.metronomeLookaheadSec
+    const spb = this.secondsPerBeat()
+    if (!isFinite(spb) || spb <= 0) return
+
+    let nextTimelineBeat = this.nextMetronomeBeatTimelineSec
+    if (nextTimelineBeat === null) {
+      const nowTimeline = this.ctxTimeToTimeline(nowCtx)
+      nextTimelineBeat = this.computeNextBeatTimelineSec(nowTimeline)
+    }
+
+    let iterations = 0
+    while (iterations < 128 && nextTimelineBeat !== null) {
+      iterations += 1
+      const eventCtxTime = this.timelineToCtxTime(nextTimelineBeat)
+      if (eventCtxTime > scheduleUntil + 1e-3) break
+      if (eventCtxTime >= nowCtx - 0.02) {
+        const source = this.audioCtx.createBufferSource()
+        source.buffer = this.metronomeBuffer
+        source.connect(this.metronomeGain)
+        source.start(eventCtxTime)
+        source.onended = () => {
+          const idx = this.metronomeSources.indexOf(source)
+          if (idx >= 0) this.metronomeSources.splice(idx, 1)
+        }
+        this.metronomeSources.push(source)
+      }
+      nextTimelineBeat += spb
+      if (nextTimelineBeat < 0) break
+    }
+
+    this.nextMetronomeBeatTimelineSec = nextTimelineBeat
+  }
+
+  private resetMetronomeState() {
+    this.nextMetronomeBeatTimelineSec = null
+    for (const s of this.metronomeSources) {
+      try { s.stop() } catch {}
+      try { s.disconnect() } catch {}
+    }
+    this.metronomeSources = []
+  }
+
+  setBpm(nextBpm: number) {
+    const sanitized = Math.min(300, Math.max(30, Math.round(nextBpm)))
+    if (sanitized === this.bpm) return
+    this.bpm = sanitized
+    if (this.metronomeEnabled && this.transportRunning) {
+      this.resetMetronomeState()
+      this.nextMetronomeBeatTimelineSec = null
+      this.scheduleMetronomeTicks()
+    }
+  }
+
+  setMetronomeEnabled(enabled: boolean) {
+    this.metronomeEnabled = enabled
+    if (!enabled) {
+      this.clearMetronomeInterval()
+      this.resetMetronomeState()
+    } else {
+      this.ensureAudio()
+      this.ensureMetronomeNodes()
+      this.nextMetronomeBeatTimelineSec = null
+      if (this.transportRunning) {
+        this.scheduleMetronomeTicks()
+        this.setMetronomeInterval()
+      }
+    }
+  }
+
+  onTransportStart(playheadSec: number) {
+    if (!this.audioCtx) return
+    this.ensureMetronomeNodes()
+    this.transportEpochCtxTime = this.audioCtx.currentTime
+    this.transportEpochTimelineSec = Math.max(0, playheadSec)
+    this.transportRunning = true
+    this.resetMetronomeState()
+    if (this.metronomeEnabled) {
+      this.scheduleMetronomeTicks()
+      this.setMetronomeInterval()
+    }
+  }
+
+  onTransportPause() {
+    this.transportRunning = false
+    this.resetMetronomeState()
+    this.clearMetronomeInterval()
+  }
+
+  onTransportStop() {
+    this.onTransportPause()
+    this.transportEpochTimelineSec = 0
+    this.transportEpochCtxTime = this.audioCtx?.currentTime ?? 0
+  }
+
+  onTransportSeek(playheadSec: number) {
+    if (!this.audioCtx) return
+    this.transportEpochCtxTime = this.audioCtx.currentTime
+    this.transportEpochTimelineSec = Math.max(0, playheadSec)
+    if (this.metronomeEnabled && this.transportRunning) {
+      this.resetMetronomeState()
+      this.scheduleMetronomeTicks()
     }
   }
 
@@ -174,7 +369,7 @@ export class AudioEngine {
     }
   }
 
-  stopAllSources() {
+  private stopClipSources() {
     for (const s of this.activeSources) {
       try { s.stop() } catch {}
       try { s.disconnect() } catch {}
@@ -182,10 +377,15 @@ export class AudioEngine {
     this.activeSources = []
   }
 
+  stopAllSources() {
+    this.stopClipSources()
+    this.resetMetronomeState()
+  }
+
   scheduleAllClipsFromPlayhead(tracks: Track[], playheadSec: number) {
     if (!this.audioCtx) return
     
-    this.stopAllSources()
+    this.stopClipSources()
     const now = this.audioCtx.currentTime
     const anySoloed = tracks.some(t => t.soloed)
 
@@ -262,6 +462,7 @@ export class AudioEngine {
 
   close() {
     this.stopAllSources()
+    this.clearMetronomeInterval()
     if (this.audioCtx) {
       try { this.audioCtx.close() } catch {}
     }

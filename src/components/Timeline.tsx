@@ -39,6 +39,9 @@ const Timeline: Component = () => {
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<string | null>(null)
   // Mix sync toggle (per room, persisted locally)
   const [syncMix, setSyncMix] = createSignal(false)
+  // Transport tempo & metronome
+  const [bpm, setBpm] = createSignal(120)
+  const [metronomeEnabled, setMetronomeEnabled] = createSignal(false)
 
   // Drag-drop visual target lane
   const [dropTargetLane, setDropTargetLane] = createSignal<number | null>(null)
@@ -211,6 +214,19 @@ const Timeline: Component = () => {
   createEffect(() => {
     audioEngine.updateTrackGains(tracks())
   })
+
+  createEffect(() => {
+    audioEngine.setBpm(bpm())
+  })
+
+  createEffect(() => {
+    audioEngine.setMetronomeEnabled(metronomeEnabled())
+  })
+
+  const clampBpm = (value: number) => {
+    if (!Number.isFinite(value)) return bpm()
+    return Math.min(300, Math.max(30, Math.round(value)))
+  }
 
   // Project server state into local Track[] while preserving ephemeral fields
   createEffect(() => {
@@ -525,6 +541,10 @@ const Timeline: Component = () => {
         onAddAudio={() => handleAddAudio()}
         onShare={handleShare}
         onMasterFX={() => { setSelectedFXTarget('master'); setBottomFXOpen(true) }}
+        bpm={bpm()}
+        onChangeBpm={(next) => setBpm(clampBpm(next))}
+        metronomeEnabled={metronomeEnabled()}
+        onToggleMetronome={() => setMetronomeEnabled((prev) => !prev)}
         onJumpToClip={(clipId, trackId, startSec) => jumpToClip(trackId, clipId, startSec)}
         onInsertSample={(payload) => { void handleInsertSample(payload) }}
         currentRoomId={roomId()}

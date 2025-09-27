@@ -1,6 +1,5 @@
 import { type Component, For, onCleanup } from 'solid-js'
 import type { Track } from '~/types/timeline'
-import { Button } from '~/components/ui/button'
 
 type TrackSidebarProps = {
   tracks: Track[]
@@ -14,6 +13,9 @@ type TrackSidebarProps = {
   onToggleSolo: (trackId: string) => void
   syncMix: boolean
   onToggleSyncMix: () => void
+  recordArmTrackId: string | null
+  onToggleRecordArm: (trackId: string) => void
+  currentUserId?: string
 }
 
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
@@ -60,91 +62,134 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
           <button class="text-base text-neutral-400 hover:text-neutral-300 pr-2
            cursor-pointer active:scale-97 transition-transform ease-out" onClick={props.onAddTrack}>Add Track</button>
         </div>
-
         <For each={props.tracks}>
-          {(track) => (
-            <div 
-              class={`${props.selectedTrackId === track.id ? 'bg-neutral-800' : 'bg-neutral-900 border-t border-neutral-800'}`} 
-              style={{ height: '96px' }}
-              onClick={() => props.onTrackClick(track.id)}
-            >
-              <div class="flex items-center gap-3 h-full px-3 py-2">
-                {/* Track name (Mute toggle) */}
-                <button
-                  class={`font-semibold text-sm flex-1 text-left px-2 py-1 rounded cursor-pointer transition-colors
-                    ${track.muted ? 'bg-amber-500 text-black ring-1 ring-amber-300' : 'hover:bg-neutral-800'}`}
-                  onClick={(e) => { e.stopPropagation(); props.onToggleMute(track.id) }}
-                  title={track.muted ? 'Unmute track' : 'Mute track'}
-                >
-                  {track.name}
-                </button>
+          {(track) => {
+            const lockedByOther = !!track.lockedBy && track.lockedBy !== props.currentUserId
+            const isRecordArmed = props.recordArmTrackId === track.id
+            const muteDisabled = lockedByOther
+            const soloDisabled = lockedByOther
+            const volumeDisabled = lockedByOther
+            return (
+              <div
+                class={`${props.selectedTrackId === track.id ? 'bg-neutral-800' : 'bg-neutral-900 border-t border-neutral-800'}`}
+                style={{ height: '96px' }}
+                onClick={() => props.onTrackClick(track.id)}
+              >
+                <div class="flex items-center gap-3 h-full px-3 py-2">
+                  <button
+                    class={`w-6 h-6 flex items-center justify-center rounded-full border transition-colors text-xs font-bold
+                      ${lockedByOther ? 'cursor-not-allowed border-red-900 text-red-900 bg-neutral-800' : isRecordArmed ? 'bg-red-500 text-black border-red-400 shadow-inner' : 'border-red-500 text-red-400 hover:bg-red-500/20'}
+                    `}
+                    title={lockedByOther ? 'Track locked by another user' : isRecordArmed ? 'Disarm recording' : 'Arm for recording'}
+                    disabled={lockedByOther}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      if (lockedByOther) return
+                      props.onToggleRecordArm(track.id)
+                    }}
+                  >
+                    R
+                  </button>
 
-                {/* Solo button */}
-                <button
-                  class={`px-2 py-1 text-xs font-semibold rounded
-                    ${track.soloed ? 'bg-blue-500/90 text-black ring-1 ring-blue-300' : 'bg-neutral-700 text-neutral-200 hover:bg-neutral-600'}`}
-                  onClick={(e) => { e.stopPropagation(); props.onToggleSolo(track.id) }}
-                  title={track.soloed ? 'Unsolo' : 'Solo'}
-                >
-                  S
-                </button>
-                
-                {/* Vertical volume slider */}
-                <div class="flex flex-col items-center gap-1">
-                  <div class="text-xs text-neutral-400">Vol</div>
-                  <div class="relative h-16 w-6">
-                    {/* Custom slider track */}
-                    <div class="absolute inset-0 w-1 bg-neutral-700 rounded-full left-1/2 transform -translate-x-1/2">
-                      <div 
-                        class="w-full bg-green-500 rounded-full transition-all duration-150"
-                        style={{ 
-                          height: `${track.volume * 100}%`,
-                          position: 'absolute',
-                          bottom: 0
+                  <button
+                    class={`font-semibold text-sm flex-1 text-left px-2 py-1 rounded cursor-pointer transition-colors
+                      ${muteDisabled
+                        ? 'bg-neutral-800/60 text-neutral-500 cursor-not-allowed'
+                        : track.muted
+                          ? 'bg-amber-500 text-black ring-1 ring-amber-300'
+                          : 'hover:bg-neutral-800'
+                      }
+                    `}
+                    disabled={muteDisabled}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (muteDisabled) return
+                      props.onToggleMute(track.id)
+                    }}
+                    title={lockedByOther ? 'Track locked by another user' : track.muted ? 'Unmute track' : 'Mute track'}
+                  >
+                    {track.name}
+                  </button>
+
+                  <button
+                    class={`px-2 py-1 text-xs font-semibold rounded
+                      ${soloDisabled
+                        ? 'bg-neutral-700/40 text-neutral-500 cursor-not-allowed'
+                        : track.soloed
+                          ? 'bg-blue-500/90 text-black ring-1 ring-blue-300'
+                          : 'bg-neutral-700 text-neutral-200 hover:bg-neutral-600'
+                      }
+                    `}
+                    disabled={soloDisabled}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (soloDisabled) return
+                      props.onToggleSolo(track.id)
+                    }}
+                    title={lockedByOther ? 'Track locked by another user' : track.soloed ? 'Unsolo' : 'Solo'}
+                  >
+                    S
+                  </button>
+
+                  <div class="flex flex-col items-center gap-1">
+                    <div class="text-xs text-neutral-400">Vol</div>
+                    <div class={`relative h-16 w-6 ${volumeDisabled ? 'opacity-60' : ''}`}>
+                      <div class="absolute inset-0 w-1 bg-neutral-700 rounded-full left-1/2 transform -translate-x-1/2">
+                        <div
+                          class="w-full bg-green-500 rounded-full transition-all duration-150"
+                          style={{
+                            height: `${track.volume * 100}%`,
+                            position: 'absolute',
+                            bottom: 0
+                          }}
+                        />
+                      </div>
+                      <div
+                        class="absolute w-4 h-4 bg-neutral-300 border-2 border-neutral-500 rounded-full left-1/2 transform -translate-x-1/2 transition-all duration-150 cursor-pointer"
+                        style={{ bottom: `${track.volume * 100}%` }}
+                      />
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={track.volume}
+                        disabled={volumeDisabled}
+                        onInput={(e) => {
+                          if (volumeDisabled) return
+                          const v = parseFloat((e.currentTarget as HTMLInputElement).value)
+                          props.onVolumeChange(track.id, v)
                         }}
+                        onMouseDown={(e) => {
+                          if (volumeDisabled) {
+                            e.preventDefault()
+                            return
+                          }
+                          e.preventDefault()
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          detachDragListeners()
+                          const handleMouseMove = (moveEvent: MouseEvent) => {
+                            const y = moveEvent.clientY - rect.top
+                            const height = rect.height
+                            const volume = Math.max(0, Math.min(1, 1 - (y / height)))
+                            props.onVolumeChange(track.id, volume)
+                          }
+                          const handleMouseUp = () => {
+                            detachDragListeners()
+                          }
+                          activeMove = handleMouseMove
+                          activeUp = handleMouseUp
+                          document.addEventListener('mousemove', handleMouseMove)
+                          document.addEventListener('mouseup', handleMouseUp)
+                        }}
+                        class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                       />
                     </div>
-                    {/* Slider handle */}
-                    <div 
-                      class="absolute w-4 h-4 bg-neutral-300 border-2 border-neutral-500 rounded-full left-1/2 transform -translate-x-1/2 transition-all duration-150 cursor-pointer"
-                      style={{ bottom: `${track.volume * 100}%` }}
-                    />
-                    {/* Invisible vertical slider input */}
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.01"
-                      value={track.volume}
-                      onInput={(e) => {
-                        const v = parseFloat((e.currentTarget as HTMLInputElement).value)
-                        props.onVolumeChange(track.id, v)
-                      }}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        const rect = e.currentTarget.getBoundingClientRect()
-                        detachDragListeners()
-                        const handleMouseMove = (moveEvent: MouseEvent) => {
-                          const y = moveEvent.clientY - rect.top
-                          const height = rect.height
-                          const volume = Math.max(0, Math.min(1, 1 - (y / height)))
-                          props.onVolumeChange(track.id, volume)
-                        }
-                        const handleMouseUp = () => {
-                          detachDragListeners()
-                        }
-                        activeMove = handleMouseMove
-                        activeUp = handleMouseUp
-                        document.addEventListener('mousemove', handleMouseMove)
-                        document.addEventListener('mouseup', handleMouseUp)
-                      }}
-                      class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    />
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+            )
+          }}
         </For>
       </div>
     </>

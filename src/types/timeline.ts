@@ -19,6 +19,9 @@ export type Track = {
   muted?: boolean
   /** Local-only solo toggle (not persisted) */
   soloed?: boolean
+  /** If present, track is locked for editing by the referenced user */
+  lockedBy?: string | null
+  lockedAt?: number | null
 }
 
 export type SelectedClip = {

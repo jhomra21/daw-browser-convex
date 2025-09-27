@@ -10,7 +10,7 @@ const loadingClipIds = new Set<string>()
 
 export type UploadToR2Result = string | null
 
-type UploadToR2 = (
+export type UploadToR2 = (
   roomId: string,
   clipId: string,
   file: File,

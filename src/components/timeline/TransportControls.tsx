@@ -20,6 +20,8 @@ type TransportControlsProps = {
   onChangeBpm: (next: number) => void
   metronomeEnabled: boolean
   onToggleMetronome: () => void
+  isRecording: boolean
+  onToggleRecord: () => void
   // Samples controls
   onJumpToClip: (clipId: string, trackId: string, startSec: number) => void
   onInsertSample: (input: { url: string; name?: string; duration?: number }) => void | Promise<void>
@@ -646,6 +648,21 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
 
       {/* Center: Transport */}
       <div class="justify-self-center flex items-center gap-3">
+        <Button
+          variant={'ghost'}
+          size="sm"
+          onClick={props.onToggleRecord}
+          aria-pressed={props.isRecording}
+          aria-label={props.isRecording ? 'Stop recording' : 'Start recording'}
+          class="flex items-center gap-2"
+        >
+          <span
+            class={`h-2.5 w-2.5 rounded-full ${props.isRecording ? 'bg-white' : 'bg-red-500 group-hover:bg-red-400'}`}
+          />
+          <span class="text-xs uppercase tracking-wide">
+            {props.isRecording ? 'Stop' : 'Rec'}
+          </span>
+        </Button>
         <Button variant="ghost" size="sm" onClick={props.onPlay} disabled={props.isPlaying} aria-label="Play">
           <Icon name="play" class="h-4 w-4" />
         </Button>
@@ -657,11 +674,10 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
         </Button>
         <div class="flex items-center gap-2">
           <label class="flex items-center gap-1 text-xs text-neutral-400">
-            <span>Tempo</span>
             <input
               type="text"
               value={tempoDraft()}
-              class="w-16 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 focus:border-neutral-500 focus:outline-none appearance-none"
+              class="w-[5ch] rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 focus:border-neutral-500 focus:outline-none appearance-none"
               inputmode="numeric"
               pattern="[0-9]*"
               onFocus={() => setTempoEditing(true)}
@@ -698,14 +714,13 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
             <span class="text-[10px] text-neutral-500">BPM</span>
           </label>
           <Button
-            variant={props.metronomeEnabled ? 'default' : 'outline'}
+            variant='ghost'
             size="sm"
             onClick={props.onToggleMetronome}
             aria-pressed={props.metronomeEnabled}
             aria-label="Toggle metronome"
           >
             <Icon name="metronome" class="h-4 w-4 mr-1" />
-            {props.metronomeEnabled ? 'Metronome On' : 'Metronome Off'}
           </Button>
         </div>
       </div>

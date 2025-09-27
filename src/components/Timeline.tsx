@@ -21,6 +21,8 @@ import { useClipDrag } from '~/hooks/useClipDrag'
 import { useClipResize } from '~/hooks/useClipResize'
 import { useTimelineSelection } from '~/hooks/useTimelineSelection'
 import { useClipBuffers } from '~/hooks/useClipBuffers'
+import { useTrackRecording } from '~/hooks/useTrackRecording'
+import RecordingPreview from './timeline/RecordingPreview'
 
 const volumeTimers = new Map<string, number>()
 const optimisticMoves = new Map<string, { trackId: string; startSec: number }>()
@@ -42,6 +44,8 @@ const Timeline: Component = () => {
   // Transport tempo & metronome
   const [bpm, setBpm] = createSignal(120)
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false)
+  const [recordArmTrackId, setRecordArmTrackId] = createSignal<string | null>(null)
+  const [isRecording, setIsRecording] = createSignal(false)
 
   // Drag-drop visual target lane
   const [dropTargetLane, setDropTargetLane] = createSignal<number | null>(null)
@@ -201,6 +205,128 @@ const Timeline: Component = () => {
     stopScrub,
   })
 
+  const notifyRecording = (message: string) => {
+    console.warn('[Timeline][recording]', message)
+  }
+
+  const recordingControls = useTrackRecording({
+    audioEngine,
+    tracks,
+    setTracks,
+    recordArmTrackId,
+    setRecordArmTrackId,
+    setSelectedTrackId,
+    setSelectedClip,
+    setSelectedClipIds,
+    setSelectedFXTarget,
+    playheadSec,
+    uploadToR2,
+    audioBufferCache,
+    roomId,
+    userId,
+    convexClient,
+    convexApi,
+    requestTransportPlay: requestPlay,
+    setIsRecording,
+    isPlaying,
+    notify: notifyRecording,
+  })
+
+  const {
+    toggleRecording: toggleRecordingSession,
+    stopRecording: stopRecordingSession,
+    previewPoints,
+    previewStartSec,
+    recordingTrackId,
+  } = recordingControls
+
+  const handleTransportStop = () => {
+    if (isRecording()) {
+      void stopRecordingSession()
+    }
+    handleStop()
+  }
+
+  const handleTransportPause = () => {
+    if (isRecording()) {
+      void stopRecordingSession()
+    }
+    handlePause()
+  }
+
+  const ensureTrackForRecording = async (): Promise<string | null> => {
+    const uid = userId()
+    const rid = roomId()
+    if (!uid || !rid) {
+      notifyRecording('Recording is only available when signed in to a project.')
+      return null
+    }
+
+    const currentTracks = tracks()
+    const armed = recordArmTrackId()
+    if (armed) {
+      const armedTrack = currentTracks.find(t => t.id === armed)
+      if (armedTrack && (!armedTrack.lockedBy || armedTrack.lockedBy === uid)) {
+        return armedTrack.id
+      }
+    }
+
+    const available = currentTracks.find(t => !t.lockedBy || t.lockedBy === uid)
+    if (available) {
+      setRecordArmTrackId(available.id)
+      return available.id
+    }
+
+    try {
+      const newTrackId = await convexClient.mutation(convexApi.tracks.create, { roomId: rid as any, userId: uid } as any) as any as string
+      setTracks(ts => ts.some(t => t.id === newTrackId) ? ts : [
+        ...ts,
+        {
+          id: newTrackId,
+          name: `Track ${ts.length + 1}`,
+          volume: 0.8,
+          clips: [],
+          muted: false,
+          soloed: false,
+          lockedBy: null,
+        },
+      ])
+      batch(() => {
+        setSelectedTrackId(newTrackId)
+        setSelectedFXTarget(newTrackId)
+        setRecordArmTrackId(newTrackId)
+      })
+      return newTrackId
+    } catch (err) {
+      console.error('[Timeline] failed to create track for recording', err)
+      notifyRecording('Failed to create a new track for recording.')
+      return null
+    }
+  }
+
+  const handleToggleRecordArm = (trackId: string) => {
+    if (isRecording()) return
+    const uid = userId()
+    const target = tracks().find(t => t.id === trackId)
+    if (target && target.lockedBy && target.lockedBy !== uid) return
+    setRecordArmTrackId(prev => (prev === trackId ? null : trackId))
+  }
+
+  const handleRecordToggle = async () => {
+    const trackId = await ensureTrackForRecording()
+    if (!trackId) return
+    const result = await toggleRecordingSession(trackId)
+    if (!result.ok && result.reason) {
+      notifyRecording(result.reason)
+    } else if (result.ok) {
+      batch(() => {
+        setSelectedTrackId(trackId)
+        setSelectedFXTarget(trackId)
+        setRecordArmTrackId(trackId)
+      })
+    }
+  }
+
   const handleLaneMouseDown: JSX.EventHandler<HTMLDivElement, MouseEvent> = (event) => {
     onLaneMouseDown(event, scrollRef)
   }
@@ -248,6 +374,7 @@ const Timeline: Component = () => {
       const serverMuted = (t as any).muted as boolean | undefined
       const serverSoloed = (t as any).soloed as boolean | undefined
       const serverName = typeof (t as any).name === 'string' ? (t as any).name : undefined
+      const serverLockedBy = typeof (t as any).lockedBy === 'string' ? (t as any).lockedBy : null
       return {
         id,
         name: serverName ?? prev?.name ?? `Track ${idx + 1}`,
@@ -259,6 +386,7 @@ const Timeline: Component = () => {
         soloed: sm
           ? (typeof serverSoloed === 'boolean' ? serverSoloed : (prev?.soloed ?? localMix[id]?.soloed ?? false))
           : (prev?.soloed ?? localMix[id]?.soloed ?? false),
+        lockedBy: serverLockedBy ?? prev?.lockedBy ?? null,
       }
     })
 
@@ -277,6 +405,7 @@ const Timeline: Component = () => {
         clips: [],
         muted: prev?.muted ?? false,
         soloed: prev?.soloed ?? false,
+        lockedBy: prev?.lockedBy ?? null,
       }
       projected.push(placeholder)
       projectedMap.set(placeholder.id, placeholder)
@@ -342,6 +471,14 @@ const Timeline: Component = () => {
     }
 
     setTracks(projected)
+    const armedId = recordArmTrackId()
+    if (armedId) {
+      const uid = userId()
+      const available = projected.find(t => t.id === armedId)
+      if (!available || (available.lockedBy && available.lockedBy !== uid)) {
+        setRecordArmTrackId(null)
+      }
+    }
     if (!selectedTrackId() && projected.length > 0) {
       batch(() => {
         setSelectedTrackId(projected[0].id)
@@ -536,8 +673,8 @@ const Timeline: Component = () => {
         isPlaying={isPlaying()}
         playheadSec={playheadSec()}
         onPlay={() => requestPlay()}
-        onPause={handlePause}
-        onStop={handleStop}
+        onPause={handleTransportPause}
+        onStop={handleTransportStop}
         onAddAudio={() => handleAddAudio()}
         onShare={handleShare}
         onMasterFX={() => { setSelectedFXTarget('master'); setBottomFXOpen(true) }}
@@ -545,6 +682,8 @@ const Timeline: Component = () => {
         onChangeBpm={(next) => setBpm(clampBpm(next))}
         metronomeEnabled={metronomeEnabled()}
         onToggleMetronome={() => setMetronomeEnabled((prev) => !prev)}
+        isRecording={isRecording()}
+        onToggleRecord={handleRecordToggle}
         onJumpToClip={(clipId, trackId, startSec) => jumpToClip(trackId, clipId, startSec)}
         onInsertSample={(payload) => { void handleInsertSample(payload) }}
         currentRoomId={roomId()}
@@ -631,6 +770,22 @@ const Timeline: Component = () => {
                   />
                 )}
               </For>
+              {(() => {
+                const start = previewStartSec()
+                const points = previewPoints()
+                const rid = recordingTrackId()
+                if (!isRecording() || start == null || points.length === 0 || !rid) return null
+                const trackIndex = tracks().findIndex(t => t.id === rid)
+                if (trackIndex < 0) return null
+                return (
+                  <div
+                    class="absolute left-0 right-0 pointer-events-none"
+                    style={{ top: `${trackIndex * LANE_HEIGHT}px`, height: `${LANE_HEIGHT}px` }}
+                  >
+                    <RecordingPreview startSec={start} points={points} />
+                  </div>
+                )
+              })()}
               {dropAtNewTrack() && (
                 <div
                   class="absolute left-0 right-0 border-t border-green-500/40 bg-green-500/10 pointer-events-none"
@@ -719,6 +874,9 @@ const Timeline: Component = () => {
             }
           }}
           onSidebarMouseDown={onSidebarMouseDown}
+          recordArmTrackId={recordArmTrackId()}
+          onToggleRecordArm={handleToggleRecordArm}
+          currentUserId={userId()}
         />
       </div>
 

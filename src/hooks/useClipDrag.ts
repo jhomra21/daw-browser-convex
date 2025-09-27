@@ -84,6 +84,10 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     const track = currentTracks.find(t => t.id === trackId)
     const clip = track?.clips.find(c => c.id === clipId)
     if (!track || !clip) return
+    const uid = userId()
+    if (track.lockedBy && track.lockedBy !== uid) {
+      return
+    }
 
     if (event.shiftKey) {
       batch(() => {
@@ -152,12 +156,13 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     const scroll = getScrollRef()
     if (!scroll) return
 
+    const currentTracks = tracks()
     const rect = scroll.getBoundingClientRect()
     const x = event.clientX - rect.left - dragDeltaX + (scroll.scrollLeft || 0)
     const desiredStart = Math.max(0, x / PPS)
     let laneIdx = yToLaneIndex(event.clientY, scroll)
 
-    if (laneIdx >= tracks().length) {
+    if (laneIdx >= currentTracks.length) {
       if (!addedTrackDuringDrag && !creatingTrackDuringDrag) {
         creatingTrackDuringDrag = true
         try {
@@ -182,6 +187,12 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       targetId = snapshot[laneIdx]?.id
     }
     if (!targetId) return
+
+    const targetTrack = snapshot.find(t => t.id === targetId)
+    const uid = userId()
+    if (targetTrack && targetTrack.lockedBy && targetTrack.lockedBy !== uid) {
+      return
+    }
 
     const movingClipId = draggingIds.clipId
 

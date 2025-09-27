@@ -12,6 +12,8 @@ export default defineSchema({
     // Optional shared mix state; only applied when clients opt-in to sync
     muted: v.optional(v.boolean()),
     soloed: v.optional(v.boolean()),
+    lockedBy: v.optional(v.string()),
+    lockedAt: v.optional(v.number()),
   })
     .index("by_room", ["roomId"]) // list tracks in a room
     .index("by_room_index", ["roomId", "index"]), // optional composite for ordering

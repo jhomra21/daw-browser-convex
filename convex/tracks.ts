@@ -8,8 +8,16 @@ export const listByRoom = query({
       .query("tracks")
       .withIndex("by_room", q => q.eq("roomId", roomId))
       .collect();
-    tracks.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-    return tracks;
+    const now = Date.now();
+    const STALE_LOCK_MS = 60_000;
+    const sanitized = tracks.map(track => {
+      if (track.lockedBy && typeof track.lockedAt === 'number' && now - track.lockedAt > STALE_LOCK_MS) {
+        return { ...track, lockedBy: undefined, lockedAt: undefined };
+      }
+      return track;
+    });
+    sanitized.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    return sanitized;
   },
 });
 
@@ -27,6 +35,8 @@ export const create = mutation({
       roomId,
       index: nextIndex,
       volume: 0.8,
+      lockedBy: undefined,
+      lockedAt: undefined,
     });
     // Record ownership
     await ctx.db.insert("ownerships", {
@@ -61,6 +71,41 @@ export const setMix = mutation({
     if (Object.keys(patch).length > 0) {
       await ctx.db.patch(trackId, patch);
     }
+  },
+});
+
+export const lock = mutation({
+  args: { trackId: v.id("tracks"), userId: v.string() },
+  handler: async (ctx, { trackId, userId }) => {
+    const track = await ctx.db.get(trackId);
+    if (!track) {
+      return { ok: false, reason: 'Track not found' };
+    }
+    const now = Date.now();
+    const STALE_LOCK_MS = 60_000;
+    if (track.lockedBy && track.lockedBy !== userId) {
+      const lockedAt = track.lockedAt ?? 0;
+      if (now - lockedAt > STALE_LOCK_MS) {
+        await ctx.db.patch(trackId, { lockedBy: userId, lockedAt: now });
+        return { ok: true };
+      }
+      return { ok: false, reason: 'Track locked by another user' };
+    }
+    await ctx.db.patch(trackId, { lockedBy: userId, lockedAt: now });
+    return { ok: true };
+  },
+});
+
+export const unlock = mutation({
+  args: { trackId: v.id("tracks"), userId: v.string() },
+  handler: async (ctx, { trackId, userId }) => {
+    const track = await ctx.db.get(trackId);
+    if (!track) return { ok: false };
+    if (track.lockedBy && track.lockedBy !== userId) {
+      return { ok: false };
+    }
+    await ctx.db.patch(trackId, { lockedBy: undefined, lockedAt: undefined });
+    return { ok: true };
   },
 });
 

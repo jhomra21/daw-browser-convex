@@ -11,13 +11,22 @@ export const fullView = query({
       .collect();
 
     // Sort client-side by index to simplify index requirements
-    tracks.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    const now = Date.now();
+    const STALE_LOCK_MS = 60_000;
+    const sanitizedTracks = tracks.map(track => {
+      if (track.lockedBy && typeof track.lockedAt === 'number' && now - track.lockedAt > STALE_LOCK_MS) {
+        return { ...track, lockedBy: undefined, lockedAt: undefined };
+      }
+      return track;
+    });
+
+    sanitizedTracks.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
 
     const clips = await ctx.db
       .query("clips")
       .withIndex("by_room", q => q.eq("roomId", roomId))
       .collect();
 
-    return { tracks, clips };
+    return { tracks: sanitizedTracks, clips };
   }
 });

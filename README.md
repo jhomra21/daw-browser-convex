@@ -1,573 +1,223 @@
-> **Last Updated**: 09/24/2025
+> **Last Updated**: 09/27/2025
 
 # Collaborative Realtime DAW
 
-A modern, collaborative digital audio workstation (DAW) built with SolidJS, featuring real-time collaboration, drag-and-drop audio editing, and cloud-based audio storage.
+Realtime, collaborative Digital audio workstation built with SolidJS, Convex, and Cloudflare Workers. 
 
-## 🎵 Features
+## Table of Contents
+- [Overview](#overview)
+- [Highlights](#highlights)
+- [Tech Stack](#tech-stack)
+- [System Architecture](#system-architecture)
+- [Project Structure](#project-structure)
+- [Environment Setup](#environment-setup)
+- [Development Workflow](#development-workflow)
+- [Key Features](#key-features)
+- [Frontend Modules](#frontend-modules)
+- [Backend & API](#backend--api)
+- [Data Model](#data-model)
+- [Authentication](#authentication)
+- [Audio Pipeline](#audio-pipeline)
+- [Deployment](#deployment)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
 
-### Core Functionality
-- **Multi-track Audio Timeline**: Professional-grade audio timeline with multiple tracks
-- **Real-time Collaboration**: Multiple users can collaborate on the same project via shared rooms
-- **Drag & Drop Audio**: Intuitive drag-and-drop interface for audio clips
-- **Audio Playback Engine**: Real-time audio playback with precise timing
-- **Visual Equalizer**: Built-in audio effects and visualization
-- **Audio Recording**: Integrated audio recording capabilities
+## Overview
 
-## 📁 Project Structure
+The Collaborative Realtime DAW combines SolidJS reactivity with Convex real-time data and Cloudflare edge services to deliver an end-to-end music production workspace. Every clip edit, track automation, and mix decision synchronises across collaborators while maintaining per-user preferences such as solo/mute states and equalizer chains.
+
+## Highlights
+- **Multi-tenant projects**: Each user can create and manage independent project rooms backed by Convex.
+- **Realtime timeline projection**: Optimistic client projections keep the UI responsive while Convex mutations settle.
+- **Edge-native uploads**: Audio samples stream directly to Cloudflare R2 through a secure Hono Worker.
+- **Web Audio engine**: Custom scheduler manages clip playback, EQ chains, and metronome timing with sample accuracy.
+- **Collaborative mixing**: Mix state can be synchronised across users or isolated locally, toggled per room.
+
+## Tech Stack
+
+| Layer | Technology |
+| --- | --- |
+| UI | SolidJS, TailwindCSS, `@kobalte/core` |
+| State | TanStack Solid Query, TanStack Router |
+| Audio | Web Audio API, `mediabunny` tooling |
+| Backend | Hono on Cloudflare Workers, Better Auth |
+| Storage | Cloudflare R2 (samples), D1 (auth), Convex (timeline data) |
+| Tooling | Bun, TypeScript, Wrangler |
+
+## System Architecture
+
+- **Frontend (`src/`)**: SolidJS SPA served through the Worker with routing handled by `@tanstack/solid-router`. Shared QueryClient (`src/lib/query-client.ts`) ensures consistent state across routes.
+- **Realtime data (`convex/`)**: Convex schema defines tracks, clips, projects, samples, effects, and ownership. Functions in `convex/*.ts` guard room access and enforce authorization.
+- **Worker API (`api/index.ts`)**: Hono app authenticates users, exposes auth proxies, uploads samples to R2, and streams audio back with signed keys.
+- **Authentication (`auth.ts`)**: Better Auth instance wraps Cloudflare D1 + KV for primary and secondary storage while registering Google OAuth.
+- **Audio engine (`src/lib/audio-engine.ts`)**: Maintains playback graph, EQ routing, and scheduling. Lazy initialisation respects autoplay policies.
+
+## Project Structure
 
 ```
 <root>/
-├── api/                    # Cloudflare Workers API entry point
-│   └── index.ts           # Hono API routes for audio upload/storage to R2
-├── convex/                # Convex database schema and functions
-│   ├── schema.ts          # Defines the data model for tracks, clips, and ownership
-│   ├── timeline.ts        # Backend logic for timeline operations
-│   ├── tracks.ts          # Backend logic for track management
-│   └── clips.ts           # Backend logic for clip management
-├── migrations/            # Database migration files
-│   └── *.sql              # SQL files for database schema changes
-├── src/                    # SolidJS frontend application
-│   ├── components/        # Reusable SolidJS components
-│   │   ├── timeline/      # Components specific to the audio timeline
-│   │   ├── ui/            # Generic UI components (buttons, dialogs, etc.)
-│   │   └── *.tsx          # Main application components like AudioRecorder
-│   ├── hooks/             # Custom SolidJS hooks for managing state and side effects
-│   ├── lib/               # Utility functions and libraries
-│   │   ├── auth-client.ts # Client-side authentication logic
-│   │   ├── convex.ts      # Convex client setup
-│   │   ├── query-client.ts# TanStack Query client setup
-│   │   ├── session.ts     # Session management utilities
-│   │   └── waveform.ts    # Waveform generation logic
-│   ├── routes/            # Application routes
-│   │   ├── __root.tsx     # Root layout
-│   │   ├── index.tsx      # Home page
-│   │   ├── Login.tsx      # Login page
-│   │   └── about.tsx      # About page
-│   ├── types/             # TypeScript type definitions
-│   └── main.tsx           # Main application entry point
-├── auth.ts                # Authentication configuration
-├── package.json           # Project dependencies and scripts
-└── wrangler.jsonc         # Cloudflare Workers configuration
-                            # - Defines R2 bucket bindings for audio storage
-                            # - Configures deployment settings for Cloudflare
-                            # - Sets up SPA routing for the frontend
+├── api/
+│   └── index.ts              # Hono Worker entrypoint & routes
+├── auth.ts                   # Better Auth configuration for Workers
+├── convex/
+│   ├── schema.ts             # Convex schema definitions
+│   ├── tracks.ts             # Track CRUD & mix mutations
+│   ├── clips.ts              # Clip CRUD & sample bindings
+│   ├── timeline.ts           # Room timeline aggregation
+│   ├── effects.ts            # EQ chain persistence
+│   ├── samples.ts            # Sample library helpers
+│   └── projects.ts           # Project ownership utilities
+├── migrations/               # D1 migrations used by Better Auth
+├── src/
+│   ├── components/           # Solid components (timeline, audio, UI)
+│   ├── hooks/                # Timeline hooks (drag, selection, recording)
+│   ├── lib/                  # Clients, audio engine, utilities
+│   ├── routes/               # File-based routes for TanStack Router
+│   ├── main.tsx              # SPA bootstrap
+│   └── index.css             # Tailwind entrypoint
+├── public/                   # Static assets
+├── tailwind.config.cjs       # Tailwind v4 configuration
+├── tsconfig.json             # Strict TypeScript config
+├── wrangler.jsonc            # Worker bindings (R2, D1, KV)
+└── package.json              # Bun scripts & dependency manifest
 ```
 
-## 🚀 Getting Started
+## Environment Setup
 
 ### Prerequisites
-- **Bun** (recommended package manager)
-- **Node.js** 18+ and npm (for compatibility)
-- **Cloudflare Account** with Workers and R2 enabled
-- **Convex Account** for database setup
+- **Bun** ≥ 1.1 (preferred package manager/runtime)
+- **Node.js** ≥ 18 (for tooling compatibility)
+- **Cloudflare account** with Workers, R2, D1, and KV enabled
+- **Convex account** connected to the CLI (`bunx convex dev`)
+- **Google OAuth credentials** for Better Auth social sign-in
 
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd <folder-name>
-   ```
-
-2. **Install dependencies**
+### Configuration Steps
+1. **Install dependencies**
    ```bash
    bun install
-   # or npm install
    ```
-
-3. **Environment Setup**
-
-   **Cloudflare R2 Setup:**
-   - Create R2 bucket for audio storage:
-     ```bash
-     wrangler r2 bucket create daw-audio-samples
-     ```
-   - Generate Cloudflare Workers types:
-     ```bash
-     wrangler types ./api/worker-configuration.d.ts
-     ```
-
-   **Database & Environment:**
-   - Copy `example.env` to `.env` and configure your environment variables
-   - Set up Convex deployment
-   - Configure Cloudflare Workers bindings in `wrangler.jsonc`:
-     - R2 bucket binding: `daw_audio_samples` (matches the bucket name created above)
-     - Ensure `nodejs_compat` is enabled
-     - The `compatibility_date` is set to `2025-09-12`. It's recommended to keep this up to date with the latest Cloudflare Workers runtime version.
-   - Populate the following secrets to satisfy `auth.ts`, `api/index.ts`, and Cloudflare bindings:
-     - `BETTER_AUTH_SECRET` – secret used by Better Auth
-     - `BETTER_AUTH_URL` – public URL of your Cloudflare Worker (e.g. `https://<worker>.workers.dev`)
-     - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` – OAuth credentials for Google sign-in
-     - `daw_convex_auth`, `daw_convex_auth_kv`, `daw_audio_samples` – these are created via `wrangler.jsonc`; ensure they exist in your Cloudflare account
-     - `VITE_AUTH_BASE_URL` – optional override used by `src/lib/auth-client.ts` when developing against a remote Worker
-     - `CONVEX_DEPLOYMENT` / `VITE_CONVEX_URL` – Convex deployment slug and public URL (see Convex setup below)
-
-   **Convex Setup:**
-   - Install the Convex CLI if you haven't already:
-     ```bash
-     bunx convex dev
-     ```
-   - Follow the interactive prompts to link or create a deployment; the command will populate/update `CONVEX_DEPLOYMENT` and `VITE_CONVEX_URL` in your `.env`.
-   - Keep the Convex dev server running while working on the app so queries/mutations in `convex/` stay hot-reloaded.
-
-4. **Development**
+2. **Copy environment template**
    ```bash
-   bun dev
-   # or npm run dev
+   cp example.env .env
    ```
-   Opens the app at [http://localhost:3000](http://localhost:3000)
-
-5. **Build for Production**
+   Populate the following keys:
+   - **`CONVEX_DEPLOYMENT`**, **`VITE_CONVEX_URL`** (set by Convex CLI)
+   - **`BETTER_AUTH_SECRET`**, **`BETTER_AUTH_URL`**
+   - **`GOOGLE_CLIENT_ID`**, **`GOOGLE_CLIENT_SECRET`**
+   - Optional: **`VITE_AUTH_BASE_URL`** when testing against remote Workers
+3. **Cloudflare bindings** (see `wrangler.jsonc`)
+   - `daw_audio_samples`: Cloudflare R2 bucket (`daw-audio-samples`)
+   - `daw_convex_auth`: Cloudflare D1 database for Better Auth
+   - `daw_convex_auth_kv`: KV namespace used as Better Auth secondary storage
+   Ensure secrets are uploaded:
    ```bash
-   bun run build
-   # or npm run build
+   wrangler secret put BETTER_AUTH_SECRET
+   wrangler secret put GOOGLE_CLIENT_ID
+   wrangler secret put GOOGLE_CLIENT_SECRET
    ```
-
-6. **Deploy**
+4. **Convex development server**
    ```bash
-   # Deploy to Cloudflare Workers
-   wrangler deploy
+   bunx convex dev
    ```
+   Follow prompts to link the project; keep the dev server running for hot reloads.
 
-## 🎛️ Usage
- 
-### Creating a Project
-1. **Start a new session**: The app automatically creates a unique room ID
-2. **Share the URL**: Copy the URL with `?roomId=` to collaborate with others
-3. **Add audio files**: Drag and drop audio files or use the file picker
+## Development Workflow
 
-  ### Working with Audio
-  - **Adding Tracks**: Click "Add Track" or drag audio below existing tracks
-  - **Moving clips**: Drag clips between tracks or within tracks
-  - **Timeline Scrubbing**: Click and drag on the timeline ruler to scrub playback
-  - **Playback Control**: Use spacebar to play/pause, click ruler for seeking
-  - **Volume Control**: Adjust track volume in the sidebar
+- **Start the app**
+  ```bash
+  bun dev
+  ```
+  The Worker proxy serves the SPA at `http://localhost:3000`.
+- **Local Worker**
+  ```bash
+  wrangler dev
+  ```
+  Useful for testing Worker-only routes (`/api/*`).
+- **Build artifacts**
+  ```bash
+  bun run build
+  bun run serve   # Preview production bundle
+  ```
+- **Deploy**
+  ```bash
+  wrangler deploy
+  ```
 
-### Multi-Selection (09/24/2025)
- 
- - **Select one clip**: Click a clip. Selection becomes that single clip.
- - **Add to selection**: Hold Shift and click additional clips to add them to the selection (additive).
- - **Marquee selection**: Click and drag on empty lane space to draw a selection rectangle. All clips intersecting the marquee are selected.
-   - Hold Shift while marquee-dragging to add to the current selection (additive marquee).
- - **Clear selection**: Click empty lane space without Shift to clear the selection.
- - **Move selected clips together**: When multiple clips are selected, dragging any selected clip moves the entire group together.
-   - Horizontal moves preserve each clip’s relative offset; vertical moves shift the group by the same track delta.
-   - Dragging below the last lane creates a new track; the group drops onto that new track.
- - **Duplicate / Delete (operate on selection)**
-   - Ctrl+D duplicates all selected clips. Duplicates are placed to the right per-track with non-overlapping placement.
-   - Delete or Backspace removes all selected clips.
- - **Resize**: Edge-resize acts on the specific clip you grab. Group resize is not supported.
-- **Optimistic Updates**: Local changes appear immediately, sync to server
+Scripts are defined in `package.json` to align with Bun’s CLI. Tailwind v4 uses the zero-runtime CSS pipeline enabled through `tailwind.config.cjs`.
 
-## 🔐 Authentication
+## Key Features
 
-The application uses `better-auth` to handle authentication, supporting various providers like Google and GitHub. The authentication flow is handled by the `auth.ts` file and the `src/lib/auth-client.ts` file.
+- **Collaborative timeline**: `src/components/Timeline.tsx` merges Convex snapshots, optimistic clip moves, and drag placeholders to prevent jitter during multi-user edits.
+- **Multi-selection workflow**: `useTimelineSelection.ts` enables marquee and shift-click selection, while `useTimelineClipActions.ts` handles duplication, deletion, and keyboard shortcuts.
+- **Audio imports**: `useTimelineClipImport.ts` supports drag-and-drop, sample library insertion, and overlap avoidance before uploading to R2.
+- **Recording pipeline**: `useTrackRecording.ts` streams microphone input into the timeline, generating clips and uploading buffers after take completion.
+- **Mix management**: Track volume, mute, and solo states are throttled locally (`TrackSidebar.tsx`) and optionally synced through Convex (`tracks.setMix`).
 
-- **Database Migrations**: The `migrations` directory contains SQL scripts for setting up and updating the database schema to support user authentication and sessions.
-- **Login**: The `/login` route provides the user interface for logging in with different authentication providers.
+## Frontend Modules
 
+- **`src/components/timeline/TransportControls.tsx`**: Central transport bar controlling playback, recording, BPM, and project management.
+- **`src/components/timeline/TrackLane.tsx`**: Renders clips per track, handles drag handles, resizing, and visual feedback.
+- **`src/components/timeline/EffectsPanel.tsx`**: Manages master/track EQ editing, wired into Convex effects mutations.
+- **`src/components/AudioRecorder.tsx`**: Wraps `mediabunny` for browser capture, including waveform previews.
+- **`src/components/VisualEqualizer.tsx`**: Real-time analyser that visualises frequency bands using the Web Audio analyser node.
 
-## 🔧 Development
+## Backend & API
 
-### Tools & Technologies
-- **SolidJS**: A declarative and efficient JavaScript library for building user interfaces. Used for the core frontend framework.
-- **`@tanstack/solid-router`**: A fully type-safe router for SolidJS applications.
-- **Hono**: A small, simple, and ultrafast web framework for the edge. Used for the Cloudflare Workers API.
-- **Convex**: A backend platform with a real-time database, used for collaborative state management.
-- **Cloudflare Workers**: A serverless platform for running backend code.
-- **R2**: Cloudflare's S3-compatible object storage, used for storing audio samples.
-- **`better-auth`**: A library for handling authentication with different providers.
-- **`kysely-d1`**: A type-safe SQL query builder for Cloudflare D1.
-- **Zod**: A TypeScript-first schema declaration and validation library.
-- **TailwindCSS**: A utility-first CSS framework for rapid UI development.
-- **`mediabunny`**: A library for client-side audio processing, used for recording, encoding, and analyzing audio files.
-- **`solid-devtools`**: A browser extension for debugging SolidJS applications.
-- **Web Audio API**: The standard browser API for processing and synthesizing audio.
+- **Auth proxy**: `/api/auth/*` routes pass through Better Auth handlers while respecting CORS (`api/index.ts`).
+- **Session middleware**: Global Hono middleware resolves the Better Auth session and surfaces `user` and `session` on the context.
+- **Sample uploads**: `/api/samples` sanitises filenames, checks for collisions, writes metadata to R2, and returns a signed fetch URL.
+- **Sample streaming**: `/api/samples/:roomId/:clipId` streams from R2, setting cache headers and surfacing the origin key in `X-R2-Key`.
 
-### Development Guidelines
-- Use `~` alias for `./src` directory imports
-- Follow SolidJS reactivity patterns (avoid circular dependencies)
-- Use `batch()` for grouping related state updates
-- Use TanStack Solid Query for API state management
+## Data Model
 
-### Scripts
-```bash
-bun start        # Start development server
-bun dev          # Start development server
-bun run build    # Build for production
-bun run serve    # Preview production build
-wrangler dev     # Develop Workers locally
-wrangler deploy  # Deploy to Cloudflare
-```
+Convex tables (see `convex/schema.ts`):
+- **`tracks`**: Room-scoped tracks with ordering, mix state, and locking metadata.
+- **`clips`**: Audio clip placements including padding, sample URL, and optional names.
+- **`samples`**: User-curated sample library entries referencing R2 URLs.
+- **`projects`**: User-to-room mapping with per-owner project names.
+- **`ownerships`**: Authorization guard ensuring only owners mutate tracks/clips.
+- **`effects`**: Ordered EQ chains per track or master bus with band parameters.
 
-## 🧠 Code Examples
+## Authentication
 
-### Authentication flow (`src/lib/auth-client.ts`, `src/lib/session.ts`, `src/routes/Login.tsx`)
-The client initializes Better Auth with cross-origin cookies and exposes Solid-friendly helpers for session state. The login route consumes those helpers to trigger OAuth flows and keep the TanStack Query cache in sync.
+- **Better Auth (`auth.ts`)**: Uses Cloudflare D1 via `kysely-d1` for primary storage and KV as a cache/secondary store. Google OAuth is the default provider; GitHub placeholder is ready for future use.
+- **Client helpers (`src/lib/auth-client.ts`)**: Solid-friendly auth client binding ensures credentials are included and supports overriding base URLs for remote Workers.
+- **Session hook (`src/lib/session.ts`)**: Exposes `useSessionQuery()` to keep TanStack Query and router guards (`src/routes/index.tsx`) aligned.
+- **Login route (`src/routes/Login.tsx`)**: Presents Google sign-in and session awareness via `LoginMethodButton`.
 
-```ts
-// src/lib/auth-client.ts
-import { createAuthClient } from "better-auth/solid";
+## Audio Pipeline
 
-const baseURL = (import.meta as any).env?.VITE_AUTH_BASE_URL || window.location.origin;
+- **Engine singleton (`src/lib/audio-engine-singleton.ts`)** ensures a shared `AudioEngine` instance across components.
+- **Scheduling**: `AudioEngine.scheduleAllClipsFromPlayhead()` computes offsets per clip and rebuilds sources on transport changes.
+- **EQ chains**: `effects.ts` mutations persist EQ bands, while the engine hydrates nodes lazily and cleans up when tracks disappear.
+- **Metronome & BPM**: `usePlayheadControls.ts` maintains playhead state, while BPM changes propagate to the engine via Solid signals.
+- **Buffer cache**: `useClipBuffers.ts` memoises decoded buffers and rehydrates missing audio using sample URLs.
 
-export const authClient = createAuthClient({
-  baseURL,
-  fetchOptions: {
-    credentials: "include",
-  },
-});
-```
+## Deployment
 
-```ts
-// src/lib/session.ts
-export function useSessionQuery() {
-  const q = useQuery<ClientSession>(() => ({
-    queryKey: ['session'],
-    queryFn: fetchSession,
-    staleTime: 1000 * 60 * 15,
-    refetchOnWindowFocus: false,
-    retry: false,
-  }));
+- **Wrangler config (`wrangler.jsonc`)**: Sets `compatibility_date` (2025-09-12), enables `nodejs_compat`, and configures SPA asset handling.
+- **Secrets**: Manage via `wrangler secret put`. Deployments automatically attach R2, D1, and KV bindings referenced by the Worker.
+- **Static assets**: Vite handles bundling; the Worker serves the SPA with `run_worker_first` to prioritise API routes.
 
-  return createMemo(() => ({
-    data: read<ClientSession>(q.data),
-    isLoading: !!read(q.isLoading),
-    error: (read(q.error) as Error | null) ?? null,
-    refetch: q.refetch,
-  }));
-}
-```
+## Troubleshooting
 
-```tsx
-// src/routes/Login.tsx
-async function signInWithGoogle() {
-  try {
-    setLoadingGoogle(true);
-    await authClient.signIn.social({
-      provider: 'google',
-      callbackURL: '/',
-    });
-  } catch (err) {
-    console.error('Google sign-in error:', err);
-    alert('Failed to start Google sign-in. Please try again.');
-    setLoadingGoogle(false);
-  }
-}
+- **Cannot load Convex data**: Verify `CONVEX_DEPLOYMENT`/`VITE_CONVEX_URL` and ensure `bunx convex dev` is running locally.
+- **Samples missing**: Check `daw_audio_samples` bucket permissions; ensure upload path `rooms/<roomId>/clips/<filename>` exists.
+- **Auth failures**: Confirm Better Auth secrets in Cloudflare and align `BETTER_AUTH_URL` with deployed Worker origin.
+- **Audio playback stalled**: User gesture may be required; trigger play from an interaction so `AudioEngine.ensureAudio()` can resume context.
 
-async function signOut() {
-  await authClient.signOut();
-  queryClient.setQueryData(['session'], null);
-}
-```
+## Contributing
 
-### Routing & data fetching guard (`src/main.tsx`, `src/routes/index.tsx`)
-Routing is driven by TanStack Router. The root of the app wires a shared `QueryClientProvider`, while the home route uses `beforeLoad` to require authentication before rendering the timeline.
+Pull requests are welcome. Please:
+- **Run Bun lint/build** before submitting.
+- **Describe architectural changes** in the PR body, especially those touching Convex functions or the audio engine.
+- **Keep diffs focused**—avoid unrelated refactors when adjusting timeline logic.
 
-```tsx
-// src/main.tsx
-const router = createRouter({
-  routeTree,
-  defaultPreload: 'intent',
-  scrollRestoration: true,
-});
+## License
 
-render(() => (
-  <QueryClientProvider client={queryClient}>
-    <RouterProvider router={router} />
-  </QueryClientProvider>
-), rootElement);
-```
-
-```tsx
-// src/routes/index.tsx
-export const Route = createFileRoute('/')({
-  beforeLoad: async ({ location }) => {
-    const session = await queryClient.ensureQueryData({
-      queryKey: ['session'],
-      queryFn: fetchSession,
-      staleTime: 1000 * 60 * 15,
-    });
-    if (!session) {
-      throw redirect({
-        to: '/Login',
-        search: { redirect: location.href },
-      });
-    }
-  },
-  component: Index,
-});
-```
-
-### Collaborative timeline syncing (`src/components/Timeline.tsx`)
-`Timeline.tsx` now composes dedicated hooks for room state, playback, clip import, and selection. `useTimelineData()` supplies the current room and Convex queries, `useClipBuffers()` hydrates missing audio buffers, and `useTimelineClipActions()` centralises keyboard-driven edits. A guarded projection effect keeps Convex state and local optimistic changes aligned while respecting per-user mix preferences.
-
-```ts
-// src/components/Timeline.tsx
-const { roomId, userId, fullView } = useTimelineData()
-const { audioBufferCache, ensureClipBuffer, uploadToR2 } = useClipBuffers({ audioEngine, tracks, setTracks })
-
-createEffect(() => {
-  const raw = (fullView as any).data
-  const data = typeof raw === 'function' ? raw() : raw
-  if (!data) return
-
-  const oldTracks = untrack(() => tracks())
-  const oldTrackMap = new Map(oldTracks.map(t => [t.id, t]))
-  const sm = syncMix()
-  const dragSnapshot = activeDrag()
-  const addedTrackDuringDrag = dragSnapshot?.addedTrackDuringDrag
-  const localMix = loadLocalMixMap(roomId())
-
-  const projected: Track[] = data.tracks.map((t: any, idx: number) => {
-    const id = t._id as string
-    const prev = oldTrackMap.get(id)
-    const serverMuted = (t as any).muted as boolean | undefined
-    const serverSoloed = (t as any).soloed as boolean | undefined
-    return {
-      id,
-      name: (t as any).name ?? prev?.name ?? `Track ${idx + 1}`,
-      volume: typeof t.volume === 'number' ? t.volume : 0.8,
-      clips: [],
-      muted: sm
-        ? (typeof serverMuted === 'boolean' ? serverMuted : prev?.muted ?? localMix[id]?.muted ?? false)
-        : (prev?.muted ?? localMix[id]?.muted ?? false),
-      soloed: sm
-        ? (typeof serverSoloed === 'boolean' ? serverSoloed : prev?.soloed ?? localMix[id]?.soloed ?? false)
-        : (prev?.soloed ?? localMix[id]?.soloed ?? false),
-    }
-  })
-
-  // inject drag placeholders, hydrate clips, honour optimisticMoves, seed selection...
-  setTracks(projected)
-})
-```
-
-Clip imports are handled in `useTimelineClipImport.ts`, which decodes audio, creates Convex records, pushes buffers into the cache, and uploads samples to R2—supporting drag-and-drop, file pickers, per-lane hit testing, overlap avoidance, optimistic placeholders, and empty-lane auto track creation.
-
-### Audio engine architecture (`src/lib/audio-engine.ts`)
-The custom `AudioEngine` wraps the Web Audio API but now adds master routing, pending EQ hydration, and offline decoding safeguards. It coordinates master/track EQ chains, mute/solo precedence, and clip scheduling without blocking Solid's reactive updates.
-
-```ts
-// src/lib/audio-engine.ts
-export class AudioEngine {
-  private audioCtx: AudioContext | null = null
-  private masterGain: GainNode | null = null
-  private destination: AudioDestinationNode | null = null
-  private trackGains = new Map<string, GainNode>()
-  private activeSources: AudioBufferSourceNode[] = []
-  private trackInputs = new Map<string, GainNode>()
-  private eqChains = new Map<string, BiquadFilterNode[]>()
-  private pendingEqParams = new Map<string, EqParamsLite>()
-  private masterEqChain: BiquadFilterNode[] = []
-
-  ensureAudio() {
-    if (!this.audioCtx) {
-      this.audioCtx = new AudioContext()
-      this.masterGain = this.audioCtx.createGain()
-      this.destination = this.audioCtx.destination
-      this.masterGain.gain.value = 1.0
-      this.rebuildMasterRouting()
-    }
-  }
-
-  setTrackEq(trackId: string, params: EqParamsLite) {
-    if (!this.audioCtx) {
-      this.pendingEqParams.set(trackId, params)
-      return
-    }
-    this.ensureTrackNodes(trackId)
-    const old = this.eqChains.get(trackId)
-    if (old) {
-      for (const n of old) { try { n.disconnect() } catch {} }
-    }
-    const nodes: BiquadFilterNode[] = []
-    if (params.enabled) {
-      for (const b of params.bands) {
-        if (!b.enabled) continue
-        const f = this.audioCtx.createBiquadFilter()
-        f.type = b.type
-        f.frequency.value = Math.max(20, Math.min(20000, b.frequency))
-        f.Q.value = Math.max(0.001, b.q)
-        f.gain.value = this.supportsGain(b.type) ? b.gainDb : 0
-        nodes.push(f)
-      }
-    }
-    this.eqChains.set(trackId, nodes)
-    this.rebuildTrackRouting(trackId)
-  }
-
-  updateTrackGains(tracks: Track[]) {
-    if (!this.audioCtx || !this.masterGain) return
-    const anySoloed = tracks.some(tt => tt.soloed)
-    for (const t of tracks) {
-      this.ensureTrackNodes(t.id)
-      const gain = this.trackGains.get(t.id)!
-      gain.gain.value = (!t.muted && (!anySoloed || t.soloed)) ? t.volume : 0
-    }
-    for (const [id, g] of Array.from(this.trackGains.entries())) {
-      if (!tracks.find(t => t.id === id)) {
-        try { g.disconnect() } catch {}
-        this.trackGains.delete(id)
-        const input = this.trackInputs.get(id)
-        if (input) {
-          try { input.disconnect() } catch {}
-          this.trackInputs.delete(id)
-        }
-        const nodes = this.eqChains.get(id)
-        if (nodes) {
-          for (const n of nodes) { try { n.disconnect() } catch {} }
-          this.eqChains.delete(id)
-        }
-        this.pendingEqParams.delete(id)
-      }
-    }
-  }
-
-  scheduleAllClipsFromPlayhead(tracks: Track[], playheadSec: number) {
-    if (!this.audioCtx) return
-    this.stopAllSources()
-    const now = this.audioCtx.currentTime
-    const anySoloed = tracks.some(t => t.soloed)
-
-    for (const t of tracks) {
-      this.ensureTrackNodes(t.id)
-      const input = this.trackInputs.get(t.id)!
-      const gain = this.trackGains.get(t.id)!
-      gain.gain.value = (!t.muted && (!anySoloed || t.soloed)) ? t.volume : 0
-
-      for (const c of t.clips) {
-        if (!c.buffer) continue
-        const leftPad = Math.max(0, c.leftPadSec ?? 0)
-        const audioStart = c.startSec + leftPad
-        if (playheadSec >= audioStart + c.buffer.duration) continue
-
-        const when = Math.max(0, audioStart - playheadSec)
-        const offset = Math.max(0, playheadSec - audioStart)
-        const playDur = Math.min(
-          c.buffer.duration - offset,
-          (c.startSec + c.duration) - Math.max(playheadSec, audioStart),
-        )
-        if (playDur <= 0) continue
-
-        const source = this.audioCtx.createBufferSource()
-        source.buffer = c.buffer
-        source.connect(input)
-        source.start(now + when, offset, playDur)
-        this.activeSources.push(source)
-      }
-    }
-  }
-}
-```
-
-Key behaviors:
-
-- **Lazy initialization**: `ensureAudio()` wires the master bus only after a user gesture, avoiding autoplay violations while remembering the intended destination.
-- **Per-track routing**: `ensureTrackNodes()` provisions dedicated input and gain nodes so `setTrackEq()` can insert user-configured EQ chains between them.
-- **Mute/solo and cleanup**: `updateTrackGains()` applies solo precedence, synchronises gain values, and tears down nodes, EQ chains, and pending parameters when tracks disappear.
-- **Clip scheduling**: `scheduleAllClipsFromPlayhead()` recreates `AudioBufferSourceNode`s relative to the current playhead, respecting clip padding, window duration, and partially consumed buffers.
-- **Master processing**: `setMasterEq()` rebuilds a Biquad chain on the master bus, while `decodeAudioData()` falls back to an `OfflineAudioContext` until the live context is user-activated and `resume()` has been called.
-
-### Sample storage API (`api/index.ts`)
-The Hono worker enforces authentication, streams uploads to Cloudflare R2 with collision handling, and exposes a signed fetch endpoint for playback.
-
-```ts
-// api/index.ts
-app.post('/api/samples', async (c) => {
-  const user = c.get('user');
-  if (!user) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  const form = await c.req.formData();
-  const roomId = form.get('roomId')?.toString();
-  const clipId = form.get('clipId')?.toString();
-  const file = form.get('file');
-  if (!roomId || !clipId || !(file instanceof File)) {
-    return c.json({ error: 'Missing roomId, clipId or file' }, 400);
-  }
-
-  const key = `rooms/${roomId}/clips/${sanitizedName}`;
-  await c.env.daw_audio_samples.put(key, file.stream(), {
-    httpMetadata: {
-      contentType: file.type || 'application/octet-stream',
-      contentDisposition: `inline; filename="${file.name}"`,
-    },
-    customMetadata: {
-      roomId,
-      clipId,
-      uploadedBy: user.id,
-    },
-  });
-
-  return c.json({ key, url: `/api/samples/${roomId}/${clipId}?key=${encodeURIComponent(key)}` });
-});
-```
-
-### Convex mutations (`convex/clips.ts`)
-Convex functions centralize collaborative state changes, guaranteeing authorization and room scoping before persisting timeline edits.
-
-```ts
-// convex/clips.ts
-export const create = mutation({
-  args: {
-    roomId: v.string(),
-    trackId: v.id('tracks'),
-    startSec: v.number(),
-    duration: v.number(),
-    userId: v.string(),
-    name: v.optional(v.string()),
-  },
-  handler: async (ctx, { roomId, trackId, startSec, duration, userId, name }) => {
-    const track = await ctx.db.get(trackId);
-    if (!track || track.roomId !== roomId) return;
-
-    const clipId = await ctx.db.insert('clips', { roomId, trackId, startSec, duration, name });
-    await ctx.db.insert('ownerships', {
-      roomId,
-      ownerUserId: userId,
-      clipId,
-    });
-
-    return clipId;
-  },
-});
-
-export const setSampleUrl = mutation({
-  args: { clipId: v.id('clips'), sampleUrl: v.string() },
-  handler: async (ctx, { clipId, sampleUrl }) => {
-    const clip = await ctx.db.get(clipId);
-    if (!clip) return;
-    await ctx.db.patch(clipId, { sampleUrl });
-  },
-});
-```
-
-## 🎨 UI Components
-
-### Timeline Components
-- **TimelineRuler**: Time-based ruler with scrubbing
-- **TrackLane**: Individual track rendering with clips
-- **TrackSidebar**: Track controls and volume adjustment
-- **TransportControls**: Playback and file import controls
-- **EffectsPanel**: Audio effects and visualization
-
-### Core Features
-- **AudioRecorder**: Built-in audio recording
-- **VisualEqualizer**: Real-time audio visualization
-- **ClipComponent**: Individual audio clip rendering
-
-## 📊 Performance Optimizations
-
-- **Audio Buffering**: Efficient audio buffer caching
-- **Optimistic Updates**: Immediate UI feedback with server sync
-- **Debounced Operations**: Volume changes and server updates
-- **Lazy Loading**: Audio samples loaded on demand
-- **Memory Management**: Proper cleanup of audio resources
-
+This project is released under the MIT License. Refer to `package.json` for the license declaration.
 
 ---
 
-Built with ❤️ using SolidJS, Hono, Convex, and Cloudflare Workers
+Built with ❤️ using SolidJS, Hono, Convex, Cloudflare Workers, and Bun.

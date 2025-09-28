@@ -13,6 +13,14 @@ export type EqParamsLite = {
   }>
 }
 
+// Lightweight Reverb params used by the engine (kept in sync with UI)
+export type ReverbParamsLite = {
+  enabled: boolean
+  wet: number // 0..1
+  decaySec: number // 0.1..10
+  preDelayMs: number // 0..200
+}
+
 export class AudioEngine {
   private audioCtx: AudioContext | null = null
   private masterGain: GainNode | null = null
@@ -26,6 +34,27 @@ export class AudioEngine {
   private pendingEqParams = new Map<string, EqParamsLite>()
   // Master EQ chain
   private masterEqChain: BiquadFilterNode[] = []
+  // --- Reverb: per-track and master ---
+  private trackReverbs = new Map<string, {
+    enabled: boolean
+    dryGain: GainNode
+    wetGain: GainNode
+    preDelay: DelayNode
+    convolver: ConvolverNode
+  }>()
+  private pendingReverbParams = new Map<string, ReverbParamsLite>()
+  private masterReverb: {
+    enabled: boolean
+    dryGain: GainNode
+    wetGain: GainNode
+    preDelay: DelayNode
+    convolver: ConvolverNode
+  } | null = null
+  // Pending master params to avoid creating AudioContext before a user gesture
+  private pendingMasterEqParams: EqParamsLite | null = null
+  private pendingMasterReverbParams: ReverbParamsLite | null = null
+  private readonly impulseBucketSize = 0.1
+  private impulseCache = new Map<string, AudioBuffer>()
   // Metronome & tempo
   private bpm = 120
   private metronomeEnabled = false
@@ -45,7 +74,18 @@ export class AudioEngine {
       this.masterGain = this.audioCtx.createGain()
       this.destination = this.audioCtx.destination
       this.masterGain.gain.value = 1.0
-      // Connect master routing initially (no EQ)
+      // Apply any pending master effects, then build routing
+      if (this.pendingMasterEqParams) {
+        const p = this.pendingMasterEqParams
+        this.pendingMasterEqParams = null
+        this.setMasterEq(p)
+      }
+      if (this.pendingMasterReverbParams) {
+        const p = this.pendingMasterReverbParams
+        this.pendingMasterReverbParams = null
+        this.setMasterReverb(p)
+      }
+      // If nothing pending, ensure we at least connect master to destination
       this.rebuildMasterRouting()
       this.ensureMetronomeNodes()
     }
@@ -238,6 +278,102 @@ export class AudioEngine {
     return type === 'peaking' || type === 'lowshelf' || type === 'highshelf'
   }
 
+  // --- Reverb helpers ---
+  private createSeededRandom(seed: number) {
+    let state = (seed >>> 0) || 1
+    return () => {
+      state = (state + 0x6D2B79F5) | 0
+      let t = Math.imul(state ^ (state >>> 15), state | 1)
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+  }
+
+  private createImpulseResponse(decaySec: number) {
+    if (!this.audioCtx) return null
+    const ctx = this.audioCtx
+    const clampedDecay = Math.min(10, Math.max(0.05, decaySec))
+    const bucketIndex = Math.max(1, Math.round(clampedDecay / this.impulseBucketSize))
+    const bucketSec = Math.min(10, Math.max(this.impulseBucketSize, bucketIndex * this.impulseBucketSize))
+    const length = Math.max(1, Math.floor(ctx.sampleRate * bucketSec))
+    const cacheKey = `${ctx.sampleRate}:${bucketIndex}:${length}`
+    const cached = this.impulseCache.get(cacheKey)
+    if (cached) return cached
+
+    const ir = ctx.createBuffer(2, length, ctx.sampleRate)
+    for (let ch = 0; ch < ir.numberOfChannels; ch++) {
+      const data = ir.getChannelData(ch)
+      const noise = this.createSeededRandom(bucketIndex * 0x9E3779B1 + ch * 0x85EBCA77)
+      for (let i = 0; i < length; i++) {
+        const t = i / length
+        const decay = Math.pow(1 - t, 3)
+        data[i] = (noise() * 2 - 1) * decay
+      }
+    }
+    this.impulseCache.set(cacheKey, ir)
+    return ir
+  }
+
+  setTrackReverb(trackId: string, params: ReverbParamsLite) {
+    if (!this.audioCtx) {
+      // Defer until audio context exists (created on user gesture)
+      this.pendingReverbParams.set(trackId, params)
+      return
+    }
+    this.ensureTrackNodes(trackId)
+    let rv = this.trackReverbs.get(trackId)
+    if (!rv) {
+      const dry = this.audioCtx.createGain()
+      const wet = this.audioCtx.createGain()
+      const pre = this.audioCtx.createDelay(2.0)
+      const conv = this.audioCtx.createConvolver()
+      // Initial params
+      dry.gain.value = 1 - Math.max(0, Math.min(1, params.wet))
+      wet.gain.value = Math.max(0, Math.min(1, params.wet))
+      pre.delayTime.value = Math.max(0, Math.min(0.2, params.preDelayMs / 1000))
+      conv.buffer = this.createImpulseResponse(params.decaySec)
+      this.trackReverbs.set(trackId, {
+        enabled: !!params.enabled,
+        dryGain: dry,
+        wetGain: wet,
+        preDelay: pre,
+        convolver: conv,
+      })
+    } else {
+      rv.enabled = !!params.enabled
+      rv.dryGain.gain.value = 1 - Math.max(0, Math.min(1, params.wet))
+      rv.wetGain.gain.value = Math.max(0, Math.min(1, params.wet))
+      rv.preDelay.delayTime.value = Math.max(0, Math.min(0.2, params.preDelayMs / 1000))
+      rv.convolver.buffer = this.createImpulseResponse(params.decaySec)
+    }
+    // Rebuild to apply routing
+    this.rebuildTrackRouting(trackId)
+  }
+
+  setMasterReverb(params: ReverbParamsLite) {
+    if (!this.audioCtx || !this.masterGain) {
+      // Defer until a user gesture creates the AudioContext
+      this.pendingMasterReverbParams = params
+      return
+    }
+    if (!this.masterReverb) {
+      this.masterReverb = {
+        enabled: !!params.enabled,
+        dryGain: this.audioCtx.createGain(),
+        wetGain: this.audioCtx.createGain(),
+        preDelay: this.audioCtx.createDelay(2.0),
+        convolver: this.audioCtx.createConvolver(),
+      }
+    }
+    const rv = this.masterReverb
+    rv.enabled = !!params.enabled
+    rv.dryGain.gain.value = 1 - Math.max(0, Math.min(1, params.wet))
+    rv.wetGain.gain.value = Math.max(0, Math.min(1, params.wet))
+    rv.preDelay.delayTime.value = Math.max(0, Math.min(0.2, params.preDelayMs / 1000))
+    rv.convolver.buffer = this.createImpulseResponse(params.decaySec)
+    this.rebuildMasterRouting()
+  }
+
   private ensureTrackNodes(trackId: string): GainNode {
     if (!this.audioCtx) this.ensureAudio()
     // At this point audioCtx/masterGain should exist
@@ -265,8 +401,14 @@ export class AudioEngine {
       // If there were pending EQ params, apply now
       const pending = this.pendingEqParams.get(trackId)
       if (pending) {
-        this.setTrackEq(trackId, pending)
         this.pendingEqParams.delete(trackId)
+        this.setTrackEq(trackId, pending)
+      }
+      // Apply pending reverb params if any
+      const pendingRv = this.pendingReverbParams.get(trackId)
+      if (pendingRv) {
+        this.pendingReverbParams.delete(trackId)
+        this.setTrackReverb(trackId, pendingRv)
       }
     }
     return input
@@ -278,20 +420,47 @@ export class AudioEngine {
     if (!input || !g) return
     // Disconnect current output path
     try { input.disconnect() } catch {}
-    const chain = this.eqChains.get(trackId)
-    if (!chain || chain.length === 0) {
-      input.connect(g)
-      return
+    const chain = this.eqChains.get(trackId) || []
+
+    // Ensure EQ chain internal wiring to g
+    if (chain.length > 0) {
+      // Connect n1 -> n2 -> ... -> g
+      for (let i = 0; i < chain.length; i++) {
+        const node = chain[i]
+        try { node.disconnect() } catch {}
+        if (i < chain.length - 1) {
+          node.connect(chain[i + 1])
+        } else {
+          node.connect(g)
+        }
+      }
     }
-    // Connect input -> n1 -> n2 -> ... -> g
-    let prev: AudioNode = input
-    for (const node of chain) {
-      try { prev.disconnect() } catch {}
-      prev.connect(node)
-      prev = node
+
+    const dest: AudioNode = chain.length > 0 ? chain[0] : g
+    const rv = this.trackReverbs.get(trackId)
+    if (rv && rv.enabled) {
+      // Disconnect reverb nodes outputs first
+      try { rv.dryGain.disconnect() } catch {}
+      try { rv.wetGain.disconnect() } catch {}
+      try { rv.preDelay.disconnect() } catch {}
+      try { rv.convolver.disconnect() } catch {}
+      // Wire: input -> dryGain -> dest
+      input.connect(rv.dryGain)
+      rv.dryGain.connect(dest)
+      // Wire: input -> preDelay -> convolver -> wetGain -> dest
+      input.connect(rv.preDelay)
+      rv.preDelay.connect(rv.convolver)
+      rv.convolver.connect(rv.wetGain)
+      rv.wetGain.connect(dest)
+    } else {
+      if (rv) {
+        try { rv.dryGain.disconnect() } catch {}
+        try { rv.wetGain.disconnect() } catch {}
+        try { rv.preDelay.disconnect() } catch {}
+        try { rv.convolver.disconnect() } catch {}
+      }
+      input.connect(dest)
     }
-    try { prev.disconnect() } catch {}
-    prev.connect(g)
   }
 
   setTrackEq(trackId: string, params: EqParamsLite) {
@@ -364,7 +533,16 @@ export class AudioEngine {
           for (const n of nodes) { try { n.disconnect() } catch {} }
           this.eqChains.delete(id)
         }
+        const rv = this.trackReverbs.get(id)
+        if (rv) {
+          try { rv.dryGain.disconnect() } catch {}
+          try { rv.wetGain.disconnect() } catch {}
+          try { rv.preDelay.disconnect() } catch {}
+          try { rv.convolver.disconnect() } catch {}
+          this.trackReverbs.delete(id)
+        }
         this.pendingEqParams.delete(id)
+        this.pendingReverbParams.delete(id)
       }
     }
   }
@@ -463,6 +641,7 @@ export class AudioEngine {
   close() {
     this.stopAllSources()
     this.clearMetronomeInterval()
+    this.impulseCache.clear()
     if (this.audioCtx) {
       try { this.audioCtx.close() } catch {}
     }
@@ -473,24 +652,62 @@ export class AudioEngine {
     if (!this.audioCtx || !this.masterGain) return
     // Disconnect masterGain from everything
     try { this.masterGain.disconnect() } catch {}
-    const chain = this.masterEqChain
-    if (!chain || chain.length === 0) {
-      this.masterGain.connect(this.destination ?? this.audioCtx.destination)
-      return
+    const eq = this.masterEqChain
+
+    // Prepare final destination
+    const finalDest = this.destination ?? this.audioCtx.destination
+
+    // Ensure EQ chain internal wiring to final destination
+    if (!eq || eq.length === 0) {
+      // No EQ; we will connect masterGain or reverb directly to destination
+    } else {
+      for (let i = 0; i < eq.length; i++) {
+        const node = eq[i]
+        try { node.disconnect() } catch {}
+        if (i < eq.length - 1) node.connect(eq[i + 1])
+        else node.connect(finalDest)
+      }
     }
-    let prev: AudioNode = this.masterGain
-    for (const node of chain) {
-      try { prev.disconnect() } catch {}
-      prev.connect(node)
-      prev = node
+
+    const rv = this.masterReverb
+    if (rv && rv.enabled) {
+      // Disconnect reverb nodes
+      try { rv.dryGain.disconnect() } catch {}
+      try { rv.wetGain.disconnect() } catch {}
+      try { rv.preDelay.disconnect() } catch {}
+      try { rv.convolver.disconnect() } catch {}
+      // Determine destination for dry/wet mix: first EQ node or finalDest
+      const dest: AudioNode = (eq && eq.length > 0) ? eq[0] : finalDest
+      // Wire: masterGain -> dryGain -> dest
+      this.masterGain.connect(rv.dryGain)
+      rv.dryGain.connect(dest)
+      // Wire: masterGain -> preDelay -> convolver -> wetGain -> dest
+      this.masterGain.connect(rv.preDelay)
+      rv.preDelay.connect(rv.convolver)
+      rv.convolver.connect(rv.wetGain)
+      rv.wetGain.connect(dest)
+    } else {
+      if (rv) {
+        try { rv.dryGain.disconnect() } catch {}
+        try { rv.wetGain.disconnect() } catch {}
+        try { rv.preDelay.disconnect() } catch {}
+        try { rv.convolver.disconnect() } catch {}
+      }
+      // Bypass reverb: connect masterGain -> first EQ node or finalDest
+      if (eq && eq.length > 0) {
+        this.masterGain.connect(eq[0])
+      } else {
+        this.masterGain.connect(finalDest)
+      }
     }
-    try { prev.disconnect() } catch {}
-    prev.connect(this.destination ?? this.audioCtx.destination)
   }
 
   setMasterEq(params: EqParamsLite) {
-    if (!this.audioCtx) this.ensureAudio()
-    if (!this.audioCtx) return
+    if (!this.audioCtx) {
+      // Defer until AudioContext exists (created via user gesture)
+      this.pendingMasterEqParams = params
+      return
+    }
     // Tear down existing nodes
     for (const n of this.masterEqChain) { try { n.disconnect() } catch {} }
     const nodes: BiquadFilterNode[] = []

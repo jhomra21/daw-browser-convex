@@ -69,7 +69,7 @@ export default defineSchema({
     .index("by_room", ["roomId"]) // list ownerships in a room (optional utility)
     .index("by_owner", ["ownerUserId"]), // list ownerships by owner (for projects)
 
-  // Effects chain (ordered). v1 supports 'eq' type with band params.
+  // Effects chain (ordered). Supports 'eq' and 'reverb' types today (extensible).
   effects: defineTable({
     roomId: v.string(),
     // target: either a specific track or the room master bus
@@ -77,18 +77,9 @@ export default defineSchema({
     trackId: v.optional(v.id("tracks")),
     index: v.number(), // order in chain (0..)
     type: v.string(), // e.g. 'eq' (future: compressor, reverb, etc.)
-    params: v.object({
-      // For 'eq'
-      enabled: v.boolean(),
-      bands: v.array(v.object({
-        id: v.string(),
-        type: v.string(), // BiquadFilterType
-        frequency: v.number(),
-        gainDb: v.number(),
-        q: v.number(),
-        enabled: v.boolean(),
-      })),
-    }),
+    // NOTE: Keep params flexible to support multiple effect types (eq, reverb, ...)
+    // Existing rows with EQ params remain valid.
+    params: v.any(),
     createdAt: v.number(), // epoch millis
   })
     .index("by_track", ["trackId"]) // list effects for a track

@@ -58,8 +58,9 @@ export function useTimelinePlayback(audioEngine: AudioEngine) {
     if (isPlaying()) {
       setStartedCtxTime(audioEngine.currentTime)
       setStartedPlayheadSec(sec)
-      audioEngine.scheduleAllClipsFromPlayhead(tracks, sec)
+      // IMPORTANT: Update transport epoch BEFORE scheduling, so MIDI events use the correct mapping
       audioEngine.onTransportSeek(sec)
+      audioEngine.scheduleAllClipsFromPlayhead(tracks, sec)
     }
   }
 

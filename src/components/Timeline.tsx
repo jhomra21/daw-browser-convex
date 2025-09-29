@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogD
 import type { Track, Clip, SelectedClip } from '~/types/timeline'
 import { getAudioEngine, resetAudioEngine } from '~/lib/audio-engine-singleton'
 import { timelineDurationSec, PPS, RULER_HEIGHT, LANE_HEIGHT, yToLaneIndex } from '~/lib/timeline-utils'
-import { canUseLocalStorage, loadLocalMixMap, saveLocalMix, loadMixSyncFlag, saveMixSyncFlag } from '~/lib/timeline-storage'
+import { canUseLocalStorage, loadLocalMixMap, saveLocalMix, loadMixSyncFlag, saveMixSyncFlag, loadGridSettings, saveGridSettings } from '~/lib/timeline-storage'
 import { ensureRoomShareLink } from '~/lib/timeline-share'
 import { useTimelineKeyboard } from '~/hooks/useTimelineKeyboard'
 import { useTimelineClipImport } from '~/hooks/useTimelineClipImport'
@@ -76,6 +76,26 @@ const Timeline: Component = () => {
       return
     }
     setSyncMix(loadMixSyncFlag(roomId()))
+  })
+
+  // Load grid settings per room
+  createEffect(() => {
+    const rid = roomId()
+    if (!canUseLocalStorage() || !rid) return
+    const settings = loadGridSettings(rid)
+    batch(() => {
+      setGridEnabled(settings.enabled)
+      setGridDenominator(settings.denominator)
+    })
+  })
+
+  // Save grid settings when they change
+  createEffect(() => {
+    const rid = roomId()
+    const enabled = gridEnabled()
+    const denom = gridDenominator()
+    if (!rid) return
+    saveGridSettings(rid, enabled, denom)
   })
 
   // Local caches for responsiveness
@@ -744,6 +764,39 @@ const Timeline: Component = () => {
     } catch {}
   }
 
+  // Audition helper: preview a short note using the target track's synth chain
+  const auditionNote = (pitch: number, velocity = 0.9, durSec = 0.35) => {
+    try {
+      audioEngine.ensureAudio()
+      const ctx: AudioContext | undefined = (audioEngine as any).audioCtx
+      if (!ctx) return
+      // Resolve track id from currently edited MIDI clip if possible
+      const id = midiEditorClipId()
+      let trackId = selectedFXTarget() || selectedTrackId()
+      if (id) {
+        for (const t of tracks()) {
+          if (t.clips.some(cc => cc.id === id)) { trackId = t.id; break }
+        }
+      }
+      const synthGain: GainNode | undefined = (audioEngine as any).ensureTrackSynthGainNode?.(trackId || 'master')
+      if (!synthGain) return
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      const start = ctx.currentTime
+      const end = start + Math.max(0.05, durSec)
+      const amp = Math.max(0, Math.min(1.5, velocity))
+      osc.type = 'sawtooth'
+      osc.frequency.setValueAtTime(440 * Math.pow(2, (pitch - 69) / 12), start)
+      gain.gain.setValueAtTime(0, start)
+      gain.gain.linearRampToValueAtTime(amp, start + 0.01)
+      gain.gain.linearRampToValueAtTime(0, end)
+      osc.connect(gain)
+      gain.connect(synthGain)
+      osc.start(start)
+      osc.stop(end)
+    } catch {}
+  }
+
   return (
     <div ref={el => (rootRef = el!)} class="h-full w-full flex flex-col bg-neutral-950 text-neutral-200" onDragOver={onDragOver} onDrop={async (e) => { if (e.defaultPrevented) return; await onDrop(e); setDropTargetLane(null); setDropAtNewTrack(false) }} onDragLeave={() => { setDropTargetLane(null); setDropAtNewTrack(false) }}>
       <input ref={el => (fileInputRef = el!)} type="file" accept="audio/*" class="hidden" onChange={onFileInput} />
@@ -850,6 +903,7 @@ const Timeline: Component = () => {
                     onClipMouseDown={onClipMouseDown}
                     onClipClick={onClipClick}
                     onClipResizeStart={onClipResizeStart}
+                    bpm={bpm()}
                     onClipDblClick={(_, clipId) => {
                       try {
                         const t = tracks().find(tt => tt.id === track.id)
@@ -913,6 +967,16 @@ const Timeline: Component = () => {
                 <MidiEditorCard
                   clipId={midiEditorClipId()!}
                   bpm={bpm()}
+                  gridDenominator={gridDenominator()}
+                  clipDurationSec={(() => {
+                    const id = midiEditorClipId()
+                    if (!id) return 1
+                    for (const t of tracks()) {
+                      const c = t.clips.find(cc => cc.id === id)
+                      if (c) return c.duration
+                    }
+                    return 1
+                  })()}
                   x={midiCard().x}
                   y={midiCard().y}
                   w={midiCard().w}
@@ -929,6 +993,7 @@ const Timeline: Component = () => {
                     return undefined
                   })()}
                   userId={userId() ?? undefined}
+                  onAuditionNote={(p, v, d) => auditionNote(p, v, d)}
                 />
               </Show>
             </div>

@@ -12,6 +12,7 @@ type TrackLaneProps = {
   onClipResizeStart: (trackId: string, clipId: string, edge: 'left' | 'right', e: MouseEvent) => void
   isDropTarget?: boolean
   onClipDblClick?: (trackId: string, clipId: string, e: MouseEvent) => void
+  bpm: number
 }
 
 const TrackLane: Component<TrackLaneProps> = (props) => {
@@ -31,6 +32,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
             onClick={props.onClipClick}
             onResizeStart={props.onClipResizeStart}
             onDblClick={props.onClipDblClick}
+            bpm={props.bpm}
           />
         )}
       </For>

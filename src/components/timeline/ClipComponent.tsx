@@ -11,6 +11,7 @@ type ClipComponentProps = {
   onClick: (trackId: string, clipId: string, e: MouseEvent) => void
   onResizeStart: (trackId: string, clipId: string, edge: 'left' | 'right', e: MouseEvent) => void
   onDblClick?: (trackId: string, clipId: string, e: MouseEvent) => void
+  bpm: number
 }
 
 const MIN_CLIP_PX = 6 // allow trimming to fine grids like 1/16 while keeping handles usable
@@ -51,8 +52,48 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const midY = padTop + innerH / 2
 
     const buffer = props.clip.buffer
+    const midi: any = (props.clip as any).midi
+    // MIDI thumbnail rendering (simple piano-roll bars)
+    if (midi && Array.isArray(midi.notes) && midi.notes.length > 0) {
+      const spb = 60 / Math.max(1, props.bpm || 120)
+      const color = props.isSelected ? 'rgba(59,130,246,0.95)' : 'rgba(34,197,94,0.95)'
+      // Determine pitch range
+      let minP = Infinity, maxP = -Infinity
+      for (const n of midi.notes as Array<{ pitch: number }>) {
+        if (typeof n.pitch === 'number') {
+          if (n.pitch < minP) minP = n.pitch
+          if (n.pitch > maxP) maxP = n.pitch
+        }
+      }
+      if (!Number.isFinite(minP) || !Number.isFinite(maxP)) { minP = 60; maxP = 72 }
+      const range = Math.max(1, maxP - minP)
+      const barH = Math.max(2, Math.floor((innerH / Math.min(12, range))))
+
+      ctx.fillStyle = color
+      for (const note of midi.notes as Array<{ beat: number; length: number; pitch: number }>) {
+        const startSec = Math.max(0, (note.beat || 0) * spb)
+        const endSec = Math.max(startSec, startSec + Math.max(0, (note.length || 0) * spb))
+        const left = Math.max(0, Math.min(cssW, Math.floor((startSec / Math.max(1e-6, props.clip.duration)) * cssW)))
+        const right = Math.max(left + 1, Math.min(cssW, Math.floor((endSec / Math.max(1e-6, props.clip.duration)) * cssW)))
+        const frac = 1 - ((note.pitch - minP) / range)
+        const centerY = padTop + Math.max(0, Math.min(1, frac)) * innerH
+        const yTop = Math.max(padTop, Math.floor(centerY - barH / 2))
+        const width = Math.max(1, right - left)
+        ctx.fillRect(left, yTop, width, barH)
+      }
+
+      // Draw subtle bar grid lines for readability
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)'
+      ctx.lineWidth = 1
+      const bars = Math.max(1, Math.floor(props.clip.duration / (spb * 4)))
+      for (let b = 1; b <= bars; b++) {
+        const x = Math.floor((b * spb * 4 / Math.max(1e-6, props.clip.duration)) * cssW) + 0.5
+        ctx.beginPath(); ctx.moveTo(x, padTop); ctx.lineTo(x, padTop + innerH); ctx.stroke()
+      }
+      return
+    }
     if (!buffer) {
-      // Placeholder stripes if buffer not yet loaded
+      // Placeholder stripes if buffer not yet loaded and not MIDI
       ctx.strokeStyle = 'rgba(255,255,255,0.10)'
       for (let x = 0; x < cssW; x += 6) {
         ctx.beginPath()
@@ -154,6 +195,13 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void props.clip.buffer
     void props.clip.duration
     void props.isSelected
+    // Trigger redraw when MIDI content changes (pitch/beat/length)
+    const midi: any = (props.clip as any).midi
+    const midiSignature = Array.isArray(midi?.notes)
+      ? midi.notes.map((note: any) => `${note.pitch ?? ''}/${note.beat ?? ''}/${note.length ?? ''}`).join('|')
+      : ''
+    void midiSignature
+    void props.bpm
     drawWaveform()
   })
 

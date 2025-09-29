@@ -5,6 +5,7 @@ import Eq, { createDefaultEqParams, type EqParams } from '~/components/effects/E
 import type { AudioEngine, EqParamsLite, ReverbParamsLite } from '~/lib/audio-engine'
 import { convexClient, convexApi } from '~/lib/convex'
 import Reverb, { createDefaultReverbParams, type ReverbParams } from '~/components/effects/Reverb'
+import Synth, { createDefaultSynthParams, type SynthParams } from '~/components/effects/Synth'
 
 type EffectsPanelProps = {
   isOpen: boolean
@@ -37,7 +38,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   })
 
   // ===== Synth (instrument tracks) =====
-  type SynthParams = { wave: 'sine' | 'square' | 'sawtooth' | 'triangle'; gain?: number; attackMs?: number; releaseMs?: number }
   const [synthByTarget, setSynthByTarget] = createSignal<Record<string, SynthParams | undefined>>({})
   const synthForTarget = createMemo(() => synthByTarget()[currentTargetId()])
 
@@ -83,7 +83,15 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
 
   function updateSynth(updater: (prev: SynthParams) => SynthParams) {
     const id = currentTargetId(); if (!id) return
-    setSynthByTarget(prev => ({ ...prev, [id]: updater(prev[id] ?? { wave: 'sawtooth', gain: 0.8, attackMs: 5, releaseMs: 30 }) }))
+    setSynthByTarget(prev => ({ ...prev, [id]: updater(prev[id] ?? createDefaultSynthParams()) }))
+  }
+
+  function handleSynthChange(updates: Partial<SynthParams>) {
+    updateSynth(prev => ({ ...prev!, ...updates }))
+  }
+
+  function handleSynthReset() {
+    updateSynth(() => createDefaultSynthParams())
   }
 
   // ===== MIDI: Add MIDI Clip on instrument tracks =====
@@ -108,7 +116,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         midi: {
           wave: 'sawtooth',
           gain: 0.8,
-          notes: [{ beat: 0, length: 1, pitch: 60, velocity: 0.9 }],
+          notes: [],
         },
         userId: uid,
       })
@@ -396,62 +404,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
             <div class="flex flex-1 flex-col overflow-hidden !-mt-2 p-1">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <Show when={currentTrack() && currentTrack()!.kind === 'instrument'}>
-                  <div class="flex items-center gap-2 text-xs text-neutral-200">
-                    <span class="font-semibold opacity-80">Synth</span>
-                    <select
-                      class="bg-neutral-800 border border-neutral-700 rounded px-1.5 py-1 text-xs"
-                      value={synthForTarget()?.wave ?? 'sawtooth'}
-                      onInput={(e) => updateSynth(prev => ({ ...prev!, wave: (e.currentTarget.value as any) }))}
-                    >
-                      <option value="sine">sine</option>
-                      <option value="square">square</option>
-                      <option value="sawtooth">sawtooth</option>
-                      <option value="triangle">triangle</option>
-                    </select>
-                    <label class="opacity-70">Gain</label>
-                    <input
-                      type="number"
-                      min="0" max="1.5" step="0.05"
-                      class="w-16 bg-neutral-800 border border-neutral-700 rounded px-1 py-0.5"
-                      value={String(synthForTarget()?.gain ?? 0.8)}
-                      onInput={(e) => {
-                        const v = Number(e.currentTarget.value)
-                        if (!Number.isFinite(v)) return
-                        updateSynth(prev => ({ ...prev!, gain: Math.max(0, Math.min(1.5, v)) }))
-                      }}
-                    />
-                    <label class="opacity-70">Atk</label>
-                    <input
-                      type="number"
-                      min="0" max="200" step="1"
-                      class="w-16 bg-neutral-800 border border-neutral-700 rounded px-1 py-0.5"
-                      value={String(synthForTarget()?.attackMs ?? 5)}
-                      onInput={(e) => {
-                        const v = Number(e.currentTarget.value)
-                        if (!Number.isFinite(v)) return
-                        updateSynth(prev => ({ ...prev!, attackMs: Math.max(0, v) }))
-                      }}
-                    />
-                    <label class="opacity-70">Rel</label>
-                    <input
-                      type="number"
-                      min="0" max="200" step="1"
-                      class="w-16 bg-neutral-800 border border-neutral-700 rounded px-1 py-0.5"
-                      value={String(synthForTarget()?.releaseMs ?? 30)}
-                      onInput={(e) => {
-                        const v = Number(e.currentTarget.value)
-                        if (!Number.isFinite(v)) return
-                        updateSynth(prev => ({ ...prev!, releaseMs: Math.max(0, v) }))
-                      }}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => updateSynth(() => ({ wave: 'sawtooth', gain: 0.8, attackMs: 5, releaseMs: 30 }))}
-                    >Reset</Button>
-                  </div>
-                </Show>
-                <Show when={currentTrack() && currentTrack()!.kind === 'instrument'}>
                   <Button variant="default" size="sm" onClick={handleAddMidiClip}>Add MIDI Clip</Button>
                 </Show>
                 <Show when={!eqForTarget()}>
@@ -484,6 +436,15 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
               </div>
               <div class="mt-3 flex-1 overflow-y-auto pr-1">
                 <div class="flex items-start gap-3 flex-wrap">
+                  {/* Synth for instrument tracks */}
+                  <Show when={currentTrack() && currentTrack()!.kind === 'instrument' && !!synthForTarget()}>
+                    <Synth
+                      params={synthForTarget()!}
+                      onChange={handleSynthChange}
+                      onReset={handleSynthReset}
+                    />
+                  </Show>
+                  
                   <For each={orderedEffects()}>{(eff) => (
                     <Show when={eff === 'eq'} fallback={
                       <Show when={!!reverbForTarget()}>
@@ -508,7 +469,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     </Show>
                   )}</For>
                 </div>
-                <Show when={!eqForTarget() && !reverbForTarget()}>
+                <Show when={!eqForTarget() && !reverbForTarget() && (!synthForTarget() || !currentTrack() || currentTrack()!.kind !== 'instrument')}>
                   <div class="mt-4 text-sm text-neutral-400">
                     No effects on this {currentTargetId() === 'master' ? 'master bus' : 'track'}. Use Add EQ or Add Reverb.
                   </div>

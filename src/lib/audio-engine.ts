@@ -26,7 +26,7 @@ export class AudioEngine {
   private masterGain: GainNode | null = null
   private destination: AudioDestinationNode | null = null
   private trackGains = new Map<string, GainNode>()
-  private activeSources: AudioBufferSourceNode[] = []
+  private activeSources: AudioScheduledSourceNode[] = []
   private metronomeSources: AudioBufferSourceNode[] = []
   // New: per-track input prior to effects, and EQ chains
   private trackInputs = new Map<string, GainNode>()
@@ -67,6 +67,8 @@ export class AudioEngine {
   private transportRunning = false
   private readonly metronomeLookaheadSec = 0.25
   private readonly metronomeIntervalMs = 50
+  // --- Simple per-track synth defaults for MIDI ---
+  private trackSynths = new Map<string, { wave: OscillatorType; gain: number; attackMs: number; releaseMs: number }>()
 
   ensureAudio() {
     if (!this.audioCtx) {
@@ -162,6 +164,15 @@ export class AudioEngine {
     if (!isFinite(spb) || spb <= 0) return fromTimelineSec
     const beats = Math.ceil((fromTimelineSec - epsilon) / spb)
     return Math.max(0, beats) * spb
+  }
+
+  setTrackSynth(trackId: string, params: { wave?: string; gain?: number; attackMs?: number; releaseMs?: number }) {
+    // Normalize and store; used during scheduling of MIDI notes
+    const wave: OscillatorType = (params.wave as OscillatorType) || 'sawtooth'
+    const gain = typeof params.gain === 'number' ? Math.max(0, Math.min(1.5, params.gain)) : 0.8
+    const attackMs = typeof params.attackMs === 'number' ? Math.max(0, params.attackMs) : 5
+    const releaseMs = typeof params.releaseMs === 'number' ? Math.max(0, params.releaseMs) : 30
+    this.trackSynths.set(trackId, { wave, gain, attackMs, releaseMs })
   }
 
   private scheduleMetronomeTicks() {
@@ -587,7 +598,64 @@ export class AudioEngine {
 
       const input = this.ensureTrackNodes(t.id)
       for (const c of t.clips) {
-        // Skip clips without audio
+        // MIDI clip scheduling
+        const midi: any = (c as any).midi
+        if (midi && Array.isArray(midi.notes)) {
+          const spb = this.secondsPerBeat()
+          const synth = this.trackSynths.get(t.id)
+          const wave = (midi.wave as OscillatorType) || synth?.wave || 'sawtooth'
+          const clipStart = c.startSec
+          const clipEnd = c.startSec + c.duration
+          for (const note of midi.notes as Array<{ beat: number; length: number; pitch: number; velocity?: number }>) {
+            const noteStartTimeline = clipStart + Math.max(0, note.beat) * spb
+            const noteEndTimeline = noteStartTimeline + Math.max(0, note.length) * spb
+            // Confine to clip window
+            const startTimeline = Math.max(noteStartTimeline, clipStart)
+            const endTimeline = Math.min(noteEndTimeline, clipEnd)
+            if (endTimeline <= startTimeline) continue
+            // Skip if playhead is after the note
+            if (playheadSec >= endTimeline) continue
+            // Compute remaining duration if playhead is inside the note
+            const remaining = endTimeline - Math.max(playheadSec, startTimeline)
+            if (remaining <= 0) continue
+
+            // Start time in context
+            const startCtx = Math.max(now, this.timelineToCtxTime(startTimeline))
+            // Build oscillator + envelope
+            const osc = this.audioCtx.createOscillator()
+            const gain = this.audioCtx.createGain()
+            const vel = typeof note.velocity === 'number' ? Math.max(0, Math.min(1, note.velocity)) : 0.9
+            const clipGain = typeof midi.gain === 'number' ? Math.max(0, Math.min(1.5, midi.gain)) : (synth?.gain ?? 0.8)
+            const amp = vel * clipGain
+            gain.gain.setValueAtTime(0, startCtx)
+            // Simple AR envelope
+            const attack = Math.max(0.001, (synth?.attackMs ?? 5) / 1000)
+            const release = Math.max(0.001, (synth?.releaseMs ?? 30) / 1000)
+            gain.gain.linearRampToValueAtTime(amp, startCtx + attack)
+            gain.gain.setValueAtTime(amp, startCtx + Math.max(0, remaining - release))
+            gain.gain.linearRampToValueAtTime(0, startCtx + Math.max(attack, remaining))
+
+            osc.type = wave
+            // MIDI note to Hz (A4=440, MIDI 69)
+            const freq = 440 * Math.pow(2, (note.pitch - 69) / 12)
+            osc.frequency.setValueAtTime(freq, startCtx)
+
+            osc.connect(gain)
+            gain.connect(input)
+
+            try { osc.start(startCtx) } catch {}
+            try { osc.stop(startCtx + Math.max(attack, remaining)) } catch {}
+            osc.onended = () => {
+              try { gain.disconnect() } catch {}
+              const idx = this.activeSources.indexOf(osc)
+              if (idx >= 0) this.activeSources.splice(idx, 1)
+            }
+            this.activeSources.push(osc)
+          }
+          continue // done with this clip
+        }
+
+        // Audio clip scheduling
         if (!c.buffer) continue
         const leftPad = Math.max(0, c.leftPadSec ?? 0)
         const windowStart = c.startSec

@@ -159,6 +159,10 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
 
     const tsSnapshot = tracks()
     const targetTrack = tsSnapshot.find(t => t.id === trackId)
+    if (targetTrack?.kind === 'instrument') {
+      console.warn('[Import] Cannot insert audio into an instrument track')
+      return
+    }
     let startSec = typeof desiredStart === 'number' ? Math.max(0, desiredStart) : Math.max(0, playheadSec())
     startSec = ensureNonOverlappingStart(targetTrack, startSec, decoded.duration)
 
@@ -205,12 +209,18 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
             targetTrackId = ts0[laneIdx]?.id
           }
           if (!targetTrackId) return
+          // Block inserting audio sample into instrument track
+          const targetTrack = ts0.find(t => t.id === targetTrackId)
+          if (targetTrack?.kind === 'instrument') {
+            console.warn('[Import] Cannot insert audio into an instrument track')
+            return
+          }
 
           // Compute non-overlapping start and base duration
-          const targetTrack = ts0.find(t => t.id === targetTrackId)
+          const targetTrack2 = ts0.find(t => t.id === targetTrackId)
           const baseDuration = typeof parsed.duration === 'number' && parsed.duration > 0 ? parsed.duration : 1
           let startSec = Math.max(0, desiredStart)
-          startSec = ensureNonOverlappingStart(targetTrack, startSec, baseDuration)
+          startSec = ensureNonOverlappingStart(targetTrack2, startSec, baseDuration)
 
           const clipName = parsed.name?.trim()?.length ? parsed.name! : 'Sample'
 
@@ -256,11 +266,17 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
         targetTrackId = ts0[laneIdx]?.id
       }
       if (!targetTrackId) return
+      // Block inserting audio URL into instrument track
+      const targetTrackUrl = ts0.find(t => t.id === targetTrackId)
+      if (targetTrackUrl?.kind === 'instrument') {
+        console.warn('[Import] Cannot insert audio into an instrument track')
+        return
+      }
 
-      const targetTrack = ts0.find(t => t.id === targetTrackId)
+      const targetTrack3 = ts0.find(t => t.id === targetTrackId)
       const baseDuration = 1
       let startSec = Math.max(0, desiredStart)
-      startSec = ensureNonOverlappingStart(targetTrack, startSec, baseDuration)
+      startSec = ensureNonOverlappingStart(targetTrack3, startSec, baseDuration)
 
       const clipName = 'Sample'
       const createdClipId = await createServerClip(targetTrackId, startSec, baseDuration, clipName)
@@ -301,6 +317,12 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
       targetTrackId = ts0[laneIdx]?.id
     }
     if (!targetTrackId) return
+    // Block file drop onto instrument track
+    const targetTrack = ts0.find(t => t.id === targetTrackId)
+    if (targetTrack?.kind === 'instrument') {
+      console.warn('[Import] Cannot insert audio into an instrument track')
+      return
+    }
 
     await handleFilesInternal(file, targetTrackId, desiredStart)
   }
@@ -309,12 +331,30 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     if (!files || files.length === 0) return
     const file = Array.from(files).find(f => f.type.startsWith('audio'))
     if (!file) return
+    // Block using selected track if instrument
+    const stid = selectedTrackId()
+    if (stid) {
+      const st = tracks().find(t => t.id === stid)
+      if (st?.kind === 'instrument') {
+        console.warn('[Import] Cannot add audio to an instrument track')
+        return
+      }
+    }
     await handleFilesInternal(file)
   }
 
   const handleAddAudio = async () => {
     const w = window as unknown as {
       showOpenFilePicker?: (options: any) => Promise<any>
+    }
+    // Block when selected track is instrument
+    const stid = selectedTrackId()
+    if (stid) {
+      const st = tracks().find(t => t.id === stid)
+      if (st?.kind === 'instrument') {
+        console.warn('[Import] Cannot add audio to an instrument track')
+        return
+      }
     }
     if (typeof w.showOpenFilePicker === 'function') {
       try {
@@ -354,6 +394,10 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
 
     const tsSnapshot = tracks()
     const targetTrack = tsSnapshot.find(t => t.id === trackId)
+    if (targetTrack?.kind === 'instrument') {
+      console.warn('[Import] Cannot insert audio into an instrument track')
+      return
+    }
     const baseDuration = typeof duration === 'number' && duration > 0 ? duration : 1
     let startSec = Math.max(0, playheadSec())
     startSec = ensureNonOverlappingStart(targetTrack, startSec, baseDuration)

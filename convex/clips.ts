@@ -53,6 +53,12 @@ export const move = mutation({
       if (!targetTrack || targetTrack.roomId !== clip.roomId) {
         return; // ignore cross-room moves
       }
+      // Block moving audio clips into instrument tracks
+      const isInstrument = (targetTrack as any).kind === 'instrument'
+      const isAudioClip = (clip as any).midi === undefined || (clip as any).midi === null
+      if (isInstrument && isAudioClip) {
+        return; // disallow placing audio clips on instrument tracks
+      }
     }
     await ctx.db.patch(clipId, {
       startSec,
@@ -150,4 +156,37 @@ export const setTiming = mutation({
     await ctx.db.patch(clipId, { startSec: safeStart, duration: safeDuration, ...(safePad !== undefined ? { leftPadSec: safePad } : {}) })
   },
 });
+
+// Set or update MIDI payload for a clip
+export const setMidi = mutation({
+  args: {
+    clipId: v.id('clips'),
+    midi: v.object({
+      wave: v.string(),
+      gain: v.optional(v.number()),
+      notes: v.array(v.object({
+        beat: v.number(),
+        length: v.number(),
+        pitch: v.number(),
+        velocity: v.optional(v.number()),
+      })),
+    }),
+    userId: v.string(),
+  },
+  handler: async (ctx, { clipId, midi, userId }) => {
+    const clip = await ctx.db.get(clipId)
+    if (!clip) return
+    const track = await ctx.db.get(clip.trackId)
+    if (!track || (track as any).kind === 'audio') return
+
+    const owners = await ctx.db
+      .query('ownerships')
+      .withIndex('by_clip', q => q.eq('clipId', clipId))
+      .collect()
+    const owner = owners[0]
+    if (!owner || owner.ownerUserId !== userId) return
+
+    await ctx.db.patch(clipId, { midi })
+  },
+})
 

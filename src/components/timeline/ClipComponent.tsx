@@ -10,6 +10,7 @@ type ClipComponentProps = {
   onMouseDown: (trackId: string, clipId: string, e: MouseEvent) => void
   onClick: (trackId: string, clipId: string, e: MouseEvent) => void
   onResizeStart: (trackId: string, clipId: string, edge: 'left' | 'right', e: MouseEvent) => void
+  onDblClick?: (trackId: string, clipId: string, e: MouseEvent) => void
 }
 
 const ClipComponent: Component<ClipComponentProps> = (props) => {
@@ -162,14 +163,24 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         width: `${Math.max(20, props.clip.duration * PPS)}px`, 
         height: `${LANE_HEIGHT - 16}px` 
       }}
-      onMouseDown={(e) => props.onMouseDown(props.trackId, props.clip.id, e)}
+      onMouseDown={(e) => {
+        // If this is the second click (detail >= 2), treat as dblclick BEFORE starting drag
+        if ((e as MouseEvent).detail >= 2) {
+          e.stopPropagation()
+          props.onDblClick?.(props.trackId, props.clip.id, e)
+          return
+        }
+        props.onMouseDown(props.trackId, props.clip.id, e)
+      }}
       onClick={(e) => props.onClick(props.trackId, props.clip.id, e)}
+      onDblClick={(e) => props.onDblClick?.(props.trackId, props.clip.id, e)}
       title={`${props.clip.name} (${props.clip.duration.toFixed(2)}s)`}
     >
       {/* Left resize handle */}
       <div
         class="absolute inset-y-0 left-0 w-2 cursor-ew-resize z-20 flex items-center justify-center text-[11px] text-neutral-200/80 select-none"
         onMouseDown={(e) => { e.stopPropagation(); props.onResizeStart(props.trackId, props.clip.id, 'left', e) }}
+        onDblClick={(e) => { e.stopPropagation(); props.onDblClick?.(props.trackId, props.clip.id, e) }}
       >
         <span class="opacity-0 group-hover:opacity-100 pointer-events-none">[</span>
       </div>
@@ -177,6 +188,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       <div
         class="absolute inset-y-0 right-0 w-2 cursor-ew-resize z-20 flex items-center justify-center text-[11px] text-neutral-200/80 select-none"
         onMouseDown={(e) => { e.stopPropagation(); props.onResizeStart(props.trackId, props.clip.id, 'right', e) }}
+        onDblClick={(e) => { e.stopPropagation(); props.onDblClick?.(props.trackId, props.clip.id, e) }}
       >
         <span class="opacity-0 group-hover:opacity-100 pointer-events-none">]</span>
       </div>

@@ -1,4 +1,4 @@
-import { type Component, type JSX, For, createEffect, createSignal, onCleanup, onMount, batch, untrack } from 'solid-js'
+import { type Component, type JSX, For, Show, createEffect, createSignal, onCleanup, onMount, batch, untrack } from 'solid-js'
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from '~/components/ui/dialog'
 import type { Track, Clip, SelectedClip } from '~/types/timeline'
 import { getAudioEngine, resetAudioEngine } from '~/lib/audio-engine-singleton'
@@ -13,6 +13,7 @@ import TimelineRuler from './timeline/TimelineRuler'
 import TrackLane from './timeline/TrackLane'
 import TrackSidebar from './timeline/TrackSidebar'
 import EffectsPanel from './timeline/EffectsPanel'
+import MidiEditorCard from './midi/MidiEditorCard'
 import { Button } from './ui/button'
 import { convexClient, convexApi } from '~/lib/convex'
 import { useTimelineData } from '~/hooks/useTimelineData'
@@ -209,6 +210,60 @@ const Timeline: Component = () => {
     console.warn('[Timeline][recording]', message)
   }
 
+  // ===== Floating MIDI editor state =====
+  const [midiEditorClipId, setMidiEditorClipId] = createSignal<string | null>(null)
+  const [midiCard, setMidiCard] = createSignal<{ x: number; y: number; w: number; h: number }>({ x: 80, y: 80, w: 720, h: 360 })
+  const midiCardStorageKey = () => {
+    const rid = roomId() || 'default'
+    return `mb:midi_card:${rid}`
+  }
+  // Load persisted position/size per room
+  createEffect(() => {
+    const key = midiCardStorageKey()
+    if (!canUseLocalStorage()) return
+    try {
+      const raw = window.localStorage.getItem(key)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed && typeof parsed === 'object') {
+          const { x, y, w, h } = parsed
+          if ([x, y, w, h].every((v: any) => typeof v === 'number' && isFinite(v))) {
+            setMidiCard({ x, y, w, h })
+          }
+        }
+      }
+    } catch {}
+  })
+  const persistMidiCard = () => {
+    if (!canUseLocalStorage()) return
+    try { window.localStorage.setItem(midiCardStorageKey(), JSON.stringify(midiCard())) } catch {}
+  }
+  const closeMidiEditor = () => setMidiEditorClipId(null)
+  const openMidiEditorFor = (clipId: string) => {
+    // Only open for clips that have MIDI payload
+    try {
+      for (const t of tracks()) {
+        const c = t.clips.find(cc => cc.id === clipId)
+        if (c && (c as any).midi) {
+          setMidiEditorClipId(clipId)
+          return
+        }
+      }
+    } catch {}
+  }
+
+  // Auto-close editor if the clip disappears or no longer has MIDI
+  createEffect(() => {
+    const id = midiEditorClipId()
+    if (!id) return
+    let ok = false
+    for (const t of tracks()) {
+      const c = t.clips.find(cc => cc.id === id)
+      if (c && (c as any).midi) { ok = true; break }
+    }
+    if (!ok) setMidiEditorClipId(null)
+  })
+
   const recordingControls = useTrackRecording({
     audioEngine,
     tracks,
@@ -387,6 +442,7 @@ const Timeline: Component = () => {
           ? (typeof serverSoloed === 'boolean' ? serverSoloed : (prev?.soloed ?? localMix[id]?.soloed ?? false))
           : (prev?.soloed ?? localMix[id]?.soloed ?? false),
         lockedBy: serverLockedBy ?? prev?.lockedBy ?? null,
+        kind: (t as any).kind ?? prev?.kind ?? 'audio',
       }
     })
 
@@ -430,6 +486,7 @@ const Timeline: Component = () => {
         leftPadSec: (c as any).leftPadSec ?? prevClip?.leftPadSec ?? 0,
         color,
         sampleUrl: (c as any).sampleUrl as string | undefined,
+        midi: (c as any).midi,
       })
     }
 
@@ -457,6 +514,7 @@ const Timeline: Component = () => {
             leftPadSec: localClip.leftPadSec ?? 0,
             color: localClip.color,
             sampleUrl: localClip.sampleUrl,
+            midi: (localClip as any).midi,
           })
         }
       }
@@ -629,6 +687,8 @@ const Timeline: Component = () => {
     const ts = tracks()
     for (const t of ts) {
       for (const c of t.clips) {
+        // Skip MIDI clips (no audio buffer to fetch)
+        if ((c as any).midi) continue
         if (!c.buffer) {
           void ensureClipBuffer(c.id, c.sampleUrl)
         }
@@ -767,6 +827,15 @@ const Timeline: Component = () => {
                     onClipMouseDown={onClipMouseDown}
                     onClipClick={onClipClick}
                     onClipResizeStart={onClipResizeStart}
+                    onClipDblClick={(_, clipId) => {
+                      try {
+                        const t = tracks().find(tt => tt.id === track.id)
+                        const c = t?.clips.find(cc => cc.id === clipId)
+                        if (c && (c as any).midi) {
+                          openMidiEditorFor(clipId)
+                        }
+                      } catch {}
+                    }}
                   />
                 )}
               </For>
@@ -805,6 +874,32 @@ const Timeline: Component = () => {
               
               {/* Playhead */}
               <div class="absolute top-0 bottom-0 w-px bg-red-500 pointer-events-none" style={{ left: `${playheadSec() * PPS}px` }} />
+
+              {/* Floating MIDI Editor Card */}
+              <Show when={midiEditorClipId()}>
+                {/* Invisible overlay to prevent interactions with content behind the editor */}
+                <div class="absolute inset-0 z-40" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} />
+                <MidiEditorCard
+                  clipId={midiEditorClipId()!}
+                  bpm={bpm()}
+                  x={midiCard().x}
+                  y={midiCard().y}
+                  w={midiCard().w}
+                  h={midiCard().h}
+                  onClose={() => closeMidiEditor()}
+                  onChangeBounds={(next: { x: number; y: number; w: number; h: number }) => { setMidiCard(next); persistMidiCard() }}
+                  midi={(() => {
+                    const id = midiEditorClipId()
+                    if (!id) return undefined
+                    for (const t of tracks()) {
+                      const c = t.clips.find(cc => cc.id === id)
+                      if (c) return (c as any).midi
+                    }
+                    return undefined
+                  })()}
+                  userId={userId() ?? undefined}
+                />
+              </Show>
             </div>
           </div>
         </div>
@@ -821,6 +916,13 @@ const Timeline: Component = () => {
           }}
           onAddTrack={async () => {
             const id = await convexClient.mutation(convexApi.tracks.create, { roomId: roomId(), userId: userId() }) as any as string
+            batch(() => {
+              setSelectedTrackId(id)
+              setSelectedFXTarget(id)
+            })
+          }}
+          onAddInstrumentTrack={async () => {
+            const id = await convexClient.mutation(convexApi.tracks.create as any, { roomId: roomId(), userId: userId(), kind: 'instrument' } as any) as any as string
             batch(() => {
               setSelectedTrackId(id)
               setSelectedFXTarget(id)
@@ -889,6 +991,24 @@ const Timeline: Component = () => {
         audioEngine={audioEngine}
         roomId={roomId()}
         userId={userId()}
+        playheadSec={playheadSec()}
+        onSelectClip={(trackId, clipId, startSec) => {
+          // Select the created clip and jump to it
+          batch(() => {
+            setSelectedTrackId(trackId)
+            setSelectedClip({ trackId, clipId })
+            setSelectedFXTarget(trackId)
+            setSelectedClipIds(new Set([clipId]))
+          })
+          setPlayhead(Math.max(0, startSec), tracks())
+          openMidiEditorFor(clipId)
+          try {
+            if (scrollRef) {
+              const centerLeft = Math.max(0, startSec * PPS - (scrollRef.clientWidth / 2))
+              scrollRef.scrollLeft = Math.floor(centerLeft)
+            }
+          } catch {}
+        }}
       />
 
       <Dialog open={confirmOpen()} onOpenChange={setConfirmOpen}>

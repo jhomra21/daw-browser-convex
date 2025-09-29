@@ -195,6 +195,12 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     }
 
     const movingClipId = draggingIds.clipId
+    const movingClipSrcTrack = snapshot.find(t => t.clips.some(c => c.id === movingClipId))
+    const movingClip = movingClipSrcTrack?.clips.find(c => c.id === movingClipId)
+    // Block audio -> instrument during drag preview
+    if (targetTrack?.kind === 'instrument' && movingClip && !(movingClip as any).midi) {
+      return
+    }
 
     if (multiDragging) {
       const multi = multiDragging
@@ -232,6 +238,10 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
         const targetIdx = ts.findIndex(t => t.id === targetId)
         if (targetIdx < 0) return ts
         const targetTrack = ts[targetIdx]
+        // Block moving audio into instrument track
+        if (targetTrack.kind === 'instrument' && !(movingClip as any).midi) {
+          return ts
+        }
 
         if (srcIdx === targetIdx) {
           const overlap = willOverlap(targetTrack.clips, movingClip.id, desiredStart, duration)
@@ -368,6 +378,32 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
         const ts = tracks()
         laneIdx = Math.max(0, Math.min(laneIdx, ts.length - 1))
         const deltaIdx = laneIdx - md.anchorOrigTrackIdx
+        // Block any audio item moving into an instrument target
+        const targetIdx = Math.max(0, Math.min(ts.length - 1, md.anchorOrigTrackIdx + deltaIdx))
+        const targetTrack = ts[targetIdx]
+        if (targetTrack?.kind === 'instrument') {
+          const hasAudio = md.items.some(it => {
+            const t = ts.find(tt => tt.clips.some(c => c.id === it.clipId))
+            const c = t?.clips.find(cc => cc.id === it.clipId)
+            return c && !(c as any).midi
+          })
+          if (hasAudio) {
+            // Cancel cross-track move; just snap start within original tracks
+            for (const it of md.items) {
+              const newStart = Math.max(0, desiredStart + (it.origStartSec - md.anchorOrigStartSec))
+              void convexClient.mutation(convexApi.clips.move, { clipId: it.clipId as any, startSec: newStart })
+              optimisticMoves.set(it.clipId, { trackId: ts[it.origTrackIdx].id, startSec: newStart })
+            }
+            updateDragState()
+            dragging = false
+            multiDragging = null
+            addedTrackDuringDrag = null
+            creatingTrackDuringDrag = false
+            window.removeEventListener('mousemove', onWindowMouseMove)
+            window.removeEventListener('mouseup', onWindowMouseUp)
+            return
+          }
+        }
         for (const it of md.items) {
           const newStart = Math.max(0, desiredStart + (it.origStartSec - md.anchorOrigStartSec))
           const idx = Math.max(0, Math.min(ts.length - 1, it.origTrackIdx + deltaIdx))
@@ -386,12 +422,19 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
         const t = tracks().find(tt => tt.id === draggingIds!.trackId)
         const c = t?.clips.find(cc => cc.id === draggingIds!.clipId)
         if (c) {
-          void convexClient.mutation(convexApi.clips.move, {
+          // If destination is instrument but clip is audio, keep track and only update start
+          const destTrack = t
+          if (destTrack?.kind === 'instrument' && !(c as any).midi) {
+            void convexClient.mutation(convexApi.clips.move, { clipId: c.id as any, startSec: c.startSec })
+            optimisticMoves.set(c.id, { trackId: t!.id, startSec: c.startSec })
+          } else {
+            void convexClient.mutation(convexApi.clips.move, {
             clipId: c.id as any,
             startSec: c.startSec,
             toTrackId: t?.id as any,
-          })
-          optimisticMoves.set(c.id, { trackId: t!.id, startSec: c.startSec })
+            })
+            optimisticMoves.set(c.id, { trackId: t!.id, startSec: c.startSec })
+          }
           batch(() => {
             setSelectedClip({ trackId: t!.id, clipId: c.id })
             setSelectedClipIds(new Set([c.id]))

@@ -15,6 +15,68 @@ export const getEqForTrack = query({
   },
 });
 
+// Synth: get synth row for a track
+export const getSynthForTrack = query({
+  args: { trackId: v.id('tracks') },
+  handler: async (ctx, { trackId }) => {
+    const rows = await ctx.db
+      .query('effects')
+      .withIndex('by_track', q => q.eq('trackId', trackId))
+      .collect();
+    rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    return rows.find(r => r.type === 'synth' && ((r as any).targetType === 'track' || (r as any).targetType === undefined)) ?? null;
+  },
+})
+
+// Synth: set or create synth params for a track
+export const setSynthParams = mutation({
+  args: {
+    roomId: v.string(),
+    trackId: v.id('tracks'),
+    userId: v.string(),
+    params: v.object({
+      wave: v.string(),
+      gain: v.optional(v.number()),
+      attackMs: v.optional(v.number()),
+      releaseMs: v.optional(v.number()),
+    }),
+  },
+  handler: async (ctx, { roomId, trackId, userId, params }) => {
+    const track = await ctx.db.get(trackId)
+    if (!track || track.roomId !== roomId) return
+
+    // owner only
+    const owners = await ctx.db
+      .query('ownerships')
+      .withIndex('by_track', q => q.eq('trackId', trackId))
+      .collect();
+    const owner = owners[0]
+    if (!owner || owner.ownerUserId !== userId) return
+
+    const existing = await ctx.db
+      .query('effects')
+      .withIndex('by_track', q => q.eq('trackId', trackId))
+      .collect();
+    const byIndex = existing.sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    const row = byIndex.find(r => r.type === 'synth') ?? null
+    if (row) {
+      await ctx.db.patch(row._id, { params, targetType: 'track' })
+      return row._id
+    }
+    const newIndex = existing.length
+    const id = await ctx.db.insert('effects', {
+      roomId,
+      targetType: 'track',
+      trackId,
+      index: newIndex,
+      type: 'synth',
+      params,
+      createdAt: Date.now(),
+    })
+    return id
+  },
+})
+
 // Set or create the Reverb params for a given track
 export const setReverbParams = mutation({
   args: {

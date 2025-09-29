@@ -137,11 +137,23 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
             leftPadSec: clip.leftPadSec ?? 0,
             color: clip.color,
             sampleUrl: clip.sampleUrl,
+            midi: (clip as any).midi,
           }],
         })))
 
         if (clip.sampleUrl) {
           void convexClient.mutation(convexApi.clips.setSampleUrl, { clipId: createdClipId as any, sampleUrl: clip.sampleUrl })
+        }
+
+        // Persist MIDI payload if present
+        if ((clip as any).midi) {
+          try {
+            await convexClient.mutation((convexApi as any).clips.setMidi, {
+              clipId: createdClipId as any,
+              midi: (clip as any).midi,
+              userId: userId() as any,
+            })
+          } catch {}
         }
 
         if (typeof clip.leftPadSec === 'number' && Number.isFinite(clip.leftPadSec)) {

@@ -15,6 +15,9 @@ type EffectsPanelProps = {
   audioEngine?: AudioEngine
   roomId?: string
   userId?: string
+  // Timeline context
+  playheadSec?: number
+  onSelectClip?: (trackId: string, clipId: string, startSec: number) => void
 }
 
 const EffectsPanel: Component<EffectsPanelProps> = (props) => {
@@ -25,9 +28,99 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     return track?.name ?? 'Track'
   }
 
+  // Target helpers must be defined before any usage below
+  const currentTargetId = () => props.selectedFXTarget || 'master'
+  const currentTrack = createMemo(() => {
+    const id = currentTargetId()
+    if (!id || id === 'master') return undefined
+    return props.tracks.find(t => t.id === id)
+  })
+
+  // ===== Synth (instrument tracks) =====
+  type SynthParams = { wave: 'sine' | 'square' | 'sawtooth' | 'triangle'; gain?: number; attackMs?: number; releaseMs?: number }
+  const [synthByTarget, setSynthByTarget] = createSignal<Record<string, SynthParams | undefined>>({})
+  const synthForTarget = createMemo(() => synthByTarget()[currentTargetId()])
+
+  // Load synth from Convex for selected track
+  const lastSavedSynth = new Map<string, string>()
+  createEffect(() => {
+    const id = currentTargetId(); if (!id || id === 'master') return
+    ;(async () => {
+      try {
+        const row = await convexClient.query((convexApi as any).effects.getSynthForTrack, { trackId: id as any })
+        if (row?.params) {
+          const p = row.params as SynthParams
+          setSynthByTarget(prev => ({ ...prev, [id]: p }))
+          lastSavedSynth.set(id, JSON.stringify(p))
+          props.audioEngine?.setTrackSynth(id, p)
+          setEffectOrderForTarget(id, 'eq', (row as any).index) // keep ordering map warm; not strictly needed
+        } else {
+          setSynthByTarget(prev => ({ ...prev, [id]: undefined }))
+        }
+      } catch {
+        setSynthByTarget(prev => ({ ...prev, [id]: undefined }))
+      }
+    })()
+  })
+
+  // Apply/persist on change
+  createEffect(() => {
+    const id = currentTargetId(); if (!id || id === 'master') return
+    const params = synthForTarget(); if (!params) return
+    const json = JSON.stringify(params)
+    if (lastSavedSynth.get(id) === json) return
+    lastSavedSynth.set(id, json)
+    props.audioEngine?.setTrackSynth(id, params)
+    if (props.roomId && props.userId) {
+      void convexClient.mutation((convexApi as any).effects.setSynthParams, {
+        roomId: props.roomId,
+        trackId: id as any,
+        userId: props.userId,
+        params,
+      })
+    }
+  })
+
+  function updateSynth(updater: (prev: SynthParams) => SynthParams) {
+    const id = currentTargetId(); if (!id) return
+    setSynthByTarget(prev => ({ ...prev, [id]: updater(prev[id] ?? { wave: 'sawtooth', gain: 0.8, attackMs: 5, releaseMs: 30 }) }))
+  }
+
+  // ===== MIDI: Add MIDI Clip on instrument tracks =====
+  async function handleAddMidiClip() {
+    const track = currentTrack(); if (!track) return
+    if ((track.kind as any) !== 'instrument') return
+    const rid = props.roomId; const uid = props.userId
+    if (!rid || !uid) return
+    const start = Math.max(0, Math.round((props.playheadSec ?? 0) * 1000) / 1000)
+    try {
+      const clipId = await convexClient.mutation(convexApi.clips.create as any, {
+        roomId: rid,
+        trackId: track.id as any,
+        startSec: start,
+        duration: 1,
+        userId: uid,
+        name: 'MIDI Clip',
+      } as any) as any as string
+      if (!clipId) return
+      await convexClient.mutation((convexApi as any).clips.setMidi, {
+        clipId: clipId as any,
+        midi: {
+          wave: 'sawtooth',
+          gain: 0.8,
+          notes: [{ beat: 0, length: 1, pitch: 60, velocity: 0.9 }],
+        },
+        userId: uid,
+      })
+      // Hint parent to select/jump
+      props.onSelectClip?.(track.id, clipId, start)
+    } catch (err) {
+      console.warn('[EffectsPanel] failed to add MIDI clip', err)
+    }
+  }
+
   // Local EQ params per FX target (trackId or 'master'); undefined = no EQ yet
   const [eqByTarget, setEqByTarget] = createSignal<Record<string, EqParams | undefined>>({})
-  const currentTargetId = () => props.selectedFXTarget || 'master'
 
   const eqForTarget = createMemo(() => {
     const id = currentTargetId()
@@ -301,7 +394,66 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
               </div>
             </div>
             <div class="flex flex-1 flex-col overflow-hidden !-mt-2 p-1">
-              <div class="flex flex-wrap items-center justify-end gap-2">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <Show when={currentTrack() && currentTrack()!.kind === 'instrument'}>
+                  <div class="flex items-center gap-2 text-xs text-neutral-200">
+                    <span class="font-semibold opacity-80">Synth</span>
+                    <select
+                      class="bg-neutral-800 border border-neutral-700 rounded px-1.5 py-1 text-xs"
+                      value={synthForTarget()?.wave ?? 'sawtooth'}
+                      onInput={(e) => updateSynth(prev => ({ ...prev!, wave: (e.currentTarget.value as any) }))}
+                    >
+                      <option value="sine">sine</option>
+                      <option value="square">square</option>
+                      <option value="sawtooth">sawtooth</option>
+                      <option value="triangle">triangle</option>
+                    </select>
+                    <label class="opacity-70">Gain</label>
+                    <input
+                      type="number"
+                      min="0" max="1.5" step="0.05"
+                      class="w-16 bg-neutral-800 border border-neutral-700 rounded px-1 py-0.5"
+                      value={String(synthForTarget()?.gain ?? 0.8)}
+                      onInput={(e) => {
+                        const v = Number(e.currentTarget.value)
+                        if (!Number.isFinite(v)) return
+                        updateSynth(prev => ({ ...prev!, gain: Math.max(0, Math.min(1.5, v)) }))
+                      }}
+                    />
+                    <label class="opacity-70">Atk</label>
+                    <input
+                      type="number"
+                      min="0" max="200" step="1"
+                      class="w-16 bg-neutral-800 border border-neutral-700 rounded px-1 py-0.5"
+                      value={String(synthForTarget()?.attackMs ?? 5)}
+                      onInput={(e) => {
+                        const v = Number(e.currentTarget.value)
+                        if (!Number.isFinite(v)) return
+                        updateSynth(prev => ({ ...prev!, attackMs: Math.max(0, v) }))
+                      }}
+                    />
+                    <label class="opacity-70">Rel</label>
+                    <input
+                      type="number"
+                      min="0" max="200" step="1"
+                      class="w-16 bg-neutral-800 border border-neutral-700 rounded px-1 py-0.5"
+                      value={String(synthForTarget()?.releaseMs ?? 30)}
+                      onInput={(e) => {
+                        const v = Number(e.currentTarget.value)
+                        if (!Number.isFinite(v)) return
+                        updateSynth(prev => ({ ...prev!, releaseMs: Math.max(0, v) }))
+                      }}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => updateSynth(() => ({ wave: 'sawtooth', gain: 0.8, attackMs: 5, releaseMs: 30 }))}
+                    >Reset</Button>
+                  </div>
+                </Show>
+                <Show when={currentTrack() && currentTrack()!.kind === 'instrument'}>
+                  <Button variant="default" size="sm" onClick={handleAddMidiClip}>Add MIDI Clip</Button>
+                </Show>
                 <Show when={!eqForTarget()}>
                   <Button variant="default" size="sm" onClick={handleAddEq}>Add EQ</Button>
                 </Show>

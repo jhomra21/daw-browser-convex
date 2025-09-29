@@ -9,6 +9,8 @@ export default defineSchema({
     roomId: v.string(),
     index: v.number(),
     volume: v.number(), // 0..1
+    // Optional track kind; defaults to 'audio' on clients if absent
+    kind: v.optional(v.string()), // 'audio' | 'instrument'
     // Optional shared mix state; only applied when clients opt-in to sync
     muted: v.optional(v.boolean()),
     soloed: v.optional(v.boolean()),
@@ -29,6 +31,17 @@ export default defineSchema({
     name: v.optional(v.string()),
     // Optional URL where the audio sample is stored (e.g. R2-backed endpoint)
     sampleUrl: v.optional(v.string()),
+    // Optional MIDI payload (instrument-generated instead of audio sample)
+    midi: v.optional(v.object({
+      wave: v.string(), // 'sine'|'square'|'sawtooth'|'triangle'
+      gain: v.optional(v.number()),
+      notes: v.array(v.object({
+        beat: v.number(),
+        length: v.number(),
+        pitch: v.number(),
+        velocity: v.optional(v.number()),
+      })),
+    })),
   })
     .index("by_room", ["roomId"]) // list clips in a room
     .index("by_track", ["trackId"]), // list clips per track

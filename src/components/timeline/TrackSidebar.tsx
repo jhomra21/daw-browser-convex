@@ -7,6 +7,7 @@ type TrackSidebarProps = {
   sidebarWidth: number
   onTrackClick: (trackId: string) => void
   onAddTrack: () => void
+  onAddInstrumentTrack?: () => void
   onVolumeChange: (trackId: string, volume: number) => void
   onSidebarMouseDown: (e: MouseEvent) => void
   onToggleMute: (trackId: string) => void
@@ -59,8 +60,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               Sync Mix
             </button>
           </div>
-          <button class="text-base text-neutral-400 hover:text-neutral-300 pr-2
-           cursor-pointer active:scale-97 transition-transform ease-out" onClick={props.onAddTrack}>Add Track</button>
+          <div class="flex items-center gap-2 pr-2">
+            <button class="text-base text-neutral-400 hover:text-neutral-300
+             cursor-pointer active:scale-97 transition-transform ease-out" onClick={props.onAddTrack}>Add Track</button>
+            <button class="text-xs text-neutral-300 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded px-2 py-1
+             cursor-pointer active:scale-97 transition-transform ease-out" onClick={() => props.onAddInstrumentTrack?.()} title="Add instrument track (for MIDI clips)">+ Instrument</button>
+          </div>
         </div>
         <For each={props.tracks}>
           {(track) => {

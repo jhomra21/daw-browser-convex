@@ -22,8 +22,8 @@ export const listByRoom = query({
 });
 
 export const create = mutation({
-  args: { roomId: v.string(), userId: v.string() },
-  handler: async (ctx, { roomId, userId }) => {
+  args: { roomId: v.string(), userId: v.string(), kind: v.optional(v.string()) },
+  handler: async (ctx, { roomId, userId, kind }) => {
     // Compute next index in room
     const existing = await ctx.db
       .query("tracks")
@@ -35,6 +35,7 @@ export const create = mutation({
       roomId,
       index: nextIndex,
       volume: 0.8,
+      kind,
       lockedBy: undefined,
       lockedAt: undefined,
     });

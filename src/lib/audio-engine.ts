@@ -21,6 +21,24 @@ export type ReverbParamsLite = {
   preDelayMs: number // 0..200
 }
 
+// Internal representation of an active MIDI note for realtime envelope retargeting
+type ActiveNote = {
+  trackId: string
+  osc: OscillatorNode
+  gain: GainNode
+  amp: number
+  startCtx: number
+  // Hard end of the note (clip/note boundary translated to context time, also respects minimum attack)
+  endCtx: number
+  // When the release should start (context time)
+  releaseStartCtx: number
+  // Envelope params used when the note was scheduled
+  attackSec: number
+  releaseSec: number
+  // Cleanup timer id for stopping oscillator at endCtx
+  cleanupTimer: number | null
+}
+
 export class AudioEngine {
   private audioCtx: AudioContext | null = null
   private masterGain: GainNode | null = null
@@ -69,6 +87,12 @@ export class AudioEngine {
   private readonly metronomeIntervalMs = 50
   // --- Simple per-track synth defaults for MIDI ---
   private trackSynths = new Map<string, { wave: OscillatorType; gain: number; attackMs: number; releaseMs: number }>()
+  // Track currently active/scheduled oscillators per track for live param updates (e.g., waveform)
+  private activeOscillatorsByTrack = new Map<string, Set<OscillatorNode>>()
+  // Track-level synth gain node so gain updates affect active notes in real time
+  private trackSynthGains = new Map<string, GainNode>()
+  // Active notes by track for realtime envelope retargeting
+  private activeNotesByTrack = new Map<string, Set<ActiveNote>>()
 
   ensureAudio() {
     if (!this.audioCtx) {
@@ -173,6 +197,108 @@ export class AudioEngine {
     const attackMs = typeof params.attackMs === 'number' ? Math.max(0, params.attackMs) : 5
     const releaseMs = typeof params.releaseMs === 'number' ? Math.max(0, params.releaseMs) : 30
     this.trackSynths.set(trackId, { wave, gain, attackMs, releaseMs })
+    // Live-update waveform for any oscillators currently active or scheduled on this track
+    const set = this.activeOscillatorsByTrack.get(trackId)
+    if (set) {
+      for (const osc of Array.from(set)) {
+        try { (osc as OscillatorNode).type = wave } catch {}
+      }
+    }
+    // Live-update track-level synth gain node, if present
+    const g = this.trackSynthGains.get(trackId)
+    if (g) {
+      try { g.gain.value = gain } catch {}
+    }
+    // Retarget envelopes of currently active notes on this track so attack/release changes apply live
+    this.retargetActiveNotesForTrack(trackId)
+  }
+
+  private computeCurrentAmp(note: ActiveNote, nowCtx: number) {
+    const { startCtx, endCtx, releaseStartCtx, attackSec, amp } = note
+    if (nowCtx <= startCtx) return 0
+    const attackEnd = startCtx + Math.max(0.001, attackSec)
+    if (nowCtx <= attackEnd) {
+      const t = (nowCtx - startCtx) / Math.max(0.001, attackSec)
+      return amp * Math.max(0, Math.min(1, t))
+    }
+    if (nowCtx <= releaseStartCtx) return amp
+    if (nowCtx >= endCtx) return 0
+    const relDur = Math.max(0.001, endCtx - releaseStartCtx)
+    const t = (nowCtx - releaseStartCtx) / relDur
+    return amp * Math.max(0, Math.min(1, 1 - t))
+  }
+
+  private scheduleCleanupForNote(note: ActiveNote) {
+    if (!this.audioCtx) return
+    const nowCtx = this.audioCtx.currentTime
+    const delayMs = Math.max(0, (note.endCtx - nowCtx) * 1000) + 5
+    if (note.cleanupTimer) try { clearTimeout(note.cleanupTimer) } catch {}
+    note.cleanupTimer = setTimeout(() => {
+      try { note.osc.stop() } catch {}
+      try { note.gain.disconnect() } catch {}
+      const set = this.activeOscillatorsByTrack.get(note.trackId)
+      if (set) {
+        set.delete(note.osc)
+        if (set.size === 0) this.activeOscillatorsByTrack.delete(note.trackId)
+      }
+      const notes = this.activeNotesByTrack.get(note.trackId)
+      if (notes) {
+        notes.delete(note)
+        if (notes.size === 0) this.activeNotesByTrack.delete(note.trackId)
+      }
+    }, delayMs) as unknown as number
+  }
+
+  private retargetActiveNotesForTrack(trackId: string) {
+    if (!this.audioCtx) return
+    const synth = this.trackSynths.get(trackId)
+    if (!synth) return
+    const notes = this.activeNotesByTrack.get(trackId)
+    if (!notes || notes.size === 0) return
+    const now = this.audioCtx.currentTime
+    const attackSec = Math.max(0.001, (synth.attackMs ?? 5) / 1000)
+    const releaseSec = Math.max(0.001, (synth.releaseMs ?? 30) / 1000)
+    for (const note of Array.from(notes)) {
+      const p = note.gain.gain
+      try { p.cancelScheduledValues(now) } catch {}
+      // Anchor to current amplitude to avoid clicks
+      const currentAmp = this.computeCurrentAmp(note, now)
+      try { p.setValueAtTime(currentAmp, now) } catch {}
+
+      // Recompute new envelope times while preserving hard end at note.endCtx
+      const attackEndNew = note.startCtx + attackSec
+      const releaseStartNew = Math.max(attackEndNew, note.endCtx - releaseSec)
+
+      if (now < attackEndNew) {
+        try { p.linearRampToValueAtTime(note.amp, attackEndNew) } catch {}
+      }
+      if (releaseStartNew > Math.max(now, attackEndNew)) {
+        try { p.setValueAtTime(note.amp, releaseStartNew) } catch {}
+      }
+      try { p.linearRampToValueAtTime(0, note.endCtx) } catch {}
+
+      // Update stored params and schedule cleanup according to new end (unchanged) but reset timer
+      note.attackSec = attackSec
+      note.releaseSec = releaseSec
+      note.releaseStartCtx = releaseStartNew
+      this.scheduleCleanupForNote(note)
+    }
+  }
+
+  private ensureTrackSynthGainNode(trackId: string): GainNode {
+    if (!this.audioCtx) this.ensureAudio()
+    const input = this.ensureTrackNodes(trackId)
+    if (!this.audioCtx) return input
+    let node = this.trackSynthGains.get(trackId)
+    if (!node) {
+      node = this.audioCtx.createGain()
+      const synth = this.trackSynths.get(trackId)
+      node.gain.value = synth?.gain ?? 0.8
+      // Route synth output into the track input (so EQ/reverb still apply downstream)
+      node.connect(input)
+      this.trackSynthGains.set(trackId, node)
+    }
+    return node
   }
 
   private scheduleMetronomeTicks() {
@@ -564,6 +690,8 @@ export class AudioEngine {
       try { s.disconnect() } catch {}
     }
     this.activeSources = []
+    // Clear tracked oscillators; onended would normally clean up, but force-clear to be safe
+    this.activeOscillatorsByTrack.clear()
   }
 
   stopAllSources() {
@@ -603,7 +731,7 @@ export class AudioEngine {
         if (midi && Array.isArray(midi.notes)) {
           const spb = this.secondsPerBeat()
           const synth = this.trackSynths.get(t.id)
-          const wave = (midi.wave as OscillatorType) || synth?.wave || 'sawtooth'
+          const wave = synth?.wave || (midi.wave as OscillatorType) || 'sawtooth'
           const clipStart = c.startSec
           const clipEnd = c.startSec + c.duration
           for (const note of midi.notes as Array<{ beat: number; length: number; pitch: number; velocity?: number }>) {
@@ -623,17 +751,27 @@ export class AudioEngine {
             const startCtx = Math.max(now, this.timelineToCtxTime(startTimeline))
             // Build oscillator + envelope
             const osc = this.audioCtx.createOscillator()
+            // Track this oscillator under its track for live updates
+            let trackOscs = this.activeOscillatorsByTrack.get(t.id)
+            if (!trackOscs) { trackOscs = new Set<OscillatorNode>(); this.activeOscillatorsByTrack.set(t.id, trackOscs) }
+            trackOscs.add(osc)
             const gain = this.audioCtx.createGain()
             const vel = typeof note.velocity === 'number' ? Math.max(0, Math.min(1, note.velocity)) : 0.9
-            const clipGain = typeof midi.gain === 'number' ? Math.max(0, Math.min(1.5, midi.gain)) : (synth?.gain ?? 0.8)
+            // Per-clip gain (track synth gain is handled by a dedicated track-level node for live updates)
+            const clipGain = typeof midi.gain === 'number' ? Math.max(0, Math.min(1.5, midi.gain)) : 1.0
             const amp = vel * clipGain
             gain.gain.setValueAtTime(0, startCtx)
             // Simple AR envelope
             const attack = Math.max(0.001, (synth?.attackMs ?? 5) / 1000)
             const release = Math.max(0.001, (synth?.releaseMs ?? 30) / 1000)
-            gain.gain.linearRampToValueAtTime(amp, startCtx + attack)
-            gain.gain.setValueAtTime(amp, startCtx + Math.max(0, remaining - release))
-            gain.gain.linearRampToValueAtTime(0, startCtx + Math.max(attack, remaining))
+            const attackEnd = startCtx + attack
+            const releaseStart = startCtx + Math.max(0, remaining - release)
+            const endCtx = startCtx + Math.max(attack, remaining)
+            gain.gain.linearRampToValueAtTime(amp, attackEnd)
+            if (releaseStart > attackEnd) {
+              gain.gain.setValueAtTime(amp, releaseStart)
+            }
+            gain.gain.linearRampToValueAtTime(0, endCtx)
 
             osc.type = wave
             // MIDI note to Hz (A4=440, MIDI 69)
@@ -641,12 +779,46 @@ export class AudioEngine {
             osc.frequency.setValueAtTime(freq, startCtx)
 
             osc.connect(gain)
-            gain.connect(input)
+            // Route MIDI note through per-track synth gain node so live gain changes apply immediately
+            gain.connect(this.ensureTrackSynthGainNode(t.id))
 
             try { osc.start(startCtx) } catch {}
-            try { osc.stop(startCtx + Math.max(attack, remaining)) } catch {}
+            // Register active note for realtime retargeting and schedule cleanup at endCtx
+            const noteEntry: ActiveNote = {
+              trackId: t.id,
+              osc,
+              gain,
+              amp,
+              startCtx,
+              endCtx,
+              releaseStartCtx: releaseStart,
+              attackSec: attack,
+              releaseSec: release,
+              cleanupTimer: null,
+            }
+            let notes = this.activeNotesByTrack.get(t.id)
+            if (!notes) { notes = new Set<ActiveNote>(); this.activeNotesByTrack.set(t.id, notes) }
+            notes.add(noteEntry)
+            this.scheduleCleanupForNote(noteEntry)
+
             osc.onended = () => {
               try { gain.disconnect() } catch {}
+              // Remove from tracking sets
+              const set = this.activeOscillatorsByTrack.get(t.id)
+              if (set) {
+                set.delete(osc)
+                if (set.size === 0) this.activeOscillatorsByTrack.delete(t.id)
+              }
+              const notes = this.activeNotesByTrack.get(t.id)
+              if (notes) {
+                for (const n of Array.from(notes)) {
+                  if (n.osc === osc) {
+                    if (n.cleanupTimer) { try { clearTimeout(n.cleanupTimer) } catch {} }
+                    notes.delete(n)
+                  }
+                }
+                if (notes.size === 0) this.activeNotesByTrack.delete(t.id)
+              }
               const idx = this.activeSources.indexOf(osc)
               if (idx >= 0) this.activeSources.splice(idx, 1)
             }

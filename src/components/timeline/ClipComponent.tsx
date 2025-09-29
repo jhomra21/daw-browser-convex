@@ -13,6 +13,8 @@ type ClipComponentProps = {
   onDblClick?: (trackId: string, clipId: string, e: MouseEvent) => void
 }
 
+const MIN_CLIP_PX = 6 // allow trimming to fine grids like 1/16 while keeping handles usable
+
 const ClipComponent: Component<ClipComponentProps> = (props) => {
   let canvasRef: HTMLCanvasElement | undefined
 
@@ -21,8 +23,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     if (!canvas) return
 
     // Compute CSS size from known clip layout to avoid timing/measurement issues
-    const cssW = Math.max(1, Math.floor(Math.max(20, props.clip.duration * PPS)))
-    const cssH = Math.max(1, Math.floor(LANE_HEIGHT - 16))
+    const cssW = Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS))
+    const cssH = Math.max(1, Math.floor(LANE_HEIGHT - 1))
     if (cssW === 0 || cssH === 0) return
 
     const dpr = (window.devicePixelRatio || 1)
@@ -155,13 +157,18 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     drawWaveform()
   })
 
+  // Dynamic handle width: keep resize handles narrow on tiny clips so dragging is easy
+  const clipWidthPx = () => Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS))
+  const handleWidthPx = () => (clipWidthPx() < 18 ? 2 : clipWidthPx() < 28 ? 3 : 6)
+
   return (
     <div
-      class={`group absolute top-2 rounded border ${props.isSelected ? 'border-blue-400 bg-blue-500/25' : 'border-green-500/60 bg-green-500/20'} hover:bg-green-500/25 cursor-grab select-none overflow-hidden`}
+      class={`group absolute border ${props.isSelected ? 'border-blue-400 bg-blue-500/25' : 'border-green-500/60 bg-green-500/20'} hover:bg-green-500/25 cursor-grab select-none overflow-hidden`}
       style={{ 
+        top: '0px',
         left: `${props.clip.startSec * PPS}px`, 
-        width: `${Math.max(20, props.clip.duration * PPS)}px`, 
-        height: `${LANE_HEIGHT - 16}px` 
+        width: `${Math.max(MIN_CLIP_PX, props.clip.duration * PPS)}px`, 
+        height: `${LANE_HEIGHT - 1}px` 
       }}
       onMouseDown={(e) => {
         // If this is the second click (detail >= 2), treat as dblclick BEFORE starting drag
@@ -178,7 +185,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     >
       {/* Left resize handle */}
       <div
-        class="absolute inset-y-0 left-0 w-2 cursor-ew-resize z-20 flex items-center justify-center text-[11px] text-neutral-200/80 select-none"
+        class="absolute inset-y-0 left-0 cursor-ew-resize z-20 flex items-center justify-center text-[11px] text-neutral-200/80 select-none"
+        style={{ width: `${handleWidthPx()}px` }}
         onMouseDown={(e) => { e.stopPropagation(); props.onResizeStart(props.trackId, props.clip.id, 'left', e) }}
         onDblClick={(e) => { e.stopPropagation(); props.onDblClick?.(props.trackId, props.clip.id, e) }}
       >
@@ -186,14 +194,15 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       </div>
       {/* Right resize handle */}
       <div
-        class="absolute inset-y-0 right-0 w-2 cursor-ew-resize z-20 flex items-center justify-center text-[11px] text-neutral-200/80 select-none"
+        class="absolute inset-y-0 right-0 cursor-ew-resize z-20 flex items-center justify-center text-[11px] text-neutral-200/80 select-none"
+        style={{ width: `${handleWidthPx()}px` }}
         onMouseDown={(e) => { e.stopPropagation(); props.onResizeStart(props.trackId, props.clip.id, 'right', e) }}
         onDblClick={(e) => { e.stopPropagation(); props.onDblClick?.(props.trackId, props.clip.id, e) }}
       >
         <span class="opacity-0 group-hover:opacity-100 pointer-events-none">]</span>
       </div>
 
-      <canvas ref={(el) => (canvasRef = el || undefined)} class="absolute inset-0 rounded pointer-events-none z-0" />
+      <canvas ref={(el) => (canvasRef = el || undefined)} class="absolute inset-0 pointer-events-none z-0" />
       <div class="px-2 py-1 text-xs truncate relative z-10">{props.clip.name}</div>
       <div class="absolute bottom-1 right-2 text-[10px] text-neutral-300 relative z-10">
         {props.clip.duration.toFixed(2)}s

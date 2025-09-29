@@ -1,6 +1,6 @@
 import { batch, type Accessor, type Setter } from 'solid-js'
 
-import { calcNonOverlapStart, willOverlap } from '~/lib/timeline-utils'
+import { calcNonOverlapStart, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import type { Clip, SelectedClip, Track } from '~/types/timeline'
 
 type ConvexClientType = typeof import('~/lib/convex').convexClient
@@ -23,6 +23,10 @@ type TimelineClipActionsOptions = {
   convexClient: ConvexClientType
   convexApi: ConvexApiType
   audioBufferCache: Map<string, AudioBuffer>
+  // snapping
+  bpm: Accessor<number>
+  gridEnabled: Accessor<boolean>
+  gridDenominator: Accessor<number>
 }
 
 type TimelineClipActionsHandlers = {
@@ -51,6 +55,9 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     convexClient,
     convexApi,
     audioBufferCache,
+    bpm,
+    gridEnabled,
+    gridDenominator,
   } = options
 
   const onClipClick = (trackId: string, clipId: string, event: MouseEvent) => {
@@ -107,17 +114,25 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       const t = tsSnapshot.find(tt => tt.id === trackId)
       if (!t) continue
 
-      for (const clip of clipsToDup) {
-        let desiredStart = clip.startSec + clip.duration + 0.0001
-        let startSec = desiredStart
-        if (willOverlap(t.clips, null, startSec, clip.duration)) {
-          startSec = calcNonOverlapStart(t.clips, null, startSec, clip.duration)
-        }
+      // Preserve relative offsets of the selection by duplicating the group as a block
+      const sorted = clipsToDup.slice().sort((a, b) => a.startSec - b.startSec)
+      const groupStart = Math.min(...sorted.map(c => c.startSec))
+      const groupEnd = Math.max(...sorted.map(c => c.startSec + c.duration))
+      const baseStart = groupEnd + 0.0001
+
+      let simulatedClips = t.clips.map(c => ({ ...c }))
+
+      for (const clip of sorted) {
+        const offset = clip.startSec - groupStart
+        const desiredStart = baseStart + offset
+        const safeStart = gridEnabled()
+          ? calcNonOverlapStartGridAligned(simulatedClips, null, desiredStart, clip.duration, bpm(), gridDenominator())
+          : calcNonOverlapStart(simulatedClips, null, desiredStart, clip.duration)
 
         const createdClipId = await convexClient.mutation(convexApi.clips.create, {
           roomId: roomId() as any,
           trackId: trackId as any,
-          startSec,
+          startSec: safeStart,
           duration: clip.duration,
           userId: userId() as any,
           name: clip.name,
@@ -132,7 +147,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
             id: createdClipId,
             name: clip.name,
             buffer: clip.buffer ?? null,
-            startSec,
+            startSec: safeStart,
             duration: clip.duration,
             leftPadSec: clip.leftPadSec ?? 0,
             color: clip.color,
@@ -159,11 +174,20 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         if (typeof clip.leftPadSec === 'number' && Number.isFinite(clip.leftPadSec)) {
           void convexClient.mutation((convexApi as any).clips.setTiming, {
             clipId: createdClipId as any,
-            startSec,
+            startSec: safeStart,
             duration: clip.duration,
             leftPadSec: clip.leftPadSec ?? 0,
           })
         }
+
+        simulatedClips = [
+          ...simulatedClips,
+          {
+            ...clip,
+            id: createdClipId,
+            startSec: safeStart,
+          },
+        ]
       }
     }
 

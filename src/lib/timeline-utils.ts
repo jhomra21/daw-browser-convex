@@ -47,3 +47,51 @@ export function calcNonOverlapStart(clips: Clip[], excludeId: string | null, des
   }
   return start
 }
+
+// --- Grid / snapping helpers ---
+export function quantizeSecToGrid(
+  sec: number,
+  bpm: number,
+  denom: number,
+  mode: 'round' | 'floor' | 'ceil' = 'round',
+): number {
+  const safeBpm = Math.max(1e-6, bpm || 0)
+  const step = (60 / safeBpm) * (4 / Math.max(1, denom || 4))
+  if (!Number.isFinite(step) || step <= 0) return Math.max(0, sec)
+  const idx = sec / step
+  let snappedIdx = idx
+  if (mode === 'floor') snappedIdx = Math.floor(idx)
+  else if (mode === 'ceil') snappedIdx = Math.ceil(idx)
+  else snappedIdx = Math.round(idx)
+  return Math.max(0, snappedIdx * step)
+}
+
+export function calcNonOverlapStartGridAligned(
+  clips: Clip[],
+  excludeId: string | null,
+  desiredStart: number,
+  duration: number,
+  bpm: number,
+  denom: number,
+  mode: 'round' | 'floor' | 'ceil' = 'round',
+): number {
+  const safeBpm = Math.max(1e-6, bpm || 0)
+  const step = (60 / safeBpm) * (4 / Math.max(1, denom || 4))
+  if (!Number.isFinite(step) || step <= 0) {
+    return calcNonOverlapStart(clips, excludeId, desiredStart, duration)
+  }
+  let start = quantizeSecToGrid(Math.max(0, desiredStart), bpm, denom, mode)
+  const sorted = clips.filter(c => !excludeId || c.id !== excludeId).slice().sort((a, b) => a.startSec - b.startSec)
+  const EPS = 0.0001
+  for (let i = 0; i < sorted.length; i++) {
+    const c = sorted[i]
+    if (start < c.startSec + c.duration && start + duration > c.startSec) {
+      // Advance exactly one grid step from the end of the overlapping clip
+      const next = c.startSec + c.duration + EPS
+      const snappedNext = quantizeSecToGrid(next, bpm, denom, 'ceil')
+      start = Math.max(start + step, snappedNext)
+      i = -1 // restart scan
+    }
+  }
+  return start
+}

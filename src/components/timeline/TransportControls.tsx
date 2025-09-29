@@ -20,6 +20,11 @@ type TransportControlsProps = {
   onChangeBpm: (next: number) => void
   metronomeEnabled: boolean
   onToggleMetronome: () => void
+  // Grid snapping
+  gridEnabled: boolean
+  onToggleGrid: () => void
+  gridDenominator: number
+  onChangeGridDenominator: (n: number) => void
   isRecording: boolean
   onToggleRecord: () => void
   // Samples controls
@@ -722,6 +727,41 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
           >
             <Icon name="metronome" class="h-4 w-4 mr-1" />
           </Button>
+          {/* Snap toggle */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={props.onToggleGrid}
+            aria-pressed={props.gridEnabled}
+            aria-label="Toggle snap to grid"
+            class={props.gridEnabled ? 'text-green-400' : ''}
+          >
+            {/* Magnet icon (inline) */}
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4 mr-1">
+              <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 15V8a6 6 0 0 1 6-6h0a6 6 0 0 1 6 6v7" />
+              <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 15a4 4 0 0 0 4 4m8 0a4 4 0 0 0 4-4" />
+              <title>Snap</title>
+            </svg>
+            <span class="text-xs">Grid</span>
+          </Button>
+          {/* Grid resolution */}
+          <DropdownMenu>
+            <DropdownMenuTrigger>
+              <Button variant="outline" size="sm" class="px-2 py-1 text-xs">
+                {`1/${props.gridDenominator}`}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent class="w-full bg-neutral-900" style={{ width: '10rem' }}>
+              <div class="p-1">
+                <div class="px-2 pb-1 text-xs text-neutral-400">Grid</div>
+                <DropdownMenuItem class="cursor-pointer text-neutral-50" onSelect={() => props.onChangeGridDenominator(2)}>1/2</DropdownMenuItem>
+                <DropdownMenuItem class="cursor-pointer text-neutral-50" onSelect={() => props.onChangeGridDenominator(4) }>1/4</DropdownMenuItem>
+                <DropdownMenuItem class="cursor-pointer text-neutral-50" onSelect={() => props.onChangeGridDenominator(8) }>1/8</DropdownMenuItem>
+                <DropdownMenuItem class="cursor-pointer text-neutral-50" onSelect={() => props.onChangeGridDenominator(12)}>1/12</DropdownMenuItem>
+                <DropdownMenuItem class="cursor-pointer text-neutral-50" onSelect={() => props.onChangeGridDenominator(16)}>1/16</DropdownMenuItem>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 

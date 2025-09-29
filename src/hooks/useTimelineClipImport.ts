@@ -1,7 +1,7 @@
 import { batch, type Accessor, type Setter } from 'solid-js'
 
 import type { AudioEngine } from '~/lib/audio-engine'
-import { clientXToSec, yToLaneIndex, willOverlap, calcNonOverlapStart } from '~/lib/timeline-utils'
+import { clientXToSec, yToLaneIndex, willOverlap, calcNonOverlapStart, quantizeSecToGrid, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import type { Clip, SelectedClip, Track } from '~/types/timeline'
 
 type ConvexClientType = typeof import('~/lib/convex').convexClient
@@ -33,6 +33,10 @@ type TimelineClipImportOptions = {
   uploadToR2: UploadToR2
   getScrollElement: () => HTMLDivElement | undefined
   getFileInput: () => HTMLInputElement | undefined
+  // snapping
+  bpm: Accessor<number>
+  gridEnabled: Accessor<boolean>
+  gridDenominator: Accessor<number>
 }
 
 type TimelineClipImportHandlers = {
@@ -61,6 +65,10 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     uploadToR2,
     getScrollElement,
     getFileInput,
+    // snapping
+    bpm,
+    gridEnabled,
+    gridDenominator,
   } = options
 
   const createServerTrack = async () => {
@@ -164,7 +172,10 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
       return
     }
     let startSec = typeof desiredStart === 'number' ? Math.max(0, desiredStart) : Math.max(0, playheadSec())
-    startSec = ensureNonOverlappingStart(targetTrack, startSec, decoded.duration)
+    if (gridEnabled()) startSec = quantizeSecToGrid(startSec, bpm(), gridDenominator(), 'round')
+    startSec = gridEnabled()
+      ? calcNonOverlapStartGridAligned(targetTrack?.clips ?? [], null, startSec, decoded.duration, bpm(), gridDenominator())
+      : ensureNonOverlappingStart(targetTrack, startSec, decoded.duration)
 
     const createdClipId = await createServerClip(trackId, startSec, decoded.duration, file.name)
     if (!createdClipId) return
@@ -197,7 +208,8 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
         if (url) {
           const scroll = getScrollElement()
           if (!scroll) return
-          const desiredStart = clientXToSec(event.clientX, scroll)
+          let desiredStart = clientXToSec(event.clientX, scroll)
+          if (gridEnabled()) desiredStart = quantizeSecToGrid(desiredStart, bpm(), gridDenominator(), 'round')
           let laneIdx = yToLaneIndex(event.clientY, scroll)
 
           const ts0 = tracks()
@@ -220,7 +232,9 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
           const targetTrack2 = ts0.find(t => t.id === targetTrackId)
           const baseDuration = typeof parsed.duration === 'number' && parsed.duration > 0 ? parsed.duration : 1
           let startSec = Math.max(0, desiredStart)
-          startSec = ensureNonOverlappingStart(targetTrack2, startSec, baseDuration)
+          startSec = gridEnabled()
+            ? calcNonOverlapStartGridAligned(targetTrack2?.clips ?? [], null, startSec, baseDuration, bpm(), gridDenominator())
+            : ensureNonOverlappingStart(targetTrack2, startSec, baseDuration)
 
           const clipName = parsed.name?.trim()?.length ? parsed.name! : 'Sample'
 
@@ -254,7 +268,8 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
       const url = urlFromText
       const scroll = getScrollElement()
       if (!scroll) return
-      const desiredStart = clientXToSec(event.clientX, scroll)
+      let desiredStart = clientXToSec(event.clientX, scroll)
+      if (gridEnabled()) desiredStart = quantizeSecToGrid(desiredStart, bpm(), gridDenominator(), 'round')
       let laneIdx = yToLaneIndex(event.clientY, scroll)
 
       const ts0 = tracks()
@@ -276,7 +291,9 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
       const targetTrack3 = ts0.find(t => t.id === targetTrackId)
       const baseDuration = 1
       let startSec = Math.max(0, desiredStart)
-      startSec = ensureNonOverlappingStart(targetTrack3, startSec, baseDuration)
+      startSec = gridEnabled()
+        ? calcNonOverlapStartGridAligned(targetTrack3?.clips ?? [], null, startSec, baseDuration, bpm(), gridDenominator())
+        : ensureNonOverlappingStart(targetTrack3, startSec, baseDuration)
 
       const clipName = 'Sample'
       const createdClipId = await createServerClip(targetTrackId, startSec, baseDuration, clipName)
@@ -305,7 +322,8 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     const scroll = getScrollElement()
     if (!scroll) return
 
-    const desiredStart = clientXToSec(event.clientX, scroll)
+    let desiredStart = clientXToSec(event.clientX, scroll)
+    if (gridEnabled()) desiredStart = quantizeSecToGrid(desiredStart, bpm(), gridDenominator(), 'round')
     let laneIdx = yToLaneIndex(event.clientY, scroll)
 
     const ts0 = tracks()
@@ -400,7 +418,9 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     }
     const baseDuration = typeof duration === 'number' && duration > 0 ? duration : 1
     let startSec = Math.max(0, playheadSec())
-    startSec = ensureNonOverlappingStart(targetTrack, startSec, baseDuration)
+    startSec = gridEnabled()
+      ? calcNonOverlapStartGridAligned(targetTrack?.clips ?? [], null, quantizeSecToGrid(startSec, bpm(), gridDenominator(), 'round'), baseDuration, bpm(), gridDenominator())
+      : ensureNonOverlappingStart(targetTrack, startSec, baseDuration)
 
     const clipName = name?.trim()?.length ? name : 'Sample'
 

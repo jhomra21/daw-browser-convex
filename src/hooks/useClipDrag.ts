@@ -1,6 +1,6 @@
 import { batch, createSignal, onCleanup, type Accessor, type Setter } from 'solid-js'
 
-import { PPS, willOverlap, calcNonOverlapStart, yToLaneIndex } from '~/lib/timeline-utils'
+import { PPS, willOverlap, calcNonOverlapStart, yToLaneIndex, quantizeSecToGrid, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import type { Track, Clip, SelectedClip } from '~/types/timeline'
 
 type MultiDragSnapshot = {
@@ -35,6 +35,10 @@ export type ClipDragOptions = {
   convexApi: typeof import('~/lib/convex').convexApi
   optimisticMoves: Map<string, { trackId: string; startSec: number }>
   getScrollElement: () => HTMLDivElement | undefined
+  // snapping
+  bpm: Accessor<number>
+  gridEnabled: Accessor<boolean>
+  gridDenominator: Accessor<number>
 }
 
 export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
@@ -159,7 +163,10 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     const currentTracks = tracks()
     const rect = scroll.getBoundingClientRect()
     const x = event.clientX - rect.left - dragDeltaX + (scroll.scrollLeft || 0)
-    const desiredStart = Math.max(0, x / PPS)
+    let desiredStart = Math.max(0, x / PPS)
+    if (options.gridEnabled()) {
+      desiredStart = quantizeSecToGrid(desiredStart, options.bpm(), options.gridDenominator(), 'round')
+    }
     let laneIdx = yToLaneIndex(event.clientY, scroll)
 
     if (laneIdx >= currentTracks.length) {
@@ -222,7 +229,8 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           const orig = findClip(it.clipId)
           if (!orig) continue
           const targetIndex = Math.max(0, Math.min(base.length - 1, it.origTrackIdx + deltaIdx))
-          const newStart = Math.max(0, desiredStart + (it.origStartSec - multi.anchorOrigStartSec))
+          let newStart = Math.max(0, desiredStart + (it.origStartSec - multi.anchorOrigStartSec))
+          if (options.gridEnabled()) newStart = quantizeSecToGrid(newStart, options.bpm(), options.gridDenominator(), 'round')
           const arr = adds.get(targetIndex) ?? []
           arr.push({ ...orig, startSec: newStart })
           adds.set(targetIndex, arr)
@@ -245,7 +253,13 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
         if (srcIdx === targetIdx) {
           const overlap = willOverlap(targetTrack.clips, movingClip.id, desiredStart, duration)
-          const newStart = overlap ? calcNonOverlapStart(targetTrack.clips, movingClip.id, desiredStart, duration) : desiredStart
+          const newStart = options.gridEnabled()
+            ? (overlap
+                ? calcNonOverlapStartGridAligned(targetTrack.clips, movingClip.id, desiredStart, duration, options.bpm(), options.gridDenominator())
+                : desiredStart)
+            : (overlap
+                ? calcNonOverlapStart(targetTrack.clips, movingClip.id, desiredStart, duration)
+                : desiredStart)
           return ts.map((t, i) => i !== srcIdx ? t : ({
             ...t,
             clips: t.clips.map(c => c.id === movingClip.id ? { ...c, startSec: newStart } : c)
@@ -253,7 +267,13 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
         }
 
         const overlap = willOverlap(targetTrack.clips, null, desiredStart, duration)
-        const newStart = overlap ? calcNonOverlapStart(targetTrack.clips, null, desiredStart, duration) : desiredStart
+        const newStart = options.gridEnabled()
+          ? (overlap
+              ? calcNonOverlapStartGridAligned(targetTrack.clips, null, desiredStart, duration, options.bpm(), options.gridDenominator())
+              : desiredStart)
+          : (overlap
+              ? calcNonOverlapStart(targetTrack.clips, null, desiredStart, duration)
+              : desiredStart)
         const prunedTargetClips = targetTrack.clips.filter(c => c.id !== movingClip.id)
         return ts.map((t, i) => {
           if (i === srcIdx) return { ...t, clips: t.clips.filter(c => c.id !== movingClip.id) }
@@ -292,7 +312,8 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
     const rect = scroll.getBoundingClientRect()
     const x = event.clientX - rect.left - dragDeltaX + (scroll.scrollLeft || 0)
-    const desiredStart = Math.max(0, x / PPS)
+    let desiredStart = Math.max(0, x / PPS)
+    if (options.gridEnabled()) desiredStart = quantizeSecToGrid(desiredStart, options.bpm(), options.gridDenominator(), 'round')
     let laneIdx = yToLaneIndex(event.clientY, scroll)
 
     const currentTracks = tracks()
@@ -322,7 +343,10 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
             const orig = findClip(it.clipId)
             if (!orig) continue
             const targetIndex = Math.max(0, Math.min(cleared.length - 1, anchorTargetIdx + (it.origTrackIdx - md.anchorOrigTrackIdx)))
-            const newStart = Math.max(0, desiredStart + (it.origStartSec - md.anchorOrigStartSec))
+            let newStart = Math.max(0, desiredStart + (it.origStartSec - md.anchorOrigStartSec))
+            if (options.gridEnabled()) {
+              newStart = quantizeSecToGrid(newStart, options.bpm(), options.gridDenominator(), 'round')
+            }
             const arr = adds.get(targetIndex) ?? []
             arr.push({ ...orig, startSec: newStart })
             adds.set(targetIndex, arr)
@@ -349,7 +373,10 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
         for (const it of md.items) {
           const targetIndex = Math.max(0, Math.min(tracks().length - 1, anchorTargetIdx + (it.origTrackIdx - md.anchorOrigTrackIdx)))
           const targetTid = tracks()[targetIndex]?.id || newTrackId
-          const newStart = Math.max(0, desiredStart + (it.origStartSec - md.anchorOrigStartSec))
+          let newStart = Math.max(0, desiredStart + (it.origStartSec - md.anchorOrigStartSec))
+          if (options.gridEnabled()) {
+            newStart = quantizeSecToGrid(newStart, options.bpm(), options.gridDenominator(), 'round')
+          }
           void convexClient.mutation(convexApi.clips.move, { clipId: it.clipId as any, startSec: newStart, toTrackId: targetTid as any })
           optimisticMoves.set(it.clipId, { trackId: targetTid, startSec: newStart })
         }
@@ -390,7 +417,8 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           if (hasAudio) {
             // Cancel cross-track move; just snap start within original tracks
             for (const it of md.items) {
-              const newStart = Math.max(0, desiredStart + (it.origStartSec - md.anchorOrigStartSec))
+              let newStart = Math.max(0, desiredStart + (it.origStartSec - md.anchorOrigStartSec))
+              if (options.gridEnabled()) newStart = quantizeSecToGrid(newStart, options.bpm(), options.gridDenominator(), 'round')
               void convexClient.mutation(convexApi.clips.move, { clipId: it.clipId as any, startSec: newStart })
               optimisticMoves.set(it.clipId, { trackId: ts[it.origTrackIdx].id, startSec: newStart })
             }
@@ -405,7 +433,8 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           }
         }
         for (const it of md.items) {
-          const newStart = Math.max(0, desiredStart + (it.origStartSec - md.anchorOrigStartSec))
+          let newStart = Math.max(0, desiredStart + (it.origStartSec - md.anchorOrigStartSec))
+          if (options.gridEnabled()) newStart = quantizeSecToGrid(newStart, options.bpm(), options.gridDenominator(), 'round')
           const idx = Math.max(0, Math.min(ts.length - 1, it.origTrackIdx + deltaIdx))
           const tid = ts[idx].id
           void convexClient.mutation(convexApi.clips.move, { clipId: it.clipId as any, startSec: newStart, toTrackId: tid as any })

@@ -24,6 +24,7 @@ import { useTimelineSelection } from '~/hooks/useTimelineSelection'
 import { useClipBuffers } from '~/hooks/useClipBuffers'
 import { useTrackRecording } from '~/hooks/useTrackRecording'
 import RecordingPreview from './timeline/RecordingPreview'
+import GridOverlay from './timeline/GridOverlay'
 
 const volumeTimers = new Map<string, number>()
 const optimisticMoves = new Map<string, { trackId: string; startSec: number }>()
@@ -47,6 +48,9 @@ const Timeline: Component = () => {
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false)
   const [recordArmTrackId, setRecordArmTrackId] = createSignal<string | null>(null)
   const [isRecording, setIsRecording] = createSignal(false)
+  // Grid / snapping state
+  const [gridEnabled, setGridEnabled] = createSignal(true)
+  const [gridDenominator, setGridDenominator] = createSignal(4) // 1/4 notes by default
 
   // Drag-drop visual target lane
   const [dropTargetLane, setDropTargetLane] = createSignal<number | null>(null)
@@ -130,6 +134,10 @@ const Timeline: Component = () => {
     uploadToR2,
     getScrollElement: () => scrollRef,
     getFileInput: () => fileInputRef,
+    // snapping
+    bpm,
+    gridEnabled,
+    gridDenominator,
   })
 
   const {
@@ -149,6 +157,10 @@ const Timeline: Component = () => {
     convexApi,
     optimisticMoves,
     getScrollElement: () => scrollRef,
+    // snapping
+    bpm,
+    gridEnabled,
+    gridDenominator,
   })
 
   const {
@@ -165,6 +177,10 @@ const Timeline: Component = () => {
     convexClient,
     convexApi,
     getScrollElement: () => scrollRef,
+    // snapping
+    bpm,
+    gridEnabled,
+    gridDenominator,
   })
 
   const {
@@ -190,6 +206,9 @@ const Timeline: Component = () => {
     convexClient,
     convexApi,
     audioBufferCache,
+    bpm,
+    gridEnabled,
+    gridDenominator,
   })
 
   const {
@@ -742,6 +761,10 @@ const Timeline: Component = () => {
         onChangeBpm={(next) => setBpm(clampBpm(next))}
         metronomeEnabled={metronomeEnabled()}
         onToggleMetronome={() => setMetronomeEnabled((prev) => !prev)}
+        gridEnabled={gridEnabled()}
+        onToggleGrid={() => setGridEnabled(prev => !prev)}
+        gridDenominator={gridDenominator()}
+        onChangeGridDenominator={(n: number) => setGridDenominator(n)}
         isRecording={isRecording()}
         onToggleRecord={handleRecordToggle}
         onJumpToClip={(clipId, trackId, startSec) => jumpToClip(trackId, clipId, startSec)}
@@ -861,6 +884,14 @@ const Timeline: Component = () => {
                   style={{ top: `${tracks().length * LANE_HEIGHT}px`, height: `${LANE_HEIGHT}px` }}
                 />
               )}
+              {/* Grid overlay: render above lanes (faint) and below selection/playhead */}
+              <GridOverlay
+                durationSec={duration()}
+                heightPx={(tracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}
+                bpm={bpm()}
+                denom={gridDenominator()}
+                enabled={gridEnabled()}
+              />
               {(() => {
                 const r = marqueeRect()
                 if (!r) return null

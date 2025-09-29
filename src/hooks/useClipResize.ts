@@ -1,6 +1,6 @@
 import { batch, type Accessor, type Setter } from 'solid-js'
 
-import { PPS } from '~/lib/timeline-utils'
+import { PPS, quantizeSecToGrid } from '~/lib/timeline-utils'
 import type { Track, SelectedClip } from '~/types/timeline'
 
 const MIN_CLIP_SEC = 0.05
@@ -21,6 +21,10 @@ type ClipResizeOptions = {
   convexClient: typeof import('~/lib/convex').convexClient
   convexApi: typeof import('~/lib/convex').convexApi
   getScrollElement: () => HTMLDivElement | undefined
+  // snapping
+  bpm: Accessor<number>
+  gridEnabled: Accessor<boolean>
+  gridDenominator: Accessor<number>
 }
 
 export type ClipResizeHandlers = {
@@ -92,7 +96,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
 
     const rect = scroll.getBoundingClientRect()
     const x = event.clientX - rect.left + (scroll.scrollLeft || 0)
-    const sec = Math.max(0, x / PPS)
+    const pointerSec = Math.max(0, x / PPS)
 
     if (resizing.edge === 'left') {
       const right = resizeFixedRight
@@ -104,7 +108,30 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
       }
       const minStartBound = Math.max(0, neighborEnd + 0.0001)
       const maxStartBound = Math.min(resizeAudioStart, maxStartByLen)
-      const newStart = Math.max(minStartBound, Math.min(sec, maxStartBound))
+
+      let newStart: number
+      if (options.gridEnabled()) {
+        // Quantize distance from right edge so duration becomes an integer multiple of grid step
+        const dist = Math.max(0, right - pointerSec)
+        let snapped = quantizeSecToGrid(dist, options.bpm(), options.gridDenominator(), 'round')
+        // ensure at least MIN_CLIP_SEC
+        if (snapped < MIN_CLIP_SEC) snapped = MIN_CLIP_SEC
+        newStart = right - snapped
+        // Respect bounds; if out of range, adjust to nearest valid multiple not exceeding bounds
+        if (newStart < minStartBound) {
+          const maxDist = Math.max(0, right - minStartBound)
+          const maxSnapped = quantizeSecToGrid(maxDist, options.bpm(), options.gridDenominator(), 'floor')
+          newStart = right - Math.max(MIN_CLIP_SEC, maxSnapped)
+        }
+        if (newStart > maxStartBound) {
+          const minDist = Math.max(0, right - maxStartBound)
+          const minSnapped = quantizeSecToGrid(minDist, options.bpm(), options.gridDenominator(), 'ceil')
+          newStart = right - Math.max(MIN_CLIP_SEC, minSnapped)
+        }
+      } else {
+        newStart = Math.max(minStartBound, Math.min(pointerSec, maxStartBound))
+      }
+
       const newDuration = Math.max(MIN_CLIP_SEC, right - newStart)
       const newLeftPad = Math.max(0, resizeAudioStart - newStart)
 
@@ -119,8 +146,30 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
       for (const other of others) {
         if (other.startSec >= resizeOrigStart && other.startSec < neighborStart) neighborStart = other.startSec
       }
-      let newRight = Math.max(sec, minRightByLen)
-      if (Number.isFinite(neighborStart)) newRight = Math.min(newRight, neighborStart - 0.0001)
+
+      let newRight: number
+      if (options.gridEnabled()) {
+        const dist = Math.max(0, pointerSec - left)
+        let snapped = quantizeSecToGrid(dist, options.bpm(), options.gridDenominator(), 'round')
+        if (snapped < MIN_CLIP_SEC) snapped = MIN_CLIP_SEC
+        newRight = left + snapped
+        // Apply neighbor clamp using snapped multiples
+        const maxRight = Number.isFinite(neighborStart) ? Math.min(neighborStart - 0.0001, Infinity) : Infinity
+        if (newRight > maxRight) {
+          const maxDist = Math.max(0, maxRight - left)
+          const maxSnapped = quantizeSecToGrid(maxDist, options.bpm(), options.gridDenominator(), 'floor')
+          newRight = left + Math.max(MIN_CLIP_SEC, maxSnapped)
+        }
+        if (newRight < minRightByLen) {
+          const minDist = Math.max(0, minRightByLen - left)
+          const minSnapped = quantizeSecToGrid(minDist, options.bpm(), options.gridDenominator(), 'ceil')
+          newRight = left + Math.max(MIN_CLIP_SEC, minSnapped)
+        }
+      } else {
+        newRight = Math.max(pointerSec, minRightByLen)
+        if (Number.isFinite(neighborStart)) newRight = Math.min(newRight, neighborStart - 0.0001)
+      }
+
       const newDuration = Math.max(MIN_CLIP_SEC, newRight - left)
 
       setTracks(ts => ts.map(t => t.id !== track.id ? t : ({

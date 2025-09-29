@@ -1,6 +1,40 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
+const sanitizeSynthParams = (params: { wave: 'sine' | 'square' | 'sawtooth' | 'triangle'; gain?: number; attackMs?: number; releaseMs?: number }) => {
+  const gain = clamp(typeof params.gain === 'number' ? params.gain : 0.8, 0, 1.5)
+  const attackMs = clamp(typeof params.attackMs === 'number' ? params.attackMs : 5, 0, 200)
+  const releaseMs = clamp(typeof params.releaseMs === 'number' ? params.releaseMs : 30, 0, 200)
+  return {
+    wave: params.wave,
+    gain,
+    attackMs,
+    releaseMs,
+  }
+}
+
+const sanitizeArpParams = (params: {
+  enabled: boolean
+  pattern: 'up' | 'down' | 'updown' | 'random'
+  rate: '1/4' | '1/8' | '1/16' | '1/32'
+  octaves: number
+  gate: number
+  hold: boolean
+}) => {
+  const octaves = clamp(Math.round(params.octaves) || 1, 1, 4)
+  const gate = clamp(Math.round(params.gate * 100) / 100 || 0.8, 0.1, 1.0)
+  return {
+    enabled: !!params.enabled,
+    pattern: params.pattern,
+    rate: params.rate,
+    octaves,
+    gate,
+    hold: !!params.hold,
+  }
+}
+
 // Return the EQ effect row for a track if it exists (we use a single EQ per track for now)
 export const getEqForTrack = query({
   args: { trackId: v.id("tracks") },
@@ -48,13 +82,19 @@ export const setSynthParams = mutation({
     trackId: v.id('tracks'),
     userId: v.string(),
     params: v.object({
-      wave: v.string(),
+      wave: v.union(
+        v.literal('sine'),
+        v.literal('square'),
+        v.literal('sawtooth'),
+        v.literal('triangle'),
+      ),
       gain: v.optional(v.number()),
       attackMs: v.optional(v.number()),
       releaseMs: v.optional(v.number()),
     }),
   },
   handler: async (ctx, { roomId, trackId, userId, params }) => {
+    const sanitized = sanitizeSynthParams(params)
     const track = await ctx.db.get(trackId)
     if (!track || track.roomId !== roomId) return
 
@@ -73,7 +113,7 @@ export const setSynthParams = mutation({
     const byIndex = existing.sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
     const row = byIndex.find(r => r.type === 'synth') ?? null
     if (row) {
-      await ctx.db.patch(row._id, { params, targetType: 'track' })
+      await ctx.db.patch(row._id, { params: sanitized, targetType: 'track' })
       return row._id
     }
     const newIndex = existing.length
@@ -83,7 +123,7 @@ export const setSynthParams = mutation({
       trackId,
       index: newIndex,
       type: 'synth',
-      params,
+      params: sanitized,
       createdAt: Date.now(),
     })
     return id
@@ -98,14 +138,25 @@ export const setArpeggiatorParams = mutation({
     userId: v.string(),
     params: v.object({
       enabled: v.boolean(),
-      pattern: v.string(), // 'up' | 'down' | 'updown' | 'random'
-      rate: v.string(), // '1/4' | '1/8' | '1/16' | '1/32'
+      pattern: v.union(
+        v.literal('up'),
+        v.literal('down'),
+        v.literal('updown'),
+        v.literal('random'),
+      ),
+      rate: v.union(
+        v.literal('1/4'),
+        v.literal('1/8'),
+        v.literal('1/16'),
+        v.literal('1/32'),
+      ),
       octaves: v.number(), // 1-4
       gate: v.number(), // 0.1-1.0
       hold: v.boolean(), // Keep arpeggiation looping until clip ends
     }),
   },
   handler: async (ctx, { roomId, trackId, userId, params }) => {
+    const sanitized = sanitizeArpParams(params)
     const track = await ctx.db.get(trackId)
     if (!track || track.roomId !== roomId) return
 
@@ -124,7 +175,7 @@ export const setArpeggiatorParams = mutation({
     const byIndex = existing.sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
     const row = byIndex.find(r => r.type === 'arpeggiator') ?? null
     if (row) {
-      await ctx.db.patch(row._id, { params, targetType: 'track' })
+      await ctx.db.patch(row._id, { params: sanitized, targetType: 'track' })
       return row._id
     }
     const newIndex = existing.length
@@ -134,7 +185,7 @@ export const setArpeggiatorParams = mutation({
       trackId,
       index: newIndex,
       type: 'arpeggiator',
-      params,
+      params: sanitized,
       createdAt: Date.now(),
     })
     return id

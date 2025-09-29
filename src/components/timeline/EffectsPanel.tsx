@@ -60,9 +60,11 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
           props.audioEngine?.setTrackArpeggiator(id, p)
         } else {
           setArpByTarget(prev => ({ ...prev, [id]: undefined }))
+          props.audioEngine?.clearTrackArpeggiator?.(id)
         }
       } catch {
         setArpByTarget(prev => ({ ...prev, [id]: undefined }))
+        props.audioEngine?.clearTrackArpeggiator?.(id)
       }
     })()
   })

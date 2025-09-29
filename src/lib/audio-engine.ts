@@ -219,6 +219,10 @@ export class AudioEngine {
     this.trackArpeggiators.set(trackId, params)
   }
 
+  clearTrackArpeggiator(trackId: string) {
+    this.trackArpeggiators.delete(trackId)
+  }
+
   private applyArpeggiator(
     notes: Array<{ beat: number; length: number; pitch: number; velocity?: number }>,
     params: { enabled: boolean; pattern: string; rate: string; octaves: number; gate: number; hold: boolean },

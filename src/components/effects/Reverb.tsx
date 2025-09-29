@@ -29,7 +29,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 export default function Reverb(props: ReverbProps) {
   return (
-    <div class={`rounded-md border border-neutral-800 bg-neutral-900 text-neutral-100 w-[30%] self-stretch flex flex-col ${props.class ?? ''}`}>
+    <div class={`rounded-md border border-neutral-800 bg-neutral-900 text-neutral-100 flex flex-col ${props.class ?? ''}`}>
       {/* Header */}
       <div class="flex items-center justify-between px-2 py-1 border-b border-neutral-800">
         <div class="flex items-center gap-2">

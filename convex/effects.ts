@@ -28,6 +28,19 @@ export const getSynthForTrack = query({
   },
 })
 
+// Arpeggiator: get arpeggiator row for a track
+export const getArpeggiatorForTrack = query({
+  args: { trackId: v.id('tracks') },
+  handler: async (ctx, { trackId }) => {
+    const rows = await ctx.db
+      .query('effects')
+      .withIndex('by_track', q => q.eq('trackId', trackId))
+      .collect();
+    rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    return rows.find(r => r.type === 'arpeggiator' && ((r as any).targetType === 'track' || (r as any).targetType === undefined)) ?? null;
+  },
+})
+
 // Synth: set or create synth params for a track
 export const setSynthParams = mutation({
   args: {
@@ -70,6 +83,57 @@ export const setSynthParams = mutation({
       trackId,
       index: newIndex,
       type: 'synth',
+      params,
+      createdAt: Date.now(),
+    })
+    return id
+  },
+})
+
+// Arpeggiator: set or create arpeggiator params for a track
+export const setArpeggiatorParams = mutation({
+  args: {
+    roomId: v.string(),
+    trackId: v.id('tracks'),
+    userId: v.string(),
+    params: v.object({
+      enabled: v.boolean(),
+      pattern: v.string(), // 'up' | 'down' | 'updown' | 'random'
+      rate: v.string(), // '1/4' | '1/8' | '1/16' | '1/32'
+      octaves: v.number(), // 1-4
+      gate: v.number(), // 0.1-1.0
+      hold: v.boolean(), // Keep arpeggiation looping until clip ends
+    }),
+  },
+  handler: async (ctx, { roomId, trackId, userId, params }) => {
+    const track = await ctx.db.get(trackId)
+    if (!track || track.roomId !== roomId) return
+
+    // owner only
+    const owners = await ctx.db
+      .query('ownerships')
+      .withIndex('by_track', q => q.eq('trackId', trackId))
+      .collect();
+    const owner = owners[0]
+    if (!owner || owner.ownerUserId !== userId) return
+
+    const existing = await ctx.db
+      .query('effects')
+      .withIndex('by_track', q => q.eq('trackId', trackId))
+      .collect();
+    const byIndex = existing.sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    const row = byIndex.find(r => r.type === 'arpeggiator') ?? null
+    if (row) {
+      await ctx.db.patch(row._id, { params, targetType: 'track' })
+      return row._id
+    }
+    const newIndex = existing.length
+    const id = await ctx.db.insert('effects', {
+      roomId,
+      targetType: 'track',
+      trackId,
+      index: newIndex,
+      type: 'arpeggiator',
       params,
       createdAt: Date.now(),
     })

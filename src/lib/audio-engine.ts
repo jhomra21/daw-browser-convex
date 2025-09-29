@@ -93,6 +93,8 @@ export class AudioEngine {
   private trackSynthGains = new Map<string, GainNode>()
   // Active notes by track for realtime envelope retargeting
   private activeNotesByTrack = new Map<string, Set<ActiveNote>>()
+  // --- Arpeggiator per track ---
+  private trackArpeggiators = new Map<string, { enabled: boolean; pattern: string; rate: string; octaves: number; gate: number; hold: boolean }>()
 
   ensureAudio() {
     if (!this.audioCtx) {
@@ -211,6 +213,124 @@ export class AudioEngine {
     }
     // Retarget envelopes of currently active notes on this track so attack/release changes apply live
     this.retargetActiveNotesForTrack(trackId)
+  }
+
+  setTrackArpeggiator(trackId: string, params: { enabled: boolean; pattern: string; rate: string; octaves: number; gate: number; hold: boolean }) {
+    this.trackArpeggiators.set(trackId, params)
+  }
+
+  private applyArpeggiator(
+    notes: Array<{ beat: number; length: number; pitch: number; velocity?: number }>,
+    params: { enabled: boolean; pattern: string; rate: string; octaves: number; gate: number; hold: boolean },
+    clipDurationBeats: number,
+  ): Array<{ beat: number; length: number; pitch: number; velocity?: number }> {
+    if (!params.enabled || notes.length === 0) return notes
+
+    // Parse rate to get step duration in beats
+    const rateMap: Record<string, number> = { '1/4': 1, '1/8': 0.5, '1/16': 0.25, '1/32': 0.125 }
+    const stepBeats = rateMap[params.rate] ?? 0.25
+
+    // Group notes into chords (notes within 50ms ~ 0.01 beats at 120 BPM)
+    const chordThreshold = 0.02 // beats
+    const sorted = notes.slice().sort((a, b) => a.beat - b.beat)
+    const chords: Array<{ beat: number; endBeat: number; pitches: number[]; velocity: number }> = []
+    
+    for (const note of sorted) {
+      const lastChord = chords[chords.length - 1]
+      if (lastChord && Math.abs(note.beat - lastChord.beat) < chordThreshold) {
+        lastChord.pitches.push(note.pitch)
+        // Extend chord end time to longest note
+        lastChord.endBeat = Math.max(lastChord.endBeat, note.beat + note.length)
+      } else {
+        chords.push({ 
+          beat: note.beat, 
+          endBeat: note.beat + note.length,
+          pitches: [note.pitch], 
+          velocity: note.velocity ?? 0.9 
+        })
+      }
+    }
+
+    // Expand each chord into arpeggiated notes
+    const arpeggiated: Array<{ beat: number; length: number; pitch: number; velocity?: number }> = []
+    
+    for (const chord of chords) {
+      // Sort pitches and expand with octaves
+      const basePitches = chord.pitches.slice().sort((a, b) => a - b)
+      if (basePitches.length === 0) {
+        continue
+      }
+      const expandedPitches: number[] = []
+      const octaves = Math.max(1, Math.floor(params.octaves || 1))
+      for (let oct = 0; oct < octaves; oct++) {
+        for (const pitch of basePitches) {
+          expandedPitches.push(pitch + oct * 12)
+        }
+      }
+
+      if (expandedPitches.length === 0) {
+        continue
+      }
+
+      // Apply pattern
+      let sequence: number[] = []
+      switch (params.pattern) {
+        case 'up':
+          sequence = expandedPitches
+          break
+        case 'down':
+          sequence = expandedPitches.slice().reverse()
+          break
+        case 'updown':
+          sequence = [...expandedPitches, ...expandedPitches.slice(0, -1).reverse()]
+          break
+        case 'random': {
+          sequence = expandedPitches.slice()
+          if (sequence.length > 1) {
+            // Deterministic shuffle seeded by chord signature for reproducible playback
+            const signature = chord.pitches.reduce((acc, pitch, idx) => {
+              const mixed = (acc ^ ((pitch + idx * 131) >>> 0)) >>> 0
+              return ((mixed << 5) - mixed) >>> 0 // simple multiplicative+add hash
+            }, Math.floor(chord.beat * 10_000) >>> 0)
+            const rand = this.createSeededRandom(signature || 1)
+            for (let i = sequence.length - 1; i > 0; i--) {
+              const j = Math.floor(rand() * (i + 1))
+              ;[sequence[i], sequence[j]] = [sequence[j], sequence[i]]
+            }
+          }
+          break
+        }
+        default:
+          sequence = expandedPitches
+      }
+
+      if (sequence.length === 0) {
+        continue
+      }
+
+      // Determine how long to arpeggiate
+      const endBeat = params.hold ? clipDurationBeats : chord.endBeat
+      
+      // Generate arpeggiated notes - loop the sequence until endBeat
+      let currentBeat = chord.beat
+      let seqIndex = 0
+      while (currentBeat < endBeat && currentBeat < clipDurationBeats) {
+        const pitch = sequence[seqIndex % sequence.length]
+        const gate = Math.max(0, params.gate)
+        if (gate <= 0) break
+        const noteLength = stepBeats * gate
+        arpeggiated.push({
+          beat: currentBeat,
+          length: noteLength,
+          pitch,
+          velocity: chord.velocity,
+        })
+        currentBeat += stepBeats
+        seqIndex++
+      }
+    }
+
+    return arpeggiated
   }
 
   private computeCurrentAmp(note: ActiveNote, nowCtx: number) {
@@ -734,7 +854,16 @@ export class AudioEngine {
           const wave = synth?.wave || (midi.wave as OscillatorType) || 'sawtooth'
           const clipStart = c.startSec
           const clipEnd = c.startSec + c.duration
-          for (const note of midi.notes as Array<{ beat: number; length: number; pitch: number; velocity?: number }>) {
+          const clipDurationBeats = c.duration / spb
+          
+          // Apply arpeggiator if enabled for this track
+          let notesToSchedule = midi.notes as Array<{ beat: number; length: number; pitch: number; velocity?: number }>
+          const arp = this.trackArpeggiators.get(t.id)
+          if (arp && arp.enabled) {
+            notesToSchedule = this.applyArpeggiator(notesToSchedule, arp, clipDurationBeats)
+          }
+          
+          for (const note of notesToSchedule) {
             const noteStartTimeline = clipStart + Math.max(0, note.beat) * spb
             const noteEndTimeline = noteStartTimeline + Math.max(0, note.length) * spb
             // Confine to clip window

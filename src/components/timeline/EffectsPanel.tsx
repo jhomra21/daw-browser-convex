@@ -6,6 +6,7 @@ import type { AudioEngine, EqParamsLite, ReverbParamsLite } from '~/lib/audio-en
 import { convexClient, convexApi } from '~/lib/convex'
 import Reverb, { createDefaultReverbParams, type ReverbParams } from '~/components/effects/Reverb'
 import Synth, { createDefaultSynthParams, type SynthParams } from '~/components/effects/Synth'
+import Arpeggiator, { createDefaultArpeggiatorParams, type ArpeggiatorParams } from '~/components/effects/Arpeggiator'
 
 type EffectsPanelProps = {
   isOpen: boolean
@@ -37,9 +38,69 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     return props.tracks.find(t => t.id === id)
   })
 
+  // ===== Arpeggiator (MIDI effect for instrument tracks) =====
+  const [arpByTarget, setArpByTarget] = createSignal<Record<string, ArpeggiatorParams | undefined>>({})
+  const arpForTarget = createMemo(() => arpByTarget()[currentTargetId()])
+
   // ===== Synth (instrument tracks) =====
   const [synthByTarget, setSynthByTarget] = createSignal<Record<string, SynthParams | undefined>>({})
   const synthForTarget = createMemo(() => synthByTarget()[currentTargetId()])
+
+  // Load arpeggiator from Convex for selected track
+  const lastSavedArp = new Map<string, string>()
+  createEffect(() => {
+    const id = currentTargetId(); if (!id || id === 'master') return
+    ;(async () => {
+      try {
+        const row = await convexClient.query((convexApi as any).effects.getArpeggiatorForTrack, { trackId: id as any })
+        if (row?.params) {
+          const p = row.params as ArpeggiatorParams
+          setArpByTarget(prev => ({ ...prev, [id]: p }))
+          lastSavedArp.set(id, JSON.stringify(p))
+          props.audioEngine?.setTrackArpeggiator(id, p)
+        } else {
+          setArpByTarget(prev => ({ ...prev, [id]: undefined }))
+        }
+      } catch {
+        setArpByTarget(prev => ({ ...prev, [id]: undefined }))
+      }
+    })()
+  })
+
+  // Apply/persist arpeggiator on change
+  createEffect(() => {
+    const id = currentTargetId(); if (!id || id === 'master') return
+    const params = arpForTarget(); if (!params) return
+    const json = JSON.stringify(params)
+    if (lastSavedArp.get(id) === json) return
+    lastSavedArp.set(id, json)
+    props.audioEngine?.setTrackArpeggiator(id, params)
+    if (props.roomId && props.userId) {
+      void convexClient.mutation((convexApi as any).effects.setArpeggiatorParams, {
+        roomId: props.roomId,
+        trackId: id as any,
+        userId: props.userId,
+        params,
+      })
+    }
+  })
+
+  function updateArp(updater: (prev: ArpeggiatorParams) => ArpeggiatorParams) {
+    const id = currentTargetId(); if (!id) return
+    setArpByTarget(prev => ({ ...prev, [id]: updater(prev[id] ?? createDefaultArpeggiatorParams()) }))
+  }
+
+  function handleArpChange(updates: Partial<ArpeggiatorParams>) {
+    updateArp(prev => ({ ...prev!, ...updates }))
+  }
+
+  function handleArpToggle(enabled: boolean) {
+    updateArp(prev => ({ ...prev!, enabled }))
+  }
+
+  function handleArpReset() {
+    updateArp(() => createDefaultArpeggiatorParams())
+  }
 
   // Load synth from Convex for selected track
   const lastSavedSynth = new Map<string, string>()
@@ -53,9 +114,16 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
           setSynthByTarget(prev => ({ ...prev, [id]: p }))
           lastSavedSynth.set(id, JSON.stringify(p))
           props.audioEngine?.setTrackSynth(id, p)
-          setEffectOrderForTarget(id, 'eq', (row as any).index) // keep ordering map warm; not strictly needed
         } else {
-          setSynthByTarget(prev => ({ ...prev, [id]: undefined }))
+          const track = props.tracks.find(t => t.id === id)
+          if (track?.kind === 'instrument') {
+            setSynthByTarget(prev => {
+              if (prev[id]) return prev
+              return { ...prev, [id]: createDefaultSynthParams() }
+            })
+          } else {
+            setSynthByTarget(prev => ({ ...prev, [id]: undefined }))
+          }
         }
       } catch {
         setSynthByTarget(prev => ({ ...prev, [id]: undefined }))
@@ -389,30 +457,48 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     <>
       <Show when={props.isOpen}>
         <div class="fixed left-0 right-0 bottom-0 border-t border-neutral-800 bg-neutral-900">
-          <div class="flex max-h-[340px]">
-            <div class="flex w-20 flex-col items-center gap-4 border-r border-neutral-800 px-3 pt-2">
-              <Button variant="outline" size="sm" class="w-full" onClick={props.onClose}>Collapse</Button>
-              <div class="flex flex-1 items-start justify-center pt-6">
+          <div class="flex h-[280px]">
+            <div class="flex w-20 flex-col items-center gap-2 border-r border-neutral-800 px-2 py-2">
+              <Button variant="outline" size="sm" class="w-full text-[10px] py-1" onClick={props.onClose}>Hide</Button>
+              <Show when={currentTrack() && currentTrack()!.kind === 'instrument'}>
+                <Button variant="default" size="sm" class="w-full text-[10px] py-1 px-1" onClick={handleAddMidiClip}>+ MIDI</Button>
+              </Show>
+              <div class="flex flex-1 items-center justify-center">
                 <span
                   class="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.15em] text-neutral-300"
-                  style={{ transform: 'rotate(-90deg)' }}
+                  style={{ transform: 'rotate(-90deg)', 'white-space': 'nowrap' }}
                 >
-                  <span class="whitespace-nowrap">{targetName()}</span>
+                  {targetName()}
                 </span>
               </div>
             </div>
-            <div class="flex flex-1 flex-col overflow-hidden !-mt-2 p-1">
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <Show when={currentTrack() && currentTrack()!.kind === 'instrument'}>
-                  <Button variant="default" size="sm" onClick={handleAddMidiClip}>Add MIDI Clip</Button>
+            <div class="flex flex-1 flex-col overflow-hidden">
+              <div class="flex flex-wrap items-center gap-1.5 px-2 py-0.5 border-b border-neutral-800/50 min-h-[28px]">
+                <Show when={currentTrack() && currentTrack()!.kind === 'instrument' && !arpForTarget()}>
+                  <Button variant="default" size="sm" class="text-[11px] py-0.5 px-2 h-6" onClick={() => {
+                    const id = currentTargetId(); if (!id) return
+                    const params = createDefaultArpeggiatorParams()
+                    setArpByTarget(prev => ({ ...prev, [id]: params }))
+                    props.audioEngine?.setTrackArpeggiator(id, params)
+                    if (props.roomId && props.userId) {
+                      void convexClient.mutation((convexApi as any).effects.setArpeggiatorParams, {
+                        roomId: props.roomId,
+                        trackId: id as any,
+                        userId: props.userId,
+                        params,
+                      })
+                    }
+                    lastSavedArp.set(id, JSON.stringify(params))
+                  }}>+ Arp</Button>
                 </Show>
                 <Show when={!eqForTarget()}>
-                  <Button variant="default" size="sm" onClick={handleAddEq}>Add EQ</Button>
+                  <Button variant="default" size="sm" class="text-[11px] py-0.5 px-2 h-6" onClick={handleAddEq}>+ EQ</Button>
                 </Show>
                 <Show when={!reverbForTarget()}>
                   <Button
                     variant="default"
                     size="sm"
+                    class="text-[11px] py-0.5 px-2 h-6"
                     onClick={() => {
                       const id = currentTargetId(); if (!id) return
                       const params = createDefaultReverbParams()
@@ -431,17 +517,29 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       }
                       lastSavedReverb.set(id, JSON.stringify(params))
                     }}
-                  >Add Reverb</Button>
+                  >+ Reverb</Button>
                 </Show>
               </div>
-              <div class="mt-3 flex-1 overflow-y-auto pr-1">
-                <div class="flex items-start gap-3 flex-wrap">
-                  {/* Synth for instrument tracks */}
+              <div class="flex-1 overflow-x-auto overflow-y-hidden px-2 py-2">
+                <div class="flex items-stretch gap-3 h-full min-w-min">
+                  {/* MIDI Effects (pre-synth) - LEFTMOST */}
+                  <Show when={currentTrack() && currentTrack()!.kind === 'instrument' && !!arpForTarget()}>
+                    <Arpeggiator
+                      params={arpForTarget()!}
+                      onChange={handleArpChange}
+                      onToggleEnabled={handleArpToggle}
+                      onReset={handleArpReset}
+                      class="min-w-[280px]"
+                    />
+                  </Show>
+                  
+                  {/* Instrument (Synth) */}
                   <Show when={currentTrack() && currentTrack()!.kind === 'instrument' && !!synthForTarget()}>
                     <Synth
                       params={synthForTarget()!}
                       onChange={handleSynthChange}
                       onReset={handleSynthReset}
+                      class="min-w-[280px]"
                     />
                   </Show>
                   
@@ -453,6 +551,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                           onChange={handleReverbChange}
                           onToggleEnabled={handleReverbToggle}
                           onReset={handleReverbReset}
+                          class="min-w-[280px]"
                         />
                       </Show>
                     }>
@@ -464,16 +563,18 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                           onBandToggle={handleBandToggle}
                           onToggleEnabled={handleToggleEnabled}
                           onReset={handleReset}
+                          class="min-w-[320px]"
                         />
                       </Show>
                     </Show>
                   )}</For>
+                  
+                  <Show when={!eqForTarget() && !reverbForTarget() && !arpForTarget() && (!synthForTarget() || !currentTrack() || currentTrack()!.kind !== 'instrument')}>
+                    <div class="flex items-center text-sm text-neutral-400 px-4">
+                      No effects on this {currentTargetId() === 'master' ? 'master bus' : 'track'}. Use Add EQ or Add Reverb.
+                    </div>
+                  </Show>
                 </div>
-                <Show when={!eqForTarget() && !reverbForTarget() && (!synthForTarget() || !currentTrack() || currentTrack()!.kind !== 'instrument')}>
-                  <div class="mt-4 text-sm text-neutral-400">
-                    No effects on this {currentTargetId() === 'master' ? 'master bus' : 'track'}. Use Add EQ or Add Reverb.
-                  </div>
-                </Show>
               </div>
             </div>
           </div>

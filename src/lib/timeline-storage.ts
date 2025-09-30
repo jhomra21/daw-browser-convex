@@ -113,26 +113,27 @@ type LoopSettings = {
 }
 
 const DEFAULT_LOOP: LoopSettings = { enabled: false, startSec: 0, endSec: 8 }
+const cloneLoop = (src: LoopSettings): LoopSettings => ({ enabled: !!src.enabled, startSec: src.startSec, endSec: src.endSec })
 
 export const loadLoopSettings = (rid?: string): LoopSettings => {
-  if (!rid) return DEFAULT_LOOP
-  if (!canUseLocalStorage()) return DEFAULT_LOOP
+  if (!rid) return cloneLoop(DEFAULT_LOOP)
+  if (!canUseLocalStorage()) return cloneLoop(DEFAULT_LOOP)
   try {
     const raw = localStorage.getItem(`${LOOP_KEY_PREFIX}${rid}`)
-    if (!raw) return DEFAULT_LOOP
+    if (!raw) return cloneLoop(DEFAULT_LOOP)
     const parsed = JSON.parse(raw)
     const start = Number(parsed?.startSec)
     const end = Number(parsed?.endSec)
     const safeStart = Number.isFinite(start) && start >= 0 ? start : DEFAULT_LOOP.startSec
     const minEnd = safeStart + 0.1
     const safeEnd = Number.isFinite(end) && end > safeStart ? end : Math.max(DEFAULT_LOOP.endSec, minEnd)
-    return {
+    return cloneLoop({
       enabled: Boolean(parsed?.enabled),
       startSec: safeStart,
       endSec: safeEnd,
-    }
+    })
   } catch {
-    return DEFAULT_LOOP
+    return cloneLoop(DEFAULT_LOOP)
   }
 }
 

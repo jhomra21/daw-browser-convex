@@ -287,10 +287,14 @@ export default function Eq(props: EqProps) {
 
   // Redraw when relevant inputs change
   createEffect(() => {
-    void props.bands
-    void props.enabled
-    void selectedId()
-    void canvasSize()
+    const bandSignature = props.bands.map(b => `${b.id}:${b.frequency}:${b.gainDb}:${b.q}:${b.enabled}:${b.type}`).join('|')
+    const _enabled = props.enabled
+    const _selected = selectedId()
+    const _size = canvasSize()
+    void bandSignature
+    void _enabled
+    void _selected
+    void _size
     draw()
   })
 

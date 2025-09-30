@@ -16,6 +16,7 @@ import EffectsPanel from './timeline/EffectsPanel'
 import MidiEditorCard from './midi/MidiEditorCard'
 import { Button } from './ui/button'
 import { convexClient, convexApi } from '~/lib/convex'
+import AgentChat from './AgentChat'
 import { useTimelineData } from '~/hooks/useTimelineData'
 import { usePlayheadControls } from '~/hooks/usePlayheadControls'
 import { useClipDrag } from '~/hooks/useClipDrag'
@@ -38,6 +39,7 @@ const Timeline: Component = () => {
   const [selectedClipIds, setSelectedClipIds] = createSignal<Set<string>>(new Set<string>(), { equals: false })
   const [bottomFXOpen, setBottomFXOpen] = createSignal(true)
   const [selectedFXTarget, setSelectedFXTarget] = createSignal<string>('master')
+  const [agentPanelOpen, setAgentPanelOpen] = createSignal(false)
   const [sidebarWidth, setSidebarWidth] = createSignal(260)
   const [confirmOpen, setConfirmOpen] = createSignal(false)
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<string | null>(null)
@@ -61,6 +63,10 @@ const Timeline: Component = () => {
 
   // Audio engine
   const audioEngine = getAudioEngine()
+  // FX initialization flags to pre-wire effects chains before user selects a track
+  const fxInitApplied = new Set<string>()
+  let masterFxInitDone = false
+  let effectsInitRoomId: string | null = null
   // Collaboration: roomId from ?roomId=; ownership tied to Better Auth userId
   const { roomId, setRoomId, userId, myProjects, fullView, navigateToRoom } = useTimelineData()
 
@@ -72,6 +78,52 @@ const Timeline: Component = () => {
   } = useClipBuffers({ audioEngine, tracks, setTracks })
 
   // Local storage helpers for mix persistence
+
+  // Allow AgentChat to apply local mute/solo changes by indices (1-based) regardless of Sync Mix state.
+  onMount(() => {
+    ;(window as any).__mbAgentApplyMix = (rid: string, ops: Array<{ type: 'setMute' | 'setSolo'; indices: number[]; value: boolean; exclusive?: boolean }>) => {
+      try {
+        if (!rid || rid !== roomId()) return
+        if (!Array.isArray(ops) || ops.length === 0) return
+        setTracks(ts => {
+          const arr = ts.map(t => ({ ...t }))
+          // Helper to convert 1-based indices to unique 0-based indices within bounds
+          const toZero = (idx1: number) => Math.max(0, Math.min(arr.length - 1, Math.floor(idx1 - 1)))
+          for (const op of ops) {
+            const src = (Array.isArray(op.indices) && op.indices.length)
+              ? op.indices
+              : (op.type === 'setSolo' ? [arr.length] : arr.map((_, i) => i + 1)) // solo(no indices)=>last track; mute(no indices)=>all
+            const targets0 = Array.from(new Set(src.map(toZero))).filter(i => i >= 0 && i < arr.length)
+            if (op.type === 'setSolo') {
+              const exclusive = !!op.exclusive && !!op.value && targets0.length === 1
+              if (exclusive) {
+                // Clear others first
+                for (let i = 0; i < arr.length; i++) {
+                  const next = i === targets0[0]
+                  arr[i].soloed = next
+                  saveLocalMix(roomId(), arr[i].id, { soloed: next })
+                }
+              } else {
+                for (const i of targets0) {
+                  arr[i].soloed = op.value
+                  saveLocalMix(roomId(), arr[i].id, { soloed: op.value })
+                }
+              }
+            } else if (op.type === 'setMute') {
+              for (const i of targets0) {
+                arr[i].muted = op.value
+                saveLocalMix(roomId(), arr[i].id, { muted: op.value })
+              }
+            }
+          }
+          return arr
+        })
+      } catch {}
+    }
+  })
+  onCleanup(() => {
+    try { delete (window as any).__mbAgentApplyMix } catch {}
+  })
   // Load syncMix per room
   createEffect(() => {
     if (!canUseLocalStorage()) {
@@ -515,6 +567,56 @@ const Timeline: Component = () => {
     audioEngine.setMetronomeEnabled(metronomeEnabled())
   })
 
+  // Ensure EQ/Reverb are applied for all tracks and master on load so effects are active before selection
+  createEffect(() => {
+    const rid = roomId()
+    const ts = tracks()
+    if (!rid) return
+    // Reset caches if room changed
+    if (effectsInitRoomId !== rid) {
+      fxInitApplied.clear()
+      masterFxInitDone = false
+      effectsInitRoomId = rid
+    }
+
+    ;(async () => {
+      try {
+        // Master FX: apply once per room
+        if (!masterFxInitDone) {
+          try {
+            const masterEq: any = await convexClient.query(convexApi.effects.getEqForMaster as any, { roomId: rid } as any)
+            if (masterEq?.params) { try { (audioEngine as any).setMasterEq?.(masterEq.params as any) } catch {} }
+          } catch {}
+          try {
+            const masterRv: any = await convexClient.query(convexApi.effects.getReverbForMaster as any, { roomId: rid } as any)
+            if (masterRv?.params) { try { (audioEngine as any).setMasterReverb?.(masterRv.params as any) } catch {} }
+          } catch {}
+          masterFxInitDone = true
+        }
+
+        // Track FX: apply once per track id
+        const pending: Promise<void>[] = []
+        for (const t of ts) {
+          if (fxInitApplied.has(t.id)) continue
+          pending.push((async () => {
+            try {
+              const [eqRow, rvRow]: any[] = await Promise.all([
+                convexClient.query(convexApi.effects.getEqForTrack as any, { trackId: t.id as any } as any),
+                convexClient.query(convexApi.effects.getReverbForTrack as any, { trackId: t.id as any } as any),
+              ])
+              if (eqRow?.params) { try { (audioEngine as any).setTrackEq?.(t.id, eqRow.params as any) } catch {} }
+              if (rvRow?.params) { try { (audioEngine as any).setTrackReverb?.(t.id, rvRow.params as any) } catch {} }
+            } catch {}
+            finally {
+              fxInitApplied.add(t.id)
+            }
+          })())
+        }
+        if (pending.length) await Promise.all(pending)
+      } catch {}
+    })()
+  })
+
   const clampBpm = (value: number) => {
     if (!Number.isFinite(value)) return bpm()
     return Math.min(300, Math.max(30, Math.round(value)))
@@ -950,6 +1052,25 @@ const Timeline: Component = () => {
           if (!uid) return
           await convexClient.mutation((convexApi as any).projects.setName, { roomId: rid, userId: uid, name })
         }}
+      />
+
+      {/* Chat toggle button - bottom-left; moves above Effects panel when open */}
+      <button
+        class="fixed left-4 z-40 bg-neutral-800 text-white rounded-md px-3 py-2 border border-neutral-700 hover:bg-neutral-700"
+        style={{ bottom: bottomFXOpen() ? '288px' : '16px' }}
+        aria-label="Toggle AI Chat"
+        onClick={() => setAgentPanelOpen((v) => !v)}
+      >
+        💬
+      </button>
+
+      {/* Agent chat panel */}
+      <AgentChat
+        isOpen={agentPanelOpen()}
+        onClose={() => setAgentPanelOpen(false)}
+        roomId={roomId()}
+        bpm={bpm()}
+        bottomOffsetPx={bottomFXOpen() ? 288 : 0}
       />
 
       <div class="flex-1 flex min-h-0" ref={el => (containerRef = el!)}>

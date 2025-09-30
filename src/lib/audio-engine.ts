@@ -579,6 +579,17 @@ export class AudioEngine {
     return type === 'peaking' || type === 'lowshelf' || type === 'highshelf'
   }
 
+  private configureBiquadNode(node: BiquadFilterNode) {
+    try {
+      node.channelCountMode = 'explicit'
+      node.channelInterpretation = 'speakers'
+      const targetChannels = this.destination?.maxChannelCount ?? this.audioCtx?.destination?.maxChannelCount ?? 2
+      node.channelCount = Math.max(1, Math.min(2, targetChannels))
+    } catch {
+      // Some browsers may not allow changing channel configuration; ignore.
+    }
+  }
+
   // --- Reverb helpers ---
   private createSeededRandom(seed: number) {
     let state = (seed >>> 0) || 1
@@ -783,6 +794,7 @@ export class AudioEngine {
       for (const b of params.bands) {
         if (!b.enabled) continue
         const f = this.audioCtx.createBiquadFilter()
+        this.configureBiquadNode(f)
         f.type = b.type
         f.frequency.value = Math.max(20, Math.min(20000, b.frequency))
         f.Q.value = Math.max(0.001, b.q)

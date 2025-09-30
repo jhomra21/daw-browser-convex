@@ -27,6 +27,8 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   const [dragging, setDragging] = createSignal(false)
   const [resizing, setResizing] = createSignal(false)
   const [notes, setNotes] = createSignal<Array<{ beat: number; length: number; pitch: number; velocity?: number }>>([])
+  const canPersist = () => Boolean(props.userId)
+  const warnMissingUser = () => console.warn('[MidiEditorCard] Cannot edit or persist MIDI without `userId`.')
   // Grid derived from BPM/denominator/clip length
   const stepsPerBeat = () => Math.max(1, Math.round((props.gridDenominator || 4) / 4))
   const secondsPerBeat = () => 60 / Math.max(1e-6, props.bpm || 120)
@@ -48,6 +50,10 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   let pointerId: number | null = null
   let saveTimer: number | null = null
   const scheduleSave = () => {
+    if (!canPersist()) {
+      warnMissingUser()
+      return
+    }
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = window.setTimeout(async () => {
       try {
@@ -154,6 +160,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   }
   const onGridClick = (e: MouseEvent | PointerEvent) => {
     if (dragNote) { e.preventDefault(); return }
+    if (!canPersist()) { warnMissingUser(); return }
     if ((e as PointerEvent).button != null && (e as PointerEvent).button !== 0) return
     const t = e.target as HTMLElement | null
     if (t && t.closest('[data-midi-note="1"]')) return
@@ -194,6 +201,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   }
   let dragNote: DragState | null = null
   const onNotePointerDown = (idx: number) => (e: PointerEvent) => {
+    if (!canPersist()) { warnMissingUser(); return }
     if (e.button !== 0) return
     e.stopPropagation(); e.preventDefault()
     // If this is a double-click, don't start dragging; deletion is handled by onDblClick
@@ -235,6 +243,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   }
   const onNotePointerMove = (e: PointerEvent) => {
     if (!dragNote) return
+    if (!canPersist()) { return }
     const el = gridRef; if (!el) return
     const { col, row } = pointToCell(el, e)
     setNotes(prev => prev.map((nn, i) => {
@@ -264,6 +273,11 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     }))
   }
   const onNotePointerUp = (_e: PointerEvent) => {
+    if (!canPersist()) {
+      dragNote = null
+      try { window.removeEventListener('pointermove', onNotePointerMove) } catch {}
+      return
+    }
     scheduleSave()
     dragNote = null
     try { window.removeEventListener('pointermove', onNotePointerMove) } catch {}
@@ -347,7 +361,13 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
                   }}
                   onPointerDown={onNotePointerDown(idx) as any}
                   onClick={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                  onDblClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); setNotes(prev => prev.filter((_, i) => i !== idx)); scheduleSave() }}
+                  onDblClick={(ev) => {
+                    ev.stopPropagation()
+                    ev.preventDefault()
+                    if (!canPersist()) { warnMissingUser(); return }
+                    setNotes(prev => prev.filter((_, i) => i !== idx))
+                    scheduleSave()
+                  }}
                   data-midi-note="1"
                 />
               ))}

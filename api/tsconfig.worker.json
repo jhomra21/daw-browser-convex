@@ -7,5 +7,10 @@
       "composite": true,
       "noEmit": false
     },
-    "include": ["**/*.ts", "../auth.ts"]
+    "include": [
+      "**/*.ts",
+      "../auth.ts",
+      "../src/lib/**/*.ts",
+      "../src/types/**/*.ts"
+    ]
   }

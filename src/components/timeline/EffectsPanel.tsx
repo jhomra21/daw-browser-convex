@@ -1,9 +1,9 @@
-import { type Component, Show, For, createSignal, createMemo, createEffect } from 'solid-js'
+import { type Component, Show, For, createSignal, createMemo, createEffect, untrack } from 'solid-js'
 import type { Track } from '~/types/timeline'
 import { Button } from '~/components/ui/button'
 import Eq, { createDefaultEqParams, type EqParams } from '~/components/effects/Eq'
 import type { AudioEngine, EqParamsLite, ReverbParamsLite } from '~/lib/audio-engine'
-import { convexClient, convexApi } from '~/lib/convex'
+import { useConvexQuery, convexClient, convexApi } from '~/lib/convex'
 import Reverb, { createDefaultReverbParams, type ReverbParams } from '~/components/effects/Reverb'
 import Synth, { createDefaultSynthParams, type SynthParams } from '~/components/effects/Synth'
 import Arpeggiator, { createDefaultArpeggiatorParams, type ArpeggiatorParams } from '~/components/effects/Arpeggiator'
@@ -38,6 +38,71 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     return props.tracks.find(t => t.id === id)
   })
 
+  // Recent local edit timestamps to avoid Convex subscription briefly overwriting UI during knob/drags
+  const eqLastLocalEdit = new Map<string, number>()
+  const reverbLastLocalEdit = new Map<string, number>()
+  const eqSaveTimers = new Map<string, number>()
+  const reverbSaveTimers = new Map<string, number>()
+  const LOCAL_EDIT_SUPPRESS_MS = 800
+  const SAVE_DEBOUNCE_MS = 200
+
+  const getQueryResult = <T,>(query: any): T | undefined => {
+    const raw = query?.data
+    return typeof raw === 'function' ? raw() : raw
+  }
+
+  const arpeggiatorQuery = useConvexQuery(
+    (convexApi as any).effects.getArpeggiatorForTrack,
+    () => {
+      const id = currentTargetId()
+      if (!id || id === 'master') return null
+      return { trackId: id as any }
+    },
+    () => ['effects', 'arpeggiator', currentTargetId()]
+  )
+
+  const synthQuery = useConvexQuery(
+    (convexApi as any).effects.getSynthForTrack,
+    () => {
+      const id = currentTargetId()
+      if (!id || id === 'master') return null
+      return { trackId: id as any }
+    },
+    () => ['effects', 'synth', currentTargetId()]
+  )
+
+  const eqMasterQuery = useConvexQuery(
+    convexApi.effects.getEqForMaster,
+    () => props.roomId ? ({ roomId: props.roomId }) : null,
+    () => ['effects', 'eq', 'master', props.roomId]
+  )
+
+  const eqTrackQuery = useConvexQuery(
+    convexApi.effects.getEqForTrack,
+    () => {
+      const id = currentTargetId()
+      if (!id || id === 'master') return null
+      return { trackId: id as any }
+    },
+    () => ['effects', 'eq', 'track', currentTargetId()]
+  )
+
+  const reverbMasterQuery = useConvexQuery(
+    convexApi.effects.getReverbForMaster,
+    () => props.roomId ? ({ roomId: props.roomId }) : null,
+    () => ['effects', 'reverb', 'master', props.roomId]
+  )
+
+  const reverbTrackQuery = useConvexQuery(
+    convexApi.effects.getReverbForTrack,
+    () => {
+      const id = currentTargetId()
+      if (!id || id === 'master') return null
+      return { trackId: id as any }
+    },
+    () => ['effects', 'reverb', 'track', currentTargetId()]
+  )
+
   // ===== Arpeggiator (MIDI effect for instrument tracks) =====
   const [arpByTarget, setArpByTarget] = createSignal<Record<string, ArpeggiatorParams | undefined>>({})
   const arpForTarget = createMemo(() => arpByTarget()[currentTargetId()])
@@ -46,27 +111,21 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const [synthByTarget, setSynthByTarget] = createSignal<Record<string, SynthParams | undefined>>({})
   const synthForTarget = createMemo(() => synthByTarget()[currentTargetId()])
 
-  // Load arpeggiator from Convex for selected track
   const lastSavedArp = new Map<string, string>()
   createEffect(() => {
-    const id = currentTargetId(); if (!id || id === 'master') return
-    ;(async () => {
-      try {
-        const row = await convexClient.query((convexApi as any).effects.getArpeggiatorForTrack, { trackId: id as any })
-        if (row?.params) {
-          const p = row.params as ArpeggiatorParams
-          setArpByTarget(prev => ({ ...prev, [id]: p }))
-          lastSavedArp.set(id, JSON.stringify(p))
-          props.audioEngine?.setTrackArpeggiator(id, p)
-        } else {
-          setArpByTarget(prev => ({ ...prev, [id]: undefined }))
-          props.audioEngine?.clearTrackArpeggiator?.(id)
-        }
-      } catch {
-        setArpByTarget(prev => ({ ...prev, [id]: undefined }))
-        props.audioEngine?.clearTrackArpeggiator?.(id)
-      }
-    })()
+    const id = currentTargetId()
+    if (!id || id === 'master') return
+    const row = getQueryResult<any>(arpeggiatorQuery)
+    if (row === undefined) return
+    if (row?.params) {
+      const p = row.params as ArpeggiatorParams
+      setArpByTarget(prev => ({ ...prev, [id]: p }))
+      lastSavedArp.set(id, JSON.stringify(p))
+      props.audioEngine?.setTrackArpeggiator(id, p)
+    } else {
+      setArpByTarget(prev => ({ ...prev, [id]: undefined }))
+      props.audioEngine?.clearTrackArpeggiator?.(id)
+    }
   })
 
   // Apply/persist arpeggiator on change
@@ -104,33 +163,31 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     updateArp(() => createDefaultArpeggiatorParams())
   }
 
-  // Load synth from Convex for selected track
   const lastSavedSynth = new Map<string, string>()
   createEffect(() => {
-    const id = currentTargetId(); if (!id || id === 'master') return
-    ;(async () => {
-      try {
-        const row = await convexClient.query((convexApi as any).effects.getSynthForTrack, { trackId: id as any })
-        if (row?.params) {
-          const p = row.params as SynthParams
-          setSynthByTarget(prev => ({ ...prev, [id]: p }))
-          lastSavedSynth.set(id, JSON.stringify(p))
-          props.audioEngine?.setTrackSynth(id, p)
-        } else {
-          const track = props.tracks.find(t => t.id === id)
-          if (track?.kind === 'instrument') {
-            setSynthByTarget(prev => {
-              if (prev[id]) return prev
-              return { ...prev, [id]: createDefaultSynthParams() }
-            })
-          } else {
-            setSynthByTarget(prev => ({ ...prev, [id]: undefined }))
-          }
-        }
-      } catch {
+    const id = currentTargetId()
+    if (!id || id === 'master') return
+    const row = getQueryResult<any>(synthQuery)
+    if (row === undefined) return
+    if (row?.params) {
+      const p = row.params as SynthParams
+      setSynthByTarget(prev => ({ ...prev, [id]: p }))
+      lastSavedSynth.set(id, JSON.stringify(p))
+      props.audioEngine?.setTrackSynth(id, p)
+    } else {
+      const track = props.tracks.find(t => t.id === id)
+      if (track?.kind === 'instrument') {
+        setSynthByTarget(prev => {
+          if (prev[id]) return prev
+          const defaults = createDefaultSynthParams()
+          lastSavedSynth.set(id, JSON.stringify(defaults))
+          props.audioEngine?.setTrackSynth(id, defaults)
+          return { ...prev, [id]: defaults }
+        })
+      } else {
         setSynthByTarget(prev => ({ ...prev, [id]: undefined }))
       }
-    })()
+    }
   })
 
   // Apply/persist on change
@@ -208,6 +265,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
 
   function updateEqForTarget(updater: (prev: EqParams) => EqParams) {
     const id = currentTargetId()
+    // mark recent local edit to temporarily ignore server hydration
+    eqLastLocalEdit.set(id, Date.now())
     setEqByTarget(prev => ({ ...prev, [id]: updater(prev[id] ?? createDefaultEqParams()) }))
   }
 
@@ -230,40 +289,55 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     updateEqForTarget(() => createDefaultEqParams())
   }
 
-  // Load EQ from Convex for selected target, if any
   const lastSaved = new Map<string, string>()
   createEffect(() => {
     const id = currentTargetId()
     if (!id) return
-    ;(async () => {
-      try {
+    const row = id === 'master'
+      ? getQueryResult<any>(eqMasterQuery)
+      : getQueryResult<any>(eqTrackQuery)
+    if (row === undefined) return
+    if (row?.params) {
+      const params = row.params as EqParams
+      const rowJson = JSON.stringify(params)
+      const current = (eqByTarget() as any)[id] as EqParams | undefined
+      const currentJson = current ? JSON.stringify(current) : undefined
+      const lastEdit = eqLastLocalEdit.get(id) ?? 0
+      const editing = (Date.now() - lastEdit < LOCAL_EDIT_SUPPRESS_MS) || eqSaveTimers.has(id)
+      if (!current) {
+        // Initial hydration for this target
+        setEqByTarget(prev => ({ ...prev, [id]: params }))
+        lastSaved.set(id, rowJson)
         if (id === 'master') {
-          if (!props.roomId) return
-          const row = await convexClient.query(convexApi.effects.getEqForMaster, { roomId: props.roomId })
-          if (row?.params) {
-            setEqByTarget(prev => ({ ...prev, [id]: row.params as EqParams }))
-            lastSaved.set(id, JSON.stringify(row.params))
-            props.audioEngine?.setMasterEq(row.params as EqParamsLite)
-            // record order index
-            setEffectOrderForTarget(id, 'eq', (row as any).index)
-          } else {
-            setEqByTarget(prev => ({ ...prev, [id]: undefined }))
-          }
+          props.audioEngine?.setMasterEq(params as EqParamsLite)
         } else {
-          const row = await convexClient.query(convexApi.effects.getEqForTrack, { trackId: id as any })
-          if (row?.params) {
-            setEqByTarget(prev => ({ ...prev, [id]: row.params as EqParams }))
-            lastSaved.set(id, JSON.stringify(row.params))
-            props.audioEngine?.setTrackEq(id, row.params as EqParamsLite)
-            setEffectOrderForTarget(id, 'eq', (row as any).index)
-          } else {
-            setEqByTarget(prev => ({ ...prev, [id]: undefined }))
-          }
+          props.audioEngine?.setTrackEq(id, params as EqParamsLite)
         }
-      } catch {
+        setEffectOrderForTarget(id, 'eq', (row as any).index)
+      } else {
+        if (editing) return
+        if (currentJson === rowJson) {
+          // Already in sync; keep UI stable, only track order/lastSaved
+          lastSaved.set(id, rowJson)
+          setEffectOrderForTarget(id, 'eq', (row as any).index)
+        } else {
+          setEqByTarget(prev => ({ ...prev, [id]: params }))
+          lastSaved.set(id, rowJson)
+          if (id === 'master') {
+            props.audioEngine?.setMasterEq(params as EqParamsLite)
+          } else {
+            props.audioEngine?.setTrackEq(id, params as EqParamsLite)
+          }
+          setEffectOrderForTarget(id, 'eq', (row as any).index)
+        }
+      }
+    } else {
+      // Only clear when not actively editing
+      const lastEdit = eqLastLocalEdit.get(id) ?? 0
+      if ((Date.now() - lastEdit) >= LOCAL_EDIT_SUPPRESS_MS && !eqSaveTimers.has(id)) {
         setEqByTarget(prev => ({ ...prev, [id]: undefined }))
       }
-    })()
+    }
   })
 
   // Apply to audio engine and persist when params change
@@ -275,27 +349,34 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     const json = JSON.stringify(params)
     if (lastSaved.get(id) === json) return
     lastSaved.set(id, json)
-    // Realtime apply
+    // Apply immediately to engine for responsive audio
     if (id === 'master') {
       props.audioEngine?.setMasterEq(params as unknown as EqParamsLite)
-      if (props.roomId && props.userId) {
-        void convexClient.mutation(convexApi.effects.setMasterEqParams, {
-          roomId: props.roomId,
-          userId: props.userId,
-          params,
-        })
-      }
     } else {
       props.audioEngine?.setTrackEq(id, params as unknown as EqParamsLite)
-      // Persist, if we have identity context
-      if (props.roomId && props.userId) {
-        void convexClient.mutation(convexApi.effects.setEqParams, {
-          roomId: props.roomId,
-          trackId: id as any,
-          userId: props.userId,
-          params,
-        })
-      }
+    }
+    // Debounce server persistence per target
+    const prevTimer = eqSaveTimers.get(id)
+    if (prevTimer) { try { clearTimeout(prevTimer) } catch {} }
+    if (props.roomId && props.userId) {
+      const timer = window.setTimeout(() => {
+        eqSaveTimers.delete(id)
+        if (id === 'master') {
+          void convexClient.mutation(convexApi.effects.setMasterEqParams, {
+            roomId: props.roomId!,
+            userId: props.userId!,
+            params,
+          })
+        } else {
+          void convexClient.mutation(convexApi.effects.setEqParams, {
+            roomId: props.roomId!,
+            trackId: id as any,
+            userId: props.userId!,
+            params,
+          })
+        }
+      }, SAVE_DEBOUNCE_MS)
+      eqSaveTimers.set(id, timer)
     }
   })
 
@@ -304,6 +385,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const reverbForTarget = createMemo(() => reverbByTarget()[currentTargetId()])
   const updateReverbForTarget = (updater: (prev: ReverbParams) => ReverbParams) => {
     const id = currentTargetId()
+    reverbLastLocalEdit.set(id, Date.now())
     setReverbByTarget(prev => ({ ...prev, [id]: updater(prev[id] ?? createDefaultReverbParams()) }))
   }
   const handleReverbChange = (updates: Partial<ReverbParams>) => {
@@ -316,38 +398,52 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     updateReverbForTarget(() => createDefaultReverbParams())
   }
 
-  // Load reverb from Convex for selected target
   const lastSavedReverb = new Map<string, string>()
   createEffect(() => {
-    const id = currentTargetId(); if (!id) return
-    ;(async () => {
-      try {
+    const id = currentTargetId()
+    if (!id) return
+    const row = id === 'master'
+      ? getQueryResult<any>(reverbMasterQuery)
+      : getQueryResult<any>(reverbTrackQuery)
+    if (row === undefined) return
+    if (row?.params) {
+      const params = row.params as ReverbParams
+      const rowJson = JSON.stringify(params)
+      const current = (reverbByTarget() as any)[id] as ReverbParams | undefined
+      const currentJson = current ? JSON.stringify(current) : undefined
+      const lastEdit = reverbLastLocalEdit.get(id) ?? 0
+      const editing = (Date.now() - lastEdit < LOCAL_EDIT_SUPPRESS_MS) || reverbSaveTimers.has(id)
+      if (!current) {
+        setReverbByTarget(prev => ({ ...prev, [id]: params }))
+        lastSavedReverb.set(id, rowJson)
         if (id === 'master') {
-          if (!props.roomId) return
-          const row = await convexClient.query(convexApi.effects.getReverbForMaster, { roomId: props.roomId })
-          if (row?.params) {
-            setReverbByTarget(prev => ({ ...prev, [id]: row.params as ReverbParams }))
-            lastSavedReverb.set(id, JSON.stringify(row.params))
-            props.audioEngine?.setMasterReverb(row.params as unknown as ReverbParamsLite)
-            setEffectOrderForTarget(id, 'reverb', (row as any).index)
-          } else {
-            setReverbByTarget(prev => ({ ...prev, [id]: undefined }))
-          }
+          props.audioEngine?.setMasterReverb(params as unknown as ReverbParamsLite)
         } else {
-          const row = await convexClient.query(convexApi.effects.getReverbForTrack, { trackId: id as any })
-          if (row?.params) {
-            setReverbByTarget(prev => ({ ...prev, [id]: row.params as ReverbParams }))
-            lastSavedReverb.set(id, JSON.stringify(row.params))
-            props.audioEngine?.setTrackReverb(id, row.params as unknown as ReverbParamsLite)
-            setEffectOrderForTarget(id, 'reverb', (row as any).index)
-          } else {
-            setReverbByTarget(prev => ({ ...prev, [id]: undefined }))
-          }
+          props.audioEngine?.setTrackReverb(id, params as unknown as ReverbParamsLite)
         }
-      } catch {
+        setEffectOrderForTarget(id, 'reverb', (row as any).index)
+      } else {
+        if (editing) return
+        if (currentJson === rowJson) {
+          lastSavedReverb.set(id, rowJson)
+          setEffectOrderForTarget(id, 'reverb', (row as any).index)
+        } else {
+          setReverbByTarget(prev => ({ ...prev, [id]: params }))
+          lastSavedReverb.set(id, rowJson)
+          if (id === 'master') {
+            props.audioEngine?.setMasterReverb(params as unknown as ReverbParamsLite)
+          } else {
+            props.audioEngine?.setTrackReverb(id, params as unknown as ReverbParamsLite)
+          }
+          setEffectOrderForTarget(id, 'reverb', (row as any).index)
+        }
+      }
+    } else {
+      const lastEdit = reverbLastLocalEdit.get(id) ?? 0
+      if ((Date.now() - lastEdit) >= LOCAL_EDIT_SUPPRESS_MS && !reverbSaveTimers.has(id)) {
         setReverbByTarget(prev => ({ ...prev, [id]: undefined }))
       }
-    })()
+    }
   })
 
   // Apply/persist reverb when params change
@@ -357,25 +453,34 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     const json = JSON.stringify(params)
     if (lastSavedReverb.get(id) === json) return
     lastSavedReverb.set(id, json)
+    // Apply immediately to engine for responsive audio
     if (id === 'master') {
       props.audioEngine?.setMasterReverb(params as unknown as ReverbParamsLite)
-      if (props.roomId && props.userId) {
-        void convexClient.mutation(convexApi.effects.setMasterReverbParams, {
-          roomId: props.roomId,
-          userId: props.userId,
-          params,
-        })
-      }
     } else {
       props.audioEngine?.setTrackReverb(id, params as unknown as ReverbParamsLite)
-      if (props.roomId && props.userId) {
-        void convexClient.mutation(convexApi.effects.setReverbParams, {
-          roomId: props.roomId,
-          trackId: id as any,
-          userId: props.userId,
-          params,
-        })
-      }
+    }
+    // Debounce server persistence per target
+    const prevTimer = reverbSaveTimers.get(id)
+    if (prevTimer) { try { clearTimeout(prevTimer) } catch {} }
+    if (props.roomId && props.userId) {
+      const timer = window.setTimeout(() => {
+        reverbSaveTimers.delete(id)
+        if (id === 'master') {
+          void convexClient.mutation(convexApi.effects.setMasterReverbParams, {
+            roomId: props.roomId!,
+            userId: props.userId!,
+            params,
+          })
+        } else {
+          void convexClient.mutation(convexApi.effects.setReverbParams, {
+            roomId: props.roomId!,
+            trackId: id as any,
+            userId: props.userId!,
+            params,
+          })
+        }
+      }, SAVE_DEBOUNCE_MS)
+      reverbSaveTimers.set(id, timer)
     }
   })
 
@@ -391,7 +496,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         next[targetId] = { ...(next[targetId] ?? {}), [kind]: index }
         return next
       })
-      const idx = { ...(effectIndexByTarget()[targetId] ?? {}), [kind]: index }
+      const idxCurrent = untrack(() => effectIndexByTarget()[targetId] ?? {})
+      const idx = { ...idxCurrent, [kind]: index }
       const entries: { kind: EffectKind; idx: number }[] = []
       if (typeof idx.eq === 'number') entries.push({ kind: 'eq', idx: idx.eq as number })
       if (typeof idx.reverb === 'number') entries.push({ kind: 'reverb', idx: idx.reverb as number })

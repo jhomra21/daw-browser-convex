@@ -178,7 +178,6 @@ export const setMidi = mutation({
     if (!clip) return
     const track = await ctx.db.get(clip.trackId)
     if (!track || (track as any).kind === 'audio') return
-
     const owners = await ctx.db
       .query('ownerships')
       .withIndex('by_clip', q => q.eq('clipId', clipId))
@@ -190,3 +189,72 @@ export const setMidi = mutation({
   },
 })
 
+// Bulk create clips in a single mutation to avoid staggered updates
+export const createMany = mutation({
+  args: {
+    items: v.array(v.object({
+      roomId: v.string(),
+      trackId: v.id('tracks'),
+      startSec: v.number(),
+      duration: v.number(),
+      userId: v.string(),
+      name: v.optional(v.string()),
+      sampleUrl: v.optional(v.string()),
+      leftPadSec: v.optional(v.number()),
+      midi: v.optional(v.object({
+        wave: v.string(),
+        gain: v.optional(v.number()),
+        notes: v.array(v.object({
+          beat: v.number(),
+          length: v.number(),
+          pitch: v.number(),
+          velocity: v.optional(v.number()),
+        })),
+      })),
+    })),
+  },
+  handler: async (ctx, { items }) => {
+    const createdIds: any[] = []
+    for (const item of items) {
+      const track = await ctx.db.get(item.trackId)
+      if (!track || track.roomId !== item.roomId) continue
+      const clipId = await ctx.db.insert('clips', {
+        roomId: item.roomId,
+        trackId: item.trackId,
+        startSec: item.startSec,
+        duration: item.duration,
+        name: item.name,
+        sampleUrl: item.sampleUrl,
+        leftPadSec: item.leftPadSec,
+        midi: item.midi,
+      })
+      await ctx.db.insert('ownerships', {
+        roomId: item.roomId,
+        ownerUserId: item.userId,
+        clipId,
+      })
+      createdIds.push(clipId)
+    }
+    return createdIds
+  },
+})
+
+// Bulk remove clips in a single mutation to avoid staggered updates
+export const removeMany = mutation({
+  args: { clipIds: v.array(v.id('clips')), userId: v.string() },
+  handler: async (ctx, { clipIds, userId }) => {
+    for (const clipId of clipIds) {
+      const clip = await ctx.db.get(clipId)
+      if (!clip) continue
+      const owners = await ctx.db
+        .query('ownerships')
+        .withIndex('by_clip', q => q.eq('clipId', clipId))
+        .collect()
+      const owner = owners[0]
+      if (!owner || owner.ownerUserId !== userId) continue
+      await ctx.db.delete(owner._id)
+      await ctx.db.delete(clipId)
+    }
+    return null
+  },
+})

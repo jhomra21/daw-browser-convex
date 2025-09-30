@@ -77,19 +77,18 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       setSelectedFXTarget(trackId)
     })
   }
-
   const deleteSelectedClips = () => {
     const ids = Array.from(selectedClipIds())
     if (ids.length === 0) return
 
+    // Optimistically remove from local tracks
     setTracks(ts => ts.map(t => ({
       ...t,
       clips: t.clips.filter(c => !ids.includes(c.id)),
     })))
 
-    for (const id of ids) {
-      void convexClient.mutation(convexApi.clips.remove, { clipId: id as any, userId: userId() as any })
-    }
+    // Bulk remove to avoid staggered server updates
+    void convexClient.mutation((convexApi as any).clips.removeMany, { clipIds: ids as any, userId: userId() as any })
 
     batch(() => {
       setSelectedClip(null)
@@ -110,16 +109,26 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
     const createdIds: { trackId: string; clipId: string }[] = []
 
+    type PendingCreate = {
+      trackId: string
+      name?: string
+      duration: number
+      startSec: number
+      buffer: AudioBuffer | null
+      color: string
+      sampleUrl?: string
+      midi?: any
+      leftPadSec?: number
+    }
+    const pending: PendingCreate[] = []
+
     for (const [trackId, clipsToDup] of byTrack.entries()) {
       const t = tsSnapshot.find(tt => tt.id === trackId)
       if (!t) continue
-
-      // Preserve relative offsets of the selection by duplicating the group as a block
       const sorted = clipsToDup.slice().sort((a, b) => a.startSec - b.startSec)
       const groupStart = Math.min(...sorted.map(c => c.startSec))
       const groupEnd = Math.max(...sorted.map(c => c.startSec + c.duration))
       const baseStart = groupEnd + 0.0001
-
       let simulatedClips = t.clips.map(c => ({ ...c }))
 
       for (const clip of sorted) {
@@ -128,66 +137,50 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         const safeStart = gridEnabled()
           ? calcNonOverlapStartGridAligned(simulatedClips, null, desiredStart, clip.duration, bpm(), gridDenominator())
           : calcNonOverlapStart(simulatedClips, null, desiredStart, clip.duration)
-
-        const createdClipId = await convexClient.mutation(convexApi.clips.create, {
-          roomId: roomId() as any,
-          trackId: trackId as any,
-          startSec: safeStart,
-          duration: clip.duration,
-          userId: userId() as any,
+        pending.push({
+          trackId,
           name: clip.name,
-        } as any) as any as string
+          duration: clip.duration,
+          startSec: safeStart,
+          buffer: clip.buffer ?? null,
+          color: clip.color,
+          sampleUrl: clip.sampleUrl,
+          midi: (clip as any).midi,
+          leftPadSec: clip.leftPadSec,
+        })
+        simulatedClips = [...simulatedClips, { ...clip, startSec: safeStart }]
+      }
+    }
 
-        if (clip.buffer) audioBufferCache.set(createdClipId, clip.buffer)
-        createdIds.push({ trackId, clipId: createdClipId })
+    const rid = roomId() as any
+    const uid = userId() as any
+    const idsCreated = await convexClient.mutation((convexApi as any).clips.createMany, {
+      items: pending.map(p => ({
+        roomId: rid,
+        trackId: p.trackId as any,
+        startSec: p.startSec,
+        duration: p.duration,
+        userId: uid,
+        name: p.name,
+      }))
+    }) as any as string[]
 
-        setTracks(ts => ts.map(tr => tr.id !== trackId ? tr : ({
-          ...tr,
-          clips: [...tr.clips, {
-            id: createdClipId,
-            name: clip.name,
-            buffer: clip.buffer ?? null,
-            startSec: safeStart,
-            duration: clip.duration,
-            leftPadSec: clip.leftPadSec ?? 0,
-            color: clip.color,
-            sampleUrl: clip.sampleUrl,
-            midi: (clip as any).midi,
-          }],
-        })))
-
-        if (clip.sampleUrl) {
-          void convexClient.mutation(convexApi.clips.setSampleUrl, { clipId: createdClipId as any, sampleUrl: clip.sampleUrl })
-        }
-
-        // Persist MIDI payload if present
-        if ((clip as any).midi) {
-          try {
-            await convexClient.mutation((convexApi as any).clips.setMidi, {
-              clipId: createdClipId as any,
-              midi: (clip as any).midi,
-              userId: userId() as any,
-            })
-          } catch {}
-        }
-
-        if (typeof clip.leftPadSec === 'number' && Number.isFinite(clip.leftPadSec)) {
-          void convexClient.mutation((convexApi as any).clips.setTiming, {
-            clipId: createdClipId as any,
-            startSec: safeStart,
-            duration: clip.duration,
-            leftPadSec: clip.leftPadSec ?? 0,
-          })
-        }
-
-        simulatedClips = [
-          ...simulatedClips,
-          {
-            ...clip,
-            id: createdClipId,
-            startSec: safeStart,
-          },
-        ]
+    for (let i = 0; i < pending.length; i++) {
+      const p = pending[i]
+      const newId = idsCreated[i]
+      if (!newId) continue
+      if (p.buffer) audioBufferCache.set(newId, p.buffer)
+      createdIds.push({ trackId: p.trackId, clipId: newId })
+      if (p.sampleUrl) {
+        void convexClient.mutation((convexApi as any).clips.setSampleUrl, { clipId: newId as any, sampleUrl: p.sampleUrl })
+      }
+      if (p.midi) {
+        try {
+          await convexClient.mutation((convexApi as any).clips.setMidi, { clipId: newId as any, midi: p.midi, userId: uid })
+        } catch {}
+      }
+      if (typeof p.leftPadSec === 'number' && Number.isFinite(p.leftPadSec)) {
+        void convexClient.mutation((convexApi as any).clips.setTiming, { clipId: newId as any, startSec: p.startSec, duration: p.duration, leftPadSec: p.leftPadSec ?? 0 })
       }
     }
 

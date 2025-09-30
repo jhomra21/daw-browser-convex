@@ -1,6 +1,6 @@
 import { Component, JSX, splitProps, createUniqueId } from "solid-js";
 
-export type IconName = "google" | "solidjs" | "file-audio" | "play" | "pause" | "stop" | "metronome";
+export type IconName = "google" | "solidjs" | "file-audio" | "play" | "pause" | "stop" | "metronome" | "repeat";
 
 type BaseIconProps = {
   size?: number | string;
@@ -237,6 +237,36 @@ const MetronomeIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElemen
   );
 };
 
+const RepeatIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
+  const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
+  const s = normalizeSize(local.size);
+
+  return (
+    <svg
+      {...rest}
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      class={local.class}
+      role={local.ariaLabel ? "img" : undefined}
+      aria-label={local.ariaLabel}
+      aria-hidden={local.ariaLabel ? undefined : "true"}
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      {local.title ? <title>{local.title}</title> : null}
+      <path d="m17 2 4 4-4 4" />
+      <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+      <path d="m7 22-4-4 4-4" />
+      <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+    </svg>
+  );
+};
+
 const registry: Record<IconName, Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>>> = {
   google: GoogleIcon,
   solidjs: SolidJSIcon,
@@ -245,6 +275,7 @@ const registry: Record<IconName, Component<BaseIconProps & JSX.SvgSVGAttributes<
   pause: PauseIcon,
   stop: StopIcon,
   metronome: MetronomeIcon,
+  repeat: RepeatIcon,
 };
 
 const Icon: Component<IconProps> = (allProps) => {

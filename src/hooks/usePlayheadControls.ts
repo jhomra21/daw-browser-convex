@@ -9,10 +9,18 @@ type Options = {
   audioEngine: AudioEngine
   tracks: Accessor<Track[]>
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
+  loopEnabled?: Accessor<boolean>
+  loopStartSec?: Accessor<number>
+  loopEndSec?: Accessor<number>
 }
 
-export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer }: Options) {
-  const playback = useTimelinePlayback(audioEngine)
+export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loopEnabled, loopStartSec, loopEndSec }: Options) {
+  const playback = useTimelinePlayback(audioEngine, {
+    loopEnabled,
+    loopStartSec,
+    loopEndSec,
+    getTracks: tracks,
+  })
 
   let scrollEl: HTMLDivElement | undefined
   let scrubbing = false

@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogD
 import type { Track, Clip, SelectedClip } from '~/types/timeline'
 import { getAudioEngine, resetAudioEngine } from '~/lib/audio-engine-singleton'
 import { timelineDurationSec, PPS, RULER_HEIGHT, LANE_HEIGHT, yToLaneIndex } from '~/lib/timeline-utils'
-import { canUseLocalStorage, loadLocalMixMap, saveLocalMix, loadMixSyncFlag, saveMixSyncFlag, loadGridSettings, saveGridSettings, loadBpm, saveBpm } from '~/lib/timeline-storage'
+import { canUseLocalStorage, loadLocalMixMap, saveLocalMix, loadMixSyncFlag, saveMixSyncFlag, loadGridSettings, saveGridSettings, loadBpm, saveBpm, loadLoopSettings, saveLoopSettings } from '~/lib/timeline-storage'
 import { ensureRoomShareLink } from '~/lib/timeline-share'
 import { useTimelineKeyboard } from '~/hooks/useTimelineKeyboard'
 import { useTimelineClipImport } from '~/hooks/useTimelineClipImport'
@@ -51,6 +51,9 @@ const Timeline: Component = () => {
   // Grid / snapping state
   const [gridEnabled, setGridEnabled] = createSignal(true)
   const [gridDenominator, setGridDenominator] = createSignal(4) // 1/4 notes by default
+  const [loopEnabled, setLoopEnabled] = createSignal(false)
+  const [loopStartSec, setLoopStartSec] = createSignal(0)
+  const [loopEndSec, setLoopEndSec] = createSignal(8)
 
   // Drag-drop visual target lane
   const [dropTargetLane, setDropTargetLane] = createSignal<number | null>(null)
@@ -77,6 +80,16 @@ const Timeline: Component = () => {
     }
     setSyncMix(loadMixSyncFlag(roomId()))
   })
+
+  // Loop region setter used by ruler interactions
+  const setLoopRegion = (start: number, end: number) => {
+    const s = Math.max(0, Math.min(start, end - 0.05))
+    const e = Math.max(s + 0.05, end)
+    batch(() => {
+      setLoopStartSec(s)
+      setLoopEndSec(e)
+    })
+  }
 
   // Load grid settings per room
   createEffect(() => {
@@ -114,6 +127,29 @@ const Timeline: Component = () => {
     saveBpm(rid, value)
   })
 
+  // Load loop settings per room
+  createEffect(() => {
+    const rid = roomId()
+    if (!canUseLocalStorage() || !rid) return
+    const loop = loadLoopSettings(rid)
+    batch(() => {
+      setLoopEnabled(loop.enabled)
+      setLoopStartSec(loop.startSec)
+      setLoopEndSec(loop.endSec)
+    })
+  })
+
+  // Save loop settings when they change
+  createEffect(() => {
+    const rid = roomId()
+    if (!rid) return
+    saveLoopSettings(rid, {
+      enabled: loopEnabled(),
+      startSec: loopStartSec(),
+      endSec: loopEndSec(),
+    })
+  })
+
   // Local caches for responsiveness
   // Optimistic positions for clips that have been moved locally but the server
   // hasn't reflected the change yet. Prevents revert-then-flash on drop.
@@ -130,7 +166,14 @@ const Timeline: Component = () => {
     startScrub,
     stopScrub,
     setScrollElement,
-  } = usePlayheadControls({ audioEngine, tracks, ensureClipBuffer })
+  } = usePlayheadControls({
+    audioEngine,
+    tracks,
+    ensureClipBuffer,
+    loopEnabled,
+    loopStartSec,
+    loopEndSec,
+  })
 
   // Share current URL with ?roomId=
   async function handleShare() {
@@ -848,6 +891,8 @@ const Timeline: Component = () => {
         onToggleGrid={() => setGridEnabled(prev => !prev)}
         gridDenominator={gridDenominator()}
         onChangeGridDenominator={(n: number) => setGridDenominator(n)}
+        loopEnabled={loopEnabled()}
+        onToggleLoop={() => setLoopEnabled(prev => !prev)}
         isRecording={isRecording()}
         onToggleRecord={handleRecordToggle}
         onJumpToClip={(clipId, trackId, startSec) => jumpToClip(trackId, clipId, startSec)}
@@ -926,6 +971,10 @@ const Timeline: Component = () => {
               denom={gridDenominator()}
               gridEnabled={gridEnabled()}
               onMouseDown={onRulerMouseDown}
+              loopEnabled={loopEnabled()}
+              loopStartSec={loopStartSec()}
+              loopEndSec={loopEndSec()}
+              onSetLoopRegion={(s, e) => setLoopRegion(s, e)}
             />
             
             <div class="absolute left-0 right-0" style={{ top: `${RULER_HEIGHT}px`, height: `${(tracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}px` }}>
@@ -982,6 +1031,19 @@ const Timeline: Component = () => {
                 denom={gridDenominator()}
                 enabled={gridEnabled()}
               />
+              {/* Loop edges: full height across timeline */}
+              {loopEnabled() && (loopEndSec() - loopStartSec() > 0.05) && (
+                <>
+                  <div
+                    class="absolute top-0 bottom-0 w-[2px] bg-green-400/70 pointer-events-none"
+                    style={{ left: `${loopStartSec() * PPS}px` }}
+                  />
+                  <div
+                    class="absolute top-0 bottom-0 w-[2px] bg-green-400/70 pointer-events-none"
+                    style={{ left: `${loopEndSec() * PPS}px` }}
+                  />
+                </>
+              )}
               {(() => {
                 const r = marqueeRect()
                 if (!r) return null

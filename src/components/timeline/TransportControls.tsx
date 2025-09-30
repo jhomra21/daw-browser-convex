@@ -25,6 +25,8 @@ type TransportControlsProps = {
   onToggleGrid: () => void
   gridDenominator: number
   onChangeGridDenominator: (n: number) => void
+  loopEnabled: boolean
+  onToggleLoop: () => void
   isRecording: boolean
   onToggleRecord: () => void
   // Samples controls
@@ -726,6 +728,17 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
             aria-label="Toggle metronome"
           >
             <Icon name="metronome" class="h-4 w-4 mr-1" />
+          </Button>
+          <Button
+            variant='ghost'
+            size="sm"
+            onClick={props.onToggleLoop}
+            aria-pressed={props.loopEnabled}
+            aria-label="Toggle loop region"
+            class={props.loopEnabled ? 'text-green-400' : ''}
+          >
+            <Icon name="repeat" class="h-4 w-4 mr-1" />
+            <span class="text-xs">Loop</span>
           </Button>
           {/* Snap toggle */}
           <Button

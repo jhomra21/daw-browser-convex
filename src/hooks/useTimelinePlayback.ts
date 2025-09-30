@@ -1,15 +1,25 @@
-import { createSignal, onCleanup } from 'solid-js'
+import { createSignal, onCleanup, type Accessor } from 'solid-js'
 
 import type { AudioEngine } from '~/lib/audio-engine'
 import type { Track } from '~/types/timeline'
 
-export function useTimelinePlayback(audioEngine: AudioEngine) {
+type LoopOptions = {
+  loopEnabled?: Accessor<boolean>
+  loopStartSec?: Accessor<number>
+  loopEndSec?: Accessor<number>
+  getTracks?: Accessor<Track[]>
+}
+
+const LOOP_EPS = 1e-3
+
+export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: LoopOptions) {
   const [isPlaying, setIsPlaying] = createSignal(false)
   const [playheadSec, setPlayheadSec] = createSignal(0)
 
   const [rafId, setRafId] = createSignal<number | null>(null)
   const [startedCtxTime, setStartedCtxTime] = createSignal(0)
   const [startedPlayheadSec, setStartedPlayheadSec] = createSignal(0)
+  const [lastTracks, setLastTracks] = createSignal<Track[]>([])
 
   const cancelRaf = () => {
     const id = rafId()
@@ -19,10 +29,43 @@ export function useTimelinePlayback(audioEngine: AudioEngine) {
     }
   }
 
+  const resolveTracks = () => {
+    const fromAccessor = loopOptions?.getTracks?.()
+    if (Array.isArray(fromAccessor)) {
+      setLastTracks(fromAccessor)
+      return fromAccessor
+    }
+    return lastTracks()
+  }
+
+  const applyLoopIfNeeded = (candidateSec: number) => {
+    const enabled = loopOptions?.loopEnabled?.() ?? false
+    if (!enabled) return { sec: candidateSec, looped: false }
+    const start = loopOptions?.loopStartSec?.() ?? 0
+    const end = loopOptions?.loopEndSec?.() ?? 0
+    const length = end - start
+    if (!(length > LOOP_EPS)) return { sec: candidateSec, looped: false }
+    if (candidateSec < start) return { sec: candidateSec, looped: false }
+    if (candidateSec < end - LOOP_EPS) return { sec: candidateSec, looped: false }
+
+    const range = Math.max(length, LOOP_EPS)
+    const offset = candidateSec - start
+    const wrapped = start + (offset % range)
+    const tracks = resolveTracks()
+    audioEngine.stopAllSources()
+    audioEngine.onTransportSeek(wrapped)
+    audioEngine.scheduleAllClipsFromPlayhead(tracks, wrapped)
+    setStartedCtxTime(audioEngine.currentTime)
+    setStartedPlayheadSec(wrapped)
+    return { sec: wrapped, looped: true }
+  }
+
   const tick = () => {
     if (!isPlaying()) return
     const elapsed = audioEngine.currentTime - startedCtxTime()
-    setPlayheadSec(startedPlayheadSec() + elapsed)
+    const nextSec = startedPlayheadSec() + elapsed
+    const { sec } = applyLoopIfNeeded(nextSec)
+    setPlayheadSec(sec)
     setRafId(requestAnimationFrame(tick))
   }
 
@@ -32,6 +75,7 @@ export function useTimelinePlayback(audioEngine: AudioEngine) {
     setIsPlaying(true)
     setStartedCtxTime(audioEngine.currentTime)
     setStartedPlayheadSec(playheadSec())
+    setLastTracks(tracks)
     audioEngine.onTransportStart(playheadSec())
     audioEngine.scheduleAllClipsFromPlayhead(tracks, playheadSec())
     setRafId(requestAnimationFrame(tick))
@@ -55,6 +99,7 @@ export function useTimelinePlayback(audioEngine: AudioEngine) {
 
   const setPlayhead = (sec: number, tracks: Track[]) => {
     setPlayheadSec(sec)
+    setLastTracks(tracks)
     if (isPlaying()) {
       setStartedCtxTime(audioEngine.currentTime)
       setStartedPlayheadSec(sec)

@@ -2,6 +2,7 @@ const MIX_KEY_PREFIX = 'mb:mix:'
 const MIX_SYNC_KEY_PREFIX = 'mb:mix-sync:'
 const GRID_KEY_PREFIX = 'mb:grid:'
 const BPM_KEY_PREFIX = 'mb:bpm:'
+const LOOP_KEY_PREFIX = 'mb:loop:'
 
 export const canUseLocalStorage = () => {
   if (typeof window === 'undefined') return false
@@ -102,5 +103,51 @@ export const saveBpm = (rid: string | undefined, value: number) => {
   const clamped = Math.min(300, Math.max(30, Math.round(safeValue)))
   try {
     localStorage.setItem(`${BPM_KEY_PREFIX}${rid}`, String(clamped))
+  } catch {}
+}
+
+type LoopSettings = {
+  enabled: boolean
+  startSec: number
+  endSec: number
+}
+
+const DEFAULT_LOOP: LoopSettings = { enabled: false, startSec: 0, endSec: 8 }
+
+export const loadLoopSettings = (rid?: string): LoopSettings => {
+  if (!rid) return DEFAULT_LOOP
+  if (!canUseLocalStorage()) return DEFAULT_LOOP
+  try {
+    const raw = localStorage.getItem(`${LOOP_KEY_PREFIX}${rid}`)
+    if (!raw) return DEFAULT_LOOP
+    const parsed = JSON.parse(raw)
+    const start = Number(parsed?.startSec)
+    const end = Number(parsed?.endSec)
+    const safeStart = Number.isFinite(start) && start >= 0 ? start : DEFAULT_LOOP.startSec
+    const minEnd = safeStart + 0.1
+    const safeEnd = Number.isFinite(end) && end > safeStart ? end : Math.max(DEFAULT_LOOP.endSec, minEnd)
+    return {
+      enabled: Boolean(parsed?.enabled),
+      startSec: safeStart,
+      endSec: safeEnd,
+    }
+  } catch {
+    return DEFAULT_LOOP
+  }
+}
+
+export const saveLoopSettings = (rid: string | undefined, value: LoopSettings) => {
+  if (!rid) return
+  if (!canUseLocalStorage()) return
+  const start = Number.isFinite(value.startSec) && value.startSec >= 0 ? value.startSec : DEFAULT_LOOP.startSec
+  const minEnd = start + 0.1
+  const end = Number.isFinite(value.endSec) && value.endSec > start ? value.endSec : Math.max(DEFAULT_LOOP.endSec, minEnd)
+  const payload: LoopSettings = {
+    enabled: !!value.enabled,
+    startSec: start,
+    endSec: end,
+  }
+  try {
+    localStorage.setItem(`${LOOP_KEY_PREFIX}${rid}`, JSON.stringify(payload))
   } catch {}
 }

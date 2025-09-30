@@ -252,6 +252,7 @@ const Timeline: Component = () => {
   // ===== Floating MIDI editor state =====
   const [midiEditorClipId, setMidiEditorClipId] = createSignal<string | null>(null)
   const [midiCard, setMidiCard] = createSignal<{ x: number; y: number; w: number; h: number }>({ x: 80, y: 80, w: 720, h: 360 })
+  let midiCardPersistTimer: number | null = null
   const midiCardStorageKey = () => {
     const rid = roomId() || 'default'
     return `mb:midi_card:${rid}`
@@ -276,6 +277,16 @@ const Timeline: Component = () => {
   const persistMidiCard = () => {
     if (!canUseLocalStorage()) return
     try { window.localStorage.setItem(midiCardStorageKey(), JSON.stringify(midiCard())) } catch {}
+  }
+  const schedulePersistMidiCard = () => {
+    if (midiCardPersistTimer) {
+      clearTimeout(midiCardPersistTimer)
+      midiCardPersistTimer = null
+    }
+    midiCardPersistTimer = window.setTimeout(() => {
+      midiCardPersistTimer = null
+      persistMidiCard()
+    }, 250)
   }
   const closeMidiEditor = () => setMidiEditorClipId(null)
   const openMidiEditorFor = (clipId: string) => {
@@ -422,11 +433,13 @@ const Timeline: Component = () => {
   }
 
   const handleLaneMouseDown: JSX.EventHandler<HTMLDivElement, MouseEvent> = (event) => {
+    if (midiEditorClipId()) { event.preventDefault(); event.stopPropagation(); return }
     onLaneMouseDown(event, scrollRef)
   }
 
   const onRulerMouseDown = (event: MouseEvent) => {
     event.preventDefault()
+    if (midiEditorClipId()) { event.stopPropagation(); return }
     startScrub(event.clientX)
   }
 
@@ -592,6 +605,7 @@ const Timeline: Component = () => {
     try { window.removeEventListener('mouseup', onResizeMouseUp) } catch {}
     audioEngine.close()
     resetAudioEngine()
+    if (midiCardPersistTimer) { clearTimeout(midiCardPersistTimer); midiCardPersistTimer = null }
     for (const timer of volumeTimers.values()) {
       clearTimeout(timer)
     }
@@ -963,7 +977,17 @@ const Timeline: Component = () => {
               {/* Floating MIDI Editor Card */}
               <Show when={midiEditorClipId()}>
                 {/* Invisible overlay to prevent interactions with content behind the editor */}
-                <div class="absolute inset-0 z-40" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} />
+                <div
+                  class="absolute inset-0 z-40 bg-transparent"
+                  style={{ 'touch-action': 'none' }}
+                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+                  onPointerMove={(e) => { e.preventDefault(); e.stopPropagation() }}
+                  onPointerUp={(e) => { e.preventDefault(); e.stopPropagation() }}
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+                  onWheel={(e) => { e.preventDefault(); e.stopPropagation() }}
+                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation() }}
+                />
                 <MidiEditorCard
                   clipId={midiEditorClipId()!}
                   bpm={bpm()}
@@ -982,7 +1006,7 @@ const Timeline: Component = () => {
                   w={midiCard().w}
                   h={midiCard().h}
                   onClose={() => closeMidiEditor()}
-                  onChangeBounds={(next: { x: number; y: number; w: number; h: number }) => { setMidiCard(next); persistMidiCard() }}
+                  onChangeBounds={(next: { x: number; y: number; w: number; h: number }) => { setMidiCard(next); schedulePersistMidiCard() }}
                   midi={(() => {
                     const id = midiEditorClipId()
                     if (!id) return undefined

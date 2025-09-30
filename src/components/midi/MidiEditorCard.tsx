@@ -70,6 +70,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     startLeft = props.x
     startTop = props.y
     setDragging(true)
+    try { (e as any).preventDefault?.() } catch {}
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch {}
     window.addEventListener('pointermove', onPointerMove)
     window.addEventListener('pointerup', onPointerUp, { once: true })
@@ -273,13 +274,16 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
       class="absolute z-50 rounded-md border border-neutral-700 bg-neutral-900 shadow-xl overflow-hidden"
       style={{ left: `${props.x}px`, top: `${props.y}px`, width: `${props.w}px`, height: `${props.h}px` }}
       onPointerDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation() }}
     >
       {/* Header: draggable */}
       <div
         class="flex items-center justify-between px-3 py-2 bg-neutral-800 border-b border-neutral-700 cursor-move select-none"
         onPointerDown={onHeaderPointerDown as any}
+        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
       >
         <div class="flex items-center gap-2 text-sm font-semibold text-neutral-200">
           <span>MIDI Editor</span>

@@ -95,6 +95,46 @@ export class AudioEngine {
   private activeNotesByTrack = new Map<string, Set<ActiveNote>>()
   // --- Arpeggiator per track ---
   private trackArpeggiators = new Map<string, { enabled: boolean; pattern: string; rate: string; octaves: number; gate: number; hold: boolean }>()
+  // --- Realtime meters: per-track analysers and temp buffers ---
+  private trackAnalysers = new Map<string, AnalyserNode>()
+  private trackMeterArrays = new Map<string, Float32Array>()
+
+  private ensureTrackAnalyser(trackId: string, gain: GainNode) {
+    if (!this.audioCtx) return
+    let a = this.trackAnalysers.get(trackId)
+    if (!a) {
+      a = this.audioCtx.createAnalyser()
+      a.fftSize = 512
+      a.smoothingTimeConstant = 0.7
+      try { gain.connect(a) } catch {}
+      this.trackAnalysers.set(trackId, a)
+    }
+  }
+
+  // Returns a normalized 0..1 RMS level for a track's post-gain signal
+  getTrackLevel(trackId: string): number {
+    const a = this.trackAnalysers.get(trackId)
+    if (!a || !this.audioCtx) return 0
+    let arr = this.trackMeterArrays.get(trackId)
+    if (!arr || arr.length !== a.fftSize) {
+      arr = new Float32Array(a.fftSize)
+      this.trackMeterArrays.set(trackId, arr)
+    }
+    try {
+      a.getFloatTimeDomainData(arr)
+    } catch {
+      return 0
+    }
+    let sum = 0
+    for (let i = 0; i < arr.length; i++) {
+      const v = arr[i]
+      sum += v * v
+    }
+    const rms = Math.sqrt(sum / Math.max(1, arr.length))
+    // Light companding for visual feel
+    const norm = Math.min(1, Math.max(0, Math.sqrt(rms)))
+    return norm
+  }
 
   ensureAudio() {
     if (!this.audioCtx) {
@@ -654,6 +694,8 @@ export class AudioEngine {
         g.gain.value = 1
         g.connect(this.masterGain)
         this.trackGains.set(trackId, g)
+        // Create analyser tapped from post-gain for meters
+        this.ensureTrackAnalyser(trackId, g)
       }
       // Connect by default input -> gain (no EQ)
       try { input.disconnect() } catch {}
@@ -773,6 +815,8 @@ export class AudioEngine {
         this.trackGains.set(t.id, g)
         // Rebuild routing from input through chain to gain
         this.rebuildTrackRouting(t.id)
+        // Ensure analyser exists and is wired to post-gain
+        this.ensureTrackAnalyser(t.id, g)
       }
       const audible = (!t.muted) && (!anySoloed || !!t.soloed)
       const effective = audible ? t.volume : 0
@@ -802,6 +846,8 @@ export class AudioEngine {
           try { rv.convolver.disconnect() } catch {}
           this.trackReverbs.delete(id)
         }
+        const an = this.trackAnalysers.get(id)
+        if (an) { try { an.disconnect() } catch {}; this.trackAnalysers.delete(id); this.trackMeterArrays.delete(id) }
         this.pendingEqParams.delete(id)
         this.pendingReverbParams.delete(id)
       }
@@ -842,6 +888,8 @@ export class AudioEngine {
         this.trackGains.set(t.id, g)
         // Rebuild routing in case EQ chain already exists
         this.rebuildTrackRouting(t.id)
+        // Ensure analyser exists and is wired to post-gain
+        this.ensureTrackAnalyser(t.id, g)
       }
       // Ensure gain reflects current mute/solo state
       const audible = (!t.muted) && (!anySoloed || !!t.soloed)

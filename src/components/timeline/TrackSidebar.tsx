@@ -1,4 +1,4 @@
-import { type Component, For, onCleanup } from 'solid-js'
+import { type Component, For, onCleanup, createEffect, createSignal } from 'solid-js'
 import type { Track } from '~/types/timeline'
 
 type TrackSidebarProps = {
@@ -17,6 +17,9 @@ type TrackSidebarProps = {
   recordArmTrackId: string | null
   onToggleRecordArm: (trackId: string) => void
   currentUserId?: string
+  // Realtime meter support
+  isPlaying: boolean
+  getTrackLevel: (trackId: string) => number
 }
 
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
@@ -37,6 +40,35 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   onCleanup(() => {
     detachDragListeners()
   })
+
+  // --- Realtime level polling ---
+  const [levels, setLevels] = createSignal<Record<string, number>>({})
+  let rafId: number | null = null
+
+  const scheduleTick = () => {
+    if (rafId == null) rafId = requestAnimationFrame(tick)
+  }
+
+  const tick = () => {
+    rafId = null
+    const next: Record<string, number> = {}
+    try {
+      for (const t of props.tracks) {
+        next[t.id] = props.getTrackLevel?.(t.id) ?? 0
+      }
+    } catch {}
+    setLevels(next)
+    if (props.isPlaying) scheduleTick()
+  }
+  createEffect(() => {
+    if (props.isPlaying) {
+      scheduleTick()
+    } else {
+      if (rafId != null) { cancelAnimationFrame(rafId); rafId = null }
+      setLevels({})
+    }
+  })
+  onCleanup(() => { if (rafId != null) cancelAnimationFrame(rafId) })
 
   return (
     <>
@@ -82,21 +114,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               >
                 <div class="flex items-center gap-3 h-full px-3 py-2">
                   <button
-                    class={`w-6 h-6 flex items-center justify-center rounded-full border transition-colors text-xs font-bold
-                      ${lockedByOther ? 'cursor-not-allowed border-red-900 text-red-900 bg-neutral-800' : isRecordArmed ? 'bg-red-500 text-black border-red-400 shadow-inner' : 'border-red-500 text-red-400 hover:bg-red-500/20'}
-                    `}
-                    title={lockedByOther ? 'Track locked by another user' : isRecordArmed ? 'Disarm recording' : 'Arm for recording'}
-                    disabled={lockedByOther}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      if (lockedByOther) return
-                      props.onToggleRecordArm(track.id)
-                    }}
-                  >
-                    R
-                  </button>
-
-                  <button
                     class={`font-semibold text-sm flex-1 text-left px-2 py-1 rounded cursor-pointer transition-colors
                       ${muteDisabled
                         ? 'bg-neutral-800/60 text-neutral-500 cursor-not-allowed'
@@ -114,6 +131,22 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     title={lockedByOther ? 'Track locked by another user' : track.muted ? 'Unmute track' : 'Mute track'}
                   >
                     {track.name}
+                  </button>
+
+                  {/* Move both Record and Solo to the right of the track name; Record to the left of Solo */}
+                  <button
+                    class={`w-6 h-6 flex items-center justify-center rounded-full border transition-colors text-xs font-bold
+                      ${lockedByOther ? 'cursor-not-allowed border-red-900 text-red-900 bg-neutral-800' : isRecordArmed ? 'bg-red-500 text-black border-red-400 shadow-inner' : 'border-red-500 text-red-400 hover:bg-red-500/20'}
+                    `}
+                    title={lockedByOther ? 'Track locked by another user' : isRecordArmed ? 'Disarm recording' : 'Arm for recording'}
+                    disabled={lockedByOther}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      if (lockedByOther) return
+                      props.onToggleRecordArm(track.id)
+                    }}
+                  >
+                    R
                   </button>
 
                   <button
@@ -139,20 +172,26 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   <div class="flex flex-col items-center gap-1">
                     <div class="text-xs text-neutral-400">Vol</div>
                     <div class={`relative h-16 w-6 ${volumeDisabled ? 'opacity-60' : ''}`}>
-                      <div class="absolute inset-0 w-1 bg-neutral-700 rounded-full left-1/2 transform -translate-x-1/2">
-                        <div
-                          class="w-full bg-green-500 rounded-full transition-all duration-150"
-                          style={{
-                            height: `${track.volume * 100}%`,
-                            position: 'absolute',
-                            bottom: 0
-                          }}
-                        />
+                      <div class="absolute inset-0 flex flex-col items-center">
+                        <div class="relative h-full w-1 rounded-full bg-neutral-800/70">
+                          {(() => {
+                            const level = props.isPlaying ? (levels()[track.id] ?? 0) : 0
+                            return (
+                              <div
+                                class="absolute bottom-0 w-full rounded-full bg-green-500 transition-all duration-75"
+                                style={{ height: `${Math.max(0, Math.min(1, level)) * 100}%` }}
+                              />
+                            )
+                          })()}
+                        </div>
                       </div>
-                      <div
-                        class="absolute w-4 h-4 bg-neutral-300 border-2 border-neutral-500 rounded-full left-1/2 transform -translate-x-1/2 transition-all duration-150 cursor-pointer"
-                        style={{ bottom: `${track.volume * 100}%` }}
-                      />
+                      {/* Volume handle indicators: one on each side of the meter line */}
+                      <div class="absolute left-0 right-0" style={{ bottom: `${track.volume * 100}%` }}>
+                        <div class="absolute left-1/2 -translate-x-1/2">
+                          <span class="absolute -left-2 text-[10px] leading-none select-none text-neutral-200">&lt;</span>
+                          <span class="absolute left-2 text-[10px] leading-none select-none text-neutral-200">&gt;</span>
+                        </div>
+                      </div>
                       <input
                         type="range"
                         min="0"

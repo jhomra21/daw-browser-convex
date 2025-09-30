@@ -45,7 +45,7 @@ const GridOverlay: Component<GridOverlayProps> = (props) => {
   return (
     <Show when={props.enabled}>
       <div
-        class="absolute left-0 top-0 pointer-events-none"
+        class="absolute left-0 top-0 pointer-events-none z-10"
         style={{
           width: `${Math.max(0, props.durationSec * PPS)}px`,
           height: `${props.heightPx}px`,

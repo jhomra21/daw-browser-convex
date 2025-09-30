@@ -920,7 +920,13 @@ const Timeline: Component = () => {
             style={{ width: `${duration() * PPS}px`, height: `${RULER_HEIGHT + (tracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}px` }} 
             onMouseDown={handleLaneMouseDown}
           >
-            <TimelineRuler durationSec={duration()} onMouseDown={onRulerMouseDown} />
+            <TimelineRuler
+              durationSec={duration()}
+              bpm={bpm()}
+              denom={gridDenominator()}
+              gridEnabled={gridEnabled()}
+              onMouseDown={onRulerMouseDown}
+            />
             
             <div class="absolute left-0 right-0" style={{ top: `${RULER_HEIGHT}px`, height: `${(tracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}px` }}>
               <For each={tracks()}>
@@ -968,7 +974,7 @@ const Timeline: Component = () => {
                   style={{ top: `${tracks().length * LANE_HEIGHT}px`, height: `${LANE_HEIGHT}px` }}
                 />
               )}
-              {/* Grid overlay: render above lanes (faint) and below selection/playhead */}
+              {/* Grid overlay: render above lanes (faint) and below selection/playhead; clipped to lanes by container */}
               <GridOverlay
                 durationSec={duration()}
                 heightPx={(tracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}
@@ -1044,6 +1050,10 @@ const Timeline: Component = () => {
           tracks={tracks()}
           selectedTrackId={selectedTrackId()}
           sidebarWidth={sidebarWidth()}
+          isPlaying={isPlaying()}
+          getTrackLevel={(id) => {
+            try { return (audioEngine as any).getTrackLevel?.(id) ?? 0 } catch { return 0 }
+          }}
           onTrackClick={(id) => {
             batch(() => {
               setSelectedTrackId(id)

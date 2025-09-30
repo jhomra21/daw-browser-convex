@@ -1,6 +1,7 @@
 const MIX_KEY_PREFIX = 'mb:mix:'
 const MIX_SYNC_KEY_PREFIX = 'mb:mix-sync:'
 const GRID_KEY_PREFIX = 'mb:grid:'
+const BPM_KEY_PREFIX = 'mb:bpm:'
 
 export const canUseLocalStorage = () => {
   if (typeof window === 'undefined') return false
@@ -75,5 +76,31 @@ export const saveGridSettings = (rid: string | undefined, enabled: boolean, deno
   if (!canUseLocalStorage()) return
   try {
     localStorage.setItem(`${GRID_KEY_PREFIX}${rid}`, JSON.stringify({ enabled, denominator }))
+  } catch {}
+}
+
+export const loadBpm = (rid?: string): number => {
+  const DEFAULT = 120
+  if (!rid) return DEFAULT
+  if (!canUseLocalStorage()) return DEFAULT
+  try {
+    const raw = localStorage.getItem(`${BPM_KEY_PREFIX}${rid}`)
+    const n = Number(raw)
+    if (!Number.isFinite(n)) return DEFAULT
+    const clamped = Math.min(300, Math.max(30, Math.round(n)))
+    return clamped
+  } catch {
+    return DEFAULT
+  }
+}
+
+export const saveBpm = (rid: string | undefined, value: number) => {
+  if (!rid) return
+  if (!canUseLocalStorage()) return
+  const DEFAULT = 120
+  const safeValue = Number.isFinite(value) ? value : DEFAULT
+  const clamped = Math.min(300, Math.max(30, Math.round(safeValue)))
+  try {
+    localStorage.setItem(`${BPM_KEY_PREFIX}${rid}`, String(clamped))
   } catch {}
 }

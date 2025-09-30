@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogD
 import type { Track, Clip, SelectedClip } from '~/types/timeline'
 import { getAudioEngine, resetAudioEngine } from '~/lib/audio-engine-singleton'
 import { timelineDurationSec, PPS, RULER_HEIGHT, LANE_HEIGHT, yToLaneIndex } from '~/lib/timeline-utils'
-import { canUseLocalStorage, loadLocalMixMap, saveLocalMix, loadMixSyncFlag, saveMixSyncFlag, loadGridSettings, saveGridSettings } from '~/lib/timeline-storage'
+import { canUseLocalStorage, loadLocalMixMap, saveLocalMix, loadMixSyncFlag, saveMixSyncFlag, loadGridSettings, saveGridSettings, loadBpm, saveBpm } from '~/lib/timeline-storage'
 import { ensureRoomShareLink } from '~/lib/timeline-share'
 import { useTimelineKeyboard } from '~/hooks/useTimelineKeyboard'
 import { useTimelineClipImport } from '~/hooks/useTimelineClipImport'
@@ -96,6 +96,22 @@ const Timeline: Component = () => {
     const denom = gridDenominator()
     if (!rid) return
     saveGridSettings(rid, enabled, denom)
+  })
+
+  // Load BPM per room (local-only, like grid)
+  createEffect(() => {
+    const rid = roomId()
+    if (!canUseLocalStorage() || !rid) return
+    const loaded = loadBpm(rid)
+    setBpm(loaded)
+  })
+
+  // Save BPM when it changes
+  createEffect(() => {
+    const rid = roomId()
+    if (!canUseLocalStorage() || !rid) return
+    const value = bpm()
+    saveBpm(rid, value)
   })
 
   // Local caches for responsiveness

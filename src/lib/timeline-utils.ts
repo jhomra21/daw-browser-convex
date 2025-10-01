@@ -41,7 +41,9 @@ export function calcNonOverlapStart(clips: Clip[], excludeId: string | null, des
   for (let i = 0; i < sorted.length; i++) {
     const c = sorted[i]
     if (start < c.startSec + c.duration && start + duration > c.startSec) {
-      start = c.startSec + c.duration + 0.0001
+      // Move start to be exactly flush with the blocking clip's right edge.
+      // No epsilon here so clips can sit perfectly adjacent without micro-gaps.
+      start = c.startSec + c.duration
       i = -1 // restart scan
     }
   }
@@ -81,16 +83,53 @@ export function calcNonOverlapStartGridAligned(
     return calcNonOverlapStart(clips, excludeId, desiredStart, duration)
   }
   let start = quantizeSecToGrid(Math.max(0, desiredStart), bpm, denom, mode)
-  const sorted = clips.filter(c => !excludeId || c.id !== excludeId).slice().sort((a, b) => a.startSec - b.startSec)
-  const EPS = 0.0001
+  const sorted = clips
+    .filter(c => !excludeId || c.id !== excludeId)
+    .slice()
+    .sort((a, b) => a.startSec - b.startSec)
+  // Align exactly to neighbors without leaving tiny gaps.
+
+  // Pass 1: gap snapping when there is no overlap
+  if (sorted.length > 0) {
+    let prevEnd = -Infinity
+    let nextStart = Infinity
+    for (let i = 0; i < sorted.length; i++) {
+      const c = sorted[i]
+      const cEnd = c.startSec + c.duration
+      if (cEnd <= start) prevEnd = Math.max(prevEnd, cEnd)
+      if (c.startSec >= start) { nextStart = Math.min(nextStart, c.startSec); break }
+    }
+    // Inside a valid gap: only magnet to an edge when close to it; otherwise respect snapped grid position.
+    const leftEdge = Number.isFinite(prevEnd) ? prevEnd : -Infinity
+    const rightEdge = Number.isFinite(nextStart) ? (nextStart as number) - duration : Infinity
+    if (start > leftEdge && start < rightEdge) {
+      const threshold = step * 0.5
+      const nearLeft = Number.isFinite(leftEdge) && Math.abs(start - (leftEdge as number)) <= threshold + 1e-7
+      const nearRight = Number.isFinite(rightEdge) && Math.abs((rightEdge as number) - start) <= threshold + 1e-7
+      if (nearLeft) start = leftEdge as number
+      else if (nearRight) start = rightEdge as number
+    } else {
+      // If snapped just outside the gap, allow snapping to the nearest edge within one grid step
+      if (Number.isFinite(rightEdge) && start >= rightEdge && (start - rightEdge) <= step + 1e-7) {
+        start = rightEdge
+      } else if (Number.isFinite(leftEdge) && start <= leftEdge && (leftEdge - start) <= step + 1e-7) {
+        start = leftEdge
+      }
+    }
+
+  }
+  // Pass 2: if overlap remains, move forward by the smaller of (a) flush to edge, (b) next grid
   for (let i = 0; i < sorted.length; i++) {
     const c = sorted[i]
     if (start < c.startSec + c.duration && start + duration > c.startSec) {
-      // Advance exactly one grid step from the end of the overlapping clip
-      const next = c.startSec + c.duration + EPS
-      const snappedNext = quantizeSecToGrid(next, bpm, denom, 'ceil')
-      start = Math.max(start + step, snappedNext)
-      i = -1 // restart scan
+      const edge = c.startSec + c.duration
+      const snappedNext = quantizeSecToGrid(edge, bpm, denom, 'ceil')
+      const candidateEdge = edge
+      const candidateGrid = Math.max(start + step, snappedNext)
+      const distEdge = Math.max(0, candidateEdge - start)
+      const distGrid = Math.max(0, candidateGrid - start)
+      start = distEdge <= distGrid ? candidateEdge : candidateGrid
+      i = -1
     }
   }
   return start

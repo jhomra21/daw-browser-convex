@@ -128,6 +128,12 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           const minSnapped = quantizeSecToGrid(minDist, options.bpm(), options.gridDenominator(), 'ceil')
           newStart = right - Math.max(MIN_CLIP_SEC, minSnapped)
         }
+        // If we're within one grid step of the left neighbor's end, snap flush to its edge
+        const step = (60 / Math.max(1e-6, options.bpm() || 0)) * (4 / Math.max(1, options.gridDenominator() || 4))
+        if (Number.isFinite(neighborEnd) && newStart > (neighborEnd as number)) {
+          const delta = newStart - (neighborEnd as number)
+          if (delta <= step + 1e-7) newStart = neighborEnd as number
+        }
       } else {
         newStart = Math.max(minStartBound, Math.min(pointerSec, maxStartBound))
       }
@@ -164,6 +170,12 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           const minDist = Math.max(0, minRightByLen - left)
           const minSnapped = quantizeSecToGrid(minDist, options.bpm(), options.gridDenominator(), 'ceil')
           newRight = left + Math.max(MIN_CLIP_SEC, minSnapped)
+        }
+        // If we're within one grid step of the right neighbor's start, snap flush to its edge
+        if (Number.isFinite(neighborStart) && newRight < (neighborStart as number)) {
+          const step = (60 / Math.max(1e-6, options.bpm() || 0)) * (4 / Math.max(1, options.gridDenominator() || 4))
+          const delta = (neighborStart as number) - newRight
+          if (delta <= step + 1e-7) newRight = neighborStart as number
         }
       } else {
         newRight = Math.max(pointerSec, minRightByLen)

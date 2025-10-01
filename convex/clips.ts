@@ -53,11 +53,11 @@ export const move = mutation({
       if (!targetTrack || targetTrack.roomId !== clip.roomId) {
         return; // ignore cross-room moves
       }
-      // Block moving audio clips into instrument tracks
-      const isInstrument = (targetTrack as any).kind === 'instrument'
-      const isAudioClip = (clip as any).midi === undefined || (clip as any).midi === null
-      if (isInstrument && isAudioClip) {
-        return; // disallow placing audio clips on instrument tracks
+      // Block moving across incompatible track types
+      const targetIsInstrument = (targetTrack as any).kind === 'instrument'
+      const clipHasMidi = (clip as any).midi !== undefined && (clip as any).midi !== null
+      if ((targetIsInstrument && !clipHasMidi) || (!targetIsInstrument && clipHasMidi)) {
+        return; // disallow audio->instrument and midi->audio
       }
     }
     await ctx.db.patch(clipId, {
@@ -92,6 +92,10 @@ export const setSampleUrl = mutation({
   handler: async (ctx, { clipId, sampleUrl }) => {
     const clip = await ctx.db.get(clipId);
     if (!clip) return;
+
+    // Disallow setting audio sample on instrument tracks
+    const track = await ctx.db.get(clip.trackId)
+    if (track && (track as any).kind === 'instrument') return
 
     await ctx.db.patch(clipId, { sampleUrl });
 
@@ -218,6 +222,10 @@ export const createMany = mutation({
     for (const item of items) {
       const track = await ctx.db.get(item.trackId)
       if (!track || track.roomId !== item.roomId) continue
+      const isInstrument = (track as any).kind === 'instrument'
+      const hasMidi = item.midi !== undefined && item.midi !== null
+      // Disallow audio on instrument tracks and MIDI on audio tracks
+      if ((isInstrument && !hasMidi) || (!isInstrument && hasMidi)) continue
       const clipId = await ctx.db.insert('clips', {
         roomId: item.roomId,
         trackId: item.trackId,

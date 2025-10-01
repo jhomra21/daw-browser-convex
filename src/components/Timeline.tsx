@@ -17,6 +17,7 @@ import MidiEditorCard from './midi/MidiEditorCard'
 import { Button } from './ui/button'
 import { convexClient, convexApi, useConvexQuery } from '~/lib/convex'
 import AgentChat from './AgentChat'
+import SharedChat from './SharedChat'
 import { useTimelineData } from '~/hooks/useTimelineData'
 import { usePlayheadControls } from '~/hooks/usePlayheadControls'
 import { useClipDrag } from '~/hooks/useClipDrag'
@@ -31,7 +32,7 @@ const volumeTimers = new Map<string, number>()
 const optimisticMoves = new Map<string, { trackId: string; startSec: number }>()
 
 const Timeline: Component = () => {
-  // Stateasa
+  // State
   const [tracks, setTracks] = createSignal<Track[]>([])
   const [selectedTrackId, setSelectedTrackId] = createSignal('')
   const [selectedClip, setSelectedClip] = createSignal<SelectedClip>(null)
@@ -40,6 +41,7 @@ const Timeline: Component = () => {
   const [bottomFXOpen, setBottomFXOpen] = createSignal(true)
   const [selectedFXTarget, setSelectedFXTarget] = createSignal<string>('master')
   const [agentPanelOpen, setAgentPanelOpen] = createSignal(false)
+  const [sharedChatOpen, setSharedChatOpen] = createSignal(false)
   const [sidebarWidth, setSidebarWidth] = createSignal(260)
   const [confirmOpen, setConfirmOpen] = createSignal(false)
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<string | null>(null)
@@ -135,6 +137,8 @@ const Timeline: Component = () => {
           }
           return arr
         })
+
+  
       } catch {}
     }
   })
@@ -288,6 +292,22 @@ const Timeline: Component = () => {
     gridDenominator,
   })
 
+  // Open FX panel when selecting a clip on a different track
+  // Only triggers when FX target switches to the selected clip's track
+  let lastFxTargetForPanel: string | null = null
+  createEffect(() => {
+    const fx = selectedFXTarget()
+    const sel = selectedClip()
+    const changed = fx !== lastFxTargetForPanel
+    lastFxTargetForPanel = fx
+    if (!changed) return
+    if (!fx || fx === 'master') return
+    if (!sel) return
+    if (sel.trackId === fx) {
+      setBottomFXOpen(true)
+    }
+  })
+
   const {
     onClipMouseDown,
     activeDrag,
@@ -309,6 +329,7 @@ const Timeline: Component = () => {
     bpm,
     gridEnabled,
     gridDenominator,
+    audioBufferCache,
   })
 
   const {
@@ -1090,6 +1111,16 @@ const Timeline: Component = () => {
         💬
       </button>
 
+      {/* Shared chat toggle button */}
+      <button
+        class="fixed left-20 z-40 bg-neutral-800 text-white rounded-md px-3 py-2 border border-neutral-700 hover:bg-neutral-700"
+        style={{ bottom: bottomFXOpen() ? '288px' : '16px' }}
+        aria-label="Toggle Room Chat"
+        onClick={() => setSharedChatOpen((v) => !v)}
+      >
+        🗨
+      </button>
+
       {/* Agent chat panel */}
       <AgentChat
         isOpen={agentPanelOpen()}
@@ -1097,6 +1128,15 @@ const Timeline: Component = () => {
         roomId={roomId()}
         userId={userId()}
         bpm={bpm()}
+        bottomOffsetPx={bottomFXOpen() ? 288 : 0}
+      />
+
+      {/* Shared chat panel */}
+      <SharedChat
+        isOpen={sharedChatOpen()}
+        onClose={() => setSharedChatOpen(false)}
+        roomId={roomId()}
+        userId={userId()}
         bottomOffsetPx={bottomFXOpen() ? 288 : 0}
       />
 
@@ -1264,10 +1304,14 @@ const Timeline: Component = () => {
           getTrackLevel={(id) => {
             try { return (audioEngine as any).getTrackLevel?.(id) ?? 0 } catch { return 0 }
           }}
+          
           onTrackClick={(id) => {
             batch(() => {
               setSelectedTrackId(id)
               setSelectedFXTarget(id)
+              // Clear any clip selection so Delete targets the selected track
+              setSelectedClip(null)
+              setSelectedClipIds(new Set<string>())
             })
           }}
           onAddTrack={async () => {

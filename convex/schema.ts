@@ -113,6 +113,22 @@ export default defineSchema({
     updatedAt: v.number(), // epoch millis
   })
     .index("by_room_owner", ["roomId", "ownerUserId"]),
+
+  // Shared chat messages (one row per message) scoped by roomId.
+  // This supports multi-user chat without array overwrite conflicts and enables
+  // efficient real-time subscriptions and pagination of latest N messages.
+  roomMessages: defineTable({
+    roomId: v.string(),
+    senderUserId: v.string(),
+    content: v.string(),
+    createdAt: v.number(), // epoch millis
+    // Optional snapshot of display name to avoid joins on read
+    senderName: v.optional(v.string()),
+    // Optional kind for future system messages, attachments, etc.
+    kind: v.optional(v.string()), // 'text' | 'system'
+  })
+    .index("by_room", ["roomId"]) // list messages in a room
+    .index("by_room_createdAt", ["roomId", "createdAt"]), // ordered reads
 });
 
 

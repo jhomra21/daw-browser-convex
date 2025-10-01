@@ -18,6 +18,7 @@ const MIN_CLIP_PX = 6 // allow trimming to fine grids like 1/16 while keeping ha
 
 const ClipComponent: Component<ClipComponentProps> = (props) => {
   let canvasRef: HTMLCanvasElement | undefined
+  const isGhost = () => props.clip.id.startsWith('__dup_preview:')
 
   function drawWaveform() {
     const canvas = canvasRef
@@ -211,7 +212,11 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
 
   return (
     <div
-      class={`group absolute border ${props.isSelected ? 'border-blue-400 bg-blue-500/25' : 'border-green-500/60 bg-green-500/20'} hover:bg-green-500/25 cursor-grab select-none overflow-hidden`}
+      class={`group absolute border ${
+        isGhost()
+          ? 'border-green-400/60 border-dashed opacity-60 pointer-events-none bg-green-500/20'
+          : (props.isSelected ? 'border-blue-400 bg-blue-500/25' : 'border-green-500/60 bg-green-500/20')
+      } ${isGhost() ? '' : 'hover:bg-green-500/25 cursor-grab'} select-none overflow-hidden`}
       style={{ 
         top: '0px',
         left: `${props.clip.startSec * PPS}px`, 

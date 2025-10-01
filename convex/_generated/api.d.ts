@@ -19,6 +19,7 @@ import type * as effects from "../effects.js";
 import type * as ownerships from "../ownerships.js";
 import type * as projects from "../projects.js";
 import type * as samples from "../samples.js";
+import type * as sharedChat from "../sharedChat.js";
 import type * as timeline from "../timeline.js";
 import type * as tracks from "../tracks.js";
 
@@ -37,6 +38,7 @@ declare const fullApi: ApiFromModules<{
   ownerships: typeof ownerships;
   projects: typeof projects;
   samples: typeof samples;
+  sharedChat: typeof sharedChat;
   timeline: typeof timeline;
   tracks: typeof tracks;
 }>;

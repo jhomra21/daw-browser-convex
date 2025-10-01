@@ -132,6 +132,12 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       let simulatedClips = t.clips.map(c => ({ ...c }))
 
       for (const clip of sorted) {
+        const isInstrument = t.kind === 'instrument'
+        const isMidi = !!(clip as any).midi
+        // Enforce track-type gating: skip invalid duplicates
+        if ((isInstrument && !isMidi) || (!isInstrument && isMidi)) {
+          continue
+        }
         const offset = clip.startSec - groupStart
         const desiredStart = baseStart + offset
         const safeStart = gridEnabled()
@@ -162,6 +168,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         duration: p.duration,
         userId: uid,
         name: p.name,
+        ...(p.midi ? { midi: p.midi } : {}),
       }))
     }) as any as string[]
 

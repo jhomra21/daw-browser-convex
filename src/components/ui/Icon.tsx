@@ -1,6 +1,6 @@
 import { Component, JSX, splitProps, createUniqueId } from "solid-js";
 
-export type IconName = "google" | "solidjs" | "file-audio" | "play" | "pause" | "stop" | "metronome" | "repeat";
+export type IconName = "google" | "solidjs" | "file-audio" | "play" | "pause" | "stop" | "metronome" | "repeat" | "grid" | "user" | "log-out" | "log-in";
 
 type BaseIconProps = {
   size?: number | string;
@@ -267,6 +267,120 @@ const RepeatIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>>
   );
 };
 
+const GridIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
+  const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
+  const s = normalizeSize(local.size);
+
+  return (
+    <svg
+      {...rest}
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      class={local.class}
+      role={local.ariaLabel ? "img" : undefined}
+      aria-label={local.ariaLabel}
+      aria-hidden={local.ariaLabel ? undefined : "true"}
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      {local.title ? <title>{local.title}</title> : null}
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M3 9h18" />
+      <path d="M3 15h18" />
+      <path d="M9 3v18" />
+      <path d="M15 3v18" />
+    </svg>
+  );
+};
+
+const UserIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
+  const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
+  const s = normalizeSize(local.size);
+  return (
+    <svg
+      {...rest}
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      class={local.class}
+      role={local.ariaLabel ? "img" : undefined}
+      aria-label={local.ariaLabel}
+      aria-hidden={local.ariaLabel ? undefined : "true"}
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      {local.title ? <title>{local.title}</title> : null}
+      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  );
+};
+
+const LogOutIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
+  const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
+  const s = normalizeSize(local.size);
+  return (
+    <svg
+      {...rest}
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      class={local.class}
+      role={local.ariaLabel ? "img" : undefined}
+      aria-label={local.ariaLabel}
+      aria-hidden={local.ariaLabel ? undefined : "true"}
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      {local.title ? <title>{local.title}</title> : null}
+      <path d="m16 17 5-5-5-5" />
+      <path d="M21 12H9" />
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    </svg>
+  );
+};
+
+const LogInIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
+  const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
+  const s = normalizeSize(local.size);
+  return (
+    <svg
+      {...rest}
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      class={local.class}
+      role={local.ariaLabel ? "img" : undefined}
+      aria-label={local.ariaLabel}
+      aria-hidden={local.ariaLabel ? undefined : "true"}
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      {local.title ? <title>{local.title}</title> : null}
+      <path d="m10 17 5-5-5-5" />
+      <path d="M15 12H3" />
+      <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+    </svg>
+  );
+};
+
 const registry: Record<IconName, Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>>> = {
   google: GoogleIcon,
   solidjs: SolidJSIcon,
@@ -276,6 +390,10 @@ const registry: Record<IconName, Component<BaseIconProps & JSX.SvgSVGAttributes<
   stop: StopIcon,
   metronome: MetronomeIcon,
   repeat: RepeatIcon,
+  grid: GridIcon,
+  user: UserIcon,
+  "log-out": LogOutIcon,
+  "log-in": LogInIcon,
 };
 
 const Icon: Component<IconProps> = (allProps) => {

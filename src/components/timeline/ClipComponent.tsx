@@ -19,6 +19,8 @@ const MIN_CLIP_PX = 6 // allow trimming to fine grids like 1/16 while keeping ha
 const ClipComponent: Component<ClipComponentProps> = (props) => {
   let canvasRef: HTMLCanvasElement | undefined
   const isGhost = () => props.clip.id.startsWith('__dup_preview:')
+  const HEADER_H = 18
+  const BOTTOM_PAD = 2
 
   function drawWaveform() {
     const canvas = canvasRef
@@ -45,9 +47,9 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     // Clear
     ctx.clearRect(0, 0, cssW, cssH)
 
-    // Reserve some space for title (top) and duration label (bottom)
-    const padTop = 12
-    const padBottom = 10
+    // Reserve space for header (top) and minimal bottom padding
+    const padTop = HEADER_H
+    const padBottom = BOTTOM_PAD
     const innerH = Math.max(1, cssH - padTop - padBottom)
     // Compute midline within inner area
     const midY = padTop + innerH / 2
@@ -212,7 +214,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
 
   return (
     <div
-      class={`group absolute border ${
+      class={`group absolute border z-20 ${
         isGhost()
           ? 'border-green-400/60 border-dashed opacity-60 pointer-events-none bg-green-500/20'
           : (props.isSelected ? 'border-blue-400 bg-blue-500/25' : 'border-green-500/60 bg-green-500/20')
@@ -234,7 +236,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       }}
       onClick={(e) => props.onClick(props.trackId, props.clip.id, e)}
       onDblClick={(e) => props.onDblClick?.(props.trackId, props.clip.id, e)}
-      title={`${props.clip.name} (${props.clip.duration.toFixed(2)}s)`}
+      title={`${props.clip.name}`}
     >
       {/* Left resize handle */}
       <div
@@ -256,9 +258,13 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       </div>
 
       <canvas ref={(el) => (canvasRef = el || undefined)} class="absolute inset-0 pointer-events-none z-0" />
-      <div class="px-2 py-1 text-xs truncate relative z-10">{props.clip.name}</div>
-      <div class="absolute bottom-1 right-2 text-[10px] text-neutral-300 relative z-10">
-        {props.clip.duration.toFixed(2)}s
+      <div
+        class={`absolute left-0 right-0 top-0 z-10 px-2 flex items-center ${
+          isGhost() ? 'bg-green-700/50' : (props.isSelected ? 'bg-blue-700/55' : 'bg-green-700/55')
+        }`}
+        style={{ height: `${HEADER_H}px` }}
+      >
+        <div class="text-[11px] leading-none truncate text-white">{props.clip.name}</div>
       </div>
     </div>
   )

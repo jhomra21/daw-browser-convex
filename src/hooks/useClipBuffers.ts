@@ -7,6 +7,8 @@ const audioBufferCache = new Map<string, AudioBuffer>()
 const sampleUrlBufferCache = new Map<string, AudioBuffer>()
 const pendingSampleBuffers = new Map<string, Promise<AudioBuffer>>()
 const loadingClipIds = new Set<string>()
+// Retry accounting to prevent spamming the server with repeated failing requests
+const sampleUrlAttemptCounts = new Map<string, number>()
 
 export type UploadToR2Result = string | null
 
@@ -34,6 +36,36 @@ type ClipBufferControls = {
 
 export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
   const { audioEngine, tracks, setTracks } = options
+
+  // Fetch helper with global per-URL cap: max 2 retries (3 total attempts)
+  const fetchSampleWithRetry = async (url: string, init?: RequestInit) => {
+    const maxTotalAttempts = 3
+    let attemptsSoFar = sampleUrlAttemptCounts.get(url) ?? 0
+    const remaining = Math.max(0, maxTotalAttempts - attemptsSoFar)
+    if (remaining <= 0) {
+      throw new Error(`retry limit reached for ${url}`)
+    }
+    let lastErr: unknown = null
+    for (let i = 0; i < remaining; i++) {
+      attemptsSoFar += 1
+      sampleUrlAttemptCounts.set(url, attemptsSoFar)
+      try {
+        const res = await fetch(url, init)
+        if (res.ok) {
+          sampleUrlAttemptCounts.delete(url)
+          return res
+        }
+        lastErr = new Error(`HTTP ${res.status} for ${url}`)
+      } catch (e) {
+        lastErr = e
+      }
+      if (i < remaining - 1) {
+        const backoffMs = 200 * Math.pow(2, i)
+        await new Promise((r) => setTimeout(r, backoffMs))
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(`failed to fetch ${url}`)
+  }
 
   const uploadToR2: UploadToR2 = async (room, clip, file, durationSec) => {
     try {
@@ -94,7 +126,7 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
       let pending = pendingSampleBuffers.get(sampleUrl)
       if (!pending) {
         pending = (async () => {
-          const res = await fetch(sampleUrl)
+          const res = await fetchSampleWithRetry(sampleUrl)
           if (!res.ok) throw new Error('failed to fetch sample')
           const ab = await res.arrayBuffer()
           return audioEngine.decodeAudioData(ab)
@@ -105,6 +137,7 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
       try {
         const decoded = await pending
         sampleUrlBufferCache.set(sampleUrl, decoded)
+        sampleUrlAttemptCounts.delete(sampleUrl)
         applyBuffer(decoded)
       } catch {
         // Ignore errors; buffer remains unset
@@ -120,10 +153,11 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
     loadingClipIds.add(clipId)
     try {
       const existing = untrack(() => tracks().flatMap(t => t.clips).find(c => c.id === clipId))
-      const res = existing?.sampleUrl ? await fetch(existing.sampleUrl) : null
+      const res = existing?.sampleUrl ? await fetchSampleWithRetry(existing.sampleUrl) : null
       if (res && res.ok) {
         const ab = await res.arrayBuffer()
         const decoded = await audioEngine.decodeAudioData(ab)
+        if (existing?.sampleUrl) sampleUrlAttemptCounts.delete(existing.sampleUrl)
         applyBuffer(decoded)
       }
     } catch {
@@ -138,6 +172,7 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
     audioBufferCache.clear()
     sampleUrlBufferCache.clear()
     pendingSampleBuffers.clear()
+    sampleUrlAttemptCounts.clear()
   }
 
   return {

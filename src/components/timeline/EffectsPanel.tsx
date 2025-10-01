@@ -1,8 +1,8 @@
-import { type Component, Show, For, createSignal, createMemo, createEffect, untrack } from 'solid-js'
+import { type Component, Show, For, createSignal, createMemo, createEffect, untrack, onMount, onCleanup } from 'solid-js'
 import type { Track } from '~/types/timeline'
 import { Button } from '~/components/ui/button'
 import Eq, { createDefaultEqParams, type EqParams } from '~/components/effects/Eq'
-import type { AudioEngine, EqParamsLite, ReverbParamsLite } from '~/lib/audio-engine'
+import type { AudioEngine, EqParamsLite, ReverbParamsLite, SpectrumFrame } from '~/lib/audio-engine'
 import { useConvexQuery, convexClient, convexApi } from '~/lib/convex'
 import { FX_PANEL_HEIGHT_PX } from '~/lib/timeline-utils'
 import Reverb, { createDefaultReverbParams, type ReverbParams } from '~/components/effects/Reverb'
@@ -257,11 +257,34 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
 
   // Local EQ params per FX target (trackId or 'master'); undefined = no EQ yet
   const [eqByTarget, setEqByTarget] = createSignal<Record<string, EqParams | undefined>>({})
+  const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null)
 
   const eqForTarget = createMemo(() => {
     const id = currentTargetId()
     const map = eqByTarget()
     return map[id]
+  })
+
+  // Live spectrum polling (keeps last non-empty after pause)
+  onMount(() => {
+    let raf = 0
+    const loop = () => {
+      try {
+        const id = currentTargetId()
+        const data = id === 'master'
+          ? props.audioEngine?.getMasterSpectrum()
+          : props.audioEngine?.getTrackSpectrum(id)
+        if (data) setSpectrum(data)
+      } catch {}
+      raf = requestAnimationFrame(loop)
+    }
+    raf = requestAnimationFrame(loop)
+    onCleanup(() => { try { cancelAnimationFrame(raf) } catch {} })
+  })
+
+  createEffect(() => {
+    void currentTargetId()
+    setSpectrum(null)
   })
 
   function updateEqForTarget(updater: (prev: EqParams) => EqParams) {
@@ -673,6 +696,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                           onToggleEnabled={handleToggleEnabled}
                           onReset={handleReset}
                           class="min-w-[320px]"
+                          spectrumData={spectrum()}
                         />
                       </Show>
                     </Show>

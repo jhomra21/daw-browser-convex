@@ -2,7 +2,7 @@ import { type Component, createSignal, For, onMount, onCleanup, Show, createEffe
 import { Button } from '~/components/ui/button'
 import Icon from '~/components/ui/Icon'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '~/components/ui/dropdown-menu'
-import UserInfoDropdown from '~/components/UserInfoDropdown'
+import { NavUser } from '~/components/nav-user'
 import { useConvexQuery, convexApi, convexClient } from '~/lib/convex'
 import { useSessionQuery } from '~/lib/session'
 import { useProjectSamples } from '~/hooks/useProjectSamples'
@@ -684,7 +684,8 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
             <input
               type="text"
               value={tempoDraft()}
-              class="w-[5ch] rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 focus:border-neutral-500 focus:outline-none appearance-none"
+              size={Math.max((tempoDraft()?.length ?? 0) + 1, 2)}
+              class="w-auto rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 focus:border-neutral-500 focus:outline-none appearance-none"
               inputmode="numeric"
               pattern="[0-9]*"
               onFocus={() => setTempoEditing(true)}
@@ -749,12 +750,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
             aria-label="Toggle snap to grid"
             class={props.gridEnabled ? 'text-green-400' : ''}
           >
-            {/* Magnet icon (inline) */}
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4 mr-1">
-              <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 15V8a6 6 0 0 1 6-6h0a6 6 0 0 1 6 6v7" />
-              <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 15a4 4 0 0 0 4 4m8 0a4 4 0 0 0 4-4" />
-              <title>Snap</title>
-            </svg>
+            <Icon name="grid" class="h-4 w-4 mr-1" />
             <span class="text-xs">Grid</span>
           </Button>
           {/* Grid resolution */}
@@ -837,7 +833,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
           </DropdownMenuContent>
         </DropdownMenu>
         {/* User info dropdown at the far right */}
-        <UserInfoDropdown />
+        <NavUser />
       </div>
     </div>
   )

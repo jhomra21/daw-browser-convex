@@ -1,5 +1,6 @@
 import { Show, For, createSignal, onMount, onCleanup, createEffect } from 'solid-js'
 import Knob from '~/components/ui/knob'
+import type { SpectrumFrame } from '~/lib/audio-engine'
 
 // ===== Types (used to inform Convex schema later) =====
 export type EqBandParams = {
@@ -43,6 +44,7 @@ export type EqProps = {
   onToggleEnabled?: (enabled: boolean) => void
   onReset?: () => void
   class?: string
+  spectrumData?: SpectrumFrame | null
 }
 
 const FREQ_MIN = 20
@@ -254,6 +256,42 @@ export default function Eq(props: EqProps) {
     ctx.lineTo(width - 6, zy)
     ctx.stroke()
 
+    // Live spectrum (if available)
+    const frame = props.spectrumData
+    const spec = frame?.data
+    if (spec && spec.length > 0) {
+      const grad = ctx.createLinearGradient(6, 0, width - 6, 0)
+      grad.addColorStop(0, '#22c55e')
+      grad.addColorStop(1, '#ef4444')
+      ctx.beginPath()
+      ctx.moveTo(6, height)
+      const L = 6, R = 6
+      const nyquist = Math.max(1, (frame?.sampleRate ?? 44100) / 2)
+      for (let x = L; x <= width - R; x += 2) {
+        const inner = Math.max(1, width - (L + R))
+        const t = (x - L) / inner
+        const freq = FREQ_MIN * Math.pow(FREQ_MAX / FREQ_MIN, t)
+        const bin = Math.min(spec.length - 1, Math.max(0, Math.floor((freq / nyquist) * spec.length)))
+        let mag = spec[bin] || 0
+        if (bin > 0 && bin < spec.length - 1) {
+          mag = (spec[bin - 1] + spec[bin] + spec[bin + 1]) / 3
+        }
+        const scaled = Math.pow(mag, 0.7)
+        const y = height - (scaled * height * 0.5)
+        ctx.lineTo(x, y)
+      }
+      ctx.lineTo(width - R, height)
+      ctx.closePath()
+      ctx.globalAlpha = 0.3
+      ctx.fillStyle = grad
+      ctx.fill()
+      ctx.globalAlpha = 0.6
+      ctx.strokeStyle = grad
+      ctx.lineWidth = 1
+      ctx.stroke()
+      ctx.globalAlpha = 1
+    }
+
     // Response curve
     if (props.enabled) {
       ctx.strokeStyle = '#22c55e'
@@ -295,6 +333,12 @@ export default function Eq(props: EqProps) {
     void _enabled
     void _selected
     void _size
+    draw()
+  })
+
+  // Redraw when spectrum data updates
+  createEffect(() => {
+    void props.spectrumData
     draw()
   })
 

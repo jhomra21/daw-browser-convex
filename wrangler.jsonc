@@ -1,5 +1,5 @@
 {
-	"name": "mediabunny-first-test",
+	"name": "daw-browser-convex",
 	"compatibility_date": "2025-09-12",
 	"main": "./api/index.ts",
 	"compatibility_flags": [
@@ -33,5 +33,9 @@
 			"binding": "daw_convex_auth_kv",
 			"id": "f5b72c238c4e42219a7fb9cad9303761"
 		}
-	]
+	],
+	"vars":{
+		"BETTER_AUTH_URL":"http://localhost:3000",
+		"VITE_CONVEX_URL":"https://polite-peccary-245.convex.cloud"
+	}
 }

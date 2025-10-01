@@ -39,6 +39,11 @@ type ActiveNote = {
   cleanupTimer: number | null
 }
 
+export type SpectrumFrame = {
+  data: Float32Array
+  sampleRate: number
+}
+
 export class AudioEngine {
   private audioCtx: AudioContext | null = null
   private masterGain: GainNode | null = null
@@ -52,6 +57,11 @@ export class AudioEngine {
   private pendingEqParams = new Map<string, EqParamsLite>()
   // Master EQ chain
   private masterEqChain: BiquadFilterNode[] = []
+  // Master spectrum analyser (tap from masterGain)
+  private masterAnalyser: AnalyserNode | null = null
+  private masterSpectrumTmp: Uint8Array | null = null
+  private masterSpectrumLast: SpectrumFrame | null = null
+  private masterAnalyserConnected = false
   // --- Reverb: per-track and master ---
   private trackReverbs = new Map<string, {
     enabled: boolean
@@ -106,6 +116,9 @@ export class AudioEngine {
     leftArr: Float32Array | null
     rightArr: Float32Array | null
   }>()
+  // Per-track spectrum temp/last (post-gain)
+  private trackSpectrumTmp = new Map<string, Uint8Array>()
+  private trackSpectrumLast = new Map<string, SpectrumFrame>()
 
   private ensureTrackAnalyser(trackId: string, gain: GainNode) {
     if (!this.audioCtx) return
@@ -148,7 +161,7 @@ export class AudioEngine {
       this.trackMeterArrays.set(trackId, arr)
     }
     try {
-      a.getFloatTimeDomainData(arr)
+      a.getFloatTimeDomainData(arr as any)
     } catch {
       return 0
     }
@@ -175,8 +188,8 @@ export class AudioEngine {
     // Ensure arrays
     if (!e.leftArr || e.leftArr.length !== left.fftSize) e.leftArr = new Float32Array(left.fftSize)
     if (!e.rightArr || e.rightArr.length !== right.fftSize) e.rightArr = new Float32Array(right.fftSize)
-    try { left.getFloatTimeDomainData(e.leftArr!) } catch { return [0, 0] }
-    try { right.getFloatTimeDomainData(e.rightArr!) } catch { return [0, 0] }
+    try { left.getFloatTimeDomainData(e.leftArr! as any) } catch { return [0, 0] }
+    try { right.getFloatTimeDomainData(e.rightArr! as any) } catch { return [0, 0] }
     const rms = (arr: Float32Array) => {
       let sum = 0
       for (let i = 0; i < arr.length; i++) { const v = arr[i]; sum += v * v }
@@ -190,6 +203,7 @@ export class AudioEngine {
     if (!this.audioCtx) {
       this.audioCtx = new AudioContext()
       this.masterGain = this.audioCtx.createGain()
+      this.masterAnalyserConnected = false
       this.destination = this.audioCtx.destination
       this.masterGain.gain.value = 1.0
       // Apply any pending master effects, then build routing
@@ -206,6 +220,22 @@ export class AudioEngine {
       // If nothing pending, ensure we at least connect master to destination
       this.rebuildMasterRouting()
       this.ensureMetronomeNodes()
+    }
+  }
+
+  private ensureMasterAnalyser() {
+    if (!this.audioCtx || !this.masterGain) return
+    if (!this.masterAnalyser) {
+      const a = this.audioCtx.createAnalyser()
+      a.fftSize = 2048
+      a.smoothingTimeConstant = 0.8
+      this.masterAnalyser = a
+    }
+    if (this.masterAnalyser && !this.masterAnalyserConnected) {
+      try {
+        this.masterGain.connect(this.masterAnalyser)
+        this.masterAnalyserConnected = true
+      } catch {}
     }
   }
 
@@ -917,6 +947,8 @@ export class AudioEngine {
           try { stereo.right.disconnect() } catch {}
           this.trackAnalysersStereo.delete(id)
         }
+        this.trackSpectrumTmp.delete(id)
+        this.trackSpectrumLast.delete(id)
         this.pendingEqParams.delete(id)
         this.pendingReverbParams.delete(id)
       }
@@ -1132,9 +1164,15 @@ export class AudioEngine {
     this.stopAllSources()
     this.clearMetronomeInterval()
     this.impulseCache.clear()
+    this.trackSpectrumTmp.clear()
+    this.trackSpectrumLast.clear()
+    this.masterSpectrumTmp = null
+    this.masterSpectrumLast = null
+    this.masterAnalyserConnected = false
     if (this.audioCtx) {
       try { this.audioCtx.close() } catch {}
     }
+    this.masterAnalyser = null
   }
 
   // --- Master EQ ---
@@ -1142,6 +1180,7 @@ export class AudioEngine {
     if (!this.audioCtx || !this.masterGain) return
     // Disconnect masterGain from everything
     try { this.masterGain.disconnect() } catch {}
+    if (this.masterAnalyserConnected) this.masterAnalyserConnected = false
     const eq = this.masterEqChain
 
     // Prepare final destination
@@ -1190,6 +1229,8 @@ export class AudioEngine {
         this.masterGain.connect(finalDest)
       }
     }
+    // Ensure analyser tap from master gain remains connected
+    this.ensureMasterAnalyser()
   }
 
   setMasterEq(params: EqParamsLite) {
@@ -1218,5 +1259,44 @@ export class AudioEngine {
     }
     this.masterEqChain = nodes
     this.rebuildMasterRouting()
+  }
+
+  // --- Live spectrum sampling (Ableton-like) ---
+  getTrackSpectrum(trackId: string): SpectrumFrame | null {
+    const a = this.trackAnalysers.get(trackId)
+    if (!a) return this.trackSpectrumLast.get(trackId) ?? null
+    let tmp = this.trackSpectrumTmp.get(trackId)
+    if (!tmp || tmp.length !== a.frequencyBinCount) {
+      tmp = new Uint8Array(a.frequencyBinCount)
+      this.trackSpectrumTmp.set(trackId, tmp)
+    }
+    try { a.getByteFrequencyData(tmp as any) } catch { return this.trackSpectrumLast.get(trackId) ?? null }
+    let sum = 0
+    for (let i = 0; i < tmp.length; i++) sum += tmp[i]
+    if (sum === 0) return this.trackSpectrumLast.get(trackId) ?? null
+    const out = new Float32Array(tmp.length)
+    for (let i = 0; i < tmp.length; i++) out[i] = tmp[i] / 255
+    const frame: SpectrumFrame = { data: out, sampleRate: this.audioCtx?.sampleRate ?? 44100 }
+    this.trackSpectrumLast.set(trackId, frame)
+    return frame
+  }
+
+  getMasterSpectrum(): SpectrumFrame | null {
+    // Do not auto-create AudioContext here to avoid autoplay policy warnings.
+    // Only sample if an AudioContext already exists (created after a user gesture).
+    this.ensureMasterAnalyser()
+    const a = this.masterAnalyser
+    if (!a) return this.masterSpectrumLast
+    if (!this.masterSpectrumTmp || this.masterSpectrumTmp.length !== a.frequencyBinCount) {
+      this.masterSpectrumTmp = new Uint8Array(a.frequencyBinCount)
+    }
+    try { a.getByteFrequencyData(this.masterSpectrumTmp as any) } catch { return this.masterSpectrumLast }
+    let sum = 0
+    for (let i = 0; i < this.masterSpectrumTmp.length; i++) sum += this.masterSpectrumTmp[i]
+    if (sum === 0) return this.masterSpectrumLast
+    const out = new Float32Array(this.masterSpectrumTmp.length)
+    for (let i = 0; i < out.length; i++) out[i] = this.masterSpectrumTmp[i] / 255
+    this.masterSpectrumLast = { data: out, sampleRate: this.audioCtx?.sampleRate ?? 44100 }
+    return this.masterSpectrumLast
   }
 }

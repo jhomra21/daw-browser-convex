@@ -1224,11 +1224,11 @@ const Timeline: Component = () => {
               {loopEnabled() && (loopEndSec() - loopStartSec() > 0.05) && (
                 <>
                   <div
-                    class="absolute top-0 bottom-0 w-[2px] bg-green-400/70 pointer-events-none"
+                    class="absolute top-0 bottom-0 w-[2px] bg-green-400/70 pointer-events-none z-30"
                     style={{ left: `${loopStartSec() * PPS}px` }}
                   />
                   <div
-                    class="absolute top-0 bottom-0 w-[2px] bg-green-400/70 pointer-events-none"
+                    class="absolute top-0 bottom-0 w-[2px] bg-green-400/70 pointer-events-none z-30"
                     style={{ left: `${loopEndSec() * PPS}px` }}
                   />
                 </>
@@ -1245,7 +1245,7 @@ const Timeline: Component = () => {
               })()}
               
               {/* Playhead */}
-              <div class="absolute top-0 bottom-0 w-px bg-red-500 pointer-events-none" style={{ left: `${playheadSec() * PPS}px` }} />
+              <div class="absolute top-0 bottom-0 w-px bg-red-500 pointer-events-none z-30" style={{ left: `${playheadSec() * PPS}px` }} />
 
               {/* Floating MIDI Editor Card */}
               <Show when={midiEditorClipId()}>

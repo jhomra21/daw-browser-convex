@@ -432,7 +432,7 @@ function AudioFileInfo(props: {
       if (isPlaying() && analyserNode) {
         // Create fresh array for each update to avoid type issues
         const dataArray = new Uint8Array(analyserNode.frequencyBinCount)
-        analyserNode.getByteFrequencyData(dataArray)
+        ;(analyserNode as any).getByteFrequencyData(dataArray as any)
         
         // Convert to normalized float array for easier processing
         const normalizedSpectrum = new Float32Array(dataArray.length)

@@ -16,6 +16,7 @@ import type {
 import type * as chat from "../chat.js";
 import type * as clips from "../clips.js";
 import type * as effects from "../effects.js";
+import type * as exports from "../exports.js";
 import type * as ownerships from "../ownerships.js";
 import type * as projects from "../projects.js";
 import type * as samples from "../samples.js";
@@ -35,6 +36,7 @@ declare const fullApi: ApiFromModules<{
   chat: typeof chat;
   clips: typeof clips;
   effects: typeof effects;
+  exports: typeof exports;
   ownerships: typeof ownerships;
   projects: typeof projects;
   samples: typeof samples;

@@ -133,6 +133,22 @@ export default defineSchema({
   })
     .index("by_room", ["roomId"]) // list messages in a room
     .index("by_room_createdAt", ["roomId", "createdAt"]), // ordered reads
+
+  // Rendered exports metadata (stored in R2 under rooms/{roomId}/exports)
+  exports: defineTable({
+    roomId: v.string(),
+    name: v.string(), // display filename
+    url: v.string(), // /api/export?key=...
+    r2Key: v.string(), // rooms/{roomId}/exports/...
+    format: v.string(), // only 'wav'
+    duration: v.optional(v.number()),
+    sampleRate: v.optional(v.number()),
+    sizeBytes: v.optional(v.number()),
+    createdAt: v.number(),
+    createdBy: v.string(), // user id
+  })
+    .index("by_room_createdAt", ["roomId", "createdAt"]) // list latest first
+    .index("by_room", ["roomId"]) // simple list by room
 });
 
 

@@ -6,6 +6,7 @@ import { NavUser } from '~/components/nav-user'
 import { useConvexQuery, convexApi, convexClient } from '~/lib/convex'
 import { useSessionQuery } from '~/lib/session'
 import { useProjectSamples } from '~/hooks/useProjectSamples'
+import { useProjectExports } from '~/hooks/useProjectExports'
 
 type TransportControlsProps = {
   isPlaying: boolean
@@ -38,6 +39,8 @@ type TransportControlsProps = {
   onCreateProject: () => void | Promise<void>
   onDeleteProject: (roomId: string) => void | Promise<void>
   onRenameProject: (roomId: string, name: string) => void | Promise<void>
+  // Exporting
+  onOpenExport: () => void
 }
 
 const TransportControls: Component<TransportControlsProps> = (props) => {
@@ -56,6 +59,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
   const [deletingSampleUrl, setDeletingSampleUrl] = createSignal<string | null>(null)
   const [insertingSampleUrl, setInsertingSampleUrl] = createSignal<string | null>(null)
   const [samplesOpen, setSamplesOpen] = createSignal(false)
+  const [exportsOpen, setExportsOpen] = createSignal(false)
   const [isDraggingSample, setIsDraggingSample] = createSignal(false)
   const [tempoDraft, setTempoDraft] = createSignal(String(props.bpm))
   const [tempoEditing, setTempoEditing] = createSignal(false)
@@ -151,6 +155,12 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
   const defaultSamplesList = () => samples.defaultSamples()
   const hasProjectSamples = () => samplesList().length > 0
   const hasDefaultSamples = () => defaultSamplesList().length > 0
+
+  const exportsQ = useProjectExports({
+    roomId: () => props.currentRoomId,
+    enabled: () => exportsOpen(),
+  })
+  const exportsList = () => exportsQ.exports()
 
   const formatBytes = (bytes?: number) => {
     if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return ''
@@ -261,6 +271,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
       {/* Left: Add Audio + Projects */}
       <div class="justify-self-start flex items-center gap-2">
         <Button size="sm" variant="outline" onClick={props.onAddAudio}>Add Audio</Button>
+        <Button size="sm" variant="outline" onClick={props.onOpenExport}>Export</Button>
         {/* Projects Dropdown moved here */}
         <DropdownMenu>
           <DropdownMenuTrigger>
@@ -758,6 +769,103 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                       }}
                     </For>
                   </Show>
+                </Show>
+              </div>
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Exports Dropdown */}
+        <DropdownMenu open={exportsOpen()} onOpenChange={setExportsOpen}>
+          <DropdownMenuTrigger>
+            <Button variant="outline" size="sm">
+              <Icon name="file-audio" class="h-4 w-4 mr-1" />
+              Exports
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent class="w-full bg-neutral-900" style={{ width: 'min(92vw, 26rem)', 'pointer-events': isDraggingSample() ? 'none' : undefined }}>
+            <div class="p-2 w-full">
+              <div class="flex items-center justify-between px-1 pb-2">
+                <span class="text-sm font-semibold text-neutral-100">Project Exports</span>
+              </div>
+              <DropdownMenuSeparator />
+              <div class="max-h-72 overflow-y-auto">
+                <Show when={exportsList().length > 0} fallback={<div class="px-2 py-2 text-xs text-neutral-500">No exports yet</div>}>
+                  <For each={exportsList()}>
+                    {(item) => {
+                      const url = item.url
+                      return (
+                        <DropdownMenuItem
+                          class="group relative w-full flex items-center justify-between gap-2 pr-16 cursor-pointer hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100"
+                          onSelect={() => { if (url) window.open(url, '_blank') }}
+                        >
+                          <div
+                            class="flex items-center gap-2 min-w-0 flex-1"
+                            draggable={!!url}
+                            onDragStart={(ev) => {
+                              try {
+                                const payload = JSON.stringify({ url, name: item.name, duration: item.duration })
+                                ev.dataTransfer?.setData('application/x-mediabunny-sample', payload)
+                                if (url) {
+                                  ev.dataTransfer?.setData('text/uri-list', url)
+                                  ev.dataTransfer?.setData('text/plain', url)
+                                }
+                                if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'copy'
+                              } catch {}
+                              setIsDraggingSample(true)
+                            }}
+                            onDragEnd={() => setIsDraggingSample(false)}
+                          >
+                            <Icon name="file-audio" class="h-4 w-4 text-neutral-400 group-hover:text-neutral-200" />
+                            <span class="font-mono text-xs truncate max-w-[12rem] text-neutral-200 group-hover:text-neutral-100" title={item.name}>{item.name}</span>
+                            <span class="text-[10px] text-neutral-400 shrink-0 uppercase">{item.format}</span>
+                          </div>
+                          <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                            <button
+                              class="p-1 cursor-pointer text-neutral-400 hover:text-neutral-200 disabled:opacity-50"
+                              aria-label="Copy export URL"
+                              disabled={!url}
+                              onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                              onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                              onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                              onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                              onClick={async (ev) => {
+                                ev.stopPropagation(); ev.preventDefault()
+                                if (url && navigator.clipboard?.writeText) {
+                                  try { await navigator.clipboard.writeText(url) } catch {}
+                                }
+                              }}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
+                                <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                  <rect width="8" height="8" x="8" y="8" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+                                </g>
+                                <title>Copy URL</title>
+                              </svg>
+                            </button>
+                            <button
+                              class={`p-1 cursor-pointer text-neutral-400 hover:text-neutral-100 disabled:opacity-50`}
+                              aria-label="Insert export"
+                              disabled={!url}
+                              onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                              onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                              onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                              onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                              onClick={async (ev) => {
+                                ev.stopPropagation(); ev.preventDefault()
+                                await handleInsertSampleAction({ url, name: item.name, duration: item.duration })
+                              }}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
+                                <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 11h16M12 4v16" />
+                                <title>Insert</title>
+                              </svg>
+                            </button>
+                          </div>
+                        </DropdownMenuItem>
+                      )
+                    }}
+                  </For>
                 </Show>
               </div>
             </div>

@@ -27,6 +27,7 @@ import { useClipBuffers } from '~/hooks/useClipBuffers'
 import { useTrackRecording } from '~/hooks/useTrackRecording'
 import RecordingPreview from './timeline/RecordingPreview'
 import GridOverlay from './timeline/GridOverlay'
+import ExportDialog from './timeline/ExportDialog'
 
 const volumeTimers = new Map<string, number>()
 const optimisticMoves = new Map<string, { trackId: string; startSec: number }>()
@@ -58,6 +59,7 @@ const Timeline: Component = () => {
   const [loopEnabled, setLoopEnabled] = createSignal(false)
   const [loopStartSec, setLoopStartSec] = createSignal(0)
   const [loopEndSec, setLoopEndSec] = createSignal(8)
+  const [exportOpen, setExportOpen] = createSignal(false)
 
   // Drag-drop visual target lane
   const [dropTargetLane, setDropTargetLane] = createSignal<number | null>(null)
@@ -1211,6 +1213,7 @@ const Timeline: Component = () => {
           if (!uid) return
           await convexClient.mutation((convexApi as any).projects.setName, { roomId: rid, userId: uid, name })
         }}
+        onOpenExport={() => setExportOpen(true)}
       />
 
       {/* Chat toggle button - bottom-left; moves above Effects panel when open */}
@@ -1574,6 +1577,19 @@ const Timeline: Component = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ExportDialog
+        isOpen={exportOpen()}
+        onClose={() => setExportOpen(false)}
+        tracks={tracks()}
+        bpm={bpm()}
+        loopEnabled={loopEnabled()}
+        loopStartSec={loopStartSec()}
+        loopEndSec={loopEndSec()}
+        roomId={roomId()}
+        userId={userId()}
+        ensureClipBuffer={ensureClipBuffer}
+      />
 
       {/* Cloud-only mode: no browser capability notice needed */}
     </div>

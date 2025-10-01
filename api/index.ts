@@ -730,6 +730,105 @@ app.get('/api/default-sample', async (c) => {
   }
 })
 
+// Upload an export to R2 (protected route)
+app.post('/api/exports', async (c) => {
+  try {
+    const user = c.get('user')
+    if (!user) return c.json({ error: 'Unauthorized' }, 401)
+
+    const form = await c.req.formData()
+    const roomId = form.get('roomId')?.toString()
+    const format = 'wav'
+    const durationStr = form.get('duration')?.toString()
+    const sampleRateStr = form.get('sampleRate')?.toString()
+    const file = form.get('file')
+    let name = form.get('name')?.toString()
+
+    if (!roomId || !(file instanceof File)) {
+      return c.json({ error: 'Missing roomId or file' }, 400)
+    }
+
+    // Sanitize filename or generate one
+    if (!name) {
+      const ts = new Date().toISOString().replace(/[-:TZ.]/g, '')
+      name = `export_${ts}.wav`
+    }
+    const sanitized = name
+      .replace(/\\/g, '/')
+      .split('/')
+      .pop()!
+      .replace(/[^A-Za-z0-9._-]/g, '_')
+      .slice(0, 180)
+
+    const exportsPrefix = `rooms/${roomId}/exports/`
+    const splitIdx = sanitized.lastIndexOf('.')
+    const base = splitIdx > 0 ? sanitized.slice(0, splitIdx) : sanitized
+    const ext = splitIdx > 0 ? sanitized.slice(splitIdx) : ''
+    let chosenName = sanitized
+    let attempts = 0
+    while (attempts < 5) {
+      const probeKey = exportsPrefix + chosenName
+      const existing = await c.env.daw_audio_samples.get(probeKey)
+      if (!existing) break
+      attempts++
+      chosenName = `${base} (${attempts})${ext}`
+    }
+    if (attempts >= 5) {
+      const ts = new Date().toISOString().replace(/[-:TZ.]/g, '')
+      chosenName = `${base}_${ts}${ext}`
+    }
+    const key = exportsPrefix + chosenName
+
+    const putRes = await c.env.daw_audio_samples.put(key, file.stream(), {
+      httpMetadata: {
+        contentType: file.type || 'audio/wav',
+        contentDisposition: `inline; filename="${chosenName}"`,
+      },
+      customMetadata: {
+        roomId,
+        format,
+        durationSec: durationStr || '',
+        sampleRate: sampleRateStr || '',
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: user.id,
+      },
+    })
+
+    const url = `/api/export?key=${encodeURIComponent(key)}`
+    return c.json({ key, url, sizeBytes: (putRes as any)?.size })
+  } catch (err) {
+    console.error('Export upload error', err)
+    return c.json({ error: 'Failed to upload export' }, 500)
+  }
+})
+
+// Stream an export from R2 by key
+app.get('/api/export', async (c) => {
+  try {
+    const key = c.req.query('key')
+    if (!key) return c.json({ error: 'Missing key query parameter' }, 400)
+    if (!key.startsWith('rooms/')) return c.json({ error: 'Invalid key' }, 400)
+
+    const obj = await c.env.daw_audio_samples.get(key)
+    if (!obj) return c.json({ error: 'Not found' }, 404)
+
+    const headers = new Headers()
+    headers.set('Content-Type', obj.httpMetadata?.contentType || 'application/octet-stream')
+    headers.set('Cache-Control', 'public, max-age=31536000, immutable')
+    headers.set('Access-Control-Allow-Origin', '*')
+    headers.set('Access-Control-Allow-Credentials', 'true')
+    if (obj.httpMetadata?.contentDisposition) {
+      headers.set('Content-Disposition', obj.httpMetadata.contentDisposition)
+    }
+    headers.set('X-R2-Key', key)
+
+    return new Response(obj.body, { headers })
+  } catch (err) {
+    console.error('Export fetch error', err)
+    return c.json({ error: 'Failed to fetch export' }, 500)
+  }
+})
+
 // AI Agent chat endpoint (streams SSE)
 app.post('/api/agent/chat', async (c) => {
   try {

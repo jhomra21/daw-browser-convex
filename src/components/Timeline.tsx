@@ -2,7 +2,7 @@ import { type Component, type JSX, For, Show, createEffect, createSignal, onClea
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from '~/components/ui/dialog'
 import type { Track, Clip, SelectedClip } from '~/types/timeline'
 import { getAudioEngine, resetAudioEngine } from '~/lib/audio-engine-singleton'
-import { timelineDurationSec, PPS, RULER_HEIGHT, LANE_HEIGHT, yToLaneIndex } from '~/lib/timeline-utils'
+import { timelineDurationSec, PPS, RULER_HEIGHT, LANE_HEIGHT, yToLaneIndex, FX_OFFSET_PX } from '~/lib/timeline-utils'
 import { canUseLocalStorage, loadLocalMixMap, saveLocalMix, loadMixSyncFlag, saveMixSyncFlag, loadGridSettings, saveGridSettings, loadBpm, saveBpm, loadLoopSettings, saveLoopSettings } from '~/lib/timeline-storage'
 import { ensureRoomShareLink } from '~/lib/timeline-share'
 import { useTimelineKeyboard } from '~/hooks/useTimelineKeyboard'
@@ -1104,7 +1104,7 @@ const Timeline: Component = () => {
       {/* Chat toggle button - bottom-left; moves above Effects panel when open */}
       <button
         class="fixed left-4 z-40 bg-neutral-800 text-white rounded-md px-3 py-2 border border-neutral-700 hover:bg-neutral-700"
-        style={{ bottom: bottomFXOpen() ? '288px' : '16px' }}
+        style={{ bottom: bottomFXOpen() ? `${FX_OFFSET_PX}px` : '16px' }}
         aria-label="Toggle AI Chat"
         onClick={() => setAgentPanelOpen((v) => !v)}
       >
@@ -1114,7 +1114,7 @@ const Timeline: Component = () => {
       {/* Shared chat toggle button */}
       <button
         class="fixed left-20 z-40 bg-neutral-800 text-white rounded-md px-3 py-2 border border-neutral-700 hover:bg-neutral-700"
-        style={{ bottom: bottomFXOpen() ? '288px' : '16px' }}
+        style={{ bottom: bottomFXOpen() ? `${FX_OFFSET_PX}px` : '16px' }}
         aria-label="Toggle Room Chat"
         onClick={() => setSharedChatOpen((v) => !v)}
       >
@@ -1128,7 +1128,7 @@ const Timeline: Component = () => {
         roomId={roomId()}
         userId={userId()}
         bpm={bpm()}
-        bottomOffsetPx={bottomFXOpen() ? 288 : 0}
+        bottomOffsetPx={bottomFXOpen() ? FX_OFFSET_PX : 0}
       />
 
       {/* Shared chat panel */}
@@ -1137,12 +1137,13 @@ const Timeline: Component = () => {
         onClose={() => setSharedChatOpen(false)}
         roomId={roomId()}
         userId={userId()}
-        bottomOffsetPx={bottomFXOpen() ? 288 : 0}
+        bottomOffsetPx={bottomFXOpen() ? FX_OFFSET_PX : 0}
       />
 
       <div class="flex-1 flex min-h-0" ref={el => (containerRef = el!)}>
         <div
-        class="flex-1 relative overflow-x-auto"
+        class="flex-1 relative overflow-auto timeline-scroll"
+        style={{ 'padding-bottom': bottomFXOpen() ? `${FX_OFFSET_PX}px` : '0px' }}
         ref={el => {
           scrollRef = el!
           setScrollElement(el || undefined)
@@ -1301,8 +1302,9 @@ const Timeline: Component = () => {
           selectedTrackId={selectedTrackId()}
           sidebarWidth={sidebarWidth()}
           isPlaying={isPlaying()}
+          bottomOffsetPx={bottomFXOpen() ? FX_OFFSET_PX : 0}
           getTrackLevel={(id) => {
-            try { return (audioEngine as any).getTrackLevel?.(id) ?? 0 } catch { return 0 }
+            try { return (audioEngine as any)?.getTrackLevel?.(id) ?? 0 } catch { return 0 }
           }}
           
           onTrackClick={(id) => {

@@ -227,7 +227,18 @@
   display: none;
 }
 
-
 html {
   overscroll-behavior: none;
+}
+
+/* Hide scrollbars for the main timeline scroll container only */
+.timeline-scroll {
+  /* Firefox */
+  scrollbar-width: none;
+  /* IE/Edge */
+  -ms-overflow-style: none;
+}
+.timeline-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }

@@ -20,6 +20,8 @@ type TrackSidebarProps = {
   // Realtime meter support
   isPlaying: boolean
   getTrackLevel: (trackId: string) => number
+  // Extra bottom padding to avoid the fixed Effects panel
+  bottomOffsetPx?: number
 }
 
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
@@ -78,7 +80,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       {/* Track list */}
       <div 
         class="bg-neutral-900 border-l border-neutral-800 p-0 overflow-y-auto" 
-        style={{ width: `${props.sidebarWidth}px`, 'min-width': '220px' }}
+        style={{ width: `${props.sidebarWidth}px`, 'min-width': '220px', 'padding-bottom': `${props.bottomOffsetPx ?? 0}px` }}
       >
         <div class="flex items-center justify-between p-1">
           <div>

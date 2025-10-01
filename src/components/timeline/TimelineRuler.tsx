@@ -249,7 +249,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
 
   return (
     <div
-      class="absolute left-0 right-0 top-0 border-b border-neutral-800 bg-neutral-900"
+      class="sticky top-0 z-20 border-b border-neutral-800 bg-neutral-900"
       style={{ width: `${rulerWidthPx()}px`, height: `${RULER_HEIGHT}px`, ...backgroundStyle() }}
       ref={el => { rootEl = el }}
       onMouseDown={onLocalMouseDown as any}

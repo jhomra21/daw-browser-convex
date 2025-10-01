@@ -46,7 +46,13 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
 
     currentScrollEl = scrollEl
 
-    let trackIdx = Math.max(0, Math.min(ts.length - 1, Math.floor((event.clientY - scrollEl.getBoundingClientRect().top - RULER_HEIGHT) / LANE_HEIGHT)))
+    let trackIdx = Math.max(
+      0,
+      Math.min(
+        ts.length - 1,
+        Math.floor((event.clientY - scrollEl.getBoundingClientRect().top + (scrollEl.scrollTop || 0) - RULER_HEIGHT) / LANE_HEIGHT),
+      ),
+    )
     const id = ts[trackIdx]?.id
     if (id) {
       batch(() => {
@@ -60,7 +66,7 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
     marqueeAdditive = !!event.shiftKey
     const rect = scrollEl.getBoundingClientRect()
     startX = event.clientX - rect.left + (scrollEl.scrollLeft || 0)
-    startY = event.clientY - rect.top
+    startY = event.clientY - rect.top + (scrollEl.scrollTop || 0)
     marqueeActive = false
     window.addEventListener('mousemove', handleDragMove)
     window.addEventListener('mouseup', handleDragUp)
@@ -84,7 +90,7 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
 
     const rect = scrollEl.getBoundingClientRect()
     const currentX = event.clientX - rect.left + (scrollEl.scrollLeft || 0)
-    const currentY = event.clientY - rect.top
+    const currentY = event.clientY - rect.top + (scrollEl.scrollTop || 0)
     const dx = Math.abs(currentX - startX)
     const dy = Math.abs(currentY - startY)
 

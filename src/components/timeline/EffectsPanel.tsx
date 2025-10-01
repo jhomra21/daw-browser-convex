@@ -4,6 +4,7 @@ import { Button } from '~/components/ui/button'
 import Eq, { createDefaultEqParams, type EqParams } from '~/components/effects/Eq'
 import type { AudioEngine, EqParamsLite, ReverbParamsLite } from '~/lib/audio-engine'
 import { useConvexQuery, convexClient, convexApi } from '~/lib/convex'
+import { FX_PANEL_HEIGHT_PX } from '~/lib/timeline-utils'
 import Reverb, { createDefaultReverbParams, type ReverbParams } from '~/components/effects/Reverb'
 import Synth, { createDefaultSynthParams, type SynthParams } from '~/components/effects/Synth'
 import Arpeggiator, { createDefaultArpeggiatorParams, type ArpeggiatorParams } from '~/components/effects/Arpeggiator'
@@ -564,8 +565,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   return (
     <>
       <Show when={props.isOpen}>
-        <div class="fixed left-0 right-0 bottom-0 border-t border-neutral-800 bg-neutral-900">
-          <div class="flex h-[280px]">
+        <div class="fixed left-0 right-0 bottom-0 z-50 border-t border-neutral-800 bg-neutral-900">
+          <div class="flex" style={{ height: `${FX_PANEL_HEIGHT_PX}px` }}>
             <div class="flex w-20 flex-col items-center gap-2 border-r border-neutral-800 px-2 py-2">
               <Button variant="outline" size="sm" class="w-full text-[10px] py-1" onClick={props.onClose}>Hide</Button>
               <Show when={currentTrack() && currentTrack()!.kind === 'instrument'}>

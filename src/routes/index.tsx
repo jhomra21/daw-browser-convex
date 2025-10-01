@@ -13,7 +13,7 @@ export const Route = createFileRoute('/')({
     })
     if (!session) {
       throw redirect({
-        to: '/Login',
+        to: '/about',
         search: { redirect: location.href },
       })
     }

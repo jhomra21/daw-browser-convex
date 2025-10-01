@@ -4,6 +4,10 @@ import type { Clip, Track } from '~/types/timeline'
 export const PPS = 100 // pixels per second
 export const RULER_HEIGHT = 32 // px
 export const LANE_HEIGHT = 96 // px per track lane
+// Shared Effects panel layout constants
+export const FX_PANEL_HEIGHT_PX = 280
+export const FX_PANEL_GAP_PX = 8
+export const FX_OFFSET_PX = FX_PANEL_HEIGHT_PX + FX_PANEL_GAP_PX
 
 export function timelineDurationSec(tracks: Track[]) {
   let maxEnd = 0
@@ -21,7 +25,7 @@ export function clientXToSec(clientX: number, scrollRef: HTMLDivElement) {
 
 export function yToLaneIndex(clientY: number, scrollRef: HTMLDivElement) {
   const rect = scrollRef.getBoundingClientRect()
-  const y = clientY - rect.top
+  const y = clientY - rect.top + (scrollRef.scrollTop || 0)
   return Math.floor((y - RULER_HEIGHT) / LANE_HEIGHT)
 }
 

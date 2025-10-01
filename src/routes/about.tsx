@@ -7,7 +7,7 @@ import { useSessionQuery } from '~/lib/session'
 export const Route = createFileRoute('/about')({
   head: () => ({
     meta: [
-      { title: 'MediaBunny – Collaborative DAW' },
+      { title: 'Browser DAW – Collaborative DAW powered by Convex, Better-Auth and Solid' },
       { name: 'description', content: 'Realtime collaborative DAW built with SolidJS, TanStack, Convex, Hono, Cloudflare Workers.' },
     ],
   }),

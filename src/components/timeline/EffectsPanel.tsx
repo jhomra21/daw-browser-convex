@@ -581,7 +581,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                 </span>
               </div>
             </div>
-            <div class="flex flex-1 flex-col overflow-hidden">
+            <div class="flex flex-1 flex-col overflow-hidden min-h-0">
               <div class="flex flex-wrap items-center gap-1.5 px-2 py-0.5 border-b border-neutral-800/50 min-h-[28px]">
                 <Show when={currentTrack() && currentTrack()!.kind === 'instrument' && !arpForTarget()}>
                   <Button variant="default" size="sm" class="text-[11px] py-0.5 px-2 h-6" onClick={() => {
@@ -629,8 +629,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                   >+ Reverb</Button>
                 </Show>
               </div>
-              <div class="flex-1 overflow-x-auto overflow-y-hidden px-2 py-2">
-                <div class="flex items-stretch gap-3 h-full min-w-min">
+              <div class="flex-1 overflow-x-auto overflow-y-hidden px-2 py-2 min-h-0">
+                <div class="flex items-stretch gap-3 h-full min-w-min min-h-0">
                   {/* MIDI Effects (pre-synth) - LEFTMOST */}
                   <Show when={currentTrack() && currentTrack()!.kind === 'instrument' && !!arpForTarget()}>
                     <Arpeggiator

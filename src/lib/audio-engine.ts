@@ -98,6 +98,14 @@ export class AudioEngine {
   // --- Realtime meters: per-track analysers and temp buffers ---
   private trackAnalysers = new Map<string, AnalyserNode>()
   private trackMeterArrays = new Map<string, Float32Array>()
+  // Stereo analysers for per-channel meters
+  private trackAnalysersStereo = new Map<string, {
+    splitter: ChannelSplitterNode
+    left: AnalyserNode
+    right: AnalyserNode
+    leftArr: Float32Array | null
+    rightArr: Float32Array | null
+  }>()
 
   private ensureTrackAnalyser(trackId: string, gain: GainNode) {
     if (!this.audioCtx) return
@@ -108,6 +116,25 @@ export class AudioEngine {
       a.smoothingTimeConstant = 0.7
       try { gain.connect(a) } catch {}
       this.trackAnalysers.set(trackId, a)
+    }
+    // Also ensure stereo analyser chain for L/R metering
+    this.ensureTrackAnalysersStereo(trackId, gain)
+  }
+
+  private ensureTrackAnalysersStereo(trackId: string, gain: GainNode) {
+    if (!this.audioCtx) return
+    let entry = this.trackAnalysersStereo.get(trackId)
+    if (!entry) {
+      const splitter = this.audioCtx.createChannelSplitter(2)
+      const left = this.audioCtx.createAnalyser()
+      const right = this.audioCtx.createAnalyser()
+      left.fftSize = 512; right.fftSize = 512
+      left.smoothingTimeConstant = 0.7; right.smoothingTimeConstant = 0.7
+      try { gain.connect(splitter) } catch {}
+      try { splitter.connect(left, 0) } catch {}
+      try { splitter.connect(right, 1) } catch {}
+      entry = { splitter, left, right, leftArr: null, rightArr: null }
+      this.trackAnalysersStereo.set(trackId, entry)
     }
   }
 
@@ -134,6 +161,29 @@ export class AudioEngine {
     // Light companding for visual feel
     const norm = Math.min(1, Math.max(0, Math.sqrt(rms)))
     return norm
+  }
+
+  // Returns normalized 0..1 RMS per channel [L, R]
+  getTrackLevelsStereo(trackId: string): [number, number] {
+    const e = this.trackAnalysersStereo.get(trackId)
+    if (!e) {
+      const m = this.getTrackLevel(trackId)
+      return [m, m]
+    }
+    const { left, right } = e
+    if (!left || !right) return [0, 0]
+    // Ensure arrays
+    if (!e.leftArr || e.leftArr.length !== left.fftSize) e.leftArr = new Float32Array(left.fftSize)
+    if (!e.rightArr || e.rightArr.length !== right.fftSize) e.rightArr = new Float32Array(right.fftSize)
+    try { left.getFloatTimeDomainData(e.leftArr!) } catch { return [0, 0] }
+    try { right.getFloatTimeDomainData(e.rightArr!) } catch { return [0, 0] }
+    const rms = (arr: Float32Array) => {
+      let sum = 0
+      for (let i = 0; i < arr.length; i++) { const v = arr[i]; sum += v * v }
+      return Math.sqrt(sum / Math.max(1, arr.length))
+    }
+    const comp = (x: number) => Math.min(1, Math.max(0, Math.sqrt(x)))
+    return [comp(rms(e.leftArr!)), comp(rms(e.rightArr!))]
   }
 
   ensureAudio() {
@@ -860,6 +910,13 @@ export class AudioEngine {
         }
         const an = this.trackAnalysers.get(id)
         if (an) { try { an.disconnect() } catch {}; this.trackAnalysers.delete(id); this.trackMeterArrays.delete(id) }
+        const stereo = this.trackAnalysersStereo.get(id)
+        if (stereo) {
+          try { stereo.splitter.disconnect() } catch {}
+          try { stereo.left.disconnect() } catch {}
+          try { stereo.right.disconnect() } catch {}
+          this.trackAnalysersStereo.delete(id)
+        }
         this.pendingEqParams.delete(id)
         this.pendingReverbParams.delete(id)
       }

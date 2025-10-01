@@ -20,6 +20,7 @@ type TrackSidebarProps = {
   // Realtime meter support
   isPlaying: boolean
   getTrackLevel: (trackId: string) => number
+  getTrackLevels?: (trackId: string) => [number, number]
   // Extra bottom padding to avoid the fixed Effects panel
   bottomOffsetPx?: number
 }
@@ -43,9 +44,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     detachDragListeners()
   })
 
-  // --- Realtime level polling ---
-  const [levels, setLevels] = createSignal<Record<string, number>>({})
+  // --- Realtime level polling (stereo with release) ---
+  const [meters, setMeters] = createSignal<Record<string, { L: number; R: number }>>({})
   let rafId: number | null = null
+  let lastTs: number | null = null
+  const releasePerSec = 3.0 // how fast meters fall (per second)
 
   const scheduleTick = () => {
     if (rafId == null) rafId = requestAnimationFrame(tick)
@@ -53,21 +56,42 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   const tick = () => {
     rafId = null
-    const next: Record<string, number> = {}
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) as number
+    const dt = lastTs == null ? 0 : Math.max(0, (now - lastTs) / 1000)
+    lastTs = now
+    const prev = meters()
+    const next: Record<string, { L: number; R: number }> = {}
+    const playing = !!props.isPlaying
     try {
       for (const t of props.tracks) {
-        next[t.id] = props.getTrackLevel?.(t.id) ?? 0
+        let srcL = 0, srcR = 0
+        if (playing) {
+          const stereo = props.getTrackLevels?.(t.id)
+          if (Array.isArray(stereo) && stereo.length === 2) {
+            srcL = stereo[0] ?? 0; srcR = stereo[1] ?? 0
+          } else {
+            const mono = props.getTrackLevel?.(t.id) ?? 0
+            srcL = mono; srcR = mono
+          }
+        } // else keep zero to decay
+        const p = prev[t.id] || { L: 0, R: 0 }
+        const decay = releasePerSec * dt
+        const L = srcL >= p.L ? srcL : Math.max(srcL, p.L - decay)
+        const R = srcR >= p.R ? srcR : Math.max(srcR, p.R - decay)
+        next[t.id] = { L: Math.max(0, Math.min(1, L)), R: Math.max(0, Math.min(1, R)) }
       }
     } catch {}
-    setLevels(next)
-    if (props.isPlaying) scheduleTick()
+    setMeters(next)
+    const anyActive = Object.values(next).some(v => v.L > 0.003 || v.R > 0.003)
+    if (playing || anyActive) scheduleTick()
   }
   createEffect(() => {
     if (props.isPlaying) {
       scheduleTick()
     } else {
-      if (rafId != null) { cancelAnimationFrame(rafId); rafId = null }
-      setLevels({})
+      // Continue animating to release meters smoothly
+      if (rafId == null) scheduleTick()
+      lastTs = null
     }
   })
   onCleanup(() => { if (rafId != null) cancelAnimationFrame(rafId) })
@@ -174,24 +198,30 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   <div class="flex flex-col items-center gap-1">
                     <div class="text-xs text-neutral-400">Vol</div>
                     <div class={`relative h-16 w-6 ${volumeDisabled ? 'opacity-60' : ''}`}>
-                      <div class="absolute inset-0 flex flex-col items-center">
-                        <div class="relative h-full w-1 rounded-full bg-neutral-800/70">
-                          {(() => {
-                            const level = props.isPlaying ? (levels()[track.id] ?? 0) : 0
-                            return (
-                              <div
-                                class="absolute bottom-0 w-full rounded-full bg-green-500 transition-all duration-75"
-                                style={{ height: `${Math.max(0, Math.min(1, level)) * 100}%` }}
-                              />
-                            )
-                          })()}
-                        </div>
+                      <div class="absolute inset-0 flex items-end justify-center gap-1">
+                        {(() => {
+                          const m = props.isPlaying ? meters()[track.id] : undefined
+                          const L = Math.max(0, Math.min(1, m?.L ?? 0))
+                          const R = Math.max(0, Math.min(1, m?.R ?? 0))
+                          const lColor = L >= 0.98 ? 'bg-red-500' : 'bg-green-500'
+                          const rColor = R >= 0.98 ? 'bg-red-500' : 'bg-green-500'
+                          return (
+                            <>
+                              <div class="relative h-full w-1 rounded-full bg-neutral-800/70 overflow-hidden">
+                                <div class={`absolute bottom-0 w-full rounded-full transition-all duration-75 ${lColor}`} style={{ height: `${L * 100}%` }} />
+                              </div>
+                              <div class="relative h-full w-1 rounded-full bg-neutral-800/70 overflow-hidden">
+                                <div class={`absolute bottom-0 w-full rounded-full transition-all duration-75 ${rColor}`} style={{ height: `${R * 100}%` }} />
+                              </div>
+                            </>
+                          )
+                        })()}
                       </div>
-                      {/* Volume handle indicators: one on each side of the meter line */}
+                      {/* Volume handle indicators: brackets outside the two bars */}
                       <div class="absolute left-0 right-0" style={{ bottom: `${track.volume * 100}%` }}>
-                        <div class="absolute left-1/2 -translate-x-1/2">
+                        <div class="absolute left-1/2 -translate-x-1/2 w-3">
                           <span class="absolute -left-2 text-[10px] leading-none select-none text-neutral-200">&lt;</span>
-                          <span class="absolute left-2 text-[10px] leading-none select-none text-neutral-200">&gt;</span>
+                          <span class="absolute -right-2 text-[10px] leading-none select-none text-neutral-200">&gt;</span>
                         </div>
                       </div>
                       <input

@@ -1306,6 +1306,14 @@ const Timeline: Component = () => {
           getTrackLevel={(id) => {
             try { return (audioEngine as any)?.getTrackLevel?.(id) ?? 0 } catch { return 0 }
           }}
+          getTrackLevels={(id) => {
+            try {
+              const stereo = (audioEngine as any)?.getTrackLevelsStereo?.(id)
+              if (stereo && Array.isArray(stereo) && stereo.length === 2) return stereo as [number, number]
+            } catch {}
+            const m = (() => { try { return (audioEngine as any)?.getTrackLevel?.(id) ?? 0 } catch { return 0 } })()
+            return [m, m]
+          }}
           
           onTrackClick={(id) => {
             batch(() => {

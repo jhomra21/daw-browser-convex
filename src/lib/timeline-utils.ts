@@ -5,7 +5,7 @@ export const PPS = 100 // pixels per second
 export const RULER_HEIGHT = 32 // px
 export const LANE_HEIGHT = 96 // px per track lane
 // Shared Effects panel layout constants
-export const FX_PANEL_HEIGHT_PX = 280
+export const FX_PANEL_HEIGHT_PX = 360
 export const FX_PANEL_GAP_PX = 8
 export const FX_OFFSET_PX = FX_PANEL_HEIGHT_PX + FX_PANEL_GAP_PX
 

@@ -1,7 +1,8 @@
-import { createMemo, createResource } from 'solid-js'
+import { createMemo } from 'solid-js'
 import type { Accessor } from 'solid-js'
 
 import { useConvexQuery, convexApi } from '~/lib/convex'
+import { useQuery } from '@tanstack/solid-query'
 
 export type ProjectSampleInventoryItem = {
   url: string
@@ -142,12 +143,9 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
     return items
   })
 
-  const [defaultSamplesResource] = createResource<DefaultSampleListItem[], boolean | null>(
-    () => {
-      if (enabled && !enabled()) return null
-      return true
-    },
-    async (_src) => {
+  const defaultSamplesQuery = useQuery(() => ({
+    queryKey: ['default-samples'],
+    queryFn: async (): Promise<DefaultSampleListItem[]> => {
       try {
         const res = await fetch('/api/default-samples')
         if (!res.ok) return []
@@ -177,12 +175,18 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
         return []
       }
     },
-    { initialValue: [] }
-  )
+    // Always fetch once and cache long-term to avoid repeat requests per open
+    enabled: () => true,
+    staleTime: 1000 * 60 * 60, // 1 hour
+    gcTime: 1000 * 60 * 60 * 24, // cache for a day
+    refetchOnWindowFocus: false,
+    placeholderData: (prev: DefaultSampleListItem[] | undefined) => prev ?? [],
+  }))
 
   const defaultSamples = createMemo<DefaultSampleListItem[]>(() => {
-    const raw = defaultSamplesResource()
-    return Array.isArray(raw) ? raw : []
+    const raw: any = (defaultSamplesQuery as any).data
+    const data = typeof raw === 'function' ? raw() : raw
+    return Array.isArray(data) ? data : []
   })
 
   return {

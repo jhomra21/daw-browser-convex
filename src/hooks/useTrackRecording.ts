@@ -193,6 +193,26 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     setCurrentRecordingTrackId(null)
   }
 
+  // Stop live preview immediately without discarding context needed for finalize
+  const haltLivePreview = () => {
+    if (!activeCtx) return
+    const ctx = activeCtx
+    try {
+      // Stop the recorder stream capturing to prevent further preview updates
+      try { ctx.stream.getTracks().forEach(t => t.stop()) } catch {}
+      try { ctx.scriptProcessor?.disconnect() } catch {}
+      try { ctx.analyser?.disconnect() } catch {}
+      try { ctx.analysisCtx?.close() } catch {}
+      ctx.analyser = null
+      ctx.scriptProcessor = null
+      ctx.analysisCtx = null
+    } catch {}
+    // Reflect UI state immediately
+    setIsRecording(false)
+    setPreviewPoints([])
+    setPreviewStartSec(null)
+  }
+
   const finalizeRecording = async () => {
     if (!activeCtx) return
     const ctx = activeCtx
@@ -200,7 +220,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     const uid = userId()
     if (!rid || !uid) {
       emit('Missing room or user context; recording discarded.')
-      activeCtx = null
+      await cleanupRecording()
       return
     }
 
@@ -448,13 +468,16 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
   const stopRecording = async () => {
     if (!activeCtx) return
+    const ctx = activeCtx
     try {
-      if (activeCtx.recorder.state !== 'inactive') {
-        activeCtx.recorder.stop()
+      if (ctx.recorder.state !== 'inactive') {
+        ctx.recorder.stop()
       }
     } catch (err) {
       console.error('[useTrackRecording] recorder.stop failed', err)
     }
+    // Immediately stop live preview and UI recording state while finalizing runs
+    haltLivePreview()
     if (finalizePromise) {
       try {
         await finalizePromise

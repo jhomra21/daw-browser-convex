@@ -686,7 +686,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                           <DropdownMenuItem
                             data-sample-url={url}
                             class="group relative w-full flex items-center justify-between gap-2 pr-16 cursor-pointer hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100"
-                            onselect={(event: Event) => { event.preventDefault() }}
+                            onselect={(event: Event) => { (event).preventDefault() }}
                           >
                             <div
                               class="flex items-center gap-2 min-w-0 flex-1"

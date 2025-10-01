@@ -924,7 +924,13 @@ const Timeline: Component = () => {
   }
 
   useTimelineKeyboard({
-    onSpace: () => isPlaying() ? handlePause() : requestPlay(),
+    onSpace: () => {
+      if (isRecording()) {
+        handleTransportPause()
+      } else {
+        isPlaying() ? handlePause() : requestPlay()
+      }
+    },
     onDelete: handleKeyboardAction,
     onDuplicate: () => { void duplicateSelectedClips() },
     onAddAudioTrack: () => {

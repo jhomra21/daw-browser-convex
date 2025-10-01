@@ -1,4 +1,4 @@
-> **Last Updated**: 09/27/2025
+> **Last Updated**: 10/01/2025
 
 # Collaborative Realtime DAW
 
@@ -10,7 +10,7 @@ Realtime, collaborative Digital audio workstation built with SolidJS, Convex, an
 - [Tech Stack](#tech-stack)
 - [System Architecture](#system-architecture)
 - [Project Structure](#project-structure)
-- [Environment Setup](#environment-setup)
+- [Getting Started](#getting-started)
 - [Development Workflow](#development-workflow)
 - [Key Features](#key-features)
 - [Frontend Modules](#frontend-modules)
@@ -83,7 +83,7 @@ The Collaborative Realtime DAW combines SolidJS reactivity with Convex real-time
 └── package.json              # Bun scripts & dependency manifest
 ```
 
-## Environment Setup
+## Getting Started
 
 ### Prerequisites
 - **Bun** ≥ 1.1 (preferred package manager/runtime)
@@ -92,59 +92,47 @@ The Collaborative Realtime DAW combines SolidJS reactivity with Convex real-time
 - **Convex account** connected to the CLI (`bunx convex dev`)
 - **Google OAuth credentials** for Better Auth social sign-in
 
-### Configuration Steps
-1. **Install dependencies**
+### Installation
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/jhomra21/daw-browser-convex.git
+   cd your-repo
+   ```
+2. **Install dependencies**
    ```bash
    bun install
    ```
-2. **Copy environment template**
+3. **Set up environment variables**
+   Copy the `example.env` file to a new file named `.env`:
    ```bash
    cp example.env .env
    ```
-   Populate the following keys:
+   Populate the `.env` file with your credentials:
    - **`CONVEX_DEPLOYMENT`**, **`VITE_CONVEX_URL`** (set by Convex CLI)
    - **`BETTER_AUTH_SECRET`**, **`BETTER_AUTH_URL`**
    - **`GOOGLE_CLIENT_ID`**, **`GOOGLE_CLIENT_SECRET`**
    - Optional: **`VITE_AUTH_BASE_URL`** when testing against remote Workers
-3. **Cloudflare bindings** (see `wrangler.jsonc`)
-   - `daw_audio_samples`: Cloudflare R2 bucket (`daw-audio-samples`)
-   - `daw_convex_auth`: Cloudflare D1 database for Better Auth
-   - `daw_convex_auth_kv`: KV namespace used as Better Auth secondary storage
-   Ensure secrets are uploaded:
+4. **Configure Cloudflare bindings**
+   Ensure your `wrangler.jsonc` file has the correct bindings for R2, D1, and KV. You will also need to upload your secrets to Cloudflare:
    ```bash
    wrangler secret put BETTER_AUTH_SECRET
    wrangler secret put GOOGLE_CLIENT_ID
    wrangler secret put GOOGLE_CLIENT_SECRET
    ```
-4. **Convex development server**
+5. **Run the Convex development server**
    ```bash
    bunx convex dev
    ```
-   Follow prompts to link the project; keep the dev server running for hot reloads.
+   Follow the prompts to link your project. Keep this server running to enable hot reloads.
 
 ## Development Workflow
 
-- **Start the app**
-  ```bash
-  bun dev
-  ```
-  The Worker proxy serves the SPA at `http://localhost:3000`.
-- **Local Worker**
-  ```bash
-  wrangler dev
-  ```
-  Useful for testing Worker-only routes (`/api/*`).
-- **Build artifacts**
-  ```bash
-  bun run build
-  bun run serve   # Preview production bundle
-  ```
-- **Deploy**
-  ```bash
-  wrangler deploy
-  ```
-
-Scripts are defined in `package.json` to align with Bun’s CLI. Tailwind v4 uses the zero-runtime CSS pipeline enabled through `tailwind.config.cjs`.
+### Available Scripts
+- **`bun dev`**: Starts the development server with hot reloading.
+- **`bun build`**: Builds the project for production.
+- **`bun serve`**: Serves the production build locally for preview.
+- **`wrangler dev`**: Runs the Cloudflare Worker locally for testing.
+- **`wrangler deploy`**: Deploys the project to Cloudflare.
 
 ## Key Features
 
@@ -207,12 +195,12 @@ Convex tables (see `convex/schema.ts`):
 - **Auth failures**: Confirm Better Auth secrets in Cloudflare and align `BETTER_AUTH_URL` with deployed Worker origin.
 - **Audio playback stalled**: User gesture may be required; trigger play from an interaction so `AudioEngine.ensureAudio()` can resume context.
 
-## Contributing
 
-Pull requests are welcome. Please:
-- **Run Bun lint/build** before submitting.
-- **Describe architectural changes** in the PR body, especially those touching Convex functions or the audio engine.
-- **Keep diffs focused**—avoid unrelated refactors when adjusting timeline logic.
+
+
+---
+
+Built with ❤️ using SolidJS, Hono, Convex, Cloudflare Workers, and Bun.sting timeline logic.
 
 ## License
 

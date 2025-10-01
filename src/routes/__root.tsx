@@ -13,6 +13,7 @@ export const Route = createRootRoute({
   head: () => ({
     meta: [
       { title: 'Browser DAW - Convex, Better-Auth, Solid, TanStack, MediaBunny' },
+      { property: 'og:image', content: '/landing-page-thumbnail.png' },
     ],
     links: [
       { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml', sizes: 'any' },

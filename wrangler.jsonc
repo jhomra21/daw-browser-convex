@@ -35,7 +35,7 @@
 		}
 	],
 	"vars":{
-		"BETTER_AUTH_URL":"http://localhost:3000",
+		"BETTER_AUTH_URL":"https://daw-browser-convex.jhonra121.workers.dev",
 		"VITE_CONVEX_URL":"https://polite-peccary-245.convex.cloud"
 	}
 }

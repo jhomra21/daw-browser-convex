@@ -330,6 +330,12 @@ const Timeline: Component = () => {
     gridEnabled,
     gridDenominator,
     audioBufferCache,
+    onCommitMoves: (ids) => {
+      // When clips are moved during playback, reschedule only those clips to avoid restarting other audio/MIDI sources
+      if (isPlaying() && ids && ids.length) {
+        try { audioEngine.rescheduleClipsAtPlayhead(tracks(), playheadSec(), ids) } catch {}
+      }
+    },
   })
 
   const {
@@ -350,6 +356,9 @@ const Timeline: Component = () => {
     bpm,
     gridEnabled,
     gridDenominator,
+    audioEngine,
+    isPlaying,
+    playheadSec,
   })
 
   const {
@@ -744,9 +753,11 @@ const Timeline: Component = () => {
         startSec: c.startSec as number,
         duration: c.duration as number,
         leftPadSec: (c as any).leftPadSec ?? prevClip?.leftPadSec ?? 0,
+        bufferOffsetSec: (c as any).bufferOffsetSec ?? prevClip?.bufferOffsetSec ?? 0,
         color,
         sampleUrl: (c as any).sampleUrl as string | undefined,
         midi: (c as any).midi,
+        midiOffsetBeats: (c as any).midiOffsetBeats ?? prevClip?.midiOffsetBeats ?? 0,
       })
     }
 
@@ -772,9 +783,11 @@ const Timeline: Component = () => {
             startSec: pos.startSec,
             duration: localClip.duration,
             leftPadSec: localClip.leftPadSec ?? 0,
+            bufferOffsetSec: (localClip as any).bufferOffsetSec ?? 0,
             color: localClip.color,
             sampleUrl: localClip.sampleUrl,
             midi: (localClip as any).midi,
+            midiOffsetBeats: (localClip as any).midiOffsetBeats ?? 0,
           })
         }
       }
@@ -911,7 +924,29 @@ const Timeline: Component = () => {
   useTimelineKeyboard({
     onSpace: () => isPlaying() ? handlePause() : requestPlay(),
     onDelete: handleKeyboardAction,
-    onDuplicate: () => { void duplicateSelectedClips() }
+    onDuplicate: () => { void duplicateSelectedClips() },
+    onAddAudioTrack: () => {
+      void (async () => {
+        try {
+          const id = await convexClient.mutation(convexApi.tracks.create, { roomId: roomId(), userId: userId() }) as any as string
+          batch(() => {
+            setSelectedTrackId(id)
+            setSelectedFXTarget(id)
+          })
+        } catch {}
+      })()
+    },
+    onAddInstrumentTrack: () => {
+      void (async () => {
+        try {
+          const id = await convexClient.mutation(convexApi.tracks.create as any, { roomId: roomId(), userId: userId(), kind: 'instrument' } as any) as any as string
+          batch(() => {
+            setSelectedTrackId(id)
+            setSelectedFXTarget(id)
+          })
+        } catch {}
+      })()
+    },
   })
 
   // Sidebar resizer

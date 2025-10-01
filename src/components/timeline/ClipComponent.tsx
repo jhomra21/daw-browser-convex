@@ -59,6 +59,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     // MIDI thumbnail rendering (simple piano-roll bars)
     if (midi && Array.isArray(midi.notes) && midi.notes.length > 0) {
       const spb = 60 / Math.max(1, props.bpm || 120)
+      const midiOffsetBeats = Math.max(0, (props.clip as any).midiOffsetBeats ?? 0)
       const color = props.isSelected ? 'rgba(59,130,246,0.95)' : 'rgba(34,197,94,0.95)'
       // Determine pitch range
       let minP = Infinity, maxP = -Infinity
@@ -74,8 +75,13 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
 
       ctx.fillStyle = color
       for (const note of midi.notes as Array<{ beat: number; length: number; pitch: number }>) {
-        const startSec = Math.max(0, (note.beat || 0) * spb)
-        const endSec = Math.max(startSec, startSec + Math.max(0, (note.length || 0) * spb))
+        const noteBeat = note.beat || 0
+        const trimmedBeats = Math.max(0, midiOffsetBeats - noteBeat)
+        const effectiveLength = Math.max(0, (note.length || 0) - trimmedBeats)
+        if (effectiveLength <= 0) continue
+        const startBeats = Math.max(0, noteBeat - midiOffsetBeats)
+        const startSec = startBeats * spb
+        const endSec = Math.max(startSec, startSec + effectiveLength * spb)
         const left = Math.max(0, Math.min(cssW, Math.floor((startSec / Math.max(1e-6, props.clip.duration)) * cssW)))
         const right = Math.max(left + 1, Math.min(cssW, Math.floor((endSec / Math.max(1e-6, props.clip.duration)) * cssW)))
         const frac = 1 - ((note.pitch - minP) / range)
@@ -112,7 +118,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const bins = bufferPxW
     const peaks = computePeaks(buffer, bins)
     const padPx = Math.max(0, Math.floor((props.clip.leftPadSec ?? 0) * PPS))
-    const drawCols = Math.max(0, Math.min(cssW - padPx, bins))
+    const offsetPx = Math.max(0, Math.floor(((props.clip as any).bufferOffsetSec ?? 0) * PPS))
+    const drawCols = Math.max(0, Math.min(cssW - padPx, Math.max(0, bins - offsetPx)))
     const color = props.isSelected ? 'rgba(59,130,246,0.9)' : 'rgba(34,197,94,0.85)'
 
     // Auto-gain normalization so waveform nearly fills inner area
@@ -128,8 +135,9 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
 
     // Draw mirrored filled bars per pixel column with high-contrast fill
     for (let i = 0; i < drawCols; i++) {
-      const min = peaks[i * 2]
-      const max = peaks[i * 2 + 1]
+      const idx = (i + offsetPx)
+      const min = peaks[idx * 2]
+      const max = peaks[idx * 2 + 1]
       const a = Math.max(Math.abs(min), Math.abs(max))
       const h = Math.min(a * amp * gain, innerH / 2)
       if (h <= 0.5) continue
@@ -146,8 +154,9 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     ctx.lineWidth = 1.5
     ctx.beginPath()
     for (let i = 0; i < drawCols; i++) {
-      const min = peaks[i * 2]
-      const max = peaks[i * 2 + 1]
+      const idx = (i + offsetPx)
+      const min = peaks[idx * 2]
+      const max = peaks[idx * 2 + 1]
       const a = Math.max(Math.abs(min), Math.abs(max))
       const x = padPx + i + 0.5
       const yTop = midY - Math.min(a * amp * gain, innerH / 2)
@@ -156,8 +165,9 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     ctx.stroke()
     ctx.beginPath()
     for (let i = 0; i < drawCols; i++) {
-      const min = peaks[i * 2]
-      const max = peaks[i * 2 + 1]
+      const idx = (i + offsetPx)
+      const min = peaks[idx * 2]
+      const max = peaks[idx * 2 + 1]
       const a = Math.max(Math.abs(min), Math.abs(max))
       const x = padPx + i + 0.5
       const yBottom = midY + Math.min(a * amp * gain, innerH / 2)
@@ -174,7 +184,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     ctx.stroke()
 
     // Mark end of audio if clip extends beyond buffer (account for left padding)
-    const audioEndX = padPx + bufferPxW
+    const audioEndX = padPx + Math.max(0, bufferPxW - offsetPx)
     if (cssW > audioEndX && audioEndX >= 0) {
       const x = Math.min(cssW, audioEndX)
       ctx.strokeStyle = 'rgba(255,255,255,0.35)'

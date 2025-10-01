@@ -1,4 +1,4 @@
-import { createMemo } from 'solid-js'
+import { createMemo, createResource } from 'solid-js'
 import type { Accessor } from 'solid-js'
 
 import { useConvexQuery, convexApi } from '~/lib/convex'
@@ -30,6 +30,16 @@ export type ProjectSampleListItem = {
   earliestClip?: ProjectSampleUsage
 }
 
+export type DefaultSampleListItem = {
+  key: string
+  url: string
+  name: string
+  duration?: number
+  sizeBytes?: number
+  mimeType?: string
+  uploadedAt?: string
+}
+
 type UseProjectSamplesArgs = {
   roomId: Accessor<string>
   enabled?: Accessor<boolean>
@@ -37,6 +47,7 @@ type UseProjectSamplesArgs = {
 
 type UseProjectSamplesResult = {
   samples: Accessor<ProjectSampleListItem[]>
+  defaultSamples: Accessor<DefaultSampleListItem[]>
   rawInventory: ReturnType<typeof useConvexQuery>
   roomClips: ReturnType<typeof useConvexQuery>
 }
@@ -131,8 +142,52 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
     return items
   })
 
+  const [defaultSamplesResource] = createResource<DefaultSampleListItem[], boolean | null>(
+    () => {
+      if (enabled && !enabled()) return null
+      return true
+    },
+    async (_src) => {
+      try {
+        const res = await fetch('/api/default-samples')
+        if (!res.ok) return []
+        const data: any = await res.json().catch(() => null)
+        const list: any[] = Array.isArray(data?.samples) ? data.samples : []
+        const out: DefaultSampleListItem[] = []
+        for (const raw of list) {
+          if (!raw || typeof raw !== 'object') continue
+          const url = typeof raw.url === 'string' ? raw.url : ''
+          if (!url) continue
+          const key = typeof raw.key === 'string' ? raw.key : url
+          const name = typeof raw.name === 'string' ? raw.name : key
+          const obj: DefaultSampleListItem = { key, url, name }
+          const dur = typeof raw.duration === 'number'
+            ? (Number.isFinite(raw.duration) ? raw.duration : undefined)
+            : typeof raw.duration === 'string'
+              ? (() => { const n = Number(raw.duration); return Number.isFinite(n) ? n : undefined })()
+              : undefined
+          if (dur !== undefined) obj.duration = dur
+          if (typeof raw.sizeBytes === 'number' && Number.isFinite(raw.sizeBytes)) obj.sizeBytes = raw.sizeBytes
+          if (typeof raw.mimeType === 'string') obj.mimeType = raw.mimeType
+          if (typeof raw.uploadedAt === 'string') obj.uploadedAt = raw.uploadedAt
+          out.push(obj)
+        }
+        return out
+      } catch {
+        return []
+      }
+    },
+    { initialValue: [] }
+  )
+
+  const defaultSamples = createMemo<DefaultSampleListItem[]>(() => {
+    const raw = defaultSamplesResource()
+    return Array.isArray(raw) ? raw : []
+  })
+
   return {
     samples,
+    defaultSamples,
     rawInventory: inventory,
     roomClips: clips,
   }

@@ -6,6 +6,8 @@ export type Clip = {
   duration: number
   /** Seconds of silence before audio begins within the clip window */
   leftPadSec?: number
+  /** Seconds to skip from the start of the audio buffer when playing this clip */
+  bufferOffsetSec?: number
   color: string
   sampleUrl?: string
   /** Present when this is a MIDI clip (instrument-generated, not audio sample) */
@@ -14,6 +16,8 @@ export type Clip = {
     gain?: number
     notes: { beat: number; length: number; pitch: number; velocity?: number }[]
   }
+  /** For MIDI clips, number of beats to offset the internal content when trimming from the left */
+  midiOffsetBeats?: number
 }
 
 export type Track = {

@@ -42,6 +42,8 @@ export type ClipDragOptions = {
   gridDenominator: Accessor<number>
   // buffer cache to prime newly created duplicates
   audioBufferCache: Map<string, AudioBuffer>
+  // Notify timeline that a set of clip moves has been committed (drop finished)
+  onCommitMoves?: (clipIds: string[]) => void
 }
 
 export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
@@ -481,7 +483,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       // If Ctrl is not held anymore at drop, treat as cancel
       if (!event.ctrlKey) { cancelDuplicationDrag(); return }
 
-      type Pending = { trackId: string; name?: string; duration: number; startSec: number; buffer: AudioBuffer | null; color: string; sampleUrl?: string; midi?: any; leftPadSec?: number }
+      type Pending = { trackId: string; name?: string; duration: number; startSec: number; buffer: AudioBuffer | null; color: string; sampleUrl?: string; midi?: any; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number }
       const plan: Pending[] = []
       const targetIdx = base.findIndex(t => t.id === targetId)
       if (targetIdx < 0) { cancelDuplicationDrag(); return }
@@ -511,6 +513,8 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           sampleUrl: orig.sampleUrl,
           midi: (orig as any).midi,
           leftPadSec: orig.leftPadSec,
+          bufferOffsetSec: (orig as any).bufferOffsetSec,
+          midiOffsetBeats: (orig as any).midiOffsetBeats,
         })
       }
 
@@ -558,6 +562,9 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           userId: uidAny,
           name: p.name,
           ...(p.midi ? { midi: p.midi } : {}),
+          leftPadSec: p.leftPadSec,
+          bufferOffsetSec: p.bufferOffsetSec,
+          midiOffsetBeats: p.midiOffsetBeats,
         }))
       }) as any as string[]
 
@@ -574,8 +581,12 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
         if (p.midi) {
           try { await convexClient.mutation((convexApi as any).clips.setMidi, { clipId: newId as any, midi: p.midi, userId: uidAny }) } catch {}
         }
-        if (typeof p.leftPadSec === 'number' && Number.isFinite(p.leftPadSec)) {
-          void convexClient.mutation((convexApi as any).clips.setTiming, { clipId: newId as any, startSec: p.startSec, duration: p.duration, leftPadSec: p.leftPadSec ?? 0 })
+        if (
+          (typeof p.leftPadSec === 'number' && Number.isFinite(p.leftPadSec)) ||
+          (typeof p.bufferOffsetSec === 'number' && Number.isFinite(p.bufferOffsetSec)) ||
+          (typeof p.midiOffsetBeats === 'number' && Number.isFinite(p.midiOffsetBeats))
+        ) {
+          void convexClient.mutation((convexApi as any).clips.setTiming, { clipId: newId as any, startSec: p.startSec, duration: p.duration, leftPadSec: p.leftPadSec ?? 0, bufferOffsetSec: p.bufferOffsetSec ?? 0, midiOffsetBeats: p.midiOffsetBeats ?? 0 })
         }
       }
 
@@ -673,6 +684,8 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           setSelectedFXTarget(newTrackId)
           setSelectedClip({ trackId: newTrackId, clipId: moving!.clipId })
         })
+        // Notify moved clips committed
+        try { options.onCommitMoves?.(md.items.map(it => it.clipId)) } catch {}
       } else {
         batch(() => {
           setSelectedTrackId(newTrackId)
@@ -686,6 +699,8 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           toTrackId: newTrackId as any,
         })
         optimisticMoves.set(moving!.clipId, { trackId: newTrackId, startSec: desiredStart })
+        // Notify moved clip committed
+        try { options.onCommitMoves?.([moving!.clipId]) } catch {}
       }
     } else {
       if (multiDragging) {
@@ -776,6 +791,8 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           setSelectedFXTarget(anchorTid)
           setSelectedClip({ trackId: anchorTid, clipId: md.anchorClipId })
         })
+        // Notify moved clips committed
+        try { options.onCommitMoves?.(md.items.map(it => it.clipId)) } catch {}
       } else {
         const t = tracks().find(tt => tt.id === draggingIds!.trackId)
         const c = t?.clips.find(cc => cc.id === draggingIds!.clipId)
@@ -801,6 +818,8 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
             setSelectedClip({ trackId: t!.id, clipId: c.id })
             setSelectedClipIds(new Set([c.id]))
           })
+          // Notify moved clip committed
+          try { options.onCommitMoves?.([c.id]) } catch {}
         }
       }
     }

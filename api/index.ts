@@ -330,7 +330,7 @@ app.post('/api/agent/execute', async (c) => {
               return clipsOnTrack[0]
             })()
             if (!clip) { results.push({ type: cmd.type, error: 'Clip not found' }); break }
-            await convex.mutation(convexApi.clips.setTiming as any, { clipId: clip._id, startSec: cmd.startSec, duration: cmd.duration, leftPadSec: cmd.leftPadSec } as any)
+            await convex.mutation(convexApi.clips.setTiming as any, { clipId: clip._id, startSec: cmd.startSec, duration: cmd.duration, leftPadSec: (cmd as any).leftPadSec, bufferOffsetSec: (cmd as any).bufferOffsetSec, midiOffsetBeats: (cmd as any).midiOffsetBeats } as any)
             results.push({ type: cmd.type, ok: true })
             break
           }
@@ -424,6 +424,8 @@ app.post('/api/agent/execute', async (c) => {
                 name: c.name,
                 sampleUrl: (c as any).sampleUrl,
                 leftPadSec: (c as any).leftPadSec,
+                bufferOffsetSec: (c as any).bufferOffsetSec,
+                midiOffsetBeats: (c as any).midiOffsetBeats,
               }
               if ((c as any).midi) item.midi = (c as any).midi
               return [item]
@@ -649,6 +651,82 @@ app.get('/api/samples/:roomId/:clipId', async (c) => {
   } catch (err) {
     console.error('Fetch error', err)
     return c.json({ error: 'Failed to fetch sample' }, 500)
+  }
+})
+
+app.get('/api/default-samples', async (c) => {
+  try {
+    const bucket = c.env.daw_audio_samples
+    if (!bucket) {
+      return c.json({ samples: [] })
+    }
+    const prefix = 'default/'
+    let cursor: string | undefined
+    const objects: any[] = []
+
+    do {
+      const page: any = await bucket.list({
+        prefix,
+        cursor,
+        limit: 1000,
+      })
+      if (Array.isArray(page?.objects)) {
+        objects.push(...page.objects)
+      }
+      cursor = page?.truncated ? page?.cursor : undefined
+    } while (cursor)
+
+    const samples: any[] = []
+    for (const obj of objects) {
+      if (!obj || typeof obj.key !== 'string' || !obj.key.startsWith(prefix)) continue
+      if (obj.key === prefix || obj.key.endsWith('/')) continue
+      const key: string = obj.key
+      const rawName = key.slice(prefix.length)
+      let decodedName = rawName || key
+      try {
+        decodedName = decodeURIComponent(decodedName)
+      } catch {}
+      const url = `/api/default-sample?key=${encodeURIComponent(key)}`
+      samples.push({
+        key,
+        name: decodedName,
+        url,
+        sizeBytes: typeof obj.size === 'number' ? obj.size : undefined,
+      })
+    }
+
+    samples.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+
+    return c.json({ samples })
+  } catch (err) {
+    console.error('Default samples list error', err)
+    return c.json({ error: 'Failed to list default samples' }, 500)
+  }
+})
+
+app.get('/api/default-sample', async (c) => {
+  try {
+    const key = c.req.query('key')
+    if (!key) return c.json({ error: 'Missing key query parameter' }, 400)
+    if (!key.startsWith('default/')) return c.json({ error: 'Invalid key' }, 400)
+
+    const obj = await c.env.daw_audio_samples.get(key)
+    if (!obj) return c.json({ error: 'Not found' }, 404)
+
+    const headers = new Headers()
+    headers.set('Content-Type', obj.httpMetadata?.contentType || 'application/octet-stream')
+    headers.set('Cache-Control', 'public, max-age=31536000, immutable')
+    headers.set('Access-Control-Allow-Origin', '*')
+    headers.set('Access-Control-Allow-Credentials', 'true')
+    if (obj.httpMetadata?.contentDisposition) {
+      headers.set('Content-Disposition', obj.httpMetadata.contentDisposition)
+    }
+    headers.set('X-R2-Key', key)
+
+    return new Response(obj.body, { headers })
+  } catch (err) {
+    console.error('Default sample fetch error', err)
+    return c.json({ error: 'Failed to fetch default sample' }, 500)
   }
 })
 

@@ -1,4 +1,8 @@
 import { createFileRoute, Link } from '@tanstack/solid-router'
+import { createSignal, onMount, onCleanup } from 'solid-js'
+import type { JSX } from 'solid-js'
+import Icon from '~/components/ui/Icon'
+import { useSessionQuery } from '~/lib/session'
 
 export const Route = createFileRoute('/about')({
   head: () => ({
@@ -10,54 +14,287 @@ export const Route = createFileRoute('/about')({
   component: About,
 })
 
+function Reveal(props: { children: JSX.Element; delay?: number; class?: string }) {
+  const [show, setShow] = createSignal(false)
+  let el!: HTMLDivElement
+  onMount(() => {
+    const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (reduce) { setShow(true); return }
+    const io = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        const d = props.delay ?? 0
+        d ? setTimeout(() => setShow(true), d) : setShow(true)
+        io.disconnect()
+      }
+    }, { threshold: 0.1, rootMargin: '0px 0px -10% 0px' })
+    io.observe(el)
+    onCleanup(() => io.disconnect())
+  })
+  return (
+    <div
+      ref={el}
+      class={`${props.class ?? ''} transform-gpu transition-all duration-350 ease-out will-change-[transform,opacity,filter] motion-reduce:transition-none motion-reduce:transform-none motion-reduce:opacity-100 motion-reduce:blur-0 ${show() ? 'opacity-100 translate-y-0 blur-0' : 'opacity-0 translate-y-8 blur-xs'}`}
+    >
+      {props.children}
+    </div>
+  )
+}
+
 function About() {
+  const session = useSessionQuery()
+  const [entered, setEntered] = createSignal(false)
+  const onSeeFeatures = (e: Event) => {
+    e.preventDefault()
+    document.getElementById('features')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  onMount(() => {
+    const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (reduce) { setEntered(true); return }
+    // Delay one tick to ensure initial styles paint before transitioning
+    setTimeout(() => setEntered(true), 80)
+  })
   return (
     <main class="min-h-screen bg-neutral-950 text-neutral-100">
-      <section class="container mx-auto px-4 py-14 flex flex-col items-center">
-        <h1 class="text-3xl md:text-4xl font-semibold text-center tracking-tight">
-          MediaBunny — Realtime Collaborative DAW
-        </h1>
-        <p class="mt-3 text-center text-neutral-400 max-w-2xl">
-          Arrange audio and MIDI clips together, add EQ/Reverb/Synth, and collaborate live — all in the browser.
-        </p>
-
-        <div class="mt-8 w-full max-w-5xl aspect-video rounded-xl border border-neutral-800 bg-neutral-900/60 overflow-hidden shadow-lg">
-          {/* Replace with an actual screenshot placed in /public when available */}
-          <img src="/logo512.png" alt="MediaBunny DAW screenshot" class="w-full h-full object-contain p-4" />
+      <section class="relative container mx-auto px-4 pt-20 pb-10 text-center">
+        <div class="pointer-events-none absolute inset-0 -z-10">
+          <div class="mx-auto mt-[-4rem] h-64 w-[36rem] rounded-full bg-[radial-gradient(closest-side,rgba(120,120,255,0.25),transparent)] blur-3xl" />
         </div>
 
-        <div class="mt-10 grid gap-6 w-full max-w-5xl sm:grid-cols-2">
-          <div class="rounded-lg border border-neutral-800 bg-neutral-900/60 p-5">
-            <h2 class="text-lg font-semibold mb-2">Features</h2>
-            <ul class="text-sm text-neutral-300 list-disc pl-5 space-y-1">
-              <li>Collaborative tracks with per‑track mute/solo and volume</li>
-              <li>MIDI and audio clips with grid snapping and loop regions</li>
-              <li>Effects: EQ, Reverb, Synth, Arpeggiator</li>
-              <li>Agent and shared chat for project coordination</li>
-              <li>Cloud storage backed by R2 and Convex</li>
-            </ul>
-          </div>
-          <div class="rounded-lg border border-neutral-800 bg-neutral-900/60 p-5">
-            <h2 class="text-lg font-semibold mb-2">Tech stack</h2>
-            <ul class="text-sm text-neutral-300 list-disc pl-5 space-y-1">
-              <li>Bun • SolidJS • TailwindCSS</li>
-              <li>TanStack Router & Solid Query</li>
-              <li>Hono on Cloudflare Workers</li>
-              <li>Convex for realtime data</li>
-              <li>Better Auth • TypeScript</li>
-            </ul>
+        <div class={`${entered() ? 'opacity-100 translate-y-0 blur-0' : 'opacity-0 translate-y-6 blur-sm'} transform-gpu transition-all duration-700 ease-out will-change-[transform,opacity,filter] motion-reduce:transition-none motion-reduce:transform-none motion-reduce:opacity-100 motion-reduce:blur-0`}>
+          <p class="text-sm uppercase tracking-widest text-neutral-400">Realtime collaborative DAW</p>
+          <h1 class="mx-auto max-w-4xl text-4xl md:text-6xl font-semibold leading-tight tracking-tight bg-clip-text text-transparent bg-gradient-to-b from-white to-neutral-400">
+            Make music together, in your browser.
+          </h1>
+          <p class="mx-auto mt-4 max-w-2xl text-neutral-300">
+            Arrange audio and MIDI, add EQ, Reverb, and Synths, and collaborate live with zero installs.
+          </p>
+          <div class="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
+            {session()?.data ? (
+              <Link to="/" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground px-6 py-3 text-sm font-medium hover:bg-primary/90 border border-neutral-700/20">
+                Go to app
+              </Link>
+            ) : (
+              <Link to="/Login" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground px-6 py-3 text-sm font-medium hover:bg-primary/90 border border-neutral-700/20">
+                Get started — Sign in
+              </Link>
+            )}
+            <a href="#features" onClick={onSeeFeatures} class="inline-flex items-center justify-center rounded-md border border-neutral-800 px-6 py-3 text-sm font-medium text-neutral-200 hover:bg-neutral-900/60">
+              See features
+            </a>
           </div>
         </div>
 
-        <div class="mt-10">
-          <Link
-            to="/Login"
-            class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground px-5 py-2 text-sm font-medium hover:bg-primary/90 border border-neutral-700/20 active:scale-97 transition-transform ease-out"
-          >
-            Get started — Sign in
-          </Link>
+        <div class={`mt-12 w-full max-w-5xl mx-auto aspect-video rounded-2xl border border-neutral-800 bg-neutral-900/60 overflow-hidden shadow-2xl transform-gpu transition-all duration-700 ease-out [transition-delay:150ms] motion-reduce:transition-none motion-reduce:transform-none motion-reduce:opacity-100 motion-reduce:blur-0 ${entered() ? 'opacity-100 translate-y-0 blur-0' : 'opacity-0 translate-y-8 blur-sm'}`}>
+          <img src="/landing-page-thumbnail.png" alt="MediaBunny DAW screenshot" class="w-full h-full object-contain p-4" loading='eager' />
         </div>
       </section>
+
+      <section id="features" class="container mx-auto px-4 py-16">
+        <div class="grid gap-6 md:grid-cols-2">
+          <Reveal delay={0} class="h-full">
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/60 overflow-hidden h-full min-h-[340px]">
+            <div class="grid md:grid-cols-[1fr_320px]">
+              <div class="p-6">
+            <h3 class="text-lg font-semibold">Live collaboration</h3>
+            <p class="mt-2 text-neutral-300">Work on the same project with friends in real time—no sync headaches.</p>
+            <ul class="mt-4 text-sm text-neutral-300 list-disc pl-5 space-y-1">
+              <li>See clip edits, loop regions, and mixer changes as they happen.</li>
+              <li>Per-track mute/solo and volume for personal monitor mixes.</li>
+              <li>Project chat keeps context alongside your timeline.</li>
+            </ul>
+            <div class="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
+              Example: Invite a collaborator, set a loop at bar 17–25, they tweak EQ while you record a new take.
+            </div>
+              </div>
+              <div class="relative hidden md:block min-h-[220px]">
+                <div class="absolute inset-0 bg-[url('/landing-page-projects.png')] bg-cover bg-right opacity-90" />
+                <div class="absolute inset-0 bg-gradient-to-l from-neutral-900/80 to-transparent" />
+              </div>
+            </div>
+          </div>
+          </Reveal>
+
+          <Reveal delay={80} class="h-full">
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/60 overflow-hidden h-full min-h-[340px]">
+            <div class="grid md:grid-cols-[1fr_320px]">
+              <div class="p-6">
+            <h3 class="text-lg font-semibold">Clips & timeline</h3>
+            <p class="mt-2 text-neutral-300">Arrange audio and MIDI with precise grid snapping and loop regions.</p>
+            <ul class="mt-4 text-sm text-neutral-300 list-disc pl-5 space-y-1">
+              <li>Drag, split, duplicate, and loop clips with keyboard shortcuts.</li>
+              <li>Tempo control and metronome for tight timing.</li>
+              <li>Zoom and scroll to focus on your arrangement.</li>
+            </ul>
+            <div class="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
+              Example: Drop stems, set snap to 1/16, quickly comp a chorus by looping and duplicating clips.
+            </div>
+              </div>
+              <div class="relative hidden md:block min-h-[220px]">
+                <div class="absolute inset-0 bg-[url('/landing-page-samples.png')] bg-cover bg-right opacity-90" />
+                <div class="absolute inset-0 bg-gradient-to-l from-neutral-900/80 to-transparent" />
+              </div>
+            </div>
+          </div>
+          </Reveal>
+
+          <Reveal delay={160} class="h-full">
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/60 overflow-hidden h-full min-h-[340px]">
+            <div class="grid md:grid-cols-[1fr_320px]">
+              <div class="p-6">
+            <h3 class="text-lg font-semibold">MIDI instruments</h3>
+            <p class="mt-2 text-neutral-300">Play built‑in synths and arpeggiators directly from your keyboard.</p>
+            <ul class="mt-4 text-sm text-neutral-300 list-disc pl-5 space-y-1">
+              <li>Record MIDI and edit notes.</li>
+              <li>Built‑in Synth and Arpeggiator for ideas without plugins.</li>
+              <li>Floating MIDI editor for quick note tweaks.</li>
+            </ul>
+            <div class="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
+              Example: Sketch a bass line with the Arp, then quantize lightly to keep the groove.
+            </div>
+              </div>
+              <div class="relative hidden md:block min-h-[220px]">
+                <div class="absolute inset-0 bg-[url('/landing-page-synth.png')] bg-cover bg-right opacity-90" />
+                <div class="absolute inset-0 bg-gradient-to-l from-neutral-900/80 to-transparent" />
+              </div>
+            </div>
+          </div>
+          </Reveal>
+
+          <Reveal delay={240} class="h-full">
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/60 overflow-hidden h-full min-h-[340px]">
+            <div class="grid md:grid-cols-[1fr_320px]">
+              <div class="p-6">
+            <h3 class="text-lg font-semibold">Effects & mixing</h3>
+            <p class="mt-2 text-neutral-300">Polish your sound with built‑in EQ and Reverb—fast and transparent.</p>
+            <ul class="mt-4 text-sm text-neutral-300 list-disc pl-5 space-y-1">
+              <li>Per‑track EQ and Reverb with simple controls.</li>
+              <li>Meters and per‑track volume sliders.</li>
+              <li>Quick EQ presets to get started fast.</li>
+            </ul>
+            <div class="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
+              Example: Add plate reverb to vocals, roll off lows with EQ, A/B with bypass to dial it in.
+            </div>
+              </div>
+              <div class="relative hidden md:block min-h-[220px]">
+                <div class="absolute inset-0 bg-[url('/landing-page-eq.png')] bg-cover bg-right opacity-90" />
+                <div class="absolute inset-0 bg-gradient-to-l from-neutral-900/80 to-transparent" />
+              </div>
+            </div>
+          </div>
+          </Reveal>
+
+          <Reveal delay={320} class="h-full">
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/60 overflow-hidden h-full min-h-[340px]">
+            <div class="grid md:grid-cols-[1fr_320px]">
+              <div class="p-6">
+            <h3 class="text-lg font-semibold">Cloud projects</h3>
+            <p class="mt-2 text-neutral-300">Your work is saved automatically and accessible on any device.</p>
+            <ul class="mt-4 text-sm text-neutral-300 list-disc pl-5 space-y-1">
+              <li>Backed by Convex and R2 for reliable realtime sync.</li>
+              <li>Share a room link to collaborate.</li>
+              <li>Sign in to access your projects across devices.</li>
+            </ul>
+            <div class="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
+              Example: Send a view‑only link to get mix notes; apply them live on a call.
+            </div>
+              </div>
+              <div class="relative hidden md:block min-h-[220px]">
+                <div class="absolute inset-0 bg-[url('/landing-page-projects.png')] bg-cover bg-right opacity-90" />
+                <div class="absolute inset-0 bg-gradient-to-l from-neutral-900/80 to-transparent" />
+              </div>
+            </div>
+          </div>
+          </Reveal>
+
+          <Reveal delay={400} class="h-full">
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/60 overflow-hidden h-full min-h-[340px]">
+            <div class="grid md:grid-cols-[1fr_320px]">
+              <div class="p-6">
+                <h3 class="text-lg font-semibold">Built for speed</h3>
+                <p class="mt-2 text-neutral-300">SolidJS + Web Audio deliver instant interactions and low latency.</p>
+                <ul class="mt-4 text-sm text-neutral-300 list-disc pl-5 space-y-1">
+                  <li>Fast startup—open a project and start playing immediately.</li>
+                  <li>Keyboard‑first workflow with responsive controls.</li>
+                  <li>Designed to feel native on any modern browser.</li>
+                </ul>
+                <div class="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
+                  Example: Nudge clips by 10ms and audition effects—all without dropping a frame.
+                </div>
+              </div>
+              <div class="relative hidden md:flex min-h-[220px] items-center justify-center">
+                <div class="absolute inset-0 -z-10 bg-[radial-gradient(closest-side,rgba(120,120,255,0.18),transparent)]" />
+                <div class="flex items-center gap-4">
+                  <Icon name="solidjs" size={72} class="-translate-y-1 drop-shadow-[0_8px_24px_rgba(118,179,225,0.35)]" ariaLabel="SolidJS" />
+                  <span class="text-4xl font-medium text-neutral-400">+</span>
+                  <Icon name="convex" size={72} class="translate-y-1 drop-shadow-[0_8px_24px_rgba(243,176,28,0.35)]" ariaLabel="Convex" />
+                </div>
+                <div class="absolute inset-0 bg-gradient-to-l from-neutral-900/80 to-transparent" />
+              </div>
+            </div>
+          </div>
+          </Reveal>
+        </div>
+      </section>
+
+      <section id="stack" class="container mx-auto px-4 pb-16">
+        <Reveal delay={60}>
+        <div class="rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 md:p-8">
+          <div class="grid grid-cols-3 sm:grid-cols-6 gap-6 place-items-center">
+
+            <a href="https://www.convex.dev/" target="_blank" rel="noreferrer" class="group flex flex-col items-center gap-3 text-neutral-300 hover:text-white">
+              <div class="h-12 flex items-center justify-center">
+                <Icon name="convex" size={48} ariaLabel="Convex" />
+              </div>
+              <div class="text-sm">Convex</div>
+            </a>
+
+            <a href="https://www.cloudflare.com/" target="_blank" rel="noreferrer" class="group flex flex-col items-center gap-3 text-neutral-300 hover:text-white">
+              <div class="h-12 flex items-center justify-center">
+                <svg viewBox="0 0 256 116" preserveAspectRatio="xMidYMid" class="h-10 w-auto" aria-hidden="true"><path fill="#FFF" d="m202.357 49.394-5.311-2.124C172.085 103.434 72.786 69.289 66.81 85.997c-.996 11.286 54.227 2.146 93.706 4.059 12.039.583 18.076 9.671 12.964 24.484l10.069.031c11.615-36.209 48.683-17.73 50.232-29.68-2.545-7.857-42.601 0-31.425-35.497Z"/><path fill="#F4811F" d="M176.332 108.348c1.593-5.31 1.062-10.622-1.593-13.809-2.656-3.187-6.374-5.31-11.154-5.842L71.17 87.634c-.531 0-1.062-.53-1.593-.53-.531-.532-.531-1.063 0-1.594.531-1.062 1.062-1.594 2.124-1.594l92.946-1.062c11.154-.53 22.839-9.56 27.087-20.182l5.312-13.809c0-.532.531-1.063 0-1.594C191.203 20.182 166.772 0 138.091 0 111.535 0 88.697 16.995 80.73 40.896c-5.311-3.718-11.684-5.843-19.12-5.31-12.747 1.061-22.838 11.683-24.432 24.43-.531 3.187 0 6.374.532 9.56C16.996 70.107 0 87.103 0 108.348c0 2.124 0 3.718.531 5.842 0 1.063 1.062 1.594 1.594 1.594h170.489c1.062 0 2.125-.53 2.125-1.594l1.593-5.842Z"/><path fill="#FAAD3F" d="M205.544 48.863h-2.656c-.531 0-1.062.53-1.593 1.062l-3.718 12.747c-1.593 5.31-1.062 10.623 1.594 13.809 2.655 3.187 6.373 5.31 11.153 5.843l19.652 1.062c.53 0 1.062.53 1.593.53.53.532.53 1.063 0 1.594-.531 1.063-1.062 1.594-2.125 1.594l-20.182 1.062c-11.154.53-22.838 9.56-27.087 20.182l-1.063 4.78c-.531.532 0 1.594 1.063 1.594h70.108c1.062 0 1.593-.531 1.593-1.593 1.062-4.25 2.124-9.03 2.124-13.81 0-27.618-22.838-50.456-50.456-50.456"/></svg>
+              </div>
+              <div class="text-sm">Cloudflare</div>
+            </a>
+
+            <a href="https://hono.dev/" target="_blank" rel="noreferrer" class="group flex flex-col items-center gap-3 text-neutral-300 hover:text-white">
+              <div class="h-12 flex items-center justify-center">
+                <svg preserveAspectRatio="xMidYMid" viewBox="0 0 256 330" class="h-10 w-auto" aria-hidden="true"><path d="M134.129.029c.876-.113 1.65.108 2.319.662a1256.253 1256.253 0 0 1 69.573 93.427c16.094 24.231 29.788 49.851 41.082 76.862 18.037 48.108 8.65 89.963-28.16 125.564-32.209 27.22-69.314 37.822-111.318 31.805-50.208-10.237-84.332-39.28-102.373-87.133C.553 225.638-.993 209.736.614 193.51c2.676-27.93 9.302-54.877 19.878-80.838 4.407-10.592 10.15-20.31 17.228-29.154a381.88 381.88 0 0 1 16.565 21.203c2.44 2.55 4.98 4.98 7.62 7.289C82.06 72.01 106.135 34.685 134.13.029Z" fill="#FF5B11" opacity=".993"/><path d="M129.49 53.7c24.314 28.2 46.29 58.238 65.93 90.114a187.318 187.318 0 0 1 15.24 33.13c8.338 32.804-.607 59.86-26.836 81.169-25.367 17.85-53.196 23.15-83.488 15.902-32.666-10.136-51.55-32.113-56.653-65.929-1.238-10.662-.133-21.043 3.314-31.142a225.41 225.41 0 0 1 17.89-35.78l19.878-29.155a5509.508 5509.508 0 0 0 44.726-58.31Z" fill="#FF9758"/></svg>
+              </div>
+              <div class="text-sm">Hono</div>
+            </a>
+
+            <a href="https://www.solidjs.com/" target="_blank" rel="noreferrer" class="group flex flex-col items-center gap-3 text-neutral-300 hover:text-white">
+              <div class="h-12 flex items-center justify-center">
+                <Icon name="solidjs" size={48} ariaLabel="SolidJS" />
+              </div>
+              <div class="text-sm">SolidJS</div>
+            </a>
+
+            <a href="https://mediabunny.dev/" class="group flex flex-col items-center gap-3 text-neutral-300 hover:text-white">
+              <div class="h-12 flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="81.95 77.25 870.2 865.04" class="h-10 w-auto" aria-hidden="true"><g stroke-width="2.00" fill="none" stroke-linecap="butt"><path stroke="#7a685d" vector-effect="non-scaling-stroke" d="   M 240.04 116.25   Q 228.59 137.04 233.46 158.95   A 3.37 3.37 0.0 0 0 234.62 160.81   C 287.64 203.65 326.76 264.58 343.65 329.85   Q 347.09 343.16 349.09 356.27   A 0.52 0.51 -13.6 0 0 349.77 356.68   Q 361.90 352.46 375.58 349.49"/><path stroke="#807a71" vector-effect="non-scaling-stroke" d="   M 375.58 349.49   Q 394.38 345.45 414.78 344.37   Q 424.27 343.87 435.73 343.54   A 0.95 0.95 0.0 0 0 436.65 342.63   Q 437.19 330.32 435.31 316.21   Q 424.30 233.54 372.97 168.02   Q 350.87 139.82 322.36 119.41   C 309.58 110.26 292.43 100.99 276.45 100.08   Q 272.95 99.89 268.75 100.03   Q 249.16 100.71 240.04 116.25"/><path stroke="#f9e2ce" vector-effect="non-scaling-stroke" d="   M 375.58 349.49   Q 366.38 315.40 354.11 286.16   Q 332.85 235.53 297.32 191.66   Q 275.31 164.50 269.61 157.38   Q 254.72 138.79 240.04 116.25"/><path stroke="#7a685d" vector-effect="non-scaling-stroke" d="   M 259.93 464.11   C 253.02 462.92 245.87 458.86 239.66 455.48   A 2.00 1.99 36.3 0 0 237.28 455.84   C 219.34 474.35 205.62 494.54 193.81 518.45   Q 177.42 551.63 167.21 586.70   Q 163.97 597.82 160.32 612.38   A 0.30 0.30 0.0 0 0 160.76 612.71   L 188.10 596.92   A 0.12 0.12 0.0 0 1 188.27 597.07   Q 184.57 608.08 179.55 626.01   C 172.87 649.86 172.77 676.65 184.82 699.20   C 196.02 720.17 213.62 735.22 234.81 747.19   Q 242.09 751.31 250.97 755.99   A 0.36 0.35 -37.3 0 1 250.88 756.65   Q 241.96 758.60 239.88 759.04   Q 227.40 761.66 215.37 757.11   Q 207.92 754.29 201.29 750.65   A 2.19 2.17 40.4 0 0 198.92 750.83   Q 197.71 751.76 196.37 753.12   Q 187.25 762.42 178.78 773.53   Q 156.83 802.35 141.36 835.24   A 2.07 2.05 31.1 0 0 141.99 837.76   Q 152.81 845.80 164.50 852.60"/><path stroke="#807a71" vector-effect="non-scaling-stroke" d="   M 164.50 852.60   Q 195.80 870.58 229.65 883.34   Q 297.20 908.80 368.94 916.55   Q 401.01 920.02 433.01 920.21   Q 505.93 920.65 576.29 898.25   Q 591.15 893.52 605.39 887.15   Q 610.00 885.09 613.67 882.73   A 1.90 1.90 0.0 0 0 614.46 880.60   Q 604.85 847.60 588.69 818.66"/><path stroke="#7a685d" vector-effect="non-scaling-stroke" d="   M 588.69 818.66   Q 581.79 807.59 575.49 796.78   C 572.89 792.33 571.94 787.86 574.74 783.13"/><path stroke="#807a71" vector-effect="non-scaling-stroke" d="   M 574.74 783.13   Q 577.73 780.90 580.61 780.08   C 600.75 774.37 619.93 767.79 638.17 757.42   C 661.80 743.99 683.35 722.02 697.79 698.78   A 0.37 0.37 0.0 0 0 697.33 698.24   C 666.21 711.45 629.91 706.03 602.05 687.69   Q 590.40 680.02 582.77 668.21   A 1.12 1.12 0.0 0 0 581.15 667.93   C 577.52 670.70 572.99 671.91 568.96 669.34   C 558.58 662.74 570.70 646.85 575.78 641.05   C 580.74 635.36 590.71 629.42 597.34 636.70   C 601.85 641.64 600.61 646.46 597.57 651.83   A 2.77 2.76 43.3 0 0 597.66 654.72   C 614.62 680.62 657.34 690.70 685.51 680.72   C 699.45 675.77 708.12 666.00 714.79 652.25   Q 722.51 636.31 725.29 618.22   A 1.40 1.39 -73.8 0 0 724.47 616.72   Q 716.24 613.11 709.09 609.40   Q 691.14 600.09 678.11 585.39   C 669.26 575.41 664.86 562.88 672.27 550.78   C 678.62 540.41 689.72 535.89 701.47 534.00   A 0.35 0.35 0.0 0 0 701.57 533.34   C 677.90 521.72 658.20 507.11 643.07 485.69   Q 631.29 469.03 622.16 456.61   Q 609.44 439.31 593.82 424.19   Q 579.47 410.30 559.72 398.05   Q 532.39 381.08 503.31 373.69   Q 480.27 367.83 456.41 365.78   C 445.37 364.84 432.40 364.93 421.75 365.37   Q 390.75 366.65 360.89 376.42   C 353.97 378.68 348.47 381.14 340.48 384.33   C 337.64 385.46 335.28 385.84 332.61 386.68   A 0.46 0.46 0.0 0 1 332.02 386.30   C 330.56 375.56 329.02 364.16 327.04 354.63   Q 307.38 259.90 237.34 192.67   C 216.22 172.39 191.52 154.85 164.05 145.46   Q 151.22 141.08 138.21 141.40   C 115.21 141.95 105.97 169.07 104.86 187.79   Q 103.46 211.28 107.57 233.99   C 123.13 319.87 177.06 396.62 254.20 438.56   Q 260.56 442.02 265.44 444.51   Q 269.74 446.70 270.91 448.28   Q 273.18 451.34 272.69 454.50   Q 271.12 464.73 259.93 464.11"/><path stroke="#f9e2ce" vector-effect="non-scaling-stroke" d="   M 574.74 783.13   Q 570.52 783.06 566.31 783.95   Q 559.68 785.36 559.65 785.36   Q 534.26 789.52 508.56 791.61   C 500.83 792.24 494.33 792.05 487.25 792.24   Q 481.52 792.39 478.38 792.99   A 2.50 2.40 -13.9 0 0 476.43 796.08   Q 477.14 798.40 479.76 799.75   C 486.75 803.36 494.24 805.91 502.94 809.04   Q 519.97 815.17 536.51 818.62   C 551.45 821.73 565.14 822.47 579.87 820.80   Q 584.52 820.27 588.69 818.66"/><path stroke="#f9e2ce" vector-effect="non-scaling-stroke" d="   M 164.50 852.60   Q 167.58 846.71 170.57 841.01   Q 181.07 821.00 195.33 803.61   Q 207.84 788.37 223.11 775.57   A 5.13 5.10 29.7 0 1 227.26 774.45   Q 234.46 775.70 242.32 776.83   Q 263.71 779.89 285.37 776.80   Q 295.97 775.28 305.03 771.93   A 0.71 0.71 0.0 0 0 305.34 770.82   Q 304.61 769.90 303.29 769.22   Q 285.77 760.19 275.30 754.96   C 250.51 742.58 227.92 727.93 212.16 706.08   C 201.70 691.60 193.56 676.23 191.82 658.16   C 191.15 651.25 190.81 645.65 191.43 639.25   Q 193.99 612.90 202.28 587.22   A 0.30 0.30 0.0 0 0 201.79 586.91   Q 196.16 592.09 189.61 595.47   A 0.43 0.42 -7.0 0 1 189.00 595.00   C 195.43 568.85 204.37 543.46 217.45 519.45   Q 233.14 490.65 259.34 466.96   A 1.99 1.98 -21.5 0 0 259.99 465.47   Q 259.99 464.89 260.77 464.64   A 0.26 0.26 0.0 0 0 260.70 464.14   L 259.93 464.11"/><path stroke="#802356" vector-effect="non-scaling-stroke" d="   M 745.73 432.92   Q 747.27 433.19 749.49 433.07   Q 797.88 430.63 843.55 412.33   Q 866.09 403.29 884.38 389.40   C 898.67 378.55 911.19 362.29 914.56 344.58   C 918.87 321.92 912.25 301.52 901.06 281.70   Q 893.05 267.51 891.90 251.17   Q 891.65 247.54 891.82 234.85   C 892.04 218.24 894.31 200.93 888.13 185.64   C 885.41 178.92 878.83 170.70 870.98 170.64   Q 859.19 170.54 848.86 176.64   Q 831.22 187.07 816.76 202.55   Q 798.89 221.69 786.50 240.52   C 760.24 280.41 742.67 324.41 735.18 371.08   Q 731.91 391.48 730.57 413.63   A 3.60 3.58 28.1 0 0 731.32 416.07   L 743.33 431.48   A 3.91 3.88 -13.9 0 0 745.73 432.92"/><path stroke="#430d3a" vector-effect="non-scaling-stroke" d="   M 691.5129 387.5092   A 17.39 16.14 -75.3 0 0 671.4883 400.2343   A 17.39 16.14 -75.3 0 0 682.6871 421.1508   A 17.39 16.14 -75.3 0 0 702.7117 408.4257   A 17.39 16.14 -75.3 0 0 691.5129 387.5092"/><path stroke="#802356" vector-effect="non-scaling-stroke" d="   M 759.21 453.23   Q 760.20 455.21 766.87 465.99   C 773.35 476.46 779.04 487.96 783.98 499.68   C 786.96 506.77 789.64 509.84 795.13 516.13   C 819.94 544.55 856.41 567.38 894.98 567.79   C 903.43 567.87 916.99 565.80 917.32 554.51   C 917.42 551.23 916.41 546.24 917.07 542.74   Q 917.80 538.95 918.60 537.40   Q 925.69 523.69 929.01 510.06   Q 935.14 484.94 920.98 464.55   C 909.83 448.51 891.95 437.59 873.32 432.46   C 866.79 430.66 858.25 428.88 851.87 431.35   Q 821.57 443.03 789.98 448.92   Q 774.78 451.75 759.69 452.43   A 0.56 0.55 -14.4 0 0 759.21 453.23"/><path stroke="#430d3a" vector-effect="non-scaling-stroke" d="   M 713.01 431.65   Q 710.15 435.05 706.92 435.64   A 2.00 2.00 0.0 0 0 705.30 437.91   Q 709.40 465.51 724.00 488.25   C 735.58 506.29 752.74 524.09 771.05 535.76   A 1.29 1.29 0.0 0 0 773.01 534.95   Q 773.04 534.83 772.82 533.89   Q 767.19 510.48 755.49 488.50   Q 740.47 460.29 720.97 438.78   Q 717.38 434.82 714.06 431.59   A 0.72 0.71 -47.9 0 0 713.01 431.65"/><path stroke="#804657" vector-effect="non-scaling-stroke" d="   M 730.10 597.57   A 2.37 2.35 -61.2 0 0 732.71 596.80   Q 738.27 589.84 738.78 580.98   C 739.22 573.33 736.93 561.52 731.06 556.74   Q 726.63 553.14 720.02 552.25   C 709.39 550.82 697.40 552.78 690.46 561.17   Q 689.46 562.38 688.89 565.00   A 1.37 1.37 0 0 0 689.02 565.97   Q 690.68 569.04 691.60 569.93   Q 706.67 584.49 723.08 594.17   Q 727.13 596.56 730.10 597.57"/><path stroke="#ffc0c8" vector-effect="non-scaling-stroke" d="   M 301.12 429.37   Q 301.72 428.54 301.88 427.03   Q 303.62 410.31 302.70 397.00   C 301.17 374.86 296.96 352.63 289.69 331.37   Q 276.02 291.38 252.17 257.33   C 235.59 233.65 215.55 211.97 191.75 196.56   Q 179.18 188.41 165.51 186.27   C 153.99 184.47 142.09 190.66 141.13 203.32   Q 139.94 219.05 143.28 235.00   C 156.32 297.32 190.68 351.40 238.84 392.88   C 256.60 408.18 277.82 422.13 300.40 429.60   A 0.64 0.63 -62.3 0 0 301.12 429.37"/><path stroke="#807a71" vector-effect="non-scaling-stroke" d="   M 566.56 541.33   Q 567.30 538.29 566.35 535.19   Q 560.47 515.93 545.77 503.48   C 528.88 489.17 505.62 487.30 488.66 502.67   C 478.33 512.03 471.40 524.85 468.88 538.37   C 467.87 543.75 468.02 548.72 472.64 552.21   Q 475.66 554.49 479.69 553.96   C 485.57 553.18 488.08 549.13 489.56 543.46   C 492.01 534.11 497.11 524.43 506.59 520.46   Q 520.81 514.51 533.35 523.45   C 539.09 527.54 543.61 534.48 546.99 541.76   Q 548.72 545.50 550.22 546.78   C 556.20 551.87 564.74 548.74 566.56 541.33"/><path stroke="#ffd9d7" vector-effect="non-scaling-stroke" d="   M 507.9343 613.3578   A 68.19 47.03 -2.7 0 0 437.6046 569.5922   A 68.19 47.03 -2.7 0 0 371.7057 619.7822   A 68.19 47.03 -2.7 0 0 442.0354 663.5478   A 68.19 47.03 -2.7 0 0 507.9343 613.3578"/><path stroke="#ff66be" vector-effect="non-scaling-stroke" d="   M 863.92 305.84   A 0.81 0.81 0.0 0 1 863.30 304.88   Q 865.98 292.63 866.73 278.76   Q 867.19 270.30 865.46 260.77   C 864.15 253.60 860.23 242.81 852.67 240.17   C 838.96 235.38 825.99 240.44 816.13 250.13   Q 805.64 260.44 796.80 273.78   Q 768.97 315.77 757.99 364.70   Q 755.22 377.03 754.41 388.93   C 754.08 393.71 753.31 405.40 759.16 407.00   Q 762.83 408.01 767.29 408.13   C 795.94 408.92 822.72 396.75 847.19 382.18   Q 858.82 375.27 867.21 367.28   Q 884.79 350.53 882.38 326.88   Q 880.60 309.45 863.92 305.84"/><path stroke="#ff66be" vector-effect="non-scaling-stroke" d="   M 797.11 470.12   Q 797.04 472.67 798.59 475.98   Q 811.52 503.66 837.83 520.18   C 854.39 530.57 881.34 537.24 895.47 518.96   C 903.04 509.17 905.53 495.84 900.01 484.46   C 891.02 465.94 870.46 458.17 851.00 457.01   Q 826.29 455.53 803.45 464.17   C 800.82 465.17 797.20 467.03 797.11 470.12"/></g><path fill="#000000" d="   M 793.87 546.27   C 794.43 552.27 796.98 557.33 792.15 562.63   C 786.90 568.39 780.37 566.05 774.56 562.42   C 766.12 557.13 756.44 550.90 749.06 544.18   A 0.26 0.26 0.0 0 0 748.66 544.50   C 760.08 563.10 763.34 589.76 749.28 607.77   Q 747.88 609.56 747.54 612.76   Q 743.23 653.08 725.62 691.13   C 703.58 738.73 664.07 774.65 614.49 792.49   Q 608.34 794.70 601.43 796.28   A 0.67 0.67 0.0 0 0 600.98 797.22   Q 602.30 800.03 603.14 801.41   Q 620.32 829.37 629.82 857.48   Q 634.09 870.11 635.41 877.46   C 637.91 891.31 630.40 899.91 618.66 905.20   Q 579.75 922.72 538.62 931.35   C 501.05 939.24 463.45 942.80 425.25 942.23   C 387.58 941.67 350.50 937.03 311.02 929.47   Q 242.53 916.36 180.47 886.03   Q 156.60 874.36 135.40 860.10   C 122.01 851.10 115.59 839.35 123.16 823.40   Q 140.56 786.74 166.59 754.33   Q 174.24 744.80 183.36 736.20   A 0.74 0.74 0.0 0 0 183.40 735.17   Q 151.01 698.96 154.01 650.01   Q 154.49 642.15 155.94 634.87   A 0.51 0.50 -1.2 0 0 155.32 634.28   C 153.82 634.65 151.34 635.50 149.41 635.57   C 139.98 635.92 135.76 628.01 137.46 619.45   Q 144.80 582.50 159.63 543.12   C 173.11 507.31 192.59 472.62 217.99 443.60   A 0.77 0.77 0.0 0 0 217.84 442.45   Q 182.82 419.02 155.32 386.38   Q 104.01 325.50 87.16 246.78   Q 81.28 219.30 82.03 193.00   C 82.77 166.81 91.90 136.29 117.06 123.56   Q 126.33 118.86 137.77 118.89   Q 150.76 118.93 161.05 121.58   C 177.96 125.93 194.86 133.26 210.23 142.76   A 0.43 0.42 15.1 0 0 210.88 142.39   Q 210.48 126.76 216.36 112.72   C 224.66 92.88 239.64 80.89 261.04 78.04   Q 287.36 74.54 311.67 86.62   C 336.01 98.72 357.61 116.99 375.79 137.19   C 426.17 193.17 457.80 266.94 459.07 342.79   A 1.57 1.56 -86.6 0 0 460.42 344.32   Q 461.78 344.50 475.57 346.38   C 521.98 352.73 565.94 371.29 601.21 402.10   Q 619.87 418.39 635.70 439.04   C 644.95 451.10 652.32 461.71 660.09 473.36   C 673.51 493.47 696.52 508.68 718.56 517.62   A 0.34 0.34 0.0 0 0 718.95 517.08   Q 713.23 510.51 708.78 503.46   C 697.16 485.06 688.82 464.75 685.80 443.43   A 1.62 1.61 88.8 0 0 684.37 442.05   C 665.11 439.93 650.44 424.51 650.72 404.71   C 650.87 394.11 655.05 385.76 661.35 377.39   A 2.52 2.51 -40.0 0 0 661.59 374.75   C 651.70 354.84 641.27 336.06 626.99 319.78   Q 617.31 308.75 605.11 301.67   C 597.17 297.06 580.29 292.15 573.35 300.86   C 570.76 304.10 570.74 307.76 573.79 310.68   A 2.09 2.09 0.0 0 0 576.11 311.06   C 580.00 309.24 583.52 308.18 587.23 311.05   Q 591.67 314.48 590.79 320.80   Q 590.05 326.08 584.16 329.92   C 579.69 332.83 572.69 332.68 567.69 330.59   C 551.42 323.79 546.35 306.00 554.97 290.89   C 563.35 276.21 582.47 273.49 597.73 276.85   C 614.62 280.56 631.00 292.88 642.42 306.18   Q 657.57 323.82 668.46 344.32   Q 674.37 355.45 679.89 364.35   Q 680.96 366.08 682.78 366.13   A 0.70 0.70 0.0 0 0 683.50 365.44   Q 683.76 327.47 673.23 291.77   C 666.66 269.51 650.64 239.92 624.72 237.96   A 0.33 0.33 0.0 0 0 624.47 238.53   Q 625.78 239.75 627.02 241.52   C 636.56 255.13 619.60 269.82 606.78 258.19   C 601.96 253.82 599.17 246.02 599.62 239.42   Q 600.51 226.42 612.61 220.34   C 625.02 214.10 640.08 218.13 652.06 225.71   C 668.23 235.93 679.61 251.83 687.15 269.34   Q 695.39 288.51 699.25 309.45   Q 704.56 338.28 704.02 367.99   A 3.57 3.57 0 0 0 705.19 370.70   L 713.41 378.22   A 0.13 0.12 25.3 0 0 713.62 378.15   C 715.56 361.52 718.50 344.86 722.90 328.89   Q 736.24 280.49 763.25 236.72   C 779.58 210.26 799.69 185.47 824.59 166.60   C 838.38 156.15 856.53 147.43 874.30 149.17   C 897.37 151.43 910.04 173.92 912.50 194.76   Q 914.03 207.70 913.50 217.25   C 912.87 228.51 910.77 243.89 913.83 257.17   C 915.83 265.88 922.59 276.09 925.66 282.71   C 934.56 301.89 938.71 320.35 936.56 340.77   C 933.26 372.01 912.56 397.32 886.96 413.67   A 0.52 0.51 37.8 0 0 887.08 414.59   Q 914.51 423.61 933.17 445.01   C 943.28 456.60 949.75 471.32 951.70 486.33   Q 952.71 494.10 951.42 504.12   Q 948.83 524.30 938.33 542.13   A 5.00 4.99 56.8 0 0 937.68 545.25   C 938.43 551.70 938.73 559.76 936.07 565.80   C 929.09 581.68 915.01 588.89 897.98 589.56   C 859.57 591.10 823.06 570.75 794.42 545.99   A 0.33 0.33 0.0 0 0 793.87 546.27   Z   M 240.04 116.25   Q 228.59 137.04 233.46 158.95   A 3.37 3.37 0.0 0 0 234.62 160.81   C 287.64 203.65 326.76 264.58 343.65 329.85   Q 347.09 343.16 349.09 356.27   A 0.52 0.51 -13.6 0 0 349.77 356.68   Q 361.90 352.46 375.58 349.49   Q 394.38 345.45 414.78 344.37   Q 424.27 343.87 435.73 343.54   A 0.95 0.95 0.0 0 0 436.65 342.63   Q 437.19 330.32 435.31 316.21   Q 424.30 233.54 372.97 168.02   Q 350.87 139.82 322.36 119.41   C 309.58 110.26 292.43 100.99 276.45 100.08   Q 272.95 99.89 268.75 100.03   Q 249.16 100.71 240.04 116.25   Z   M 259.93 464.11   C 253.02 462.92 245.87 458.86 239.66 455.48   A 2.00 1.99 36.3 0 0 237.28 455.84   C 219.34 474.35 205.62 494.54 193.81 518.45   Q 177.42 551.63 167.21 586.70   Q 163.97 597.82 160.32 612.38   A 0.30 0.30 0.0 0 0 160.76 612.71   L 188.10 596.92   A 0.12 0.12 0.0 0 1 188.27 597.07   Q 184.57 608.08 179.55 626.01   C 172.87 649.86 172.77 676.65 184.82 699.20   C 196.02 720.17 213.62 735.22 234.81 747.19   Q 242.09 751.31 250.97 755.99   A 0.36 0.35 -37.3 0 1 250.88 756.65   Q 241.96 758.60 239.88 759.04   Q 227.40 761.66 215.37 757.11   Q 207.92 754.29 201.29 750.65   A 2.19 2.17 40.4 0 1 198.92 750.83   Q 197.71 751.76 196.37 753.12   Q 187.25 762.42 178.78 773.53   Q 156.83 802.35 141.36 835.24   A 2.07 2.05 31.1 0 0 141.99 837.76   Q 152.81 845.80 164.50 852.60   Q 195.80 870.58 229.65 883.34   Q 297.20 908.80 368.94 916.55   Q 401.01 920.02 433.01 920.21   Q 505.93 920.65 576.29 898.25   Q 591.15 893.52 605.39 887.15   Q 610.00 885.09 613.67 882.73   A 1.90 1.90 0.0 0 0 614.46 880.60   Q 604.85 847.60 588.69 818.66   Q 581.79 807.59 575.49 796.78   C 572.89 792.33 571.94 787.86 574.74 783.13   Q 577.73 780.90 580.61 780.08   C 600.75 774.37 619.93 767.79 638.17 757.42   C 661.80 743.99 683.35 722.02 697.79 698.78   A 0.37 0.37 0.0 0 0 697.33 698.24   C 666.21 711.45 629.91 706.03 602.05 687.69   Q 590.40 680.02 582.77 668.21   A 1.12 1.12 0 0 0 581.15 667.93   C 577.52 670.70 572.99 671.91 568.96 669.34   C 558.58 662.74 570.70 646.85 575.78 641.05   C 580.74 635.36 590.71 629.42 597.34 636.70   C 601.85 641.64 600.61 646.46 597.57 651.83   A 2.77 2.76 43.3 0 0 597.66 654.72   C 614.62 680.62 657.34 690.70 685.51 680.72   C 699.45 675.77 708.12 666.00 714.79 652.25   Q 722.51 636.31 725.29 618.22   A 1.40 1.39 0 0 0 724.47 616.72   Q 716.24 613.11 709.09 609.40   Q 691.14 600.09 678.11 585.39   C 669.26 575.41 664.86 562.88 672.27 550.78   C 678.62 540.41 689.72 535.89 701.47 534.00   A 0.35 0.35 0 0 0 701.57 533.34   C 677.90 521.72 658.20 507.11 643.07 485.69   Q 631.29 469.03 622.16 456.61   Q 609.44 439.31 593.82 424.19   Q 579.47 410.30 559.72 398.05   Q 532.39 381.08 503.31 373.69   Q 480.27 367.83 456.41 365.78   C 445.37 364.84 432.40 364.93 421.75 365.37   Q 390.75 366.65 360.89 376.42   C 353.97 378.68 348.47 381.14 340.48 384.33   C 337.64 385.46 335.28 385.84 332.61 386.68   A 0.46 0.46 0 0 1 332.02 386.30   C 330.56 375.56 329.02 364.16 327.04 354.63   Q 307.38 259.90 237.34 192.67   C 216.22 172.39 191.52 154.85 164.05 145.46   Q 151.22 141.08 138.21 141.40   C 115.21 141.95 105.97 169.07 104.86 187.79   Q 103.46 211.28 107.57 233.99   C 123.13 319.87 177.06 396.62 254.20 438.56   Q 260.56 442.02 265.44 444.51   Q 269.74 446.70 270.91 448.28   Q 273.18 451.34 272.69 454.50   Q 271.12 464.73 259.93 464.11   Z   M 745.73 432.92   Q 747.27 433.19 749.49 433.07   Q 797.88 430.63 843.55 412.33   Q 866.09 403.29 884.38 389.40   C 898.67 378.55 911.19 362.29 914.56 344.58   C 918.87 321.92 912.25 301.52 901.06 281.70   Q 893.05 267.51 891.90 251.17   Q 891.65 247.54 891.82 234.85   C 892.04 218.24 894.31 200.93 888.13 185.64   C 885.41 178.92 878.83 170.70 870.98 170.64   Q 859.19 170.54 848.86 176.64   Q 831.22 187.07 816.76 202.55   Q 798.89 221.69 786.50 240.52   C 760.24 280.41 742.67 324.41 735.18 371.08   Q 731.91 391.48 730.57 413.63   A 3.60 3.58 28.1 0 0 731.32 416.07   L 743.33 431.48   A 3.91 3.88 -13.9 0 0 745.73 432.92   Z   M 691.5129 387.5092   A 17.39 16.14 -75.3 0 0 671.4883 400.2343   A 17.39 16.14 -75.3 0 0 682.6871 421.1508   A 17.39 16.14 -75.3 0 0 702.7117 408.4257   A 17.39 16.14 -75.3 0 0 691.5129 387.5092   Z   M 759.21 453.23   Q 760.20 455.21 766.87 465.99   C 773.35 476.46 779.04 487.96 783.98 499.68   C 786.96 506.77 789.64 509.84 795.13 516.13   C 819.94 544.55 856.41 567.38 894.98 567.79   C 903.43 567.87 916.99 565.80 917.32 554.51   C 917.42 551.23 916.41 546.24 917.07 542.74   Q 917.80 538.95 918.60 537.40   Q 925.69 523.69 929.01 510.06   Q 935.14 484.94 920.98 464.55   C 909.83 448.51 891.95 437.59 873.32 432.46   C 866.79 430.66 858.25 428.88 851.87 431.35   Q 821.57 443.03 789.98 448.92   Q 774.78 451.75 759.69 452.43   A 0.56 0.55 -14.4 0 0 759.21 453.23   Z   M 713.01 431.65   Q 710.15 435.05 706.92 435.64   A 2.00 2.00 0 0 0 705.30 437.91   Q 709.40 465.51 724.00 488.25   C 735.58 506.29 752.74 524.09 771.05 535.76   A 1.29 1.29 0 0 1 771.05 535.76   C 752.74 524.09 735.58 506.29 724.00 488.25   Q 709.40 465.51 705.30 437.91   A 2.00 2.00 0 0 1 706.92 435.64   Q 710.15 435.05 713.01 431.65   Z   M 730.10 597.57   A 2.37 2.35 -61.2 0 0 732.71 596.80   Q 738.27 589.84 738.78 580.98   C 739.22 573.33 736.93 561.52 731.06 556.74   Q 726.63 553.14 720.02 552.25   C 709.39 550.82 697.40 552.78 690.46 561.17   Q 689.46 562.38 688.89 565.00   A 1.37 1.37 0 0 0 689.02 565.97   Q 690.68 569.04 691.60 569.93   Q 706.67 584.49 723.08 594.17   Q 727.13 596.56 730.10 597.57   Z"/><path fill="#fff3e2" d="   M 375.58 349.49   Q 366.38 315.40 354.11 286.16   Q 332.85 235.53 297.32 191.66   Q 275.31 164.50 269.61 157.38   Q 254.72 138.79 240.04 116.25   Q 249.16 100.71 268.75 100.03   Q 272.95 99.89 276.45 100.08   C 292.43 100.99 309.58 110.26 322.36 119.41   Q 350.87 139.82 372.97 168.02   Q 424.30 233.54 435.31 316.21   Q 437.19 330.32 436.65 342.63   A 0.95 0.95 0 0 1 435.73 343.54   Q 424.27 343.87 414.78 344.37   Q 394.38 345.45 375.58 349.49   Z"/><path fill="#f3d0b9" d="   M 240.04 116.25   Q 254.72 138.79 269.61 157.38   Q 275.31 164.50 297.32 191.66   Q 332.85 235.53 354.11 286.16   Q 366.38 315.40 375.58 349.49   Q 361.90 352.46 349.77 356.68   A 0.52 0.51 0 0 1 349.09 356.27   Q 347.09 343.16 343.65 329.85   C 326.76 264.58 287.64 203.65 234.62 160.81   A 3.37 3.37 0 0 1 233.46 158.95   Q 228.59 137.04 240.04 116.25   Z"/><path fill="#fff3e2" d="   M 574.74 783.13   Q 570.52 783.06 566.31 783.95   Q 559.68 785.36 559.65 785.36   Q 534.26 789.52 508.56 791.61   C 500.83 792.24 494.33 792.05 487.25 792.24   Q 481.52 792.39 478.38 792.99   A 2.50 2.40 0 0 1 476.43 796.08   Q 477.14 798.40 479.76 799.75   C 486.75 803.36 494.24 805.91 502.94 809.04   Q 519.97 815.17 536.51 818.62   C 551.45 821.73 565.14 822.47 579.87 820.80   Q 584.52 820.27 588.69 818.66   Q 604.85 847.60 614.46 880.60   A 1.90 1.90 0 0 1 613.67 882.73   Q 610.00 885.09 605.39 887.15   Q 591.15 893.52 576.29 898.25   Q 505.93 920.65 433.01 920.21   Q 401.01 920.02 368.94 916.55   Q 297.20 908.80 229.65 883.34   Q 195.80 870.58 164.50 852.60   Q 167.58 846.71 170.57 841.01   Q 181.07 821.00 195.33 803.61   Q 207.84 788.37 223.11 775.57   A 5.13 5.10 0 0 1 227.26 774.45   Q 234.46 775.70 242.32 776.83   Q 263.71 779.89 285.37 776.80   Q 295.97 775.28 305.03 771.93   A 0.71 0.71 0 0 0 305.34 770.82   Q 304.61 769.90 303.29 769.22   Q 285.77 760.19 275.30 754.96   C 250.51 742.58 227.92 727.93 212.16 706.08   C 201.70 691.60 193.56 676.23 191.82 658.16   C 191.15 651.25 190.81 645.65 191.43 639.25   Q 193.99 612.90 202.28 587.22   A 0.30 0.30 0 0 0 201.79 586.91   Q 196.16 592.09 189.61 595.47   A 0.43 0.42 0 0 1 189.00 595.00   C 195.43 568.85 204.37 543.46 217.45 519.45   Q 233.14 490.65 259.34 466.96   A 1.99 1.98 0 0 1 259.99 465.47   Q 259.99 464.89 260.77 464.64   A 0.26 0.26 0 0 0 260.70 464.14   L 259.93 464.11   Q 271.12 464.73 272.69 454.50   Q 273.18 451.34 270.91 448.28   Q 269.74 446.70 265.44 444.51   Q 260.56 442.02 254.20 438.56   C 177.06 396.62 123.13 319.87 107.57 233.99   Q 103.46 211.28 104.86 187.79   C 105.97 169.07 115.21 141.95 138.21 141.40   Q 151.22 141.08 164.05 145.46   C 191.52 154.85 216.22 172.39 237.34 192.67   Q 307.38 259.90 327.04 354.63   C 329.02 364.16 330.56 375.56 332.02 386.30   A 0.46 0.46 0 0 0 332.61 386.68   C 335.28 385.84 337.64 385.46 340.48 384.33   C 348.47 381.14 353.97 378.68 360.89 376.42   Q 390.75 366.65 421.75 365.37   C 432.40 364.93 445.37 364.84 456.41 365.78   Q 480.27 367.83 503.31 373.69   Q 532.39 381.08 559.72 398.05   Q 579.47 410.30 593.82 424.19   Q 609.44 439.31 622.16 456.61   Q 631.29 469.03 643.07 485.69   C 658.20 507.11 677.90 521.72 701.57 533.34   A 0.35 0.35 0 0 1 701.47 534.00   C 689.72 535.89 678.62 540.41 672.27 550.78   C 664.86 562.88 669.26 575.41 678.11 585.39   Q 691.14 600.09 709.09 609.40   Q 716.24 613.11 724.47 616.72   A 1.40 1.39 0 0 1 725.29 618.22   Q 722.51 636.31 714.79 652.25   C 708.12 666.00 699.45 675.77 685.51 680.72   C 657.34 690.70 614.62 680.62 597.66 654.72   A 2.77 2.76 0 0 1 597.57 651.83   C 600.61 646.46 601.85 641.64 597.34 636.70   C 590.71 629.42 580.74 635.36 575.78 641.05   C 570.70 646.85 558.58 662.74 568.96 669.34   C 572.99 671.91 577.52 670.70 581.15 667.93   A 1.12 1.12 0 0 1 582.77 668.21   Q 590.40 680.02 602.05 687.69   C 629.91 706.03 666.21 711.45 697.33 698.24   A 0.37 0.37 0 0 1 697.79 698.78   C 683.35 722.02 661.80 743.99 638.17 757.42   C 619.93 767.79 600.75 774.37 580.61 780.08   Q 577.73 780.90 574.74 783.13   Z   M 301.12 429.37   Q 301.72 428.54 301.88 427.03   Q 303.62 410.31 302.70 397.00   C 301.17 374.86 296.96 352.63 289.69 331.37   Q 276.02 291.38 252.17 257.33   C 235.59 233.65 215.55 211.97 191.75 196.56   Q 179.18 188.41 165.51 186.27   C 153.99 184.47 142.09 190.66 141.13 203.32   Q 139.94 219.05 143.28 235.00   C 156.32 297.32 190.68 351.40 238.84 392.88   C 256.60 408.18 277.82 422.13 300.40 429.60   A 0.64 0.63 0 0 0 301.12 429.37   Z   M 566.56 541.33   Q 567.30 538.29 566.35 535.19   Q 560.47 515.93 545.77 503.48   C 528.88 489.17 505.62 487.30 488.66 502.67   C 478.33 512.03 471.40 524.85 468.88 538.37   C 467.87 543.75 468.02 548.72 472.64 552.21   Q 475.66 554.49 479.69 553.96   C 485.57 553.18 488.08 549.13 489.56 543.46   C 492.01 534.11 497.11 524.43 506.59 520.46   Q 520.81 514.51 533.35 523.45   C 539.09 527.54 543.61 534.48 546.99 541.76   Q 548.72 545.50 550.22 546.78   C 556.20 551.87 564.74 548.74 566.56 541.33   Z   M 507.9343 613.3578   A 68.19 47.03 -2.7 0 0 437.6046 569.5922   A 68.19 47.03 -2.7 0 0 371.7057 619.7822   A 68.19 47.03 -2.7 0 0 442.0354 663.5478   A 68.19 47.03 -2.7 0 0 507.9343 613.3578   Z"/></svg>
+              </div>
+              <div class="text-sm">MediaBunny</div>
+            </a>
+
+            <a href="https://www.better-auth.com/" target="_blank" rel="noreferrer" class="group flex flex-col items-center gap-3 text-neutral-300 hover:text-white">
+              <div class="h-12 flex items-center justify-center">
+                <svg fill="none" viewBox="0 0 500 500" class="h-10 w-auto" aria-hidden="true"><path fill="#fff" d="M0 0h500v500H0z"/><path fill="#000" d="M69 121h86.988v259H69zM337.575 121H430v259h-92.425z"/><path fill="#000" d="M427.282 121v83.456h-174.52V121zM430 296.544V380H252.762v-83.456z"/><path fill="#000" d="M252.762 204.455v92.089h-96.774v-92.089z"/></svg>
+              </div>
+              <div class="text-sm">Better Auth</div>
+            </a>
+          </div>
+
+          <div class="mt-8 text-center text-sm text-neutral-400">
+            Built by <a href="mailto:jhonra121@gmail.com" class="text-neutral-200 hover:underline">Juan Martinez</a> ·
+            <a href="https://github.com/jhomra21" target="_blank" rel="noreferrer" class="ml-2 text-neutral-200 hover:underline">@jhomra21</a>
+          </div>
+        </div>
+        </Reveal>
+      </section>
+
+      <footer class="container mx-auto px-4 pb-20 text-center text-sm text-neutral-500">
+        Designed with clarity and focus. No installs. Just music.
+      </footer>
     </main>
   )
 }

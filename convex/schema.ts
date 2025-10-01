@@ -27,6 +27,8 @@ export default defineSchema({
     duration: v.number(),
     // Optional left padding (seconds) before audio begins within the clip window
     leftPadSec: v.optional(v.number()),
+    // Optional trim offset (seconds) into the audio buffer
+    bufferOffsetSec: v.optional(v.number()),
     // Optional shared display name for the clip (e.g., original filename)
     name: v.optional(v.string()),
     // Optional URL where the audio sample is stored (e.g. R2-backed endpoint)
@@ -42,6 +44,8 @@ export default defineSchema({
         velocity: v.optional(v.number()),
       })),
     })),
+    // Optional internal MIDI offset in beats when trimming from the left
+    midiOffsetBeats: v.optional(v.number()),
   })
     .index("by_room", ["roomId"]) // list clips in a room
     .index("by_track", ["trackId"]), // list clips per track

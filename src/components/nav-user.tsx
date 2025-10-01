@@ -77,10 +77,16 @@ export const NavUser: Component = () => {
             Account
           </DropdownMenuItem>
           <DropdownMenuSeparator />
+          <DropdownMenuItem class="cursor-pointer text-neutral-200" as={Link}>
+            <Icon name="house" class="mr-2 h-4 w-4" />
+            About
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem class="cursor-pointer text-neutral-200" onSelect={handleSignOut}>
             <Icon name="log-out" class="mr-2 h-4 w-4" />
             Logout
           </DropdownMenuItem>
+          
         </DropdownMenuContent>
       </DropdownMenu>
     </Show>

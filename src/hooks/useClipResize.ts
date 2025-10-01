@@ -2,6 +2,7 @@ import { batch, type Accessor, type Setter } from 'solid-js'
 
 import { PPS, quantizeSecToGrid } from '~/lib/timeline-utils'
 import type { Track, SelectedClip } from '~/types/timeline'
+import type { AudioEngine } from '~/lib/audio-engine'
 
 const MIN_CLIP_SEC = 0.05
 
@@ -25,6 +26,9 @@ type ClipResizeOptions = {
   bpm: Accessor<number>
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
+  audioEngine: AudioEngine
+  isPlaying: Accessor<boolean>
+  playheadSec: Accessor<number>
 }
 
 export type ClipResizeHandlers = {
@@ -44,6 +48,9 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     convexClient,
     convexApi,
     getScrollElement,
+    audioEngine,
+    isPlaying,
+    playheadSec,
   } = options
 
   let clipResizing = false
@@ -54,6 +61,8 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
   let resizeAudioStart = 0
   let resizeFixedLeft = 0
   let resizeFixedRight = 0
+  let resizeOrigBufferOffset = 0
+  let resizeOrigMidiOffsetBeats = 0
 
   const onClipResizeStart = (trackId: string, clipId: string, edge: 'left' | 'right', event: MouseEvent) => {
     event.preventDefault()
@@ -70,6 +79,8 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     resizeAudioStart = resizeOrigStart + resizeOrigPad
     resizeFixedLeft = clip.startSec
     resizeFixedRight = clip.startSec + clip.duration
+    resizeOrigBufferOffset = (clip as any).bufferOffsetSec ?? 0
+    resizeOrigMidiOffsetBeats = (clip as any).midiOffsetBeats ?? 0
 
     batch(() => {
       setSelectedTrackId(trackId)
@@ -107,7 +118,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         if (end <= resizeOrigStart && end > neighborEnd) neighborEnd = end
       }
       const minStartBound = Math.max(0, neighborEnd + 0.0001)
-      const maxStartBound = Math.min(resizeAudioStart, maxStartByLen)
+      const maxStartBound = maxStartByLen
 
       let newStart: number
       if (options.gridEnabled()) {
@@ -139,12 +150,42 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
       }
 
       const newDuration = Math.max(MIN_CLIP_SEC, right - newStart)
-      const newLeftPad = Math.max(0, resizeAudioStart - newStart)
-
-      setTracks(ts => ts.map(t => t.id !== track.id ? t : ({
-        ...t,
-        clips: t.clips.map(c => c.id !== clip.id ? c : ({ ...c, startSec: newStart, duration: newDuration, leftPadSec: newLeftPad }))
-      })))
+      // Compute pad/offset updates for audio and MIDI
+      const isMidi = !!(clip as any).midi
+      if (isMidi) {
+        const spb = 60 / Math.max(1, options.bpm() || 120)
+        const deltaSec = newStart - resizeOrigStart
+        const deltaBeats = deltaSec / spb
+        const base = Math.max(0, resizeOrigMidiOffsetBeats)
+        const nextMidiOffset = Math.max(0, base + deltaBeats)
+        setTracks(ts => ts.map(t => t.id !== track.id ? t : ({
+          ...t,
+          clips: t.clips.map(c => c.id !== clip.id ? c : ({ ...c, startSec: newStart, duration: newDuration, midiOffsetBeats: nextMidiOffset }))
+        })))
+      } else {
+        const windowDuration = resizeFixedRight - resizeFixedLeft
+        const fallbackBufferDur = Math.max(0, windowDuration - resizeOrigPad)
+        const bufferDur = clip.buffer?.duration ?? fallbackBufferDur
+        const delta = newStart - resizeOrigStart
+        let nextLeftPad = resizeOrigPad
+        let nextBufOffset = Math.max(0, resizeOrigBufferOffset)
+        if (delta >= 0) {
+          const consumePad = Math.min(nextLeftPad, delta)
+          nextLeftPad = Math.max(0, nextLeftPad - consumePad)
+          const remaining = delta - consumePad
+          nextBufOffset = Math.max(0, Math.min(bufferDur, nextBufOffset + Math.max(0, remaining)))
+        } else {
+          const supply = -delta
+          const reduceBuf = Math.min(nextBufOffset, supply)
+          nextBufOffset = Math.max(0, nextBufOffset - reduceBuf)
+          const leftover = supply - reduceBuf
+          nextLeftPad = Math.max(0, nextLeftPad + Math.max(0, leftover))
+        }
+        setTracks(ts => ts.map(t => t.id !== track.id ? t : ({
+          ...t,
+          clips: t.clips.map(c => c.id !== clip.id ? c : ({ ...c, startSec: newStart, duration: newDuration, leftPadSec: nextLeftPad, bufferOffsetSec: nextBufOffset }))
+        })))
+      }
     } else {
       const left = resizeFixedLeft
       const minRightByLen = left + MIN_CLIP_SEC
@@ -215,7 +256,14 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         startSec: clip.startSec,
         duration: clip.duration,
         leftPadSec: clip.leftPadSec ?? 0,
+        bufferOffsetSec: (clip as any).bufferOffsetSec ?? 0,
+        midiOffsetBeats: (clip as any).midiOffsetBeats ?? 0,
       })
+      if (isPlaying() && audioEngine) {
+        queueMicrotask(() => {
+          try { audioEngine.rescheduleClipsAtPlayhead(tracks(), playheadSec(), [clip.id]) } catch {}
+        })
+      }
     }
   }
 

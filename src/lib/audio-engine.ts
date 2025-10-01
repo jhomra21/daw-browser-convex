@@ -24,6 +24,7 @@ export type ReverbParamsLite = {
 // Internal representation of an active MIDI note for realtime envelope retargeting
 type ActiveNote = {
   trackId: string
+  clipId: string
   osc: OscillatorNode
   gain: GainNode
   amp: number
@@ -50,6 +51,7 @@ export class AudioEngine {
   private destination: AudioDestinationNode | null = null
   private trackGains = new Map<string, GainNode>()
   private activeSources: AudioScheduledSourceNode[] = []
+  private activeSourcesByClip = new Map<string, Set<AudioScheduledSourceNode>>()
   private metronomeSources: AudioBufferSourceNode[] = []
   // New: per-track input prior to effects, and EQ chains
   private trackInputs = new Map<string, GainNode>()
@@ -961,6 +963,8 @@ export class AudioEngine {
       try { s.disconnect() } catch {}
     }
     this.activeSources = []
+    // Clear per-clip tracking since corresponding sources have been stopped
+    this.activeSourcesByClip.clear()
     // Clear tracked oscillators; onended would normally clean up, but force-clear to be safe
     this.activeOscillatorsByTrack.clear()
   }
@@ -968,6 +972,164 @@ export class AudioEngine {
   stopAllSources() {
     this.stopClipSources()
     this.resetMetronomeState()
+  }
+
+  private scheduleMidiClip(track: Track, clip: Clip, playheadSec: number, nowCtx: number): boolean {
+    if (!this.audioCtx) return false
+    const midi: any = (clip as any).midi
+    if (!midi || !Array.isArray(midi.notes)) return false
+
+    const spb = this.secondsPerBeat()
+    const synth = this.trackSynths.get(track.id)
+    const wave = synth?.wave || (midi.wave as OscillatorType) || 'sawtooth'
+    const clipStart = clip.startSec
+    const clipEnd = clip.startSec + clip.duration
+    const clipDurationBeats = clip.duration / spb
+
+    let notesToSchedule = midi.notes as Array<{ beat: number; length: number; pitch: number; velocity?: number }>
+    const arp = this.trackArpeggiators.get(track.id)
+    if (arp && arp.enabled) {
+      notesToSchedule = this.applyArpeggiator(notesToSchedule, arp, clipDurationBeats)
+    }
+
+    const midiOffBeats = Math.max(0, (clip as any).midiOffsetBeats ?? 0)
+    for (const note of notesToSchedule) {
+      const noteBeatRaw = note.beat || 0
+      const trimmedBeats = Math.max(0, midiOffBeats - noteBeatRaw)
+      const effectiveLength = Math.max(0, (note.length || 0) - trimmedBeats)
+      if (effectiveLength <= 0) continue
+      const noteBeatEff = Math.max(0, noteBeatRaw - midiOffBeats)
+      const noteStartTimeline = clipStart + noteBeatEff * spb
+      const noteEndTimeline = noteStartTimeline + effectiveLength * spb
+      const startTimeline = Math.max(noteStartTimeline, clipStart)
+      const endTimeline = Math.min(noteEndTimeline, clipEnd)
+      if (endTimeline <= startTimeline) continue
+      if (playheadSec >= endTimeline) continue
+      const remaining = endTimeline - Math.max(playheadSec, startTimeline)
+      if (remaining <= 0) continue
+
+      const startCtx = Math.max(nowCtx, this.timelineToCtxTime(startTimeline))
+      const osc = this.audioCtx.createOscillator()
+      let trackOscs = this.activeOscillatorsByTrack.get(track.id)
+      if (!trackOscs) { trackOscs = new Set<OscillatorNode>(); this.activeOscillatorsByTrack.set(track.id, trackOscs) }
+      trackOscs.add(osc)
+      const gain = this.audioCtx.createGain()
+      const vel = typeof note.velocity === 'number' ? Math.max(0, Math.min(1, note.velocity)) : 0.9
+      const clipGain = typeof midi.gain === 'number' ? Math.max(0, Math.min(1.5, midi.gain)) : 1.0
+      const amp = vel * clipGain
+      gain.gain.setValueAtTime(0, startCtx)
+      const attack = Math.max(0.001, (synth?.attackMs ?? 5) / 1000)
+      const release = Math.max(0.001, (synth?.releaseMs ?? 30) / 1000)
+      const attackEnd = startCtx + attack
+      const releaseStart = startCtx + Math.max(0, remaining - release)
+      const endCtx = startCtx + Math.max(attack, remaining)
+      gain.gain.linearRampToValueAtTime(amp, attackEnd)
+      if (releaseStart > attackEnd) {
+        gain.gain.setValueAtTime(amp, releaseStart)
+      }
+      gain.gain.linearRampToValueAtTime(0, endCtx)
+
+      osc.type = wave
+      const freq = 440 * Math.pow(2, (note.pitch - 69) / 12)
+      osc.frequency.setValueAtTime(freq, startCtx)
+      osc.connect(gain)
+      gain.connect(this.ensureTrackSynthGainNode(track.id))
+
+      try { osc.start(startCtx) } catch {}
+      const noteEntry: ActiveNote = {
+        trackId: track.id,
+        clipId: clip.id,
+        osc,
+        gain,
+        amp,
+        startCtx,
+        endCtx,
+        releaseStartCtx: releaseStart,
+        attackSec: attack,
+        releaseSec: release,
+        cleanupTimer: null,
+      }
+      let notes = this.activeNotesByTrack.get(track.id)
+      if (!notes) { notes = new Set<ActiveNote>(); this.activeNotesByTrack.set(track.id, notes) }
+      notes.add(noteEntry)
+      this.scheduleCleanupForNote(noteEntry)
+
+      osc.onended = () => {
+        try { gain.disconnect() } catch {}
+        const set = this.activeOscillatorsByTrack.get(track.id)
+        if (set) {
+          set.delete(osc)
+          if (set.size === 0) this.activeOscillatorsByTrack.delete(track.id)
+        }
+        const activeNotes = this.activeNotesByTrack.get(track.id)
+        if (activeNotes) {
+          for (const n of Array.from(activeNotes)) {
+            if (n.osc === osc) {
+              if (n.cleanupTimer) { try { clearTimeout(n.cleanupTimer) } catch {} }
+              activeNotes.delete(n)
+            }
+          }
+          if (activeNotes.size === 0) this.activeNotesByTrack.delete(track.id)
+        }
+        const idx = this.activeSources.indexOf(osc)
+        if (idx >= 0) this.activeSources.splice(idx, 1)
+        const setByClip = this.activeSourcesByClip.get(clip.id)
+        if (setByClip) {
+          setByClip.delete(osc)
+          if (setByClip.size === 0) this.activeSourcesByClip.delete(clip.id)
+        }
+      }
+      this.activeSources.push(osc)
+      let clipSet = this.activeSourcesByClip.get(clip.id)
+      if (!clipSet) { clipSet = new Set(); this.activeSourcesByClip.set(clip.id, clipSet) }
+      clipSet.add(osc)
+    }
+
+    return true
+  }
+
+  private scheduleAudioClip(clip: Clip, input: GainNode, playheadSec: number, nowCtx: number) {
+    if (!this.audioCtx) return
+    if (!clip.buffer) return
+
+    const leftPad = Math.max(0, clip.leftPadSec ?? 0)
+    const bufferOffsetRaw = Math.max(0, (clip as any).bufferOffsetSec ?? 0)
+    const windowStart = clip.startSec
+    const windowEnd = clip.startSec + clip.duration
+    const audioStart = windowStart + leftPad
+    const bufferDur = clip.buffer.duration
+    const bufferOffset = Math.min(bufferDur, bufferOffsetRaw)
+    const bufferDurRemain = Math.max(0, bufferDur - bufferOffset)
+    const audioEnd = Math.min(windowEnd, audioStart + bufferDurRemain)
+
+    if (playheadSec >= audioEnd) return
+
+    const when = Math.max(0, audioStart - playheadSec)
+    const offsetNoBase = Math.max(0, playheadSec - audioStart)
+    if (offsetNoBase >= bufferDurRemain) return
+
+    const maxPlayableFromOffset = Math.max(0, bufferDurRemain - offsetNoBase)
+    const clipWindowRemaining = Math.max(0, audioEnd - Math.max(playheadSec, audioStart))
+    const playDur = Math.min(maxPlayableFromOffset, clipWindowRemaining)
+    if (playDur <= 0) return
+
+    const source = this.audioCtx.createBufferSource()
+    source.buffer = clip.buffer
+    source.connect(input)
+    source.start(nowCtx + when, bufferOffset + offsetNoBase, playDur)
+    source.onended = () => {
+      const idx = this.activeSources.indexOf(source)
+      if (idx >= 0) this.activeSources.splice(idx, 1)
+      const setByClip = this.activeSourcesByClip.get(clip.id)
+      if (setByClip) {
+        setByClip.delete(source)
+        if (setByClip.size === 0) this.activeSourcesByClip.delete(clip.id)
+      }
+    }
+    this.activeSources.push(source)
+    let clipSet = this.activeSourcesByClip.get(clip.id)
+    if (!clipSet) { clipSet = new Set(); this.activeSourcesByClip.set(clip.id, clipSet) }
+    clipSet.add(source)
   }
 
   scheduleAllClipsFromPlayhead(tracks: Track[], playheadSec: number) {
@@ -999,143 +1161,66 @@ export class AudioEngine {
 
       const input = this.ensureTrackNodes(t.id)
       for (const c of t.clips) {
-        // MIDI clip scheduling
-        const midi: any = (c as any).midi
-        if (midi && Array.isArray(midi.notes)) {
-          const spb = this.secondsPerBeat()
-          const synth = this.trackSynths.get(t.id)
-          const wave = synth?.wave || (midi.wave as OscillatorType) || 'sawtooth'
-          const clipStart = c.startSec
-          const clipEnd = c.startSec + c.duration
-          const clipDurationBeats = c.duration / spb
-          
-          // Apply arpeggiator if enabled for this track
-          let notesToSchedule = midi.notes as Array<{ beat: number; length: number; pitch: number; velocity?: number }>
-          const arp = this.trackArpeggiators.get(t.id)
-          if (arp && arp.enabled) {
-            notesToSchedule = this.applyArpeggiator(notesToSchedule, arp, clipDurationBeats)
-          }
-          
-          for (const note of notesToSchedule) {
-            const noteStartTimeline = clipStart + Math.max(0, note.beat) * spb
-            const noteEndTimeline = noteStartTimeline + Math.max(0, note.length) * spb
-            // Confine to clip window
-            const startTimeline = Math.max(noteStartTimeline, clipStart)
-            const endTimeline = Math.min(noteEndTimeline, clipEnd)
-            if (endTimeline <= startTimeline) continue
-            // Skip if playhead is after the note
-            if (playheadSec >= endTimeline) continue
-            // Compute remaining duration if playhead is inside the note
-            const remaining = endTimeline - Math.max(playheadSec, startTimeline)
-            if (remaining <= 0) continue
-
-            // Start time in context
-            const startCtx = Math.max(now, this.timelineToCtxTime(startTimeline))
-            // Build oscillator + envelope
-            const osc = this.audioCtx.createOscillator()
-            // Track this oscillator under its track for live updates
-            let trackOscs = this.activeOscillatorsByTrack.get(t.id)
-            if (!trackOscs) { trackOscs = new Set<OscillatorNode>(); this.activeOscillatorsByTrack.set(t.id, trackOscs) }
-            trackOscs.add(osc)
-            const gain = this.audioCtx.createGain()
-            const vel = typeof note.velocity === 'number' ? Math.max(0, Math.min(1, note.velocity)) : 0.9
-            // Per-clip gain (track synth gain is handled by a dedicated track-level node for live updates)
-            const clipGain = typeof midi.gain === 'number' ? Math.max(0, Math.min(1.5, midi.gain)) : 1.0
-            const amp = vel * clipGain
-            gain.gain.setValueAtTime(0, startCtx)
-            // Simple AR envelope
-            const attack = Math.max(0.001, (synth?.attackMs ?? 5) / 1000)
-            const release = Math.max(0.001, (synth?.releaseMs ?? 30) / 1000)
-            const attackEnd = startCtx + attack
-            const releaseStart = startCtx + Math.max(0, remaining - release)
-            const endCtx = startCtx + Math.max(attack, remaining)
-            gain.gain.linearRampToValueAtTime(amp, attackEnd)
-            if (releaseStart > attackEnd) {
-              gain.gain.setValueAtTime(amp, releaseStart)
-            }
-            gain.gain.linearRampToValueAtTime(0, endCtx)
-
-            osc.type = wave
-            // MIDI note to Hz (A4=440, MIDI 69)
-            const freq = 440 * Math.pow(2, (note.pitch - 69) / 12)
-            osc.frequency.setValueAtTime(freq, startCtx)
-
-            osc.connect(gain)
-            // Route MIDI note through per-track synth gain node so live gain changes apply immediately
-            gain.connect(this.ensureTrackSynthGainNode(t.id))
-
-            try { osc.start(startCtx) } catch {}
-            // Register active note for realtime retargeting and schedule cleanup at endCtx
-            const noteEntry: ActiveNote = {
-              trackId: t.id,
-              osc,
-              gain,
-              amp,
-              startCtx,
-              endCtx,
-              releaseStartCtx: releaseStart,
-              attackSec: attack,
-              releaseSec: release,
-              cleanupTimer: null,
-            }
-            let notes = this.activeNotesByTrack.get(t.id)
-            if (!notes) { notes = new Set<ActiveNote>(); this.activeNotesByTrack.set(t.id, notes) }
-            notes.add(noteEntry)
-            this.scheduleCleanupForNote(noteEntry)
-
-            osc.onended = () => {
-              try { gain.disconnect() } catch {}
-              // Remove from tracking sets
-              const set = this.activeOscillatorsByTrack.get(t.id)
-              if (set) {
-                set.delete(osc)
-                if (set.size === 0) this.activeOscillatorsByTrack.delete(t.id)
-              }
-              const notes = this.activeNotesByTrack.get(t.id)
-              if (notes) {
-                for (const n of Array.from(notes)) {
-                  if (n.osc === osc) {
-                    if (n.cleanupTimer) { try { clearTimeout(n.cleanupTimer) } catch {} }
-                    notes.delete(n)
-                  }
-                }
-                if (notes.size === 0) this.activeNotesByTrack.delete(t.id)
-              }
-              const idx = this.activeSources.indexOf(osc)
-              if (idx >= 0) this.activeSources.splice(idx, 1)
-            }
-            this.activeSources.push(osc)
-          }
-          continue // done with this clip
+        if (this.scheduleMidiClip(t, c, playheadSec, now)) {
+          continue
         }
 
-        // Audio clip scheduling
-        if (!c.buffer) continue
-        const leftPad = Math.max(0, c.leftPadSec ?? 0)
-        const windowStart = c.startSec
-        const windowEnd = c.startSec + c.duration
-        const audioStart = windowStart + leftPad
-        const bufferDur = c.buffer.duration
-        const audioEnd = Math.min(windowEnd, audioStart + bufferDur)
+        this.scheduleAudioClip(c, input, playheadSec, now)
+      }
+    }
+  }
 
-        // If playhead is outside the audio window, nothing to schedule
-        if (playheadSec >= audioEnd) continue
+  private stopSourcesForClip(clipId: string) {
+    // Stop audio buffer sources for this clip
+    const set = this.activeSourcesByClip.get(clipId)
+    if (set) {
+      for (const src of Array.from(set)) {
+        try { src.stop() } catch {}
+        try { src.disconnect() } catch {}
+        const idx = this.activeSources.indexOf(src)
+        if (idx >= 0) this.activeSources.splice(idx, 1)
+      }
+      this.activeSourcesByClip.delete(clipId)
+    }
+    // Stop active MIDI notes for this clip across all tracks
+    for (const [trackId, notes] of Array.from(this.activeNotesByTrack.entries())) {
+      for (const n of Array.from(notes)) {
+        if (n.clipId === clipId) {
+          if (n.cleanupTimer) { try { clearTimeout(n.cleanupTimer) } catch {} }
+          try { n.osc.stop() } catch {}
+          try { n.gain.disconnect() } catch {}
+          notes.delete(n)
+        }
+      }
+      if (notes.size === 0) this.activeNotesByTrack.delete(trackId)
+    }
+  }
 
-        const when = Math.max(0, audioStart - playheadSec)
-        const offset = Math.max(0, playheadSec - audioStart)
-        if (offset >= bufferDur) continue
+  rescheduleClipsAtPlayhead(tracks: Track[], playheadSec: number, clipIds: string[]) {
+    if (!this.audioCtx) return
+    if (!clipIds || clipIds.length === 0) return
+    const idsSet = new Set<string>(clipIds)
+    const ids = Array.from(idsSet)
+    const now = this.audioCtx.currentTime
+    const anySoloed = tracks.some(t => t.soloed)
+    for (const id of ids) this.stopSourcesForClip(id)
 
-        // How long can we play starting from offset within clip and buffer
-        const maxPlayableFromOffset = Math.max(0, bufferDur - offset)
-        const clipWindowRemaining = Math.max(0, audioEnd - Math.max(playheadSec, audioStart))
-        const playDur = Math.min(maxPlayableFromOffset, clipWindowRemaining)
-        if (playDur <= 0) continue
+    for (const t of tracks) {
+      // Ensure routing and gains exist and reflect mute/solo
+      this.ensureTrackNodes(t.id)
+      const g = this.trackGains.get(t.id)
+      if (g) {
+        const audible = (!t.muted) && (!anySoloed || !!t.soloed)
+        g.gain.value = audible ? t.volume : 0
+      }
+      const input = this.ensureTrackNodes(t.id)
+      for (const c of t.clips) {
+        if (!idsSet.has(c.id)) continue
+        if (this.scheduleMidiClip(t, c, playheadSec, now)) {
+          continue
+        }
 
-        const s = this.audioCtx.createBufferSource()
-        s.buffer = c.buffer
-        s.connect(input)
-        s.start(now + when, offset, playDur)
-        this.activeSources.push(s)
+        this.scheduleAudioClip(c, input, playheadSec, now)
       }
     }
   }

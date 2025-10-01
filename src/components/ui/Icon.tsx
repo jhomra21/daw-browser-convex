@@ -1,6 +1,6 @@
 import { Component, JSX, splitProps, createUniqueId } from "solid-js";
 
-export type IconName = "google" | "solidjs" | "file-audio" | "play" | "pause" | "stop" | "metronome" | "repeat" | "grid" | "user" | "log-out" | "log-in";
+export type IconName = "google" | "solidjs" | "convex" | "file-audio" | "play" | "pause" | "stop" | "metronome" | "repeat" | "grid" | "user" | "log-out" | "log-in" | "house";
 
 type BaseIconProps = {
   size?: number | string;
@@ -92,6 +92,31 @@ const SolidJSIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>
       <path d="m77.283 50.473-6.44 1.61c-27.371 8.05-35.422 33.811-20.931 56.352 16.1 20.931 49.912 32.201 77.283 24.151l99.824-33.811S141.686 35.982 77.283 50.473Z" fill={`url(#${idB})`} opacity=".3"/>
       <path d="M209.308 122.926c-18.44-23.037-49.007-32.59-77.283-24.151l-99.824 32.201L0 187.328l180.327 30.591 32.201-57.962c6.44-11.27 4.83-24.15-3.22-37.031Z" fill={`url(#${idC})`}/>
       <path d="M177.107 179.278c-18.44-23.037-49.008-32.59-77.283-24.151L0 187.328s85.333 64.403 151.346 48.302l4.83-1.61c27.371-8.05 37.032-33.811 20.93-54.742Z" fill={`url(#${idD})`}/>
+    </svg>
+  );
+};
+
+const ConvexIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
+  const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
+  const s = normalizeSize(local.size);
+  return (
+    <svg
+      {...rest}
+      width={s}
+      height={s}
+      viewBox="28 28 128 132"
+      xmlns="http://www.w3.org/2000/svg"
+      preserveAspectRatio="xMidYMid"
+      class={local.class}
+      role={local.ariaLabel ? "img" : undefined}
+      aria-label={local.ariaLabel}
+      aria-hidden={local.ariaLabel ? undefined : "true"}
+      fill="none"
+    >
+      {local.title ? <title>{local.title}</title> : null}
+      <path fill="#F3B01C" d="M108.092 130.021c18.166-2.018 35.293-11.698 44.723-27.854-4.466 39.961-48.162 65.218-83.83 49.711-3.286-1.425-6.115-3.796-8.056-6.844-8.016-12.586-10.65-28.601-6.865-43.135 10.817 18.668 32.81 30.111 54.028 28.122Z"/>
+      <path fill="#8D2676" d="M53.401 90.174c-7.364 17.017-7.682 36.94 1.345 53.336-31.77-23.902-31.423-75.052-.388-98.715 2.87-2.187 6.282-3.485 9.86-3.683 14.713-.776 29.662 4.91 40.146 15.507-21.3.212-42.046 13.857-50.963 33.555Z"/>
+      <path fill="#EE342F" d="M114.637 61.855C103.89 46.87 87.069 36.668 68.639 36.358c35.625-16.17 79.446 10.047 84.217 48.807.444 3.598-.139 7.267-1.734 10.512-6.656 13.518-18.998 24.002-33.42 27.882 10.567-19.599 9.263-43.544-3.065-61.704Z"/>
     </svg>
   );
 };
@@ -381,9 +406,37 @@ const LogInIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> 
   );
 };
 
+const HouseIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
+  const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
+  const s = normalizeSize(local.size);
+  return (
+    <svg
+      {...rest}
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      class={local.class}
+      role={local.ariaLabel ? "img" : undefined}
+      aria-label={local.ariaLabel}
+      aria-hidden={local.ariaLabel ? undefined : "true"}
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      {local.title ? <title>{local.title}</title> : null}
+      <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />
+      <path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A 2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  );
+};
+
 const registry: Record<IconName, Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>>> = {
   google: GoogleIcon,
   solidjs: SolidJSIcon,
+  convex: ConvexIcon,
   "file-audio": FileAudioIcon,
   play: PlayIcon,
   pause: PauseIcon,
@@ -394,6 +447,7 @@ const registry: Record<IconName, Component<BaseIconProps & JSX.SvgSVGAttributes<
   user: UserIcon,
   "log-out": LogOutIcon,
   "log-in": LogInIcon,
+  house: HouseIcon,
 };
 
 const Icon: Component<IconProps> = (allProps) => {

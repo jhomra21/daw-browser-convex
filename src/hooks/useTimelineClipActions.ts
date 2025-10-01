@@ -119,6 +119,8 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       sampleUrl?: string
       midi?: any
       leftPadSec?: number
+      bufferOffsetSec?: number
+      midiOffsetBeats?: number
     }
     const pending: PendingCreate[] = []
 
@@ -153,6 +155,8 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
           sampleUrl: clip.sampleUrl,
           midi: (clip as any).midi,
           leftPadSec: clip.leftPadSec,
+          bufferOffsetSec: (clip as any).bufferOffsetSec,
+          midiOffsetBeats: (clip as any).midiOffsetBeats,
         })
         simulatedClips = [...simulatedClips, { ...clip, startSec: safeStart }]
       }
@@ -169,6 +173,9 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         userId: uid,
         name: p.name,
         ...(p.midi ? { midi: p.midi } : {}),
+        leftPadSec: p.leftPadSec,
+        bufferOffsetSec: p.bufferOffsetSec,
+        midiOffsetBeats: p.midiOffsetBeats,
       }))
     }) as any as string[]
 
@@ -186,8 +193,12 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
           await convexClient.mutation((convexApi as any).clips.setMidi, { clipId: newId as any, midi: p.midi, userId: uid })
         } catch {}
       }
-      if (typeof p.leftPadSec === 'number' && Number.isFinite(p.leftPadSec)) {
-        void convexClient.mutation((convexApi as any).clips.setTiming, { clipId: newId as any, startSec: p.startSec, duration: p.duration, leftPadSec: p.leftPadSec ?? 0 })
+      if (
+        (typeof p.leftPadSec === 'number' && Number.isFinite(p.leftPadSec)) ||
+        (typeof p.bufferOffsetSec === 'number' && Number.isFinite(p.bufferOffsetSec)) ||
+        (typeof p.midiOffsetBeats === 'number' && Number.isFinite(p.midiOffsetBeats))
+      ) {
+        void convexClient.mutation((convexApi as any).clips.setTiming, { clipId: newId as any, startSec: p.startSec, duration: p.duration, leftPadSec: p.leftPadSec ?? 0, bufferOffsetSec: p.bufferOffsetSec ?? 0, midiOffsetBeats: p.midiOffsetBeats ?? 0 })
       }
     }
 

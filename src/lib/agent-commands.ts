@@ -90,6 +90,8 @@ export const CommandSchema = z.discriminatedUnion('type', [
     startSec: z.number().min(0),
     duration: z.number().min(0),
     leftPadSec: z.number().min(0).optional(),
+    bufferOffsetSec: z.number().min(0).optional(),
+    midiOffsetBeats: z.number().min(0).optional(),
     clipAtOrAfterSec: z.number().min(0).optional(),
     clipIndex: z.number().int().min(0).optional(),
   }),

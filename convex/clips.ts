@@ -149,15 +149,21 @@ export const setName = mutation({
 
 // Update timing (startSec and duration) for a clip
 export const setTiming = mutation({
-  args: { clipId: v.id("clips"), startSec: v.number(), duration: v.number(), leftPadSec: v.optional(v.number()) },
-  handler: async (ctx, { clipId, startSec, duration, leftPadSec }) => {
+  args: { clipId: v.id("clips"), startSec: v.number(), duration: v.number(), leftPadSec: v.optional(v.number()), bufferOffsetSec: v.optional(v.number()), midiOffsetBeats: v.optional(v.number()) },
+  handler: async (ctx, { clipId, startSec, duration, leftPadSec, bufferOffsetSec, midiOffsetBeats }) => {
     const clip = await ctx.db.get(clipId)
     if (!clip) return
     // Sanity clamps
     const safeStart = Math.max(0, startSec)
     const safeDuration = Math.max(0, duration)
     const safePad = typeof leftPadSec === 'number' && isFinite(leftPadSec) ? Math.max(0, leftPadSec) : undefined
-    await ctx.db.patch(clipId, { startSec: safeStart, duration: safeDuration, ...(safePad !== undefined ? { leftPadSec: safePad } : {}) })
+    const safeBuf = typeof bufferOffsetSec === 'number' && isFinite(bufferOffsetSec) ? Math.max(0, bufferOffsetSec) : undefined
+    const safeMidiOff = typeof midiOffsetBeats === 'number' && isFinite(midiOffsetBeats) ? Math.max(0, midiOffsetBeats) : undefined
+    const patch: Record<string, unknown> = { startSec: safeStart, duration: safeDuration }
+    if (safePad !== undefined) patch.leftPadSec = safePad
+    if (safeBuf !== undefined) patch.bufferOffsetSec = safeBuf
+    if (safeMidiOff !== undefined) patch.midiOffsetBeats = safeMidiOff
+    await ctx.db.patch(clipId, patch)
   },
 });
 
@@ -215,6 +221,8 @@ export const createMany = mutation({
           velocity: v.optional(v.number()),
         })),
       })),
+      bufferOffsetSec: v.optional(v.number()),
+      midiOffsetBeats: v.optional(v.number()),
     })),
   },
   handler: async (ctx, { items }) => {
@@ -235,6 +243,8 @@ export const createMany = mutation({
         sampleUrl: item.sampleUrl,
         leftPadSec: item.leftPadSec,
         midi: item.midi,
+        bufferOffsetSec: item.bufferOffsetSec,
+        midiOffsetBeats: item.midiOffsetBeats,
       })
       await ctx.db.insert('ownerships', {
         roomId: item.roomId,

@@ -472,6 +472,8 @@ const Timeline: Component = () => {
     if (!ok) setMidiEditorClipId(null)
   })
 
+  // (moved) ensure any live notes stop when editor closes
+
   const recordingControls = useTrackRecording({
     audioEngine,
     tracks,
@@ -1054,6 +1056,75 @@ const Timeline: Component = () => {
     } catch {}
   }
 
+  // Live note play (sustain until keyup) for computer keyboard input
+  const activeLiveNotes = new Map<number, { osc: OscillatorNode; gain: GainNode; trackId: string }>()
+  const startLiveNote = (pitch: number, velocity = 0.9) => {
+    try {
+      audioEngine.ensureAudio()
+      const ctx: AudioContext | undefined = (audioEngine as any).audioCtx
+      if (!ctx) return
+      if (activeLiveNotes.has(pitch)) return
+      // Resolve target track: edited MIDI clip's track, else selectedFXTarget/selectedTrackId
+      const id = midiEditorClipId()
+      let trackId = selectedFXTarget() || selectedTrackId()
+      if (id) {
+        for (const t of tracks()) {
+          if (t.clips.some(cc => cc.id === id)) { trackId = t.id; break }
+        }
+      }
+      if (!trackId) return
+      const synthGain: GainNode | undefined = (audioEngine as any).ensureTrackSynthGainNode?.(trackId)
+      if (!synthGain) return
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      const start = ctx.currentTime
+      const amp = Math.max(0, Math.min(1.5, velocity))
+      osc.type = 'sawtooth'
+      osc.frequency.setValueAtTime(440 * Math.pow(2, (pitch - 69) / 12), start)
+      gain.gain.setValueAtTime(0, start)
+      // quick attack
+      gain.gain.linearRampToValueAtTime(amp, start + 0.01)
+      osc.connect(gain)
+      gain.connect(synthGain)
+      osc.start(start)
+      activeLiveNotes.set(pitch, { osc, gain, trackId })
+    } catch {}
+  }
+  const stopLiveNote = (pitch: number) => {
+    try {
+      const entry = activeLiveNotes.get(pitch)
+      if (!entry) return
+      activeLiveNotes.delete(pitch)
+      const ctx: AudioContext | undefined = (audioEngine as any).audioCtx
+      if (!ctx) { try { entry.osc.stop() } catch {}; try { entry.gain.disconnect() } catch {}; return }
+      const now = ctx.currentTime
+      try {
+        // short release to avoid clicks
+        entry.gain.gain.cancelScheduledValues(now)
+        const current = entry.gain.gain.value
+        entry.gain.gain.setValueAtTime(current, now)
+        entry.gain.gain.linearRampToValueAtTime(0, now + 0.05)
+        entry.osc.stop(now + 0.06)
+      } catch {}
+      entry.osc.onended = () => {
+        try { entry.gain.disconnect() } catch {}
+      }
+    } catch {}
+  }
+  const stopAllLiveNotes = () => {
+    try {
+      for (const p of Array.from(activeLiveNotes.keys())) stopLiveNote(p)
+    } catch {}
+  }
+
+  // Ensure any live notes are stopped when closing the MIDI editor
+  createEffect(() => {
+    const id = midiEditorClipId()
+    if (!id) {
+      try { stopAllLiveNotes() } catch {}
+    }
+  })
+
   return (
     <div ref={el => (rootRef = el!)} class="h-full w-full flex flex-col bg-neutral-950 text-neutral-200" onDragOver={onDragOver} onDrop={async (e) => { if (e.defaultPrevented) return; await onDrop(e); setDropTargetLane(null); setDropAtNewTrack(false) }} onDragLeave={() => { setDropTargetLane(null); setDropAtNewTrack(false) }}>
       <input ref={el => (fileInputRef = el!)} type="file" accept="audio/*" class="hidden" onChange={onFileInput} />
@@ -1325,7 +1396,10 @@ const Timeline: Component = () => {
                     return undefined
                   })()}
                   userId={userId() ?? undefined}
+                  roomId={roomId() ?? undefined}
                   onAuditionNote={(p, v, d) => auditionNote(p, v, d)}
+                  onStartLiveNote={(p, v) => startLiveNote(p, v)}
+                  onStopLiveNote={(p) => stopLiveNote(p)}
                 />
               </Show>
             </div>

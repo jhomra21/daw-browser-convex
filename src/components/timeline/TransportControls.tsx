@@ -869,7 +869,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
           {/* Grid resolution */}
           <DropdownMenu>
             <DropdownMenuTrigger>
-              <Button variant="outline" size="sm" class="px-2 py-1 text-xs">
+              <Button variant="ghost" size="sm" class="px-2 py-1 text-xs">
                 {`1/${props.gridDenominator}`}
               </Button>
             </DropdownMenuTrigger>

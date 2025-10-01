@@ -77,7 +77,7 @@ export const NavUser: Component = () => {
             Account
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem class="cursor-pointer text-neutral-200" as={Link}>
+          <DropdownMenuItem class="cursor-pointer text-neutral-200" as={Link} to="/about">
             <Icon name="house" class="mr-2 h-4 w-4" />
             About
           </DropdownMenuItem>

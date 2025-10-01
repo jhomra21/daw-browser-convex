@@ -54,7 +54,7 @@ function About() {
     setTimeout(() => setEntered(true), 80)
   })
   return (
-    <main class="min-h-screen bg-neutral-950 text-neutral-100">
+    <main class="min-h-screen bg-gradient-to-b from-neutral-950 to-neutral-900 text-neutral-100">
       <section class="relative container mx-auto px-4 pt-20 pb-10 text-center">
         <div class="pointer-events-none absolute inset-0 -z-10">
           <div class="mx-auto mt-[-4rem] h-64 w-[36rem] rounded-full bg-[radial-gradient(closest-side,rgba(120,120,255,0.25),transparent)] blur-3xl" />

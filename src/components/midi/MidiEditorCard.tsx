@@ -1,4 +1,4 @@
-import { type Component, createSignal, onCleanup, createEffect, For } from 'solid-js'
+import { type Component, createSignal, onCleanup, createEffect, For, onMount } from 'solid-js'
 import { convexClient, convexApi } from '~/lib/convex'
 import type { Clip } from '~/types/timeline'
 
@@ -19,6 +19,11 @@ export type MidiEditorCardProps = {
   userId?: string
   // Optional: preview note when adding/dragging
   onAuditionNote?: (pitch: number, velocity?: number, durSec?: number) => void
+  // Local-only: current room id for per-room persistence
+  roomId?: string
+  // Live note callbacks for computer keyboard play
+  onStartLiveNote?: (pitch: number, velocity?: number) => void
+  onStopLiveNote?: (pitch: number) => void
 }
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v))
@@ -27,6 +32,13 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   const [dragging, setDragging] = createSignal(false)
   const [resizing, setResizing] = createSignal(false)
   const [notes, setNotes] = createSignal<Array<{ beat: number; length: number; pitch: number; velocity?: number }>>([])
+  // Local-only toggle to capture keyboard for playing notes
+  const storageKey = () => `mb:midi_kb:${props.roomId || 'default'}`
+  const [kbEnabled, setKbEnabled] = createSignal(false)
+  const octaveKey = () => `mb:midi_kb_oct:${props.roomId || 'default'}`
+  const [octave, setOctave] = createSignal(0)
+  // Track active rows for gutter highlighting
+  const [activeRows, setActiveRows] = createSignal<Set<number>>(new Set(), { equals: false })
   const canPersist = () => Boolean(props.userId)
   const warnMissingUser = () => console.warn('[MidiEditorCard] Cannot edit or persist MIDI without `userId`.')
   // Grid derived from BPM/denominator/clip length
@@ -283,6 +295,110 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     try { window.removeEventListener('pointermove', onNotePointerMove) } catch {}
   }
 
+  // --- Computer keyboard play mode (A/S/D/F/G row mapping) ---
+  // Mapping based on event.code for US QWERTY; anchor A as C4 (MIDI 60)
+  const BASE_C4 = 60
+  const whiteMap: Record<string, number> = {
+    KeyA: 0, // C4
+    KeyS: 2, // D4
+    KeyD: 4, // E4
+    KeyF: 5, // F4
+    KeyG: 7, // G4
+    KeyH: 9, // A4
+    KeyJ: 11, // B4
+    KeyK: 12, // C5
+    KeyL: 14, // D5
+    Semicolon: 16, // E5
+  }
+  const blackMap: Record<string, number> = {
+    KeyW: 1,  // C#4
+    KeyE: 3,  // D#4
+    KeyT: 6,  // F#4
+    KeyY: 8,  // G#4
+    KeyU: 10, // A#4
+    KeyO: 13, // C#5
+    KeyP: 15, // D#5
+  }
+  const codeToSemitone = (code: string): number | undefined => {
+    if (whiteMap[code] != null) return whiteMap[code]
+    if (blackMap[code] != null) return blackMap[code]
+    return undefined
+  }
+  const pressed = new Map<string, number>()
+  const velocity = 0.9
+  const handleKeyDown = (e: KeyboardEvent) => {
+    const target = e.target as HTMLElement | null
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+    // Octave shift with Z/X
+    if (e.code === 'KeyZ') {
+      setOctave(v => Math.max(-4, Math.min(4, v - 1)))
+      e.preventDefault(); e.stopPropagation();
+      return
+    }
+    if (e.code === 'KeyX') {
+      setOctave(v => Math.max(-4, Math.min(4, v + 1)))
+      e.preventDefault(); e.stopPropagation();
+      return
+    }
+    const semi = codeToSemitone(e.code)
+    if (semi == null) return
+    if (pressed.has(e.code)) { e.preventDefault(); e.stopPropagation(); return }
+    const pitch = BASE_C4 + semi + octave() * 12
+    pressed.set(e.code, pitch)
+    // highlight row
+    setActiveRows(prev => { const n = new Set(prev); n.add(pitch); return n })
+    props.onStartLiveNote?.(pitch, velocity)
+    e.preventDefault()
+    e.stopPropagation()
+  }
+  const handleKeyUp = (e: KeyboardEvent) => {
+    const semi = codeToSemitone(e.code)
+    if (semi == null) return
+    const pitch = pressed.get(e.code)
+    if (pitch == null) return
+    pressed.delete(e.code)
+    props.onStopLiveNote?.(pitch)
+    setActiveRows(prev => { const n = new Set(prev); n.delete(pitch); return n })
+    e.preventDefault()
+    e.stopPropagation()
+  }
+  // Persist toggle locally per room
+  onMount(() => {
+    try {
+      const raw = window.localStorage.getItem(storageKey())
+      if (raw != null) setKbEnabled(raw === '1')
+      const oct = window.localStorage.getItem(octaveKey())
+      if (oct != null) {
+        const v = parseInt(oct, 10); if (Number.isFinite(v)) setOctave(Math.max(-4, Math.min(4, v)))
+      }
+    } catch {}
+  })
+  createEffect(() => {
+    try { window.localStorage.setItem(storageKey(), kbEnabled() ? '1' : '0') } catch {}
+  })
+  createEffect(() => {
+    try { window.localStorage.setItem(octaveKey(), String(octave())) } catch {}
+  })
+  // Manage listeners only when enabled
+  createEffect(() => {
+    if (!kbEnabled()) return
+    window.addEventListener('keydown', handleKeyDown, { capture: true })
+    window.addEventListener('keyup', handleKeyUp, { capture: true })
+    onCleanup(() => {
+      try { window.removeEventListener('keydown', handleKeyDown, { capture: true } as EventListenerOptions) } catch {}
+      try { window.removeEventListener('keyup', handleKeyUp, { capture: true } as EventListenerOptions) } catch {}
+      // Release any still-held notes
+      try {
+        for (const pitch of pressed.values()) {
+          props.onStopLiveNote?.(pitch)
+        }
+        pressed.clear()
+        setActiveRows(new Set<number>())
+      } catch {}
+    })
+  })
+
+
   return (
     <div
       class="absolute z-50 rounded-md border border-neutral-700 bg-neutral-900 shadow-xl overflow-hidden"
@@ -299,8 +415,19 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
         onPointerDown={onHeaderPointerDown as any}
         onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
       >
-        <div class="flex items-center gap-2 text-sm font-semibold text-neutral-200">
-          <span>MIDI Editor</span>
+        <div class="flex items-center gap-3 text-sm font-semibold text-neutral-200">
+          <div class="flex items-center gap-2">
+            <button
+              class={`px-2 py-0.5 rounded border text-xs ${kbEnabled() ? 'bg-green-600/20 border-green-500 text-green-300' : 'bg-neutral-700/30 border-neutral-600 text-neutral-300'}`}
+              onPointerDown={(e) => { e.stopPropagation() }}
+              onClick={(e) => { e.stopPropagation(); setKbEnabled(v => !v) }}
+              title="Toggle computer keyboard input (local only)"
+            >
+              ⌨ MIDI Keys
+            </button>
+            <span class="text-neutral-400">•</span>
+            <span>MIDI Editor</span>
+          </div>
           <span class="text-neutral-400">•</span>
           <span class="text-neutral-300 text-xs">Clip: {props.clipId.slice(0, 8)}</span>
           <span class="text-neutral-500 text-xs">BPM: {props.bpm}</span>
@@ -325,9 +452,10 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
                 {(r) => {
                   const pitch = Math.max(minPitch, Math.min(maxPitch, topPitch() - r))
                   const black = isBlackKey(pitch)
+                  const active = () => activeRows().has(pitch)
                   return (
                     <div
-                      class={`relative flex items-center justify-center text-[10px] font-mono ${black ? 'bg-neutral-700/70 text-neutral-100' : 'bg-neutral-800/70 text-neutral-200'} border-b border-neutral-800 cursor-pointer`}
+                      class={`relative flex items-center justify-center text-[10px] font-mono ${active() ? 'bg-green-600/50 text-white border-green-400' : (black ? 'bg-neutral-700/70 text-neutral-100' : 'bg-neutral-800/70 text-neutral-200')} border-b border-neutral-800 cursor-pointer`}
                       onPointerDown={(e) => { e.stopPropagation(); props.onAuditionNote?.(pitch, 0.9, Math.min(0.6, secondsPerBeat())) }}
                       title={noteName(pitch)}
                     >

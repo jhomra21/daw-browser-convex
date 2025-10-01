@@ -15,7 +15,7 @@ import TrackSidebar from './timeline/TrackSidebar'
 import EffectsPanel from './timeline/EffectsPanel'
 import MidiEditorCard from './midi/MidiEditorCard'
 import { Button } from './ui/button'
-import { convexClient, convexApi } from '~/lib/convex'
+import { convexClient, convexApi, useConvexQuery } from '~/lib/convex'
 import AgentChat from './AgentChat'
 import { useTimelineData } from '~/hooks/useTimelineData'
 import { usePlayheadControls } from '~/hooks/usePlayheadControls'
@@ -70,6 +70,17 @@ const Timeline: Component = () => {
   // Collaboration: roomId from ?roomId=; ownership tied to Better Auth userId
   const { roomId, setRoomId, userId, myProjects, fullView, navigateToRoom } = useTimelineData()
 
+  // Tracks owned by current user (for mix precedence)
+  const ownedTracksQ = useConvexQuery(
+    (convexApi as any).ownerships.listOwnedTrackIds,
+    () => {
+      const rid = roomId()
+      const uid = userId()
+      return rid && uid ? ({ roomId: rid, ownerUserId: uid } as any) : null
+    },
+    () => ['owned-tracks', roomId(), userId()]
+  )
+
   const {
     audioBufferCache,
     ensureClipBuffer,
@@ -87,18 +98,24 @@ const Timeline: Component = () => {
         if (!Array.isArray(ops) || ops.length === 0) return
         setTracks(ts => {
           const arr = ts.map(t => ({ ...t }))
+          // Owned set for this user
+          const ownedRaw: any = (ownedTracksQ as any)?.data
+          const ownedArr: any = typeof ownedRaw === 'function' ? ownedRaw() : ownedRaw
+          const ownedSet = new Set<string>(Array.isArray(ownedArr) ? ownedArr.map((x: any) => String(x)) : [])
           // Helper to convert 1-based indices to unique 0-based indices within bounds
           const toZero = (idx1: number) => Math.max(0, Math.min(arr.length - 1, Math.floor(idx1 - 1)))
           for (const op of ops) {
             const src = (Array.isArray(op.indices) && op.indices.length)
               ? op.indices
               : (op.type === 'setSolo' ? [arr.length] : arr.map((_, i) => i + 1)) // solo(no indices)=>last track; mute(no indices)=>all
-            const targets0 = Array.from(new Set(src.map(toZero))).filter(i => i >= 0 && i < arr.length)
+            // Filter targets to OWNED tracks only
+            const targets0 = Array.from(new Set(src.map(toZero))).filter(i => i >= 0 && i < arr.length && ownedSet.has(arr[i].id))
             if (op.type === 'setSolo') {
               const exclusive = !!op.exclusive && !!op.value && targets0.length === 1
               if (exclusive) {
-                // Clear others first
+                // Clear others within OWNED set first
                 for (let i = 0; i < arr.length; i++) {
+                  if (!ownedSet.has(arr[i].id)) continue
                   const next = i === targets0[0]
                   arr[i].soloed = next
                   saveLocalMix(roomId(), arr[i].id, { soloed: next })
@@ -633,6 +650,9 @@ const Timeline: Component = () => {
     const oldTrackMap = new Map(oldTracks.map(t => [t.id, t]))
 
     const sm = syncMix()
+    const ownedRaw: any = (ownedTracksQ as any)?.data
+    const ownedArr: any = typeof ownedRaw === 'function' ? ownedRaw() : ownedRaw
+    const ownedSet = new Set<string>(Array.isArray(ownedArr) ? ownedArr.map((x: any) => String(x)) : [])
     const dragSnapshot = activeDrag()
     const addedTrackDuringDrag = dragSnapshot?.addedTrackDuringDrag
     const localMix = loadLocalMixMap(roomId())
@@ -643,17 +663,23 @@ const Timeline: Component = () => {
       const serverSoloed = (t as any).soloed as boolean | undefined
       const serverName = typeof (t as any).name === 'string' ? (t as any).name : undefined
       const serverLockedBy = typeof (t as any).lockedBy === 'string' ? (t as any).lockedBy : null
+      const isOwned = ownedSet.has(id)
       return {
         id,
         name: serverName ?? prev?.name ?? `Track ${idx + 1}`,
         volume: typeof t.volume === 'number' ? t.volume : 0.8,
         clips: [],
-        muted: sm
-          ? (typeof serverMuted === 'boolean' ? serverMuted : (prev?.muted ?? localMix[id]?.muted ?? false))
-          : (prev?.muted ?? localMix[id]?.muted ?? false),
-        soloed: sm
-          ? (typeof serverSoloed === 'boolean' ? serverSoloed : (prev?.soloed ?? localMix[id]?.soloed ?? false))
-          : (prev?.soloed ?? localMix[id]?.soloed ?? false),
+        // Owner view: prefer LOCAL state; Non-owner view: prefer SERVER only when Sync Mix is ON
+        muted: isOwned
+          ? (prev?.muted ?? localMix[id]?.muted ?? (typeof serverMuted === 'boolean' ? serverMuted : false))
+          : (sm
+            ? (typeof serverMuted === 'boolean' ? serverMuted : (prev?.muted ?? localMix[id]?.muted ?? false))
+            : (prev?.muted ?? localMix[id]?.muted ?? false)),
+        soloed: isOwned
+          ? (prev?.soloed ?? localMix[id]?.soloed ?? (typeof serverSoloed === 'boolean' ? serverSoloed : false))
+          : (sm
+            ? (typeof serverSoloed === 'boolean' ? serverSoloed : (prev?.soloed ?? localMix[id]?.soloed ?? false))
+            : (prev?.soloed ?? localMix[id]?.soloed ?? false)),
         lockedBy: serverLockedBy ?? prev?.lockedBy ?? null,
         kind: (t as any).kind ?? prev?.kind ?? 'audio',
       }
@@ -1069,6 +1095,7 @@ const Timeline: Component = () => {
         isOpen={agentPanelOpen()}
         onClose={() => setAgentPanelOpen(false)}
         roomId={roomId()}
+        userId={userId()}
         bpm={bpm()}
         bottomOffsetPx={bottomFXOpen() ? 288 : 0}
       />
@@ -1276,10 +1303,16 @@ const Timeline: Component = () => {
               return { ...t, muted: nextMuted }
             }))
             if (rid) saveLocalMix(rid, trackId, { muted: nextMuted })
-            if (syncMix()) {
+            // Keep server in sync for OWNED tracks regardless of Sync Mix; ignore for non-owned
+            try {
               const uid = userId()
-              if (uid) void convexClient.mutation(convexApi.tracks.setMix, { trackId: trackId as any, muted: nextMuted, userId: uid })
-            }
+              const ownedRaw: any = (ownedTracksQ as any)?.data
+              const ownedArr: any = typeof ownedRaw === 'function' ? ownedRaw() : ownedRaw
+              const ownedSet = new Set<string>(Array.isArray(ownedArr) ? ownedArr.map((x: any) => String(x)) : [])
+              if (uid && ownedSet.has(trackId)) {
+                void convexClient.mutation(convexApi.tracks.setMix, { trackId: trackId as any, muted: nextMuted, userId: uid } as any)
+              }
+            } catch {}
           }}
           onToggleSolo={(trackId) => {
             const rid = roomId()
@@ -1290,10 +1323,16 @@ const Timeline: Component = () => {
               return { ...t, soloed: nextSoloed }
             }))
             if (rid) saveLocalMix(rid, trackId, { soloed: nextSoloed })
-            if (syncMix()) {
+            // Keep server in sync for OWNED tracks regardless of Sync Mix; ignore for non-owned
+            try {
               const uid = userId()
-              if (uid) void convexClient.mutation(convexApi.tracks.setMix, { trackId: trackId as any, soloed: nextSoloed, userId: uid })
-            }
+              const ownedRaw: any = (ownedTracksQ as any)?.data
+              const ownedArr: any = typeof ownedRaw === 'function' ? ownedRaw() : ownedRaw
+              const ownedSet = new Set<string>(Array.isArray(ownedArr) ? ownedArr.map((x: any) => String(x)) : [])
+              if (uid && ownedSet.has(trackId)) {
+                void convexClient.mutation(convexApi.tracks.setMix, { trackId: trackId as any, soloed: nextSoloed, userId: uid } as any)
+              }
+            } catch {}
           }}
           syncMix={syncMix()}
           onToggleSyncMix={() => {

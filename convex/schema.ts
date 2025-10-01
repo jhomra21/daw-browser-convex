@@ -98,6 +98,21 @@ export default defineSchema({
     .index("by_track", ["trackId"]) // list effects for a track
     .index("by_room", ["roomId"]) // list effects in a room
     .index("by_track_order", ["trackId", "index"]), // chain ordering
+
+  // Per-user per-project chat history for the AI agent panel.
+  // Keep a single row per (roomId, ownerUserId) with an array of messages.
+  chatHistories: defineTable({
+    roomId: v.string(),
+    ownerUserId: v.string(),
+    messages: v.array(
+      v.object({
+        role: v.string(), // 'user' | 'assistant'
+        content: v.string(),
+      })
+    ),
+    updatedAt: v.number(), // epoch millis
+  })
+    .index("by_room_owner", ["roomId", "ownerUserId"]),
 });
 
 

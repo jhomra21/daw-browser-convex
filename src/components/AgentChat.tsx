@@ -1,5 +1,6 @@
-import { type Component, For, Show, createSignal, createEffect } from 'solid-js'
+import { type Component, For, Show, createSignal, createEffect, onCleanup } from 'solid-js'
 import { CommandsEnvelopeSchema, type CommandsEnvelope } from '~/lib/agent-commands'
+import { convexClient, convexApi } from '~/lib/convex'
 
 // Minimal message type for local chat UI
 type Msg = { role: 'user' | 'assistant'; content: string }
@@ -259,6 +260,7 @@ type AgentChatProps = {
   roomId?: string
   bottomOffsetPx?: number
   bpm?: number
+  userId?: string
 }
 
 const AgentChat: Component<AgentChatProps> = (props) => {
@@ -266,10 +268,44 @@ const AgentChat: Component<AgentChatProps> = (props) => {
   const [input, setInput] = createSignal('')
   const [streaming, setStreaming] = createSignal(false)
   let textareaRef: HTMLTextAreaElement | undefined
+  let messagesRef: HTMLDivElement | undefined
+  let bottomAnchorRef: HTMLDivElement | undefined
   const [parsedCommands, setParsedCommands] = createSignal<CommandsEnvelope | null>(null)
   const [executing, setExecuting] = createSignal(false)
   const [executeError, setExecuteError] = createSignal<string | null>(null)
   const [autoApply, setAutoApply] = createSignal(false)
+  let saveTimer: number | null = null
+  const [loaded, setLoaded] = createSignal(false)
+  const [forceScrollNext, setForceScrollNext] = createSignal(false)
+
+  // Auto-scroll helpers
+  function isNearBottom(threshold = 24) {
+    const el = messagesRef
+    if (!el) return true
+    return el.scrollTop + el.clientHeight >= el.scrollHeight - threshold
+  }
+  function scrollToBottom(opts?: { smooth?: boolean }) {
+    const container = messagesRef
+    const anchor = bottomAnchorRef
+    if (!container) return
+    try {
+      if (anchor && typeof anchor.scrollIntoView === 'function') {
+        anchor.scrollIntoView({ behavior: opts?.smooth ? 'smooth' : 'auto', block: 'end' })
+      } else if (opts?.smooth && typeof container.scrollTo === 'function') {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
+      } else {
+        container.scrollTop = container.scrollHeight
+      }
+    } catch {}
+  }
+
+  function scrollToBottomSoon(opts?: { smooth?: boolean }) {
+    // Try multiple ticks to cover DOM/layout timing across environments
+    scrollToBottom(opts)
+    queueMicrotask(() => scrollToBottom(opts))
+    setTimeout(() => scrollToBottom(opts), 0)
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom(opts)))
+  }
 
   createEffect(() => {
     if (props.isOpen) {
@@ -277,6 +313,24 @@ const AgentChat: Component<AgentChatProps> = (props) => {
         try { textareaRef?.focus() } catch {}
       })
     }
+  })
+
+  // Scroll to bottom when opening the panel
+  createEffect(() => {
+    const open = props.isOpen
+    if (!open) return
+    setForceScrollNext(true)
+    // Ensure DOM is painted before measuring scrollHeight
+    scrollToBottomSoon()
+  })
+
+  // After history has loaded, ensure we are at latest
+  createEffect(() => {
+    if (!props.isOpen) return
+    if (!loaded()) return
+    const count = messages().length
+    if (count <= 0) return
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom()))
   })
 
   // Load/save auto-apply preference
@@ -290,6 +344,90 @@ const AgentChat: Component<AgentChatProps> = (props) => {
     try { localStorage.setItem('agent_auto_apply', autoApply() ? '1' : '0') } catch {}
   })
 
+  // Load history when panel opens or identifiers change
+  createEffect(() => {
+    const open = props.isOpen
+    const rid = props.roomId
+    const uid = props.userId
+    if (!open || !rid || !uid) return
+    setLoaded(false)
+    let cancelled = false
+    onCleanup(() => {
+      cancelled = true
+    })
+    ;(async () => {
+      try {
+        const history = await convexClient.query((convexApi as any).chat.getHistory, { roomId: rid, ownerUserId: uid } as any)
+        if (cancelled || props.roomId !== rid || props.userId !== uid || !props.isOpen) return
+        if (Array.isArray(history)) {
+          setMessages(history as any)
+          setForceScrollNext(true)
+          // Ensure we land at the latest after DOM paints
+          scrollToBottomSoon()
+        }
+        setLoaded(true)
+      } catch {
+        if (cancelled || props.roomId !== rid || props.userId !== uid || !props.isOpen) return
+        setLoaded(true)
+      }
+    })()
+  })
+
+  // Debounced save of history whenever messages change
+  function scheduleSaveHistory() {
+    const rid = props.roomId
+    const uid = props.userId
+    if (!rid || !uid) return
+    if (saveTimer) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+    }
+    saveTimer = window.setTimeout(() => {
+      saveTimer = null
+      try {
+        void convexClient.mutation((convexApi as any).chat.setHistory, {
+          roomId: rid,
+          ownerUserId: uid,
+          messages: messages(),
+        } as any).catch(() => {})
+      } catch {}
+    }, 400)
+  }
+
+  createEffect(() => {
+    // Trigger on message list changes; debounce to avoid excessive writes during streaming
+    const _ms = messages()
+    const rid = props.roomId
+    const uid = props.userId
+    const open = props.isOpen
+    if (!open || !rid || !uid || !loaded()) return
+    if (!Array.isArray(_ms) || _ms.length === 0) return
+    scheduleSaveHistory()
+  })
+
+  // Keep view pinned to latest messages by default, but don't hijack when user has scrolled up
+  createEffect(() => {
+    const _ = messages() // track message changes
+    const open = props.isOpen
+    const force = forceScrollNext() // capture to track signal
+    const smooth = streaming() // capture to track signal
+    if (!open) return
+    requestAnimationFrame(() => {
+      if (force) {
+        scrollToBottomSoon()
+        setForceScrollNext(false)
+        return
+      }
+      if (smooth || isNearBottom()) {
+        scrollToBottomSoon({ smooth })
+      }
+    })
+  })
+
+  onCleanup(() => {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+  })
+
   function tryExtractCommands() {
     const last = messages()[messages().length - 1]
     if (!last || last.role !== 'assistant') return
@@ -301,7 +439,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
       }
       return ''
     })()
-    const editIntent = /\b(add|create|move|copy|delete|remove|set|insert|enable|mute|solo|place|drop)\b/.test(lastUserText)
+    const editIntent = /\b(add|create|move|copy|delete|remove|set|insert|enable|mute|unmute|solo|unsolo|place|drop)\b/.test(lastUserText)
     // Heuristic: find last mentioned track number in recent messages
     const guessTrack = (() => {
       for (let i = messages().length - 1; i >= 0 && i >= messages().length - 8; i--) {
@@ -470,6 +608,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
           summary = parts.length ? `Applied: ${parts.join(', ')}` : 'Done.'
         }
         setMessages(prev => [...prev, { role: 'assistant', content: summary }])
+        requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom()))
       } catch {}
     } catch (e: any) {
       setExecuteError(String(e?.message || e) )
@@ -484,6 +623,8 @@ const AgentChat: Component<AgentChatProps> = (props) => {
 
     const userMsg: Msg = { role: 'user', content }
     setMessages(prev => [...prev, userMsg, { role: 'assistant', content: '' }])
+    // Bring the placeholder into view
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom()))
     setInput('')
     setStreaming(true)
     setParsedCommands(null)
@@ -527,7 +668,16 @@ const AgentChat: Component<AgentChatProps> = (props) => {
       // Try to parse commands from the last assistant message
       tryExtractCommands()
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, something went wrong.' }])
+      setMessages(prev => {
+        const arr = prev.slice()
+        const idx = arr.length - 1
+        if (idx >= 0 && arr[idx]?.role === 'assistant' && arr[idx]?.content === '') {
+          arr[idx] = { role: 'assistant', content: 'Sorry, something went wrong.' }
+          return arr
+        }
+        arr.push({ role: 'assistant', content: 'Sorry, something went wrong.' })
+        return arr
+      })
     } finally {
       setStreaming(false)
     }
@@ -558,37 +708,40 @@ const AgentChat: Component<AgentChatProps> = (props) => {
             <button class="text-neutral-400 hover:text-white" onClick={props.onClose}>✕</button>
           </div>
         </div>
-        <div class="flex-1 overflow-y-auto px-3 py-2 space-y-2">
-          <For each={messages()}>{(m) => (
-            <div class={m.role === 'user' ? 'text-right' : 'text-left'}>
-              <div class={
-                'inline-block max-w-[90%] rounded-md px-2 py-1 text-sm ' +
-                (m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-neutral-800 text-neutral-100')
-              }>
-                {m.content}
+        <div class="flex-1 overflow-y-auto px-3 py-2" ref={el => { messagesRef = el; try { if (props.isOpen) requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom())) } catch {} }}>
+          <div class="min-h-full flex flex-col justify-end space-y-2">
+            <For each={messages()}>{(m) => (
+              <div class={m.role === 'user' ? 'text-right' : 'text-left'}>
+                <div class={
+                  'inline-block max-w-[90%] rounded-md px-2 py-1 text-sm ' +
+                  (m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-neutral-800 text-neutral-100')
+                }>
+                  {m.content}
+                </div>
               </div>
-            </div>
-          )}</For>
-          <Show when={!autoApply() && parsedCommands()}>
-            <div class="mt-2 p-2 bg-neutral-800 border border-neutral-700 rounded">
-              <div class="text-xs text-neutral-300 mb-1">Proposed changes (JSON):</div>
-              <pre class="text-[11px] leading-snug text-neutral-200 overflow-x-auto max-h-32"><code>{JSON.stringify(parsedCommands(), null, 2)}</code></pre>
-              <div class="flex gap-2 mt-2 justify-end">
-                <button
-                  class="px-2 py-1 text-xs rounded border border-neutral-600 text-neutral-200 hover:bg-neutral-700 disabled:opacity-50"
-                  disabled={executing()}
-                  onClick={() => void applyCommands()}
-                >{executing() ? 'Applying…' : 'Apply changes'}</button>
-                <button
-                  class="px-2 py-1 text-xs rounded border border-neutral-700 text-neutral-400 hover:text-neutral-200"
-                  onClick={() => setParsedCommands(null)}
-                >Dismiss</button>
+            )}</For>
+            <div ref={el => (bottomAnchorRef = el)} />
+            <Show when={!autoApply() && parsedCommands()}>
+              <div class="mt-2 p-2 bg-neutral-800 border border-neutral-700 rounded">
+                <div class="text-xs text-neutral-300 mb-1">Proposed changes (JSON):</div>
+                <pre class="text-[11px] leading-snug text-neutral-200 overflow-x-auto max-h-32"><code>{JSON.stringify(parsedCommands(), null, 2)}</code></pre>
+                <div class="flex gap-2 mt-2 justify-end">
+                  <button
+                    class="px-2 py-1 text-xs rounded border border-neutral-600 text-neutral-200 hover:bg-neutral-700 disabled:opacity-50"
+                    disabled={executing()}
+                    onClick={() => void applyCommands()}
+                  >{executing() ? 'Applying…' : 'Apply changes'}</button>
+                  <button
+                    class="px-2 py-1 text-xs rounded border border-neutral-700 text-neutral-400 hover:text-neutral-200"
+                    onClick={() => setParsedCommands(null)}
+                  >Dismiss</button>
+                </div>
+                <Show when={executeError()}>
+                  <div class="text-xs text-red-400 mt-2">{executeError()}</div>
+                </Show>
               </div>
-              <Show when={executeError()}>
-                <div class="text-xs text-red-400 mt-2">{executeError()}</div>
-              </Show>
-            </div>
-          </Show>
+            </Show>
+          </div>
         </div>
         <div class="border-t border-neutral-800 p-2">
           <textarea

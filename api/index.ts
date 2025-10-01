@@ -460,14 +460,23 @@ app.post('/api/agent/execute', async (c) => {
             }
             const idxs = collectIndices()
             if (!idxs.length) { results.push({ type: cmd.type, error: 'No track specified' }); break }
-            let updated = 0
+            // Attempt mutations
             for (const i of idxs) {
               const t = trackList?.[i]
               if (!t) continue
               await convex.mutation(convexApi.tracks.setMix as any, { trackId: t._id, muted: (cmd as any).value, userId: (user as any).id } as any)
-              updated++
             }
-            results.push({ type: cmd.type, ok: true, updated })
+            // Verify which actually changed on server (owner-only)
+            try {
+              const after: any[] = await convex.query(convexApi.tracks.listByRoom as any, { roomId } as any)
+              const verified = idxs.reduce((count, i) => {
+                const t = after?.[i]
+                return count + ((t && typeof t.muted === 'boolean' && t.muted === (cmd as any).value) ? 1 : 0)
+              }, 0)
+              results.push({ type: cmd.type, ok: true, updated: verified })
+            } catch {
+              results.push({ type: cmd.type, ok: true, updated: 0 })
+            }
             break
           }
           case 'setSolo': {
@@ -493,14 +502,22 @@ app.post('/api/agent/execute', async (c) => {
                 await convex.mutation(convexApi.tracks.setMix as any, { trackId: ot._id, soloed: false, userId: (user as any).id } as any)
               }
             }
-            let updated = 0
             for (const i of idxs) {
               const t = trackList?.[i]
               if (!t) continue
               await convex.mutation(convexApi.tracks.setMix as any, { trackId: t._id, soloed: value, userId: (user as any).id } as any)
-              updated++
             }
-            results.push({ type: cmd.type, ok: true, updated })
+            // Verify which actually changed on server (owner-only)
+            try {
+              const after: any[] = await convex.query(convexApi.tracks.listByRoom as any, { roomId } as any)
+              const verified = idxs.reduce((count, i) => {
+                const t = after?.[i]
+                return count + ((t && typeof t.soloed === 'boolean' && t.soloed === value) ? 1 : 0)
+              }, 0)
+              results.push({ type: cmd.type, ok: true, updated: verified })
+            } catch {
+              results.push({ type: cmd.type, ok: true, updated: 0 })
+            }
             break
           }
           default:

@@ -41,8 +41,9 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     // Reset and scale to device pixels
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.scale(dpr, dpr)
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    // Disable smoothing to avoid blurry rendering
+    ;(ctx as any).imageSmoothingEnabled = false
 
     // Clear
     ctx.clearRect(0, 0, cssW, cssH)

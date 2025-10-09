@@ -1,5 +1,16 @@
 import type { Track, Clip } from '~/types/timeline'
 
+const MASTER_FADE_DOWN_SEC = 0.002
+const MASTER_FADE_HOLD_SEC = 0.001
+const MASTER_FADE_UP_SEC = 0.006
+const MASTER_STOP_DELAY_SEC = 0.004
+
+type ScheduleOptions = {
+  atCtxTime?: number
+  preserveExisting?: boolean
+  endLimitSec?: number
+}
+
 // Lightweight EQ params shape used by the engine (kept in sync with UI)
 export type EqParamsLite = {
   enabled: boolean
@@ -645,11 +656,13 @@ export class AudioEngine {
     this.transportEpochCtxTime = this.audioCtx?.currentTime ?? 0
   }
 
-  onTransportSeek(playheadSec: number) {
+  onTransportSeek(playheadSec: number, offsetSec = 0, opts?: { resetMetronome?: boolean }) {
     if (!this.audioCtx) return
-    this.transportEpochCtxTime = this.audioCtx.currentTime
+    const now = this.audioCtx.currentTime
+    this.transportEpochCtxTime = now + Math.max(0, offsetSec)
     this.transportEpochTimelineSec = Math.max(0, playheadSec)
-    if (this.metronomeEnabled && this.transportRunning) {
+    const shouldReset = opts?.resetMetronome !== false
+    if (shouldReset && this.metronomeEnabled && this.transportRunning) {
       this.resetMetronomeState()
       this.scheduleMetronomeTicks()
     }
@@ -958,15 +971,47 @@ export class AudioEngine {
   }
 
   private stopClipSources() {
-    for (const s of this.activeSources) {
-      try { s.stop() } catch {}
-      try { s.disconnect() } catch {}
-    }
+    // Snapshot currently active sources to avoid stopping newly scheduled ones
+    const toStop = Array.from(this.activeSources)
+    // Reset tracking immediately so subsequent schedules are isolated
     this.activeSources = []
-    // Clear per-clip tracking since corresponding sources have been stopped
     this.activeSourcesByClip.clear()
-    // Clear tracked oscillators; onended would normally clean up, but force-clear to be safe
     this.activeOscillatorsByTrack.clear()
+
+    // Quick master fade to avoid clicks
+    const ctx = this.audioCtx
+    const mg = this.masterGain
+    let stopAt: number | null = null
+    if (ctx && mg) {
+      try {
+        const now = ctx.currentTime
+        const prev = mg.gain.value
+        mg.gain.cancelScheduledValues(now)
+        mg.gain.setValueAtTime(prev, now)
+        mg.gain.linearRampToValueAtTime(0, now + MASTER_FADE_DOWN_SEC)
+        const holdStart = now + MASTER_FADE_DOWN_SEC
+        mg.gain.setValueAtTime(0, holdStart + MASTER_FADE_HOLD_SEC)
+        mg.gain.linearRampToValueAtTime(prev, now + MASTER_FADE_UP_SEC)
+        stopAt = now + MASTER_STOP_DELAY_SEC
+      } catch {}
+    }
+
+    const doStop = () => {
+      for (const s of toStop) {
+        try {
+          if (stopAt !== null) {
+            s.stop(stopAt)
+          } else {
+            s.stop()
+          }
+        } catch {
+          try { s.stop() } catch {}
+        }
+        try { s.disconnect() } catch {}
+      }
+    }
+
+    doStop()
   }
 
   stopAllSources() {
@@ -974,7 +1019,7 @@ export class AudioEngine {
     this.resetMetronomeState()
   }
 
-  private scheduleMidiClip(track: Track, clip: Clip, playheadSec: number, nowCtx: number): boolean {
+  private scheduleMidiClip(track: Track, clip: Clip, playheadSec: number, nowCtx: number, endLimitSec?: number): boolean {
     if (!this.audioCtx) return false
     const midi: any = (clip as any).midi
     if (!midi || !Array.isArray(midi.notes)) return false
@@ -983,7 +1028,8 @@ export class AudioEngine {
     const synth = this.trackSynths.get(track.id)
     const wave = synth?.wave || (midi.wave as OscillatorType) || 'sawtooth'
     const clipStart = clip.startSec
-    const clipEnd = clip.startSec + clip.duration
+    const clipEndRaw = clip.startSec + clip.duration
+    const clipEnd = (typeof endLimitSec === 'number') ? Math.min(clipEndRaw, endLimitSec) : clipEndRaw
     const clipDurationBeats = clip.duration / spb
 
     let notesToSchedule = midi.notes as Array<{ beat: number; length: number; pitch: number; velocity?: number }>
@@ -1088,14 +1134,15 @@ export class AudioEngine {
     return true
   }
 
-  private scheduleAudioClip(clip: Clip, input: GainNode, playheadSec: number, nowCtx: number) {
+  private scheduleAudioClip(clip: Clip, input: GainNode, playheadSec: number, nowCtx: number, endLimitSec?: number) {
     if (!this.audioCtx) return
     if (!clip.buffer) return
 
     const leftPad = Math.max(0, clip.leftPadSec ?? 0)
     const bufferOffsetRaw = Math.max(0, (clip as any).bufferOffsetSec ?? 0)
     const windowStart = clip.startSec
-    const windowEnd = clip.startSec + clip.duration
+    const windowEndRaw = clip.startSec + clip.duration
+    const windowEnd = (typeof endLimitSec === 'number') ? Math.min(windowEndRaw, endLimitSec) : windowEndRaw
     const audioStart = windowStart + leftPad
     const bufferDur = clip.buffer.duration
     const bufferOffset = Math.min(bufferDur, bufferOffsetRaw)
@@ -1132,11 +1179,13 @@ export class AudioEngine {
     clipSet.add(source)
   }
 
-  scheduleAllClipsFromPlayhead(tracks: Track[], playheadSec: number) {
+  scheduleAllClipsFromPlayhead(tracks: Track[], playheadSec: number, opts?: ScheduleOptions) {
     if (!this.audioCtx) return
     
-    this.stopClipSources()
-    const now = this.audioCtx.currentTime
+    if (!opts?.preserveExisting) this.stopClipSources()
+    const hasOverride = typeof opts?.atCtxTime === 'number'
+    const baseNow = hasOverride ? (opts!.atCtxTime as number) : this.timelineToCtxTime(playheadSec)
+    const now = baseNow
     const anySoloed = tracks.some(t => t.soloed)
 
     for (const t of tracks) {
@@ -1161,11 +1210,11 @@ export class AudioEngine {
 
       const input = this.ensureTrackNodes(t.id)
       for (const c of t.clips) {
-        if (this.scheduleMidiClip(t, c, playheadSec, now)) {
+        if (this.scheduleMidiClip(t, c, playheadSec, now, opts?.endLimitSec)) {
           continue
         }
 
-        this.scheduleAudioClip(c, input, playheadSec, now)
+        this.scheduleAudioClip(c, input, playheadSec, now, opts?.endLimitSec)
       }
     }
   }
@@ -1196,12 +1245,12 @@ export class AudioEngine {
     }
   }
 
-  rescheduleClipsAtPlayhead(tracks: Track[], playheadSec: number, clipIds: string[]) {
+  rescheduleClipsAtPlayhead(tracks: Track[], playheadSec: number, clipIds: string[], opts?: ScheduleOptions) {
     if (!this.audioCtx) return
     if (!clipIds || clipIds.length === 0) return
     const idsSet = new Set<string>(clipIds)
     const ids = Array.from(idsSet)
-    const now = this.audioCtx.currentTime
+    const now = this.timelineToCtxTime(playheadSec)
     const anySoloed = tracks.some(t => t.soloed)
     for (const id of ids) this.stopSourcesForClip(id)
 
@@ -1216,11 +1265,11 @@ export class AudioEngine {
       const input = this.ensureTrackNodes(t.id)
       for (const c of t.clips) {
         if (!idsSet.has(c.id)) continue
-        if (this.scheduleMidiClip(t, c, playheadSec, now)) {
+        if (this.scheduleMidiClip(t, c, playheadSec, now, opts?.endLimitSec)) {
           continue
         }
 
-        this.scheduleAudioClip(c, input, playheadSec, now)
+        this.scheduleAudioClip(c, input, playheadSec, now, opts?.endLimitSec)
       }
     }
   }
@@ -1233,6 +1282,16 @@ export class AudioEngine {
 
   get currentTime() {
     return this.audioCtx?.currentTime ?? 0
+  }
+
+  // Sum of output and base latency (seconds) if available; used for A/V visual alignment
+  get outputLatencySec() {
+    const ctx = this.audioCtx
+    if (!ctx) return 0
+    const base = (ctx as any).baseLatency ?? 0
+    const out = (ctx as any).outputLatency ?? 0
+    const total = (typeof base === 'number' ? base : 0) + (typeof out === 'number' ? out : 0)
+    return Number.isFinite(total) ? total : 0
   }
 
   async decodeAudioData(arrayBuffer: ArrayBuffer) {

@@ -335,7 +335,13 @@ const Timeline: Component = () => {
     onCommitMoves: (ids) => {
       // When clips are moved during playback, reschedule only those clips to avoid restarting other audio/MIDI sources
       if (isPlaying() && ids && ids.length) {
-        try { audioEngine.rescheduleClipsAtPlayhead(tracks(), playheadSec(), ids) } catch {}
+        try {
+          const enabled = loopEnabled()
+          const start = loopStartSec()
+          const end = loopEndSec()
+          const lenOk = enabled && end - start > 1e-3
+          audioEngine.rescheduleClipsAtPlayhead(tracks(), playheadSec(), ids, lenOk ? { endLimitSec: end } : undefined)
+        } catch {}
       }
     },
   })
@@ -361,6 +367,8 @@ const Timeline: Component = () => {
     audioEngine,
     isPlaying,
     playheadSec,
+    loopEnabled,
+    loopEndSec,
   })
 
   const {

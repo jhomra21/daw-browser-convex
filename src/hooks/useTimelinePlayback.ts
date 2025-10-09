@@ -20,6 +20,18 @@ export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: Loop
   const [startedCtxTime, setStartedCtxTime] = createSignal(0)
   const [startedPlayheadSec, setStartedPlayheadSec] = createSignal(0)
   const [lastTracks, setLastTracks] = createSignal<Track[]>([])
+  // Schedule a little ahead to avoid past-time starts under scheduling jitter.
+  // This keeps metronome ticks and clip audio locked to the same transport timestamp.
+  const SCHED_AHEAD_SEC = 0.02
+  // Centralize loop state (start/end/active) so timing logic stays in sync across handlers
+  const getLoopParams = () => {
+    const enabled = loopOptions?.loopEnabled?.() ?? false
+    const start = loopOptions?.loopStartSec?.() ?? 0
+    const end = loopOptions?.loopEndSec?.() ?? 0
+    const length = end - start
+    const isActive = enabled && length > LOOP_EPS
+    return { enabled, start, end, length, isActive }
+  }
 
   const cancelRaf = () => {
     const id = rafId()
@@ -39,21 +51,16 @@ export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: Loop
   }
 
   const applyLoopIfNeeded = (candidateSec: number) => {
-    const enabled = loopOptions?.loopEnabled?.() ?? false
-    if (!enabled) return { sec: candidateSec, looped: false }
-    const start = loopOptions?.loopStartSec?.() ?? 0
-    const end = loopOptions?.loopEndSec?.() ?? 0
-    const length = end - start
-    if (!(length > LOOP_EPS)) return { sec: candidateSec, looped: false }
+    const { isActive, start, end } = getLoopParams()
+    if (!isActive) return { sec: candidateSec, looped: false }
     if (candidateSec < start) return { sec: candidateSec, looped: false }
     if (candidateSec < end - LOOP_EPS) return { sec: candidateSec, looped: false }
 
-    const range = Math.max(length, LOOP_EPS)
-    const offset = candidateSec - start
-    const wrapped = start + (offset % range)
+    // Wrap cleanly to the start of the loop; schedule immediately with slight ahead offset
+    const wrapped = start
     const tracks = resolveTracks()
     audioEngine.stopAllSources()
-    audioEngine.onTransportSeek(wrapped)
+    audioEngine.onTransportSeek(wrapped, SCHED_AHEAD_SEC)
     audioEngine.scheduleAllClipsFromPlayhead(tracks, wrapped)
     setStartedCtxTime(audioEngine.currentTime)
     setStartedPlayheadSec(wrapped)
@@ -62,7 +69,9 @@ export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: Loop
 
   const tick = () => {
     if (!isPlaying()) return
-    const elapsed = audioEngine.currentTime - startedCtxTime()
+    const elapsedRaw = audioEngine.currentTime - startedCtxTime()
+    const latency = audioEngine.outputLatencySec || 0
+    const elapsed = Math.max(0, elapsedRaw - latency)
     const nextSec = startedPlayheadSec() + elapsed
     const { sec } = applyLoopIfNeeded(nextSec)
     setPlayheadSec(sec)
@@ -77,7 +86,9 @@ export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: Loop
     setStartedPlayheadSec(playheadSec())
     setLastTracks(tracks)
     audioEngine.onTransportStart(playheadSec())
-    audioEngine.scheduleAllClipsFromPlayhead(tracks, playheadSec())
+    audioEngine.onTransportSeek(playheadSec(), SCHED_AHEAD_SEC)
+    const { isActive, end } = getLoopParams()
+    audioEngine.scheduleAllClipsFromPlayhead(tracks, playheadSec(), isActive ? { endLimitSec: end } : undefined)
     setRafId(requestAnimationFrame(tick))
   }
 
@@ -104,8 +115,9 @@ export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: Loop
       setStartedCtxTime(audioEngine.currentTime)
       setStartedPlayheadSec(sec)
       // IMPORTANT: Update transport epoch BEFORE scheduling, so MIDI events use the correct mapping
-      audioEngine.onTransportSeek(sec)
-      audioEngine.scheduleAllClipsFromPlayhead(tracks, sec)
+      audioEngine.onTransportSeek(sec, SCHED_AHEAD_SEC)
+      const { isActive, end } = getLoopParams()
+      audioEngine.scheduleAllClipsFromPlayhead(tracks, sec, isActive ? { endLimitSec: end } : undefined)
     }
   }
 

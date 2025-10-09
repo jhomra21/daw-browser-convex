@@ -29,6 +29,8 @@ type ClipResizeOptions = {
   audioEngine: AudioEngine
   isPlaying: Accessor<boolean>
   playheadSec: Accessor<number>
+  loopEnabled?: Accessor<boolean>
+  loopEndSec?: Accessor<number>
 }
 
 export type ClipResizeHandlers = {
@@ -261,7 +263,12 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
       })
       if (isPlaying() && audioEngine) {
         queueMicrotask(() => {
-          try { audioEngine.rescheduleClipsAtPlayhead(tracks(), playheadSec(), [clip.id]) } catch {}
+          try {
+            const enabled = options.loopEnabled?.() ?? false
+            const end = options.loopEndSec?.()
+            const lenOk = enabled && typeof end === 'number'
+            audioEngine.rescheduleClipsAtPlayhead(tracks(), playheadSec(), [clip.id], lenOk ? { endLimitSec: end } : undefined)
+          } catch {}
         })
       }
     }

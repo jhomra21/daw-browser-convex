@@ -1560,7 +1560,7 @@ const Timeline: Component = () => {
       />
 
       <Dialog open={confirmOpen()} onOpenChange={setConfirmOpen}>
-        <DialogContent>
+        <DialogContent class="bg-neutral-900 text-neutral-100 border border-neutral-800">
           <DialogHeader>
             <DialogTitle>Delete this track?</DialogTitle>
             <DialogDescription>

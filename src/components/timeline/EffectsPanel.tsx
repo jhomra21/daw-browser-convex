@@ -1,588 +1,725 @@
-import { type Component, Show, For, createSignal, createMemo, createEffect, untrack, onMount, onCleanup } from 'solid-js'
-import type { Track } from '~/types/timeline'
-import { Button } from '~/components/ui/button'
-import Eq, { createDefaultEqParams, type EqParams } from '~/components/effects/Eq'
-import type { AudioEngine, EqParamsLite, ReverbParamsLite, SpectrumFrame } from '~/lib/audio-engine'
-import { useConvexQuery, convexClient, convexApi } from '~/lib/convex'
-import { FX_PANEL_HEIGHT_PX } from '~/lib/timeline-utils'
-import Reverb, { createDefaultReverbParams, type ReverbParams } from '~/components/effects/Reverb'
-import Synth, { createDefaultSynthParams, type SynthParams } from '~/components/effects/Synth'
-import Arpeggiator, { createDefaultArpeggiatorParams, type ArpeggiatorParams } from '~/components/effects/Arpeggiator'
+import {
+  type Component,
+  Show,
+  For,
+  createSignal,
+  createMemo,
+  createEffect,
+  untrack,
+  onMount,
+  onCleanup,
+} from "solid-js";
+import type { Track } from "~/types/timeline";
+import { Button } from "~/components/ui/button";
+import Eq, {
+  createDefaultEqParams,
+  type EqParams,
+} from "~/components/effects/Eq";
+import type {
+  AudioEngine,
+  EqParamsLite,
+  ReverbParamsLite,
+  SpectrumFrame,
+} from "~/lib/audio-engine";
+import { useConvexQuery, convexClient, convexApi } from "~/lib/convex";
+import { FX_PANEL_HEIGHT_PX } from "~/lib/timeline-utils";
+import Reverb, {
+  createDefaultReverbParams,
+  type ReverbParams,
+} from "~/components/effects/Reverb";
+import Synth, {
+  createDefaultSynthParams,
+  type SynthParams,
+} from "~/components/effects/Synth";
+import Arpeggiator, {
+  createDefaultArpeggiatorParams,
+  type ArpeggiatorParams,
+} from "~/components/effects/Arpeggiator";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+} from "~/components/ui/dropdown-menu";
 
 type EffectsPanelProps = {
-  isOpen: boolean
-  selectedFXTarget: string
-  tracks: Track[]
-  onClose: () => void
-  onOpen: () => void
-  audioEngine?: AudioEngine
-  roomId?: string
-  userId?: string
+  isOpen: boolean;
+  selectedFXTarget: string;
+  tracks: Track[];
+  onClose: () => void;
+  onOpen: () => void;
+  audioEngine?: AudioEngine;
+  roomId?: string;
+  userId?: string;
   // Timeline context
-  playheadSec?: number
-  onSelectClip?: (trackId: string, clipId: string, startSec: number) => void
-}
+  playheadSec?: number;
+  onSelectClip?: (trackId: string, clipId: string, startSec: number) => void;
+};
 
 const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const targetName = () => {
-    const id = props.selectedFXTarget
-    if (id === 'master') return 'Master'
-    const track = props.tracks.find(t => t.id === id)
-    return track?.name ?? 'Track'
-  }
+    const id = props.selectedFXTarget;
+    if (id === "master") return "Master";
+    const track = props.tracks.find((t) => t.id === id);
+    return track?.name ?? "Track";
+  };
 
   // Target helpers must be defined before any usage below
-  const currentTargetId = () => props.selectedFXTarget || 'master'
+  const currentTargetId = () => props.selectedFXTarget || "master";
   const currentTrack = createMemo(() => {
-    const id = currentTargetId()
-    if (!id || id === 'master') return undefined
-    return props.tracks.find(t => t.id === id)
-  })
+    const id = currentTargetId();
+    if (!id || id === "master") return undefined;
+    return props.tracks.find((t) => t.id === id);
+  });
 
   // Recent local edit timestamps to avoid Convex subscription briefly overwriting UI during knob/drags
-  const eqLastLocalEdit = new Map<string, number>()
-  const reverbLastLocalEdit = new Map<string, number>()
-  const eqSaveTimers = new Map<string, number>()
-  const reverbSaveTimers = new Map<string, number>()
-  const LOCAL_EDIT_SUPPRESS_MS = 800
-  const SAVE_DEBOUNCE_MS = 200
+  const eqLastLocalEdit = new Map<string, number>();
+  const reverbLastLocalEdit = new Map<string, number>();
+  const eqSaveTimers = new Map<string, number>();
+  const reverbSaveTimers = new Map<string, number>();
+  const LOCAL_EDIT_SUPPRESS_MS = 800;
+  const SAVE_DEBOUNCE_MS = 200;
 
   const getQueryResult = <T,>(query: any): T | undefined => {
-    const raw = query?.data
-    return typeof raw === 'function' ? raw() : raw
-  }
+    const raw = query?.data;
+    return typeof raw === "function" ? raw() : raw;
+  };
 
   const arpeggiatorQuery = useConvexQuery(
     (convexApi as any).effects.getArpeggiatorForTrack,
     () => {
-      const id = currentTargetId()
-      if (!id || id === 'master') return null
-      return { trackId: id as any }
+      const id = currentTargetId();
+      if (!id || id === "master") return null;
+      return { trackId: id as any };
     },
-    () => ['effects', 'arpeggiator', currentTargetId()]
-  )
+    () => ["effects", "arpeggiator", currentTargetId()],
+  );
 
   const synthQuery = useConvexQuery(
     (convexApi as any).effects.getSynthForTrack,
     () => {
-      const id = currentTargetId()
-      if (!id || id === 'master') return null
-      return { trackId: id as any }
+      const id = currentTargetId();
+      if (!id || id === "master") return null;
+      return { trackId: id as any };
     },
-    () => ['effects', 'synth', currentTargetId()]
-  )
+    () => ["effects", "synth", currentTargetId()],
+  );
 
   const eqMasterQuery = useConvexQuery(
     convexApi.effects.getEqForMaster,
-    () => props.roomId ? ({ roomId: props.roomId }) : null,
-    () => ['effects', 'eq', 'master', props.roomId]
-  )
+    () => (props.roomId ? { roomId: props.roomId } : null),
+    () => ["effects", "eq", "master", props.roomId],
+  );
 
   const eqTrackQuery = useConvexQuery(
     convexApi.effects.getEqForTrack,
     () => {
-      const id = currentTargetId()
-      if (!id || id === 'master') return null
-      return { trackId: id as any }
+      const id = currentTargetId();
+      if (!id || id === "master") return null;
+      return { trackId: id as any };
     },
-    () => ['effects', 'eq', 'track', currentTargetId()]
-  )
+    () => ["effects", "eq", "track", currentTargetId()],
+  );
 
   const reverbMasterQuery = useConvexQuery(
     convexApi.effects.getReverbForMaster,
-    () => props.roomId ? ({ roomId: props.roomId }) : null,
-    () => ['effects', 'reverb', 'master', props.roomId]
-  )
+    () => (props.roomId ? { roomId: props.roomId } : null),
+    () => ["effects", "reverb", "master", props.roomId],
+  );
 
   const reverbTrackQuery = useConvexQuery(
     convexApi.effects.getReverbForTrack,
     () => {
-      const id = currentTargetId()
-      if (!id || id === 'master') return null
-      return { trackId: id as any }
+      const id = currentTargetId();
+      if (!id || id === "master") return null;
+      return { trackId: id as any };
     },
-    () => ['effects', 'reverb', 'track', currentTargetId()]
-  )
+    () => ["effects", "reverb", "track", currentTargetId()],
+  );
 
   // ===== Arpeggiator (MIDI effect for instrument tracks) =====
-  const [arpByTarget, setArpByTarget] = createSignal<Record<string, ArpeggiatorParams | undefined>>({})
-  const arpForTarget = createMemo(() => arpByTarget()[currentTargetId()])
+  const [arpByTarget, setArpByTarget] = createSignal<
+    Record<string, ArpeggiatorParams | undefined>
+  >({});
+  const arpForTarget = createMemo(() => arpByTarget()[currentTargetId()]);
 
   // ===== Synth (instrument tracks) =====
-  const [synthByTarget, setSynthByTarget] = createSignal<Record<string, SynthParams | undefined>>({})
-  const synthForTarget = createMemo(() => synthByTarget()[currentTargetId()])
+  const [synthByTarget, setSynthByTarget] = createSignal<
+    Record<string, SynthParams | undefined>
+  >({});
+  const synthForTarget = createMemo(() => synthByTarget()[currentTargetId()]);
 
-  const lastSavedArp = new Map<string, string>()
+  const lastSavedArp = new Map<string, string>();
   createEffect(() => {
-    const id = currentTargetId()
-    if (!id || id === 'master') return
-    const row = getQueryResult<any>(arpeggiatorQuery)
-    if (row === undefined) return
+    const id = currentTargetId();
+    if (!id || id === "master") return;
+    const row = getQueryResult<any>(arpeggiatorQuery);
+    if (row === undefined) return;
     if (row?.params) {
-      const p = row.params as ArpeggiatorParams
-      setArpByTarget(prev => ({ ...prev, [id]: p }))
-      lastSavedArp.set(id, JSON.stringify(p))
-      props.audioEngine?.setTrackArpeggiator(id, p)
+      const p = row.params as ArpeggiatorParams;
+      setArpByTarget((prev) => ({ ...prev, [id]: p }));
+      lastSavedArp.set(id, JSON.stringify(p));
+      props.audioEngine?.setTrackArpeggiator(id, p);
     } else {
-      setArpByTarget(prev => ({ ...prev, [id]: undefined }))
-      props.audioEngine?.clearTrackArpeggiator?.(id)
+      setArpByTarget((prev) => ({ ...prev, [id]: undefined }));
+      props.audioEngine?.clearTrackArpeggiator?.(id);
     }
-  })
+  });
 
   // Apply/persist arpeggiator on change
   createEffect(() => {
-    const id = currentTargetId(); if (!id || id === 'master') return
-    const params = arpForTarget(); if (!params) return
-    const json = JSON.stringify(params)
-    if (lastSavedArp.get(id) === json) return
-    lastSavedArp.set(id, json)
-    props.audioEngine?.setTrackArpeggiator(id, params)
+    const id = currentTargetId();
+    if (!id || id === "master") return;
+    const params = arpForTarget();
+    if (!params) return;
+    const json = JSON.stringify(params);
+    if (lastSavedArp.get(id) === json) return;
+    lastSavedArp.set(id, json);
+    props.audioEngine?.setTrackArpeggiator(id, params);
     if (props.roomId && props.userId) {
-      void convexClient.mutation((convexApi as any).effects.setArpeggiatorParams, {
-        roomId: props.roomId,
-        trackId: id as any,
-        userId: props.userId,
-        params,
-      })
+      void convexClient.mutation(
+        (convexApi as any).effects.setArpeggiatorParams,
+        {
+          roomId: props.roomId,
+          trackId: id as any,
+          userId: props.userId,
+          params,
+        },
+      );
     }
-  })
+  });
 
   function updateArp(updater: (prev: ArpeggiatorParams) => ArpeggiatorParams) {
-    const id = currentTargetId(); if (!id) return
-    setArpByTarget(prev => ({ ...prev, [id]: updater(prev[id] ?? createDefaultArpeggiatorParams()) }))
+    const id = currentTargetId();
+    if (!id) return;
+    setArpByTarget((prev) => ({
+      ...prev,
+      [id]: updater(prev[id] ?? createDefaultArpeggiatorParams()),
+    }));
   }
 
   function handleArpChange(updates: Partial<ArpeggiatorParams>) {
-    updateArp(prev => ({ ...prev!, ...updates }))
+    updateArp((prev) => ({ ...prev!, ...updates }));
   }
 
   function handleArpToggle(enabled: boolean) {
-    updateArp(prev => ({ ...prev!, enabled }))
+    updateArp((prev) => ({ ...prev!, enabled }));
   }
 
   function handleArpReset() {
-    updateArp(() => createDefaultArpeggiatorParams())
+    updateArp(() => createDefaultArpeggiatorParams());
   }
 
-  const lastSavedSynth = new Map<string, string>()
+  const lastSavedSynth = new Map<string, string>();
   createEffect(() => {
-    const id = currentTargetId()
-    if (!id || id === 'master') return
-    const row = getQueryResult<any>(synthQuery)
-    if (row === undefined) return
+    const id = currentTargetId();
+    if (!id || id === "master") return;
+    const row = getQueryResult<any>(synthQuery);
+    if (row === undefined) return;
     if (row?.params) {
-      const p = row.params as SynthParams
-      setSynthByTarget(prev => ({ ...prev, [id]: p }))
-      lastSavedSynth.set(id, JSON.stringify(p))
-      props.audioEngine?.setTrackSynth(id, p)
+      const p = row.params as SynthParams;
+      setSynthByTarget((prev) => ({ ...prev, [id]: p }));
+      lastSavedSynth.set(id, JSON.stringify(p));
+      props.audioEngine?.setTrackSynth(id, p);
     } else {
-      const track = props.tracks.find(t => t.id === id)
-      if (track?.kind === 'instrument') {
-        setSynthByTarget(prev => {
-          if (prev[id]) return prev
-          const defaults = createDefaultSynthParams()
-          lastSavedSynth.set(id, JSON.stringify(defaults))
-          props.audioEngine?.setTrackSynth(id, defaults)
-          return { ...prev, [id]: defaults }
-        })
+      const track = props.tracks.find((t) => t.id === id);
+      if (track?.kind === "instrument") {
+        setSynthByTarget((prev) => {
+          if (prev[id]) return prev;
+          const defaults = createDefaultSynthParams();
+          lastSavedSynth.set(id, JSON.stringify(defaults));
+          props.audioEngine?.setTrackSynth(id, defaults);
+          return { ...prev, [id]: defaults };
+        });
       } else {
-        setSynthByTarget(prev => ({ ...prev, [id]: undefined }))
+        setSynthByTarget((prev) => ({ ...prev, [id]: undefined }));
       }
     }
-  })
+  });
 
   // Apply/persist on change
   createEffect(() => {
-    const id = currentTargetId(); if (!id || id === 'master') return
-    const params = synthForTarget(); if (!params) return
-    const json = JSON.stringify(params)
-    if (lastSavedSynth.get(id) === json) return
-    lastSavedSynth.set(id, json)
-    props.audioEngine?.setTrackSynth(id, params)
+    const id = currentTargetId();
+    if (!id || id === "master") return;
+    const params = synthForTarget();
+    if (!params) return;
+    const json = JSON.stringify(params);
+    if (lastSavedSynth.get(id) === json) return;
+    lastSavedSynth.set(id, json);
+    props.audioEngine?.setTrackSynth(id, params);
     if (props.roomId && props.userId) {
       void convexClient.mutation((convexApi as any).effects.setSynthParams, {
         roomId: props.roomId,
         trackId: id as any,
         userId: props.userId,
         params,
-      })
+      });
     }
-  })
+  });
 
   function updateSynth(updater: (prev: SynthParams) => SynthParams) {
-    const id = currentTargetId(); if (!id) return
-    setSynthByTarget(prev => ({ ...prev, [id]: updater(prev[id] ?? createDefaultSynthParams()) }))
+    const id = currentTargetId();
+    if (!id) return;
+    setSynthByTarget((prev) => ({
+      ...prev,
+      [id]: updater(prev[id] ?? createDefaultSynthParams()),
+    }));
   }
 
   function handleSynthChange(updates: Partial<SynthParams>) {
-    updateSynth(prev => ({ ...prev!, ...updates }))
+    updateSynth((prev) => ({ ...prev!, ...updates }));
   }
 
   function handleSynthReset() {
-    updateSynth(() => createDefaultSynthParams())
+    updateSynth(() => createDefaultSynthParams());
   }
 
   // ===== MIDI: Add MIDI Clip on instrument tracks =====
   async function handleAddMidiClip() {
-    const track = currentTrack(); if (!track) return
-    if ((track.kind as any) !== 'instrument') return
-    const rid = props.roomId; const uid = props.userId
-    if (!rid || !uid) return
-    const start = Math.max(0, Math.round((props.playheadSec ?? 0) * 1000) / 1000)
+    const track = currentTrack();
+    if (!track) return;
+    if ((track.kind as any) !== "instrument") return;
+    const rid = props.roomId;
+    const uid = props.userId;
+    if (!rid || !uid) return;
+    const start = Math.max(
+      0,
+      Math.round((props.playheadSec ?? 0) * 1000) / 1000,
+    );
     try {
-      const clipId = await convexClient.mutation(convexApi.clips.create as any, {
-        roomId: rid,
-        trackId: track.id as any,
-        startSec: start,
-        duration: 1,
-        userId: uid,
-        name: 'MIDI Clip',
-      } as any) as any as string
-      if (!clipId) return
+      const clipId = (await convexClient.mutation(
+        convexApi.clips.create as any,
+        {
+          roomId: rid,
+          trackId: track.id as any,
+          startSec: start,
+          duration: 1,
+          userId: uid,
+          name: "MIDI Clip",
+        } as any,
+      )) as any as string;
+      if (!clipId) return;
       await convexClient.mutation((convexApi as any).clips.setMidi, {
         clipId: clipId as any,
         midi: {
-          wave: 'sawtooth',
+          wave: "sawtooth",
           gain: 0.8,
           notes: [],
         },
         userId: uid,
-      })
+      });
       // Hint parent to select/jump
-      props.onSelectClip?.(track.id, clipId, start)
+      props.onSelectClip?.(track.id, clipId, start);
     } catch (err) {
-      console.warn('[EffectsPanel] failed to add MIDI clip', err)
+      console.warn("[EffectsPanel] failed to add MIDI clip", err);
     }
   }
 
   // Local EQ params per FX target (trackId or 'master'); undefined = no EQ yet
-  const [eqByTarget, setEqByTarget] = createSignal<Record<string, EqParams | undefined>>({})
-  const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null)
+  const [eqByTarget, setEqByTarget] = createSignal<
+    Record<string, EqParams | undefined>
+  >({});
+  const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null);
 
   const eqForTarget = createMemo(() => {
-    const id = currentTargetId()
-    const map = eqByTarget()
-    return map[id]
-  })
+    const id = currentTargetId();
+    const map = eqByTarget();
+    return map[id];
+  });
 
   // Live spectrum polling (keeps last non-empty after pause)
   onMount(() => {
-    let raf = 0
+    let raf = 0;
     const loop = () => {
       try {
-        const id = currentTargetId()
-        const data = id === 'master'
-          ? props.audioEngine?.getMasterSpectrum()
-          : props.audioEngine?.getTrackSpectrum(id)
-        if (data) setSpectrum(data)
+        const id = currentTargetId();
+        const data =
+          id === "master"
+            ? props.audioEngine?.getMasterSpectrum()
+            : props.audioEngine?.getTrackSpectrum(id);
+        if (data) setSpectrum(data);
       } catch {}
-      raf = requestAnimationFrame(loop)
-    }
-    raf = requestAnimationFrame(loop)
-    onCleanup(() => { try { cancelAnimationFrame(raf) } catch {} })
-  })
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    onCleanup(() => {
+      try {
+        cancelAnimationFrame(raf);
+      } catch {}
+    });
+  });
 
   createEffect(() => {
-    void currentTargetId()
-    setSpectrum(null)
-  })
+    void currentTargetId();
+    setSpectrum(null);
+  });
 
   function updateEqForTarget(updater: (prev: EqParams) => EqParams) {
-    const id = currentTargetId()
+    const id = currentTargetId();
     // mark recent local edit to temporarily ignore server hydration
-    eqLastLocalEdit.set(id, Date.now())
-    setEqByTarget(prev => ({ ...prev, [id]: updater(prev[id] ?? createDefaultEqParams()) }))
+    eqLastLocalEdit.set(id, Date.now());
+    setEqByTarget((prev) => ({
+      ...prev,
+      [id]: updater(prev[id] ?? createDefaultEqParams()),
+    }));
   }
 
-  const handleBandChange = (bandId: string, updates: Partial<EqParams['bands'][number]>) => {
-    updateEqForTarget(prev => ({
+  const handleBandChange = (
+    bandId: string,
+    updates: Partial<EqParams["bands"][number]>,
+  ) => {
+    updateEqForTarget((prev) => ({
       ...prev!,
-      bands: prev!.bands.map(b => b.id === bandId ? { ...b, ...updates } : b)
-    }))
-  }
+      bands: prev!.bands.map((b) =>
+        b.id === bandId ? { ...b, ...updates } : b,
+      ),
+    }));
+  };
   const handleBandToggle = (bandId: string) => {
-    updateEqForTarget(prev => ({
+    updateEqForTarget((prev) => ({
       ...prev!,
-      bands: prev!.bands.map(b => b.id === bandId ? { ...b, enabled: !b.enabled } : b)
-    }))
-  }
+      bands: prev!.bands.map((b) =>
+        b.id === bandId ? { ...b, enabled: !b.enabled } : b,
+      ),
+    }));
+  };
   const handleToggleEnabled = (enabled: boolean) => {
-    updateEqForTarget(prev => ({ ...prev!, enabled }))
-  }
+    updateEqForTarget((prev) => ({ ...prev!, enabled }));
+  };
   const handleReset = () => {
-    updateEqForTarget(() => createDefaultEqParams())
-  }
+    updateEqForTarget(() => createDefaultEqParams());
+  };
 
-  const lastSaved = new Map<string, string>()
+  const lastSaved = new Map<string, string>();
   createEffect(() => {
-    const id = currentTargetId()
-    if (!id) return
-    const row = id === 'master'
-      ? getQueryResult<any>(eqMasterQuery)
-      : getQueryResult<any>(eqTrackQuery)
-    if (row === undefined) return
+    const id = currentTargetId();
+    if (!id) return;
+    const row =
+      id === "master"
+        ? getQueryResult<any>(eqMasterQuery)
+        : getQueryResult<any>(eqTrackQuery);
+    if (row === undefined) return;
     if (row?.params) {
-      const params = row.params as EqParams
-      const rowJson = JSON.stringify(params)
-      const current = (eqByTarget() as any)[id] as EqParams | undefined
-      const currentJson = current ? JSON.stringify(current) : undefined
-      const lastEdit = eqLastLocalEdit.get(id) ?? 0
-      const editing = (Date.now() - lastEdit < LOCAL_EDIT_SUPPRESS_MS) || eqSaveTimers.has(id)
+      const params = row.params as EqParams;
+      const rowJson = JSON.stringify(params);
+      const current = (eqByTarget() as any)[id] as EqParams | undefined;
+      const currentJson = current ? JSON.stringify(current) : undefined;
+      const lastEdit = eqLastLocalEdit.get(id) ?? 0;
+      const editing =
+        Date.now() - lastEdit < LOCAL_EDIT_SUPPRESS_MS || eqSaveTimers.has(id);
       if (!current) {
         // Initial hydration for this target
-        setEqByTarget(prev => ({ ...prev, [id]: params }))
-        lastSaved.set(id, rowJson)
-        if (id === 'master') {
-          props.audioEngine?.setMasterEq(params as EqParamsLite)
+        setEqByTarget((prev) => ({ ...prev, [id]: params }));
+        lastSaved.set(id, rowJson);
+        if (id === "master") {
+          props.audioEngine?.setMasterEq(params as EqParamsLite);
         } else {
-          props.audioEngine?.setTrackEq(id, params as EqParamsLite)
+          props.audioEngine?.setTrackEq(id, params as EqParamsLite);
         }
-        setEffectOrderForTarget(id, 'eq', (row as any).index)
+        setEffectOrderForTarget(id, "eq", (row as any).index);
       } else {
-        if (editing) return
+        if (editing) return;
         if (currentJson === rowJson) {
           // Already in sync; keep UI stable, only track order/lastSaved
-          lastSaved.set(id, rowJson)
-          setEffectOrderForTarget(id, 'eq', (row as any).index)
+          lastSaved.set(id, rowJson);
+          setEffectOrderForTarget(id, "eq", (row as any).index);
         } else {
-          setEqByTarget(prev => ({ ...prev, [id]: params }))
-          lastSaved.set(id, rowJson)
-          if (id === 'master') {
-            props.audioEngine?.setMasterEq(params as EqParamsLite)
+          setEqByTarget((prev) => ({ ...prev, [id]: params }));
+          lastSaved.set(id, rowJson);
+          if (id === "master") {
+            props.audioEngine?.setMasterEq(params as EqParamsLite);
           } else {
-            props.audioEngine?.setTrackEq(id, params as EqParamsLite)
+            props.audioEngine?.setTrackEq(id, params as EqParamsLite);
           }
-          setEffectOrderForTarget(id, 'eq', (row as any).index)
+          setEffectOrderForTarget(id, "eq", (row as any).index);
         }
       }
     } else {
       // Only clear when not actively editing
-      const lastEdit = eqLastLocalEdit.get(id) ?? 0
-      if ((Date.now() - lastEdit) >= LOCAL_EDIT_SUPPRESS_MS && !eqSaveTimers.has(id)) {
-        setEqByTarget(prev => ({ ...prev, [id]: undefined }))
+      const lastEdit = eqLastLocalEdit.get(id) ?? 0;
+      if (
+        Date.now() - lastEdit >= LOCAL_EDIT_SUPPRESS_MS &&
+        !eqSaveTimers.has(id)
+      ) {
+        setEqByTarget((prev) => ({ ...prev, [id]: undefined }));
       }
     }
-  })
+  });
 
   // Apply to audio engine and persist when params change
   createEffect(() => {
-    const id = currentTargetId()
-    if (!id) return
-    const params = eqForTarget()
-    if (!params) return
-    const json = JSON.stringify(params)
-    if (lastSaved.get(id) === json) return
-    lastSaved.set(id, json)
+    const id = currentTargetId();
+    if (!id) return;
+    const params = eqForTarget();
+    if (!params) return;
+    const json = JSON.stringify(params);
+    if (lastSaved.get(id) === json) return;
+    lastSaved.set(id, json);
     // Apply immediately to engine for responsive audio
-    if (id === 'master') {
-      props.audioEngine?.setMasterEq(params as unknown as EqParamsLite)
+    if (id === "master") {
+      props.audioEngine?.setMasterEq(params as unknown as EqParamsLite);
     } else {
-      props.audioEngine?.setTrackEq(id, params as unknown as EqParamsLite)
+      props.audioEngine?.setTrackEq(id, params as unknown as EqParamsLite);
     }
     // Debounce server persistence per target
-    const prevTimer = eqSaveTimers.get(id)
-    if (prevTimer) { try { clearTimeout(prevTimer) } catch {} }
+    const prevTimer = eqSaveTimers.get(id);
+    if (prevTimer) {
+      try {
+        clearTimeout(prevTimer);
+      } catch {}
+    }
     if (props.roomId && props.userId) {
       const timer = window.setTimeout(() => {
-        eqSaveTimers.delete(id)
-        if (id === 'master') {
+        eqSaveTimers.delete(id);
+        if (id === "master") {
           void convexClient.mutation(convexApi.effects.setMasterEqParams, {
             roomId: props.roomId!,
             userId: props.userId!,
             params,
-          })
+          });
         } else {
           void convexClient.mutation(convexApi.effects.setEqParams, {
             roomId: props.roomId!,
             trackId: id as any,
             userId: props.userId!,
             params,
-          })
+          });
         }
-      }, SAVE_DEBOUNCE_MS)
-      eqSaveTimers.set(id, timer)
+      }, SAVE_DEBOUNCE_MS);
+      eqSaveTimers.set(id, timer);
     }
-  })
+  });
 
   // ===== Reverb wiring (parallel to EQ) =====
-  const [reverbByTarget, setReverbByTarget] = createSignal<Record<string, ReverbParams | undefined>>({})
-  const reverbForTarget = createMemo(() => reverbByTarget()[currentTargetId()])
-  const updateReverbForTarget = (updater: (prev: ReverbParams) => ReverbParams) => {
-    const id = currentTargetId()
-    reverbLastLocalEdit.set(id, Date.now())
-    setReverbByTarget(prev => ({ ...prev, [id]: updater(prev[id] ?? createDefaultReverbParams()) }))
-  }
+  const [reverbByTarget, setReverbByTarget] = createSignal<
+    Record<string, ReverbParams | undefined>
+  >({});
+  const reverbForTarget = createMemo(() => reverbByTarget()[currentTargetId()]);
+  const updateReverbForTarget = (
+    updater: (prev: ReverbParams) => ReverbParams,
+  ) => {
+    const id = currentTargetId();
+    reverbLastLocalEdit.set(id, Date.now());
+    setReverbByTarget((prev) => ({
+      ...prev,
+      [id]: updater(prev[id] ?? createDefaultReverbParams()),
+    }));
+  };
   const handleReverbChange = (updates: Partial<ReverbParams>) => {
-    updateReverbForTarget(prev => ({ ...prev!, ...updates }))
-  }
+    updateReverbForTarget((prev) => ({ ...prev!, ...updates }));
+  };
   const handleReverbToggle = (enabled: boolean) => {
-    updateReverbForTarget(prev => ({ ...prev!, enabled }))
-  }
+    updateReverbForTarget((prev) => ({ ...prev!, enabled }));
+  };
   const handleReverbReset = () => {
-    updateReverbForTarget(() => createDefaultReverbParams())
-  }
+    updateReverbForTarget(() => createDefaultReverbParams());
+  };
 
-  const lastSavedReverb = new Map<string, string>()
+  const lastSavedReverb = new Map<string, string>();
   createEffect(() => {
-    const id = currentTargetId()
-    if (!id) return
-    const row = id === 'master'
-      ? getQueryResult<any>(reverbMasterQuery)
-      : getQueryResult<any>(reverbTrackQuery)
-    if (row === undefined) return
+    const id = currentTargetId();
+    if (!id) return;
+    const row =
+      id === "master"
+        ? getQueryResult<any>(reverbMasterQuery)
+        : getQueryResult<any>(reverbTrackQuery);
+    if (row === undefined) return;
     if (row?.params) {
-      const params = row.params as ReverbParams
-      const rowJson = JSON.stringify(params)
-      const current = (reverbByTarget() as any)[id] as ReverbParams | undefined
-      const currentJson = current ? JSON.stringify(current) : undefined
-      const lastEdit = reverbLastLocalEdit.get(id) ?? 0
-      const editing = (Date.now() - lastEdit < LOCAL_EDIT_SUPPRESS_MS) || reverbSaveTimers.has(id)
+      const params = row.params as ReverbParams;
+      const rowJson = JSON.stringify(params);
+      const current = (reverbByTarget() as any)[id] as ReverbParams | undefined;
+      const currentJson = current ? JSON.stringify(current) : undefined;
+      const lastEdit = reverbLastLocalEdit.get(id) ?? 0;
+      const editing =
+        Date.now() - lastEdit < LOCAL_EDIT_SUPPRESS_MS ||
+        reverbSaveTimers.has(id);
       if (!current) {
-        setReverbByTarget(prev => ({ ...prev, [id]: params }))
-        lastSavedReverb.set(id, rowJson)
-        if (id === 'master') {
-          props.audioEngine?.setMasterReverb(params as unknown as ReverbParamsLite)
+        setReverbByTarget((prev) => ({ ...prev, [id]: params }));
+        lastSavedReverb.set(id, rowJson);
+        if (id === "master") {
+          props.audioEngine?.setMasterReverb(
+            params as unknown as ReverbParamsLite,
+          );
         } else {
-          props.audioEngine?.setTrackReverb(id, params as unknown as ReverbParamsLite)
+          props.audioEngine?.setTrackReverb(
+            id,
+            params as unknown as ReverbParamsLite,
+          );
         }
-        setEffectOrderForTarget(id, 'reverb', (row as any).index)
+        setEffectOrderForTarget(id, "reverb", (row as any).index);
       } else {
-        if (editing) return
+        if (editing) return;
         if (currentJson === rowJson) {
-          lastSavedReverb.set(id, rowJson)
-          setEffectOrderForTarget(id, 'reverb', (row as any).index)
+          lastSavedReverb.set(id, rowJson);
+          setEffectOrderForTarget(id, "reverb", (row as any).index);
         } else {
-          setReverbByTarget(prev => ({ ...prev, [id]: params }))
-          lastSavedReverb.set(id, rowJson)
-          if (id === 'master') {
-            props.audioEngine?.setMasterReverb(params as unknown as ReverbParamsLite)
+          setReverbByTarget((prev) => ({ ...prev, [id]: params }));
+          lastSavedReverb.set(id, rowJson);
+          if (id === "master") {
+            props.audioEngine?.setMasterReverb(
+              params as unknown as ReverbParamsLite,
+            );
           } else {
-            props.audioEngine?.setTrackReverb(id, params as unknown as ReverbParamsLite)
+            props.audioEngine?.setTrackReverb(
+              id,
+              params as unknown as ReverbParamsLite,
+            );
           }
-          setEffectOrderForTarget(id, 'reverb', (row as any).index)
+          setEffectOrderForTarget(id, "reverb", (row as any).index);
         }
       }
     } else {
-      const lastEdit = reverbLastLocalEdit.get(id) ?? 0
-      if ((Date.now() - lastEdit) >= LOCAL_EDIT_SUPPRESS_MS && !reverbSaveTimers.has(id)) {
-        setReverbByTarget(prev => ({ ...prev, [id]: undefined }))
+      const lastEdit = reverbLastLocalEdit.get(id) ?? 0;
+      if (
+        Date.now() - lastEdit >= LOCAL_EDIT_SUPPRESS_MS &&
+        !reverbSaveTimers.has(id)
+      ) {
+        setReverbByTarget((prev) => ({ ...prev, [id]: undefined }));
       }
     }
-  })
+  });
 
   // Apply/persist reverb when params change
   createEffect(() => {
-    const id = currentTargetId(); if (!id) return
-    const params = reverbForTarget(); if (!params) return
-    const json = JSON.stringify(params)
-    if (lastSavedReverb.get(id) === json) return
-    lastSavedReverb.set(id, json)
+    const id = currentTargetId();
+    if (!id) return;
+    const params = reverbForTarget();
+    if (!params) return;
+    const json = JSON.stringify(params);
+    if (lastSavedReverb.get(id) === json) return;
+    lastSavedReverb.set(id, json);
     // Apply immediately to engine for responsive audio
-    if (id === 'master') {
-      props.audioEngine?.setMasterReverb(params as unknown as ReverbParamsLite)
+    if (id === "master") {
+      props.audioEngine?.setMasterReverb(params as unknown as ReverbParamsLite);
     } else {
-      props.audioEngine?.setTrackReverb(id, params as unknown as ReverbParamsLite)
+      props.audioEngine?.setTrackReverb(
+        id,
+        params as unknown as ReverbParamsLite,
+      );
     }
     // Debounce server persistence per target
-    const prevTimer = reverbSaveTimers.get(id)
-    if (prevTimer) { try { clearTimeout(prevTimer) } catch {} }
+    const prevTimer = reverbSaveTimers.get(id);
+    if (prevTimer) {
+      try {
+        clearTimeout(prevTimer);
+      } catch {}
+    }
     if (props.roomId && props.userId) {
       const timer = window.setTimeout(() => {
-        reverbSaveTimers.delete(id)
-        if (id === 'master') {
+        reverbSaveTimers.delete(id);
+        if (id === "master") {
           void convexClient.mutation(convexApi.effects.setMasterReverbParams, {
             roomId: props.roomId!,
             userId: props.userId!,
             params,
-          })
+          });
         } else {
           void convexClient.mutation(convexApi.effects.setReverbParams, {
             roomId: props.roomId!,
             trackId: id as any,
             userId: props.userId!,
             params,
-          })
+          });
         }
-      }, SAVE_DEBOUNCE_MS)
-      reverbSaveTimers.set(id, timer)
+      }, SAVE_DEBOUNCE_MS);
+      reverbSaveTimers.set(id, timer);
     }
-  })
+  });
 
   // ===== Effect ordering (per target) =====
-  type EffectKind = 'eq' | 'reverb'
-  const [effectOrderByTarget, setEffectOrderByTarget] = createSignal<Record<string, EffectKind[]>>({})
-  const [effectIndexByTarget, setEffectIndexByTarget] = createSignal<Record<string, Partial<Record<EffectKind, number>>>>({})
+  type EffectKind = "eq" | "reverb";
+  const [effectOrderByTarget, setEffectOrderByTarget] = createSignal<
+    Record<string, EffectKind[]>
+  >({});
+  const [effectIndexByTarget, setEffectIndexByTarget] = createSignal<
+    Record<string, Partial<Record<EffectKind, number>>>
+  >({});
 
-  function setEffectOrderForTarget(targetId: string, kind: EffectKind, index?: number) {
-    if (typeof index === 'number') {
-      setEffectIndexByTarget(prev => {
-        const next = { ...prev }
-        next[targetId] = { ...(next[targetId] ?? {}), [kind]: index }
-        return next
-      })
-      const idxCurrent = untrack(() => effectIndexByTarget()[targetId] ?? {})
-      const idx = { ...idxCurrent, [kind]: index }
-      const entries: { kind: EffectKind; idx: number }[] = []
-      if (typeof idx.eq === 'number') entries.push({ kind: 'eq', idx: idx.eq as number })
-      if (typeof idx.reverb === 'number') entries.push({ kind: 'reverb', idx: idx.reverb as number })
+  function setEffectOrderForTarget(
+    targetId: string,
+    kind: EffectKind,
+    index?: number,
+  ) {
+    if (typeof index === "number") {
+      setEffectIndexByTarget((prev) => {
+        const next = { ...prev };
+        next[targetId] = { ...(next[targetId] ?? {}), [kind]: index };
+        return next;
+      });
+      const idxCurrent = untrack(() => effectIndexByTarget()[targetId] ?? {});
+      const idx = { ...idxCurrent, [kind]: index };
+      const entries: { kind: EffectKind; idx: number }[] = [];
+      if (typeof idx.eq === "number")
+        entries.push({ kind: "eq", idx: idx.eq as number });
+      if (typeof idx.reverb === "number")
+        entries.push({ kind: "reverb", idx: idx.reverb as number });
       if (entries.length > 0) {
-        entries.sort((a, b) => a.idx - b.idx)
-        setEffectOrderByTarget(prev => ({ ...prev, [targetId]: entries.map(e => e.kind) }))
-        return
+        entries.sort((a, b) => a.idx - b.idx);
+        setEffectOrderByTarget((prev) => ({
+          ...prev,
+          [targetId]: entries.map((e) => e.kind),
+        }));
+        return;
       }
     }
-    appendEffectOrder(targetId, kind)
+    appendEffectOrder(targetId, kind);
   }
 
   function appendEffectOrder(targetId: string, kind: EffectKind) {
-    setEffectOrderByTarget(prev => {
-      const arr = prev[targetId] ?? []
-      if (arr.includes(kind)) return prev
-      return { ...prev, [targetId]: [...arr, kind] }
-    })
+    setEffectOrderByTarget((prev) => {
+      const arr = prev[targetId] ?? [];
+      if (arr.includes(kind)) return prev;
+      return { ...prev, [targetId]: [...arr, kind] };
+    });
   }
 
   const orderedEffects = createMemo<EffectKind[]>(() => {
-    const id = currentTargetId()
-    const map = effectOrderByTarget()
-    const arr = map[id]
-    if (arr && arr.length > 0) return arr
+    const id = currentTargetId();
+    const map = effectOrderByTarget();
+    const arr = map[id];
+    if (arr && arr.length > 0) return arr;
     // Fallback by presence
-    const present: EffectKind[] = []
-    if (eqForTarget()) present.push('eq')
-    if (reverbForTarget()) present.push('reverb')
-    if (present.length === 2) return ['eq', 'reverb']
-    return present
-  })
+    const present: EffectKind[] = [];
+    if (eqForTarget()) present.push("eq");
+    if (reverbForTarget()) present.push("reverb");
+    if (present.length === 2) return ["eq", "reverb"];
+    return present;
+  });
 
   async function handleAddEq() {
-    const id = currentTargetId()
-    if (!id) return
-    const params = createDefaultEqParams()
-    setEqByTarget(prev => ({ ...prev, [id]: params }))
-    appendEffectOrder(id, 'eq')
+    const id = currentTargetId();
+    if (!id) return;
+    const params = createDefaultEqParams();
+    setEqByTarget((prev) => ({ ...prev, [id]: params }));
+    appendEffectOrder(id, "eq");
     // Apply immediately
-    if (id === 'master') {
-      props.audioEngine?.setMasterEq(params as unknown as EqParamsLite)
+    if (id === "master") {
+      props.audioEngine?.setMasterEq(params as unknown as EqParamsLite);
       if (props.roomId && props.userId) {
-        void convexClient.mutation((convexApi as any).effects.setMasterEqParams, {
-          roomId: props.roomId,
-          userId: props.userId,
-          params,
-        })
+        void convexClient.mutation(
+          (convexApi as any).effects.setMasterEqParams,
+          {
+            roomId: props.roomId,
+            userId: props.userId,
+            params,
+          },
+        );
       }
     } else {
-      props.audioEngine?.setTrackEq(id, params as EqParamsLite)
+      props.audioEngine?.setTrackEq(id, params as EqParamsLite);
       if (props.roomId && props.userId) {
         void convexClient.mutation(convexApi.effects.setEqParams, {
           roomId: props.roomId,
           trackId: id as any,
           userId: props.userId,
           params,
-        })
+        });
       }
     }
-    lastSaved.set(id, JSON.stringify(params))
+    lastSaved.set(id, JSON.stringify(params));
   }
 
   return (
@@ -591,14 +728,33 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         <div class="fixed left-0 right-0 bottom-0 z-50 border-t border-neutral-800 bg-neutral-900">
           <div class="flex" style={{ height: `${FX_PANEL_HEIGHT_PX}px` }}>
             <div class="flex w-20 flex-col items-center gap-2 border-r border-neutral-800 px-2 py-2">
-              <Button variant="outline" size="sm" class="w-full text-[10px] py-1" onClick={props.onClose}>Hide</Button>
-              <Show when={currentTrack() && currentTrack()!.kind === 'instrument'}>
-                <Button variant="default" size="sm" class="w-full text-[10px] py-1 px-1" onClick={handleAddMidiClip}>+ MIDI</Button>
+              <Button
+                variant="outline"
+                size="sm"
+                class="w-full text-[10px] py-1"
+                onClick={props.onClose}
+              >
+                Hide
+              </Button>
+              <Show
+                when={currentTrack() && currentTrack()!.kind === "instrument"}
+              >
+                <Button
+                  variant="default"
+                  size="sm"
+                  class="w-full text-[10px] py-1 px-1"
+                  onClick={handleAddMidiClip}
+                >
+                  + MIDI
+                </Button>
               </Show>
               <div class="flex flex-1 items-center justify-center">
                 <span
                   class="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.15em] text-neutral-300"
-                  style={{ transform: 'rotate(-90deg)', 'white-space': 'nowrap' }}
+                  style={{
+                    transform: "rotate(-90deg)",
+                    "white-space": "nowrap",
+                  }}
                 >
                   {targetName()}
                 </span>
@@ -606,25 +762,49 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
             </div>
             <div class="flex flex-1 flex-col overflow-hidden min-h-0">
               <div class="flex flex-wrap items-center gap-1.5 px-2 py-0.5 border-b border-neutral-800/50 min-h-[28px]">
-                <Show when={currentTrack() && currentTrack()!.kind === 'instrument' && !arpForTarget()}>
-                  <Button variant="default" size="sm" class="text-[11px] py-0.5 px-2 h-6" onClick={() => {
-                    const id = currentTargetId(); if (!id) return
-                    const params = createDefaultArpeggiatorParams()
-                    setArpByTarget(prev => ({ ...prev, [id]: params }))
-                    props.audioEngine?.setTrackArpeggiator(id, params)
-                    if (props.roomId && props.userId) {
-                      void convexClient.mutation((convexApi as any).effects.setArpeggiatorParams, {
-                        roomId: props.roomId,
-                        trackId: id as any,
-                        userId: props.userId,
-                        params,
-                      })
-                    }
-                    lastSavedArp.set(id, JSON.stringify(params))
-                  }}>+ Arp</Button>
+                <Show
+                  when={
+                    currentTrack() &&
+                    currentTrack()!.kind === "instrument" &&
+                    !arpForTarget()
+                  }
+                >
+                  <Button
+                    variant="default"
+                    size="sm"
+                    class="text-[11px] py-0.5 px-2 h-6"
+                    onClick={() => {
+                      const id = currentTargetId();
+                      if (!id) return;
+                      const params = createDefaultArpeggiatorParams();
+                      setArpByTarget((prev) => ({ ...prev, [id]: params }));
+                      props.audioEngine?.setTrackArpeggiator(id, params);
+                      if (props.roomId && props.userId) {
+                        void convexClient.mutation(
+                          (convexApi as any).effects.setArpeggiatorParams,
+                          {
+                            roomId: props.roomId,
+                            trackId: id as any,
+                            userId: props.userId,
+                            params,
+                          },
+                        );
+                      }
+                      lastSavedArp.set(id, JSON.stringify(params));
+                    }}
+                  >
+                    + Arp
+                  </Button>
                 </Show>
                 <Show when={!eqForTarget()}>
-                  <Button variant="default" size="sm" class="text-[11px] py-0.5 px-2 h-6" onClick={handleAddEq}>+ EQ</Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    class="text-[11px] py-0.5 px-2 h-6"
+                    onClick={handleAddEq}
+                  >
+                    + EQ
+                  </Button>
                 </Show>
                 <Show when={!reverbForTarget()}>
                   <Button
@@ -632,30 +812,137 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     size="sm"
                     class="text-[11px] py-0.5 px-2 h-6"
                     onClick={() => {
-                      const id = currentTargetId(); if (!id) return
-                      const params = createDefaultReverbParams()
-                      setReverbByTarget(prev => ({ ...prev, [id]: params }))
-                      appendEffectOrder(id, 'reverb')
-                      if (id === 'master') {
-                        props.audioEngine?.setMasterReverb(params as unknown as ReverbParamsLite)
+                      const id = currentTargetId();
+                      if (!id) return;
+                      const params = createDefaultReverbParams();
+                      setReverbByTarget((prev) => ({ ...prev, [id]: params }));
+                      appendEffectOrder(id, "reverb");
+                      if (id === "master") {
+                        props.audioEngine?.setMasterReverb(
+                          params as unknown as ReverbParamsLite,
+                        );
                         if (props.roomId && props.userId) {
-                          void convexClient.mutation(convexApi.effects.setMasterReverbParams, { roomId: props.roomId, userId: props.userId, params })
+                          void convexClient.mutation(
+                            convexApi.effects.setMasterReverbParams,
+                            {
+                              roomId: props.roomId,
+                              userId: props.userId,
+                              params,
+                            },
+                          );
                         }
                       } else {
-                        props.audioEngine?.setTrackReverb(id, params as unknown as ReverbParamsLite)
+                        props.audioEngine?.setTrackReverb(
+                          id,
+                          params as unknown as ReverbParamsLite,
+                        );
                         if (props.roomId && props.userId) {
-                          void convexClient.mutation(convexApi.effects.setReverbParams, { roomId: props.roomId, trackId: id as any, userId: props.userId, params })
+                          void convexClient.mutation(
+                            convexApi.effects.setReverbParams,
+                            {
+                              roomId: props.roomId,
+                              trackId: id as any,
+                              userId: props.userId,
+                              params,
+                            },
+                          );
                         }
                       }
-                      lastSavedReverb.set(id, JSON.stringify(params))
+                      lastSavedReverb.set(id, JSON.stringify(params));
                     }}
-                  >+ Reverb</Button>
+                  >
+                    + Reverb
+                  </Button>
                 </Show>
+                <div class="ml-auto">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        class="text-[11px] py-0.5 px-2 h-6"
+                        aria-label="Show keyboard shortcuts"
+                      >
+                        Shortcuts
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      class="bg-neutral-900 text-neutral-100"
+                      style={{ width: "min(92vw, 22rem)" }}
+                    >
+                      <DropdownMenuLabel class="text-neutral-400">
+                        Timeline
+                      </DropdownMenuLabel>
+                      <DropdownMenuItem disabled>
+                        Play / Pause
+                        <DropdownMenuShortcut>Space</DropdownMenuShortcut>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled>
+                        Delete selection or track
+                        <DropdownMenuShortcut>
+                          Del / Backspace
+                        </DropdownMenuShortcut>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled>
+                        Duplicate clips
+                        <DropdownMenuShortcut>
+                          Ctrl/Cmd + D
+                        </DropdownMenuShortcut>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled>
+                        Add Audio Track
+                        <DropdownMenuShortcut>Shift + T</DropdownMenuShortcut>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled>
+                        Add Instrument Track
+                        <DropdownMenuShortcut>
+                          Ctrl/Cmd + Shift + T
+                        </DropdownMenuShortcut>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled>
+                        Toggle Sidebar
+                        <DropdownMenuShortcut>
+                          Ctrl/Cmd + B
+                        </DropdownMenuShortcut>
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel class="text-neutral-400">
+                        MIDI Editor (when ⌨ enabled)
+                      </DropdownMenuLabel>
+                      <DropdownMenuItem disabled>
+                        Note keys
+                        <DropdownMenuShortcut>
+                          A S D F G H J K L ;
+                        </DropdownMenuShortcut>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled>
+                        Sharp keys
+                        <DropdownMenuShortcut>
+                          W E T Y U O P
+                        </DropdownMenuShortcut>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled>
+                        Octave down
+                        <DropdownMenuShortcut>Z</DropdownMenuShortcut>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled>
+                        Octave up
+                        <DropdownMenuShortcut>X</DropdownMenuShortcut>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
               <div class="flex-1 overflow-x-auto overflow-y-hidden px-2 py-2 min-h-0">
                 <div class="flex items-stretch gap-3 h-full min-w-min min-h-0">
                   {/* MIDI Effects (pre-synth) - LEFTMOST */}
-                  <Show when={currentTrack() && currentTrack()!.kind === 'instrument' && !!arpForTarget()}>
+                  <Show
+                    when={
+                      currentTrack() &&
+                      currentTrack()!.kind === "instrument" &&
+                      !!arpForTarget()
+                    }
+                  >
                     <Arpeggiator
                       params={arpForTarget()!}
                       onChange={handleArpChange}
@@ -664,9 +951,15 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       class="min-w-[280px]"
                     />
                   </Show>
-                  
+
                   {/* Instrument (Synth) */}
-                  <Show when={currentTrack() && currentTrack()!.kind === 'instrument' && !!synthForTarget()}>
+                  <Show
+                    when={
+                      currentTrack() &&
+                      currentTrack()!.kind === "instrument" &&
+                      !!synthForTarget()
+                    }
+                  >
                     <Synth
                       params={synthForTarget()!}
                       onChange={handleSynthChange}
@@ -674,37 +967,53 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       class="min-w-[280px]"
                     />
                   </Show>
-                  
-                  <For each={orderedEffects()}>{(eff) => (
-                    <Show when={eff === 'eq'} fallback={
-                      <Show when={!!reverbForTarget()}>
-                        <Reverb
-                          params={reverbForTarget()!}
-                          onChange={handleReverbChange}
-                          onToggleEnabled={handleReverbToggle}
-                          onReset={handleReverbReset}
-                          class="min-w-[280px]"
-                        />
+
+                  <For each={orderedEffects()}>
+                    {(eff) => (
+                      <Show
+                        when={eff === "eq"}
+                        fallback={
+                          <Show when={!!reverbForTarget()}>
+                            <Reverb
+                              params={reverbForTarget()!}
+                              onChange={handleReverbChange}
+                              onToggleEnabled={handleReverbToggle}
+                              onReset={handleReverbReset}
+                              class="min-w-[280px]"
+                            />
+                          </Show>
+                        }
+                      >
+                        <Show when={!!eqForTarget()}>
+                          <Eq
+                            bands={eqForTarget()!.bands}
+                            enabled={eqForTarget()!.enabled}
+                            onBandChange={handleBandChange}
+                            onBandToggle={handleBandToggle}
+                            onToggleEnabled={handleToggleEnabled}
+                            onReset={handleReset}
+                            class="min-w-[320px]"
+                            spectrumData={spectrum()}
+                          />
+                        </Show>
                       </Show>
-                    }>
-                      <Show when={!!eqForTarget()}>
-                        <Eq
-                          bands={eqForTarget()!.bands}
-                          enabled={eqForTarget()!.enabled}
-                          onBandChange={handleBandChange}
-                          onBandToggle={handleBandToggle}
-                          onToggleEnabled={handleToggleEnabled}
-                          onReset={handleReset}
-                          class="min-w-[320px]"
-                          spectrumData={spectrum()}
-                        />
-                      </Show>
-                    </Show>
-                  )}</For>
-                  
-                  <Show when={!eqForTarget() && !reverbForTarget() && !arpForTarget() && (!synthForTarget() || !currentTrack() || currentTrack()!.kind !== 'instrument')}>
+                    )}
+                  </For>
+
+                  <Show
+                    when={
+                      !eqForTarget() &&
+                      !reverbForTarget() &&
+                      !arpForTarget() &&
+                      (!synthForTarget() ||
+                        !currentTrack() ||
+                        currentTrack()!.kind !== "instrument")
+                    }
+                  >
                     <div class="flex items-center text-sm text-neutral-400 px-4">
-                      No effects on this {currentTargetId() === 'master' ? 'master bus' : 'track'}. Use Add EQ or Add Reverb.
+                      No effects on this{" "}
+                      {currentTargetId() === "master" ? "master bus" : "track"}.
+                      Use Add EQ or Add Reverb.
                     </div>
                   </Show>
                 </div>
@@ -722,8 +1031,10 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
           Open Effects
         </button>
       </Show>
-    </>
-  )
-}
 
-export default EffectsPanel
+      {/* Shortcuts dropdown implemented above; removed dialog variant */}
+    </>
+  );
+};
+
+export default EffectsPanel;

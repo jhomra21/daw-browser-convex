@@ -2,6 +2,7 @@ import { batch, createSignal, onCleanup, type Accessor, type Setter } from 'soli
 
 import { PPS, willOverlap, calcNonOverlapStart, yToLaneIndex, quantizeSecToGrid, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import type { Track, Clip, SelectedClip } from '~/types/timeline'
+import type { HistoryEntry } from '~/lib/undo/types'
 
 type MultiDragSnapshot = {
   anchorClipId: string
@@ -44,6 +45,8 @@ export type ClipDragOptions = {
   audioBufferCache: Map<string, AudioBuffer>
   // Notify timeline that a set of clip moves has been committed (drop finished)
   onCommitMoves?: (clipIds: string[]) => void
+  // optional history push
+  historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
 }
 
 export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
@@ -71,6 +74,8 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
   let multiDragging: MultiDragSnapshot | null = null
   // Ctrl-drag duplication state
   let duplicationActive = false
+  // Pre-move snapshot for undo
+  let prePositions = new Map<string, { trackId: string; startSec: number }>()
 
   const PREVIEW_PREFIX = '__dup_preview:'
   const isPreviewId = (id: string) => id.startsWith(PREVIEW_PREFIX)
@@ -132,6 +137,18 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     dragging = true
     duplicationActive = !!event.ctrlKey
     draggingIds = { trackId, clipId }
+    // capture pre-positions
+    prePositions = new Map<string, { trackId: string; startSec: number }>()
+    if (isMultiDrag) {
+      for (const id of selection) {
+        for (const t of currentTracks) {
+          const f = t.clips.find(cc => cc.id === id)
+          if (f) { prePositions.set(id, { trackId: t.id, startSec: f.startSec }); break }
+        }
+      }
+    } else {
+      prePositions.set(clipId, { trackId, startSec: clip.startSec })
+    }
     batch(() => {
       setSelectedTrackId(trackId)
       setSelectedClip({ trackId, clipId })
@@ -603,6 +620,19 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       }
 
       // finalize
+      // Push history entries for each created duplicate
+      try {
+        const rid = roomId()
+        if (rid && typeof options.historyPush === 'function') {
+          for (let i = 0; i < plan.length; i++) {
+            const p = plan[i]
+            const nid = idsCreated[i]
+            if (!nid) continue
+            options.historyPush({ type: 'clip-create', roomId: rid, data: { trackId: p.trackId, clip: { originalId: nid, currentId: nid, startSec: p.startSec, duration: p.duration, name: p.name, sampleUrl: p.sampleUrl, midi: p.midi, timing: { leftPadSec: p.leftPadSec, bufferOffsetSec: p.bufferOffsetSec, midiOffsetBeats: p.midiOffsetBeats } } } })
+          }
+        }
+      } catch {}
+
       dragging = false
       duplicationActive = false
       multiDragging = null
@@ -686,6 +716,24 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
         })
         // Notify moved clips committed
         try { options.onCommitMoves?.(md.items.map(it => it.clipId)) } catch {}
+        // Push history move entry
+        try {
+          const rid = roomId()
+          if (rid && typeof options.historyPush === 'function') {
+            const tsNow = tracks()
+            const anchorIdxNow = tsNow.findIndex(tt => tt.id === newTrackId)
+            const deltaIdxNow = anchorIdxNow >= 0 ? anchorIdxNow - md.anchorOrigTrackIdx : 0
+            const moves = md.items.map(it => {
+              const fallbackTrackId = tsNow[it.origTrackIdx]?.id ?? prePositions.get(it.clipId)?.trackId ?? newTrackId
+              const pre = prePositions.get(it.clipId) || { trackId: fallbackTrackId, startSec: it.origStartSec }
+              const idx = Math.max(0, Math.min(tsNow.length - 1, (it.origTrackIdx + deltaIdxNow)))
+              const postTrackId = tsNow[idx]?.id ?? newTrackId
+              const postStart = optimisticMoves.get(it.clipId)?.startSec ?? it.origStartSec
+              return { clipId: it.clipId, from: pre, to: { trackId: postTrackId, startSec: postStart } }
+            })
+            options.historyPush({ type: 'clips-move', roomId: rid, data: { moves } })
+          }
+        } catch {}
       } else {
         batch(() => {
           setSelectedTrackId(newTrackId)
@@ -820,6 +868,15 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           })
           // Notify moved clip committed
           try { options.onCommitMoves?.([c.id]) } catch {}
+          // Push history move entry (single)
+          try {
+            const rid = roomId()
+            const pre = prePositions.get(c.id) || { trackId: t!.id, startSec: c.startSec }
+            const to = { trackId: t!.id, startSec: c.startSec }
+            if (rid && typeof options.historyPush === 'function') {
+              options.historyPush({ type: 'clips-move', roomId: rid, data: { moves: [{ clipId: c.id, from: pre, to }] } })
+            }
+          } catch {}
         }
       }
     }

@@ -57,6 +57,7 @@ type EffectsPanelProps = {
   // Timeline context
   playheadSec?: number;
   onSelectClip?: (trackId: string, clipId: string, startSec: number) => void;
+  onEffectParamsCommitted?: (payload: { targetId: string; effect: 'eq'|'reverb'|'synth'|'arp'|'master-eq'|'master-reverb'; from: any; to: any }) => void;
 };
 
 const EffectsPanel: Component<EffectsPanelProps> = (props) => {
@@ -177,6 +178,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     if (!params) return;
     const json = JSON.stringify(params);
     if (lastSavedArp.get(id) === json) return;
+    const prev = lastSavedArp.get(id);
     lastSavedArp.set(id, json);
     props.audioEngine?.setTrackArpeggiator(id, params);
     if (props.roomId && props.userId) {
@@ -190,6 +192,15 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         },
       );
     }
+    try {
+      if (prev)
+        props.onEffectParamsCommitted?.({
+          targetId: id,
+          effect: "arp",
+          from: JSON.parse(prev),
+          to: params,
+        });
+    } catch {}
   });
 
   function updateArp(updater: (prev: ArpeggiatorParams) => ArpeggiatorParams) {
@@ -248,6 +259,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     if (!params) return;
     const json = JSON.stringify(params);
     if (lastSavedSynth.get(id) === json) return;
+    const prev = lastSavedSynth.get(id);
     lastSavedSynth.set(id, json);
     props.audioEngine?.setTrackSynth(id, params);
     if (props.roomId && props.userId) {
@@ -258,6 +270,15 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         params,
       });
     }
+    try {
+      if (prev)
+        props.onEffectParamsCommitted?.({
+          targetId: id,
+          effect: "synth",
+          from: JSON.parse(prev),
+          to: params,
+        });
+    } catch {}
   });
 
   function updateSynth(updater: (prev: SynthParams) => SynthParams) {
@@ -457,6 +478,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     if (!params) return;
     const json = JSON.stringify(params);
     if (lastSaved.get(id) === json) return;
+    const prev = lastSaved.get(id);
     lastSaved.set(id, json);
     // Apply immediately to engine for responsive audio
     if (id === "master") {
@@ -491,6 +513,15 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       }, SAVE_DEBOUNCE_MS);
       eqSaveTimers.set(id, timer);
     }
+    try {
+      if (prev)
+        props.onEffectParamsCommitted?.({
+          targetId: id,
+          effect: id === "master" ? "master-eq" : "eq",
+          from: JSON.parse(prev),
+          to: params,
+        });
+    } catch {}
   });
 
   // ===== Reverb wiring (parallel to EQ) =====
@@ -590,6 +621,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     if (!params) return;
     const json = JSON.stringify(params);
     if (lastSavedReverb.get(id) === json) return;
+    const prev = lastSavedReverb.get(id);
     lastSavedReverb.set(id, json);
     // Apply immediately to engine for responsive audio
     if (id === "master") {
@@ -627,6 +659,15 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       }, SAVE_DEBOUNCE_MS);
       reverbSaveTimers.set(id, timer);
     }
+    try {
+      if (prev)
+        props.onEffectParamsCommitted?.({
+          targetId: id,
+          effect: id === "master" ? "master-reverb" : "reverb",
+          from: JSON.parse(prev),
+          to: params,
+        });
+    } catch {}
   });
 
   // ===== Effect ordering (per target) =====

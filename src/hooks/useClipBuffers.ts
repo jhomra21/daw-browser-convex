@@ -1,4 +1,6 @@
 import { type Accessor, type Setter, untrack } from 'solid-js'
+import { computePeaks } from '~/lib/waveform'
+import { PPS } from '~/lib/timeline-utils'
 
 import type { AudioEngine } from '~/lib/audio-engine'
 import type { Track } from '~/types/timeline'
@@ -36,6 +38,26 @@ type ClipBufferControls = {
 
 export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
   const { audioEngine, tracks, setTracks } = options
+
+  // Batch-apply decoded buffers so many waveforms appear at once instead of one-by-one
+  const pendingAssignments = new Map<string, AudioBuffer>()
+  const BATCH_APPLY_MS = 120
+  let applyTimer: number | null = null
+  const scheduleApply = () => {
+    if (applyTimer != null) return
+    applyTimer = window.setTimeout(() => {
+      applyTimer = null
+      const entries = Array.from(pendingAssignments.entries())
+      pendingAssignments.clear()
+      if (entries.length === 0) return
+      const idSet = new Set(entries.map(([id]) => id))
+      const bufMap = new Map(entries)
+      setTracks(ts => ts.map(t => ({
+        ...t,
+        clips: t.clips.map(c => idSet.has(c.id) ? { ...c, buffer: bufMap.get(c.id)! } : c)
+      })))
+    }, BATCH_APPLY_MS)
+  }
 
   // Fetch helper with global per-URL cap: max 2 retries (3 total attempts)
   const fetchSampleWithRetry = async (url: string, init?: RequestInit) => {
@@ -104,16 +126,27 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
           audioBufferCache.set(clipId, buffer)
           matchingClipIds.add(clipId)
         }
-        setTracks(ts => ts.map(t => ({
-          ...t,
-          clips: t.clips.map(c => matchingClipIds.has(c.id) ? { ...c, buffer } : c),
-        })))
+        // Precompute waveform peaks once per buffer to avoid per-clip heavy sync work
+        try {
+          const bins = Math.max(1, Math.floor(buffer.duration * PPS))
+          const prime = () => { try { computePeaks(buffer, bins) } catch {} }
+          const ric = (window as any).requestIdleCallback as ((cb: any, opts?: any) => any) | undefined
+          if (ric) ric(prime, { timeout: 120 })
+          else setTimeout(prime, 0)
+        } catch {}
+        for (const id of matchingClipIds) pendingAssignments.set(id, buffer)
+        scheduleApply()
       } else {
         audioBufferCache.set(clipId, buffer)
-        setTracks(ts => ts.map(t => ({
-          ...t,
-          clips: t.clips.map(c => c.id === clipId ? { ...c, buffer } : c),
-        })))
+        try {
+          const bins = Math.max(1, Math.floor(buffer.duration * PPS))
+          const prime = () => { try { computePeaks(buffer, bins) } catch {} }
+          const ric = (window as any).requestIdleCallback as ((cb: any, opts?: any) => any) | undefined
+          if (ric) ric(prime, { timeout: 120 })
+          else setTimeout(prime, 0)
+        } catch {}
+        pendingAssignments.set(clipId, buffer)
+        scheduleApply()
       }
     }
 
@@ -173,6 +206,11 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
     sampleUrlBufferCache.clear()
     pendingSampleBuffers.clear()
     sampleUrlAttemptCounts.clear()
+    if (applyTimer !== null) {
+      clearTimeout(applyTimer)
+      applyTimer = null
+    }
+    pendingAssignments.clear()
   }
 
   return {

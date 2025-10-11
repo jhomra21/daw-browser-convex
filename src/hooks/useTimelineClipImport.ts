@@ -3,6 +3,7 @@ import { batch, type Accessor, type Setter } from 'solid-js'
 import type { AudioEngine } from '~/lib/audio-engine'
 import { clientXToSec, yToLaneIndex, willOverlap, calcNonOverlapStart, quantizeSecToGrid, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import type { Clip, SelectedClip, Track } from '~/types/timeline'
+import type { HistoryEntry } from '~/lib/undo/types'
 
 type ConvexClientType = typeof import('~/lib/convex').convexClient
 
@@ -37,6 +38,8 @@ type TimelineClipImportOptions = {
   bpm: Accessor<number>
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
+  // optional history push
+  historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
 }
 
 type TimelineClipImportHandlers = {
@@ -192,6 +195,13 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
       color: '#22c55e',
     })
 
+    try {
+      const rid = roomId()
+      if (rid && typeof options.historyPush === 'function') {
+        options.historyPush({ type: 'clip-create', roomId: rid, data: { trackId, clip: { originalId: createdClipId, currentId: createdClipId, startSec, duration: decoded.duration, name: file.name } } })
+      }
+    } catch {}
+
     applySelectionAfterCreate(trackId, createdClipId)
   }
 
@@ -254,6 +264,12 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
           await convexClient.mutation(convexApi.clips.setSampleUrl, { clipId: createdClipId as any, sampleUrl: url })
 
           applySelectionAfterCreate(targetTrackId, createdClipId)
+          try {
+            const rid = roomId()
+            if (rid && typeof options.historyPush === 'function') {
+              options.historyPush({ type: 'clip-create', roomId: rid, data: { trackId: targetTrackId, clip: { originalId: createdClipId, currentId: createdClipId, startSec, duration: baseDuration, name: clipName, sampleUrl: url } } })
+            }
+          } catch {}
           return
         }
       } catch {}
@@ -312,6 +328,12 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
       await convexClient.mutation(convexApi.clips.setSampleUrl, { clipId: createdClipId as any, sampleUrl: url })
 
       applySelectionAfterCreate(targetTrackId, createdClipId)
+      try {
+        const rid = roomId()
+        if (rid && typeof options.historyPush === 'function') {
+          options.historyPush({ type: 'clip-create', roomId: rid, data: { trackId: targetTrackId, clip: { originalId: createdClipId, currentId: createdClipId, startSec, duration: baseDuration, name: clipName, sampleUrl: url } } })
+        }
+      } catch {}
       return
     }
 
@@ -440,6 +462,12 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     await convexClient.mutation(convexApi.clips.setSampleUrl, { clipId: createdClipId as any, sampleUrl: url })
 
     applySelectionAfterCreate(trackId, createdClipId)
+    try {
+      const rid = roomId()
+      if (rid && typeof options.historyPush === 'function') {
+        options.historyPush({ type: 'clip-create', roomId: rid, data: { trackId, clip: { originalId: createdClipId, currentId: createdClipId, startSec, duration: baseDuration, name: clipName, sampleUrl: url } } })
+      }
+    } catch {}
   }
 
   return {

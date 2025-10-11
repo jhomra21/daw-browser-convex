@@ -3,6 +3,7 @@ const MIX_SYNC_KEY_PREFIX = 'mb:mix-sync:'
 const GRID_KEY_PREFIX = 'mb:grid:'
 const BPM_KEY_PREFIX = 'mb:bpm:'
 const LOOP_KEY_PREFIX = 'mb:loop:'
+const HISTORY_KEY_PREFIX = 'mb:history:'
 
 export const canUseLocalStorage = () => {
   if (typeof window === 'undefined') return false
@@ -150,5 +151,24 @@ export const saveLoopSettings = (rid: string | undefined, value: LoopSettings) =
   }
   try {
     localStorage.setItem(`${LOOP_KEY_PREFIX}${rid}`, JSON.stringify(payload))
+  } catch {}
+}
+
+// ---- Undo/Redo history (optional) ----
+export type PersistedHistory = { undo: any[]; redo: any[] }
+
+export const loadHistory = (rid?: string): PersistedHistory => {
+  if (!rid || !canUseLocalStorage()) return { undo: [], redo: [] }
+  try {
+    return JSON.parse(localStorage.getItem(`${HISTORY_KEY_PREFIX}${rid}`) || '{"undo":[],"redo":[]}') as PersistedHistory
+  } catch {
+    return { undo: [], redo: [] }
+  }
+}
+
+export const saveHistory = (rid: string | undefined, value: PersistedHistory) => {
+  if (!rid || !canUseLocalStorage()) return
+  try {
+    localStorage.setItem(`${HISTORY_KEY_PREFIX}${rid}`, JSON.stringify(value))
   } catch {}
 }

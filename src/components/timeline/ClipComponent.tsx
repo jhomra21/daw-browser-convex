@@ -1,7 +1,7 @@
 import { type Component, onMount, onCleanup, createEffect } from 'solid-js'
 import type { Clip } from '~/types/timeline'
 import { PPS, LANE_HEIGHT } from '~/lib/timeline-utils'
-import { computePeaks } from '~/lib/waveform'
+import { computePeaks, getWaveformSprite } from '~/lib/waveform'
 
 type ClipComponentProps = {
   clip: Clip
@@ -117,72 +117,44 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     // Fix waveform horizontal scale to real time based on buffer length (no stretch with clip resize)
     const bufferPxW = Math.max(1, Math.floor(buffer.duration * PPS))
     const bins = bufferPxW
-    const peaks = computePeaks(buffer, bins)
     const padPx = Math.max(0, Math.floor((props.clip.leftPadSec ?? 0) * PPS))
     const offsetPx = Math.max(0, Math.floor(((props.clip as any).bufferOffsetSec ?? 0) * PPS))
     const drawCols = Math.max(0, Math.min(cssW - padPx, Math.max(0, bins - offsetPx)))
-    const color = props.isSelected ? 'rgba(59,130,246,0.9)' : 'rgba(34,197,94,0.85)'
-
-    // Auto-gain normalization so waveform nearly fills inner area
-    let peak = 0
-    for (let i = 0; i < bins; i++) {
-      const min = peaks[i * 2]
-      const max = peaks[i * 2 + 1]
-      const a = Math.max(Math.abs(min), Math.abs(max))
-      if (a > peak) peak = a
-    }
-    const amp = innerH / 2
-    const gain = Math.min(0.98 / (peak || 1), 4.0) // cap gain to avoid extreme zoom
-
-    // Draw mirrored filled bars per pixel column with high-contrast fill
-    for (let i = 0; i < drawCols; i++) {
-      const idx = (i + offsetPx)
-      const min = peaks[idx * 2]
-      const max = peaks[idx * 2 + 1]
-      const a = Math.max(Math.abs(min), Math.abs(max))
-      const h = Math.min(a * amp * gain, innerH / 2)
-      if (h <= 0.5) continue
-      // top half (bright)
+    // Draw from a shared pre-rendered sprite (fast blit), falling back to per-clip draw if needed
+    const sprite = getWaveformSprite(buffer, bins, innerH)
+    if (sprite) {
+      ctx.drawImage(sprite, /*sx*/ offsetPx, /*sy*/ 0, /*sw*/ drawCols, /*sh*/ innerH, /*dx*/ padPx, /*dy*/ padTop, /*dw*/ drawCols, /*dh*/ innerH)
+    } else {
+      // Fallback: compute and draw inline (should rarely happen)
+      const peaks = computePeaks(buffer, bins)
+      let peak = 0
+      for (let i = 0; i < bins; i++) {
+        const min = peaks[i * 2]
+        const max = peaks[i * 2 + 1]
+        const a = Math.max(Math.abs(min), Math.abs(max))
+        if (a > peak) peak = a
+      }
+      const amp = innerH / 2
+      const gain = Math.min(0.98 / (peak || 1), 4.0)
       ctx.fillStyle = 'rgba(255,255,255,0.55)'
-      ctx.fillRect(padPx + i, midY - h, 1, h)
-      // bottom half (bright)
-      ctx.fillStyle = 'rgba(255,255,255,0.55)'
-      ctx.fillRect(padPx + i, midY, 1, h)
+      for (let i = 0; i < drawCols; i++) {
+        const idx = (i + offsetPx)
+        const min = peaks[idx * 2]
+        const max = peaks[idx * 2 + 1]
+        const a = Math.max(Math.abs(min), Math.abs(max))
+        const h = Math.min(a * amp * gain, innerH / 2)
+        if (h <= 0.5) continue
+        ctx.fillRect(padPx + i, midY - h, 1, h)
+        ctx.fillRect(padPx + i, midY, 1, h)
+      }
+      // Midline
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(0, Math.floor(midY) + 0.5)
+      ctx.lineTo(cssW, Math.floor(midY) + 0.5)
+      ctx.stroke()
     }
-
-    // Optional outlines (top and bottom) for clarity
-    ctx.strokeStyle = 'rgba(255,255,255,0.95)'
-    ctx.lineWidth = 1.5
-    ctx.beginPath()
-    for (let i = 0; i < drawCols; i++) {
-      const idx = (i + offsetPx)
-      const min = peaks[idx * 2]
-      const max = peaks[idx * 2 + 1]
-      const a = Math.max(Math.abs(min), Math.abs(max))
-      const x = padPx + i + 0.5
-      const yTop = midY - Math.min(a * amp * gain, innerH / 2)
-      if (i === 0) ctx.moveTo(x, yTop); else ctx.lineTo(x, yTop)
-    }
-    ctx.stroke()
-    ctx.beginPath()
-    for (let i = 0; i < drawCols; i++) {
-      const idx = (i + offsetPx)
-      const min = peaks[idx * 2]
-      const max = peaks[idx * 2 + 1]
-      const a = Math.max(Math.abs(min), Math.abs(max))
-      const x = padPx + i + 0.5
-      const yBottom = midY + Math.min(a * amp * gain, innerH / 2)
-      if (i === 0) ctx.moveTo(x, yBottom); else ctx.lineTo(x, yBottom)
-    }
-    ctx.stroke()
-
-    // Midline on top (thicker for clarity)
-    ctx.strokeStyle = 'rgba(255,255,255,0.7)'
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.moveTo(0, Math.floor(midY) + 0.5)
-    ctx.lineTo(cssW, Math.floor(midY) + 0.5)
-    ctx.stroke()
 
     // Mark end of audio if clip extends beyond buffer (account for left padding)
     const audioEndX = padPx + Math.max(0, bufferPxW - offsetPx)

@@ -28,6 +28,10 @@ import { useTrackRecording } from '~/hooks/useTrackRecording'
 import RecordingPreview from './timeline/RecordingPreview'
 import GridOverlay from './timeline/GridOverlay'
 import ExportDialog from './timeline/ExportDialog'
+import { createUndoManager, type UndoManager } from '~/lib/undo/manager'
+import type { HistoryEntry } from '~/lib/undo/types'
+import { loadHistory, saveHistory } from '~/lib/timeline-storage'
+import { execUndo, execRedo } from '~/lib/undo/exec'
 
 const volumeTimers = new Map<string, number>()
 const optimisticMoves = new Map<string, { trackId: string; startSec: number }>()
@@ -67,6 +71,12 @@ const Timeline: Component = () => {
 
   // Audio engine
   const audioEngine = getAudioEngine()
+  // Undo/Redo manager (per room)
+  let undoMgr: UndoManager | null = null
+  const pushHistory = (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => {
+    if (undoMgr) undoMgr.push(entry, mergeKey, mergeWindowMs)
+  }
+
   // FX initialization flags to pre-wire effects chains before user selects a track
   const fxInitApplied = new Set<string>()
   let masterFxInitDone = false
@@ -143,6 +153,17 @@ const Timeline: Component = () => {
   
       } catch {}
     }
+  })
+
+  // Initialize Undo manager when room is known; hydrate persisted stacks
+  createEffect(() => {
+    const rid = roomId()
+    if (!rid) return
+    undoMgr = createUndoManager({ roomId: rid, onChange: (state) => saveHistory(rid, state) })
+    try {
+      const persisted = loadHistory(rid)
+      undoMgr.hydrate(persisted as any)
+    } catch {}
   })
   onCleanup(() => {
     try { delete (window as any).__mbAgentApplyMix } catch {}
@@ -292,6 +313,7 @@ const Timeline: Component = () => {
     bpm,
     gridEnabled,
     gridDenominator,
+    historyPush: (entry, key, win) => pushHistory(entry, key, win),
   })
 
   // Open FX panel when selecting a clip on a different track
@@ -344,6 +366,7 @@ const Timeline: Component = () => {
         } catch {}
       }
     },
+    historyPush: (entry, key, win) => pushHistory(entry, key, win),
   })
 
   const {
@@ -369,6 +392,8 @@ const Timeline: Component = () => {
     playheadSec,
     loopEnabled,
     loopEndSec,
+    roomId,
+    historyPush: (entry, key, win) => pushHistory(entry, key, win),
   })
 
   const {
@@ -397,6 +422,7 @@ const Timeline: Component = () => {
     bpm,
     gridEnabled,
     gridDenominator,
+    historyPush: (entry, key, win) => pushHistory(entry, key, win),
   })
 
   const {
@@ -951,8 +977,36 @@ const Timeline: Component = () => {
             setSelectedTrackId(id)
             setSelectedFXTarget(id)
           })
+          const rid = roomId(); if (rid) pushHistory({ type: 'track-create', roomId: rid, data: { trackId: String(id) } })
         } catch {}
       })()
+    },
+    onUndo: () => {
+      try {
+        const rid = roomId()
+        const uid = userId()
+        if (!undoMgr || !rid || !uid) return
+        if (!undoMgr.canUndo()) return
+        const e = undoMgr.popUndo()
+        if (!e) return
+        void execUndo(e, { convexClient, convexApi, setTracks, audioBufferCache, roomId: rid, userId: uid, audioEngine }).then(() => {
+          undoMgr!.pushRedo(e)
+        })
+      } catch {}
+    },
+    onRedo: () => {
+      try {
+        const rid = roomId()
+        const uid = userId()
+        if (!undoMgr || !rid || !uid) return
+        if (!undoMgr.canRedo()) return
+        const e = undoMgr.popRedo()
+        if (!e) return
+        void execRedo(e, { convexClient, convexApi, setTracks, audioBufferCache, roomId: rid, userId: uid, audioEngine }).then(() => {
+          // After successful redo we push entry back onto undo
+          undoMgr!.push(e)
+        })
+      } catch {}
     },
     onAddInstrumentTrack: () => {
       void (async () => {
@@ -962,6 +1016,7 @@ const Timeline: Component = () => {
             setSelectedTrackId(id)
             setSelectedFXTarget(id)
           })
+          const rid = roomId(); if (rid) pushHistory({ type: 'track-create', roomId: rid, data: { trackId: String(id), kind: 'instrument' } })
         } catch {}
       })()
     },
@@ -1456,6 +1511,7 @@ const Timeline: Component = () => {
               setSelectedTrackId(id)
               setSelectedFXTarget(id)
             })
+            const rid = roomId(); if (rid) pushHistory({ type: 'track-create', roomId: rid, data: { trackId: String(id) } })
           }}
           onAddInstrumentTrack={async () => {
             const id = await convexClient.mutation(convexApi.tracks.create as any, { roomId: roomId(), userId: userId(), kind: 'instrument' } as any) as any as string
@@ -1463,20 +1519,25 @@ const Timeline: Component = () => {
               setSelectedTrackId(id)
               setSelectedFXTarget(id)
             })
+            const rid = roomId(); if (rid) pushHistory({ type: 'track-create', roomId: rid, data: { trackId: String(id), kind: 'instrument' } })
           }}
           onVolumeChange={(trackId, volume) => {
+            const rid = roomId()
+            const prevVolume = (() => { try { const t = tracks().find(tt => tt.id === trackId); return t?.volume ?? volume } catch { return volume } })()
             setTracks(ts => ts.map(t => t.id !== trackId ? t : ({ ...t, volume })))
-            const prev = volumeTimers.get(trackId)
-            if (prev) clearTimeout(prev)
+            const prevTimer = volumeTimers.get(trackId)
+            if (prevTimer) clearTimeout(prevTimer)
             const timer = window.setTimeout(() => {
               void convexClient.mutation(convexApi.tracks.setVolume, { trackId: trackId as any, volume })
               volumeTimers.delete(trackId)
             }, 150)
             volumeTimers.set(trackId, timer)
+            if (rid) pushHistory({ type: 'track-volume', roomId: rid, data: { trackId, from: prevVolume, to: volume } }, `track:vol:${trackId}`, 600)
           }}
           onToggleMute={(trackId) => {
             const rid = roomId()
             let nextMuted = false
+            const prevMuted = (() => { try { const t = tracks().find(tt => tt.id === trackId); return !!t?.muted } catch { return false } })()
             setTracks(ts => ts.map(t => {
               if (t.id !== trackId) return t
               nextMuted = !t.muted
@@ -1493,10 +1554,12 @@ const Timeline: Component = () => {
                 void convexClient.mutation(convexApi.tracks.setMix, { trackId: trackId as any, muted: nextMuted, userId: uid } as any)
               }
             } catch {}
+            if (rid) pushHistory({ type: 'track-mute', roomId: rid, data: { trackId, from: prevMuted, to: !prevMuted } })
           }}
           onToggleSolo={(trackId) => {
             const rid = roomId()
             let nextSoloed = false
+            const prevSolo = (() => { try { const t = tracks().find(tt => tt.id === trackId); return !!t?.soloed } catch { return false } })()
             setTracks(ts => ts.map(t => {
               if (t.id !== trackId) return t
               nextSoloed = !t.soloed
@@ -1513,6 +1576,7 @@ const Timeline: Component = () => {
                 void convexClient.mutation(convexApi.tracks.setMix, { trackId: trackId as any, soloed: nextSoloed, userId: uid } as any)
               }
             } catch {}
+            if (rid) pushHistory({ type: 'track-solo', roomId: rid, data: { trackId, from: prevSolo, to: !prevSolo } })
           }}
           syncMix={syncMix()}
           onToggleSyncMix={() => {
@@ -1556,6 +1620,11 @@ const Timeline: Component = () => {
               scrollRef.scrollLeft = Math.floor(centerLeft)
             }
           } catch {}
+        }}
+        onEffectParamsCommitted={({ targetId, effect, from, to }) => {
+          const rid = roomId();
+          if (!rid) return;
+          pushHistory({ type: 'effect-params', roomId: rid, data: { targetId, effect: effect as any, from, to } }, `fx:${effect}:${targetId}`, 600)
         }}
       />
 

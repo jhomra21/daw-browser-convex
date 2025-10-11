@@ -164,3 +164,92 @@ export function clearPeaksCacheFor(buffer: AudioBuffer) {
   perChannelCache.delete(buffer)
   monoWithPosCache.delete(buffer)
 }
+
+// Sprite cache: pre-rendered waveform images per buffer and resolution
+const spriteCache: WeakMap<AudioBuffer, Map<string, HTMLCanvasElement>> = new WeakMap()
+
+export function getWaveformSprite(buffer: AudioBuffer, bins: number, height: number): HTMLCanvasElement | null {
+  // Avoid SSR usage
+  if (typeof document === 'undefined') return null
+  const b = Math.max(1, Math.floor(bins))
+  const h = Math.max(1, Math.floor(height))
+  let byRes = spriteCache.get(buffer)
+  if (!byRes) { byRes = new Map(); spriteCache.set(buffer, byRes) }
+  const key = `${b}x${h}`
+  const cached = byRes.get(key)
+  if (cached) return cached
+
+  // Compute peaks once (cached by computePeaks)
+  const peaks = computePeaks(buffer, b)
+  // Auto-gain normalize like ClipComponent
+  let peak = 0
+  for (let i = 0; i < b; i++) {
+    const min = peaks[i * 2]
+    const max = peaks[i * 2 + 1]
+    const a = Math.max(Math.abs(min), Math.abs(max))
+    if (a > peak) peak = a
+  }
+  const amp = h / 2
+  const gain = Math.min(0.98 / (peak || 1), 4.0)
+
+  const canvas = document.createElement('canvas')
+  canvas.width = b
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  ctx.clearRect(0, 0, b, h)
+
+  // Fill bars mirrored around midline in white
+  ctx.fillStyle = 'rgba(255,255,255,0.55)'
+  const midY = h / 2
+  for (let i = 0; i < b; i++) {
+    const min = peaks[i * 2]
+    const max = peaks[i * 2 + 1]
+    const a = Math.max(Math.abs(min), Math.abs(max))
+    const hh = Math.min(a * amp * gain, h / 2)
+    if (hh <= 0.5) continue
+    // top half
+    ctx.fillRect(i, Math.floor(midY - hh), 1, Math.ceil(hh))
+    // bottom half
+    ctx.fillRect(i, Math.floor(midY), 1, Math.ceil(hh))
+  }
+
+  // Optional outlines for visual clarity
+  ctx.strokeStyle = 'rgba(255,255,255,0.95)'
+  ctx.lineWidth = 1
+  // top outline
+  ctx.beginPath()
+  for (let i = 0; i < b; i++) {
+    const min = peaks[i * 2]
+    const max = peaks[i * 2 + 1]
+    const a = Math.max(Math.abs(min), Math.abs(max))
+    const yTop = midY - Math.min(a * amp * gain, h / 2)
+    const x = i + 0.5
+    if (i === 0) ctx.moveTo(x, yTop)
+    else ctx.lineTo(x, yTop)
+  }
+  ctx.stroke()
+  // bottom outline
+  ctx.beginPath()
+  for (let i = 0; i < b; i++) {
+    const min = peaks[i * 2]
+    const max = peaks[i * 2 + 1]
+    const a = Math.max(Math.abs(min), Math.abs(max))
+    const yBottom = midY + Math.min(a * amp * gain, h / 2)
+    const x = i + 0.5
+    if (i === 0) ctx.moveTo(x, yBottom)
+    else ctx.lineTo(x, yBottom)
+  }
+  ctx.stroke()
+
+  // Midline
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(0, Math.floor(midY) + 0.5)
+  ctx.lineTo(b, Math.floor(midY) + 0.5)
+  ctx.stroke()
+
+  byRes.set(key, canvas)
+  return canvas
+}

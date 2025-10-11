@@ -31,6 +31,9 @@ type ClipResizeOptions = {
   playheadSec: Accessor<number>
   loopEnabled?: Accessor<boolean>
   loopEndSec?: Accessor<number>
+  roomId?: Accessor<string | undefined>
+  // optional history push
+  historyPush?: (entry: import('~/lib/undo/types').HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
 }
 
 export type ClipResizeHandlers = {
@@ -261,6 +264,34 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         bufferOffsetSec: (clip as any).bufferOffsetSec ?? 0,
         midiOffsetBeats: (clip as any).midiOffsetBeats ?? 0,
       })
+      try {
+        const rid = (options as any).roomId?.() as string | undefined
+        if (rid && typeof options.historyPush === 'function') {
+          const from = {
+            startSec: resizeOrigStart,
+            duration: resizeOrigDuration,
+            leftPadSec: resizeOrigPad,
+            bufferOffsetSec: resizeOrigBufferOffset,
+            midiOffsetBeats: resizeOrigMidiOffsetBeats,
+          }
+          const to = {
+            startSec: clip.startSec,
+            duration: clip.duration,
+            leftPadSec: clip.leftPadSec,
+            bufferOffsetSec: (clip as any).bufferOffsetSec,
+            midiOffsetBeats: (clip as any).midiOffsetBeats,
+          }
+          const sameTiming =
+            Math.abs((from.startSec ?? 0) - (to.startSec ?? 0)) < 1e-6 &&
+            Math.abs((from.duration ?? 0) - (to.duration ?? 0)) < 1e-6 &&
+            Math.abs((from.leftPadSec ?? 0) - (to.leftPadSec ?? 0)) < 1e-6 &&
+            Math.abs((from.bufferOffsetSec ?? 0) - (to.bufferOffsetSec ?? 0)) < 1e-6 &&
+            Math.abs((from.midiOffsetBeats ?? 0) - (to.midiOffsetBeats ?? 0)) < 1e-6
+          if (!sameTiming) {
+            options.historyPush({ type: 'clip-timing', roomId: rid, data: { clipId: clip.id, from, to } })
+          }
+        }
+      } catch {}
       if (isPlaying() && audioEngine) {
         queueMicrotask(() => {
           try {

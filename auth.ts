@@ -38,7 +38,9 @@ export function createAuth(env: Env) {
                 return await env.daw_convex_auth_kv.get(key);
             },
             set: async (key: string, value: string, ttl?: number) => {
-                const options = ttl ? { expirationTtl: ttl } : undefined;
+                // Cloudflare KV requires expiration_ttl >= 60s; clamp any smaller TTLs
+                const minTtl = typeof ttl === "number" ? Math.max(60, Math.ceil(ttl)) : undefined;
+                const options = minTtl ? { expirationTtl: minTtl } : undefined;
                 await env.daw_convex_auth_kv.put(key, value, options);
             },
             delete: async (key: string) => {

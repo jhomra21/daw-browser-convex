@@ -1128,7 +1128,7 @@ const Timeline: Component = () => {
   }
 
   // Live note play (sustain until keyup) for computer keyboard input
-  const activeLiveNotes = new Map<number, { osc: OscillatorNode; gain: GainNode; trackId: string }>()
+  const activeLiveNotes = new Map<number, { oscs: OscillatorNode[]; gain: GainNode; trackId: string }>()
   const startLiveNote = (pitch: number, velocity = 0.9) => {
     try {
       audioEngine.ensureAudio()
@@ -1146,19 +1146,29 @@ const Timeline: Component = () => {
       if (!trackId) return
       const synthGain: GainNode | undefined = (audioEngine as any).ensureTrackSynthGainNode?.(trackId)
       if (!synthGain) return
-      const osc = ctx.createOscillator()
+      const osc1 = ctx.createOscillator()
+      const osc2 = ctx.createOscillator()
       const gain = ctx.createGain()
       const start = ctx.currentTime
-      const amp = Math.max(0, Math.min(1.5, velocity))
-      osc.type = 'sawtooth'
-      osc.frequency.setValueAtTime(440 * Math.pow(2, (pitch - 69) / 12), start)
-      gain.gain.setValueAtTime(0, start)
-      // quick attack
-      gain.gain.linearRampToValueAtTime(amp, start + 0.01)
-      osc.connect(gain)
+      const synthState = (audioEngine as any)?.trackSynths?.get?.(trackId)
+      const wave1 = synthState?.wave1 ?? synthState?.wave ?? 'sawtooth'
+      const wave2 = synthState?.wave2 ?? synthState?.wave ?? wave1
+      const targetAmp = Math.max(0, Math.min(1.5, velocity)) / 2
+      try { osc1.type = wave1 } catch {}
+      try { osc2.type = wave2 } catch {}
+      const freq = 440 * Math.pow(2, (pitch - 69) / 12)
+      osc1.frequency.setValueAtTime(freq, start)
+      osc2.frequency.setValueAtTime(freq, start)
+      const EPS = 1e-4
+      gain.gain.setValueAtTime(EPS, start)
+      // quick exponential attack for preview
+      gain.gain.exponentialRampToValueAtTime(Math.max(EPS, targetAmp), start + 0.01)
+      osc1.connect(gain)
+      osc2.connect(gain)
       gain.connect(synthGain)
-      osc.start(start)
-      activeLiveNotes.set(pitch, { osc, gain, trackId })
+      osc1.start(start)
+      osc2.start(start)
+      activeLiveNotes.set(pitch, { oscs: [osc1, osc2], gain, trackId })
     } catch {}
   }
   const stopLiveNote = (pitch: number) => {
@@ -1167,7 +1177,11 @@ const Timeline: Component = () => {
       if (!entry) return
       activeLiveNotes.delete(pitch)
       const ctx: AudioContext | undefined = (audioEngine as any).audioCtx
-      if (!ctx) { try { entry.osc.stop() } catch {}; try { entry.gain.disconnect() } catch {}; return }
+      if (!ctx) {
+        for (const o of entry.oscs) { try { o.stop() } catch {} }
+        try { entry.gain.disconnect() } catch {}
+        return
+      }
       const now = ctx.currentTime
       try {
         // short release to avoid clicks
@@ -1175,10 +1189,12 @@ const Timeline: Component = () => {
         const current = entry.gain.gain.value
         entry.gain.gain.setValueAtTime(current, now)
         entry.gain.gain.linearRampToValueAtTime(0, now + 0.05)
-        entry.osc.stop(now + 0.06)
+        for (const o of entry.oscs) { try { o.stop(now + 0.06) } catch {} }
       } catch {}
-      entry.osc.onended = () => {
-        try { entry.gain.disconnect() } catch {}
+      for (const o of entry.oscs) {
+        o.onended = () => {
+          try { entry.gain.disconnect() } catch {}
+        }
       }
     } catch {}
   }

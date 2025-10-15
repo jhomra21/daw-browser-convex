@@ -8,11 +8,6 @@
  * @module
  */
 
-import type {
-  ApiFromModules,
-  FilterApi,
-  FunctionReference,
-} from "convex/server";
 import type * as chat from "../chat.js";
 import type * as clips from "../clips.js";
 import type * as effects from "../effects.js";
@@ -23,6 +18,12 @@ import type * as samples from "../samples.js";
 import type * as sharedChat from "../sharedChat.js";
 import type * as timeline from "../timeline.js";
 import type * as tracks from "../tracks.js";
+
+import type {
+  ApiFromModules,
+  FilterApi,
+  FunctionReference,
+} from "convex/server";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -44,11 +45,15 @@ declare const fullApi: ApiFromModules<{
   timeline: typeof timeline;
   tracks: typeof tracks;
 }>;
+declare const fullApiWithMounts: typeof fullApi;
+
 export declare const api: FilterApi<
-  typeof fullApi,
+  typeof fullApiWithMounts,
   FunctionReference<any, "public">
 >;
 export declare const internal: FilterApi<
-  typeof fullApi,
+  typeof fullApiWithMounts,
   FunctionReference<any, "internal">
 >;
+
+export declare const components: {};

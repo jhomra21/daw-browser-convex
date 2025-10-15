@@ -90,7 +90,8 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
         const clipEnd = c.startSec + c.duration
         const fxCfg = fx?.trackFx?.[t.id]
         const synth = fxCfg?.synth
-        const wave: OscillatorType = (synth?.wave as OscillatorType) || (midi.wave as OscillatorType) || 'sawtooth'
+        const wave1: OscillatorType = ((synth as any)?.wave1 as OscillatorType) || (synth as any)?.wave || (midi.wave as OscillatorType) || 'sawtooth'
+        const wave2: OscillatorType = ((synth as any)?.wave2 as OscillatorType) || (synth as any)?.wave || wave1
         const synthGain = typeof synth?.gain === 'number' ? Math.max(0, Math.min(1.5, synth.gain)) : 1.0
         const clipGain = typeof midi.gain === 'number' ? Math.max(0, Math.min(1.5, midi.gain)) : 1.0
         const attackSec = Math.max(0.001, ((synth?.attackMs ?? 5) / 1000))
@@ -121,26 +122,36 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
           const noteDur = Math.min(end, endTimeline) - Math.max(start, startTimeline)
           if (noteDur <= 0) continue
 
-          const osc = ctx.createOscillator()
+          const osc1 = ctx.createOscillator()
+          const osc2 = ctx.createOscillator()
           const gain = ctx.createGain()
           const vel = typeof note.velocity === 'number' ? Math.max(0, Math.min(1, note.velocity)) : 0.9
           const amp = vel * clipGain * synthGain
-          osc.type = wave
+          // Two oscillators -> halve envelope target so net loudness matches prior single-osc
+          const envTarget = amp / 2
+          try { osc1.type = wave1 } catch {}
+          try { osc2.type = wave2 } catch {}
           const freq = 440 * Math.pow(2, (note.pitch - 69) / 12)
-          osc.frequency.setValueAtTime(freq, when)
-          gain.gain.setValueAtTime(0, when)
+          osc1.frequency.setValueAtTime(freq, when)
+          osc2.frequency.setValueAtTime(freq, when)
+          const EPS = 1e-4
+          gain.gain.setValueAtTime(EPS, when)
           // Attack/Release from synth params
           const attack = attackSec
           const release = releaseSec
-          gain.gain.linearRampToValueAtTime(amp, when + attack)
+          gain.gain.exponentialRampToValueAtTime(Math.max(EPS, envTarget), when + attack)
           const noteEnd = when + noteDur
           const relStart = Math.max(when + attack, noteEnd - release)
-          gain.gain.setValueAtTime(amp, relStart)
-          gain.gain.linearRampToValueAtTime(0, noteEnd)
-          osc.connect(gain)
+          gain.gain.setValueAtTime(Math.max(EPS, envTarget), relStart)
+          gain.gain.exponentialRampToValueAtTime(EPS, noteEnd)
+          try { gain.gain.setValueAtTime(0, noteEnd + 1e-4) } catch {}
+          osc1.connect(gain)
+          osc2.connect(gain)
           gain.connect(trackInput)
-          try { osc.start(when) } catch {}
-          try { osc.stop(noteEnd) } catch {}
+          try { osc1.start(when) } catch {}
+          try { osc2.start(when) } catch {}
+          try { osc1.stop(noteEnd) } catch {}
+          try { osc2.stop(noteEnd) } catch {}
         }
         continue
       }
@@ -208,7 +219,7 @@ export type ReverbParamsLite = {
 }
 
 export type ArpParams = { enabled: boolean; pattern: string; rate: string; octaves: number; gate: number; hold: boolean }
-export type SynthParams = { wave: OscillatorType; gain?: number; attackMs?: number; releaseMs?: number }
+export type SynthParams = { wave?: OscillatorType; wave1?: OscillatorType; wave2?: OscillatorType; gain?: number; attackMs?: number; releaseMs?: number }
 
 function supportsGain(type: BiquadFilterType) {
   return type === 'peaking' || type === 'lowshelf' || type === 'highshelf'

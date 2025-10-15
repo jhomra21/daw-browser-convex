@@ -31,6 +31,7 @@ import Synth, {
   createDefaultSynthParams,
   type SynthParams,
 } from "~/components/effects/Synth";
+import SynthCard from "~/components/effects/SynthCard";
 import Arpeggiator, {
   createDefaultArpeggiatorParams,
   type ArpeggiatorParams,
@@ -81,6 +82,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const reverbLastLocalEdit = new Map<string, number>();
   const eqSaveTimers = new Map<string, number>();
   const reverbSaveTimers = new Map<string, number>();
+  const synthLastLocalEdit = new Map<string, number>();
+  const synthSaveTimers = new Map<string, number>();
   const LOCAL_EDIT_SUPPRESS_MS = 800;
   const SAVE_DEBOUNCE_MS = 200;
 
@@ -152,6 +155,85 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     Record<string, SynthParams | undefined>
   >({});
   const synthForTarget = createMemo(() => synthByTarget()[currentTargetId()]);
+
+  // Expanded Synth floating card
+  const [expandedSynth, setExpandedSynth] = createSignal<{
+    targetId: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null>(null);
+
+  const normalizeSynthParams = (input: Partial<SynthParams> & Record<string, any>): SynthParams => {
+    const wave1 = (input.wave1 as SynthParams['wave1']) ?? (input.wave as SynthParams['wave1']) ?? 'sawtooth'
+    const wave2 = (input.wave2 as SynthParams['wave2']) ?? wave1
+    const gain = typeof input.gain === 'number' ? Math.min(1.5, Math.max(0, input.gain)) : 0.8
+    const attackMs = typeof input.attackMs === 'number' ? Math.min(200, Math.max(0, input.attackMs)) : 5
+    const releaseMs = typeof input.releaseMs === 'number' ? Math.min(200, Math.max(0, input.releaseMs)) : 30
+    return {
+      wave1,
+      wave2,
+      gain,
+      attackMs,
+      releaseMs,
+      wave: (input.wave as SynthParams['wave1']) ?? wave1,
+    }
+  }
+
+  const synthToJson = (params: SynthParams) => JSON.stringify({ ...params, wave: params.wave ?? params.wave1 })
+
+  const applySynthForTarget = (targetId: string, updater: (prev: SynthParams) => SynthParams) => {
+    setSynthByTarget((prev) => {
+      const base = prev[targetId] ?? createDefaultSynthParams()
+      const nextRaw = updater(base)
+      const normalized = normalizeSynthParams(nextRaw)
+      return { ...prev, [targetId]: normalized }
+    })
+  }
+
+  const clampSynthBounds = (bounds: { x: number; y: number; w: number; h: number }) => {
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const minW = Math.max(360, Math.min(640, vw - 40))
+    const minH = Math.max(320, Math.min(420, vh - 80))
+    const maxW = Math.max(minW, vw - 12)
+    const maxH = Math.max(minH, vh - 24)
+    const w = Math.min(Math.max(bounds.w, minW), maxW)
+    const h = Math.min(Math.max(bounds.h, minH), maxH)
+    const maxX = Math.max(0, vw - w)
+    const maxY = Math.max(0, vh - h)
+    const x = Math.min(Math.max(bounds.x, 0), maxX)
+    const y = Math.min(Math.max(bounds.y, 0), maxY)
+    return { x, y, w, h }
+  }
+
+  const openSynthCard = () => {
+    const id = currentTargetId(); if (!id) return;
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const initialW = Math.min(640, vw - 40)
+    const initialH = Math.min(420, vh - 80)
+    const tentative = clampSynthBounds({
+      x: Math.round((vw - initialW) / 2),
+      y: Math.round((vh - initialH) / 3),
+      w: initialW,
+      h: initialH,
+    })
+    setExpandedSynth({ targetId: id, ...tentative });
+  };
+  const closeSynthCard = () => setExpandedSynth(null);
+  const updateSynthCardBounds = (next: { x: number; y: number; w: number; h: number }) => {
+    const cur = expandedSynth();
+    if (!cur) return;
+    const sanitized = clampSynthBounds({
+      x: next.x ?? cur.x,
+      y: next.y ?? cur.y,
+      w: next.w ?? cur.w,
+      h: next.h ?? cur.h,
+    })
+    setExpandedSynth({ targetId: cur.targetId, ...sanitized });
+  };
 
   const lastSavedArp = new Map<string, string>();
   createEffect(() => {
@@ -231,17 +313,33 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     const row = getQueryResult<any>(synthQuery);
     if (row === undefined) return;
     if (row?.params) {
-      const p = row.params as SynthParams;
-      setSynthByTarget((prev) => ({ ...prev, [id]: p }));
-      lastSavedSynth.set(id, JSON.stringify(p));
-      props.audioEngine?.setTrackSynth(id, p);
+      const p = normalizeSynthParams(row.params as any);
+      const current = (synthByTarget() as any)[id] as SynthParams | undefined;
+      const rowJson = synthToJson(p);
+      const currentJson = current ? synthToJson(current) : undefined;
+      const lastEdit = synthLastLocalEdit.get(id) ?? 0;
+      const editing = Date.now() - lastEdit < LOCAL_EDIT_SUPPRESS_MS || synthSaveTimers.has(id);
+      if (!current) {
+        setSynthByTarget((prev) => ({ ...prev, [id]: p }));
+        lastSavedSynth.set(id, rowJson);
+        props.audioEngine?.setTrackSynth(id, p);
+      } else {
+        if (editing) return;
+        if (currentJson !== rowJson) {
+          setSynthByTarget((prev) => ({ ...prev, [id]: p }));
+          lastSavedSynth.set(id, rowJson);
+          props.audioEngine?.setTrackSynth(id, p);
+        } else {
+          lastSavedSynth.set(id, rowJson);
+        }
+      }
     } else {
       const track = props.tracks.find((t) => t.id === id);
       if (track?.kind === "instrument") {
         setSynthByTarget((prev) => {
           if (prev[id]) return prev;
           const defaults = createDefaultSynthParams();
-          lastSavedSynth.set(id, JSON.stringify(defaults));
+          lastSavedSynth.set(id, synthToJson(defaults));
           props.audioEngine?.setTrackSynth(id, defaults);
           return { ...prev, [id]: defaults };
         });
@@ -257,18 +355,25 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     if (!id || id === "master") return;
     const params = synthForTarget();
     if (!params) return;
-    const json = JSON.stringify(params);
+    const payload = normalizeSynthParams(params);
+    const json = synthToJson(payload);
     if (lastSavedSynth.get(id) === json) return;
     const prev = lastSavedSynth.get(id);
     lastSavedSynth.set(id, json);
-    props.audioEngine?.setTrackSynth(id, params);
+    props.audioEngine?.setTrackSynth(id, payload);
+    const prevTimer = synthSaveTimers.get(id);
+    if (prevTimer) { try { clearTimeout(prevTimer) } catch {} }
     if (props.roomId && props.userId) {
-      void convexClient.mutation((convexApi as any).effects.setSynthParams, {
-        roomId: props.roomId,
-        trackId: id as any,
-        userId: props.userId,
-        params,
-      });
+      const timer = window.setTimeout(() => {
+        synthSaveTimers.delete(id);
+        void convexClient.mutation((convexApi as any).effects.setSynthParams, {
+          roomId: props.roomId!,
+          trackId: id as any,
+          userId: props.userId!,
+          params: payload,
+        });
+      }, SAVE_DEBOUNCE_MS);
+      synthSaveTimers.set(id, timer);
     }
     try {
       if (prev)
@@ -276,7 +381,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
           targetId: id,
           effect: "synth",
           from: JSON.parse(prev),
-          to: params,
+          to: payload,
         });
     } catch {}
   });
@@ -284,10 +389,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   function updateSynth(updater: (prev: SynthParams) => SynthParams) {
     const id = currentTargetId();
     if (!id) return;
-    setSynthByTarget((prev) => ({
-      ...prev,
-      [id]: updater(prev[id] ?? createDefaultSynthParams()),
-    }));
+    synthLastLocalEdit.set(id, Date.now());
+    applySynthForTarget(id, updater);
   }
 
   function handleSynthChange(updates: Partial<SynthParams>) {
@@ -296,6 +399,15 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
 
   function handleSynthReset() {
     updateSynth(() => createDefaultSynthParams());
+  }
+
+  // Direct update handlers for expanded card (target-agnostic)
+  function handleSynthChangeForTarget(targetId: string, updates: Partial<SynthParams>) {
+    synthLastLocalEdit.set(targetId, Date.now());
+    applySynthForTarget(targetId, (prev) => ({ ...prev, ...updates }));
+  }
+  function handleSynthResetForTarget(targetId: string) {
+    applySynthForTarget(targetId, () => createDefaultSynthParams());
   }
 
   // ===== MIDI: Add MIDI Clip on instrument tracks =====
@@ -998,15 +1110,34 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     when={
                       currentTrack() &&
                       currentTrack()!.kind === "instrument" &&
-                      !!synthForTarget()
+                      !!synthForTarget() &&
+                      expandedSynth()?.targetId !== currentTargetId()
                     }
                   >
                     <Synth
                       params={synthForTarget()!}
                       onChange={handleSynthChange}
                       onReset={handleSynthReset}
+                      onExpand={openSynthCard}
+                      variant="compact"
                       class="min-w-[280px]"
                     />
+                  </Show>
+                  <Show
+                    when={
+                      currentTrack() &&
+                      currentTrack()!.kind === "instrument" &&
+                      !!synthForTarget() &&
+                      expandedSynth()?.targetId === currentTargetId()
+                    }
+                  >
+                    <div class="min-w-[200px] flex items-center justify-between px-2 py-2 rounded border border-neutral-800 bg-neutral-900 text-neutral-300">
+                      <span class="text-xs">Synth is expanded</span>
+                      <button
+                        class="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700"
+                        onClick={closeSynthCard}
+                      >Restore</button>
+                    </div>
                   </Show>
 
                   <For each={orderedEffects()}>
@@ -1073,9 +1204,32 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         </button>
       </Show>
 
+      {/* Floating Synth card */}
+      <Show when={!!expandedSynth()}>
+        {(() => {
+          const exp = expandedSynth()!
+          const p = (synthByTarget() as any)[exp.targetId] as SynthParams | undefined
+          const params = p ?? createDefaultSynthParams()
+          return (
+            <SynthCard
+              params={params}
+              onChange={(u) => handleSynthChangeForTarget(exp.targetId, u)}
+              onReset={() => handleSynthResetForTarget(exp.targetId)}
+              x={exp.x}
+              y={exp.y}
+              w={exp.w}
+              h={exp.h}
+              onChangeBounds={updateSynthCardBounds}
+              onClose={closeSynthCard}
+            />
+          )
+        })()}
+      </Show>
+
       {/* Shortcuts dropdown implemented above; removed dialog variant */}
     </>
   );
 };
 
 export default EffectsPanel;
+ 

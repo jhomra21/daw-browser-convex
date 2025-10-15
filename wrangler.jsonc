@@ -1,41 +1,37 @@
 {
-	"name": "daw-browser-convex",
-	"compatibility_date": "2025-09-12",
-	"main": "./api/index.ts",
-	"compatibility_flags": [
-		"nodejs_compat"
-	],
-	"assets": {
-		"not_found_handling": "single-page-application",
-		"run_worker_first": [
-			"/api/*"
-		]
-	},
-	"observability": {
-		"enabled": true
-	},
-	"r2_buckets": [
-		{
-			"bucket_name": "daw-audio-samples",
-			"binding": "daw_audio_samples",
-			"remote": true
-		}
-	],
-	"d1_databases": [
-		{
-			"binding": "daw_convex_auth",
-			"database_name": "daw-convex-auth",
-			"database_id": "b0c71972-0d8e-4975-860f-3d38eb323549"
-		}
-	],
-	"kv_namespaces": [
-		{
-			"binding": "daw_convex_auth_kv",
-			"id": "f5b72c238c4e42219a7fb9cad9303761"
-		}
-	],
-	"vars":{
-		"BETTER_AUTH_URL":"https://daw-browser-convex.jhonra121.workers.dev",
-		"VITE_CONVEX_URL":"https://polite-peccary-245.convex.cloud"
-	}
+  "name": "daw-browser-convex",
+  "compatibility_date": "2025-09-29",
+  "main": "./api/index.ts",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
+  },
+  "observability": {
+    "enabled": true,
+  },
+  "r2_buckets": [
+    {
+      "bucket_name": "daw-audio-samples",
+      "binding": "daw_audio_samples",
+      "remote": true,
+    },
+  ],
+  "d1_databases": [
+    {
+      "binding": "daw_convex_auth",
+      "database_name": "daw-convex-auth",
+      "database_id": "b0c71972-0d8e-4975-860f-3d38eb323549",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "daw_convex_auth_kv",
+      "id": "f5b72c238c4e42219a7fb9cad9303761",
+    },
+  ],
+  "vars": {
+    "BETTER_AUTH_URL": "https://daw-browser-convex.jhonra121.workers.dev",
+    "VITE_CONVEX_URL": "https://polite-peccary-245.convex.cloud",
+  },
 }

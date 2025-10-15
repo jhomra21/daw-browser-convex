@@ -3,12 +3,17 @@ import { v } from "convex/values";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
-const sanitizeSynthParams = (params: { wave: 'sine' | 'square' | 'sawtooth' | 'triangle'; gain?: number; attackMs?: number; releaseMs?: number }) => {
+type Wave = 'sine' | 'square' | 'sawtooth' | 'triangle'
+const sanitizeSynthParams = (params: { wave: Wave; wave1?: Wave; wave2?: Wave; gain?: number; attackMs?: number; releaseMs?: number }) => {
   const gain = clamp(typeof params.gain === 'number' ? params.gain : 0.8, 0, 1.5)
   const attackMs = clamp(typeof params.attackMs === 'number' ? params.attackMs : 5, 0, 200)
   const releaseMs = clamp(typeof params.releaseMs === 'number' ? params.releaseMs : 30, 0, 200)
+  const wave1: Wave = (params.wave1 as Wave) ?? params.wave
+  const wave2: Wave = (params.wave2 as Wave) ?? wave1
   return {
     wave: params.wave,
+    wave1,
+    wave2,
     gain,
     attackMs,
     releaseMs,
@@ -88,6 +93,18 @@ export const setSynthParams = mutation({
         v.literal('sawtooth'),
         v.literal('triangle'),
       ),
+      wave1: v.optional(v.union(
+        v.literal('sine'),
+        v.literal('square'),
+        v.literal('sawtooth'),
+        v.literal('triangle'),
+      )),
+      wave2: v.optional(v.union(
+        v.literal('sine'),
+        v.literal('square'),
+        v.literal('sawtooth'),
+        v.literal('triangle'),
+      )),
       gain: v.optional(v.number()),
       attackMs: v.optional(v.number()),
       releaseMs: v.optional(v.number()),

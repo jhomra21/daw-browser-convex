@@ -1,5 +1,6 @@
 import type { Track } from '~/types/timeline'
 import { Output, BufferTarget, WavOutputFormat, AudioBufferSource } from 'mediabunny'
+import { supportsGain, type ArpParams, type EqParamsLite, type ReverbParamsLite, type SynthParamsInput } from '~/lib/effects/params'
 
 export type ExportRange =
   | { mode: 'whole' }
@@ -15,7 +16,7 @@ export type ExportRequest = {
   fx?: {
     masterEq?: EqParamsLite
     masterReverb?: ReverbParamsLite
-    trackFx?: Record<string, { eq?: EqParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParams }>
+    trackFx?: Record<string, { eq?: EqParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput }>
   }
 }
 
@@ -205,26 +206,6 @@ export async function encodeAudioBuffer(buffer: AudioBuffer): Promise<ExportResu
   return { audioBuffer: buffer, blob, mimeType: 'audio/wav', fileExtension: '.wav', durationSec: buffer.duration, sampleRate: sr }
 }
 
-// --- Minimal FX chain helpers (keep in sync with audio-engine shapes) ---
-export type EqParamsLite = {
-  enabled: boolean
-  bands: Array<{ id: string; type: BiquadFilterType; frequency: number; gainDb: number; q: number; enabled: boolean }>
-}
-
-export type ReverbParamsLite = {
-  enabled: boolean
-  wet: number
-  decaySec: number
-  preDelayMs: number
-}
-
-export type ArpParams = { enabled: boolean; pattern: string; rate: string; octaves: number; gate: number; hold: boolean }
-export type SynthParams = { wave?: OscillatorType; wave1?: OscillatorType; wave2?: OscillatorType; gain?: number; attackMs?: number; releaseMs?: number }
-
-function supportsGain(type: BiquadFilterType) {
-  return type === 'peaking' || type === 'lowshelf' || type === 'highshelf'
-}
-
 function buildEqNodes(ctx: BaseAudioContext, params?: EqParamsLite, channels = 2): BiquadFilterNode[] {
   const nodes: BiquadFilterNode[] = []
   if (!params?.enabled) return nodes
@@ -406,3 +387,4 @@ function applyArpeggiator(
   }
   return arpeggiated
 }
+

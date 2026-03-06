@@ -1,21 +1,9 @@
 import { Show } from 'solid-js'
 import Knob from '~/components/ui/knob'
+import {
+  type ReverbParams,
+} from '~/lib/effects/params'
 
-export type ReverbParams = {
-  enabled: boolean
-  wet: number // 0..1
-  decaySec: number // 0.1..10
-  preDelayMs: number // 0..200
-}
-
-export function createDefaultReverbParams(): ReverbParams {
-  return {
-    enabled: true,
-    wet: 0.25,
-    decaySec: 2.2,
-    preDelayMs: 20,
-  }
-}
 
 export type ReverbProps = {
   params: ReverbParams
@@ -112,3 +100,4 @@ export default function Reverb(props: ReverbProps) {
     </div>
   )
 }
+

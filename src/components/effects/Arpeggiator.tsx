@@ -1,25 +1,9 @@
 import { Show, For } from 'solid-js'
 import Knob from '~/components/ui/knob'
+import {
+  type ArpeggiatorParams,
+} from '~/lib/effects/params'
 
-export type ArpeggiatorParams = {
-  enabled: boolean
-  pattern: 'up' | 'down' | 'updown' | 'random'
-  rate: '1/4' | '1/8' | '1/16' | '1/32'
-  octaves: number // 1-4
-  gate: number // 0.1-1.0 (note length percentage)
-  hold: boolean // Keep arpeggiation going until clip ends (vs. stopping when MIDI note ends)
-}
-
-export function createDefaultArpeggiatorParams(): ArpeggiatorParams {
-  return {
-    enabled: true,
-    pattern: 'up',
-    rate: '1/16',
-    octaves: 1,
-    gate: 0.8,
-    hold: true,
-  }
-}
 
 export type ArpeggiatorProps = {
   params: ArpeggiatorParams
@@ -170,3 +154,4 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
     </div>
   )
 }
+

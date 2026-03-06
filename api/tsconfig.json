@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["vite/client", "./worker-configuration.d.ts"],
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": [
+    "**/*.ts",
+    "../src/lib/**/*.ts",
+    "../src/types/**/*.ts"
+  ]
+}

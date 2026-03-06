@@ -1,6 +1,13 @@
-Think carefully and only action the specific task I have given you with the most concise and elegant solution that changes as little code as possible.
-Do not suggest to run bun dev or any dev related commands, build is fine to suggest.
+## Philosophy
+This codebase will outlive you. Every shortcut becomes someone else's burden. Every hack compounds into technical debt that slows the whole team down. 
+You are not just writing code, you are shaping the future of this project. The patterns you establish will be copied. The corners you cut will be cut again.
+Fight entropy. Leave the codebase better than you found it.
 
+## Code Thinking
+Review your implementation before stopping. Check whether there is a better or simpler approach whether any redundant code remains, whether duplicate logic was introduced, and whether any dead or unused code was left behind. If you find issues, fix them now; if not, briefly confirm the implementation is clean.
+                
+Think carefully and only action the specific task I have given you with the most concise and elegant solution that takes into consideration existing code across codebase.
+Prefer the most concise and elegant solutions that changes or adds as little code as possible.
 ## Tech Stack
 This project uses a specific tech stack. Only use these technologies:
 - **Bun** - Package manager and runtime
@@ -112,9 +119,13 @@ const defaultContext = {};
 const context = contextObject || defaultContext;
 ```
 
-### Key Rules:
-1. **Effects should not update state that affects their own dependencies**
-2. **Use `batch()` to group related state updates**
-3. **Add guards to prevent unnecessary effect runs**
-4. **Create memos at component level, not inside loops**
-5. **Avoid self-referential contexts/defaults**
+### Consumer-shaped APIs
+
+If a helper or component has one real consumer, shape its API around that call site instead of making it look generically reusable.
+
+Rules:
+- Prefer passing parent context directly over exploding it into many small props/accessors.
+- Return domain-grouped objects instead of long flat lists of handlers and state.
+- Hide target-specific plumbing, normalization, and bookkeeping inside the helper.
+- Do not keep re-export surfaces or generic-looking types unless multiple consumers actually need them.
+- Only generalize after a second real consumer proves the abstraction.

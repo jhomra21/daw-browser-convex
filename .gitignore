@@ -5,6 +5,7 @@ dist
 .netlify
 .vinxi
 app.config.timestamp_*.js
+*.tsbuildinfo
 
 # Environment
 .env*
@@ -20,7 +21,7 @@ app.config.timestamp_*.js
 .settings/
 
 # Temp
-gitignore
+tmp/*
 
 # System Files
 .DS_Store

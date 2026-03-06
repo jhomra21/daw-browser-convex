@@ -1,5 +1,10 @@
 import { type Component, createSignal, onCleanup } from 'solid-js'
-import Synth, { type SynthParams } from '~/components/effects/Synth'
+import Synth from '~/components/effects/Synth'
+import {
+  clampSynthCardBounds,
+  type SynthCardBounds,
+} from '~/components/effects/synth-card-bounds'
+import type { SynthParams } from '~/lib/effects/params'
 
 export type SynthCardProps = {
   params: SynthParams
@@ -10,10 +15,10 @@ export type SynthCardProps = {
   w: number
   h: number
   onClose: () => void
-  onChangeBounds: (next: { x: number; y: number; w: number; h: number }) => void
+  onChangeBounds: (next: SynthCardBounds) => void
 }
 
-const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v))
+type PointerMode = 'drag' | 'resize'
 
 const SynthCard: Component<SynthCardProps> = (props) => {
   const [dragging, setDragging] = createSignal(false)
@@ -27,82 +32,75 @@ const SynthCard: Component<SynthCardProps> = (props) => {
   let resizeStartW = 0
   let resizeStartH = 0
 
-  const sanitizeBounds = (bounds: { x: number; y: number; w: number; h: number }) => {
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const minW = Math.max(360, Math.min(640, vw - 40))
-    const minH = Math.max(320, Math.min(420, vh - 80))
-    const maxW = Math.max(minW, vw - 12)
-    const maxH = Math.max(minH, vh - 24)
-    const w = clamp(bounds.w, minW, maxW)
-    const h = clamp(bounds.h, minH, maxH)
-    const maxX = Math.max(0, vw - w)
-    const maxY = Math.max(0, vh - h)
-    const x = clamp(bounds.x, 0, maxX)
-    const y = clamp(bounds.y, 0, maxY)
-    return { x, y, w, h }
-  }
-
-  const onHeaderPointerDown = (e: PointerEvent) => {
+  function beginPointerInteraction(e: PointerEvent, mode: PointerMode): void {
     if (pointerId !== null) return
+
     try { e.preventDefault(); e.stopPropagation() } catch {}
-    if ((e as any).button != null && (e as any).button !== 0) return
+
+    const button = (e as { button?: number }).button
+    if (button != null && button !== 0) return
+
     pointerId = e.pointerId
     dragStartX = e.clientX
     dragStartY = e.clientY
-    startLeft = props.x
-    startTop = props.y
-    setDragging(true)
     captureEl = e.currentTarget as HTMLElement
-    try { captureEl.setPointerCapture?.(e.pointerId) } catch {}
-    window.addEventListener('pointermove', onPointerMove, { passive: false, capture: true })
-    window.addEventListener('pointerup', onPointerUp, { once: true, passive: false, capture: true })
-  }
 
-  const onResizerPointerDown = (e: PointerEvent) => {
-    if (pointerId !== null) return
-    try { e.preventDefault(); e.stopPropagation() } catch {}
-    if ((e as any).button != null && (e as any).button !== 0) return
-    pointerId = e.pointerId
-    dragStartX = e.clientX
-    dragStartY = e.clientY
+    if (mode === 'drag') {
+      startLeft = props.x
+      startTop = props.y
+      setDragging(true)
+      return capturePointer(e)
+    }
+
     resizeStartW = props.w
     resizeStartH = props.h
     setResizing(true)
-    captureEl = e.currentTarget as HTMLElement
-    try { captureEl.setPointerCapture?.(e.pointerId) } catch {}
+    capturePointer(e)
+  }
+
+  function capturePointer(e: PointerEvent): void {
+    try { captureEl?.setPointerCapture?.(e.pointerId) } catch {}
     window.addEventListener('pointermove', onPointerMove, { passive: false, capture: true })
     window.addEventListener('pointerup', onPointerUp, { once: true, passive: false, capture: true })
   }
 
-  const onPointerMove = (e: PointerEvent) => {
+  function onHeaderPointerDown(e: PointerEvent): void {
+    beginPointerInteraction(e, 'drag')
+  }
+
+  function onResizerPointerDown(e: PointerEvent): void {
+    beginPointerInteraction(e, 'resize')
+  }
+
+  function onPointerMove(e: PointerEvent): void {
     try { e.preventDefault(); e.stopPropagation() } catch {}
+
+    const dx = e.clientX - dragStartX
+    const dy = e.clientY - dragStartY
+
     if (dragging()) {
-      const dx = e.clientX - dragStartX
-      const dy = e.clientY - dragStartY
-      const next = sanitizeBounds({
+      props.onChangeBounds(clampSynthCardBounds({
         x: startLeft + dx,
         y: startTop + dy,
         w: props.w,
         h: props.h,
-      })
-      props.onChangeBounds(next)
-    } else if (resizing()) {
-      const dx = e.clientX - dragStartX
-      const dy = e.clientY - dragStartY
-      const next = sanitizeBounds({
+      }))
+      return
+    }
+
+    if (resizing()) {
+      props.onChangeBounds(clampSynthCardBounds({
         x: props.x,
         y: props.y,
         w: resizeStartW + dx,
         h: resizeStartH + dy,
-      })
-      props.onChangeBounds(next)
+      }))
     }
   }
 
-  const onPointerUp = (e: PointerEvent) => {
-    dragging() && setDragging(false)
-    resizing() && setResizing(false)
+  function onPointerUp(): void {
+    if (dragging()) setDragging(false)
+    if (resizing()) setResizing(false)
     if (pointerId !== null) {
       try { captureEl?.releasePointerCapture?.(pointerId) } catch {}
     }
@@ -137,7 +135,7 @@ const SynthCard: Component<SynthCardProps> = (props) => {
           onClick={props.onClose}
           aria-label="Close Synth editor"
         >
-          ✕
+          X
         </button>
       </div>
       <div class="p-2 w-full h-[calc(100%-36px)] overflow-hidden" style={{ 'touch-action': 'manipulation' }}>
@@ -154,3 +152,4 @@ const SynthCard: Component<SynthCardProps> = (props) => {
 }
 
 export default SynthCard
+

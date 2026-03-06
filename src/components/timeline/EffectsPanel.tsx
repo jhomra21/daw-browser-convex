@@ -9,33 +9,11 @@ import {
   onMount,
   onCleanup,
 } from "solid-js";
-import type { Track } from "~/types/timeline";
-import { Button } from "~/components/ui/button";
-import Eq, {
-  createDefaultEqParams,
-  type EqParams,
-} from "~/components/effects/Eq";
-import type {
-  AudioEngine,
-  EqParamsLite,
-  ReverbParamsLite,
-  SpectrumFrame,
-} from "~/lib/audio-engine";
-import { useConvexQuery, convexClient, convexApi } from "~/lib/convex";
-import { FX_PANEL_HEIGHT_PX } from "~/lib/timeline-utils";
-import Reverb, {
-  createDefaultReverbParams,
-  type ReverbParams,
-} from "~/components/effects/Reverb";
-import Synth, {
-  createDefaultSynthParams,
-  type SynthParams,
-} from "~/components/effects/Synth";
+import Arpeggiator from "~/components/effects/Arpeggiator";
+import Eq from "~/components/effects/Eq";
+import Reverb from "~/components/effects/Reverb";
+import Synth from "~/components/effects/Synth";
 import SynthCard from "~/components/effects/SynthCard";
-import Arpeggiator, {
-  createDefaultArpeggiatorParams,
-  type ArpeggiatorParams,
-} from "~/components/effects/Arpeggiator";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -45,6 +23,22 @@ import {
   DropdownMenuSeparator,
   DropdownMenuShortcut,
 } from "~/components/ui/dropdown-menu";
+import { Button } from "~/components/ui/button";
+import {
+  createEffectsPanelState,
+} from "~/components/timeline/create-effects-panel-state";
+import {
+  createDefaultEqParams,
+  createDefaultReverbParams,
+  type EqParams,
+  type EqParamsLite,
+  type ReverbParams,
+  type ReverbParamsLite,
+} from "~/lib/effects/params";
+import type { AudioEngine, SpectrumFrame } from "~/lib/audio-engine";
+import { convexApi, convexClient, useConvexQuery } from "~/lib/convex";
+import { FX_PANEL_HEIGHT_PX } from "~/lib/timeline-utils";
+import type { Track } from "~/types/timeline";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -63,27 +57,22 @@ type EffectsPanelProps = {
 
 const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const targetName = () => {
-    const id = props.selectedFXTarget;
-    if (id === "master") return "Master";
-    const track = props.tracks.find((t) => t.id === id);
-    return track?.name ?? "Track";
+    if (currentTargetId() === "master") return "Master";
+    return currentTrack()?.name ?? "Track";
   };
 
-  // Target helpers must be defined before any usage below
   const currentTargetId = () => props.selectedFXTarget || "master";
   const currentTrack = createMemo(() => {
     const id = currentTargetId();
     if (!id || id === "master") return undefined;
     return props.tracks.find((t) => t.id === id);
   });
+  const isInstrumentTrack = createMemo(() => currentTrack()?.kind === "instrument");
 
-  // Recent local edit timestamps to avoid Convex subscription briefly overwriting UI during knob/drags
   const eqLastLocalEdit = new Map<string, number>();
   const reverbLastLocalEdit = new Map<string, number>();
   const eqSaveTimers = new Map<string, number>();
   const reverbSaveTimers = new Map<string, number>();
-  const synthLastLocalEdit = new Map<string, number>();
-  const synthSaveTimers = new Map<string, number>();
   const LOCAL_EDIT_SUPPRESS_MS = 800;
   const SAVE_DEBOUNCE_MS = 200;
 
@@ -91,26 +80,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     const raw = query?.data;
     return typeof raw === "function" ? raw() : raw;
   };
-
-  const arpeggiatorQuery = useConvexQuery(
-    (convexApi as any).effects.getArpeggiatorForTrack,
-    () => {
-      const id = currentTargetId();
-      if (!id || id === "master") return null;
-      return { trackId: id as any };
-    },
-    () => ["effects", "arpeggiator", currentTargetId()],
-  );
-
-  const synthQuery = useConvexQuery(
-    (convexApi as any).effects.getSynthForTrack,
-    () => {
-      const id = currentTargetId();
-      if (!id || id === "master") return null;
-      return { trackId: id as any };
-    },
-    () => ["effects", "synth", currentTargetId()],
-  );
 
   const eqMasterQuery = useConvexQuery(
     convexApi.effects.getEqForMaster,
@@ -144,312 +113,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     () => ["effects", "reverb", "track", currentTargetId()],
   );
 
-  // ===== Arpeggiator (MIDI effect for instrument tracks) =====
-  const [arpByTarget, setArpByTarget] = createSignal<
-    Record<string, ArpeggiatorParams | undefined>
-  >({});
-  const arpForTarget = createMemo(() => arpByTarget()[currentTargetId()]);
-
-  // ===== Synth (instrument tracks) =====
-  const [synthByTarget, setSynthByTarget] = createSignal<
-    Record<string, SynthParams | undefined>
-  >({});
-  const synthForTarget = createMemo(() => synthByTarget()[currentTargetId()]);
-
-  // Expanded Synth floating card
-  const [expandedSynth, setExpandedSynth] = createSignal<{
-    targetId: string;
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-  } | null>(null);
-
-  const normalizeSynthParams = (input: Partial<SynthParams> & Record<string, any>): SynthParams => {
-    const wave1 = (input.wave1 as SynthParams['wave1']) ?? (input.wave as SynthParams['wave1']) ?? 'sawtooth'
-    const wave2 = (input.wave2 as SynthParams['wave2']) ?? wave1
-    const gain = typeof input.gain === 'number' ? Math.min(1.5, Math.max(0, input.gain)) : 0.8
-    const attackMs = typeof input.attackMs === 'number' ? Math.min(200, Math.max(0, input.attackMs)) : 5
-    const releaseMs = typeof input.releaseMs === 'number' ? Math.min(200, Math.max(0, input.releaseMs)) : 30
-    return {
-      wave1,
-      wave2,
-      gain,
-      attackMs,
-      releaseMs,
-      wave: (input.wave as SynthParams['wave1']) ?? wave1,
-    }
-  }
-
-  const synthToJson = (params: SynthParams) => JSON.stringify({ ...params, wave: params.wave ?? params.wave1 })
-
-  const applySynthForTarget = (targetId: string, updater: (prev: SynthParams) => SynthParams) => {
-    setSynthByTarget((prev) => {
-      const base = prev[targetId] ?? createDefaultSynthParams()
-      const nextRaw = updater(base)
-      const normalized = normalizeSynthParams(nextRaw)
-      return { ...prev, [targetId]: normalized }
-    })
-  }
-
-  const clampSynthBounds = (bounds: { x: number; y: number; w: number; h: number }) => {
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const minW = Math.max(360, Math.min(640, vw - 40))
-    const minH = Math.max(320, Math.min(420, vh - 80))
-    const maxW = Math.max(minW, vw - 12)
-    const maxH = Math.max(minH, vh - 24)
-    const w = Math.min(Math.max(bounds.w, minW), maxW)
-    const h = Math.min(Math.max(bounds.h, minH), maxH)
-    const maxX = Math.max(0, vw - w)
-    const maxY = Math.max(0, vh - h)
-    const x = Math.min(Math.max(bounds.x, 0), maxX)
-    const y = Math.min(Math.max(bounds.y, 0), maxY)
-    return { x, y, w, h }
-  }
-
-  const openSynthCard = () => {
-    const id = currentTargetId(); if (!id) return;
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const initialW = Math.min(640, vw - 40)
-    const initialH = Math.min(420, vh - 80)
-    const tentative = clampSynthBounds({
-      x: Math.round((vw - initialW) / 2),
-      y: Math.round((vh - initialH) / 3),
-      w: initialW,
-      h: initialH,
-    })
-    setExpandedSynth({ targetId: id, ...tentative });
-  };
-  const closeSynthCard = () => setExpandedSynth(null);
-  const updateSynthCardBounds = (next: { x: number; y: number; w: number; h: number }) => {
-    const cur = expandedSynth();
-    if (!cur) return;
-    const sanitized = clampSynthBounds({
-      x: next.x ?? cur.x,
-      y: next.y ?? cur.y,
-      w: next.w ?? cur.w,
-      h: next.h ?? cur.h,
-    })
-    setExpandedSynth({ targetId: cur.targetId, ...sanitized });
-  };
-
-  const lastSavedArp = new Map<string, string>();
-  createEffect(() => {
-    const id = currentTargetId();
-    if (!id || id === "master") return;
-    const row = getQueryResult<any>(arpeggiatorQuery);
-    if (row === undefined) return;
-    if (row?.params) {
-      const p = row.params as ArpeggiatorParams;
-      setArpByTarget((prev) => ({ ...prev, [id]: p }));
-      lastSavedArp.set(id, JSON.stringify(p));
-      props.audioEngine?.setTrackArpeggiator(id, p);
-    } else {
-      setArpByTarget((prev) => ({ ...prev, [id]: undefined }));
-      props.audioEngine?.clearTrackArpeggiator?.(id);
-    }
-  });
-
-  // Apply/persist arpeggiator on change
-  createEffect(() => {
-    const id = currentTargetId();
-    if (!id || id === "master") return;
-    const params = arpForTarget();
-    if (!params) return;
-    const json = JSON.stringify(params);
-    if (lastSavedArp.get(id) === json) return;
-    const prev = lastSavedArp.get(id);
-    lastSavedArp.set(id, json);
-    props.audioEngine?.setTrackArpeggiator(id, params);
-    if (props.roomId && props.userId) {
-      void convexClient.mutation(
-        (convexApi as any).effects.setArpeggiatorParams,
-        {
-          roomId: props.roomId,
-          trackId: id as any,
-          userId: props.userId,
-          params,
-        },
-      );
-    }
-    try {
-      if (prev)
-        props.onEffectParamsCommitted?.({
-          targetId: id,
-          effect: "arp",
-          from: JSON.parse(prev),
-          to: params,
-        });
-    } catch {}
-  });
-
-  function updateArp(updater: (prev: ArpeggiatorParams) => ArpeggiatorParams) {
-    const id = currentTargetId();
-    if (!id) return;
-    setArpByTarget((prev) => ({
-      ...prev,
-      [id]: updater(prev[id] ?? createDefaultArpeggiatorParams()),
-    }));
-  }
-
-  function handleArpChange(updates: Partial<ArpeggiatorParams>) {
-    updateArp((prev) => ({ ...prev!, ...updates }));
-  }
-
-  function handleArpToggle(enabled: boolean) {
-    updateArp((prev) => ({ ...prev!, enabled }));
-  }
-
-  function handleArpReset() {
-    updateArp(() => createDefaultArpeggiatorParams());
-  }
-
-  const lastSavedSynth = new Map<string, string>();
-  createEffect(() => {
-    const id = currentTargetId();
-    if (!id || id === "master") return;
-    const row = getQueryResult<any>(synthQuery);
-    if (row === undefined) return;
-    if (row?.params) {
-      const p = normalizeSynthParams(row.params as any);
-      const current = (synthByTarget() as any)[id] as SynthParams | undefined;
-      const rowJson = synthToJson(p);
-      const currentJson = current ? synthToJson(current) : undefined;
-      const lastEdit = synthLastLocalEdit.get(id) ?? 0;
-      const editing = Date.now() - lastEdit < LOCAL_EDIT_SUPPRESS_MS || synthSaveTimers.has(id);
-      if (!current) {
-        setSynthByTarget((prev) => ({ ...prev, [id]: p }));
-        lastSavedSynth.set(id, rowJson);
-        props.audioEngine?.setTrackSynth(id, p);
-      } else {
-        if (editing) return;
-        if (currentJson !== rowJson) {
-          setSynthByTarget((prev) => ({ ...prev, [id]: p }));
-          lastSavedSynth.set(id, rowJson);
-          props.audioEngine?.setTrackSynth(id, p);
-        } else {
-          lastSavedSynth.set(id, rowJson);
-        }
-      }
-    } else {
-      const track = props.tracks.find((t) => t.id === id);
-      if (track?.kind === "instrument") {
-        setSynthByTarget((prev) => {
-          if (prev[id]) return prev;
-          const defaults = createDefaultSynthParams();
-          lastSavedSynth.set(id, synthToJson(defaults));
-          props.audioEngine?.setTrackSynth(id, defaults);
-          return { ...prev, [id]: defaults };
-        });
-      } else {
-        setSynthByTarget((prev) => ({ ...prev, [id]: undefined }));
-      }
-    }
-  });
-
-  // Apply/persist on change
-  createEffect(() => {
-    const id = currentTargetId();
-    if (!id || id === "master") return;
-    const params = synthForTarget();
-    if (!params) return;
-    const payload = normalizeSynthParams(params);
-    const json = synthToJson(payload);
-    if (lastSavedSynth.get(id) === json) return;
-    const prev = lastSavedSynth.get(id);
-    lastSavedSynth.set(id, json);
-    props.audioEngine?.setTrackSynth(id, payload);
-    const prevTimer = synthSaveTimers.get(id);
-    if (prevTimer) { try { clearTimeout(prevTimer) } catch {} }
-    if (props.roomId && props.userId) {
-      const timer = window.setTimeout(() => {
-        synthSaveTimers.delete(id);
-        void convexClient.mutation((convexApi as any).effects.setSynthParams, {
-          roomId: props.roomId!,
-          trackId: id as any,
-          userId: props.userId!,
-          params: payload,
-        });
-      }, SAVE_DEBOUNCE_MS);
-      synthSaveTimers.set(id, timer);
-    }
-    try {
-      if (prev)
-        props.onEffectParamsCommitted?.({
-          targetId: id,
-          effect: "synth",
-          from: JSON.parse(prev),
-          to: payload,
-        });
-    } catch {}
-  });
-
-  function updateSynth(updater: (prev: SynthParams) => SynthParams) {
-    const id = currentTargetId();
-    if (!id) return;
-    synthLastLocalEdit.set(id, Date.now());
-    applySynthForTarget(id, updater);
-  }
-
-  function handleSynthChange(updates: Partial<SynthParams>) {
-    updateSynth((prev) => ({ ...prev!, ...updates }));
-  }
-
-  function handleSynthReset() {
-    updateSynth(() => createDefaultSynthParams());
-  }
-
-  // Direct update handlers for expanded card (target-agnostic)
-  function handleSynthChangeForTarget(targetId: string, updates: Partial<SynthParams>) {
-    synthLastLocalEdit.set(targetId, Date.now());
-    applySynthForTarget(targetId, (prev) => ({ ...prev, ...updates }));
-  }
-  function handleSynthResetForTarget(targetId: string) {
-    applySynthForTarget(targetId, () => createDefaultSynthParams());
-  }
-
-  // ===== MIDI: Add MIDI Clip on instrument tracks =====
-  async function handleAddMidiClip() {
-    const track = currentTrack();
-    if (!track) return;
-    if ((track.kind as any) !== "instrument") return;
-    const rid = props.roomId;
-    const uid = props.userId;
-    if (!rid || !uid) return;
-    const start = Math.max(
-      0,
-      Math.round((props.playheadSec ?? 0) * 1000) / 1000,
-    );
-    try {
-      const clipId = (await convexClient.mutation(
-        convexApi.clips.create as any,
-        {
-          roomId: rid,
-          trackId: track.id as any,
-          startSec: start,
-          duration: 1,
-          userId: uid,
-          name: "MIDI Clip",
-        } as any,
-      )) as any as string;
-      if (!clipId) return;
-      await convexClient.mutation((convexApi as any).clips.setMidi, {
-        clipId: clipId as any,
-        midi: {
-          wave: "sawtooth",
-          gain: 0.8,
-          notes: [],
-        },
-        userId: uid,
-      });
-      // Hint parent to select/jump
-      props.onSelectClip?.(track.id, clipId, start);
-    } catch (err) {
-      console.warn("[EffectsPanel] failed to add MIDI clip", err);
-    }
-  }
+  const instrumentState = createEffectsPanelState(props, currentTargetId, currentTrack);
 
   // Local EQ params per FX target (trackId or 'master'); undefined = no EQ yet
   const [eqByTarget, setEqByTarget] = createSignal<
@@ -842,7 +506,43 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     return present;
   });
 
-  async function handleAddEq() {
+  function handleAddReverb() {
+    const id = currentTargetId();
+    if (!id) return;
+
+    const params = createDefaultReverbParams();
+    setReverbByTarget((prev) => ({ ...prev, [id]: params }));
+    appendEffectOrder(id, "reverb");
+
+    if (id === "master") {
+      props.audioEngine?.setMasterReverb(
+        params as unknown as ReverbParamsLite,
+      );
+      if (props.roomId && props.userId) {
+        void convexClient.mutation(convexApi.effects.setMasterReverbParams, {
+          roomId: props.roomId,
+          userId: props.userId,
+          params,
+        });
+      }
+    } else {
+      props.audioEngine?.setTrackReverb(
+        id,
+        params as unknown as ReverbParamsLite,
+      );
+      if (props.roomId && props.userId) {
+        void convexClient.mutation(convexApi.effects.setReverbParams, {
+          roomId: props.roomId,
+          trackId: id as any,
+          userId: props.userId,
+          params,
+        });
+      }
+    }
+
+    lastSavedReverb.set(id, JSON.stringify(params));
+  }
+  function handleAddEq() {
     const id = currentTargetId();
     if (!id) return;
     const params = createDefaultEqParams();
@@ -890,13 +590,13 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                 Hide
               </Button>
               <Show
-                when={currentTrack() && currentTrack()!.kind === "instrument"}
+                when={isInstrumentTrack()}
               >
                 <Button
                   variant="default"
                   size="sm"
                   class="w-full text-[10px] py-1 px-1"
-                  onClick={handleAddMidiClip}
+                  onClick={instrumentState.addMidiClip}
                 >
                   + MIDI
                 </Button>
@@ -919,32 +619,14 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                   when={
                     currentTrack() &&
                     currentTrack()!.kind === "instrument" &&
-                    !arpForTarget()
+                    !instrumentState.arp.params()
                   }
                 >
                   <Button
                     variant="default"
                     size="sm"
                     class="text-[11px] py-0.5 px-2 h-6"
-                    onClick={() => {
-                      const id = currentTargetId();
-                      if (!id) return;
-                      const params = createDefaultArpeggiatorParams();
-                      setArpByTarget((prev) => ({ ...prev, [id]: params }));
-                      props.audioEngine?.setTrackArpeggiator(id, params);
-                      if (props.roomId && props.userId) {
-                        void convexClient.mutation(
-                          (convexApi as any).effects.setArpeggiatorParams,
-                          {
-                            roomId: props.roomId,
-                            trackId: id as any,
-                            userId: props.userId,
-                            params,
-                          },
-                        );
-                      }
-                      lastSavedArp.set(id, JSON.stringify(params));
-                    }}
+                    onClick={instrumentState.arp.add}
                   >
                     + Arp
                   </Button>
@@ -964,45 +646,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     variant="default"
                     size="sm"
                     class="text-[11px] py-0.5 px-2 h-6"
-                    onClick={() => {
-                      const id = currentTargetId();
-                      if (!id) return;
-                      const params = createDefaultReverbParams();
-                      setReverbByTarget((prev) => ({ ...prev, [id]: params }));
-                      appendEffectOrder(id, "reverb");
-                      if (id === "master") {
-                        props.audioEngine?.setMasterReverb(
-                          params as unknown as ReverbParamsLite,
-                        );
-                        if (props.roomId && props.userId) {
-                          void convexClient.mutation(
-                            convexApi.effects.setMasterReverbParams,
-                            {
-                              roomId: props.roomId,
-                              userId: props.userId,
-                              params,
-                            },
-                          );
-                        }
-                      } else {
-                        props.audioEngine?.setTrackReverb(
-                          id,
-                          params as unknown as ReverbParamsLite,
-                        );
-                        if (props.roomId && props.userId) {
-                          void convexClient.mutation(
-                            convexApi.effects.setReverbParams,
-                            {
-                              roomId: props.roomId,
-                              trackId: id as any,
-                              userId: props.userId,
-                              params,
-                            },
-                          );
-                        }
-                      }
-                      lastSavedReverb.set(id, JSON.stringify(params));
-                    }}
+                    onClick={handleAddReverb}
                   >
                     + Reverb
                   </Button>
@@ -1060,7 +704,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuLabel class="text-neutral-400">
-                        MIDI Editor (when ⌨ enabled)
+                        MIDI Editor (when keyboard enabled)
                       </DropdownMenuLabel>
                       <DropdownMenuItem disabled>
                         Note keys
@@ -1093,14 +737,14 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     when={
                       currentTrack() &&
                       currentTrack()!.kind === "instrument" &&
-                      !!arpForTarget()
+                      !!instrumentState.arp.params()
                     }
                   >
                     <Arpeggiator
-                      params={arpForTarget()!}
-                      onChange={handleArpChange}
-                      onToggleEnabled={handleArpToggle}
-                      onReset={handleArpReset}
+                      params={instrumentState.arp.params()!}
+                      onChange={instrumentState.arp.change}
+                      onToggleEnabled={instrumentState.arp.toggle}
+                      onReset={instrumentState.arp.reset}
                       class="min-w-[280px]"
                     />
                   </Show>
@@ -1110,15 +754,15 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     when={
                       currentTrack() &&
                       currentTrack()!.kind === "instrument" &&
-                      !!synthForTarget() &&
-                      expandedSynth()?.targetId !== currentTargetId()
+                      !!instrumentState.synth.params() &&
+                      !instrumentState.synth.isExpandedForCurrentTarget()
                     }
                   >
                     <Synth
-                      params={synthForTarget()!}
-                      onChange={handleSynthChange}
-                      onReset={handleSynthReset}
-                      onExpand={openSynthCard}
+                      params={instrumentState.synth.params()!}
+                      onChange={instrumentState.synth.change}
+                      onReset={instrumentState.synth.reset}
+                      onExpand={instrumentState.synth.open}
                       variant="compact"
                       class="min-w-[280px]"
                     />
@@ -1127,15 +771,15 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     when={
                       currentTrack() &&
                       currentTrack()!.kind === "instrument" &&
-                      !!synthForTarget() &&
-                      expandedSynth()?.targetId === currentTargetId()
+                      !!instrumentState.synth.params() &&
+                      instrumentState.synth.isExpandedForCurrentTarget()
                     }
                   >
                     <div class="min-w-[200px] flex items-center justify-between px-2 py-2 rounded border border-neutral-800 bg-neutral-900 text-neutral-300">
                       <span class="text-xs">Synth is expanded</span>
                       <button
                         class="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700"
-                        onClick={closeSynthCard}
+                        onClick={instrumentState.synth.close}
                       >Restore</button>
                     </div>
                   </Show>
@@ -1176,8 +820,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     when={
                       !eqForTarget() &&
                       !reverbForTarget() &&
-                      !arpForTarget() &&
-                      (!synthForTarget() ||
+                      !instrumentState.arp.params() &&
+                      (!instrumentState.synth.params() ||
                         !currentTrack() ||
                         currentTrack()!.kind !== "instrument")
                     }
@@ -1205,31 +849,28 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       </Show>
 
       {/* Floating Synth card */}
-      <Show when={!!expandedSynth()}>
+      <Show when={!!instrumentState.synth.expandedCard()}>
         {(() => {
-          const exp = expandedSynth()!
-          const p = (synthByTarget() as any)[exp.targetId] as SynthParams | undefined
-          const params = p ?? createDefaultSynthParams()
+          const card = instrumentState.synth.expandedCard()!;
           return (
             <SynthCard
-              params={params}
-              onChange={(u) => handleSynthChangeForTarget(exp.targetId, u)}
-              onReset={() => handleSynthResetForTarget(exp.targetId)}
-              x={exp.x}
-              y={exp.y}
-              w={exp.w}
-              h={exp.h}
-              onChangeBounds={updateSynthCardBounds}
-              onClose={closeSynthCard}
+              params={card.params}
+              onChange={card.onChange}
+              onReset={card.onReset}
+              x={card.x}
+              y={card.y}
+              w={card.w}
+              h={card.h}
+              onChangeBounds={instrumentState.synth.updateCardBounds}
+              onClose={instrumentState.synth.close}
             />
           )
         })()}
       </Show>
-
       {/* Shortcuts dropdown implemented above; removed dialog variant */}
     </>
   );
 };
 
 export default EffectsPanel;
- 
+

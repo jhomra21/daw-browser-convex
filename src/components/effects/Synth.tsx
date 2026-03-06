@@ -1,25 +1,10 @@
 import { Show, For, createMemo } from 'solid-js'
 import Knob from '~/components/ui/knob'
+import {
+  type SynthParams,
+  type SynthWave,
+} from '~/lib/effects/params'
 
-export type SynthParams = {
-  wave1: 'sine' | 'square' | 'sawtooth' | 'triangle'
-  wave2: 'sine' | 'square' | 'sawtooth' | 'triangle'
-  gain: number // 0..1.5
-  attackMs: number // 0..200
-  releaseMs: number // 0..200
-  wave?: WaveType
-}
-
-export function createDefaultSynthParams(): SynthParams {
-  return {
-    wave1: 'sawtooth',
-    wave2: 'sawtooth',
-    gain: 0.8,
-    attackMs: 5,
-    releaseMs: 30,
-    wave: 'sawtooth',
-  }
-}
 
 export type SynthProps = {
   params: SynthParams
@@ -32,12 +17,11 @@ export type SynthProps = {
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
-type WaveType = 'sine' | 'square' | 'sawtooth' | 'triangle'
-const WAVEFORMS: { value: WaveType; label: string; icon: string }[] = [
-  { value: 'sine', label: 'Sine', icon: '∿' },
-  { value: 'square', label: 'Square', icon: '⊓' },
-  { value: 'sawtooth', label: 'Sawtooth', icon: '⊿' },
-  { value: 'triangle', label: 'Triangle', icon: '△' },
+const WAVEFORMS: { value: SynthWave; label: string; icon: string }[] = [
+  { value: 'sine', label: 'Sine', icon: '~' },
+  { value: 'square', label: 'Square', icon: '[]' },
+  { value: 'sawtooth', label: 'Sawtooth', icon: '/|' },
+  { value: 'triangle', label: 'Triangle', icon: '/\\' },
 ]
 
 export default function Synth(props: SynthProps) {
@@ -180,7 +164,7 @@ export default function Synth(props: SynthProps) {
   )
 }
 
-function WavePreview(props: { wave: WaveType; width?: number; height?: number }) {
+function WavePreview(props: { wave: SynthWave; width?: number; height?: number }) {
   const w = props.width ?? 180
   const h = props.height ?? 36
   const pad = 4
@@ -230,7 +214,7 @@ function EnvelopePreview(props: { attackMs: number; releaseMs: number; holdMs?: 
     const pts: Array<[number, number]> = []
     const A_STEPS = 24
     for (let i = 0; i <= A_STEPS; i++) {
-      const t = A_STEPS === 0 ? 1 : i / A_STEPS
+      const t = i / A_STEPS
       const amp = Math.pow(t, 0.5)
       pts.push([x(t * attack), y(amp)])
     }
@@ -253,3 +237,4 @@ function EnvelopePreview(props: { attackMs: number; releaseMs: number; holdMs?: 
     </svg>
   )
 }
+

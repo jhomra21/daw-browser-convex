@@ -6,13 +6,15 @@ export type ClipTiming = {
   midiOffsetBeats?: number
 }
 
+export type ClipOffsets = Omit<ClipTiming, 'startSec' | 'duration'>
+
 export type ClipSnapshot = {
   startSec: number
   duration: number
   name?: string
   sampleUrl?: string
   midi?: any
-  timing?: ClipTiming
+  timing?: ClipOffsets
 }
 
 export type HistoryEntry =
@@ -29,7 +31,7 @@ export type HistoryEntry =
           name?: string
           sampleUrl?: string
           midi?: any
-          timing?: ClipTiming
+          timing?: ClipOffsets
         }
       }
     }

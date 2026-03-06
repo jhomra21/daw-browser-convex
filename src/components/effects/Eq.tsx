@@ -1,41 +1,14 @@
 import { Show, For, createSignal, onMount, onCleanup, createEffect } from 'solid-js'
-import Knob from '~/components/ui/knob'
 import type { SpectrumFrame } from '~/lib/audio-engine'
+import Knob from '~/components/ui/knob'
+import {
+  supportsGain,
+  type EqBandParams,
+  type EqParams,
+} from '~/lib/effects/params'
 
-// ===== Types (used to inform Convex schema later) =====
-export type EqBandParams = {
-  id: string
-  frequency: number // Hz (20..20000)
-  gainDb: number // dB (-24..+24)
-  q: number // Q factor (0.2..18)
-  enabled: boolean
-  type: BiquadFilterType // 'peaking' | 'lowshelf' | 'highshelf' | 'lowpass' | 'highpass' | 'bandpass' | 'notch'
-}
-
-export type EqParams = {
-  bands: EqBandParams[]
-  enabled: boolean
-}
-
-// Create 8 default bands (Ableton-style layout)
-export function createDefaultEqParams(): EqParams {
-  // Log-spaced defaults roughly across spectrum
-  const defaults = [
-    40, 100, 200, 500, 1000, 2500, 6000, 12000,
-  ]
-  const bands: EqBandParams[] = defaults.map((f, i) => ({
-    id: `b${i + 1}`,
-    frequency: f,
-    gainDb: 0,
-    q: 1.0,
-    enabled: true,
-    type: i === 0 ? 'lowshelf' : i === defaults.length - 1 ? 'highshelf' : 'peaking',
-  }))
-  return { bands, enabled: true }
-}
 
 // ===== Component =====
-
 export type EqProps = {
   bands: EqBandParams[]
   enabled: boolean
@@ -127,9 +100,6 @@ export default function Eq(props: EqProps) {
     const t = (clamped - top) / h
     return GAIN_MAX - t * (GAIN_MAX - GAIN_MIN)
   }
-
-  // Helpers
-  const supportsGain = (t: BiquadFilterType) => (t === 'peaking' || t === 'lowshelf' || t === 'highshelf')
 
   // Simple response model per type. This is an approximation for visualization only.
   const responseAt = (freq: number) => {
@@ -394,6 +364,18 @@ export default function Eq(props: EqProps) {
   // UI helpers
   const selBand = () => props.bands.find(b => b.id === selectedId())
 
+  const selectedFrequencyLabel = () => {
+    const frequency = selBand()?.frequency ?? 0
+    return frequency >= 1000 ? `${(frequency / 1000).toFixed(1)} kHz` : `${frequency} Hz`
+  }
+
+  const selectedGainLabel = () => {
+    const band = selBand()
+    const gain = band?.gainDb ?? 0
+    const gainDisabled = band ? !supportsGain(band.type) : false
+    return gainDisabled ? '-' : `${gain >= 0 ? '+' : ''}${gain.toFixed(1)} dB`
+  }
+
   return (
     <div class={`rounded-md border border-neutral-800 bg-neutral-900 text-neutral-100 flex flex-col ${props.class ?? ''}`}>
       {/* Header */}
@@ -466,7 +448,7 @@ export default function Eq(props: EqProps) {
                 onValueChange={(v) => selBand() && props.onBandChange(selBand()!.id, { frequency: Math.round(v) })}
               />
               <div class="text-[8px] leading-none text-neutral-300 font-mono">
-                {(() => { const f = selBand()?.frequency ?? 0; return f >= 1000 ? `${(f / 1000).toFixed(1)} kHz` : `${f} Hz` })()}
+                {selectedFrequencyLabel()}
               </div>
             </div>
 
@@ -487,7 +469,7 @@ export default function Eq(props: EqProps) {
                 onValueChange={(v) => selBand() && props.onBandChange(selBand()!.id, { gainDb: Math.round(v * 10) / 10 })}
               />
               <div class="text-[8px] text-neutral-300 font-mono">
-                {(() => { const g = selBand()?.gainDb ?? 0; const disabled = selBand() ? !supportsGain(selBand()!.type) : false; return disabled ? '—' : `${g >= 0 ? '+' : ''}${g.toFixed(1)} dB` })()}
+                {selectedGainLabel()}
               </div>
             </div>
 
@@ -551,3 +533,4 @@ export default function Eq(props: EqProps) {
     </div>
   )
 }
+

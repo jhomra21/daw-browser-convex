@@ -1,3 +1,4 @@
+import { supportsGain, type EqParamsLite, type ReverbParamsLite, type SynthParamsInput } from '~/lib/effects/params'
 import type { Track, Clip } from '~/types/timeline'
 
 const MASTER_FADE_DOWN_SEC = 0.002
@@ -11,43 +12,17 @@ type ScheduleOptions = {
   endLimitSec?: number
 }
 
-// Lightweight EQ params shape used by the engine (kept in sync with UI)
-export type EqParamsLite = {
-  enabled: boolean
-  bands: Array<{
-    id: string
-    type: BiquadFilterType
-    frequency: number
-    gainDb: number
-    q: number
-    enabled: boolean
-  }>
-}
-
-// Lightweight Reverb params used by the engine (kept in sync with UI)
-export type ReverbParamsLite = {
-  enabled: boolean
-  wet: number // 0..1
-  decaySec: number // 0.1..10
-  preDelayMs: number // 0..200
-}
-
-// Internal representation of an active MIDI note for realtime envelope retargeting
 type ActiveNote = {
   trackId: string
   clipId: string
-  oscs: OscillatorNode[]
+  oscs: [OscillatorNode, OscillatorNode]
   gain: GainNode
   amp: number
   startCtx: number
-  // Hard end of the note (clip/note boundary translated to context time, also respects minimum attack)
   endCtx: number
-  // When the release should start (context time)
   releaseStartCtx: number
-  // Envelope params used when the note was scheduled
   attackSec: number
   releaseSec: number
-  // Cleanup timer id for stopping oscillator at endCtx
   cleanupTimer: number | null
 }
 
@@ -325,7 +300,7 @@ export class AudioEngine {
     return Math.max(0, beats) * spb
   }
 
-  setTrackSynth(trackId: string, params: { wave?: string; wave1?: string; wave2?: string; gain?: number; attackMs?: number; releaseMs?: number }) {
+  setTrackSynth(trackId: string, params: SynthParamsInput) {
     // Normalize and store; used during scheduling of MIDI notes
     const wave1: OscillatorType = (params.wave1 as OscillatorType) || (params.wave as OscillatorType) || 'sawtooth'
     const wave2: OscillatorType = (params.wave2 as OscillatorType) || (params.wave as OscillatorType) || wave1
@@ -679,11 +654,6 @@ export class AudioEngine {
   }
 
   // --- Effects: EQ chain management ---
-  // Minimal shared type (avoid importing from UI component)
-  private supportsGain(type: BiquadFilterType) {
-    return type === 'peaking' || type === 'lowshelf' || type === 'highshelf'
-  }
-
   private configureBiquadNode(node: BiquadFilterNode) {
     try {
       node.channelCountMode = 'explicit'
@@ -903,7 +873,7 @@ export class AudioEngine {
         f.type = b.type
         f.frequency.value = Math.max(20, Math.min(20000, b.frequency))
         f.Q.value = Math.max(0.001, b.q)
-        if (this.supportsGain(b.type)) {
+        if (supportsGain(b.type)) {
           f.gain.value = b.gainDb
         } else {
           f.gain.value = 0
@@ -1036,7 +1006,6 @@ export class AudioEngine {
 
     const spb = this.secondsPerBeat()
     const synth = this.trackSynths.get(track.id)
-    const wave = synth?.wave || (midi.wave as OscillatorType) || 'sawtooth'
     const clipStart = clip.startSec
     const clipEndRaw = clip.startSec + clip.duration
     const clipEnd = (typeof endLimitSec === 'number') ? Math.min(clipEndRaw, endLimitSec) : clipEndRaw
@@ -1406,7 +1375,7 @@ export class AudioEngine {
         f.type = b.type
         f.frequency.value = Math.max(20, Math.min(20000, b.frequency))
         f.Q.value = Math.max(0.001, b.q)
-        if (this.supportsGain(b.type)) {
+        if (supportsGain(b.type)) {
           f.gain.value = b.gainDb
         } else {
           f.gain.value = 0

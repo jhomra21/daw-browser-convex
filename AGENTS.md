@@ -2,6 +2,7 @@
 This codebase will outlive you. Every shortcut becomes someone else's burden. Every hack compounds into technical debt that slows the whole team down. 
 You are not just writing code, you are shaping the future of this project. The patterns you establish will be copied. The corners you cut will be cut again.
 Fight entropy. Leave the codebase better than you found it.
+Do not write plausible code, write accurate correct code
 
 ## Code Thinking
 Review your implementation before stopping. Check whether there is a better or simpler approach whether any redundant code remains, whether duplicate logic was introduced, and whether any dead or unused code was left behind. If you find issues, fix them now; if not, briefly confirm the implementation is clean.
@@ -68,59 +69,7 @@ This project uses a specific tech stack. Only use these technologies:
 - Deploy via Wrangler to Cloudflare Workers
 - Port 3000 for local development
 
-## SolidJS Reactivity Guidelines ⚠️
-
-**AVOID CIRCULAR DEPENDENCIES** - These cause "too much recursion" errors:
-
-### ❌ Dangerous Patterns:
-```javascript
-// DON'T: Effect that reads query data and updates state affecting same query
-createEffect(() => {
-  const data = someQuery.data();
-  setSomeState(data.map(...)); // Can trigger infinite re-renders
-});
-
-// DON'T: Memos for simple calculations
-const size = createMemo(() => props.size || { width: 320, height: 384 });
-
-// DON'T: Creating memos inside render loops
-<For each={items}>
-  {(item) => {
-    const computed = createMemo(() => item.data); // Created on every render!
-    return <div>{computed()}</div>;
-  }}
-</For>
-
-// DON'T: Using function as its own default context
-const context = contextObject || myFunction; // Self-reference
-```
-
-### ✅ Safe Patterns:
-```javascript
-// DO: Guard effects with change detection
-createEffect(() => {
-  const data = someQuery.data();
-  if (!data || !hasActuallyChanged(data)) return;
-
-  batch(() => { // Group state updates
-    setSomeState(newValue);
-    setOtherState(otherValue);
-  });
-});
-
-// DO: Simple functions for basic calculations
-const size = () => props.size || { width: 320, height: 384 };
-
-// DO: Create memos outside render loops
-const computed = createMemo(() => items().map(item => transform(item)));
-
-// DO: Use stable default contexts
-const defaultContext = {};
-const context = contextObject || defaultContext;
-```
-
 ### Consumer-shaped APIs
-
 If a helper or component has one real consumer, shape its API around that call site instead of making it look generically reusable.
 
 Rules:
@@ -129,3 +78,25 @@ Rules:
 - Hide target-specific plumbing, normalization, and bookkeeping inside the helper.
 - Do not keep re-export surfaces or generic-looking types unless multiple consumers actually need them.
 - Only generalize after a second real consumer proves the abstraction.
+
+## Engineering Rules (Non-Negotiable)
+- Functional style first: prefer pure functions, immutable updates, explicit inputs/outputs.
+- Single responsibility: each function/module should have one reason to change.
+- Complexity budget:
+  - Target `O(1)` or `O(log n)` where practical.
+  - Avoid accidental `O(n^2+)` (nested scans in hot paths).
+  - Use `Map`/`Set` for membership and indexing instead of repeated linear lookups.
+- Performance footgun policy:
+  - Do not introduce `setTimeout`, `setInterval`, `requestAnimationFrame`, or self-rescheduling loops unless explicitly justified in code comments and cleaned up deterministically.
+  - No polling loops when event-driven/reactive alternatives exist.
+- Avoid hidden side effects: no mutation of shared module state unless clearly documented.
+
+## Code Organization
+- Keep app-specific logic organized.
+- Prefer composition over inheritance; avoid god-modules.
+- Keep adapters thin and deterministic; isolate I/O at boundaries.
+
+## Change Quality Bar
+- Keep diffs focused; do not mix refactors with feature behavior changes unless requested.
+- Preserve public contracts unless change is intentional and documented.
+- Validate before finishing

@@ -12,7 +12,7 @@ import { queryClient } from "~/lib/query-client"
 export const NavUser: Component = () => {
   const navigate = useNavigate()
   const session = useSessionQuery()
-  const user = createMemo(() => session()?.data?.user as any)
+  const user = createMemo(() => session.data?.user as any)
 
   const getInitials = (name: string) => {
     if (!name || name === "Guest") return name.charAt(0).toUpperCase() || "G";

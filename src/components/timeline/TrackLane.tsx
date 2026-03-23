@@ -7,7 +7,7 @@ type TrackLaneProps = {
   track: Track
   index: number
   selectedClipIds: Set<string>
-  onClipMouseDown: (trackId: string, clipId: string, e: MouseEvent) => void
+  onClipPointerDown: (trackId: string, clipId: string, e: PointerEvent) => void
   onClipClick: (trackId: string, clipId: string, e: MouseEvent) => void
   onClipResizeStart: (trackId: string, clipId: string, edge: 'left' | 'right', e: MouseEvent) => void
   isDropTarget?: boolean
@@ -28,7 +28,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
             clip={clip}
             trackId={props.track.id}
             isSelected={props.selectedClipIds.has(clip.id)}
-            onMouseDown={props.onClipMouseDown}
+            onPointerDown={props.onClipPointerDown}
             onClick={props.onClipClick}
             onResizeStart={props.onClipResizeStart}
             onDblClick={props.onClipDblClick}

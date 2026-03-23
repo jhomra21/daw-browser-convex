@@ -455,7 +455,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
                   const active = () => activeRows().has(pitch)
                   return (
                     <div
-                      class={`relative flex items-center justify-center text-[10px] font-mono ${active() ? 'bg-green-600/50 text-white border-green-400' : (black ? 'bg-neutral-700/70 text-neutral-100' : 'bg-neutral-800/70 text-neutral-200')} border-b border-neutral-800 cursor-pointer`}
+                      class={`relative flex items-center justify-center text-2xs font-mono ${active() ? 'bg-green-600/50 text-white border-green-400' : (black ? 'bg-neutral-700/70 text-neutral-100' : 'bg-neutral-800/70 text-neutral-200')} border-b border-neutral-800 cursor-pointer`}
                       onPointerDown={(e) => { e.stopPropagation(); props.onAuditionNote?.(pitch, 0.9, Math.min(0.6, secondsPerBeat())) }}
                       title={noteName(pitch)}
                     >

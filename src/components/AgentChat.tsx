@@ -202,7 +202,7 @@ function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }):
       return ok.success ? ok.data : null
     }
   }
-  // update effect params: arp rate, synth wave, reverb wet on track X
+  // update effect params: arp rate, synth waves, reverb wet on track X
   {
     // Try to find a track number in this text; if absent, caller may retry on previous user msg
     const tMatch = text.match(/track\s+(\d+)/)
@@ -214,12 +214,12 @@ function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }):
       const rate = rateMatch[1] as '1/4'|'1/8'|'1/16'|'1/32'
       commands.push({ type: 'setArpeggiatorParams', trackIndex: t, enabled: true, pattern: 'up', rate, octaves: 1, gate: 0.8, hold: false })
     }
-    // Synth wave
+    // Synth waves
     const waveMatch = text.match(/\b(sine|square|triangle|tri|saw|sawtooth)\b\s*(?:wave)?/)
     if (waveMatch && /\b(synth)\b/.test(text) && t) {
       const raw = waveMatch[1]
-      const wave = raw === 'tri' ? 'triangle' : (raw === 'saw' ? 'sawtooth' : raw)
-      commands.push({ type: 'setSynthParams', trackIndex: t, wave })
+      const waveform = raw === 'tri' ? 'triangle' : (raw === 'saw' ? 'sawtooth' : raw)
+      commands.push({ type: 'setSynthParams', trackIndex: t, wave1: waveform, wave2: waveform })
     }
     // Reverb wet percent
     const wetMatch = text.match(/\b(\d{1,3})%\s*wet\b/)
@@ -261,6 +261,7 @@ type AgentChatProps = {
   bottomOffsetPx?: number
   bpm?: number
   userId?: string
+  onApplyMixOps?: (ops: Array<{ type: 'setMute' | 'setSolo'; indices: number[]; value: boolean; exclusive?: boolean }>) => void
 }
 
 const AgentChat: Component<AgentChatProps> = (props) => {
@@ -540,28 +541,26 @@ const AgentChat: Component<AgentChatProps> = (props) => {
       setParsedCommands(null)
       // Inline confirmation summary
       try {
+        const results = Array.isArray(out?.results) ? out.results as any[] : []
         // Apply local mix changes to UI immediately (works even when Sync Mix is off)
         try {
           const cmds = effectiveCommands as any[]
           const mixOps: Array<{ type: 'setMute' | 'setSolo'; indices: number[]; value: boolean; exclusive?: boolean }> = []
-          for (const c of cmds) {
-            if (c?.type === 'setMute') {
-              const indices = Array.isArray(c.trackIndices) && c.trackIndices.length
-                ? c.trackIndices
-                : (typeof c.trackIndex === 'number' ? [c.trackIndex] : [])
-              mixOps.push({ type: 'setMute', indices, value: !!c.value })
-            } else if (c?.type === 'setSolo') {
-              const indices = Array.isArray(c.trackIndices) && c.trackIndices.length
-                ? c.trackIndices
-                : (typeof c.trackIndex === 'number' ? [c.trackIndex] : [])
-              mixOps.push({ type: 'setSolo', indices, value: !!c.value, exclusive: !!c.exclusive })
+          for (let index = 0; index < results.length; index++) {
+            const result = results[index]
+            const command = cmds[index]
+            if (result?.error || !command) continue
+            const indices = Array.isArray(result?.appliedTrackIndices) ? result.appliedTrackIndices : []
+            if (command?.type === 'setMute' && indices.length > 0) {
+              mixOps.push({ type: 'setMute', indices, value: !!command.value })
+            } else if (command?.type === 'setSolo' && indices.length > 0) {
+              mixOps.push({ type: 'setSolo', indices, value: !!command.value, exclusive: !!command.exclusive })
             }
           }
           if (mixOps.length) {
-            try { (window as any).__mbAgentApplyMix?.(props.roomId, mixOps) } catch {}
+            try { props.onApplyMixOps?.(mixOps) } catch {}
           }
         } catch {}
-        const results = Array.isArray(out?.results) ? out.results as any[] : []
         const first = effectiveCommands[0] as any
         let summary = ''
         if (results.length === 1 && !results[0]?.error) {
@@ -724,7 +723,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
             <Show when={!autoApply() && parsedCommands()}>
               <div class="mt-2 p-2 bg-neutral-800 border border-neutral-700 rounded">
                 <div class="text-xs text-neutral-300 mb-1">Proposed changes (JSON):</div>
-                <pre class="text-[11px] leading-snug text-neutral-200 overflow-x-auto max-h-32"><code>{JSON.stringify(parsedCommands(), null, 2)}</code></pre>
+                <pre class="text-2xs leading-snug text-neutral-200 overflow-x-auto max-h-32"><code>{JSON.stringify(parsedCommands(), null, 2)}</code></pre>
                 <div class="flex gap-2 mt-2 justify-end">
                   <button
                     class="px-2 py-1 text-xs rounded border border-neutral-600 text-neutral-200 hover:bg-neutral-700 disabled:opacity-50"

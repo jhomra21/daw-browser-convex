@@ -58,12 +58,12 @@ export default function Synth(props: SynthProps) {
         <div class="grid gap-3" style={{ 'grid-template-columns': '1fr 1fr' }}>
           {/* Osc 1 */}
           <div class="flex flex-col gap-1">
-            <div class="text-[11px] text-neutral-400">Osc 1</div>
+            <div class="text-2xs text-neutral-400">Osc 1</div>
             <div class="flex items-center gap-1 flex-wrap">
               <For each={WAVEFORMS}>{(wf) => (
                 <button
-                  class={`px-2 py-0.5 text-[11px] rounded border transition-colors ${props.params.wave1 === wf.value ? 'bg-blue-500/20 text-blue-300 border-blue-400/30' : 'bg-neutral-800 text-neutral-300 border-neutral-700 hover:bg-neutral-700'}`}
-                  onClick={() => props.onChange({ wave1: wf.value, wave: wf.value })}
+                  class={`px-2 py-0.5 text-2xs rounded border transition-colors ${props.params.wave1 === wf.value ? 'bg-blue-500/20 text-blue-300 border-blue-400/30' : 'bg-neutral-800 text-neutral-300 border-neutral-700 hover:bg-neutral-700'}`}
+                  onClick={() => props.onChange({ wave1: wf.value })}
                   title={wf.label}
                 >
                   <span class="font-mono text-sm">{wf.icon}</span>
@@ -78,11 +78,11 @@ export default function Synth(props: SynthProps) {
           </div>
           {/* Osc 2 */}
           <div class="flex flex-col gap-1">
-            <div class="text-[11px] text-neutral-400">Osc 2</div>
+            <div class="text-2xs text-neutral-400">Osc 2</div>
             <div class="flex items-center gap-1 flex-wrap">
               <For each={WAVEFORMS}>{(wf) => (
                 <button
-                  class={`px-2 py-0.5 text-[11px] rounded border transition-colors ${props.params.wave2 === wf.value ? 'bg-green-500/20 text-green-300 border-green-400/30' : 'bg-neutral-800 text-neutral-300 border-neutral-700 hover:bg-neutral-700'}`}
+                  class={`px-2 py-0.5 text-2xs rounded border transition-colors ${props.params.wave2 === wf.value ? 'bg-green-500/20 text-green-300 border-green-400/30' : 'bg-neutral-800 text-neutral-300 border-neutral-700 hover:bg-neutral-700'}`}
                   onClick={() => props.onChange({ wave2: wf.value })}
                   title={wf.label}
                 >

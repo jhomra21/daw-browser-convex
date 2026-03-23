@@ -2,7 +2,7 @@ import type { HistoryEntry, MergeKey, PersistedHistory } from './types'
 
 export type UndoManager = ReturnType<typeof createUndoManager>
 
-export function createUndoManager(options: { max?: number; roomId: string; onChange?: (state: PersistedHistory) => void }) {
+export function createUndoManager(options: { max?: number; onChange?: (state: PersistedHistory) => void }) {
   const max = options.max ?? 50
   let undo: HistoryEntry[] = []
   let redo: HistoryEntry[] = []
@@ -31,6 +31,12 @@ export function createUndoManager(options: { max?: number; roomId: string; onCha
 
   const canUndo = () => undo.length > 0
   const canRedo = () => redo.length > 0
+  const pushUndoEntry = (entry: HistoryEntry) => {
+    undo.push(entry)
+    if (undo.length > max) undo.shift()
+    lastMerged = null
+    notify()
+  }
   const popUndo = () => {
     const e = undo.pop()
     if (e) notify()
@@ -56,5 +62,5 @@ export function createUndoManager(options: { max?: number; roomId: string; onCha
     notify()
   }
 
-  return { roomId: options.roomId, push, canUndo, canRedo, popUndo, pushRedo, popRedo, clear, snapshot, hydrate }
+  return { push, pushUndoEntry, canUndo, canRedo, popUndo, pushRedo, popRedo, clear, snapshot, hydrate }
 }

@@ -1,5 +1,8 @@
-import { batch, type Accessor, type Setter } from 'solid-js'
+import { type Accessor, type Setter } from 'solid-js'
 
+import { persistClipTiming } from '~/lib/clip-mutations'
+import { buildClipTimingHistoryEntry } from '~/lib/undo/builders'
+import { selectPrimaryClip } from '~/lib/timeline-selection'
 import { PPS, quantizeSecToGrid } from '~/lib/timeline-utils'
 import type { Track, SelectedClip } from '~/types/timeline'
 import type { AudioEngine } from '~/lib/audio-engine'
@@ -15,14 +18,15 @@ type ResizeState = {
 type ClipResizeOptions = {
   tracks: Accessor<Track[]>
   setTracks: Setter<Track[]>
+  canWriteClip: (clipId: string) => boolean
   setSelectedTrackId: Setter<string>
   setSelectedClip: Setter<SelectedClip>
   setSelectedClipIds: Setter<Set<string>>
   setSelectedFXTarget: Setter<string>
   convexClient: typeof import('~/lib/convex').convexClient
   convexApi: typeof import('~/lib/convex').convexApi
+  userId: Accessor<string | undefined>
   getScrollElement: () => HTMLDivElement | undefined
-  // snapping
   bpm: Accessor<number>
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
@@ -32,7 +36,6 @@ type ClipResizeOptions = {
   loopEnabled?: Accessor<boolean>
   loopEndSec?: Accessor<number>
   roomId?: Accessor<string | undefined>
-  // optional history push
   historyPush?: (entry: import('~/lib/undo/types').HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
 }
 
@@ -46,12 +49,14 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
   const {
     tracks,
     setTracks,
+    canWriteClip,
     setSelectedTrackId,
     setSelectedClip,
     setSelectedClipIds,
     setSelectedFXTarget,
     convexClient,
     convexApi,
+    userId,
     getScrollElement,
     audioEngine,
     isPlaying,
@@ -63,7 +68,6 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
   let resizeOrigStart = 0
   let resizeOrigDuration = 0
   let resizeOrigPad = 0
-  let resizeAudioStart = 0
   let resizeFixedLeft = 0
   let resizeFixedRight = 0
   let resizeOrigBufferOffset = 0
@@ -75,24 +79,19 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     const track = tracks().find(t => t.id === trackId)
     const clip = track?.clips.find(c => c.id === clipId)
     if (!track || !clip) return
+    if (!canWriteClip(clipId)) return
 
     clipResizing = true
     resizing = { trackId, clipId, edge }
     resizeOrigStart = clip.startSec
     resizeOrigDuration = clip.duration
     resizeOrigPad = clip.leftPadSec ?? 0
-    resizeAudioStart = resizeOrigStart + resizeOrigPad
     resizeFixedLeft = clip.startSec
     resizeFixedRight = clip.startSec + clip.duration
-    resizeOrigBufferOffset = (clip as any).bufferOffsetSec ?? 0
-    resizeOrigMidiOffsetBeats = (clip as any).midiOffsetBeats ?? 0
+    resizeOrigBufferOffset = clip.bufferOffsetSec ?? 0
+    resizeOrigMidiOffsetBeats = clip.midiOffsetBeats ?? 0
 
-    batch(() => {
-      setSelectedTrackId(trackId)
-      setSelectedClip({ trackId, clipId })
-      setSelectedClipIds(new Set([clipId]))
-      setSelectedFXTarget(trackId)
-    })
+    selectPrimaryClip({ setSelectedTrackId, setSelectedClip, setSelectedClipIds, setSelectedFXTarget }, { trackId, clipId })
 
     window.addEventListener('mousemove', onResizeMouseMove)
     window.addEventListener('mouseup', onResizeMouseUp)
@@ -103,9 +102,10 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     const scroll = getScrollElement()
     if (!scroll) return
 
-    const track = tracks().find(t => t.id === resizing!.trackId)
+    const activeResize = resizing
+    const track = tracks().find(t => t.id === activeResize.trackId)
     if (!track) return
-    const clip = track.clips.find(c => c.id === resizing!.clipId)
+    const clip = track.clips.find(c => c.id === activeResize.clipId)
     if (!clip) return
 
     const others = track.clips.filter(c => c.id !== clip.id)
@@ -127,13 +127,10 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
 
       let newStart: number
       if (options.gridEnabled()) {
-        // Quantize distance from right edge so duration becomes an integer multiple of grid step
         const dist = Math.max(0, right - pointerSec)
         let snapped = quantizeSecToGrid(dist, options.bpm(), options.gridDenominator(), 'round')
-        // ensure at least MIN_CLIP_SEC
         if (snapped < MIN_CLIP_SEC) snapped = MIN_CLIP_SEC
         newStart = right - snapped
-        // Respect bounds; if out of range, adjust to nearest valid multiple not exceeding bounds
         if (newStart < minStartBound) {
           const maxDist = Math.max(0, right - minStartBound)
           const maxSnapped = quantizeSecToGrid(maxDist, options.bpm(), options.gridDenominator(), 'floor')
@@ -144,19 +141,17 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           const minSnapped = quantizeSecToGrid(minDist, options.bpm(), options.gridDenominator(), 'ceil')
           newStart = right - Math.max(MIN_CLIP_SEC, minSnapped)
         }
-        // If we're within one grid step of the left neighbor's end, snap flush to its edge
         const step = (60 / Math.max(1e-6, options.bpm() || 0)) * (4 / Math.max(1, options.gridDenominator() || 4))
-        if (Number.isFinite(neighborEnd) && newStart > (neighborEnd as number)) {
-          const delta = newStart - (neighborEnd as number)
-          if (delta <= step + 1e-7) newStart = neighborEnd as number
+        if (Number.isFinite(neighborEnd) && newStart > neighborEnd) {
+          const delta = newStart - neighborEnd
+          if (delta <= step + 1e-7) newStart = neighborEnd
         }
       } else {
         newStart = Math.max(minStartBound, Math.min(pointerSec, maxStartBound))
       }
 
       const newDuration = Math.max(MIN_CLIP_SEC, right - newStart)
-      // Compute pad/offset updates for audio and MIDI
-      const isMidi = !!(clip as any).midi
+      const isMidi = !!clip.midi
       if (isMidi) {
         const spb = 60 / Math.max(1, options.bpm() || 120)
         const deltaSec = newStart - resizeOrigStart
@@ -165,7 +160,12 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         const nextMidiOffset = Math.max(0, base + deltaBeats)
         setTracks(ts => ts.map(t => t.id !== track.id ? t : ({
           ...t,
-          clips: t.clips.map(c => c.id !== clip.id ? c : ({ ...c, startSec: newStart, duration: newDuration, midiOffsetBeats: nextMidiOffset }))
+          clips: t.clips.map(c => c.id !== clip.id ? c : ({
+            ...c,
+            startSec: newStart,
+            duration: newDuration,
+            midiOffsetBeats: nextMidiOffset,
+          }))
         })))
       } else {
         const windowDuration = resizeFixedRight - resizeFixedLeft
@@ -188,7 +188,13 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         }
         setTracks(ts => ts.map(t => t.id !== track.id ? t : ({
           ...t,
-          clips: t.clips.map(c => c.id !== clip.id ? c : ({ ...c, startSec: newStart, duration: newDuration, leftPadSec: nextLeftPad, bufferOffsetSec: nextBufOffset }))
+          clips: t.clips.map(c => c.id !== clip.id ? c : ({
+            ...c,
+            startSec: newStart,
+            duration: newDuration,
+            leftPadSec: nextLeftPad,
+            bufferOffsetSec: nextBufOffset,
+          }))
         })))
       }
     } else {
@@ -205,7 +211,6 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         let snapped = quantizeSecToGrid(dist, options.bpm(), options.gridDenominator(), 'round')
         if (snapped < MIN_CLIP_SEC) snapped = MIN_CLIP_SEC
         newRight = left + snapped
-        // Apply neighbor clamp using snapped multiples
         const maxRight = Number.isFinite(neighborStart) ? Math.min(neighborStart - 0.0001, Infinity) : Infinity
         if (newRight > maxRight) {
           const maxDist = Math.max(0, maxRight - left)
@@ -217,11 +222,10 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           const minSnapped = quantizeSecToGrid(minDist, options.bpm(), options.gridDenominator(), 'ceil')
           newRight = left + Math.max(MIN_CLIP_SEC, minSnapped)
         }
-        // If we're within one grid step of the right neighbor's start, snap flush to its edge
-        if (Number.isFinite(neighborStart) && newRight < (neighborStart as number)) {
+        if (Number.isFinite(neighborStart) && newRight < neighborStart) {
           const step = (60 / Math.max(1e-6, options.bpm() || 0)) * (4 / Math.max(1, options.gridDenominator() || 4))
-          const delta = (neighborStart as number) - newRight
-          if (delta <= step + 1e-7) newRight = neighborStart as number
+          const delta = neighborStart - newRight
+          if (delta <= step + 1e-7) newRight = neighborStart
         }
       } else {
         newRight = Math.max(pointerSec, minRightByLen)
@@ -256,16 +260,19 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     window.removeEventListener('mouseup', onResizeMouseUp)
 
     if (track && clip && active) {
-      void convexClient.mutation((convexApi as any).clips.setTiming, {
-        clipId: clip.id as any,
-        startSec: clip.startSec,
-        duration: clip.duration,
-        leftPadSec: clip.leftPadSec ?? 0,
-        bufferOffsetSec: (clip as any).bufferOffsetSec ?? 0,
-        midiOffsetBeats: (clip as any).midiOffsetBeats ?? 0,
-      })
+      const uid = userId()
+      if (uid) {
+        void persistClipTiming(convexClient, convexApi, uid, {
+          clipId: clip.id,
+          startSec: clip.startSec,
+          duration: clip.duration,
+          leftPadSec: clip.leftPadSec ?? 0,
+          bufferOffsetSec: clip.bufferOffsetSec ?? 0,
+          midiOffsetBeats: clip.midiOffsetBeats ?? 0,
+        })
+      }
       try {
-        const rid = (options as any).roomId?.() as string | undefined
+        const rid = options.roomId?.()
         if (rid && typeof options.historyPush === 'function') {
           const from = {
             startSec: resizeOrigStart,
@@ -278,8 +285,8 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
             startSec: clip.startSec,
             duration: clip.duration,
             leftPadSec: clip.leftPadSec,
-            bufferOffsetSec: (clip as any).bufferOffsetSec,
-            midiOffsetBeats: (clip as any).midiOffsetBeats,
+            bufferOffsetSec: clip.bufferOffsetSec,
+            midiOffsetBeats: clip.midiOffsetBeats,
           }
           const sameTiming =
             Math.abs((from.startSec ?? 0) - (to.startSec ?? 0)) < 1e-6 &&
@@ -288,7 +295,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
             Math.abs((from.bufferOffsetSec ?? 0) - (to.bufferOffsetSec ?? 0)) < 1e-6 &&
             Math.abs((from.midiOffsetBeats ?? 0) - (to.midiOffsetBeats ?? 0)) < 1e-6
           if (!sameTiming) {
-            options.historyPush({ type: 'clip-timing', roomId: rid, data: { clipId: clip.id, from, to } })
+            options.historyPush(buildClipTimingHistoryEntry({ roomId: rid, clip, from, to }))
           }
         }
       } catch {}

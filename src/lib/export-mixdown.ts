@@ -1,6 +1,12 @@
-import type { Track } from '~/types/timeline'
 import { Output, BufferTarget, WavOutputFormat, AudioBufferSource } from 'mediabunny'
-import { supportsGain, type ArpParams, type EqParamsLite, type ReverbParamsLite, type SynthParamsInput } from '~/lib/effects/params'
+
+import { getPlayableAudioWindow, getScheduledMidiEvents } from '~/lib/audio-scheduling'
+import { type ArpParams, type EqParamsLite, type ReverbParamsLite, type SynthParamsInput } from '~/lib/effects/params'
+import { createSynthVoiceOscillators, getSynthVoiceConfig, getSynthVoiceVelocity, scheduleSynthVoiceEnvelope } from '~/lib/synth-voice'
+import { createOfflineMixerNodes } from '~/lib/mixer/apply-offline-routing'
+import { createMixerChannels } from '~/lib/mixer/channels'
+import { resolveMixerGraph } from '~/lib/mixer/resolve-routing'
+import type { Track } from '~/types/timeline'
 
 export type ExportRange =
   | { mode: 'whole' }
@@ -31,12 +37,11 @@ export type ExportResult = {
 
 function lastClipEndSec(tracks: Track[]): number {
   let maxEnd = 0
-  for (const t of tracks) {
-    for (const c of t.clips) {
-      maxEnd = Math.max(maxEnd, c.startSec + c.duration)
+  for (const track of tracks) {
+    for (const clip of track.clips) {
+      maxEnd = Math.max(maxEnd, clip.startSec + clip.duration)
     }
   }
-  // default to small length to avoid zero-length renders
   return Math.max(0.001, maxEnd)
 }
 
@@ -44,9 +49,9 @@ function computeRangeSec(tracks: Track[], range: ExportRange): { start: number; 
   if (range.mode === 'whole') {
     return { start: 0, end: lastClipEndSec(tracks) }
   }
-  const s = Math.max(0, range.startSec)
-  const e = Math.max(s, range.endSec)
-  return { start: s, end: e }
+  const start = Math.max(0, range.startSec)
+  const end = Math.max(start, range.endSec)
+  return { start, end }
 }
 
 export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
@@ -55,137 +60,79 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
   const duration = Math.max(0.001, end - start)
   const length = Math.ceil(duration * sampleRate)
   const ctx = new OfflineAudioContext(numberOfChannels, length, sampleRate)
+  const trackById = new Map(tracks.map(track => [track.id, track]))
+  const mixerGraph = resolveMixerGraph({
+    channels: createMixerChannels(tracks),
+    masterEq: fx?.masterEq,
+    masterReverb: fx?.masterReverb,
+    trackFx: fx?.trackFx,
+  })
+  const { trackNodes } = createOfflineMixerNodes(ctx, mixerGraph)
 
-  // Master chain: input -> (reverb/eq) -> destination
-  const masterInput = ctx.createGain()
-  masterInput.gain.value = 1
+  for (const resolvedTrack of mixerGraph.channels) {
+    const track = trackById.get(resolvedTrack.channel.id)
+    if (!track) continue
+    const trackInput = trackNodes.get(track.id)?.input
+    if (!trackInput) continue
+    const fxCfg = resolvedTrack.fx
 
-  const masterDest: AudioNode = buildMasterChain(ctx, masterInput, ctx.destination, fx?.masterEq, fx?.masterReverb)
-  // Note: buildMasterChain connects nodes; masterDest is final (not used further)
-
-  const anySoloed = tracks.some(t => t.soloed)
-
-  const secondsPerBeat = () => 60 / Math.max(1, bpm || 120)
-
-  for (const t of tracks) {
-    // Track-level gain: respect mute/solo/volume
-    // Track chain: trackInput -> (reverb/eq) -> trackGain -> masterInput
-    const trackInput = ctx.createGain()
-    const trackGain = ctx.createGain()
-    const audible = (!t.muted) && (!anySoloed || !!t.soloed)
-    const effective = audible ? t.volume : 0
-    trackGain.gain.value = Number.isFinite(effective) ? effective : 0
-    // Insert per-track FX between input and gain
-    const fxCfg = fx?.trackFx?.[t.id]
-    const destAfterFx = buildTrackChain(ctx, trackInput, trackGain, fxCfg?.eq, fxCfg?.reverb)
-    // Finally route trackGain to master input
-    trackGain.connect(masterInput)
-
-    for (const c of t.clips) {
-      // MIDI clip
-      const midi: any = (c as any).midi
+    for (const clip of track.clips) {
+      const midi = clip.midi
       if (midi && Array.isArray(midi.notes)) {
-        const spb = secondsPerBeat()
-        const midiOffBeats = Math.max(0, (c as any).midiOffsetBeats ?? 0)
-        const clipStart = c.startSec
-        const clipEnd = c.startSec + c.duration
-        const fxCfg = fx?.trackFx?.[t.id]
-        const synth = fxCfg?.synth
-        const wave1: OscillatorType = ((synth as any)?.wave1 as OscillatorType) || (synth as any)?.wave || (midi.wave as OscillatorType) || 'sawtooth'
-        const wave2: OscillatorType = ((synth as any)?.wave2 as OscillatorType) || (synth as any)?.wave || wave1
-        const synthGain = typeof synth?.gain === 'number' ? Math.max(0, Math.min(1.5, synth.gain)) : 1.0
-        const clipGain = typeof midi.gain === 'number' ? Math.max(0, Math.min(1.5, midi.gain)) : 1.0
-        const attackSec = Math.max(0.001, ((synth?.attackMs ?? 5) / 1000))
-        const releaseSec = Math.max(0.001, ((synth?.releaseMs ?? 30) / 1000))
+        const voice = getSynthVoiceConfig({ synth: fxCfg?.synth, midi })
+        const events = getScheduledMidiEvents({
+          clip,
+          bpm,
+          notes: midi.notes,
+          rangeStartSec: start,
+          rangeEndSec: end,
+          arp: fxCfg?.arp,
+        })
 
-        const clipDurationBeats = c.duration / spb
-        let notesToSchedule = midi.notes as Array<{ beat: number; length: number; pitch: number; velocity?: number }>
-        const arp = fxCfg?.arp
-        if (arp && arp.enabled) {
-          notesToSchedule = applyArpeggiator(notesToSchedule, arp, clipDurationBeats)
-        }
-
-        for (const note of notesToSchedule) {
-          const noteBeatRaw = note.beat || 0
-          const trimmedBeats = Math.max(0, midiOffBeats - noteBeatRaw)
-          const effectiveLength = Math.max(0, (note.length || 0) - trimmedBeats)
-          if (effectiveLength <= 0) continue
-          const noteBeatEff = Math.max(0, noteBeatRaw - midiOffBeats)
-          const noteStartTimeline = clipStart + noteBeatEff * spb
-          const noteEndTimeline = noteStartTimeline + effectiveLength * spb
-          const startTimeline = Math.max(noteStartTimeline, clipStart)
-          const endTimeline = Math.min(noteEndTimeline, clipEnd)
-          if (endTimeline <= startTimeline) continue
-
-          // Clip to export window
-          if (endTimeline <= start || startTimeline >= end) continue
-          const when = Math.max(0, startTimeline - start)
-          const noteDur = Math.min(end, endTimeline) - Math.max(start, startTimeline)
+        for (const event of events) {
+          const when = Math.max(0, event.startSec - start)
+          const noteDur = event.endSec - event.startSec
           if (noteDur <= 0) continue
 
-          const osc1 = ctx.createOscillator()
-          const osc2 = ctx.createOscillator()
+          const { osc1, osc2 } = createSynthVoiceOscillators(ctx, {
+            startTime: when,
+            pitch: event.pitch,
+            wave1: voice.wave1,
+            wave2: voice.wave2,
+          })
           const gain = ctx.createGain()
-          const vel = typeof note.velocity === 'number' ? Math.max(0, Math.min(1, note.velocity)) : 0.9
-          const amp = vel * clipGain * synthGain
-          // Two oscillators -> halve envelope target so net loudness matches prior single-osc
-          const envTarget = amp / 2
-          try { osc1.type = wave1 } catch {}
-          try { osc2.type = wave2 } catch {}
-          const freq = 440 * Math.pow(2, (note.pitch - 69) / 12)
-          osc1.frequency.setValueAtTime(freq, when)
-          osc2.frequency.setValueAtTime(freq, when)
-          const EPS = 1e-4
-          gain.gain.setValueAtTime(EPS, when)
-          // Attack/Release from synth params
-          const attack = attackSec
-          const release = releaseSec
-          gain.gain.exponentialRampToValueAtTime(Math.max(EPS, envTarget), when + attack)
-          const noteEnd = when + noteDur
-          const relStart = Math.max(when + attack, noteEnd - release)
-          gain.gain.setValueAtTime(Math.max(EPS, envTarget), relStart)
-          gain.gain.exponentialRampToValueAtTime(EPS, noteEnd)
-          try { gain.gain.setValueAtTime(0, noteEnd + 1e-4) } catch {}
+          const peakGain = (getSynthVoiceVelocity(event.velocity) * voice.clipGain * voice.synthGain) / 2
+          const envelope = scheduleSynthVoiceEnvelope(gain.gain, {
+            startTime: when,
+            durationSec: noteDur,
+            attackSec: voice.attackSec,
+            releaseSec: voice.releaseSec,
+            peakGain,
+          })
           osc1.connect(gain)
           osc2.connect(gain)
           gain.connect(trackInput)
           try { osc1.start(when) } catch {}
           try { osc2.start(when) } catch {}
-          try { osc1.stop(noteEnd) } catch {}
-          try { osc2.stop(noteEnd) } catch {}
+          try { osc1.stop(envelope.endTime) } catch {}
+          try { osc2.stop(envelope.endTime) } catch {}
         }
         continue
       }
 
-      // Audio clip
-      if (!c.buffer) continue
-      const buffer = c.buffer
-      const leftPad = Math.max(0, c.leftPadSec ?? 0)
-      const bufferOffsetRaw = Math.max(0, (c as any).bufferOffsetSec ?? 0)
-      const windowStart = c.startSec
-      const windowEnd = c.startSec + c.duration
-      const audioStart = windowStart + leftPad
-      const bufferDur = buffer.duration
-      const bufferOffset = Math.min(bufferDur, bufferOffsetRaw)
-      const bufferDurRemain = Math.max(0, bufferDur - bufferOffset)
-      const audioEnd = Math.min(windowEnd, audioStart + bufferDurRemain)
-      if (audioEnd <= audioStart) continue
-
-      // Clip to export window
-      const playableStart = Math.max(start, audioStart)
-      const playableEnd = Math.min(end, audioEnd)
-      if (playableEnd <= playableStart) continue
-
-      const when = Math.max(0, playableStart - start)
-      const offsetNoBase = Math.max(0, playableStart - audioStart)
-      const offset = bufferOffset + offsetNoBase
-      const playDur = Math.max(0, playableEnd - playableStart)
-      if (playDur <= 0) continue
+      if (!clip.buffer) continue
+      const window = getPlayableAudioWindow({
+        clip,
+        bufferDurationSec: clip.buffer.duration,
+        rangeStartSec: start,
+        rangeEndSec: end,
+      })
+      if (!window) continue
 
       const src = ctx.createBufferSource()
-      src.buffer = buffer
+      src.buffer = clip.buffer
       src.connect(trackInput)
-      try { src.start(when, offset, playDur) } catch {}
+      try { src.start(Math.max(0, window.startSec - start), window.offsetSec, window.durationSec) } catch {}
     }
   }
 
@@ -193,7 +140,7 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
 }
 
 export async function encodeAudioBuffer(buffer: AudioBuffer): Promise<ExportResult> {
-  const sr = buffer.sampleRate
+  const sampleRate = buffer.sampleRate
   const output = new Output({ format: new WavOutputFormat(), target: new BufferTarget() })
   const src = new AudioBufferSource({ codec: 'pcm-s16' })
   output.addAudioTrack(src)
@@ -201,190 +148,14 @@ export async function encodeAudioBuffer(buffer: AudioBuffer): Promise<ExportResu
   await src.add(buffer)
   src.close()
   await output.finalize()
-  const buf = (output.target as BufferTarget).buffer!
-  const blob = new Blob([buf], { type: 'audio/wav' })
-  return { audioBuffer: buffer, blob, mimeType: 'audio/wav', fileExtension: '.wav', durationSec: buffer.duration, sampleRate: sr }
-}
-
-function buildEqNodes(ctx: BaseAudioContext, params?: EqParamsLite, channels = 2): BiquadFilterNode[] {
-  const nodes: BiquadFilterNode[] = []
-  if (!params?.enabled) return nodes
-  for (const b of params.bands) {
-    if (!b.enabled) continue
-    const f = ctx.createBiquadFilter()
-    f.type = b.type
-    f.frequency.value = Math.max(20, Math.min(20000, b.frequency))
-    f.Q.value = Math.max(0.001, b.q)
-    f.gain.value = supportsGain(b.type) ? b.gainDb : 0
-    try {
-      // Avoid channel count mode changes/glitches by pinning
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(f as any).channelCountMode = 'explicit'
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(f as any).channelInterpretation = 'speakers'
-      f.channelCount = Math.max(1, Math.min(2, channels))
-    } catch {}
-    nodes.push(f)
-  }
-  return nodes
-}
-
-function createImpulseResponse(ctx: BaseAudioContext, decaySec: number) {
-  const clampedDecay = Math.min(10, Math.max(0.05, decaySec))
-  const length = Math.max(1, Math.floor(ctx.sampleRate * clampedDecay))
-  const ir = ctx.createBuffer(2, length, ctx.sampleRate)
-  for (let ch = 0; ch < ir.numberOfChannels; ch++) {
-    const data = ir.getChannelData(ch)
-    for (let i = 0; i < length; i++) {
-      const t = i / length
-      const decay = Math.pow(1 - t, 3)
-      // simple white noise tail
-      data[i] = (Math.random() * 2 - 1) * decay
-    }
-  }
-  return ir
-}
-
-function wireEqChain(input: AudioNode, eq: BiquadFilterNode[], dest: AudioNode) {
-  if (eq.length === 0) {
-    input.connect(dest)
-    return dest
-  }
-  input.connect(eq[0])
-  for (let i = 0; i < eq.length - 1; i++) eq[i].connect(eq[i + 1])
-  eq[eq.length - 1].connect(dest)
-  return eq[0]
-}
-
-function buildTrackChain(ctx: OfflineAudioContext, trackInput: GainNode, trackGain: GainNode, eqParams?: EqParamsLite, rvParams?: ReverbParamsLite) {
-  // Build EQ chain to final destination (trackGain)
-  const eq = buildEqNodes(ctx, eqParams, ctx.destination.channelCount || 2)
-  const dest: AudioNode = trackGain
-  if (eq.length) {
-    // Ensure eq chain outputs to dest
-    for (let i = 0; i < eq.length - 1; i++) eq[i].connect(eq[i + 1])
-    eq[eq.length - 1].connect(dest)
-  }
-
-  if (rvParams && rvParams.enabled) {
-    // Parallel reverb around EQ (like live engine)
-    const dry = ctx.createGain(); dry.gain.value = 1 - Math.max(0, Math.min(1, rvParams.wet))
-    const wet = ctx.createGain(); wet.gain.value = Math.max(0, Math.min(1, rvParams.wet))
-    const pre = ctx.createDelay(2.0); pre.delayTime.value = Math.max(0, Math.min(0.2, rvParams.preDelayMs / 1000))
-    const conv = ctx.createConvolver(); conv.buffer = createImpulseResponse(ctx, rvParams.decaySec)
-
-    // Wire dry/wet to EQ entry or dest when no EQ
-    const eqEntry = eq.length ? eq[0] : dest
-    trackInput.connect(dry); dry.connect(eqEntry)
-    trackInput.connect(pre); pre.connect(conv); conv.connect(wet); wet.connect(eqEntry)
-  } else {
-    // No reverb: route through EQ (or directly) to dest
-    if (eq.length) trackInput.connect(eq[0])
-    else trackInput.connect(dest)
-  }
-  return dest
-}
-
-function buildMasterChain(ctx: OfflineAudioContext, masterInput: GainNode, finalDest: AudioNode, eqParams?: EqParamsLite, rvParams?: ReverbParamsLite) {
-  const eq = buildEqNodes(ctx, eqParams, ctx.destination.channelCount || 2)
-  if (eq.length) {
-    for (let i = 0; i < eq.length - 1; i++) eq[i].connect(eq[i + 1])
-    eq[eq.length - 1].connect(finalDest)
-  }
-
-  if (rvParams && rvParams.enabled) {
-    const dry = ctx.createGain(); dry.gain.value = 1 - Math.max(0, Math.min(1, rvParams.wet))
-    const wet = ctx.createGain(); wet.gain.value = Math.max(0, Math.min(1, rvParams.wet))
-    const pre = ctx.createDelay(2.0); pre.delayTime.value = Math.max(0, Math.min(0.2, rvParams.preDelayMs / 1000))
-    const conv = ctx.createConvolver(); conv.buffer = createImpulseResponse(ctx, rvParams.decaySec)
-    const eqEntry = eq.length ? eq[0] : finalDest
-    masterInput.connect(dry); dry.connect(eqEntry)
-    masterInput.connect(pre); pre.connect(conv); conv.connect(wet); wet.connect(eqEntry)
-  } else {
-    if (eq.length) masterInput.connect(eq[0])
-    else masterInput.connect(finalDest)
-  }
-  return finalDest
-}
-
-// Arpeggiator expansion (copied/adapted from live engine)
-function createSeededRandom(seed: number) {
-  let state = (seed >>> 0) || 1
-  return () => {
-    state = (state + 0x6D2B79F5) | 0
-    let t = Math.imul(state ^ (state >>> 15), state | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  const outBuffer = (output.target as BufferTarget).buffer!
+  const blob = new Blob([outBuffer], { type: 'audio/wav' })
+  return {
+    audioBuffer: buffer,
+    blob,
+    mimeType: 'audio/wav',
+    fileExtension: '.wav',
+    durationSec: buffer.duration,
+    sampleRate,
   }
 }
-
-function applyArpeggiator(
-  notes: Array<{ beat: number; length: number; pitch: number; velocity?: number }>,
-  params: ArpParams,
-  clipDurationBeats: number,
-): Array<{ beat: number; length: number; pitch: number; velocity?: number }> {
-  if (!params.enabled || notes.length === 0) return notes
-
-  const rateMap: Record<string, number> = { '1/4': 1, '1/8': 0.5, '1/16': 0.25, '1/32': 0.125 }
-  const stepBeats = rateMap[params.rate] ?? 0.25
-  const chordThreshold = 0.02
-  const sorted = notes.slice().sort((a, b) => a.beat - b.beat)
-  const chords: Array<{ beat: number; endBeat: number; pitches: number[]; velocity: number }> = []
-
-  for (const note of sorted) {
-    const lastChord = chords[chords.length - 1]
-    if (lastChord && Math.abs(note.beat - lastChord.beat) < chordThreshold) {
-      lastChord.pitches.push(note.pitch)
-      lastChord.endBeat = Math.max(lastChord.endBeat, note.beat + note.length)
-    } else {
-      chords.push({ beat: note.beat, endBeat: note.beat + note.length, pitches: [note.pitch], velocity: note.velocity ?? 0.9 })
-    }
-  }
-
-  const arpeggiated: Array<{ beat: number; length: number; pitch: number; velocity?: number }> = []
-  for (const chord of chords) {
-    const basePitches = chord.pitches.slice().sort((a, b) => a - b)
-    if (basePitches.length === 0) continue
-    const expandedPitches: number[] = []
-    const octaves = Math.max(1, Math.floor(params.octaves || 1))
-    for (let oct = 0; oct < octaves; oct++) {
-      for (const pitch of basePitches) expandedPitches.push(pitch + oct * 12)
-    }
-    if (expandedPitches.length === 0) continue
-
-    let sequence: number[] = []
-    switch (params.pattern) {
-      case 'up': sequence = expandedPitches; break
-      case 'down': sequence = expandedPitches.slice().reverse(); break
-      case 'updown': sequence = [...expandedPitches, ...expandedPitches.slice(0, -1).reverse()]; break
-      case 'random': {
-        sequence = expandedPitches.slice()
-        if (sequence.length > 1) {
-          const signature = chord.pitches.reduce((acc, p, idx) => (((acc ^ ((p + idx * 131) >>> 0)) >>> 0) * 33) >>> 0, Math.floor(chord.beat * 10000) >>> 0)
-          const rand = createSeededRandom(signature || 1)
-          for (let i = sequence.length - 1; i > 0; i--) {
-            const j = Math.floor(rand() * (i + 1))
-            ;[sequence[i], sequence[j]] = [sequence[j], sequence[i]]
-          }
-        }
-        break
-      }
-      default: sequence = expandedPitches
-    }
-
-    const endBeat = params.hold ? clipDurationBeats : chord.endBeat
-    let currentBeat = chord.beat
-    let seqIndex = 0
-    const gate = Math.max(0, params.gate)
-    if (gate <= 0) continue
-    const noteLen = stepBeats * gate
-    while (currentBeat < endBeat && currentBeat < clipDurationBeats) {
-      const pitch = sequence[seqIndex % sequence.length]
-      arpeggiated.push({ beat: currentBeat, length: noteLen, pitch, velocity: chord.velocity })
-      currentBeat += stepBeats
-      seqIndex++
-    }
-  }
-  return arpeggiated
-}
-

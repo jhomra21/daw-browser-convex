@@ -88,6 +88,8 @@ module.exports = {
         error: "hsl(var(--error) / <alpha-value>)",
         "error-foreground": "hsl(var(--error-foreground) / <alpha-value>)",
         ring: "hsl(var(--ring) / <alpha-value>)",
+        "clip-audio": "hsl(var(--clip-audio) / <alpha-value>)",
+        "clip-recording": "hsl(var(--clip-recording) / <alpha-value>)",
       },
       borderRadius: {
         xl: "calc(var(--radius) + 4px)",

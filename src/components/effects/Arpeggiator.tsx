@@ -38,7 +38,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
           <span class="text-xs font-semibold">Arpeggiator</span>
           <Show when={props.onToggleEnabled}>
             <button
-              class={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+              class={`text-2xs px-1.5 py-0.5 rounded border transition-colors ${
                 props.params.enabled
                   ? 'bg-green-500/20 text-green-300 border-green-400/30'
                   : 'bg-neutral-800 text-neutral-400 border-neutral-700'
@@ -49,7 +49,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
             </button>
           </Show>
           <button
-            class={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+            class={`text-2xs px-1.5 py-0.5 rounded border transition-colors ${
               props.params.hold
                 ? 'bg-blue-500/20 text-blue-300 border-blue-400/30'
                 : 'bg-neutral-800 text-neutral-400 border-neutral-700'
@@ -73,7 +73,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
 
       {/* Pattern Selector */}
       <div class="px-2 py-2 border-b border-neutral-800/50">
-        <div class="text-[10px] text-neutral-400 mb-1 text-center">Pattern</div>
+        <div class="text-2xs text-neutral-400 mb-1 text-center">Pattern</div>
         <div class="flex items-center justify-center gap-1">
           <For each={PATTERNS}>
             {(pat) => (
@@ -95,7 +95,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
 
       {/* Rate Selector */}
       <div class="px-2 py-2 border-b border-neutral-800/50">
-        <div class="text-[10px] text-neutral-400 mb-1 text-center">Rate</div>
+        <div class="text-2xs text-neutral-400 mb-1 text-center">Rate</div>
         <div class="flex items-center justify-center gap-1">
           <For each={RATES}>
             {(r) => (

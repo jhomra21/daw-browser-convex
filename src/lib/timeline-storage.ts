@@ -15,7 +15,7 @@ export const canUseLocalStorage = () => {
   }
 }
 
-export const loadLocalMixMap = (rid?: string): Record<string, { muted?: boolean; soloed?: boolean }> => {
+export const loadLocalMixMap = (rid?: string): Record<string, { muted?: boolean; soloed?: boolean; volume?: number }> => {
   if (!rid) return {}
   if (!canUseLocalStorage()) return {}
   try {
@@ -28,7 +28,7 @@ export const loadLocalMixMap = (rid?: string): Record<string, { muted?: boolean;
 export const saveLocalMix = (
   rid: string | undefined,
   trackId: string,
-  update: Partial<{ muted: boolean; soloed: boolean }>,
+  update: Partial<{ muted: boolean; soloed: boolean; volume: number }>,
 ) => {
   if (!rid) return
   if (!canUseLocalStorage()) return
@@ -160,7 +160,8 @@ export type PersistedHistory = { undo: any[]; redo: any[] }
 export const loadHistory = (rid?: string): PersistedHistory => {
   if (!rid || !canUseLocalStorage()) return { undo: [], redo: [] }
   try {
-    return JSON.parse(localStorage.getItem(`${HISTORY_KEY_PREFIX}${rid}`) || '{"undo":[],"redo":[]}') as PersistedHistory
+    const raw = JSON.parse(localStorage.getItem(`${HISTORY_KEY_PREFIX}${rid}`) || '{"undo":[],"redo":[]}')
+    return raw as PersistedHistory
   } catch {
     return { undo: [], redo: [] }
   }

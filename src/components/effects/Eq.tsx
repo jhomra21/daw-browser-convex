@@ -408,7 +408,7 @@ export default function Eq(props: EqProps) {
           <For each={props.bands}>
             {(b, i) => (
               <button
-                class={`w-4 h-4 rounded text-[9px] font-bold flex items-center justify-center transition-colors ${
+                class={`w-4 h-4 rounded text-3xs font-bold flex items-center justify-center transition-colors ${
                   selectedId() === b.id ? 'bg-blue-500 text-white' : (b.enabled ? 'bg-neutral-700 text-neutral-200 hover:bg-neutral-600' : 'bg-neutral-800 text-neutral-500')
                 }`}
                 onClick={() => setSelectedId(b.id)}
@@ -418,7 +418,7 @@ export default function Eq(props: EqProps) {
           </For>
           <Show when={props.onBandToggle && selBand()}>
             <button
-              class={`ml-1 text-[8px] px-1 py-0.5 rounded ${selBand()?.enabled ? 'bg-neutral-300 text-black' : 'bg-neutral-800 text-neutral-300'}`}
+              class={`ml-1 text-3xs px-1 py-0.5 rounded ${selBand()?.enabled ? 'bg-neutral-300 text-black' : 'bg-neutral-800 text-neutral-300'}`}
               onClick={() => selBand() && props.onBandToggle?.(selBand()!.id)}
               title={selBand()?.enabled ? 'Disable band' : 'Enable band'}
             >{selBand()?.enabled ? 'On' : 'Off'}</button>
@@ -433,7 +433,7 @@ export default function Eq(props: EqProps) {
           <div class="flex flex-col gap-1">
             {/* Frequency */}
             <div class="flex flex-col items-center gap-1">
-              <div class="text-[8px] leading-none text-neutral-400">Freq</div>
+              <div class="text-3xs leading-none text-neutral-400">Freq</div>
               <Knob
                 value={selBand()?.frequency ?? 1000}
                 min={FREQ_MIN}
@@ -447,14 +447,14 @@ export default function Eq(props: EqProps) {
                 showValue={false}
                 onValueChange={(v) => selBand() && props.onBandChange(selBand()!.id, { frequency: Math.round(v) })}
               />
-              <div class="text-[8px] leading-none text-neutral-300 font-mono">
+              <div class="text-3xs leading-none text-neutral-300 font-mono">
                 {selectedFrequencyLabel()}
               </div>
             </div>
 
             {/* Gain */}
             <div class="flex flex-col items-center gap-1">
-              <div class="text-[8px] leading-none text-neutral-400">Gain</div>
+              <div class="text-3xs leading-none text-neutral-400">Gain</div>
               <Knob
                 value={selBand()?.gainDb ?? 0}
                 min={GAIN_MIN}
@@ -468,14 +468,14 @@ export default function Eq(props: EqProps) {
                 showValue={false}
                 onValueChange={(v) => selBand() && props.onBandChange(selBand()!.id, { gainDb: Math.round(v * 10) / 10 })}
               />
-              <div class="text-[8px] text-neutral-300 font-mono">
+              <div class="text-3xs text-neutral-300 font-mono">
                 {selectedGainLabel()}
               </div>
             </div>
 
             {/* Q */}
             <div class="flex flex-col items-center gap-1">
-              <div class="text-[8px] leading-none text-neutral-400">Q</div>
+              <div class="text-3xs leading-none text-neutral-400">Q</div>
               <Knob
                 value={selBand()?.q ?? 1}
                 min={Q_MIN}
@@ -487,7 +487,7 @@ export default function Eq(props: EqProps) {
                 showValue={false}
                 onValueChange={(v) => selBand() && props.onBandChange(selBand()!.id, { q: Math.round(v * 10) / 10 })}
               />
-              <div class="text-[8px] leading-none text-neutral-300 font-mono">{selBand()?.q?.toFixed(1) ?? '0.0'}</div>
+              <div class="text-3xs leading-none text-neutral-300 font-mono">{selBand()?.q?.toFixed(1) ?? '0.0'}</div>
             </div>
           </div>
 
@@ -513,7 +513,7 @@ export default function Eq(props: EqProps) {
           <For each={FILTER_TYPES}>
             {(ft) => (
               <button
-                class={`px-1 py-0.5 text-[9px] rounded border ${
+                class={`px-1 py-0.5 text-3xs rounded border ${
                   selBand()?.type === ft.value
                     ? 'bg-blue-500/20 text-blue-300 border-blue-400/30'
                     : 'bg-neutral-800 text-neutral-300 border-neutral-700 hover:bg-neutral-700'

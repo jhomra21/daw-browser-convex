@@ -4,9 +4,11 @@ import Icon from '~/components/ui/Icon'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '~/components/ui/dropdown-menu'
 import { NavUser } from '~/components/nav-user'
 import { useConvexQuery, convexApi, convexClient } from '~/lib/convex'
+import type { InsertSampleInput } from '~/hooks/useTimelineClipImport'
 import { useSessionQuery } from '~/lib/session'
 import { useProjectSamples } from '~/hooks/useProjectSamples'
 import { useProjectExports } from '~/hooks/useProjectExports'
+import { cn } from '~/lib/utils'
 
 type TransportControlsProps = {
   isPlaying: boolean
@@ -32,7 +34,7 @@ type TransportControlsProps = {
   onToggleRecord: () => void
   // Samples controls
   onJumpToClip: (clipId: string, trackId: string, startSec: number) => void
-  onInsertSample: (input: { url: string; name?: string; duration?: number }) => void | Promise<void>
+  onInsertSample: (input: InsertSampleInput) => void | Promise<void>
   // Projects controls
   currentRoomId: string
   onOpenProject: (roomId: string) => void
@@ -55,9 +57,9 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
   const [editingName, setEditingName] = createSignal<string>('')
   const [renamingProjectId, setRenamingProjectId] = createSignal<string | null>(null)
   // Samples actions state
-  const [confirmingSampleUrl, setConfirmingSampleUrl] = createSignal<string | null>(null)
-  const [deletingSampleUrl, setDeletingSampleUrl] = createSignal<string | null>(null)
-  const [insertingSampleUrl, setInsertingSampleUrl] = createSignal<string | null>(null)
+  const [confirmingSampleKey, setConfirmingSampleKey] = createSignal<string | null>(null)
+  const [deletingSampleKey, setDeletingSampleKey] = createSignal<string | null>(null)
+  const [insertingSampleKey, setInsertingSampleKey] = createSignal<string | null>(null)
   const [samplesOpen, setSamplesOpen] = createSignal(false)
   const [exportsOpen, setExportsOpen] = createSignal(false)
   const [isDraggingSample, setIsDraggingSample] = createSignal(false)
@@ -134,7 +136,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
 
   // Projects data
   const session = useSessionQuery()
-  const userId = () => (session()?.data?.user as any)?.id ?? ''
+  const userId = () => (session.data?.user as any)?.id ?? ''
   const myProjects = useConvexQuery(
     // Cast to any until Convex codegen picks up new function
     (convexApi as any).projects.listMineDetailed,
@@ -142,9 +144,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
     () => ['projects', 'mine_detailed', userId()]
   )
   const projects = () => {
-    const raw: any = (myProjects as any).data
-    const data = (typeof raw === 'function' ? raw() : raw)
-    return Array.isArray(data) ? data as { roomId: string, name: string }[] : undefined
+    return Array.isArray(myProjects.data) ? myProjects.data as { roomId: string, name: string }[] : undefined
   }
 
   const samples = useProjectSamples({
@@ -175,14 +175,41 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
     return `${formatted} ${units[unitIndex]}`
   }
 
-  const handleInsertSampleAction = async (sample: { url?: string; name?: string; duration?: number }) => {
+  const startSampleDrag = (
+    event: DragEvent,
+    sample: InsertSampleInput,
+  ) => {
+    try {
+      const payload = JSON.stringify({
+        url: sample.url,
+        name: sample.name,
+        duration: sample.duration,
+        assetKey: sample.assetKey,
+        sourceKind: sample.sourceKind,
+        source: sample.source,
+      })
+      event.dataTransfer?.setData('application/x-mediabunny-sample', payload)
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+    } catch {}
+    setIsDraggingSample(true)
+  }
+
+  const handleInsertSampleAction = async (sample: InsertSampleInput & { key?: string }) => {
     const url = sample?.url
     if (!url) return
-    setInsertingSampleUrl(url)
+    const sampleKey = sample?.key ?? url
+    setInsertingSampleKey(sampleKey)
     try {
-      await Promise.resolve(props.onInsertSample({ url, name: sample?.name, duration: sample?.duration }))
+      await Promise.resolve(props.onInsertSample({
+        url,
+        name: sample?.name,
+        duration: sample?.duration,
+        assetKey: sample?.assetKey,
+        sourceKind: sample?.sourceKind,
+        source: sample?.source,
+      }))
     } finally {
-      setInsertingSampleUrl(null)
+      setInsertingSampleKey(null)
     }
   }
 
@@ -191,12 +218,12 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
     const rid = props.currentRoomId
     const uid = userId()
     if (!rid || !uid) return
-    setDeletingSampleUrl(sample.url)
+    setDeletingSampleKey(sample.key)
     try {
-      await convexClient.mutation((convexApi as any).samples.removeFromRoom, { roomId: rid, url: sample.url, userId: uid })
-      setConfirmingSampleUrl(null)
+      await convexClient.mutation((convexApi as any).samples.removeFromRoom, { roomId: rid, assetKey: sample.assetKey, userId: uid })
+      setConfirmingSampleKey(null)
     } finally {
-      setDeletingSampleUrl(null)
+      setDeletingSampleKey(null)
     }
   }
 
@@ -223,24 +250,63 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
     setShareOpen(open)
     if (!open) setCopied(false)
   }
+  const closeShareMenu = () => setShareOpen(false)
+  const stopPropagation = (event: Event) => {
+    event.stopPropagation()
+  }
+  const stopMenuPress = (event: Event) => {
+    event.stopPropagation()
+    event.preventDefault()
+  }
+  const beginProjectRename = (roomId: string, name: string) => {
+    setEditingProjectId(roomId)
+    setEditingName(name)
+  }
+  const cancelProjectRename = () => {
+    setEditingProjectId(null)
+  }
+  const confirmProjectRename = async (roomId: string) => {
+    if (renamingProjectId() === roomId) return
+    const name = editingName().trim()
+    if (!name) {
+      cancelProjectRename()
+      return
+    }
+    setRenamingProjectId(roomId)
+    try {
+      await props.onRenameProject(roomId, name)
+    } finally {
+      setRenamingProjectId(null)
+      cancelProjectRename()
+    }
+  }
+  const confirmProjectDelete = async (roomId: string) => {
+    setDeletingProjectId(roomId)
+    try {
+      await props.onDeleteProject(roomId)
+    } finally {
+      setDeletingProjectId(null)
+      setConfirmingProjectId(null)
+    }
+  }
 
   // Cancel inline confirmation/rename when clicking outside or pressing Esc
   const handleDocMouseDown = (e: MouseEvent) => {
     const cid = confirmingProjectId()
     const eid = editingProjectId()
-    const sid = confirmingSampleUrl()
+    const sid = confirmingSampleKey()
     if (!cid && !eid && !sid) return
     const t = e.target as HTMLElement | null
     if (!t) return
     if (cid && !t.closest(`[data-project-rid="${cid}"]`)) setConfirmingProjectId(null)
     if (eid && !t.closest(`[data-project-rid="${eid}"]`)) setEditingProjectId(null)
-    if (sid && !t.closest(`[data-sample-url="${sid}"]`)) setConfirmingSampleUrl(null)
+    if (sid && !t.closest(`[data-sample-key="${sid}"]`)) setConfirmingSampleKey(null)
   }
   const handleEscKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       if (confirmingProjectId()) setConfirmingProjectId(null)
       if (editingProjectId()) setEditingProjectId(null)
-      if (confirmingSampleUrl()) setConfirmingSampleUrl(null)
+      if (confirmingSampleKey()) setConfirmingSampleKey(null)
     }
   }
   onMount(() => {
@@ -307,7 +373,10 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                       <Show when={!isEditing() && !isConfirmingDelete()} fallback={
                         <div
                           data-project-rid={rid}
-                          class={`group relative w-full flex items-center justify-between gap-2 pr-12 ${props.currentRoomId === rid ? 'text-green-400' : ''}`}
+                          class={cn(
+                            'group relative w-full flex items-center justify-between gap-2 pr-12',
+                            props.currentRoomId === rid && 'text-green-400',
+                          )}
                           onMouseDown={(e) => e.stopPropagation()}
                           onClick={(e) => e.stopPropagation()}
                         >
@@ -317,46 +386,38 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                               <title>Project</title>
                             </svg>
                             <Show when={isEditing()} fallback={
-                              <span class={`font-mono text-xs truncate max-w-[14rem] ${props.currentRoomId === rid ? 'text-green-400' : 'text-neutral-200'}`} title={proj.name}>{proj.name}</span>
+                              <span class={cn('font-mono text-xs truncate max-w-56', props.currentRoomId === rid ? 'text-green-400' : 'text-neutral-200')} title={proj.name}>{proj.name}</span>
                             }>
                               <form
                                 class="flex items-center gap-2 min-w-0 w-full"
                                 onSubmit={async (ev) => {
                                   ev.preventDefault()
                                   ev.stopPropagation()
-                                  if (renamingProjectId() === rid) return
-                                  const name = editingName().trim()
-                                  if (!name) { setEditingProjectId(null); return }
-                                  setRenamingProjectId(rid)
-                                  try { await props.onRenameProject(rid, name) } finally { setRenamingProjectId(null); setEditingProjectId(null) }
+                                  await confirmProjectRename(rid)
                                 }}
                               >
                                 <input
                                   data-project-input={rid}
                                   value={editingName()}
-                                  onInput={(e) => { e.stopPropagation(); setEditingName((e.currentTarget as HTMLInputElement).value) }}
+                                  onInput={(e) => { stopPropagation(e); setEditingName((e.currentTarget as HTMLInputElement).value) }}
                                   onKeyDown={async (e) => {
-                                    e.stopPropagation();
+                                    stopPropagation(e)
                                     if (e.key === 'Enter' || (e as any).code === 'Enter' || (e as any).code === 'NumpadEnter' || (e as any).keyCode === 13 || (e as any).which === 13) {
-                                      e.preventDefault();
-                                      if (renamingProjectId() === rid) return
-                                      const name = editingName().trim()
-                                      if (!name) { setEditingProjectId(null); return }
-                                      setRenamingProjectId(rid)
-                                      try { await props.onRenameProject(rid, name) } finally { setRenamingProjectId(null); setEditingProjectId(null) }
+                                      e.preventDefault()
+                                      await confirmProjectRename(rid)
                                       return
                                     }
                                     if (e.key === 'Escape') {
-                                      e.preventDefault();
-                                      setEditingProjectId(null)
+                                      e.preventDefault()
+                                      cancelProjectRename()
                                     }
                                   }}
-                                  onKeyUp={(e) => e.stopPropagation()}
-                                  onPointerUp={(e) => e.stopPropagation()}
-                                  onMouseUp={(e) => e.stopPropagation()}
-                                  onMouseMove={(e) => e.stopPropagation()}
-                                  onPointerMove={(e) => e.stopPropagation()}
-                                  class={`bg-neutral-800 text-neutral-100 text-xs px-2 py-1 pr-12 rounded outline-none border border-neutral-700 focus:border-neutral-500 w-full`}
+                                  onKeyUp={stopPropagation}
+                                  onPointerUp={stopPropagation}
+                                  onMouseUp={stopPropagation}
+                                  onMouseMove={stopPropagation}
+                                  onPointerMove={stopPropagation}
+                                  class="bg-neutral-800 text-neutral-100 text-xs px-2 py-1 pr-12 rounded outline-none border border-neutral-700 focus:border-neutral-500 w-full"
                                   ref={(el) => {
                                     try {
                                       const node = el as HTMLInputElement
@@ -385,16 +446,16 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                           </div>
                           <div class="absolute right-2 top-1/2 -translate-y-1/2" data-project-controls>
                             {/* Delete Confirm/Cancel cluster */}
-                            <div class={`absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1 transition-opacity duration-150 ${isConfirmingDelete() ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                            <div class={cn('absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1 transition-opacity duration-150', isConfirmingDelete() ? 'opacity-100' : 'opacity-0 pointer-events-none')}>
                               <button
-                                class={`p-1 rounded cursor-pointer ${deletingProjectId() === rid ? 'opacity-60 cursor-not-allowed text-neutral-400' : 'text-green-500 hover:text-green-400'}`}
+                                class={cn('p-1 rounded cursor-pointer', deletingProjectId() === rid ? 'opacity-60 cursor-not-allowed text-neutral-400' : 'text-green-500 hover:text-green-400')}
                                 aria-label={deletingProjectId() === rid ? 'Deleting…' : 'Confirm delete'}
                                 disabled={deletingProjectId() === rid}
-                                onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onClick={async (ev) => { ev.stopPropagation(); ev.preventDefault(); setDeletingProjectId(rid); try { await props.onDeleteProject(rid) } finally { setDeletingProjectId(null); setConfirmingProjectId(null) } }}
+                                onPointerDown={stopMenuPress}
+                                onMouseDown={stopMenuPress}
+                                onPointerUp={stopMenuPress}
+                                onMouseUp={stopMenuPress}
+                                onClick={async (ev) => { stopMenuPress(ev); await confirmProjectDelete(rid) }}
                               >
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
                                   <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m5 12l5 5L20 7" />
@@ -402,14 +463,14 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                                 </svg>
                               </button>
                               <button
-                                class={`p-1 rounded cursor-pointer ${deletingProjectId() === rid ? 'opacity-60 cursor-not-allowed text-neutral-400' : 'text-neutral-400 hover:text-neutral-300'}`}
+                                class={cn('p-1 rounded cursor-pointer', deletingProjectId() === rid ? 'opacity-60 cursor-not-allowed text-neutral-400' : 'text-neutral-400 hover:text-neutral-300')}
                                 aria-label="Cancel delete"
                                 disabled={deletingProjectId() === rid}
-                                onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); setConfirmingProjectId(null) }}
+                                onPointerDown={stopMenuPress}
+                                onMouseDown={stopMenuPress}
+                                onPointerUp={stopMenuPress}
+                                onMouseUp={stopMenuPress}
+                                onClick={(ev) => { stopMenuPress(ev); setConfirmingProjectId(null) }}
                               >
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
                                   <path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m7 7l10 10M17 7L7 17" />
@@ -419,21 +480,18 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                             </div>
                             {/* Rename Confirm/Cancel cluster positioned at far right while editing */}
                             <Show when={isEditing()}>
-                              <div class={`absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1`}>
+                              <div class="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1">
                                 <button
-                                  class={`p-1 rounded cursor-pointer ${isRenaming() ? 'opacity-60 cursor-not-allowed text-neutral-400' : 'text-green-500 hover:text-green-400'}`}
+                                  class={cn('p-1 rounded cursor-pointer', isRenaming() ? 'opacity-60 cursor-not-allowed text-neutral-400' : 'text-green-500 hover:text-green-400')}
                                   aria-label={isRenaming() ? 'Renaming…' : 'Confirm rename'}
                                   disabled={isRenaming()}
-                                  onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                  onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                  onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
+                                  onPointerDown={stopMenuPress}
+                                  onMouseDown={stopMenuPress}
+                                  onPointerUp={stopMenuPress}
                                   onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
                                   onClick={async (ev) => {
-                                    ev.stopPropagation(); ev.preventDefault();
-                                    const name = editingName().trim()
-                                    if (!name) { setEditingProjectId(null); return }
-                                    setRenamingProjectId(rid)
-                                    try { await props.onRenameProject(rid, name) } finally { setRenamingProjectId(null); setEditingProjectId(null) }
+                                    stopMenuPress(ev)
+                                    await confirmProjectRename(rid)
                                   }}
                                 >
                                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
@@ -442,14 +500,14 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                                   </svg>
                                 </button>
                                 <button
-                                  class={`p-1 rounded cursor-pointer ${isRenaming() ? 'opacity-60 cursor-not-allowed text-neutral-400' : 'text-neutral-400 hover:text-neutral-300'}`}
+                                  class={cn('p-1 rounded cursor-pointer', isRenaming() ? 'opacity-60 cursor-not-allowed text-neutral-400' : 'text-neutral-400 hover:text-neutral-300')}
                                   aria-label="Cancel rename"
                                   disabled={isRenaming()}
-                                  onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                  onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                  onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                  onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                  onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); setEditingProjectId(null) }}
+                                  onPointerDown={stopMenuPress}
+                                  onMouseDown={stopMenuPress}
+                                  onPointerUp={stopMenuPress}
+                                  onMouseUp={stopMenuPress}
+                                  onClick={(ev) => { stopMenuPress(ev); cancelProjectRename() }}
                                 >
                                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
                                     <path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m7 7l10 10M17 7L7 17" />
@@ -463,7 +521,10 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                       }>
                         <DropdownMenuItem
                           data-project-rid={rid}
-                          class={`group relative w-full flex items-center justify-between gap-2 cursor-pointer hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100 pr-12 ${props.currentRoomId === rid ? 'text-green-400' : ''}`}
+                          class={cn(
+                            'group relative w-full flex items-center justify-between gap-2 cursor-pointer hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100 pr-12',
+                            props.currentRoomId === rid && 'text-green-400',
+                          )}
                           onSelect={() => { setConfirmingProjectId(null); props.onOpenProject(rid) }}
                         >
                           <div class="flex items-center gap-2 min-w-0 flex-1">
@@ -471,19 +532,19 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                               <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
                               <title>Project</title>
                             </svg>
-                            <span class={`font-mono text-xs truncate max-w-[14rem] ${props.currentRoomId === rid ? 'text-green-400 group-hover:text-green-300' : 'text-neutral-200 group-hover:text-neutral-100'}`} title={proj.name}>{proj.name}</span>
+                            <span class={cn('font-mono text-xs truncate max-w-56', props.currentRoomId === rid ? 'text-green-400 group-hover:text-green-300' : 'text-neutral-200 group-hover:text-neutral-100')} title={proj.name}>{proj.name}</span>
                           </div>
                           <div class="absolute right-2 top-1/2 -translate-y-1/2" data-project-controls>
                             {/* Triggers: Edit + Delete (hidden during rename/delete confirm) */}
-                            <div class={`flex items-center gap-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto`}>
+                            <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto">
                               <button
                                 class="p-1 cursor-pointer text-neutral-400 hover:text-neutral-200"
                                 aria-label="Edit project name"
-                                onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); setEditingProjectId(rid); setEditingName(proj.name) }}
+                                onPointerDown={stopMenuPress}
+                                onMouseDown={stopMenuPress}
+                                onPointerUp={stopMenuPress}
+                                onMouseUp={stopMenuPress}
+                                onClick={(ev) => { stopMenuPress(ev); beginProjectRename(rid, proj.name) }}
                               >
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
                                   <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 20h9" />
@@ -494,11 +555,11 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                               <button
                                 class="p-1 cursor-pointer text-neutral-400 hover:text-red-500"
                                 aria-label="Delete project"
-                                onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                                onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); setConfirmingProjectId(rid) }}
+                                onPointerDown={stopMenuPress}
+                                onMouseDown={stopMenuPress}
+                                onPointerUp={stopMenuPress}
+                                onMouseUp={stopMenuPress}
+                                onClick={(ev) => { stopMenuPress(ev); setConfirmingProjectId(rid) }}
                               >
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
                                   <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m-1 0v14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V6m3 4v8m4-8v8" />
@@ -542,15 +603,16 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                   <Show when={hasProjectSamples()}>
                     <For each={samplesList()}>
                       {(sample) => {
+                        const sampleKey = sample.key
                         const url = sample.url
                         const count = sample.count
                         const earliest = sample.earliestClip
-                        const isConfirming = () => confirmingSampleUrl() === url
-                        const isDeleting = () => deletingSampleUrl() === url
-                        const isInserting = () => insertingSampleUrl() === url
+                        const isConfirming = () => confirmingSampleKey() === sampleKey
+                        const isDeleting = () => deletingSampleKey() === sampleKey
+                        const isInserting = () => insertingSampleKey() === sampleKey
                         return (
                           <DropdownMenuItem
-                            data-sample-url={url}
+                            data-sample-key={sampleKey}
                             class="group relative w-full flex items-center justify-between gap-2 pr-20 cursor-pointer hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100"
                             onSelect={() => {
                               if (!earliest) return
@@ -560,23 +622,12 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                             <div
                               class="flex items-center gap-2 min-w-0 flex-1"
                               draggable={!!url}
-                              onDragStart={(ev) => {
-                                try {
-                                  const payload = JSON.stringify({ url, name: sample.name, duration: sample.duration })
-                                  ev.dataTransfer?.setData('application/x-mediabunny-sample', payload)
-                                  if (url) {
-                                    ev.dataTransfer?.setData('text/uri-list', url)
-                                    ev.dataTransfer?.setData('text/plain', url)
-                                  }
-                                  if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'copy'
-                                } catch {}
-                                setIsDraggingSample(true)
-                              }}
+                              onDragStart={(ev) => startSampleDrag(ev, sample)}
                               onDragEnd={() => setIsDraggingSample(false)}
                             >
                               <Icon name="file-audio" class="h-4 w-4 text-neutral-400 group-hover:text-neutral-200" />
-                              <span class="font-mono text-xs truncate max-w-[12rem] text-neutral-200 group-hover:text-neutral-100" title={sample.name}>{sample.name}</span>
-                              <span class="text-[10px] text-neutral-400 shrink-0">x{count}</span>
+                              <span class="font-mono text-xs truncate max-w-48 text-neutral-200 group-hover:text-neutral-100" title={sample.name}>{sample.name}</span>
+                              <span class="text-xs text-neutral-400 shrink-0">x{count}</span>
                             </div>
                             <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                               <button
@@ -602,7 +653,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                                 </svg>
                               </button>
                               <button
-                                class={`p-1 cursor-pointer text-neutral-400 hover:text-neutral-100 disabled:opacity-50 ${isInserting() ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                class={cn('p-1 cursor-pointer text-neutral-400 hover:text-neutral-100 disabled:opacity-50', isInserting() && 'opacity-60 cursor-not-allowed')}
                                 aria-label="Insert sample"
                                 disabled={!url || isInserting()}
                                 onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
@@ -621,7 +672,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                               </button>
                               <Show when={isConfirming()} fallback={
                                 <button
-                                  class={`p-1 cursor-pointer ${count > 0 ? 'text-neutral-500 cursor-not-allowed' : 'text-red-500 hover:text-red-400'} ${count > 0 ? 'opacity-50' : ''}`}
+                                  class={cn('p-1 cursor-pointer', count > 0 ? 'text-neutral-500 cursor-not-allowed opacity-50' : 'text-red-500 hover:text-red-400')}
                                   aria-label={count > 0 ? 'Cannot delete sample in use' : 'Delete sample'}
                                   disabled={count > 0}
                                   onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
@@ -630,7 +681,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                                   onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
                                   onClick={(ev) => {
                                     ev.stopPropagation(); ev.preventDefault()
-                                    if (count === 0) setConfirmingSampleUrl(url)
+                                    if (count === 0) setConfirmingSampleKey(sampleKey)
                                   }}
                                 >
                                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
@@ -641,7 +692,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                               }>
                                 <div class="flex items-center gap-1">
                                   <button
-                                    class={`p-1 cursor-pointer ${isDeleting() ? 'opacity-60 cursor-not-allowed text-neutral-400' : 'text-green-500 hover:text-green-400'}`}
+                                    class={cn('p-1 cursor-pointer', isDeleting() ? 'opacity-60 cursor-not-allowed text-neutral-400' : 'text-green-500 hover:text-green-400')}
                                     aria-label={isDeleting() ? 'Deleting…' : 'Confirm delete'}
                                     disabled={isDeleting()}
                                     onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
@@ -667,7 +718,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                                     onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
                                     onClick={(ev) => {
                                       ev.stopPropagation(); ev.preventDefault()
-                                      setConfirmingSampleUrl(null)
+                                      setConfirmingSampleKey(null)
                                     }}
                                   >
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
@@ -687,39 +738,28 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                     <DropdownMenuSeparator class="my-2" />
                   </Show>
                   <Show when={hasDefaultSamples()}>
-                    <div class="px-2 pt-1 pb-2 text-[11px] uppercase tracking-wide text-neutral-500">Default Samples</div>
+                    <div class="px-2 pt-1 pb-2 text-xs uppercase tracking-wide text-neutral-500">Default Samples</div>
                     <For each={defaultSamplesList()}>
                       {(sample) => {
                         const url = sample.url
                         const size = formatBytes(sample.sizeBytes)
-                        const isInserting = () => insertingSampleUrl() === url
+                        const isInserting = () => insertingSampleKey() === sample.key
                         return (
                           <DropdownMenuItem
-                            data-sample-url={url}
+                            data-sample-key={sample.key}
                             class="group relative w-full flex items-center justify-between gap-2 pr-16 cursor-pointer hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100"
                             onselect={(event: Event) => { (event).preventDefault() }}
                           >
                             <div
                               class="flex items-center gap-2 min-w-0 flex-1"
                               draggable={!!url}
-                              onDragStart={(ev) => {
-                                try {
-                                  const payload = JSON.stringify({ url, name: sample.name, duration: sample.duration })
-                                  ev.dataTransfer?.setData('application/x-mediabunny-sample', payload)
-                                  if (url) {
-                                    ev.dataTransfer?.setData('text/uri-list', url)
-                                    ev.dataTransfer?.setData('text/plain', url)
-                                  }
-                                  if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'copy'
-                                } catch {}
-                                setIsDraggingSample(true)
-                              }}
+                              onDragStart={(ev) => startSampleDrag(ev, sample)}
                               onDragEnd={() => setIsDraggingSample(false)}
                             >
                               <Icon name="file-audio" class="h-4 w-4 text-neutral-400 group-hover:text-neutral-200" />
-                              <span class="font-mono text-xs truncate max-w-[12rem] text-neutral-200 group-hover:text-neutral-100" title={sample.name}>{sample.name}</span>
+                              <span class="font-mono text-xs truncate max-w-48 text-neutral-200 group-hover:text-neutral-100" title={sample.name}>{sample.name}</span>
                               <Show when={size}>
-                                <span class="text-[10px] text-neutral-400 shrink-0">{size}</span>
+                                <span class="text-xs text-neutral-400 shrink-0">{size}</span>
                               </Show>
                             </div>
                             <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -746,7 +786,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                                 </svg>
                               </button>
                               <button
-                                class={`p-1 cursor-pointer text-neutral-400 hover:text-neutral-100 disabled:opacity-50 ${isInserting() ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                class={cn('p-1 cursor-pointer text-neutral-400 hover:text-neutral-100 disabled:opacity-50', isInserting() && 'opacity-60 cursor-not-allowed')}
                                 aria-label="Insert default sample"
                                 disabled={!url || isInserting()}
                                 onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
@@ -801,24 +841,10 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                         >
                           <div
                             class="flex items-center gap-2 min-w-0 flex-1"
-                            draggable={!!url}
-                            onDragStart={(ev) => {
-                              try {
-                                const payload = JSON.stringify({ url, name: item.name, duration: item.duration })
-                                ev.dataTransfer?.setData('application/x-mediabunny-sample', payload)
-                                if (url) {
-                                  ev.dataTransfer?.setData('text/uri-list', url)
-                                  ev.dataTransfer?.setData('text/plain', url)
-                                }
-                                if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'copy'
-                              } catch {}
-                              setIsDraggingSample(true)
-                            }}
-                            onDragEnd={() => setIsDraggingSample(false)}
                           >
                             <Icon name="file-audio" class="h-4 w-4 text-neutral-400 group-hover:text-neutral-200" />
-                            <span class="font-mono text-xs truncate max-w-[12rem] text-neutral-200 group-hover:text-neutral-100" title={item.name}>{item.name}</span>
-                            <span class="text-[10px] text-neutral-400 shrink-0 uppercase">{item.format}</span>
+                            <span class="font-mono text-xs truncate max-w-48 text-neutral-200 group-hover:text-neutral-100" title={item.name}>{item.name}</span>
+                            <span class="text-xs text-neutral-400 shrink-0 uppercase">{item.format}</span>
                           </div>
                           <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                             <button
@@ -844,17 +870,9 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                               </svg>
                             </button>
                             <button
-                              class={`p-1 cursor-pointer text-neutral-400 hover:text-neutral-100 disabled:opacity-50`}
+                              class="p-1 cursor-pointer text-neutral-400 hover:text-neutral-100 disabled:opacity-50"
                               aria-label="Insert export"
-                              disabled={!url}
-                              onPointerDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                              onMouseDown={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                              onPointerUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                              onMouseUp={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
-                              onClick={async (ev) => {
-                                ev.stopPropagation(); ev.preventDefault()
-                                await handleInsertSampleAction({ url, name: item.name, duration: item.duration })
-                              }}
+                              disabled
                             >
                               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
                                 <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 11h16M12 4v16" />
@@ -885,7 +903,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
           class="flex items-center gap-2"
         >
           <span
-            class={`h-2.5 w-2.5 rounded-full ${props.isRecording ? 'bg-white' : 'bg-red-500 group-hover:bg-red-400'}`}
+            class={cn('h-2.5 w-2.5 rounded-full', props.isRecording ? 'bg-white' : 'bg-red-500 group-hover:bg-red-400')}
           />
           <span class="text-xs uppercase tracking-wide">
             {props.isRecording ? 'Stop' : 'Rec'}
@@ -940,7 +958,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
               onPointerUp={endTempoDrag}
               onPointerCancel={endTempoDrag}
             />
-            <span class="text-[10px] text-neutral-500">BPM</span>
+            <span class="text-xs text-neutral-500">BPM</span>
           </label>
           <Button
             variant='ghost'
@@ -1016,7 +1034,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                   type="button"
                   class="rounded p-1 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800"
                   aria-label="Close"
-                  onClick={() => setShareOpen(false)}
+                  onClick={closeShareMenu}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4 w-4">
                     <path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m7 7l10 10M17 7L7 17" />
@@ -1024,7 +1042,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                   </svg>
                 </button>
               </div>
-              <div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 w-full">
+              <div class="flex items-center gap-2 w-full">
                 <div class="min-w-0 max-w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-neutral-200 shadow-inner w-full">
                   <div class="font-mono" style={{ "overflow": "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }}>{window.location.href}</div>
                 </div>
@@ -1032,7 +1050,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                   variant="ghost"
                   size="icon"
                   aria-label={copied() ? 'Copied' : 'Copy URL'}
-                  class={`shrink-0 ${copied() ? 'text-green-500' : 'text-neutral-400'}`}
+                  class={cn('shrink-0', copied() ? 'text-green-500' : 'text-neutral-400')}
                   onClick={copyUrl}
                 >
                   {copied() ? (

@@ -1,9 +1,14 @@
-import { createSignal, onCleanup, batch, type Accessor, type Setter } from 'solid-js'
+import { createSignal, onCleanup, type Accessor, type Setter } from 'solid-js'
 
+import { createUploadedAudioClip } from '~/lib/clip-create'
+import { createAudioAssetKey, getAudioSourceMetadata } from '~/lib/audio-source'
 import type { AudioEngine } from '~/lib/audio-engine'
-import type { Track, SelectedClip } from '~/types/timeline'
-import type { UploadToR2 } from '~/hooks/useClipBuffers'
+import { selectPrimaryClip } from '~/lib/timeline-selection'
 import { calcNonOverlapStart, willOverlap } from '~/lib/timeline-utils'
+import { getTrackHistoryRef } from '~/lib/undo/refs'
+import type { HistoryEntry } from '~/lib/undo/types'
+import type { UploadToR2 } from '~/hooks/useClipBuffers'
+import type { Track, SelectedClip } from '~/types/timeline'
 
 const RECORDING_MIME_TYPES = [
   'audio/webm;codecs=opus',
@@ -21,8 +26,6 @@ type UseTrackRecordingOptions = {
   audioEngine: AudioEngine
   tracks: Accessor<Track[]>
   setTracks: Setter<Track[]>
-  recordArmTrackId: Accessor<string | null>
-  setRecordArmTrackId: Setter<string | null>
   setSelectedTrackId: Setter<string>
   setSelectedClip: Setter<SelectedClip>
   setSelectedClipIds: Setter<Set<string>>
@@ -36,8 +39,9 @@ type UseTrackRecordingOptions = {
   convexApi: ConvexApiType
   requestTransportPlay: () => Promise<void>
   setIsRecording: Setter<boolean>
-  isPlaying: Accessor<boolean>
   notify?: (message: string) => void
+  historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
+  grantClipWrite?: (clipId: string) => void
 }
 
 type StartRecordingResult = {
@@ -49,7 +53,6 @@ type StartRecordingResult = {
 type RecordingContext = {
   trackId: string
   startSec: number
-  startCtxTime: number
   stream: MediaStream
   recorder: MediaRecorder
   chunks: BlobPart[]
@@ -58,6 +61,10 @@ type RecordingContext = {
   analyser: AnalyserNode | null
   scriptProcessor: ScriptProcessorNode | null
   analysisCtx: AudioContext | null
+  onDataAvailable: (event: BlobEvent) => void
+  onStop: () => void
+  stopPromise: Promise<void>
+  rejectStopPromise: (error?: unknown) => void
 }
 
 export type UseTrackRecordingReturn = {
@@ -75,8 +82,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     audioEngine,
     tracks,
     setTracks,
-    recordArmTrackId,
-    setRecordArmTrackId,
     setSelectedTrackId,
     setSelectedClip,
     setSelectedClipIds,
@@ -90,17 +95,47 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     convexApi,
     requestTransportPlay,
     setIsRecording,
-    isPlaying,
     notify,
+    historyPush,
+    grantClipWrite,
   } = options
 
+  const selectionSetters = {
+    setSelectedTrackId,
+    setSelectedClip,
+    setSelectedClipIds,
+    setSelectedFXTarget,
+  }
+
   const [isRecordingInternal, setIsRecordingInternal] = createSignal(false)
-  const [previewPoints, setPreviewPoints] = createSignal<{ offset: number; amplitude: number }[]>([])
+  const livePreviewPoints: { offset: number; amplitude: number }[] = []
+  const [previewPoints, setPreviewPoints] = createSignal<{ offset: number; amplitude: number }[]>([], { equals: false })
   const [previewStartSec, setPreviewStartSec] = createSignal<number | null>(null)
   const [currentRecordingTrackId, setCurrentRecordingTrackId] = createSignal<string | null>(null)
 
   let activeCtx: RecordingContext | null = null
-  let finalizePromise: Promise<void> | null = null
+  const createStopPromise = () => {
+    let settled = false
+    let resolvePromise!: () => void
+    let rejectPromise!: (error?: unknown) => void
+    const promise = new Promise<void>((resolve, reject) => {
+      resolvePromise = () => {
+        if (settled) return
+        settled = true
+        resolve()
+      }
+      rejectPromise = (error?: unknown) => {
+        if (settled) return
+        settled = true
+        reject(error)
+      }
+    })
+    return {
+      promise,
+      resolve: resolvePromise,
+      reject: rejectPromise,
+    }
+  }
 
   const emit = (message: string) => {
     console.warn('[useTrackRecording]', message)
@@ -164,41 +199,33 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     activeCtx = null
 
     try {
-      ctx.recorder.ondataavailable = null
-      ctx.recorder.onstop = null
+      ctx.recorder.removeEventListener('dataavailable', ctx.onDataAvailable)
+      ctx.recorder.removeEventListener('stop', ctx.onStop)
     } catch {}
 
     try {
-      ctx.recorder.stop()
+      if (ctx.recorder.state !== 'inactive') ctx.recorder.stop()
     } catch {}
-
-    try {
-      ctx.stream.getTracks().forEach(track => track.stop())
-    } catch {}
-
+    try { ctx.stream.getTracks().forEach(track => track.stop()) } catch {}
     try {
       ctx.scriptProcessor?.disconnect()
       ctx.analyser?.disconnect()
     } catch {}
-
-    try {
-      await ctx.analysisCtx?.close()
-    } catch {}
+    try { await ctx.analysisCtx?.close() } catch {}
 
     await releaseTrackLock(ctx.trackId, ctx.lockedByUserId)
     setIsRecording(false)
     setIsRecordingInternal(false)
-    setPreviewPoints([])
+    livePreviewPoints.length = 0
+    setPreviewPoints(livePreviewPoints)
     setPreviewStartSec(null)
     setCurrentRecordingTrackId(null)
   }
 
-  // Stop live preview immediately without discarding context needed for finalize
   const haltLivePreview = () => {
     if (!activeCtx) return
     const ctx = activeCtx
     try {
-      // Stop the recorder stream capturing to prevent further preview updates
       try { ctx.stream.getTracks().forEach(t => t.stop()) } catch {}
       try { ctx.scriptProcessor?.disconnect() } catch {}
       try { ctx.analyser?.disconnect() } catch {}
@@ -207,9 +234,9 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       ctx.scriptProcessor = null
       ctx.analysisCtx = null
     } catch {}
-    // Reflect UI state immediately
     setIsRecording(false)
-    setPreviewPoints([])
+    livePreviewPoints.length = 0
+    setPreviewPoints(livePreviewPoints)
     setPreviewStartSec(null)
   }
 
@@ -227,7 +254,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     const blob = new Blob(ctx.chunks, { type: ctx.mimeType || 'audio/webm' })
     if (!blob.size) {
       emit('Recording contained no audio data.')
-      activeCtx = null
       await cleanupRecording()
       return
     }
@@ -258,75 +284,59 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     }
 
     const baseDuration = decoded.duration
+    const sourceMetadata = getAudioSourceMetadata(decoded)
+    const sourceAssetKey = createAudioAssetKey()
     const desiredStart = Math.max(0, ctx.startSec)
     const nonOverlapStart = willOverlap(targetTrack.clips, null, desiredStart, baseDuration)
       ? calcNonOverlapStart(targetTrack.clips, null, desiredStart, baseDuration)
       : desiredStart
 
-    let createdClipId: string
     try {
-      createdClipId = await convexClient.mutation(convexApi.clips.create, {
+      await createUploadedAudioClip({
         roomId: rid,
-        trackId: ctx.trackId as any,
-        startSec: nonOverlapStart,
-        duration: baseDuration,
         userId: uid,
-        name: file.name,
-      } as any) as any as string
+        trackId: ctx.trackId,
+        trackRef: getTrackHistoryRef(tracks().find((entry) => entry.id === ctx.trackId)),
+        startSec: nonOverlapStart,
+        file,
+        decoded,
+        source: sourceMetadata,
+        sourceAssetKey,
+        sourceKind: 'recording',
+        createServerClip: async (payload) => await convexClient.mutation(convexApi.clips.create, payload as any) as any as string,
+        insertLocalClip: (trackId, clip) => {
+          setTracks(ts => ts.map(t => t.id !== trackId ? t : ({
+            ...t,
+            clips: [...t.clips, clip],
+          })))
+        },
+        selectClip: (trackId, clipId) => {
+          selectPrimaryClip(selectionSetters, { trackId, clipId })
+        },
+        historyPush,
+        uploadToR2,
+        audioBufferCache,
+        grantClipWrite,
+        color: 'clip-recording',
+      })
     } catch (err) {
-      console.error('[useTrackRecording] clips.create failed', err)
-      emit('Failed to create recorded clip on server.')
+      if (err instanceof Error && err.message === 'sample-upload-failed') {
+        emit('Failed to upload recorded audio.')
+      } else {
+        if (!(err instanceof Error && err.message === 'clip-create-failed')) {
+          console.error('[useTrackRecording] clips.create failed', err)
+        }
+        emit('Failed to create recorded clip on server.')
+      }
       await cleanupRecording()
       return
-    }
-
-    audioBufferCache.set(createdClipId, decoded)
-
-    setTracks(ts => ts.map(t => t.id !== ctx.trackId ? t : ({
-      ...t,
-      clips: [
-        ...t.clips,
-        {
-          id: createdClipId,
-          name: file.name,
-          buffer: decoded,
-          startSec: nonOverlapStart,
-          duration: baseDuration,
-          leftPadSec: 0,
-          color: '#ef4444',
-          sampleUrl: undefined,
-        },
-      ],
-    })))
-
-    batch(() => {
-      setSelectedTrackId(ctx.trackId)
-      setSelectedFXTarget(ctx.trackId)
-      setSelectedClip({ trackId: ctx.trackId, clipId: createdClipId })
-      setSelectedClipIds(new Set([createdClipId]))
-    })
-
-    try {
-      const sampleUrl = await uploadToR2(rid, createdClipId, file, baseDuration)
-      if (sampleUrl) {
-        await convexClient.mutation(convexApi.clips.setSampleUrl, { clipId: createdClipId as any, sampleUrl })
-        setTracks(ts => ts.map(t => t.id !== ctx.trackId ? t : ({
-          ...t,
-          clips: t.clips.map(c => c.id === createdClipId ? { ...c, sampleUrl } : c),
-        })))
-      }
-    } catch (err) {
-      console.error('[useTrackRecording] failed to upload recording', err)
-      emit('Recorded clip created but upload failed. You may retry upload manually.')
     }
 
     await cleanupRecording()
   }
 
   const startRecording = async (trackId: string): Promise<StartRecordingResult> => {
-    if (isRecordingInternal()) {
-      return { ok: false, reason: 'Already recording' }
-    }
+    if (isRecordingInternal()) return { ok: false, reason: 'Already recording' }
     const uid = userId()
     const rid = roomId()
     if (!uid || !rid) {
@@ -352,9 +362,8 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
     let stream: MediaStream
     try {
-      const constraints: MediaStreamConstraints = { audio: true }
-      stream = await navigator.mediaDevices.getUserMedia(constraints)
-    } catch (err) {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch {
       emit('Microphone access denied.')
       await releaseTrackLock(trackId, uid)
       return { ok: false, reason: 'Permission denied' }
@@ -373,14 +382,26 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     }
 
     const chunks: BlobPart[] = []
-    recorder.addEventListener('dataavailable', (event) => {
+    const stopCompletion = createStopPromise()
+    const onDataAvailable = (event: BlobEvent) => {
       if (event.data?.size) chunks.push(event.data)
-    })
-    recorder.addEventListener('stop', () => {
-      finalizePromise = finalizeRecording().finally(() => {
-        finalizePromise = null
-      })
-    })
+    }
+    const onStop = () => {
+      void (async () => {
+        try {
+          await finalizeRecording()
+          stopCompletion.resolve()
+        } catch (error) {
+          console.error('[useTrackRecording] finalize recording failed', error)
+          try {
+            await cleanupRecording()
+          } catch {}
+          stopCompletion.reject(error)
+        }
+      })()
+    }
+    recorder.addEventListener('dataavailable', onDataAvailable)
+    recorder.addEventListener('stop', onStop)
 
     const startSec = Math.max(0, playheadSec())
 
@@ -404,17 +425,18 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         const input = event.inputBuffer.getChannelData(0)
         let sum = 0
         for (let i = 0; i < input.length; i++) {
-          const v = input[i]
-          sum += v * v
+          const value = input[i]
+          sum += value * value
         }
         const rms = Math.sqrt(sum / input.length)
         const ctxTime = ctxRef?.currentTime ?? 0
         const offset = Math.max(0, ctxTime - startCtxTime)
-        setPreviewPoints(prev => {
-          const next = [...prev, { offset, amplitude: Math.min(1, rms) }]
-          const cutoff = Math.max(0, offset - 5)
-          return next.filter(p => p.offset >= cutoff)
-        })
+        const cutoff = Math.max(0, offset - 5)
+        livePreviewPoints.push({ offset, amplitude: Math.min(1, rms) })
+        while (livePreviewPoints.length > 0 && livePreviewPoints[0].offset < cutoff) {
+          livePreviewPoints.shift()
+        }
+        setPreviewPoints(livePreviewPoints)
       }
       source.connect(analyser)
       analyser.connect(scriptProcessor)
@@ -428,7 +450,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     activeCtx = {
       trackId,
       startSec,
-      startCtxTime,
       stream,
       recorder,
       chunks,
@@ -437,6 +458,10 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       analyser,
       scriptProcessor,
       analysisCtx,
+      onDataAvailable,
+      onStop,
+      stopPromise: stopCompletion.promise,
+      rejectStopPromise: stopCompletion.reject,
     }
 
     ensureAudioCtx()
@@ -453,10 +478,10 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     setIsRecording(true)
     setIsRecordingInternal(true)
     setCurrentRecordingTrackId(trackId)
-    setPreviewPoints([])
+    livePreviewPoints.length = 0
+    setPreviewPoints(livePreviewPoints)
     setPreviewStartSec(startSec)
 
-    // Ensure transport runs so metronome/playback can accompany recording.
     try {
       await requestTransportPlay()
     } catch (err) {
@@ -475,15 +500,14 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       }
     } catch (err) {
       console.error('[useTrackRecording] recorder.stop failed', err)
+      ctx.rejectStopPromise(err)
+      await cleanupRecording()
     }
-    // Immediately stop live preview and UI recording state while finalizing runs
     haltLivePreview()
-    if (finalizePromise) {
-      try {
-        await finalizePromise
-      } catch (err) {
-        console.error('[useTrackRecording] finalize recording failed', err)
-      }
+    try {
+      await ctx.stopPromise
+    } catch (err) {
+      console.error('[useTrackRecording] finalize recording failed', err)
     }
   }
 

@@ -25,7 +25,7 @@ const RATE_LIMIT_WINDOW_MS = 10_000
 
 const SharedChat: Component<SharedChatProps> = (props) => {
   const session = useSessionQuery()
-  const displayName = () => (session()?.data?.user as any)?.name as string | undefined
+  const displayName = () => (session.data?.user as any)?.name as string | undefined
 
   // Client-side rate limiter state (timestamps in ms of recent sends)
   let recentSends: number[] = []
@@ -40,14 +40,12 @@ const SharedChat: Component<SharedChatProps> = (props) => {
   // Real-time latest messages for the room (bounded)
   const messagesQ = useConvexQuery(
     (convexApi as any).sharedChat.listLatest,
-    () => props.roomId ? ({ roomId: props.roomId, limit: 200 } as any) : null,
-    () => ['shared-chat', props.roomId]
+    () => props.roomId && props.userId ? ({ roomId: props.roomId, userId: props.userId, limit: 200 } as any) : null,
+    () => ['shared-chat', props.roomId, props.userId]
   )
 
   const messages = (): MessageRow[] => {
-    const raw = (messagesQ as any).data
-    const list = typeof raw === 'function' ? raw() : raw
-    return Array.isArray(list) ? list as MessageRow[] : []
+    return Array.isArray(messagesQ.data) ? messagesQ.data as MessageRow[] : []
   }
 
   // Focus input when opened
@@ -147,7 +145,7 @@ const SharedChat: Component<SharedChatProps> = (props) => {
             <For each={messages()}>{(m) => (
               <div class="text-left">
                 <div class="inline-block max-w-[90%] rounded-md px-2 py-1 text-sm bg-neutral-800 text-neutral-100">
-                  <div class="text-[10px] text-neutral-400 mb-0.5">{m.senderName || m.senderUserId}</div>
+                  <div class="text-2xs text-neutral-400 mb-0.5">{m.senderName || m.senderUserId}</div>
                   <div>{m.content}</div>
                 </div>
               </div>

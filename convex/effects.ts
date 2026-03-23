@@ -1,24 +1,10 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireMasterBusWriteAccess } from "./roomAccess";
+import { getTrackWriteAccess } from "./trackWrites";
+import { normalizeSynthParams } from "../src/lib/effects/params";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
-
-type Wave = 'sine' | 'square' | 'sawtooth' | 'triangle'
-const sanitizeSynthParams = (params: { wave: Wave; wave1?: Wave; wave2?: Wave; gain?: number; attackMs?: number; releaseMs?: number }) => {
-  const gain = clamp(typeof params.gain === 'number' ? params.gain : 0.8, 0, 1.5)
-  const attackMs = clamp(typeof params.attackMs === 'number' ? params.attackMs : 5, 0, 200)
-  const releaseMs = clamp(typeof params.releaseMs === 'number' ? params.releaseMs : 30, 0, 200)
-  const wave1: Wave = (params.wave1 as Wave) ?? params.wave
-  const wave2: Wave = (params.wave2 as Wave) ?? wave1
-  return {
-    wave: params.wave,
-    wave1,
-    wave2,
-    gain,
-    attackMs,
-    releaseMs,
-  }
-}
 
 const sanitizeArpParams = (params: {
   enabled: boolean
@@ -41,6 +27,22 @@ const sanitizeArpParams = (params: {
 }
 
 // Return the EQ effect row for a track if it exists (we use a single EQ per track for now)
+export const listByRoom = query({
+  args: { roomId: v.string() },
+  handler: async (ctx, { roomId }) => {
+    const rows = await ctx.db
+      .query("effects")
+      .withIndex("by_room", q => q.eq("roomId", roomId))
+      .collect();
+    rows.sort((a, b) => {
+      if ((a.targetType ?? '') !== (b.targetType ?? '')) return (a.targetType ?? '').localeCompare(b.targetType ?? '');
+      if (String(a.trackId ?? '') !== String(b.trackId ?? '')) return String(a.trackId ?? '').localeCompare(String(b.trackId ?? ''));
+      return (a.index ?? 0) - (b.index ?? 0);
+    });
+    return rows;
+  },
+});
+
 export const getEqForTrack = query({
   args: { trackId: v.id("tracks") },
   handler: async (ctx, { trackId }) => {
@@ -48,9 +50,8 @@ export const getEqForTrack = query({
       .query("effects")
       .withIndex("by_track", q => q.eq("trackId", trackId))
       .collect();
-    // Prefer the first EQ by index; treat missing targetType as 'track' for backward-compat
     rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-    return rows.find(r => r.type === "eq" && ((r as any).targetType === 'track' || (r as any).targetType === undefined)) ?? null;
+    return rows.find(r => r.type === "eq" && r.targetType === 'track') ?? null;
   },
 });
 
@@ -63,7 +64,7 @@ export const getSynthForTrack = query({
       .withIndex('by_track', q => q.eq('trackId', trackId))
       .collect();
     rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-    return rows.find(r => r.type === 'synth' && ((r as any).targetType === 'track' || (r as any).targetType === undefined)) ?? null;
+    return rows.find(r => r.type === 'synth' && r.targetType === 'track') ?? null;
   },
 })
 
@@ -76,7 +77,7 @@ export const getArpeggiatorForTrack = query({
       .withIndex('by_track', q => q.eq('trackId', trackId))
       .collect();
     rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-    return rows.find(r => r.type === 'arpeggiator' && ((r as any).targetType === 'track' || (r as any).targetType === undefined)) ?? null;
+    return rows.find(r => r.type === 'arpeggiator' && r.targetType === 'track') ?? null;
   },
 })
 
@@ -87,41 +88,27 @@ export const setSynthParams = mutation({
     trackId: v.id('tracks'),
     userId: v.string(),
     params: v.object({
-      wave: v.union(
+      wave1: v.union(
         v.literal('sine'),
         v.literal('square'),
         v.literal('sawtooth'),
         v.literal('triangle'),
       ),
-      wave1: v.optional(v.union(
+      wave2: v.union(
         v.literal('sine'),
         v.literal('square'),
         v.literal('sawtooth'),
         v.literal('triangle'),
-      )),
-      wave2: v.optional(v.union(
-        v.literal('sine'),
-        v.literal('square'),
-        v.literal('sawtooth'),
-        v.literal('triangle'),
-      )),
+      ),
       gain: v.optional(v.number()),
       attackMs: v.optional(v.number()),
       releaseMs: v.optional(v.number()),
     }),
   },
   handler: async (ctx, { roomId, trackId, userId, params }) => {
-    const sanitized = sanitizeSynthParams(params)
-    const track = await ctx.db.get(trackId)
-    if (!track || track.roomId !== roomId) return
-
-    // owner only
-    const owners = await ctx.db
-      .query('ownerships')
-      .withIndex('by_track', q => q.eq('trackId', trackId))
-      .collect();
-    const owner = owners[0]
-    if (!owner || owner.ownerUserId !== userId) return
+    const sanitized = normalizeSynthParams(params)
+    const access = await getTrackWriteAccess(ctx, trackId, userId)
+    if (!access || access.track.roomId !== roomId) return
 
     const existing = await ctx.db
       .query('effects')
@@ -174,16 +161,8 @@ export const setArpeggiatorParams = mutation({
   },
   handler: async (ctx, { roomId, trackId, userId, params }) => {
     const sanitized = sanitizeArpParams(params)
-    const track = await ctx.db.get(trackId)
-    if (!track || track.roomId !== roomId) return
-
-    // owner only
-    const owners = await ctx.db
-      .query('ownerships')
-      .withIndex('by_track', q => q.eq('trackId', trackId))
-      .collect();
-    const owner = owners[0]
-    if (!owner || owner.ownerUserId !== userId) return
+    const access = await getTrackWriteAccess(ctx, trackId, userId)
+    if (!access || access.track.roomId !== roomId) return
 
     const existing = await ctx.db
       .query('effects')
@@ -223,16 +202,8 @@ export const setReverbParams = mutation({
     }),
   },
   handler: async (ctx, { roomId, trackId, userId, params }) => {
-    const track = await ctx.db.get(trackId);
-    if (!track || track.roomId !== roomId) return;
-
-    // Enforce ownership
-    const owners = await ctx.db
-      .query("ownerships")
-      .withIndex("by_track", q => q.eq("trackId", trackId))
-      .collect();
-    const owner = owners[0];
-    if (!owner || owner.ownerUserId !== userId) return;
+    const access = await getTrackWriteAccess(ctx, trackId, userId);
+    if (!access || access.track.roomId !== roomId) return;
 
     const existing = await ctx.db
       .query("effects")
@@ -241,7 +212,7 @@ export const setReverbParams = mutation({
     const byIndex = existing.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
     const row = byIndex.find(r => r.type === "reverb") ?? null;
     if (row) {
-      await ctx.db.patch(row._id, { params });
+      await ctx.db.patch(row._id, { params, targetType: 'track' });
       return row._id;
     }
     const newIndex = existing.length;
@@ -258,7 +229,6 @@ export const setReverbParams = mutation({
   },
 });
 
-// Set or create the Reverb params for the room master bus
 export const setMasterReverbParams = mutation({
   args: {
     roomId: v.string(),
@@ -271,13 +241,7 @@ export const setMasterReverbParams = mutation({
     }),
   },
   handler: async (ctx, { roomId, userId, params }) => {
-    // Enforce that the user owns a project entry for this room
-    const projs = await ctx.db
-      .query('projects')
-      .withIndex('by_room_owner', q => q.eq('roomId', roomId).eq('ownerUserId', userId))
-      .collect();
-    const proj = projs[0]
-    if (!proj) return
+    await requireMasterBusWriteAccess(ctx, roomId, userId)
 
     const existing = await ctx.db
       .query('effects')
@@ -299,7 +263,7 @@ export const setMasterReverbParams = mutation({
       createdAt: Date.now(),
     });
     return id;
-  }
+  },
 });
 
 // Master-level EQ (per room)
@@ -324,7 +288,7 @@ export const getReverbForTrack = query({
       .withIndex("by_track", q => q.eq("trackId", trackId))
       .collect();
     rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-    return rows.find(r => r.type === "reverb" && ((r as any).targetType === 'track' || (r as any).targetType === undefined)) ?? null;
+    return rows.find(r => r.type === "reverb" && r.targetType === 'track') ?? null;
   },
 });
 
@@ -360,19 +324,9 @@ export const setEqParams = mutation({
     }),
   },
   handler: async (ctx, { roomId, trackId, userId, params }) => {
-    // Validate that the track belongs to the same room
-    const track = await ctx.db.get(trackId);
-    if (!track || track.roomId !== roomId) return;
+    const access = await getTrackWriteAccess(ctx, trackId, userId);
+    if (!access || access.track.roomId !== roomId) return;
 
-    // Enforce ownership
-    const owners = await ctx.db
-      .query("ownerships")
-      .withIndex("by_track", q => q.eq("trackId", trackId))
-      .collect();
-    const owner = owners[0];
-    if (!owner || owner.ownerUserId !== userId) return;
-
-    // Find existing EQ for this track
     const existing = await ctx.db
       .query("effects")
       .withIndex("by_track", q => q.eq("trackId", trackId))
@@ -381,7 +335,7 @@ export const setEqParams = mutation({
     const eqRow = byIndex.find(r => r.type === "eq") ?? null;
 
     if (eqRow) {
-      await ctx.db.patch(eqRow._id, { params });
+      await ctx.db.patch(eqRow._id, { params, targetType: 'track' });
       return eqRow._id;
     }
 
@@ -418,13 +372,7 @@ export const setMasterEqParams = mutation({
     }),
   },
   handler: async (ctx, { roomId, userId, params }) => {
-    // Enforce that the user owns a project entry for this room
-    const projs = await ctx.db
-      .query('projects')
-      .withIndex('by_room_owner', q => q.eq('roomId', roomId).eq('ownerUserId', userId))
-      .collect();
-    const proj = projs[0]
-    if (!proj) return
+    await requireMasterBusWriteAccess(ctx, roomId, userId)
 
     // Find existing master EQ
     const existing = await ctx.db

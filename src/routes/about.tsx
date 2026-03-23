@@ -69,7 +69,7 @@ function About() {
             Arrange audio and MIDI, add EQ, Reverb, and Synths, and collaborate live with zero installs.
           </p>
           <div class="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
-            {session()?.data ? (
+            {session.data ? (
               <Link to="/" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground px-6 py-3 text-sm font-medium hover:bg-primary/90 border border-neutral-700/20">
                 Go to app
               </Link>

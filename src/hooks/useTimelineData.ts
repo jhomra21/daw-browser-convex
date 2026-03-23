@@ -16,9 +16,10 @@ type UseTimelineDataReturn = {
 export function useTimelineData(): UseTimelineDataReturn {
   const [roomId, setRoomId] = createSignal<string>('')
   const [ridAutoCreated, setRidAutoCreated] = createSignal(false)
+  const pendingEnsureRoomKeys = new Set<string>()
 
   const session = useSessionQuery()
-  const userId = () => (session()?.data?.user as any)?.id ?? ''
+  const userId = () => (session.data?.user as any)?.id ?? ''
 
   const navigateToRoom = (rid: string) => {
     try {
@@ -70,12 +71,22 @@ export function useTimelineData(): UseTimelineDataReturn {
     () => ['timeline', roomId()]
   )
 
+  const ensureRoomOwnership = (rid: string, uid: string) => {
+    const key = `${uid}:${rid}`
+    if (!rid || !uid || pendingEnsureRoomKeys.has(key)) return
+
+    pendingEnsureRoomKeys.add(key)
+    void convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: rid, userId: uid })
+      .finally(() => {
+        pendingEnsureRoomKeys.delete(key)
+      })
+  }
+
   createEffect(() => {
     const uid = userId()
     if (!uid) return
     const rid = roomId()
-    const projectsRaw = (myProjects as any)?.data
-    const projects = typeof projectsRaw === 'function' ? projectsRaw() : projectsRaw
+    const projects = myProjects.data
 
     if (ridAutoCreated()) {
       if (!Array.isArray(projects)) return
@@ -89,14 +100,14 @@ export function useTimelineData(): UseTimelineDataReturn {
       }
 
       if (rid) {
-        void convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: rid, userId: uid })
+        ensureRoomOwnership(rid, uid)
       }
       setRidAutoCreated(false)
       return
     }
 
     if (rid) {
-      void convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: rid, userId: uid })
+      ensureRoomOwnership(rid, uid)
     }
   })
 

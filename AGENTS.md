@@ -43,9 +43,8 @@ This project uses a specific tech stack. Only use these technologies:
 - Use `@kobalte/core` for accessible UI components
 - Leverage `class-variance-authority` for component variants
 
-## Code Style
-
 ### TypeScript
+- Never typecast. Never use `as`
 - Use strict TypeScript configuration
 - Prefer `type` over `interface` for object shapes
 - Use proper typing for Cloudflare Workers environment

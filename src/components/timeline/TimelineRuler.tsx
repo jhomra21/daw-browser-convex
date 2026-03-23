@@ -274,7 +274,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
         {(marker) => (
           <div class="absolute bottom-0" style={{ left: `${marker.positionPx}px` }}>
             <div class="w-[2px] bg-neutral-200/80" style={{ height: `${RULER_HEIGHT}px` }} />
-            <div class="absolute -top-5 text-[10px] font-medium text-neutral-300 select-none">
+            <div class="absolute -top-5 text-2xs font-medium text-neutral-300 select-none">
               {marker.label}
             </div>
           </div>

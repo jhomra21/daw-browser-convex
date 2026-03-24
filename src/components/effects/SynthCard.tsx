@@ -138,8 +138,8 @@ const SynthCard: Component<SynthCardProps> = (props) => {
           X
         </button>
       </div>
-      <div class="p-2 w-full h-[calc(100%-36px)] overflow-hidden" style={{ 'touch-action': 'manipulation' }}>
-        <Synth params={props.params} onChange={props.onChange} onReset={props.onReset} variant="expanded" class="min-w-[640px]" />
+      <div class="w-full overflow-hidden p-2" style={{ height: 'calc(100% - 36px)', 'touch-action': 'manipulation' }}>
+        <Synth params={props.params} onChange={props.onChange} onReset={props.onReset} variant="expanded" class="min-w-160" />
       </div>
       <div
         class="absolute right-1 bottom-1 w-4 h-4 cursor-se-resize rounded-sm bg-neutral-700/60 hover:bg-neutral-600/70"
@@ -152,4 +152,3 @@ const SynthCard: Component<SynthCardProps> = (props) => {
 }
 
 export default SynthCard
-

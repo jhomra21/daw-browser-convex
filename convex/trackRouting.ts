@@ -4,8 +4,6 @@ import {
   normalizeTrackRouting as normalizeTrackRoutingCore,
 } from "../src/lib/track-routing-core";
 
-type ClipKind = 'audio' | 'midi'
-
 type TrackLike = {
   _id: string
   channelRole?: string
@@ -38,4 +36,3 @@ export {
   normalizeTrackChannelRole as sanitizeChannelRole,
   sanitizeTrackRouting,
 }
-

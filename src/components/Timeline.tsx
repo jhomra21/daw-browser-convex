@@ -54,6 +54,8 @@ type ProjectDeleteResult = {
   conflicts: ProjectDeleteConflict[]
 }
 type AgentMixOp = { type: 'setMute' | 'setSolo'; indices: number[]; value: boolean; exclusive?: boolean }
+type PanelsTimeline = Parameters<typeof TimelinePanels>[0]["timeline"]
+type OverlaysTimeline = Parameters<typeof TimelineOverlays>[0]["timeline"]
 
 const addIdsToSet = (current: Set<string>, ids: Iterable<string>) => {
   let next: Set<string> | null = null
@@ -147,10 +149,10 @@ const Timeline: Component = () => {
   // Drag-drop visual target lane
   const [dropTargetLane, setDropTargetLane] = createSignal<number | null>(null)
   const [dropAtNewTrack, setDropAtNewTrack] = createSignal(false)
-  const [optimisticTrackWriteIds, setOptimisticTrackWriteIds] = createSignal<Set<string>>(new Set<string>(), { equals: false })
-  const [optimisticClipWriteIds, setOptimisticClipWriteIds] = createSignal<Set<string>>(new Set<string>(), { equals: false })
-  const [pendingSharedTrackVolumes, setPendingSharedTrackVolumes] = createSignal<Map<string, number>>(new Map<string, number>(), { equals: false })
-  const [pendingSharedTrackRouting, setPendingSharedTrackRouting] = createSignal<Map<string, LocalTrackRouting>>(new Map<string, LocalTrackRouting>(), { equals: false })
+  const [optimisticTrackWriteIds, setOptimisticTrackWriteIds] = createSignal<Set<string>>(new Set<string>())
+  const [optimisticClipWriteIds, setOptimisticClipWriteIds] = createSignal<Set<string>>(new Set<string>())
+  const [pendingSharedTrackVolumes, setPendingSharedTrackVolumes] = createSignal<Map<string, number>>(new Map<string, number>())
+  const [pendingSharedTrackRouting, setPendingSharedTrackRouting] = createSignal<Map<string, LocalTrackRouting>>(new Map<string, LocalTrackRouting>())
 
   // Audio engine
   const audioEngine = getAudioEngine()
@@ -508,7 +510,6 @@ const Timeline: Component = () => {
   const {
     isPlaying,
     playheadSec,
-    handlePlay,
     handlePause,
     handleStop,
     setPlayhead,
@@ -659,10 +660,8 @@ const Timeline: Component = () => {
 
   const {
     onClipClick,
-    deleteSelectedClips,
     duplicateSelectedClips,
     performDeleteTrack,
-    requestDeleteSelectedTrack,
     handleKeyboardAction,
   } = useTimelineClipActions({
     tracks,
@@ -1604,6 +1603,138 @@ const Timeline: Component = () => {
     }
   })
 
+  // Grouped props passed to Solid children need stable identities so their
+  // property reads stay reactive instead of snapshotting inline object values.
+  const panelsTimeline: PanelsTimeline = {
+    get bottomFXOpen() {
+      return bottomFXOpen()
+    },
+    get agentPanelOpen() {
+      return agentPanelOpen()
+    },
+    get sharedChatOpen() {
+      return sharedChatOpen()
+    },
+    get exportOpen() {
+      return exportOpen()
+    },
+    get bottomOffsetPx() {
+      return bottomFXOpen() ? FX_OFFSET_PX : 0
+    },
+    get selectedFXTarget() {
+      return selectedFXTarget()
+    },
+    get tracks() {
+      return tracks()
+    },
+    get playheadSec() {
+      return playheadSec()
+    },
+    get bpm() {
+      return bpm()
+    },
+    get loopEnabled() {
+      return loopEnabled()
+    },
+    get loopStartSec() {
+      return loopStartSec()
+    },
+    get loopEndSec() {
+      return loopEndSec()
+    },
+    get roomId() {
+      return roomId()
+    },
+    get userId() {
+      return userId()
+    },
+    toggleAgentPanel: () => setAgentPanelOpen((value) => !value),
+    toggleSharedChat: () => setSharedChatOpen((value) => !value),
+    closeAgentPanel: () => setAgentPanelOpen(false),
+    closeSharedChat: () => setSharedChatOpen(false),
+    closeEffects: () => setBottomFXOpen(false),
+    openEffects: () => setBottomFXOpen(true),
+    closeExport: () => setExportOpen(false),
+    canWriteTrackRouting: canWriteTrack,
+    grantClipWrite,
+    trackSendsChange: updateTrackSends,
+    trackOutputTargetChange: updateTrackOutputTargetId,
+    selectClip: jumpToClip,
+    applyAgentMixOps,
+    effectParamsCommitted: ({ targetId, effect, from, to }) => {
+      const rid = roomId()
+      if (!rid) return
+      pushHistory(buildEffectParamsHistoryEntry({ roomId: rid, effect: effect as any, targetId, tracks: tracks(), from, to }), `fx:${effect}:${targetId}`, 600)
+    },
+  }
+  const overlaysTimeline: OverlaysTimeline = {
+    get tracks() {
+      return tracks()
+    },
+    get durationSec() {
+      return duration()
+    },
+    get bpm() {
+      return bpm()
+    },
+    get gridDenominator() {
+      return gridDenominator()
+    },
+    get gridEnabled() {
+      return gridEnabled()
+    },
+    get loopEnabled() {
+      return loopEnabled()
+    },
+    get loopStartSec() {
+      return loopStartSec()
+    },
+    get loopEndSec() {
+      return loopEndSec()
+    },
+    get playheadSec() {
+      return playheadSec()
+    },
+    get dropAtNewTrack() {
+      return dropAtNewTrack()
+    },
+    get isRecording() {
+      return isRecording()
+    },
+    get previewStartSec() {
+      return previewStartSec()
+    },
+    get previewPoints() {
+      return previewPoints()
+    },
+    get recordingTrackId() {
+      return recordingTrackId()
+    },
+    get marqueeRect() {
+      return marqueeRect()
+    },
+    get midiEditorClipId() {
+      return midiEditorClipId()
+    },
+    get midiCard() {
+      return midiCard()
+    },
+    get userId() {
+      return userId()
+    },
+    get roomId() {
+      return roomId()
+    },
+    closeMidiEditor,
+    changeMidiCardBounds: (next) => {
+      setMidiCard(next)
+      schedulePersistMidiCard()
+    },
+    auditionNote,
+    startLiveNote,
+    stopLiveNote,
+  }
+
   return (
     <div ref={el => (rootRef = el!)} class="h-full w-full flex flex-col bg-neutral-950 text-neutral-200" onDragOver={onDragOver} onDrop={async (e) => { if (e.defaultPrevented) return; await onDrop(e); setDropTargetLane(null); setDropAtNewTrack(false) }} onDragLeave={() => { setDropTargetLane(null); setDropAtNewTrack(false) }}>
       <input ref={el => (fileInputRef = el!)} type="file" accept="audio/*" class="hidden" onChange={onFileInput} />
@@ -1686,43 +1817,9 @@ const Timeline: Component = () => {
         onOpenExport={() => setExportOpen(true)}
       />
       <TimelinePanels
-        state={{
-          bottomFXOpen,
-          agentPanelOpen,
-          sharedChatOpen,
-          exportOpen,
-          bottomOffsetPx: () => bottomFXOpen() ? FX_OFFSET_PX : 0,
-          selectedFXTarget,
-          tracks,
-          playheadSec,
-          bpm,
-          loopEnabled,
-          loopStartSec,
-          loopEndSec,
-        }}
-        session={{ roomId, userId }}
+        timeline={panelsTimeline}
         audioEngine={audioEngine}
         ensureClipBuffer={ensureClipBuffer}
-        actions={{
-          toggleAgentPanel: () => setAgentPanelOpen((value) => !value),
-          toggleSharedChat: () => setSharedChatOpen((value) => !value),
-          closeAgentPanel: () => setAgentPanelOpen(false),
-          closeSharedChat: () => setSharedChatOpen(false),
-          closeEffects: () => setBottomFXOpen(false),
-          openEffects: () => setBottomFXOpen(true),
-          closeExport: () => setExportOpen(false),
-          canWriteTrackRouting: canWriteTrack,
-          grantClipWrite,
-          trackSendsChange: updateTrackSends,
-          trackOutputTargetChange: updateTrackOutputTargetId,
-          selectClip: jumpToClip,
-          applyAgentMixOps,
-          effectParamsCommitted: ({ targetId, effect, from, to }) => {
-            const rid = roomId()
-            if (!rid) return
-            pushHistory(buildEffectParamsHistoryEntry({ roomId: rid, effect: effect as any, targetId, tracks: tracks(), from, to }), `fx:${effect}:${targetId}`, 600)
-          },
-        }}
       />
 
       <div class="flex-1 flex min-h-0" ref={el => (containerRef = el!)}>
@@ -1776,33 +1873,7 @@ const Timeline: Component = () => {
                 )}
               </For>
               <TimelineOverlays
-                state={{
-                  tracks,
-                  durationSec: duration,
-                  bpm,
-                  gridDenominator,
-                  gridEnabled,
-                  loopEnabled,
-                  loopStartSec,
-                  loopEndSec,
-                  playheadSec,
-                  dropAtNewTrack,
-                  isRecording,
-                  previewStartSec,
-                  previewPoints,
-                  recordingTrackId,
-                  marqueeRect,
-                  midiEditorClipId,
-                  midiCard,
-                }}
-                session={{ userId, roomId }}
-                actions={{
-                  closeMidiEditor,
-                  changeMidiCardBounds: (next) => { setMidiCard(next); schedulePersistMidiCard() },
-                  auditionNote,
-                  startLiveNote,
-                  stopLiveNote,
-                }}
+                timeline={overlaysTimeline}
               />
             </div>
           </div>

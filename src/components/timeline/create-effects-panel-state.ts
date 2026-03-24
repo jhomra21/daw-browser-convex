@@ -72,30 +72,6 @@ type EffectsPanelState = {
   };
 };
 
-type TrackEffectState<TParams> = {
-  add: () => void;
-  flushPending: () => void;
-  params: Accessor<TParams | undefined>;
-  readForTarget: (targetId: string) => TParams | undefined;
-  reset: () => void;
-  update: (updater: (prev: TParams) => TParams) => void;
-  updateForTarget: (targetId: string, updater: (prev: TParams) => TParams) => void;
-};
-
-type TrackEffectStateOptions<TParams> = {
-  effect: EffectParamsCommitPayload["effect"];
-  query: any;
-  queryKey: string;
-  readQueryParams: (row: any) => TParams | undefined;
-  readVisibleParams: (targetId: string) => TParams | undefined;
-  createInitialParams: (targetId: string) => TParams | undefined;
-  serializeParams: (params: TParams) => string;
-  applyToEngine: (targetId: string, params: TParams) => void;
-  clearFromEngine: (targetId: string) => void;
-  persistParams: (targetId: string, params: TParams) => void;
-  debounceMs?: number;
-};
-
 const SAVE_DEBOUNCE_MS = 200;
 const LOCAL_EDIT_SUPPRESS_MS = 800;
 
@@ -139,36 +115,6 @@ export function createEffectsPanelState(
     });
   }
 
-  function createTrackEffectState<TParams>(
-    options: TrackEffectStateOptions<TParams>,
-  ): TrackEffectState<TParams> {
-    const query = useConvexQuery(
-      options.query,
-      () => {
-        const targetId = getTrackTargetId();
-        return targetId ? { trackId: targetId as any } : null;
-      },
-      () => ["effects", options.queryKey, currentTargetId()],
-    );
-
-    return createPersistedEffectState<TParams>({
-      targetId: getTrackTargetId,
-      row: () => query.data,
-      readQueryParams: options.readQueryParams,
-      readVisibleParams: options.readVisibleParams,
-      createInitialParams: options.createInitialParams,
-      serializeParams: options.serializeParams,
-      applyToEngine: options.applyToEngine,
-      clearFromEngine: options.clearFromEngine,
-      persistParams: options.persistParams,
-      debounceMs: options.debounceMs,
-      remoteOverwriteAfterMs: LOCAL_EDIT_SUPPRESS_MS,
-      onParamsCommitted: (targetId, previous, next) => {
-        commitEffectChange(options.effect, targetId, previous, next);
-      },
-    });
-  }
-
   const synthDefaultsByTarget = new Map<string, SynthParams>();
   const ensureSynthDefaults = (targetId: string) => {
     const current = synthDefaultsByTarget.get(targetId);
@@ -178,12 +124,25 @@ export function createEffectsPanelState(
     return next;
   };
 
-  const arpState = createTrackEffectState<ArpeggiatorParams>({
-    effect: "arp",
-    query: (convexApi as any).effects.getArpeggiatorForTrack,
-    queryKey: "arpeggiator",
+  const readSynthDefaults = (targetId: string) => {
+    return currentTrack()?.kind === "instrument"
+      ? ensureSynthDefaults(targetId)
+      : undefined;
+  };
+
+  const arpQuery = useConvexQuery(
+    (convexApi as any).effects.getArpeggiatorForTrack,
+    () => {
+      const targetId = getTrackTargetId();
+      return targetId ? { trackId: targetId as any } : null;
+    },
+    () => ["effects", "arpeggiator", currentTargetId()],
+  );
+
+  const arpState = createPersistedEffectState<ArpeggiatorParams>({
+    targetId: getTrackTargetId,
+    row: () => arpQuery.data,
     readQueryParams: (row) => row?.params as ArpeggiatorParams | undefined,
-    readVisibleParams: () => undefined,
     createInitialParams: () => createDefaultArpeggiatorParams(),
     serializeParams: (params) => JSON.stringify(params),
     applyToEngine: (targetId, params) => {
@@ -195,27 +154,31 @@ export function createEffectsPanelState(
     persistParams: (targetId, params) => {
       persistTrackEffect(targetId, (convexApi as any).effects.setArpeggiatorParams, params);
     },
+    remoteOverwriteAfterMs: LOCAL_EDIT_SUPPRESS_MS,
+    onParamsCommitted: (targetId, previous, next) => {
+      commitEffectChange("arp", targetId, previous, next);
+    },
   });
 
-  const synthState = createTrackEffectState<SynthParams>({
-    effect: "synth",
-    query: (convexApi as any).effects.getSynthForTrack,
-    queryKey: "synth",
+  const synthQuery = useConvexQuery(
+    (convexApi as any).effects.getSynthForTrack,
+    () => {
+      const targetId = getTrackTargetId();
+      return targetId ? { trackId: targetId as any } : null;
+    },
+    () => ["effects", "synth", currentTargetId()],
+  );
+
+  const synthState = createPersistedEffectState<SynthParams>({
+    targetId: getTrackTargetId,
+    row: () => synthQuery.data,
     readQueryParams: (row) => {
       return row?.params
         ? normalizeSynthParams(row.params as SynthParamsInput)
         : undefined;
     },
-    readVisibleParams: (targetId) => {
-      return currentTrack()?.kind === "instrument"
-        ? ensureSynthDefaults(targetId)
-        : undefined;
-    },
-    createInitialParams: (targetId) => {
-      return currentTrack()?.kind === "instrument"
-        ? ensureSynthDefaults(targetId)
-        : undefined;
-    },
+    readVisibleParams: readSynthDefaults,
+    createInitialParams: readSynthDefaults,
     serializeParams: serializeSynthParams,
     applyToEngine: (targetId, params) => {
       context.audioEngine?.setTrackSynth(targetId, params);
@@ -227,6 +190,10 @@ export function createEffectsPanelState(
       persistTrackEffect(targetId, (convexApi as any).effects.setSynthParams, params);
     },
     debounceMs: SAVE_DEBOUNCE_MS,
+    remoteOverwriteAfterMs: LOCAL_EDIT_SUPPRESS_MS,
+    onParamsCommitted: (targetId, previous, next) => {
+      commitEffectChange("synth", targetId, previous, next);
+    },
   });
 
   const [expandedSynth, setExpandedSynth] = createSignal<ExpandedSynthBounds | null>(null);

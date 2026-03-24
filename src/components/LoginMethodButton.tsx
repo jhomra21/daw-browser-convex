@@ -1,5 +1,6 @@
 import { Show, type JSX } from "solid-js";
 import { Button } from "~/components/ui/button";
+import { cn } from "~/lib/utils";
 
 export type LoginMethodButtonProps = {
   label: string;
@@ -12,16 +13,19 @@ export type LoginMethodButtonProps = {
 
 const Spinner = (props: { class?: string }) => (
   <div
-    class={`h-4 w-4 animate-spin rounded-full border-2 border-solid border-current border-t-transparent ${props.class ?? ""}`}
+    class={cn(
+      "h-4 w-4 animate-spin rounded-full border-2 border-solid border-current border-t-transparent",
+      props.class,
+    )}
   />
 );
 
 export function LoginMethodButton(props: LoginMethodButtonProps) {
   return (
-    <div class={`relative w-full ${props.class ?? ""}`}>
+    <div class={cn("relative w-full", props.class)}>
       <Button
         variant={"outline"}
-        class={`w-full`}
+        class="w-full"
         onClick={props.onClick}
         disabled={props.disabled}
       >

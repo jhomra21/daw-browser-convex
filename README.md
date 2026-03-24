@@ -145,10 +145,10 @@ The Collaborative Realtime DAW combines SolidJS reactivity with Convex real-time
 ## Frontend Modules
 
 - **`src/components/timeline/TransportControls.tsx`**: Central transport bar controlling playback, recording, BPM, and project management.
+- **`src/components/timeline/TrackSidebar.tsx`**: Per-track mixer strip with volume, mute/solo, and record-arm controls.
 - **`src/components/timeline/TrackLane.tsx`**: Renders clips per track, handles drag handles, resizing, and visual feedback.
 - **`src/components/timeline/EffectsPanel.tsx`**: Manages master/track EQ editing, wired into Convex effects mutations.
-- **`src/components/AudioRecorder.tsx`**: Wraps `mediabunny` for browser capture, including waveform previews.
-- **`src/components/VisualEqualizer.tsx`**: Real-time analyser that visualises frequency bands using the Web Audio analyser node.
+- **`src/hooks/useTrackRecording.ts`**: Captures microphone input, manages recording locks, and turns finished takes into timeline clips.
 
 ## Backend & API
 
@@ -160,7 +160,8 @@ The Collaborative Realtime DAW combines SolidJS reactivity with Convex real-time
 ## Data Model
 
 Convex tables (see `convex/schema.ts`):
-- **`tracks`**: Room-scoped tracks with ordering, mix state, and locking metadata.
+- **`tracks`**: Room-scoped tracks with ordering and track kind metadata.
+- **`mixerChannels`**: Persisted mix state, routing, and track locks.
 - **`clips`**: Audio clip placements including padding, sample URL, and optional names.
 - **`samples`**: User-curated sample library entries referencing R2 URLs.
 - **`projects`**: User-to-room mapping with per-owner project names.

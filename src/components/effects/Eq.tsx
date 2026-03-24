@@ -4,8 +4,8 @@ import Knob from '~/components/ui/knob'
 import {
   supportsGain,
   type EqBandParams,
-  type EqParams,
 } from '~/lib/effects/params'
+import { cn } from '~/lib/utils'
 
 
 // ===== Component =====
@@ -377,14 +377,17 @@ export default function Eq(props: EqProps) {
   }
 
   return (
-    <div class={`rounded-md border border-neutral-800 bg-neutral-900 text-neutral-100 flex flex-col ${props.class ?? ''}`}>
+    <div class={cn('flex flex-col rounded-md border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
       {/* Header */}
-      <div class="flex items-center justify-between px-2 py-1 border-b border-neutral-800">
+      <div class="flex items-center justify-between border-b border-neutral-800 px-2 py-1">
         <div class="flex items-center gap-2">
           <span class="text-xs font-semibold">EQ</span>
           <Show when={props.onToggleEnabled}>
             <button
-              class={`ml-2 text-xs px-2 py-0.5 rounded ${props.enabled ? 'bg-green-500/20 text-green-400 ring-1 ring-green-500/30' : 'bg-neutral-800 text-neutral-400'}`}
+              class={cn(
+                'ml-2 rounded px-2 py-0.5 text-xs',
+                props.enabled ? 'bg-green-500/20 text-green-400 ring-1 ring-green-500/30' : 'bg-neutral-800 text-neutral-400',
+              )}
               onClick={() => props.onToggleEnabled?.(!props.enabled)}
               title={props.enabled ? 'Disable EQ' : 'Enable EQ'}
             >
@@ -395,7 +398,7 @@ export default function Eq(props: EqProps) {
         <div class="flex items-center gap-2">
           <Show when={props.onReset}>
             <button
-              class="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700"
+              class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
               onClick={() => props.onReset?.()}
             >Reset</button>
           </Show>
@@ -408,9 +411,14 @@ export default function Eq(props: EqProps) {
           <For each={props.bands}>
             {(b, i) => (
               <button
-                class={`w-4 h-4 rounded text-3xs font-bold flex items-center justify-center transition-colors ${
-                  selectedId() === b.id ? 'bg-blue-500 text-white' : (b.enabled ? 'bg-neutral-700 text-neutral-200 hover:bg-neutral-600' : 'bg-neutral-800 text-neutral-500')
-                }`}
+                class={cn(
+                  'flex h-4 w-4 items-center justify-center rounded text-3xs font-bold transition-colors',
+                  selectedId() === b.id
+                    ? 'bg-blue-500 text-white'
+                    : b.enabled
+                      ? 'bg-neutral-700 text-neutral-200 hover:bg-neutral-600'
+                      : 'bg-neutral-800 text-neutral-500',
+                )}
                 onClick={() => setSelectedId(b.id)}
                 title={`Band ${i() + 1}`}
               >{i() + 1}</button>
@@ -418,7 +426,10 @@ export default function Eq(props: EqProps) {
           </For>
           <Show when={props.onBandToggle && selBand()}>
             <button
-              class={`ml-1 text-3xs px-1 py-0.5 rounded ${selBand()?.enabled ? 'bg-neutral-300 text-black' : 'bg-neutral-800 text-neutral-300'}`}
+              class={cn(
+                'ml-1 rounded px-1 py-0.5 text-3xs',
+                selBand()?.enabled ? 'bg-neutral-300 text-black' : 'bg-neutral-800 text-neutral-300',
+              )}
               onClick={() => selBand() && props.onBandToggle?.(selBand()!.id)}
               title={selBand()?.enabled ? 'Disable band' : 'Enable band'}
             >{selBand()?.enabled ? 'On' : 'Off'}</button>
@@ -428,7 +439,7 @@ export default function Eq(props: EqProps) {
 
       {/* Controls + Graph (compact) */}
       <div class="px-2 pb-1">
-        <div class="grid grid-cols-[44px_1fr] gap-1.5 items-start">
+        <div class="grid items-start gap-1.5" style={{ 'grid-template-columns': '44px minmax(0, 1fr)' }}>
           {/* Left: vertical controls */}
           <div class="flex flex-col gap-1">
             {/* Frequency */}
@@ -497,7 +508,7 @@ export default function Eq(props: EqProps) {
               ref={(el) => (canvasRef = el || undefined)}
               width={canvasSize().width}
               height={canvasSize().height}
-              class={`w-full rounded-md ${props.enabled ? 'cursor-crosshair' : 'cursor-not-allowed opacity-60'}`}
+              class={cn('w-full rounded-md', props.enabled ? 'cursor-crosshair' : 'cursor-not-allowed opacity-60')}
               onMouseDown={onCanvasMouseDown}
               onMouseMove={onCanvasMouseMove}
               onMouseUp={onCanvasMouseUp}
@@ -513,11 +524,12 @@ export default function Eq(props: EqProps) {
           <For each={FILTER_TYPES}>
             {(ft) => (
               <button
-                class={`px-1 py-0.5 text-3xs rounded border ${
+                class={cn(
+                  'rounded border border-neutral-700 px-1 py-0.5 text-3xs',
                   selBand()?.type === ft.value
-                    ? 'bg-blue-500/20 text-blue-300 border-blue-400/30'
-                    : 'bg-neutral-800 text-neutral-300 border-neutral-700 hover:bg-neutral-700'
-                }`}
+                    ? 'border-blue-400/30 bg-blue-500/20 text-blue-300'
+                    : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
+                )}
                 disabled={!props.enabled || !selBand()?.enabled}
                 onClick={() => selBand() && props.onBandChange(selBand()!.id, { type: ft.value })}
                 title={ft.label}
@@ -533,4 +545,3 @@ export default function Eq(props: EqProps) {
     </div>
   )
 }
-

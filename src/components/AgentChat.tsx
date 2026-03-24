@@ -1,6 +1,7 @@
 import { type Component, For, Show, createSignal, createEffect, onCleanup } from 'solid-js'
 import { CommandsEnvelopeSchema, type CommandsEnvelope } from '~/lib/agent-commands'
 import { convexClient, convexApi } from '~/lib/convex'
+import { cn } from '~/lib/utils'
 
 // Minimal message type for local chat UI
 type Msg = { role: 'user' | 'assistant'; content: string }
@@ -408,7 +409,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
 
   // Keep view pinned to latest messages by default, but don't hijack when user has scrolled up
   createEffect(() => {
-    const _ = messages() // track message changes
+    void messages()
     const open = props.isOpen
     const force = forceScrollNext() // capture to track signal
     const smooth = streaming() // capture to track signal
@@ -692,14 +693,17 @@ const AgentChat: Component<AgentChatProps> = (props) => {
   return (
     <Show when={props.isOpen}>
       <div
-        class="fixed left-0 bottom-0 w-[380px] h-[460px] bg-neutral-900 border-t border-r border-neutral-800 flex flex-col z-50 pointer-events-auto"
+        class="pointer-events-auto fixed bottom-0 left-0 z-50 flex h-[28.75rem] w-[23.75rem] flex-col border-r border-t border-neutral-800 bg-neutral-900"
         style={{ bottom: `${props.bottomOffsetPx ?? 0}px` }}
       >
         <div class="flex items-center justify-between px-3 py-2 border-b border-neutral-800">
           <div class="text-sm font-semibold text-neutral-200">AI Agent</div>
           <div class="flex items-center gap-2">
             <button
-              class={`text-xs px-2 py-1 rounded border ${autoApply() ? 'border-green-500 text-green-400' : 'border-neutral-600 text-neutral-300'} hover:bg-neutral-800`}
+              class={cn(
+                'rounded border px-2 py-1 text-xs hover:bg-neutral-800',
+                autoApply() ? 'border-green-500 text-green-400' : 'border-neutral-600 text-neutral-300',
+              )}
               aria-pressed={autoApply()}
               onClick={() => setAutoApply(v => !v)}
               title="Auto-apply detected commands"
@@ -711,10 +715,12 @@ const AgentChat: Component<AgentChatProps> = (props) => {
           <div class="min-h-full flex flex-col justify-end space-y-2">
             <For each={messages()}>{(m) => (
               <div class={m.role === 'user' ? 'text-right' : 'text-left'}>
-                <div class={
-                  'inline-block max-w-[90%] rounded-md px-2 py-1 text-sm ' +
-                  (m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-neutral-800 text-neutral-100')
-                }>
+                <div
+                  class={cn(
+                    'inline-block max-w-[90%] rounded-md px-2 py-1 text-sm',
+                    m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-neutral-800 text-neutral-100',
+                  )}
+                >
                   {m.content}
                 </div>
               </div>
@@ -744,7 +750,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
         </div>
         <div class="border-t border-neutral-800 p-2">
           <textarea
-            class="w-full h-[72px] resize-none rounded bg-neutral-800 text-neutral-100 p-2 text-sm outline-none"
+            class="h-[4.5rem] w-full resize-none rounded bg-neutral-800 p-2 text-sm text-neutral-100 outline-none"
             placeholder="Ask to add tracks, effects, synths, or clips..."
             value={input()}
             onInput={(e) => setInput(e.currentTarget.value)}

@@ -78,7 +78,7 @@ Do something like
 
 If we truly need a new text style, we define a token for it.
 
-6. Use cx for class merging
+6. Use cn for class merging
 
 Avoid manual string concatenation.
 
@@ -88,7 +88,7 @@ class={`bg-background rounded-xl overflow-hidden shadow-lg border border-border 
 
 Do
 
-class={cx(
+class={cn(
   "bg-background rounded-xl overflow-hidden shadow-lg border border-border",
   props.containerClass
 )}

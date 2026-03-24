@@ -65,17 +65,6 @@ type EffectsPanelProps = {
 
 const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   type EffectKind = "eq" | "reverb";
-  type EffectCommitKind = "eq" | "reverb" | "master-eq" | "master-reverb";
-  type ManagedEffectConfig<TParams, TParamsLite> = {
-    kind: EffectKind;
-    trackCommitEffect: EffectKind;
-    masterCommitEffect: EffectCommitKind;
-    createDefaultParams: () => TParams;
-    masterQueryApi: unknown;
-    trackQueryApi: unknown;
-    applyToEngine: (targetId: string, params: TParamsLite) => void;
-    persist: (targetId: string, params: TParams) => Promise<unknown>;
-  };
 
   const targetName = () => {
     if (currentTargetId() === "master") return "Master";
@@ -161,56 +150,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       }
     }
     appendEffectOrder(targetId, kind);
-  }
-
-  function createManagedEffectState<TParams extends EqParams | ReverbParams, TParamsLite extends EqParamsLite | ReverbParamsLite>(
-    config: ManagedEffectConfig<TParams, TParamsLite>,
-  ) {
-    const masterQuery = useConvexQuery(
-      config.masterQueryApi as any,
-      () => (props.roomId ? { roomId: props.roomId } : null),
-      () => ["effects", config.kind, "master", props.roomId],
-    );
-
-    const trackQuery = useConvexQuery(
-      config.trackQueryApi as any,
-      () => {
-        const id = currentTargetId();
-        if (!id || id === "master") return null;
-        return { trackId: id as any };
-      },
-      () => ["effects", config.kind, "track", currentTargetId()],
-    );
-
-    return createPersistedEffectState<TParams>({
-      targetId: currentTargetId,
-      row: () => currentTargetId() === "master"
-        ? masterQuery.data
-        : trackQuery.data,
-      readQueryParams: (row) => row?.params as TParams | undefined,
-      createInitialParams: () => config.createDefaultParams(),
-      serializeParams: (params) => JSON.stringify(params),
-      applyToEngine: (targetId, params) => {
-        config.applyToEngine(targetId, params as unknown as TParamsLite);
-      },
-      persistParams: (targetId, params) => config.persist(targetId, params),
-      debounceMs: SAVE_DEBOUNCE_MS,
-      remoteOverwriteAfterMs: LOCAL_EDIT_SUPPRESS_MS,
-      onQueryRow: (targetId, row) => {
-        if (row?.params) {
-          setEffectOrderForTarget(targetId, config.kind, row.index as number | undefined);
-        }
-      },
-      onParamsCommitted: (targetId, previous, next) => {
-        if (previous === undefined) return;
-        props.onEffectParamsCommitted?.({
-          targetId,
-          effect: targetId === "master" ? config.masterCommitEffect : config.trackCommitEffect,
-          from: previous,
-          to: next,
-        });
-      },
-    });
   }
 
   const instrumentState = createEffectsPanelState(props, currentTargetId, currentTrack);
@@ -313,13 +252,28 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     setSpectrum(null);
   });
 
-  const eqState = createManagedEffectState<EqParams, EqParamsLite>({
-    kind: "eq",
-    trackCommitEffect: "eq",
-    masterCommitEffect: "master-eq",
-    createDefaultParams: createDefaultEqParams,
-    masterQueryApi: convexApi.effects.getEqForMaster,
-    trackQueryApi: convexApi.effects.getEqForTrack,
+  const eqMasterQuery = useConvexQuery(
+    convexApi.effects.getEqForMaster,
+    () => (props.roomId ? { roomId: props.roomId } : null),
+    () => ["effects", "eq", "master", props.roomId],
+  );
+
+  const eqTrackQuery = useConvexQuery(
+    convexApi.effects.getEqForTrack,
+    () => {
+      const id = currentTargetId();
+      if (!id || id === "master") return null;
+      return { trackId: id as any };
+    },
+    () => ["effects", "eq", "track", currentTargetId()],
+  );
+
+  const eqState = createPersistedEffectState<EqParams>({
+    targetId: currentTargetId,
+    row: () => currentTargetId() === "master" ? eqMasterQuery.data : eqTrackQuery.data,
+    readQueryParams: (row) => row?.params as EqParams | undefined,
+    createInitialParams: () => createDefaultEqParams(),
+    serializeParams: (params) => JSON.stringify(params),
     applyToEngine: (targetId, params) => {
       if (targetId === "master") {
         props.audioEngine?.setMasterEq(params);
@@ -327,7 +281,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         props.audioEngine?.setTrackEq(targetId, params);
       }
     },
-    persist: (targetId, params) => {
+    persistParams: (targetId, params) => {
       if (!props.roomId || !props.userId) return Promise.resolve();
       if (targetId === "master") {
         return convexClient.mutation(convexApi.effects.setMasterEqParams, {
@@ -341,6 +295,22 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         trackId: targetId as any,
         userId: props.userId,
         params,
+      });
+    },
+    debounceMs: SAVE_DEBOUNCE_MS,
+    remoteOverwriteAfterMs: LOCAL_EDIT_SUPPRESS_MS,
+    onQueryRow: (targetId, row) => {
+      if (row?.params) {
+        setEffectOrderForTarget(targetId, "eq", row.index as number | undefined);
+      }
+    },
+    onParamsCommitted: (targetId, previous, next) => {
+      if (previous === undefined) return;
+      props.onEffectParamsCommitted?.({
+        targetId,
+        effect: targetId === "master" ? "master-eq" : "eq",
+        from: previous,
+        to: next,
       });
     },
   });
@@ -372,13 +342,28 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     eqState.update(() => createDefaultEqParams());
   };
 
-  const reverbState = createManagedEffectState<ReverbParams, ReverbParamsLite>({
-    kind: "reverb",
-    trackCommitEffect: "reverb",
-    masterCommitEffect: "master-reverb",
-    createDefaultParams: createDefaultReverbParams,
-    masterQueryApi: convexApi.effects.getReverbForMaster,
-    trackQueryApi: convexApi.effects.getReverbForTrack,
+  const reverbMasterQuery = useConvexQuery(
+    convexApi.effects.getReverbForMaster,
+    () => (props.roomId ? { roomId: props.roomId } : null),
+    () => ["effects", "reverb", "master", props.roomId],
+  );
+
+  const reverbTrackQuery = useConvexQuery(
+    convexApi.effects.getReverbForTrack,
+    () => {
+      const id = currentTargetId();
+      if (!id || id === "master") return null;
+      return { trackId: id as any };
+    },
+    () => ["effects", "reverb", "track", currentTargetId()],
+  );
+
+  const reverbState = createPersistedEffectState<ReverbParams>({
+    targetId: currentTargetId,
+    row: () => currentTargetId() === "master" ? reverbMasterQuery.data : reverbTrackQuery.data,
+    readQueryParams: (row) => row?.params as ReverbParams | undefined,
+    createInitialParams: () => createDefaultReverbParams(),
+    serializeParams: (params) => JSON.stringify(params),
     applyToEngine: (targetId, params) => {
       if (targetId === "master") {
         props.audioEngine?.setMasterReverb(params);
@@ -386,7 +371,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         props.audioEngine?.setTrackReverb(targetId, params);
       }
     },
-    persist: (targetId, params) => {
+    persistParams: (targetId, params) => {
       if (!props.roomId || !props.userId) return Promise.resolve();
       if (targetId === "master") {
         return convexClient.mutation(convexApi.effects.setMasterReverbParams, {
@@ -400,6 +385,22 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         trackId: targetId as any,
         userId: props.userId,
         params,
+      });
+    },
+    debounceMs: SAVE_DEBOUNCE_MS,
+    remoteOverwriteAfterMs: LOCAL_EDIT_SUPPRESS_MS,
+    onQueryRow: (targetId, row) => {
+      if (row?.params) {
+        setEffectOrderForTarget(targetId, "reverb", row.index as number | undefined);
+      }
+    },
+    onParamsCommitted: (targetId, previous, next) => {
+      if (previous === undefined) return;
+      props.onEffectParamsCommitted?.({
+        targetId,
+        effect: targetId === "master" ? "master-reverb" : "reverb",
+        from: previous,
+        to: next,
       });
     },
   });

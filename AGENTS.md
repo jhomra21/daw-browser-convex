@@ -78,6 +78,32 @@ Rules:
 - Do not keep re-export surfaces or generic-looking types unless multiple consumers actually need them.
 - Only generalize after a second real consumer proves the abstraction.
 
+### Explicit UI and Static Content
+Prefer dumb, explicit code for static UI. Do not turn plain JSX into a data model unless the content is truly dynamic or reused in multiple places.
+
+Rules:
+- For static pages and marketing UI, write the content inline in JSX.
+- Do not create typed data arrays or config objects just to map static content into components.
+- If markup repeats, extract a small wrapper component for the repeated shell instead of introducing a data structure.
+- Prefer component extraction over class-string extraction.
+- Do not create `const ...Class = "..."` helpers or style modules for one-off UI.
+- Keep classes at the callsite unless a small wrapper component makes the file clearly easier to read.
+- Prefer files that can be read top-to-bottom without chasing helper abstractions.
+- Default to the most local and obvious solution, even if it is slightly longer.
+- Suggest abstractions when local solutions are too long
+
+Bad:
+- `type Feature = ...`
+- `const features = [...]`
+- `features.map(...)` for static page content
+- extracting class strings into JS constants instead of extracting a small component
+
+Good:
+- inline static JSX content
+- small wrapper components for repeated layout/chrome
+- explicit props for real repeated structure
+- local code that stays easy to scan and edit
+
 ## Engineering Rules (Non-Negotiable)
 - Functional style first: prefer pure functions, immutable updates, explicit inputs/outputs.
 - Single responsibility: each function/module should have one reason to change.

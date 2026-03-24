@@ -1,5 +1,4 @@
 import { createFileRoute, Link } from '@tanstack/solid-router'
-import { createSignal, onMount, onCleanup } from 'solid-js'
 import type { JSX } from 'solid-js'
 import Icon from '~/components/ui/Icon'
 import { useSessionQuery } from '~/lib/session'
@@ -14,53 +13,65 @@ export const Route = createFileRoute('/about')({
   component: About,
 })
 
-function Reveal(props: { children: JSX.Element; delay?: number; class?: string }) {
-  const [show, setShow] = createSignal(false)
-  let el!: HTMLDivElement
-  onMount(() => {
-    const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    if (reduce) { setShow(true); return }
-    const io = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) {
-        const d = props.delay ?? 0
-        d ? setTimeout(() => setShow(true), d) : setShow(true)
-        io.disconnect()
-      }
-    }, { threshold: 0.1, rootMargin: '0px 0px -10% 0px' })
-    io.observe(el)
-    onCleanup(() => io.disconnect())
-  })
+function FeatureImage(props: { src: string }) {
   return (
-    <div
-      ref={el}
-      class={`${props.class ?? ''} transform-gpu transition-all duration-350 ease-out will-change-[transform,opacity,filter] motion-reduce:transition-none motion-reduce:transform-none motion-reduce:opacity-100 motion-reduce:blur-0 ${show() ? 'opacity-100 translate-y-0 blur-0' : 'opacity-0 translate-y-8 blur-xs'}`}
-    >
-      {props.children}
+    <div class="relative hidden min-h-55 md:block md:w-80 md:shrink-0">
+      <img src={props.src} alt="" class="absolute inset-0 h-full w-full object-cover object-right opacity-90" />
+      <div class="absolute inset-0 bg-gradient-to-l from-neutral-900/80 to-transparent" />
+    </div>
+  )
+}
+
+function FeatureLogos() {
+  return (
+    <div class="relative hidden min-h-55 items-center justify-center md:flex md:w-80 md:shrink-0">
+      <div class="absolute inset-0 -z-10 bg-[radial-gradient(closest-side,rgba(120,120,255,0.18),transparent)]" />
+      <div class="flex items-center gap-4">
+        <Icon name="solidjs" size={72} class="-translate-y-1 drop-shadow-lg" ariaLabel="SolidJS" />
+        <span class="text-4xl font-medium text-neutral-400">+</span>
+        <Icon name="convex" size={72} class="translate-y-1 drop-shadow-lg" ariaLabel="Convex" />
+      </div>
+      <div class="absolute inset-0 bg-gradient-to-l from-neutral-900/80 to-transparent" />
+    </div>
+  )
+}
+
+function FeatureCard(props: {
+  title: string
+  description: string
+  example: string
+  children: JSX.Element
+  visual: JSX.Element
+}) {
+  return (
+    <div class="about-feature-card h-full min-h-85 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900/60">
+      <div class="h-full md:flex">
+        <div class="p-6 md:flex-1">
+          <h3 class="text-lg font-semibold">{props.title}</h3>
+          <p class="mt-2 text-neutral-300">{props.description}</p>
+          <ul class="mt-4 list-disc space-y-1 pl-5 text-sm text-neutral-300">
+            {props.children}
+          </ul>
+          <div class="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
+            Example: {props.example}
+          </div>
+        </div>
+        {props.visual}
+      </div>
     </div>
   )
 }
 
 function About() {
   const session = useSessionQuery()
-  const [entered, setEntered] = createSignal(false)
-  const onSeeFeatures = (e: Event) => {
-    e.preventDefault()
-    document.getElementById('features')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-  onMount(() => {
-    const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    if (reduce) { setEntered(true); return }
-    // Delay one tick to ensure initial styles paint before transitioning
-    setTimeout(() => setEntered(true), 80)
-  })
   return (
-    <main class="min-h-screen bg-gradient-to-b from-neutral-950 to-neutral-900 text-neutral-100">
+    <main class="about-page min-h-screen bg-gradient-to-b from-neutral-950 to-neutral-900 text-neutral-100">
       <section class="relative container mx-auto px-4 pt-20 pb-10 text-center">
         <div class="pointer-events-none absolute inset-0 -z-10">
-          <div class="mx-auto mt-[-4rem] h-64 w-[36rem] rounded-full bg-[radial-gradient(closest-side,rgba(120,120,255,0.25),transparent)] blur-3xl" />
+          <div class="mx-auto -mt-16 h-64 w-144 rounded-full bg-[radial-gradient(closest-side,rgba(120,120,255,0.25),transparent)] blur-3xl" />
         </div>
 
-        <div class={`${entered() ? 'opacity-100 translate-y-0 blur-0' : 'opacity-0 translate-y-6 blur-sm'} transform-gpu transition-all duration-700 ease-out will-change-[transform,opacity,filter] motion-reduce:transition-none motion-reduce:transform-none motion-reduce:opacity-100 motion-reduce:blur-0`}>
+        <div class="about-hero-copy">
           <p class="text-sm uppercase tracking-widest text-neutral-400">Realtime collaborative DAW</p>
           <h1 class="mx-auto max-w-4xl text-4xl md:text-6xl font-semibold leading-tight tracking-tight bg-clip-text text-transparent bg-gradient-to-b from-white to-neutral-400">
             Make music together, in your browser.
@@ -68,177 +79,120 @@ function About() {
           <p class="mx-auto mt-4 max-w-2xl text-neutral-300">
             Arrange audio and MIDI, add EQ, Reverb, and Synths, and collaborate live with zero installs.
           </p>
-          <div class="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
+          <div class="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
             {session.data ? (
-              <Link to="/" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground px-6 py-3 text-sm font-medium hover:bg-primary/90 border border-neutral-700/20">
+              <Link
+                to="/"
+                class="inline-flex items-center justify-center rounded-md border border-neutral-700/20 bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
                 Go to app
               </Link>
             ) : (
-              <Link to="/Login" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground px-6 py-3 text-sm font-medium hover:bg-primary/90 border border-neutral-700/20">
-                Get started — Sign in
+              <Link
+                to="/Login"
+                class="inline-flex items-center justify-center rounded-md border border-neutral-700/20 bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                Get started - Sign in
               </Link>
             )}
-            <a href="#features" onClick={onSeeFeatures} class="inline-flex items-center justify-center rounded-md border border-neutral-800 px-6 py-3 text-sm font-medium text-neutral-200 hover:bg-neutral-900/60">
+            <a
+              href="#features"
+              class="inline-flex items-center justify-center rounded-md border border-neutral-800 px-6 py-3 text-sm font-medium text-neutral-200 hover:bg-neutral-900/60"
+            >
               See features
             </a>
           </div>
         </div>
 
-        <div class={`mt-12 w-full max-w-5xl mx-auto aspect-video rounded-2xl border border-neutral-800 bg-neutral-900/60 overflow-hidden shadow-2xl transform-gpu transition-all duration-700 ease-out [transition-delay:150ms] motion-reduce:transition-none motion-reduce:transform-none motion-reduce:opacity-100 motion-reduce:blur-0 ${entered() ? 'opacity-100 translate-y-0 blur-0' : 'opacity-0 translate-y-8 blur-sm'}`}>
+        <div class="about-hero-media mx-auto mt-12 aspect-video w-full max-w-5xl overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900/60 shadow-2xl">
           <img src="/landing-page-thumbnail.png" alt="MediaBunny DAW screenshot" class="w-full h-full object-contain p-4" loading='eager' />
         </div>
       </section>
 
       <section id="features" class="container mx-auto px-4 py-16">
         <div class="grid gap-6 md:grid-cols-2">
-          <Reveal delay={0} class="h-full">
-          <div class="rounded-xl border border-neutral-800 bg-neutral-900/60 overflow-hidden h-full min-h-[340px]">
-            <div class="grid md:grid-cols-[1fr_320px]">
-              <div class="p-6">
-            <h3 class="text-lg font-semibold">Live collaboration</h3>
-            <p class="mt-2 text-neutral-300">Work on the same project with friends in real time—no sync headaches.</p>
-            <ul class="mt-4 text-sm text-neutral-300 list-disc pl-5 space-y-1">
+          <FeatureCard
+            title="Live collaboration"
+            description="Work on the same project with friends in real time, without sync headaches."
+            example="Invite a collaborator, set a loop at bar 17-25, they tweak EQ while you record a new take."
+            visual={<FeatureImage src="/landing-page-projects.png" />}
+          >
+            <>
               <li>See clip edits, loop regions, and mixer changes as they happen.</li>
               <li>Per-track mute/solo and volume for personal monitor mixes.</li>
               <li>Project chat keeps context alongside your timeline.</li>
-            </ul>
-            <div class="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
-              Example: Invite a collaborator, set a loop at bar 17–25, they tweak EQ while you record a new take.
-            </div>
-              </div>
-              <div class="relative hidden md:block min-h-[220px]">
-                <div class="absolute inset-0 bg-[url('/landing-page-projects.png')] bg-cover bg-right opacity-90" />
-                <div class="absolute inset-0 bg-gradient-to-l from-neutral-900/80 to-transparent" />
-              </div>
-            </div>
-          </div>
-          </Reveal>
+            </>
+          </FeatureCard>
 
-          <Reveal delay={80} class="h-full">
-          <div class="rounded-xl border border-neutral-800 bg-neutral-900/60 overflow-hidden h-full min-h-[340px]">
-            <div class="grid md:grid-cols-[1fr_320px]">
-              <div class="p-6">
-            <h3 class="text-lg font-semibold">Clips & timeline</h3>
-            <p class="mt-2 text-neutral-300">Arrange audio and MIDI with precise grid snapping and loop regions.</p>
-            <ul class="mt-4 text-sm text-neutral-300 list-disc pl-5 space-y-1">
+          <FeatureCard
+            title="Clips & timeline"
+            description="Arrange audio and MIDI with precise grid snapping and loop regions."
+            example="Drop stems, set snap to 1/16, quickly comp a chorus by looping and duplicating clips."
+            visual={<FeatureImage src="/landing-page-samples.png" />}
+          >
+            <>
               <li>Drag, split, duplicate, and loop clips with keyboard shortcuts.</li>
               <li>Tempo control and metronome for tight timing.</li>
               <li>Zoom and scroll to focus on your arrangement.</li>
-            </ul>
-            <div class="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
-              Example: Drop stems, set snap to 1/16, quickly comp a chorus by looping and duplicating clips.
-            </div>
-              </div>
-              <div class="relative hidden md:block min-h-[220px]">
-                <div class="absolute inset-0 bg-[url('/landing-page-samples.png')] bg-cover bg-right opacity-90" />
-                <div class="absolute inset-0 bg-gradient-to-l from-neutral-900/80 to-transparent" />
-              </div>
-            </div>
-          </div>
-          </Reveal>
+            </>
+          </FeatureCard>
 
-          <Reveal delay={160} class="h-full">
-          <div class="rounded-xl border border-neutral-800 bg-neutral-900/60 overflow-hidden h-full min-h-[340px]">
-            <div class="grid md:grid-cols-[1fr_320px]">
-              <div class="p-6">
-            <h3 class="text-lg font-semibold">MIDI instruments</h3>
-            <p class="mt-2 text-neutral-300">Play built‑in synths and arpeggiators directly from your keyboard.</p>
-            <ul class="mt-4 text-sm text-neutral-300 list-disc pl-5 space-y-1">
+          <FeatureCard
+            title="MIDI instruments"
+            description="Play the built-in synths and arpeggiators directly from your keyboard."
+            example="Sketch a bass line with the Arp, then quantize lightly to keep the groove."
+            visual={<FeatureImage src="/landing-page-synth.png" />}
+          >
+            <>
               <li>Record MIDI and edit notes.</li>
-              <li>Built‑in Synth and Arpeggiator for ideas without plugins.</li>
+              <li>Built-in Synth and Arpeggiator for ideas without plugins.</li>
               <li>Floating MIDI editor for quick note tweaks.</li>
-            </ul>
-            <div class="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
-              Example: Sketch a bass line with the Arp, then quantize lightly to keep the groove.
-            </div>
-              </div>
-              <div class="relative hidden md:block min-h-[220px]">
-                <div class="absolute inset-0 bg-[url('/landing-page-synth.png')] bg-cover bg-right opacity-90" />
-                <div class="absolute inset-0 bg-gradient-to-l from-neutral-900/80 to-transparent" />
-              </div>
-            </div>
-          </div>
-          </Reveal>
+            </>
+          </FeatureCard>
 
-          <Reveal delay={240} class="h-full">
-          <div class="rounded-xl border border-neutral-800 bg-neutral-900/60 overflow-hidden h-full min-h-[340px]">
-            <div class="grid md:grid-cols-[1fr_320px]">
-              <div class="p-6">
-            <h3 class="text-lg font-semibold">Effects & mixing</h3>
-            <p class="mt-2 text-neutral-300">Polish your sound with built‑in EQ and Reverb—fast and transparent.</p>
-            <ul class="mt-4 text-sm text-neutral-300 list-disc pl-5 space-y-1">
-              <li>Per‑track EQ and Reverb with simple controls.</li>
-              <li>Meters and per‑track volume sliders.</li>
+          <FeatureCard
+            title="Effects & mixing"
+            description="Polish your sound with built-in EQ and Reverb, fast and transparent."
+            example="Add plate reverb to vocals, roll off lows with EQ, A/B with bypass to dial it in."
+            visual={<FeatureImage src="/landing-page-eq.png" />}
+          >
+            <>
+              <li>Per-track EQ and Reverb with simple controls.</li>
+              <li>Meters and per-track volume sliders.</li>
               <li>Quick EQ presets to get started fast.</li>
-            </ul>
-            <div class="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
-              Example: Add plate reverb to vocals, roll off lows with EQ, A/B with bypass to dial it in.
-            </div>
-              </div>
-              <div class="relative hidden md:block min-h-[220px]">
-                <div class="absolute inset-0 bg-[url('/landing-page-eq.png')] bg-cover bg-right opacity-90" />
-                <div class="absolute inset-0 bg-gradient-to-l from-neutral-900/80 to-transparent" />
-              </div>
-            </div>
-          </div>
-          </Reveal>
+            </>
+          </FeatureCard>
 
-          <Reveal delay={320} class="h-full">
-          <div class="rounded-xl border border-neutral-800 bg-neutral-900/60 overflow-hidden h-full min-h-[340px]">
-            <div class="grid md:grid-cols-[1fr_320px]">
-              <div class="p-6">
-            <h3 class="text-lg font-semibold">Cloud projects</h3>
-            <p class="mt-2 text-neutral-300">Your work is saved automatically and accessible on any device.</p>
-            <ul class="mt-4 text-sm text-neutral-300 list-disc pl-5 space-y-1">
+          <FeatureCard
+            title="Cloud projects"
+            description="Your work is saved automatically and accessible on any device."
+            example="Send a read-only link to get mix notes, then apply them live on a call."
+            visual={<FeatureImage src="/landing-page-projects.png" />}
+          >
+            <>
               <li>Backed by Convex and R2 for reliable realtime sync.</li>
               <li>Share a room link to collaborate.</li>
               <li>Sign in to access your projects across devices.</li>
-            </ul>
-            <div class="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
-              Example: Send a view‑only link to get mix notes; apply them live on a call.
-            </div>
-              </div>
-              <div class="relative hidden md:block min-h-[220px]">
-                <div class="absolute inset-0 bg-[url('/landing-page-projects.png')] bg-cover bg-right opacity-90" />
-                <div class="absolute inset-0 bg-gradient-to-l from-neutral-900/80 to-transparent" />
-              </div>
-            </div>
-          </div>
-          </Reveal>
+            </>
+          </FeatureCard>
 
-          <Reveal delay={400} class="h-full">
-          <div class="rounded-xl border border-neutral-800 bg-neutral-900/60 overflow-hidden h-full min-h-[340px]">
-            <div class="grid md:grid-cols-[1fr_320px]">
-              <div class="p-6">
-                <h3 class="text-lg font-semibold">Built for speed</h3>
-                <p class="mt-2 text-neutral-300">SolidJS + Web Audio deliver instant interactions and low latency.</p>
-                <ul class="mt-4 text-sm text-neutral-300 list-disc pl-5 space-y-1">
-                  <li>Fast startup—open a project and start playing immediately.</li>
-                  <li>Keyboard‑first workflow with responsive controls.</li>
-                  <li>Designed to feel native on any modern browser.</li>
-                </ul>
-                <div class="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
-                  Example: Nudge clips by 10ms and audition effects—all without dropping a frame.
-                </div>
-              </div>
-              <div class="relative hidden md:flex min-h-[220px] items-center justify-center">
-                <div class="absolute inset-0 -z-10 bg-[radial-gradient(closest-side,rgba(120,120,255,0.18),transparent)]" />
-                <div class="flex items-center gap-4">
-                  <Icon name="solidjs" size={72} class="-translate-y-1 drop-shadow-[0_8px_24px_rgba(118,179,225,0.35)]" ariaLabel="SolidJS" />
-                  <span class="text-4xl font-medium text-neutral-400">+</span>
-                  <Icon name="convex" size={72} class="translate-y-1 drop-shadow-[0_8px_24px_rgba(243,176,28,0.35)]" ariaLabel="Convex" />
-                </div>
-                <div class="absolute inset-0 bg-gradient-to-l from-neutral-900/80 to-transparent" />
-              </div>
-            </div>
-          </div>
-          </Reveal>
+          <FeatureCard
+            title="Built for speed"
+            description="SolidJS + Web Audio deliver instant interactions and low latency."
+            example="Nudge clips by 10ms and audition effects, all without dropping a frame."
+            visual={<FeatureLogos />}
+          >
+            <>
+              <li>Fast startup, so you can open a project and start playing immediately.</li>
+              <li>Keyboard-first workflow with responsive controls.</li>
+              <li>Designed to feel native on any modern browser.</li>
+            </>
+          </FeatureCard>
         </div>
       </section>
 
       <section id="stack" class="container mx-auto px-4 pb-16">
-        <Reveal delay={60}>
-        <div class="rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 md:p-8">
+        <div class="about-feature-card rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 md:p-8">
           <div class="grid grid-cols-3 sm:grid-cols-6 gap-6 place-items-center">
 
             <a href="https://www.convex.dev/" target="_blank" rel="noreferrer" class="group flex flex-col items-center gap-3 text-neutral-300 hover:text-white">
@@ -289,7 +243,6 @@ function About() {
             <a href="https://github.com/jhomra21" target="_blank" rel="noreferrer" class="ml-2 text-neutral-200 hover:underline">@jhomra21</a>
           </div>
         </div>
-        </Reveal>
       </section>
 
       <footer class="container mx-auto px-4 pb-20 text-center text-sm text-neutral-500">

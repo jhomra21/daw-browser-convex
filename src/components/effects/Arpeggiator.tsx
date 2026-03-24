@@ -3,6 +3,7 @@ import Knob from '~/components/ui/knob'
 import {
   type ArpeggiatorParams,
 } from '~/lib/effects/params'
+import { cn } from '~/lib/utils'
 
 
 export type ArpeggiatorProps = {
@@ -31,29 +32,31 @@ const RATES: { value: ArpeggiatorParams['rate']; label: string }[] = [
 
 export default function Arpeggiator(props: ArpeggiatorProps) {
   return (
-    <div class={`rounded-md border border-neutral-800 bg-neutral-900 text-neutral-100 flex flex-col ${props.class ?? ''}`}>
+    <div class={cn('flex flex-col rounded-md border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
       {/* Header */}
-      <div class="flex items-center justify-between px-2 py-1 border-b border-neutral-800">
+      <div class="flex items-center justify-between border-b border-neutral-800 px-2 py-1">
         <div class="flex items-center gap-2">
           <span class="text-xs font-semibold">Arpeggiator</span>
           <Show when={props.onToggleEnabled}>
             <button
-              class={`text-2xs px-1.5 py-0.5 rounded border transition-colors ${
+              class={cn(
+                'rounded border border-neutral-700 px-1.5 py-0.5 text-2xs transition-colors',
                 props.params.enabled
-                  ? 'bg-green-500/20 text-green-300 border-green-400/30'
-                  : 'bg-neutral-800 text-neutral-400 border-neutral-700'
-              }`}
+                  ? 'border-green-400/30 bg-green-500/20 text-green-300'
+                  : 'bg-neutral-800 text-neutral-400',
+              )}
               onClick={() => props.onToggleEnabled?.(!props.params.enabled)}
             >
               {props.params.enabled ? 'ON' : 'OFF'}
             </button>
           </Show>
           <button
-            class={`text-2xs px-1.5 py-0.5 rounded border transition-colors ${
+            class={cn(
+              'rounded border border-neutral-700 px-1.5 py-0.5 text-2xs transition-colors',
               props.params.hold
-                ? 'bg-blue-500/20 text-blue-300 border-blue-400/30'
-                : 'bg-neutral-800 text-neutral-400 border-neutral-700'
-            }`}
+                ? 'border-blue-400/30 bg-blue-500/20 text-blue-300'
+                : 'bg-neutral-800 text-neutral-400',
+            )}
             onClick={() => props.onChange({ hold: !props.params.hold })}
             disabled={!props.params.enabled}
             title="Hold: Keep arpeggiation looping until clip ends"
@@ -64,7 +67,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
         <div class="flex items-center gap-2">
           <Show when={props.onReset}>
             <button
-              class="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700"
+              class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
               onClick={() => props.onReset?.()}
             >Reset</button>
           </Show>
@@ -78,11 +81,12 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
           <For each={PATTERNS}>
             {(pat) => (
               <button
-                class={`px-2 py-1 text-xs rounded border transition-colors ${
+                class={cn(
+                  'rounded border border-neutral-700 px-2 py-1 text-xs transition-colors',
                   props.params.pattern === pat.value
-                    ? 'bg-blue-500/20 text-blue-300 border-blue-400/30'
-                    : 'bg-neutral-800 text-neutral-300 border-neutral-700 hover:bg-neutral-700'
-                }`}
+                    ? 'border-blue-400/30 bg-blue-500/20 text-blue-300'
+                    : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
+                )}
                 onClick={() => props.onChange({ pattern: pat.value })}
                 disabled={!props.params.enabled}
               >
@@ -100,11 +104,12 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
           <For each={RATES}>
             {(r) => (
               <button
-                class={`px-2 py-1 text-xs rounded border transition-colors font-mono ${
+                class={cn(
+                  'rounded border border-neutral-700 px-2 py-1 font-mono text-xs transition-colors',
                   props.params.rate === r.value
-                    ? 'bg-blue-500/20 text-blue-300 border-blue-400/30'
-                    : 'bg-neutral-800 text-neutral-300 border-neutral-700 hover:bg-neutral-700'
-                }`}
+                    ? 'border-blue-400/30 bg-blue-500/20 text-blue-300'
+                    : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
+                )}
                 onClick={() => props.onChange({ rate: r.value })}
                 disabled={!props.params.enabled}
               >
@@ -154,4 +159,3 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
     </div>
   )
 }
-

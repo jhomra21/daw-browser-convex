@@ -87,7 +87,7 @@ Dialkit is a UI control library. We are an app with Convex subscriptions, an aud
 
 ### 2. Do not copy the metadata-renderer pattern for everything
 
-Dialkit can drive many controls from one metadata renderer because its domain is generic panel controls. Our effects are richer and more specialized. `Eq`, `Synth`, and `VisualEqualizer` should stay explicit components.
+Dialkit can drive many controls from one metadata renderer because its domain is generic panel controls. Our effects are richer and more specialized. `Eq` and `Synth` should stay explicit components.
 
 ### 3. Do not copy the styling approach directly
 
@@ -104,7 +104,7 @@ Dialkit feels coherent because its primitives are coherent. We should match that
 3. `EqParamsLite`, `ReverbParamsLite`, and `supportsGain` are duplicated in `audio-engine.ts` and `export-mixdown.ts`.
 4. Synth floating-card bounds logic is duplicated between `EffectsPanel.tsx` and `SynthCard.tsx`.
 5. `Eq`, `Reverb`, `Synth`, and `Arpeggiator` repeat the same card shell and header structure.
-6. `VisualEqualizer` is live and used by `AudioRecorder`, so it is not cleanup fallout.
+6. The old `AudioRecorder` / `VisualEqualizer` pair was orphaned from the app and should not be treated as an active product surface.
 
 ## Parity-Focused Plan
 
@@ -188,7 +188,7 @@ Goals:
 
 Do not rename its API repo-wide unless that becomes necessary during real migrations.
 
-### Step 6. Revisit `Eq` and `VisualEqualizer` carefully
+### Step 6. Revisit `Eq` carefully
 
 Do not merge them.
 
@@ -196,7 +196,7 @@ Instead:
 
 - share only helpers that are truly identical
 - keep `Eq` as an effect editor
-- keep `VisualEqualizer` as an `AudioRecorder`-specific editor unless later evidence says otherwise
+- keep recorder-specific experiments out of the main effect architecture unless they are wired into the app
 
 ## Simplest Execution Order
 
@@ -213,5 +213,4 @@ Instead:
 2. Do not build a generic metadata renderer for the effects stack.
 3. Do not move the repo away from Tailwind.
 4. Do not force all effect editors into one generic prop contract immediately.
-5. Do not touch `VisualEqualizer` unless a specific shared helper is proven.
-
+5. Do not preserve orphaned recording UI without an actual app entry point.

@@ -3,6 +3,7 @@ import Knob from '~/components/ui/knob'
 import {
   type ReverbParams,
 } from '~/lib/effects/params'
+import { cn } from '~/lib/utils'
 
 
 export type ReverbProps = {
@@ -17,14 +18,17 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 export default function Reverb(props: ReverbProps) {
   return (
-    <div class={`rounded-md border border-neutral-800 bg-neutral-900 text-neutral-100 flex flex-col ${props.class ?? ''}`}>
+    <div class={cn('flex flex-col rounded-md border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
       {/* Header */}
-      <div class="flex items-center justify-between px-2 py-1 border-b border-neutral-800">
+      <div class="flex items-center justify-between border-b border-neutral-800 px-2 py-1">
         <div class="flex items-center gap-2">
           <span class="text-xs font-semibold">Reverb</span>
           <Show when={props.onToggleEnabled}>
             <button
-              class={`ml-2 text-xs px-2 py-0.5 rounded ${props.params.enabled ? 'bg-green-500/20 text-green-400 ring-1 ring-green-500/30' : 'bg-neutral-800 text-neutral-400'}`}
+              class={cn(
+                'ml-2 rounded px-2 py-0.5 text-xs',
+                props.params.enabled ? 'bg-green-500/20 text-green-400 ring-1 ring-green-500/30' : 'bg-neutral-800 text-neutral-400',
+              )}
               onClick={() => props.onToggleEnabled?.(!props.params.enabled)}
               title={props.params.enabled ? 'Disable Reverb' : 'Enable Reverb'}
             >
@@ -35,7 +39,7 @@ export default function Reverb(props: ReverbProps) {
         <div class="flex items-center gap-2">
           <Show when={props.onReset}>
             <button
-              class="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700"
+              class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
               onClick={() => props.onReset?.()}
             >Reset</button>
           </Show>
@@ -100,4 +104,3 @@ export default function Reverb(props: ReverbProps) {
     </div>
   )
 }
-

@@ -23,8 +23,6 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
   const secondsPerBeat = () => 60 / Math.max(1e-6, props.bpm || 0)
   const secondsPerBar = () => secondsPerBeat() * 4
   const gridStepSec = () => secondsPerBeat() * (4 / Math.max(1, props.denom || 4))
-
-  const gridStepPx = () => Math.max(0.5, gridStepSec() * PPS)
   const barStepPx = () => Math.max(0.5, secondsPerBar() * PPS)
 
   const rulerWidthPx = () => Math.max(0, props.durationSec * PPS)
@@ -273,7 +271,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
       <For each={majorMarkers()}>
         {(marker) => (
           <div class="absolute bottom-0" style={{ left: `${marker.positionPx}px` }}>
-            <div class="w-[2px] bg-neutral-200/80" style={{ height: `${RULER_HEIGHT}px` }} />
+            <div class="w-0.5 bg-neutral-200/80" style={{ height: `${RULER_HEIGHT}px` }} />
             <div class="absolute -top-5 text-2xs font-medium text-neutral-300 select-none">
               {marker.label}
             </div>

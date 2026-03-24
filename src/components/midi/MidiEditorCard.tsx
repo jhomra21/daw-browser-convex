@@ -1,5 +1,6 @@
 import { type Component, createSignal, onCleanup, createEffect, For, onMount } from 'solid-js'
 import { convexClient, convexApi } from '~/lib/convex'
+import { cn } from '~/lib/utils'
 import type { Clip } from '~/types/timeline'
 
 export type MidiEditorCardProps = {
@@ -145,7 +146,6 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   })
 
   // Helpers to compute grid cell from pointer
-  let scrollerRef: HTMLDivElement | undefined
   const pointToCell = (container: HTMLElement, e: MouseEvent | PointerEvent) => {
     const rect = container.getBoundingClientRect()
     const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left))
@@ -418,7 +418,10 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
         <div class="flex items-center gap-3 text-sm font-semibold text-neutral-200">
           <div class="flex items-center gap-2">
             <button
-              class={`px-2 py-0.5 rounded border text-xs ${kbEnabled() ? 'bg-green-600/20 border-green-500 text-green-300' : 'bg-neutral-700/30 border-neutral-600 text-neutral-300'}`}
+              class={cn(
+                'rounded border px-2 py-0.5 text-xs',
+                kbEnabled() ? 'border-green-500 bg-green-600/20 text-green-300' : 'border-neutral-600 bg-neutral-700/30 text-neutral-300',
+              )}
               onPointerDown={(e) => { e.stopPropagation() }}
               onClick={(e) => { e.stopPropagation(); setKbEnabled(v => !v) }}
               title="Toggle computer keyboard input (local only)"
@@ -443,8 +446,8 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
       </div>
 
       {/* Body: piano gutter + grid */}
-      <div class="relative w-full h-[calc(100%-36px)]">
-        <div class="absolute inset-0 grid overflow-y-auto" style={{ 'grid-template-columns': '44px 1fr' }} ref={(el) => (scrollerRef = el || undefined)}>
+      <div class="relative w-full" style={{ height: 'calc(100% - 36px)' }}>
+        <div class="absolute inset-0 grid overflow-y-auto" style={{ 'grid-template-columns': '44px 1fr' }}>
           {/* Piano gutter */}
           <div class="bg-neutral-900 border-r border-neutral-800 select-none">
             <div class="grid w-full" style={{ 'grid-template-rows': `repeat(${rows()}, ${rowPx}px)` }}>
@@ -455,7 +458,14 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
                   const active = () => activeRows().has(pitch)
                   return (
                     <div
-                      class={`relative flex items-center justify-center text-2xs font-mono ${active() ? 'bg-green-600/50 text-white border-green-400' : (black ? 'bg-neutral-700/70 text-neutral-100' : 'bg-neutral-800/70 text-neutral-200')} border-b border-neutral-800 cursor-pointer`}
+                      class={cn(
+                        'relative flex cursor-pointer items-center justify-center border-b border-neutral-800 font-mono text-2xs',
+                        active()
+                          ? 'border-green-400 bg-green-600/50 text-white'
+                          : black
+                            ? 'bg-neutral-700/70 text-neutral-100'
+                            : 'bg-neutral-800/70 text-neutral-200',
+                      )}
                       onPointerDown={(e) => { e.stopPropagation(); props.onAuditionNote?.(pitch, 0.9, Math.min(0.6, secondsPerBeat())) }}
                       title={noteName(pitch)}
                     >
@@ -472,7 +482,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
               {[...Array(rows() * cols())].map((_, i) => {
                 const colIdx = i % cols()
                 const major = (colIdx % (stepsPerBeat() * 4)) === 0
-                return <div class={`border ${major ? 'border-neutral-700' : 'border-neutral-800'}`} />
+                return <div class={cn('border', major ? 'border-neutral-700' : 'border-neutral-800')} />
               })}
             </div>
             {/* Notes overlay (scrolls with content) */}

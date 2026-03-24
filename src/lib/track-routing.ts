@@ -1,6 +1,5 @@
 import {
   canTrackReceiveAudioClipKind,
-  getTrackAcceptedClipKind,
   isClipKindCompatibleWithTrack,
   normalizeTrackChannelRole,
   normalizeTrackRouting as normalizeTrackRoutingCore,
@@ -39,4 +38,3 @@ export function normalizeTrackRouting(
     tracks,
   })
 }
-

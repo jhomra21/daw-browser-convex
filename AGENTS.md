@@ -115,6 +115,9 @@ Good:
   - Do not introduce `setTimeout`, `setInterval`, `requestAnimationFrame`, or self-rescheduling loops unless explicitly justified in code comments and cleaned up deterministically.
   - No polling loops when event-driven/reactive alternatives exist.
 - Avoid hidden side effects: no mutation of shared module state unless clearly documented.
+- Two things that make code actually maintainable:
+  1. reduce the layers a reader has to trace
+  2. reduce the state a reader has to hold in their head
 
 ## Code Organization
 - Keep app-specific logic organized.

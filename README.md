@@ -133,6 +133,7 @@ The Collaborative Realtime DAW combines SolidJS reactivity with Convex real-time
 - **`bun serve`**: Serves the production build locally for preview.
 - **`wrangler dev`**: Runs the Cloudflare Worker locally for testing.
 - **`wrangler deploy`**: Deploys the project to Cloudflare.
+- **`bun knip`**: Uses knip to find unused deps, exports, etc (https://knip.dev/overview/configuration)
 
 ## Key Features
 

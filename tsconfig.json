@@ -19,20 +19,16 @@
     "types": ["vite/client"],
 
     // Path Aliases
-    "baseUrl": ".",
+    // "baseUrl": ".",
     "paths": {
-      "~/*": [
-        "./src/*"
-      ],
-      "@/*": [
-        "./src/*"
-      ]
-    }
+      "~/*": ["./src/*"],
+      "@/*": ["./src/*"],
+    },
   },
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
     "convex/**/*.ts",
-    "vite.config.ts"
-  ]
+    "vite.config.ts",
+  ],
 }

@@ -1,16 +1,47 @@
 ## Philosophy
 This codebase will outlive you. Every shortcut becomes someone else's burden. Every hack compounds into technical debt that slows the whole team down. 
+
 You are not just writing code, you are shaping the future of this project. The patterns you establish will be copied. The corners you cut will be cut again.
+
 Fight entropy. Leave the codebase better than you found it.
-Do not write plausible code, write accurate correct code
+
+Do not write plausible code, write accurate code backed by the reality of this codebase
 
 ## Code Thinking
 Review your implementation before stopping. Check whether there is a better or simpler approach whether any redundant code remains, whether duplicate logic was introduced, and whether any dead or unused code was left behind. If you find issues, fix them now; if not, briefly confirm the implementation is clean.
                 
 Think carefully and only action the specific task I have given you with the most concise and elegant solution that takes into consideration existing code across codebase.
+
 Prefer the most concise and elegant solutions that changes or adds as little code as possible.
-## Tech Stack
-This project uses a specific tech stack. Only use these technologies:
+
+## Engineering Rules (Non-Negotiable)
+- Functional style first: prefer pure functions, immutable updates, explicit inputs/outputs.
+- Single responsibility: each function/module should have one reason to change.
+- Complexity budget:
+  - Target `O(1)` or `O(log n)` where practical.
+  - Avoid accidental `O(n^2+)` (nested scans in hot paths).
+  - Use `Map`/`Set` for membership and indexing instead of repeated linear lookups.
+- Performance footgun policy:
+  - Do not introduce `setTimeout`, `setInterval`, `requestAnimationFrame`, or self-rescheduling loops unless explicitly justified in code comments and cleaned up deterministically.
+  - No polling loops when event-driven/reactive alternatives exist.
+- Avoid hidden side effects: no mutation of shared module state unless clearly documented.
+
+## Code Maintainability
+- Two things that make code actually maintainable:
+  1. reduce the layers a reader has to trace
+  2. reduce the state a reader has to hold in their head
+
+## Code Organization
+- Keep app-specific logic organized.
+- Prefer composition over inheritance; avoid god-modules.
+- Keep adapters thin and deterministic; isolate I/O at boundaries.
+
+## Change Quality Bar
+- Keep diffs focused; do not mix refactors with feature behavior changes unless requested.
+- Preserve public contracts unless change is intentional and documented.
+- Validate before finishing
+
+## Dependencies
 - **Bun** - Package manager and runtime
 - **SolidJS** - Frontend framework
 - **TanStack Solid Query** - Data fetching and state management
@@ -22,6 +53,8 @@ This project uses a specific tech stack. Only use these technologies:
 - **TailwindCSS** - Styling framework
 - **TypeScript** - Primary language
 - **MediaBunny** - Media management
+
+Solid rules: `AGENTS-solid.md`
 
 ### Frontend (SolidJS)
 - Use functional components with TypeScript
@@ -63,10 +96,7 @@ This project uses a specific tech stack. Only use these technologies:
 - Descriptive names that indicate purpose
 
 ## Development Workflow
-- Use `bun dev` for development server
 - Build with `bun run build`
-- Deploy via Wrangler to Cloudflare Workers
-- Port 3000 for local development
 
 ### Consumer-shaped APIs
 If a helper or component has one real consumer, shape its API around that call site instead of making it look generically reusable.
@@ -103,28 +133,3 @@ Good:
 - small wrapper components for repeated layout/chrome
 - explicit props for real repeated structure
 - local code that stays easy to scan and edit
-
-## Engineering Rules (Non-Negotiable)
-- Functional style first: prefer pure functions, immutable updates, explicit inputs/outputs.
-- Single responsibility: each function/module should have one reason to change.
-- Complexity budget:
-  - Target `O(1)` or `O(log n)` where practical.
-  - Avoid accidental `O(n^2+)` (nested scans in hot paths).
-  - Use `Map`/`Set` for membership and indexing instead of repeated linear lookups.
-- Performance footgun policy:
-  - Do not introduce `setTimeout`, `setInterval`, `requestAnimationFrame`, or self-rescheduling loops unless explicitly justified in code comments and cleaned up deterministically.
-  - No polling loops when event-driven/reactive alternatives exist.
-- Avoid hidden side effects: no mutation of shared module state unless clearly documented.
-- Two things that make code actually maintainable:
-  1. reduce the layers a reader has to trace
-  2. reduce the state a reader has to hold in their head
-
-## Code Organization
-- Keep app-specific logic organized.
-- Prefer composition over inheritance; avoid god-modules.
-- Keep adapters thin and deterministic; isolate I/O at boundaries.
-
-## Change Quality Bar
-- Keep diffs focused; do not mix refactors with feature behavior changes unless requested.
-- Preserve public contracts unless change is intentional and documented.
-- Validate before finishing

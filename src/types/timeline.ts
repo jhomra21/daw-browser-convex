@@ -1,14 +1,17 @@
+import type { Id } from '../../convex/_generated/dataModel'
 import type { AudioSourceKind } from '~/lib/audio-source'
 
+export type TrackId = Id<'tracks'>
+
 export type TrackSend = {
-  targetId: string
+  targetId: TrackId
   amount: number
 }
 
 export type TrackChannelRole = 'track' | 'group' | 'return'
 
 export type TrackRouting = {
-  outputTargetId?: string
+  outputTargetId?: TrackId
   sends?: TrackSend[]
 }
 
@@ -37,7 +40,7 @@ export type Clip = {
 }
 
 export type Track = {
-  id: string
+  id: TrackId
   historyRef?: string
   name: string
   volume: number
@@ -48,11 +51,11 @@ export type Track = {
   lockedAt?: number | null
   kind?: 'audio' | 'instrument'
   channelRole?: TrackChannelRole
-  outputTargetId?: string
+  outputTargetId?: TrackId
   sends?: TrackSend[]
 }
 
 export type SelectedClip = {
-  trackId: string
+  trackId: TrackId
   clipId: string
 } | null

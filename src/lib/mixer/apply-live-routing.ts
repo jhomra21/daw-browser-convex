@@ -17,7 +17,7 @@ type ApplyLiveMixerGraphOptions = {
 }
 
 export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
-  const activeTrackIds = new Set(options.graph.channels.map((entry) => entry.channel.id))
+  const activeTrackIds = new Set<string>(options.graph.channels.map((entry) => entry.channel.id))
 
   for (const resolvedTrack of options.graph.channels) {
     const channelId = resolvedTrack.channel.id

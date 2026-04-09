@@ -4,30 +4,33 @@ import { cn } from '~/lib/utils'
 import type { Track } from '~/types/timeline'
 
 type TrackSidebarProps = {
-  tracks: Track[]
-  selectedTrackId: string
-  sidebarWidth: number
-  onTrackClick: (trackId: string) => void
-  onAddTrack: () => void
-  onAddReturnTrack?: () => void
-  onAddGroupTrack?: () => void
-  onAddInstrumentTrack?: () => void
-  onVolumeChange: (trackId: string, volume: number) => void
-  onSidebarMouseDown: (e: MouseEvent) => void
-  onToggleMute: (trackId: string) => void
-  onToggleSolo: (trackId: string) => void
-  syncMix: boolean
-  onToggleSyncMix: () => void
-  recordArmTrackId: string | null
-  onToggleRecordArm: (trackId: string) => void
-  currentUserId?: string
-  isPlaying: boolean
-  getTrackLevel: (trackId: string) => number
-  getTrackLevels?: (trackId: string) => [number, number]
-  bottomOffsetPx?: number
+  sidebar: {
+    tracks: Track[]
+    selectedTrackId: Track['id'] | ''
+    sidebarWidth: number
+    onTrackClick: (trackId: Track['id']) => void
+    onAddTrack: () => void
+    onAddReturnTrack?: () => void
+    onAddGroupTrack?: () => void
+    onAddInstrumentTrack?: () => void
+    onVolumeChange: (trackId: Track['id'], volume: number) => void
+    onSidebarMouseDown: (e: MouseEvent) => void
+    onToggleMute: (trackId: Track['id']) => void
+    onToggleSolo: (trackId: Track['id']) => void
+    syncMix: boolean
+    onToggleSyncMix: () => void
+    recordArmTrackId: Track['id'] | null
+    onToggleRecordArm: (trackId: Track['id']) => void
+    currentUserId?: string
+    isPlaying: boolean
+    getTrackLevel: (trackId: Track['id']) => number
+    getTrackLevels?: (trackId: Track['id']) => [number, number]
+    bottomOffsetPx?: number
+  }
 }
 
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
+  const sidebar = () => props.sidebar
   let activeMove: ((event: MouseEvent) => void) | null = null
   let activeUp: (() => void) | null = null
 
@@ -51,30 +54,32 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   let lastTs: number | null = null
   const releasePerSec = 3.0
 
+  // Event-driven meter updates are not exposed by the audio engine yet, so keep this
+  // RAF loop local to the sidebar and tear it down deterministically on cleanup.
   const scheduleTick = () => {
     if (rafId == null) rafId = requestAnimationFrame(tick)
   }
 
   const tick = () => {
     rafId = null
-    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) as number
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
     const dt = lastTs == null ? 0 : Math.max(0, (now - lastTs) / 1000)
     lastTs = now
     const prev = meters()
     const next: Record<string, { L: number; R: number }> = {}
-    const playing = !!props.isPlaying
+    const playing = !!sidebar().isPlaying
 
     try {
-      for (const track of props.tracks) {
+      for (const track of sidebar().tracks) {
         let srcL = 0
         let srcR = 0
         if (playing) {
-          const stereo = props.getTrackLevels?.(track.id)
+          const stereo = sidebar().getTrackLevels?.(track.id)
           if (Array.isArray(stereo) && stereo.length === 2) {
             srcL = stereo[0] ?? 0
             srcR = stereo[1] ?? 0
           } else {
-            const mono = props.getTrackLevel?.(track.id) ?? 0
+            const mono = sidebar().getTrackLevel?.(track.id) ?? 0
             srcL = mono
             srcR = mono
           }
@@ -96,7 +101,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   }
 
   createEffect(() => {
-    if (props.isPlaying) {
+    if (sidebar().isPlaying) {
       scheduleTick()
       return
     }
@@ -110,38 +115,38 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   return (
     <>
-      <div class="w-1 cursor-col-resize bg-neutral-800 hover:bg-neutral-700" onMouseDown={props.onSidebarMouseDown} />
+      <div class="w-1 cursor-col-resize bg-neutral-800 hover:bg-neutral-700" onMouseDown={sidebar().onSidebarMouseDown} />
 
       <div
         class="overflow-y-auto border-l border-neutral-800 bg-neutral-900 p-0"
-        style={{ width: `${props.sidebarWidth}px`, 'min-width': '220px', 'padding-bottom': `${props.bottomOffsetPx ?? 0}px` }}
+        style={{ width: `${sidebar().sidebarWidth}px`, 'min-width': '220px', 'padding-bottom': `${sidebar().bottomOffsetPx ?? 0}px` }}
       >
         <div class="flex items-center justify-between p-1">
           <div>
             <button
               class={cn(
                 'rounded-md p-0.5 text-xs font-medium transition-transform ease-out active:scale-97',
-                props.syncMix
+                sidebar().syncMix
                   ? 'bg-blue-500/15 text-blue-300 ring-1 ring-blue-400/30'
                   : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-300',
               )}
-              onClick={props.onToggleSyncMix}
+              onClick={sidebar().onToggleSyncMix}
               title="Toggle syncing mute/solo across users"
             >
               Sync Mix
             </button>
           </div>
           <div class="flex items-center gap-2 pr-2">
-            <button class="cursor-pointer text-base text-neutral-400 transition-transform ease-out active:scale-97 hover:text-neutral-300" onClick={props.onAddTrack}>Add Track</button>
-            <button class="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700" onClick={() => props.onAddReturnTrack?.()} title="Add return track">+ Return</button>
-            <button class="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700" onClick={() => props.onAddGroupTrack?.()} title="Add group bus">+ Group</button>
-            <button class="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700" onClick={() => props.onAddInstrumentTrack?.()} title="Add instrument track (for MIDI clips)">+ Instrument</button>
+            <button class="cursor-pointer text-base text-neutral-400 transition-transform ease-out active:scale-97 hover:text-neutral-300" onClick={sidebar().onAddTrack}>Add Track</button>
+            <button class="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700" onClick={() => sidebar().onAddReturnTrack?.()} title="Add return track">+ Return</button>
+            <button class="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700" onClick={() => sidebar().onAddGroupTrack?.()} title="Add group bus">+ Group</button>
+            <button class="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700" onClick={() => sidebar().onAddInstrumentTrack?.()} title="Add instrument track (for MIDI clips)">+ Instrument</button>
           </div>
         </div>
-        <For each={props.tracks}>
+        <For each={sidebar().tracks}>
           {(track) => {
-            const lockedByOther = !!track.lockedBy && track.lockedBy !== props.currentUserId
-            const isRecordArmed = props.recordArmTrackId === track.id
+            const lockedByOther = !!track.lockedBy && track.lockedBy !== sidebar().currentUserId
+            const isRecordArmed = sidebar().recordArmTrackId === track.id
             const channelRole = getTrackChannelRole(track)
             const isReturnTrack = channelRole === 'return'
             const isGroupTrack = channelRole === 'group'
@@ -156,12 +161,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             return (
               <div
                 class={cn(
-                  props.selectedTrackId === track.id
+                  sidebar().selectedTrackId === track.id
                     ? 'bg-neutral-800'
                     : 'border-t border-neutral-800 bg-neutral-900',
                 )}
                 style={{ height: '96px' }}
-                onClick={() => props.onTrackClick(track.id)}
+                onClick={() => sidebar().onTrackClick(track.id)}
               >
                 <div class="flex h-full items-center gap-3 px-3 py-2">
                   <button
@@ -177,7 +182,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     onClick={(event) => {
                       event.stopPropagation()
                       if (muteDisabled) return
-                      props.onToggleMute(track.id)
+                      sidebar().onToggleMute(track.id)
                     }}
                     title={lockedByOther ? 'Track locked by another user' : muted() ? 'Unmute track' : 'Mute track'}
                   >
@@ -206,7 +211,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     onClick={(event) => {
                       event.stopPropagation()
                       if (recordDisabled) return
-                      props.onToggleRecordArm(track.id)
+                      sidebar().onToggleRecordArm(track.id)
                     }}
                   >
                     R
@@ -225,7 +230,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     onClick={(event) => {
                       event.stopPropagation()
                       if (soloDisabled) return
-                      props.onToggleSolo(track.id)
+                      sidebar().onToggleSolo(track.id)
                     }}
                     title={lockedByOther ? 'Track locked by another user' : soloed() ? 'Unsolo' : 'Solo'}
                   >
@@ -237,7 +242,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     <div class={cn('relative h-16 w-6', volumeDisabled && 'opacity-60')}>
                       <div class="absolute inset-0 flex items-end justify-center gap-1">
                         {(() => {
-                          const meter = props.isPlaying ? meters()[track.id] : undefined
+                          const meter = sidebar().isPlaying ? meters()[track.id] : undefined
                           const left = Math.max(0, Math.min(1, meter?.L ?? 0))
                           const right = Math.max(0, Math.min(1, meter?.R ?? 0))
                           const leftColor = left >= 0.98 ? 'bg-red-500' : 'bg-green-500'
@@ -269,8 +274,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                         disabled={volumeDisabled}
                         onInput={(event) => {
                           if (volumeDisabled) return
-                          const nextVolume = parseFloat((event.currentTarget as HTMLInputElement).value)
-                          props.onVolumeChange(track.id, nextVolume)
+                          const nextVolume = parseFloat(event.currentTarget.value)
+                          sidebar().onVolumeChange(track.id, nextVolume)
                         }}
                         onMouseDown={(event) => {
                           if (volumeDisabled) {
@@ -284,7 +289,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             const y = moveEvent.clientY - rect.top
                             const height = rect.height
                             const nextVolume = Math.max(0, Math.min(1, 1 - y / height))
-                            props.onVolumeChange(track.id, nextVolume)
+                            sidebar().onVolumeChange(track.id, nextVolume)
                           }
                           const handleMouseUp = () => {
                             detachDragListeners()

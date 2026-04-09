@@ -22,6 +22,7 @@ import {
 import { buildClipCreatePayload } from '../src/lib/clip-create'
 import { getPersistableAudioSourceMetadata } from '../src/lib/audio-source'
 import { normalizeSynthParams } from '../src/lib/effects/params'
+import type { Track } from '../src/types/timeline'
 import { getClipKindFromClip, getClipTargetError } from './clip-targets'
 import { listSortedClipsForTrack, resolveTrackClip, selectTrackClips, trackAtIndex as trackAtIndexImpl } from './indexing'
 import { resolveAgentMixTargetIndices } from '../src/lib/agent-command-targets'
@@ -46,7 +47,7 @@ type SetSoloInput = z.infer<typeof SetSoloCommandSchema>
 type AddSampleClipsInput = z.infer<typeof AddSampleClipsCommandSchema>
 
 type TrackDoc = {
-  _id: string
+  _id: Track['id']
   kind?: string
   channelRole?: string
 }
@@ -112,7 +113,7 @@ function pickMatchingSample(query: string, samples: SampleDoc[]) {
 function buildAgentSampleClipPayload(input: {
   roomId: string
   userId: string
-  trackId: string
+  trackId: Track['id']
   startSec: number
   duration: number
   sample: SampleDoc
@@ -249,6 +250,26 @@ export function createAgentActions(context: AgentActionContext) {
     roomId: context.roomId,
   } as any) as any[]
 
+  const listOwnedClipIds = async () => {
+    return new Set<string>((await context.convex.query(context.convexApi.ownerships.listOwnedClipIds as any, {
+      roomId: context.roomId,
+      ownerUserId: context.userId,
+    } as any) as any[]).map((clipId) => String(clipId)))
+  }
+
+  const listOwnedRoomClips = async () => {
+    const [allClips, ownedClipIds] = await Promise.all([listRoomClips(), listOwnedClipIds()])
+    return allClips.filter((clip) => ownedClipIds.has(String(clip._id)))
+  }
+
+  const isOwnedClip = (ownedClipIds: ReadonlySet<string>, clipId: unknown) => {
+    return ownedClipIds.has(String(clipId))
+  }
+
+  const isAppliedClipMutationResult = (result: unknown) => {
+    return !!result && typeof result === 'object' && 'status' in result && result.status === 'applied'
+  }
+
   const resolveSourceClip = async (input: {
     trackIndex: number
     clipIndex?: number
@@ -261,6 +282,22 @@ export function createAgentActions(context: AgentActionContext) {
     const clip = resolveTrackClip(clipsOnTrack, input)
     if (!clip) return { error: 'Clip not found' } as const
     return { track, clip, allClips, clipsOnTrack } as const
+  }
+
+  const resolveOwnedSourceClip = async (input: {
+    trackIndex: number
+    clipIndex?: number
+    clipAtOrAfterSec?: number
+  }) => {
+    const [resolved, ownedClipIds] = await Promise.all([
+      resolveSourceClip(input),
+      listOwnedClipIds(),
+    ])
+    if ('error' in resolved) return resolved
+    if (!isOwnedClip(ownedClipIds, resolved.clip._id)) {
+      return { error: 'Clip is not writable by the current user' } as const
+    }
+    return resolved
   }
 
   const resolveSourceClipSelection = async (input: {
@@ -294,6 +331,30 @@ export function createAgentActions(context: AgentActionContext) {
     if (selectedClips.length === 0) return { error: 'No clips selected' } as const
 
     return { fromTrack, toTrack, selectedClips } as const
+  }
+
+  const resolveOwnedSourceClipSelection = async (input: {
+    fromTrackIndex: number
+    toTrackIndex?: number
+    clipIndices?: number[]
+    rangeStartSec?: number
+    rangeEndSec?: number
+    clipAtOrAfterSec?: number
+    count?: number
+  }) => {
+    const [resolved, ownedClipIds] = await Promise.all([
+      resolveSourceClipSelection(input),
+      listOwnedClipIds(),
+    ])
+    if (!('selectedClips' in resolved)) return resolved
+    const selectedClips = resolved.selectedClips ?? []
+    const writableSelectedClips = selectedClips.filter((clip) => isOwnedClip(ownedClipIds, clip._id))
+    return {
+      ...resolved,
+      selectedClips,
+      writableSelectedClips,
+      skippedByOwnership: selectedClips.length - writableSelectedClips.length,
+    } as const
   }
 
   return {
@@ -417,7 +478,7 @@ export function createAgentActions(context: AgentActionContext) {
     },
 
     async moveClip(input: Omit<MoveClipInput, 'type'>) {
-      const resolved = await resolveSourceClip({
+      const resolved = await resolveOwnedSourceClip({
         trackIndex: input.fromTrackIndex,
         clipIndex: input.clipIndex,
         clipAtOrAfterSec: input.clipAtOrAfterSec,
@@ -431,21 +492,20 @@ export function createAgentActions(context: AgentActionContext) {
         if (targetError) return { error: targetError }
       }
 
-      await context.convex.mutation(context.convexApi.clips.move as any, {
+      const result = await context.convex.mutation(context.convexApi.clips.move as any, {
         clipId: resolved.clip._id,
         userId: context.userId,
         startSec: input.newStartSec,
         toTrackId: toTrack?._id,
       } as any)
 
-      const afterClips = await listRoomClips()
-      const updatedClip = afterClips.find((clip) => String(clip._id) === String(resolved.clip._id))
-      const ok = !!updatedClip && Math.abs((updatedClip.startSec ?? 0) - input.newStartSec) < 1e-6 && (!toTrack || String(updatedClip.trackId) === String(toTrack._id))
-      return ok ? { ok: true, clipId: resolved.clip._id } : { error: 'Move did not apply' }
+      return isAppliedClipMutationResult(result)
+        ? { ok: true, clipId: resolved.clip._id }
+        : { error: 'Move did not apply' }
     },
 
     async removeClip(input: Omit<RemoveClipInput, 'type'>) {
-      const resolved = await resolveSourceClip({
+      const resolved = await resolveOwnedSourceClip({
         trackIndex: input.trackIndex,
         clipIndex: input.clipIndex,
         clipAtOrAfterSec: input.clipAtOrAfterSec,
@@ -485,14 +545,14 @@ export function createAgentActions(context: AgentActionContext) {
     },
 
     async setTiming(input: Omit<SetTimingInput, 'type'>) {
-      const resolved = await resolveSourceClip({
+      const resolved = await resolveOwnedSourceClip({
         trackIndex: input.trackIndex,
         clipIndex: input.clipIndex,
         clipAtOrAfterSec: input.clipAtOrAfterSec,
       })
       if ('error' in resolved) return resolved
 
-      await context.convex.mutation(context.convexApi.clips.setTiming as any, {
+      const result = await context.convex.mutation(context.convexApi.clips.setTiming as any, {
         clipId: resolved.clip._id,
         userId: context.userId,
         startSec: input.startSec,
@@ -502,71 +562,61 @@ export function createAgentActions(context: AgentActionContext) {
         midiOffsetBeats: input.midiOffsetBeats,
       } as any)
 
-      const afterClips = await listRoomClips()
-      const updatedClip = afterClips.find((clip) => String(clip._id) === String(resolved.clip._id))
-      const timingApplied = !!updatedClip
-        && Math.abs((updatedClip.startSec ?? 0) - input.startSec) < 1e-6
-        && Math.abs((updatedClip.duration ?? 0) - input.duration) < 1e-6
-      return timingApplied ? { ok: true } : { error: 'Timing change did not apply' }
+      return isAppliedClipMutationResult(result) ? { ok: true } : { error: 'Timing change did not apply' }
     },
 
     async moveClips(input: Omit<MoveClipsInput, 'type'>) {
-      const resolved = await resolveSourceClipSelection(input)
-      if ('error' in resolved) return resolved
+      const resolved = await resolveOwnedSourceClipSelection(input)
+      if (!('writableSelectedClips' in resolved)) return resolved
+      if (resolved.writableSelectedClips.length === 0) {
+        return { error: 'No writable clips selected' }
+      }
 
       const targetTrack = resolved.toTrack ?? resolved.fromTrack
-      for (const clip of resolved.selectedClips) {
+      for (const clip of resolved.writableSelectedClips) {
         const targetError = getClipTargetError(targetTrack, getClipKindFromClip(clip))
         if (targetError) return { error: targetError }
       }
 
-      const base = resolved.selectedClips[0].startSec
-      const expectedMoves = new Map<string, { trackId: string; startSec: number }>()
-      for (const clip of resolved.selectedClips) {
-        const newStart = typeof input.newStartSec === 'number'
+      const base = resolved.selectedClips[0]?.startSec ?? resolved.writableSelectedClips[0].startSec
+      let moved = 0
+      for (const clip of resolved.writableSelectedClips) {
+        const requestedStart = typeof input.newStartSec === 'number'
           ? (input.keepRelativePositions !== false ? input.newStartSec + (clip.startSec - base) : input.newStartSec)
           : clip.startSec
-        expectedMoves.set(String(clip._id), {
-          trackId: String(resolved.toTrack?._id ?? clip.trackId),
-          startSec: newStart,
-        })
-        await context.convex.mutation(context.convexApi.clips.move as any, {
+        const result = await context.convex.mutation(context.convexApi.clips.move as any, {
           clipId: clip._id,
           userId: context.userId,
-          startSec: newStart,
+          startSec: requestedStart,
           toTrackId: resolved.toTrack?._id,
         } as any)
+        if (isAppliedClipMutationResult(result)) {
+          moved += 1
+        }
       }
-
-      const afterClips = await listRoomClips()
-      const afterById = new Map(afterClips.map((clip) => [String(clip._id), clip]))
-      let moved = 0
-      for (const [clipId, expected] of expectedMoves.entries()) {
-        const updatedClip = afterById.get(clipId)
-        if (!updatedClip) continue
-        if (String(updatedClip.trackId) !== expected.trackId) continue
-        if (Math.abs((updatedClip.startSec ?? 0) - expected.startSec) > 1e-6) continue
-        moved += 1
-      }
+      const skipped = resolved.skippedByOwnership + (resolved.writableSelectedClips.length - moved)
       if (moved === 0) return { error: 'No clips were moved' }
-      if (moved !== resolved.selectedClips.length) {
-        return { ok: true, moved, skipped: resolved.selectedClips.length - moved }
+      if (skipped > 0) {
+        return { ok: true, moved, skipped }
       }
       return { ok: true, moved }
     },
 
     async copyClips(input: Omit<CopyClipsInput, 'type'>) {
-      const resolved = await resolveSourceClipSelection(input)
-      if ('error' in resolved) return resolved
+      const resolved = await resolveOwnedSourceClipSelection(input)
+      if (!('writableSelectedClips' in resolved)) return resolved
       if (!resolved.toTrack) return { error: 'Track not found' }
+      if (resolved.writableSelectedClips.length === 0) {
+        return { error: 'No writable clips selected' }
+      }
 
-      for (const clip of resolved.selectedClips) {
+      for (const clip of resolved.writableSelectedClips) {
         const targetError = getClipTargetError(resolved.toTrack, getClipKindFromClip(clip))
         if (targetError) return { error: targetError }
       }
 
-      const base = resolved.selectedClips[0].startSec
-      const items = resolved.selectedClips.map((clip) => {
+      const base = resolved.selectedClips[0]?.startSec ?? resolved.writableSelectedClips[0].startSec
+      const items = resolved.writableSelectedClips.map((clip) => {
         const startSec = typeof input.startAtSec === 'number'
           ? (input.keepRelativePositions !== false ? input.startAtSec + (clip.startSec - base) : input.startAtSec)
           : clip.startSec
@@ -599,15 +649,16 @@ export function createAgentActions(context: AgentActionContext) {
 
       const ids = await context.convex.mutation(context.convexApi.clips.createMany as any, { items } as any)
       const created = Array.isArray(ids) ? ids.filter(Boolean).length : 0
+      const skipped = resolved.skippedByOwnership + (items.length - created)
       if (created === 0) return { error: 'No clips were copied' }
-      if (created !== items.length) return { ok: true, created, skipped: items.length - created }
+      if (skipped > 0) return { ok: true, created, skipped }
       return { ok: true, created }
     },
 
     async removeMany(input: Omit<RemoveManyInput, 'type'>) {
       const track = await trackAtIndex(input.trackIndex)
       if (!track) return { error: 'Track not found' }
-      const clipsOnTrack = (await listRoomClips()).filter((clip) => String(clip.trackId) === String(track._id))
+      const clipsOnTrack = (await listOwnedRoomClips()).filter((clip) => String(clip.trackId) === String(track._id))
       const targets = clipsOnTrack.filter((clip) => clip.startSec >= input.rangeStartSec && clip.startSec < input.rangeEndSec)
       const targetIds = targets.map((clip) => clip._id)
       if (targetIds.length === 0) return { ok: true, removed: 0 }

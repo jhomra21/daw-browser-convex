@@ -1,4 +1,4 @@
-import { type Accessor, type Setter, untrack } from 'solid-js'
+import { type Accessor, untrack } from 'solid-js'
 
 import { clearWaveformAssetCache } from '~/lib/audio-peaks/asset-store'
 import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
@@ -24,7 +24,7 @@ type EnsureClipBuffer = (clipId: string, sampleUrl?: string) => Promise<void>
 type ClipBufferOptions = {
   audioEngine: AudioEngine
   tracks: Accessor<Track[]>
-  setTracks: Setter<Track[]>
+  onBufferChange?: () => void
 }
 
 type ClipBufferControls = {
@@ -34,8 +34,22 @@ type ClipBufferControls = {
   clearClipBufferCaches: () => void
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null
+}
+
 export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
-  const { audioEngine, tracks, setTracks } = options
+  const { audioEngine, tracks } = options
+
+  const publishBufferUpdate = () => {
+    options.onBufferChange?.()
+  }
+
+  const cacheBuffer = (clipId: string, buffer: AudioBuffer) => {
+    if (audioBufferCache.get(clipId) === buffer) return false
+    audioBufferCache.set(clipId, buffer)
+    return true
+  }
 
   const uploadToR2: UploadToR2 = async (room, assetKey, file, durationSec) => {
     try {
@@ -48,26 +62,18 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
       }
       const res = await fetch('/api/samples', { method: 'POST', body: fd })
       if (!res.ok) return null
-      const data: any = await res.json().catch(() => null as any)
-      return data?.url ?? null
+      const data = await res.json().catch(() => null)
+      return isRecord(data) && typeof data.url === 'string' ? data.url : null
     } catch {
       return null
     }
-  }
-
-  const applyBufferToTracks = (clipIds: Iterable<string>, buffer: AudioBuffer) => {
-    const ids = new Set(clipIds)
-    if (ids.size === 0) return
-    setTracks(current => current.map((track) => ({
-      ...track,
-      clips: track.clips.map((clip) => ids.has(clip.id) ? { ...clip, buffer } : clip),
-    })))
   }
 
   const ensureClipBuffer: EnsureClipBuffer = async (clipId, sampleUrl) => {
     if (audioBufferCache.has(clipId)) return
 
     const applyBuffer = async (buffer: AudioBuffer) => {
+      let didChange = false
       if (sampleUrl) {
         const snapshot = untrack(() => tracks())
         const matchingClipIds: string[] = []
@@ -75,19 +81,18 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
           for (const clip of track.clips) {
             if (clip.sampleUrl !== sampleUrl) continue
             matchingClipIds.push(clip.id)
-            audioBufferCache.set(clip.id, buffer)
+            didChange = cacheBuffer(clip.id, buffer) || didChange
           }
         }
         if (matchingClipIds.length === 0) {
-          audioBufferCache.set(clipId, buffer)
-          matchingClipIds.push(clipId)
+          didChange = cacheBuffer(clipId, buffer) || didChange
         }
-        applyBufferToTracks(matchingClipIds, buffer)
+        if (didChange) publishBufferUpdate()
         return
       }
 
-      audioBufferCache.set(clipId, buffer)
-      applyBufferToTracks([clipId], buffer)
+      didChange = cacheBuffer(clipId, buffer)
+      if (didChange) publishBufferUpdate()
     }
 
     if (sampleUrl) {
@@ -115,10 +120,12 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
   }
 
   const clearClipBufferCaches = () => {
+    const hadEntries = loadingClipIds.size > 0 || audioBufferCache.size > 0
     loadingClipIds.clear()
     audioBufferCache.clear()
     sampleBufferLoader.clear()
     clearWaveformAssetCache()
+    if (hadEntries) publishBufferUpdate()
   }
 
   return {

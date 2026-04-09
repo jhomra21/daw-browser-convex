@@ -1,5 +1,7 @@
-import type { Accessor, Setter } from 'solid-js'
+import type { Accessor } from 'solid-js'
 
+import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
+import { buildTrackCreateMutationInput } from '~/lib/track-mutation-args'
 import { buildTrackCreateHistoryEntry } from '~/lib/undo/builders'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Clip, Track } from '~/types/timeline'
@@ -9,7 +11,7 @@ type ConvexClientType = typeof import('~/lib/convex').convexClient
 type ConvexApiType = typeof import('~/lib/convex').convexApi
 
 type CreateLocalTrackOptions = {
-  id: string
+  id: Track['id']
   historyRef?: string
   index: number
   name?: string
@@ -21,13 +23,12 @@ type CreateLocalTrackOptions = {
   lockedBy?: string | null
   clips?: Clip[]
   sends?: Track['sends']
-  outputTargetId?: string
+  outputTargetId?: Track['id']
 }
 
 type EnsureLocalTrackOptions = Omit<CreateLocalTrackOptions, 'index'> & {
   index?: number
-  tracks: Accessor<Track[]>
-  setTracks: Setter<Track[]>
+  insertLocalTrack: (track: Track, index: number) => void
 }
 
 type CreateOptimisticTrackOptions = Omit<CreateLocalTrackOptions, 'id' | 'index'> & {
@@ -36,14 +37,15 @@ type CreateOptimisticTrackOptions = Omit<CreateLocalTrackOptions, 'id' | 'index'
   convexApi: ConvexApiType
   roomId: string
   userId: string
-  tracks: Accessor<Track[]>
-  setTracks: Setter<Track[]>
-  grantWrite?: (trackId: string) => void
+  insertLocalTrack: (track: Track, index: number) => void
+  grantWrite?: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
+  grantScope?: OptimisticGrantScope
 }
 
 type HistoryPush = (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
 
 type CreateOptimisticTrackWithHistoryOptions = CreateOptimisticTrackOptions & {
+  tracks: Accessor<Track[]>
   historyPush?: HistoryPush
 }
 
@@ -52,7 +54,7 @@ export function createLocalTrack(options: CreateLocalTrackOptions): Track {
     id: options.id,
     historyRef: options.historyRef ?? options.id,
     name: options.name ?? `Track ${options.index + 1}`,
-    volume: Number.isFinite(options.volume) ? (options.volume as number) : 0.8,
+    volume: typeof options.volume === 'number' && Number.isFinite(options.volume) ? options.volume : 0.8,
     clips: options.clips ?? [],
     muted: options.muted ?? false,
     soloed: options.soloed ?? false,
@@ -68,12 +70,9 @@ export function createLocalTrack(options: CreateLocalTrackOptions): Track {
 }
 
 function ensureLocalTrack(options: EnsureLocalTrackOptions): Track {
-  const existing = options.tracks().find((track) => track.id === options.id)
-  if (existing) return existing
-
   let index = options.index
   if (index === undefined) {
-    index = options.tracks().length
+    index = 0
   }
   const next = createLocalTrack({
     id: options.id,
@@ -90,29 +89,22 @@ function ensureLocalTrack(options: EnsureLocalTrackOptions): Track {
     sends: options.sends,
     outputTargetId: options.outputTargetId,
   })
-
-  options.setTracks((current) => {
-    if (current.some((track) => track.id === options.id)) return current
-    if (index >= current.length) return [...current, next]
-    return [...current.slice(0, index), next, ...current.slice(index)]
-  })
+  options.insertLocalTrack(next, index)
   return next
 }
 
 export async function createOptimisticTrack(options: CreateOptimisticTrackOptions): Promise<Track | null> {
-  const payload: Record<string, unknown> = {
-    roomId: options.roomId as any,
-    userId: options.userId as any,
+  const payload = buildTrackCreateMutationInput({
+    roomId: options.roomId,
+    userId: options.userId,
+    index: options.index,
     kind: options.kind,
     channelRole: options.channelRole,
-  }
-  if (options.index !== undefined) {
-    payload.index = options.index
-  }
-  const trackId = await options.convexClient.mutation(options.convexApi.tracks.create, payload as any) as any as string
+  })
+  const trackId = await options.convexClient.mutation(options.convexApi.tracks.create, payload)
   if (!trackId) return null
 
-  options.grantWrite?.(trackId)
+  options.grantWrite?.(trackId, options.grantScope)
 
   return ensureLocalTrack({
     id: trackId,
@@ -128,8 +120,7 @@ export async function createOptimisticTrack(options: CreateOptimisticTrackOption
     clips: options.clips,
     sends: options.sends,
     outputTargetId: options.outputTargetId,
-    tracks: options.tracks,
-    setTracks: options.setTracks,
+    insertLocalTrack: options.insertLocalTrack,
   })
 }
 

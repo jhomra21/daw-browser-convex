@@ -1,5 +1,6 @@
 import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
-import type { TrackChannelRole, TrackSend } from '~/types/timeline'
+import type { ArpeggiatorParams, EqParams, ReverbParams, SynthParams } from '~/lib/effects/params'
+import type { Track, TrackChannelRole, TrackSend } from '~/types/timeline'
 
 export type TrackRef = string
 export type ClipRef = string
@@ -33,7 +34,7 @@ export type HistoryClipSnapshot = ClipSnapshot & {
 
 export type TrackRoutingSnapshot = {
   sends: TrackSend[]
-  outputTargetId?: string
+  outputTargetId?: Track['id']
 }
 
 export type TrackRoutingHistorySnapshot = {
@@ -59,6 +60,53 @@ export type TrackSnapshot = {
   channelRole?: TrackChannelRole
   routing: TrackRoutingHistorySnapshot
 }
+
+export type TrackEffect = 'eq' | 'reverb' | 'synth' | 'arp'
+export type EffectType = TrackEffect | 'master-eq' | 'master-reverb'
+
+export type EffectParamsByEffect = {
+  eq: EqParams
+  reverb: ReverbParams
+  synth: SynthParams
+  arp: ArpeggiatorParams
+  'master-eq': EqParams
+  'master-reverb': ReverbParams
+}
+
+type EffectTargetId<Effect extends EffectType> = Effect extends TrackEffect ? Track['id'] : 'master'
+
+export type TrackEffectSnapshot = Partial<{
+  eq: EqParams
+  reverb: ReverbParams
+  synth: SynthParams
+  arp: ArpeggiatorParams
+}>
+
+type EffectParamsCommitPayloadMap = {
+  [Effect in EffectType]: {
+    targetId: EffectTargetId<Effect>
+    effect: Effect
+    from: EffectParamsByEffect[Effect]
+    to: EffectParamsByEffect[Effect]
+  }
+}
+
+export type EffectParamsCommitPayload<Effect extends EffectType = EffectType> = EffectParamsCommitPayloadMap[Effect]
+
+type EffectParamsHistoryEntryMap = {
+  [Effect in EffectType]: {
+    type: 'effect-params'
+    roomId: string
+    data: {
+      trackRef?: TrackRef
+      effect: Effect
+      from: EffectParamsByEffect[Effect]
+      to: EffectParamsByEffect[Effect]
+    }
+  }
+}
+
+export type EffectParamsHistoryEntry<Effect extends EffectType = EffectType> = EffectParamsHistoryEntryMap[Effect]
 
 export type HistoryEntry =
   | {
@@ -120,7 +168,7 @@ export type HistoryEntry =
       data: {
         track: TrackSnapshot
         clips: HistoryClipSnapshot[]
-        effects?: { eq?: any; reverb?: any; synth?: any; arp?: any }
+        effects?: TrackEffectSnapshot
         inboundRouting?: InboundTrackRoutingSnapshot[]
         recreatedTrackId?: string
         recreatedClips?: Array<{ clipRef: ClipRef; clipId: string }>
@@ -146,16 +194,7 @@ export type HistoryEntry =
       roomId: string
       data: { trackRef: TrackRef; from: TrackRoutingHistorySnapshot; to: TrackRoutingHistorySnapshot }
     }
-  | {
-      type: 'effect-params'
-      roomId: string
-      data: {
-        trackRef?: TrackRef
-        effect: 'eq' | 'reverb' | 'synth' | 'arp' | 'master-eq' | 'master-reverb'
-        from: any
-        to: any
-      }
-    }
+  | EffectParamsHistoryEntry
 
 export type MergeKey = string
 

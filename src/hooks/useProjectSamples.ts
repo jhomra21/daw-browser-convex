@@ -1,24 +1,30 @@
-import { createMemo } from 'solid-js'
+import type { FunctionReturnType } from 'convex/server'
+import { createEffect, createMemo, createSignal, on } from 'solid-js'
 import type { Accessor } from 'solid-js'
 import { useConvexQuery, convexApi } from '~/lib/convex'
 import { useQuery } from '@tanstack/solid-query'
 import { getPersistedAudioSource, type AudioSourceKind, type AudioSourceMetadata } from '~/lib/audio-source'
+import { ensureDefaultSampleMetadata, loadCachedDefaultSampleMetadata } from '~/lib/default-sample-cache'
+import type { Track } from '~/types/timeline'
 
-export type ProjectSampleInventoryItem = {
+type SampleRow = FunctionReturnType<typeof convexApi.samples.listByRoom>[number]
+type ClipRow = FunctionReturnType<typeof convexApi.clips.listByRoom>[number]
+
+type ProjectSampleInventoryItem = {
   assetKey: string
   sourceKind: AudioSourceKind
   url: string
   name?: string
   source: AudioSourceMetadata
-  ownerUserId: string
-  createdAt: number
+  ownerUserId?: string
+  createdAt?: number
 }
 
-export type ProjectSampleUsage = {
+type ProjectSampleUsage = {
   assetKey: string
   sourceKind: AudioSourceKind
   clipId: string
-  trackId: string
+  trackId: Track['id']
   startSec: number
   name?: string
   source: AudioSourceMetadata
@@ -36,6 +42,19 @@ export type ProjectSampleListItem = {
   ownerUserId: string
   count: number
   earliestClip?: ProjectSampleUsage
+}
+
+type DefaultSampleCatalogItem = {
+  key: string
+  assetKey: string
+  sourceKind: AudioSourceKind
+  url: string
+  name: string
+  duration?: number
+  source?: AudioSourceMetadata
+  sizeBytes?: number
+  mimeType?: string
+  uploadedAt?: string
 }
 
 export type DefaultSampleListItem = {
@@ -61,10 +80,147 @@ type UseProjectSamplesResult = {
   defaultSamples: Accessor<DefaultSampleListItem[]>
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null
+}
+
+const readFiniteNumber = (value: unknown) => {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+const readString = (value: unknown) => {
+  return typeof value === 'string' ? value : undefined
+}
+
+const readAudioSourceKind = (value: unknown): AudioSourceKind | undefined => {
+  return value === 'upload' || value === 'url' || value === 'recording' ? value : undefined
+}
+
+const readAudioSourceMetadata = (value: unknown): AudioSourceMetadata | undefined => {
+  if (!isRecord(value)) return undefined
+  const durationSec = readFiniteNumber(value.durationSec)
+  const sampleRate = readFiniteNumber(value.sampleRate)
+  const channelCount = readFiniteNumber(value.channelCount)
+  if (durationSec === undefined || sampleRate === undefined || channelCount === undefined) {
+    return undefined
+  }
+  return { durationSec, sampleRate, channelCount }
+}
+
+function isAudioSourceMetadataEqual(a: AudioSourceMetadata | undefined, b: AudioSourceMetadata | undefined): boolean {
+  if (!a || !b) return a === b
+  return a.durationSec === b.durationSec
+    && a.sampleRate === b.sampleRate
+    && a.channelCount === b.channelCount
+}
+
+function isAudioSourceMetadataMapEqual(
+  a: Map<string, AudioSourceMetadata>,
+  b: Map<string, AudioSourceMetadata>,
+): boolean {
+  if (a.size !== b.size) return false
+  for (const [key, value] of a) {
+    if (!isAudioSourceMetadataEqual(value, b.get(key))) return false
+  }
+  return true
+}
+
+const buildProjectSampleInventoryItem = (item: SampleRow): ProjectSampleInventoryItem => {
+  const sourceKind = readAudioSourceKind(item.sourceKind)
+  const durationSec = readFiniteNumber(item.duration)
+  const sampleRate = readFiniteNumber(item.sampleRate)
+  const channelCount = readFiniteNumber(item.channelCount)
+  if (
+    !item.assetKey
+    || !sourceKind
+    || !item.url
+    || durationSec === undefined
+    || sampleRate === undefined
+    || channelCount === undefined
+  ) {
+    throw new Error('Invalid sample inventory row')
+  }
+
+  return {
+    assetKey: item.assetKey,
+    sourceKind,
+    url: item.url,
+    name: readString(item.name),
+    source: {
+      durationSec,
+      sampleRate,
+      channelCount,
+    },
+    ownerUserId: readString(item.ownerUserId),
+    createdAt: readFiniteNumber(item.createdAt),
+  }
+}
+
+const buildProjectSampleUsage = (clip: ClipRow): ProjectSampleUsage | null => {
+  const sourceKind = readAudioSourceKind(clip.sourceKind)
+  const source = getPersistedAudioSource({
+    sourceAssetKey: clip.sourceAssetKey,
+    sourceKind,
+    sourceDurationSec: clip.sourceDurationSec,
+    sourceSampleRate: clip.sourceSampleRate,
+    sourceChannelCount: clip.sourceChannelCount,
+  })
+  if (!source) return null
+
+  return {
+    assetKey: source.assetKey,
+    sourceKind: source.sourceKind,
+    clipId: clip._id,
+    trackId: clip.trackId,
+    startSec: Number(clip.startSec ?? 0),
+    name: readString(clip.name),
+    source: source.source,
+  }
+}
+
+function buildDefaultSampleCatalogItem(raw: unknown): DefaultSampleCatalogItem {
+  if (!isRecord(raw)) {
+    throw new Error('Invalid default sample payload')
+  }
+
+  const key = readString(raw.key)
+  const assetKey = readString(raw.assetKey)
+  const sourceKind = readAudioSourceKind(raw.sourceKind)
+  const url = readString(raw.url)
+  const name = readString(raw.name)
+  if (!key || !assetKey || !sourceKind || !url || !name) {
+    throw new Error('Invalid default sample payload')
+  }
+
+  return {
+    key,
+    assetKey,
+    sourceKind,
+    url,
+    name,
+    duration: readFiniteNumber(raw.duration),
+    source: readAudioSourceMetadata(raw.source),
+    sizeBytes: readFiniteNumber(raw.sizeBytes),
+    mimeType: readString(raw.mimeType),
+    uploadedAt: readString(raw.uploadedAt),
+  }
+}
+
+function mergeDefaultSampleMetadata(
+  sample: DefaultSampleCatalogItem,
+  source: AudioSourceMetadata,
+): DefaultSampleListItem {
+  return {
+    ...sample,
+    duration: sample.duration ?? source.durationSec,
+    source,
+  }
+}
+
 export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSamplesResult {
   const { roomId, enabled } = options
   const inventory = useConvexQuery(
-    (convexApi as any).samples.listByRoom,
+    convexApi.samples.listByRoom,
     () => {
       if (enabled && !enabled()) return null
       const rid = roomId()
@@ -74,7 +230,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
   )
 
   const clips = useConvexQuery(
-    (convexApi as any).clips.listByRoom,
+    convexApi.clips.listByRoom,
     () => {
       if (enabled && !enabled()) return null
       const rid = roomId()
@@ -83,60 +239,78 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
     () => ['clips', 'by_room', roomId()]
   )
 
+  const [cachedDefaultSampleMetadataByKey, setCachedDefaultSampleMetadataByKey] = createSignal<Map<string, AudioSourceMetadata>>(new Map())
+
+  const defaultSamplesQuery = useQuery(() => ({
+    queryKey: ['default-samples'],
+    queryFn: async (): Promise<DefaultSampleCatalogItem[]> => {
+      const res = await fetch('/api/default-samples').catch(() => null)
+      if (!res || !res.ok) return []
+      const data = await res.json().catch(() => null)
+      const list = isRecord(data) && Array.isArray(data.samples) ? data.samples : []
+      return list.map(buildDefaultSampleCatalogItem)
+    },
+    staleTime: 1000 * 60 * 60,
+    gcTime: 1000 * 60 * 60 * 24,
+    refetchOnWindowFocus: false,
+    placeholderData: (prev: DefaultSampleCatalogItem[] | undefined) => prev ?? [],
+  }))
+
+  createEffect(on(
+    () => defaultSamplesQuery.data,
+    (data) => {
+      const list = Array.isArray(data) ? data : []
+      if (list.length === 0) return
+
+      void (async () => {
+        const next = new Map<string, AudioSourceMetadata>()
+        for (const sample of list) {
+          const source = sample.source ?? await loadCachedDefaultSampleMetadata(sample.assetKey)
+          if (source) {
+            next.set(sample.key, source)
+          }
+        }
+        for (const sample of list) {
+          if (next.has(sample.key) || sample.source) continue
+          const source = await ensureDefaultSampleMetadata({
+            assetKey: sample.assetKey,
+            url: sample.url,
+          })
+          if (source) {
+            next.set(sample.key, source)
+          }
+        }
+        setCachedDefaultSampleMetadataByKey((current) => {
+          return isAudioSourceMetadataMapEqual(current, next) ? current : next
+        })
+      })()
+    },
+  ))
+
+  const defaultSamples = createMemo<DefaultSampleListItem[]>(() => {
+    const list = Array.isArray(defaultSamplesQuery.data) ? defaultSamplesQuery.data : []
+    const metadataByKey = cachedDefaultSampleMetadataByKey()
+    const items: DefaultSampleListItem[] = []
+    for (const sample of list) {
+      const source = sample.source ?? metadataByKey.get(sample.key)
+      if (!source) continue
+      items.push(mergeDefaultSampleMetadata(sample, source))
+    }
+    return items
+  })
+
   const samples = createMemo<ProjectSampleListItem[]>(() => {
     const inventoryData = inventory.data
     const clipsData = clips.data
     if (!Array.isArray(inventoryData)) return []
     if (!Array.isArray(clipsData)) return []
 
-    const invList: ProjectSampleInventoryItem[] = inventoryData.map((item: any) => {
-      const assetKey = item.assetKey as string | undefined
-      const sourceKind = item.sourceKind as AudioSourceKind | undefined
-      const durationSec = item.duration as number
-      const sampleRate = item.sampleRate as number
-      const channelCount = item.channelCount as number
-      const createdAt = item.createdAt as number
-      const url = item.url as string | undefined
-      const ownerUserId = item.ownerUserId as string | undefined
-      if (!assetKey || !sourceKind || !url || !ownerUserId || !Number.isFinite(durationSec) || !Number.isFinite(sampleRate) || !Number.isFinite(channelCount) || !Number.isFinite(createdAt)) {
-        throw new Error('Invalid sample inventory row')
-      }
-      return {
-        assetKey,
-        sourceKind,
-        url,
-        name: item.name as string | undefined,
-        source: {
-          durationSec,
-          sampleRate,
-          channelCount,
-        },
-        ownerUserId,
-        createdAt,
-      }
-    })
+    const invList: ProjectSampleInventoryItem[] = inventoryData.map(buildProjectSampleInventoryItem)
 
     const clipList: ProjectSampleUsage[] = []
     for (const clip of clipsData) {
-      const source = getPersistedAudioSource({
-        sourceAssetKey: clip.sourceAssetKey,
-        sourceKind: clip.sourceKind,
-        sourceDurationSec: clip.sourceDurationSec,
-        sourceSampleRate: clip.sourceSampleRate,
-        sourceChannelCount: clip.sourceChannelCount,
-      })
-      if (!source) {
-        continue
-      }
-      clipList.push({
-        assetKey: source.assetKey,
-        sourceKind: source.sourceKind,
-        clipId: clip._id as string,
-        trackId: clip.trackId as string,
-        startSec: Number(clip.startSec ?? 0),
-        name: clip.name as string | undefined,
-        source: source.source,
-      })
+      const usage = buildProjectSampleUsage(clip)
+      if (usage) clipList.push(usage)
     }
 
     const inventoryByKey = new Map<string, ProjectSampleInventoryItem>()
@@ -149,32 +323,40 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
       const list = usageByKey.get(clip.assetKey)
       if (list) list.push(clip); else usageByKey.set(clip.assetKey, [clip])
     }
+    const defaultInventoryByKey = new Map<string, DefaultSampleListItem>()
+    for (const sample of defaultSamples()) {
+      defaultInventoryByKey.set(sample.assetKey, sample)
+    }
+
     const allKeys = new Set<string>([...inventoryByKey.keys(), ...usageByKey.keys()])
 
     const items: ProjectSampleListItem[] = []
     for (const key of allKeys) {
       const inv = inventoryByKey.get(key)
-      if (!inv) {
-        throw new Error('Missing sample inventory row for clip usage')
-      }
+      const fallback = defaultInventoryByKey.get(key)
       const usages = usageByKey.get(key) ?? []
-      const count = usages.length
       const earliest = usages.reduce<ProjectSampleUsage | undefined>((current, candidate) => {
         if (!current) return candidate
         return candidate.startSec < current.startSec ? candidate : current
       }, undefined)
-      const name = inv.name || earliest?.name || 'Sample'
+      const source = inv?.source ?? fallback?.source ?? earliest?.source
+      if (!source) continue
+      const url = inv?.url ?? fallback?.url
+      if (!url) continue
+      const sourceKind = inv?.sourceKind ?? fallback?.sourceKind ?? earliest?.sourceKind
+      if (!sourceKind) continue
+      const name = inv?.name || fallback?.name || earliest?.name || 'Sample'
       items.push({
         key,
-        assetKey: inv.assetKey,
-        sourceKind: inv.sourceKind,
-        url: inv.url,
+        assetKey: inv?.assetKey ?? fallback?.assetKey ?? key,
+        sourceKind,
+        url,
         name,
-        duration: inv.source.durationSec,
-        source: inv.source,
-        createdAt: inv.createdAt,
-        ownerUserId: inv.ownerUserId,
-        count,
+        duration: source.durationSec,
+        source,
+        createdAt: inv?.createdAt ?? 0,
+        ownerUserId: inv?.ownerUserId ?? '',
+        count: usages.length,
         earliestClip: earliest,
       })
     }
@@ -183,62 +365,9 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
       const aTime = a.earliestClip?.startSec ?? 0
       const bTime = b.earliestClip?.startSec ?? 0
       if (aTime !== bTime) return aTime - bTime
-        return a.name.localeCompare(b.name)
+      return a.name.localeCompare(b.name)
     })
     return items
-  })
-
-  const defaultSamplesQuery = useQuery(() => ({
-    queryKey: ['default-samples'],
-    queryFn: async (): Promise<DefaultSampleListItem[]> => {
-      const res = await fetch('/api/default-samples').catch(() => null)
-      if (!res || !res.ok) return []
-      const data: any = await res.json().catch(() => null)
-      const list: any[] = Array.isArray(data?.samples) ? data.samples : []
-      return list.map((raw: any) => {
-        const key = raw?.key as string | undefined
-        const assetKey = raw?.assetKey as string | undefined
-        const sourceKind = raw?.sourceKind as AudioSourceKind | undefined
-        const url = raw?.url as string | undefined
-        const name = raw?.name as string | undefined
-        const duration = raw?.duration as number
-        const source = raw?.source as AudioSourceMetadata | undefined
-        if (
-          !key ||
-          !assetKey ||
-          !sourceKind ||
-          !url ||
-          !name ||
-          !Number.isFinite(duration) ||
-          !source ||
-          !Number.isFinite(source.durationSec) ||
-          !Number.isFinite(source.sampleRate) ||
-          !Number.isFinite(source.channelCount)
-        ) {
-          throw new Error('Invalid default sample payload')
-        }
-        return {
-          key,
-          assetKey,
-          sourceKind,
-          url,
-          name,
-          duration,
-          source,
-          sizeBytes: typeof raw.sizeBytes === 'number' && Number.isFinite(raw.sizeBytes) ? raw.sizeBytes : undefined,
-          mimeType: typeof raw.mimeType === 'string' ? raw.mimeType : undefined,
-          uploadedAt: typeof raw.uploadedAt === 'string' ? raw.uploadedAt : undefined,
-        }
-      })
-    },
-    staleTime: 1000 * 60 * 60,
-    gcTime: 1000 * 60 * 60 * 24,
-    refetchOnWindowFocus: false,
-    placeholderData: (prev: DefaultSampleListItem[] | undefined) => prev ?? [],
-  }))
-
-  const defaultSamples = createMemo<DefaultSampleListItem[]>(() => {
-    return Array.isArray(defaultSamplesQuery.data) ? defaultSamplesQuery.data : []
   })
 
   return {

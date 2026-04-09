@@ -6,11 +6,12 @@ import {
 import { cn } from '~/lib/utils'
 
 
-export type ArpeggiatorProps = {
+type ArpeggiatorProps = {
   params: ArpeggiatorParams
   onChange: (updates: Partial<ArpeggiatorParams>) => void
   onToggleEnabled?: (enabled: boolean) => void
   onReset?: () => void
+  disabled?: boolean
   class?: string
 }
 
@@ -45,6 +46,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
                   ? 'border-green-400/30 bg-green-500/20 text-green-300'
                   : 'bg-neutral-800 text-neutral-400',
               )}
+              disabled={props.disabled}
               onClick={() => props.onToggleEnabled?.(!props.params.enabled)}
             >
               {props.params.enabled ? 'ON' : 'OFF'}
@@ -58,7 +60,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
                 : 'bg-neutral-800 text-neutral-400',
             )}
             onClick={() => props.onChange({ hold: !props.params.hold })}
-            disabled={!props.params.enabled}
+            disabled={props.disabled || !props.params.enabled}
             title="Hold: Keep arpeggiation looping until clip ends"
           >
             HOLD
@@ -68,6 +70,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
           <Show when={props.onReset}>
             <button
               class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+              disabled={props.disabled}
               onClick={() => props.onReset?.()}
             >Reset</button>
           </Show>
@@ -88,7 +91,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
                     : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
                 )}
                 onClick={() => props.onChange({ pattern: pat.value })}
-                disabled={!props.params.enabled}
+                disabled={props.disabled || !props.params.enabled}
               >
                 {pat.label}
               </button>
@@ -111,7 +114,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
                     : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
                 )}
                 onClick={() => props.onChange({ rate: r.value })}
-                disabled={!props.params.enabled}
+                disabled={props.disabled || !props.params.enabled}
               >
                 {r.label}
               </button>
@@ -134,7 +137,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
             label=""
             showValue={false}
             onValueChange={(v) => props.onChange({ octaves: Math.round(clamp(v, 1, 4)) })}
-            disabled={!props.params.enabled}
+            disabled={props.disabled || !props.params.enabled}
           />
           <div class="text-xs leading-none text-neutral-300 font-mono">{props.params.octaves}</div>
         </div>
@@ -151,7 +154,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
             label=""
             showValue={false}
             onValueChange={(v) => props.onChange({ gate: Math.round(clamp(v, 0.1, 1.0) * 100) / 100 })}
-            disabled={!props.params.enabled}
+            disabled={props.disabled || !props.params.enabled}
           />
           <div class="text-xs leading-none text-neutral-300 font-mono">{(props.params.gate * 100).toFixed(0)}%</div>
         </div>

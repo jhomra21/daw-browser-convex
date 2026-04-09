@@ -5,8 +5,8 @@ import {
   deleteMixerStateForTrack,
   ensureMixerChannelForTrack,
   getMergedTrack,
-  isMixerLockStale,
   listRoomTracksWithMixerChannels,
+  normalizeMixerLockState,
   removeTrackRoutingReferences,
 } from "./mixerChannels";
 import {
@@ -23,6 +23,7 @@ type DeleteOwnedTrackOptions = {
 const trackDeleteConflictReason = v.union(
   v.literal("foreign-clips"),
   v.literal("not-empty"),
+  v.literal("locked"),
 )
 
 const trackDeleteResult = v.union(
@@ -63,7 +64,7 @@ type TrackDeletePreflight =
     }
   | {
       ok: false
-      reason: "access-denied" | "not-empty" | "foreign-clips"
+      reason: "access-denied" | "not-empty" | "foreign-clips" | "locked"
     }
 
 export async function getTrackDeletePreflight(
@@ -78,6 +79,13 @@ export async function getTrackDeletePreflight(
   }
 
   const { owner, track } = access;
+  const mergedTrack = await getMergedTrack(ctx, trackId);
+  if (mergedTrack) {
+    const lockState = normalizeMixerLockState(mergedTrack.lockedBy, mergedTrack.lockedAt);
+    if (lockState.isLocked) {
+      return { ok: false, reason: "locked" };
+    }
+  }
   const clips = await ctx.db
     .query("clips")
     .withIndex("by_track", (q: any) => q.eq("trackId", trackId))
@@ -298,11 +306,8 @@ export const lock = mutation({
     const mergedTrack = await getMergedTrack(ctx, trackId);
     if (!mergedTrack) return { ok: false, reason: "Track not found" };
     const now = Date.now();
-    if (mergedTrack.lockedBy && mergedTrack.lockedBy !== userId) {
-      if (isMixerLockStale(mergedTrack.lockedBy, mergedTrack.lockedAt ?? undefined, now)) {
-        await ctx.db.patch(channel._id, { lockedBy: userId, lockedAt: now });
-        return { ok: true };
-      }
+    const lockState = normalizeMixerLockState(mergedTrack.lockedBy, mergedTrack.lockedAt, now);
+    if (lockState.isLocked && lockState.lockedBy !== userId) {
       return { ok: false, reason: "Track locked by another user" };
     }
     await ctx.db.patch(channel._id, { lockedBy: userId, lockedAt: now });
@@ -318,7 +323,8 @@ export const unlock = mutation({
     const channel = await ensureMixerChannelForTrack(ctx, track);
     const mergedTrack = await getMergedTrack(ctx, trackId);
     if (!mergedTrack) return { ok: false };
-    if (mergedTrack.lockedBy && mergedTrack.lockedBy !== userId) {
+    const lockState = normalizeMixerLockState(mergedTrack.lockedBy, mergedTrack.lockedAt);
+    if (lockState.isLocked && lockState.lockedBy !== userId) {
       return { ok: false };
     }
     await ctx.db.patch(channel._id, { lockedBy: undefined, lockedAt: undefined });

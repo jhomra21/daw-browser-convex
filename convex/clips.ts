@@ -5,6 +5,7 @@ import { getClipOwnership, getClipWriteAccess } from './clipWrites'
 import { getMergedTrack } from './mixerChannels'
 import { upsertSampleRow } from './sampleRows'
 import { isClipKindCompatibleWithTrack } from './trackRouting'
+import { normalizeClipStartSec, normalizeClipTimingPatch } from '../src/lib/clip-timing'
 import { buildClipAudioSourceFields, normalizeAudioSourceMetadataPatch, sanitizePositiveNumber, type AudioSourceKind } from '../src/lib/audio-source-rules'
 
 type ClipKind = 'audio' | 'midi'
@@ -231,8 +232,10 @@ export const move = mutation({
   },
   handler: async (ctx, { clipId, userId, startSec, toTrackId }) => {
     const access = await getClipWriteAccess(ctx, clipId, userId)
-    if (!access) return
+    if (!access) return { status: 'rejected' as const }
     const clip = access.clip
+    const nextStartSec = normalizeClipStartSec(startSec)
+    const nextTrackId = toTrackId ?? clip.trackId
     if (toTrackId) {
       const targetTrack = await getCompatibleMergedTrack(
         ctx,
@@ -240,12 +243,13 @@ export const move = mutation({
         clip.roomId,
         sanitizeClipKind((clip as any).midi ? 'midi' : 'audio'),
       )
-      if (!targetTrack) return
+      if (!targetTrack) return { status: 'rejected' as const }
     }
     await ctx.db.patch(clipId, {
-      startSec,
-      trackId: toTrackId ?? clip.trackId,
+      startSec: nextStartSec,
+      trackId: nextTrackId,
     })
+    return { status: 'applied' as const }
   },
 })
 
@@ -281,17 +285,23 @@ export const setTiming = mutation({
   },
   handler: async (ctx, { clipId, userId, startSec, duration, leftPadSec, bufferOffsetSec, midiOffsetBeats }) => {
     const access = await getClipWriteAccess(ctx, clipId, userId)
-    if (!access) return
-    const safeStart = Math.max(0, startSec)
-    const safeDuration = Math.max(0, duration)
-    const safePad = typeof leftPadSec === 'number' && isFinite(leftPadSec) ? Math.max(0, leftPadSec) : undefined
-    const safeBuf = typeof bufferOffsetSec === 'number' && isFinite(bufferOffsetSec) ? Math.max(0, bufferOffsetSec) : undefined
-    const safeMidiOff = typeof midiOffsetBeats === 'number' && isFinite(midiOffsetBeats) ? Math.max(0, midiOffsetBeats) : undefined
-    const patch: Record<string, unknown> = { startSec: safeStart, duration: safeDuration }
-    if (safePad !== undefined) patch.leftPadSec = safePad
-    if (safeBuf !== undefined) patch.bufferOffsetSec = safeBuf
-    if (safeMidiOff !== undefined) patch.midiOffsetBeats = safeMidiOff
+    if (!access) return { status: 'rejected' as const }
+    const normalizedTiming = normalizeClipTimingPatch({
+      startSec,
+      duration,
+      leftPadSec,
+      bufferOffsetSec,
+      midiOffsetBeats,
+    })
+    const patch: Record<string, unknown> = {
+      startSec: normalizedTiming.startSec,
+      duration: normalizedTiming.duration,
+    }
+    if (normalizedTiming.leftPadSec !== undefined) patch.leftPadSec = normalizedTiming.leftPadSec
+    if (normalizedTiming.bufferOffsetSec !== undefined) patch.bufferOffsetSec = normalizedTiming.bufferOffsetSec
+    if (normalizedTiming.midiOffsetBeats !== undefined) patch.midiOffsetBeats = normalizedTiming.midiOffsetBeats
     await ctx.db.patch(clipId, patch)
+    return { status: 'applied' as const }
   },
 })
 

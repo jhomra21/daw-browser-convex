@@ -1,15 +1,17 @@
-import { type Accessor, type Setter } from 'solid-js'
+import type { Accessor } from 'solid-js'
 
 import { buildClipCreatePayload, buildLocalClip, createUploadedAudioClip, pushClipCreateHistory, type ClipCreateSnapshot } from '~/lib/clip-create'
 import { createAudioAssetKey, getAudioSourceMetadata, type AudioSourceKind } from '~/lib/audio-source'
 import type { AudioEngine } from '~/lib/audio-engine'
 import { canTrackReceiveAudioClip, getTrackChannelRole } from '~/lib/track-routing'
-import { selectPrimaryClip, selectTrackTarget } from '~/lib/timeline-selection'
+import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { clientXToSec, yToLaneIndex, willOverlap, calcNonOverlapStart, quantizeSecToGrid, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
-import { createLocalTrack, createOptimisticTrackWithHistory } from '~/lib/tracks'
-import type { Clip, SelectedClip, Track } from '~/types/timeline'
+import { createOptimisticTrackWithHistory } from '~/lib/tracks'
+import type { Clip, Track } from '~/types/timeline'
+
+import type { TimelineSelectionController } from './useTimelineSelectionState'
 
 type ConvexClientType = typeof import('~/lib/convex').convexClient
 
@@ -38,12 +40,9 @@ export type InsertSampleInput = {
 type TimelineClipImportOptions = {
   audioEngine: AudioEngine
   tracks: Accessor<Track[]>
-  setTracks: Setter<Track[]>
-  selectedTrackId: Accessor<string>
-  setSelectedTrackId: Setter<string>
-  setSelectedClip: Setter<SelectedClip>
-  setSelectedClipIds: Setter<Set<string>>
-  setSelectedFXTarget: Setter<string>
+  insertLocalTrack: (track: Track, index: number) => void
+  insertLocalClip: (trackId: Track['id'], clip: Clip) => void
+  selection: TimelineSelectionController
   playheadSec: Accessor<number>
   roomId: Accessor<string | undefined>
   userId: Accessor<string | undefined>
@@ -57,8 +56,8 @@ type TimelineClipImportOptions = {
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
-  grantWrite?: (trackId: string) => void
-  grantClipWrite?: (clipId: string) => void
+  grantWrite?: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
+  grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
 }
 
 type TimelineClipImportHandlers = {
@@ -68,16 +67,21 @@ type TimelineClipImportHandlers = {
   handleInsertSample: (input: InsertSampleInput) => Promise<void>
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null
+}
+
+const isAudioSourceKind = (value: unknown): value is AudioSourceKind => {
+  return value === 'upload' || value === 'url' || value === 'recording'
+}
+
 export function useTimelineClipImport(options: TimelineClipImportOptions): TimelineClipImportHandlers {
   const {
     audioEngine,
     tracks,
-    setTracks,
-    selectedTrackId,
-    setSelectedTrackId,
-    setSelectedClip,
-    setSelectedClipIds,
-    setSelectedFXTarget,
+    insertLocalTrack,
+    insertLocalClip,
+    selection,
     playheadSec,
     roomId,
     userId,
@@ -93,13 +97,6 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     grantWrite,
     grantClipWrite,
   } = options
-
-  const selectionSetters = {
-    setSelectedTrackId,
-    setSelectedClip,
-    setSelectedClipIds,
-    setSelectedFXTarget,
-  }
 
   const requireAudioTrack = (track: Track | undefined, message = '[Import] Cannot insert audio into this track') => {
     if (!track || !canTrackReceiveAudioClip(track)) {
@@ -120,22 +117,24 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
       roomId: rid,
       userId: uid,
       tracks,
-      setTracks,
+      insertLocalTrack,
+      index: tracks().length,
       grantWrite,
+      grantScope: { roomId: rid, userId: uid },
       historyPush: options.historyPush,
     })
     if (!track) return null
 
-    selectTrackTarget(selectionSetters, track.id)
+    selection.selectTrackTarget(track.id)
     return track
   }
 
-  const ensureTargetAudioTrack = async (trackId?: string, message?: string) => {
+  const ensureTargetAudioTrack = async (trackId?: Track['id'], message?: string) => {
     if (trackId) {
       return requireAudioTrack(tracks().find((track) => track.id === trackId), message)
     }
 
-    const selectedId = selectedTrackId()
+    const selectedId = selection.selectedTrackId()
     if (selectedId) {
       const track = tracks().find((item) => item.id === selectedId)
       if (track && getTrackChannelRole(track) !== 'track') {
@@ -181,34 +180,18 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     }
   }
 
-  const insertOptimisticClip = (trackId: string, clip: Clip) => {
-    setTracks(ts => {
-      const idx = ts.findIndex(t => t.id === trackId)
-      if (idx === -1) {
-        return [...ts, createLocalTrack({ id: trackId, index: ts.length, clips: [clip] })]
-      }
-      const track = ts[idx]
-      const existsIdx = track.clips.findIndex(c => c.id === clip.id)
-      if (existsIdx >= 0) {
-        const updatedClips = track.clips.map(c => c.id === clip.id ? { ...c, ...clip, buffer: clip.buffer ?? c.buffer ?? null } : c)
-        return ts.map((t, i) => (i !== idx ? t : { ...t, clips: updatedClips }))
-      }
-      return ts.map((t, i) => (i !== idx ? t : { ...t, clips: [...t.clips, clip] }))
-    })
-  }
-
-  const createServerClip = async (trackId: string, clip: ClipCreateSnapshot) => {
+  const createServerClip = async (trackId: Track['id'], clip: ClipCreateSnapshot) => {
     const rid = roomId()
     const uid = userId()
     if (!rid || !uid) return null
     return await convexClient.mutation(
       convexApi.clips.create,
-      buildClipCreatePayload({ roomId: rid, userId: uid, trackId, clip }) as any,
-    ) as any as string
+      buildClipCreatePayload({ roomId: rid, userId: uid, trackId, clip }),
+    )
   }
 
-  const applySelectionAfterCreate = (trackId: string, clipId: string) => {
-    selectPrimaryClip(selectionSetters, { trackId, clipId })
+  const applySelectionAfterCreate = (trackId: Track['id'], clipId: string) => {
+    selection.selectPrimaryClip({ trackId, clipId })
   }
 
   const ensureNonOverlappingStart = (track: Track | undefined, desiredStart: number, duration: number) => {
@@ -217,29 +200,36 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     return calcNonOverlapStart(track.clips, null, desiredStart, duration)
   }
 
-  const resolveInsertSample = (input: InsertSampleInput): InsertSampleInput | null => {
+  const resolveInsertSample = (input: unknown): InsertSampleInput | null => {
+    if (!isRecord(input)) return null
     const duration = input.duration
     const assetKey = input.assetKey
     const sourceKind = input.sourceKind
     const source = input.source
     if (!(typeof duration === 'number' && duration > 0)) return null
-    if (!assetKey || !sourceKind) return null
-    if (!(typeof source?.durationSec === 'number' && source.durationSec > 0)) return null
-    if (!(typeof source.sampleRate === 'number' && source.sampleRate > 0)) return null
-    if (!(typeof source.channelCount === 'number' && source.channelCount > 0)) return null
+    if (typeof input.url !== 'string' || !input.url) return null
+    if (typeof assetKey !== 'string' || !assetKey) return null
+    if (!isAudioSourceKind(sourceKind)) return null
+    if (!isRecord(source)) return null
+    const durationSec = source.durationSec
+    const sampleRate = source.sampleRate
+    const channelCount = source.channelCount
+    if (!(typeof durationSec === 'number' && durationSec > 0)) return null
+    if (!(typeof sampleRate === 'number' && sampleRate > 0)) return null
+    if (!(typeof channelCount === 'number' && channelCount > 0)) return null
 
     return {
       url: input.url,
-      name: input.name,
+      name: typeof input.name === 'string' ? input.name : undefined,
       duration,
       assetKey,
       sourceKind,
-      source,
+      source: { durationSec, sampleRate, channelCount },
     }
   }
 
   const createAudioSourceClip = async (input: {
-    trackId: string
+    trackId: Track['id']
     startSec: number
     duration: number
     source: {
@@ -253,6 +243,8 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     sourceKind: AudioSourceKind
   }) => {
     const rid = roomId()
+    const uid = userId()
+    const grantScope = rid && uid ? { roomId: rid, userId: uid } : null
     const clipName = input.name?.trim()?.length ? input.name : 'Sample'
     const clipSnapshot: ClipCreateSnapshot = {
       startSec: input.startSec,
@@ -266,9 +258,9 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
 
     const createdClipId = await createServerClip(input.trackId, clipSnapshot)
     if (!createdClipId) return null
-    grantClipWrite?.(createdClipId)
+    grantClipWrite?.(createdClipId, grantScope)
 
-    insertOptimisticClip(input.trackId, buildLocalClip({
+    insertLocalClip(input.trackId, buildLocalClip({
       id: createdClipId,
       clip: clipSnapshot,
     }))
@@ -286,7 +278,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     return createdClipId
   }
 
-  const handleFilesInternal = async (file: File, trackId?: string, desiredStart?: number) => {
+  const handleFilesInternal = async (file: File, trackId?: Track['id'], desiredStart?: number) => {
     const ab = await file.arrayBuffer()
     const decoded = await audioEngine.decodeAudioData(ab)
     const sourceMetadata = getAudioSourceMetadata(decoded)
@@ -317,13 +309,14 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
         source: sourceMetadata,
         sourceAssetKey,
         sourceKind: 'upload',
-        createServerClip: async (payload) => await convexClient.mutation(convexApi.clips.create, payload as any) as any as string,
-        insertLocalClip: insertOptimisticClip,
+        createServerClip: async (payload) => await convexClient.mutation(convexApi.clips.create, payload),
+        insertLocalClip,
         selectClip: applySelectionAfterCreate,
         historyPush: options.historyPush,
         uploadToR2,
         audioBufferCache,
         grantClipWrite,
+        grantScope: { roomId: rid, userId: uid },
       })
     } catch {}
   }
@@ -355,10 +348,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     const samplePayload = dt?.getData('application/x-mediabunny-sample')
     if (samplePayload) {
       try {
-        const parsed = JSON.parse(samplePayload) as InsertSampleInput
-        if (parsed?.url) {
-          if (await placeUrlClip(parsed)) return
-        }
+        if (await placeUrlClip(JSON.parse(samplePayload))) return
       } catch {}
     }
 
@@ -379,25 +369,28 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     await handleFilesInternal(file)
   }
 
+  const isAbortError = (error: unknown) => {
+    if (error instanceof DOMException) return error.name === 'AbortError'
+    return false
+  }
+
   const handleAddAudio = async () => {
-    const w = window as unknown as { showOpenFilePicker?: (options: any) => Promise<any> }
-    if (typeof w.showOpenFilePicker === 'function') {
+    if (typeof window.showOpenFilePicker === 'function') {
       try {
-        const handles: any[] = await w.showOpenFilePicker({
+        const [fileHandle] = await window.showOpenFilePicker({
           multiple: false,
           types: [{
             description: 'Audio files',
             accept: { 'audio/*': ['.wav', '.mp3', '.ogg', '.flac', '.m4a', '.webm'] },
           }],
         })
-        const fileHandle: any = Array.isArray(handles) ? handles[0] : handles
         if (!fileHandle) return
-        const file: File | undefined = await fileHandle.getFile?.()
+        const file = await fileHandle.getFile()
         if (!file || !file.type.startsWith('audio')) return
         await handleFilesInternal(file)
         return
-      } catch (err: any) {
-        if (err && (err.name === 'AbortError' || err.code === 20)) return
+      } catch (error) {
+        if (isAbortError(error)) return
       }
     }
     getFileInput()?.click()

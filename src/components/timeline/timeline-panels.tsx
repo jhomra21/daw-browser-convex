@@ -1,6 +1,8 @@
 import { type Component, Show, Suspense, lazy } from 'solid-js'
 import { Button } from '~/components/ui/button'
 import type { AudioEngine } from '~/lib/audio-engine'
+import type { OptimisticGrantWrite } from '~/lib/optimistic-grant-scope'
+import type { EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
 import type { Track, TrackSend } from '~/types/timeline'
 
 const AgentChat = lazy(() => import('~/components/AgentChat'))
@@ -9,43 +11,52 @@ const EffectsPanel = lazy(() => import('~/components/timeline/EffectsPanel'))
 const ExportDialog = lazy(() => import('~/components/timeline/ExportDialog'))
 
 type TimelinePanelsProps = {
-  timeline: {
-    bottomFXOpen: boolean
+  chat: {
+    bottomOffsetPx: number
     agentPanelOpen: boolean
     sharedChatOpen: boolean
-    exportOpen: boolean
-    bottomOffsetPx: number
+    roomId?: string
+    userId?: string
+    bpm: number
+    toggleAgentPanel: () => void
+    toggleSharedChat: () => void
+    closeAgentPanel: () => void
+    closeSharedChat: () => void
+    applyAgentMixOps: (ops: Array<{ type: 'setMute' | 'setSolo'; indices: number[]; value: boolean; exclusive?: boolean; issuedAt: number }>) => void
+  }
+  effectsPanel: {
+    isOpen: boolean
     selectedFXTarget: string
     tracks: Track[]
     playheadSec: number
+    roomId?: string
+    userId?: string
+    audioEngine: AudioEngine
+    canWriteTrackRouting: (trackId: Track['id']) => boolean
+    grantClipWrite: OptimisticGrantWrite
+    onTrackSendsChange: (trackId: Track['id'], sends: TrackSend[]) => void
+    onTrackOutputTargetChange: (trackId: Track['id'], outputTargetId?: Track['id']) => void
+    onSelectClip: (trackId: Track['id'], clipId: string, startSec: number) => void
+    onClose: () => void
+    onOpen: () => void
+    onEffectParamsCommitted: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>) => void
+  }
+  exportDialog: {
+    isOpen: boolean
+    tracks: Track[]
     bpm: number
     loopEnabled: boolean
     loopStartSec: number
     loopEndSec: number
     roomId?: string
     userId?: string
-    toggleAgentPanel: () => void
-    toggleSharedChat: () => void
-    closeAgentPanel: () => void
-    closeSharedChat: () => void
-    closeEffects: () => void
-    openEffects: () => void
-    closeExport: () => void
-    canWriteTrackRouting: (trackId: string) => boolean
-    grantClipWrite: (clipId: string) => void
-    trackSendsChange: (trackId: string, sends: TrackSend[]) => void
-    trackOutputTargetChange: (trackId: string, outputTargetId?: string) => void
-    selectClip: (trackId: string, clipId: string, startSec: number) => void
-    applyAgentMixOps: (ops: Array<{ type: 'setMute' | 'setSolo'; indices: number[]; value: boolean; exclusive?: boolean }>) => void
-    effectParamsCommitted: (payload: { targetId: string; effect: 'eq'|'reverb'|'synth'|'arp'|'master-eq'|'master-reverb'; from: any; to: any }) => void
+    ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
+    onClose: () => void
   }
-  audioEngine: AudioEngine
-  ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
 }
 
 const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
-  const timeline = props.timeline
-  const floatingButtonOffset = () => timeline.bottomOffsetPx > 0 ? `${timeline.bottomOffsetPx}px` : '16px'
+  const floatingButtonOffset = () => props.chat.bottomOffsetPx > 0 ? `${props.chat.bottomOffsetPx}px` : '16px'
 
   return (
     <>
@@ -55,7 +66,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         class="fixed left-4 z-40 bg-neutral-800 text-neutral-100 hover:bg-neutral-700"
         style={{ bottom: floatingButtonOffset() }}
         aria-label="Toggle AI Chat"
-        onClick={timeline.toggleAgentPanel}
+        onClick={props.chat.toggleAgentPanel}
       >
         AI Chat
       </Button>
@@ -66,70 +77,70 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         class="fixed left-24 z-40 bg-neutral-800 text-neutral-100 hover:bg-neutral-700"
         style={{ bottom: floatingButtonOffset() }}
         aria-label="Toggle Room Chat"
-        onClick={timeline.toggleSharedChat}
+        onClick={props.chat.toggleSharedChat}
       >
         Room Chat
       </Button>
 
-      <Show when={timeline.agentPanelOpen}>
+      <Show when={props.chat.agentPanelOpen}>
         <Suspense fallback={null}>
           <AgentChat
-            isOpen={timeline.agentPanelOpen}
-            onClose={timeline.closeAgentPanel}
-            roomId={timeline.roomId}
-            userId={timeline.userId}
-            bpm={timeline.bpm}
-            bottomOffsetPx={timeline.bottomOffsetPx}
-            onApplyMixOps={timeline.applyAgentMixOps}
+            isOpen={props.chat.agentPanelOpen}
+            onClose={props.chat.closeAgentPanel}
+            roomId={props.chat.roomId}
+            userId={props.chat.userId}
+            bpm={props.chat.bpm}
+            bottomOffsetPx={props.chat.bottomOffsetPx}
+            onApplyMixOps={props.chat.applyAgentMixOps}
           />
         </Suspense>
       </Show>
 
-      <Show when={timeline.sharedChatOpen}>
+      <Show when={props.chat.sharedChatOpen}>
         <Suspense fallback={null}>
           <SharedChat
-            isOpen={timeline.sharedChatOpen}
-            onClose={timeline.closeSharedChat}
-            roomId={timeline.roomId}
-            userId={timeline.userId}
-            bottomOffsetPx={timeline.bottomOffsetPx}
+            isOpen={props.chat.sharedChatOpen}
+            onClose={props.chat.closeSharedChat}
+            roomId={props.chat.roomId}
+            userId={props.chat.userId}
+            bottomOffsetPx={props.chat.bottomOffsetPx}
           />
         </Suspense>
       </Show>
 
       <Suspense fallback={null}>
         <EffectsPanel
-          isOpen={timeline.bottomFXOpen}
-          selectedFXTarget={timeline.selectedFXTarget}
-          tracks={timeline.tracks}
-          onClose={timeline.closeEffects}
-          onOpen={timeline.openEffects}
-          audioEngine={props.audioEngine}
-          roomId={timeline.roomId}
-          userId={timeline.userId}
-          canWriteTrackRouting={timeline.canWriteTrackRouting}
-          grantClipWrite={timeline.grantClipWrite}
-          playheadSec={timeline.playheadSec}
-          onTrackSendsChange={timeline.trackSendsChange}
-          onTrackOutputTargetChange={timeline.trackOutputTargetChange}
-          onSelectClip={timeline.selectClip}
-          onEffectParamsCommitted={timeline.effectParamsCommitted}
+          isOpen={props.effectsPanel.isOpen}
+          selectedFXTarget={props.effectsPanel.selectedFXTarget}
+          tracks={props.effectsPanel.tracks}
+          onClose={props.effectsPanel.onClose}
+          onOpen={props.effectsPanel.onOpen}
+          audioEngine={props.effectsPanel.audioEngine}
+          roomId={props.effectsPanel.roomId}
+          userId={props.effectsPanel.userId}
+          canWriteTrackRouting={props.effectsPanel.canWriteTrackRouting}
+          grantClipWrite={props.effectsPanel.grantClipWrite}
+          playheadSec={props.effectsPanel.playheadSec}
+          onTrackSendsChange={props.effectsPanel.onTrackSendsChange}
+          onTrackOutputTargetChange={props.effectsPanel.onTrackOutputTargetChange}
+          onSelectClip={props.effectsPanel.onSelectClip}
+          onEffectParamsCommitted={props.effectsPanel.onEffectParamsCommitted}
         />
       </Suspense>
 
-      <Show when={timeline.exportOpen}>
+      <Show when={props.exportDialog.isOpen}>
         <Suspense fallback={null}>
           <ExportDialog
-            isOpen={timeline.exportOpen}
-            onClose={timeline.closeExport}
-            tracks={timeline.tracks}
-            bpm={timeline.bpm}
-            loopEnabled={timeline.loopEnabled}
-            loopStartSec={timeline.loopStartSec}
-            loopEndSec={timeline.loopEndSec}
-            roomId={timeline.roomId}
-            userId={timeline.userId}
-            ensureClipBuffer={props.ensureClipBuffer}
+            isOpen={props.exportDialog.isOpen}
+            onClose={props.exportDialog.onClose}
+            tracks={props.exportDialog.tracks}
+            bpm={props.exportDialog.bpm}
+            loopEnabled={props.exportDialog.loopEnabled}
+            loopStartSec={props.exportDialog.loopStartSec}
+            loopEndSec={props.exportDialog.loopEndSec}
+            roomId={props.exportDialog.roomId}
+            userId={props.exportDialog.userId}
+            ensureClipBuffer={props.exportDialog.ensureClipBuffer}
           />
         </Suspense>
       </Show>

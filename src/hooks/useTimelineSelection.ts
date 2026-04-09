@@ -1,20 +1,18 @@
-import { createSignal, type Accessor, type Setter } from 'solid-js'
+import { createSignal, type Accessor } from 'solid-js'
 
-import { selectTrackTarget } from '~/lib/timeline-selection'
 import { PPS, RULER_HEIGHT, LANE_HEIGHT } from '~/lib/timeline-utils'
 import type { Track } from '~/types/timeline'
 
-export type TimelineSelectionOptions = {
+import type { TimelineSelectionController } from './useTimelineSelectionState'
+
+type TimelineSelectionOptions = {
   tracks: Accessor<Track[]>
-  setSelectedTrackId: Setter<string>
-  setSelectedClip: Setter<{ trackId: string; clipId: string } | null>
-  setSelectedClipIds: Setter<Set<string>>
-  setSelectedFXTarget: Setter<string>
+  selection: TimelineSelectionController
   startScrub: (clientX: number) => void
   stopScrub: () => void
 }
 
-export type TimelineSelection = {
+type TimelineSelection = {
   marqueeRect: Accessor<{ x: number; y: number; width: number; height: number } | null>
   onLaneMouseDown: (event: MouseEvent, scrollEl: HTMLDivElement | undefined) => void
   onLaneDragUp: () => void
@@ -23,10 +21,7 @@ export type TimelineSelection = {
 export function useTimelineSelection(options: TimelineSelectionOptions): TimelineSelection {
   const {
     tracks,
-    setSelectedTrackId,
-    setSelectedClip,
-    setSelectedClipIds,
-    setSelectedFXTarget,
+    selection,
     startScrub,
     stopScrub,
   } = options
@@ -54,8 +49,7 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
     )
     const id = ts[trackIdx]?.id
     if (id) {
-      selectTrackTarget(
-        { setSelectedTrackId, setSelectedClip, setSelectedClipIds, setSelectedFXTarget },
+      selection.selectTrackTarget(
         id,
         event.shiftKey ? { clearPrimaryClip: true } : { clearClipSelection: true },
       )
@@ -128,13 +122,13 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
     }
 
     if (marqueeAdditive) {
-      setSelectedClipIds(prev => {
-        const next = new Set<string>(prev)
+      selection.setSelectedClipIds((previous) => {
+        const next = new Set<string>(previous)
         for (const id of selected) next.add(id)
         return next
       })
     } else {
-      setSelectedClipIds(selected)
+      selection.setSelectedClipIds(selected)
     }
   }
 

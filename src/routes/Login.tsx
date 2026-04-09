@@ -1,6 +1,7 @@
 import { type Component, Show, createSignal } from 'solid-js';
-import { Link, createFileRoute } from '@tanstack/solid-router';
+import { createFileRoute } from '@tanstack/solid-router';
 import { authClient } from '~/lib/auth-client';
+import { normalizeAppRedirect, readAuthRedirectSearch } from '~/lib/auth-redirect';
 import { LoginMethodButton } from '~/components/LoginMethodButton';
 import { useSessionQuery } from '~/lib/session';
 import { Button } from '~/components/ui/button';
@@ -9,14 +10,16 @@ import Icon from '~/components/ui/Icon';
 
 const Login: Component = () => {
   const session = useSessionQuery();
+  const search = Route.useSearch();
   const [loadingGoogle, setLoadingGoogle] = createSignal(false);
+  const redirectTarget = () => normalizeAppRedirect(search().redirect);
 
   async function signInWithGoogle() {
     try {
       setLoadingGoogle(true);
       await authClient.signIn.social({
         provider: 'google',
-        callbackURL: '/',
+        callbackURL: redirectTarget(),
         // errorCallbackURL: '/login', // optional: land back here on error
       });
       // Note: The above triggers a redirect flow. No further action required here.
@@ -61,8 +64,13 @@ const Login: Component = () => {
               <div class="font-medium">{session.data?.user?.email}</div>
             </div>
             <div class="flex gap-2">
-              <Button class="inline-flex items-center justify-center rounded-md bg-neutral-800 px-4 py-2 hover:bg-neutral-700">
-                <Link to="/">Go to app</Link>
+              <Button
+                class="inline-flex items-center justify-center rounded-md bg-neutral-800 px-4 py-2 hover:bg-neutral-700"
+                onClick={() => {
+                  window.location.assign(redirectTarget())
+                }}
+              >
+                Go to app
               </Button>
               <Button onClick={signOut} class="inline-flex items-center justify-center rounded-md border border-neutral-700 px-4 py-2 hover:bg-neutral-800">
                 Sign out
@@ -76,5 +84,6 @@ const Login: Component = () => {
 };
 
 export const Route = createFileRoute('/Login')({
+  validateSearch: readAuthRedirectSearch,
   component: Login,
 });

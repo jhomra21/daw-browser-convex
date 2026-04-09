@@ -4,23 +4,24 @@ import { drawWaveformPeaks } from '~/lib/audio-peaks/render-waveform'
 import { getWaveformSlice } from '~/lib/audio-peaks/select-waveform-window'
 import { LANE_HEIGHT, PPS } from '~/lib/timeline-utils'
 import { cn } from '~/lib/utils'
-import type { Clip } from '~/types/timeline'
+import type { Clip, Track } from '~/types/timeline'
 
 type ClipComponentProps = {
   clip: Clip
-  trackId: string
+  trackId: Track['id']
   isSelected: boolean
-  onPointerDown: (trackId: string, clipId: string, e: PointerEvent) => void
-  onClick: (trackId: string, clipId: string, e: MouseEvent) => void
-  onResizeStart: (trackId: string, clipId: string, edge: 'left' | 'right', e: MouseEvent) => void
-  onDblClick?: (trackId: string, clipId: string, e: MouseEvent) => void
+  onPointerDown: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
+  onClick: (trackId: Track['id'], clipId: string, e: MouseEvent) => void
+  onResizeStart: (trackId: Track['id'], clipId: string, edge: 'left' | 'right', e: MouseEvent) => void
+  onDblClick?: (trackId: Track['id'], clipId: string, e: MouseEvent) => void
   bpm: number
 }
 
+// these values center waveform in clips container
 const MIN_CLIP_PX = 6
 const WAVEFORM_PAD_Y = 6
 const AUDIO_WAVEFORM_BOX_H = 34
-const AUDIO_WAVEFORM_TOP_PX = 28
+const AUDIO_WAVEFORM_TOP_PX = 8
 
 type AudioWaveformLayout = {
   sourceDurationSec: number

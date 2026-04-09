@@ -1,28 +1,26 @@
-import { type Accessor, type Setter } from 'solid-js'
+import type { Accessor } from 'solid-js'
 
 import { persistClipTiming } from '~/lib/clip-mutations'
 import { buildClipTimingHistoryEntry } from '~/lib/undo/builders'
-import { selectPrimaryClip } from '~/lib/timeline-selection'
 import { PPS, quantizeSecToGrid } from '~/lib/timeline-utils'
-import type { Track, SelectedClip } from '~/types/timeline'
-import type { AudioEngine } from '~/lib/audio-engine'
+import type { Track } from '~/types/timeline'
+
+import type { TimelineSelectionController } from './useTimelineSelectionState'
 
 const MIN_CLIP_SEC = 0.05
 
 type ResizeState = {
-  trackId: string
+  trackId: Track['id']
   clipId: string
   edge: 'left' | 'right'
 }
 
 type ClipResizeOptions = {
   tracks: Accessor<Track[]>
-  setTracks: Setter<Track[]>
+  setDraftClipTiming: (clipId: string, patch: { startSec?: number; duration?: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number } | null) => void
+  commitClipTiming: (clipId: string, patch: { startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number }) => void
   canWriteClip: (clipId: string) => boolean
-  setSelectedTrackId: Setter<string>
-  setSelectedClip: Setter<SelectedClip>
-  setSelectedClipIds: Setter<Set<string>>
-  setSelectedFXTarget: Setter<string>
+  selection: TimelineSelectionController
   convexClient: typeof import('~/lib/convex').convexClient
   convexApi: typeof import('~/lib/convex').convexApi
   userId: Accessor<string | undefined>
@@ -30,17 +28,13 @@ type ClipResizeOptions = {
   bpm: Accessor<number>
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
-  audioEngine: AudioEngine
-  isPlaying: Accessor<boolean>
-  playheadSec: Accessor<number>
-  loopEnabled?: Accessor<boolean>
-  loopEndSec?: Accessor<number>
-  roomId?: Accessor<string | undefined>
-  historyPush?: (entry: import('~/lib/undo/types').HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
+  rescheduleChangedClips: (clipIds: string[]) => void
+  roomId: Accessor<string | undefined>
+  historyPush: (entry: import('~/lib/undo/types').HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
 }
 
-export type ClipResizeHandlers = {
-  onClipResizeStart: (trackId: string, clipId: string, edge: 'left' | 'right', event: MouseEvent) => void
+type ClipResizeHandlers = {
+  onClipResizeStart: (trackId: Track['id'], clipId: string, edge: 'left' | 'right', event: MouseEvent) => void
   onResizeMouseMove: (event: MouseEvent) => void
   onResizeMouseUp: () => void
 }
@@ -48,19 +42,14 @@ export type ClipResizeHandlers = {
 export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
   const {
     tracks,
-    setTracks,
+    setDraftClipTiming,
+    commitClipTiming,
     canWriteClip,
-    setSelectedTrackId,
-    setSelectedClip,
-    setSelectedClipIds,
-    setSelectedFXTarget,
+    selection,
     convexClient,
     convexApi,
     userId,
     getScrollElement,
-    audioEngine,
-    isPlaying,
-    playheadSec,
   } = options
 
   let clipResizing = false
@@ -73,7 +62,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
   let resizeOrigBufferOffset = 0
   let resizeOrigMidiOffsetBeats = 0
 
-  const onClipResizeStart = (trackId: string, clipId: string, edge: 'left' | 'right', event: MouseEvent) => {
+  const onClipResizeStart = (trackId: Track['id'], clipId: string, edge: 'left' | 'right', event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
     const track = tracks().find(t => t.id === trackId)
@@ -91,7 +80,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     resizeOrigBufferOffset = clip.bufferOffsetSec ?? 0
     resizeOrigMidiOffsetBeats = clip.midiOffsetBeats ?? 0
 
-    selectPrimaryClip({ setSelectedTrackId, setSelectedClip, setSelectedClipIds, setSelectedFXTarget }, { trackId, clipId })
+    selection.selectPrimaryClip({ trackId, clipId })
 
     window.addEventListener('mousemove', onResizeMouseMove)
     window.addEventListener('mouseup', onResizeMouseUp)
@@ -158,15 +147,11 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         const deltaBeats = deltaSec / spb
         const base = Math.max(0, resizeOrigMidiOffsetBeats)
         const nextMidiOffset = Math.max(0, base + deltaBeats)
-        setTracks(ts => ts.map(t => t.id !== track.id ? t : ({
-          ...t,
-          clips: t.clips.map(c => c.id !== clip.id ? c : ({
-            ...c,
-            startSec: newStart,
-            duration: newDuration,
-            midiOffsetBeats: nextMidiOffset,
-          }))
-        })))
+        setDraftClipTiming(clip.id, {
+          startSec: newStart,
+          duration: newDuration,
+          midiOffsetBeats: nextMidiOffset,
+        })
       } else {
         const windowDuration = resizeFixedRight - resizeFixedLeft
         const fallbackBufferDur = Math.max(0, windowDuration - resizeOrigPad)
@@ -186,16 +171,12 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           const leftover = supply - reduceBuf
           nextLeftPad = Math.max(0, nextLeftPad + Math.max(0, leftover))
         }
-        setTracks(ts => ts.map(t => t.id !== track.id ? t : ({
-          ...t,
-          clips: t.clips.map(c => c.id !== clip.id ? c : ({
-            ...c,
-            startSec: newStart,
-            duration: newDuration,
-            leftPadSec: nextLeftPad,
-            bufferOffsetSec: nextBufOffset,
-          }))
-        })))
+        setDraftClipTiming(clip.id, {
+          startSec: newStart,
+          duration: newDuration,
+          leftPadSec: nextLeftPad,
+          bufferOffsetSec: nextBufOffset,
+        })
       }
     } else {
       const left = resizeFixedLeft
@@ -234,10 +215,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
 
       const newDuration = Math.max(MIN_CLIP_SEC, newRight - left)
 
-      setTracks(ts => ts.map(t => t.id !== track.id ? t : ({
-        ...t,
-        clips: t.clips.map(c => c.id !== clip.id ? c : ({ ...c, duration: newDuration }))
-      })))
+      setDraftClipTiming(clip.id, { duration: newDuration })
     }
   }
 
@@ -260,6 +238,14 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     window.removeEventListener('mouseup', onResizeMouseUp)
 
     if (track && clip && active) {
+      setDraftClipTiming(clip.id, null)
+      commitClipTiming(clip.id, {
+        startSec: clip.startSec,
+        duration: clip.duration,
+        leftPadSec: clip.leftPadSec,
+        bufferOffsetSec: clip.bufferOffsetSec,
+        midiOffsetBeats: clip.midiOffsetBeats,
+      })
       const uid = userId()
       if (uid) {
         void persistClipTiming(convexClient, convexApi, uid, {
@@ -272,8 +258,8 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         })
       }
       try {
-        const rid = options.roomId?.()
-        if (rid && typeof options.historyPush === 'function') {
+        const rid = options.roomId()
+        if (rid) {
           const from = {
             startSec: resizeOrigStart,
             duration: resizeOrigDuration,
@@ -299,16 +285,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           }
         }
       } catch {}
-      if (isPlaying() && audioEngine) {
-        queueMicrotask(() => {
-          try {
-            const enabled = options.loopEnabled?.() ?? false
-            const end = options.loopEndSec?.()
-            const lenOk = enabled && typeof end === 'number'
-            audioEngine.rescheduleClipsAtPlayhead(tracks(), playheadSec(), [clip.id], lenOk ? { endLimitSec: end } : undefined)
-          } catch {}
-        })
-      }
+      queueMicrotask(() => options.rescheduleChangedClips([clip.id]))
     }
   }
 

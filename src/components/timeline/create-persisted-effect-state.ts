@@ -6,10 +6,10 @@ import {
   type Accessor,
 } from 'solid-js'
 
-type PersistedEffectStateOptions<TParams> = {
+type PersistedEffectStateOptions<TRow, TParams> = {
   targetId: Accessor<string | undefined>
-  row: Accessor<unknown>
-  readQueryParams: (row: any) => TParams | undefined
+  row: Accessor<TRow>
+  readQueryParams: (row: TRow) => TParams | undefined
   readVisibleParams?: (targetId: string) => TParams | undefined
   createInitialParams: (targetId: string) => TParams | undefined
   serializeParams: (params: TParams) => string
@@ -17,7 +17,7 @@ type PersistedEffectStateOptions<TParams> = {
   clearFromEngine?: (targetId: string) => void
   persistParams: (targetId: string, params: TParams) => void | Promise<unknown>
   onParamsCommitted?: (targetId: string, previous: TParams | undefined, next: TParams) => void
-  onQueryRow?: (targetId: string, row: any) => void
+  onQueryRow?: (targetId: string, row: TRow) => void
   debounceMs?: number
   remoteOverwriteAfterMs?: number
 }
@@ -26,21 +26,31 @@ type PersistedEffectState<TParams> = {
   add: () => void
   flushPending: () => void
   params: Accessor<TParams | undefined>
+  readDraftForTarget: (targetId: string) => TParams | undefined
   readForTarget: (targetId: string) => TParams | undefined
   reset: () => void
+  syncRemoteForTarget: (targetId: string, params: TParams | undefined) => void
   update: (updater: (prev: TParams) => TParams) => void
   updateForTarget: (targetId: string, updater: (prev: TParams) => TParams) => void
 }
 
-export function createPersistedEffectState<TParams>(
-  options: PersistedEffectStateOptions<TParams>,
+export function createPersistedEffectState<TRow, TParams>(
+  options: PersistedEffectStateOptions<TRow, TParams>,
 ): PersistedEffectState<TParams> {
   const [remoteByTarget, setRemoteByTarget] = createSignal<Record<string, TParams | undefined>>({})
   const [draftByTarget, setDraftByTarget] = createSignal<Record<string, TParams | undefined>>({})
-  const saveTimers = new Map<string, number>()
+  const saveTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const lastLocalEdit = new Map<string, number>()
+  const persistAttemptByTarget = new Map<string, number>()
 
   function clearDraft(targetId: string) {
+    const timer = saveTimers.get(targetId)
+    if (timer) {
+      clearTimeout(timer)
+      saveTimers.delete(targetId)
+    }
+    persistAttemptByTarget.delete(targetId)
+    lastLocalEdit.delete(targetId)
     setDraftByTarget((prev) => {
       if (!(targetId in prev)) return prev
       const next = { ...prev }
@@ -62,19 +72,36 @@ export function createPersistedEffectState<TParams>(
     saveTimers.delete(targetId)
     const params = draftByTarget()[targetId]
     if (!params) return
-    void Promise.resolve(options.persistParams(targetId, params))
+    persistNow(targetId, params)
+  }
+
+  function persistNow(targetId: string, params: TParams) {
+    const attempt = (persistAttemptByTarget.get(targetId) ?? 0) + 1
+    persistAttemptByTarget.set(targetId, attempt)
+    const serialized = options.serializeParams(params)
+    void Promise.resolve()
+      .then(() => options.persistParams(targetId, params))
+      .catch(() => {
+      if (persistAttemptByTarget.get(targetId) !== attempt) return
+      const current = draftByTarget()[targetId]
+      if (!current) return
+      if (options.serializeParams(current) !== serialized) return
+      clearDraft(targetId)
+      })
   }
 
   function persistOrSchedule(targetId: string, params: TParams) {
     const debounceMs = options.debounceMs ?? 0
     if (debounceMs <= 0) {
-      void Promise.resolve(options.persistParams(targetId, params))
+      persistNow(targetId, params)
       return
     }
 
     const previousTimer = saveTimers.get(targetId)
     if (previousTimer) clearTimeout(previousTimer)
-    saveTimers.set(targetId, window.setTimeout(() => flushTarget(targetId), debounceMs))
+    // Batch quick effect tweaks into one persistence write and cancel any
+    // leftover timers during cleanup.
+    saveTimers.set(targetId, setTimeout(() => flushTarget(targetId), debounceMs))
   }
 
   function applyUpdate(targetId: string, updater: (prev: TParams) => TParams) {
@@ -98,17 +125,11 @@ export function createPersistedEffectState<TParams>(
     return readCurrent(targetId)
   })
 
-  createEffect(() => {
-    const targetId = options.targetId()
-    if (!targetId) return
-
-    const row = options.row()
-    if (row === undefined) return
-
-    options.onQueryRow?.(targetId, row)
-
-    const nextParams = options.readQueryParams(row)
-    setRemoteByTarget((prev) => ({ ...prev, [targetId]: nextParams }))
+  function syncRemote(targetId: string, nextParams: TParams | undefined) {
+    setRemoteByTarget((prev) => {
+      if (prev[targetId] === nextParams) return prev
+      return { ...prev, [targetId]: nextParams }
+    })
 
     const draft = draftByTarget()[targetId]
     if (!draft) return
@@ -126,6 +147,18 @@ export function createPersistedEffectState<TParams>(
     if (Date.now() - lastEdit >= overwriteAfterMs) {
       clearDraft(targetId)
     }
+  }
+
+  createEffect(() => {
+    const targetId = options.targetId()
+    if (!targetId) return
+
+    const row = options.row()
+    if (row === undefined) return
+
+    options.onQueryRow?.(targetId, row)
+
+    syncRemote(targetId, options.readQueryParams(row))
   })
 
   createEffect(() => {
@@ -161,6 +194,7 @@ export function createPersistedEffectState<TParams>(
       saveTimers.clear()
     },
     params,
+    readDraftForTarget: (targetId) => draftByTarget()[targetId],
     readForTarget: readCurrent,
     reset: () => {
       const targetId = options.targetId()
@@ -169,6 +203,7 @@ export function createPersistedEffectState<TParams>(
       if (!initial) return
       applyUpdate(targetId, () => initial)
     },
+    syncRemoteForTarget: syncRemote,
     update: (updater) => {
       const targetId = options.targetId()
       if (!targetId) return

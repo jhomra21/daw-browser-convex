@@ -2,11 +2,17 @@ import { buildClipHistorySnapshot } from '~/lib/clip-create'
 import type { Track, TrackRouting } from '~/types/timeline'
 
 import { buildTrackRoutingHistorySnapshot, getClipHistoryRef, getTrackHistoryRef } from './refs'
-import type { HistoryEntry, HistoryScope } from './types'
+import type {
+  EffectParamsCommitPayload,
+  EffectParamsHistoryEntry,
+  HistoryEntry,
+  HistoryScope,
+  TrackEffectSnapshot,
+} from './types'
 
 export function buildTrackCreateHistoryEntry(input: {
   roomId: string
-  trackId: string
+  trackId: Track['id']
   index: number
   kind?: 'audio' | 'instrument'
   channelRole?: Track['channelRole']
@@ -28,7 +34,7 @@ export function buildTrackDeleteHistoryEntry(input: {
   roomId: string
   track: Track
   tracks: Track[]
-  effects?: { eq?: any; reverb?: any; synth?: any; arp?: any }
+  effects?: TrackEffectSnapshot
 }): Extract<HistoryEntry, { type: 'track-delete' }> {
   const { roomId, track, tracks, effects } = input
   const trackRef = getTrackHistoryRef(track)
@@ -124,24 +130,82 @@ export function buildTrackRoutingHistoryEntry(input: {
   }
 }
 
-export function buildEffectParamsHistoryEntry(input: {
+type EffectParamsHistoryEntryInput = {
   roomId: string
-  effect: Extract<HistoryEntry, { type: 'effect-params' }>['data']['effect']
-  targetId: string
   tracks: Track[]
-  from: unknown
-  to: unknown
-}): Extract<HistoryEntry, { type: 'effect-params' }> {
-  const track = input.tracks.find((entry) => entry.id === input.targetId)
-  return {
-    type: 'effect-params',
-    roomId: input.roomId,
-    data: {
-      effect: input.effect,
-      trackRef: track ? getTrackHistoryRef(track) : undefined,
-      from: input.from,
-      to: input.to,
-    },
+  payload: EffectParamsCommitPayload
+}
+
+export function buildEffectParamsHistoryEntry(input: EffectParamsHistoryEntryInput): EffectParamsHistoryEntry {
+  const track = input.tracks.find((entry) => entry.id === input.payload.targetId)
+  const trackRef = track ? getTrackHistoryRef(track) : undefined
+  switch (input.payload.effect) {
+    case 'eq':
+      return {
+        type: 'effect-params',
+        roomId: input.roomId,
+        data: {
+          effect: input.payload.effect,
+          trackRef,
+          from: input.payload.from,
+          to: input.payload.to,
+        },
+      }
+    case 'reverb':
+      return {
+        type: 'effect-params',
+        roomId: input.roomId,
+        data: {
+          effect: input.payload.effect,
+          trackRef,
+          from: input.payload.from,
+          to: input.payload.to,
+        },
+      }
+    case 'synth':
+      return {
+        type: 'effect-params',
+        roomId: input.roomId,
+        data: {
+          effect: input.payload.effect,
+          trackRef,
+          from: input.payload.from,
+          to: input.payload.to,
+        },
+      }
+    case 'arp':
+      return {
+        type: 'effect-params',
+        roomId: input.roomId,
+        data: {
+          effect: input.payload.effect,
+          trackRef,
+          from: input.payload.from,
+          to: input.payload.to,
+        },
+      }
+    case 'master-eq':
+      return {
+        type: 'effect-params',
+        roomId: input.roomId,
+        data: {
+          effect: input.payload.effect,
+          trackRef,
+          from: input.payload.from,
+          to: input.payload.to,
+        },
+      }
+    case 'master-reverb':
+      return {
+        type: 'effect-params',
+        roomId: input.roomId,
+        data: {
+          effect: input.payload.effect,
+          trackRef,
+          from: input.payload.from,
+          to: input.payload.to,
+        },
+      }
   }
 }
 
@@ -170,8 +234,8 @@ export function buildClipsMoveHistoryEntry(input: {
   tracks: Track[]
   moves: Array<{
     clipId: string
-    from: { trackId: string; startSec: number }
-    to: { trackId: string; startSec: number }
+    from: { trackId: Track['id']; startSec: number }
+    to: { trackId: Track['id']; startSec: number }
   }>
 }): Extract<HistoryEntry, { type: 'clips-move' }> {
   const trackById = new Map(input.tracks.map((track) => [track.id, track]))

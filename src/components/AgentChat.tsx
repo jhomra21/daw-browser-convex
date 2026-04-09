@@ -6,6 +6,14 @@ import { cn } from '~/lib/utils'
 // Minimal message type for local chat UI
 type Msg = { role: 'user' | 'assistant'; content: string }
 
+const readTrackKind = (value: string | undefined): 'audio' | 'instrument' | undefined => {
+  return value === 'audio' || value === 'instrument' ? value : undefined
+}
+
+const readArpRate = (value: string | undefined): '1/4' | '1/8' | '1/16' | '1/32' | undefined => {
+  return value === '1/4' || value === '1/8' || value === '1/16' || value === '1/32' ? value : undefined
+}
+
 // Fallback: infer simple copy/move commands when model forgets JSON
 function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }): CommandsEnvelope | null {
   const text = textRaw.toLowerCase()
@@ -24,7 +32,7 @@ function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }):
   if (/\b(unmute|mute)\b/.test(text) && /\btrack\b|\btracks\b/.test(text)) {
     const nums = collectTrackNums()
     const value = !/\bunmute\b/.test(text)
-    const cmd: any = { type: 'setMute', value }
+    const cmd: Record<string, unknown> = { type: 'setMute', value }
     if (nums.length > 1) cmd.trackIndices = nums
     else if (nums.length === 1) cmd.trackIndex = nums[0]
     const env = { commands: [cmd] }
@@ -37,7 +45,7 @@ function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }):
     const nums = collectTrackNums()
     const value = !/\bunsolo\b/.test(text)
     const exclusive = /\bsolo\b\s+(only|just)\b/.test(text)
-    const cmd: any = { type: 'setSolo', value }
+    const cmd: Record<string, unknown> = { type: 'setSolo', value }
     if (exclusive && value) cmd.exclusive = true
     if (nums.length > 1) cmd.trackIndices = nums
     else if (nums.length === 1) cmd.trackIndex = nums[0]
@@ -89,7 +97,7 @@ function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }):
       const intervalMatch = text.match(/\bevery\s+(\d+(?:\.\d+)?)\s*(?:sec|second|seconds|s)\b|\bspac(?:ed|e)\s*(?:by\s*)?(\d+(?:\.\d+)?)\s*(?:sec|second|seconds|s)\b/)
       const intervalSec = intervalMatch ? Number(intervalMatch[1] || intervalMatch[2]) : undefined
 
-      const cmd: any = { type: 'addSampleClips', sampleQuery }
+      const cmd: Record<string, unknown> = { type: 'addSampleClips', sampleQuery }
       if (nums.length === 1) cmd.trackIndex = nums[0]
       if (typeof startSec === 'number') cmd.startSec = startSec
       if (typeof count === 'number') cmd.count = count
@@ -108,7 +116,7 @@ function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }):
     if (createMatch) {
       // Determine kind if specified
       const kindMatch = text.match(/\b(audio|instrument)\b[\s\S]*?\btrack\b/)
-      const kind = (kindMatch ? kindMatch[1] : undefined) as 'audio' | 'instrument' | undefined
+      const kind = readTrackKind(kindMatch?.[1])
       // If also asks to copy into it from a specific track
       const copyIntoIt = text.match(/\b(copy|duplicate)\b[\s\S]*?from\s+track\s+(\d+)[\s\S]*?(?:into|to)\s+it\b/)
       if (copyIntoIt) {
@@ -118,12 +126,12 @@ function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }):
             { type: 'createTrack', kind },
             { type: 'copyClips', fromTrackIndex: from, keepRelativePositions: true }, // toTrackIndex omitted -> defaults to last
           ],
-        } as any
+        }
         const ok = CommandsEnvelopeSchema.safeParse(env)
         return ok.success ? ok.data : null
       }
       // Only create track
-      const env = { commands: [ { type: 'createTrack', kind } ] } as any
+      const env = { commands: [{ type: 'createTrack', kind }] }
       const ok = CommandsEnvelopeSchema.safeParse(env)
       if (ok.success) return ok.data
     }
@@ -133,7 +141,7 @@ function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }):
     const copyIntoIt = text.match(/\b(copy|duplicate)\b[\s\S]*?from\s+track\s+(\d+)[\s\S]*?(?:into|to)\s+it\b/)
     if (copyIntoIt) {
       const from = Number(copyIntoIt[2])
-      const env = { commands: [ { type: 'copyClips', fromTrackIndex: from, keepRelativePositions: true } ] } as any
+      const env = { commands: [{ type: 'copyClips', fromTrackIndex: from, keepRelativePositions: true }] }
       const ok = CommandsEnvelopeSchema.safeParse(env)
       return ok.success ? ok.data : null
     }
@@ -145,7 +153,7 @@ function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }):
     const to = Number(m[3])
     const countMatch = text.match(/\b(\d+)\s+clips?\b/)
     const count = countMatch ? Number(countMatch[1]) : undefined
-    const env = { commands: [ { type: 'copyClips', fromTrackIndex: from, toTrackIndex: to, count, keepRelativePositions: true } ] } as any
+    const env = { commands: [{ type: 'copyClips', fromTrackIndex: from, toTrackIndex: to, count, keepRelativePositions: true }] }
     const ok = CommandsEnvelopeSchema.safeParse(env)
     return ok.success ? ok.data : null
   }
@@ -158,7 +166,7 @@ function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }):
     const count = countMatch ? Number(countMatch[1]) : undefined
     const startMatch = text.match(/(?:at|to|starting at)\s*(\d+(?:\.\d+)?)\s*s/)
     const newStartSec = startMatch ? Number(startMatch[1]) : undefined
-    const env = { commands: [ { type: 'moveClips', fromTrackIndex: from, toTrackIndex: to, count, newStartSec, keepRelativePositions: true } ] } as any
+    const env = { commands: [{ type: 'moveClips', fromTrackIndex: from, toTrackIndex: to, count, newStartSec, keepRelativePositions: true }] }
     const ok = CommandsEnvelopeSchema.safeParse(env)
     return ok.success ? ok.data : null
   }
@@ -166,7 +174,7 @@ function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }):
   let m2 = text.match(/\b(delete|remove|clear)\b[\s\S]*?\b(all|every)?\b[\s\S]*?clips?[\s\S]*?track\s+(\d+)/)
   if (m2) {
     const t = Number(m2[3])
-    const env = { commands: [ { type: 'removeMany', trackIndex: t, rangeStartSec: 0, rangeEndSec: 1e9 } ] } as any
+    const env = { commands: [{ type: 'removeMany', trackIndex: t, rangeStartSec: 0, rangeEndSec: 1e9 }] }
     const ok = CommandsEnvelopeSchema.safeParse(env)
     return ok.success ? ok.data : null
   }
@@ -178,7 +186,7 @@ function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }):
     const wantsArp = /\b(arp|arpeggiator)\b/.test(text)
     const wantsEq = /\b(eq|equalizer)\b/.test(text)
     const wantsReverb = /\breverb\b/.test(text)
-    const commands: any[] = []
+    const commands: Array<Record<string, unknown>> = []
     if (wantsArp) {
       commands.push({ type: 'setArpeggiatorParams', trackIndex: t, enabled: true, pattern: 'up', rate: '1/8', octaves: 1, gate: 0.8, hold: false })
     }
@@ -208,12 +216,14 @@ function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }):
     // Try to find a track number in this text; if absent, caller may retry on previous user msg
     const tMatch = text.match(/track\s+(\d+)/)
     const t = tMatch ? Number(tMatch[1]) : (opts?.guessTrack)
-    const commands: any[] = []
+    const commands: Array<Record<string, unknown>> = []
     // Arp rate like 1/16, 1/8, 1/4, 1/32
     const rateMatch = text.match(/\b(1\/(?:4|8|16|32))\b/)
     if (rateMatch && /\b(arp|arpeggiator)\b/.test(text) && t) {
-      const rate = rateMatch[1] as '1/4'|'1/8'|'1/16'|'1/32'
-      commands.push({ type: 'setArpeggiatorParams', trackIndex: t, enabled: true, pattern: 'up', rate, octaves: 1, gate: 0.8, hold: false })
+      const rate = readArpRate(rateMatch[1])
+      if (rate) {
+        commands.push({ type: 'setArpeggiatorParams', trackIndex: t, enabled: true, pattern: 'up', rate, octaves: 1, gate: 0.8, hold: false })
+      }
     }
     // Synth waves
     const waveMatch = text.match(/\b(sine|square|triangle|tri|saw|sawtooth)\b\s*(?:wave)?/)
@@ -262,7 +272,7 @@ type AgentChatProps = {
   bottomOffsetPx?: number
   bpm?: number
   userId?: string
-  onApplyMixOps?: (ops: Array<{ type: 'setMute' | 'setSolo'; indices: number[]; value: boolean; exclusive?: boolean }>) => void
+  onApplyMixOps?: (ops: Array<{ type: 'setMute' | 'setSolo'; indices: number[]; value: boolean; exclusive?: boolean; issuedAt: number }>) => void
 }
 
 const AgentChat: Component<AgentChatProps> = (props) => {
@@ -353,9 +363,11 @@ const AgentChat: Component<AgentChatProps> = (props) => {
     const uid = props.userId
     if (!open || !rid || !uid) return
     setLoaded(false)
+    setMessages([])
     let cancelled = false
     onCleanup(() => {
       cancelled = true
+      clearSaveHistoryTimer()
     })
     ;(async () => {
       try {
@@ -376,21 +388,26 @@ const AgentChat: Component<AgentChatProps> = (props) => {
   })
 
   // Debounced save of history whenever messages change
-  function scheduleSaveHistory() {
-    const rid = props.roomId
-    const uid = props.userId
-    if (!rid || !uid) return
+  function clearSaveHistoryTimer() {
     if (saveTimer) {
       clearTimeout(saveTimer)
       saveTimer = null
     }
+  }
+
+  function scheduleSaveHistory(nextMessages: Msg[]) {
+    const rid = props.roomId
+    const uid = props.userId
+    if (!rid || !uid) return
+    clearSaveHistoryTimer()
+    const messagesSnapshot = nextMessages.slice()
     saveTimer = window.setTimeout(() => {
       saveTimer = null
       try {
         void convexClient.mutation((convexApi as any).chat.setHistory, {
           roomId: rid,
           ownerUserId: uid,
-          messages: messages(),
+          messages: messagesSnapshot,
         } as any).catch(() => {})
       } catch {}
     }, 400)
@@ -404,7 +421,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
     const open = props.isOpen
     if (!open || !rid || !uid || !loaded()) return
     if (!Array.isArray(_ms) || _ms.length === 0) return
-    scheduleSaveHistory()
+    scheduleSaveHistory(_ms)
   })
 
   // Keep view pinned to latest messages by default, but don't hijack when user has scrolled up
@@ -427,7 +444,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
   })
 
   onCleanup(() => {
-    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+    clearSaveHistoryTimer()
   })
 
   function tryExtractCommands() {
@@ -529,6 +546,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
         effectiveCommands = effectiveCommands.filter((c: any) => c?.type !== 'setMute')
       }
 
+      const mixIssuedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
       const res = await fetch('/api/agent/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -546,16 +564,16 @@ const AgentChat: Component<AgentChatProps> = (props) => {
         // Apply local mix changes to UI immediately (works even when Sync Mix is off)
         try {
           const cmds = effectiveCommands as any[]
-          const mixOps: Array<{ type: 'setMute' | 'setSolo'; indices: number[]; value: boolean; exclusive?: boolean }> = []
+          const mixOps: Array<{ type: 'setMute' | 'setSolo'; indices: number[]; value: boolean; exclusive?: boolean; issuedAt: number }> = []
           for (let index = 0; index < results.length; index++) {
             const result = results[index]
             const command = cmds[index]
             if (result?.error || !command) continue
             const indices = Array.isArray(result?.appliedTrackIndices) ? result.appliedTrackIndices : []
             if (command?.type === 'setMute' && indices.length > 0) {
-              mixOps.push({ type: 'setMute', indices, value: !!command.value })
+              mixOps.push({ type: 'setMute', indices, value: !!command.value, issuedAt: mixIssuedAt })
             } else if (command?.type === 'setSolo' && indices.length > 0) {
-              mixOps.push({ type: 'setSolo', indices, value: !!command.value, exclusive: !!command.exclusive })
+              mixOps.push({ type: 'setSolo', indices, value: !!command.value, exclusive: !!command.exclusive, issuedAt: mixIssuedAt })
             }
           }
           if (mixOps.length) {

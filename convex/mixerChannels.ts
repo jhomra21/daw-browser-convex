@@ -41,10 +41,28 @@ export function isMixerLockStale(
   return !!lockedBy && lockedAt !== undefined && now - lockedAt > STALE_LOCK_MS;
 }
 
+export function normalizeMixerLockState(
+  lockedBy: string | undefined,
+  lockedAt: number | undefined,
+  now = Date.now(),
+) {
+  if (!lockedBy || lockedAt === undefined || isMixerLockStale(lockedBy, lockedAt, now)) {
+    return {
+      lockedBy: undefined,
+      lockedAt: undefined,
+      isLocked: false,
+    };
+  }
+
+  return {
+    lockedBy,
+    lockedAt,
+    isLocked: true,
+  };
+}
+
 function buildMixerChannelStateRecord(fields: MixerChannelStateOverrides = {}, now = Date.now()) {
-  const lockedAt = fields.lockedAt;
-  const lockedBy = fields.lockedBy;
-  const stale = isMixerLockStale(lockedBy, lockedAt, now);
+  const lockState = normalizeMixerLockState(fields.lockedBy, fields.lockedAt, now);
   let volume = fields.volume;
   if (volume === undefined) volume = 0.8;
   let channelRole = fields.channelRole;
@@ -55,8 +73,8 @@ function buildMixerChannelStateRecord(fields: MixerChannelStateOverrides = {}, n
     volume,
     muted: fields.muted,
     soloed: fields.soloed,
-    lockedBy: stale ? undefined : lockedBy,
-    lockedAt: stale ? undefined : lockedAt,
+    lockedBy: lockState.lockedBy,
+    lockedAt: lockState.lockedAt,
     channelRole,
     outputTargetId: fields.outputTargetId,
     sends,
@@ -120,14 +138,14 @@ function mergeTrackWithMixerState(
   if (channel.sends === undefined) {
     throw new Error(`Missing mixer channel sends for track ${String(track._id)}.`);
   }
-  const stale = isMixerLockStale(channel.lockedBy, channel.lockedAt, now);
+  const lockState = normalizeMixerLockState(channel.lockedBy, channel.lockedAt, now);
   return {
     ...track,
     volume: channel.volume,
     muted: channel.muted,
     soloed: channel.soloed,
-    lockedBy: stale ? undefined : channel.lockedBy,
-    lockedAt: stale ? undefined : channel.lockedAt,
+    lockedBy: lockState.lockedBy,
+    lockedAt: lockState.lockedAt,
     channelRole: channel.channelRole,
     outputTargetId: channel.outputTargetId,
     sends: channel.sends,

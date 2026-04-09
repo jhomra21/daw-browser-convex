@@ -8,11 +8,11 @@ type TrackLaneProps = {
   track: Track
   index: number
   selectedClipIds: Set<string>
-  onClipPointerDown: (trackId: string, clipId: string, e: PointerEvent) => void
-  onClipClick: (trackId: string, clipId: string, e: MouseEvent) => void
-  onClipResizeStart: (trackId: string, clipId: string, edge: 'left' | 'right', e: MouseEvent) => void
+  onClipPointerDown: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
+  onClipClick: (trackId: Track['id'], clipId: string, e: MouseEvent) => void
+  onClipResizeStart: (trackId: Track['id'], clipId: string, edge: 'left' | 'right', e: MouseEvent) => void
   isDropTarget?: boolean
-  onClipDblClick?: (trackId: string, clipId: string, e: MouseEvent) => void
+  onClipDblClick?: (trackId: Track['id'], clipId: string, e: MouseEvent) => void
   bpm: number
 }
 

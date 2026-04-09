@@ -61,8 +61,6 @@ app.on(['POST', 'GET'], '/api/auth/*', async (c) => {
   return auth.handler(c.req.raw);
 });
 
-app.get('/api/test', (c) => c.text('Hono!'))
-
 // Session endpoint to check current user
 app.get('/api/session', (c) => {
   const session = c.get('session');
@@ -342,9 +340,9 @@ app.get('/api/default-samples', async (c) => {
       const duration = Number(metadata?.durationSec)
       const sampleRate = Number(metadata?.sampleRate)
       const channelCount = Number(metadata?.channelCount)
-      if (!Number.isFinite(duration) || duration <= 0) continue
-      if (!Number.isFinite(sampleRate) || sampleRate <= 0) continue
-      if (!Number.isFinite(channelCount) || channelCount <= 0) continue
+      const hasMetadata = Number.isFinite(duration) && duration > 0
+        && Number.isFinite(sampleRate) && sampleRate > 0
+        && Number.isFinite(channelCount) && channelCount > 0
       const rawName = key.slice(prefix.length)
       let decodedName = rawName || key
       try {
@@ -357,12 +355,14 @@ app.get('/api/default-samples', async (c) => {
         sourceKind: 'url',
         name: decodedName,
         url,
-        duration,
-        source: {
-          durationSec: duration,
-          sampleRate,
-          channelCount,
-        },
+        duration: hasMetadata ? duration : undefined,
+        source: hasMetadata
+          ? {
+              durationSec: duration,
+              sampleRate,
+              channelCount,
+            }
+          : undefined,
         sizeBytes: typeof obj.size === 'number' ? obj.size : undefined,
       })
     }

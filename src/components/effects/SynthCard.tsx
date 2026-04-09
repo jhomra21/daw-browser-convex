@@ -6,7 +6,7 @@ import {
 } from '~/components/effects/synth-card-bounds'
 import type { SynthParams } from '~/lib/effects/params'
 
-export type SynthCardProps = {
+type SynthCardProps = {
   params: SynthParams
   onChange: (updates: Partial<SynthParams>) => void
   onReset?: () => void

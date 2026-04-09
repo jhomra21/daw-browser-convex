@@ -1,6 +1,6 @@
 import type { ArpParams, EqParamsLite, ReverbParamsLite, SynthParamsInput } from '~/lib/effects/params'
 import type { MixerChannel } from '~/lib/mixer/channels'
-import type { TrackSend } from '~/types/timeline'
+import type { Track, TrackSend } from '~/types/timeline'
 
 export type MixerTrackFx = {
   eq?: EqParamsLite
@@ -22,7 +22,7 @@ export type ResolvedMixerChannel = {
   channel: MixerChannel
   gain: number
   outputGain: number
-  outputTargetId?: string
+  outputTargetId?: Track['id']
   sends: ResolvedMixerSend[]
   fx?: MixerTrackFx
 }

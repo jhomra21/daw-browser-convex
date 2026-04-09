@@ -3,15 +3,15 @@ import type { Track, TrackChannelRole, TrackSend } from '~/types/timeline'
 export type MixerChannelRole = TrackChannelRole | 'master'
 
 export type MixerChannel = {
-  id: string
-  sourceTrackId?: string
+  id: Track['id']
+  sourceTrackId?: Track['id']
   name: string
   role: MixerChannelRole
   volume: number
   muted: boolean
   soloed: boolean
   sends: TrackSend[]
-  outputTargetId?: string
+  outputTargetId?: Track['id']
   kind?: 'audio' | 'instrument'
 }
 
@@ -20,7 +20,7 @@ export function getMixerChannelRole(channel: Pick<MixerChannel, 'role'> | null |
   return 'track'
 }
 
-export function createMixerChannel(track: Track): MixerChannel {
+function createMixerChannel(track: Track): MixerChannel {
   const role: MixerChannelRole = track.channelRole === 'return' || track.channelRole === 'group' ? track.channelRole : 'track'
   return {
     id: track.id,

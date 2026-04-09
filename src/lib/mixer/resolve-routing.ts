@@ -2,10 +2,11 @@ import type { MixerChannel } from '~/lib/mixer/channels'
 import { getMixerChannelRole } from '~/lib/mixer/channels'
 import { normalizeTrackRouting } from '~/lib/track-routing-core'
 import type { ResolveMixerGraphOptions, ResolvedMixerGraph, ResolvedMixerSend } from '~/lib/mixer/types'
+import type { Track } from '~/types/timeline'
 
 type ResolvedChannelRouting = {
   channel: MixerChannel
-  outputTargetId?: string
+  outputTargetId?: Track['id']
   sends: ResolvedMixerSend[]
 }
 
@@ -16,7 +17,7 @@ type SoloRoutingState = {
 
 function resolveChannelRouting(
   channel: MixerChannel,
-  routingTracks: Array<{ id: string; channelRole?: string }>,
+  routingTracks: Array<{ id: Track['id']; channelRole?: string }>,
 ): ResolvedChannelRouting {
   const normalized = normalizeTrackRouting({
     track: { id: channel.id, channelRole: channel.role },

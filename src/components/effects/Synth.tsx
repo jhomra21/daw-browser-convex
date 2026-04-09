@@ -7,11 +7,12 @@ import {
 import { cn } from '~/lib/utils'
 
 
-export type SynthProps = {
+type SynthProps = {
   params: SynthParams
   onChange: (updates: Partial<SynthParams>) => void
   onReset?: () => void
   onExpand?: () => void
+  disabled?: boolean
   variant?: 'compact' | 'expanded'
   class?: string
 }
@@ -42,12 +43,14 @@ export default function Synth(props: SynthProps) {
           <Show when={props.onExpand}>
             <button
               class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+              disabled={props.disabled}
               onClick={() => props.onExpand?.()}
             >Expand</button>
           </Show>
           <Show when={props.onReset}>
             <button
               class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+              disabled={props.disabled}
               onClick={() => props.onReset?.()}
             >Reset</button>
           </Show>
@@ -70,6 +73,7 @@ export default function Synth(props: SynthProps) {
                       : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
                   )}
                   onClick={() => props.onChange({ wave1: wf.value })}
+                  disabled={props.disabled}
                   title={wf.label}
                 >
                   <span class="font-mono text-sm">{wf.icon}</span>
@@ -95,6 +99,7 @@ export default function Synth(props: SynthProps) {
                       : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
                   )}
                   onClick={() => props.onChange({ wave2: wf.value })}
+                  disabled={props.disabled}
                   title={wf.label}
                 >
                   <span class="font-mono text-sm">{wf.icon}</span>
@@ -124,6 +129,7 @@ export default function Synth(props: SynthProps) {
             label=""
             showValue={false}
             onValueChange={(v) => props.onChange({ gain: Math.round(clamp(v, 0, 1.5) * 100) / 100 })}
+            disabled={props.disabled}
           />
           <div class="text-xs leading-none text-neutral-300 font-mono">{props.params.gain.toFixed(2)}</div>
         </div>
@@ -141,6 +147,7 @@ export default function Synth(props: SynthProps) {
             unit="ms"
             showValue={false}
             onValueChange={(v) => props.onChange({ attackMs: Math.round(clamp(v, 0, 200)) })}
+            disabled={props.disabled}
           />
           <div class="text-xs leading-none text-neutral-300 font-mono">{props.params.attackMs}ms</div>
         </div>
@@ -158,6 +165,7 @@ export default function Synth(props: SynthProps) {
             unit="ms"
             showValue={false}
             onValueChange={(v) => props.onChange({ releaseMs: Math.round(clamp(v, 0, 200)) })}
+            disabled={props.disabled}
           />
           <div class="text-xs leading-none text-neutral-300 font-mono">{props.params.releaseMs}ms</div>
         </div>

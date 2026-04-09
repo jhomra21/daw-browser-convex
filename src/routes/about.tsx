@@ -1,9 +1,11 @@
 import { createFileRoute, Link } from '@tanstack/solid-router'
 import type { JSX } from 'solid-js'
 import Icon from '~/components/ui/Icon'
+import { normalizeAppRedirect, readAuthRedirectSearch } from '~/lib/auth-redirect'
 import { useSessionQuery } from '~/lib/session'
 
 export const Route = createFileRoute('/about')({
+  validateSearch: readAuthRedirectSearch,
   head: () => ({
     meta: [
       { title: 'Browser DAW – Collaborative DAW powered by Convex, Better-Auth and Solid' },
@@ -64,6 +66,8 @@ function FeatureCard(props: {
 
 function About() {
   const session = useSessionQuery()
+  const search = Route.useSearch()
+  const redirectTarget = () => normalizeAppRedirect(search().redirect)
   return (
     <main class="about-page min-h-screen bg-gradient-to-b from-neutral-950 to-neutral-900 text-neutral-100">
       <section class="relative container mx-auto px-4 pt-20 pb-10 text-center">
@@ -81,11 +85,19 @@ function About() {
           </p>
           <div class="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
             {session.data ? (
-              <Link
-                to="/"
+              <a
+                href={redirectTarget()}
                 class="inline-flex items-center justify-center rounded-md border border-neutral-700/20 bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
               >
                 Go to app
+              </a>
+            ) : search().redirect ? (
+              <Link
+                to="/Login"
+                search={{ redirect: search().redirect }}
+                class="inline-flex items-center justify-center rounded-md border border-neutral-700/20 bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                Get started - Sign in
               </Link>
             ) : (
               <Link

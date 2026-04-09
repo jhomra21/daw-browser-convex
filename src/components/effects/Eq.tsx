@@ -9,7 +9,7 @@ import { cn } from '~/lib/utils'
 
 
 // ===== Component =====
-export type EqProps = {
+type EqProps = {
   bands: EqBandParams[]
   enabled: boolean
   onBandChange: (bandId: string, updates: Partial<EqBandParams>) => void

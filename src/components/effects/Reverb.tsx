@@ -6,7 +6,7 @@ import {
 import { cn } from '~/lib/utils'
 
 
-export type ReverbProps = {
+type ReverbProps = {
   params: ReverbParams
   onChange: (updates: Partial<ReverbParams>) => void
   onToggleEnabled?: (enabled: boolean) => void

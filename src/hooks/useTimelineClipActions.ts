@@ -1,29 +1,34 @@
+import type { FunctionReturnType } from 'convex/server'
 import { batch, type Accessor, type Setter } from 'solid-js'
 
-import { buildClipCreateSnapshot, createManyClips, pushClipCreateHistory, type BatchClipCreateItem } from '~/lib/clip-create'
+import { buildClipCreateSnapshot, buildCreatedClipSelection, createProjectedClips, pushClipCreateHistory, type BatchClipCreateItem } from '~/lib/clip-create'
+import { buildClipRemoveManyMutationInput } from '~/lib/clip-mutation-args'
+import { getTrackDeleteConflictMessage } from '~/lib/delete-conflict-messages'
+import { buildTrackEffectQueryArgs } from '~/lib/effect-track-args'
+import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { isClipCompatibleWithTrack } from '~/lib/track-routing'
-import { appendClipToSelection, selectClipGroup, selectMasterTarget, selectPrimaryClip, selectTrackTarget } from '~/lib/timeline-selection'
+import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
 import { calcNonOverlapStart, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import { buildClipDeleteHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Clip, SelectedClip, Track } from '~/types/timeline'
 
+import type { TimelineSelectionController } from './useTimelineSelectionState'
+
 type ConvexClientType = typeof import('~/lib/convex').convexClient
 
 type ConvexApiType = typeof import('~/lib/convex').convexApi
+type TrackDeleteResult = FunctionReturnType<ConvexApiType['tracks']['remove']>
 
 type TimelineClipActionsOptions = {
   tracks: Accessor<Track[]>
-  setTracks: Setter<Track[]>
+  insertLocalClip: (trackId: Track['id'], clip: Clip) => void
+  removeLocalClips: (clipIds: Iterable<string>) => void
+  removeLocalTrack: (trackId: Track['id']) => void
   canWriteClip: (clipId: string) => boolean
-  selectedTrackId: Accessor<string>
-  setSelectedTrackId: Setter<string>
-  selectedClipIds: Accessor<Set<string>>
-  setSelectedClipIds: Setter<Set<string>>
-  setSelectedClip: Setter<SelectedClip>
-  setSelectedFXTarget: Setter<string>
-  setPendingDeleteTrackId: Setter<string | null>
+  selection: TimelineSelectionController
+  setPendingDeleteTrackId: Setter<Track['id'] | null>
   setConfirmOpen: Setter<boolean>
   roomId: Accessor<string | undefined>
   userId: Accessor<string | undefined>
@@ -34,29 +39,24 @@ type TimelineClipActionsOptions = {
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
-  grantClipWrites?: (clipIds: Iterable<string>) => void
+  grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void
 }
 
 type TimelineClipActionsHandlers = {
-  onClipClick: (trackId: string, clipId: string, event: MouseEvent) => void
-  deleteSelectedClips: () => Promise<void>
+  onClipClick: (trackId: Track['id'], clipId: string, event: MouseEvent) => void
   duplicateSelectedClips: () => Promise<void>
-  performDeleteTrack: (trackId: string) => Promise<void>
-  requestDeleteSelectedTrack: () => void
+  performDeleteTrack: (trackId: Track['id']) => Promise<void>
   handleKeyboardAction: () => void
 }
 
 export function useTimelineClipActions(options: TimelineClipActionsOptions): TimelineClipActionsHandlers {
   const {
     tracks,
-    setTracks,
+    insertLocalClip,
+    removeLocalClips,
+    removeLocalTrack,
     canWriteClip,
-    selectedTrackId,
-    setSelectedTrackId,
-    selectedClipIds,
-    setSelectedClipIds,
-    setSelectedClip,
-    setSelectedFXTarget,
+    selection,
     setPendingDeleteTrackId,
     setConfirmOpen,
     roomId,
@@ -71,38 +71,52 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     grantClipWrites,
   } = options
 
-  const selectionSetters = {
-    setSelectedTrackId,
-    setSelectedClip,
-    setSelectedClipIds,
-    setSelectedFXTarget,
-  }
-
-  const onClipClick = (trackId: string, clipId: string, event: MouseEvent) => {
+  const onClipClick = (trackId: Track['id'], clipId: string, event: MouseEvent) => {
     event.stopPropagation()
     if (!event.shiftKey) {
-      selectPrimaryClip(selectionSetters, { trackId, clipId })
+      selection.selectPrimaryClip({ trackId, clipId })
       return
     }
-    appendClipToSelection(selectionSetters, { trackId, clipId })
+    selection.appendClipToSelection({ trackId, clipId })
   }
 
   const getWritableSelectedClipIds = (selectedIds: Set<string>) => new Set(
     Array.from(selectedIds).filter((clipId) => canWriteClip(clipId)),
   )
 
-  const showTrackDeleteFailure = (result: any) => {
+  const selectedTrackId = selection.selectedTrackId
+  const selectedClipIds = selection.selectedClipIds
+
+  const showTrackDeleteFailure = (result: TrackDeleteResult | null | undefined) => {
     if (result?.status === 'conflict') {
-      switch (result.reason) {
-        case 'foreign-clips':
-          window.alert('This track cannot be deleted yet because it still contains clips owned by another collaborator.')
-          return
-        case 'not-empty':
-          window.alert('This track cannot be deleted while it still contains clips.')
-          return
-      }
+      window.alert(getTrackDeleteConflictMessage(result.reason))
+      return
     }
     window.alert('This track could not be deleted.')
+  }
+
+  const queryTrackEffect = async <TRow>(read: () => Promise<TRow>): Promise<TRow | null> => {
+    try {
+      return await read()
+    } catch {
+      return null
+    }
+  }
+
+  const loadTrackDeleteEffects = async (trackId: Track['id']) => {
+    const [eqRow, rvRow, synthRow, arpRow] = await Promise.all([
+      queryTrackEffect(() => convexClient.query(convexApi.effects.getEqForTrack, buildTrackEffectQueryArgs(trackId))),
+      queryTrackEffect(() => convexClient.query(convexApi.effects.getReverbForTrack, buildTrackEffectQueryArgs(trackId))),
+      queryTrackEffect(() => convexClient.query(convexApi.effects.getSynthForTrack, buildTrackEffectQueryArgs(trackId))),
+      queryTrackEffect(() => convexClient.query(convexApi.effects.getArpeggiatorForTrack, buildTrackEffectQueryArgs(trackId))),
+    ])
+
+    return {
+      eq: eqRow?.params,
+      reverb: rvRow?.params,
+      synth: synthRow?.params,
+      arp: arpRow?.params,
+    }
   }
 
   const deleteSelectedClips = async () => {
@@ -115,10 +129,10 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     if (!uid) return
 
     const snapshot = tracks()
-    const result = await convexClient.mutation((convexApi as any).clips.removeMany, {
-      clipIds: Array.from(writableSelectedIds) as any,
-      userId: uid as any,
-    }) as any
+    const result = await convexClient.mutation(
+      convexApi.clips.removeMany,
+      buildClipRemoveManyMutationInput({ clipIds: Array.from(writableSelectedIds), userId: uid }),
+    )
     const removedIds = new Set<string>(
       Array.isArray(result?.removedClipIds)
         ? result.removedClipIds.map((clipId: unknown) => String(clipId))
@@ -127,34 +141,31 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     if (removedIds.size === 0) return
 
     const remainingSelectedIds = new Set(Array.from(selectedIds).filter((clipId) => !removedIds.has(clipId)))
-    const nextPrimary = (() => {
+    const nextPrimary: SelectedClip = (() => {
       if (remainingSelectedIds.size === 0) return null
       for (const track of snapshot) {
         const clip = track.clips.find((entry) => remainingSelectedIds.has(entry.id))
-        if (clip) return { trackId: track.id, clipId: clip.id } as SelectedClip
+        if (clip) return { trackId: track.id, clipId: clip.id }
       }
       return null
     })()
 
     try {
-      const rid = roomId() as any
+      const rid = roomId()
       if (rid && typeof historyPush === 'function') {
         const entry = buildClipDeleteHistoryEntry({ roomId: rid, tracks: snapshot, clipIds: removedIds })
         if (entry.data.items.length > 0) historyPush(entry)
       }
     } catch {}
 
-    setTracks(ts => ts.map(track => ({
-      ...track,
-      clips: track.clips.filter(clip => !removedIds.has(clip.id)),
-    })))
+    removeLocalClips(removedIds)
 
     batch(() => {
-      setSelectedClip(nextPrimary)
-      setSelectedClipIds(remainingSelectedIds)
+      selection.setSelectedClip(nextPrimary)
+      selection.setSelectedClipIds(remainingSelectedIds)
       if (nextPrimary) {
-        setSelectedTrackId(nextPrimary.trackId)
-        setSelectedFXTarget(nextPrimary.trackId)
+        selection.setSelectedTrackId(nextPrimary.trackId)
+        selection.setSelectedFXTarget(nextPrimary.trackId)
       }
     })
   }
@@ -166,7 +177,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     if (writableSelectedIds.size === 0) return
 
     const tsSnapshot = tracks()
-    const byTrack = new Map<string, Clip[]>()
+    const byTrack = new Map<Track['id'], Clip[]>()
     for (const track of tsSnapshot) {
       const selected = track.clips.filter(clip => writableSelectedIds.has(clip.id))
       if (selected.length > 0) byTrack.set(track.id, selected)
@@ -192,7 +203,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
           : calcNonOverlapStart(simulatedClips, null, desiredStart, clip.duration)
         pending.push({
           trackId,
-          buffer: clip.buffer ?? null,
+          buffer: clip.buffer ?? audioBufferCache.get(clip.id) ?? null,
           clip: {
             ...buildClipCreateSnapshot(clip, { preserveHistoryRef: false }),
             startSec: safeStart,
@@ -206,13 +217,15 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     const uid = userId()
     if (!rid || !uid || pending.length === 0) return
 
-    const created = await createManyClips({
+    const created = await createProjectedClips({
       roomId: rid,
       userId: uid,
       items: pending,
-      createMany: async (items) => await convexClient.mutation((convexApi as any).clips.createMany, { items }) as any as string[],
+      createMany: async (items) => await convexClient.mutation(convexApi.clips.createMany, { items }),
+      insertLocalClip,
       audioBufferCache,
       grantClipWrites,
+      grantScope: { roomId: rid, userId: uid },
     })
 
     for (const item of created) {
@@ -226,17 +239,13 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       })
     }
 
-    const last = created[created.length - 1]
-    if (last) {
-      selectClipGroup(selectionSetters, {
-        trackId: last.trackId,
-        clipIds: created.map(item => item.clipId),
-        primaryClipId: last.clipId,
-      })
+    const nextSelection = buildCreatedClipSelection(created)
+    if (nextSelection) {
+      selection.selectClipGroup(nextSelection)
     }
   }
 
-  const performDeleteTrack = async (trackId: string) => {
+  const performDeleteTrack = async (trackId: Track['id']) => {
     const uid = userId()
     if (!uid) return
 
@@ -246,26 +255,21 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
     let historyEntry: ReturnType<typeof buildTrackDeleteHistoryEntry> | null = null
     try {
-      const rid = roomId() as any
+      const rid = roomId()
       if (rid && typeof historyPush === 'function') {
-        let eqRow: any = null
-        let rvRow: any = null
-        let synthRow: any = null
-        let arpRow: any = null
-        try { eqRow = await convexClient.query((convexApi as any).effects.getEqForTrack, { trackId: trackId as any } as any) } catch {}
-        try { rvRow = await convexClient.query((convexApi as any).effects.getReverbForTrack, { trackId: trackId as any } as any) } catch {}
-        try { synthRow = await convexClient.query((convexApi as any).effects.getSynthForTrack, { trackId: trackId as any } as any) } catch {}
-        try { arpRow = await convexClient.query((convexApi as any).effects.getArpeggiatorForTrack, { trackId: trackId as any } as any) } catch {}
         historyEntry = buildTrackDeleteHistoryEntry({
           roomId: rid,
           track,
           tracks: snapshot,
-          effects: { eq: eqRow?.params, reverb: rvRow?.params, synth: synthRow?.params, arp: arpRow?.params },
+          effects: await loadTrackDeleteEffects(trackId),
         })
       }
     } catch {}
 
-    const result = await convexClient.mutation(convexApi.tracks.remove, { trackId: trackId as any, userId: uid as any }) as any
+    const result = await convexClient.mutation(
+      convexApi.tracks.remove,
+      buildTrackDeleteMutationInput({ trackId, userId: uid }),
+    )
     if (result?.status !== 'deleted') {
       showTrackDeleteFailure(result)
       return
@@ -275,20 +279,14 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       historyPush(historyEntry)
     }
 
-    setTracks(current => current
-      .filter(entry => entry.id !== trackId)
-      .map(entry => ({
-        ...entry,
-        outputTargetId: entry.outputTargetId === trackId ? undefined : entry.outputTargetId,
-        sends: entry.sends?.filter(send => send.targetId !== trackId),
-      })))
+    removeLocalTrack(trackId)
 
     const next = snapshot.filter(entry => entry.id !== trackId)
     batch(() => {
       if (next.length > 0) {
-        selectTrackTarget(selectionSetters, next[0].id, { clearClipSelection: true })
+        selection.selectTrackTarget(next[0].id, { clearClipSelection: true })
       } else {
-        selectMasterTarget(selectionSetters)
+        selection.selectMasterTarget()
       }
     })
   }
@@ -318,10 +316,8 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
   return {
     onClipClick,
-    deleteSelectedClips,
     duplicateSelectedClips,
     performDeleteTrack,
-    requestDeleteSelectedTrack,
     handleKeyboardAction,
   }
 }

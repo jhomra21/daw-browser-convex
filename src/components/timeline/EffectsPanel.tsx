@@ -2,9 +2,9 @@ import {
   type Component,
   Show,
   For,
+  createEffect,
   createSignal,
   createMemo,
-  createEffect,
   untrack,
   onCleanup,
 } from "solid-js";
@@ -26,21 +26,25 @@ import { Button } from "~/components/ui/button";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import {
   createEffectsPanelState,
+  EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
+  EFFECT_PANEL_SAVE_DEBOUNCE_MS,
 } from "~/components/timeline/create-effects-panel-state";
+import { buildTrackEffectMutationInput, buildTrackEffectQueryArgs } from "~/lib/effect-track-args";
 import {
+  type ArpeggiatorParams,
   createDefaultEqParams,
   createDefaultReverbParams,
-  type ArpeggiatorParams,
   normalizeSynthParams,
   type EqParams,
-  type EqParamsLite,
   type ReverbParams,
-  type ReverbParamsLite,
-  type SynthParamsInput,
 } from "~/lib/effects/params";
+import type { FunctionReturnType } from "convex/server";
 import type { AudioEngine, SpectrumFrame } from "~/lib/audio-engine";
 import { convexApi, convexClient, useConvexQuery } from "~/lib/convex";
-import { getTrackChannelRole } from "~/lib/track-routing";
+import { useEffectsPanelAudioSync } from "~/hooks/useEffectsPanelAudioSync";
+import { useEffectsPanelTarget } from "~/hooks/useEffectsPanelTarget";
+import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
+import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import { FX_PANEL_HEIGHT_PX } from "~/lib/timeline-utils";
 import type { Track, TrackSend } from "~/types/timeline";
 
@@ -53,58 +57,504 @@ type EffectsPanelProps = {
   audioEngine?: AudioEngine;
   roomId?: string;
   userId?: string;
-  canWriteTrackRouting?: (trackId: string) => boolean;
-  grantClipWrite?: (clipId: string) => void;
+  canWriteTrackRouting?: (trackId: Track["id"]) => boolean;
+  grantClipWrite?: OptimisticGrantWrite;
   // Timeline context
   playheadSec?: number;
-  onSelectClip?: (trackId: string, clipId: string, startSec: number) => void;
-  onTrackSendsChange?: (trackId: string, sends: TrackSend[]) => void;
-  onTrackOutputTargetChange?: (trackId: string, outputTargetId?: string) => void;
-  onEffectParamsCommitted?: (payload: { targetId: string; effect: 'eq'|'reverb'|'synth'|'arp'|'master-eq'|'master-reverb'; from: any; to: any }) => void;
+  onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
+  onTrackSendsChange?: (trackId: Track["id"], sends: TrackSend[]) => void;
+  onTrackOutputTargetChange?: (trackId: Track["id"], outputTargetId?: Track["id"]) => void;
+  onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>) => void;
+};
+
+type EffectKind = "eq" | "reverb";
+type InstrumentPanelState = ReturnType<typeof createEffectsPanelState>;
+type TrackEqRow = FunctionReturnType<typeof convexApi.effects.getEqForTrack>;
+type TrackReverbRow = FunctionReturnType<typeof convexApi.effects.getReverbForTrack>;
+
+type EffectsPanelRailProps = {
+  rail: {
+    isInstrumentTrack: boolean;
+    targetName: string;
+    onClose: () => void;
+    onAddMidiClip: () => Promise<void>;
+    canWrite: boolean;
+  };
+};
+
+const EffectsPanelRail: Component<EffectsPanelRailProps> = (props) => (
+  <div class="flex w-20 flex-col items-center gap-2 border-r border-neutral-800 px-2 py-2">
+    <Button
+      variant="outline"
+      size="sm"
+      class="w-full py-1 text-xs"
+      onClick={props.rail.onClose}
+    >
+      Hide
+    </Button>
+    <Show when={props.rail.isInstrumentTrack}>
+      <Button
+        variant="default"
+        size="sm"
+        class="w-full px-1 py-1 text-xs"
+        disabled={!props.rail.canWrite}
+        onClick={() => void props.rail.onAddMidiClip()}
+      >
+        + MIDI
+      </Button>
+    </Show>
+    <div class="flex flex-1 items-center justify-center">
+      <span
+        class="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-neutral-300"
+        style={{
+          transform: "rotate(-90deg)",
+          "white-space": "nowrap",
+        }}
+      >
+        {props.rail.targetName}
+      </span>
+    </div>
+  </div>
+);
+
+type EffectsPanelToolbarProps = {
+  toolbar: {
+    showAddArp: boolean;
+    showAddEq: boolean;
+    showAddReverb: boolean;
+    onAddArp: () => void;
+    onAddEq: () => void;
+    onAddReverb: () => void;
+    canWrite: boolean;
+  };
+};
+
+const EffectsPanelToolbar: Component<EffectsPanelToolbarProps> = (props) => (
+  <div class="flex min-h-7 flex-wrap items-center gap-1.5 border-b border-neutral-800/50 px-2 py-0.5">
+    <Show when={props.toolbar.showAddArp}>
+      <Button
+        variant="default"
+        size="sm"
+        class="h-6 px-2 py-0.5 text-xs"
+        disabled={!props.toolbar.canWrite}
+        onClick={props.toolbar.onAddArp}
+      >
+        + Arp
+      </Button>
+    </Show>
+    <Show when={props.toolbar.showAddEq}>
+      <Button
+        variant="default"
+        size="sm"
+        class="h-6 px-2 py-0.5 text-xs"
+        disabled={!props.toolbar.canWrite}
+        onClick={props.toolbar.onAddEq}
+      >
+        + EQ
+      </Button>
+    </Show>
+    <Show when={props.toolbar.showAddReverb}>
+      <Button
+        variant="default"
+        size="sm"
+        class="h-6 px-2 py-0.5 text-xs"
+        disabled={!props.toolbar.canWrite}
+        onClick={props.toolbar.onAddReverb}
+      >
+        + Reverb
+      </Button>
+    </Show>
+    <div class="ml-auto">
+      <DropdownMenu>
+        <DropdownMenuTrigger>
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-6 px-2 py-0.5 text-xs"
+            aria-label="Show keyboard shortcuts"
+          >
+            Shortcuts
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          class="bg-neutral-900 text-neutral-100"
+          style={{ width: "min(92vw, 22rem)" }}
+        >
+          <DropdownMenuLabel class="text-neutral-400">
+            Timeline
+          </DropdownMenuLabel>
+          <DropdownMenuItem disabled>
+            Play / Pause
+            <DropdownMenuShortcut>Space</DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            Delete selection or track
+            <DropdownMenuShortcut>
+              Del / Backspace
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            Duplicate clips
+            <DropdownMenuShortcut>
+              Ctrl/Cmd + D
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            Add Audio Track
+            <DropdownMenuShortcut>Shift + T</DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            Add Instrument Track
+            <DropdownMenuShortcut>
+              Ctrl/Cmd + Shift + T
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel class="text-neutral-400">
+            MIDI Editor (when keyboard enabled)
+          </DropdownMenuLabel>
+          <DropdownMenuItem disabled>
+            Note keys
+            <DropdownMenuShortcut>
+              A S D F G H J K L ;
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            Sharp keys
+            <DropdownMenuShortcut>
+              W E T Y U O P
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            Octave down
+            <DropdownMenuShortcut>Z</DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            Octave up
+            <DropdownMenuShortcut>X</DropdownMenuShortcut>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  </div>
+);
+
+type EffectsPanelInstrumentSectionProps = {
+  instrument: {
+    currentTrack?: Track;
+    state: InstrumentPanelState;
+    canWrite: boolean;
+  };
+};
+
+const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProps> = (props) => (
+  <div classList={{ "pointer-events-none opacity-60": !props.instrument.canWrite }}>
+    <Show
+      when={
+        props.instrument.currentTrack &&
+        props.instrument.currentTrack.kind === "instrument" &&
+        !!props.instrument.state.arp.params()
+      }
+    >
+      <Arpeggiator
+        params={props.instrument.state.arp.params()!}
+        onChange={(updates) => {
+          if (!props.instrument.canWrite) return;
+          props.instrument.state.arp.change(updates);
+        }}
+        onToggleEnabled={(enabled) => {
+          if (!props.instrument.canWrite) return;
+          props.instrument.state.arp.toggle(enabled);
+        }}
+        onReset={() => {
+          if (!props.instrument.canWrite) return;
+          props.instrument.state.arp.reset();
+        }}
+        disabled={!props.instrument.canWrite}
+        class="min-w-72"
+      />
+    </Show>
+
+    <Show
+      when={
+        props.instrument.currentTrack &&
+        props.instrument.currentTrack.kind === "instrument" &&
+        !!props.instrument.state.synth.params() &&
+        !props.instrument.state.synth.isExpandedForCurrentTarget()
+      }
+    >
+      <Synth
+        params={props.instrument.state.synth.params()!}
+        onChange={(updates) => {
+          if (!props.instrument.canWrite) return;
+          props.instrument.state.synth.change(updates);
+        }}
+        onReset={() => {
+          if (!props.instrument.canWrite) return;
+          props.instrument.state.synth.reset();
+        }}
+        onExpand={() => {
+          if (!props.instrument.canWrite) return;
+          props.instrument.state.synth.open();
+        }}
+        disabled={!props.instrument.canWrite}
+        variant="compact"
+        class="min-w-72"
+      />
+    </Show>
+
+    <Show
+      when={
+        props.instrument.currentTrack &&
+        props.instrument.currentTrack.kind === "instrument" &&
+        !!props.instrument.state.synth.params() &&
+        props.instrument.state.synth.isExpandedForCurrentTarget()
+      }
+    >
+      <div class="flex min-w-48 items-center justify-between rounded border border-neutral-800 bg-neutral-900 px-2 py-2 text-neutral-300">
+        <span class="text-xs">Synth is expanded</span>
+        <button
+          class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+          onClick={props.instrument.state.synth.close}
+        >
+          Restore
+        </button>
+      </div>
+    </Show>
+  </div>
+);
+
+type EffectsPanelRoutingCardProps = {
+  routing: {
+    visible: boolean;
+    groupTracks: Track[];
+    outputTargetId: string;
+    canWrite: boolean;
+    onChange: (value: string) => void;
+  };
+};
+
+const EffectsPanelRoutingCard: Component<EffectsPanelRoutingCardProps> = (props) => (
+  <Show when={props.routing.visible}>
+    <div class="min-w-60 rounded border border-neutral-800 bg-neutral-950/80 p-3">
+      <div class="mb-3 flex items-center justify-between">
+        <span class="text-xs font-semibold uppercase tracking-wide text-neutral-300">Output</span>
+        <span class="text-xs text-neutral-500">Bus routing</span>
+      </div>
+      <select
+        value={props.routing.outputTargetId}
+        onChange={(event) => props.routing.onChange(event.currentTarget.value)}
+        disabled={!props.routing.canWrite}
+        class="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-2 text-sm text-neutral-200 outline-none focus:border-neutral-600"
+      >
+        <option value="">Master</option>
+        <For each={props.routing.groupTracks}>
+          {(groupTrack) => <option value={groupTrack.id}>{groupTrack.name}</option>}
+        </For>
+      </select>
+      <Show when={props.routing.groupTracks.length === 0}>
+        <div class="mt-2 text-xs text-neutral-500">Add a group track to route this channel into a submix.</div>
+      </Show>
+      <Show when={!props.routing.canWrite}>
+        <div class="mt-2 text-xs text-neutral-500">Routing is read-only for collaborator-owned tracks.</div>
+      </Show>
+    </div>
+  </Show>
+);
+
+type EffectsPanelSendsCardProps = {
+  sends: {
+    visible: boolean;
+    returnTracks: Track[];
+    canWrite: boolean;
+    amountByTarget: Map<Track["id"], number>;
+    onChange: (targetId: Track["id"], amount: number) => void;
+  };
+};
+
+const EffectsPanelSendsCard: Component<EffectsPanelSendsCardProps> = (props) => (
+  <Show when={props.sends.visible}>
+    <div class="min-w-64 rounded border border-neutral-800 bg-neutral-950/80 p-3">
+      <div class="mb-3 flex items-center justify-between">
+        <span class="text-xs font-semibold uppercase tracking-wide text-neutral-300">Sends</span>
+        <span class="text-xs text-neutral-500">Post-fader</span>
+      </div>
+      <Show
+        when={props.sends.returnTracks.length > 0}
+        fallback={
+          <div class="text-xs text-neutral-500">
+            Add a return track to route shared reverb or delay-style processing.
+          </div>
+        }
+      >
+        <div class="space-y-3">
+          <For each={props.sends.returnTracks}>
+            {(returnTrack) => {
+              const amount = () => props.sends.amountByTarget.get(returnTrack.id) ?? 0;
+              return (
+                <label class="block">
+                  <div class="mb-1 flex items-center justify-between gap-3 text-xs text-neutral-300">
+                    <span class="truncate">{returnTrack.name}</span>
+                    <span class="tabular-nums text-neutral-500">{Math.round(amount() * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={amount()}
+                    disabled={!props.sends.canWrite}
+                    onInput={(event) => props.sends.onChange(returnTrack.id, parseFloat(event.currentTarget.value))}
+                    class="h-2 w-full cursor-pointer accent-neutral-200"
+                  />
+                </label>
+              );
+            }}
+          </For>
+        </div>
+      </Show>
+      <Show when={!props.sends.canWrite}>
+        <div class="mt-3 text-xs text-neutral-500">Routing is read-only for collaborator-owned tracks.</div>
+      </Show>
+    </div>
+  </Show>
+);
+
+type EffectsPanelEffectCardsProps = {
+  effects: {
+    orderedEffects: EffectKind[];
+    eqParams?: EqParams;
+    reverbParams?: ReverbParams;
+    canWrite: boolean;
+    spectrum: SpectrumFrame | null;
+    onBandChange: (bandId: string, updates: Partial<EqParams["bands"][number]>) => void;
+    onBandToggle: (bandId: string) => void;
+    onToggleEqEnabled: (enabled: boolean) => void;
+    onResetEq: () => void;
+    onReverbChange: (updates: Partial<ReverbParams>) => void;
+    onReverbToggle: (enabled: boolean) => void;
+    onResetReverb: () => void;
+  };
+};
+
+const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props) => (
+  <div classList={{ "pointer-events-none opacity-60": !props.effects.canWrite }}>
+    <For each={props.effects.orderedEffects}>
+      {(effect) => (
+        <Show
+          when={effect === "eq"}
+          fallback={
+            <Show when={!!props.effects.reverbParams}>
+              <Reverb
+                params={props.effects.reverbParams!}
+                onChange={props.effects.onReverbChange}
+                onToggleEnabled={props.effects.onReverbToggle}
+                onReset={props.effects.onResetReverb}
+                class="min-w-72"
+              />
+            </Show>
+          }
+        >
+          <Show when={!!props.effects.eqParams}>
+            <Eq
+              bands={props.effects.eqParams!.bands}
+              enabled={props.effects.eqParams!.enabled}
+              onBandChange={props.effects.onBandChange}
+              onBandToggle={props.effects.onBandToggle}
+              onToggleEnabled={props.effects.onToggleEqEnabled}
+              onReset={props.effects.onResetEq}
+              class="min-w-80"
+              spectrumData={props.effects.spectrum}
+            />
+          </Show>
+        </Show>
+      )}
+    </For>
+  </div>
+);
+
+const EffectsPanelReadOnlyNotice: Component = () => (
+  <div class="flex min-w-60 items-center rounded border border-neutral-800 bg-neutral-950/80 px-3 py-2 text-xs text-neutral-500">
+    Effects are read-only for collaborator-owned tracks.
+  </div>
+);
+
+type EffectsPanelEmptyStateProps = {
+  empty: {
+    visible: boolean;
+    currentTargetId: string;
+  };
+};
+
+const EffectsPanelEmptyState: Component<EffectsPanelEmptyStateProps> = (props) => (
+  <Show when={props.empty.visible}>
+    <div class="flex items-center px-4 text-sm text-neutral-400">
+      No effects on this {props.empty.currentTargetId === "master" ? "master bus" : "track"}.
+      Use Add EQ or Add Reverb.
+    </div>
+  </Show>
+);
+
+type EffectsPanelClosedButtonProps = {
+  onOpen: () => void;
+};
+
+const EffectsPanelClosedButton: Component<EffectsPanelClosedButtonProps> = (props) => (
+  <button
+    class="fixed bottom-4 right-4 rounded-md border border-neutral-700 bg-neutral-800 px-3 py-2 text-white hover:bg-neutral-700"
+    onClick={props.onOpen}
+  >
+    Open Effects
+  </button>
+);
+
+type EffectsPanelFloatingSynthProps = {
+  synth: InstrumentPanelState["synth"];
+  canWrite: boolean;
+};
+
+const EffectsPanelFloatingSynth: Component<EffectsPanelFloatingSynthProps> = (props) => {
+  const card = () => props.synth.expandedCard();
+
+  return (
+    <Show when={props.canWrite && !!card()}>
+      <SynthCard
+        params={card()!.params}
+        onChange={card()!.onChange}
+        onReset={card()!.onReset}
+        x={card()!.x}
+        y={card()!.y}
+        w={card()!.w}
+        h={card()!.h}
+        onChangeBounds={props.synth.updateCardBounds}
+        onClose={props.synth.close}
+      />
+    </Show>
+  );
 };
 
 const EffectsPanel: Component<EffectsPanelProps> = (props) => {
-  type EffectKind = "eq" | "reverb";
-
-  const targetName = () => {
-    if (currentTargetId() === "master") return "Master";
-    return currentTrack()?.name ?? "Track";
-  };
-
-  const currentTargetId = () => props.selectedFXTarget || "master";
-  const currentTrack = createMemo(() => {
-    const id = currentTargetId();
-    if (!id || id === "master") return undefined;
-    return props.tracks.find((t) => t.id === id);
+  const target = useEffectsPanelTarget({
+    selectedFXTarget: () => props.selectedFXTarget,
+    tracks: () => props.tracks,
+    canWriteTrackRouting: props.canWriteTrackRouting,
   });
-  const currentTrackRole = createMemo(() => getTrackChannelRole(currentTrack()));
-  const isInstrumentTrack = createMemo(() => currentTrack()?.kind === "instrument");
-  const isGroupTrack = createMemo(() => currentTrackRole() === "group");
-  const canEditSends = createMemo(() => currentTrackRole() === "track");
-  const canWriteCurrentTrackRouting = createMemo(() => {
-    const track = currentTrack();
-    if (!track) return false;
-    return props.canWriteTrackRouting ? props.canWriteTrackRouting(track.id) : true;
-  });
-  const returnTracks = createMemo(() =>
-    props.tracks.filter((track) => getTrackChannelRole(track) === "return" && track.id !== currentTargetId()),
-  );
-  const groupTracks = createMemo(() =>
-    props.tracks.filter((track) => getTrackChannelRole(track) === "group" && track.id !== currentTargetId()),
-  );
-  const currentTrackSends = () => currentTrack()?.sends ?? [];
-  const currentTrackOutputTargetId = () => currentTrack()?.outputTargetId ?? "";
-  const currentSendAmountByTarget = createMemo(() => {
-    const next = new Map<string, number>();
-    for (const send of currentTrackSends()) {
-      next.set(send.targetId, send.amount);
-    }
-    return next;
-  });
-
-  const LOCAL_EDIT_SUPPRESS_MS = 800;
-  const SAVE_DEBOUNCE_MS = 200;
-
+  const {
+    currentTargetId,
+    targetName,
+    currentTrack,
+    currentTrackId,
+    isInstrumentTrack,
+    isGroupTrack,
+    canEditSends,
+    canWriteCurrentTrackRouting,
+    returnTracks,
+    groupTracks,
+    currentTrackSends,
+    currentTrackOutputTargetId,
+    currentSendAmountByTarget,
+    resolveTrackByTargetId,
+  } = target;
 
   // ===== Effect ordering (per target) =====
   const [effectOrderByTarget, setEffectOrderByTarget] = createSignal<
@@ -136,10 +586,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       const idxCurrent = untrack(() => effectIndexByTarget()[targetId] ?? {});
       const idx = { ...idxCurrent, [kind]: index };
       const entries: { kind: EffectKind; idx: number }[] = [];
-      if (typeof idx.eq === "number")
-        entries.push({ kind: "eq", idx: idx.eq as number });
-      if (typeof idx.reverb === "number")
-        entries.push({ kind: "reverb", idx: idx.reverb as number });
+      if (typeof idx.eq === "number") entries.push({ kind: "eq", idx: idx.eq });
+      if (typeof idx.reverb === "number") entries.push({ kind: "reverb", idx: idx.reverb });
       if (entries.length > 0) {
         entries.sort((a, b) => a.idx - b.idx);
         setEffectOrderByTarget((prev) => ({
@@ -152,105 +600,9 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     appendEffectOrder(targetId, kind);
   }
 
-  const instrumentState = createEffectsPanelState(props, currentTargetId, currentTrack);
-  const roomEffects = useConvexQuery(
-    (convexApi as any).effects.listByRoom,
-    () => props.roomId ? { roomId: props.roomId } : null,
-    () => ["effects", "room", props.roomId],
-  );
-  const disabledEq = { ...createDefaultEqParams(), enabled: false };
-  const disabledReverb = { ...createDefaultReverbParams(), enabled: false };
-
-  createEffect(() => {
-    const audioEngine = props.audioEngine;
-    const effects = roomEffects.data;
-    if (!audioEngine || !effects) return;
-
-    const activeTargetId = currentTargetId();
-    const eqByTrackId = new Map<string, EqParamsLite>();
-    const reverbByTrackId = new Map<string, ReverbParamsLite>();
-    const synthByTrackId = new Map<string, SynthParamsInput>();
-    const arpByTrackId = new Map<string, ArpeggiatorParams>();
-    let hasMasterEq = false;
-    let hasMasterReverb = false;
-
-    for (const row of effects) {
-      if (row?.targetType === "master") {
-        if (activeTargetId === "master") continue;
-        if (row.type === "eq" && row.params) {
-          hasMasterEq = true;
-          audioEngine.setMasterEq(row.params as EqParamsLite);
-        }
-        if (row.type === "reverb" && row.params) {
-          hasMasterReverb = true;
-          audioEngine.setMasterReverb(row.params as ReverbParamsLite);
-        }
-        continue;
-      }
-
-      const trackId = row?.trackId as string | undefined;
-      if (!trackId || trackId === activeTargetId) continue;
-      if (row.type === "eq" && row.params) eqByTrackId.set(trackId, row.params as EqParamsLite);
-      if (row.type === "reverb" && row.params) reverbByTrackId.set(trackId, row.params as ReverbParamsLite);
-      if (row.type === "synth" && row.params) synthByTrackId.set(trackId, normalizeSynthParams(row.params as SynthParamsInput));
-      if (row.type === "arpeggiator" && row.params) arpByTrackId.set(trackId, row.params as ArpeggiatorParams);
-    }
-    if (activeTargetId !== "master") {
-      if (!hasMasterEq) audioEngine.setMasterEq(disabledEq);
-      if (!hasMasterReverb) audioEngine.setMasterReverb(disabledReverb);
-    }
-
-    for (const track of props.tracks) {
-      if (track.id === activeTargetId) continue;
-      const eq = eqByTrackId.get(track.id);
-      if (eq) audioEngine.setTrackEq(track.id, eq);
-      else audioEngine.setTrackEq(track.id, disabledEq);
-      const reverb = reverbByTrackId.get(track.id);
-      if (reverb) audioEngine.setTrackReverb(track.id, reverb);
-      else audioEngine.setTrackReverb(track.id, disabledReverb);
-      if (track.kind === "instrument") {
-        const synth = synthByTrackId.get(track.id);
-        if (synth) audioEngine.setTrackSynth(track.id, synth);
-        else audioEngine.clearTrackSynth?.(track.id);
-        const arp = arpByTrackId.get(track.id);
-        if (arp) audioEngine.setTrackArpeggiator(track.id, arp);
-        else audioEngine.clearTrackArpeggiator?.(track.id);
-        continue;
-      }
-      audioEngine.clearTrackSynth?.(track.id);
-      audioEngine.clearTrackArpeggiator?.(track.id);
-    }
-  });
-
-  const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null);
-
-  // Live spectrum polling (keeps last non-empty after pause)
-  createEffect(() => {
-    if (!props.isOpen) return;
-    let raf = 0;
-    const loop = () => {
-      try {
-        const id = currentTargetId();
-        const data =
-          id === "master"
-            ? props.audioEngine?.getMasterSpectrum()
-            : props.audioEngine?.getTrackSpectrum(id);
-        if (data) setSpectrum(data);
-      } catch {}
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    onCleanup(() => {
-      try {
-        cancelAnimationFrame(raf);
-      } catch {}
-    });
-  });
-
-  createEffect(() => {
-    void currentTargetId();
-    setSpectrum(null);
-  });
+  const instrumentState = createEffectsPanelState(props, currentTargetId, currentTrack, resolveTrackByTargetId);
+  const canWriteCurrentTargetEffects = createMemo(() => currentTargetId() === "master" || canWriteCurrentTrackRouting());
+  const isCurrentTargetReadOnly = createMemo(() => currentTargetId() !== "master" && !canWriteCurrentTrackRouting());
 
   const eqMasterQuery = useConvexQuery(
     convexApi.effects.getEqForMaster,
@@ -261,17 +613,16 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const eqTrackQuery = useConvexQuery(
     convexApi.effects.getEqForTrack,
     () => {
-      const id = currentTargetId();
-      if (!id || id === "master") return null;
-      return { trackId: id as any };
+      const trackId = currentTrackId();
+      return trackId ? buildTrackEffectQueryArgs(trackId) : null;
     },
     () => ["effects", "eq", "track", currentTargetId()],
   );
 
-  const eqState = createPersistedEffectState<EqParams>({
+  const eqState = createPersistedEffectState<TrackEqRow, EqParams>({
     targetId: currentTargetId,
     row: () => currentTargetId() === "master" ? eqMasterQuery.data : eqTrackQuery.data,
-    readQueryParams: (row) => row?.params as EqParams | undefined,
+    readQueryParams: (row) => row?.params,
     createInitialParams: () => createDefaultEqParams(),
     serializeParams: (params) => JSON.stringify(params),
     applyToEngine: (targetId, params) => {
@@ -290,25 +641,41 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
           params,
         });
       }
-      return convexClient.mutation(convexApi.effects.setEqParams, {
-        roomId: props.roomId,
-        trackId: targetId as any,
-        userId: props.userId,
-        params,
-      });
+      const track = resolveTrackByTargetId(targetId);
+      if (!track) return Promise.resolve();
+      return convexClient.mutation(
+        convexApi.effects.setEqParams,
+        buildTrackEffectMutationInput({
+          roomId: props.roomId,
+          trackId: track.id,
+          userId: props.userId,
+          params,
+        }),
+      );
     },
-    debounceMs: SAVE_DEBOUNCE_MS,
-    remoteOverwriteAfterMs: LOCAL_EDIT_SUPPRESS_MS,
+    debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
+    remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
     onQueryRow: (targetId, row) => {
       if (row?.params) {
-        setEffectOrderForTarget(targetId, "eq", row.index as number | undefined);
+        setEffectOrderForTarget(targetId, "eq", typeof row.index === "number" ? row.index : undefined);
       }
     },
     onParamsCommitted: (targetId, previous, next) => {
       if (previous === undefined) return;
+      if (targetId === "master") {
+        props.onEffectParamsCommitted?.({
+          targetId: "master",
+          effect: "master-eq",
+          from: previous,
+          to: next,
+        });
+        return;
+      }
+      const track = resolveTrackByTargetId(targetId);
+      if (!track) return;
       props.onEffectParamsCommitted?.({
-        targetId,
-        effect: targetId === "master" ? "master-eq" : "eq",
+        targetId: track.id,
+        effect: "eq",
         from: previous,
         to: next,
       });
@@ -320,6 +687,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     bandId: string,
     updates: Partial<EqParams["bands"][number]>,
   ) => {
+    if (!canWriteCurrentTargetEffects()) return;
     eqState.update((prev) => ({
       ...prev,
       bands: prev.bands.map((band) =>
@@ -328,6 +696,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     }));
   };
   const handleBandToggle = (bandId: string) => {
+    if (!canWriteCurrentTargetEffects()) return;
     eqState.update((prev) => ({
       ...prev,
       bands: prev.bands.map((band) =>
@@ -336,9 +705,11 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     }));
   };
   const handleToggleEnabled = (enabled: boolean) => {
+    if (!canWriteCurrentTargetEffects()) return;
     eqState.update((prev) => ({ ...prev, enabled }));
   };
   const handleReset = () => {
+    if (!canWriteCurrentTargetEffects()) return;
     eqState.update(() => createDefaultEqParams());
   };
 
@@ -351,17 +722,16 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const reverbTrackQuery = useConvexQuery(
     convexApi.effects.getReverbForTrack,
     () => {
-      const id = currentTargetId();
-      if (!id || id === "master") return null;
-      return { trackId: id as any };
+      const trackId = currentTrackId();
+      return trackId ? buildTrackEffectQueryArgs(trackId) : null;
     },
     () => ["effects", "reverb", "track", currentTargetId()],
   );
 
-  const reverbState = createPersistedEffectState<ReverbParams>({
+  const reverbState = createPersistedEffectState<TrackReverbRow, ReverbParams>({
     targetId: currentTargetId,
     row: () => currentTargetId() === "master" ? reverbMasterQuery.data : reverbTrackQuery.data,
-    readQueryParams: (row) => row?.params as ReverbParams | undefined,
+    readQueryParams: (row) => row?.params,
     createInitialParams: () => createDefaultReverbParams(),
     serializeParams: (params) => JSON.stringify(params),
     applyToEngine: (targetId, params) => {
@@ -380,25 +750,41 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
           params,
         });
       }
-      return convexClient.mutation(convexApi.effects.setReverbParams, {
-        roomId: props.roomId,
-        trackId: targetId as any,
-        userId: props.userId,
-        params,
-      });
+      const track = resolveTrackByTargetId(targetId);
+      if (!track) return Promise.resolve();
+      return convexClient.mutation(
+        convexApi.effects.setReverbParams,
+        buildTrackEffectMutationInput({
+          roomId: props.roomId,
+          trackId: track.id,
+          userId: props.userId,
+          params,
+        }),
+      );
     },
-    debounceMs: SAVE_DEBOUNCE_MS,
-    remoteOverwriteAfterMs: LOCAL_EDIT_SUPPRESS_MS,
+    debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
+    remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
     onQueryRow: (targetId, row) => {
       if (row?.params) {
-        setEffectOrderForTarget(targetId, "reverb", row.index as number | undefined);
+        setEffectOrderForTarget(targetId, "reverb", typeof row.index === "number" ? row.index : undefined);
       }
     },
     onParamsCommitted: (targetId, previous, next) => {
       if (previous === undefined) return;
+      if (targetId === "master") {
+        props.onEffectParamsCommitted?.({
+          targetId: "master",
+          effect: "master-reverb",
+          from: previous,
+          to: next,
+        });
+        return;
+      }
+      const track = resolveTrackByTargetId(targetId);
+      if (!track) return;
       props.onEffectParamsCommitted?.({
-        targetId,
-        effect: targetId === "master" ? "master-reverb" : "reverb",
+        targetId: track.id,
+        effect: "reverb",
         from: previous,
         to: next,
       });
@@ -407,14 +793,55 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
 
   const reverbForTarget = reverbState.params;
   const handleReverbChange = (updates: Partial<ReverbParams>) => {
+    if (!canWriteCurrentTargetEffects()) return;
     reverbState.update((prev) => ({ ...prev, ...updates }));
   };
   const handleReverbToggle = (enabled: boolean) => {
+    if (!canWriteCurrentTargetEffects()) return;
     reverbState.update((prev) => ({ ...prev, enabled }));
   };
   const handleReverbReset = () => {
+    if (!canWriteCurrentTargetEffects()) return;
     reverbState.update(() => createDefaultReverbParams());
   };
+
+  const { roomEffects, spectrum } = useEffectsPanelAudioSync({
+    isOpen: () => props.isOpen,
+    roomId: () => props.roomId,
+    currentTargetId,
+    tracks: () => props.tracks,
+    audioEngine: () => props.audioEngine,
+    localDraftEffects: {
+      eq: eqState.readDraftForTarget,
+      reverb: reverbState.readDraftForTarget,
+      synth: instrumentState.synth.readDraftForTarget,
+      arp: instrumentState.arp.readDraftForTarget,
+    },
+  });
+
+  createEffect(() => {
+    const effects = roomEffects.data;
+    if (effects === undefined) return;
+    const activeTarget = currentTargetId();
+    const synthByTrackId = new Map<string, ReturnType<typeof normalizeSynthParams>>();
+    const arpByTrackId = new Map<string, ArpeggiatorParams>();
+    for (const row of effects) {
+      if (row?.targetType !== "track" || !row.trackId) continue;
+      if (row.type === "synth" && row.params) {
+        synthByTrackId.set(row.trackId, normalizeSynthParams(row.params));
+      }
+      if (row.type === "arpeggiator" && row.params) {
+        arpByTrackId.set(row.trackId, row.params);
+      }
+    }
+    for (const track of props.tracks) {
+      if (track.id === activeTarget) continue;
+      const synthParams = track.kind === "instrument" ? synthByTrackId.get(track.id) : undefined;
+      const arpParams = track.kind === "instrument" ? arpByTrackId.get(track.id) : undefined;
+      instrumentState.synth.syncRemoteForTarget(track.id, synthParams);
+      instrumentState.arp.syncRemoteForTarget(track.id, arpParams);
+    }
+  });
 
   const orderedEffects = createMemo<EffectKind[]>(() => {
     const id = currentTargetId();
@@ -434,6 +861,11 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     instrumentState.flushPending();
   };
 
+  createEffect(() => {
+    if (!isCurrentTargetReadOnly()) return;
+    instrumentState.synth.close();
+  });
+
   const handleClose = () => {
     flushPending();
     props.onClose();
@@ -444,7 +876,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   });
 
 
-  function handleSendAmountChange(targetId: string, amount: number) {
+  function handleSendAmountChange(targetId: Track["id"], amount: number) {
     const track = currentTrack();
     if (!track || !canEditSends() || !canWriteCurrentTrackRouting()) return;
 
@@ -458,7 +890,10 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   function handleOutputTargetChange(nextValue: string) {
     const track = currentTrack();
     if (!track || isGroupTrack() || !canWriteCurrentTrackRouting()) return;
-    props.onTrackOutputTargetChange?.(track.id, nextValue || undefined);
+    const outputTargetId = nextValue
+      ? groupTracks().find((groupTrack) => groupTrack.id === nextValue)?.id
+      : undefined;
+    props.onTrackOutputTargetChange?.(track.id, outputTargetId);
   }
 
   return (
@@ -466,334 +901,85 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       <Show when={props.isOpen}>
         <div class="fixed left-0 right-0 bottom-0 z-50 border-t border-neutral-800 bg-neutral-900">
           <div class="flex" style={{ height: `${FX_PANEL_HEIGHT_PX}px` }}>
-            <div class="flex w-20 flex-col items-center gap-2 border-r border-neutral-800 px-2 py-2">
-              <Button
-                variant="outline"
-                size="sm"
-                class="w-full py-1 text-xs"
-                onClick={handleClose}
-              >
-                Hide
-              </Button>
-              <Show
-                when={isInstrumentTrack()}
-              >
-                <Button
-                  variant="default"
-                  size="sm"
-                  class="w-full px-1 py-1 text-xs"
-                  onClick={instrumentState.addMidiClip}
-                >
-                  + MIDI
-                </Button>
-              </Show>
-              <div class="flex flex-1 items-center justify-center">
-                <span
-                  class="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-neutral-300"
-                  style={{
-                    transform: "rotate(-90deg)",
-                    "white-space": "nowrap",
-                  }}
-                >
-                  {targetName()}
-                </span>
-              </div>
-            </div>
+            <EffectsPanelRail
+              rail={{
+                isInstrumentTrack: isInstrumentTrack(),
+                targetName: targetName(),
+                onClose: handleClose,
+                onAddMidiClip: instrumentState.addMidiClip,
+                canWrite: canWriteCurrentTargetEffects(),
+              }}
+            />
             <div class="flex flex-1 flex-col overflow-hidden min-h-0">
-              <div class="flex min-h-7 flex-wrap items-center gap-1.5 border-b border-neutral-800/50 px-2 py-0.5">
-                <Show
-                  when={
-                    currentTrack() &&
-                    currentTrack()!.kind === "instrument" &&
-                    !instrumentState.arp.params()
-                  }
-                >
-                  <Button
-                    variant="default"
-                    size="sm"
-                    class="h-6 px-2 py-0.5 text-xs"
-                    onClick={instrumentState.arp.add}
-                  >
-                    + Arp
-                  </Button>
-                </Show>
-                <Show when={!eqForTarget()}>
-                  <Button
-                    variant="default"
-                    size="sm"
-                    class="h-6 px-2 py-0.5 text-xs"
-                    onClick={eqState.add}
-                  >
-                    + EQ
-                  </Button>
-                </Show>
-                <Show when={!reverbForTarget()}>
-                  <Button
-                    variant="default"
-                    size="sm"
-                    class="h-6 px-2 py-0.5 text-xs"
-                    onClick={reverbState.add}
-                  >
-                    + Reverb
-                  </Button>
-                </Show>
-                <div class="ml-auto">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        class="h-6 px-2 py-0.5 text-xs"
-                        aria-label="Show keyboard shortcuts"
-                      >
-                        Shortcuts
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                      class="bg-neutral-900 text-neutral-100"
-                      style={{ width: "min(92vw, 22rem)" }}
-                    >
-                      <DropdownMenuLabel class="text-neutral-400">
-                        Timeline
-                      </DropdownMenuLabel>
-                      <DropdownMenuItem disabled>
-                        Play / Pause
-                        <DropdownMenuShortcut>Space</DropdownMenuShortcut>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem disabled>
-                        Delete selection or track
-                        <DropdownMenuShortcut>
-                          Del / Backspace
-                        </DropdownMenuShortcut>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem disabled>
-                        Duplicate clips
-                        <DropdownMenuShortcut>
-                          Ctrl/Cmd + D
-                        </DropdownMenuShortcut>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem disabled>
-                        Add Audio Track
-                        <DropdownMenuShortcut>Shift + T</DropdownMenuShortcut>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem disabled>
-                        Add Instrument Track
-                        <DropdownMenuShortcut>
-                          Ctrl/Cmd + Shift + T
-                        </DropdownMenuShortcut>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem disabled>
-                        Toggle Sidebar
-                        <DropdownMenuShortcut>
-                          Ctrl/Cmd + B
-                        </DropdownMenuShortcut>
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuLabel class="text-neutral-400">
-                        MIDI Editor (when keyboard enabled)
-                      </DropdownMenuLabel>
-                      <DropdownMenuItem disabled>
-                        Note keys
-                        <DropdownMenuShortcut>
-                          A S D F G H J K L ;
-                        </DropdownMenuShortcut>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem disabled>
-                        Sharp keys
-                        <DropdownMenuShortcut>
-                          W E T Y U O P
-                        </DropdownMenuShortcut>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem disabled>
-                        Octave down
-                        <DropdownMenuShortcut>Z</DropdownMenuShortcut>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem disabled>
-                        Octave up
-                        <DropdownMenuShortcut>X</DropdownMenuShortcut>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
+              <EffectsPanelToolbar
+                toolbar={{
+                  showAddArp: !!currentTrack() && currentTrack()!.kind === "instrument" && !instrumentState.arp.params(),
+                  showAddEq: !eqForTarget(),
+                  showAddReverb: !reverbForTarget(),
+                  onAddArp: instrumentState.arp.add,
+                  onAddEq: eqState.add,
+                  onAddReverb: reverbState.add,
+                  canWrite: canWriteCurrentTargetEffects(),
+                }}
+              />
               <div class="flex-1 overflow-x-auto overflow-y-hidden px-2 py-2 min-h-0">
                 <div class="flex items-stretch gap-3 h-full min-w-min min-h-0">
-                  {/* MIDI Effects (pre-synth) - LEFTMOST */}
-                  <Show
-                    when={
-                      currentTrack() &&
-                      currentTrack()!.kind === "instrument" &&
-                      !!instrumentState.arp.params()
-                    }
-                  >
-                    <Arpeggiator
-                      params={instrumentState.arp.params()!}
-                      onChange={instrumentState.arp.change}
-                      onToggleEnabled={instrumentState.arp.toggle}
-                      onReset={instrumentState.arp.reset}
-                      class="min-w-72"
-                    />
+                  <EffectsPanelInstrumentSection
+                    instrument={{
+                      currentTrack: currentTrack(),
+                      state: instrumentState,
+                      canWrite: canWriteCurrentTargetEffects(),
+                    }}
+                  />
+                  <EffectsPanelRoutingCard
+                    routing={{
+                      visible: !!currentTrack() && !isGroupTrack(),
+                      groupTracks: groupTracks(),
+                      outputTargetId: currentTrackOutputTargetId(),
+                      canWrite: canWriteCurrentTrackRouting(),
+                      onChange: handleOutputTargetChange,
+                    }}
+                  />
+                  <EffectsPanelSendsCard
+                    sends={{
+                      visible: !!currentTrack() && canEditSends(),
+                      returnTracks: returnTracks(),
+                      canWrite: canWriteCurrentTrackRouting(),
+                      amountByTarget: currentSendAmountByTarget(),
+                      onChange: handleSendAmountChange,
+                    }}
+                  />
+                  <EffectsPanelEffectCards
+                    effects={{
+                      orderedEffects: orderedEffects(),
+                      eqParams: eqForTarget(),
+                      reverbParams: reverbForTarget(),
+                      canWrite: canWriteCurrentTargetEffects(),
+                      spectrum: spectrum(),
+                      onBandChange: handleBandChange,
+                      onBandToggle: handleBandToggle,
+                      onToggleEqEnabled: handleToggleEnabled,
+                      onResetEq: handleReset,
+                      onReverbChange: handleReverbChange,
+                      onReverbToggle: handleReverbToggle,
+                      onResetReverb: handleReverbReset,
+                    }}
+                  />
+                  <Show when={isCurrentTargetReadOnly()}>
+                    <EffectsPanelReadOnlyNotice />
                   </Show>
-
-                  {/* Instrument (Synth) */}
-                  <Show
-                    when={
-                      currentTrack() &&
-                      currentTrack()!.kind === "instrument" &&
-                      !!instrumentState.synth.params() &&
-                      !instrumentState.synth.isExpandedForCurrentTarget()
-                    }
-                  >
-                    <Synth
-                      params={instrumentState.synth.params()!}
-                      onChange={instrumentState.synth.change}
-                      onReset={instrumentState.synth.reset}
-                      onExpand={instrumentState.synth.open}
-                      variant="compact"
-                      class="min-w-72"
-                    />
-                  </Show>
-                  <Show
-                    when={
-                      currentTrack() &&
-                      currentTrack()!.kind === "instrument" &&
-                      !!instrumentState.synth.params() &&
-                      instrumentState.synth.isExpandedForCurrentTarget()
-                    }
-                  >
-                    <div class="min-w-48 rounded border border-neutral-800 bg-neutral-900 px-2 py-2 text-neutral-300 flex items-center justify-between">
-                      <span class="text-xs">Synth is expanded</span>
-                      <button
-                        class="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700"
-                        onClick={instrumentState.synth.close}
-                      >Restore</button>
-                    </div>
-                  </Show>
-
-                  <Show when={currentTrack() && !isGroupTrack()}>
-                    <div class="min-w-60 rounded border border-neutral-800 bg-neutral-950/80 p-3">
-                      <div class="mb-3 flex items-center justify-between">
-                        <span class="text-xs font-semibold uppercase tracking-wide text-neutral-300">Output</span>
-                        <span class="text-xs text-neutral-500">Bus routing</span>
-                      </div>
-                      <select
-                        value={currentTrackOutputTargetId()}
-                        onChange={(event) => handleOutputTargetChange((event.currentTarget as HTMLSelectElement).value)}
-                        disabled={!canWriteCurrentTrackRouting()}
-                        class="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-2 text-sm text-neutral-200 outline-none focus:border-neutral-600"
-                      >
-                        <option value="">Master</option>
-                        <For each={groupTracks()}>
-                          {(groupTrack) => <option value={groupTrack.id}>{groupTrack.name}</option>}
-                        </For>
-                      </select>
-                      <Show when={groupTracks().length === 0}>
-                        <div class="mt-2 text-xs text-neutral-500">Add a group track to route this channel into a submix.</div>
-                      </Show>
-                      <Show when={!canWriteCurrentTrackRouting()}>
-                        <div class="mt-2 text-xs text-neutral-500">Routing is read-only for collaborator-owned tracks.</div>
-                      </Show>
-                    </div>
-                  </Show>
-
-                  <Show when={currentTrack() && canEditSends()}>
-                    <div class="min-w-64 rounded border border-neutral-800 bg-neutral-950/80 p-3">
-                      <div class="mb-3 flex items-center justify-between">
-                        <span class="text-xs font-semibold uppercase tracking-wide text-neutral-300">Sends</span>
-                        <span class="text-xs text-neutral-500">Post-fader</span>
-                      </div>
-                      <Show
-                        when={returnTracks().length > 0}
-                        fallback={
-                          <div class="text-xs text-neutral-500">
-                            Add a return track to route shared reverb or delay-style processing.
-                          </div>
-                        }
-                      >
-                        <div class="space-y-3">
-                          <For each={returnTracks()}>
-                            {(returnTrack) => {
-                              const amount = () => currentSendAmountByTarget().get(returnTrack.id) ?? 0;
-                              return (
-                                <label class="block">
-                                  <div class="mb-1 flex items-center justify-between gap-3 text-xs text-neutral-300">
-                                    <span class="truncate">{returnTrack.name}</span>
-                                    <span class="tabular-nums text-neutral-500">{Math.round(amount() * 100)}%</span>
-                                  </div>
-                                  <input
-                                    type="range"
-                                    min="0"
-                                    max="1"
-                                    step="0.01"
-                                    value={amount()}
-                                    disabled={!canWriteCurrentTrackRouting()}
-                                    onInput={(event) =>
-                                      handleSendAmountChange(
-                                        returnTrack.id,
-                                        parseFloat((event.currentTarget as HTMLInputElement).value),
-                                      )}
-                                    class="h-2 w-full cursor-pointer accent-neutral-200"
-                                  />
-                                </label>
-                              );
-                            }}
-                          </For>
-                        </div>
-                      </Show>
-                      <Show when={!canWriteCurrentTrackRouting()}>
-                        <div class="mt-3 text-xs text-neutral-500">Routing is read-only for collaborator-owned tracks.</div>
-                      </Show>
-                    </div>
-                  </Show>
-
-                  <For each={orderedEffects()}>
-                    {(eff) => (
-                      <Show
-                        when={eff === "eq"}
-                        fallback={
-                          <Show when={!!reverbForTarget()}>
-                            <Reverb
-                              params={reverbForTarget()!}
-                              onChange={handleReverbChange}
-                              onToggleEnabled={handleReverbToggle}
-                              onReset={handleReverbReset}
-                              class="min-w-72"
-                            />
-                          </Show>
-                        }
-                      >
-                        <Show when={!!eqForTarget()}>
-                          <Eq
-                            bands={eqForTarget()!.bands}
-                            enabled={eqForTarget()!.enabled}
-                            onBandChange={handleBandChange}
-                            onBandToggle={handleBandToggle}
-                            onToggleEnabled={handleToggleEnabled}
-                            onReset={handleReset}
-                            class="min-w-80"
-                            spectrumData={spectrum()}
-                          />
-                        </Show>
-                      </Show>
-                    )}
-                  </For>
-
-                  <Show
-                    when={
-                      !eqForTarget() &&
-                      !reverbForTarget() &&
-                      !instrumentState.arp.params() &&
-                      (!instrumentState.synth.params() ||
-                        !currentTrack() ||
-                        currentTrack()!.kind !== "instrument")
-                    }
-                  >
-                    <div class="flex items-center text-sm text-neutral-400 px-4">
-                      No effects on this{" "}
-                      {currentTargetId() === "master" ? "master bus" : "track"}.
-                      Use Add EQ or Add Reverb.
-                    </div>
-                  </Show>
+                  <EffectsPanelEmptyState
+                    empty={{
+                      visible:
+                        !eqForTarget() &&
+                        !reverbForTarget() &&
+                        !instrumentState.arp.params() &&
+                        (!instrumentState.synth.params() ||
+                          !currentTrack() ||
+                          currentTrack()!.kind !== "instrument"),
+                      currentTargetId: currentTargetId(),
+                    }}
+                  />
                 </div>
               </div>
             </div>
@@ -802,34 +988,10 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       </Show>
 
       <Show when={!props.isOpen}>
-        <button
-          class="fixed bottom-4 right-4 bg-neutral-800 text-white rounded-md px-3 py-2 border border-neutral-700 hover:bg-neutral-700"
-          onClick={props.onOpen}
-        >
-          Open Effects
-        </button>
+        <EffectsPanelClosedButton onOpen={props.onOpen} />
       </Show>
 
-      {/* Floating Synth card */}
-      <Show when={!!instrumentState.synth.expandedCard()}>
-        {(() => {
-          const card = instrumentState.synth.expandedCard()!;
-          return (
-            <SynthCard
-              params={card.params}
-              onChange={card.onChange}
-              onReset={card.onReset}
-              x={card.x}
-              y={card.y}
-              w={card.w}
-              h={card.h}
-              onChangeBounds={instrumentState.synth.updateCardBounds}
-              onClose={instrumentState.synth.close}
-            />
-          )
-        })()}
-      </Show>
-      {/* Shortcuts dropdown implemented above; removed dialog variant */}
+      <EffectsPanelFloatingSynth synth={instrumentState.synth} canWrite={canWriteCurrentTargetEffects()} />
     </>
   );
 };

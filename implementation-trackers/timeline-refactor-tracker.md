@@ -17,12 +17,12 @@ This tracker should be updated throughout the refactor, not just with progress, 
 
 ## Rules Driving This Refactor
 
-Source rules:
+Initial source rules:
 - `AGENTS.md`
 - `AGENTS-solid.md`
 - `SOFTWARE_PATTERNS.md`
 - `consistency-guidelines.md`
-- `code-simplifier.md`
+- the former root `code-simplifier.md`, now superseded by the consolidated project guidance and this tracker
 
 Refactor guardrails:
 - Do not change behavior unless required to preserve correctness during refactor.
@@ -59,10 +59,9 @@ There is no dedicated test script in `package.json` right now.
 - Current role: composition root + resolved-model construction + history/mixer wiring + interaction hook wiring + high-level timeline actions + sidebar resize DOM plumbing + render tree
 
 #### Shared timeline lookup duplication
-Current duplicated or near-duplicated track/clip indexing logic exists in:
+Initial duplicated or near-duplicated track/clip indexing logic existed in:
 - `src/components/Timeline.tsx`
 - `src/hooks/useClipDrag.ts`
-- `src/hooks/useTimelineMidiOverlay.ts`
 - `src/hooks/useTimelineMixerController.ts`
 - `src/lib/resolve-timeline-tracks.ts`
 
@@ -335,7 +334,7 @@ Returned shape:
 First consumers to update where the shared helper clearly removes duplicated scans or duplicated lookup logic without adding indirection:
 - [x] `src/components/Timeline.tsx`
 - [x] `src/hooks/useClipDrag.ts`
-- [ ] `src/hooks/useTimelineMidiOverlay.ts`
+- [x] `src/hooks/useTimelineMidiOverlay.ts`
 - [x] `src/hooks/useTimelineMixerController.ts`
 - [x] `src/components/timeline/timeline-overlays.tsx`
 - [x] `src/lib/resolve-timeline-tracks.ts`
@@ -638,7 +637,7 @@ Definition of done:
 - [x] `src/hooks/useClipDrag.ts`
 - [x] `src/hooks/useClipBuffers.ts`
 - [x] `src/hooks/useTrackRecording.ts`
-- [ ] `src/hooks/useTimelineMidiOverlay.ts`
+- [x] `src/hooks/useTimelineMidiOverlay.ts`
 - [x] `src/hooks/useTimelineMixerController.ts`
 - [x] `src/components/timeline/timeline-overlays.tsx`
 - [x] `src/components/timeline/EffectsPanel.tsx`
@@ -759,13 +758,13 @@ Manual smoke checks before finishing:
 - 2026-04-02: Manual validation exposed a runtime regression on authenticated app load: `Cannot access 'renderTracks' before initialization`. This came from Step 7/12-era ordering leaving early hooks closed over the `renderTracks` const before `useTimelineResolvedModel(...)` initialized it.
 
 ### Decisions made during implementation
-- 2026-04-01: Added explicit constraints from `consistency-guidelines.md` and `code-simplifier.md` to keep the refactor scoped, explicit, and consistent.
+- 2026-04-01: Added explicit constraints from `consistency-guidelines.md` and the former root `code-simplifier.md` to keep the refactor scoped, explicit, and consistent.
 - 2026-04-01: Shared timeline indexing is required only where it removes duplicated scans or duplicated lookup logic without increasing indirection.
 - 2026-04-01: `useProjectedTimelineModel` now derives existing track and clip IDs from server full-view data plus projection state, preserving optimistic grant reconciliation without depending on resolved tracks.
 - 2026-04-01: `useTimelineProjectionState.removeLocalTrack` now computes track clip membership internally from server clips, pending creates, and committed/draft move patches so `Timeline.tsx` no longer feeds it render-model lookups.
 - 2026-04-01: `useTimelineHistory` now accepts `getActions` and resolves the action set lazily at undo/redo execution time so history setup no longer closes over later mixer wiring.
 - 2026-04-01: The shared `createTimelineTrackIndex` helper returns both low-level maps and `clipEntryById` so consumers can replace ad hoc mixed shapes without extra adapter code.
-- 2026-04-01: Step 2 intentionally left `useTimelineMidiOverlay.ts` for later because it still uses a simple local clip search and was not required to land the first shared-index slice cleanly.
+- 2026-04-01: Step 2 initially left `useTimelineMidiOverlay.ts` for later; the pre-merge review later replaced its local clip search with the shared timeline track index.
 - 2026-04-01: `useTimelineResolvedModel` owns the old `bufferVersion()` dependency and identity reconciliation effect so model invalidation and history-ref tracking move together with the resolved model instead of staying split across files.
 - 2026-04-01: `useClipBuffers` now accepts an optional `onBufferChange` callback instead of owning `bufferVersion`, which keeps the buffer invalidation trigger at the timeline composition boundary while letting the resolved-model hook depend on it.
 - 2026-04-01: Step 4 replaced local getter wrappers with direct closures at consumer callsites, which removed the forwarding layer without forcing a broader file reorder yet.
@@ -810,4 +809,4 @@ The refactor is complete when all are true:
 - `EffectsPanel.tsx` keeps explicit UI and moves non-UI sync logic out.
 - `TransportControls.tsx` keeps explicit UI and moves per-section controller logic out.
 - `audio-engine.ts` groups per-track runtime state by responsibility.
-- `bun run typecheck`, `bun run build`, and `bun run knip` all pass.
+- `bun run typecheck` and `bun run build` pass; `bun run knip` is either clean or remains explicitly tracked as a pre-existing repo-level blocker.

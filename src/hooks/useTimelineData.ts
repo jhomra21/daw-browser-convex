@@ -163,8 +163,18 @@ export function useTimelineData(): UseTimelineDataReturn {
 
   const fullView = useConvexQuery(
     convexApi.timeline.fullView,
-    () => roomId() ? ({ roomId: roomId() }) : null,
-    () => ['timeline', roomId()]
+    () => {
+      const rid = roomId()
+      const uid = userId()
+      if (!rid || !uid || bootstrapRoomId() === rid) return null
+      return { roomId: rid, userId: uid }
+    },
+    () => {
+      const rid = roomId()
+      const uid = userId()
+      const bootstrapRid = bootstrapRoomId()
+      return ['timeline', rid, uid, bootstrapRid]
+    }
   )
 
   const ensureOwnedRoom = async (
@@ -220,14 +230,6 @@ export function useTimelineData(): UseTimelineDataReturn {
       }
       setBootstrapRoomId(null)
     })
-  })
-
-  createEffect(() => {
-    const uid = userId()
-    const rid = roomId()
-    if (!uid || !rid) return
-    if (bootstrapRoomId() === rid) return
-    void ensureOwnedRoom(rid, uid)
   })
 
   const showProjectDeleteConflict = (result: { conflicts?: ProjectDeleteConflict[] } | null | undefined) => {

@@ -1,5 +1,7 @@
 import { createEffect, createSignal, onCleanup, onMount } from 'solid-js'
 
+import { hasAncestorDatasetValue } from '~/lib/dom-dataset'
+
 type UseProjectsMenuControllerOptions = {
   onDeleteProject: (roomId: string) => void | Promise<void>
   onRenameProject: (roomId: string, name: string) => void | Promise<void>
@@ -88,14 +90,21 @@ export function useProjectsMenuController(
     }
   }
 
+  const escapeCssValue = (value: string) => {
+    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+      return CSS.escape(value)
+    }
+    return value.replace(/["\\]/g, '\\$&')
+  }
+
   const handleDocMouseDown = (event: MouseEvent) => {
     const confirmId = confirmingProjectId()
     const editId = editingProjectId()
     if (!confirmId && !editId) return
     const target = event.target
     if (!(target instanceof HTMLElement)) return
-    if (confirmId && !target.closest(`[data-project-rid="${confirmId}"]`)) setConfirmingProjectId(null)
-    if (editId && !target.closest(`[data-project-rid="${editId}"]`)) setEditingProjectId(null)
+    if (confirmId && !hasAncestorDatasetValue(target, (element) => element.dataset.projectRid, confirmId)) setConfirmingProjectId(null)
+    if (editId && !hasAncestorDatasetValue(target, (element) => element.dataset.projectRid, editId)) setEditingProjectId(null)
   }
 
   const handleEscKey = (event: KeyboardEvent) => {
@@ -121,7 +130,7 @@ export function useProjectsMenuController(
     if (!roomId) return
     const tryFocus = () => {
       try {
-        const element = document.querySelector(`input[data-project-input="${roomId}"]`)
+        const element = document.querySelector(`input[data-project-input="${escapeCssValue(roomId)}"]`)
         if (element instanceof HTMLInputElement) {
           element.focus()
           element.select?.()

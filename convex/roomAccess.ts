@@ -1,4 +1,6 @@
 import type { Doc } from "./_generated/dataModel";
+import { query } from "./_generated/server";
+import { v } from "convex/values";
 
 type RoomSummary = {
   roomId: string;
@@ -107,6 +109,14 @@ export async function hasRoomAccess(
 
   return projectsRaw.length > 0 || ownershipsRaw.length > 0;
 }
+
+export const canAccess = query({
+  args: { roomId: v.string(), userId: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, { roomId, userId }) => {
+    return hasRoomAccess(ctx, roomId, userId);
+  },
+});
 
 export async function requireRoomAccess(
   ctx: any,

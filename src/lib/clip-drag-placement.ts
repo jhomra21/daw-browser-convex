@@ -75,6 +75,7 @@ export function resolveNonDupTargetTrackId(
 
 export function resolveNonDupClipDragPlacement(input: {
   tracks: Track[]
+  lookup?: TimelineTrackIndex
   draggingIds: { trackId: Track['id']; clipId: string }
   multiDragging: MultiDragSnapshot | null
   addedTrackDuringDrag: Track['id'] | null
@@ -89,7 +90,7 @@ export function resolveNonDupClipDragPlacement(input: {
     return { status: 'needs-track' }
   }
 
-  const lookup = createTimelineTrackIndex(input.tracks)
+  const lookup = input.lookup ?? createTimelineTrackIndex(input.tracks)
   const targetTrackId = resolveNonDupTargetTrackId(input.tracks, input.laneIdx, input.addedTrackDuringDrag)
   if (!targetTrackId) {
     return { status: 'invalid' }
@@ -126,13 +127,12 @@ export function resolveNonDupClipDragPlacement(input: {
       if (input.gridEnabled) {
         nextStart = quantizeSecToGrid(nextStart, input.bpm, input.gridDenominator, 'round')
       }
-      const trackClips = [...input.tracks[nextIndex]?.clips.filter((clip) => !selectedClipIds.has(clip.id)) ?? [], ...(adds.get(nextIndex) ?? [])]
+      const trackClips = [...input.tracks[nextIndex].clips.filter((clip) => !selectedClipIds.has(clip.id)), ...(adds.get(nextIndex) ?? [])]
       const overlap = willOverlap(trackClips, originalClip.id, nextStart, originalClip.duration)
       const safeStart = input.gridEnabled
         ? calcNonOverlapStartGridAligned(trackClips, originalClip.id, nextStart, originalClip.duration, input.bpm, input.gridDenominator)
         : (overlap ? calcNonOverlapStart(trackClips, originalClip.id, nextStart, originalClip.duration) : nextStart)
-      const trackId = input.tracks[nextIndex]?.id
-      if (!trackId) continue
+      const trackId = input.tracks[nextIndex].id
       moves.push({ clipId: item.clipId, trackId, startSec: safeStart })
       const existingAdds = adds.get(nextIndex) ?? []
       existingAdds.push({ ...originalClip, startSec: safeStart })
@@ -183,6 +183,7 @@ export function resolveNonDupClipDragPlacement(input: {
 
 export function planDuplicatedClipPlacements(input: {
   tracks: Track[]
+  lookup?: TimelineTrackIndex
   draggingIds: { trackId: Track['id']; clipId: string }
   multiDragging: MultiDragSnapshot | null
   targetTrackId: Track['id']
@@ -191,14 +192,14 @@ export function planDuplicatedClipPlacements(input: {
   bpm: number
   gridDenominator: number
 }): DuplicatedClipPlacement[] | null {
-  const lookup = createTimelineTrackIndex(input.tracks)
+  const lookup = input.lookup ?? createTimelineTrackIndex(input.tracks)
   const targetIndex = lookup.trackIndexById.get(input.targetTrackId) ?? -1
   if (targetIndex < 0) return null
 
   const placements: DuplicatedClipPlacement[] = []
   const pendingByTrackIndex = new Map<number, Clip[]>()
   const addPlacement = (originalClip: Clip, trackIndex: number, nextStart: number): void => {
-    const existingClips = input.tracks[trackIndex]?.clips ?? []
+    const existingClips = input.tracks[trackIndex].clips
     const pendingClips = pendingByTrackIndex.get(trackIndex) ?? []
     const trackClips = [...existingClips, ...pendingClips]
     const overlap = willOverlap(trackClips, null, nextStart, originalClip.duration)

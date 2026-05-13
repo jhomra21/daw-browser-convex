@@ -14,6 +14,7 @@ import {
   sanitizeTrackRouting,
 } from "./trackRouting";
 import { getTrackWriteAccess, requireTrackOwnerForWrite } from "./trackWrites";
+import { requireRoomAccess } from "./roomAccess";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -190,6 +191,8 @@ export const listByRoom = query({
 export const create = mutation({
   args: { roomId: v.string(), userId: v.string(), index: v.optional(v.number()), kind: v.optional(v.string()), channelRole: v.optional(v.string()) },
   handler: async (ctx, { roomId, userId, index, kind, channelRole }) => {
+    await requireRoomAccess(ctx, roomId, userId);
+
     const existing = await ctx.db
       .query("tracks")
       .withIndex("by_room_index", q => q.eq("roomId", roomId))

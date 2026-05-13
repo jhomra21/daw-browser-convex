@@ -174,13 +174,13 @@ export function createAgentActions(context: AgentActionContext) {
 
     const track = await trackAtIndex(input.target)
     if (!track) return { error: `No track at index ${input.target}` } as const
-    await context.convex.mutation(input.trackMutation, {
+    const result = await context.convex.mutation(input.trackMutation, {
       roomId: context.roomId,
       trackId: track._id,
       userId: context.userId,
       params: input.params,
     } as any)
-    return { ok: true } as const
+    return result ? { ok: true } as const : { error: 'Effect update did not apply' } as const
   }
 
   const setTrackMixFlag = async (input: {
@@ -451,13 +451,13 @@ export function createAgentActions(context: AgentActionContext) {
         ...normalizeSynthParams(row?.params ?? {}),
         ...updates,
       })
-      await context.convex.mutation(context.convexApi.effects.setSynthParams as any, {
+      const result = await context.convex.mutation(context.convexApi.effects.setSynthParams as any, {
         roomId: context.roomId,
         trackId: track._id,
         userId: context.userId,
         params,
       } as any)
-      return { ok: true }
+      return result ? { ok: true } : { error: 'Effect update did not apply' }
     },
 
     async deleteTrack(input: Omit<DeleteTrackInput, 'type'>) {
@@ -528,7 +528,7 @@ export function createAgentActions(context: AgentActionContext) {
       const track = await trackAtIndex(input.trackIndex)
       if (!track) return { error: `No track at index ${input.trackIndex}` }
       if ((track.kind ?? 'audio') !== 'instrument') return { error: 'Not an instrument track' }
-      await context.convex.mutation(context.convexApi.effects.setArpeggiatorParams as any, {
+      const result = await context.convex.mutation(context.convexApi.effects.setArpeggiatorParams as any, {
         roomId: context.roomId,
         trackId: track._id,
         userId: context.userId,
@@ -541,7 +541,7 @@ export function createAgentActions(context: AgentActionContext) {
           hold: input.hold,
         },
       } as any)
-      return { ok: true }
+      return result ? { ok: true } : { error: 'Effect update did not apply' }
     },
 
     async setTiming(input: Omit<SetTimingInput, 'type'>) {
@@ -645,8 +645,6 @@ export function createAgentActions(context: AgentActionContext) {
           },
         })
       })
-      if (items.length === 0) return { error: 'No clips selected' }
-
       const ids = await context.convex.mutation(context.convexApi.clips.createMany as any, { items } as any)
       const created = Array.isArray(ids) ? ids.filter(Boolean).length : 0
       const skipped = resolved.skippedByOwnership + (items.length - created)
@@ -719,6 +717,16 @@ export function createAgentActions(context: AgentActionContext) {
       const query = normalizeText(input.sampleQuery)
       if (!query) return { error: 'Missing sampleQuery' }
 
+      const samples = await context.convex.query(context.convexApi.samples.listByRoom as any, {
+        roomId: context.roomId,
+      } as any) as SampleDoc[]
+      const sample = pickMatchingSample(query, samples)
+      if (!sample) return { error: 'Sample not found in project' }
+
+      const hasKnownDuration = typeof sample.duration === 'number' && Number.isFinite(sample.duration) && sample.duration > 0
+      if (!hasKnownDuration) return { error: 'Sample duration unavailable' }
+      const baseDuration = Number(sample.duration)
+
       let trackList = await context.getTracks()
       const hasExplicitTrackIndex = typeof input.trackIndex === 'number'
       let targetTrack = hasExplicitTrackIndex ? trackAtIndexImpl(trackList, input.trackIndex) : undefined
@@ -738,17 +746,8 @@ export function createAgentActions(context: AgentActionContext) {
       const targetError = getClipTargetError(targetTrack, 'audio')
       if (targetError) return { error: targetError }
 
-      const samples = await context.convex.query(context.convexApi.samples.listByRoom as any, {
-        roomId: context.roomId,
-      } as any) as SampleDoc[]
-      const sample = pickMatchingSample(query, samples)
-      if (!sample) return { error: 'Sample not found in project' }
-
       const bpm = typeof input.bpm === 'number' ? Math.max(20, Math.min(300, Number(input.bpm))) : 120
       const beatSec = 60 / bpm
-      const hasKnownDuration = typeof sample.duration === 'number' && Number.isFinite(sample.duration) && sample.duration > 0
-      if (!hasKnownDuration) return { error: 'Sample duration unavailable' }
-      const baseDuration = Number(sample.duration)
       let count = typeof input.count === 'number' ? Math.max(1, Math.floor(Number(input.count))) : undefined
       let intervalSec = typeof input.intervalSec === 'number' ? Math.max(0, Number(input.intervalSec)) : undefined
 

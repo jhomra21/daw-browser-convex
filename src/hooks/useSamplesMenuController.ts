@@ -4,6 +4,8 @@ import type { InsertSampleInput } from '~/hooks/useTimelineClipImport'
 import { copyText } from '~/lib/clipboard'
 import { useProjectSamples, type ProjectSampleListItem } from '~/hooks/useProjectSamples'
 import { convexApi, convexClient } from '~/lib/convex'
+import { hasAncestorDatasetValue } from '~/lib/dom-dataset'
+import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData } from '~/lib/sample-drag-data'
 import type { Track } from '~/types/timeline'
 
 type UseSamplesMenuControllerOptions = {
@@ -62,15 +64,7 @@ export function useSamplesMenuController(
 
   const onStartSampleDrag = (event: DragEvent, sample: InsertSampleInput) => {
     try {
-      const payload = JSON.stringify({
-        url: sample.url,
-        name: sample.name,
-        duration: sample.duration,
-        assetKey: sample.assetKey,
-        sourceKind: sample.sourceKind,
-        source: sample.source,
-      })
-      event.dataTransfer?.setData('application/x-mediabunny-sample', payload)
+      event.dataTransfer?.setData(SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData(sample))
       if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = 'copy'
       }
@@ -118,7 +112,7 @@ export function useSamplesMenuController(
     if (!sampleId) return
     const target = event.target
     if (!(target instanceof HTMLElement)) return
-    if (!target.closest(`[data-sample-key="${sampleId}"]`)) setConfirmingSampleKey(null)
+    if (!hasAncestorDatasetValue(target, (element) => element.dataset.sampleKey, sampleId)) setConfirmingSampleKey(null)
   }
 
   const handleEscKey = (event: KeyboardEvent) => {

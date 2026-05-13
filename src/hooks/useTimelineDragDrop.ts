@@ -1,6 +1,7 @@
 import { createSignal, onCleanup, onMount } from 'solid-js'
 import type { Accessor } from 'solid-js'
 
+import { SAMPLE_DRAG_DATA_TYPE } from '~/lib/sample-drag-data'
 import { yToLaneIndex } from '~/lib/timeline-utils'
 import type { Track } from '~/types/timeline'
 
@@ -60,8 +61,7 @@ export function useTimelineDragDrop(
 
   const isSampleDragInsideRoot = (event: DragEvent) => {
     const transfer = event.dataTransfer
-    const types = Array.from(transfer?.types ?? [])
-    if (!types.includes('application/x-mediabunny-sample')) return false
+    if (!transfer?.types.includes(SAMPLE_DRAG_DATA_TYPE)) return false
     const root = options.rootElement()
     if (!root) return false
     const bounds = root.getBoundingClientRect()

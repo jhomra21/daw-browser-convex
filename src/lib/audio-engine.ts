@@ -415,6 +415,48 @@ export class AudioEngine {
     }, delayMs) as unknown as number
   }
 
+  private stopActiveNote(note: ActiveNote) {
+    if (note.cleanupTimer) { try { clearTimeout(note.cleanupTimer) } catch {} }
+    for (const o of note.oscs) {
+      try { o.stop() } catch {}
+      try { o.disconnect() } catch {}
+      const idx = this.activeSources.indexOf(o)
+      if (idx >= 0) this.activeSources.splice(idx, 1)
+      const clipSources = this.activeSourcesByClip.get(note.clipId)
+      if (clipSources) {
+        clipSources.delete(o)
+        if (clipSources.size === 0) this.activeSourcesByClip.delete(note.clipId)
+      }
+    }
+    try { note.gain.disconnect() } catch {}
+
+    const trackOscs = this.synthRuntime.activeOscillatorsByTrack.get(note.trackId)
+    if (trackOscs) {
+      for (const o of note.oscs) trackOscs.delete(o)
+      if (trackOscs.size === 0) this.synthRuntime.activeOscillatorsByTrack.delete(note.trackId)
+    }
+
+    const notes = this.synthRuntime.activeNotesByTrack.get(note.trackId)
+    if (notes) {
+      notes.delete(note)
+      if (notes.size === 0) this.synthRuntime.activeNotesByTrack.delete(note.trackId)
+    }
+  }
+
+  private stopActiveNotesForClip(clipId: string) {
+    for (const notes of Array.from(this.synthRuntime.activeNotesByTrack.values())) {
+      for (const note of Array.from(notes)) {
+        if (note.clipId === clipId) this.stopActiveNote(note)
+      }
+    }
+  }
+
+  private stopAllActiveNotes() {
+    for (const notes of Array.from(this.synthRuntime.activeNotesByTrack.values())) {
+      for (const note of Array.from(notes)) this.stopActiveNote(note)
+    }
+  }
+
   private retargetActiveNotesForTrack(trackId: string) {
     if (!this.audioCtx) return
     const synth = this.synthRuntime.configs.get(trackId)
@@ -772,6 +814,7 @@ export class AudioEngine {
   }
 
   private stopClipSources() {
+    this.stopAllActiveNotes()
     // Snapshot currently active sources to avoid stopping newly scheduled ones
     const toStop = Array.from(this.activeSources)
     // Reset tracking immediately so subsequent schedules are isolated
@@ -969,18 +1012,7 @@ export class AudioEngine {
       }
       this.activeSourcesByClip.delete(clipId)
     }
-    // Stop active MIDI notes for this clip across all tracks
-    for (const [trackId, notes] of Array.from(this.synthRuntime.activeNotesByTrack.entries())) {
-      for (const n of Array.from(notes)) {
-        if (n.clipId === clipId) {
-          if (n.cleanupTimer) { try { clearTimeout(n.cleanupTimer) } catch {} }
-          for (const o of n.oscs) { try { o.stop() } catch {} }
-          try { n.gain.disconnect() } catch {}
-          notes.delete(n)
-        }
-      }
-      if (notes.size === 0) this.synthRuntime.activeNotesByTrack.delete(trackId)
-    }
+    this.stopActiveNotesForClip(clipId)
   }
 
   rescheduleClipsAtPlayhead(tracks: Track[], playheadSec: number, clipIds: string[], opts?: ScheduleOptions) {

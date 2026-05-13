@@ -6,6 +6,7 @@ import { createSynthVoiceOscillators, getSynthVoiceConfig, getSynthVoiceVelocity
 import { createOfflineMixerNodes } from '~/lib/mixer/apply-offline-routing'
 import { createMixerChannels } from '~/lib/mixer/channels'
 import { resolveMixerGraph } from '~/lib/mixer/resolve-routing'
+import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
 import type { Track } from '~/types/timeline'
 
 export type ExportRange =
@@ -60,7 +61,7 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
   const duration = Math.max(0.001, end - start)
   const length = Math.ceil(duration * sampleRate)
   const ctx = new OfflineAudioContext(numberOfChannels, length, sampleRate)
-  const trackById = new Map(tracks.map(track => [track.id, track]))
+  const trackIndex = createTimelineTrackIndex(tracks)
   const mixerGraph = resolveMixerGraph({
     channels: createMixerChannels(tracks),
     masterEq: fx?.masterEq,
@@ -70,7 +71,7 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
   const { trackNodes } = createOfflineMixerNodes(ctx, mixerGraph)
 
   for (const resolvedTrack of mixerGraph.channels) {
-    const track = trackById.get(resolvedTrack.channel.id)
+    const track = trackIndex.trackById.get(resolvedTrack.channel.id)
     if (!track) continue
     const trackInput = trackNodes.get(track.id)?.input
     if (!trackInput) continue

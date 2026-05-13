@@ -1,9 +1,10 @@
-import { createEffect, createSignal, onCleanup } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import type { Accessor } from 'solid-js'
 
 import type { TimelineMidiBounds } from '~/components/timeline/timeline-overlays'
 import type { AudioEngine } from '~/lib/audio-engine'
 import { canUseLocalStorage } from '~/lib/timeline-storage'
+import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
 import type { Track } from '~/types/timeline'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
@@ -31,16 +32,6 @@ type LiveNote = {
   gain: GainNode
 }
 
-function findClipById(tracks: Track[], clipId: string) {
-  for (const track of tracks) {
-    const clip = track.clips.find((entry) => entry.id === clipId)
-    if (clip) {
-      return { track, clip }
-    }
-  }
-  return null
-}
-
 function readMidiBounds(value: unknown): TimelineMidiBounds | null {
   if (!value || typeof value !== 'object') return null
   if (!('x' in value) || !('y' in value) || !('w' in value) || !('h' in value)) return null
@@ -62,6 +53,7 @@ export function useTimelineMidiOverlay(
   const [midiCard, setMidiCard] = createSignal<TimelineMidiBounds>({ x: 80, y: 80, w: 720, h: 360 })
   const activeLiveNotes = new Map<number, LiveNote>()
   let midiCardPersistTimer: number | null = null
+  const trackIndex = createMemo(() => createTimelineTrackIndex(options.tracks()))
 
   const midiCardStorageKey = () => {
     const roomId = options.roomId() || 'default'
@@ -91,7 +83,7 @@ export function useTimelineMidiOverlay(
   const resolveTargetTrackId = () => {
     const clipId = midiEditorClipId()
     if (clipId) {
-      const match = findClipById(options.tracks(), clipId)
+      const match = trackIndex().clipEntryById.get(clipId)
       if (match) return match.track.id
     }
     return options.selection.selectedFXTarget() || options.selection.selectedTrackId()
@@ -139,7 +131,7 @@ export function useTimelineMidiOverlay(
   const closeMidiEditor = () => setMidiEditorClipId(null)
 
   const openMidiEditorFor = (clipId: string) => {
-    const match = findClipById(options.tracks(), clipId)
+    const match = trackIndex().clipEntryById.get(clipId)
     if (match?.clip.midi) {
       setMidiEditorClipId(clipId)
     }
@@ -225,7 +217,7 @@ export function useTimelineMidiOverlay(
   createEffect(() => {
     const clipId = midiEditorClipId()
     if (!clipId) return
-    const match = findClipById(options.tracks(), clipId)
+    const match = trackIndex().clipEntryById.get(clipId)
     if (!match?.clip.midi) {
       setMidiEditorClipId(null)
     }

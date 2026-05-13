@@ -326,6 +326,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     if (duplicationActive) {
       const placements = planDuplicatedClipPlacements({
         tracks: snapshot,
+        lookup,
         draggingIds,
         multiDragging,
         targetTrackId: targetId,
@@ -352,6 +353,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     } else {
       const plannedPlacement = resolveNonDupClipDragPlacement({
         tracks: snapshot,
+        lookup,
         draggingIds,
         multiDragging,
         addedTrackDuringDrag,
@@ -432,7 +434,8 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       }
       if (!targetId) { cancelDuplicationDrag(); return }
 
-      const targetTrack = base.find(t => t.id === targetId)
+      const lookup = createTimelineTrackIndex(base)
+      const targetTrack = lookup.trackById.get(targetId)
       const targetUserId = userId()
       if (targetTrack && targetTrack.lockedBy && targetTrack.lockedBy !== targetUserId) { cancelDuplicationDrag(); return }
 
@@ -441,6 +444,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
       const placements = planDuplicatedClipPlacements({
         tracks: base,
+        lookup,
         draggingIds: draggingIds!,
         multiDragging,
         targetTrackId: targetId,
@@ -531,8 +535,10 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     }
 
     const currentTracks = placementTracks()
+    let currentLookup = createTimelineTrackIndex(currentTracks)
     let plannedPlacement = resolveNonDupClipDragPlacement({
       tracks: currentTracks,
+      lookup: currentLookup,
       draggingIds,
       multiDragging,
       addedTrackDuringDrag,
@@ -551,8 +557,10 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
         return
       }
       finalTracks = placementTracks()
+      currentLookup = createTimelineTrackIndex(finalTracks)
       plannedPlacement = resolveNonDupClipDragPlacement({
         tracks: finalTracks,
+        lookup: currentLookup,
         draggingIds,
         multiDragging,
         addedTrackDuringDrag,

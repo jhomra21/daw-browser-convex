@@ -51,11 +51,11 @@ export async function upsertSampleRow(ctx: any, input: UpsertSampleRowInput) {
     if (existingRow.url !== url) patch.url = url
     if (!existingRow.name && input.name) patch.name = input.name
     const currentDuration = sanitizePositiveNumber(existingRow.duration)
-    if (duration !== undefined && (currentDuration === undefined || numbersDiffer(currentDuration, duration))) {
+    if (currentDuration === undefined || numbersDiffer(currentDuration, duration)) {
       patch.duration = duration
     }
-    if (sampleRate !== undefined && existingRow.sampleRate !== sampleRate) patch.sampleRate = sampleRate
-    if (channelCount !== undefined && existingRow.channelCount !== channelCount) patch.channelCount = channelCount
+    if (existingRow.sampleRate !== sampleRate) patch.sampleRate = sampleRate
+    if (existingRow.channelCount !== channelCount) patch.channelCount = channelCount
     if (Object.keys(patch).length > 0) {
       await ctx.db.patch(existingRow._id, patch)
     }

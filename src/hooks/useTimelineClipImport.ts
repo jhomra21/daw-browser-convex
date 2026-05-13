@@ -5,6 +5,7 @@ import { createAudioAssetKey, getAudioSourceMetadata, type AudioSourceKind } fro
 import type { AudioEngine } from '~/lib/audio-engine'
 import { canTrackReceiveAudioClip, getTrackChannelRole } from '~/lib/track-routing'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
+import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE, type SampleDragData } from '~/lib/sample-drag-data'
 import { clientXToSec, yToLaneIndex, willOverlap, calcNonOverlapStart, quantizeSecToGrid, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
@@ -24,18 +25,7 @@ type UploadToR2 = (
   durationSec?: number,
 ) => Promise<string | null>
 
-export type InsertSampleInput = {
-  url: string
-  name?: string
-  duration: number
-  assetKey: string
-  sourceKind: AudioSourceKind
-  source: {
-    durationSec: number
-    sampleRate: number
-    channelCount: number
-  }
-}
+export type InsertSampleInput = SampleDragData
 
 type TimelineClipImportOptions = {
   audioEngine: AudioEngine
@@ -65,14 +55,6 @@ type TimelineClipImportHandlers = {
   handleFiles: (files: FileList | null) => Promise<void>
   handleAddAudio: () => Promise<void>
   handleInsertSample: (input: InsertSampleInput) => Promise<void>
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === 'object' && value !== null
-}
-
-const isAudioSourceKind = (value: unknown): value is AudioSourceKind => {
-  return value === 'upload' || value === 'url' || value === 'recording'
 }
 
 export function useTimelineClipImport(options: TimelineClipImportOptions): TimelineClipImportHandlers {
@@ -200,34 +182,6 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     return calcNonOverlapStart(track.clips, null, desiredStart, duration)
   }
 
-  const resolveInsertSample = (input: unknown): InsertSampleInput | null => {
-    if (!isRecord(input)) return null
-    const duration = input.duration
-    const assetKey = input.assetKey
-    const sourceKind = input.sourceKind
-    const source = input.source
-    if (!(typeof duration === 'number' && duration > 0)) return null
-    if (typeof input.url !== 'string' || !input.url) return null
-    if (typeof assetKey !== 'string' || !assetKey) return null
-    if (!isAudioSourceKind(sourceKind)) return null
-    if (!isRecord(source)) return null
-    const durationSec = source.durationSec
-    const sampleRate = source.sampleRate
-    const channelCount = source.channelCount
-    if (!(typeof durationSec === 'number' && durationSec > 0)) return null
-    if (!(typeof sampleRate === 'number' && sampleRate > 0)) return null
-    if (!(typeof channelCount === 'number' && channelCount > 0)) return null
-
-    return {
-      url: input.url,
-      name: typeof input.name === 'string' ? input.name : undefined,
-      duration,
-      assetKey,
-      sourceKind,
-      source: { durationSec, sampleRate, channelCount },
-    }
-  }
-
   const createAudioSourceClip = async (input: {
     trackId: Track['id']
     startSec: number
@@ -326,31 +280,26 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     const dt = event.dataTransfer
 
     const placeUrlClip = async (
-      input: InsertSampleInput,
+      input: InsertSampleInput | null,
     ) => {
-      const resolved = resolveInsertSample(input)
-      if (!resolved) return false
-      const placement = await resolveDropPlacement(event.clientX, event.clientY, resolved.duration)
+      if (!input) return false
+      const placement = await resolveDropPlacement(event.clientX, event.clientY, input.duration)
       if (!placement) return false
       await createAudioSourceClip({
         trackId: placement.track.id,
         startSec: placement.startSec,
-        duration: resolved.duration,
-        source: resolved.source,
-        url: resolved.url,
-        name: resolved.name,
-        assetKey: resolved.assetKey,
-        sourceKind: resolved.sourceKind,
+        duration: input.duration,
+        source: input.source,
+        url: input.url,
+        name: input.name,
+        assetKey: input.assetKey,
+        sourceKind: input.sourceKind,
       })
       return true
     }
 
-    const samplePayload = dt?.getData('application/x-mediabunny-sample')
-    if (samplePayload) {
-      try {
-        if (await placeUrlClip(JSON.parse(samplePayload))) return
-      } catch {}
-    }
+    const samplePayload = dt?.getData(SAMPLE_DRAG_DATA_TYPE)
+    if (samplePayload && await placeUrlClip(parseSampleDragData(samplePayload))) return
 
     const file = dt?.files?.[0]
     if (!file || !file.type.startsWith('audio')) return
@@ -397,22 +346,19 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
   }
 
   const handleInsertSample = async (input: InsertSampleInput) => {
-    if (!input.url) return
     const targetTrack = await ensureTargetAudioTrack(undefined, '[Import] Cannot insert audio into this track')
     if (!targetTrack) return
-    const resolved = resolveInsertSample(input)
-    if (!resolved) return
-    const startSec = resolveClipStartSec(targetTrack, playheadSec(), resolved.duration)
+    const startSec = resolveClipStartSec(targetTrack, playheadSec(), input.duration)
 
     await createAudioSourceClip({
       trackId: targetTrack.id,
       startSec,
-      duration: resolved.duration,
-      source: resolved.source,
-      url: resolved.url,
-      name: resolved.name,
-      assetKey: resolved.assetKey,
-      sourceKind: resolved.sourceKind,
+      duration: input.duration,
+      source: input.source,
+      url: input.url,
+      name: input.name,
+      assetKey: input.assetKey,
+      sourceKind: input.sourceKind,
     })
   }
 

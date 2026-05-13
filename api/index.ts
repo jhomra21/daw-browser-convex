@@ -13,6 +13,15 @@ type Variables = {
   session: Session['session'] | null;
 }
 
+async function canAccessAgentRoom(
+  convex: ConvexHttpClient,
+  roomId: string,
+  userId: string,
+) {
+  const canAccess = await convex.query(convexApi.roomAccess.canAccess as any, { roomId, userId } as any)
+  return canAccess
+}
+
 const app = new Hono<{
   Bindings: Env;
   Variables: Variables;
@@ -88,6 +97,9 @@ app.post('/api/agent/execute', async (c) => {
       return c.json({ error: 'Invalid commands', issues: parsed.error.issues }, 400)
     }
     const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
+    if (!(await canAccessAgentRoom(convex, roomId, (user as any).id))) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
     const trackList: any[] = await convex.query(convexApi.tracks.listByRoom as any, { roomId } as any)
     const agentActions = createAgentActions({
       convex,
@@ -517,6 +529,11 @@ app.post('/api/agent/chat', async (c) => {
 
     const openrouter = createOpenRouter({ apiKey: c.env.OPENROUTER_API_KEY })
     const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
+    if (roomId) {
+      if (!(await canAccessAgentRoom(convex, roomId, (user as any).id))) {
+        return c.json({ error: 'Forbidden' }, 403)
+      }
+    }
 
     const modelName = 'openai/gpt-oss-20b:free'
     const today = new Date().toISOString().slice(0, 10)

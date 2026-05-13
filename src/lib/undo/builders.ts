@@ -1,4 +1,5 @@
 import { buildClipHistorySnapshot } from '~/lib/clip-create'
+import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
 import type { Track, TrackRouting } from '~/types/timeline'
 
 import { buildTrackRoutingHistorySnapshot, getClipHistoryRef, getTrackHistoryRef } from './refs'
@@ -238,20 +239,19 @@ export function buildClipsMoveHistoryEntry(input: {
     to: { trackId: Track['id']; startSec: number }
   }>
 }): Extract<HistoryEntry, { type: 'clips-move' }> {
-  const trackById = new Map(input.tracks.map((track) => [track.id, track]))
-  const clipById = new Map(input.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, clip] as const)))
+  const trackIndex = createTimelineTrackIndex(input.tracks)
   return {
     type: 'clips-move',
     roomId: input.roomId,
     data: {
       moves: input.moves.map((move) => ({
-        clipRef: getClipHistoryRef(clipById.get(move.clipId)),
+        clipRef: getClipHistoryRef(trackIndex.clipById.get(move.clipId)),
         from: {
-          trackRef: getTrackHistoryRef(trackById.get(move.from.trackId)),
+          trackRef: getTrackHistoryRef(trackIndex.trackById.get(move.from.trackId)),
           startSec: move.from.startSec,
         },
         to: {
-          trackRef: getTrackHistoryRef(trackById.get(move.to.trackId)),
+          trackRef: getTrackHistoryRef(trackIndex.trackById.get(move.to.trackId)),
           startSec: move.to.startSec,
         },
       })),

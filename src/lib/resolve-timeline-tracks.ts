@@ -371,6 +371,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
   }
 
   const applyClipEdits = (edits: Map<string, ClipTimelinePatch>) => {
+    const replacementsByTrack = new Map<Track, Map<string, Clip>>()
     for (const [clipId, patch] of edits) {
       const currentTrackId = clipTrackIdById.get(clipId)
       const currentTrack = currentTrackId ? trackById.get(currentTrackId) : undefined
@@ -386,9 +387,14 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
         pushClipToTrack(nextTrack, nextClip)
         clipTrackIdById.set(clipId, resolvedNextTrackId)
       } else {
-        currentTrack.clips = currentTrack.clips.map((clip) => clip.id === clipId ? nextClip : clip)
+        const replacements = replacementsByTrack.get(currentTrack) ?? new Map<string, Clip>()
+        replacements.set(clipId, nextClip)
+        replacementsByTrack.set(currentTrack, replacements)
       }
       clipById.set(clipId, nextClip)
+    }
+    for (const [track, replacements] of replacementsByTrack) {
+      track.clips = track.clips.map((clip) => replacements.get(clip.id) ?? clip)
     }
   }
 

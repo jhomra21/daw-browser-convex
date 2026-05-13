@@ -5,6 +5,7 @@ import { getClipOwnership, getClipWriteAccess } from './clipWrites'
 import { getMergedTrack } from './mixerChannels'
 import { upsertSampleRow } from './sampleRows'
 import { isClipKindCompatibleWithTrack } from './trackRouting'
+import { getTrackWriteAccess } from './trackWrites'
 import { normalizeClipStartSec, normalizeClipTimingPatch } from '../src/lib/clip-timing'
 import { buildClipAudioSourceFields, normalizeAudioSourceMetadataPatch, sanitizePositiveNumber, type AudioSourceKind } from '../src/lib/audio-source-rules'
 
@@ -66,9 +67,6 @@ const sanitizeClipKind = (value: string | undefined): ClipKind => {
   return 'audio'
 }
 
-const canCreateClipOnTrack = (track: any, clipKind: ClipKind) =>
-  isClipKindCompatibleWithTrack(track as any, clipKind)
-
 const getCompatibleMergedTrack = async (
   ctx: any,
   trackId: any,
@@ -77,8 +75,35 @@ const getCompatibleMergedTrack = async (
 ) => {
   const track = await getMergedTrack(ctx, trackId)
   if (!track || track.roomId !== roomId) return null
-  if (!canCreateClipOnTrack(track, clipKind)) return null
+  if (!isClipKindCompatibleWithTrack(track as any, clipKind)) return null
   return track
+}
+
+const getWritableCompatibleMergedTrack = async (
+  ctx: any,
+  trackId: any,
+  userId: string,
+  roomId: string,
+  clipKind: ClipKind,
+) => {
+  const access = await getTrackWriteAccess(ctx, trackId, userId)
+  if (!access) return null
+  return await getCompatibleMergedTrack(ctx, trackId, roomId, clipKind)
+}
+
+const isMergedTrackLockedByOther = (
+  track: { lockedBy?: string | null },
+  userId: string,
+) => !!track.lockedBy && track.lockedBy !== userId
+
+const isTrackLockedByOther = async (
+  ctx: any,
+  trackId: any,
+  userId: string,
+) => {
+  const track = await getMergedTrack(ctx, trackId)
+  if (!track) return true
+  return isMergedTrackLockedByOther(track, userId)
 }
 
 const buildClipCreatePatch = (
@@ -135,7 +160,7 @@ const createOwnedClip = async (
   item: ClipCreateInput,
 ) => {
   const clipKind = sanitizeClipKind(item.clipKind ?? (item.midi ? 'midi' : 'audio'))
-  const track = await getCompatibleMergedTrack(ctx, item.trackId, item.roomId, clipKind)
+  const track = await getWritableCompatibleMergedTrack(ctx, item.trackId, item.userId, item.roomId, clipKind)
   if (!track) return null
 
   const sourceMetadata = normalizeAudioSourceMetadataPatch(item)
@@ -236,6 +261,7 @@ export const move = mutation({
     const clip = access.clip
     const nextStartSec = normalizeClipStartSec(startSec)
     const nextTrackId = toTrackId ?? clip.trackId
+    if (await isTrackLockedByOther(ctx, clip.trackId, userId)) return { status: 'rejected' as const }
     if (toTrackId) {
       const targetTrack = await getCompatibleMergedTrack(
         ctx,
@@ -244,6 +270,7 @@ export const move = mutation({
         sanitizeClipKind((clip as any).midi ? 'midi' : 'audio'),
       )
       if (!targetTrack) return { status: 'rejected' as const }
+      if (isMergedTrackLockedByOther(targetTrack, userId)) return { status: 'rejected' as const }
     }
     await ctx.db.patch(clipId, {
       startSec: nextStartSec,
@@ -286,6 +313,8 @@ export const setTiming = mutation({
   handler: async (ctx, { clipId, userId, startSec, duration, leftPadSec, bufferOffsetSec, midiOffsetBeats }) => {
     const access = await getClipWriteAccess(ctx, clipId, userId)
     if (!access) return { status: 'rejected' as const }
+    if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
+
     const normalizedTiming = normalizeClipTimingPatch({
       startSec,
       duration,
@@ -378,8 +407,11 @@ export const removeMany = mutation({
   handler: async (ctx, { clipIds, userId }) => {
     const removedClipIds: any[] = []
     const skipped: Array<{ clipId: any; reason: 'access-denied' | 'not-found' }> = []
-    for (const clipId of clipIds) {
-      const ownership = await getClipOwnership(ctx, clipId)
+    const ownerships = await Promise.all(clipIds.map(async (clipId) => ({
+      clipId,
+      ownership: await getClipOwnership(ctx, clipId),
+    })))
+    for (const { clipId, ownership } of ownerships) {
       if (!ownership) {
         skipped.push({ clipId, reason: 'not-found' })
         continue

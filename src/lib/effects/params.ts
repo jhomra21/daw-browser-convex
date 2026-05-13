@@ -68,7 +68,6 @@ export type SynthParams = {
   gain: number
   attackMs: number
   releaseMs: number
-  wave?: SynthWave
 }
 
 export type SynthParamsInput = Partial<SynthParams>
@@ -80,12 +79,11 @@ export function createDefaultSynthParams(): SynthParams {
     gain: 0.8,
     attackMs: 5,
     releaseMs: 30,
-    wave: 'sawtooth',
   }
 }
 
 export function normalizeSynthParams(input: SynthParamsInput): SynthParams {
-  const wave1 = input.wave1 ?? input.wave ?? 'sawtooth'
+  const wave1 = input.wave1 ?? 'sawtooth'
   const wave2 = input.wave2 ?? wave1
 
   return {
@@ -94,15 +92,11 @@ export function normalizeSynthParams(input: SynthParamsInput): SynthParams {
     gain: typeof input.gain === 'number' ? clamp(input.gain, 0, 1.5) : 0.8,
     attackMs: typeof input.attackMs === 'number' ? clamp(input.attackMs, 0, 200) : 5,
     releaseMs: typeof input.releaseMs === 'number' ? clamp(input.releaseMs, 0, 200) : 30,
-    wave: input.wave ?? wave1,
   }
 }
 
 export function serializeSynthParams(params: SynthParams): string {
-  return JSON.stringify({
-    ...params,
-    wave: params.wave ?? params.wave1,
-  })
+  return JSON.stringify(params)
 }
 
 export type ArpeggiatorPattern = 'up' | 'down' | 'updown' | 'random'

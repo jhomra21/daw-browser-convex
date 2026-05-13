@@ -1,0 +1,214 @@
+import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
+import {
+  createDefaultEqParams,
+  createDefaultReverbParams,
+  normalizeSynthParams,
+  type ArpeggiatorParams,
+  type EqParams,
+  type ReverbParams,
+  type SynthParams,
+  type SynthParamsInput,
+} from "~/lib/effects/params";
+import type { AudioEngine, SpectrumFrame } from "~/lib/audio-engine";
+import { convexApi, useConvexQuery } from "~/lib/convex";
+import type { Track } from "~/types/timeline";
+
+type UseEffectsPanelAudioSyncOptions = {
+  isOpen: Accessor<boolean>;
+  roomId: Accessor<string | undefined>;
+  currentTargetId: Accessor<string>;
+  tracks: Accessor<Track[]>;
+  audioEngine: Accessor<AudioEngine | undefined>;
+  localDraftEffects?: {
+    eq?: (targetId: string) => EqParams | undefined;
+    reverb?: (targetId: string) => ReverbParams | undefined;
+    synth?: (targetId: string) => SynthParams | undefined;
+    arp?: (targetId: string) => ArpeggiatorParams | undefined;
+  };
+};
+
+type UseEffectsPanelAudioSyncReturn = {
+  roomEffects: ReturnType<typeof useConvexQuery<typeof convexApi.effects.listByRoom>>;
+  spectrum: Accessor<SpectrumFrame | null>;
+};
+
+export function useEffectsPanelAudioSync(
+  options: UseEffectsPanelAudioSyncOptions,
+): UseEffectsPanelAudioSyncReturn {
+  const roomEffects = useConvexQuery(
+    convexApi.effects.listByRoom,
+    () => {
+      const roomId = options.roomId();
+      return roomId ? { roomId } : null;
+    },
+    () => ["effects", "room", options.roomId()],
+  );
+
+  const disabledEq = { ...createDefaultEqParams(), enabled: false };
+  const disabledReverb = { ...createDefaultReverbParams(), enabled: false };
+  let syncedTrackIds = new Set<Track["id"]>();
+  let syncedRoomId: string | null = null;
+
+  const clearSyncedTrackState = (audioEngine: AudioEngine, trackIds: Iterable<Track["id"]>) => {
+    for (const trackId of trackIds) {
+      audioEngine.setTrackEq(trackId, disabledEq);
+      audioEngine.setTrackReverb(trackId, disabledReverb);
+      audioEngine.clearTrackSynth?.(trackId);
+      audioEngine.clearTrackArpeggiator?.(trackId);
+    }
+  };
+
+  const clearSyncedMasterState = (audioEngine: AudioEngine) => {
+    audioEngine.setMasterEq(disabledEq);
+    audioEngine.setMasterReverb(disabledReverb);
+  };
+
+  createEffect(() => {
+    const audioEngine = options.audioEngine();
+    const roomId = options.roomId();
+    if (!audioEngine) return;
+    if (roomId) return;
+    clearSyncedTrackState(audioEngine, syncedTrackIds);
+    clearSyncedMasterState(audioEngine);
+    syncedTrackIds = new Set();
+    syncedRoomId = null;
+  });
+
+  createEffect(() => {
+    const audioEngine = options.audioEngine();
+    const roomId = options.roomId();
+    const effects = roomEffects.data;
+    if (!audioEngine) return;
+
+    const activeTargetId = options.currentTargetId();
+    const tracks = options.tracks();
+    const currentTrackIds = new Set(tracks.map((track) => track.id));
+    if (effects === undefined) {
+      if (roomId && syncedRoomId !== roomId) {
+        clearSyncedTrackState(audioEngine, new Set([...syncedTrackIds, ...currentTrackIds]));
+        clearSyncedMasterState(audioEngine);
+        syncedTrackIds = new Set(currentTrackIds);
+        syncedRoomId = roomId;
+      }
+      return;
+    }
+
+    if (!roomId) return;
+
+    const eqByTrackId = new Map<string, EqParams>();
+    const reverbByTrackId = new Map<string, ReverbParams>();
+    const synthByTrackId = new Map<string, SynthParams>();
+    const arpByTrackId = new Map<string, ArpeggiatorParams>();
+    let hasMasterEq = false;
+    let hasMasterReverb = false;
+
+    for (const row of effects) {
+      if (row?.targetType === "master") {
+        if (activeTargetId === "master") continue;
+        if (row.type === "eq" && row.params) {
+          hasMasterEq = true;
+          audioEngine.setMasterEq(row.params);
+        }
+        if (row.type === "reverb" && row.params) {
+          hasMasterReverb = true;
+          audioEngine.setMasterReverb(row.params);
+        }
+        continue;
+      }
+
+      const trackId = row?.trackId;
+      if (!trackId || trackId === activeTargetId) continue;
+      if (row.type === "eq" && row.params) eqByTrackId.set(trackId, row.params);
+      if (row.type === "reverb" && row.params) reverbByTrackId.set(trackId, row.params);
+      if (row.type === "synth" && row.params) synthByTrackId.set(trackId, normalizeSynthParams(row.params as SynthParamsInput));
+      if (row.type === "arpeggiator" && row.params) arpByTrackId.set(trackId, row.params);
+    }
+
+    const masterEqDraft = activeTargetId === "master"
+      ? undefined
+      : options.localDraftEffects?.eq?.("master");
+    if (masterEqDraft) {
+      hasMasterEq = true;
+      audioEngine.setMasterEq(masterEqDraft);
+    }
+
+    const masterReverbDraft = activeTargetId === "master"
+      ? undefined
+      : options.localDraftEffects?.reverb?.("master");
+    if (masterReverbDraft) {
+      hasMasterReverb = true;
+      audioEngine.setMasterReverb(masterReverbDraft);
+    }
+
+    if (activeTargetId !== "master") {
+      if (!hasMasterEq) audioEngine.setMasterEq(disabledEq);
+      if (!hasMasterReverb) audioEngine.setMasterReverb(disabledReverb);
+    }
+
+    const staleTrackIds = new Set<Track["id"]>();
+    for (const trackId of syncedTrackIds) {
+      if (!currentTrackIds.has(trackId)) {
+        staleTrackIds.add(trackId);
+      }
+    }
+    clearSyncedTrackState(audioEngine, staleTrackIds);
+
+    for (const track of tracks) {
+      if (track.id === activeTargetId) continue;
+      const eq = options.localDraftEffects?.eq?.(track.id) ?? eqByTrackId.get(track.id);
+      if (eq) audioEngine.setTrackEq(track.id, eq);
+      else audioEngine.setTrackEq(track.id, disabledEq);
+      const reverb = options.localDraftEffects?.reverb?.(track.id) ?? reverbByTrackId.get(track.id);
+      if (reverb) audioEngine.setTrackReverb(track.id, reverb);
+      else audioEngine.setTrackReverb(track.id, disabledReverb);
+      if (track.kind === "instrument") {
+        const synth = options.localDraftEffects?.synth?.(track.id) ?? synthByTrackId.get(track.id);
+        if (synth) audioEngine.setTrackSynth(track.id, synth);
+        else audioEngine.clearTrackSynth?.(track.id);
+        const arp = options.localDraftEffects?.arp?.(track.id) ?? arpByTrackId.get(track.id);
+        if (arp) audioEngine.setTrackArpeggiator(track.id, arp);
+        else audioEngine.clearTrackArpeggiator?.(track.id);
+        continue;
+      }
+      audioEngine.clearTrackSynth?.(track.id);
+      audioEngine.clearTrackArpeggiator?.(track.id);
+    }
+
+    syncedTrackIds = new Set(currentTrackIds);
+    syncedRoomId = roomId;
+  });
+
+  const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null);
+
+  createEffect(() => {
+    if (!options.isOpen()) return;
+    let raf = 0;
+    const loop = () => {
+      try {
+        const audioEngine = options.audioEngine();
+        const id = options.currentTargetId();
+        const data = id === "master"
+          ? audioEngine?.getMasterSpectrum()
+          : audioEngine?.getTrackSpectrum(id);
+        if (data) setSpectrum(data);
+      } catch {}
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    onCleanup(() => {
+      try {
+        cancelAnimationFrame(raf);
+      } catch {}
+    });
+  });
+
+  createEffect(() => {
+    void options.currentTargetId();
+    setSpectrum(null);
+  });
+
+  return {
+    roomEffects,
+    spectrum,
+  };
+}

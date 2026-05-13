@@ -1,0 +1,32 @@
+import { createSignal, type Accessor } from 'solid-js'
+
+import { useProjectExports } from '~/hooks/useProjectExports'
+import { copyText } from '~/lib/clipboard'
+
+type UseExportsMenuControllerOptions = {
+  currentRoomId: Accessor<string>
+}
+
+type UseExportsMenuControllerReturn = {
+  open: Accessor<boolean>
+  onOpenChange: (open: boolean) => void
+  exports: ReturnType<typeof useProjectExports>['exports']
+  copyText: (value?: string) => Promise<void>
+}
+
+export function useExportsMenuController(
+  options: UseExportsMenuControllerOptions,
+): UseExportsMenuControllerReturn {
+  const [open, setOpen] = createSignal(false)
+  const exportsQ = useProjectExports({
+    roomId: options.currentRoomId,
+    enabled: open,
+  })
+
+  return {
+    open,
+    onOpenChange: setOpen,
+    exports: exportsQ.exports,
+    copyText,
+  }
+}

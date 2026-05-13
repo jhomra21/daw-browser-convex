@@ -1,10 +1,13 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requireRoomAccess } from "./roomAccess";
 
 // List the latest N messages for a room, ordered by createdAt ascending.
 export const listLatest = query({
-  args: { roomId: v.string(), limit: v.optional(v.number()) },
-  handler: async (ctx, { roomId, limit }) => {
+  args: { roomId: v.string(), userId: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, { roomId, userId, limit }) => {
+    await requireRoomAccess(ctx, roomId, userId);
+
     const rows = await ctx.db
       .query("roomMessages")
       .withIndex("by_room_createdAt", (q) => q.eq("roomId", roomId))
@@ -18,8 +21,6 @@ export const listLatest = query({
   },
 });
 
-// Send a message to the shared room chat. Requires the user to have a `projects`
-// row for (roomId, senderUserId) as a membership marker.
 export const send = mutation({
   args: {
     roomId: v.string(),
@@ -32,13 +33,7 @@ export const send = mutation({
     const text = content.trim();
     if (!text) return null;
 
-    // Membership check via projects.by_room_owner
-    const projs = await ctx.db
-      .query('projects')
-      .withIndex('by_room_owner', (q) => q.eq('roomId', roomId).eq('ownerUserId', senderUserId))
-      .collect();
-    const proj = projs[0];
-    if (!proj) return null;
+    await requireRoomAccess(ctx, roomId, senderUserId);
 
     await ctx.db.insert('roomMessages', {
       roomId,

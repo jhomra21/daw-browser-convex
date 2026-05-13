@@ -1,9 +1,19 @@
+import { normalizePersistedHistory, serializePersistedHistory } from '~/lib/undo/persisted-history'
+import type { PersistedHistory } from '~/lib/undo/types'
+
 const MIX_KEY_PREFIX = 'mb:mix:'
 const MIX_SYNC_KEY_PREFIX = 'mb:mix-sync:'
 const GRID_KEY_PREFIX = 'mb:grid:'
 const BPM_KEY_PREFIX = 'mb:bpm:'
 const LOOP_KEY_PREFIX = 'mb:loop:'
 const HISTORY_KEY_PREFIX = 'mb:history:'
+
+export type LocalMixPatch = Partial<{ muted: boolean; soloed: boolean; volume: number }>
+export type LocalMixMap = Record<string, LocalMixPatch>
+type HistoryStorageScope = {
+  roomId?: string
+  userId?: string
+}
 
 export const canUseLocalStorage = () => {
   if (typeof window === 'undefined') return false
@@ -15,7 +25,7 @@ export const canUseLocalStorage = () => {
   }
 }
 
-export const loadLocalMixMap = (rid?: string): Record<string, { muted?: boolean; soloed?: boolean }> => {
+export const loadLocalMixMap = (rid?: string): LocalMixMap => {
   if (!rid) return {}
   if (!canUseLocalStorage()) return {}
   try {
@@ -25,18 +35,52 @@ export const loadLocalMixMap = (rid?: string): Record<string, { muted?: boolean;
   }
 }
 
+export const saveLocalMixMap = (rid: string | undefined, map: LocalMixMap) => {
+  if (!rid) return
+  if (!canUseLocalStorage()) return
+  try {
+    localStorage.setItem(`${MIX_KEY_PREFIX}${rid}`, JSON.stringify(map))
+  } catch {}
+}
+
 export const saveLocalMix = (
   rid: string | undefined,
   trackId: string,
-  update: Partial<{ muted: boolean; soloed: boolean }>,
+  update: LocalMixPatch,
 ) => {
   if (!rid) return
   if (!canUseLocalStorage()) return
   const map = loadLocalMixMap(rid)
-  map[trackId] = { ...(map[trackId] || {}), ...update }
-  try {
-    localStorage.setItem(`${MIX_KEY_PREFIX}${rid}`, JSON.stringify(map))
-  } catch {}
+  const nextEntry = { ...(map[trackId] ?? {}), ...update }
+  if (
+    nextEntry.volume === undefined
+    && nextEntry.muted === undefined
+    && nextEntry.soloed === undefined
+  ) {
+    delete map[trackId]
+  } else {
+    map[trackId] = nextEntry
+  }
+  saveLocalMixMap(rid, map)
+}
+
+export const stripSharedTrackBooleanOverrides = (
+  map: LocalMixMap,
+  writableTrackIds: Iterable<string>,
+): LocalMixMap => {
+  let next: LocalMixMap | null = null
+  for (const trackId of writableTrackIds) {
+    const entry = (next ?? map)[trackId]
+    if (!entry) continue
+    if (entry.muted === undefined && entry.soloed === undefined) continue
+    if (!next) next = { ...map }
+    if (entry.volume === undefined) {
+      delete next[trackId]
+      continue
+    }
+    next[trackId] = { volume: entry.volume }
+  }
+  return next ?? map
 }
 
 export const loadMixSyncFlag = (rid?: string): boolean => {
@@ -154,21 +198,51 @@ export const saveLoopSettings = (rid: string | undefined, value: LoopSettings) =
   } catch {}
 }
 
-// ---- Undo/Redo history (optional) ----
-export type PersistedHistory = { undo: any[]; redo: any[] }
+const toHistoryStorageKey = (scope: HistoryStorageScope) => {
+  if (!scope.roomId) return null
+  return scope.userId ? `${scope.roomId}:${scope.userId}` : scope.roomId
+}
 
-export const loadHistory = (rid?: string): PersistedHistory => {
-  if (!rid || !canUseLocalStorage()) return { undo: [], redo: [] }
+const toHistoryLocalStorageKey = (storageKey: string) => `${HISTORY_KEY_PREFIX}${storageKey}`
+
+const readStoredHistory = (storageKey: string) => {
+  const raw = localStorage.getItem(toHistoryLocalStorageKey(storageKey))
+  if (!raw) return null
+  return JSON.parse(raw) as unknown
+}
+
+export const loadHistory = (scope: HistoryStorageScope): PersistedHistory => {
+  if (!scope.roomId || !canUseLocalStorage()) return { undo: [], redo: [] }
   try {
-    return JSON.parse(localStorage.getItem(`${HISTORY_KEY_PREFIX}${rid}`) || '{"undo":[],"redo":[]}') as PersistedHistory
+    const scopedKey = toHistoryStorageKey(scope)
+    if (scopedKey) {
+      const scopedHistory = readStoredHistory(scopedKey)
+      if (scopedHistory !== null) {
+        return normalizePersistedHistory(scopedHistory)
+      }
+    }
+
+    const legacyHistory = readStoredHistory(scope.roomId)
+    if (legacyHistory === null) {
+      return { undo: [], redo: [] }
+    }
+    const normalized = normalizePersistedHistory(legacyHistory)
+    if (scope.userId && scopedKey) {
+      try {
+        localStorage.setItem(toHistoryLocalStorageKey(scopedKey), JSON.stringify(serializePersistedHistory(normalized)))
+        localStorage.removeItem(toHistoryLocalStorageKey(scope.roomId))
+      } catch {}
+    }
+    return normalized
   } catch {
     return { undo: [], redo: [] }
   }
 }
 
-export const saveHistory = (rid: string | undefined, value: PersistedHistory) => {
-  if (!rid || !canUseLocalStorage()) return
+export const saveHistory = (scope: HistoryStorageScope, value: PersistedHistory) => {
+  const storageKey = toHistoryStorageKey(scope)
+  if (!storageKey || !canUseLocalStorage()) return
   try {
-    localStorage.setItem(`${HISTORY_KEY_PREFIX}${rid}`, JSON.stringify(value))
+    localStorage.setItem(toHistoryLocalStorageKey(storageKey), JSON.stringify(serializePersistedHistory(value)))
   } catch {}
 }

@@ -216,4 +216,4 @@ export function useBatchConvexMutations() {
 
 // Direct access to Convex client for advanced use cases
 export const convexClient = convex;
-export const convexApi = api; 
+export const convexApi = api;

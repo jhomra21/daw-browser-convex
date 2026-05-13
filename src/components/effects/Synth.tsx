@@ -4,13 +4,15 @@ import {
   type SynthParams,
   type SynthWave,
 } from '~/lib/effects/params'
+import { cn } from '~/lib/utils'
 
 
-export type SynthProps = {
+type SynthProps = {
   params: SynthParams
   onChange: (updates: Partial<SynthParams>) => void
   onReset?: () => void
   onExpand?: () => void
+  disabled?: boolean
   variant?: 'compact' | 'expanded'
   class?: string
 }
@@ -31,22 +33,24 @@ export default function Synth(props: SynthProps) {
   const envW = () => (variant() === 'expanded' ? 360 : 220)
   const envH = () => (variant() === 'expanded' ? 80 : 48)
   return (
-    <div class={`rounded-md border border-neutral-800 bg-neutral-900 text-neutral-100 flex flex-col ${props.class ?? ''}`}>
+    <div class={cn('flex flex-col rounded-md border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
       {/* Header */}
-      <div class="flex items-center justify-between px-2 py-1 border-b border-neutral-800">
+      <div class="flex items-center justify-between border-b border-neutral-800 px-2 py-1">
         <div class="flex items-center gap-2">
           <span class="text-xs font-semibold">Synth</span>
         </div>
         <div class="flex items-center gap-2">
           <Show when={props.onExpand}>
             <button
-              class="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700"
+              class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+              disabled={props.disabled}
               onClick={() => props.onExpand?.()}
             >Expand</button>
           </Show>
           <Show when={props.onReset}>
             <button
-              class="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700"
+              class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+              disabled={props.disabled}
               onClick={() => props.onReset?.()}
             >Reset</button>
           </Show>
@@ -58,12 +62,18 @@ export default function Synth(props: SynthProps) {
         <div class="grid gap-3" style={{ 'grid-template-columns': '1fr 1fr' }}>
           {/* Osc 1 */}
           <div class="flex flex-col gap-1">
-            <div class="text-[11px] text-neutral-400">Osc 1</div>
+            <div class="text-2xs text-neutral-400">Osc 1</div>
             <div class="flex items-center gap-1 flex-wrap">
               <For each={WAVEFORMS}>{(wf) => (
                 <button
-                  class={`px-2 py-0.5 text-[11px] rounded border transition-colors ${props.params.wave1 === wf.value ? 'bg-blue-500/20 text-blue-300 border-blue-400/30' : 'bg-neutral-800 text-neutral-300 border-neutral-700 hover:bg-neutral-700'}`}
-                  onClick={() => props.onChange({ wave1: wf.value, wave: wf.value })}
+                  class={cn(
+                    'rounded border border-neutral-700 px-2 py-0.5 text-2xs transition-colors',
+                    props.params.wave1 === wf.value
+                      ? 'border-blue-400/30 bg-blue-500/20 text-blue-300'
+                      : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
+                  )}
+                  onClick={() => props.onChange({ wave1: wf.value })}
+                  disabled={props.disabled}
                   title={wf.label}
                 >
                   <span class="font-mono text-sm">{wf.icon}</span>
@@ -78,12 +88,18 @@ export default function Synth(props: SynthProps) {
           </div>
           {/* Osc 2 */}
           <div class="flex flex-col gap-1">
-            <div class="text-[11px] text-neutral-400">Osc 2</div>
+            <div class="text-2xs text-neutral-400">Osc 2</div>
             <div class="flex items-center gap-1 flex-wrap">
               <For each={WAVEFORMS}>{(wf) => (
                 <button
-                  class={`px-2 py-0.5 text-[11px] rounded border transition-colors ${props.params.wave2 === wf.value ? 'bg-green-500/20 text-green-300 border-green-400/30' : 'bg-neutral-800 text-neutral-300 border-neutral-700 hover:bg-neutral-700'}`}
+                  class={cn(
+                    'rounded border border-neutral-700 px-2 py-0.5 text-2xs transition-colors',
+                    props.params.wave2 === wf.value
+                      ? 'border-green-400/30 bg-green-500/20 text-green-300'
+                      : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
+                  )}
                   onClick={() => props.onChange({ wave2: wf.value })}
+                  disabled={props.disabled}
                   title={wf.label}
                 >
                   <span class="font-mono text-sm">{wf.icon}</span>
@@ -113,6 +129,7 @@ export default function Synth(props: SynthProps) {
             label=""
             showValue={false}
             onValueChange={(v) => props.onChange({ gain: Math.round(clamp(v, 0, 1.5) * 100) / 100 })}
+            disabled={props.disabled}
           />
           <div class="text-xs leading-none text-neutral-300 font-mono">{props.params.gain.toFixed(2)}</div>
         </div>
@@ -130,6 +147,7 @@ export default function Synth(props: SynthProps) {
             unit="ms"
             showValue={false}
             onValueChange={(v) => props.onChange({ attackMs: Math.round(clamp(v, 0, 200)) })}
+            disabled={props.disabled}
           />
           <div class="text-xs leading-none text-neutral-300 font-mono">{props.params.attackMs}ms</div>
         </div>
@@ -147,6 +165,7 @@ export default function Synth(props: SynthProps) {
             unit="ms"
             showValue={false}
             onValueChange={(v) => props.onChange({ releaseMs: Math.round(clamp(v, 0, 200)) })}
+            disabled={props.disabled}
           />
           <div class="text-xs leading-none text-neutral-300 font-mono">{props.params.releaseMs}ms</div>
         </div>
@@ -237,4 +256,3 @@ function EnvelopePreview(props: { attackMs: number; releaseMs: number; holdMs?: 
     </svg>
   )
 }
-

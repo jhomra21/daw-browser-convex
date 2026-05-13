@@ -54,7 +54,7 @@ const RecordingPreview: Component<RecordingPreviewProps> = (props) => {
 
   return (
     <div
-      class="absolute top-2 rounded border border-red-500/70 bg-red-500/15 shadow-[0_0_8px_rgba(248,113,113,0.35)] overflow-hidden pointer-events-none"
+      class="pointer-events-none absolute top-2 overflow-hidden rounded border border-red-500/70 bg-red-500/15 shadow-md shadow-red-500/20"
       style={{
         left: `${props.startSec * PPS}px`,
         width: widthStyle(),

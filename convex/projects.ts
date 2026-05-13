@@ -1,161 +1,285 @@
-import { query, mutation } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
+import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
+import { deleteOwnedTrack, getTrackDeletePreflight } from "./tracks";
+import { listAccessibleRooms } from "./roomAccess";
 
-// List distinct roomIds for a given owner (Better Auth userId)
-export const listMine = query({
-  args: { userId: v.string() },
-  returns: v.array(v.string()),
-  handler: async (ctx, { userId }) => {
-    const owned = await ctx.db
-      .query("ownerships")
-      .withIndex("by_owner", (q) => q.eq("ownerUserId", userId))
-      .collect();
+type DeleteConflictReason = "foreign-clips" | "not-empty" | "locked";
 
-    const rooms = new Set<string>();
-    for (const o of owned) {
-      rooms.add(o.roomId);
-    }
+const deleteConflictReason = v.union(
+  v.literal("foreign-clips"),
+  v.literal("not-empty"),
+  v.literal("locked"),
+);
 
-    // Return deterministic order for convenience
-    return Array.from(rooms).sort();
-  },
+const deleteConflict = v.object({
+  trackId: v.string(),
+  reason: deleteConflictReason,
 });
 
-// List projects with names for a given owner (non-breaking addition)
+type DeleteConflict = {
+  trackId: string
+  reason: DeleteConflictReason
+}
+
+type DeleteOwnedInRoomConflictResult = {
+  status: "conflict"
+  conflictTrackIds: string[]
+  conflicts: DeleteConflict[]
+}
+
+type DeleteOwnedInRoomDeletedResult = {
+  status: "deleted"
+  conflictTrackIds: string[]
+  conflicts: DeleteConflict[]
+}
+
+type DeleteCurrentOwnedInRoomDeletedResult = {
+  status: "deleted"
+  destinationRoomId: string
+}
+
+function buildDeleteConflictResult(
+  preflight: Pick<Awaited<ReturnType<typeof getOwnedRoomDeletePreflight>>, "conflictTrackIds" | "conflicts">,
+): DeleteOwnedInRoomConflictResult {
+  return {
+    status: "conflict",
+    conflictTrackIds: preflight.conflictTrackIds,
+    conflicts: preflight.conflicts,
+  };
+}
+
+function buildDeleteOwnedInRoomDeletedResult(): DeleteOwnedInRoomDeletedResult {
+  return {
+    status: "deleted",
+    conflictTrackIds: [],
+    conflicts: [],
+  };
+}
+
+function buildDeleteCurrentOwnedInRoomDeletedResult(
+  destinationRoomId: string,
+): DeleteCurrentOwnedInRoomDeletedResult {
+  return {
+    status: "deleted",
+    destinationRoomId,
+  };
+}
+
+async function getOwnedRoomDeletePreflight(
+  ctx: MutationCtx,
+  roomId: string,
+  userId: string,
+) {
+  const ownerships: Doc<"ownerships">[] = await ctx.db
+    .query("ownerships")
+    .withIndex("by_room", (q) => q.eq("roomId", roomId))
+    .collect();
+  const ownedTrackOwnerships: Doc<"ownerships">[] = [];
+  const ownedClipOwnerships: Doc<"ownerships">[] = [];
+  const markerOwnerships: Doc<"ownerships">[] = [];
+
+  for (const ownership of ownerships) {
+    if (ownership.ownerUserId !== userId) continue;
+    if (ownership.trackId) {
+      ownedTrackOwnerships.push(ownership);
+      continue;
+    }
+    if (ownership.clipId) {
+      ownedClipOwnerships.push(ownership);
+      continue;
+    }
+    markerOwnerships.push(ownership);
+  }
+
+  const conflictsByTrackId = new Map<string, {
+    trackId: string;
+    reason: DeleteConflictReason;
+  }>();
+
+  for (const ownership of ownedTrackOwnerships) {
+    const trackId = ownership.trackId;
+    if (!trackId) continue;
+
+    const preflight = await getTrackDeletePreflight(ctx, trackId, userId, {
+      onlyIfEmpty: true,
+      assumeOwnedClipsRemoved: true,
+    });
+    if (preflight.ok || preflight.reason === "access-denied") continue;
+
+    const trackKey = String(trackId);
+    if (conflictsByTrackId.has(trackKey)) continue;
+
+    conflictsByTrackId.set(trackKey, {
+      trackId: trackKey,
+      reason: preflight.reason,
+    });
+  }
+
+  const conflicts = Array.from(conflictsByTrackId.values())
+    .sort((left, right) => left.trackId.localeCompare(right.trackId));
+
+  return {
+    conflicts,
+    conflictTrackIds: conflicts.map((conflict) => conflict.trackId),
+    ownedTrackOwnerships,
+    ownedClipOwnerships,
+    markerOwnerships,
+  };
+}
+
+async function ensureOwnedRoomRecords(
+  ctx: MutationCtx,
+  roomId: string,
+  userId: string,
+) {
+  const [projRows, ownershipRows]: [Doc<"projects">[], Doc<"ownerships">[]] = await Promise.all([
+    ctx.db
+      .query("projects")
+      .withIndex("by_room_owner", (q) => q.eq("roomId", roomId).eq("ownerUserId", userId))
+      .collect(),
+    ctx.db
+      .query("ownerships")
+      .withIndex("by_room_owner", (q) => q.eq("roomId", roomId).eq("ownerUserId", userId))
+      .collect(),
+  ]);
+  const markerOwnership = ownershipRows.find((ownership) => !ownership.trackId && !ownership.clipId);
+  if (!projRows[0]) {
+    await ctx.db.insert("projects", {
+      roomId,
+      ownerUserId: userId,
+      name: "Untitled",
+      createdAt: Date.now(),
+    });
+  }
+  if (!markerOwnership) {
+    await ctx.db.insert("ownerships", {
+      roomId,
+      ownerUserId: userId,
+    });
+  }
+}
+
+async function deleteOwnedRoomFromPreflight(
+  ctx: MutationCtx,
+  roomId: string,
+  preflight: Awaited<ReturnType<typeof getOwnedRoomDeletePreflight>>,
+  userId: string,
+) {
+  for (const ownership of preflight.ownedClipOwnerships) {
+    const clipId = ownership.clipId;
+    if (!clipId) continue;
+    const clip = await ctx.db.get(clipId);
+    if (clip) {
+      await ctx.db.delete(clip._id);
+    }
+    await ctx.db.delete(ownership._id);
+  }
+
+  for (const ownership of preflight.ownedTrackOwnerships) {
+    const trackId = ownership.trackId;
+    if (!trackId) continue;
+    const track = await ctx.db.get(trackId);
+    if (!track) {
+      await ctx.db.delete(ownership._id);
+      continue;
+    }
+    const removed = await deleteOwnedTrack(ctx, trackId, userId, { onlyIfEmpty: true });
+    if (!removed) {
+      throw new Error("Unable to remove an owned track during project cleanup.");
+    }
+  }
+
+  for (const ownership of preflight.markerOwnerships) {
+    await ctx.db.delete(ownership._id);
+  }
+
+  const projects: Doc<"projects">[] = await ctx.db
+    .query("projects")
+    .withIndex("by_room_owner", (q) => q.eq("roomId", roomId).eq("ownerUserId", userId))
+    .collect();
+  for (const project of projects) {
+    await ctx.db.delete(project._id);
+  }
+}
+
 export const listMineDetailed = query({
   args: { userId: v.string() },
   returns: v.array(v.object({ roomId: v.string(), name: v.string() })),
   handler: async (ctx, { userId }) => {
-    const owned = await ctx.db
-      .query("ownerships")
-      .withIndex("by_owner", (q) => q.eq("ownerUserId", userId))
-      .collect();
-
-    const rooms = Array.from(new Set(owned.map((o) => o.roomId))).sort();
-
-    const results: { roomId: string; name: string }[] = [];
-    for (const roomId of rooms) {
-      // Look for an existing project metadata row for this owner+room
-      const projRows = await ctx.db
-        .query("projects")
-        .withIndex("by_room_owner", (q) => q.eq("roomId", roomId).eq("ownerUserId", userId))
-        .collect();
-      const proj = projRows[0];
-      const fallback = `Untitled`;
-      results.push({ roomId, name: proj?.name ?? fallback });
-    }
-    return results;
+    return listAccessibleRooms(ctx, userId);
   },
 });
 
-// Ensure the user has an ownership marker in a room so it appears in listMine.
-// This creates a placeholder ownership row without clipId/trackId.
 export const ensureOwnedRoom = mutation({
   args: { roomId: v.string(), userId: v.string() },
   returns: v.null(),
   handler: async (ctx, { roomId, userId }) => {
-    // Does an ownership by this user in this room exist already?
-    const existing = await ctx.db
-      .query("ownerships")
-      .withIndex("by_room", (q) => q.eq("roomId", roomId))
-      .collect();
-    const has = existing.some((o) => o.ownerUserId === userId);
-    if (!has) {
-      await ctx.db.insert("ownerships", {
-        roomId,
-        ownerUserId: userId,
-        // clipId and trackId left undefined as a marker
-      } as any);
-    }
-
-    // Ensure a project metadata row exists for this owner+room (idempotent)
-    const projRows = await ctx.db
-      .query("projects")
-      .withIndex("by_room_owner", (q) => q.eq("roomId", roomId).eq("ownerUserId", userId))
-      .collect();
-    if (!projRows[0]) {
-      await ctx.db.insert("projects", {
-        roomId,
-        ownerUserId: userId,
-        name: "Untitled",
-        createdAt: Date.now(),
-      });
-    }
+    await ensureOwnedRoomRecords(ctx, roomId, userId);
     return null;
   },
 });
 
-// Delete all content owned by the user within a room and remove their ownerships.
-// This is safe for a shared room: it only removes the caller's owned items.
 export const deleteOwnedInRoom = mutation({
   args: { roomId: v.string(), userId: v.string() },
-  returns: v.null(),
+  returns: v.object({
+    status: v.union(v.literal("deleted"), v.literal("conflict")),
+    conflictTrackIds: v.array(v.string()),
+    conflicts: v.array(deleteConflict),
+  }),
   handler: async (ctx, { roomId, userId }) => {
-    // 1) Delete owned clips first
-    const clips = await ctx.db
-      .query("clips")
-      .withIndex("by_room", (q) => q.eq("roomId", roomId))
-      .collect();
-    for (const clip of clips) {
-      const owners = await ctx.db
-        .query("ownerships")
-        .withIndex("by_clip", (q) => q.eq("clipId", clip._id))
-        .collect();
-      const owner = owners[0];
-      if (owner && owner.ownerUserId === userId) {
-        await ctx.db.delete(owner._id);
-        await ctx.db.delete(clip._id);
-      }
+    const preflight = await getOwnedRoomDeletePreflight(ctx, roomId, userId);
+    if (preflight.conflicts.length > 0) {
+      return buildDeleteConflictResult(preflight);
     }
+    await deleteOwnedRoomFromPreflight(ctx, roomId, preflight, userId);
 
-    // 2) Delete owned tracks that are now empty
-    const tracks = await ctx.db
-      .query("tracks")
-      .withIndex("by_room", (q) => q.eq("roomId", roomId))
-      .collect();
-    for (const track of tracks) {
-      const owners = await ctx.db
-        .query("ownerships")
-        .withIndex("by_track", (q) => q.eq("trackId", track._id))
-        .collect();
-      const owner = owners[0];
-      if (owner && owner.ownerUserId === userId) {
-        const remainingClips = await ctx.db
-          .query("clips")
-          .withIndex("by_track", (q) => q.eq("trackId", track._id))
-          .collect();
-        if (remainingClips.length === 0) {
-          await ctx.db.delete(owner._id);
-          await ctx.db.delete(track._id);
-        }
-      }
-    }
-
-    // 3) Remove any stray ownership rows by this user within the room
-    const ownerships = await ctx.db
-      .query("ownerships")
-      .withIndex("by_room", (q) => q.eq("roomId", roomId))
-      .collect();
-    for (const o of ownerships) {
-      if (o.ownerUserId === userId) {
-        await ctx.db.delete(o._id);
-      }
-    }
-
-    // 4) Remove the project metadata row for this owner+room
-    const projects = await ctx.db
-      .query("projects")
-      .withIndex("by_room_owner", (q) => q.eq("roomId", roomId).eq("ownerUserId", userId))
-      .collect();
-    if (projects[0]) {
-      await ctx.db.delete(projects[0]._id);
-    }
-
-    return null;
+    return buildDeleteOwnedInRoomDeletedResult();
   },
 });
 
-// Rename or set the project name for this owner in a room
+async function ensureDeleteDestinationRoom(
+  ctx: MutationCtx,
+  roomId: string,
+  userId: string,
+) {
+  const alternateRoom = (await listAccessibleRooms(ctx, userId))
+    .find((entry) => entry.roomId !== roomId);
+  if (alternateRoom?.roomId) {
+    return alternateRoom.roomId;
+  }
+
+  const destinationRoomId = crypto.randomUUID();
+  await ensureOwnedRoomRecords(ctx, destinationRoomId, userId);
+  return destinationRoomId;
+}
+
+export const deleteCurrentOwnedInRoom = mutation({
+  args: { roomId: v.string(), userId: v.string() },
+  returns: v.union(
+    v.object({
+      status: v.literal("deleted"),
+      destinationRoomId: v.string(),
+    }),
+    v.object({
+      status: v.literal("conflict"),
+      conflictTrackIds: v.array(v.string()),
+      conflicts: v.array(deleteConflict),
+    }),
+  ),
+  handler: async (ctx, { roomId, userId }) => {
+    const preflight = await getOwnedRoomDeletePreflight(ctx, roomId, userId);
+    if (preflight.conflicts.length > 0) {
+      return buildDeleteConflictResult(preflight);
+    }
+
+    const destinationRoomId = await ensureDeleteDestinationRoom(ctx, roomId, userId);
+    await deleteOwnedRoomFromPreflight(ctx, roomId, preflight, userId);
+
+    return buildDeleteCurrentOwnedInRoomDeletedResult(destinationRoomId);
+  },
+});
+
 export const setName = mutation({
   args: { roomId: v.string(), userId: v.string(), name: v.string() },
   returns: v.null(),

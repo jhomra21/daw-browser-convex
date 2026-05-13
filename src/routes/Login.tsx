@@ -1,6 +1,7 @@
 import { type Component, Show, createSignal } from 'solid-js';
-import { Link, createFileRoute } from '@tanstack/solid-router';
+import { createFileRoute } from '@tanstack/solid-router';
 import { authClient } from '~/lib/auth-client';
+import { normalizeAppRedirect, readAuthRedirectSearch } from '~/lib/auth-redirect';
 import { LoginMethodButton } from '~/components/LoginMethodButton';
 import { useSessionQuery } from '~/lib/session';
 import { Button } from '~/components/ui/button';
@@ -9,14 +10,16 @@ import Icon from '~/components/ui/Icon';
 
 const Login: Component = () => {
   const session = useSessionQuery();
+  const search = Route.useSearch();
   const [loadingGoogle, setLoadingGoogle] = createSignal(false);
+  const redirectTarget = () => normalizeAppRedirect(search().redirect);
 
   async function signInWithGoogle() {
     try {
       setLoadingGoogle(true);
       await authClient.signIn.social({
         provider: 'google',
-        callbackURL: '/',
+        callbackURL: redirectTarget(),
         // errorCallbackURL: '/login', // optional: land back here on error
       });
       // Note: The above triggers a redirect flow. No further action required here.
@@ -38,13 +41,13 @@ const Login: Component = () => {
   return (
     <div class="min-h-svh flex items-center justify-center bg-neutral-950 text-white p-6">
       <div class="w-full max-w-md rounded-xl border border-neutral-800 bg-neutral-900 p-6 shadow-lg">
-        <Show when={!session()?.data} fallback={<div class="text-xl font-semibold italic">Welcome</div>}>
+        <Show when={!session.data} fallback={<div class="text-xl font-semibold italic">Welcome</div>}>
           <h1 class="text-2xl font-semibold mb-2">Sign in</h1>
           <p class="text-neutral-400 mb-6">Use your Google account to continue.</p>
         </Show>
 
         <Show
-          when={session()?.data}
+          when={session.data}
           fallback={
             <LoginMethodButton
               label="Continue with Google"
@@ -58,11 +61,16 @@ const Login: Component = () => {
           <div class="space-y-4">
             <div class="rounded-md border border-neutral-800 bg-neutral-950 p-3">
               <div class="text-sm text-neutral-400">Signed in as</div>
-              <div class="font-medium">{session()?.data?.user?.email}</div>
+              <div class="font-medium">{session.data?.user?.email}</div>
             </div>
             <div class="flex gap-2">
-              <Button class="inline-flex items-center justify-center rounded-md bg-neutral-800 px-4 py-2 hover:bg-neutral-700">
-                <Link to="/">Go to app</Link>
+              <Button
+                class="inline-flex items-center justify-center rounded-md bg-neutral-800 px-4 py-2 hover:bg-neutral-700"
+                onClick={() => {
+                  window.location.assign(redirectTarget())
+                }}
+              >
+                Go to app
               </Button>
               <Button onClick={signOut} class="inline-flex items-center justify-center rounded-md border border-neutral-700 px-4 py-2 hover:bg-neutral-800">
                 Sign out
@@ -76,5 +84,6 @@ const Login: Component = () => {
 };
 
 export const Route = createFileRoute('/Login')({
+  validateSearch: readAuthRedirectSearch,
   component: Login,
 });

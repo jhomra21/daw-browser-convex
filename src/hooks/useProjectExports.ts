@@ -22,7 +22,6 @@ type UseProjectExportsArgs = {
 
 type UseProjectExportsResult = {
   exports: Accessor<ProjectExportItem[]>
-  raw: ReturnType<typeof useConvexQuery>
 }
 
 export function useProjectExports(options: UseProjectExportsArgs): UseProjectExportsResult {
@@ -39,10 +38,8 @@ export function useProjectExports(options: UseProjectExportsArgs): UseProjectExp
   )
 
   const list = createMemo<ProjectExportItem[]>(() => {
-    const dataRaw: any = (raw as any).data
-    const data = typeof dataRaw === 'function' ? dataRaw() : dataRaw
-    return Array.isArray(data) ? data : []
+    return Array.isArray(raw.data) ? raw.data : []
   })
 
-  return { exports: list, raw }
+  return { exports: list }
 }

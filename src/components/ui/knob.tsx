@@ -1,4 +1,5 @@
 import { createSignal, onCleanup } from 'solid-js'
+import { cn } from '~/lib/utils'
 
 export type KnobProps = {
   value: number
@@ -144,8 +145,11 @@ export default function Knob(props: KnobProps) {
       )}
       
       {/* Knob Container - Larger click area */}
-      <div 
-        class={`relative select-none ${props.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} transition-transform duration-100`}
+      <div
+        class={cn(
+          'relative select-none transition-transform duration-100',
+          props.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+        )}
         style={{ 
           width: `${size() + 12}px`, 
           height: `${size() + 12}px`,
@@ -189,10 +193,11 @@ export default function Knob(props: KnobProps) {
         </svg>
         
         {/* Center Indicator */}
-        <div 
-          class={`absolute w-[2px] rounded-full transform -translate-x-1/2 origin-bottom transition-colors duration-150 ${
-            isDragging() ? 'bg-sky-100' : 'bg-gray-200'
-          }`}
+        <div
+          class={cn(
+            'absolute w-0.5 -translate-x-1/2 transform rounded-full origin-bottom transition-colors duration-150',
+            isDragging() ? 'bg-sky-100' : 'bg-gray-200',
+          )}
           style={{ 
             left: '50%',
             top: `${pointerTop()}px`,
@@ -205,9 +210,12 @@ export default function Knob(props: KnobProps) {
       
       {/* Value Display */}
       {props.showValue !== false && (
-        <div class={`text-xs font-mono text-center min-w-[3rem] ${
-          isDragging() ? 'text-gray-200' : 'text-gray-400'
-        } transition-colors duration-150`}>
+        <div
+          class={cn(
+            'min-w-12 text-center font-mono text-xs transition-colors duration-150',
+            isDragging() ? 'text-gray-200' : 'text-gray-400',
+          )}
+        >
           {formatValue()}
         </div>
       )}

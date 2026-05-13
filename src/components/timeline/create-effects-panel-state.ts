@@ -1,7 +1,7 @@
 import {
-  createEffect,
   createMemo,
   createSignal,
+  onCleanup,
   type Accessor,
 } from "solid-js";
 import {
@@ -9,7 +9,10 @@ import {
   createInitialSynthCardBounds,
   type SynthCardBounds,
 } from "~/components/effects/synth-card-bounds";
+import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
+import { buildClipCreatePayload } from "~/lib/clip-create";
 import { convexApi, convexClient, useConvexQuery } from "~/lib/convex";
+import { buildTrackEffectMutationInput, buildTrackEffectQueryArgs } from "~/lib/effect-track-args";
 import {
   createDefaultArpeggiatorParams,
   createDefaultSynthParams,
@@ -17,25 +20,27 @@ import {
   serializeSynthParams,
   type ArpeggiatorParams,
   type SynthParams,
-  type SynthParamsInput,
 } from "~/lib/effects/params";
+import {
+  didOptimisticGrantScopeChange,
+  readOptimisticGrantScope,
+  type OptimisticGrantWrite,
+} from "~/lib/optimistic-grant-scope";
+import type { EffectParamsByEffect, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
+import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import type { AudioEngine } from "~/lib/audio-engine";
 import type { Track } from "~/types/timeline";
-
-type EffectParamsCommitPayload = {
-  targetId: string;
-  effect: "arp" | "synth";
-  from: unknown;
-  to: unknown;
-};
+type TrackArpRow = FunctionReturnType<typeof convexApi.effects.getArpeggiatorForTrack>;
+type TrackSynthRow = FunctionReturnType<typeof convexApi.effects.getSynthForTrack>;
 
 type EffectsPanelContext = {
   audioEngine?: AudioEngine;
   roomId?: string;
   userId?: string;
   playheadSec?: number;
-  onSelectClip?: (trackId: string, clipId: string, startSec: number) => void;
-  onEffectParamsCommitted?: (payload: EffectParamsCommitPayload) => void;
+  grantClipWrite?: OptimisticGrantWrite;
+  onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
+  onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>) => void;
 };
 
 type ExpandedSynthBounds = SynthCardBounds & {
@@ -50,11 +55,14 @@ type ExpandedSynthCard = ExpandedSynthBounds & {
 
 type EffectsPanelState = {
   addMidiClip: () => Promise<void>;
+  flushPending: () => void;
   arp: {
     add: () => void;
     change: (updates: Partial<ArpeggiatorParams>) => void;
     params: Accessor<ArpeggiatorParams | undefined>;
+    readDraftForTarget: (targetId: string) => ArpeggiatorParams | undefined;
     reset: () => void;
+    syncRemoteForTarget: (targetId: string, params: ArpeggiatorParams | undefined) => void;
     toggle: (enabled: boolean) => void;
   };
   synth: {
@@ -64,298 +72,193 @@ type EffectsPanelState = {
     isExpandedForCurrentTarget: Accessor<boolean>;
     open: () => void;
     params: Accessor<SynthParams | undefined>;
+    readDraftForTarget: (targetId: string) => SynthParams | undefined;
     reset: () => void;
+    syncRemoteForTarget: (targetId: string, params: SynthParams | undefined) => void;
     updateCardBounds: (next: SynthCardBounds) => void;
   };
 };
 
-const LOCAL_EDIT_SUPPRESS_MS = 800;
-const SAVE_DEBOUNCE_MS = 200;
-
-function getQueryResult<T>(query: unknown): T | undefined {
-  const raw = (query as { data?: unknown })?.data;
-  return typeof raw === "function" ? (raw as () => T)() : (raw as T | undefined);
-}
-
-function parseJsonValue(value: string | undefined): unknown {
-  if (!value) return undefined;
-
-  try {
-    return JSON.parse(value);
-  } catch {
-    return undefined;
-  }
-}
+export const EFFECT_PANEL_SAVE_DEBOUNCE_MS = 200;
+export const EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS = 800;
 
 export function createEffectsPanelState(
   context: EffectsPanelContext,
   currentTargetId: Accessor<string>,
   currentTrack: Accessor<Track | undefined>,
+  resolveTrackById: (targetId: string) => Track | undefined,
 ): EffectsPanelState {
-  function getTrackTargetId(): string | undefined {
-    const targetId = currentTargetId();
-    if (!targetId || targetId === "master") return undefined;
-    return targetId;
+  function getTrackTargetId(): Track["id"] | undefined {
+    if (currentTargetId() === "master") return undefined;
+    return currentTrack()?.id;
   }
 
-  function persistArpeggiator(targetId: string, params: ArpeggiatorParams): void {
+  function getTrackByTargetId(targetId: string): Track | undefined {
+    if (targetId === "master") return undefined;
+    return resolveTrackById(targetId);
+  }
+
+  function persistArpeggiator(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setArpeggiatorParams>["params"]) {
     const roomId = context.roomId;
     const userId = context.userId;
     if (!roomId || !userId) return;
 
-    void convexClient.mutation((convexApi as any).effects.setArpeggiatorParams, {
-      roomId,
-      trackId: targetId as any,
-      userId,
-      params,
-    });
+    return convexClient.mutation(
+      convexApi.effects.setArpeggiatorParams,
+      buildTrackEffectMutationInput({
+        roomId,
+        trackId,
+        userId,
+        params,
+      }),
+    );
   }
 
-  function persistSynth(targetId: string, params: SynthParamsInput): void {
+  function persistSynth(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setSynthParams>["params"]) {
     const roomId = context.roomId;
     const userId = context.userId;
     if (!roomId || !userId) return;
 
-    void convexClient.mutation((convexApi as any).effects.setSynthParams, {
-      roomId,
-      trackId: targetId as any,
-      userId,
-      params,
-    });
+    return convexClient.mutation(
+      convexApi.effects.setSynthParams,
+      buildTrackEffectMutationInput({
+        roomId,
+        trackId,
+        userId,
+        params,
+      }),
+    );
   }
 
-  function commitEffectChange(
-    effect: EffectParamsCommitPayload["effect"],
-    targetId: string,
-    previous: string | undefined,
-    next: unknown,
+  function commitArpChange(
+    targetId: Track["id"],
+    previous: EffectParamsByEffect["arp"] | undefined,
+    next: EffectParamsByEffect["arp"],
   ): void {
-    const from = parseJsonValue(previous);
-    if (from === undefined) return;
-
+    if (previous === undefined) return;
     context.onEffectParamsCommitted?.({
       targetId,
-      effect,
-      from,
+      effect: "arp",
+      from: previous,
       to: next,
     });
   }
 
-  const synthLastLocalEdit = new Map<string, number>();
-  const synthSaveTimers = new Map<string, number>();
+  function commitSynthChange(
+    targetId: Track["id"],
+    previous: EffectParamsByEffect["synth"] | undefined,
+    next: EffectParamsByEffect["synth"],
+  ): void {
+    if (previous === undefined) return;
+    context.onEffectParamsCommitted?.({
+      targetId,
+      effect: "synth",
+      from: previous,
+      to: next,
+    });
+  }
 
-  const arpeggiatorQuery = useConvexQuery(
-    (convexApi as any).effects.getArpeggiatorForTrack,
+  const synthDefaultsByTarget = new Map<string, SynthParams>();
+  const ensureSynthDefaults = (targetId: string) => {
+    const current = synthDefaultsByTarget.get(targetId);
+    if (current) return current;
+    const next = createDefaultSynthParams();
+    synthDefaultsByTarget.set(targetId, next);
+    return next;
+  };
+
+  const readSynthDefaults = (targetId: string) => {
+    return getTrackByTargetId(targetId)?.kind === "instrument"
+      ? ensureSynthDefaults(targetId)
+      : undefined;
+  };
+
+  const arpQuery = useConvexQuery(
+    convexApi.effects.getArpeggiatorForTrack,
     () => {
       const targetId = getTrackTargetId();
-      return targetId ? { trackId: targetId as any } : null;
+      return targetId ? buildTrackEffectQueryArgs(targetId) : null;
     },
     () => ["effects", "arpeggiator", currentTargetId()],
   );
 
+  const arpState = createPersistedEffectState<TrackArpRow, ArpeggiatorParams>({
+    targetId: getTrackTargetId,
+    row: () => arpQuery.data,
+    readQueryParams: (row) => row?.params,
+    createInitialParams: () => createDefaultArpeggiatorParams(),
+    serializeParams: (params) => JSON.stringify(params),
+    applyToEngine: (targetId, params) => {
+      context.audioEngine?.setTrackArpeggiator(targetId, params);
+    },
+    clearFromEngine: (targetId) => {
+      context.audioEngine?.clearTrackArpeggiator?.(targetId);
+    },
+    persistParams: (targetId, params) => {
+      const track = getTrackByTargetId(targetId);
+      if (!track) return;
+      persistArpeggiator(track.id, params);
+    },
+    remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
+    onParamsCommitted: (targetId, previous, next) => {
+      const track = getTrackByTargetId(targetId);
+      if (!track) return;
+      commitArpChange(track.id, previous, next);
+    },
+  });
+
   const synthQuery = useConvexQuery(
-    (convexApi as any).effects.getSynthForTrack,
+    convexApi.effects.getSynthForTrack,
     () => {
       const targetId = getTrackTargetId();
-      return targetId ? { trackId: targetId as any } : null;
+      return targetId ? buildTrackEffectQueryArgs(targetId) : null;
     },
     () => ["effects", "synth", currentTargetId()],
   );
 
-  const [arpByTarget, setArpByTarget] = createSignal<Record<string, ArpeggiatorParams | undefined>>({});
-  const arpForTarget = createMemo(() => arpByTarget()[currentTargetId()]);
-
-  const [synthByTarget, setSynthByTarget] = createSignal<Record<string, SynthParams | undefined>>({});
-  const synthForTarget = createMemo(() => synthByTarget()[currentTargetId()]);
+  const synthState = createPersistedEffectState<TrackSynthRow, SynthParams>({
+    targetId: getTrackTargetId,
+    row: () => synthQuery.data,
+    readQueryParams: (row) => {
+      return row?.params
+        ? normalizeSynthParams(row.params)
+        : undefined;
+    },
+    readVisibleParams: readSynthDefaults,
+    createInitialParams: readSynthDefaults,
+    serializeParams: serializeSynthParams,
+    applyToEngine: (targetId, params) => {
+      context.audioEngine?.setTrackSynth(targetId, params);
+    },
+    clearFromEngine: (targetId) => {
+      context.audioEngine?.clearTrackSynth?.(targetId);
+    },
+    persistParams: (targetId, params) => {
+      const track = getTrackByTargetId(targetId);
+      if (!track) return;
+      persistSynth(track.id, params);
+    },
+    debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
+    remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
+    onParamsCommitted: (targetId, previous, next) => {
+      const track = getTrackByTargetId(targetId);
+      if (!track) return;
+      commitSynthChange(track.id, previous, next);
+    },
+  });
 
   const [expandedSynth, setExpandedSynth] = createSignal<ExpandedSynthBounds | null>(null);
 
-  const lastSavedArp = new Map<string, string>();
-  createEffect(() => {
-    const targetId = getTrackTargetId();
-    if (!targetId) return;
-
-    const row = getQueryResult<any>(arpeggiatorQuery);
-    if (row === undefined) return;
-
-    if (row?.params) {
-      const params = row.params as ArpeggiatorParams;
-      setArpByTarget((prev) => ({ ...prev, [targetId]: params }));
-      lastSavedArp.set(targetId, JSON.stringify(params));
-      context.audioEngine?.setTrackArpeggiator(targetId, params);
-      return;
-    }
-
-    setArpByTarget((prev) => ({ ...prev, [targetId]: undefined }));
-    context.audioEngine?.clearTrackArpeggiator?.(targetId);
-  });
-
-  createEffect(() => {
-    const targetId = getTrackTargetId();
-    if (!targetId) return;
-
-    const params = arpForTarget();
-    if (!params) return;
-
-    const json = JSON.stringify(params);
-    if (lastSavedArp.get(targetId) === json) return;
-
-    const previous = lastSavedArp.get(targetId);
-    lastSavedArp.set(targetId, json);
-    context.audioEngine?.setTrackArpeggiator(targetId, params);
-    persistArpeggiator(targetId, params);
-    commitEffectChange("arp", targetId, previous, params);
-  });
-
-  function updateArp(updater: (prev: ArpeggiatorParams) => ArpeggiatorParams): void {
-    const targetId = getTrackTargetId();
-    if (!targetId) return;
-
-    setArpByTarget((prev) => ({
-      ...prev,
-      [targetId]: updater(prev[targetId] ?? createDefaultArpeggiatorParams()),
-    }));
-  }
-
   function handleArpChange(updates: Partial<ArpeggiatorParams>): void {
-    updateArp((prev) => ({ ...prev, ...updates }));
+    arpState.update((prev) => ({ ...prev, ...updates }));
   }
 
   function handleArpToggle(enabled: boolean): void {
-    updateArp((prev) => ({ ...prev, enabled }));
-  }
-
-  function handleArpReset(): void {
-    updateArp(() => createDefaultArpeggiatorParams());
-  }
-
-  function handleAddArp(): void {
-    const targetId = getTrackTargetId();
-    if (!targetId) return;
-
-    const params = createDefaultArpeggiatorParams();
-    setArpByTarget((prev) => ({ ...prev, [targetId]: params }));
-    context.audioEngine?.setTrackArpeggiator(targetId, params);
-    persistArpeggiator(targetId, params);
-    lastSavedArp.set(targetId, JSON.stringify(params));
-  }
-
-  function applySynthForTarget(targetId: string, updater: (prev: SynthParams) => SynthParams): void {
-    setSynthByTarget((prev) => {
-      const base = prev[targetId] ?? createDefaultSynthParams();
-      return {
-        ...prev,
-        [targetId]: normalizeSynthParams(updater(base)),
-      };
-    });
-  }
-
-  const lastSavedSynth = new Map<string, string>();
-  createEffect(() => {
-    const targetId = getTrackTargetId();
-    if (!targetId) return;
-
-    const row = getQueryResult<any>(synthQuery);
-    if (row === undefined) return;
-
-    if (!row?.params) {
-      const track = currentTrack();
-      if (track?.kind === "instrument") {
-        setSynthByTarget((prev) => {
-          if (prev[targetId]) return prev;
-
-          const defaults = createDefaultSynthParams();
-          lastSavedSynth.set(targetId, serializeSynthParams(defaults));
-          context.audioEngine?.setTrackSynth(targetId, defaults);
-          return { ...prev, [targetId]: defaults };
-        });
-        return;
-      }
-
-      setSynthByTarget((prev) => ({ ...prev, [targetId]: undefined }));
-      return;
-    }
-
-    const params = normalizeSynthParams(row.params as SynthParamsInput);
-    const current = synthByTarget()[targetId];
-    const rowJson = serializeSynthParams(params);
-    const currentJson = current ? serializeSynthParams(current) : undefined;
-    const lastEdit = synthLastLocalEdit.get(targetId) ?? 0;
-    const isEditing = Date.now() - lastEdit < LOCAL_EDIT_SUPPRESS_MS || synthSaveTimers.has(targetId);
-
-    if (!current) {
-      setSynthByTarget((prev) => ({ ...prev, [targetId]: params }));
-      lastSavedSynth.set(targetId, rowJson);
-      context.audioEngine?.setTrackSynth(targetId, params);
-      return;
-    }
-
-    if (isEditing) return;
-
-    if (currentJson !== rowJson) {
-      setSynthByTarget((prev) => ({ ...prev, [targetId]: params }));
-      lastSavedSynth.set(targetId, rowJson);
-      context.audioEngine?.setTrackSynth(targetId, params);
-      return;
-    }
-
-    lastSavedSynth.set(targetId, rowJson);
-  });
-
-  createEffect(() => {
-    const targetId = getTrackTargetId();
-    if (!targetId) return;
-
-    const params = synthForTarget();
-    if (!params) return;
-
-    const payload = normalizeSynthParams(params);
-    const json = serializeSynthParams(payload);
-    if (lastSavedSynth.get(targetId) === json) return;
-
-    const previous = lastSavedSynth.get(targetId);
-    lastSavedSynth.set(targetId, json);
-    context.audioEngine?.setTrackSynth(targetId, payload);
-
-    const previousTimer = synthSaveTimers.get(targetId);
-    if (previousTimer) {
-      clearTimeout(previousTimer);
-    }
-
-    if (context.roomId && context.userId) {
-      const timer = window.setTimeout(() => {
-        synthSaveTimers.delete(targetId);
-        persistSynth(targetId, payload);
-      }, SAVE_DEBOUNCE_MS);
-      synthSaveTimers.set(targetId, timer);
-    }
-
-    commitEffectChange("synth", targetId, previous, payload);
-  });
-
-  function updateSynth(updater: (prev: SynthParams) => SynthParams): void {
-    const targetId = getTrackTargetId();
-    if (!targetId) return;
-
-    synthLastLocalEdit.set(targetId, Date.now());
-    applySynthForTarget(targetId, updater);
+    arpState.update((prev) => ({ ...prev, enabled }));
   }
 
   function handleSynthChange(updates: Partial<SynthParams>): void {
-    updateSynth((prev) => ({ ...prev, ...updates }));
-  }
-
-  function handleSynthReset(): void {
-    updateSynth(() => createDefaultSynthParams());
-  }
-
-  function handleSynthChangeForTarget(targetId: string, updates: Partial<SynthParams>): void {
-    synthLastLocalEdit.set(targetId, Date.now());
-    applySynthForTarget(targetId, (prev) => ({ ...prev, ...updates }));
-  }
-
-  function handleSynthResetForTarget(targetId: string): void {
-    applySynthForTarget(targetId, () => createDefaultSynthParams());
+    synthState.update((prev) => ({ ...prev, ...updates }));
   }
 
   function openSynthCard(): void {
@@ -380,40 +283,46 @@ export function createEffectsPanelState(
   }
 
   function getSynthParamsForTarget(targetId: string): SynthParams {
-    return synthByTarget()[targetId] ?? createDefaultSynthParams();
+    return synthState.readForTarget(targetId) ?? ensureSynthDefaults(targetId);
   }
 
   async function handleAddMidiClip(): Promise<void> {
     const track = currentTrack();
     if (!track || track.kind !== "instrument") return;
 
-    const roomId = context.roomId;
-    const userId = context.userId;
-    if (!roomId || !userId) return;
+    const grantScope = readOptimisticGrantScope({
+      roomId: context.roomId,
+      userId: context.userId,
+    });
+    if (!grantScope) return;
+    const { roomId, userId } = grantScope;
 
     const start = Math.max(0, Math.round((context.playheadSec ?? 0) * 1000) / 1000);
 
     try {
-      const clipId = await convexClient.mutation(convexApi.clips.create as any, {
+      const clipId = await convexClient.mutation(convexApi.clips.create, buildClipCreatePayload({
         roomId,
-        trackId: track.id as any,
-        startSec: start,
-        duration: 1,
         userId,
-        name: "MIDI Clip",
-      } as any) as any as string;
+        trackId: track.id,
+        clip: {
+          startSec: start,
+          duration: 1,
+          name: "MIDI Clip",
+          midi: {
+            wave: "sawtooth",
+            gain: 0.8,
+            notes: [],
+          },
+        },
+      }));
       if (!clipId) return;
 
-      await convexClient.mutation((convexApi as any).clips.setMidi, {
-        clipId: clipId as any,
-        midi: {
-          wave: "sawtooth",
-          gain: 0.8,
-          notes: [],
-        },
-        userId,
+      context.grantClipWrite?.(clipId, grantScope);
+      const currentScope = readOptimisticGrantScope({
+        roomId: context.roomId,
+        userId: context.userId,
       });
-
+      if (!currentScope || didOptimisticGrantScopeChange(grantScope, currentScope)) return;
       context.onSelectClip?.(track.id, clipId, start);
     } catch (error) {
       console.warn("[EffectsPanel] failed to add MIDI clip", error);
@@ -427,8 +336,12 @@ export function createEffectsPanelState(
     return {
       ...current,
       params: getSynthParamsForTarget(current.targetId),
-      onChange: (updates) => handleSynthChangeForTarget(current.targetId, updates),
-      onReset: () => handleSynthResetForTarget(current.targetId),
+      onChange: (updates) => {
+        synthState.updateForTarget(current.targetId, (prev) => ({ ...prev, ...updates }));
+      },
+      onReset: () => {
+        synthState.updateForTarget(current.targetId, () => ensureSynthDefaults(current.targetId));
+      },
     };
   });
 
@@ -436,13 +349,25 @@ export function createEffectsPanelState(
     () => expandedSynth()?.targetId === currentTargetId(),
   );
 
+  const flushPending = () => {
+    arpState.flushPending();
+    synthState.flushPending();
+  };
+
+  onCleanup(() => {
+    flushPending();
+  });
+
   return {
     addMidiClip: handleAddMidiClip,
+    flushPending,
     arp: {
-      add: handleAddArp,
+      add: arpState.add,
       change: handleArpChange,
-      params: arpForTarget,
-      reset: handleArpReset,
+      params: arpState.params,
+      readDraftForTarget: arpState.readDraftForTarget,
+      reset: arpState.reset,
+      syncRemoteForTarget: arpState.syncRemoteForTarget,
       toggle: handleArpToggle,
     },
     synth: {
@@ -451,10 +376,11 @@ export function createEffectsPanelState(
       expandedCard: expandedSynthCard,
       isExpandedForCurrentTarget: isSynthExpandedForCurrentTarget,
       open: openSynthCard,
-      params: synthForTarget,
-      reset: handleSynthReset,
+      params: synthState.params,
+      readDraftForTarget: synthState.readDraftForTarget,
+      reset: synthState.reset,
+      syncRemoteForTarget: synthState.syncRemoteForTarget,
       updateCardBounds: updateSynthCardBounds,
     },
   };
 }
-

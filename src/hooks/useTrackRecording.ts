@@ -1,17 +1,34 @@
-import { createSignal, onCleanup, batch, type Accessor, type Setter } from 'solid-js'
+import { batch, createSignal, onCleanup, type Accessor, type Setter } from 'solid-js'
 
+import { createUploadedAudioClip, pushClipCreateHistory } from '~/lib/clip-create'
+import { createAudioAssetKey, getAudioSourceMetadata } from '~/lib/audio-source'
 import type { AudioEngine } from '~/lib/audio-engine'
-import type { Track, SelectedClip } from '~/types/timeline'
-import type { UploadToR2 } from '~/hooks/useClipBuffers'
+import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
+import {
+  acquireTrackRecordingLock,
+  cleanupRecordingSession,
+  createStopPromise,
+  ensureRecordingAudioContext,
+  getRecordingSupport,
+  haltRecordingPreview,
+  releaseTrackRecordingLock,
+  startRecordingLockHeartbeat,
+  clearRecordingLockHeartbeat,
+  type RecordingContext,
+} from '~/lib/track-recording-session'
+import {
+  ensureTrackForRecording,
+  finalizeAutoCreatedTrackFailure,
+  commitAutoCreatedTrack,
+} from '~/lib/track-recording-target'
+import { canTrackReceiveAudioClip } from '~/lib/track-routing'
 import { calcNonOverlapStart, willOverlap } from '~/lib/timeline-utils'
+import { getTrackHistoryRef } from '~/lib/undo/refs'
+import type { HistoryEntry } from '~/lib/undo/types'
+import type { UploadToR2 } from '~/hooks/useClipBuffers'
+import type { Track } from '~/types/timeline'
 
-const RECORDING_MIME_TYPES = [
-  'audio/webm;codecs=opus',
-  'audio/webm',
-  'audio/ogg;codecs=opus',
-  'audio/ogg',
-  'audio/mp4',
-]
+import type { TimelineSelectionController } from './useTimelineSelectionState'
 
 type ConvexClientType = typeof import('~/lib/convex').convexClient
 
@@ -20,13 +37,11 @@ type ConvexApiType = typeof import('~/lib/convex').convexApi
 type UseTrackRecordingOptions = {
   audioEngine: AudioEngine
   tracks: Accessor<Track[]>
-  setTracks: Setter<Track[]>
-  recordArmTrackId: Accessor<string | null>
-  setRecordArmTrackId: Setter<string | null>
-  setSelectedTrackId: Setter<string>
-  setSelectedClip: Setter<SelectedClip>
-  setSelectedClipIds: Setter<Set<string>>
-  setSelectedFXTarget: Setter<string>
+  setTrackLock: (trackId: Track['id'], lockedBy: string | null) => void
+  clearTrackLock: (trackId: Track['id']) => void
+  removeLocalTrack: (trackId: Track['id']) => void
+  insertLocalClip: (trackId: Track['id'], clip: Track['clips'][number]) => void
+  selection: TimelineSelectionController
   playheadSec: Accessor<number>
   uploadToR2: UploadToR2
   audioBufferCache: Map<string, AudioBuffer>
@@ -35,52 +50,41 @@ type UseTrackRecordingOptions = {
   convexClient: ConvexClientType
   convexApi: ConvexApiType
   requestTransportPlay: () => Promise<void>
+  createTrackForRecording: () => Promise<Track | null>
   setIsRecording: Setter<boolean>
-  isPlaying: Accessor<boolean>
   notify?: (message: string) => void
+  historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
+  grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
 }
 
 type StartRecordingResult = {
   ok: boolean
-  trackId?: string
+  trackId?: Track['id']
   reason?: string
 }
 
-type RecordingContext = {
-  trackId: string
-  startSec: number
-  startCtxTime: number
-  stream: MediaStream
-  recorder: MediaRecorder
-  chunks: BlobPart[]
-  mimeType: string
-  lockedByUserId: string
-  analyser: AnalyserNode | null
-  scriptProcessor: ScriptProcessorNode | null
-  analysisCtx: AudioContext | null
-}
-
-export type UseTrackRecordingReturn = {
+type UseTrackRecordingReturn = {
   isRecording: Accessor<boolean>
+  recordArmTrackId: Accessor<Track['id'] | null>
   previewPoints: Accessor<{ offset: number; amplitude: number }[]>
   previewStartSec: Accessor<number | null>
-  recordingTrackId: Accessor<string | null>
-  startRecording: (trackId: string) => Promise<StartRecordingResult>
+  recordingTrackId: Accessor<Track['id'] | null>
+  toggleRecordArm: (trackId: Track['id']) => void
+  reconcileRecordArm: (nextTracks: Track[]) => void
+  startRecording: (trackId: Track['id']) => Promise<StartRecordingResult>
   stopRecording: () => Promise<void>
-  toggleRecording: (trackId: string) => Promise<StartRecordingResult>
+  toggleRecording: () => Promise<StartRecordingResult>
 }
 
 export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRecordingReturn {
   const {
     audioEngine,
     tracks,
-    setTracks,
-    recordArmTrackId,
-    setRecordArmTrackId,
-    setSelectedTrackId,
-    setSelectedClip,
-    setSelectedClipIds,
-    setSelectedFXTarget,
+    setTrackLock,
+    clearTrackLock,
+    removeLocalTrack,
+    insertLocalClip,
+    selection,
     playheadSec,
     uploadToR2,
     audioBufferCache,
@@ -89,18 +93,22 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     convexClient,
     convexApi,
     requestTransportPlay,
+    createTrackForRecording,
     setIsRecording,
-    isPlaying,
     notify,
+    historyPush,
+    grantClipWrite,
   } = options
 
   const [isRecordingInternal, setIsRecordingInternal] = createSignal(false)
-  const [previewPoints, setPreviewPoints] = createSignal<{ offset: number; amplitude: number }[]>([])
+  const [recordArmTrackId, setRecordArmTrackId] = createSignal<Track['id'] | null>(null)
+  const livePreviewPoints: { offset: number; amplitude: number }[] = []
+  const [previewPoints, setPreviewPoints] = createSignal<{ offset: number; amplitude: number }[]>([], { equals: false })
   const [previewStartSec, setPreviewStartSec] = createSignal<number | null>(null)
-  const [currentRecordingTrackId, setCurrentRecordingTrackId] = createSignal<string | null>(null)
+  const [currentRecordingTrackId, setCurrentRecordingTrackId] = createSignal<Track['id'] | null>(null)
 
   let activeCtx: RecordingContext | null = null
-  let finalizePromise: Promise<void> | null = null
+  let lockHeartbeatTimer: number | null = null
 
   const emit = (message: string) => {
     console.warn('[useTrackRecording]', message)
@@ -111,106 +119,97 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     }
   }
 
-  const pickMimeType = () => {
-    for (const mime of RECORDING_MIME_TYPES) {
-      if (MediaRecorder.isTypeSupported(mime)) return mime
-    }
-    return ''
+  const selectRecordingTrack = (trackId: Track['id']) => {
+    batch(() => {
+      selection.selectTrackTarget(trackId)
+      setRecordArmTrackId(trackId)
+    })
   }
 
-  const ensureAudioCtx = () => {
-    try {
-      audioEngine.ensureAudio()
-    } catch {}
+  const clearRecordArmForTrack = (trackId: Track['id']) => {
+    setRecordArmTrackId((current) => current === trackId ? null : current)
   }
 
-  const acquireTrackLock = async (trackId: string, locker: string) => {
-    try {
-      const res: any = await convexClient.mutation((convexApi as any).tracks.lock, {
-        trackId: trackId as any,
-        userId: locker,
-      })
-      if (!res?.ok) {
-        return { ok: false, reason: res?.reason as string | undefined }
-      }
-      setTracks(ts => ts.map(t => t.id === trackId ? ({ ...t, lockedBy: locker }) : t))
-      return { ok: true }
-    } catch (err) {
-      console.error('[useTrackRecording] failed to lock track', err)
-      return { ok: false, reason: 'Failed to lock track' }
+  const toggleRecordArm = (trackId: Track['id']) => {
+    if (isRecordingInternal()) return
+    const uid = userId()
+    const targetTrack = tracks().find((track) => track.id === trackId)
+    if (!canTrackReceiveAudioClip(targetTrack)) return
+    if (targetTrack?.lockedBy && targetTrack.lockedBy !== uid) return
+    setRecordArmTrackId((current) => current === trackId ? null : trackId)
+  }
+
+  const reconcileRecordArm = (nextTracks: Track[]) => {
+    const armedTrackId = recordArmTrackId()
+    if (!armedTrackId) return
+    const uid = userId()
+    const availableTrack = nextTracks.find((track) => track.id === armedTrackId)
+    if (!availableTrack || !canTrackReceiveAudioClip(availableTrack) || (availableTrack.lockedBy && availableTrack.lockedBy !== uid)) {
+      setRecordArmTrackId(null)
     }
   }
 
-  const releaseTrackLock = async (trackId: string, locker: string | undefined) => {
-    if (!locker) {
-      setTracks(ts => ts.map(t => t.id === trackId ? ({ ...t, lockedBy: null }) : t))
-      return
-    }
-    try {
-      await convexClient.mutation((convexApi as any).tracks.unlock, {
-        trackId: trackId as any,
-        userId: locker,
-      })
-    } catch (err) {
-      console.error('[useTrackRecording] failed to unlock track', err)
-    } finally {
-      setTracks(ts => ts.map(t => t.id === trackId ? ({ ...t, lockedBy: null }) : t))
-    }
+  const releaseTrackLock = async (trackId: Track['id'], locker: string | undefined) => {
+    await releaseTrackRecordingLock({
+      trackId,
+      locker,
+      convexClient,
+      convexApi,
+      setTrackLock,
+      clearTrackLock,
+    })
   }
 
   const cleanupRecording = async () => {
-    if (!activeCtx) return
     const ctx = activeCtx
     activeCtx = null
-
-    try {
-      ctx.recorder.ondataavailable = null
-      ctx.recorder.onstop = null
-    } catch {}
-
-    try {
-      ctx.recorder.stop()
-    } catch {}
-
-    try {
-      ctx.stream.getTracks().forEach(track => track.stop())
-    } catch {}
-
-    try {
-      ctx.scriptProcessor?.disconnect()
-      ctx.analyser?.disconnect()
-    } catch {}
-
-    try {
-      await ctx.analysisCtx?.close()
-    } catch {}
-
-    await releaseTrackLock(ctx.trackId, ctx.lockedByUserId)
-    setIsRecording(false)
-    setIsRecordingInternal(false)
-    setPreviewPoints([])
-    setPreviewStartSec(null)
-    setCurrentRecordingTrackId(null)
+    await cleanupRecordingSession({
+      activeCtx: ctx,
+      clearLockHeartbeat: () => {
+        lockHeartbeatTimer = clearRecordingLockHeartbeat(lockHeartbeatTimer)
+      },
+      releaseTrackLock,
+      setIsRecording,
+      setIsRecordingInternal,
+      livePreviewPoints,
+      setPreviewPoints,
+      setPreviewStartSec,
+      setCurrentRecordingTrackId,
+    })
   }
 
-  // Stop live preview immediately without discarding context needed for finalize
   const haltLivePreview = () => {
-    if (!activeCtx) return
-    const ctx = activeCtx
-    try {
-      // Stop the recorder stream capturing to prevent further preview updates
-      try { ctx.stream.getTracks().forEach(t => t.stop()) } catch {}
-      try { ctx.scriptProcessor?.disconnect() } catch {}
-      try { ctx.analyser?.disconnect() } catch {}
-      try { ctx.analysisCtx?.close() } catch {}
-      ctx.analyser = null
-      ctx.scriptProcessor = null
-      ctx.analysisCtx = null
-    } catch {}
-    // Reflect UI state immediately
-    setIsRecording(false)
-    setPreviewPoints([])
-    setPreviewStartSec(null)
+    haltRecordingPreview({
+      activeCtx,
+      setIsRecording,
+      livePreviewPoints,
+      setPreviewPoints,
+      setPreviewStartSec,
+    })
+  }
+
+  const handleAutoCreatedTrackFailure = async (track: Track | null) => {
+    await finalizeAutoCreatedTrackFailure({
+      track,
+      tracks: tracks(),
+      roomId: roomId(),
+      userId: userId(),
+      historyPush,
+      convexClient,
+      convexApi,
+      removeLocalTrack,
+      clearRecordArmForTrack,
+      emit,
+    })
+  }
+
+  const commitCreatedTrack = (track: Track | null) => {
+    commitAutoCreatedTrack({
+      historyPush,
+      roomId: roomId(),
+      tracks: tracks(),
+      track,
+    })
   }
 
   const finalizeRecording = async () => {
@@ -221,14 +220,15 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     if (!rid || !uid) {
       emit('Missing room or user context; recording discarded.')
       await cleanupRecording()
+      await handleAutoCreatedTrackFailure(ctx.createdTrack)
       return
     }
 
     const blob = new Blob(ctx.chunks, { type: ctx.mimeType || 'audio/webm' })
     if (!blob.size) {
       emit('Recording contained no audio data.')
-      activeCtx = null
       await cleanupRecording()
+      await handleAutoCreatedTrackFailure(ctx.createdTrack)
       return
     }
 
@@ -246,6 +246,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     if (!decoded) {
       emit('Failed to decode recorded audio; skipping clip creation.')
       await cleanupRecording()
+      await handleAutoCreatedTrackFailure(ctx.createdTrack)
       return
     }
 
@@ -254,79 +255,71 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     if (!targetTrack) {
       emit('Recording target track missing; clip skipped.')
       await cleanupRecording()
+      await handleAutoCreatedTrackFailure(ctx.createdTrack)
       return
     }
 
     const baseDuration = decoded.duration
+    const sourceMetadata = getAudioSourceMetadata(decoded)
+    const sourceAssetKey = createAudioAssetKey()
     const desiredStart = Math.max(0, ctx.startSec)
     const nonOverlapStart = willOverlap(targetTrack.clips, null, desiredStart, baseDuration)
       ? calcNonOverlapStart(targetTrack.clips, null, desiredStart, baseDuration)
       : desiredStart
 
-    let createdClipId: string
     try {
-      createdClipId = await convexClient.mutation(convexApi.clips.create, {
+      const createdClip = await createUploadedAudioClip({
         roomId: rid,
-        trackId: ctx.trackId as any,
-        startSec: nonOverlapStart,
-        duration: baseDuration,
         userId: uid,
-        name: file.name,
-      } as any) as any as string
-    } catch (err) {
-      console.error('[useTrackRecording] clips.create failed', err)
-      emit('Failed to create recorded clip on server.')
+        trackId: ctx.trackId,
+        trackRef: getTrackHistoryRef(targetTrack),
+        startSec: nonOverlapStart,
+        file,
+        decoded,
+        source: sourceMetadata,
+        sourceAssetKey,
+        sourceKind: 'recording',
+        createServerClip: async (payload) => await convexClient.mutation(convexApi.clips.create, payload),
+        insertLocalClip,
+        selectClip: (trackId, clipId) => {
+          selection.selectPrimaryClip({ trackId, clipId })
+        },
+        uploadToR2,
+        audioBufferCache,
+        grantClipWrite,
+        grantScope: { roomId: rid, userId: uid },
+        color: 'clip-recording',
+        pushHistory: false,
+      })
       await cleanupRecording()
+      if (ctx.createdTrack) {
+        commitCreatedTrack(ctx.createdTrack)
+      }
+      pushClipCreateHistory({
+        historyPush,
+        roomId: rid,
+        trackId: ctx.trackId,
+        trackRef: getTrackHistoryRef(tracks().find((entry) => entry.id === ctx.trackId) ?? targetTrack),
+        clipId: createdClip.clipId,
+        clip: createdClip.clip,
+      })
+    } catch (err) {
+      if (err instanceof Error && err.message === 'sample-upload-failed') {
+        emit('Failed to upload recorded audio.')
+      } else {
+        if (!(err instanceof Error && err.message === 'clip-create-failed')) {
+          console.error('[useTrackRecording] clips.create failed', err)
+        }
+        emit('Failed to create recorded clip on server.')
+      }
+      await cleanupRecording()
+      await handleAutoCreatedTrackFailure(ctx.createdTrack)
       return
     }
-
-    audioBufferCache.set(createdClipId, decoded)
-
-    setTracks(ts => ts.map(t => t.id !== ctx.trackId ? t : ({
-      ...t,
-      clips: [
-        ...t.clips,
-        {
-          id: createdClipId,
-          name: file.name,
-          buffer: decoded,
-          startSec: nonOverlapStart,
-          duration: baseDuration,
-          leftPadSec: 0,
-          color: '#ef4444',
-          sampleUrl: undefined,
-        },
-      ],
-    })))
-
-    batch(() => {
-      setSelectedTrackId(ctx.trackId)
-      setSelectedFXTarget(ctx.trackId)
-      setSelectedClip({ trackId: ctx.trackId, clipId: createdClipId })
-      setSelectedClipIds(new Set([createdClipId]))
-    })
-
-    try {
-      const sampleUrl = await uploadToR2(rid, createdClipId, file, baseDuration)
-      if (sampleUrl) {
-        await convexClient.mutation(convexApi.clips.setSampleUrl, { clipId: createdClipId as any, sampleUrl })
-        setTracks(ts => ts.map(t => t.id !== ctx.trackId ? t : ({
-          ...t,
-          clips: t.clips.map(c => c.id === createdClipId ? { ...c, sampleUrl } : c),
-        })))
-      }
-    } catch (err) {
-      console.error('[useTrackRecording] failed to upload recording', err)
-      emit('Recorded clip created but upload failed. You may retry upload manually.')
-    }
-
-    await cleanupRecording()
   }
 
-  const startRecording = async (trackId: string): Promise<StartRecordingResult> => {
-    if (isRecordingInternal()) {
-      return { ok: false, reason: 'Already recording' }
-    }
+  const startRecording = async (trackId: Track['id'], createdTrack: Track | null = null): Promise<StartRecordingResult> => {
+    if (isRecordingInternal()) return { ok: false, reason: 'Already recording' }
     const uid = userId()
     const rid = roomId()
     if (!uid || !rid) {
@@ -344,7 +337,20 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       return { ok: false, reason: 'Track locked' }
     }
 
-    const lockRes = await acquireTrackLock(trackId, uid)
+    const recordingSupport = getRecordingSupport()
+    if (!recordingSupport.supported) {
+      emit('Recording is not supported in this browser.')
+      return { ok: false, reason: 'Recorder unsupported' }
+    }
+
+    const lockRes = await acquireTrackRecordingLock({
+      trackId,
+      locker: uid,
+      convexClient,
+      convexApi,
+      setTrackLock,
+      clearTrackLock,
+    })
     if (!lockRes.ok) {
       emit(lockRes.reason ?? 'Unable to lock track for recording.')
       return { ok: false, reason: lockRes.reason }
@@ -352,15 +358,14 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
     let stream: MediaStream
     try {
-      const constraints: MediaStreamConstraints = { audio: true }
-      stream = await navigator.mediaDevices.getUserMedia(constraints)
-    } catch (err) {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch {
       emit('Microphone access denied.')
       await releaseTrackLock(trackId, uid)
       return { ok: false, reason: 'Permission denied' }
     }
 
-    const mimeType = pickMimeType()
+    const mimeType = recordingSupport.mimeType
     let recorder: MediaRecorder
     try {
       recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
@@ -373,14 +378,26 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     }
 
     const chunks: BlobPart[] = []
-    recorder.addEventListener('dataavailable', (event) => {
+    const stopCompletion = createStopPromise()
+    const onDataAvailable = (event: BlobEvent) => {
       if (event.data?.size) chunks.push(event.data)
-    })
-    recorder.addEventListener('stop', () => {
-      finalizePromise = finalizeRecording().finally(() => {
-        finalizePromise = null
-      })
-    })
+    }
+    const onStop = () => {
+      void (async () => {
+        try {
+          await finalizeRecording()
+          stopCompletion.resolve()
+        } catch (error) {
+          console.error('[useTrackRecording] finalize recording failed', error)
+          try {
+            await cleanupRecording()
+          } catch {}
+          stopCompletion.reject(error)
+        }
+      })()
+    }
+    recorder.addEventListener('dataavailable', onDataAvailable)
+    recorder.addEventListener('stop', onStop)
 
     const startSec = Math.max(0, playheadSec())
 
@@ -404,17 +421,18 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         const input = event.inputBuffer.getChannelData(0)
         let sum = 0
         for (let i = 0; i < input.length; i++) {
-          const v = input[i]
-          sum += v * v
+          const value = input[i]
+          sum += value * value
         }
         const rms = Math.sqrt(sum / input.length)
         const ctxTime = ctxRef?.currentTime ?? 0
         const offset = Math.max(0, ctxTime - startCtxTime)
-        setPreviewPoints(prev => {
-          const next = [...prev, { offset, amplitude: Math.min(1, rms) }]
-          const cutoff = Math.max(0, offset - 5)
-          return next.filter(p => p.offset >= cutoff)
-        })
+        const cutoff = Math.max(0, offset - 5)
+        livePreviewPoints.push({ offset, amplitude: Math.min(1, rms) })
+        while (livePreviewPoints.length > 0 && livePreviewPoints[0].offset < cutoff) {
+          livePreviewPoints.shift()
+        }
+        setPreviewPoints(livePreviewPoints)
       }
       source.connect(analyser)
       analyser.connect(scriptProcessor)
@@ -427,8 +445,8 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
     activeCtx = {
       trackId,
+      createdTrack,
       startSec,
-      startCtxTime,
       stream,
       recorder,
       chunks,
@@ -437,9 +455,23 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       analyser,
       scriptProcessor,
       analysisCtx,
+      onDataAvailable,
+      onStop,
+      stopPromise: stopCompletion.promise,
+      rejectStopPromise: stopCompletion.reject,
     }
 
-    ensureAudioCtx()
+    ensureRecordingAudioContext(audioEngine)
+    lockHeartbeatTimer = clearRecordingLockHeartbeat(lockHeartbeatTimer)
+    lockHeartbeatTimer = startRecordingLockHeartbeat({
+      trackId,
+      locker: uid,
+      convexClient,
+      convexApi,
+      onError: (error) => {
+        console.warn('[useTrackRecording] failed to refresh track lock', error)
+      },
+    })
 
     try {
       recorder.start()
@@ -453,10 +485,10 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     setIsRecording(true)
     setIsRecordingInternal(true)
     setCurrentRecordingTrackId(trackId)
-    setPreviewPoints([])
+    livePreviewPoints.length = 0
+    setPreviewPoints(livePreviewPoints)
     setPreviewStartSec(startSec)
 
-    // Ensure transport runs so metronome/playback can accompany recording.
     try {
       await requestTransportPlay()
     } catch (err) {
@@ -475,35 +507,69 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       }
     } catch (err) {
       console.error('[useTrackRecording] recorder.stop failed', err)
+      ctx.rejectStopPromise(err)
+      await cleanupRecording()
+      await handleAutoCreatedTrackFailure(ctx.createdTrack)
     }
-    // Immediately stop live preview and UI recording state while finalizing runs
     haltLivePreview()
-    if (finalizePromise) {
-      try {
-        await finalizePromise
-      } catch (err) {
-        console.error('[useTrackRecording] finalize recording failed', err)
-      }
+    try {
+      await ctx.stopPromise
+    } catch (err) {
+      console.error('[useTrackRecording] finalize recording failed', err)
     }
   }
 
-  const toggleRecording = async (trackId: string): Promise<StartRecordingResult> => {
+  const toggleRecording = async (): Promise<StartRecordingResult> => {
     if (isRecordingInternal()) {
+      const activeTrackId = currentRecordingTrackId() ?? recordArmTrackId() ?? undefined
       await stopRecording()
-      return { ok: true, trackId }
+      return { ok: true, trackId: activeTrackId }
     }
-    return startRecording(trackId)
+    const target = await ensureTrackForRecording({
+      roomId: roomId(),
+      userId: userId(),
+      tracks: tracks(),
+      recordArmTrackId: recordArmTrackId(),
+      setRecordArmTrackId,
+      createTrackForRecording,
+      emit,
+    })
+    if (!target) return { ok: false, reason: 'No available track for recording' }
+    const result = await startRecording(target.track.id, target.createdDuringSetup ? target.track : null)
+    if (result.ok) {
+      selectRecordingTrack(target.track.id)
+      return result
+    }
+    if (target.createdDuringSetup) {
+      await finalizeAutoCreatedTrackFailure({
+        track: target.track,
+        tracks: tracks(),
+        roomId: roomId(),
+        userId: userId(),
+        historyPush,
+        convexClient,
+        convexApi,
+        removeLocalTrack,
+        clearRecordArmForTrack,
+        emit,
+      })
+    }
+    return result
   }
 
   onCleanup(() => {
+    lockHeartbeatTimer = clearRecordingLockHeartbeat(lockHeartbeatTimer)
     void stopRecording()
   })
 
   return {
     isRecording: isRecordingInternal,
+    recordArmTrackId,
     previewPoints,
     previewStartSec,
     recordingTrackId: currentRecordingTrackId,
+    toggleRecordArm,
+    reconcileRecordArm,
     startRecording,
     stopRecording,
     toggleRecording,

@@ -1,3 +1,4 @@
+import { calcNonOverlappingStart, willClipsOverlap } from '~/lib/clip-placement'
 import type { Clip, Track } from '~/types/timeline'
 
 // Timeline constants
@@ -30,28 +31,11 @@ export function yToLaneIndex(clientY: number, scrollRef: HTMLDivElement) {
 }
 
 export function willOverlap(clips: Clip[], excludeId: string | null, start: number, duration: number) {
-  const end = start + duration
-  for (const c of clips) {
-    if (excludeId && c.id === excludeId) continue
-    const cEnd = c.startSec + c.duration
-    if (end > c.startSec && start < cEnd) return true
-  }
-  return false
+  return willClipsOverlap(clips, excludeId, start, duration)
 }
 
 export function calcNonOverlapStart(clips: Clip[], excludeId: string | null, desiredStart: number, duration: number) {
-  let start = Math.max(0, desiredStart)
-  const sorted = clips.filter(c => !excludeId || c.id !== excludeId).slice().sort((a, b) => a.startSec - b.startSec)
-  for (let i = 0; i < sorted.length; i++) {
-    const c = sorted[i]
-    if (start < c.startSec + c.duration && start + duration > c.startSec) {
-      // Move start to be exactly flush with the blocking clip's right edge.
-      // No epsilon here so clips can sit perfectly adjacent without micro-gaps.
-      start = c.startSec + c.duration
-      i = -1 // restart scan
-    }
-  }
-  return start
+  return calcNonOverlappingStart(clips, excludeId, desiredStart, duration)
 }
 
 // --- Grid / snapping helpers ---

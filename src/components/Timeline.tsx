@@ -1,10 +1,9 @@
-import { type Component, type JSX, For, Show, createEffect, createSignal, onCleanup, onMount, batch, untrack } from 'solid-js'
+import { type Accessor, type Component, type JSX, For, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from '~/components/ui/dialog'
-import type { Track, Clip, SelectedClip } from '~/types/timeline'
+import type { Track } from '~/types/timeline'
 import { getAudioEngine, resetAudioEngine } from '~/lib/audio-engine-singleton'
-import { timelineDurationSec, PPS, RULER_HEIGHT, LANE_HEIGHT, yToLaneIndex, FX_OFFSET_PX } from '~/lib/timeline-utils'
-import { canUseLocalStorage, loadLocalMixMap, saveLocalMix, loadMixSyncFlag, saveMixSyncFlag, loadGridSettings, saveGridSettings, loadBpm, saveBpm, loadLoopSettings, saveLoopSettings } from '~/lib/timeline-storage'
-import { ensureRoomShareLink } from '~/lib/timeline-share'
+import { timelineDurationSec, PPS, RULER_HEIGHT, LANE_HEIGHT, FX_OFFSET_PX } from '~/lib/timeline-utils'
+import { saveLocalMix } from '~/lib/timeline-storage'
 import { useTimelineKeyboard } from '~/hooks/useTimelineKeyboard'
 import { useTimelineClipImport } from '~/hooks/useTimelineClipImport'
 import { useTimelineClipActions } from '~/hooks/useTimelineClipActions'
@@ -12,249 +11,280 @@ import TransportControls from './timeline/TransportControls'
 import TimelineRuler from './timeline/TimelineRuler'
 import TrackLane from './timeline/TrackLane'
 import TrackSidebar from './timeline/TrackSidebar'
-import EffectsPanel from './timeline/EffectsPanel'
-import MidiEditorCard from './midi/MidiEditorCard'
 import { Button } from './ui/button'
-import { convexClient, convexApi, useConvexQuery } from '~/lib/convex'
-import AgentChat from './AgentChat'
-import SharedChat from './SharedChat'
+import { convexClient, convexApi } from '~/lib/convex'
 import { useTimelineData } from '~/hooks/useTimelineData'
 import { usePlayheadControls } from '~/hooks/usePlayheadControls'
 import { useClipDrag } from '~/hooks/useClipDrag'
 import { useClipResize } from '~/hooks/useClipResize'
 import { useTimelineSelection } from '~/hooks/useTimelineSelection'
 import { useClipBuffers } from '~/hooks/useClipBuffers'
+import { normalizeCommandTrackIndices } from '~/lib/agent-command-targets'
+import { useTimelineResolvedModel } from '~/hooks/useTimelineResolvedModel'
+import { useTimelineActions } from '~/hooks/useTimelineActions'
+import { useTimelineSidebarResize } from '~/hooks/useTimelineSidebarResize'
+import type { UploadToR2 } from '~/hooks/useClipBuffers'
 import { useTrackRecording } from '~/hooks/useTrackRecording'
-import RecordingPreview from './timeline/RecordingPreview'
-import GridOverlay from './timeline/GridOverlay'
-import ExportDialog from './timeline/ExportDialog'
-import { createUndoManager, type UndoManager } from '~/lib/undo/manager'
-import type { HistoryEntry } from '~/lib/undo/types'
-import { loadHistory, saveHistory } from '~/lib/timeline-storage'
-import { execUndo, execRedo } from '~/lib/undo/exec'
+import { buildEffectParamsHistoryEntry } from '~/lib/undo/builders'
+import type { EffectParamsCommitPayload } from '~/lib/undo/types'
+import TimelineOverlays from './timeline/timeline-overlays'
+import TimelinePanels from './timeline/timeline-panels'
+import { useTimelinePreferences } from '~/hooks/useTimelinePreferences'
+import { useTimelineMidiOverlay } from '~/hooks/useTimelineMidiOverlay'
+import { useTimelineMixerController } from '~/hooks/useTimelineMixerController'
+import { useProjectedTimelineModel } from '~/hooks/useProjectedTimelineModel'
+import { useTimelineDragDrop } from '~/hooks/useTimelineDragDrop'
+import { useTimelineHistory } from '~/hooks/useTimelineHistory'
+import { useTimelineIdentity } from '~/hooks/useTimelineIdentity'
+import { useTimelineLocalMix } from '~/hooks/useTimelineLocalMix'
+import { useTimelineProjectionState } from '~/hooks/useTimelineProjectionState'
+import { useTimelineSelectionState } from '~/hooks/useTimelineSelectionState'
 
-const volumeTimers = new Map<string, number>()
-const optimisticMoves = new Map<string, { trackId: string; startSec: number }>()
+type AgentMixOp = { type: 'setMute' | 'setSolo'; indices: number[]; value: boolean; exclusive?: boolean; issuedAt: number }
 
 const Timeline: Component = () => {
-  // State
-  const [tracks, setTracks] = createSignal<Track[]>([])
-  const [selectedTrackId, setSelectedTrackId] = createSignal('')
-  const [selectedClip, setSelectedClip] = createSignal<SelectedClip>(null)
-  // Multi-selection: set of selected clip IDs (selectedClip is the primary/last-selected)
-  const [selectedClipIds, setSelectedClipIds] = createSignal<Set<string>>(new Set<string>(), { equals: false })
   const [bottomFXOpen, setBottomFXOpen] = createSignal(true)
-  const [selectedFXTarget, setSelectedFXTarget] = createSignal<string>('master')
   const [agentPanelOpen, setAgentPanelOpen] = createSignal(false)
   const [sharedChatOpen, setSharedChatOpen] = createSignal(false)
-  const [sidebarWidth, setSidebarWidth] = createSignal(260)
   const [confirmOpen, setConfirmOpen] = createSignal(false)
-  const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<string | null>(null)
-  // Mix sync toggle (per room, persisted locally)
-  const [syncMix, setSyncMix] = createSignal(false)
+  const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<Track['id'] | null>(null)
   // Transport tempo & metronome
-  const [bpm, setBpm] = createSignal(120)
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false)
-  const [recordArmTrackId, setRecordArmTrackId] = createSignal<string | null>(null)
   const [isRecording, setIsRecording] = createSignal(false)
-  // Grid / snapping state
-  const [gridEnabled, setGridEnabled] = createSignal(true)
-  const [gridDenominator, setGridDenominator] = createSignal(4) // 1/4 notes by default
-  const [loopEnabled, setLoopEnabled] = createSignal(false)
-  const [loopStartSec, setLoopStartSec] = createSignal(0)
-  const [loopEndSec, setLoopEndSec] = createSignal(8)
   const [exportOpen, setExportOpen] = createSignal(false)
-
-  // Drag-drop visual target lane
-  const [dropTargetLane, setDropTargetLane] = createSignal<number | null>(null)
-  const [dropAtNewTrack, setDropAtNewTrack] = createSignal(false)
 
   // Audio engine
   const audioEngine = getAudioEngine()
-  // Undo/Redo manager (per room)
-  let undoMgr: UndoManager | null = null
-  const pushHistory = (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => {
-    if (undoMgr) undoMgr.push(entry, mergeKey, mergeWindowMs)
-  }
-
-  // FX initialization flags to pre-wire effects chains before user selects a track
-  const fxInitApplied = new Set<string>()
-  let masterFxInitDone = false
-  let effectsInitRoomId: string | null = null
   // Collaboration: roomId from ?roomId=; ownership tied to Better Auth userId
-  const { roomId, setRoomId, userId, myProjects, fullView, navigateToRoom } = useTimelineData()
-
-  // Tracks owned by current user (for mix precedence)
-  const ownedTracksQ = useConvexQuery(
-    (convexApi as any).ownerships.listOwnedTrackIds,
-    () => {
-      const rid = roomId()
-      const uid = userId()
-      return rid && uid ? ({ roomId: rid, ownerUserId: uid } as any) : null
-    },
-    () => ['owned-tracks', roomId(), userId()]
-  )
-
+  const { roomId, setRoomId, userId, projects, fullView, navigateToRoom, createProject, renameProject, deleteProject } = useTimelineData()
   const {
-    audioBufferCache,
-    ensureClipBuffer,
-    uploadToR2,
-    clearClipBufferCaches,
-  } = useClipBuffers({ audioEngine, tracks, setTracks })
-
-  // Local storage helpers for mix persistence
-
-  // Allow AgentChat to apply local mute/solo changes by indices (1-based) regardless of Sync Mix state.
-  onMount(() => {
-    ;(window as any).__mbAgentApplyMix = (rid: string, ops: Array<{ type: 'setMute' | 'setSolo'; indices: number[]; value: boolean; exclusive?: boolean }>) => {
-      try {
-        if (!rid || rid !== roomId()) return
-        if (!Array.isArray(ops) || ops.length === 0) return
-        setTracks(ts => {
-          const arr = ts.map(t => ({ ...t }))
-          // Owned set for this user
-          const ownedRaw: any = (ownedTracksQ as any)?.data
-          const ownedArr: any = typeof ownedRaw === 'function' ? ownedRaw() : ownedRaw
-          const ownedSet = new Set<string>(Array.isArray(ownedArr) ? ownedArr.map((x: any) => String(x)) : [])
-          // Helper to convert 1-based indices to unique 0-based indices within bounds
-          const toZero = (idx1: number) => Math.max(0, Math.min(arr.length - 1, Math.floor(idx1 - 1)))
-          for (const op of ops) {
-            const src = (Array.isArray(op.indices) && op.indices.length)
-              ? op.indices
-              : (op.type === 'setSolo' ? [arr.length] : arr.map((_, i) => i + 1)) // solo(no indices)=>last track; mute(no indices)=>all
-            // Filter targets to OWNED tracks only
-            const targets0 = Array.from(new Set(src.map(toZero))).filter(i => i >= 0 && i < arr.length && ownedSet.has(arr[i].id))
-            if (op.type === 'setSolo') {
-              const exclusive = !!op.exclusive && !!op.value && targets0.length === 1
-              if (exclusive) {
-                // Clear others within OWNED set first
-                for (let i = 0; i < arr.length; i++) {
-                  if (!ownedSet.has(arr[i].id)) continue
-                  const next = i === targets0[0]
-                  arr[i].soloed = next
-                  saveLocalMix(roomId(), arr[i].id, { soloed: next })
-                }
-              } else {
-                for (const i of targets0) {
-                  arr[i].soloed = op.value
-                  saveLocalMix(roomId(), arr[i].id, { soloed: op.value })
-                }
-              }
-            } else if (op.type === 'setMute') {
-              for (const i of targets0) {
-                arr[i].muted = op.value
-                saveLocalMix(roomId(), arr[i].id, { muted: op.value })
-              }
-            }
-          }
-          return arr
-        })
-
-  
-      } catch {}
-    }
+    sidebarWidth,
+    setSidebarWidth,
+    syncMix,
+    toggleSyncMix,
+    bpm,
+    setBpm,
+    clampBpm,
+    gridEnabled,
+    setGridEnabled,
+    gridDenominator,
+    setGridDenominator,
+    loopEnabled,
+    setLoopEnabled,
+    loopStartSec,
+    loopEndSec,
+    setLoopRegion,
+  } = useTimelinePreferences({ roomId })
+  const identity = useTimelineIdentity({
+    roomId,
+    serverData: () => fullView.data,
+  })
+  const projection = useTimelineProjectionState({
+    roomId,
+    serverData: () => fullView.data,
+    rememberTrackProjection: identity.rememberTrackProjection,
+    rememberClipHistoryRef: identity.rememberClipHistoryRef,
+  })
+  let renderTracks: Accessor<Track[]> = () => []
+  const selection = useTimelineSelectionState({
+    roomId,
+    tracks: () => renderTracks(),
+    effectsPanel: {
+      isOpen: bottomFXOpen,
+      setOpen: setBottomFXOpen,
+    },
+  })
+  const {
+    writableTrackIds,
+    optimisticTrackIds,
+    canWriteTrack,
+    canWriteClip,
+    grantTrackWrite,
+    grantClipWrite,
+    grantClipWrites,
+    serverTrackState,
+  } = useProjectedTimelineModel({
+    roomId,
+    userId,
+    fullViewData: () => fullView.data,
+    pendingTrackEntriesById: projection.pendingTrackEntriesById,
+    pendingClipCreatesById: projection.pendingClipCreatesById,
+    removedTrackIds: projection.removedTrackIds,
+    removedClipIds: projection.removedClipIds,
+  })
+  const localMix = useTimelineLocalMix({
+    roomId,
+    writableTrackIds,
+  })
+  let ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void> = async () => {}
+  let uploadToR2: UploadToR2 = async () => null
+  let clearClipBufferCaches = () => {}
+  let audioBufferCache = new Map<string, AudioBuffer>()
+  const clipBuffers = useClipBuffers({
+    audioEngine,
+    tracks: () => resolvedTracks(),
+    onBufferChange: () => setBufferVersion((current) => current + 1),
+  })
+  const {
+    pushHistory,
+    handleUndo,
+    handleRedo,
+  } = useTimelineHistory({
+    roomId,
+    userId,
+    getTracks: () => resolvedTracks(),
+    convexClient,
+    convexApi,
+    audioEngine,
+    ensureClipBuffer: (clipId, sampleUrl) => clipBuffers.ensureClipBuffer(clipId, sampleUrl),
+    grantTrackWrite,
+    grantClipWrite,
+    persistLocalMix: saveLocalMix,
+    getActions: () => ({
+      insertLocalTrack: (track, index) => projection.insertLocalTrack(track, index),
+      removeLocalTrack: (trackId) => projection.removeLocalTrack(trackId),
+      insertLocalClip: (trackId, clip) => projection.insertLocalClip(trackId, clip),
+      removeLocalClips: (clipIds) => projection.removeLocalClips(clipIds),
+      commitClipMoves: (moves) => projection.commitClipMoves(moves),
+      commitClipTiming: (clipId, patch) => projection.commitClipTiming(clipId, patch),
+      rescheduleChangedClips,
+      cancelTrackVolumeWrite: (trackId) => cancelTrackVolumeWrite(trackId),
+      cancelTrackRoutingWrite: (trackId) => cancelTrackRoutingWrite(trackId),
+      cancelTrackMixWrite: (trackId) => cancelTrackMixWrite(trackId),
+      applyTrackVolume: (trackId, volume, scope) => applyTrackVolume(trackId, volume, scope),
+      applyTrackMixState: (trackId, patch, scope) => applyTrackMixState(trackId, patch, scope),
+      applyTrackRouting: (trackId, routing) => applyTrackRouting(trackId, { sends: routing.sends ?? [], outputTargetId: routing.outputTargetId }),
+    }),
+  })
+  const {
+    pendingSharedTrackVolumes,
+    pendingSharedTrackRouting,
+    pendingSharedTrackMix,
+    cancelTrackVolumeWrite,
+    cancelTrackRoutingWrite,
+    cancelTrackMixWrite,
+    applyTrackVolume,
+    applyTrackMixState,
+    applyConfirmedTrackMixState,
+    applyTrackRouting,
+    setTrackVolume,
+    handleToggleTrackMute,
+    handleToggleTrackSolo,
+    updateTrackSends,
+    updateTrackOutputTargetId,
+  } = useTimelineMixerController({
+    roomId,
+    userId,
+    syncMix,
+    tracks: () => renderTracks(),
+    localMix,
+    optimisticTrackIds,
+    canWriteTrack,
+    pushHistory,
+    serverTrackState,
   })
 
-  // Initialize Undo manager when room is known; hydrate persisted stacks
-  createEffect(() => {
-    const rid = roomId()
-    if (!rid) return
-    undoMgr = createUndoManager({ roomId: rid, onChange: (state) => saveHistory(rid, state) })
+  const [bufferVersion, setBufferVersion] = createSignal(0)
+  const {
+    resolvedTracks,
+    placementTracks,
+    renderTracks: resolvedRenderTracks,
+    trackLookup,
+  } = useTimelineResolvedModel({
+    fullViewData: () => fullView.data,
+    syncMix,
+    writableTrackIds,
+    serverTrackState,
+    localMixByTrackId: localMix.byTrackId,
+    pendingSharedTrackVolumes,
+    pendingSharedTrackRouting,
+    pendingSharedTrackMix,
+    projection: {
+      pendingTrackEntriesById: projection.pendingTrackEntriesById,
+      removedTrackIds: projection.removedTrackIds,
+      pendingTrackLocksById: projection.pendingTrackLocksById,
+      pendingClipCreatesById: projection.pendingClipCreatesById,
+      removedClipIds: projection.removedClipIds,
+      committedClipEditsById: projection.committedClipEditsById,
+      draftClipEditsById: projection.draftClipEditsById,
+      previewClipsByTrackId: projection.previewClipsByTrackId,
+    },
+    identity: {
+      trackHistoryRefsById: identity.trackHistoryRefsById,
+      trackNamesByHistoryRef: identity.trackNamesByHistoryRef,
+      clipHistoryRefsById: identity.clipHistoryRefsById,
+      rememberTrackProjection: identity.rememberTrackProjection,
+      rememberClipHistoryRef: identity.rememberClipHistoryRef,
+    },
+    audioBufferCache: clipBuffers.audioBufferCache,
+    bufferVersion,
+  })
+  renderTracks = resolvedRenderTracks
+  audioBufferCache = clipBuffers.audioBufferCache
+  ensureClipBuffer = clipBuffers.ensureClipBuffer
+  uploadToR2 = clipBuffers.uploadToR2
+  clearClipBufferCaches = clipBuffers.clearClipBufferCaches
+  const pendingDeleteTrackClipCount = createMemo(() => {
+    const trackId = pendingDeleteTrackId()
+    if (!trackId) return 0
+    return trackLookup().trackById.get(trackId)?.clips.length ?? 0
+  })
+
+  function rescheduleChangedClips(clipIds: string[]) {
+    if (clipIds.length === 0 || !isPlaying()) return
     try {
-      const persisted = loadHistory(rid)
-      undoMgr.hydrate(persisted as any)
+      const enabled = loopEnabled()
+      const end = loopEndSec()
+      const lenOk = enabled && end > loopStartSec() + 1e-3
+      audioEngine.rescheduleClipsAtPlayhead(renderTracks(), playheadSec(), clipIds, lenOk ? { endLimitSec: end } : undefined)
     } catch {}
-  })
-  onCleanup(() => {
-    try { delete (window as any).__mbAgentApplyMix } catch {}
-  })
-  // Load syncMix per room
-  createEffect(() => {
-    if (!canUseLocalStorage()) {
-      setSyncMix(false)
-      return
-    }
-    setSyncMix(loadMixSyncFlag(roomId()))
-  })
-
-  // Loop region setter used by ruler interactions
-  const setLoopRegion = (start: number, end: number) => {
-    const s = Math.max(0, Math.min(start, end - 0.05))
-    const e = Math.max(s + 0.05, end)
-    batch(() => {
-      setLoopStartSec(s)
-      setLoopEndSec(e)
-    })
   }
 
-  // Load grid settings per room
-  createEffect(() => {
-    const rid = roomId()
-    if (!canUseLocalStorage() || !rid) return
-    const settings = loadGridSettings(rid)
-    batch(() => {
-      setGridEnabled(settings.enabled)
-      setGridDenominator(settings.denominator)
-    })
-  })
+  const applyAgentMixOps = (ops: AgentMixOp[]) => {
+    try {
+      if (!roomId() || !Array.isArray(ops) || ops.length === 0) return
+      const currentTracks = renderTracks()
+      const ownedSet = writableTrackIds()
+      for (const op of ops) {
+        const targets: Track[] = []
+        for (const index of new Set(normalizeCommandTrackIndices(Array.isArray(op.indices) ? op.indices : undefined))) {
+          if (index < 0 || index >= currentTracks.length) continue
+          const track = currentTracks[index]
+          if (!track || !ownedSet.has(track.id)) continue
+          targets.push(track)
+        }
+        if (op.type === 'setSolo' && op.exclusive && op.value && targets.length === 1) {
+          for (const track of currentTracks) {
+            if (!ownedSet.has(track.id)) continue
+            applyConfirmedTrackMixState(track.id, { soloed: track.id === targets[0].id }, op.issuedAt)
+          }
+          continue
+        }
+        for (const track of targets) {
+          applyConfirmedTrackMixState(track.id, op.type === 'setSolo' ? { soloed: op.value } : { muted: op.value }, op.issuedAt)
+        }
+      }
+    } catch {}
+  }
 
-  // Save grid settings when they change
-  createEffect(() => {
-    const rid = roomId()
-    const enabled = gridEnabled()
-    const denom = gridDenominator()
-    if (!rid) return
-    saveGridSettings(rid, enabled, denom)
-  })
-
-  // Load BPM per room (local-only, like grid)
-  createEffect(() => {
-    const rid = roomId()
-    if (!canUseLocalStorage() || !rid) return
-    const loaded = loadBpm(rid)
-    setBpm(loaded)
-  })
-
-  // Save BPM when it changes
-  createEffect(() => {
-    const rid = roomId()
-    if (!canUseLocalStorage() || !rid) return
-    const value = bpm()
-    saveBpm(rid, value)
-  })
-
-  // Load loop settings per room
-  createEffect(() => {
-    const rid = roomId()
-    if (!canUseLocalStorage() || !rid) return
-    const loop = loadLoopSettings(rid)
-    batch(() => {
-      setLoopEnabled(loop.enabled)
-      setLoopStartSec(loop.startSec)
-      setLoopEndSec(loop.endSec)
-    })
-  })
-
-  // Save loop settings when they change
-  createEffect(() => {
+  const pushEffectParamsHistory = (payload: EffectParamsCommitPayload) => {
     const rid = roomId()
     if (!rid) return
-    saveLoopSettings(rid, {
-      enabled: loopEnabled(),
-      startSec: loopStartSec(),
-      endSec: loopEndSec(),
-    })
-  })
+    pushHistory(
+      buildEffectParamsHistoryEntry({
+        roomId: rid,
+        tracks: renderTracks(),
+        payload,
+      }),
+      `fx:${payload.effect}:${payload.targetId}`,
+      600,
+    )
+  }
 
-  // Local caches for responsiveness
-  // Optimistic positions for clips that have been moved locally but the server
-  // hasn't reflected the change yet. Prevents revert-then-flash on drop.
-  
   // Playback & playhead controls
   const {
     isPlaying,
     playheadSec,
-    handlePlay,
     handlePause,
     handleStop,
     setPlayhead,
@@ -264,27 +294,62 @@ const Timeline: Component = () => {
     setScrollElement,
   } = usePlayheadControls({
     audioEngine,
-    tracks,
+    tracks: () => renderTracks(),
     ensureClipBuffer,
     loopEnabled,
     loopStartSec,
     loopEndSec,
   })
 
-  // Share current URL with ?roomId=
-  async function handleShare() {
-    ensureRoomShareLink(roomId(), (rid) => setRoomId(rid))
-  }
-
   // DOM refs
   let scrollRef: HTMLDivElement | undefined
   let fileInputRef: HTMLInputElement | undefined
   let containerRef: HTMLDivElement | undefined
   let rootRef: HTMLDivElement | undefined
-  // Sidebar resize state
-  let resizing = false
-  let resizeStartX = 0
-  let resizeStartWidth = 0
+
+  let openMidiEditorFor = (_clipId: string) => {}
+  let stopRecordingSession: () => Promise<void> = async () => {}
+  let toggleRecordingSession: () => Promise<unknown> = async () => {}
+
+  const {
+    createTimelineTrack,
+    handleTransportPause,
+    handleTransportStop,
+    handleRecordToggle,
+    handleShare,
+    jumpToClip,
+  } = useTimelineActions({
+    room: {
+      roomId,
+      setRoomId,
+      userId,
+    },
+    creation: {
+      renderTracks,
+      selection,
+      insertLocalTrack: projection.insertLocalTrack,
+      grantTrackWrite,
+      pushHistory,
+      convexClient,
+      convexApi,
+    },
+    transport: {
+      isRecording,
+      handlePause,
+      handleStop,
+      stopRecording: () => stopRecordingSession(),
+      toggleRecording: () => toggleRecordingSession(),
+    },
+    navigation: {
+      renderTracks,
+      trackLookup,
+      selection,
+      setPlayhead,
+      openMidiEditorFor: (clipId) => openMidiEditorFor(clipId),
+      ensureClipBuffer,
+      getScrollElement: () => scrollRef,
+    },
+  })
 
   const {
     handleDrop: onDrop,
@@ -293,13 +358,10 @@ const Timeline: Component = () => {
     handleInsertSample,
   } = useTimelineClipImport({
     audioEngine,
-    tracks,
-    setTracks,
-    selectedTrackId,
-    setSelectedTrackId,
-    setSelectedClip,
-    setSelectedClipIds,
-    setSelectedFXTarget,
+    tracks: () => renderTracks(),
+    insertLocalTrack: projection.insertLocalTrack,
+    insertLocalClip: projection.insertLocalClip,
+    selection,
     playheadSec,
     roomId,
     userId,
@@ -309,64 +371,56 @@ const Timeline: Component = () => {
     uploadToR2,
     getScrollElement: () => scrollRef,
     getFileInput: () => fileInputRef,
-    // snapping
     bpm,
     gridEnabled,
     gridDenominator,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
-  })
-
-  // Open FX panel when selecting a clip on a different track
-  // Only triggers when FX target switches to the selected clip's track
-  let lastFxTargetForPanel: string | null = null
-  createEffect(() => {
-    const fx = selectedFXTarget()
-    const sel = selectedClip()
-    const changed = fx !== lastFxTargetForPanel
-    lastFxTargetForPanel = fx
-    if (!changed) return
-    if (!fx || fx === 'master') return
-    if (!sel) return
-    if (sel.trackId === fx) {
-      setBottomFXOpen(true)
-    }
+    grantWrite: grantTrackWrite,
+    grantClipWrite,
   })
 
   const {
-    onClipMouseDown,
-    activeDrag,
+    dropTargetLane,
+    dropAtNewTrack,
+    handleRootDragOver,
+    handleRootDrop,
+    handleRootDragLeave,
+  } = useTimelineDragDrop({
+    tracks: () => renderTracks(),
+    rootElement: () => rootRef,
+    scrollElement: () => scrollRef,
+    onDrop,
+  })
+
+  const {
+    onClipPointerDown,
   } = useClipDrag({
-    tracks,
-    setTracks,
-    selectedClipIds,
-    setSelectedClipIds,
-    setSelectedTrackId,
-    setSelectedClip,
-    setSelectedFXTarget,
+    placementTracks: () => placementTracks(),
+    resolvedTracks: () => resolvedTracks(),
+    insertLocalTrack: projection.insertLocalTrack,
+    insertLocalClip: projection.insertLocalClip,
+    removeLocalTrack: projection.removeLocalTrack,
+    replaceDraftClipMoves: projection.replaceDraftClipMoves,
+    clearDraftClipMoves: projection.clearDraftClipMoves,
+    setPreviewClipsByTrack: projection.setPreviewClipsByTrackId,
+    commitClipMoves: projection.commitClipMoves,
+    canWriteClip,
+    selection,
     roomId,
     userId,
     convexClient,
     convexApi,
-    optimisticMoves,
     getScrollElement: () => scrollRef,
-    // snapping
     bpm,
     gridEnabled,
     gridDenominator,
     audioBufferCache,
     onCommitMoves: (ids) => {
-      // When clips are moved during playback, reschedule only those clips to avoid restarting other audio/MIDI sources
-      if (isPlaying() && ids && ids.length) {
-        try {
-          const enabled = loopEnabled()
-          const start = loopStartSec()
-          const end = loopEndSec()
-          const lenOk = enabled && end - start > 1e-3
-          audioEngine.rescheduleClipsAtPlayhead(tracks(), playheadSec(), ids, lenOk ? { endLimitSec: end } : undefined)
-        } catch {}
-      }
+      rescheduleChangedClips(ids)
     },
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
+    grantWrite: grantTrackWrite,
+    grantClipWrites,
   })
 
   const {
@@ -374,44 +428,35 @@ const Timeline: Component = () => {
     onResizeMouseMove,
     onResizeMouseUp,
   } = useClipResize({
-    tracks,
-    setTracks,
-    setSelectedTrackId,
-    setSelectedClip,
-    setSelectedClipIds,
-    setSelectedFXTarget,
+    tracks: () => renderTracks(),
+    setDraftClipTiming: projection.setDraftClipTiming,
+    commitClipTiming: projection.commitClipTiming,
+    canWriteClip,
+    selection,
     convexClient,
     convexApi,
+    userId,
     getScrollElement: () => scrollRef,
-    // snapping
     bpm,
     gridEnabled,
     gridDenominator,
-    audioEngine,
-    isPlaying,
-    playheadSec,
-    loopEnabled,
-    loopEndSec,
+    rescheduleChangedClips,
     roomId,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
   })
 
   const {
     onClipClick,
-    deleteSelectedClips,
     duplicateSelectedClips,
     performDeleteTrack,
-    requestDeleteSelectedTrack,
     handleKeyboardAction,
   } = useTimelineClipActions({
-    tracks,
-    setTracks,
-    selectedTrackId,
-    setSelectedTrackId,
-    selectedClipIds,
-    setSelectedClipIds,
-    setSelectedClip,
-    setSelectedFXTarget,
+    tracks: () => renderTracks(),
+    insertLocalClip: projection.insertLocalClip,
+    removeLocalClips: projection.removeLocalClips,
+    removeLocalTrack: projection.removeLocalTrack,
+    canWriteClip,
+    selection,
     setPendingDeleteTrackId,
     setConfirmOpen,
     roomId,
@@ -423,6 +468,7 @@ const Timeline: Component = () => {
     gridEnabled,
     gridDenominator,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
+    grantClipWrites,
   })
 
   const {
@@ -430,96 +476,37 @@ const Timeline: Component = () => {
     onLaneMouseDown,
     onLaneDragUp,
   } = useTimelineSelection({
-    tracks,
-    setSelectedTrackId,
-    setSelectedClip,
-    setSelectedClipIds,
-    setSelectedFXTarget,
+    tracks: () => renderTracks(),
+    selection,
     startScrub,
     stopScrub,
   })
 
-  const notifyRecording = (message: string) => {
-    console.warn('[Timeline][recording]', message)
-  }
-
-  // ===== Floating MIDI editor state =====
-  const [midiEditorClipId, setMidiEditorClipId] = createSignal<string | null>(null)
-  const [midiCard, setMidiCard] = createSignal<{ x: number; y: number; w: number; h: number }>({ x: 80, y: 80, w: 720, h: 360 })
-  let midiCardPersistTimer: number | null = null
-  const midiCardStorageKey = () => {
-    const rid = roomId() || 'default'
-    return `mb:midi_card:${rid}`
-  }
-  // Load persisted position/size per room
-  createEffect(() => {
-    const key = midiCardStorageKey()
-    if (!canUseLocalStorage()) return
-    try {
-      const raw = window.localStorage.getItem(key)
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (parsed && typeof parsed === 'object') {
-          const { x, y, w, h } = parsed
-          if ([x, y, w, h].every((v: any) => typeof v === 'number' && isFinite(v))) {
-            setMidiCard({ x, y, w, h })
-          }
-        }
-      }
-    } catch {}
+  const {
+    midiEditorClipId,
+    midiCard,
+    closeMidiEditor,
+    openMidiEditorFor: nextOpenMidiEditorFor,
+    changeMidiCardBounds,
+    auditionNote,
+    startLiveNote,
+    stopLiveNote,
+  } = useTimelineMidiOverlay({
+    audioEngine,
+    tracks: () => renderTracks(),
+    roomId,
+    selection,
   })
-  const persistMidiCard = () => {
-    if (!canUseLocalStorage()) return
-    try { window.localStorage.setItem(midiCardStorageKey(), JSON.stringify(midiCard())) } catch {}
-  }
-  const schedulePersistMidiCard = () => {
-    if (midiCardPersistTimer) {
-      clearTimeout(midiCardPersistTimer)
-      midiCardPersistTimer = null
-    }
-    midiCardPersistTimer = window.setTimeout(() => {
-      midiCardPersistTimer = null
-      persistMidiCard()
-    }, 250)
-  }
-  const closeMidiEditor = () => setMidiEditorClipId(null)
-  const openMidiEditorFor = (clipId: string) => {
-    // Only open for clips that have MIDI payload
-    try {
-      for (const t of tracks()) {
-        const c = t.clips.find(cc => cc.id === clipId)
-        if (c && (c as any).midi) {
-          setMidiEditorClipId(clipId)
-          return
-        }
-      }
-    } catch {}
-  }
-
-  // Auto-close editor if the clip disappears or no longer has MIDI
-  createEffect(() => {
-    const id = midiEditorClipId()
-    if (!id) return
-    let ok = false
-    for (const t of tracks()) {
-      const c = t.clips.find(cc => cc.id === id)
-      if (c && (c as any).midi) { ok = true; break }
-    }
-    if (!ok) setMidiEditorClipId(null)
-  })
-
-  // (moved) ensure any live notes stop when editor closes
+  openMidiEditorFor = nextOpenMidiEditorFor
 
   const recordingControls = useTrackRecording({
     audioEngine,
-    tracks,
-    setTracks,
-    recordArmTrackId,
-    setRecordArmTrackId,
-    setSelectedTrackId,
-    setSelectedClip,
-    setSelectedClipIds,
-    setSelectedFXTarget,
+    tracks: () => renderTracks(),
+    setTrackLock: projection.setTrackLock,
+    clearTrackLock: projection.clearTrackLock,
+    removeLocalTrack: projection.removeLocalTrack,
+    insertLocalClip: projection.insertLocalClip,
+    selection,
     playheadSec,
     uploadToR2,
     audioBufferCache,
@@ -528,436 +515,27 @@ const Timeline: Component = () => {
     convexClient,
     convexApi,
     requestTransportPlay: requestPlay,
+    createTrackForRecording: async () => await createTimelineTrack({}, { pushHistory: false, select: false }),
     setIsRecording,
-    isPlaying,
-    notify: notifyRecording,
+    notify: (message) => {
+      console.warn('[Timeline][recording]', message)
+    },
+    historyPush: (entry, key, win) => pushHistory(entry, key, win),
+    grantClipWrite,
   })
 
   const {
-    toggleRecording: toggleRecordingSession,
-    stopRecording: stopRecordingSession,
+    recordArmTrackId,
+    toggleRecording: nextToggleRecordingSession,
+    toggleRecordArm: handleToggleRecordArm,
+    reconcileRecordArm,
+    stopRecording: nextStopRecordingSession,
     previewPoints,
     previewStartSec,
     recordingTrackId,
   } = recordingControls
-
-  const handleTransportStop = () => {
-    if (isRecording()) {
-      void stopRecordingSession()
-    }
-    handleStop()
-  }
-
-  const handleTransportPause = () => {
-    if (isRecording()) {
-      void stopRecordingSession()
-    }
-    handlePause()
-  }
-
-  const ensureTrackForRecording = async (): Promise<string | null> => {
-    const uid = userId()
-    const rid = roomId()
-    if (!uid || !rid) {
-      notifyRecording('Recording is only available when signed in to a project.')
-      return null
-    }
-
-    const currentTracks = tracks()
-    const armed = recordArmTrackId()
-    if (armed) {
-      const armedTrack = currentTracks.find(t => t.id === armed)
-      if (armedTrack && (!armedTrack.lockedBy || armedTrack.lockedBy === uid)) {
-        return armedTrack.id
-      }
-    }
-
-    const available = currentTracks.find(t => !t.lockedBy || t.lockedBy === uid)
-    if (available) {
-      setRecordArmTrackId(available.id)
-      return available.id
-    }
-
-    try {
-      const newTrackId = await convexClient.mutation(convexApi.tracks.create, { roomId: rid as any, userId: uid } as any) as any as string
-      setTracks(ts => ts.some(t => t.id === newTrackId) ? ts : [
-        ...ts,
-        {
-          id: newTrackId,
-          name: `Track ${ts.length + 1}`,
-          volume: 0.8,
-          clips: [],
-          muted: false,
-          soloed: false,
-          lockedBy: null,
-        },
-      ])
-      batch(() => {
-        setSelectedTrackId(newTrackId)
-        setSelectedFXTarget(newTrackId)
-        setRecordArmTrackId(newTrackId)
-      })
-      return newTrackId
-    } catch (err) {
-      console.error('[Timeline] failed to create track for recording', err)
-      notifyRecording('Failed to create a new track for recording.')
-      return null
-    }
-  }
-
-  const handleToggleRecordArm = (trackId: string) => {
-    if (isRecording()) return
-    const uid = userId()
-    const target = tracks().find(t => t.id === trackId)
-    if (target && target.lockedBy && target.lockedBy !== uid) return
-    setRecordArmTrackId(prev => (prev === trackId ? null : trackId))
-  }
-
-  const handleRecordToggle = async () => {
-    const trackId = await ensureTrackForRecording()
-    if (!trackId) return
-    const result = await toggleRecordingSession(trackId)
-    if (!result.ok && result.reason) {
-      notifyRecording(result.reason)
-    } else if (result.ok) {
-      batch(() => {
-        setSelectedTrackId(trackId)
-        setSelectedFXTarget(trackId)
-        setRecordArmTrackId(trackId)
-      })
-    }
-  }
-
-  const handleLaneMouseDown: JSX.EventHandler<HTMLDivElement, MouseEvent> = (event) => {
-    if (midiEditorClipId()) { event.preventDefault(); event.stopPropagation(); return }
-    onLaneMouseDown(event, scrollRef)
-  }
-
-  const onRulerMouseDown = (event: MouseEvent) => {
-    event.preventDefault()
-    if (midiEditorClipId()) { event.stopPropagation(); return }
-    startScrub(event.clientX)
-  }
-
-  // Keep audio engine synced with tracks
-  createEffect(() => {
-    audioEngine.updateTrackGains(tracks())
-  })
-
-  createEffect(() => {
-    audioEngine.setBpm(bpm())
-  })
-
-  createEffect(() => {
-    audioEngine.setMetronomeEnabled(metronomeEnabled())
-  })
-
-  // Ensure EQ/Reverb are applied for all tracks and master on load so effects are active before selection
-  createEffect(() => {
-    const rid = roomId()
-    const ts = tracks()
-    if (!rid) return
-    // Reset caches if room changed
-    if (effectsInitRoomId !== rid) {
-      fxInitApplied.clear()
-      masterFxInitDone = false
-      effectsInitRoomId = rid
-    }
-
-    ;(async () => {
-      try {
-        // Master FX: apply once per room
-        if (!masterFxInitDone) {
-          try {
-            const masterEq: any = await convexClient.query(convexApi.effects.getEqForMaster as any, { roomId: rid } as any)
-            if (masterEq?.params) { try { (audioEngine as any).setMasterEq?.(masterEq.params as any) } catch {} }
-          } catch {}
-          try {
-            const masterRv: any = await convexClient.query(convexApi.effects.getReverbForMaster as any, { roomId: rid } as any)
-            if (masterRv?.params) { try { (audioEngine as any).setMasterReverb?.(masterRv.params as any) } catch {} }
-          } catch {}
-          masterFxInitDone = true
-        }
-
-        // Track FX: apply once per track id
-        const pending: Promise<void>[] = []
-        for (const t of ts) {
-          if (fxInitApplied.has(t.id)) continue
-          pending.push((async () => {
-            try {
-              const [eqRow, rvRow]: any[] = await Promise.all([
-                convexClient.query(convexApi.effects.getEqForTrack as any, { trackId: t.id as any } as any),
-                convexClient.query(convexApi.effects.getReverbForTrack as any, { trackId: t.id as any } as any),
-              ])
-              if (eqRow?.params) { try { (audioEngine as any).setTrackEq?.(t.id, eqRow.params as any) } catch {} }
-              if (rvRow?.params) { try { (audioEngine as any).setTrackReverb?.(t.id, rvRow.params as any) } catch {} }
-            } catch {}
-            finally {
-              fxInitApplied.add(t.id)
-            }
-          })())
-        }
-        if (pending.length) await Promise.all(pending)
-      } catch {}
-    })()
-  })
-
-  const clampBpm = (value: number) => {
-    if (!Number.isFinite(value)) return bpm()
-    return Math.min(300, Math.max(30, Math.round(value)))
-  }
-
-  // Project server state into local Track[] while preserving ephemeral fields
-  createEffect(() => {
-    const raw = (fullView as any).data
-    const data = typeof raw === 'function' ? raw() : raw
-    if (!data) return
-
-    // Read old tracks without tracking to avoid creating a feedback loop
-    const oldTracks = untrack(() => tracks())
-    const oldTrackMap = new Map(oldTracks.map(t => [t.id, t]))
-
-    const sm = syncMix()
-    const ownedRaw: any = (ownedTracksQ as any)?.data
-    const ownedArr: any = typeof ownedRaw === 'function' ? ownedRaw() : ownedRaw
-    const ownedSet = new Set<string>(Array.isArray(ownedArr) ? ownedArr.map((x: any) => String(x)) : [])
-    const dragSnapshot = activeDrag()
-    const addedTrackDuringDrag = dragSnapshot?.addedTrackDuringDrag
-    const localMix = loadLocalMixMap(roomId())
-    const projected: Track[] = data.tracks.map((t: any, idx: number) => {
-      const id = t._id as string
-      const prev = oldTrackMap.get(id)
-      const serverMuted = (t as any).muted as boolean | undefined
-      const serverSoloed = (t as any).soloed as boolean | undefined
-      const serverName = typeof (t as any).name === 'string' ? (t as any).name : undefined
-      const serverLockedBy = typeof (t as any).lockedBy === 'string' ? (t as any).lockedBy : null
-      const isOwned = ownedSet.has(id)
-      return {
-        id,
-        name: serverName ?? prev?.name ?? `Track ${idx + 1}`,
-        volume: typeof t.volume === 'number' ? t.volume : 0.8,
-        clips: [],
-        // Owner view: prefer LOCAL state; Non-owner view: prefer SERVER only when Sync Mix is ON
-        muted: isOwned
-          ? (prev?.muted ?? localMix[id]?.muted ?? (typeof serverMuted === 'boolean' ? serverMuted : false))
-          : (sm
-            ? (typeof serverMuted === 'boolean' ? serverMuted : (prev?.muted ?? localMix[id]?.muted ?? false))
-            : (prev?.muted ?? localMix[id]?.muted ?? false)),
-        soloed: isOwned
-          ? (prev?.soloed ?? localMix[id]?.soloed ?? (typeof serverSoloed === 'boolean' ? serverSoloed : false))
-          : (sm
-            ? (typeof serverSoloed === 'boolean' ? serverSoloed : (prev?.soloed ?? localMix[id]?.soloed ?? false))
-            : (prev?.soloed ?? localMix[id]?.soloed ?? false)),
-        lockedBy: serverLockedBy ?? prev?.lockedBy ?? null,
-        kind: (t as any).kind ?? prev?.kind ?? 'audio',
-      }
-    })
-
-    const projectedMap = new Map(projected.map(t => [t.id, t]))
-    // Track server clip positions to clear optimistic entries when in-sync
-    const serverClipPos = new Map<string, { trackId: string; startSec: number }>()
-
-    // If we've created a track during drag that hasn't arrived from the server yet,
-    // inject a placeholder so the UI remains stable while dragging.
-    if (addedTrackDuringDrag && !projectedMap.has(addedTrackDuringDrag)) {
-      const prev = oldTrackMap.get(addedTrackDuringDrag)
-      const placeholder: Track = {
-        id: addedTrackDuringDrag,
-        name: prev?.name ?? `Track ${projected.length + 1}`,
-        volume: prev?.volume ?? 0.8,
-        clips: [],
-        muted: prev?.muted ?? false,
-        soloed: prev?.soloed ?? false,
-        lockedBy: prev?.lockedBy ?? null,
-      }
-      projected.push(placeholder)
-      projectedMap.set(placeholder.id, placeholder)
-    }
-
-    for (const c of data.clips as any[]) {
-      const trackId = c.trackId as string
-      const t = projectedMap.get(trackId)
-      if (!t) continue
-      const prevTrack = oldTrackMap.get(trackId)
-      const prevClip = prevTrack?.clips.find(cc => cc.id === (c._id as string))
-      const buffer = audioBufferCache.get(c._id as string) ?? prevClip?.buffer ?? null
-      const name = (c as any).name ?? prevClip?.name ?? 'Clip'
-      const color = prevClip?.color ?? '#22c55e'
-      serverClipPos.set(c._id as string, { trackId, startSec: c.startSec as number })
-      t.clips.push({
-        id: c._id as string,
-        name,
-        buffer,
-        startSec: c.startSec as number,
-        duration: c.duration as number,
-        leftPadSec: (c as any).leftPadSec ?? prevClip?.leftPadSec ?? 0,
-        bufferOffsetSec: (c as any).bufferOffsetSec ?? prevClip?.bufferOffsetSec ?? 0,
-        color,
-        sampleUrl: (c as any).sampleUrl as string | undefined,
-        midi: (c as any).midi,
-        midiOffsetBeats: (c as any).midiOffsetBeats ?? prevClip?.midiOffsetBeats ?? 0,
-      })
-    }
-
-    // Apply optimistic post-drop moves to prevent revert-then-flash while server catches up
-    if (optimisticMoves.size > 0) {
-      const localTracks = untrack(() => tracks())
-      for (const [id, pos] of optimisticMoves) {
-        let localClip: Clip | undefined
-        for (const lt of localTracks) {
-          const found = lt.clips.find(cc => cc.id === id)
-          if (found) { localClip = found; break }
-        }
-        if (!localClip) continue
-        for (const t of projected) {
-          t.clips = t.clips.filter(cc => cc.id !== id)
-        }
-        const targetProjected = projectedMap.get(pos.trackId)
-        if (targetProjected) {
-          targetProjected.clips.push({
-            id: localClip.id,
-            name: localClip.name,
-            buffer: localClip.buffer ?? null,
-            startSec: pos.startSec,
-            duration: localClip.duration,
-            leftPadSec: localClip.leftPadSec ?? 0,
-            bufferOffsetSec: (localClip as any).bufferOffsetSec ?? 0,
-            color: localClip.color,
-            sampleUrl: localClip.sampleUrl,
-            midi: (localClip as any).midi,
-            midiOffsetBeats: (localClip as any).midiOffsetBeats ?? 0,
-          })
-        }
-      }
-      // Clear any optimistic entries that the server has now reflected
-      const EPS = 1e-3
-      for (const [id, pos] of Array.from(optimisticMoves.entries())) {
-        const server = serverClipPos.get(id)
-        if (server && server.trackId === pos.trackId && Math.abs(server.startSec - pos.startSec) < EPS) {
-          optimisticMoves.delete(id)
-        }
-      }
-    }
-
-    setTracks(projected)
-    const armedId = recordArmTrackId()
-    if (armedId) {
-      const uid = userId()
-      const available = projected.find(t => t.id === armedId)
-      if (!available || (available.lockedBy && available.lockedBy !== uid)) {
-        setRecordArmTrackId(null)
-      }
-    }
-    if (!selectedTrackId() && projected.length > 0) {
-      batch(() => {
-        setSelectedTrackId(projected[0].id)
-        setSelectedFXTarget(projected[0].id)
-      })
-    }
-  })
-
-  onCleanup(() => {
-    try { onLaneDragUp() } catch {}
-    try { window.removeEventListener('mousemove', onSidebarMouseMove) } catch {}
-    try { window.removeEventListener('mouseup', onSidebarMouseUp) } catch {}
-    try { window.removeEventListener('mousemove', onResizeMouseMove) } catch {}
-    try { window.removeEventListener('mouseup', onResizeMouseUp) } catch {}
-    audioEngine.close()
-    resetAudioEngine()
-    if (midiCardPersistTimer) { clearTimeout(midiCardPersistTimer); midiCardPersistTimer = null }
-    for (const timer of volumeTimers.values()) {
-      clearTimeout(timer)
-    }
-    volumeTimers.clear()
-    clearClipBufferCaches()
-    optimisticMoves.clear()
-  })
-
-  function onDragOver(e: DragEvent) {
-    e.preventDefault()
-    try { if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy' } catch {}
-    // Update target lane highlight
-    if (scrollRef) {
-      const idx = yToLaneIndex(e.clientY, scrollRef)
-      const len = tracks().length
-      if (idx >= 0 && idx < len) {
-        setDropTargetLane(idx)
-        setDropAtNewTrack(false)
-      } else if (idx >= len) {
-        setDropTargetLane(null)
-        setDropAtNewTrack(true)
-      } else {
-        setDropTargetLane(null)
-        setDropAtNewTrack(false)
-      }
-    }
-  }
-
-  // Global fallback to ensure drops are received when dragging from floating menus
-  function onDragOverGlobal(e: DragEvent) {
-    const dt = e.dataTransfer
-    const types = Array.from(dt?.types ?? [])
-    const hasCustom = types.includes('application/x-mediabunny-sample')
-    const urlText = dt?.getData('text/uri-list') || dt?.getData('text/plain')
-    const looksLikeUrl = !!urlText && (/^https?:\/\//i.test(urlText) || urlText.startsWith('blob:'))
-    if (!hasCustom && !looksLikeUrl) return
-    // Only signal copy inside our app root
-    const root = rootRef
-    if (!root) return
-    const r = root.getBoundingClientRect()
-    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return
-    e.preventDefault()
-    try { if (dt) dt.dropEffect = 'copy' } catch {}
-    // Update lane highlight using global handler as well
-    if (scrollRef) {
-      const idx = yToLaneIndex(e.clientY, scrollRef)
-      const len = tracks().length
-      if (idx >= 0 && idx < len) {
-        setDropTargetLane(idx)
-        setDropAtNewTrack(false)
-      } else if (idx >= len) {
-        setDropTargetLane(null)
-        setDropAtNewTrack(true)
-      } else {
-        setDropTargetLane(null)
-        setDropAtNewTrack(false)
-      }
-    }
-  }
-
-  function onWindowDrop(e: DragEvent) {
-    const dt = e.dataTransfer
-    const types = Array.from(dt?.types ?? [])
-    const hasCustom = types.includes('application/x-mediabunny-sample')
-    const urlText = dt?.getData('text/uri-list') || dt?.getData('text/plain')
-    const looksLikeUrl = !!urlText && (/^https?:\/\//i.test(urlText) || urlText.startsWith('blob:'))
-    if (!hasCustom && !looksLikeUrl) return
-    // Only handle drops inside our app root
-    const root = rootRef
-    if (!root) return
-    const r = root.getBoundingClientRect()
-    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return
-    // Prevent default navigation and delegate to normal handler
-    e.preventDefault()
-    void onDrop(e)
-    setDropTargetLane(null)
-    setDropAtNewTrack(false)
-  }
-
-  onMount(() => {
-    window.addEventListener('dragover', onDragOverGlobal, { capture: true })
-    window.addEventListener('drop', onWindowDrop as any, { capture: true })
-  })
-  onCleanup(() => {
-    window.removeEventListener('dragover', onDragOverGlobal, { capture: true } as any)
-    window.removeEventListener('drop', onWindowDrop as any, { capture: true } as any)
-  })
-
-  async function onFileInput(e: Event) {
-    const input = e.currentTarget as HTMLInputElement
-    await handleFiles(input.files)
-    input.value = ''
-  }
+  toggleRecordingSession = nextToggleRecordingSession
+  stopRecordingSession = nextStopRecordingSession
 
   useTimelineKeyboard({
     onSpace: () => {
@@ -972,249 +550,79 @@ const Timeline: Component = () => {
     onAddAudioTrack: () => {
       void (async () => {
         try {
-          const id = await convexClient.mutation(convexApi.tracks.create, { roomId: roomId(), userId: userId() }) as any as string
-          batch(() => {
-            setSelectedTrackId(id)
-            setSelectedFXTarget(id)
-          })
-          const rid = roomId(); if (rid) pushHistory({ type: 'track-create', roomId: rid, data: { trackId: String(id) } })
+          await createTimelineTrack()
         } catch {}
       })()
     },
     onUndo: () => {
-      try {
-        const rid = roomId()
-        const uid = userId()
-        if (!undoMgr || !rid || !uid) return
-        if (!undoMgr.canUndo()) return
-        const e = undoMgr.popUndo()
-        if (!e) return
-        void execUndo(e, { convexClient, convexApi, setTracks, audioBufferCache, roomId: rid, userId: uid, audioEngine }).then(() => {
-          undoMgr!.pushRedo(e)
-        })
-      } catch {}
+      handleUndo()
     },
     onRedo: () => {
-      try {
-        const rid = roomId()
-        const uid = userId()
-        if (!undoMgr || !rid || !uid) return
-        if (!undoMgr.canRedo()) return
-        const e = undoMgr.popRedo()
-        if (!e) return
-        void execRedo(e, { convexClient, convexApi, setTracks, audioBufferCache, roomId: rid, userId: uid, audioEngine }).then(() => {
-          // After successful redo we push entry back onto undo
-          undoMgr!.push(e)
-        })
-      } catch {}
+      handleRedo()
     },
     onAddInstrumentTrack: () => {
       void (async () => {
         try {
-          const id = await convexClient.mutation(convexApi.tracks.create as any, { roomId: roomId(), userId: userId(), kind: 'instrument' } as any) as any as string
-          batch(() => {
-            setSelectedTrackId(id)
-            setSelectedFXTarget(id)
-          })
-          const rid = roomId(); if (rid) pushHistory({ type: 'track-create', roomId: rid, data: { trackId: String(id), kind: 'instrument' } })
+          await createTimelineTrack({ kind: 'instrument' })
         } catch {}
       })()
     },
   })
 
-  // Sidebar resizer
-  function onSidebarMouseDown(e: MouseEvent) {
-    e.preventDefault()
-    resizing = true
-    resizeStartX = e.clientX
-    resizeStartWidth = sidebarWidth()
-    window.addEventListener('mousemove', onSidebarMouseMove)
-    window.addEventListener('mouseup', onSidebarMouseUp)
-  }
-
-  function onSidebarMouseMove(e: MouseEvent) {
-    if (!resizing) return
-    const containerW = containerRef?.clientWidth ?? 0
-    const delta = resizeStartX - e.clientX // dragging left increases width
-    const minW = 220
-    const maxW = Math.max(minW, Math.floor(containerW * 0.7))
-    const next = Math.max(minW, Math.min(maxW, resizeStartWidth + delta))
-    setSidebarWidth(next)
-  }
-
-  function onSidebarMouseUp() {
-    resizing = false
-    window.removeEventListener('mousemove', onSidebarMouseMove)
-    window.removeEventListener('mouseup', onSidebarMouseUp)
-  }
-
-  // Duration helper
-  const duration = () => timelineDurationSec(tracks())
-
-  // Ensure missing clip buffers are loaded (local handle first, then R2)
-  createEffect(() => {
-    const ts = tracks()
-    for (const t of ts) {
-      for (const c of t.clips) {
-        // Skip MIDI clips (no audio buffer to fetch)
-        if ((c as any).midi) continue
-        if (!c.buffer) {
-          void ensureClipBuffer(c.id, c.sampleUrl)
-        }
-      }
-    }
+  const { onSidebarMouseDown } = useTimelineSidebarResize({
+    sidebarWidth,
+    setSidebarWidth,
+    getContainerElement: () => containerRef,
   })
 
-  // Before starting playback, try to (re)load any missing buffers in a user-gesture context.
-  // Jump to a specific clip (from Samples dropdown): select it, move playhead, and scroll into view
-  function jumpToClip(trackId: string, clipId: string, startSec: number) {
-    // Ensure selection states are consistent
-    batch(() => {
-      setSelectedTrackId(trackId)
-      setSelectedClip({ trackId, clipId })
-      setSelectedFXTarget(trackId)
-      setSelectedClipIds(new Set([clipId]))
-    })
-    // Move playhead to the start of the clip
-    setPlayhead(Math.max(0, startSec), tracks())
-    // Try to load buffer if missing
-    try {
-      const t = tracks().find(tt => tt.id === trackId)
-      const c = t?.clips.find(cc => cc.id === clipId)
-      if (c && !c.buffer) {
-        void ensureClipBuffer(clipId, c.sampleUrl)
-      }
-    } catch {}
-    // Center the clip horizontally in view
-    try {
-      if (scrollRef) {
-        const centerLeft = Math.max(0, startSec * PPS - (scrollRef.clientWidth / 2))
-        scrollRef.scrollLeft = Math.floor(centerLeft)
-      }
-    } catch {}
+  const handleLaneMouseDown: JSX.EventHandler<HTMLDivElement, MouseEvent> = (event) => {
+    if (midiEditorClipId()) { event.preventDefault(); event.stopPropagation(); return }
+    onLaneMouseDown(event, scrollRef)
   }
 
-  // Audition helper: preview a short note using the target track's synth chain
-  const auditionNote = (pitch: number, velocity = 0.9, durSec = 0.35) => {
-    try {
-      audioEngine.ensureAudio()
-      const ctx: AudioContext | undefined = (audioEngine as any).audioCtx
-      if (!ctx) return
-      // Resolve track id from currently edited MIDI clip if possible
-      const id = midiEditorClipId()
-      let trackId = selectedFXTarget() || selectedTrackId()
-      if (id) {
-        for (const t of tracks()) {
-          if (t.clips.some(cc => cc.id === id)) { trackId = t.id; break }
-        }
-      }
-      const synthGain: GainNode | undefined = (audioEngine as any).ensureTrackSynthGainNode?.(trackId || 'master')
-      if (!synthGain) return
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      const start = ctx.currentTime
-      const end = start + Math.max(0.05, durSec)
-      const amp = Math.max(0, Math.min(1.5, velocity))
-      osc.type = 'sawtooth'
-      osc.frequency.setValueAtTime(440 * Math.pow(2, (pitch - 69) / 12), start)
-      gain.gain.setValueAtTime(0, start)
-      gain.gain.linearRampToValueAtTime(amp, start + 0.01)
-      gain.gain.linearRampToValueAtTime(0, end)
-      osc.connect(gain)
-      gain.connect(synthGain)
-      osc.start(start)
-      osc.stop(end)
-    } catch {}
+  const onRulerMouseDown = (event: MouseEvent) => {
+    event.preventDefault()
+    if (midiEditorClipId()) { event.stopPropagation(); return }
+    startScrub(event.clientX)
   }
 
-  // Live note play (sustain until keyup) for computer keyboard input
-  const activeLiveNotes = new Map<number, { oscs: OscillatorNode[]; gain: GainNode; trackId: string }>()
-  const startLiveNote = (pitch: number, velocity = 0.9) => {
-    try {
-      audioEngine.ensureAudio()
-      const ctx: AudioContext | undefined = (audioEngine as any).audioCtx
-      if (!ctx) return
-      if (activeLiveNotes.has(pitch)) return
-      // Resolve target track: edited MIDI clip's track, else selectedFXTarget/selectedTrackId
-      const id = midiEditorClipId()
-      let trackId = selectedFXTarget() || selectedTrackId()
-      if (id) {
-        for (const t of tracks()) {
-          if (t.clips.some(cc => cc.id === id)) { trackId = t.id; break }
-        }
-      }
-      if (!trackId) return
-      const synthGain: GainNode | undefined = (audioEngine as any).ensureTrackSynthGainNode?.(trackId)
-      if (!synthGain) return
-      const osc1 = ctx.createOscillator()
-      const osc2 = ctx.createOscillator()
-      const gain = ctx.createGain()
-      const start = ctx.currentTime
-      const synthState = (audioEngine as any)?.trackSynths?.get?.(trackId)
-      const wave1 = synthState?.wave1 ?? synthState?.wave ?? 'sawtooth'
-      const wave2 = synthState?.wave2 ?? synthState?.wave ?? wave1
-      const targetAmp = Math.max(0, Math.min(1.5, velocity)) / 2
-      try { osc1.type = wave1 } catch {}
-      try { osc2.type = wave2 } catch {}
-      const freq = 440 * Math.pow(2, (pitch - 69) / 12)
-      osc1.frequency.setValueAtTime(freq, start)
-      osc2.frequency.setValueAtTime(freq, start)
-      const EPS = 1e-4
-      gain.gain.setValueAtTime(EPS, start)
-      // quick exponential attack for preview
-      gain.gain.exponentialRampToValueAtTime(Math.max(EPS, targetAmp), start + 0.01)
-      osc1.connect(gain)
-      osc2.connect(gain)
-      gain.connect(synthGain)
-      osc1.start(start)
-      osc2.start(start)
-      activeLiveNotes.set(pitch, { oscs: [osc1, osc2], gain, trackId })
-    } catch {}
-  }
-  const stopLiveNote = (pitch: number) => {
-    try {
-      const entry = activeLiveNotes.get(pitch)
-      if (!entry) return
-      activeLiveNotes.delete(pitch)
-      const ctx: AudioContext | undefined = (audioEngine as any).audioCtx
-      if (!ctx) {
-        for (const o of entry.oscs) { try { o.stop() } catch {} }
-        try { entry.gain.disconnect() } catch {}
-        return
-      }
-      const now = ctx.currentTime
-      try {
-        // short release to avoid clicks
-        entry.gain.gain.cancelScheduledValues(now)
-        const current = entry.gain.gain.value
-        entry.gain.gain.setValueAtTime(current, now)
-        entry.gain.gain.linearRampToValueAtTime(0, now + 0.05)
-        for (const o of entry.oscs) { try { o.stop(now + 0.06) } catch {} }
-      } catch {}
-      for (const o of entry.oscs) {
-        o.onended = () => {
-          try { entry.gain.disconnect() } catch {}
-        }
-      }
-    } catch {}
-  }
-  const stopAllLiveNotes = () => {
-    try {
-      for (const p of Array.from(activeLiveNotes.keys())) stopLiveNote(p)
-    } catch {}
+  const onFileInput: JSX.EventHandler<HTMLInputElement, Event> = async (e) => {
+    const input = e.currentTarget
+    await handleFiles(input.files)
+    input.value = ''
   }
 
-  // Ensure any live notes are stopped when closing the MIDI editor
+  const duration = () => timelineDurationSec(renderTracks())
+
   createEffect(() => {
-    const id = midiEditorClipId()
-    if (!id) {
-      try { stopAllLiveNotes() } catch {}
-    }
+    audioEngine.updateTrackGains(renderTracks())
+  })
+
+  createEffect(() => {
+    audioEngine.setBpm(bpm())
+  })
+
+  createEffect(() => {
+    audioEngine.setMetronomeEnabled(metronomeEnabled())
+  })
+
+  createEffect(() => {
+    const nextTracks = resolvedTracks()
+    reconcileRecordArm(nextTracks)
+  })
+
+  onCleanup(() => {
+    try { onLaneDragUp() } catch {}
+    try { window.removeEventListener('mousemove', onResizeMouseMove) } catch {}
+    try { window.removeEventListener('mouseup', onResizeMouseUp) } catch {}
+    audioEngine.close()
+    resetAudioEngine()
+    clearClipBufferCaches()
   })
 
   return (
-    <div ref={el => (rootRef = el!)} class="h-full w-full flex flex-col bg-neutral-950 text-neutral-200" onDragOver={onDragOver} onDrop={async (e) => { if (e.defaultPrevented) return; await onDrop(e); setDropTargetLane(null); setDropAtNewTrack(false) }} onDragLeave={() => { setDropTargetLane(null); setDropAtNewTrack(false) }}>
-      <input ref={el => (fileInputRef = el!)} type="file" accept="audio/*" class="hidden" onChange={onFileInput} />
+    <div ref={(el) => { rootRef = el }} class="h-full w-full flex flex-col bg-neutral-950 text-neutral-200" onDragOver={handleRootDragOver} onDrop={handleRootDrop} onDragLeave={handleRootDragLeave}>
+      <input ref={(el) => { fileInputRef = el }} type="file" accept="audio/*" class="hidden" onChange={onFileInput} />
       
       <TransportControls
         isPlaying={isPlaying()}
@@ -1224,7 +632,7 @@ const Timeline: Component = () => {
         onStop={handleTransportStop}
         onAddAudio={() => handleAddAudio()}
         onShare={handleShare}
-        onMasterFX={() => { setSelectedFXTarget('master'); setBottomFXOpen(true) }}
+        onMasterFX={() => { selection.setSelectedFXTarget('master'); setBottomFXOpen(true) }}
         bpm={bpm()}
         onChangeBpm={(next) => setBpm(clampBpm(next))}
         metronomeEnabled={metronomeEnabled()}
@@ -1240,112 +648,73 @@ const Timeline: Component = () => {
         onJumpToClip={(clipId, trackId, startSec) => jumpToClip(trackId, clipId, startSec)}
         onInsertSample={(payload) => { void handleInsertSample(payload) }}
         currentRoomId={roomId()}
+        currentUserId={userId()}
+        projects={projects()}
         onOpenProject={(rid) => {
           navigateToRoom(rid)
-          const uid = userId()
-          if (uid) void convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: rid, userId: uid })
         }}
-        onCreateProject={async () => {
-          const rid = crypto.randomUUID()
-          navigateToRoom(rid)
-          const uid = userId()
-          if (uid) await convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: rid, userId: uid })
-        }}
-        onDeleteProject={async (rid) => {
-          const uid = userId()
-          if (!uid) return
-          // If deleting the active project, navigate to an existing other project FIRST
-          // (if any), otherwise create a fresh one. Only then delete the old project
-          // to avoid the ensureOwnedRoom effect re-adding it.
-          if (rid === roomId()) {
-            const old = rid
-            // Snapshot current projects and pick another one, if available
-            const projectsRaw: any = (myProjects as any)?.data
-            const projectsLocal = typeof projectsRaw === 'function' ? projectsRaw() : projectsRaw
-            let other: string | undefined = Array.isArray(projectsLocal)
-              ? (projectsLocal.find((p: any) => p?.roomId && p.roomId !== old)?.roomId as string | undefined)
-              : undefined
-            // If local cache isn't ready, fetch a fresh snapshot to avoid creating an unnecessary new project
-            if (!other) {
-              try {
-                const freshList: any[] = await convexClient.query((convexApi as any).projects.listMineDetailed, { userId: uid } as any)
-                other = freshList?.find?.((p: any) => p?.roomId && p.roomId !== old)?.roomId
-              } catch {}
-            }
-
-            if (other) {
-              navigateToRoom(other)
-              await convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: other, userId: uid })
-              await convexClient.mutation(convexApi.projects.deleteOwnedInRoom, { roomId: old, userId: uid })
-            } else {
-              const fresh = crypto.randomUUID()
-              navigateToRoom(fresh)
-              await convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: fresh, userId: uid })
-              await convexClient.mutation(convexApi.projects.deleteOwnedInRoom, { roomId: old, userId: uid })
-            }
-          } else {
-            await convexClient.mutation(convexApi.projects.deleteOwnedInRoom, { roomId: rid, userId: uid })
-          }
-        }}
-        onRenameProject={async (rid, name) => {
-          const uid = userId()
-          if (!uid) return
-          await convexClient.mutation((convexApi as any).projects.setName, { roomId: rid, userId: uid, name })
-        }}
+        onCreateProject={createProject}
+        onDeleteProject={deleteProject}
+        onRenameProject={renameProject}
         onOpenExport={() => setExportOpen(true)}
       />
-
-      {/* Chat toggle button - bottom-left; moves above Effects panel when open */}
-      <button
-        class="fixed left-4 z-40 bg-neutral-800 text-white rounded-md px-3 py-2 border border-neutral-700 hover:bg-neutral-700"
-        style={{ bottom: bottomFXOpen() ? `${FX_OFFSET_PX}px` : '16px' }}
-        aria-label="Toggle AI Chat"
-        onClick={() => setAgentPanelOpen((v) => !v)}
-      >
-        💬
-      </button>
-
-      {/* Shared chat toggle button */}
-      <button
-        class="fixed left-20 z-40 bg-neutral-800 text-white rounded-md px-3 py-2 border border-neutral-700 hover:bg-neutral-700"
-        style={{ bottom: bottomFXOpen() ? `${FX_OFFSET_PX}px` : '16px' }}
-        aria-label="Toggle Room Chat"
-        onClick={() => setSharedChatOpen((v) => !v)}
-      >
-        🗨
-      </button>
-
-      {/* Agent chat panel */}
-      <AgentChat
-        isOpen={agentPanelOpen()}
-        onClose={() => setAgentPanelOpen(false)}
-        roomId={roomId()}
-        userId={userId()}
-        bpm={bpm()}
-        bottomOffsetPx={bottomFXOpen() ? FX_OFFSET_PX : 0}
+      <TimelinePanels
+        chat={{
+          bottomOffsetPx: bottomFXOpen() ? FX_OFFSET_PX : 0,
+          agentPanelOpen: agentPanelOpen(),
+          sharedChatOpen: sharedChatOpen(),
+          roomId: roomId(),
+          userId: userId(),
+          bpm: bpm(),
+          toggleAgentPanel: () => setAgentPanelOpen((value) => !value),
+          toggleSharedChat: () => setSharedChatOpen((value) => !value),
+          closeAgentPanel: () => setAgentPanelOpen(false),
+          closeSharedChat: () => setSharedChatOpen(false),
+          applyAgentMixOps,
+        }}
+        effectsPanel={{
+          isOpen: bottomFXOpen(),
+          selectedFXTarget: selection.selectedFXTarget(),
+          tracks: renderTracks(),
+          playheadSec: playheadSec(),
+          roomId: roomId(),
+          userId: userId(),
+          audioEngine,
+          canWriteTrackRouting: canWriteTrack,
+          grantClipWrite,
+          onTrackSendsChange: updateTrackSends,
+          onTrackOutputTargetChange: updateTrackOutputTargetId,
+          onSelectClip: jumpToClip,
+          onClose: () => setBottomFXOpen(false),
+          onOpen: () => setBottomFXOpen(true),
+          onEffectParamsCommitted: pushEffectParamsHistory,
+        }}
+        exportDialog={{
+          isOpen: exportOpen(),
+          tracks: renderTracks(),
+          bpm: bpm(),
+          loopEnabled: loopEnabled(),
+          loopStartSec: loopStartSec(),
+          loopEndSec: loopEndSec(),
+          roomId: roomId(),
+          userId: userId(),
+          ensureClipBuffer,
+          onClose: () => setExportOpen(false),
+        }}
       />
 
-      {/* Shared chat panel */}
-      <SharedChat
-        isOpen={sharedChatOpen()}
-        onClose={() => setSharedChatOpen(false)}
-        roomId={roomId()}
-        userId={userId()}
-        bottomOffsetPx={bottomFXOpen() ? FX_OFFSET_PX : 0}
-      />
-
-      <div class="flex-1 flex min-h-0" ref={el => (containerRef = el!)}>
+      <div class="flex-1 flex min-h-0" ref={(el) => { containerRef = el }}>
         <div
         class="flex-1 relative overflow-auto timeline-scroll"
         style={{ 'padding-bottom': bottomFXOpen() ? `${FX_OFFSET_PX}px` : '0px' }}
-        ref={el => {
-          scrollRef = el!
-          setScrollElement(el || undefined)
+        ref={(el) => {
+          scrollRef = el
+          setScrollElement(el)
         }}
       >
           <div 
             class="relative select-none" 
-            style={{ width: `${duration() * PPS}px`, height: `${RULER_HEIGHT + (tracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}px` }} 
+            style={{ width: `${duration() * PPS}px`, height: `${RULER_HEIGHT + (renderTracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}px` }}
             onMouseDown={handleLaneMouseDown}
           >
             <TimelineRuler
@@ -1360,303 +729,113 @@ const Timeline: Component = () => {
               onSetLoopRegion={(s, e) => setLoopRegion(s, e)}
             />
             
-            <div class="absolute left-0 right-0" style={{ top: `${RULER_HEIGHT}px`, height: `${(tracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}px` }}>
-              <For each={tracks()}>
+            <div class="absolute left-0 right-0" style={{ top: `${RULER_HEIGHT}px`, height: `${(renderTracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}px` }}>
+              <For each={renderTracks()}>
                 {(track, i) => (
                   <TrackLane
                     track={track}
                     index={i()}
                     isDropTarget={dropTargetLane() === i()}
-                    selectedClipIds={selectedClipIds()}
-                    onClipMouseDown={onClipMouseDown}
+                    selectedClipIds={selection.selectedClipIds()}
+                    onClipPointerDown={onClipPointerDown}
                     onClipClick={onClipClick}
                     onClipResizeStart={onClipResizeStart}
                     bpm={bpm()}
                     onClipDblClick={(_, clipId) => {
-                      try {
-                        const t = tracks().find(tt => tt.id === track.id)
-                        const c = t?.clips.find(cc => cc.id === clipId)
-                        if (c && (c as any).midi) {
-                          openMidiEditorFor(clipId)
-                        }
-                      } catch {}
+                      const match = trackLookup().clipEntryById.get(clipId)
+                      if (match && match.trackId === track.id && match.clip.midi) {
+                        openMidiEditorFor(clipId)
+                      }
                     }}
                   />
                 )}
               </For>
-              {(() => {
-                const start = previewStartSec()
-                const points = previewPoints()
-                const rid = recordingTrackId()
-                if (!isRecording() || start == null || points.length === 0 || !rid) return null
-                const trackIndex = tracks().findIndex(t => t.id === rid)
-                if (trackIndex < 0) return null
-                return (
-                  <div
-                    class="absolute left-0 right-0 pointer-events-none"
-                    style={{ top: `${trackIndex * LANE_HEIGHT}px`, height: `${LANE_HEIGHT}px` }}
-                  >
-                    <RecordingPreview startSec={start} points={points} />
-                  </div>
-                )
-              })()}
-              {dropAtNewTrack() && (
-                <div
-                  class="absolute left-0 right-0 border-t border-green-500/40 bg-green-500/10 pointer-events-none"
-                  style={{ top: `${tracks().length * LANE_HEIGHT}px`, height: `${LANE_HEIGHT}px` }}
-                />
-              )}
-              {/* Grid overlay: render above lanes (faint) and below selection/playhead; clipped to lanes by container */}
-              <GridOverlay
-                durationSec={duration()}
-                heightPx={(tracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}
-                bpm={bpm()}
-                denom={gridDenominator()}
-                enabled={gridEnabled()}
+              <TimelineOverlays
+                timeline={{
+                  tracks: renderTracks(),
+                  durationSec: duration(),
+                  bpm: bpm(),
+                  gridDenominator: gridDenominator(),
+                  gridEnabled: gridEnabled(),
+                  loopEnabled: loopEnabled(),
+                  loopStartSec: loopStartSec(),
+                  loopEndSec: loopEndSec(),
+                  playheadSec: playheadSec(),
+                  dropAtNewTrack: dropAtNewTrack(),
+                  marqueeRect: marqueeRect(),
+                }}
+                recording={{
+                  isRecording: isRecording(),
+                  previewStartSec: previewStartSec(),
+                  previewPoints: previewPoints(),
+                  recordingTrackId: recordingTrackId(),
+                }}
+                midi={{
+                  clipId: midiEditorClipId(),
+                  card: midiCard(),
+                  userId: userId(),
+                  roomId: roomId(),
+                  close: closeMidiEditor,
+                  changeBounds: changeMidiCardBounds,
+                  auditionNote,
+                  startLiveNote,
+                  stopLiveNote,
+                }}
               />
-              {/* Loop edges: full height across timeline */}
-              {loopEnabled() && (loopEndSec() - loopStartSec() > 0.05) && (
-                <>
-                  <div
-                    class="absolute top-0 bottom-0 w-[2px] bg-green-400/70 pointer-events-none z-30"
-                    style={{ left: `${loopStartSec() * PPS}px` }}
-                  />
-                  <div
-                    class="absolute top-0 bottom-0 w-[2px] bg-green-400/70 pointer-events-none z-30"
-                    style={{ left: `${loopEndSec() * PPS}px` }}
-                  />
-                </>
-              )}
-              {(() => {
-                const r = marqueeRect()
-                if (!r) return null
-                return (
-                  <div
-                    class="absolute border border-blue-400 bg-blue-400/10 pointer-events-none z-50"
-                    style={{ left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` }}
-                  />
-                )
-              })()}
-              
-              {/* Playhead */}
-              <div class="absolute top-0 bottom-0 w-px bg-red-500 pointer-events-none z-30" style={{ left: `${playheadSec() * PPS}px` }} />
-
-              {/* Floating MIDI Editor Card */}
-              <Show when={midiEditorClipId()}>
-                {/* Invisible overlay to prevent interactions with content behind the editor */}
-                <div
-                  class="absolute inset-0 z-40 bg-transparent"
-                  style={{ 'touch-action': 'none' }}
-                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation() }}
-                  onPointerMove={(e) => { e.preventDefault(); e.stopPropagation() }}
-                  onPointerUp={(e) => { e.preventDefault(); e.stopPropagation() }}
-                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
-                  onWheel={(e) => { e.preventDefault(); e.stopPropagation() }}
-                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation() }}
-                />
-                <MidiEditorCard
-                  clipId={midiEditorClipId()!}
-                  bpm={bpm()}
-                  gridDenominator={gridDenominator()}
-                  clipDurationSec={(() => {
-                    const id = midiEditorClipId()
-                    if (!id) return 1
-                    for (const t of tracks()) {
-                      const c = t.clips.find(cc => cc.id === id)
-                      if (c) return c.duration
-                    }
-                    return 1
-                  })()}
-                  x={midiCard().x}
-                  y={midiCard().y}
-                  w={midiCard().w}
-                  h={midiCard().h}
-                  onClose={() => closeMidiEditor()}
-                  onChangeBounds={(next: { x: number; y: number; w: number; h: number }) => { setMidiCard(next); schedulePersistMidiCard() }}
-                  midi={(() => {
-                    const id = midiEditorClipId()
-                    if (!id) return undefined
-                    for (const t of tracks()) {
-                      const c = t.clips.find(cc => cc.id === id)
-                      if (c) return (c as any).midi
-                    }
-                    return undefined
-                  })()}
-                  userId={userId() ?? undefined}
-                  roomId={roomId() ?? undefined}
-                  onAuditionNote={(p, v, d) => auditionNote(p, v, d)}
-                  onStartLiveNote={(p, v) => startLiveNote(p, v)}
-                  onStopLiveNote={(p) => stopLiveNote(p)}
-                />
-              </Show>
             </div>
           </div>
         </div>
 
         <TrackSidebar
-          tracks={tracks()}
-          selectedTrackId={selectedTrackId()}
-          sidebarWidth={sidebarWidth()}
-          isPlaying={isPlaying()}
-          bottomOffsetPx={bottomFXOpen() ? FX_OFFSET_PX : 0}
-          getTrackLevel={(id) => {
-            try { return (audioEngine as any)?.getTrackLevel?.(id) ?? 0 } catch { return 0 }
+          sidebar={{
+            tracks: renderTracks(),
+            selectedTrackId: selection.selectedTrackId(),
+            sidebarWidth: sidebarWidth(),
+            isPlaying: isPlaying(),
+            bottomOffsetPx: bottomFXOpen() ? FX_OFFSET_PX : 0,
+            syncMix: syncMix(),
+            recordArmTrackId: recordArmTrackId(),
+            currentUserId: userId(),
+            getTrackLevel: (id) => {
+              try { return audioEngine.getTrackLevel(id) } catch { return 0 }
+            },
+            getTrackLevels: (id) => {
+              try { return audioEngine.getTrackLevelsStereo(id) } catch { return [0, 0] }
+            },
+            onTrackClick: (id) => {
+              selection.selectTrackTarget(id, { clearClipSelection: true })
+            },
+            onAddTrack: async () => {
+              await createTimelineTrack()
+            },
+            onAddReturnTrack: async () => {
+              await createTimelineTrack({ channelRole: 'return' })
+            },
+            onAddGroupTrack: async () => {
+              await createTimelineTrack({ channelRole: 'group' })
+            },
+            onAddInstrumentTrack: async () => {
+              await createTimelineTrack({ kind: 'instrument' })
+            },
+            onVolumeChange: setTrackVolume,
+            onToggleMute: handleToggleTrackMute,
+            onToggleSolo: handleToggleTrackSolo,
+            onToggleSyncMix: toggleSyncMix,
+            onSidebarMouseDown,
+            onToggleRecordArm: handleToggleRecordArm,
           }}
-          getTrackLevels={(id) => {
-            try {
-              const stereo = (audioEngine as any)?.getTrackLevelsStereo?.(id)
-              if (stereo && Array.isArray(stereo) && stereo.length === 2) return stereo as [number, number]
-            } catch {}
-            const m = (() => { try { return (audioEngine as any)?.getTrackLevel?.(id) ?? 0 } catch { return 0 } })()
-            return [m, m]
-          }}
-          
-          onTrackClick={(id) => {
-            batch(() => {
-              setSelectedTrackId(id)
-              setSelectedFXTarget(id)
-              // Clear any clip selection so Delete targets the selected track
-              setSelectedClip(null)
-              setSelectedClipIds(new Set<string>())
-            })
-          }}
-          onAddTrack={async () => {
-            const id = await convexClient.mutation(convexApi.tracks.create, { roomId: roomId(), userId: userId() }) as any as string
-            batch(() => {
-              setSelectedTrackId(id)
-              setSelectedFXTarget(id)
-            })
-            const rid = roomId(); if (rid) pushHistory({ type: 'track-create', roomId: rid, data: { trackId: String(id) } })
-          }}
-          onAddInstrumentTrack={async () => {
-            const id = await convexClient.mutation(convexApi.tracks.create as any, { roomId: roomId(), userId: userId(), kind: 'instrument' } as any) as any as string
-            batch(() => {
-              setSelectedTrackId(id)
-              setSelectedFXTarget(id)
-            })
-            const rid = roomId(); if (rid) pushHistory({ type: 'track-create', roomId: rid, data: { trackId: String(id), kind: 'instrument' } })
-          }}
-          onVolumeChange={(trackId, volume) => {
-            const rid = roomId()
-            const prevVolume = (() => { try { const t = tracks().find(tt => tt.id === trackId); return t?.volume ?? volume } catch { return volume } })()
-            setTracks(ts => ts.map(t => t.id !== trackId ? t : ({ ...t, volume })))
-            const prevTimer = volumeTimers.get(trackId)
-            if (prevTimer) clearTimeout(prevTimer)
-            const timer = window.setTimeout(() => {
-              void convexClient.mutation(convexApi.tracks.setVolume, { trackId: trackId as any, volume })
-              volumeTimers.delete(trackId)
-            }, 150)
-            volumeTimers.set(trackId, timer)
-            if (rid) pushHistory({ type: 'track-volume', roomId: rid, data: { trackId, from: prevVolume, to: volume } }, `track:vol:${trackId}`, 600)
-          }}
-          onToggleMute={(trackId) => {
-            const rid = roomId()
-            let nextMuted = false
-            const prevMuted = (() => { try { const t = tracks().find(tt => tt.id === trackId); return !!t?.muted } catch { return false } })()
-            setTracks(ts => ts.map(t => {
-              if (t.id !== trackId) return t
-              nextMuted = !t.muted
-              return { ...t, muted: nextMuted }
-            }))
-            if (rid) saveLocalMix(rid, trackId, { muted: nextMuted })
-            // Keep server in sync for OWNED tracks regardless of Sync Mix; ignore for non-owned
-            try {
-              const uid = userId()
-              const ownedRaw: any = (ownedTracksQ as any)?.data
-              const ownedArr: any = typeof ownedRaw === 'function' ? ownedRaw() : ownedRaw
-              const ownedSet = new Set<string>(Array.isArray(ownedArr) ? ownedArr.map((x: any) => String(x)) : [])
-              if (uid && ownedSet.has(trackId)) {
-                void convexClient.mutation(convexApi.tracks.setMix, { trackId: trackId as any, muted: nextMuted, userId: uid } as any)
-              }
-            } catch {}
-            if (rid) pushHistory({ type: 'track-mute', roomId: rid, data: { trackId, from: prevMuted, to: !prevMuted } })
-          }}
-          onToggleSolo={(trackId) => {
-            const rid = roomId()
-            let nextSoloed = false
-            const prevSolo = (() => { try { const t = tracks().find(tt => tt.id === trackId); return !!t?.soloed } catch { return false } })()
-            setTracks(ts => ts.map(t => {
-              if (t.id !== trackId) return t
-              nextSoloed = !t.soloed
-              return { ...t, soloed: nextSoloed }
-            }))
-            if (rid) saveLocalMix(rid, trackId, { soloed: nextSoloed })
-            // Keep server in sync for OWNED tracks regardless of Sync Mix; ignore for non-owned
-            try {
-              const uid = userId()
-              const ownedRaw: any = (ownedTracksQ as any)?.data
-              const ownedArr: any = typeof ownedRaw === 'function' ? ownedRaw() : ownedRaw
-              const ownedSet = new Set<string>(Array.isArray(ownedArr) ? ownedArr.map((x: any) => String(x)) : [])
-              if (uid && ownedSet.has(trackId)) {
-                void convexClient.mutation(convexApi.tracks.setMix, { trackId: trackId as any, soloed: nextSoloed, userId: uid } as any)
-              }
-            } catch {}
-            if (rid) pushHistory({ type: 'track-solo', roomId: rid, data: { trackId, from: prevSolo, to: !prevSolo } })
-          }}
-          syncMix={syncMix()}
-          onToggleSyncMix={() => {
-            const rid = roomId()
-            if (rid) {
-              const next = !syncMix()
-              setSyncMix(next)
-              saveMixSyncFlag(rid, next)
-            }
-          }}
-          onSidebarMouseDown={onSidebarMouseDown}
-          recordArmTrackId={recordArmTrackId()}
-          onToggleRecordArm={handleToggleRecordArm}
-          currentUserId={userId()}
         />
       </div>
 
-      <EffectsPanel
-        isOpen={bottomFXOpen()}
-        selectedFXTarget={selectedFXTarget()}
-        tracks={tracks()}
-        onClose={() => setBottomFXOpen(false)}
-        onOpen={() => setBottomFXOpen(true)}
-        audioEngine={audioEngine}
-        roomId={roomId()}
-        userId={userId()}
-        playheadSec={playheadSec()}
-        onSelectClip={(trackId, clipId, startSec) => {
-          // Select the created clip and jump to it
-          batch(() => {
-            setSelectedTrackId(trackId)
-            setSelectedClip({ trackId, clipId })
-            setSelectedFXTarget(trackId)
-            setSelectedClipIds(new Set([clipId]))
-          })
-          setPlayhead(Math.max(0, startSec), tracks())
-          openMidiEditorFor(clipId)
-          try {
-            if (scrollRef) {
-              const centerLeft = Math.max(0, startSec * PPS - (scrollRef.clientWidth / 2))
-              scrollRef.scrollLeft = Math.floor(centerLeft)
-            }
-          } catch {}
-        }}
-        onEffectParamsCommitted={({ targetId, effect, from, to }) => {
-          const rid = roomId();
-          if (!rid) return;
-          pushHistory({ type: 'effect-params', roomId: rid, data: { targetId, effect: effect as any, from, to } }, `fx:${effect}:${targetId}`, 600)
-        }}
-      />
 
       <Dialog open={confirmOpen()} onOpenChange={setConfirmOpen}>
         <DialogContent class="bg-neutral-900 text-neutral-100 border border-neutral-800">
           <DialogHeader>
             <DialogTitle>Delete this track?</DialogTitle>
             <DialogDescription>
-              {(() => {
-                const id = pendingDeleteTrackId()
-                const t = tracks().find(tt => tt.id === id)
-                const count = t?.clips.length ?? 0
-                return count > 0
-                  ? `This track contains ${count} audio clip${count === 1 ? '' : 's'}. Deleting the track will remove them. This action cannot be undone.`
-                  : `This track has no audio clips. Deleting it cannot be undone.`
-              })()}
+              {pendingDeleteTrackClipCount() > 0
+                ? `This track contains ${pendingDeleteTrackClipCount()} audio clip${pendingDeleteTrackClipCount() === 1 ? '' : 's'}. Deleting the track will remove them. This action cannot be undone.`
+                : 'This track has no audio clips. Deleting it cannot be undone.'}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1671,18 +850,6 @@ const Timeline: Component = () => {
         </DialogContent>
       </Dialog>
 
-      <ExportDialog
-        isOpen={exportOpen()}
-        onClose={() => setExportOpen(false)}
-        tracks={tracks()}
-        bpm={bpm()}
-        loopEnabled={loopEnabled()}
-        loopStartSec={loopStartSec()}
-        loopEndSec={loopEndSec()}
-        roomId={roomId()}
-        userId={userId()}
-        ensureClipBuffer={ensureClipBuffer}
-      />
 
       {/* Cloud-only mode: no browser capability notice needed */}
     </div>

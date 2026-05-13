@@ -1,6 +1,7 @@
 import { type Component, For, Show, createSignal, createEffect, onCleanup } from 'solid-js'
 import { convexApi, convexClient, useConvexQuery } from '~/lib/convex'
 import { useSessionQuery } from '~/lib/session'
+import { cn } from '~/lib/utils'
 
 export type SharedChatProps = {
   isOpen: boolean
@@ -25,7 +26,7 @@ const RATE_LIMIT_WINDOW_MS = 10_000
 
 const SharedChat: Component<SharedChatProps> = (props) => {
   const session = useSessionQuery()
-  const displayName = () => (session()?.data?.user as any)?.name as string | undefined
+  const displayName = () => (session.data?.user as any)?.name as string | undefined
 
   // Client-side rate limiter state (timestamps in ms of recent sends)
   let recentSends: number[] = []
@@ -34,20 +35,17 @@ const SharedChat: Component<SharedChatProps> = (props) => {
 
   const [input, setInput] = createSignal('')
   let textareaRef: HTMLTextAreaElement | undefined
-  let listRef: HTMLDivElement | undefined
   let bottomAnchorRef: HTMLDivElement | undefined
 
   // Real-time latest messages for the room (bounded)
   const messagesQ = useConvexQuery(
     (convexApi as any).sharedChat.listLatest,
-    () => props.roomId ? ({ roomId: props.roomId, limit: 200 } as any) : null,
-    () => ['shared-chat', props.roomId]
+    () => props.roomId && props.userId ? ({ roomId: props.roomId, userId: props.userId, limit: 200 } as any) : null,
+    () => ['shared-chat', props.roomId, props.userId]
   )
 
   const messages = (): MessageRow[] => {
-    const raw = (messagesQ as any).data
-    const list = typeof raw === 'function' ? raw() : raw
-    return Array.isArray(list) ? list as MessageRow[] : []
+    return Array.isArray(messagesQ.data) ? messagesQ.data as MessageRow[] : []
   }
 
   // Focus input when opened
@@ -66,8 +64,7 @@ const SharedChat: Component<SharedChatProps> = (props) => {
 
   createEffect(() => {
     if (!props.isOpen) return
-    // Track length to detect additions
-    const _len = messages().length
+    void messages().length
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom()))
   })
 
@@ -130,7 +127,7 @@ const SharedChat: Component<SharedChatProps> = (props) => {
   return (
     <Show when={props.isOpen}>
       <div
-        class="fixed left-[404px] bottom-0 w-[380px] h-[460px] bg-neutral-900 border-t border-l border-neutral-800 flex flex-col z-50 pointer-events-auto"
+        class="pointer-events-auto fixed bottom-0 left-[25.25rem] z-50 flex h-[28.75rem] w-[23.75rem] flex-col border-l border-t border-neutral-800 bg-neutral-900"
         style={{ bottom: `${props.bottomOffsetPx ?? 0}px` }}
       >
         <div class="flex items-center justify-between px-3 py-2 border-b border-neutral-800">
@@ -142,12 +139,12 @@ const SharedChat: Component<SharedChatProps> = (props) => {
             <button class="text-neutral-400 hover:text-white" onClick={props.onClose}>✕</button>
           </div>
         </div>
-        <div class="flex-1 overflow-y-auto px-3 py-2" ref={el => { listRef = el; try { if (props.isOpen) requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom())) } catch {} }}>
+        <div class="flex-1 overflow-y-auto px-3 py-2" ref={() => { try { if (props.isOpen) requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom())) } catch {} }}>
           <div class="min-h-full flex flex-col justify-end space-y-2">
             <For each={messages()}>{(m) => (
               <div class="text-left">
-                <div class="inline-block max-w-[90%] rounded-md px-2 py-1 text-sm bg-neutral-800 text-neutral-100">
-                  <div class="text-[10px] text-neutral-400 mb-0.5">{m.senderName || m.senderUserId}</div>
+                <div class="inline-block max-w-[90%] rounded-md bg-neutral-800 px-2 py-1 text-sm text-neutral-100">
+                  <div class="text-2xs text-neutral-400 mb-0.5">{m.senderName || m.senderUserId}</div>
                   <div>{m.content}</div>
                 </div>
               </div>
@@ -157,7 +154,7 @@ const SharedChat: Component<SharedChatProps> = (props) => {
         </div>
         <div class="border-t border-neutral-800 p-2">
           <textarea
-            class="w-full h-[72px] resize-none rounded bg-neutral-800 text-neutral-100 p-2 text-sm outline-none"
+            class="h-[4.5rem] w-full resize-none rounded bg-neutral-800 p-2 text-sm text-neutral-100 outline-none"
             placeholder={props.userId ? 'Type a message…' : 'Sign in to chat'}
             disabled={!props.userId}
             value={input()}
@@ -168,7 +165,10 @@ const SharedChat: Component<SharedChatProps> = (props) => {
           <div class="flex justify-end pt-2">
             <button
               disabled={!props.userId}
-              class="bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 text-white text-sm px-3 py-1 rounded border border-neutral-600"
+              class={cn(
+                'rounded border border-neutral-600 bg-neutral-700 px-3 py-1 text-sm text-white hover:bg-neutral-600',
+                !props.userId && 'opacity-50',
+              )}
               onClick={() => void send()}
             >
               Send

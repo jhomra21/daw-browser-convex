@@ -1,344 +1,587 @@
-import type { HistoryEntry, ClipSnapshot, ClipTiming } from './types'
+import { buildClipCreatePayload, buildLocalClip, createManyClips } from '~/lib/clip-create'
+import { buildClipMoveMutationInput, buildClipRemoveManyMutationInput } from '~/lib/clip-mutation-args'
+import { buildTrackEffectMutationInput } from '~/lib/effect-track-args'
+import { persistClipTiming } from '~/lib/clip-mutations'
+import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
+import type { LocalMixPatch } from '~/lib/timeline-storage'
+import { buildTrackRoutingMutationInput } from '~/lib/track-routing-state'
+import { buildTrackCreateMutationInput, buildTrackDeleteMutationInput, buildTrackMixMutationInput, buildTrackVolumeMutationInput } from '~/lib/track-mutation-args'
+import { normalizeTrackRouting } from '~/lib/track-routing'
+import type { AudioEngine } from '~/lib/audio-engine'
+import { createLocalTrack } from '~/lib/tracks'
+import type { Track, TrackRouting } from '~/types/timeline'
+
+import { buildHistoryRefIndex, resolveClipId, resolveStoredTrackId, resolveTrackId, resolveTrackRoutingSnapshot } from './refs'
+import type { HistoryEntry } from './types'
 
 type Deps = {
   convexClient: typeof import('~/lib/convex').convexClient
   convexApi: typeof import('~/lib/convex').convexApi
-  setTracks: (updater: any) => void
-  audioBufferCache: Map<string, AudioBuffer>
+  getTracks: () => Track[]
+  getHistoryEntries: () => HistoryEntry[]
   roomId: string
   userId: string
-  audioEngine?: any
+  persistLocalMix: (roomId: string, trackId: Track['id'], patch: LocalMixPatch) => void
+  audioEngine: AudioEngine
+  ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
+  grantTrackWrite: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
+  grantClipWrite: (clipId: string, scope?: OptimisticGrantScope | null) => void
+  actions: {
+    insertLocalTrack: (track: Track, index: number) => void
+    removeLocalTrack: (trackId: Track['id']) => void
+    insertLocalClip: (trackId: Track['id'], clip: Track['clips'][number]) => void
+    removeLocalClips: (clipIds: Iterable<string>) => void
+    commitClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
+    commitClipTiming: (clipId: string, patch: { startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number }) => void
+    rescheduleChangedClips: (clipIds: string[]) => void
+    cancelTrackVolumeWrite: (trackId: Track['id']) => void
+    cancelTrackRoutingWrite: (trackId: Track['id']) => void
+    cancelTrackMixWrite: (trackId: Track['id']) => void
+    applyTrackVolume: (trackId: Track['id'], volume: number, scope?: 'local' | 'shared') => void
+    applyTrackMixState: (trackId: Track['id'], patch: { muted?: boolean; soloed?: boolean }, scope?: 'local' | 'shared') => void
+    applyTrackRouting: (trackId: Track['id'], routing: TrackRouting) => void
+  }
 }
 
-function applyLocalDeleteClip(setTracks: Deps['setTracks'], trackId: string, clipId: string) {
-  setTracks((ts: any[]) => ts.map(t => t.id !== trackId ? t : ({ ...t, clips: t.clips.filter((c: any) => c.id !== clipId) })))
+type HistoryDirection = 'undo' | 'redo'
+
+function pickDirectionalValue<T>(direction: HistoryDirection, from: T, to: T) {
+  return direction === 'undo' ? from : to
 }
 
-function applyLocalAddClip(setTracks: Deps['setTracks'], trackId: string, clip: any) {
-  setTracks((ts: any[]) => ts.map(t => t.id !== trackId ? t : ({ ...t, clips: [...t.clips, clip] })))
+function buildRefIndex(deps: Deps) {
+  return buildHistoryRefIndex(deps.getHistoryEntries(), deps.getTracks())
 }
 
-function applyLocalMoveClip(setTracks: Deps['setTracks'], clipId: string, toTrackId: string, startSec: number) {
-  setTracks((ts: any[]) => {
-    let moving: any | null = null
-    const pruned = ts.map(t => {
-      if (t.clips.some((c: any) => c.id === clipId)) {
-        const found = t.clips.find((c: any) => c.id === clipId)
-        moving = found ? { ...found } : null
-        return { ...t, clips: t.clips.filter((c: any) => c.id !== clipId) }
-      }
-      return t
-    })
-    if (!moving) return ts
-    moving.startSec = startSec
-    return pruned.map(t => t.id !== toTrackId ? t : ({ ...t, clips: [...t.clips, moving] }))
+function syncTrackCreateEntryId(entries: HistoryEntry[], trackRef: string | undefined, trackId: Track['id']) {
+  if (!trackRef) return
+  for (const entry of entries) {
+    if (entry.type === 'track-create' && entry.data.trackRef === trackRef) {
+      entry.data.currentTrackId = trackId
+    }
+  }
+}
+
+function syncClipCreateEntryIds(entries: HistoryEntry[], clipIdsByRef: ReadonlyMap<string, string>) {
+  if (clipIdsByRef.size === 0) return
+  for (const entry of entries) {
+    if (entry.type !== 'clip-create') continue
+    const clipId = clipIdsByRef.get(entry.data.clip.clipRef)
+    if (clipId) {
+      entry.data.clip.currentId = clipId
+    }
+  }
+}
+
+function buildHistoryContext(deps: Deps) {
+  const tracks = deps.getTracks()
+  return {
+    refIndex: buildHistoryRefIndex(deps.getHistoryEntries(), tracks),
+    trackIdByClipId: buildTrackIdByClipId(tracks),
+  }
+}
+
+function requireResolved<T>(value: T | null | undefined, message: string): T {
+  if (value === null || value === undefined) {
+    throw new Error(message)
+  }
+  return value
+}
+
+function buildTrackIdByClipId(tracks: Track[]) {
+  const next = new Map<string, Track['id']>()
+  for (const track of tracks) {
+    for (const clip of track.clips) {
+      next.set(clip.id, track.id)
+    }
+  }
+  return next
+}
+
+async function removeClipIdsOrThrow(deps: Deps, clipIds: string[], message: string) {
+  if (clipIds.length === 0) return
+  const result = await deps.convexClient.mutation(
+    deps.convexApi.clips.removeMany,
+    buildClipRemoveManyMutationInput({ clipIds, userId: deps.userId }),
+  )
+  const removedIds = new Set(
+    Array.isArray(result?.removedClipIds)
+      ? result.removedClipIds.map((clipId: unknown) => String(clipId))
+      : [],
+  )
+  if (clipIds.some((clipId) => !removedIds.has(String(clipId)))) {
+    throw new Error(message)
+  }
+}
+
+async function removeTrackOrThrow(deps: Deps, trackId: Track['id'], message: string) {
+  const result = await deps.convexClient.mutation(
+    deps.convexApi.tracks.remove,
+    buildTrackDeleteMutationInput({ trackId, userId: deps.userId }),
+  )
+  if (result?.status !== 'deleted') {
+    throw new Error(message)
+  }
+}
+
+function readCurrentTrackRouting(track: Pick<Track, 'sends' | 'outputTargetId'> | null | undefined): TrackRouting {
+  return {
+    sends: track?.sends ?? [],
+    outputTargetId: track?.outputTargetId,
+  }
+}
+
+function mergeTrackRouting(base: TrackRouting, next: TrackRouting): TrackRouting {
+  const sendsByTargetId = new Map<string, NonNullable<TrackRouting['sends']>[number]>()
+  for (const send of base.sends ?? []) sendsByTargetId.set(send.targetId, send)
+  for (const send of next.sends ?? []) sendsByTargetId.set(send.targetId, send)
+  return {
+    sends: Array.from(sendsByTargetId.values()).sort((left, right) => left.targetId.localeCompare(right.targetId)),
+    outputTargetId: next.outputTargetId ?? base.outputTargetId,
+  }
+}
+
+async function persistTrackRouting(
+  convexClient: Deps['convexClient'],
+  convexApi: Deps['convexApi'],
+  userId: string,
+  trackId: Track['id'],
+  routing: TrackRouting,
+) {
+  await convexClient.mutation(
+    convexApi.tracks.setRouting,
+    buildTrackRoutingMutationInput({ trackId, userId, routing: { sends: routing.sends ?? [], outputTargetId: routing.outputTargetId } }),
+  )
+}
+
+async function persistTrackMixState(
+  convexClient: Deps['convexClient'],
+  convexApi: Deps['convexApi'],
+  userId: string,
+  trackId: Track['id'],
+  mix: { muted?: boolean; soloed?: boolean },
+) {
+  if (typeof mix.muted !== 'boolean' && typeof mix.soloed !== 'boolean') return
+  await convexClient.mutation(convexApi.tracks.setMix, buildTrackMixMutationInput({
+    trackId,
+    userId,
+    muted: mix.muted,
+    soloed: mix.soloed,
+  }))
+}
+
+async function applyTrackVolumeEntry(entry: Extract<HistoryEntry, { type: 'track-volume' }>, deps: Deps, direction: HistoryDirection) {
+  const index = buildRefIndex(deps)
+  const trackId = requireResolved(resolveTrackId(index, entry.data.trackRef), 'Track not found for track-volume history entry')
+  const volume = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+  deps.actions.cancelTrackVolumeWrite(trackId)
+  if (entry.data.scope === 'local') {
+    deps.persistLocalMix(deps.roomId, trackId, { volume })
+  } else {
+    await deps.convexClient.mutation(
+      deps.convexApi.tracks.setVolume,
+      buildTrackVolumeMutationInput({ trackId, volume, userId: deps.userId }),
+    )
+  }
+  deps.actions.applyTrackVolume(trackId, volume, entry.data.scope)
+}
+
+async function applyTrackBooleanEntry(
+  entry: Extract<HistoryEntry, { type: 'track-mute' | 'track-solo' }>,
+  deps: Deps,
+  direction: HistoryDirection,
+) {
+  const index = buildRefIndex(deps)
+  const trackId = requireResolved(resolveTrackId(index, entry.data.trackRef), `Track not found for ${entry.type} history entry`)
+  const value = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+  const patch = entry.type === 'track-mute' ? { muted: value } : { soloed: value }
+  deps.actions.cancelTrackMixWrite(trackId)
+  if (entry.data.scope !== 'local') {
+    await persistTrackMixState(deps.convexClient, deps.convexApi, deps.userId, trackId, patch)
+  } else {
+    deps.persistLocalMix(deps.roomId, trackId, patch)
+  }
+  deps.actions.applyTrackMixState(trackId, patch, entry.data.scope)
+}
+
+async function applyTrackRoutingEntry(entry: Extract<HistoryEntry, { type: 'track-routing' }>, deps: Deps, direction: HistoryDirection) {
+  const index = buildRefIndex(deps)
+  const trackId = requireResolved(resolveTrackId(index, entry.data.trackRef), 'Track not found for track-routing history entry')
+  const track = deps.getTracks().find((entryValue) => entryValue.id === trackId)
+  const routing = resolveTrackRoutingSnapshot(index, pickDirectionalValue(direction, entry.data.from, entry.data.to))
+  const normalizedRouting = track ? normalizeTrackRouting(track, routing, deps.getTracks()) : routing
+  deps.actions.cancelTrackRoutingWrite(trackId)
+  await persistTrackRouting(deps.convexClient, deps.convexApi, deps.userId, trackId, normalizedRouting)
+  deps.actions.applyTrackRouting(trackId, normalizedRouting)
+}
+
+type EffectParamsEntry = Extract<HistoryEntry, { type: 'effect-params' }>
+
+function readEffectTrackId(entry: EffectParamsEntry, deps: Deps) {
+  const index = buildRefIndex(deps)
+  return requireResolved(resolveTrackId(index, entry.data.trackRef), `Track not found for ${entry.data.effect} history entry`)
+}
+
+async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, direction: HistoryDirection) {
+  switch (entry.data.effect) {
+    case 'master-eq': {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+      await deps.convexClient.mutation(deps.convexApi.effects.setMasterEqParams, { roomId: deps.roomId, userId: deps.userId, params })
+      try { deps.audioEngine.setMasterEq(params) } catch {}
+      return
+    }
+    case 'master-reverb': {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+      await deps.convexClient.mutation(deps.convexApi.effects.setMasterReverbParams, { roomId: deps.roomId, userId: deps.userId, params })
+      try { deps.audioEngine.setMasterReverb(params) } catch {}
+      return
+    }
+    case 'eq': {
+      const trackId = readEffectTrackId(entry, deps)
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+      await deps.convexClient.mutation(
+        deps.convexApi.effects.setEqParams,
+        buildTrackEffectMutationInput({ roomId: deps.roomId, trackId, userId: deps.userId, params }),
+      )
+      try { deps.audioEngine.setTrackEq(trackId, params) } catch {}
+      return
+    }
+    case 'reverb': {
+      const trackId = readEffectTrackId(entry, deps)
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+      await deps.convexClient.mutation(
+        deps.convexApi.effects.setReverbParams,
+        buildTrackEffectMutationInput({ roomId: deps.roomId, trackId, userId: deps.userId, params }),
+      )
+      try { deps.audioEngine.setTrackReverb(trackId, params) } catch {}
+      return
+    }
+    case 'synth': {
+      const trackId = readEffectTrackId(entry, deps)
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+      await deps.convexClient.mutation(
+        deps.convexApi.effects.setSynthParams,
+        buildTrackEffectMutationInput({ roomId: deps.roomId, trackId, userId: deps.userId, params }),
+      )
+      try { deps.audioEngine.setTrackSynth(trackId, params) } catch {}
+      return
+    }
+    case 'arp': {
+      const trackId = readEffectTrackId(entry, deps)
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+      await deps.convexClient.mutation(
+        deps.convexApi.effects.setArpeggiatorParams,
+        buildTrackEffectMutationInput({ roomId: deps.roomId, trackId, userId: deps.userId, params }),
+      )
+      try { deps.audioEngine.setTrackArpeggiator(trackId, params) } catch {}
+      return
+    }
+  }
+}
+
+async function applyClipTimingEntry(entry: Extract<HistoryEntry, { type: 'clip-timing' }>, deps: Deps, direction: HistoryDirection) {
+  const index = buildRefIndex(deps)
+  const clipId = requireResolved(resolveClipId(index, entry.data.clipRef), 'Clip not found for clip-timing history entry')
+  const timing = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+  const applied = await persistClipTiming(deps.convexClient, deps.convexApi, deps.userId, {
+    clipId,
+    startSec: timing.startSec,
+    duration: timing.duration,
+    leftPadSec: timing.leftPadSec ?? 0,
+    bufferOffsetSec: timing.bufferOffsetSec ?? 0,
+    midiOffsetBeats: timing.midiOffsetBeats ?? 0,
   })
+  if (!applied) {
+    throw new Error('Failed to apply clip timing during history replay')
+  }
+  deps.actions.commitClipTiming(clipId, timing)
+  deps.actions.rescheduleChangedClips([clipId])
 }
 
-function applyLocalSetTiming(setTracks: Deps['setTracks'], clipId: string, timing: ClipTiming) {
-  setTracks((ts: any[]) => ts.map(t => ({
-    ...t,
-    clips: t.clips.map((c: any) => c.id !== clipId ? c : ({ ...c, startSec: timing.startSec, duration: timing.duration, leftPadSec: timing.leftPadSec ?? c.leftPadSec, bufferOffsetSec: (timing as any).bufferOffsetSec ?? (c as any).bufferOffsetSec, midiOffsetBeats: (timing as any).midiOffsetBeats ?? (c as any).midiOffsetBeats }))
-  })))
-}
+async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-delete' }>, deps: Deps) {
+  const grantScope = { roomId: deps.roomId, userId: deps.userId }
+  const index = buildRefIndex(deps)
+  const sourceItems = entry.data.items ?? []
+  if (sourceItems.length === 0) return
+  const items = sourceItems.map(({ trackRef, clip }) => {
+    const trackId = requireResolved(resolveTrackId(index, trackRef), 'Track not found for clip-delete history entry')
+    return {
+      trackId,
+      clip,
+    }
+  })
 
-export async function execUndo(entry: HistoryEntry, deps: Deps) {
-  const { convexClient, convexApi, setTracks, audioBufferCache, roomId, userId, audioEngine } = deps
-  switch (entry.type) {
-    case 'clip-create': { // inverse: delete the created/current clip
-      const idToDelete = entry.data.clip.currentId || entry.data.clip.originalId
-      try { await convexClient.mutation((convexApi as any).clips.removeMany, { clipIds: [idToDelete] as any, userId: userId as any }) } catch {}
-      applyLocalDeleteClip(setTracks, entry.data.trackId, idToDelete)
-      entry.data.clip.currentId = undefined
-      break
-    }
-    case 'clip-delete': { // inverse: recreate clips per original track
-      const sourceItems = (() => {
-        if (entry.data.items && entry.data.items.length) return entry.data.items
-        const legacyClips: ClipSnapshot[] | undefined = (entry.data as any).clips
-        const legacyTrackId: string | undefined = (entry.data as any).trackId
-        if (legacyClips && legacyTrackId) {
-          return legacyClips.map(clip => ({ trackId: legacyTrackId, clip }))
-        }
-        return [] as Array<{ trackId: string; clip: ClipSnapshot }>
-      })()
-      if (sourceItems.length === 0) break
-      // Upgrade legacy entries so subsequent redo/undo use new schema
-      entry.data.items = sourceItems
-      // Bulk create for atomic UI update and correct redo tracking
-      const items = sourceItems.map(({ trackId, clip: c }) => ({
-        roomId,
-        trackId: trackId as any,
-        startSec: c.startSec,
-        duration: c.duration,
-        userId,
-        name: c.name,
-        ...(c.midi ? { midi: c.midi } : {}),
-        leftPadSec: c.timing?.leftPadSec,
-        bufferOffsetSec: c.timing?.bufferOffsetSec,
-        midiOffsetBeats: c.timing?.midiOffsetBeats,
-      }))
-      let newIds: string[] = []
-      try {
-        newIds = await convexClient.mutation((convexApi as any).clips.createMany, { items }) as any as string[]
-      } catch {}
-      // Best-effort follow-ups for sampleUrl and timing to mirror original state
-      for (let i = 0; i < sourceItems.length; i++) {
-        const { clip: c } = sourceItems[i]
-        const id = newIds[i]
-        if (!id) continue
-        if (c.sampleUrl) { try { await convexClient.mutation((convexApi as any).clips.setSampleUrl, { clipId: id as any, sampleUrl: c.sampleUrl }) } catch {} }
-        if (c.timing && (typeof c.timing.leftPadSec === 'number' || typeof c.timing.bufferOffsetSec === 'number' || typeof c.timing.midiOffsetBeats === 'number')) {
-          const t = c.timing
-          try { await convexClient.mutation((convexApi as any).clips.setTiming, { clipId: id as any, startSec: c.startSec, duration: c.duration, leftPadSec: t.leftPadSec ?? 0, bufferOffsetSec: t.bufferOffsetSec ?? 0, midiOffsetBeats: t.midiOffsetBeats ?? 0 }) } catch {}
-        }
-      }
-      // Local add in a single batch per track to avoid one-by-one flicker
-      const perTrackAdds = new Map<string, any[]>()
-      for (let i = 0; i < sourceItems.length; i++) {
-        const it = sourceItems[i]
-        const c = it.clip
-        const tid = it.trackId as string
-        const id = newIds[i] || crypto.randomUUID()
-        if (!id) continue
-        const arr = perTrackAdds.get(tid) ?? []
-        arr.push({
-          id,
-          name: c.name || 'Clip',
-          buffer: null,
-          startSec: c.startSec,
-          duration: c.duration,
-          color: '#22c55e',
-          sampleUrl: c.sampleUrl,
-          midi: c.midi,
-          leftPadSec: c.timing?.leftPadSec,
-          bufferOffsetSec: c.timing?.bufferOffsetSec,
-          midiOffsetBeats: c.timing?.midiOffsetBeats,
-        })
-        perTrackAdds.set(tid, arr)
-      }
-      setTracks((ts: any[]) => ts.map(t => {
-        const adds = perTrackAdds.get(t.id)
-        if (!adds || adds.length === 0) return t
-        const merged = [...t.clips, ...adds].sort((a: any, b: any) => (a.startSec ?? 0) - (b.startSec ?? 0))
-        return { ...t, clips: merged }
-      }))
-      entry.data.recreatedClipIds = newIds.filter(Boolean)
-      break
-    }
-    case 'clips-move': { // inverse: move back to from
-      for (const m of entry.data.moves) {
-        try { await convexClient.mutation((convexApi as any).clips.move, { clipId: m.clipId as any, startSec: m.from.startSec, toTrackId: m.from.trackId as any }) } catch {}
-        applyLocalMoveClip(setTracks, m.clipId, m.from.trackId, m.from.startSec)
-      }
-      if (audioEngine) {
-        try { audioEngine.rescheduleClipsAtPlayhead?.(undefined, undefined, entry.data.moves.map(m => m.clipId)) } catch {}
-      }
-      break
-    }
-    case 'clip-timing': {
-      const t = entry.data.from
-      try { await convexClient.mutation((convexApi as any).clips.setTiming, { clipId: entry.data.clipId as any, startSec: t.startSec, duration: t.duration, leftPadSec: t.leftPadSec ?? 0, bufferOffsetSec: t.bufferOffsetSec ?? 0, midiOffsetBeats: t.midiOffsetBeats ?? 0 }) } catch {}
-      applyLocalSetTiming(setTracks, entry.data.clipId, t)
-      if (audioEngine) {
-        try { audioEngine.rescheduleClipsAtPlayhead?.(undefined, undefined, [entry.data.clipId]) } catch {}
-      }
-      break
-    }
-    case 'track-create': { // inverse: remove the track
-      try { await convexClient.mutation((convexApi as any).tracks.remove, { trackId: entry.data.trackId as any, userId }) } catch {}
-      setTracks((ts: any[]) => ts.filter(t => t.id !== entry.data.trackId))
-      break
-    }
-    case 'track-delete': { // inverse: recreate track + clips + effects
-      let newTrackId: string = ''
-      try { newTrackId = await convexClient.mutation((convexApi as any).tracks.create, { roomId, userId, kind: entry.data.track.kind } as any) as any as string } catch {}
-      if (!newTrackId) break
-      entry.data.recreatedTrackId = newTrackId
-      // Set volume; mute/solo best-effort via setMix if owned server supports it
-      try { await convexClient.mutation((convexApi as any).tracks.setVolume, { trackId: newTrackId as any, volume: entry.data.track.volume }) } catch {}
-      try {
-        const payload: any = { trackId: newTrackId as any }
-        if (typeof entry.data.track.muted === 'boolean') payload.muted = entry.data.track.muted
-        if (typeof entry.data.track.soloed === 'boolean') payload.soloed = entry.data.track.soloed
-        if ('muted' in payload || 'soloed' in payload) await convexClient.mutation((convexApi as any).tracks.setMix, payload)
-      } catch {}
-      // Local insertion (name locally only)
-      setTracks((ts: any[]) => ts.some(t => t.id === newTrackId) ? ts : [...ts, { id: newTrackId, name: entry.data.track.name, volume: entry.data.track.volume, clips: [], muted: entry.data.track.muted ?? false, soloed: entry.data.track.soloed ?? false, kind: entry.data.track.kind ?? 'audio' }])
-      // Effects
-      try {
-        if (entry.data.effects?.eq) await convexClient.mutation((convexApi as any).effects.setEqParams, { roomId, trackId: newTrackId as any, userId, params: entry.data.effects.eq })
-      } catch {}
-      try {
-        if (entry.data.effects?.reverb) await convexClient.mutation((convexApi as any).effects.setReverbParams, { roomId, trackId: newTrackId as any, userId, params: entry.data.effects.reverb })
-      } catch {}
-      try {
-        if (entry.data.effects?.synth) await convexClient.mutation((convexApi as any).effects.setSynthParams, { roomId, trackId: newTrackId as any, userId, params: entry.data.effects.synth })
-      } catch {}
-      try {
-        if (entry.data.effects?.arp) await convexClient.mutation((convexApi as any).effects.setArpeggiatorParams, { roomId, trackId: newTrackId as any, userId, params: entry.data.effects.arp })
-      } catch {}
-      // Recreate clips
-      const created: string[] = []
-      for (const c of entry.data.clips) {
-        let newId: string = ''
-        try {
-          newId = await convexClient.mutation((convexApi as any).clips.create, { roomId, trackId: newTrackId as any, startSec: c.startSec, duration: c.duration, userId, name: c.name } as any) as any as string
-        } catch {}
-        if (!newId) continue
-        if (c.sampleUrl) { try { await convexClient.mutation((convexApi as any).clips.setSampleUrl, { clipId: newId as any, sampleUrl: c.sampleUrl }) } catch {} }
-        if (c.midi) { try { await convexClient.mutation((convexApi as any).clips.setMidi, { clipId: newId as any, midi: c.midi, userId }) } catch {} }
-        if (c.timing) {
-          const t = c.timing
-          try { await convexClient.mutation((convexApi as any).clips.setTiming, { clipId: newId as any, startSec: c.startSec, duration: c.duration, leftPadSec: t.leftPadSec ?? 0, bufferOffsetSec: t.bufferOffsetSec ?? 0, midiOffsetBeats: t.midiOffsetBeats ?? 0 }) } catch {}
-        }
-        applyLocalAddClip(setTracks, newTrackId, {
-          id: newId, name: c.name || 'Clip', buffer: null, startSec: c.startSec, duration: c.duration, color: '#22c55e', sampleUrl: c.sampleUrl, midi: c.midi,
-          leftPadSec: c.timing?.leftPadSec, bufferOffsetSec: c.timing?.bufferOffsetSec, midiOffsetBeats: c.timing?.midiOffsetBeats,
-        })
-        created.push(newId)
-      }
-      entry.data.recreatedClipIds = created
-      break
-    }
-    case 'track-volume': {
-      try { await convexClient.mutation((convexApi as any).tracks.setVolume, { trackId: entry.data.trackId as any, volume: entry.data.from }) } catch {}
-      setTracks((ts: any[]) => ts.map(t => t.id !== entry.data.trackId ? t : ({ ...t, volume: entry.data.from })))
-      break
-    }
-    case 'track-mute': {
-      try { await convexClient.mutation((convexApi as any).tracks.setMix, { trackId: entry.data.trackId as any, muted: entry.data.from }) } catch {}
-      setTracks((ts: any[]) => ts.map(t => t.id !== entry.data.trackId ? t : ({ ...t, muted: entry.data.from })))
-      break
-    }
-    case 'track-solo': {
-      try { await convexClient.mutation((convexApi as any).tracks.setMix, { trackId: entry.data.trackId as any, soloed: entry.data.from }) } catch {}
-      setTracks((ts: any[]) => ts.map(t => t.id !== entry.data.trackId ? t : ({ ...t, soloed: entry.data.from })))
-      break
-    }
-    case 'effect-params': {
-      const { effect, targetId, from } = entry.data
-      try {
-        if (effect === 'master-eq') await convexClient.mutation((convexApi as any).effects.setMasterEqParams, { roomId, userId, params: from })
-        else if (effect === 'master-reverb') await convexClient.mutation((convexApi as any).effects.setMasterReverbParams, { roomId, userId, params: from })
-        else if (effect === 'eq') await convexClient.mutation((convexApi as any).effects.setEqParams, { roomId, trackId: targetId as any, userId, params: from })
-        else if (effect === 'reverb') await convexClient.mutation((convexApi as any).effects.setReverbParams, { roomId, trackId: targetId as any, userId, params: from })
-        else if (effect === 'synth') await convexClient.mutation((convexApi as any).effects.setSynthParams, { roomId, trackId: targetId as any, userId, params: from })
-        else if (effect === 'arp') await convexClient.mutation((convexApi as any).effects.setArpeggiatorParams, { roomId, trackId: targetId as any, userId, params: from })
-      } catch {}
-      try {
-        if (effect === 'master-eq') audioEngine?.setMasterEq?.(from)
-        else if (effect === 'master-reverb') audioEngine?.setMasterReverb?.(from)
-        else if (effect === 'eq') audioEngine?.setTrackEq?.(targetId, from)
-        else if (effect === 'reverb') audioEngine?.setTrackReverb?.(targetId, from)
-        else if (effect === 'synth') audioEngine?.setTrackSynth?.(targetId, from)
-        else if (effect === 'arp') audioEngine?.setTrackArpeggiator?.(targetId, from)
-      } catch {}
-      break
+  const recreatedClipIdsByRef = new Map((entry.data.recreatedClips ?? []).map((item) => [item.clipRef, item.clipId]))
+  const pendingItems = items.filter((item) => !recreatedClipIdsByRef.has(item.clip.clipRef!))
+  if (pendingItems.length > 0) {
+    const created = await createManyClips({
+      roomId: deps.roomId,
+      userId: deps.userId,
+      items: pendingItems,
+      createMany: async (clipPayloads) => await deps.convexClient.mutation(deps.convexApi.clips.createMany, { items: clipPayloads }),
+    })
+    for (let indexValue = 0; indexValue < created.length; indexValue++) {
+      recreatedClipIdsByRef.set(pendingItems[indexValue].clip.clipRef!, created[indexValue].clipId)
     }
   }
+
+  const perTrackAdds = new Map<Track['id'], Track['clips']>()
+  for (const item of items) {
+    const clipId = requireResolved(recreatedClipIdsByRef.get(item.clip.clipRef!), 'Missing recreated clip id')
+    deps.grantClipWrite(clipId, grantScope)
+    if (item.clip.sampleUrl) {
+      await deps.ensureClipBuffer?.(clipId, item.clip.sampleUrl)
+    }
+    const adds = perTrackAdds.get(item.trackId) ?? []
+    adds.push(buildLocalClip({ id: clipId, clip: item.clip }))
+    perTrackAdds.set(item.trackId, adds)
+  }
+
+  for (const [trackId, adds] of perTrackAdds) {
+    for (const clip of adds) {
+      deps.actions.insertLocalClip(trackId, clip)
+    }
+  }
+  const recreatedClipIds = Array.from(recreatedClipIdsByRef.values())
+  if (recreatedClipIds.length > 0) {
+    deps.actions.rescheduleChangedClips(recreatedClipIds)
+  }
+  entry.data.recreatedClips = Array.from(recreatedClipIdsByRef.entries()).map(([clipRef, clipId]) => ({ clipRef, clipId }))
+  syncClipCreateEntryIds(deps.getHistoryEntries(), recreatedClipIdsByRef)
 }
 
-export async function execRedo(entry: HistoryEntry, deps: Deps) {
-  const { convexClient, convexApi, setTracks, audioBufferCache, roomId, userId, audioEngine } = deps
+async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: HistoryDirection) {
+  if (entry.roomId !== deps.roomId) {
+    throw new Error(`History entry room mismatch: expected ${deps.roomId}, received ${entry.roomId}`)
+  }
+  const { convexClient, convexApi, roomId, userId } = deps
+  const grantScope = { roomId, userId }
+  const historyContext = buildHistoryContext(deps)
+
   switch (entry.type) {
-    case 'clip-create': { // redo: create again
-      let newId = ''
-      const c = entry.data.clip
-      try {
-        newId = await convexClient.mutation((convexApi as any).clips.create, { roomId, trackId: entry.data.trackId as any, startSec: c.startSec, duration: c.duration, userId, name: c.name } as any) as any as string
-      } catch {}
-      if (!newId) break
-      if (c.sampleUrl) { try { await convexClient.mutation((convexApi as any).clips.setSampleUrl, { clipId: newId as any, sampleUrl: c.sampleUrl }) } catch {} }
-      if (c.midi) { try { await convexClient.mutation((convexApi as any).clips.setMidi, { clipId: newId as any, midi: c.midi, userId }) } catch {} }
-      if (c.timing) {
-        const t = c.timing
-        try { await convexClient.mutation((convexApi as any).clips.setTiming, { clipId: newId as any, startSec: c.startSec, duration: c.duration, leftPadSec: t.leftPadSec ?? 0, bufferOffsetSec: t.bufferOffsetSec ?? 0, midiOffsetBeats: t.midiOffsetBeats ?? 0 }) } catch {}
+    case 'clip-create': {
+      const index = historyContext.refIndex
+      if (direction === 'undo') {
+        const clipId = requireResolved(resolveClipId(index, entry.data.clip.clipRef) ?? entry.data.clip.currentId, 'Clip not found for clip-create undo')
+        requireResolved(historyContext.trackIdByClipId.get(clipId) ?? resolveTrackId(index, entry.data.trackRef), 'Track not found for clip-create undo')
+        await removeClipIdsOrThrow(deps, [clipId], 'Failed to remove clip during clip-create undo')
+        deps.actions.removeLocalClips([clipId])
+        entry.data.clip.currentId = undefined
+        return
       }
+
+      const trackId = requireResolved(resolveTrackId(index, entry.data.trackRef), 'Track not found for clip-create redo')
+      const existingId = entry.data.clip.currentId
+      const clipSnapshot = entry.data.clip
+      const newId = existingId || await convexClient.mutation(convexApi.clips.create, buildClipCreatePayload({ roomId, userId, trackId, clip: clipSnapshot }))
+      if (!newId) throw new Error('Failed to recreate clip')
       entry.data.clip.currentId = newId
-      applyLocalAddClip(setTracks, entry.data.trackId, {
-        id: newId, name: c.name || 'Clip', buffer: null, startSec: c.startSec, duration: c.duration, color: '#22c55e', sampleUrl: c.sampleUrl, midi: c.midi,
-        leftPadSec: c.timing?.leftPadSec, bufferOffsetSec: c.timing?.bufferOffsetSec, midiOffsetBeats: c.timing?.midiOffsetBeats,
-      })
-      break
-    }
-    case 'clip-delete': { // redo: delete recreated clips
-      const ids = entry.data.recreatedClipIds || []
-      if (ids.length === 0) break
-      try { await convexClient.mutation((convexApi as any).clips.removeMany, { clipIds: ids as any, userId: userId as any }) } catch {}
-      // Remove locally across all tracks to be robust
-      setTracks((ts: any[]) => ts.map(t => ({ ...t, clips: t.clips.filter((c: any) => !ids.includes(c.id)) })))
-      break
-    }
-    case 'clips-move': { // redo: move to "to"
-      for (const m of entry.data.moves) {
-        try { await convexClient.mutation((convexApi as any).clips.move, { clipId: m.clipId as any, startSec: m.to.startSec, toTrackId: m.to.trackId as any }) } catch {}
-        applyLocalMoveClip(setTracks, m.clipId, m.to.trackId, m.to.startSec)
+      deps.grantClipWrite(newId, grantScope)
+      if (clipSnapshot.sampleUrl) {
+        await deps.ensureClipBuffer?.(newId, clipSnapshot.sampleUrl)
       }
-      if (audioEngine) {
-        try { audioEngine.rescheduleClipsAtPlayhead?.(undefined, undefined, entry.data.moves.map(m => m.clipId)) } catch {}
+      deps.actions.insertLocalClip(trackId, buildLocalClip({ id: newId, clip: clipSnapshot }))
+      deps.actions.rescheduleChangedClips([newId])
+      return
+    }
+
+    case 'clip-delete': {
+      if (direction === 'undo') {
+        await recreateDeletedClips(entry, deps)
+        return
       }
-      break
+      const ids = (entry.data.recreatedClips ?? []).map((item) => item.clipId)
+      if (ids.length === 0) return
+      await removeClipIdsOrThrow(deps, ids, 'Failed to remove clips during clip-delete redo')
+      deps.actions.removeLocalClips(ids)
+      entry.data.recreatedClips = []
+      return
     }
-    case 'clip-timing': {
-      const t = entry.data.to
-      try { await convexClient.mutation((convexApi as any).clips.setTiming, { clipId: entry.data.clipId as any, startSec: t.startSec, duration: t.duration, leftPadSec: t.leftPadSec ?? 0, bufferOffsetSec: t.bufferOffsetSec ?? 0, midiOffsetBeats: t.midiOffsetBeats ?? 0 }) } catch {}
-      applyLocalSetTiming(setTracks, entry.data.clipId, t)
-      if (audioEngine) {
-        try { audioEngine.rescheduleClipsAtPlayhead?.(undefined, undefined, [entry.data.clipId]) } catch {}
+
+    case 'clips-move': {
+      const index = buildRefIndex(deps)
+      const movedClipIds: string[] = []
+      for (const move of entry.data.moves) {
+        const clipId = requireResolved(resolveClipId(index, move.clipRef), 'Clip not found for clips-move history entry')
+        const target = pickDirectionalValue(direction, move.from, move.to)
+        const toTrackId = requireResolved(resolveTrackId(index, target.trackRef), 'Target track not found for clips-move history entry')
+        const result = await convexClient.mutation(
+          convexApi.clips.move,
+          buildClipMoveMutationInput({ clipId, userId, startSec: target.startSec, toTrackId }),
+        )
+        if (result?.status !== 'applied') {
+          throw new Error('Failed to move clip during history replay')
+        }
+        deps.actions.commitClipMoves([{ clipId, trackId: toTrackId, startSec: target.startSec }])
+        movedClipIds.push(clipId)
       }
-      break
+      deps.actions.rescheduleChangedClips(movedClipIds)
+      return
     }
-    case 'track-create': { // redo: create again (new id)
-      let newId = ''
-      try { newId = await convexClient.mutation((convexApi as any).tracks.create, { roomId, userId, kind: entry.data.kind } as any) as any as string } catch {}
-      if (!newId) break
-      // local add (minimal)
-      setTracks((ts: any[]) => ts.some(t => t.id === newId) ? ts : [...ts, { id: newId, name: `Track ${ts.length + 1}`, volume: 0.8, clips: [], muted: false, soloed: false }])
-      // Note: we don't overwrite entry.data.trackId; this entry remains id-agnostic on redo
-      break
+
+    case 'clip-timing':
+      await applyClipTimingEntry(entry, deps, direction)
+      return
+
+    case 'track-create': {
+      if (direction === 'undo') {
+        const trackId = requireResolved(
+          resolveTrackId(historyContext.refIndex, entry.data.trackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.currentTrackId),
+          'Track not found for track-create undo',
+        )
+        await removeTrackOrThrow(deps, trackId, 'Failed to remove track during track-create undo')
+        deps.actions.removeLocalTrack(trackId)
+        entry.data.currentTrackId = undefined
+        return
+      }
+
+      let newId = resolveStoredTrackId(deps.getTracks(), entry.data.currentTrackId)
+      if (!newId) {
+        newId = await convexClient.mutation(
+          convexApi.tracks.create,
+          buildTrackCreateMutationInput({
+            roomId,
+            userId,
+            index: entry.data.index,
+            kind: entry.data.kind,
+            channelRole: entry.data.channelRole,
+          }),
+        )
+      }
+      if (!newId) throw new Error('Failed to recreate track')
+      entry.data.currentTrackId = newId
+      deps.grantTrackWrite(newId, grantScope)
+      deps.actions.insertLocalTrack(createLocalTrack({
+        id: newId,
+        historyRef: entry.data.trackRef,
+        index: entry.data.index,
+        kind: entry.data.kind ?? 'audio',
+        channelRole: entry.data.channelRole ?? 'track',
+      }), entry.data.index)
+      return
     }
-    case 'track-delete': { // redo: remove recreated track
-      const tid = entry.data.recreatedTrackId
-      if (!tid) break
-      try { await convexClient.mutation((convexApi as any).tracks.remove, { trackId: tid as any, userId }) } catch {}
-      setTracks((ts: any[]) => ts.filter(t => t.id !== tid))
-      break
+
+    case 'track-delete': {
+      if (direction === 'redo') {
+        const trackId = requireResolved(
+          resolveTrackId(historyContext.refIndex, entry.data.track.trackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.recreatedTrackId),
+          'Track not found for track-delete redo',
+        )
+        await removeTrackOrThrow(deps, trackId, 'Failed to remove track during track-delete redo')
+        deps.actions.removeLocalTrack(trackId)
+        entry.data.recreatedTrackId = undefined
+        entry.data.recreatedClips = []
+        return
+      }
+
+      let newTrackId = resolveStoredTrackId(deps.getTracks(), entry.data.recreatedTrackId)
+      if (!newTrackId) {
+        newTrackId = await convexClient.mutation(
+          convexApi.tracks.create,
+          buildTrackCreateMutationInput({
+            roomId,
+            userId,
+            index: entry.data.track.index,
+            kind: entry.data.track.kind,
+            channelRole: entry.data.track.channelRole,
+          }),
+        )
+      }
+      if (!newTrackId) throw new Error('Failed to recreate deleted track')
+      entry.data.recreatedTrackId = newTrackId
+      deps.grantTrackWrite(newTrackId, grantScope)
+      syncTrackCreateEntryId(deps.getHistoryEntries(), entry.data.track.trackRef, newTrackId)
+      await convexClient.mutation(convexApi.tracks.setVolume, buildTrackVolumeMutationInput({ trackId: newTrackId, volume: entry.data.track.volume, userId }))
+      await persistTrackMixState(convexClient, convexApi, userId, newTrackId, { muted: entry.data.track.muted, soloed: entry.data.track.soloed })
+
+      deps.actions.insertLocalTrack(createLocalTrack({
+        id: newTrackId,
+        historyRef: entry.data.track.trackRef,
+        index: entry.data.track.index,
+        name: entry.data.track.name,
+        volume: entry.data.track.volume,
+        clips: [],
+        muted: entry.data.track.muted ?? false,
+        soloed: entry.data.track.soloed ?? false,
+        kind: entry.data.track.kind ?? 'audio',
+        channelRole: entry.data.track.channelRole ?? 'track',
+        sends: [],
+        outputTargetId: undefined,
+      }), entry.data.track.index)
+
+      if (entry.data.effects?.eq) await convexClient.mutation(convexApi.effects.setEqParams, buildTrackEffectMutationInput({ roomId, trackId: newTrackId, userId, params: entry.data.effects.eq }))
+      if (entry.data.effects?.reverb) await convexClient.mutation(convexApi.effects.setReverbParams, buildTrackEffectMutationInput({ roomId, trackId: newTrackId, userId, params: entry.data.effects.reverb }))
+      if (entry.data.effects?.synth) await convexClient.mutation(convexApi.effects.setSynthParams, buildTrackEffectMutationInput({ roomId, trackId: newTrackId, userId, params: entry.data.effects.synth }))
+      if (entry.data.effects?.arp) await convexClient.mutation(convexApi.effects.setArpeggiatorParams, buildTrackEffectMutationInput({ roomId, trackId: newTrackId, userId, params: entry.data.effects.arp }))
+
+      const recreatedClipIdsByRef = new Map((entry.data.recreatedClips ?? []).map((item) => [item.clipRef, item.clipId]))
+      const restoredClipIds: string[] = []
+      for (const clip of entry.data.clips) {
+        const clipRef = requireResolved(clip.clipRef, 'Missing clip reference for track-delete history entry')
+        const clipSnapshot = clip
+        const newId = recreatedClipIdsByRef.get(clipRef) || await convexClient.mutation(convexApi.clips.create, buildClipCreatePayload({ roomId, userId, trackId: newTrackId, clip: clipSnapshot }))
+        if (!newId) throw new Error('Failed to recreate deleted track clip')
+        recreatedClipIdsByRef.set(clipRef, newId)
+        deps.grantClipWrite(newId, grantScope)
+        if (clipSnapshot.sampleUrl) {
+          await deps.ensureClipBuffer?.(newId, clipSnapshot.sampleUrl)
+        }
+        deps.actions.insertLocalClip(newTrackId, buildLocalClip({ id: newId, clip: clipSnapshot }))
+        restoredClipIds.push(newId)
+      }
+      if (restoredClipIds.length > 0) {
+        deps.actions.rescheduleChangedClips(restoredClipIds)
+      }
+      entry.data.recreatedClips = Array.from(recreatedClipIdsByRef.entries()).map(([clipRef, clipId]) => ({ clipRef, clipId }))
+      syncClipCreateEntryIds(deps.getHistoryEntries(), recreatedClipIdsByRef)
+
+      const refreshedIndex = buildRefIndex(deps)
+      const restoredTrack = deps.getTracks().find((track) => track.id === newTrackId)
+      if (restoredTrack) {
+        const ownRouting = normalizeTrackRouting(restoredTrack, resolveTrackRoutingSnapshot(refreshedIndex, entry.data.track.routing), deps.getTracks())
+        await persistTrackRouting(convexClient, convexApi, userId, newTrackId, ownRouting)
+        deps.actions.applyTrackRouting(newTrackId, ownRouting)
+      }
+
+      for (const inbound of entry.data.inboundRouting ?? []) {
+        const sourceTrackId = resolveTrackId(refreshedIndex, inbound.sourceTrackRef)
+        if (!sourceTrackId) continue
+        const sourceTrack = deps.getTracks().find((track) => track.id === sourceTrackId)
+        if (!sourceTrack) continue
+        const merged = mergeTrackRouting(
+          readCurrentTrackRouting(sourceTrack),
+          resolveTrackRoutingSnapshot(refreshedIndex, inbound),
+        )
+        const normalized = normalizeTrackRouting(sourceTrack, merged, deps.getTracks())
+        await persistTrackRouting(convexClient, convexApi, userId, sourceTrackId, normalized)
+        deps.actions.applyTrackRouting(sourceTrackId, normalized)
+      }
+      return
     }
-    case 'track-volume': {
-      try { await convexClient.mutation((convexApi as any).tracks.setVolume, { trackId: entry.data.trackId as any, volume: entry.data.to }) } catch {}
-      setTracks((ts: any[]) => ts.map(t => t.id !== entry.data.trackId ? t : ({ ...t, volume: entry.data.to })))
-      break
-    }
-    case 'track-mute': {
-      try { await convexClient.mutation((convexApi as any).tracks.setMix, { trackId: entry.data.trackId as any, muted: entry.data.to }) } catch {}
-      setTracks((ts: any[]) => ts.map(t => t.id !== entry.data.trackId ? t : ({ ...t, muted: entry.data.to })))
-      break
-    }
-    case 'track-solo': {
-      try { await convexClient.mutation((convexApi as any).tracks.setMix, { trackId: entry.data.trackId as any, soloed: entry.data.to }) } catch {}
-      setTracks((ts: any[]) => ts.map(t => t.id !== entry.data.trackId ? t : ({ ...t, soloed: entry.data.to })))
-      break
-    }
-    case 'effect-params': {
-      const { effect, targetId, to } = entry.data
-      try {
-        if (effect === 'master-eq') await convexClient.mutation((convexApi as any).effects.setMasterEqParams, { roomId, userId, params: to })
-        else if (effect === 'master-reverb') await convexClient.mutation((convexApi as any).effects.setMasterReverbParams, { roomId, userId, params: to })
-        else if (effect === 'eq') await convexClient.mutation((convexApi as any).effects.setEqParams, { roomId, trackId: targetId as any, userId, params: to })
-        else if (effect === 'reverb') await convexClient.mutation((convexApi as any).effects.setReverbParams, { roomId, trackId: targetId as any, userId, params: to })
-        else if (effect === 'synth') await convexClient.mutation((convexApi as any).effects.setSynthParams, { roomId, trackId: targetId as any, userId, params: to })
-        else if (effect === 'arp') await convexClient.mutation((convexApi as any).effects.setArpeggiatorParams, { roomId, trackId: targetId as any, userId, params: to })
-      } catch {}
-      try {
-        if (effect === 'master-eq') audioEngine?.setMasterEq?.(to)
-        else if (effect === 'master-reverb') audioEngine?.setMasterReverb?.(to)
-        else if (effect === 'eq') audioEngine?.setTrackEq?.(targetId, to)
-        else if (effect === 'reverb') audioEngine?.setTrackReverb?.(targetId, to)
-        else if (effect === 'synth') audioEngine?.setTrackSynth?.(targetId, to)
-        else if (effect === 'arp') audioEngine?.setTrackArpeggiator?.(targetId, to)
-      } catch {}
-      break
-    }
+
+    case 'track-volume':
+      await applyTrackVolumeEntry(entry, deps, direction)
+      return
+
+    case 'track-mute':
+    case 'track-solo':
+      await applyTrackBooleanEntry(entry, deps, direction)
+      return
+
+    case 'track-routing':
+      await applyTrackRoutingEntry(entry, deps, direction)
+      return
+
+    case 'effect-params':
+      await applyEffectParamsEntry(entry, deps, direction)
+      return
   }
+}
+
+export function execUndo(entry: HistoryEntry, deps: Deps) {
+  return execHistoryEntry(entry, deps, 'undo')
+}
+
+export function execRedo(entry: HistoryEntry, deps: Deps) {
+  return execHistoryEntry(entry, deps, 'redo')
 }

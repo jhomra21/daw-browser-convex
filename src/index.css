@@ -314,14 +314,59 @@ html {
   overscroll-behavior: none;
 }
 
-/* Hide scrollbars for the main timeline scroll container only */
-.timeline-scroll {
+/* Hide scrollbars for timeline scroll containers */
+.timeline-scroll,
+.track-sidebar-scroll {
   /* Firefox */
   scrollbar-width: none;
   /* IE/Edge */
   -ms-overflow-style: none;
 }
-.timeline-scroll::-webkit-scrollbar {
+.timeline-scroll::-webkit-scrollbar,
+.track-sidebar-scroll::-webkit-scrollbar {
   width: 0;
   height: 0;
+}
+
+.track-volume-slider {
+  height: 1.25rem;
+  appearance: none;
+  touch-action: none;
+  border: 2px solid rgb(64 64 64);
+  border-radius: 0.125rem;
+  background: linear-gradient(
+    to right,
+    rgb(251 191 36) 0 var(--track-volume-percent),
+    rgb(163 163 163) var(--track-volume-percent) 100%
+  );
+}
+
+.track-volume-slider::-webkit-slider-runnable-track {
+  height: 100%;
+  border-radius: 0.125rem;
+  background: transparent;
+}
+
+.track-volume-slider::-webkit-slider-thumb {
+  width: 0;
+  height: 1.25rem;
+  appearance: none;
+}
+
+.track-volume-slider::-moz-range-track {
+  height: 100%;
+  border-radius: 0.125rem;
+  background: rgb(163 163 163);
+}
+
+.track-volume-slider::-moz-range-progress {
+  height: 100%;
+  border-radius: 0.125rem;
+  background: rgb(251 191 36);
+}
+
+.track-volume-slider::-moz-range-thumb {
+  width: 0;
+  height: 0;
+  border: 0;
 }

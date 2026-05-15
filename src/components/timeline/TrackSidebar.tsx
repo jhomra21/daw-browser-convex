@@ -1,7 +1,7 @@
-import { type Component, For, Show, createEffect, createSignal, onCleanup } from 'solid-js'
+import { type Component, For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import { canTrackReceiveAudioClip, getTrackChannelRole } from '~/lib/track-routing'
 import { cn } from '~/lib/utils'
-import type { Track } from '~/types/timeline'
+import type { Track, TrackSend } from '~/types/timeline'
 
 type TrackSidebarProps = {
   sidebar: {
@@ -13,6 +13,9 @@ type TrackSidebarProps = {
     onAddReturnTrack?: () => void
     onAddGroupTrack?: () => void
     onAddInstrumentTrack?: () => void
+    canWriteTrackRouting?: (trackId: Track['id']) => boolean
+    onTrackSendsChange?: (trackId: Track['id'], sends: TrackSend[]) => void
+    onTrackOutputTargetChange?: (trackId: Track['id'], outputTargetId?: Track['id']) => void
     onVolumeChange: (trackId: Track['id'], volume: number) => void
     onSidebarMouseDown: (e: MouseEvent) => void
     onToggleMute: (trackId: Track['id']) => void
@@ -31,23 +34,6 @@ type TrackSidebarProps = {
 
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const sidebar = () => props.sidebar
-  let activeMove: ((event: MouseEvent) => void) | null = null
-  let activeUp: (() => void) | null = null
-
-  const detachDragListeners = () => {
-    if (activeMove) {
-      document.removeEventListener('mousemove', activeMove)
-      activeMove = null
-    }
-    if (activeUp) {
-      document.removeEventListener('mouseup', activeUp)
-      activeUp = null
-    }
-  }
-
-  onCleanup(() => {
-    detachDragListeners()
-  })
 
   const [meters, setMeters] = createSignal<Record<string, { L: number; R: number }>>({})
   let rafId: number | null = null
@@ -75,11 +61,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         let srcR = 0
         if (playing) {
           const stereo = sidebar().getTrackLevels?.(track.id)
-          if (Array.isArray(stereo) && stereo.length === 2) {
+          if (stereo) {
             srcL = stereo[0] ?? 0
             srcR = stereo[1] ?? 0
           } else {
-            const mono = sidebar().getTrackLevel?.(track.id) ?? 0
+            const mono = sidebar().getTrackLevel(track.id)
             srcL = mono
             srcR = mono
           }
@@ -95,9 +81,13 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       }
     } catch {}
 
-    setMeters(next)
-    const anyActive = Object.values(next).some((value) => value.L > 0.003 || value.R > 0.003)
-    if (playing || anyActive) scheduleTick()
+    const metersChanged = sidebar().tracks.some((track) => {
+      const previous = prev[track.id]
+      const current = next[track.id]
+      return !previous || !current || previous.L !== current.L || previous.R !== current.R
+    }) || Object.keys(prev).length !== sidebar().tracks.length
+    if (metersChanged) setMeters(next)
+    if (playing) scheduleTick()
   }
 
   createEffect(() => {
@@ -105,7 +95,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       scheduleTick()
       return
     }
-    if (rafId == null) scheduleTick()
+    if (rafId != null) {
+      cancelAnimationFrame(rafId)
+      rafId = null
+    }
+    setMeters((current) => Object.keys(current).length === 0 ? current : {})
     lastTs = null
   })
 
@@ -113,15 +107,74 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     if (rafId != null) cancelAnimationFrame(rafId)
   })
 
+  const groupTracks = createMemo(() => sidebar().tracks.filter((track) => getTrackChannelRole(track) === 'group'))
+  const returnTracks = createMemo(() => sidebar().tracks.filter((track) => getTrackChannelRole(track) === 'return'))
+
+  const canWriteTrackRouting = (track: Track) => sidebar().canWriteTrackRouting?.(track.id) ?? true
+
+  const handleOutputTargetChange = (track: Track, value: string) => {
+    if (!canWriteTrackRouting(track)) return
+    const outputTargetId = value
+      ? groupTracks().find((groupTrack) => groupTrack.id === value)?.id
+      : undefined
+    sidebar().onTrackOutputTargetChange?.(track.id, outputTargetId)
+  }
+
+  const selectedSendTargetId = (track: Track) => track.sends?.find((send) => send.amount > 0.0001)?.targetId ?? ''
+
+  const handleSendTargetChange = (track: Track, targetId: string) => {
+    if (!canWriteTrackRouting(track)) return
+    const returnTrack = returnTracks().find((candidate) => candidate.id === targetId)
+    const currentTargetId = selectedSendTargetId(track)
+    const existingSends = track.sends ?? []
+    if (!returnTrack) {
+      sidebar().onTrackSendsChange?.(track.id, existingSends.filter((send) => send.targetId !== currentTargetId))
+      return
+    }
+    const amount = existingSends.find((send) => send.targetId === returnTrack.id)?.amount ?? 1
+    sidebar().onTrackSendsChange?.(track.id, [
+      ...existingSends.filter((send) => send.targetId !== currentTargetId && send.targetId !== returnTrack.id),
+      { targetId: returnTrack.id, amount },
+    ])
+  }
+
+  let activeVolumePointerId: number | null = null
+  let activeVolumeTrackId: Track['id'] | null = null
+  let activeVolumeValue: number | null = null
+
+  const clampVolume = (volume: number) => Math.max(0, Math.min(1, volume))
+  const quantizeVolume = (volume: number) => Math.round(clampVolume(volume) * 100) / 100
+
+  const volumeFromPointer = (input: HTMLInputElement, clientX: number) => {
+    const rect = input.getBoundingClientRect()
+    const width = Math.max(1, rect.width)
+    return quantizeVolume((clientX - rect.left) / width)
+  }
+
+  const updateTrackVolume = (track: Track, volume: number) => {
+    const nextVolume = quantizeVolume(volume)
+    if (activeVolumeTrackId === track.id) {
+      if (activeVolumeValue === nextVolume) return
+      activeVolumeValue = nextVolume
+    } else if (nextVolume === quantizeVolume(track.volume ?? 0.8)) {
+      return
+    }
+    sidebar().onVolumeChange(track.id, nextVolume)
+  }
+
+  const updateVolumeFromPointer = (track: Track, input: HTMLInputElement, clientX: number) => {
+    updateTrackVolume(track, volumeFromPointer(input, clientX))
+  }
+
   return (
     <>
       <div class="w-1 cursor-col-resize bg-neutral-800 hover:bg-neutral-700" onMouseDown={sidebar().onSidebarMouseDown} />
 
       <div
-        class="overflow-y-auto border-l border-neutral-800 bg-neutral-900 p-0"
-        style={{ width: `${sidebar().sidebarWidth}px`, 'min-width': '220px', 'padding-bottom': `${sidebar().bottomOffsetPx ?? 0}px` }}
+        class="track-sidebar-scroll overflow-y-auto overflow-x-hidden border-l border-neutral-800 bg-neutral-900 p-0"
+        style={{ width: `${sidebar().sidebarWidth}px`, 'min-width': '320px', 'padding-bottom': `${sidebar().bottomOffsetPx ?? 0}px` }}
       >
-        <div class="flex items-center justify-between p-1">
+        <div class="flex items-center justify-between gap-2 p-1">
           <div>
             <button
               class={cn(
@@ -136,11 +189,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               Sync Mix
             </button>
           </div>
-          <div class="flex items-center gap-2 pr-2">
-            <button class="cursor-pointer text-base text-neutral-400 transition-transform ease-out active:scale-97 hover:text-neutral-300" onClick={sidebar().onAddTrack}>Add Track</button>
+          <div class="flex min-w-0 items-center gap-2 pr-2">
+            <button class="cursor-pointer whitespace-nowrap text-base text-neutral-400 transition-transform ease-out active:scale-97 hover:text-neutral-300" onClick={sidebar().onAddTrack}>Add Track</button>
             <button class="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700" onClick={() => sidebar().onAddReturnTrack?.()} title="Add return track">+ Return</button>
             <button class="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700" onClick={() => sidebar().onAddGroupTrack?.()} title="Add group bus">+ Group</button>
-            <button class="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700" onClick={() => sidebar().onAddInstrumentTrack?.()} title="Add instrument track (for MIDI clips)">+ Instrument</button>
+            <button class="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700" onClick={() => sidebar().onAddInstrumentTrack?.()} title="Add instrument track (for MIDI clips)">+ Inst</button>
           </div>
         </div>
         <For each={sidebar().tracks}>
@@ -157,6 +210,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const volume = () => track.volume ?? 0.8
             const muted = () => !!track.muted
             const soloed = () => !!track.soloed
+            const currentSendTargetId = () => selectedSendTargetId(track)
 
             return (
               <div
@@ -168,78 +222,170 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 style={{ height: '96px' }}
                 onClick={() => sidebar().onTrackClick(track.id)}
               >
-                <div class="flex h-full items-center gap-3 px-3 py-2">
-                  <button
-                    class={cn(
-                      'flex-1 rounded px-2 py-1 text-left text-sm font-semibold transition-colors',
-                      muteDisabled
-                        ? 'cursor-not-allowed bg-neutral-800/60 text-neutral-500'
-                        : muted()
-                          ? 'bg-amber-500 text-black ring-1 ring-amber-300'
-                          : 'hover:bg-neutral-800',
-                    )}
-                    disabled={muteDisabled}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      if (muteDisabled) return
-                      sidebar().onToggleMute(track.id)
-                    }}
-                    title={lockedByOther ? 'Track locked by another user' : muted() ? 'Unmute track' : 'Mute track'}
-                  >
-                    <span class="flex items-center gap-2">
-                      <span>{track.name}</span>
-                      <Show when={isReturnTrack}>
-                        <span class="rounded bg-neutral-700 px-1.5 py-0.5 text-xs uppercase tracking-wide text-neutral-300">Return</span>
-                      </Show>
-                      <Show when={isGroupTrack}>
-                        <span class="rounded bg-neutral-700 px-1.5 py-0.5 text-xs uppercase tracking-wide text-neutral-300">Group</span>
-                      </Show>
-                    </span>
-                  </button>
+                <div class="grid h-full grid-cols-[minmax(72px,96px)_minmax(112px,132px)_52px_minmax(0,1fr)_18px] items-center gap-2 py-2 pl-2 pr-2">
+                  <div class="min-w-0 overflow-hidden">
+                    <button
+                      class={cn(
+                        'w-full rounded py-1 text-left text-sm font-semibold transition-colors',
+                        muteDisabled
+                          ? 'cursor-not-allowed bg-neutral-800/60 text-neutral-500'
+                          : muted()
+                            ? 'bg-amber-500 text-black ring-1 ring-amber-300'
+                            : 'hover:bg-neutral-800',
+                      )}
+                      disabled={muteDisabled}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        if (muteDisabled) return
+                        sidebar().onToggleMute(track.id)
+                      }}
+                      title={lockedByOther ? 'Track locked by another user' : muted() ? 'Unmute track' : 'Mute track'}
+                    >
+                      <span class="flex flex-col items-start gap-1">
+                        <span class="truncate">{track.name}</span>
+                        <Show when={isReturnTrack}>
+                          <span class="rounded bg-neutral-700 px-1.5 py-0.5 text-xs uppercase tracking-wide text-neutral-300">Return</span>
+                        </Show>
+                        <Show when={isGroupTrack}>
+                          <span class="rounded bg-neutral-700 px-1.5 py-0.5 text-xs uppercase tracking-wide text-neutral-300">Group</span>
+                        </Show>
+                      </span>
+                    </button>
+                  </div>
 
-                  <button
-                    class={cn(
-                      'flex h-6 w-6 items-center justify-center rounded-full border text-xs font-bold transition-colors',
-                      recordDisabled
-                        ? 'cursor-not-allowed border-red-900 bg-neutral-800 text-red-900'
-                        : isRecordArmed
-                          ? 'border-red-400 bg-red-500 text-black shadow-inner'
-                          : 'border-red-500 text-red-400 hover:bg-red-500/20',
-                    )}
-                    title={lockedByOther ? 'Track locked by another user' : isReturnTrack ? 'Return tracks cannot be armed for recording' : isGroupTrack ? 'Group tracks cannot be armed for recording' : track.kind === 'instrument' ? 'Instrument tracks cannot be armed for audio recording' : isRecordArmed ? 'Disarm recording' : 'Arm for recording'}
-                    disabled={recordDisabled}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      if (recordDisabled) return
-                      sidebar().onToggleRecordArm(track.id)
-                    }}
-                  >
-                    R
-                  </button>
+                  <div class="flex min-w-0 flex-col gap-1">
+                    <Show when={!isGroupTrack}>
+                      <select
+                        value={track.outputTargetId ?? ''}
+                        disabled={!canWriteTrackRouting(track)}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => handleOutputTargetChange(track, event.currentTarget.value)}
+                        class="h-7 w-full rounded border border-neutral-700 bg-neutral-950 px-2 text-xs text-neutral-200 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:text-neutral-500"
+                        title="Track output"
+                      >
+                        <option value="">Master</option>
+                        <For each={groupTracks()}>
+                          {(groupTrack) => <option value={groupTrack.id}>{groupTrack.name}</option>}
+                        </For>
+                      </select>
+                    </Show>
 
-                  <button
-                    class={cn(
-                      'rounded px-2 py-1 text-xs font-semibold',
-                      soloDisabled
-                        ? 'cursor-not-allowed bg-neutral-700/40 text-neutral-500'
-                        : soloed()
-                          ? 'bg-blue-500/90 text-black ring-1 ring-blue-300'
-                          : 'bg-neutral-700 text-neutral-200 hover:bg-neutral-600',
-                    )}
-                    disabled={soloDisabled}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      if (soloDisabled) return
-                      sidebar().onToggleSolo(track.id)
-                    }}
-                    title={lockedByOther ? 'Track locked by another user' : soloed() ? 'Unsolo' : 'Solo'}
-                  >
-                    S
-                  </button>
+                    <Show when={channelRole === 'track'}>
+                      <select
+                        value={currentSendTargetId()}
+                        disabled={!canWriteTrackRouting(track) || returnTracks().length === 0}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => handleSendTargetChange(track, event.currentTarget.value)}
+                        class="h-7 w-full rounded border border-neutral-700 bg-neutral-950 px-2 text-xs text-neutral-200 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:text-neutral-500"
+                        title="Track send"
+                      >
+                        <option value="">None</option>
+                        <For each={returnTracks()}>
+                          {(returnTrack) => <option value={returnTrack.id}>{returnTrack.name}</option>}
+                        </For>
+                      </select>
+                    </Show>
+                  </div>
 
-                  <div class="flex flex-col items-center gap-1">
-                    <div class="text-xs text-neutral-400">Vol</div>
-                    <div class={cn('relative h-16 w-6', volumeDisabled && 'opacity-60')}>
+                  <div class="flex min-w-0 flex-col gap-1">
+                    <div class="grid grid-cols-2 gap-1">
+                      <button
+                        class={cn(
+                          'flex h-7 items-center justify-center rounded border text-xs font-bold transition-colors',
+                          recordDisabled
+                            ? 'cursor-not-allowed border-red-900 bg-neutral-800 text-red-900'
+                            : isRecordArmed
+                              ? 'border-red-400 bg-red-500 text-black shadow-inner'
+                              : 'border-red-500 text-red-400 hover:bg-red-500/20',
+                        )}
+                        title={lockedByOther ? 'Track locked by another user' : isReturnTrack ? 'Return tracks cannot be armed for recording' : isGroupTrack ? 'Group tracks cannot be armed for recording' : track.kind === 'instrument' ? 'Instrument tracks cannot be armed for audio recording' : isRecordArmed ? 'Disarm recording' : 'Arm for recording'}
+                        disabled={recordDisabled}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          if (recordDisabled) return
+                          sidebar().onToggleRecordArm(track.id)
+                        }}
+                      >
+                        R
+                      </button>
+
+                      <button
+                        class={cn(
+                          'h-7 rounded border px-2 text-xs font-semibold',
+                          soloDisabled
+                            ? 'cursor-not-allowed border-neutral-700 bg-neutral-700/40 text-neutral-500'
+                            : soloed()
+                              ? 'border-blue-300 bg-blue-500/90 text-black'
+                              : 'border-neutral-700 bg-neutral-800 text-neutral-200 hover:bg-neutral-700',
+                        )}
+                        disabled={soloDisabled}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          if (soloDisabled) return
+                          sidebar().onToggleSolo(track.id)
+                        }}
+                        title={lockedByOther ? 'Track locked by another user' : soloed() ? 'Unsolo' : 'Solo'}
+                      >
+                        S
+                      </button>
+                    </div>
+
+                    <div class="flex h-7 items-center px-0.5">
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={volume()}
+                        disabled={volumeDisabled}
+                        style={{ '--track-volume-percent': `${volume() * 100}%` }}
+                        onClick={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => {
+                          event.stopPropagation()
+                          if (volumeDisabled) return
+                          event.preventDefault()
+                          activeVolumePointerId = event.pointerId
+                          activeVolumeTrackId = track.id
+                          activeVolumeValue = quantizeVolume(track.volume ?? 0.8)
+                          event.currentTarget.setPointerCapture(event.pointerId)
+                          updateVolumeFromPointer(track, event.currentTarget, event.clientX)
+                        }}
+                        onPointerMove={(event) => {
+                          if (activeVolumePointerId !== event.pointerId) return
+                          event.stopPropagation()
+                          updateVolumeFromPointer(track, event.currentTarget, event.clientX)
+                        }}
+                        onPointerUp={(event) => {
+                          if (activeVolumePointerId !== event.pointerId) return
+                          event.stopPropagation()
+                          activeVolumePointerId = null
+                          activeVolumeTrackId = null
+                          activeVolumeValue = null
+                          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                            event.currentTarget.releasePointerCapture(event.pointerId)
+                          }
+                        }}
+                        onPointerCancel={(event) => {
+                          if (activeVolumePointerId !== event.pointerId) return
+                          activeVolumePointerId = null
+                          activeVolumeTrackId = null
+                          activeVolumeValue = null
+                        }}
+                        onInput={(event) => {
+                          event.stopPropagation()
+                          if (volumeDisabled) return
+                          updateTrackVolume(track, parseFloat(event.currentTarget.value))
+                        }}
+                        class={cn('track-volume-slider w-full cursor-pointer', volumeDisabled && 'cursor-not-allowed opacity-60')}
+                        title={lockedByOther ? 'Track locked by another user' : 'Track volume'}
+                      />
+                    </div>
+                  </div>
+
+                  <div />
+
+                  <div class="flex flex-col items-center gap-1 justify-self-end">
+                    <div class="relative h-16 w-4">
                       <div class="absolute inset-0 flex items-end justify-center gap-1">
                         {(() => {
                           const meter = sidebar().isPlaying ? meters()[track.id] : undefined
@@ -259,48 +405,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           )
                         })()}
                       </div>
-                      <div class="absolute left-0 right-0" style={{ bottom: `${volume() * 100}%` }}>
-                        <div class="absolute left-1/2 w-3 -translate-x-1/2">
-                          <span class="absolute -left-2 select-none text-xs leading-none text-neutral-200">&lt;</span>
-                          <span class="absolute -right-2 select-none text-xs leading-none text-neutral-200">&gt;</span>
-                        </div>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.01"
-                        value={volume()}
-                        disabled={volumeDisabled}
-                        onInput={(event) => {
-                          if (volumeDisabled) return
-                          const nextVolume = parseFloat(event.currentTarget.value)
-                          sidebar().onVolumeChange(track.id, nextVolume)
-                        }}
-                        onMouseDown={(event) => {
-                          if (volumeDisabled) {
-                            event.preventDefault()
-                            return
-                          }
-                          event.preventDefault()
-                          const rect = event.currentTarget.getBoundingClientRect()
-                          detachDragListeners()
-                          const handleMouseMove = (moveEvent: MouseEvent) => {
-                            const y = moveEvent.clientY - rect.top
-                            const height = rect.height
-                            const nextVolume = Math.max(0, Math.min(1, 1 - y / height))
-                            sidebar().onVolumeChange(track.id, nextVolume)
-                          }
-                          const handleMouseUp = () => {
-                            detachDragListeners()
-                          }
-                          activeMove = handleMouseMove
-                          activeUp = handleMouseUp
-                          document.addEventListener('mousemove', handleMouseMove)
-                          document.addEventListener('mouseup', handleMouseUp)
-                        }}
-                        class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                      />
                     </div>
                   </div>
                 </div>

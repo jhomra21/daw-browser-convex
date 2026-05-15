@@ -46,11 +46,11 @@ import { useEffectsPanelTarget } from "~/hooks/useEffectsPanelTarget";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import { FX_PANEL_HEIGHT_PX } from "~/lib/timeline-utils";
-import type { Track, TrackSend } from "~/types/timeline";
+import type { Track } from "~/types/timeline";
 
 type EffectsPanelProps = {
   isOpen: boolean;
-  selectedFXTarget: string;
+  selectedFXTarget: Track["id"] | "master";
   tracks: Track[];
   onClose: () => void;
   onOpen: () => void;
@@ -62,8 +62,6 @@ type EffectsPanelProps = {
   // Timeline context
   playheadSec?: number;
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
-  onTrackSendsChange?: (trackId: Track["id"], sends: TrackSend[]) => void;
-  onTrackOutputTargetChange?: (trackId: Track["id"], outputTargetId?: Track["id"]) => void;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>) => void;
 };
 
@@ -324,102 +322,6 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
   </div>
 );
 
-type EffectsPanelRoutingCardProps = {
-  routing: {
-    visible: boolean;
-    groupTracks: Track[];
-    outputTargetId: string;
-    canWrite: boolean;
-    onChange: (value: string) => void;
-  };
-};
-
-const EffectsPanelRoutingCard: Component<EffectsPanelRoutingCardProps> = (props) => (
-  <Show when={props.routing.visible}>
-    <div class="min-w-60 rounded border border-neutral-800 bg-neutral-950/80 p-3">
-      <div class="mb-3 flex items-center justify-between">
-        <span class="text-xs font-semibold uppercase tracking-wide text-neutral-300">Output</span>
-        <span class="text-xs text-neutral-500">Bus routing</span>
-      </div>
-      <select
-        value={props.routing.outputTargetId}
-        onChange={(event) => props.routing.onChange(event.currentTarget.value)}
-        disabled={!props.routing.canWrite}
-        class="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-2 text-sm text-neutral-200 outline-none focus:border-neutral-600"
-      >
-        <option value="">Master</option>
-        <For each={props.routing.groupTracks}>
-          {(groupTrack) => <option value={groupTrack.id}>{groupTrack.name}</option>}
-        </For>
-      </select>
-      <Show when={props.routing.groupTracks.length === 0}>
-        <div class="mt-2 text-xs text-neutral-500">Add a group track to route this channel into a submix.</div>
-      </Show>
-      <Show when={!props.routing.canWrite}>
-        <div class="mt-2 text-xs text-neutral-500">Routing is read-only for collaborator-owned tracks.</div>
-      </Show>
-    </div>
-  </Show>
-);
-
-type EffectsPanelSendsCardProps = {
-  sends: {
-    visible: boolean;
-    returnTracks: Track[];
-    canWrite: boolean;
-    amountByTarget: Map<Track["id"], number>;
-    onChange: (targetId: Track["id"], amount: number) => void;
-  };
-};
-
-const EffectsPanelSendsCard: Component<EffectsPanelSendsCardProps> = (props) => (
-  <Show when={props.sends.visible}>
-    <div class="min-w-64 rounded border border-neutral-800 bg-neutral-950/80 p-3">
-      <div class="mb-3 flex items-center justify-between">
-        <span class="text-xs font-semibold uppercase tracking-wide text-neutral-300">Sends</span>
-        <span class="text-xs text-neutral-500">Post-fader</span>
-      </div>
-      <Show
-        when={props.sends.returnTracks.length > 0}
-        fallback={
-          <div class="text-xs text-neutral-500">
-            Add a return track to route shared reverb or delay-style processing.
-          </div>
-        }
-      >
-        <div class="space-y-3">
-          <For each={props.sends.returnTracks}>
-            {(returnTrack) => {
-              const amount = () => props.sends.amountByTarget.get(returnTrack.id) ?? 0;
-              return (
-                <label class="block">
-                  <div class="mb-1 flex items-center justify-between gap-3 text-xs text-neutral-300">
-                    <span class="truncate">{returnTrack.name}</span>
-                    <span class="tabular-nums text-neutral-500">{Math.round(amount() * 100)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={amount()}
-                    disabled={!props.sends.canWrite}
-                    onInput={(event) => props.sends.onChange(returnTrack.id, parseFloat(event.currentTarget.value))}
-                    class="h-2 w-full cursor-pointer accent-neutral-200"
-                  />
-                </label>
-              );
-            }}
-          </For>
-        </div>
-      </Show>
-      <Show when={!props.sends.canWrite}>
-        <div class="mt-3 text-xs text-neutral-500">Routing is read-only for collaborator-owned tracks.</div>
-      </Show>
-    </div>
-  </Show>
-);
-
 type EffectsPanelEffectCardsProps = {
   effects: {
     orderedEffects: EffectKind[];
@@ -545,14 +447,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     currentTrack,
     currentTrackId,
     isInstrumentTrack,
-    isGroupTrack,
-    canEditSends,
     canWriteCurrentTrackRouting,
-    returnTracks,
-    groupTracks,
-    currentTrackSends,
-    currentTrackOutputTargetId,
-    currentSendAmountByTarget,
     resolveTrackByTargetId,
   } = target;
 
@@ -875,27 +770,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     flushPending();
   });
 
-
-  function handleSendAmountChange(targetId: Track["id"], amount: number) {
-    const track = currentTrack();
-    if (!track || !canEditSends() || !canWriteCurrentTrackRouting()) return;
-
-    const nextAmount = Math.max(0, Math.min(1, Number.isFinite(amount) ? amount : 0));
-    const nextSends = currentTrackSends().filter((send) => send.targetId !== targetId);
-    if (nextAmount > 0.0001) {
-      nextSends.push({ targetId, amount: nextAmount });
-    }
-    props.onTrackSendsChange?.(track.id, nextSends);
-  }
-  function handleOutputTargetChange(nextValue: string) {
-    const track = currentTrack();
-    if (!track || isGroupTrack() || !canWriteCurrentTrackRouting()) return;
-    const outputTargetId = nextValue
-      ? groupTracks().find((groupTrack) => groupTrack.id === nextValue)?.id
-      : undefined;
-    props.onTrackOutputTargetChange?.(track.id, outputTargetId);
-  }
-
   return (
     <>
       <Show when={props.isOpen}>
@@ -929,24 +803,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       currentTrack: currentTrack(),
                       state: instrumentState,
                       canWrite: canWriteCurrentTargetEffects(),
-                    }}
-                  />
-                  <EffectsPanelRoutingCard
-                    routing={{
-                      visible: !!currentTrack() && !isGroupTrack(),
-                      groupTracks: groupTracks(),
-                      outputTargetId: currentTrackOutputTargetId(),
-                      canWrite: canWriteCurrentTrackRouting(),
-                      onChange: handleOutputTargetChange,
-                    }}
-                  />
-                  <EffectsPanelSendsCard
-                    sends={{
-                      visible: !!currentTrack() && canEditSends(),
-                      returnTracks: returnTracks(),
-                      canWrite: canWriteCurrentTrackRouting(),
-                      amountByTarget: currentSendAmountByTarget(),
-                      onChange: handleSendAmountChange,
                     }}
                   />
                   <EffectsPanelEffectCards

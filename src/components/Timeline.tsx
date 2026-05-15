@@ -682,8 +682,6 @@ const Timeline: Component = () => {
           audioEngine,
           canWriteTrackRouting: canWriteTrack,
           grantClipWrite,
-          onTrackSendsChange: updateTrackSends,
-          onTrackOutputTargetChange: updateTrackOutputTargetId,
           onSelectClip: jumpToClip,
           onClose: () => setBottomFXOpen(false),
           onOpen: () => setBottomFXOpen(true),
@@ -817,6 +815,9 @@ const Timeline: Component = () => {
             onAddInstrumentTrack: async () => {
               await createTimelineTrack({ kind: 'instrument' })
             },
+            canWriteTrackRouting: canWriteTrack,
+            onTrackSendsChange: updateTrackSends,
+            onTrackOutputTargetChange: updateTrackOutputTargetId,
             onVolumeChange: setTrackVolume,
             onToggleMute: handleToggleTrackMute,
             onToggleSolo: handleToggleTrackSolo,

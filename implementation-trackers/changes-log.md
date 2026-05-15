@@ -2,6 +2,52 @@
 
 Tracks review-driven follow-up work before merging the audio refactor branch.
 
+## 2026-05-15 — Track Sidebar Routing and Meter Visibility Follow-Up
+
+### Scope
+
+- Reviewed the current track-row redesign follow-up after the track sidebar routing controls moved from the effects panel into the sidebar.
+- Used `implementation-trackers/audio-refactor-branch-tracker.md`, `implementation-trackers/timeline-refactor-tracker.md`, and this changes log as history context.
+
+### Before Review Skills
+
+- Moved track output and send routing controls into `src/components/timeline/TrackSidebar.tsx` and wired them from `src/components/Timeline.tsx`.
+- Removed the duplicated routing card path from `src/components/timeline/EffectsPanel.tsx` so routing edits now live in the track rows.
+- Raised the sidebar resize minimum width to 320px and adjusted the track-row grid columns so the stereo audio meter remains visible at minimum width instead of being clipped.
+- Restored per-track volume editing as a horizontal sidebar slider under the record/solo controls, matching the redesigned Ableton-style track row layout.
+- Restyled the volume slider as a smaller flat rectangular control with a filled amber segment, gray remainder, 2px border, and preserved row spacing instead of the native rounded thumb.
+- Added explicit pointer-drag handling for the custom volume slider so the flat no-thumb control supports click-and-drag changes rather than click-only updates.
+- Preserved existing send routes and amounts when changing the sidebar's selected send target instead of replacing the full sends array.
+- Added hidden-scrollbar styling for the track sidebar scroll area while preserving vertical scrolling.
+
+### Simplify Review
+
+- Memoized sidebar group and return track lists so each track row reuses derived routing target arrays instead of filtering all tracks per row.
+- Removed now-unused routing callback props from `EffectsPanel`, `TimelinePanels`, and the effects-panel callsite in `Timeline`.
+- Grouped the shared timeline and track-sidebar hidden-scrollbar CSS selectors to avoid duplicate scrollbar declarations.
+- Removed the now-unused routing-specific return fields from `useEffectsPanelTarget` after the final simplify rerun; the rerun then returned LGTM.
+- Quantized custom slider drag values to the existing `0.01` step and skipped duplicate volume emissions during pointer drags to reduce hot-path mixer/history churn.
+- Avoided no-op meter state updates and stopped the meter RAF loop when playback is stopped because stopped meters are not rendered.
+- The final simplify rerun returned LGTM for reuse, quality, and in-scope efficiency.
+
+### Defensive-Code Review
+
+- Removed redundant role guards from sidebar routing change handlers after verifying the handlers are only wired from role-gated selects.
+- Removed the redundant stereo-level tuple shape check in `TrackSidebar` because the callback type already guarantees `[number, number]` when present.
+- Removed the redundant sidebar resize `maxWidth` lower clamp because the final width clamp already enforces the minimum width.
+- Tightened the effects-panel target type to `Track["id"] | "master"` and removed the now-redundant empty-target fallback in `useEffectsPanelTarget`.
+- Removed the optional fallback around the required sidebar mono meter callback.
+- Kept permission and optional-callback guards because they protect writable-track and optional integration boundaries.
+- The final defensive-code-review rerun returned LGTM with no additional high-confidence redundant guards or impossible branches.
+
+### Validation
+
+- `bun run typecheck`, `git diff --check`, and `bun run build` passed after simplify cleanup.
+- `bun run typecheck`, `git diff --check`, and `bun run build` passed after defensive cleanup and log updates.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the sidebar volume slider restoration, styling, and drag-interaction fixes.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the final simplify and defensive-code-review follow-up cleanup.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the final repeated review loop where both simplify and defensive-code-review returned LGTM.
+
 ## 2026-05-13 — Access-Control Review Follow-Up
 
 ### Scope

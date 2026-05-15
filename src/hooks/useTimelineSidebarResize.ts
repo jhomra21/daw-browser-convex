@@ -22,8 +22,8 @@ export function useTimelineSidebarResize(
     if (!resizing) return
     const containerWidth = options.getContainerElement()?.clientWidth ?? 0
     const delta = resizeStartX - event.clientX
-    const minWidth = 220
-    const maxWidth = Math.max(minWidth, Math.floor(containerWidth * 0.7))
+    const minWidth = 320
+    const maxWidth = Math.floor(containerWidth * 0.7)
     const nextWidth = Math.max(minWidth, Math.min(maxWidth, resizeStartWidth + delta))
     options.setSidebarWidth(nextWidth)
   }

@@ -1,6 +1,14 @@
 import { createEffect, on, type Accessor } from 'solid-js'
 
-import { loadLocalMixMap, saveLocalMix, saveLocalMixMap, stripSharedTrackBooleanOverrides, type LocalMixMap, type LocalMixPatch } from '~/lib/timeline-storage'
+import {
+  loadLocalMixMap,
+  loadLocalRoutingMap,
+  saveLocalMixMap,
+  saveLocalRoutingMap,
+  stripSharedTrackBooleanOverrides,
+  type LocalMixMap,
+  type LocalMixPatch,
+} from '~/lib/timeline-storage'
 import type { Track } from '~/types/timeline'
 
 import { useRoomPersistedState } from './useRoomPersistedState'
@@ -19,7 +27,11 @@ type UseTimelineLocalMixReturn = {
 function mergeLocalMixPatch(current: LocalMixMap, trackId: Track['id'], patch: LocalMixPatch): LocalMixMap {
   const previousEntry = current[trackId] ?? {}
   const nextEntry = { ...previousEntry, ...patch }
-  const isEmpty = nextEntry.volume === undefined && nextEntry.muted === undefined && nextEntry.soloed === undefined
+  const isEmpty = nextEntry.volume === undefined
+    && nextEntry.muted === undefined
+    && nextEntry.soloed === undefined
+    && nextEntry.sends === undefined
+    && nextEntry.outputTargetId === undefined
 
   if (isEmpty) {
     if (!(trackId in current)) return current
@@ -32,6 +44,8 @@ function mergeLocalMixPatch(current: LocalMixMap, trackId: Track['id'], patch: L
     previousEntry.volume === nextEntry.volume
     && previousEntry.muted === nextEntry.muted
     && previousEntry.soloed === nextEntry.soloed
+    && previousEntry.sends === nextEntry.sends
+    && previousEntry.outputTargetId === nextEntry.outputTargetId
   ) {
     return current
   }
@@ -42,14 +56,46 @@ function mergeLocalMixPatch(current: LocalMixMap, trackId: Track['id'], patch: L
   }
 }
 
+const loadLocalTrackState = (roomId: string): LocalMixMap => {
+  const mix = loadLocalMixMap(roomId)
+  const routing = loadLocalRoutingMap(roomId)
+  let next: LocalMixMap | null = null
+  for (const [trackId, patch] of Object.entries(routing)) {
+    if (patch.sends === undefined && patch.outputTargetId === undefined) continue
+    if (!next) next = { ...mix }
+    next[trackId] = {
+      ...(next[trackId] ?? {}),
+      sends: patch.sends,
+      outputTargetId: patch.outputTargetId,
+    }
+  }
+  return next ?? mix
+}
+
+const saveLocalTrackState = (roomId: string, value: LocalMixMap) => {
+  saveLocalMixMap(roomId, value)
+  const routing = Object.fromEntries(
+    Object.entries(value)
+      .filter(([, patch]) => patch.sends !== undefined || patch.outputTargetId !== undefined)
+      .map(([trackId, patch]) => [
+        trackId,
+        {
+          sends: patch.sends,
+          outputTargetId: patch.outputTargetId,
+        },
+      ]),
+  )
+  saveLocalRoutingMap(roomId, routing)
+}
+
 export function useTimelineLocalMix(
   options: UseTimelineLocalMixOptions,
 ): UseTimelineLocalMixReturn {
   const persistedState = useRoomPersistedState<LocalMixMap>({
     roomId: options.roomId,
     createInitial: () => ({}),
-    load: (roomId) => loadLocalMixMap(roomId),
-    save: (roomId, value) => saveLocalMixMap(roomId, value),
+    load: (roomId) => loadLocalTrackState(roomId),
+    save: (roomId, value) => saveLocalTrackState(roomId, value),
   })
 
   createEffect(on(options.writableTrackIds, (writableTrackIds) => {
@@ -62,7 +108,8 @@ export function useTimelineLocalMix(
       persistedState.setValueSilently((current) => mergeLocalMixPatch(current, trackId, patch))
     },
     persist: (trackId, patch) => {
-      saveLocalMix(options.roomId(), trackId, patch)
+      const next = persistedState.setValueSilently((current) => mergeLocalMixPatch(current, trackId, patch))
+      saveLocalTrackState(options.roomId(), next)
     },
   }
 }

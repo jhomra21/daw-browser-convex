@@ -53,6 +53,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const [meters, setMeters] = createSignal<
     Record<string, { L: number; R: number }>
   >({});
+  const [selectedOutputTargets, setSelectedOutputTargets] = createSignal<
+    Map<Track["id"], string>
+  >(new Map());
+  const [selectedSendTargets, setSelectedSendTargets] = createSignal<
+    Map<Track["id"], string>
+  >(new Map());
   let rafId: number | null = null;
   let lastTs: number | null = null;
   const releasePerSec = 3.0;
@@ -73,33 +79,31 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     const next: Record<string, { L: number; R: number }> = {};
     const playing = !!sidebar().isPlaying;
 
-    try {
-      for (const track of sidebar().tracks) {
-        let srcL = 0;
-        let srcR = 0;
-        if (playing) {
-          const stereo = sidebar().getTrackLevels?.(track.id);
-          if (stereo) {
-            srcL = stereo[0] ?? 0;
-            srcR = stereo[1] ?? 0;
-          } else {
-            const mono = sidebar().getTrackLevel(track.id);
-            srcL = mono;
-            srcR = mono;
-          }
+    for (const track of sidebar().tracks) {
+      let srcL = 0;
+      let srcR = 0;
+      if (playing) {
+        const stereo = sidebar().getTrackLevels?.(track.id);
+        if (stereo) {
+          srcL = stereo[0];
+          srcR = stereo[1];
+        } else {
+          const mono = sidebar().getTrackLevel(track.id);
+          srcL = mono;
+          srcR = mono;
         }
-        const previous = prev[track.id] || { L: 0, R: 0 };
-        const decay = releasePerSec * dt;
-        const left =
-          srcL >= previous.L ? srcL : Math.max(srcL, previous.L - decay);
-        const right =
-          srcR >= previous.R ? srcR : Math.max(srcR, previous.R - decay);
-        next[track.id] = {
-          L: clampUnit(left),
-          R: clampUnit(right),
-        };
       }
-    } catch {}
+      const previous = prev[track.id] || { L: 0, R: 0 };
+      const decay = releasePerSec * dt;
+      const left =
+        srcL >= previous.L ? srcL : Math.max(srcL, previous.L - decay);
+      const right =
+        srcR >= previous.R ? srcR : Math.max(srcR, previous.R - decay);
+      next[track.id] = {
+        L: clampUnit(left),
+        R: clampUnit(right),
+      };
+    }
 
     const metersChanged =
       sidebar().tracks.some((track) => {
@@ -107,7 +111,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         const current = next[track.id];
         return (
           !previous ||
-          !current ||
           previous.L !== current.L ||
           previous.R !== current.R
         );
@@ -136,49 +139,112 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const groupTracks = createMemo(() =>
     sidebar().tracks.filter((track) => getTrackChannelRole(track) === "group"),
   );
+  const groupTrackNames = createMemo(
+    () =>
+      new Map<string, string>(
+        groupTracks().map((track) => [track.id, track.name]),
+      ),
+  );
   const returnTracks = createMemo(() =>
     sidebar().tracks.filter((track) => getTrackChannelRole(track) === "return"),
   );
   const returnTrackNames = createMemo(
     () =>
-      new Map(
+      new Map<string, string>(
         returnTracks().map((track, index) => [track.id, `Return ${index + 1}`]),
       ),
   );
   const displayTrackName = (track: Track) =>
     returnTrackNames().get(track.id) ?? track.name;
+  const actualOutputTargetId = (track: Track) => track.outputTargetId ?? "";
+  const selectedOutputTargetId = (track: Track) =>
+    selectedOutputTargets().get(track.id) ?? actualOutputTargetId(track);
+  const outputTargetName = (track: Track) =>
+    groupTrackNames().get(selectedOutputTargetId(track)) ?? "Master";
+  const actualSendTargetId = (track: Track) =>
+    track.sends?.find((send) => send.amount > 0.0001)?.targetId ??
+    "";
+  const selectedSendTargetId = (track: Track) =>
+    selectedSendTargets().get(track.id) ?? actualSendTargetId(track);
+  const sendTargetName = (track: Track) => {
+    const targetId = selectedSendTargetId(track);
+    if (!targetId) return "None";
+    return returnTrackNames().get(targetId) ?? "None";
+  };
+
+  createEffect(() => {
+    const trackById = new Map(sidebar().tracks.map((track) => [track.id, track]));
+    setSelectedOutputTargets((current) => {
+      let next: Map<Track["id"], string> | null = null;
+      for (const [trackId, targetId] of current) {
+        const track = trackById.get(trackId);
+        if (
+          !track ||
+          actualOutputTargetId(track) === targetId ||
+          (targetId && !groupTrackNames().has(targetId))
+        ) {
+          if (!next) next = new Map(current);
+          next.delete(trackId);
+        }
+      }
+      return next ?? current;
+    });
+    setSelectedSendTargets((current) => {
+      let next: Map<Track["id"], string> | null = null;
+      for (const [trackId, targetId] of current) {
+        const track = trackById.get(trackId);
+        if (
+          !track ||
+          actualSendTargetId(track) === targetId ||
+          (targetId && !returnTrackNames().has(targetId))
+        ) {
+          if (!next) next = new Map(current);
+          next.delete(trackId);
+        }
+      }
+      return next ?? current;
+    });
+  });
 
   const canWriteTrackRouting = (track: Track) =>
     sidebar().canWriteTrackRouting?.(track.id) ?? true;
 
   const handleOutputTargetChange = (track: Track, value: string) => {
     if (!canWriteTrackRouting(track)) return;
+    setSelectedOutputTargets((current) =>
+      current.get(track.id) === value
+        ? current
+        : new Map(current).set(track.id, value),
+    );
     const outputTargetId = value
       ? groupTracks().find((groupTrack) => groupTrack.id === value)?.id
       : undefined;
     sidebar().onTrackOutputTargetChange?.(track.id, outputTargetId);
   };
 
-  const selectedSendTargetId = (track: Track) =>
-    track.sends?.find((send) => send.amount > 0.0001)?.targetId ?? "";
-
   const handleSendTargetChange = (track: Track, targetId: string) => {
     if (!canWriteTrackRouting(track)) return;
+    setSelectedSendTargets((current) =>
+      current.get(track.id) === targetId
+        ? current
+        : new Map(current).set(track.id, targetId),
+    );
+    const existingSends = track.sends ?? [];
     const returnTrack = returnTracks().find(
       (candidate) => candidate.id === targetId,
     );
-    const currentTargetId = selectedSendTargetId(track);
-    const existingSends = track.sends ?? [];
     if (!returnTrack) {
-      sidebar().onTrackSendsChange?.(
-        track.id,
-        existingSends.filter((send) => send.targetId !== currentTargetId),
-      );
+      sidebar().onTrackSendsChange?.(track.id, []);
       return;
     }
+    const currentTargetId = actualSendTargetId(track);
+    const existingAmount = existingSends.find(
+      (send) => send.targetId === returnTrack.id,
+    )?.amount;
     const amount =
-      existingSends.find((send) => send.targetId === returnTrack.id)?.amount ??
-      1;
+      existingAmount !== undefined && existingAmount > 0.0001
+        ? existingAmount
+        : 1;
     sidebar().onTrackSendsChange?.(track.id, [
       ...existingSends.filter(
         (send) =>
@@ -351,56 +417,111 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
                   <div class="flex min-w-0 flex-col gap-1">
                     <Show when={!isGroupTrack}>
-                      <select
-                        value={track.outputTargetId ?? ""}
-                        disabled={!canWriteTrackRouting(track)}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) =>
-                          handleOutputTargetChange(
-                            track,
-                            event.currentTarget.value,
-                          )
-                        }
-                        class="h-7 w-full rounded border border-neutral-700 bg-neutral-950 px-2 text-xs text-neutral-200 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:text-neutral-500"
-                        title="Track output"
-                      >
-                        <option value="">Master</option>
-                        <For each={groupTracks()}>
-                          {(groupTrack) => (
-                            <option value={groupTrack.id}>
-                              {groupTrack.name}
-                            </option>
+                      <div class="relative">
+                        <div
+                          class={cn(
+                            "flex h-7 w-full items-center justify-between rounded border border-neutral-700 bg-neutral-950 px-2 text-xs text-neutral-200",
+                            !canWriteTrackRouting(track) &&
+                              "text-neutral-500",
                           )}
-                        </For>
-                      </select>
+                        >
+                          <span class="truncate">
+                            {outputTargetName(track)}
+                          </span>
+                          <svg
+                            class="h-3 w-3 shrink-0 text-neutral-300"
+                            viewBox="0 0 12 12"
+                            fill="none"
+                            aria-hidden="true"
+                          >
+                            <path
+                              d="M2.5 4.5 6 8l3.5-3.5"
+                              stroke="currentColor"
+                              stroke-width="1.5"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                            />
+                          </svg>
+                        </div>
+                        <select
+                          value={selectedOutputTargetId(track)}
+                          disabled={!canWriteTrackRouting(track)}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) =>
+                            handleOutputTargetChange(
+                              track,
+                              event.currentTarget.value,
+                            )
+                          }
+                          class="absolute inset-0 h-7 w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                          title="Track output"
+                        >
+                          <option value="">Master</option>
+                          <For each={groupTracks()}>
+                            {(groupTrack) => (
+                              <option value={groupTrack.id}>
+                                {groupTrack.name}
+                              </option>
+                            )}
+                          </For>
+                        </select>
+                      </div>
                     </Show>
 
                     <Show when={channelRole === "track"}>
-                      <select
-                        value={currentSendTargetId()}
-                        disabled={
-                          !canWriteTrackRouting(track) ||
-                          returnTracks().length === 0
-                        }
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) =>
-                          handleSendTargetChange(
-                            track,
-                            event.currentTarget.value,
-                          )
-                        }
-                        class="h-7 w-full rounded border border-neutral-700 bg-neutral-950 px-2 text-xs text-neutral-200 outline-none focus:border-neutral-600 disabled:cursor-not-allowed disabled:text-neutral-500"
-                        title="Track send"
-                      >
-                        <option value="">None</option>
-                        <For each={returnTracks()}>
-                          {(returnTrack) => (
-                            <option value={returnTrack.id}>
-                              {displayTrackName(returnTrack)}
-                            </option>
+                      <div class="relative">
+                        <div
+                          class={cn(
+                            "flex h-7 w-full items-center justify-between rounded border border-neutral-700 bg-neutral-950 px-2 text-xs text-neutral-200",
+                            (!canWriteTrackRouting(track) ||
+                              returnTracks().length === 0) &&
+                              "text-neutral-500",
                           )}
-                        </For>
-                      </select>
+                        >
+                          <span class="truncate">
+                            {sendTargetName(track)}
+                          </span>
+                          <svg
+                            class="h-3 w-3 shrink-0 text-neutral-300"
+                            viewBox="0 0 12 12"
+                            fill="none"
+                            aria-hidden="true"
+                          >
+                            <path
+                              d="M2.5 4.5 6 8l3.5-3.5"
+                              stroke="currentColor"
+                              stroke-width="1.5"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                            />
+                          </svg>
+                        </div>
+                        <select
+                          value={currentSendTargetId()}
+                          disabled={
+                            !canWriteTrackRouting(track) ||
+                            returnTracks().length === 0
+                          }
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) =>
+                            handleSendTargetChange(
+                              track,
+                              event.currentTarget.value,
+                            )
+                          }
+                          class="absolute inset-0 h-7 w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                          title="Track send"
+                        >
+                          <option value="">None</option>
+                          <For each={returnTracks()}>
+                            {(returnTrack) => (
+                              <option value={returnTrack.id}>
+                                {displayTrackName(returnTrack)}
+                              </option>
+                            )}
+                          </For>
+                        </select>
+                      </div>
                     </Show>
                   </div>
 

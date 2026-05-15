@@ -25,6 +25,18 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Tightened the track-row layout so sidebar columns use consistent horizontal spacing while keeping the record/solo controls, volume slider, and stereo meter group fixed-width at minimum sidebar sizes.
 - Raised the shared sidebar minimum width to 336px across initial state, drag-resize clamping, and rendered sidebar width so the right-side stereo meters do not compress or clip.
 - Made the sidebar resize divider visually thinner/brighter while increasing its transparent drag hit area without changing the visible divider width.
+- Replaced the visible native routing select triggers with aligned custom trigger shells while keeping invisible native selects for dropdown behavior, so label and chevron spacing stay visually balanced.
+- Added immediate per-track selected-value state for the custom routing triggers so the visible output/send labels reflect the native select choice without waiting for persisted routing props to round trip.
+- Added local-first routing persistence for output/send changes so owner routing choices survive refresh from local storage while Convex remains the sharing/sync path.
+- Fixed the local mix persist path so silent in-memory routing updates also flush the merged local mix map to local storage.
+- Saved routing patches directly to the room local mix key before applying optimistic shared routing, avoiding any dependency on the later shared write path.
+- Added a dedicated per-room local routing storage key and merged it into the local track state on load so routing restore no longer depends on the mix override cleanup path.
+- Moved the local routing write to the Timeline sidebar callback boundary so every output/send UI change flushes local routing before any mixer-controller permission, equality, or shared-write branch can skip it.
+- Moved local routing persistence back into the mixer-controller routing application boundary so sidebar changes, undo/redo, and other controller-level routing applications update the same local-first store.
+- Made the sidebar send `None` option clear all sends for the single-send dropdown contract so hidden additional sends cannot reappear after refresh.
+- Persisted normalized local routing before the mixer controller's no-op equality return so re-selecting `None` repairs stale local routing storage even when pending in-memory routing already matches.
+- Persisted sidebar routing changes through the shared local mix abstraction at the Timeline callback boundary as well, so selecting send `None` flushes `sends: []` before any controller snapshot/equality/pending-routing branch can interfere.
+- Manually confirmed the local-first send `None` path now survives immediate refresh without waiting for Convex/shared persistence.
 
 ### Simplify Review
 
@@ -36,6 +48,9 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Avoided no-op meter state updates and stopped the meter RAF loop when playback is stopped because stopped meters are not rendered.
 - Reused a local `displayTrackName` helper for both row labels and send options, and aligned the label wrapper with the centered track-name button.
 - Reused a local unit clamp helper for volume and stereo-meter values, removed a redundant header wrapper, and noted the file-wide TrackSidebar formatting churn for later cleanup outside this focused sidebar layout follow-up.
+- Reconciled the custom routing trigger selected-value maps after the simplify review so confirmed values and removed tracks do not leave stale local labels, skipped no-op selected-value updates, and reused target-name maps for output/send label lookups.
+- A simplify rerun for local-first routing skipped broad storage abstraction changes, kept branded-track-id-safe target lookups, and briefly removed the duplicate mixer-controller routing write before later validation restored controller-boundary persistence alongside the Timeline callback write.
+- The repeated simplify loop removed the final duplicate routing write from `useTimelineLocalMix.persist` because the merged local track-state save already writes the dedicated routing map, then reuse, quality, and efficiency reruns all returned LGTM.
 - The final simplify rerun returned LGTM for reuse, quality, and in-scope efficiency.
 
 ### Defensive-Code Review
@@ -48,6 +63,10 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Kept permission and optional-callback guards because they protect writable-track and optional integration boundaries.
 - A defensive-code-review rerun found no additional high-confidence redundant guards in the return-label naming or track-name UI state changes.
 - A defensive-code-review rerun found no high-confidence redundant guards, impossible branches, or stale log entries in the sidebar spacing, resize minimum, fixed meter group, or resize-hitbox follow-up.
+- A defensive-code-review rerun found no high-confidence redundant guards or stale log entries in the custom routing trigger selected-value follow-up.
+- A defensive-code-review rerun removed the redundant sidebar meter sampling `try` wrapper and tuple-element fallbacks after verifying the Timeline callsite already catches audio-engine meter failures and returns a typed stereo tuple.
+- The repeated defensive-code-review loop returned LGTM for both UI and routing-storage groups with no additional high-confidence redundant guards or impossible branches.
+- The post-confirmation defensive-code-review removed the now-impossible meter `current` fallback after proving every rendered track receives a sampled meter entry in the same tick, and clarified an intermediate simplify-log entry that was superseded by the confirmed callback-plus-controller local routing persistence path.
 - The final defensive-code-review rerun returned LGTM with no additional high-confidence redundant guards or impossible branches.
 
 ### Validation
@@ -61,6 +80,21 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - `bun run typecheck` and `git diff --check` passed after the selected-row meter contrast follow-up.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after the track-sidebar spacing, resize minimum, fixed meter group, and resize-hitbox follow-up.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after the simplify and defensive-code-review cleanup for the sidebar layout follow-up.
+- `bun run typecheck` and `git diff --check` passed after the routing dropdown trigger alignment follow-up.
+- `bun run typecheck` and `git diff --check` passed after the instant routing trigger selected-value follow-up.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the simplify cleanup and defensive-code-review rerun for the custom routing trigger follow-up.
+- `bun run typecheck` and `git diff --check` passed after adding local-first routing persistence.
+- `bun run typecheck` and `git diff --check` passed after fixing the local mix flush path for local-first routing.
+- `bun run typecheck` and `git diff --check` passed after making routing writes flush directly to local storage.
+- `bun run typecheck` and `git diff --check` passed after adding dedicated local routing storage.
+- `bun run typecheck` and `git diff --check` passed after moving local routing persistence to the sidebar callback boundary.
+- `bun run typecheck` and `git diff --check` passed after the simplify and defensive-code-review cleanup for local-first routing persistence.
+- `bun run typecheck` and `git diff --check` passed after the repeated simplify loop; the repeated defensive-code-review loop then returned LGTM.
+- `bun run typecheck` and `git diff --check` passed after moving local routing persistence into the mixer controller and clearing all sends for sidebar `None`.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after making routing persistence run before no-op equality checks.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after adding the local mix callback-boundary write for sidebar routing changes.
+- User validation confirmed selecting a return send, changing it to `None`, and refreshing immediately now keeps `None`.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after post-confirmation simplify and defensive-code-review cleanup.
 
 ## 2026-05-13 — Access-Control Review Follow-Up
 

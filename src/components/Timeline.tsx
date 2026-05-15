@@ -816,8 +816,14 @@ const Timeline: Component = () => {
               await createTimelineTrack({ kind: 'instrument' })
             },
             canWriteTrackRouting: canWriteTrack,
-            onTrackSendsChange: updateTrackSends,
-            onTrackOutputTargetChange: updateTrackOutputTargetId,
+            onTrackSendsChange: (trackId, sends) => {
+              localMix.persist(trackId, { sends })
+              updateTrackSends(trackId, sends)
+            },
+            onTrackOutputTargetChange: (trackId, outputTargetId) => {
+              localMix.persist(trackId, { outputTargetId: outputTargetId ?? null })
+              updateTrackOutputTargetId(trackId, outputTargetId)
+            },
             onVolumeChange: setTrackVolume,
             onToggleMute: handleToggleTrackMute,
             onToggleSolo: handleToggleTrackSolo,

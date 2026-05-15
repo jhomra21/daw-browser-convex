@@ -192,6 +192,12 @@ const applyTrackMix = (
   const pendingRouting = options.client.mix.pendingSharedTrackRouting.get(track.id)
   const pendingMix = options.client.mix.pendingSharedMixByTrackId.get(track.id)
   const serverRouting = serverState?.serverRouting.get(track.id)
+  const localRouting = localMixState?.sends !== undefined || localMixState?.outputTargetId !== undefined
+    ? {
+        sends: localMixState.sends ?? track.sends ?? [],
+        outputTargetId: localMixState.outputTargetId ?? undefined,
+      }
+    : undefined
   const resolvedMix = resolveTrackMixView({
     canWriteSharedMix,
     syncMix: options.client.mix.syncMix,
@@ -217,9 +223,9 @@ const applyTrackMix = (
   track.muted = resolvedMix.muted
   track.soloed = resolvedMix.soloed
 
-  const routingSource = canWriteSharedMix && pendingRouting
+  const routingSource = localRouting ?? (canWriteSharedMix && pendingRouting
     ? pendingRouting
-    : serverRouting ?? { sends: track.sends ?? [], outputTargetId: track.outputTargetId }
+    : serverRouting ?? { sends: track.sends ?? [], outputTargetId: track.outputTargetId })
   const normalizedRouting = normalizeTrackRouting(track, routingSource, tracks)
   track.sends = normalizedRouting.sends
   track.outputTargetId = normalizedRouting.outputTargetId

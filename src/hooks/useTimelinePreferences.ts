@@ -11,6 +11,7 @@ import {
   saveLoopSettings,
   saveMixSyncFlag,
 } from '~/lib/timeline-storage'
+import { TIMELINE_SIDEBAR_MIN_WIDTH } from '~/lib/timeline-layout'
 
 import { useRoomPersistedState } from './useRoomPersistedState'
 
@@ -40,7 +41,7 @@ type UseTimelinePreferencesReturn = {
 export function useTimelinePreferences(
   options: UseTimelinePreferencesOptions,
 ): UseTimelinePreferencesReturn {
-  const [sidebarWidth, setSidebarWidth] = createSignal(260)
+  const [sidebarWidth, setSidebarWidth] = createSignal(TIMELINE_SIDEBAR_MIN_WIDTH)
 
   const syncMixState = useRoomPersistedState<boolean>({
     roomId: options.roomId,

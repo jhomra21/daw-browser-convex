@@ -1,15 +1,25 @@
 import { normalizePersistedHistory, serializePersistedHistory } from '~/lib/undo/persisted-history'
 import type { PersistedHistory } from '~/lib/undo/types'
+import type { TrackId, TrackSend } from '~/types/timeline'
 
 const MIX_KEY_PREFIX = 'mb:mix:'
+const ROUTING_KEY_PREFIX = 'mb:routing:'
 const MIX_SYNC_KEY_PREFIX = 'mb:mix-sync:'
 const GRID_KEY_PREFIX = 'mb:grid:'
 const BPM_KEY_PREFIX = 'mb:bpm:'
 const LOOP_KEY_PREFIX = 'mb:loop:'
 const HISTORY_KEY_PREFIX = 'mb:history:'
 
-export type LocalMixPatch = Partial<{ muted: boolean; soloed: boolean; volume: number }>
+export type LocalMixPatch = Partial<{
+  muted: boolean
+  soloed: boolean
+  volume: number
+  sends: TrackSend[]
+  outputTargetId: TrackId | null
+}>
 export type LocalMixMap = Record<string, LocalMixPatch>
+export type LocalRoutingPatch = Pick<LocalMixPatch, 'sends' | 'outputTargetId'>
+export type LocalRoutingMap = Record<string, LocalRoutingPatch>
 type HistoryStorageScope = {
   roomId?: string
   userId?: string
@@ -56,12 +66,35 @@ export const saveLocalMix = (
     nextEntry.volume === undefined
     && nextEntry.muted === undefined
     && nextEntry.soloed === undefined
+    && nextEntry.sends === undefined
+    && nextEntry.outputTargetId === undefined
   ) {
     delete map[trackId]
   } else {
     map[trackId] = nextEntry
   }
   saveLocalMixMap(rid, map)
+}
+
+export const loadLocalRoutingMap = (rid?: string): LocalRoutingMap => {
+  if (!rid) return {}
+  if (!canUseLocalStorage()) return {}
+  try {
+    return JSON.parse(localStorage.getItem(`${ROUTING_KEY_PREFIX}${rid}`) || '{}')
+  } catch {
+    return {}
+  }
+}
+
+export const saveLocalRoutingMap = (
+  rid: string | undefined,
+  map: LocalRoutingMap,
+) => {
+  if (!rid) return
+  if (!canUseLocalStorage()) return
+  try {
+    localStorage.setItem(`${ROUTING_KEY_PREFIX}${rid}`, JSON.stringify(map))
+  } catch {}
 }
 
 export const stripSharedTrackBooleanOverrides = (
@@ -74,11 +107,19 @@ export const stripSharedTrackBooleanOverrides = (
     if (!entry) continue
     if (entry.muted === undefined && entry.soloed === undefined) continue
     if (!next) next = { ...map }
-    if (entry.volume === undefined) {
+    if (
+      entry.volume === undefined
+      && entry.sends === undefined
+      && entry.outputTargetId === undefined
+    ) {
       delete next[trackId]
       continue
     }
-    next[trackId] = { volume: entry.volume }
+    next[trackId] = {
+      volume: entry.volume,
+      sends: entry.sends,
+      outputTargetId: entry.outputTargetId,
+    }
   }
   return next ?? map
 }

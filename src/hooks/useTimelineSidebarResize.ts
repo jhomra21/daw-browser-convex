@@ -1,5 +1,6 @@
 import type { Accessor } from 'solid-js'
 import { onCleanup } from 'solid-js'
+import { TIMELINE_SIDEBAR_MIN_WIDTH } from '~/lib/timeline-layout'
 
 type UseTimelineSidebarResizeOptions = {
   sidebarWidth: Accessor<number>
@@ -22,9 +23,8 @@ export function useTimelineSidebarResize(
     if (!resizing) return
     const containerWidth = options.getContainerElement()?.clientWidth ?? 0
     const delta = resizeStartX - event.clientX
-    const minWidth = 220
-    const maxWidth = Math.max(minWidth, Math.floor(containerWidth * 0.7))
-    const nextWidth = Math.max(minWidth, Math.min(maxWidth, resizeStartWidth + delta))
+    const maxWidth = Math.floor(containerWidth * 0.7)
+    const nextWidth = Math.max(TIMELINE_SIDEBAR_MIN_WIDTH, Math.min(maxWidth, resizeStartWidth + delta))
     options.setSidebarWidth(nextWidth)
   }
 

@@ -2,6 +2,100 @@
 
 Tracks review-driven follow-up work before merging the audio refactor branch.
 
+## 2026-05-15 — Track Sidebar Routing and Meter Visibility Follow-Up
+
+### Scope
+
+- Reviewed the current track-row redesign follow-up after the track sidebar routing controls moved from the effects panel into the sidebar.
+- Used `implementation-trackers/audio-refactor-branch-tracker.md`, `implementation-trackers/timeline-refactor-tracker.md`, and this changes log as history context.
+
+### Before Review Skills
+
+- Moved track output and send routing controls into `src/components/timeline/TrackSidebar.tsx` and wired them from `src/components/Timeline.tsx`.
+- Removed the duplicated routing card path from `src/components/timeline/EffectsPanel.tsx` so routing edits now live in the track rows.
+- Raised the sidebar resize minimum width to 320px and adjusted the track-row grid columns so the stereo audio meter remains visible at minimum width instead of being clipped.
+- Restored per-track volume editing as a horizontal sidebar slider under the record/solo controls, matching the redesigned Ableton-style track row layout.
+- Restyled the volume slider as a smaller flat rectangular control with a filled amber segment, gray remainder, 2px border, and preserved row spacing instead of the native rounded thumb.
+- Added explicit pointer-drag handling for the custom volume slider so the flat no-thumb control supports click-and-drag changes rather than click-only updates.
+- Preserved existing send routes and amounts when changing the sidebar's selected send target instead of replacing the full sends array.
+- Added hidden-scrollbar styling for the track sidebar scroll area while preserving vertical scrolling.
+- Renamed return-track labels in the sidebar and send selector to `Return #` and removed the separate return badge.
+- Refined the track-name click target into a compact centered border-only control with instant hover/selection state changes and a consistent visible border across muted and selected rows.
+- Darkened the inactive stereo meter wells so meters remain visible against selected track rows.
+- Tightened the track-row layout so sidebar columns use consistent horizontal spacing while keeping the record/solo controls, volume slider, and stereo meter group fixed-width at minimum sidebar sizes.
+- Raised the shared sidebar minimum width to 336px across initial state, drag-resize clamping, and rendered sidebar width so the right-side stereo meters do not compress or clip.
+- Made the sidebar resize divider visually thinner/brighter while increasing its transparent drag hit area without changing the visible divider width.
+- Replaced the visible native routing select triggers with aligned custom trigger shells while keeping invisible native selects for dropdown behavior, so label and chevron spacing stay visually balanced.
+- Added immediate per-track selected-value state for the custom routing triggers so the visible output/send labels reflect the native select choice without waiting for persisted routing props to round trip.
+- Added local-first routing persistence for output/send changes so owner routing choices survive refresh from local storage while Convex remains the sharing/sync path.
+- Fixed the local mix persist path so silent in-memory routing updates also flush the merged local mix map to local storage.
+- Saved routing patches directly to the room local mix key before applying optimistic shared routing, avoiding any dependency on the later shared write path.
+- Added a dedicated per-room local routing storage key and merged it into the local track state on load so routing restore no longer depends on the mix override cleanup path.
+- Moved the local routing write to the Timeline sidebar callback boundary so every output/send UI change flushes local routing before any mixer-controller permission, equality, or shared-write branch can skip it.
+- Moved local routing persistence back into the mixer-controller routing application boundary so sidebar changes, undo/redo, and other controller-level routing applications update the same local-first store.
+- Made the sidebar send `None` option clear all sends for the single-send dropdown contract so hidden additional sends cannot reappear after refresh.
+- Persisted normalized local routing before the mixer controller's no-op equality return so re-selecting `None` repairs stale local routing storage even when pending in-memory routing already matches.
+- Persisted sidebar routing changes through the shared local mix abstraction at the Timeline callback boundary as well, so selecting send `None` flushes `sends: []` before any controller snapshot/equality/pending-routing branch can interfere.
+- Manually confirmed the local-first send `None` path now survives immediate refresh without waiting for Convex/shared persistence.
+
+### Simplify Review
+
+- Memoized sidebar group and return track lists so each track row reuses derived routing target arrays instead of filtering all tracks per row.
+- Removed now-unused routing callback props from `EffectsPanel`, `TimelinePanels`, and the effects-panel callsite in `Timeline`.
+- Grouped the shared timeline and track-sidebar hidden-scrollbar CSS selectors to avoid duplicate scrollbar declarations.
+- Removed the now-unused routing-specific return fields from `useEffectsPanelTarget` after the final simplify rerun; the rerun then returned LGTM.
+- Quantized custom slider drag values to the existing `0.01` step and skipped duplicate volume emissions during pointer drags to reduce hot-path mixer/history churn.
+- Avoided no-op meter state updates and stopped the meter RAF loop when playback is stopped because stopped meters are not rendered.
+- Reused a local `displayTrackName` helper for both row labels and send options, and aligned the label wrapper with the centered track-name button.
+- Reused a local unit clamp helper for volume and stereo-meter values, removed a redundant header wrapper, and noted the file-wide TrackSidebar formatting churn for later cleanup outside this focused sidebar layout follow-up.
+- Reconciled the custom routing trigger selected-value maps after the simplify review so confirmed values and removed tracks do not leave stale local labels, skipped no-op selected-value updates, and reused target-name maps for output/send label lookups.
+- A simplify rerun for local-first routing skipped broad storage abstraction changes, kept branded-track-id-safe target lookups, and briefly removed the duplicate mixer-controller routing write before later validation restored controller-boundary persistence alongside the Timeline callback write.
+- The repeated simplify loop removed the final duplicate routing write from `useTimelineLocalMix.persist` because the merged local track-state save already writes the dedicated routing map, then reuse, quality, and efficiency reruns all returned LGTM.
+- The final simplify rerun returned LGTM for reuse, quality, and in-scope efficiency.
+
+### Defensive-Code Review
+
+- Removed redundant role guards from sidebar routing change handlers after verifying the handlers are only wired from role-gated selects.
+- Removed the redundant stereo-level tuple shape check in `TrackSidebar` because the callback type already guarantees `[number, number]` when present.
+- Removed the redundant sidebar resize `maxWidth` lower clamp because the final width clamp already enforces the minimum width.
+- Tightened the effects-panel target type to `Track["id"] | "master"` and removed the now-redundant empty-target fallback in `useEffectsPanelTarget`.
+- Removed the optional fallback around the required sidebar mono meter callback.
+- Kept permission and optional-callback guards because they protect writable-track and optional integration boundaries.
+- A defensive-code-review rerun found no additional high-confidence redundant guards in the return-label naming or track-name UI state changes.
+- A defensive-code-review rerun found no high-confidence redundant guards, impossible branches, or stale log entries in the sidebar spacing, resize minimum, fixed meter group, or resize-hitbox follow-up.
+- A defensive-code-review rerun found no high-confidence redundant guards or stale log entries in the custom routing trigger selected-value follow-up.
+- A defensive-code-review rerun removed the redundant sidebar meter sampling `try` wrapper and tuple-element fallbacks after verifying the Timeline callsite already catches audio-engine meter failures and returns a typed stereo tuple.
+- The repeated defensive-code-review loop returned LGTM for both UI and routing-storage groups with no additional high-confidence redundant guards or impossible branches.
+- The post-confirmation defensive-code-review removed the now-impossible meter `current` fallback after proving every rendered track receives a sampled meter entry in the same tick, and clarified an intermediate simplify-log entry that was superseded by the confirmed callback-plus-controller local routing persistence path.
+- The final defensive-code-review rerun returned LGTM with no additional high-confidence redundant guards or impossible branches.
+
+### Validation
+
+- `bun run typecheck`, `git diff --check`, and `bun run build` passed after simplify cleanup.
+- `bun run typecheck`, `git diff --check`, and `bun run build` passed after defensive cleanup and log updates.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the sidebar volume slider restoration, styling, and drag-interaction fixes.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the final simplify and defensive-code-review follow-up cleanup.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the final repeated review loop where both simplify and defensive-code-review returned LGTM.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the return-label and track-name border follow-up.
+- `bun run typecheck` and `git diff --check` passed after the selected-row meter contrast follow-up.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the track-sidebar spacing, resize minimum, fixed meter group, and resize-hitbox follow-up.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the simplify and defensive-code-review cleanup for the sidebar layout follow-up.
+- `bun run typecheck` and `git diff --check` passed after the routing dropdown trigger alignment follow-up.
+- `bun run typecheck` and `git diff --check` passed after the instant routing trigger selected-value follow-up.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the simplify cleanup and defensive-code-review rerun for the custom routing trigger follow-up.
+- `bun run typecheck` and `git diff --check` passed after adding local-first routing persistence.
+- `bun run typecheck` and `git diff --check` passed after fixing the local mix flush path for local-first routing.
+- `bun run typecheck` and `git diff --check` passed after making routing writes flush directly to local storage.
+- `bun run typecheck` and `git diff --check` passed after adding dedicated local routing storage.
+- `bun run typecheck` and `git diff --check` passed after moving local routing persistence to the sidebar callback boundary.
+- `bun run typecheck` and `git diff --check` passed after the simplify and defensive-code-review cleanup for local-first routing persistence.
+- `bun run typecheck` and `git diff --check` passed after the repeated simplify loop; the repeated defensive-code-review loop then returned LGTM.
+- `bun run typecheck` and `git diff --check` passed after moving local routing persistence into the mixer controller and clearing all sends for sidebar `None`.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after making routing persistence run before no-op equality checks.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after adding the local mix callback-boundary write for sidebar routing changes.
+- User validation confirmed selecting a return send, changing it to `None`, and refreshing immediately now keeps `None`.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after post-confirmation simplify and defensive-code-review cleanup.
+
 ## 2026-05-13 — Access-Control Review Follow-Up
 
 ### Scope

@@ -89,10 +89,21 @@ export function useTimelineMixerController(
     return next
   })
   const getTrack = (trackId: Track['id']) => trackIndex().trackById.get(trackId)
+  const getLocalRouting = (trackId: Track['id']): LocalTrackRouting | undefined => {
+    const localMix = options.localMix.byTrackId()[trackId]
+    if (localMix?.sends === undefined && localMix?.outputTargetId === undefined) return undefined
+    const track = getTrack(trackId)
+    return {
+      sends: localMix.sends ?? track?.sends ?? [],
+      outputTargetId: localMix.outputTargetId ?? undefined,
+    }
+  }
 
   const getTrackRoutingSnapshot = (trackId: Track['id']): LocalTrackRouting => {
     const pendingRouting = rawPendingSharedTrackRouting().get(trackId)
     if (pendingRouting) return pendingRouting
+    const localRouting = getLocalRouting(trackId)
+    if (localRouting) return localRouting
     const track = getTrack(trackId)
     return {
       sends: track?.sends ?? [],
@@ -258,11 +269,20 @@ export function useTimelineMixerController(
     timers.set(trackId, { timer, token })
   }
 
-  const applyTrackRouting = (trackId: Track['id'], next: LocalTrackRouting) => {
+  const persistLocalTrackRouting = (trackId: Track['id'], routing: LocalTrackRouting) => {
+    const localRoutingPatch: LocalMixPatch = {
+      sends: routing.sends,
+      outputTargetId: routing.outputTargetId ?? null,
+    }
+    options.localMix.persist(trackId, localRoutingPatch)
+  }
+
+  const applyTrackRouting = (trackId: Track['id'], next: LocalTrackRouting, persistLocal = true) => {
     clearScheduledWrite(routingTimers, trackId)
     const track = getTrack(trackId)
     if (!track) return
     const normalized = normalizeTrackRouting(track, next, options.tracks())
+    if (persistLocal) persistLocalTrackRouting(trackId, normalized)
     const previous = rawPendingSharedTrackRouting().get(trackId)
     if (previous && isTrackRoutingEqual(previous, normalized)) return
 
@@ -302,9 +322,10 @@ export function useTimelineMixerController(
 
     const previous = getTrackRoutingSnapshot(trackId)
     const normalized = normalizeTrackRouting(track, next, options.tracks())
+    persistLocalTrackRouting(trackId, normalized)
     if (isTrackRoutingEqual(previous, normalized)) return
 
-    applyTrackRouting(trackId, normalized)
+    applyTrackRouting(trackId, normalized, false)
     persistTrackRouting(trackId, normalized)
 
     if (!roomId) return

@@ -3,7 +3,7 @@ import { Button } from '~/components/ui/button'
 import type { AudioEngine } from '~/lib/audio-engine'
 import type { OptimisticGrantWrite } from '~/lib/optimistic-grant-scope'
 import type { EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
-import type { Track, TrackSend } from '~/types/timeline'
+import type { Track } from '~/types/timeline'
 
 const AgentChat = lazy(() => import('~/components/AgentChat'))
 const SharedChat = lazy(() => import('~/components/SharedChat'))
@@ -26,7 +26,7 @@ type TimelinePanelsProps = {
   }
   effectsPanel: {
     isOpen: boolean
-    selectedFXTarget: string
+    selectedFXTarget: Track['id'] | 'master'
     tracks: Track[]
     playheadSec: number
     roomId?: string
@@ -34,8 +34,6 @@ type TimelinePanelsProps = {
     audioEngine: AudioEngine
     canWriteTrackRouting: (trackId: Track['id']) => boolean
     grantClipWrite: OptimisticGrantWrite
-    onTrackSendsChange: (trackId: Track['id'], sends: TrackSend[]) => void
-    onTrackOutputTargetChange: (trackId: Track['id'], outputTargetId?: Track['id']) => void
     onSelectClip: (trackId: Track['id'], clipId: string, startSec: number) => void
     onClose: () => void
     onOpen: () => void
@@ -121,8 +119,6 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
           canWriteTrackRouting={props.effectsPanel.canWriteTrackRouting}
           grantClipWrite={props.effectsPanel.grantClipWrite}
           playheadSec={props.effectsPanel.playheadSec}
-          onTrackSendsChange={props.effectsPanel.onTrackSendsChange}
-          onTrackOutputTargetChange={props.effectsPanel.onTrackOutputTargetChange}
           onSelectClip={props.effectsPanel.onSelectClip}
           onEffectParamsCommitted={props.effectsPanel.onEffectParamsCommitted}
         />

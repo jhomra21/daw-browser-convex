@@ -22,6 +22,9 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Renamed return-track labels in the sidebar and send selector to `Return #` and removed the separate return badge.
 - Refined the track-name click target into a compact centered border-only control with instant hover/selection state changes and a consistent visible border across muted and selected rows.
 - Darkened the inactive stereo meter wells so meters remain visible against selected track rows.
+- Tightened the track-row layout so sidebar columns use consistent horizontal spacing while keeping the record/solo controls, volume slider, and stereo meter group fixed-width at minimum sidebar sizes.
+- Raised the shared sidebar minimum width to 336px across initial state, drag-resize clamping, and rendered sidebar width so the right-side stereo meters do not compress or clip.
+- Made the sidebar resize divider visually thinner/brighter while increasing its transparent drag hit area without changing the visible divider width.
 
 ### Simplify Review
 
@@ -32,6 +35,7 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Quantized custom slider drag values to the existing `0.01` step and skipped duplicate volume emissions during pointer drags to reduce hot-path mixer/history churn.
 - Avoided no-op meter state updates and stopped the meter RAF loop when playback is stopped because stopped meters are not rendered.
 - Reused a local `displayTrackName` helper for both row labels and send options, and aligned the label wrapper with the centered track-name button.
+- Reused a local unit clamp helper for volume and stereo-meter values, removed a redundant header wrapper, and noted the file-wide TrackSidebar formatting churn for later cleanup outside this focused sidebar layout follow-up.
 - The final simplify rerun returned LGTM for reuse, quality, and in-scope efficiency.
 
 ### Defensive-Code Review
@@ -43,6 +47,7 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Removed the optional fallback around the required sidebar mono meter callback.
 - Kept permission and optional-callback guards because they protect writable-track and optional integration boundaries.
 - A defensive-code-review rerun found no additional high-confidence redundant guards in the return-label naming or track-name UI state changes.
+- A defensive-code-review rerun found no high-confidence redundant guards, impossible branches, or stale log entries in the sidebar spacing, resize minimum, fixed meter group, or resize-hitbox follow-up.
 - The final defensive-code-review rerun returned LGTM with no additional high-confidence redundant guards or impossible branches.
 
 ### Validation
@@ -54,6 +59,8 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after the final repeated review loop where both simplify and defensive-code-review returned LGTM.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after the return-label and track-name border follow-up.
 - `bun run typecheck` and `git diff --check` passed after the selected-row meter contrast follow-up.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the track-sidebar spacing, resize minimum, fixed meter group, and resize-hitbox follow-up.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the simplify and defensive-code-review cleanup for the sidebar layout follow-up.
 
 ## 2026-05-13 — Access-Control Review Follow-Up
 

@@ -1,0 +1,1 @@
+export const TIMELINE_SIDEBAR_MIN_WIDTH = 336

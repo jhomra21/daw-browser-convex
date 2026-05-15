@@ -21,6 +21,7 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Added hidden-scrollbar styling for the track sidebar scroll area while preserving vertical scrolling.
 - Renamed return-track labels in the sidebar and send selector to `Return #` and removed the separate return badge.
 - Refined the track-name click target into a compact centered border-only control with instant hover/selection state changes and a consistent visible border across muted and selected rows.
+- Darkened the inactive stereo meter wells so meters remain visible against selected track rows.
 
 ### Simplify Review
 
@@ -52,6 +53,7 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after the final simplify and defensive-code-review follow-up cleanup.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after the final repeated review loop where both simplify and defensive-code-review returned LGTM.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after the return-label and track-name border follow-up.
+- `bun run typecheck` and `git diff --check` passed after the selected-row meter contrast follow-up.
 
 ## 2026-05-13 — Access-Control Review Follow-Up
 

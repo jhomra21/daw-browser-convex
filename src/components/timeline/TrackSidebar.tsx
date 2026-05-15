@@ -396,10 +396,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           const rightColor = right >= 0.98 ? 'bg-red-500' : 'bg-green-500'
                           return (
                             <>
-                              <div class="relative h-full w-1 overflow-hidden rounded-full bg-neutral-800/70">
+                              <div class="relative h-full w-1 overflow-hidden rounded-full bg-neutral-950/70">
                                 <div class={cn('absolute bottom-0 w-full rounded-full transition-all duration-75', leftColor)} style={{ height: `${left * 100}%` }} />
                               </div>
-                              <div class="relative h-full w-1 overflow-hidden rounded-full bg-neutral-800/70">
+                              <div class="relative h-full w-1 overflow-hidden rounded-full bg-neutral-950/70">
                                 <div class={cn('absolute bottom-0 w-full rounded-full transition-all duration-75', rightColor)} style={{ height: `${right * 100}%` }} />
                               </div>
                             </>

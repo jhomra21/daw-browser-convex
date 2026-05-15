@@ -109,6 +109,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   const groupTracks = createMemo(() => sidebar().tracks.filter((track) => getTrackChannelRole(track) === 'group'))
   const returnTracks = createMemo(() => sidebar().tracks.filter((track) => getTrackChannelRole(track) === 'return'))
+  const returnTrackNames = createMemo(() => new Map(returnTracks().map((track, index) => [track.id, `Return ${index + 1}`])))
+  const displayTrackName = (track: Track) => returnTrackNames().get(track.id) ?? track.name
 
   const canWriteTrackRouting = (track: Track) => sidebar().canWriteTrackRouting?.(track.id) ?? true
 
@@ -226,12 +228,14 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   <div class="min-w-0 overflow-hidden">
                     <button
                       class={cn(
-                        'w-full rounded py-1 text-left text-sm font-semibold transition-colors',
+                        'flex h-7 w-full items-center justify-center rounded-sm border px-2 text-center text-sm font-semibold',
                         muteDisabled
-                          ? 'cursor-not-allowed bg-neutral-800/60 text-neutral-500'
+                          ? 'cursor-not-allowed border-neutral-700 text-neutral-500'
                           : muted()
-                            ? 'bg-amber-500 text-black ring-1 ring-amber-300'
-                            : 'hover:bg-neutral-800',
+                            ? 'border-neutral-700 bg-amber-500 text-black'
+                            : sidebar().selectedTrackId === track.id
+                              ? 'border-neutral-700'
+                              : 'border-neutral-700 hover:border-neutral-600',
                       )}
                       disabled={muteDisabled}
                       onClick={(event) => {
@@ -241,11 +245,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       }}
                       title={lockedByOther ? 'Track locked by another user' : muted() ? 'Unmute track' : 'Mute track'}
                     >
-                      <span class="flex flex-col items-start gap-1">
-                        <span class="truncate">{track.name}</span>
-                        <Show when={isReturnTrack}>
-                          <span class="rounded bg-neutral-700 px-1.5 py-0.5 text-xs uppercase tracking-wide text-neutral-300">Return</span>
-                        </Show>
+                      <span class="flex min-w-0 flex-col items-center gap-1">
+                        <span class="truncate">{displayTrackName(track)}</span>
                         <Show when={isGroupTrack}>
                           <span class="rounded bg-neutral-700 px-1.5 py-0.5 text-xs uppercase tracking-wide text-neutral-300">Group</span>
                         </Show>
@@ -281,7 +282,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       >
                         <option value="">None</option>
                         <For each={returnTracks()}>
-                          {(returnTrack) => <option value={returnTrack.id}>{returnTrack.name}</option>}
+                          {(returnTrack) => <option value={returnTrack.id}>{displayTrackName(returnTrack)}</option>}
                         </For>
                       </select>
                     </Show>

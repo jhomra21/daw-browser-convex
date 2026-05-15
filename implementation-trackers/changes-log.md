@@ -19,6 +19,8 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Added explicit pointer-drag handling for the custom volume slider so the flat no-thumb control supports click-and-drag changes rather than click-only updates.
 - Preserved existing send routes and amounts when changing the sidebar's selected send target instead of replacing the full sends array.
 - Added hidden-scrollbar styling for the track sidebar scroll area while preserving vertical scrolling.
+- Renamed return-track labels in the sidebar and send selector to `Return #` and removed the separate return badge.
+- Refined the track-name click target into a compact centered border-only control with instant hover/selection state changes and a consistent visible border across muted and selected rows.
 
 ### Simplify Review
 
@@ -28,6 +30,7 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Removed the now-unused routing-specific return fields from `useEffectsPanelTarget` after the final simplify rerun; the rerun then returned LGTM.
 - Quantized custom slider drag values to the existing `0.01` step and skipped duplicate volume emissions during pointer drags to reduce hot-path mixer/history churn.
 - Avoided no-op meter state updates and stopped the meter RAF loop when playback is stopped because stopped meters are not rendered.
+- Reused a local `displayTrackName` helper for both row labels and send options, and aligned the label wrapper with the centered track-name button.
 - The final simplify rerun returned LGTM for reuse, quality, and in-scope efficiency.
 
 ### Defensive-Code Review
@@ -38,6 +41,7 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Tightened the effects-panel target type to `Track["id"] | "master"` and removed the now-redundant empty-target fallback in `useEffectsPanelTarget`.
 - Removed the optional fallback around the required sidebar mono meter callback.
 - Kept permission and optional-callback guards because they protect writable-track and optional integration boundaries.
+- A defensive-code-review rerun found no additional high-confidence redundant guards in the return-label naming or track-name UI state changes.
 - The final defensive-code-review rerun returned LGTM with no additional high-confidence redundant guards or impossible branches.
 
 ### Validation
@@ -47,6 +51,7 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after the sidebar volume slider restoration, styling, and drag-interaction fixes.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after the final simplify and defensive-code-review follow-up cleanup.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after the final repeated review loop where both simplify and defensive-code-review returned LGTM.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the return-label and track-name border follow-up.
 
 ## 2026-05-13 — Access-Control Review Follow-Up
 

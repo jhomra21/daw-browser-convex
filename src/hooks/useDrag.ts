@@ -7,6 +7,7 @@ export type UseDragOptions = {
   onDragMove?: (pos: Point, event: PointerEvent) => void | Promise<void>
   onDragEnd?: (pos: Point, event: PointerEvent) => void | Promise<void>
   disabled?: () => boolean
+  dragCursorClass?: string
 }
 
 export function useDrag(options: UseDragOptions = {}) {
@@ -23,6 +24,7 @@ export function useDrag(options: UseDragOptions = {}) {
     window.removeEventListener('pointerup', handlePointerUp, { capture: true })
     window.removeEventListener('pointercancel', handlePointerUp, { capture: true })
     document.body.classList.remove('select-none')
+    if (options.dragCursorClass) document.body.classList.remove(options.dragCursorClass)
   }
 
   const cancelDrag = () => {
@@ -51,6 +53,7 @@ export function useDrag(options: UseDragOptions = {}) {
     activePointerId = event.pointerId
     setIsDragging(true)
     document.body.classList.add('select-none')
+    if (options.dragCursorClass) document.body.classList.add(options.dragCursorClass)
     window.addEventListener('pointermove', handlePointerMove)
     window.addEventListener('pointerup', handlePointerUp, { capture: true })
     window.addEventListener('pointercancel', handlePointerUp, { capture: true })

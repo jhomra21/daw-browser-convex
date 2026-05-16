@@ -34,6 +34,10 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Replaced the sidebar row separator element with an inset row shadow during simplify cleanup, preserving track/sidebar row alignment without adding per-row decorative DOM.
 - Simplify review also replaced the sidebar row's hard-coded `96px` height with the shared `LANE_HEIGHT` constant so future timeline lane-height changes cannot desynchronize sidebar rows.
 - Defensive-code review found no high-confidence redundant guards, duplicated validation, or impossible-state branches in the drag-release or stacking follow-up.
+- Restyled clip name labels from rounded inset badges into full-width integrated top strips with stronger opacity and `p-1` text padding, so labels read as part of the clip instead of floating cards while keeping the intended compact inset around the text.
+- Added an optional `dragCursorClass` lifecycle hook to shared `useDrag` and wired clip dragging to `cursor-grabbing`, keeping the active move cursor cleanup in the same path as global pointer listener cleanup.
+- Simplify review initially suggested vertical-only padding, but the label intentionally remains `p-1` to preserve the desired text inset; broader cursor-class ownership concerns were left unchanged because overlapping drag sessions are outside the current single-active-drag UI path.
+- Defensive-code review found no high-confidence redundant guards or impossible branches in the clip label and drag-cursor follow-up.
 
 ### Validation
 
@@ -44,6 +48,7 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after simplify review; final validation was rerun after defensive-code cleanup and log updates.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after the clip-drag release and timeline/sidebar stacking fixes.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after the final guide-layering correction, simplify cleanup, defensive-code-review rerun, log update, and final diff review.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the clip label strip, drag cursor lifecycle, simplify cleanup, defensive-code-review rerun, log update, and final diff review.
 
 ## 2026-05-15 — Track Sidebar Routing and Meter Visibility Follow-Up
 

@@ -6,7 +6,7 @@ type TimelineRulerProps = {
   bpm: number
   denom: number
   gridEnabled: boolean
-  onMouseDown: (e: MouseEvent) => void
+  onPointerDown: (e: PointerEvent) => void
   loopEnabled?: boolean
   loopStartSec?: number
   loopEndSec?: number
@@ -44,6 +44,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     if (!listenersAttached) return
     try { window.removeEventListener('pointermove', onPointerMove) } catch {}
     try { window.removeEventListener('pointerup', onPointerUp) } catch {}
+    try { window.removeEventListener('pointercancel', onPointerUp) } catch {}
     listenersAttached = false
   }
 
@@ -51,6 +52,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     if (listenersAttached) return
     try { window.addEventListener('pointermove', onPointerMove) } catch {}
     try { window.addEventListener('pointerup', onPointerUp) } catch {}
+    try { window.addEventListener('pointercancel', onPointerUp) } catch {}
     listenersAttached = true
   }
 
@@ -108,12 +110,12 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     detachPointerListeners()
   }
 
-  const onLocalMouseDown = (e: MouseEvent) => {
+  const onLocalPointerDown = (e: PointerEvent) => {
     // Defer to scrub handler if we lack a loop setter or click is in lower half
     const rect = rootEl?.getBoundingClientRect()
     const inTopHalf = rect ? (e.clientY - rect.top) <= (RULER_HEIGHT / 2) : true
-    if (!props.onSetLoopRegion || !inTopHalf || !props.loopEnabled) { props.onMouseDown?.(e); return }
-    if (e.button !== 0) { props.onMouseDown?.(e); return }
+    if (!props.onSetLoopRegion || !inTopHalf || !props.loopEnabled) { props.onPointerDown?.(e); return }
+    if (e.button !== 0) { props.onPointerDown?.(e); return }
 
     const sec = clientXToSecLocal(e.clientX)
     const startPx = loopStartPx()
@@ -138,7 +140,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
   }
 
   // Cursor feedback for edges and move area in top half
-  const onLocalMouseMove = (e: MouseEvent) => {
+  const onLocalPointerMove = (e: PointerEvent) => {
     if (!rootEl) return
     const rect = rootEl.getBoundingClientRect()
     const inTopHalf = (e.clientY - rect.top) <= (RULER_HEIGHT / 2)
@@ -158,7 +160,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     }
   }
 
-  const onLocalMouseLeave = () => {
+  const onLocalPointerLeave = () => {
     if (rootEl) rootEl.style.cursor = ''
   }
 
@@ -251,9 +253,9 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
       class="sticky top-0 z-20 border-b border-neutral-800 bg-neutral-900"
       style={{ width: `${rulerWidthPx()}px`, height: `${RULER_HEIGHT}px`, ...backgroundStyle() }}
       ref={el => { rootEl = el }}
-      onMouseDown={onLocalMouseDown as any}
-      onMouseMove={onLocalMouseMove as any}
-      onMouseLeave={onLocalMouseLeave as any}
+      onPointerDown={onLocalPointerDown}
+      onPointerMove={onLocalPointerMove}
+      onPointerLeave={onLocalPointerLeave}
     >
       <Show when={showLoop()}>
         <div

@@ -97,7 +97,7 @@ export function useProjectsMenuController(
     return value.replace(/["\\]/g, '\\$&')
   }
 
-  const handleDocMouseDown = (event: MouseEvent) => {
+  const handleDocPointerDown = (event: PointerEvent) => {
     const confirmId = confirmingProjectId()
     const editId = editingProjectId()
     if (!confirmId && !editId) return
@@ -114,13 +114,13 @@ export function useProjectsMenuController(
   }
 
   onMount(() => {
-    window.addEventListener('mousedown', handleDocMouseDown, captureOptions)
+    window.addEventListener('pointerdown', handleDocPointerDown, captureOptions)
     window.addEventListener('keydown', handleEscKey, captureOptions)
   })
 
   onCleanup(() => {
     clearRenameFocus()
-    window.removeEventListener('mousedown', handleDocMouseDown, captureOptions)
+    window.removeEventListener('pointerdown', handleDocPointerDown, captureOptions)
     window.removeEventListener('keydown', handleEscKey, captureOptions)
   })
 

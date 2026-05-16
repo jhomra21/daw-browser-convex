@@ -445,7 +445,7 @@ const Timeline: Component = () => {
   })
 
   const {
-    onClipClick,
+    onClipPointerUp,
     duplicateSelectedClips,
     performDeleteTrack,
     handleKeyboardAction,
@@ -568,7 +568,7 @@ const Timeline: Component = () => {
     },
   })
 
-  const { onSidebarMouseDown } = useTimelineSidebarResize({
+  const { onSidebarPointerDown } = useTimelineSidebarResize({
     sidebarWidth,
     setSidebarWidth,
     getContainerElement: () => containerRef,
@@ -580,7 +580,7 @@ const Timeline: Component = () => {
     onLanePointerDown(event, scrollRef)
   }
 
-  const onRulerMouseDown = (event: MouseEvent) => {
+  const onRulerPointerDown = (event: PointerEvent) => {
     event.preventDefault()
     if (midiEditorClipId()) { event.stopPropagation(); return }
     startScrub(event.clientX)
@@ -717,7 +717,7 @@ const Timeline: Component = () => {
               bpm={bpm()}
               denom={gridDenominator()}
               gridEnabled={gridEnabled()}
-              onMouseDown={onRulerMouseDown}
+              onPointerDown={onRulerPointerDown}
               loopEnabled={loopEnabled()}
               loopStartSec={loopStartSec()}
               loopEndSec={loopEndSec()}
@@ -733,7 +733,7 @@ const Timeline: Component = () => {
                     isDropTarget={dropTargetLane() === i()}
                     selectedClipIds={selection.selectedClipIds()}
                     onClipPointerDown={onClipPointerDown}
-                    onClipClick={onClipClick}
+                    onClipPointerUp={onClipPointerUp}
                     onClipResizeStart={onClipResizeStart}
                     bpm={bpm()}
                     onClipDblClick={(_, clipId) => {
@@ -825,7 +825,7 @@ const Timeline: Component = () => {
             onToggleMute: handleToggleTrackMute,
             onToggleSolo: handleToggleTrackSolo,
             onToggleSyncMix: toggleSyncMix,
-            onSidebarMouseDown,
+            onSidebarPointerDown,
             onToggleRecordArm: handleToggleRecordArm,
           }}
         />

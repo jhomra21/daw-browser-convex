@@ -151,7 +151,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   })
 
   // Helpers to compute grid cell from pointer
-  const pointToCell = (container: HTMLElement, e: MouseEvent | PointerEvent) => {
+  const pointToCell = (container: HTMLElement, e: PointerEvent) => {
     const rect = container.getBoundingClientRect()
     const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left))
     // gridRef moves with scrolling, so rect.top already accounts for scroll.
@@ -175,7 +175,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     const n = ((midi % 12) + 12) % 12
     return n === 1 || n === 3 || n === 6 || n === 8 || n === 10
   }
-  const onGridClick = (e: MouseEvent | PointerEvent) => {
+  const onGridClick = (e: PointerEvent) => {
     if (dragNote) { e.preventDefault(); return }
     if (!canPersist()) { warnMissingUser(); return }
     if ((e as PointerEvent).button != null && (e as PointerEvent).button !== 0) return
@@ -222,7 +222,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     if (e.button !== 0) return
     e.stopPropagation(); e.preventDefault()
     // If this is a double-click, don't start dragging; deletion is handled by onDblClick
-    if ((e as unknown as MouseEvent).detail && (e as unknown as MouseEvent).detail >= 2) {
+    if (e.detail >= 2) {
       return
     }
     const n = notes()[idx]; if (!n) return
@@ -409,7 +409,6 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
       class="absolute z-50 rounded-md border border-neutral-700 bg-neutral-900 shadow-xl overflow-hidden"
       style={{ left: `${props.x}px`, top: `${props.y}px`, width: `${props.w}px`, height: `${props.h}px` }}
       onPointerDown={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation() }}
@@ -418,7 +417,6 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
       <div
         class="flex items-center justify-between px-3 py-2 bg-neutral-800 border-b border-neutral-700 cursor-move select-none"
         onPointerDown={onHeaderPointerDown as any}
-        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
       >
         <div class="flex items-center gap-3 text-sm font-semibold text-neutral-200">
           <div class="flex items-center gap-2">

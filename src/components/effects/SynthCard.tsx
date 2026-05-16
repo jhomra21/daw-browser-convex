@@ -118,7 +118,6 @@ const SynthCard: Component<SynthCardProps> = (props) => {
       class="fixed z-[9999] rounded-md border border-neutral-700 bg-neutral-900 shadow-xl overflow-hidden"
       style={{ left: `${props.x}px`, top: `${props.y}px`, width: `${props.w}px`, height: `${props.h}px` }}
       onPointerDown={(e) => { e.stopPropagation() }}
-      onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation() }}

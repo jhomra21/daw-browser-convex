@@ -279,11 +279,11 @@ const Sidebar: Component<SidebarProps> = (rawProps) => {
 }
 
 type SidebarTriggerProps<T extends ValidComponent = "button"> = ButtonProps<T> & {
-  onClick?: (event: MouseEvent) => void
+  onPointerUp?: (event: PointerEvent) => void
 }
 
 const SidebarTrigger = <T extends ValidComponent = "button">(props: SidebarTriggerProps<T>) => {
-  const [local, others] = splitProps(props as SidebarTriggerProps, ["class", "onClick"])
+  const [local, others] = splitProps(props as SidebarTriggerProps, ["class", "onPointerUp"])
   const { toggleSidebar } = useSidebar()
 
   return (
@@ -292,8 +292,8 @@ const SidebarTrigger = <T extends ValidComponent = "button">(props: SidebarTrigg
       variant="ghost"
       size="icon"
       class={cn("size-7", local.class)}
-      onClick={(event: MouseEvent) => {
-        local.onClick?.(event)
+      onPointerUp={(event: PointerEvent) => {
+        local.onPointerUp?.(event)
         toggleSidebar()
       }}
       {...others}

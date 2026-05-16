@@ -11,9 +11,9 @@ type ClipComponentProps = {
   trackId: Track['id']
   isSelected: boolean
   onPointerDown: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
-  onClick: (trackId: Track['id'], clipId: string, e: MouseEvent) => void
-  onResizeStart: (trackId: Track['id'], clipId: string, edge: 'left' | 'right', e: MouseEvent) => void
-  onDblClick?: (trackId: Track['id'], clipId: string, e: MouseEvent) => void
+  onPointerUp: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
+  onResizeStart: (trackId: Track['id'], clipId: string, edge: 'left' | 'right', e: PointerEvent) => void
+  onDblClick?: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
   bpm: number
 }
 
@@ -246,20 +246,20 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         }
         props.onPointerDown(props.trackId, props.clip.id, e)
       }}
-      onClick={(e) => props.onClick(props.trackId, props.clip.id, e)}
+      onPointerUp={(e) => props.onPointerUp(props.trackId, props.clip.id, e)}
       title={`${props.clip.name}`}
     >
       <div
         class="absolute inset-y-0 left-0 z-20 flex cursor-ew-resize items-center justify-center select-none text-xs text-neutral-200/80"
         style={{ width: `${handleWidthPx()}px` }}
-        onMouseDown={(e) => { e.stopPropagation(); props.onResizeStart(props.trackId, props.clip.id, 'left', e) }}
+        onPointerDown={(e) => { e.stopPropagation(); props.onResizeStart(props.trackId, props.clip.id, 'left', e) }}
       >
         <span class="opacity-0 group-hover:opacity-100 pointer-events-none">[</span>
       </div>
       <div
         class="absolute inset-y-0 right-0 z-20 flex cursor-ew-resize items-center justify-center select-none text-xs text-neutral-200/80"
         style={{ width: `${handleWidthPx()}px` }}
-        onMouseDown={(e) => { e.stopPropagation(); props.onResizeStart(props.trackId, props.clip.id, 'right', e) }}
+        onPointerDown={(e) => { e.stopPropagation(); props.onResizeStart(props.trackId, props.clip.id, 'right', e) }}
       >
         <span class="opacity-0 group-hover:opacity-100 pointer-events-none">]</span>
       </div>

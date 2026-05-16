@@ -43,7 +43,7 @@ type TimelineClipActionsOptions = {
 }
 
 type TimelineClipActionsHandlers = {
-  onClipClick: (trackId: Track['id'], clipId: string, event: MouseEvent) => void
+  onClipPointerUp: (trackId: Track['id'], clipId: string, event: PointerEvent) => void
   duplicateSelectedClips: () => Promise<void>
   performDeleteTrack: (trackId: Track['id']) => Promise<void>
   handleKeyboardAction: () => void
@@ -71,7 +71,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     grantClipWrites,
   } = options
 
-  const onClipClick = (trackId: Track['id'], clipId: string, event: MouseEvent) => {
+  const onClipPointerUp = (trackId: Track['id'], clipId: string, event: PointerEvent) => {
     event.stopPropagation()
     if (!event.shiftKey) {
       selection.selectPrimaryClip({ trackId, clipId })
@@ -315,7 +315,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
   }
 
   return {
-    onClipClick,
+    onClipPointerUp,
     duplicateSelectedClips,
     performDeleteTrack,
     handleKeyboardAction,

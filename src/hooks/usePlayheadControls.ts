@@ -34,11 +34,12 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loo
     if (!scrubbing) return
     scrubbing = false
     scrubListenersActive = false
-    window.removeEventListener('mousemove', onScrubMove)
-    window.removeEventListener('mouseup', onScrubEnd)
+    window.removeEventListener('pointermove', onScrubMove)
+    window.removeEventListener('pointerup', onScrubEnd)
+    window.removeEventListener('pointercancel', onScrubEnd)
   }
 
-  const onScrubMove = (event: MouseEvent) => {
+  const onScrubMove = (event: PointerEvent) => {
     moveScrub(event.clientX)
   }
 
@@ -59,8 +60,9 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loo
     scrubbing = true
     if (options?.listen === false || scrubListenersActive) return
     scrubListenersActive = true
-    window.addEventListener('mousemove', onScrubMove)
-    window.addEventListener('mouseup', onScrubEnd)
+    window.addEventListener('pointermove', onScrubMove)
+    window.addEventListener('pointerup', onScrubEnd)
+    window.addEventListener('pointercancel', onScrubEnd)
   }
 
   const requestPlay = async () => {

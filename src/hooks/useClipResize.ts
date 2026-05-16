@@ -34,7 +34,7 @@ type ClipResizeOptions = {
 }
 
 type ClipResizeHandlers = {
-  onClipResizeStart: (trackId: Track['id'], clipId: string, edge: 'left' | 'right', event: MouseEvent) => void
+  onClipResizeStart: (trackId: Track['id'], clipId: string, edge: 'left' | 'right', event: PointerEvent) => void
 }
 
 export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
@@ -61,11 +61,12 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
   let resizeOrigMidiOffsetBeats = 0
 
   const removeResizeListeners = () => {
-    window.removeEventListener('mousemove', onResizeMouseMove)
-    window.removeEventListener('mouseup', onResizeMouseUp)
+    window.removeEventListener('pointermove', onResizePointerMove)
+    window.removeEventListener('pointerup', onResizePointerUp)
+    window.removeEventListener('pointercancel', onResizePointerUp)
   }
 
-  const onClipResizeStart = (trackId: Track['id'], clipId: string, edge: 'left' | 'right', event: MouseEvent) => {
+  const onClipResizeStart = (trackId: Track['id'], clipId: string, edge: 'left' | 'right', event: PointerEvent) => {
     event.preventDefault()
     event.stopPropagation()
     const track = tracks().find(t => t.id === trackId)
@@ -85,11 +86,15 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
 
     selection.selectPrimaryClip({ trackId, clipId })
 
-    window.addEventListener('mousemove', onResizeMouseMove)
-    window.addEventListener('mouseup', onResizeMouseUp)
+    if (event.currentTarget instanceof HTMLElement) {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
+    window.addEventListener('pointermove', onResizePointerMove)
+    window.addEventListener('pointerup', onResizePointerUp)
+    window.addEventListener('pointercancel', onResizePointerUp)
   }
 
-  const onResizeMouseMove = (event: MouseEvent) => {
+  const onResizePointerMove = (event: PointerEvent) => {
     if (!clipResizing || !resizing) return
     const scroll = getScrollElement()
     if (!scroll) return
@@ -222,7 +227,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     }
   }
 
-  const onResizeMouseUp = () => {
+  const onResizePointerUp = () => {
     if (!clipResizing || !resizing) {
       clipResizing = false
       resizing = null

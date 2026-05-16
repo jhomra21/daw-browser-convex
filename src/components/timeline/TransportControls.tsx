@@ -173,7 +173,7 @@ const ProjectsMenu: Component<{ projects: ProjectsMenuController }> = (props) =>
                       <div
                         data-project-rid={roomId}
                         class={cn('group relative flex w-full items-center justify-between gap-2 pr-12', menu().currentRoomId === roomId && 'text-green-400')}
-                        onMouseDown={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => event.stopPropagation()}
                       >
                         <div class="flex min-w-0 flex-1 items-center gap-2">
@@ -214,8 +214,6 @@ const ProjectsMenu: Component<{ projects: ProjectsMenuController }> = (props) =>
                                 }}
                                 onKeyUp={menu().stopPropagation}
                                 onPointerUp={menu().stopPropagation}
-                                onMouseUp={menu().stopPropagation}
-                                onMouseMove={menu().stopPropagation}
                                 onPointerMove={menu().stopPropagation}
                                 class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 pr-12 text-xs text-neutral-100 outline-none focus:border-neutral-500"
                                 ref={(element) => {
@@ -224,11 +222,8 @@ const ProjectsMenu: Component<{ projects: ProjectsMenuController }> = (props) =>
                                       event.stopPropagation()
                                     }
                                     element.addEventListener('pointermove', stopCapture, { capture: true })
-                                    element.addEventListener('mousemove', stopCapture, { capture: true })
                                     element.addEventListener('pointerdown', stopCapture, { capture: true })
-                                    element.addEventListener('mousedown', stopCapture, { capture: true })
                                     element.addEventListener('pointerup', stopCapture, { capture: true })
-                                    element.addEventListener('mouseup', stopCapture, { capture: true })
                                   } catch {}
                                 }}
                               />
@@ -244,9 +239,7 @@ const ProjectsMenu: Component<{ projects: ProjectsMenuController }> = (props) =>
                               aria-label={menu().deletingProjectId() === roomId ? 'Deleting…' : 'Confirm delete'}
                               disabled={menu().deletingProjectId() === roomId}
                               onPointerDown={menu().stopMenuPress}
-                              onMouseDown={menu().stopMenuPress}
                               onPointerUp={menu().stopMenuPress}
-                              onMouseUp={menu().stopMenuPress}
                               onClick={async (event) => {
                                 menu().stopMenuPress(event)
                                 await menu().confirmProjectDelete(roomId)
@@ -262,9 +255,7 @@ const ProjectsMenu: Component<{ projects: ProjectsMenuController }> = (props) =>
                               aria-label="Cancel delete"
                               disabled={menu().deletingProjectId() === roomId}
                               onPointerDown={menu().stopMenuPress}
-                              onMouseDown={menu().stopMenuPress}
                               onPointerUp={menu().stopMenuPress}
-                              onMouseUp={menu().stopMenuPress}
                               onClick={(event) => {
                                 menu().stopMenuPress(event)
                                 menu().setConfirmingProjectId(null)
@@ -283,12 +274,7 @@ const ProjectsMenu: Component<{ projects: ProjectsMenuController }> = (props) =>
                                 aria-label={isRenaming() ? 'Renaming…' : 'Confirm rename'}
                                 disabled={isRenaming()}
                                 onPointerDown={menu().stopMenuPress}
-                                onMouseDown={menu().stopMenuPress}
                                 onPointerUp={menu().stopMenuPress}
-                                onMouseUp={(event) => {
-                                  event.stopPropagation()
-                                  event.preventDefault()
-                                }}
                                 onClick={async (event) => {
                                   menu().stopMenuPress(event)
                                   await menu().confirmProjectRename(roomId)
@@ -304,9 +290,7 @@ const ProjectsMenu: Component<{ projects: ProjectsMenuController }> = (props) =>
                                 aria-label="Cancel rename"
                                 disabled={isRenaming()}
                                 onPointerDown={menu().stopMenuPress}
-                                onMouseDown={menu().stopMenuPress}
                                 onPointerUp={menu().stopMenuPress}
-                                onMouseUp={menu().stopMenuPress}
                                 onClick={(event) => {
                                   menu().stopMenuPress(event)
                                   menu().cancelProjectRename()
@@ -347,9 +331,7 @@ const ProjectsMenu: Component<{ projects: ProjectsMenuController }> = (props) =>
                             class="cursor-pointer p-1 text-neutral-400 hover:text-neutral-200"
                             aria-label="Edit project name"
                             onPointerDown={menu().stopMenuPress}
-                            onMouseDown={menu().stopMenuPress}
                             onPointerUp={menu().stopMenuPress}
-                            onMouseUp={menu().stopMenuPress}
                             onClick={(event) => {
                               menu().stopMenuPress(event)
                               menu().beginProjectRename(roomId, project.name)
@@ -365,9 +347,7 @@ const ProjectsMenu: Component<{ projects: ProjectsMenuController }> = (props) =>
                             class="cursor-pointer p-1 text-neutral-400 hover:text-red-500"
                             aria-label="Delete project"
                             onPointerDown={menu().stopMenuPress}
-                            onMouseDown={menu().stopMenuPress}
                             onPointerUp={menu().stopMenuPress}
-                            onMouseUp={menu().stopMenuPress}
                             onClick={(event) => {
                               menu().stopMenuPress(event)
                               menu().setConfirmingProjectId(roomId)
@@ -452,15 +432,7 @@ const SamplesMenu: Component<{ samples: SamplesMenuController }> = (props) => {
                               event.stopPropagation()
                               event.preventDefault()
                             }}
-                            onMouseDown={(event) => {
-                              event.stopPropagation()
-                              event.preventDefault()
-                            }}
                             onPointerUp={(event) => {
-                              event.stopPropagation()
-                              event.preventDefault()
-                            }}
-                            onMouseUp={(event) => {
                               event.stopPropagation()
                               event.preventDefault()
                             }}
@@ -486,15 +458,7 @@ const SamplesMenu: Component<{ samples: SamplesMenuController }> = (props) => {
                               event.stopPropagation()
                               event.preventDefault()
                             }}
-                            onMouseDown={(event) => {
-                              event.stopPropagation()
-                              event.preventDefault()
-                            }}
                             onPointerUp={(event) => {
-                              event.stopPropagation()
-                              event.preventDefault()
-                            }}
-                            onMouseUp={(event) => {
                               event.stopPropagation()
                               event.preventDefault()
                             }}
@@ -520,15 +484,7 @@ const SamplesMenu: Component<{ samples: SamplesMenuController }> = (props) => {
                                   event.stopPropagation()
                                   event.preventDefault()
                                 }}
-                                onMouseDown={(event) => {
-                                  event.stopPropagation()
-                                  event.preventDefault()
-                                }}
                                 onPointerUp={(event) => {
-                                  event.stopPropagation()
-                                  event.preventDefault()
-                                }}
-                                onMouseUp={(event) => {
                                   event.stopPropagation()
                                   event.preventDefault()
                                 }}
@@ -556,15 +512,7 @@ const SamplesMenu: Component<{ samples: SamplesMenuController }> = (props) => {
                                   event.stopPropagation()
                                   event.preventDefault()
                                 }}
-                                onMouseDown={(event) => {
-                                  event.stopPropagation()
-                                  event.preventDefault()
-                                }}
                                 onPointerUp={(event) => {
-                                  event.stopPropagation()
-                                  event.preventDefault()
-                                }}
-                                onMouseUp={(event) => {
                                   event.stopPropagation()
                                   event.preventDefault()
                                 }}
@@ -586,15 +534,7 @@ const SamplesMenu: Component<{ samples: SamplesMenuController }> = (props) => {
                                   event.stopPropagation()
                                   event.preventDefault()
                                 }}
-                                onMouseDown={(event) => {
-                                  event.stopPropagation()
-                                  event.preventDefault()
-                                }}
                                 onPointerUp={(event) => {
-                                  event.stopPropagation()
-                                  event.preventDefault()
-                                }}
-                                onMouseUp={(event) => {
                                   event.stopPropagation()
                                   event.preventDefault()
                                 }}
@@ -654,15 +594,7 @@ const SamplesMenu: Component<{ samples: SamplesMenuController }> = (props) => {
                               event.stopPropagation()
                               event.preventDefault()
                             }}
-                            onMouseDown={(event) => {
-                              event.stopPropagation()
-                              event.preventDefault()
-                            }}
                             onPointerUp={(event) => {
-                              event.stopPropagation()
-                              event.preventDefault()
-                            }}
-                            onMouseUp={(event) => {
                               event.stopPropagation()
                               event.preventDefault()
                             }}
@@ -688,15 +620,7 @@ const SamplesMenu: Component<{ samples: SamplesMenuController }> = (props) => {
                               event.stopPropagation()
                               event.preventDefault()
                             }}
-                            onMouseDown={(event) => {
-                              event.stopPropagation()
-                              event.preventDefault()
-                            }}
                             onPointerUp={(event) => {
-                              event.stopPropagation()
-                              event.preventDefault()
-                            }}
-                            onMouseUp={(event) => {
                               event.stopPropagation()
                               event.preventDefault()
                             }}
@@ -768,15 +692,7 @@ const ExportsMenu: Component<{ exportsMenu: ExportsMenuController }> = (props) =
                           event.stopPropagation()
                           event.preventDefault()
                         }}
-                        onMouseDown={(event) => {
-                          event.stopPropagation()
-                          event.preventDefault()
-                        }}
                         onPointerUp={(event) => {
-                          event.stopPropagation()
-                          event.preventDefault()
-                        }}
-                        onMouseUp={(event) => {
                           event.stopPropagation()
                           event.preventDefault()
                         }}

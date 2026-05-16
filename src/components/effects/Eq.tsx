@@ -313,8 +313,11 @@ export default function Eq(props: EqProps) {
   })
 
   // Interaction: drag nodes to set freq/gain
-  const onCanvasMouseDown = (ev: MouseEvent) => {
+  const onCanvasPointerDown = (ev: PointerEvent) => {
     if (!props.enabled || !canvasRef) return
+    if (ev.currentTarget instanceof HTMLCanvasElement) {
+      ev.currentTarget.setPointerCapture(ev.pointerId)
+    }
     const rect = canvasRef.getBoundingClientRect()
     const x = ev.clientX - rect.left
     const y = ev.clientY - rect.top
@@ -344,7 +347,7 @@ export default function Eq(props: EqProps) {
     }
   }
 
-  const onCanvasMouseMove = (ev: MouseEvent) => {
+  const onCanvasPointerMove = (ev: PointerEvent) => {
     const id = draggedId(); if (!id || !canvasRef) return
     const rect = canvasRef.getBoundingClientRect()
     const x = ev.clientX - rect.left
@@ -359,7 +362,7 @@ export default function Eq(props: EqProps) {
     }
   }
 
-  const onCanvasMouseUp = () => setDraggedId(null)
+  const onCanvasPointerUp = () => setDraggedId(null)
 
   // UI helpers
   const selBand = () => props.bands.find(b => b.id === selectedId())
@@ -509,10 +512,10 @@ export default function Eq(props: EqProps) {
               width={canvasSize().width}
               height={canvasSize().height}
               class={cn('w-full rounded-md', props.enabled ? 'cursor-crosshair' : 'cursor-not-allowed opacity-60')}
-              onMouseDown={onCanvasMouseDown}
-              onMouseMove={onCanvasMouseMove}
-              onMouseUp={onCanvasMouseUp}
-              onMouseLeave={onCanvasMouseUp}
+              onPointerDown={onCanvasPointerDown}
+              onPointerMove={onCanvasPointerMove}
+              onPointerUp={onCanvasPointerUp}
+              onPointerCancel={onCanvasPointerUp}
             />
           </div>
         </div>

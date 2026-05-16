@@ -71,17 +71,20 @@ export default function Knob(props: KnobProps) {
     return `${value.toFixed(1)}${unit}`
   }
 
-  const handleMouseDown = (event: MouseEvent) => {
+  const handlePointerDown = (event: PointerEvent) => {
     if (props.disabled) return
     
     event.preventDefault()
     event.stopPropagation()
+    if (event.currentTarget instanceof HTMLElement) {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
     
     setIsDragging(true)
     setStartY(event.clientY)
     setStartValue(props.value)
     
-    const handleMouseMove = (moveEvent: MouseEvent) => {
+    const handlePointerMove = (moveEvent: PointerEvent) => {
       moveEvent.preventDefault()
       const deltaY = startY() - moveEvent.clientY
       const sensitivity = props.logarithmic ? 1.0 : 1.5
@@ -111,15 +114,17 @@ export default function Knob(props: KnobProps) {
       props.onValueChange(finalValue)
     }
     
-    const handleMouseUp = (upEvent: MouseEvent) => {
+    const handlePointerUp = (upEvent: PointerEvent) => {
       upEvent.preventDefault()
       setIsDragging(false)
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('pointermove', handlePointerMove)
+      document.removeEventListener('pointerup', handlePointerUp)
+      document.removeEventListener('pointercancel', handlePointerUp)
     }
     
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
+    document.addEventListener('pointermove', handlePointerMove)
+    document.addEventListener('pointerup', handlePointerUp)
+    document.addEventListener('pointercancel', handlePointerUp)
   }
 
   // Cleanup on component unmount
@@ -158,7 +163,7 @@ export default function Knob(props: KnobProps) {
           '-webkit-user-select': 'none',
           'touch-action': 'none'
         }}
-        onMouseDown={handleMouseDown}
+        onPointerDown={handlePointerDown}
         onDblClick={handleDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
         onDragStart={(e) => e.preventDefault()}

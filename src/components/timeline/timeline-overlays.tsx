@@ -128,7 +128,6 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
           onPointerDown={stopOverlayEvent}
           onPointerMove={stopOverlayEvent}
           onPointerUp={stopOverlayEvent}
-          onMouseDown={stopOverlayEvent}
           onClick={stopOverlayEvent}
           onWheel={stopOverlayEvent}
           onContextMenu={stopOverlayEvent}

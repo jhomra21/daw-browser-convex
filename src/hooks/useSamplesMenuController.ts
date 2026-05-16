@@ -107,7 +107,7 @@ export function useSamplesMenuController(
     }
   }
 
-  const handleDocMouseDown = (event: MouseEvent) => {
+  const handleDocPointerDown = (event: PointerEvent) => {
     const sampleId = confirmingSampleKey()
     if (!sampleId) return
     const target = event.target
@@ -121,12 +121,12 @@ export function useSamplesMenuController(
   }
 
   onMount(() => {
-    window.addEventListener('mousedown', handleDocMouseDown, captureOptions)
+    window.addEventListener('pointerdown', handleDocPointerDown, captureOptions)
     window.addEventListener('keydown', handleEscKey, captureOptions)
   })
 
   onCleanup(() => {
-    window.removeEventListener('mousedown', handleDocMouseDown, captureOptions)
+    window.removeEventListener('pointerdown', handleDocPointerDown, captureOptions)
     window.removeEventListener('keydown', handleEscKey, captureOptions)
   })
 

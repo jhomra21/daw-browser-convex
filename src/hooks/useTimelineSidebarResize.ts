@@ -9,7 +9,7 @@ type UseTimelineSidebarResizeOptions = {
 }
 
 type UseTimelineSidebarResizeReturn = {
-  onSidebarMouseDown: (event: MouseEvent) => void
+  onSidebarPointerDown: (event: PointerEvent) => void
 }
 
 export function useTimelineSidebarResize(
@@ -19,7 +19,7 @@ export function useTimelineSidebarResize(
   let resizeStartX = 0
   let resizeStartWidth = 0
 
-  function onSidebarMouseMove(event: MouseEvent): void {
+  function onSidebarPointerMove(event: PointerEvent): void {
     if (!resizing) return
     const containerWidth = options.getContainerElement()?.clientWidth ?? 0
     const delta = resizeStartX - event.clientX
@@ -28,27 +28,33 @@ export function useTimelineSidebarResize(
     options.setSidebarWidth(nextWidth)
   }
 
-  function onSidebarMouseUp(): void {
+  function onSidebarPointerUp(): void {
     resizing = false
-    window.removeEventListener('mousemove', onSidebarMouseMove)
-    window.removeEventListener('mouseup', onSidebarMouseUp)
+    window.removeEventListener('pointermove', onSidebarPointerMove)
+    window.removeEventListener('pointerup', onSidebarPointerUp)
+    window.removeEventListener('pointercancel', onSidebarPointerUp)
   }
 
-  function onSidebarMouseDown(event: MouseEvent): void {
+  function onSidebarPointerDown(event: PointerEvent): void {
     event.preventDefault()
+    if (event.currentTarget instanceof HTMLElement) {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
     resizing = true
     resizeStartX = event.clientX
     resizeStartWidth = options.sidebarWidth()
-    window.addEventListener('mousemove', onSidebarMouseMove)
-    window.addEventListener('mouseup', onSidebarMouseUp)
+    window.addEventListener('pointermove', onSidebarPointerMove)
+    window.addEventListener('pointerup', onSidebarPointerUp)
+    window.addEventListener('pointercancel', onSidebarPointerUp)
   }
 
   onCleanup(() => {
-    window.removeEventListener('mousemove', onSidebarMouseMove)
-    window.removeEventListener('mouseup', onSidebarMouseUp)
+    window.removeEventListener('pointermove', onSidebarPointerMove)
+    window.removeEventListener('pointerup', onSidebarPointerUp)
+    window.removeEventListener('pointercancel', onSidebarPointerUp)
   })
 
   return {
-    onSidebarMouseDown,
+    onSidebarPointerDown,
   }
 }

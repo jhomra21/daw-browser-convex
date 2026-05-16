@@ -32,7 +32,7 @@ type TrackSidebarProps = {
       outputTargetId?: Track["id"],
     ) => void;
     onVolumeChange: (trackId: Track["id"], volume: number) => void;
-    onSidebarMouseDown: (e: MouseEvent) => void;
+    onSidebarPointerDown: (e: PointerEvent) => void;
     onToggleMute: (trackId: Track["id"]) => void;
     onToggleSolo: (trackId: Track["id"]) => void;
     syncMix: boolean;
@@ -292,7 +292,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     <>
       <div
         class="relative z-20 -mx-[7px] flex w-4 cursor-col-resize justify-center"
-        onMouseDown={sidebar().onSidebarMouseDown}
+        onPointerDown={sidebar().onSidebarPointerDown}
       >
         <div class="pointer-events-none h-full w-0.5 bg-neutral-700" />
       </div>

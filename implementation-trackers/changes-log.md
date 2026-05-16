@@ -2,6 +2,42 @@
 
 Tracks review-driven follow-up work before merging the audio refactor branch.
 
+## 2026-05-16 — Unified Timeline Sidebar Scroll Follow-Up
+
+### Scope
+
+- Created the `unify-timeline-sidebar` branch after the pointer-event cleanup landed on `master`.
+- Reworked the timeline/sidebar layout so track rows and their sidebar controls share one vertical scroll context instead of scrolling independently.
+- Kept horizontal scrolling scoped to the clip/timeline area while keeping the track sidebar visible at the right edge.
+
+### Layout Changes
+
+- Moved `TrackSidebar` into the main timeline scroll content in `src/components/Timeline.tsx` so vertical scrolling moves timeline lanes and sidebar rows together.
+- Wrapped the clip/ruler area and sidebar in one wide flex content surface sized from timeline duration plus sidebar width.
+- Kept the sidebar pinned during horizontal timeline scrolling with a sticky right-side wrapper.
+- Removed the sidebar's independent vertical scroll container so the sidebar no longer drifts out of alignment with the timeline lanes.
+- Made the sidebar header sticky to the shared timeline scrollport so `Sync Mix`, add-track controls, and routing controls stay aligned with the sticky timeline ruler.
+- Locked the sidebar header height to the shared `RULER_HEIGHT` constant so its bottom border aligns with the timeline ruler border.
+- Prevented the sidebar header controls from wrapping when users resize the sidebar, avoiding variable header height that would break row alignment.
+- Changed the sidebar resize hit area from a layout-taking flex column to an absolutely positioned overlay on the sidebar's left edge, preserving the drag affordance without creating a visible 16px gap between the ruler and sidebar.
+
+### Corrections During Visual Iteration
+
+- Confirmed that earlier sticky-header attempts appeared ineffective because the dev server had been stopped before visual verification.
+- Removed an attempted first-row border adjustment after confirming the perceived double-border issue was not the root cause.
+- Removed the resize gutter's temporary sticky background strip once the resize hit area was converted to a non-layout overlay.
+- Kept the resize divider visually distinct while ensuring the invisible hit area no longer affects layout or introduces blank space.
+- Simplify review found no scoped reuse, quality, or efficiency cleanup needed; its positioning-context concern was already covered by the sticky sidebar wrapper.
+- Defensive-code review removed the optional `bottomOffsetPx` fallback from `TrackSidebar` because the single `Timeline` callsite always passes the shared bottom offset.
+
+### Validation
+
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after moving the sidebar into the timeline scroll content.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after making the sidebar header sticky.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after aligning the sidebar header height with `RULER_HEIGHT`.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after converting the resize hit area into an absolute overlay.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after simplify review; final validation was rerun after defensive-code cleanup and log updates.
+
 ## 2026-05-15 — Track Sidebar Routing and Meter Visibility Follow-Up
 
 ### Scope

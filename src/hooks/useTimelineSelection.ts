@@ -1,21 +1,22 @@
-import { createSignal, type Accessor } from 'solid-js'
+import { createSignal, onCleanup, type Accessor } from 'solid-js'
 
 import { PPS, RULER_HEIGHT, LANE_HEIGHT } from '~/lib/timeline-utils'
 import type { Track } from '~/types/timeline'
 
+import { useDrag } from './useDrag'
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 
 type TimelineSelectionOptions = {
   tracks: Accessor<Track[]>
   selection: TimelineSelectionController
-  startScrub: (clientX: number) => void
+  startScrub: (clientX: number, options?: { listen?: boolean }) => void
+  moveScrub: (clientX: number) => void
   stopScrub: () => void
 }
 
 type TimelineSelection = {
   marqueeRect: Accessor<{ x: number; y: number; width: number; height: number } | null>
-  onLaneMouseDown: (event: MouseEvent, scrollEl: HTMLDivElement | undefined) => void
-  onLaneDragUp: () => void
+  onLanePointerDown: (event: PointerEvent, scrollEl: HTMLDivElement | undefined) => void
 }
 
 export function useTimelineSelection(options: TimelineSelectionOptions): TimelineSelection {
@@ -23,6 +24,7 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
     tracks,
     selection,
     startScrub,
+    moveScrub,
     stopScrub,
   } = options
 
@@ -33,10 +35,9 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
   let startX = 0
   let startY = 0
 
-  const onLaneMouseDown = (event: MouseEvent, scrollEl: HTMLDivElement | undefined) => {
-    event.preventDefault()
+  const startLaneDrag = (event: PointerEvent, scrollEl: HTMLDivElement | undefined) => {
     const ts = tracks()
-    if (ts.length === 0 || !scrollEl) return
+    if (ts.length === 0 || !scrollEl) return false
 
     currentScrollEl = scrollEl
 
@@ -60,25 +61,18 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
     startX = event.clientX - rect.left + (scrollEl.scrollLeft || 0)
     startY = event.clientY - rect.top + (scrollEl.scrollTop || 0)
     marqueeActive = false
-    window.addEventListener('mousemove', handleDragMove)
-    window.addEventListener('mouseup', handleDragUp)
-    startScrub(event.clientX)
+    startScrub(event.clientX, { listen: false })
+    return true
   }
 
-  const handleDragMove = (event: MouseEvent) => {
-    const scrollEl = currentScrollEl
-    if (!scrollEl) return
-    onLaneDragMove(event, scrollEl)
+  const onLanePointerDown = (event: PointerEvent, scrollEl: HTMLDivElement | undefined) => {
+    if (!startLaneDrag(event, scrollEl)) return
+    laneDrag.onPointerDown(event)
   }
 
-  const handleDragUp = () => {
-    onLaneDragUp()
-  }
-
-  let currentScrollEl: HTMLDivElement | undefined
-  const onLaneDragMove = (event: MouseEvent, scrollEl: HTMLDivElement | undefined) => {
+  let currentScrollEl: HTMLDivElement
+  const onLaneDragMove = (event: PointerEvent, scrollEl: HTMLDivElement) => {
     currentScrollEl = scrollEl
-    if (!scrollEl) return
 
     const rect = scrollEl.getBoundingClientRect()
     const currentX = event.clientX - rect.left + (scrollEl.scrollLeft || 0)
@@ -91,7 +85,10 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
       stopScrub()
     }
 
-    if (!marqueeActive) return
+    if (!marqueeActive) {
+      moveScrub(event.clientX)
+      return
+    }
 
     const x = Math.min(startX, currentX)
     const y = Math.min(startY, currentY) - RULER_HEIGHT
@@ -132,17 +129,27 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
     }
   }
 
+  const laneDrag = useDrag({
+    onDragMove: (_, event) => {
+      onLaneDragMove(event, currentScrollEl)
+    },
+    onDragEnd: () => {
+      onLaneDragUp()
+    },
+  })
+
   const onLaneDragUp = () => {
-    window.removeEventListener('mousemove', handleDragMove)
-    window.removeEventListener('mouseup', handleDragUp)
+    stopScrub()
     setMarqueeRect(null)
     marqueeActive = false
-    currentScrollEl = undefined
   }
+
+  onCleanup(() => {
+    onLaneDragUp()
+  })
 
   return {
     marqueeRect,
-    onLaneMouseDown,
-    onLaneDragUp,
+    onLanePointerDown,
   }
 }

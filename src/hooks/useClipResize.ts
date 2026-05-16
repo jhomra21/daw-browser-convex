@@ -1,4 +1,4 @@
-import type { Accessor } from 'solid-js'
+import { onCleanup, type Accessor } from 'solid-js'
 
 import { persistClipTiming } from '~/lib/clip-mutations'
 import { buildClipTimingHistoryEntry } from '~/lib/undo/builders'
@@ -35,8 +35,6 @@ type ClipResizeOptions = {
 
 type ClipResizeHandlers = {
   onClipResizeStart: (trackId: Track['id'], clipId: string, edge: 'left' | 'right', event: MouseEvent) => void
-  onResizeMouseMove: (event: MouseEvent) => void
-  onResizeMouseUp: () => void
 }
 
 export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
@@ -61,6 +59,11 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
   let resizeFixedRight = 0
   let resizeOrigBufferOffset = 0
   let resizeOrigMidiOffsetBeats = 0
+
+  const removeResizeListeners = () => {
+    window.removeEventListener('mousemove', onResizeMouseMove)
+    window.removeEventListener('mouseup', onResizeMouseUp)
+  }
 
   const onClipResizeStart = (trackId: Track['id'], clipId: string, edge: 'left' | 'right', event: MouseEvent) => {
     event.preventDefault()
@@ -223,8 +226,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     if (!clipResizing || !resizing) {
       clipResizing = false
       resizing = null
-      window.removeEventListener('mousemove', onResizeMouseMove)
-      window.removeEventListener('mouseup', onResizeMouseUp)
+      removeResizeListeners()
       return
     }
 
@@ -234,8 +236,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     clipResizing = false
     const active = resizing
     resizing = null
-    window.removeEventListener('mousemove', onResizeMouseMove)
-    window.removeEventListener('mouseup', onResizeMouseUp)
+    removeResizeListeners()
 
     if (track && clip && active) {
       setDraftClipTiming(clip.id, null)
@@ -289,9 +290,13 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     }
   }
 
+  onCleanup(() => {
+    clipResizing = false
+    resizing = null
+    removeResizeListeners()
+  })
+
   return {
     onClipResizeStart,
-    onResizeMouseMove,
-    onResizeMouseUp,
   }
 }

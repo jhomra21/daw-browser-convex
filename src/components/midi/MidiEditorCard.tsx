@@ -1,4 +1,4 @@
-import { type Component, createSignal, onCleanup, createEffect, For, onMount } from 'solid-js'
+import { type Component, createMemo, createSignal, onCleanup, createEffect, For, onMount } from 'solid-js'
 import { convexClient, convexApi } from '~/lib/convex'
 import { cn } from '~/lib/utils'
 import type { Clip } from '~/types/timeline'
@@ -51,6 +51,11 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   const minPitch = 12
   const maxPitch = 108
   const rows = () => (maxPitch - minPitch + 1) // 97 rows
+  const gridCells = createMemo(() => {
+    const columnCount = cols()
+    const majorStep = stepsPerBeat() * 4
+    return Array.from({ length: rows() * columnCount }, (_, i) => i % columnCount % majorStep === 0)
+  })
   const topPitch = () => maxPitch
   const rowPx = 20
   const contentHeightPx = () => rows() * rowPx
@@ -479,15 +484,16 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
           {/* Grid area */}
           <div class="relative bg-neutral-900" ref={(el) => (gridRef = el || undefined)} onPointerDown={onGridClick as any}>
             <div class="w-full grid" style={{ 'grid-template-rows': `repeat(${rows()}, ${rowPx}px)`, 'grid-template-columns': `repeat(${cols()}, minmax(0, 1fr))` }}>
-              {[...Array(rows() * cols())].map((_, i) => {
-                const colIdx = i % cols()
-                const major = (colIdx % (stepsPerBeat() * 4)) === 0
-                return <div class={cn('border', major ? 'border-neutral-700' : 'border-neutral-800')} />
-              })}
+              <For each={gridCells()}>
+                {(major) => (
+                  <div class={cn('border', major ? 'border-neutral-700' : 'border-neutral-800')} />
+                )}
+              </For>
             </div>
             {/* Notes overlay (scrolls with content) */}
             <div class="absolute left-0 right-0 pointer-events-none" style={{ top: '0px', height: `${contentHeightPx()}px` }}>
-              {notes().map((n, idx) => (
+              <For each={notes()}>
+                {(n, idx) => (
                 <div
                   class="absolute rounded-sm bg-green-500/70 border border-green-400/80 pointer-events-auto"
                   style={{
@@ -497,18 +503,19 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
                     height: `${Math.max(2, rowPx - 2)}px`,
                     cursor: 'grab',
                   }}
-                  onPointerDown={onNotePointerDown(idx) as any}
+                  onPointerDown={(ev) => onNotePointerDown(idx())(ev)}
                   onClick={(ev) => { ev.stopPropagation(); ev.preventDefault() }}
                   onDblClick={(ev) => {
                     ev.stopPropagation()
                     ev.preventDefault()
                     if (!canPersist()) { warnMissingUser(); return }
-                    setNotes(prev => prev.filter((_, i) => i !== idx))
+                    setNotes(prev => prev.filter((_, i) => i !== idx()))
                     scheduleSave()
                   }}
                   data-midi-note="1"
                 />
-              ))}
+                )}
+              </For>
             </div>
           </div>
         </div>

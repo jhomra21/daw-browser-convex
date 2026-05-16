@@ -287,6 +287,8 @@ const AgentChat: Component<AgentChatProps> = (props) => {
   const [executeError, setExecuteError] = createSignal<string | null>(null)
   const [autoApply, setAutoApply] = createSignal(false)
   let saveTimer: number | null = null
+  const pendingScrollTimers = new Set<number>()
+  const pendingScrollFrames = new Set<number>()
   const [loaded, setLoaded] = createSignal(false)
   const [forceScrollNext, setForceScrollNext] = createSignal(false)
 
@@ -311,12 +313,33 @@ const AgentChat: Component<AgentChatProps> = (props) => {
     } catch {}
   }
 
+  function scheduleScrollFrame(callback: () => void) {
+    const frame = requestAnimationFrame(() => {
+      pendingScrollFrames.delete(frame)
+      callback()
+    })
+    pendingScrollFrames.add(frame)
+  }
+
+  function clearPendingScrollWork() {
+    for (const timer of pendingScrollTimers) window.clearTimeout(timer)
+    pendingScrollTimers.clear()
+    for (const frame of pendingScrollFrames) cancelAnimationFrame(frame)
+    pendingScrollFrames.clear()
+  }
+
   function scrollToBottomSoon(opts?: { smooth?: boolean }) {
-    // Try multiple ticks to cover DOM/layout timing across environments
+    clearPendingScrollWork()
     scrollToBottom(opts)
     queueMicrotask(() => scrollToBottom(opts))
-    setTimeout(() => scrollToBottom(opts), 0)
-    requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom(opts)))
+    const timer = window.setTimeout(() => {
+      pendingScrollTimers.delete(timer)
+      scrollToBottom(opts)
+    }, 0)
+    pendingScrollTimers.add(timer)
+    scheduleScrollFrame(() => {
+      scheduleScrollFrame(() => scrollToBottom(opts))
+    })
   }
 
   createEffect(() => {
@@ -342,7 +365,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
     if (!loaded()) return
     const count = messages().length
     if (count <= 0) return
-    requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom()))
+    scrollToBottomSoon()
   })
 
   // Load/save auto-apply preference
@@ -431,7 +454,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
     const force = forceScrollNext() // capture to track signal
     const smooth = streaming() // capture to track signal
     if (!open) return
-    requestAnimationFrame(() => {
+    scheduleScrollFrame(() => {
       if (force) {
         scrollToBottomSoon()
         setForceScrollNext(false)
@@ -445,6 +468,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
 
   onCleanup(() => {
     clearSaveHistoryTimer()
+    clearPendingScrollWork()
   })
 
   function tryExtractCommands() {
@@ -626,7 +650,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
           summary = parts.length ? `Applied: ${parts.join(', ')}` : 'Done.'
         }
         setMessages(prev => [...prev, { role: 'assistant', content: summary }])
-        requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom()))
+        scrollToBottomSoon()
       } catch {}
     } catch (e: any) {
       setExecuteError(String(e?.message || e) )
@@ -642,7 +666,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
     const userMsg: Msg = { role: 'user', content }
     setMessages(prev => [...prev, userMsg, { role: 'assistant', content: '' }])
     // Bring the placeholder into view
-    requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom()))
+    scrollToBottomSoon()
     setInput('')
     setStreaming(true)
     setParsedCommands(null)
@@ -729,7 +753,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
             <button class="text-neutral-400 hover:text-white" onClick={props.onClose}>✕</button>
           </div>
         </div>
-        <div class="flex-1 overflow-y-auto px-3 py-2" ref={el => { messagesRef = el; try { if (props.isOpen) requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom())) } catch {} }}>
+        <div class="flex-1 overflow-y-auto px-3 py-2" ref={el => { messagesRef = el; if (props.isOpen) scrollToBottomSoon() }}>
           <div class="min-h-full flex flex-col justify-end space-y-2">
             <For each={messages()}>{(m) => (
               <div class={m.role === 'user' ? 'text-right' : 'text-left'}>

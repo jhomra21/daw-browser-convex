@@ -290,6 +290,7 @@ const Timeline: Component = () => {
     setPlayhead,
     requestPlay,
     startScrub,
+    moveScrub,
     stopScrub,
     setScrollElement,
   } = usePlayheadControls({
@@ -425,8 +426,6 @@ const Timeline: Component = () => {
 
   const {
     onClipResizeStart,
-    onResizeMouseMove,
-    onResizeMouseUp,
   } = useClipResize({
     tracks: () => renderTracks(),
     setDraftClipTiming: projection.setDraftClipTiming,
@@ -473,12 +472,12 @@ const Timeline: Component = () => {
 
   const {
     marqueeRect,
-    onLaneMouseDown,
-    onLaneDragUp,
+    onLanePointerDown,
   } = useTimelineSelection({
     tracks: () => renderTracks(),
     selection,
     startScrub,
+    moveScrub,
     stopScrub,
   })
 
@@ -575,9 +574,10 @@ const Timeline: Component = () => {
     getContainerElement: () => containerRef,
   })
 
-  const handleLaneMouseDown: JSX.EventHandler<HTMLDivElement, MouseEvent> = (event) => {
+  const handleLanePointerDown: JSX.EventHandler<HTMLDivElement, PointerEvent> = (event) => {
+    if (event.target instanceof Element && event.target.closest('[data-timeline-ruler="1"]')) return
     if (midiEditorClipId()) { event.preventDefault(); event.stopPropagation(); return }
-    onLaneMouseDown(event, scrollRef)
+    onLanePointerDown(event, scrollRef)
   }
 
   const onRulerMouseDown = (event: MouseEvent) => {
@@ -612,9 +612,6 @@ const Timeline: Component = () => {
   })
 
   onCleanup(() => {
-    try { onLaneDragUp() } catch {}
-    try { window.removeEventListener('mousemove', onResizeMouseMove) } catch {}
-    try { window.removeEventListener('mouseup', onResizeMouseUp) } catch {}
     audioEngine.close()
     resetAudioEngine()
     clearClipBufferCaches()
@@ -713,7 +710,7 @@ const Timeline: Component = () => {
           <div 
             class="relative select-none" 
             style={{ width: `${duration() * PPS}px`, height: `${RULER_HEIGHT + (renderTracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}px` }}
-            onMouseDown={handleLaneMouseDown}
+            onPointerDown={handleLanePointerDown}
           >
             <TimelineRuler
               durationSec={duration()}

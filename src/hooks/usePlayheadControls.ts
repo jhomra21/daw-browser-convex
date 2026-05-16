@@ -24,6 +24,7 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loo
 
   let scrollEl: HTMLDivElement | undefined
   let scrubbing = false
+  let scrubListenersActive = false
 
   const setScrollElement = (el?: HTMLDivElement) => {
     scrollEl = el
@@ -32,13 +33,18 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loo
   const stopScrub = () => {
     if (!scrubbing) return
     scrubbing = false
+    scrubListenersActive = false
     window.removeEventListener('mousemove', onScrubMove)
     window.removeEventListener('mouseup', onScrubEnd)
   }
 
   const onScrubMove = (event: MouseEvent) => {
+    moveScrub(event.clientX)
+  }
+
+  const moveScrub = (clientX: number) => {
     if (!scrubbing || !scrollEl) return
-    const sec = clientXToSec(event.clientX, scrollEl)
+    const sec = clientXToSec(clientX, scrollEl)
     playback.setPlayhead(sec, tracks())
   }
 
@@ -46,15 +52,15 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loo
     stopScrub()
   }
 
-  const startScrub = (clientX: number) => {
+  const startScrub = (clientX: number, options?: { listen?: boolean }) => {
     if (!scrollEl) return
     const sec = clientXToSec(clientX, scrollEl)
     playback.setPlayhead(sec, tracks())
-    if (!scrubbing) {
-      scrubbing = true
-      window.addEventListener('mousemove', onScrubMove)
-      window.addEventListener('mouseup', onScrubEnd)
-    }
+    scrubbing = true
+    if (options?.listen === false || scrubListenersActive) return
+    scrubListenersActive = true
+    window.addEventListener('mousemove', onScrubMove)
+    window.addEventListener('mouseup', onScrubEnd)
   }
 
   const requestPlay = async () => {
@@ -82,6 +88,7 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loo
     ...playback,
     requestPlay,
     startScrub,
+    moveScrub,
     stopScrub,
     setScrollElement,
   }

@@ -352,7 +352,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
           {(track) => {
             const lockedByOther =
               !!track.lockedBy && track.lockedBy !== sidebar().currentUserId;
-            const isRecordArmed = sidebar().recordArmTrackId === track.id;
+            const isRecordArmed = () => sidebar().recordArmTrackId === track.id;
             const channelRole = getTrackChannelRole(track);
             const isReturnTrack = channelRole === "return";
             const isGroupTrack = channelRole === "group";
@@ -533,7 +533,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             "flex h-7 items-center justify-center rounded border text-xs font-bold transition-colors",
                             recordDisabled
                               ? "cursor-not-allowed border-red-900 bg-neutral-800 text-red-900"
-                              : isRecordArmed
+                              : isRecordArmed()
                                 ? "border-red-400 bg-red-500 text-black shadow-inner"
                                 : "border-red-500 text-red-400 hover:bg-red-500/20",
                           )}
@@ -546,7 +546,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                                   ? "Group tracks cannot be armed for recording"
                                   : track.kind === "instrument"
                                     ? "Instrument tracks cannot be armed for audio recording"
-                                    : isRecordArmed
+                                    : isRecordArmed()
                                       ? "Disarm recording"
                                       : "Arm for recording"
                           }

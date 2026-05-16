@@ -37,6 +37,9 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Persisted normalized local routing before the mixer controller's no-op equality return so re-selecting `None` repairs stale local routing storage even when pending in-memory routing already matches.
 - Persisted sidebar routing changes through the shared local mix abstraction at the Timeline callback boundary as well, so selecting send `None` flushes `sends: []` before any controller snapshot/equality/pending-routing branch can interfere.
 - Manually confirmed the local-first send `None` path now survives immediate refresh without waiting for Convex/shared persistence.
+- Validated the final Solid UI review findings and fixed stale record-arm row state, timeline drag listener cleanup, clip-resize listener cleanup, MIDI editor JSX `.map()` rendering, and AgentChat deferred scroll cleanup.
+- Switched timeline lane selection from mouse-only drag events to pointer events so the pointer-start contract, global move/up listeners, and cleanup path use the same event family.
+- Fixed the follow-up Solid review findings by reading MIDI `<For>` note indices at pointer-event time, moving the MIDI grid-cell memo below its row dependency, and routing pointer lane scrub movement through `usePlayheadControls.moveScrub`.
 
 ### Simplify Review
 
@@ -52,6 +55,8 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - A simplify rerun for local-first routing skipped broad storage abstraction changes, kept branded-track-id-safe target lookups, and briefly removed the duplicate mixer-controller routing write before later validation restored controller-boundary persistence alongside the Timeline callback write.
 - The repeated simplify loop removed the final duplicate routing write from `useTimelineLocalMix.persist` because the merged local track-state save already writes the dedicated routing map, then reuse, quality, and efficiency reruns all returned LGTM.
 - The final simplify rerun returned LGTM for reuse, quality, and in-scope efficiency.
+- The Solid UI simplify pass reused the existing `useDrag` pointer lifecycle helper for lane selection, removed unused hook cleanup exports and MIDI grid-cell key state, routed AgentChat deferred scroll frames through one tracked scheduling helper, and moved the remaining inline deferred-scroll callers onto that helper.
+- The post-review simplify loop cached MIDI grid column and major-step values inside the grid-cell memo, reduced grid-cell entries to booleans, coalesced superseded AgentChat deferred-scroll work, and let pointer lane scrubs start without redundant mouse listeners; the rerun returned LGTM for reuse, quality, and efficiency.
 
 ### Defensive-Code Review
 
@@ -68,6 +73,8 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - The repeated defensive-code-review loop returned LGTM for both UI and routing-storage groups with no additional high-confidence redundant guards or impossible branches.
 - The post-confirmation defensive-code-review removed the now-impossible meter `current` fallback after proving every rendered track receives a sampled meter entry in the same tick, and clarified an intermediate simplify-log entry that was superseded by the confirmed callback-plus-controller local routing persistence path.
 - The final defensive-code-review rerun returned LGTM with no additional high-confidence redundant guards or impossible branches.
+- The Solid UI defensive-code-review removed redundant lane-drag scroll-element fallbacks, duplicate `useDrag` cancellation, and duplicate parent lane-drag cleanup while keeping hook-owned cleanup that stops scrub state and clears marquee state.
+- The post-review defensive-code-review loop returned LGTM for AgentChat, timeline hooks, MIDI, TrackSidebar, and the changes log; the AgentChat scroll coalescing was kept as the accepted simplify efficiency fix rather than removed as redundant defense.
 
 ### Validation
 
@@ -95,6 +102,8 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after adding the local mix callback-boundary write for sidebar routing changes.
 - User validation confirmed selecting a return send, changing it to `None`, and refreshing immediately now keeps `None`.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after post-confirmation simplify and defensive-code-review cleanup.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the Solid UI cleanup, simplify pass, defensive-code-review pass, and pointer-event lane selection follow-up.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the final post-review simplify loop, defensive-code-review loop, changes-log update, and final diff review.
 
 ## 2026-05-13 — Access-Control Review Follow-Up
 

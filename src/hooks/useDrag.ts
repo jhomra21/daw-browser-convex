@@ -20,8 +20,8 @@ export function useDrag(options: UseDragOptions = {}) {
 
   const removeGlobalListeners = () => {
     window.removeEventListener('pointermove', handlePointerMove)
-    window.removeEventListener('pointerup', handlePointerUp)
-    window.removeEventListener('pointercancel', handlePointerUp)
+    window.removeEventListener('pointerup', handlePointerUp, { capture: true })
+    window.removeEventListener('pointercancel', handlePointerUp, { capture: true })
     document.body.classList.remove('select-none')
   }
 
@@ -52,8 +52,8 @@ export function useDrag(options: UseDragOptions = {}) {
     setIsDragging(true)
     document.body.classList.add('select-none')
     window.addEventListener('pointermove', handlePointerMove)
-    window.addEventListener('pointerup', handlePointerUp)
-    window.addEventListener('pointercancel', handlePointerUp)
+    window.addEventListener('pointerup', handlePointerUp, { capture: true })
+    window.addEventListener('pointercancel', handlePointerUp, { capture: true })
     void options.onDragStart?.(getPointerPos(event), event)
   }
 

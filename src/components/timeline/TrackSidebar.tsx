@@ -12,7 +12,7 @@ import {
   getTrackChannelRole,
 } from "~/lib/track-routing";
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
-import { RULER_HEIGHT } from "~/lib/timeline-utils";
+import { LANE_HEIGHT, RULER_HEIGHT } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Track, TrackSend } from "~/types/timeline";
 
@@ -306,7 +306,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
           "padding-bottom": `${sidebar().bottomOffsetPx}px`,
         }}
       >
-        <div class="sticky top-0 z-30 flex items-center justify-between gap-2 overflow-hidden border-b border-neutral-800 bg-neutral-900 p-1" style={{ height: `${RULER_HEIGHT}px` }}>
+        <div class="sticky top-0 z-40 flex items-center justify-between gap-2 overflow-hidden border-b border-neutral-800 bg-neutral-900 p-1" style={{ height: `${RULER_HEIGHT}px` }}>
           <button
             class={cn(
               "shrink-0 whitespace-nowrap rounded-md px-1 py-0.5 text-xs font-medium leading-none transition-transform ease-out active:scale-97",
@@ -370,11 +370,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             return (
               <div
                 class={cn(
+                  "[box-shadow:inset_0_-1px_0_rgb(38_38_38)]",
                   sidebar().selectedTrackId === track.id
                     ? "bg-neutral-800"
-                    : "border-t border-neutral-800 bg-neutral-900",
+                    : "bg-neutral-900",
                 )}
-                style={{ height: "96px" }}
+                style={{ height: `${LANE_HEIGHT}px` }}
                 onClick={() => sidebar().onTrackClick(track.id)}
               >
                 <div class="grid h-full grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 p-2">

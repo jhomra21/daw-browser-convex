@@ -103,11 +103,11 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
       {props.timeline.loopEnabled && props.timeline.loopEndSec - props.timeline.loopStartSec > 0.05 && (
         <>
           <div
-            class="absolute top-0 bottom-0 w-px bg-green-400/70 pointer-events-none z-30"
+            class="absolute top-0 bottom-0 w-px bg-green-400/70 pointer-events-none z-[25]"
             style={{ left: `${props.timeline.loopStartSec * PPS}px` }}
           />
           <div
-            class="absolute top-0 bottom-0 w-px bg-green-400/70 pointer-events-none z-30"
+            class="absolute top-0 bottom-0 w-px bg-green-400/70 pointer-events-none z-[25]"
             style={{ left: `${props.timeline.loopEndSec * PPS}px` }}
           />
         </>
@@ -120,7 +120,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
           />
         )}
       </Show>
-      <div class="absolute top-0 bottom-0 z-30 w-px bg-red-500 pointer-events-none" style={{ left: `${props.timeline.playheadSec * PPS}px` }} />
+      <div class="absolute top-0 bottom-0 z-[25] w-px bg-red-500 pointer-events-none" style={{ left: `${props.timeline.playheadSec * PPS}px` }} />
       <Show when={props.midi.clipId}>
         <div
           class="absolute inset-0 z-40 bg-transparent"

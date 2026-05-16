@@ -29,6 +29,11 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Kept the resize divider visually distinct while ensuring the invisible hit area no longer affects layout or introduces blank space.
 - Simplify review found no scoped reuse, quality, or efficiency cleanup needed; its positioning-context concern was already covered by the sticky sidebar wrapper.
 - Defensive-code review removed the optional `bottomOffsetPx` fallback from `TrackSidebar` because the single `Timeline` callsite always passes the shared bottom offset.
+- Fixed clip drag release cleanup by listening for shared drag `pointerup` and `pointercancel` in the capture phase, so clip-level pointer-up handling cannot leave the drag session active after release.
+- Rebalanced timeline stacking so the sidebar header remains above the ruler, the ruler remains above scrolled clips, and playhead/loop guide overlays sit above clips/text while staying below the sticky ruler.
+- Replaced the sidebar row separator element with an inset row shadow during simplify cleanup, preserving track/sidebar row alignment without adding per-row decorative DOM.
+- Simplify review also replaced the sidebar row's hard-coded `96px` height with the shared `LANE_HEIGHT` constant so future timeline lane-height changes cannot desynchronize sidebar rows.
+- Defensive-code review found no high-confidence redundant guards, duplicated validation, or impossible-state branches in the drag-release or stacking follow-up.
 
 ### Validation
 
@@ -37,6 +42,8 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after aligning the sidebar header height with `RULER_HEIGHT`.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after converting the resize hit area into an absolute overlay.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after simplify review; final validation was rerun after defensive-code cleanup and log updates.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the clip-drag release and timeline/sidebar stacking fixes.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the final guide-layering correction, simplify cleanup, defensive-code-review rerun, log update, and final diff review.
 
 ## 2026-05-15 — Track Sidebar Routing and Meter Visibility Follow-Up
 

@@ -912,7 +912,7 @@ const Timeline: Component = () => {
             </div>
 
             <div
-              class="sticky right-0 z-20 flex shrink-0"
+              class="sticky right-0 z-40 flex shrink-0"
               style={{ width: `${sidebarWidth()}px` }}
             >
               <TrackSidebar

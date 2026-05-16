@@ -250,7 +250,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
   return (
     <div
       data-timeline-ruler="1"
-      class="sticky top-0 z-20 border-b border-neutral-800 bg-neutral-900"
+      class="sticky top-0 z-30 border-b border-neutral-800 bg-neutral-900"
       style={{ width: `${rulerWidthPx()}px`, height: `${RULER_HEIGHT}px`, ...backgroundStyle() }}
       ref={el => { rootEl = el }}
       onPointerDown={onLocalPointerDown}

@@ -179,6 +179,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
   } = useDrag({
     onDragMove: (_, event) => onPointerDragMove(event),
     onDragEnd: (_, event) => onPointerDragEnd(event),
+    dragCursorClass: 'cursor-grabbing',
   })
 
   const onClipPointerDown = (trackId: Track['id'], clipId: string, event: PointerEvent) => {
@@ -261,7 +262,10 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     creatingTrackDuringDrag = false
 
     const scroll = getScrollRef()
-    if (!scroll) return
+    if (!scroll) {
+      resetDragState()
+      return
+    }
     const rect = scroll.getBoundingClientRect()
     const leftPx = clip.startSec * PPS - (scroll.scrollLeft || 0)
     dragDeltaX = event.clientX - (rect.left + leftPx)

@@ -2,6 +2,54 @@
 
 Tracks review-driven follow-up work before merging the audio refactor branch.
 
+## 2026-05-16 — Unified Timeline Sidebar Scroll Follow-Up
+
+### Scope
+
+- Created the `unify-timeline-sidebar` branch after the pointer-event cleanup landed on `master`.
+- Reworked the timeline/sidebar layout so track rows and their sidebar controls share one vertical scroll context instead of scrolling independently.
+- Kept horizontal scrolling scoped to the clip/timeline area while keeping the track sidebar visible at the right edge.
+
+### Layout Changes
+
+- Moved `TrackSidebar` into the main timeline scroll content in `src/components/Timeline.tsx` so vertical scrolling moves timeline lanes and sidebar rows together.
+- Wrapped the clip/ruler area and sidebar in one wide flex content surface sized from timeline duration plus sidebar width.
+- Kept the sidebar pinned during horizontal timeline scrolling with a sticky right-side wrapper.
+- Removed the sidebar's independent vertical scroll container so the sidebar no longer drifts out of alignment with the timeline lanes.
+- Made the sidebar header sticky to the shared timeline scrollport so `Sync Mix`, add-track controls, and routing controls stay aligned with the sticky timeline ruler.
+- Locked the sidebar header height to the shared `RULER_HEIGHT` constant so its bottom border aligns with the timeline ruler border.
+- Prevented the sidebar header controls from wrapping when users resize the sidebar, avoiding variable header height that would break row alignment.
+- Changed the sidebar resize hit area from a layout-taking flex column to an absolutely positioned overlay on the sidebar's left edge, preserving the drag affordance without creating a visible 16px gap between the ruler and sidebar.
+
+### Corrections During Visual Iteration
+
+- Confirmed that earlier sticky-header attempts appeared ineffective because the dev server had been stopped before visual verification.
+- Removed an attempted first-row border adjustment after confirming the perceived double-border issue was not the root cause.
+- Removed the resize gutter's temporary sticky background strip once the resize hit area was converted to a non-layout overlay.
+- Kept the resize divider visually distinct while ensuring the invisible hit area no longer affects layout or introduces blank space.
+- Simplify review found no scoped reuse, quality, or efficiency cleanup needed; its positioning-context concern was already covered by the sticky sidebar wrapper.
+- Defensive-code review removed the optional `bottomOffsetPx` fallback from `TrackSidebar` because the single `Timeline` callsite always passes the shared bottom offset.
+- Fixed clip drag release cleanup by listening for shared drag `pointerup` and `pointercancel` in the capture phase, so clip-level pointer-up handling cannot leave the drag session active after release.
+- Rebalanced timeline stacking so the sidebar header remains above the ruler, the ruler remains above scrolled clips, and playhead/loop guide overlays sit above clips/text while staying below the sticky ruler.
+- Replaced the sidebar row separator element with an inset row shadow during simplify cleanup, preserving track/sidebar row alignment without adding per-row decorative DOM.
+- Simplify review also replaced the sidebar row's hard-coded `96px` height with the shared `LANE_HEIGHT` constant so future timeline lane-height changes cannot desynchronize sidebar rows.
+- Defensive-code review found no high-confidence redundant guards, duplicated validation, or impossible-state branches in the drag-release or stacking follow-up.
+- Restyled clip name labels from rounded inset badges into full-width integrated top strips with stronger opacity and `p-1` text padding, so labels read as part of the clip instead of floating cards while keeping the intended compact inset around the text.
+- Added an optional `dragCursorClass` lifecycle hook to shared `useDrag` and wired clip dragging to `cursor-grabbing`, keeping the active move cursor cleanup in the same path as global pointer listener cleanup.
+- Simplify review initially suggested vertical-only padding, but the label intentionally remains `p-1` to preserve the desired text inset; broader cursor-class ownership concerns were left unchanged because overlapping drag sessions are outside the current single-active-drag UI path.
+- Defensive-code review found no high-confidence redundant guards or impossible branches in the clip label and drag-cursor follow-up.
+
+### Validation
+
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after moving the sidebar into the timeline scroll content.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after making the sidebar header sticky.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after aligning the sidebar header height with `RULER_HEIGHT`.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after converting the resize hit area into an absolute overlay.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after simplify review; final validation was rerun after defensive-code cleanup and log updates.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the clip-drag release and timeline/sidebar stacking fixes.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the final guide-layering correction, simplify cleanup, defensive-code-review rerun, log update, and final diff review.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the clip label strip, drag cursor lifecycle, simplify cleanup, defensive-code-review rerun, log update, and final diff review.
+
 ## 2026-05-15 — Track Sidebar Routing and Meter Visibility Follow-Up
 
 ### Scope

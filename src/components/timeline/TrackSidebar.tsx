@@ -12,6 +12,7 @@ import {
   getTrackChannelRole,
 } from "~/lib/track-routing";
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
+import { LANE_HEIGHT, RULER_HEIGHT } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Track, TrackSend } from "~/types/timeline";
 
@@ -43,7 +44,7 @@ type TrackSidebarProps = {
     isPlaying: boolean;
     getTrackLevel: (trackId: Track["id"]) => number;
     getTrackLevels?: (trackId: Track["id"]) => [number, number];
-    bottomOffsetPx?: number;
+    bottomOffsetPx: number;
   };
 };
 
@@ -291,24 +292,24 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   return (
     <>
       <div
-        class="relative z-20 -mx-[7px] flex w-4 cursor-col-resize justify-center"
+        class="absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize"
         onPointerDown={sidebar().onSidebarPointerDown}
       >
-        <div class="pointer-events-none h-full w-0.5 bg-neutral-700" />
+        <div class="pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-neutral-700" />
       </div>
 
       <div
-        class="track-sidebar-scroll overflow-y-auto overflow-x-hidden border-l border-neutral-800 bg-neutral-900 p-0"
+        class="track-sidebar-scroll overflow-x-clip border-l border-neutral-800 bg-neutral-900 p-0"
         style={{
           width: `${sidebar().sidebarWidth}px`,
           "min-width": `${TIMELINE_SIDEBAR_MIN_WIDTH}px`,
-          "padding-bottom": `${sidebar().bottomOffsetPx ?? 0}px`,
+          "padding-bottom": `${sidebar().bottomOffsetPx}px`,
         }}
       >
-        <div class="flex items-center justify-between gap-2 p-1">
+        <div class="sticky top-0 z-40 flex items-center justify-between gap-2 overflow-hidden border-b border-neutral-800 bg-neutral-900 p-1" style={{ height: `${RULER_HEIGHT}px` }}>
           <button
             class={cn(
-              "rounded-md p-0.5 text-xs font-medium transition-transform ease-out active:scale-97",
+              "shrink-0 whitespace-nowrap rounded-md px-1 py-0.5 text-xs font-medium leading-none transition-transform ease-out active:scale-97",
               sidebar().syncMix
                 ? "bg-blue-500/15 text-blue-300 ring-1 ring-blue-400/30"
                 : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-300",
@@ -318,29 +319,29 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
           >
             Sync Mix
           </button>
-          <div class="flex min-w-0 items-center gap-2 pr-2">
+          <div class="flex min-w-0 items-center gap-2 overflow-hidden pr-2">
             <button
-              class="cursor-pointer whitespace-nowrap text-base text-neutral-400 transition-transform ease-out active:scale-97 hover:text-neutral-300"
+              class="shrink-0 cursor-pointer whitespace-nowrap text-sm text-neutral-400 transition-transform ease-out active:scale-97 hover:text-neutral-300"
               onClick={sidebar().onAddTrack}
             >
               Add Track
             </button>
             <button
-              class="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700"
+              class="shrink-0 cursor-pointer whitespace-nowrap rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700"
               onClick={() => sidebar().onAddReturnTrack?.()}
               title="Add return track"
             >
               + Return
             </button>
             <button
-              class="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700"
+              class="shrink-0 cursor-pointer whitespace-nowrap rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700"
               onClick={() => sidebar().onAddGroupTrack?.()}
               title="Add group bus"
             >
               + Group
             </button>
             <button
-              class="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700"
+              class="shrink-0 cursor-pointer whitespace-nowrap rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700"
               onClick={() => sidebar().onAddInstrumentTrack?.()}
               title="Add instrument track (for MIDI clips)"
             >
@@ -369,11 +370,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             return (
               <div
                 class={cn(
+                  "[box-shadow:inset_0_-1px_0_rgb(38_38_38)]",
                   sidebar().selectedTrackId === track.id
                     ? "bg-neutral-800"
-                    : "border-t border-neutral-800 bg-neutral-900",
+                    : "bg-neutral-900",
                 )}
-                style={{ height: "96px" }}
+                style={{ height: `${LANE_HEIGHT}px` }}
                 onClick={() => sidebar().onTrackClick(track.id)}
               >
                 <div class="grid h-full grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 p-2">

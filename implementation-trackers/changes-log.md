@@ -33,6 +33,7 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Let Kobalte own top-level `Media` and `Share` menu open state, keeping their side-effect handlers only, so menu-to-menu switching closes the previous content through the menubar context.
 - Converted the `Share` menu close control from a native button to a `MenubarItem` so close behavior routes through the same menu primitive path.
 - Hid non-active closed menu content during menu switching and tracked the active animation value inside the menubar wrapper so an older menu cannot flash during the final close animation.
+- Tightened the toolbar row padding from `px-3 py-2` to `px-2 py-1` so the native menu bar uses a more compact top, bottom, and side inset.
 
 ### Solid Architecture Cleanup
 
@@ -70,6 +71,7 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after simplify cleanup, defensive-code-review cleanup, log updates, and final diff review.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after the second simplify pass, second defensive-code-review pass, log update, and final diff review.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after the post-commit menu animation polish, repeated simplify loop, defensive-code-review rerun, log update, and final diff review.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after tightening the native toolbar row padding and updating this log.
 
 ## 2026-05-16 — Unified Timeline Sidebar Scroll Follow-Up
 

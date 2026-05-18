@@ -114,9 +114,7 @@ type NativeMenuTriggerProps = {
 };
 
 const NativeMenuTrigger: Component<NativeMenuTriggerProps> = (props) => (
-  <MenubarTrigger
-    class="h-7 rounded px-2 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100 data-[expanded]:bg-neutral-800 data-[expanded]:text-neutral-100"
-  >
+  <MenubarTrigger class="h-7 rounded px-2 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100 data-[expanded]:bg-neutral-800 data-[expanded]:text-neutral-100">
     {props.label}
   </MenubarTrigger>
 );
@@ -196,16 +194,10 @@ const EditMenu: Component = () => {
     <MenubarMenu value="edit">
       <NativeMenuTrigger label="Edit" />
       <MenubarContent class="w-44 border-neutral-800 bg-neutral-900">
-        <MenubarItem
-          class={nativeMenuItemClass}
-          onSelect={toolbar().onUndo}
-        >
+        <MenubarItem class={nativeMenuItemClass} onSelect={toolbar().onUndo}>
           Undo
         </MenubarItem>
-        <MenubarItem
-          class={nativeMenuItemClass}
-          onSelect={toolbar().onRedo}
-        >
+        <MenubarItem class={nativeMenuItemClass} onSelect={toolbar().onRedo}>
           Redo
         </MenubarItem>
       </MenubarContent>
@@ -1435,9 +1427,7 @@ const ShareMenu: Component<{ share: ShareMenuController }> = (props) => {
 
 const ShortcutsSubMenu: Component = () => (
   <MenubarSub>
-    <MenubarSubTrigger class={nativeMenuItemClass}>
-      Shortcuts
-    </MenubarSubTrigger>
+    <MenubarSubTrigger class={nativeMenuItemClass}>Shortcuts</MenubarSubTrigger>
     <MenubarPortal>
       <MenubarSubContent
         class="border-neutral-800 bg-neutral-900 text-neutral-100"
@@ -1557,34 +1547,19 @@ const SettingsMenu: Component = () => {
         <Show
           when={user()?.email}
           fallback={
-            <MenubarItem
-              as={Link}
-              to="/Login"
-              class={nativeMenuItemClass}
-            >
+            <MenubarItem as={Link} to="/Login" class={nativeMenuItemClass}>
               Sign in
             </MenubarItem>
           }
         >
-          <MenubarItem
-            as={Link}
-            to="/Login"
-            class={nativeMenuItemClass}
-          >
+          <MenubarItem as={Link} to="/Login" class={nativeMenuItemClass}>
             Account
           </MenubarItem>
-          <MenubarItem
-            class={nativeMenuItemClass}
-            onSelect={handleSignOut}
-          >
+          <MenubarItem class={nativeMenuItemClass} onSelect={handleSignOut}>
             Logout
           </MenubarItem>
         </Show>
-        <MenubarItem
-          as={Link}
-          to="/about"
-          class={nativeMenuItemClass}
-        >
+        <MenubarItem as={Link} to="/about" class={nativeMenuItemClass}>
           About
         </MenubarItem>
       </MenubarContent>
@@ -1624,7 +1599,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
   };
 
   return (
-    <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-3 py-2">
+    <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-2 py-1">
       <div class="justify-self-start flex items-center gap-1">
         <ToolbarProvider value={toolbarContext}>
           <Menubar class="flex items-center gap-1">

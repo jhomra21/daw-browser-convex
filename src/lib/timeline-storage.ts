@@ -18,8 +18,8 @@ export type LocalMixPatch = Partial<{
   outputTargetId: TrackId | null
 }>
 export type LocalMixMap = Record<string, LocalMixPatch>
-export type LocalRoutingPatch = Pick<LocalMixPatch, 'sends' | 'outputTargetId'>
-export type LocalRoutingMap = Record<string, LocalRoutingPatch>
+type LocalRoutingPatch = Pick<LocalMixPatch, 'sends' | 'outputTargetId'>
+type LocalRoutingMap = Record<string, LocalRoutingPatch>
 type HistoryStorageScope = {
   roomId?: string
   userId?: string

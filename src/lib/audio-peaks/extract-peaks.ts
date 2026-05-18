@@ -1,9 +1,9 @@
 import type { PeakAssetRecord, PeakChunkRecord, PeakLevelRecord } from '~/lib/audio-peaks/types'
 import { resamplePeakPairs } from '~/lib/audio-peaks/resample-peak-pairs'
 
-export const PEAK_LEVELS_PER_SECOND = [400, 100, 25] as const
-export const HIGH_RES_PEAKS_PER_SECOND = PEAK_LEVELS_PER_SECOND[0]
-export const MAX_CHUNK_DURATION_SEC = 2
+const PEAK_LEVELS_PER_SECOND = [400, 100, 25] as const
+const HIGH_RES_PEAKS_PER_SECOND = PEAK_LEVELS_PER_SECOND[0]
+const MAX_CHUNK_DURATION_SEC = 2
 export const SILENCE_BYTE = 128
 
 function clampSample(value: number) {

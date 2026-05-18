@@ -1,6 +1,6 @@
 export type AudioSourceKind = 'upload' | 'url' | 'recording'
 
-export type AudioSourceMetadataPatchInput = {
+type AudioSourceMetadataPatchInput = {
   assetKey?: string
   sourceKind?: string
   durationSec?: number
@@ -8,7 +8,7 @@ export type AudioSourceMetadataPatchInput = {
   channelCount?: number
 }
 
-export type AudioSourceMetadataPatch = {
+type AudioSourceMetadataPatch = {
   assetKey?: string
   sourceKind?: AudioSourceKind
   durationSec?: number
@@ -16,7 +16,7 @@ export type AudioSourceMetadataPatch = {
   channelCount?: number
 }
 
-export type ClipAudioSourceFields = {
+type ClipAudioSourceFields = {
   sourceAssetKey?: string
   sourceKind?: AudioSourceKind
   sourceDurationSec?: number

@@ -2,6 +2,30 @@
 
 Tracks review-driven follow-up work before merging the audio refactor branch.
 
+## 2026-05-18 — Dead Code and Knip Cleanup
+
+### Scope
+
+- Created the `cleanup-one` branch from `master` after the native toolbar redesign PR landed.
+- Ran `bun run knip` to identify unused files, unused exports/types, unlisted dependencies, and duplicate exports.
+- Verified findings with source searches before editing.
+- Preserved planned future-use UI files, including `nav-user` and unused shared UI primitives, instead of deleting them.
+
+### Cleanup
+
+- Added `kysely@0.28.11` as a direct dependency because `api/auth.ts` imports `Kysely` directly and Better Auth's Kysely adapter expects the `0.28.x` export surface.
+- Replaced the duplicate `primeWaveformAsset` alias with direct `ensurePeakAsset` usage in `clip-source-client`.
+- Converted unused exported helpers, constants, and types to file-local declarations where they only had internal consumers.
+- Removed unused Convex mutation/action/prefetch/invalidate/batch helper exports from `src/lib/convex.ts`.
+- Removed unused Menubar group/radio-group exports.
+- Removed the unused `buttonVariants` export while keeping `ButtonProps` for the preserved future-use sidebar UI.
+- Updated `knip.json` so Knip ignores planned future-use UI files and UI-only export/type reports under `src/components/ui`.
+
+### Validation
+
+- `bun run knip` passed after cleanup and intentional UI ignores.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after cleanup.
+
 ## 2026-05-17 — Native Toolbar Redesign Follow-Up
 
 ### Scope

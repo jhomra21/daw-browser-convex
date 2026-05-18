@@ -57,7 +57,7 @@ type DefaultSampleCatalogItem = {
   uploadedAt?: string
 }
 
-export type DefaultSampleListItem = {
+type DefaultSampleListItem = {
   key: string
   assetKey: string
   sourceKind: AudioSourceKind

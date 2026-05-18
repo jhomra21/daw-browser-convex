@@ -19,7 +19,7 @@ export function disconnectAudioNodes(nodes: Array<AudioNode | null | undefined>)
   }
 }
 
-export function connectEqNodes(eqNodes: BiquadFilterNode[], destination: AudioNode) {
+function connectEqNodes(eqNodes: BiquadFilterNode[], destination: AudioNode) {
   if (eqNodes.length === 0) return
   for (let index = 0; index < eqNodes.length; index++) {
     const node = eqNodes[index]
@@ -28,7 +28,7 @@ export function connectEqNodes(eqNodes: BiquadFilterNode[], destination: AudioNo
   }
 }
 
-export function getEqEntryNode(eqNodes: BiquadFilterNode[], destination: AudioNode) {
+function getEqEntryNode(eqNodes: BiquadFilterNode[], destination: AudioNode) {
   return eqNodes[0] ?? destination
 }
 

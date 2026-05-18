@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/solid-query'
 import { authClient } from '~/lib/auth-client'
 
-export type ClientSession = {
+type ClientSession = {
   user: {
     id: string
     email?: string

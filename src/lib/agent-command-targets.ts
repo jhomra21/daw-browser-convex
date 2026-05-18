@@ -1,4 +1,4 @@
-export type AgentMixFallbackMode = 'last-track' | 'all-tracks' | 'none'
+type AgentMixFallbackMode = 'last-track' | 'all-tracks' | 'none'
 
 export function toZeroBasedCommandIndex(value: number | undefined | null) {
   if (value == null || !Number.isFinite(value)) return undefined

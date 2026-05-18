@@ -1,4 +1,4 @@
-import { primeWaveformAsset } from '~/lib/audio-peaks/asset-store'
+import { ensurePeakAsset } from '~/lib/audio-peaks/asset-store'
 import { getAudioSourceMetadata } from '~/lib/audio-source'
 
 export async function primeClipSourceAsset(input: {
@@ -6,7 +6,7 @@ export async function primeClipSourceAsset(input: {
   sampleUrl?: string
   buffer?: AudioBuffer | null
 }) {
-  const record = await primeWaveformAsset({
+  const record = await ensurePeakAsset({
     assetKey: input.sourceAssetKey,
     sampleUrl: input.sampleUrl,
     buffer: input.buffer ?? null,

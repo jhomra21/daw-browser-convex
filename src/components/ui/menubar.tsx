@@ -1,19 +1,98 @@
-import type { Component, ComponentProps, JSX, ValidComponent } from "solid-js";
-import { mergeProps, splitProps } from "solid-js";
+import type {
+  Accessor,
+  Component,
+  ComponentProps,
+  JSX,
+  ValidComponent,
+} from "solid-js";
+import {
+  createContext,
+  createEffect,
+  createSignal,
+  mergeProps,
+  splitProps,
+  useContext,
+} from "solid-js";
 
 import * as MenubarPrimitive from "@kobalte/core/menubar";
 import type { PolymorphicProps } from "@kobalte/core/polymorphic";
 
 import { cn } from "~/lib/utils";
 
-const Menubar = MenubarPrimitive.Root;
+type MenubarAnimationState = {
+  animate: boolean;
+  value: string | null | undefined;
+};
+
+type MenubarAnimationContextValue = {
+  animation: Accessor<MenubarAnimationState>;
+};
+
+const MenubarAnimationContext = createContext<MenubarAnimationContextValue>();
+const MenubarMenuValueContext = createContext<string>();
+
+const useMenubarAnimation = () => {
+  const context = useContext(MenubarAnimationContext);
+  if (!context) throw new Error("MenubarContent must be used within Menubar.");
+  return context;
+};
+
+const useMenubarMenuValue = () => {
+  const value = useContext(MenubarMenuValueContext);
+  if (value === undefined) {
+    throw new Error("MenubarContent must be used within MenubarMenu.");
+  }
+  return value;
+};
+
+type MenubarProps = MenubarPrimitive.MenubarRootProps & {
+  children?: JSX.Element;
+  class?: string;
+};
+
+const Menubar: Component<MenubarProps> = (props) => {
+  const initialValue = props.value ?? props.defaultValue;
+  const [animation, setAnimation] = createSignal<MenubarAnimationState>({
+    animate: true,
+    value: initialValue,
+  });
+  const [currentValue, setCurrentValue] = createSignal<
+    string | null | undefined
+  >(initialValue);
+  const [local, rest] = splitProps(props, ["onValueChange"]);
+
+  createEffect(() => {
+    if (props.value !== undefined) setCurrentValue(props.value);
+  });
+
+  return (
+    <MenubarAnimationContext.Provider value={{ animation }}>
+      <MenubarPrimitive.Root
+        {...rest}
+        onValueChange={(nextValue) => {
+          const previousValue = currentValue();
+          setAnimation({
+            animate: previousValue == null || nextValue == null,
+            value: nextValue ?? previousValue,
+          });
+          setCurrentValue(nextValue);
+          local.onValueChange?.(nextValue);
+        }}
+      />
+    </MenubarAnimationContext.Provider>
+  );
+};
 const MenubarPortal = MenubarPrimitive.Portal;
 const MenubarGroup = MenubarPrimitive.Group;
 const MenubarRadioGroup = MenubarPrimitive.RadioGroup;
 
 const MenubarMenu: Component<MenubarPrimitive.MenubarMenuProps> = (props) => {
   const mergedProps = mergeProps({ gutter: 8, shift: -4 }, props);
-  return <MenubarPrimitive.Menu {...mergedProps} />;
+  return (
+    <MenubarMenuValueContext.Provider value={props.value}>
+      <MenubarPrimitive.Menu {...mergedProps} />
+    </MenubarMenuValueContext.Provider>
+  );
 };
 
 const MenubarSub: Component<MenubarPrimitive.MenubarSubProps> = (props) => {
@@ -33,8 +112,8 @@ const MenubarTrigger = <T extends ValidComponent = "button">(
   return (
     <MenubarPrimitive.Trigger
       class={cn(
-        "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium !cursor-pointer active:scale-97 !transition-transform !duration-150 ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
-        "h-9 px-3 text-xs hover:bg-accent hover:text-accent-foreground data-[expanded]:bg-accent data-[expanded]:text-accent-foreground data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground",
+        "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium !cursor-pointer focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+        "h-9 px-3 text-xs hover:bg-accent hover:text-accent-foreground data-[expanded]:bg-accent data-[expanded]:text-accent-foreground",
         local.class,
       )}
       {...rest}
@@ -51,13 +130,19 @@ const MenubarContent = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, MenubarContentProps<T>>,
 ) => {
   const [local, rest] = splitProps(props as MenubarContentProps, ["class"]);
+  const animation = useMenubarAnimation();
+  const menuValue = useMenubarMenuValue();
+  const shouldAnimate = () =>
+    animation.animation().animate !== false &&
+    menuValue === animation.animation().value;
   return (
     <MenubarPrimitive.Portal>
       <MenubarPrimitive.Content
         class={cn(
           "z-50 min-w-32 max-h-(--kb-menu-content-available-height) overflow-y-auto overflow-x-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md outline-none",
-          "origin-[var(--kb-menu-content-transform-origin)] data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0 data-[closed]:zoom-out-95 data-[expanded]:zoom-in-95",
-          "data-[placement=bottom]:slide-in-from-top-2 data-[placement=left]:slide-in-from-right-2 data-[placement=right]:slide-in-from-left-2 data-[placement=top]:slide-in-from-bottom-2",
+          shouldAnimate()
+            ? "origin-[var(--kb-menu-content-transform-origin)] data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0 data-[closed]:zoom-out-95 data-[expanded]:zoom-in-95 data-[placement=bottom]:slide-in-from-top-2 data-[placement=left]:slide-in-from-right-2 data-[placement=right]:slide-in-from-left-2 data-[placement=top]:slide-in-from-bottom-2"
+            : "data-[closed]:hidden",
           local.class,
         )}
         {...rest}

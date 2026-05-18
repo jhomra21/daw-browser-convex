@@ -28,6 +28,11 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Added conventional Popper spacing to top-level menus and submenus through Kobalte `gutter`/`shift` props instead of content margin offsets.
 - Matched the submenu feel more closely to shadcn's Menubar styling with expanded subtrigger state, chevrons, stronger submenu shadow, and portaled submenu content to avoid clipping.
 - Fixed the `Project Media` menu's horizontal scrollbar by hiding x-overflow while keeping vertical scrolling.
+- Added native-feeling menubar animation gating: initial open and final close animate, while switching from one open top menu to another is instant.
+- Removed top-level trigger press-scale, focus-ring flash, hover color transition, and stale highlighted-state styling so hover/open feedback changes immediately and only reflects the active menu.
+- Let Kobalte own top-level `Media` and `Share` menu open state, keeping their side-effect handlers only, so menu-to-menu switching closes the previous content through the menubar context.
+- Converted the `Share` menu close control from a native button to a `MenubarItem` so close behavior routes through the same menu primitive path.
+- Hid non-active closed menu content during menu switching and tracked the active animation value inside the menubar wrapper so an older menu cannot flash during the final close animation.
 
 ### Solid Architecture Cleanup
 
@@ -47,6 +52,9 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - A second simplify review reused one shared grid-resolution list for the transport dropdown and Settings menu, fixed menubar child indentation, and skipped no-op effect order/index state updates when refreshed query rows match current state.
 - Defensive-code review removed a redundant tempo draft length fallback and an empty defensive wrapper around static input pointer listener registration.
 - A second defensive-code review found no additional high-confidence redundant guards, duplicated validation, or impossible-state branches.
+- The post-commit menu polish simplify loop moved menu identity into the local `MenubarMenu` wrapper context, removed the duplicate `Share` open prop, combined animation state, and then returned LGTM for reuse, quality, and efficiency.
+- The post-commit simplify cleanup also kept controlled menubar value tracking synced with external `value` props so animation decisions do not rely on stale local state.
+- The post-commit defensive-code-review removed the redundant optional menubar animation context fallback and then returned LGTM.
 
 ### Validation
 
@@ -61,6 +69,7 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after polishing menubar focus outlines, menu/submenu spacing, submenu clipping, and media-menu overflow.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after simplify cleanup, defensive-code-review cleanup, log updates, and final diff review.
 - `bun run typecheck`, `bun run build`, and `git diff --check` passed after the second simplify pass, second defensive-code-review pass, log update, and final diff review.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the post-commit menu animation polish, repeated simplify loop, defensive-code-review rerun, log update, and final diff review.
 
 ## 2026-05-16 — Unified Timeline Sidebar Scroll Follow-Up
 

@@ -127,7 +127,6 @@ const nativeMenuItemClass =
 const gridDenominators = [2, 4, 8, 12, 16];
 
 type ShareMenuController = {
-  open: boolean;
   onOpenChange: (open: boolean) => void;
   onOpen: () => Promise<void>;
   onClose: () => void;
@@ -670,7 +669,6 @@ const ProjectMediaMenu: Component = () => {
   return (
     <MenubarMenu
       value="media"
-      open={samples().open() || exportsMenu().open()}
       onOpenChange={(open) => {
         samples().onOpenChange(open);
         exportsMenu().onOpenChange(open);
@@ -1324,7 +1322,6 @@ const ShareMenu: Component<{ share: ShareMenuController }> = (props) => {
   return (
     <MenubarMenu
       value="share"
-      open={share().open}
       onOpenChange={(open) => {
         if (open) {
           void share().onOpen();
@@ -1345,11 +1342,10 @@ const ShareMenu: Component<{ share: ShareMenuController }> = (props) => {
                 Share this room
               </span>
             </div>
-            <button
-              type="button"
+            <MenubarItem
               class="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
               aria-label="Close"
-              onClick={share().onClose}
+              onSelect={share().onClose}
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -1366,7 +1362,7 @@ const ShareMenu: Component<{ share: ShareMenuController }> = (props) => {
                 />
                 <title>Close</title>
               </svg>
-            </button>
+            </MenubarItem>
           </div>
           <div class="flex w-full items-center gap-2">
             <div class="min-w-0 w-full max-w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-neutral-200 shadow-inner">
@@ -1639,7 +1635,6 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
             <SettingsMenu />
             <ShareMenu
               share={{
-                open: shareMenu.open(),
                 onOpenChange: shareMenu.onOpenChange,
                 onOpen: shareMenu.onOpen,
                 onClose: shareMenu.onClose,

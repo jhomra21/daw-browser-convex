@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const EqBandSchema = z.object({
+const EqBandSchema = z.object({
   id: z.string(),
   type: z.string(),
   frequency: z.number(),
@@ -183,7 +183,7 @@ export const AddSampleClipsCommandSchema = z.object({
   bpm: z.number().min(20).max(300).optional(),
 })
 
-export const CommandSchema = z.discriminatedUnion('type', [
+const CommandSchema = z.discriminatedUnion('type', [
   CreateTrackCommandSchema,
   SetTrackRoutingCommandSchema,
   SetTrackVolumeCommandSchema,
@@ -204,7 +204,7 @@ export const CommandSchema = z.discriminatedUnion('type', [
   AddSampleClipsCommandSchema,
 ])
 
-export type AgentCommand = z.infer<typeof CommandSchema>
+type AgentCommand = z.infer<typeof CommandSchema>
 
 export const CommandsEnvelopeSchema = z.object({
   commands: z.array(CommandSchema).min(1),

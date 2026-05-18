@@ -1,5 +1,15 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreFiles": [
+    "src/components/nav-user.tsx",
+    "src/components/ui/**/*.tsx"
+  ],
+  "ignoreIssues": {
+    "src/components/ui/**/*.tsx": [
+      "exports",
+      "types"
+    ]
+  },
   "tags": [
     "-lintignore"
   ]

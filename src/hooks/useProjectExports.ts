@@ -1,7 +1,7 @@
 import { createMemo, type Accessor } from 'solid-js'
 import { useConvexQuery, convexApi } from '~/lib/convex'
 
-export type ProjectExportItem = {
+type ProjectExportItem = {
   _id: string
   roomId: string
   name: string

@@ -14,7 +14,7 @@ export type ExportRange =
   | { mode: 'loop'; startSec: number; endSec: number }
   | { mode: 'custom'; startSec: number; endSec: number }
 
-export type ExportRequest = {
+type ExportRequest = {
   tracks: Track[]
   bpm: number
   range: ExportRange
@@ -27,7 +27,7 @@ export type ExportRequest = {
   }
 }
 
-export type ExportResult = {
+type ExportResult = {
   audioBuffer: AudioBuffer
   blob: Blob
   mimeType: string

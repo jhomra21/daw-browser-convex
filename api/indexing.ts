@@ -1,8 +1,8 @@
 import { toZeroBasedCommandIndex } from '../src/lib/agent-command-targets'
 
-export const toZeroBased = (n: any): number | undefined => toZeroBasedCommandIndex(typeof n === 'number' ? n : Number(n))
+const toZeroBased = (n: any): number | undefined => toZeroBasedCommandIndex(typeof n === 'number' ? n : Number(n))
 
-export const asPositiveIndex = (n: any): number | undefined => {
+const asPositiveIndex = (n: any): number | undefined => {
   const idx = toZeroBased(n)
   return (typeof idx === 'number' && idx >= 0) ? idx : undefined
 }
@@ -12,17 +12,17 @@ export function trackAtIndex<T>(list: readonly T[] | undefined, value: any): T |
   return (typeof idx === 'number' && list) ? (list[idx] as T | undefined) : undefined
 }
 
-export function clipAtIndex<T>(clips: readonly T[], value: any): T | undefined {
+function clipAtIndex<T>(clips: readonly T[], value: any): T | undefined {
   const idx = asPositiveIndex(value)
   return typeof idx === 'number' ? clips[idx] : undefined
 }
 
-export function clipsFromIndices<T>(clips: readonly T[], values: readonly any[] | undefined): T[] {
+function clipsFromIndices<T>(clips: readonly T[], values: readonly any[] | undefined): T[] {
   if (!Array.isArray(values) || values.length === 0) return []
   return values.map(v => clipAtIndex(clips, v)).filter(Boolean) as T[]
 }
 
-export function sortClipsByStartSec<T extends { startSec?: number }>(clips: readonly T[]) {
+function sortClipsByStartSec<T extends { startSec?: number }>(clips: readonly T[]) {
   return [...clips].sort((left, right) => (left.startSec ?? 0) - (right.startSec ?? 0))
 }
 

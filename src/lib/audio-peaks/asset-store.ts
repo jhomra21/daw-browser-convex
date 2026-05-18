@@ -110,7 +110,6 @@ export async function loadPeakChunkData(chunkKey: string): Promise<Uint8Array | 
   }
 }
 
-export const primeWaveformAsset = ensurePeakAsset
 
 export function clearWaveformAssetCache() {
   assetRecordCache.clear()

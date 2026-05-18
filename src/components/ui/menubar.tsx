@@ -83,8 +83,6 @@ const Menubar: Component<MenubarProps> = (props) => {
   );
 };
 const MenubarPortal = MenubarPrimitive.Portal;
-const MenubarGroup = MenubarPrimitive.Group;
-const MenubarRadioGroup = MenubarPrimitive.RadioGroup;
 
 const MenubarMenu: Component<MenubarPrimitive.MenubarMenuProps> = (props) => {
   const mergedProps = mergeProps({ gutter: 8, shift: -4 }, props);
@@ -298,6 +296,4 @@ export {
   MenubarSub,
   MenubarSubTrigger,
   MenubarSubContent,
-  MenubarGroup,
-  MenubarRadioGroup,
 };

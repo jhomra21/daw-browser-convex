@@ -1,6 +1,6 @@
 import { Component, JSX, splitProps, createUniqueId } from "solid-js";
 
-export type IconName = "google" | "solidjs" | "convex" | "file-audio" | "play" | "pause" | "stop" | "metronome" | "repeat" | "grid" | "user" | "log-out" | "log-in" | "house";
+type IconName = "google" | "solidjs" | "convex" | "file-audio" | "play" | "pause" | "stop" | "metronome" | "repeat" | "grid" | "user" | "log-out" | "log-in" | "house";
 
 type BaseIconProps = {
   size?: number | string;
@@ -9,7 +9,7 @@ type BaseIconProps = {
   ariaLabel?: string;
 };
 
-export type IconProps = BaseIconProps & {
+type IconProps = BaseIconProps & {
   name: IconName;
 } & JSX.SvgSVGAttributes<SVGSVGElement>;
 

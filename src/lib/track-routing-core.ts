@@ -1,26 +1,26 @@
 export type RoutingClipKind = 'audio' | 'midi'
 
-export type RoutingTrackLike<TTrackId extends string = string> = {
+type RoutingTrackLike<TTrackId extends string = string> = {
   id: TTrackId
   channelRole?: string
   kind?: string
 }
 
-export type RoutingSendLike<TTrackId extends string = string> = {
+type RoutingSendLike<TTrackId extends string = string> = {
   targetId: TTrackId
   amount: number
 }
 
-export type RoutingTrackChannelRole = 'track' | 'group' | 'return'
+type RoutingTrackChannelRole = 'track' | 'group' | 'return'
 
-export type NormalizeRoutingInput<TTrackId extends string = string> = {
+type NormalizeRoutingInput<TTrackId extends string = string> = {
   track: Pick<RoutingTrackLike<TTrackId>, 'id' | 'channelRole'> | null | undefined
   sends?: Array<RoutingSendLike<TTrackId>>
   outputTargetId?: TTrackId
   tracks: Array<Pick<RoutingTrackLike<TTrackId>, 'id' | 'channelRole'>>
 }
 
-export type NormalizedRouting<TTrackId extends string = string> = {
+type NormalizedRouting<TTrackId extends string = string> = {
   sends: Array<RoutingSendLike<TTrackId>>
   outputTargetId?: TTrackId
 }
@@ -30,7 +30,7 @@ export function normalizeTrackChannelRole(value: string | undefined): RoutingTra
   return 'track'
 }
 
-export function normalizeTrackSendAmount(value: number | undefined) {
+function normalizeTrackSendAmount(value: number | undefined) {
   if (!Number.isFinite(value)) return 0
   return Math.max(0, Math.min(1, value as number))
 }

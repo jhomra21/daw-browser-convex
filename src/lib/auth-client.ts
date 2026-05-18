@@ -11,5 +11,3 @@ export const authClient = createAuthClient({
     credentials: "include",
   },
 });
-
-export type AuthClient = typeof authClient;

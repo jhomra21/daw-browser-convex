@@ -1,7 +1,7 @@
 import { createSignal, onCleanup } from 'solid-js'
 import { cn } from '~/lib/utils'
 
-export type KnobProps = {
+type KnobProps = {
   value: number
   min: number
   max: number

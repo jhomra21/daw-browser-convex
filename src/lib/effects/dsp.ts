@@ -7,7 +7,7 @@ type ImpulseBucket = {
   bucketSec: number
 }
 
-export function createSeededRandom(seed: number) {
+function createSeededRandom(seed: number) {
   let state = (seed >>> 0) || 1
   return () => {
     state = (state + 0x6D2B79F5) | 0
@@ -17,7 +17,7 @@ export function createSeededRandom(seed: number) {
   }
 }
 
-export function getImpulseBucket(decaySec: number, bucketSize = 0.1): ImpulseBucket {
+function getImpulseBucket(decaySec: number, bucketSize = 0.1): ImpulseBucket {
   const clampedDecay = Math.min(10, Math.max(0.05, decaySec))
   const bucketIndex = Math.max(1, Math.round(clampedDecay / bucketSize))
   return {

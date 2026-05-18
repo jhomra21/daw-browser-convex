@@ -1,11 +1,10 @@
 import { ConvexClient } from "convex/browser";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/solid-query";
+import { useQuery, useQueryClient } from "@tanstack/solid-query";
 import { createEffect, onCleanup, untrack } from "solid-js";
 
 import { api } from "../../convex/_generated/api";
 import type {
   FunctionReference,
-  FunctionReturnType,
   FunctionArgs,
 } from "convex/server";
 
@@ -83,135 +82,6 @@ export function useConvexQuery<
   });
 
   return tanstackQuery;
-}
-
-// Type-safe Convex mutation hook using TanStack Query
-export function useConvexMutation<
-  Mutation extends FunctionReference<"mutation", "public", any, any>,
->(
-  mutation: Mutation,
-  options?: {
-    onSuccess?: (data: FunctionReturnType<Mutation>, variables: FunctionArgs<Mutation>) => void;
-    onError?: (error: Error, variables: FunctionArgs<Mutation>) => void;
-    onMutate?: (variables: FunctionArgs<Mutation>) => Promise<any> | any;
-    onSettled?: (data: FunctionReturnType<Mutation> | undefined, error: Error | null, variables: FunctionArgs<Mutation>) => void;
-    invalidateQueries?: string[][];
-    optimisticUpdate?: (queryClient: any, variables: FunctionArgs<Mutation>) => void;
-  }
-) {
-  const queryClient = useQueryClient();
-
-  return useMutation(() => ({
-    mutationFn: async (args: FunctionArgs<Mutation>) => {
-      return await convex.mutation(mutation as any, args as any);
-    },
-    onMutate: async (variables) => {
-      // Apply optimistic update if provided
-      if (options?.optimisticUpdate) {
-        options.optimisticUpdate(queryClient, variables);
-      }
-
-      // Call user's onMutate
-      return await options?.onMutate?.(variables);
-    },
-    onSuccess: (data, variables) => {
-      // Auto-invalidate specified query patterns
-      if (options?.invalidateQueries) {
-        options.invalidateQueries.forEach(queryKey => {
-          queryClient.invalidateQueries({ queryKey });
-        });
-      }
-      options?.onSuccess?.(data, variables);
-    },
-    onError: (error, variables) => {
-      // Revert optimistic updates on error by invalidating affected queries
-      if (options?.optimisticUpdate && options?.invalidateQueries) {
-        options.invalidateQueries.forEach(queryKey => {
-          queryClient.invalidateQueries({ queryKey });
-        });
-      }
-      options?.onError?.(error, variables);
-    },
-    onSettled: options?.onSettled,
-  }));
-}
-
-// Type-safe Convex action hook using TanStack Query
-export function useConvexAction<
-  Action extends FunctionReference<"action", "public", any, any>,
->(
-  action: Action,
-  options?: {
-    onSuccess?: (data: FunctionReturnType<Action>, variables: FunctionArgs<Action>) => void;
-    onError?: (error: Error, variables: FunctionArgs<Action>) => void;
-    onMutate?: (variables: FunctionArgs<Action>) => Promise<any> | any;
-    onSettled?: (data: FunctionReturnType<Action> | undefined, error: Error | null, variables: FunctionArgs<Action>) => void;
-    invalidateQueries?: string[][];
-  }
-) {
-  const queryClient = useQueryClient();
-
-  return useMutation(() => ({
-    mutationFn: async (args: FunctionArgs<Action>) => {
-      return await convex.action(action as any, args as any);
-    },
-    onSuccess: (data, variables) => {
-      // Auto-invalidate specified query patterns
-      if (options?.invalidateQueries) {
-        options.invalidateQueries.forEach(queryKey => {
-          queryClient.invalidateQueries({ queryKey });
-        });
-      }
-      options?.onSuccess?.(data, variables);
-    },
-    onError: options?.onError,
-    onMutate: options?.onMutate,
-    onSettled: options?.onSettled,
-  }));
-}
-
-// Utility function to prefetch Convex queries
-export function prefetchConvexQuery<
-  Query extends FunctionReference<"query", "public", any, any>,
->(
-  queryClient: any,
-  query: Query,
-  args: FunctionArgs<Query>,
-  queryKey: (string | number | boolean | null | undefined)[]
-) {
-  return queryClient.prefetchQuery({
-    queryKey: ['convex', ...queryKey],
-    queryFn: () => convex.query(query as any, args as any),
-    staleTime: 1000 * 60 * 5,
-  });
-}
-
-// Utility function to manually invalidate Convex queries
-export function invalidateConvexQueries(
-  queryClient: any,
-  queryKeyPattern: (string | number | boolean | null | undefined)[]
-) {
-  return queryClient.invalidateQueries({
-    queryKey: ['convex', ...queryKeyPattern],
-  });
-}
-
-
-
-// Utility for batch operations
-export function useBatchConvexMutations() {
-  const queryClient = useQueryClient();
-
-  return {
-    batch: async (operations: Array<() => Promise<any>>) => {
-      const results = await Promise.allSettled(operations.map(op => op()));
-
-      // Invalidate all Convex queries after batch operations
-      queryClient.invalidateQueries({ queryKey: ['convex'] });
-
-      return results;
-    }
-  };
 }
 
 // Direct access to Convex client for advanced use cases

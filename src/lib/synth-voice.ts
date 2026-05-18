@@ -13,7 +13,7 @@ type SynthVoiceSource = {
   releaseMs?: number
 }
 
-export type SynthVoiceConfig = {
+type SynthVoiceConfig = {
   wave1: OscillatorType
   wave2: OscillatorType
   synthGain: number
@@ -22,7 +22,7 @@ export type SynthVoiceConfig = {
   releaseSec: number
 }
 
-export type SynthVoiceEnvelope = {
+type SynthVoiceEnvelope = {
   peakTime: number
   releaseStartTime: number
   endTime: number
@@ -55,11 +55,11 @@ export function getSynthVoiceVelocity(velocity?: number) {
   return typeof velocity === 'number' ? clamp(velocity, 0, 1) : 0.9
 }
 
-export function getMidiNoteFrequency(pitch: number) {
+function getMidiNoteFrequency(pitch: number) {
   return 440 * Math.pow(2, (pitch - 69) / 12)
 }
 
-export function getSynthVoiceEnvelope(
+function getSynthVoiceEnvelope(
   startTime: number,
   durationSec: number,
   attackSec: number,

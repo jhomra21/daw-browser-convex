@@ -9,14 +9,14 @@ type MidiNote = {
   velocity?: number
 }
 
-export type ScheduledMidiEvent = {
+type ScheduledMidiEvent = {
   startSec: number
   endSec: number
   pitch: number
   velocity?: number
 }
 
-export type PlayableAudioWindow = {
+type PlayableAudioWindow = {
   startSec: number
   offsetSec: number
   durationSec: number

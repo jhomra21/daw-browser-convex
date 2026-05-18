@@ -2,7 +2,7 @@ import { createSignal, onCleanup } from 'solid-js'
 
 type Point = { x: number; y: number }
 
-export type UseDragOptions = {
+type UseDragOptions = {
   onDragStart?: (pos: Point, event: PointerEvent) => void | Promise<void>
   onDragMove?: (pos: Point, event: PointerEvent) => void | Promise<void>
   onDragEnd?: (pos: Point, event: PointerEvent) => void | Promise<void>

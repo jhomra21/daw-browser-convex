@@ -13,15 +13,6 @@ import Eq from "~/components/effects/Eq";
 import Reverb from "~/components/effects/Reverb";
 import Synth from "~/components/effects/Synth";
 import SynthCard from "~/components/effects/SynthCard";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuShortcut,
-} from "~/components/ui/dropdown-menu";
 import { Button } from "~/components/ui/button";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import {
@@ -162,78 +153,6 @@ const EffectsPanelToolbar: Component<EffectsPanelToolbarProps> = (props) => (
         + Reverb
       </Button>
     </Show>
-    <div class="ml-auto">
-      <DropdownMenu>
-        <DropdownMenuTrigger>
-          <Button
-            variant="outline"
-            size="sm"
-            class="h-6 px-2 py-0.5 text-xs"
-            aria-label="Show keyboard shortcuts"
-          >
-            Shortcuts
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          class="bg-neutral-900 text-neutral-100"
-          style={{ width: "min(92vw, 22rem)" }}
-        >
-          <DropdownMenuLabel class="text-neutral-400">
-            Timeline
-          </DropdownMenuLabel>
-          <DropdownMenuItem disabled>
-            Play / Pause
-            <DropdownMenuShortcut>Space</DropdownMenuShortcut>
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled>
-            Delete selection or track
-            <DropdownMenuShortcut>
-              Del / Backspace
-            </DropdownMenuShortcut>
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled>
-            Duplicate clips
-            <DropdownMenuShortcut>
-              Ctrl/Cmd + D
-            </DropdownMenuShortcut>
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled>
-            Add Audio Track
-            <DropdownMenuShortcut>Shift + T</DropdownMenuShortcut>
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled>
-            Add Instrument Track
-            <DropdownMenuShortcut>
-              Ctrl/Cmd + Shift + T
-            </DropdownMenuShortcut>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel class="text-neutral-400">
-            MIDI Editor (when keyboard enabled)
-          </DropdownMenuLabel>
-          <DropdownMenuItem disabled>
-            Note keys
-            <DropdownMenuShortcut>
-              A S D F G H J K L ;
-            </DropdownMenuShortcut>
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled>
-            Sharp keys
-            <DropdownMenuShortcut>
-              W E T Y U O P
-            </DropdownMenuShortcut>
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled>
-            Octave down
-            <DropdownMenuShortcut>Z</DropdownMenuShortcut>
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled>
-            Octave up
-            <DropdownMenuShortcut>X</DropdownMenuShortcut>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
   </div>
 );
 
@@ -474,9 +393,11 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   ) {
     if (typeof index === "number") {
       setEffectIndexByTarget((prev) => {
-        const next = { ...prev };
-        next[targetId] = { ...(next[targetId] ?? {}), [kind]: index };
-        return next;
+        if (prev[targetId]?.[kind] === index) return prev;
+        return {
+          ...prev,
+          [targetId]: { ...(prev[targetId] ?? {}), [kind]: index },
+        };
       });
       const idxCurrent = untrack(() => effectIndexByTarget()[targetId] ?? {});
       const idx = { ...idxCurrent, [kind]: index };
@@ -485,10 +406,20 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       if (typeof idx.reverb === "number") entries.push({ kind: "reverb", idx: idx.reverb });
       if (entries.length > 0) {
         entries.sort((a, b) => a.idx - b.idx);
-        setEffectOrderByTarget((prev) => ({
-          ...prev,
-          [targetId]: entries.map((entry) => entry.kind),
-        }));
+        const nextOrder = entries.map((entry) => entry.kind);
+        setEffectOrderByTarget((prev) => {
+          const currentOrder = prev[targetId] ?? [];
+          if (
+            currentOrder.length === nextOrder.length &&
+            currentOrder.every((entry, entryIndex) => entry === nextOrder[entryIndex])
+          ) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [targetId]: nextOrder,
+          };
+        });
         return;
       }
     }

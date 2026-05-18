@@ -742,6 +742,8 @@ const Timeline: Component = () => {
         onToggleLoop={() => setLoopEnabled((prev) => !prev)}
         isRecording={isRecording()}
         onToggleRecord={handleRecordToggle}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
         onJumpToClip={(clipId, trackId, startSec) =>
           jumpToClip(trackId, clipId, startSec)
         }

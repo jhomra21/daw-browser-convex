@@ -2,6 +2,77 @@
 
 Tracks review-driven follow-up work before merging the audio refactor branch.
 
+## 2026-05-17 — Native Toolbar Redesign Follow-Up
+
+### Scope
+
+- Created the `native-toolbar-redesign` branch after the unified timeline/sidebar branch landed.
+- Reworked the timeline toolbar so the center transport controls remain unchanged while the left side uses native app-style menu triggers.
+- Moved toolbar-adjacent actions into top menu groups instead of scattered buttons and bottom-right controls.
+
+### Toolbar and Menu Changes
+
+- Added `File`, `Edit`, `Project`, `Project Media`, `Settings`, and `Share` menu triggers to the left side of `src/components/timeline/TransportControls.tsx`.
+- Kept the center `TransportBar` intact and left the right side as playhead-only after moving `Share` into the left menu group.
+- Wired `Timeline.tsx` to pass `onUndo` and `onRedo` into `TransportControls` so `Edit` can expose undo/redo actions.
+- Removed the standalone `NavUser` toolbar avatar path and moved sign-in, account, logout, and about actions into `Settings`.
+- Restored the missing project media functionality by adding a `Project Media` menu with project samples, default samples, exports, sample drag, copy, insert, and delete actions.
+- Moved the bottom-right `Shortcuts` trigger out of `EffectsPanel` and into `Settings > Shortcuts` while preserving the same shortcut list users previously saw.
+- Portaled the shortcuts submenu content so it is not clipped by the parent settings dropdown.
+- Removed the bright shortcuts submenu border and standardized menu hover/focus styling so highlighted items keep readable text contrast.
+- Updated `NativeMenuTrigger` to render the dropdown trigger as the shared `Button` component, avoiding nested interactive controls.
+- Replaced the attempted dropdown-based menu-bar behavior with a dedicated Solid/Kobalte Menubar wrapper, matching shadcn's React/Radix Menubar pattern for desktop menu bars.
+- Converted the native toolbar menus to `Menubar.Root/Menu/Trigger/Content` so hovering another top menu while one is open switches menus through Kobalte's built-in menubar context.
+- Added highlighted/open trigger styling through Kobalte Menubar trigger state so top menu triggers remain visually selected while their menu is active.
+- Removed the white focus outline around open menubar content while preserving item-level focus styling.
+- Added conventional Popper spacing to top-level menus and submenus through Kobalte `gutter`/`shift` props instead of content margin offsets.
+- Matched the submenu feel more closely to shadcn's Menubar styling with expanded subtrigger state, chevrons, stronger submenu shadow, and portaled submenu content to avoid clipping.
+- Fixed the `Project Media` menu's horizontal scrollbar by hiding x-overflow while keeping vertical scrolling.
+- Added native-feeling menubar animation gating: initial open and final close animate, while switching from one open top menu to another is instant.
+- Removed top-level trigger press-scale, focus-ring flash, hover color transition, and stale highlighted-state styling so hover/open feedback changes immediately and only reflects the active menu.
+- Let Kobalte own top-level `Media` and `Share` menu open state, keeping their side-effect handlers only, so menu-to-menu switching closes the previous content through the menubar context.
+- Converted the `Share` menu close control from a native button to a `MenubarItem` so close behavior routes through the same menu primitive path.
+- Hid non-active closed menu content during menu switching and tracked the active animation value inside the menubar wrapper so an older menu cannot flash during the final close animation.
+- Tightened the toolbar row padding from `px-3 py-2` to `px-2 py-1` so the native menu bar uses a more compact top, bottom, and side inset.
+
+### Solid Architecture Cleanup
+
+- Replaced expanded per-menu prop lists with a file-local `ToolbarProvider`/`useToolbar` context for private toolbar menu components.
+- Kept the toolbar context scoped to `TransportControls.tsx` instead of introducing global app state, matching Solid's context use case for avoiding prop drilling without broadening ownership.
+- Kept menu-specific controllers local to `TransportControls`, including projects, samples, exports, share, and tempo controllers.
+- Added `src/components/ui/menubar.tsx` as the Solid port of shadcn's Menubar wrapper, using `@kobalte/core/menubar` while preserving local dropdown menu styling.
+- Used Solid's `mergeProps` in the menubar wrapper for default `gutter` and `shift` values so callers can override positioning without losing idiomatic default-prop handling.
+
+### Review Follow-Up
+
+- Solid UI review found the dropdown triggers were nesting a `Button` inside `DropdownMenuTrigger`; fixed by rendering the trigger polymorphically as `Button`.
+- A follow-up review after restoring the media menu returned no additional high-confidence findings.
+- Simplified the menu callsites and then replaced local prop threading with the scoped toolbar context after reviewing Solid props/context guidance.
+- Simplify review removed the duplicate share-menu open path so the menu open state handler is the single path that prepares the share URL.
+- Simplify review noted broader repeated menu icon-button chrome and dropdown/menubar wrapper class duplication, but those were left unchanged to keep the follow-up focused.
+- A second simplify review reused one shared grid-resolution list for the transport dropdown and Settings menu, fixed menubar child indentation, and skipped no-op effect order/index state updates when refreshed query rows match current state.
+- Defensive-code review removed a redundant tempo draft length fallback and an empty defensive wrapper around static input pointer listener registration.
+- A second defensive-code review found no additional high-confidence redundant guards, duplicated validation, or impossible-state branches.
+- The post-commit menu polish simplify loop moved menu identity into the local `MenubarMenu` wrapper context, removed the duplicate `Share` open prop, combined animation state, and then returned LGTM for reuse, quality, and efficiency.
+- The post-commit simplify cleanup also kept controlled menubar value tracking synced with external `value` props so animation decisions do not rely on stale local state.
+- The post-commit defensive-code-review removed the redundant optional menubar animation context fallback and then returned LGTM.
+
+### Validation
+
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the initial native toolbar implementation and nested-trigger fix.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after simplifying menu prop passing.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after adding the local `ToolbarProvider`.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after restoring `Project Media`, samples, default samples, exports, and account/settings functionality.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after moving shortcuts into `Settings > Shortcuts`.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after moving `Share` into the left toolbar menu group.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after fixing the shortcuts submenu clipping, border, and menu hover contrast.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after porting the native toolbar menus from dropdown menus to Kobalte Menubar.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after polishing menubar focus outlines, menu/submenu spacing, submenu clipping, and media-menu overflow.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after simplify cleanup, defensive-code-review cleanup, log updates, and final diff review.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the second simplify pass, second defensive-code-review pass, log update, and final diff review.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the post-commit menu animation polish, repeated simplify loop, defensive-code-review rerun, log update, and final diff review.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after tightening the native toolbar row padding and updating this log.
+
 ## 2026-05-16 — Unified Timeline Sidebar Scroll Follow-Up
 
 ### Scope

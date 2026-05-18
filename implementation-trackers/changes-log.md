@@ -2,6 +2,33 @@
 
 Tracks review-driven follow-up work before merging the audio refactor branch.
 
+## 2026-05-18 — Center Transport Controls Redesign
+
+### Scope
+
+- Created the `play-controls` branch from `master`.
+- Redesigned the center toolbar transport controls in `src/components/timeline/TransportControls.tsx` to better match Ableton-style play, stop, and record controls while keeping the surrounding toolbar structure intact.
+
+### Toolbar Changes
+
+- Replaced separate play and pause buttons with a single play/pause toggle so the play button becomes pause while playback is active.
+- Simplified record, play/pause, and stop into icon-only controls with matching dimensions and spacing.
+- Kept record as the same current-color glyph as the other transport icons when inactive, reserving red styling for the active recording state.
+- Aligned the metronome, loop, grid, and grid-resolution controls with the center transport button sizing and removed extra icon margin offsets that made icons appear off-center.
+- Matched center-toolbar button hover colors and height to the left native menu trigger styling, using the same neutral hover background/text treatment instead of the bright default ghost-button hover.
+
+### Review Follow-Up
+
+- Simplify review reused the native menu trigger class for center text-style controls so hover color, height, padding, and typography stay tied to the left toolbar menus.
+- Simplify review found no scoped efficiency cleanup needed; the button-size conflict concern was rejected because the shared `cn` helper uses `tailwind-merge` to resolve conflicting Tailwind utilities.
+- Defensive-code review found no high-confidence redundant guards, duplicated validation, or impossible-state branches in the transport control follow-up.
+
+### Validation
+
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the transport control redesign.
+- `bun run typecheck` and `git diff --check` passed after follow-up sizing, centering, record-state, and hover-color adjustments.
+- `bun run typecheck` and `git diff --check` passed after simplify cleanup and defensive-code-review.
+
 ## 2026-05-18 — Dead Code and Knip Cleanup
 
 ### Scope

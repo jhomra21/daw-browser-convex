@@ -113,8 +113,16 @@ type NativeMenuTriggerProps = {
   label: string;
 };
 
+const nativeMenuTriggerClass =
+  "h-7 rounded px-2 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100";
+
 const NativeMenuTrigger: Component<NativeMenuTriggerProps> = (props) => (
-  <MenubarTrigger class="h-7 rounded px-2 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100 data-[expanded]:bg-neutral-800 data-[expanded]:text-neutral-100">
+  <MenubarTrigger
+    class={cn(
+      nativeMenuTriggerClass,
+      "data-[expanded]:bg-neutral-800 data-[expanded]:text-neutral-100",
+    )}
+  >
     {props.label}
   </MenubarTrigger>
 );
@@ -1152,59 +1160,62 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
   props,
 ) => {
   const transport = () => props.transport;
+  const centerIconButtonClass =
+    "h-7 w-7 rounded text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100";
 
   return (
-    <div class="justify-self-center flex items-center gap-3">
+    <div class="justify-self-center flex items-center gap-1">
       <Button
         variant="ghost"
-        size="sm"
+        size="icon"
         onClick={transport().onToggleRecord}
         aria-pressed={transport().isRecording}
         aria-label={
           transport().isRecording ? "Stop recording" : "Start recording"
         }
-        class="flex items-center gap-2"
+        class={cn(
+          centerIconButtonClass,
+          transport().isRecording && "bg-red-500 hover:bg-red-500/90",
+        )}
       >
         <span
           class={cn(
-            "h-2.5 w-2.5 rounded-full",
-            transport().isRecording
-              ? "bg-white"
-              : "bg-red-500 group-hover:bg-red-400",
+            "h-3.5 w-3.5 rounded-full",
+            transport().isRecording ? "bg-background" : "bg-current",
           )}
         />
-        <span class="text-xs uppercase tracking-wide">
-          {transport().isRecording ? "Stop" : "Rec"}
-        </span>
       </Button>
       <Button
         variant="ghost"
-        size="sm"
-        onClick={transport().onPlay}
-        disabled={transport().isPlaying}
-        aria-label="Play"
+        size="icon"
+        onClick={() => {
+          if (transport().isPlaying) {
+            transport().onPause();
+            return;
+          }
+          transport().onPlay();
+        }}
+        aria-label={transport().isPlaying ? "Pause" : "Play"}
+        class={centerIconButtonClass}
       >
-        <Icon name="play" class="h-4 w-4" />
+        <Show
+          when={transport().isPlaying}
+          fallback={<Icon name="play" class="h-4 w-4 fill-current" />}
+        >
+          <Icon name="pause" class="h-4 w-4" />
+        </Show>
       </Button>
       <Button
         variant="ghost"
-        size="sm"
-        onClick={transport().onPause}
-        disabled={!transport().isPlaying}
-        aria-label="Pause"
-      >
-        <Icon name="pause" class="h-4 w-4" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
+        size="icon"
         onClick={transport().onStop}
         aria-label="Stop"
+        class={centerIconButtonClass}
       >
-        <Icon name="stop" class="h-4 w-4" />
+        <Icon name="stop" class="h-4 w-4 fill-current" />
       </Button>
-      <div class="flex items-center gap-2">
-        <label class="flex items-center gap-1 text-xs text-neutral-400">
+      <div class="flex items-center">
+        <label class="flex items-center gap-1 text-xs text-neutral-400 pr-1">
           <input
             type="text"
             value={transport().tempoDraft()}
@@ -1247,12 +1258,13 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
         </label>
         <Button
           variant="ghost"
-          size="sm"
+          size="icon"
           onClick={transport().onToggleMetronome}
           aria-pressed={transport().metronomeEnabled}
           aria-label="Toggle metronome"
+          class={centerIconButtonClass}
         >
-          <Icon name="metronome" class="mr-1 h-4 w-4" />
+          <Icon name="metronome" class="h-4 w-4" />
         </Button>
         <Button
           variant="ghost"
@@ -1260,9 +1272,12 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
           onClick={transport().onToggleLoop}
           aria-pressed={transport().loopEnabled}
           aria-label="Toggle loop region"
-          class={transport().loopEnabled ? "text-green-400" : ""}
+          class={cn(
+            nativeMenuTriggerClass,
+            transport().loopEnabled && "text-green-400",
+          )}
         >
-          <Icon name="repeat" class="mr-1 h-4 w-4" />
+          <Icon name="repeat" class="h-4 w-4" />
           <span class="text-xs">Loop</span>
         </Button>
         <Button
@@ -1271,14 +1286,17 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
           onClick={transport().onToggleGrid}
           aria-pressed={transport().gridEnabled}
           aria-label="Toggle snap to grid"
-          class={transport().gridEnabled ? "text-green-400" : ""}
+          class={cn(
+            nativeMenuTriggerClass,
+            transport().gridEnabled && "text-green-400",
+          )}
         >
-          <Icon name="grid" class="mr-1 h-4 w-4" />
+          <Icon name="grid" class="h-4 w-4" />
           <span class="text-xs">Grid</span>
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger>
-            <Button variant="ghost" size="sm" class="px-2 py-1 text-xs">
+            <Button variant="ghost" size="sm" class={nativeMenuTriggerClass}>
               {`1/${transport().gridDenominator}`}
             </Button>
           </DropdownMenuTrigger>
@@ -1599,7 +1617,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
   };
 
   return (
-    <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-2 py-1">
+    <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-neutral-800 bg-neutral-950 p-2">
       <div class="justify-self-start flex items-center gap-1">
         <ToolbarProvider value={toolbarContext}>
           <Menubar class="flex items-center gap-1">

@@ -22,10 +22,6 @@ type TrackSidebarProps = {
     selectedTrackId: Track["id"] | "";
     sidebarWidth: number;
     onTrackClick: (trackId: Track["id"]) => void;
-    onAddTrack: () => void;
-    onAddReturnTrack?: () => void;
-    onAddGroupTrack?: () => void;
-    onAddInstrumentTrack?: () => void;
     canWriteTrackRouting?: (trackId: Track["id"]) => boolean;
     onTrackSendsChange?: (trackId: Track["id"], sends: TrackSend[]) => void;
     onTrackOutputTargetChange?: (
@@ -36,8 +32,6 @@ type TrackSidebarProps = {
     onSidebarPointerDown: (e: PointerEvent) => void;
     onToggleMute: (trackId: Track["id"]) => void;
     onToggleSolo: (trackId: Track["id"]) => void;
-    syncMix: boolean;
-    onToggleSyncMix: () => void;
     recordArmTrackId: Track["id"] | null;
     onToggleRecordArm: (trackId: Track["id"]) => void;
     currentUserId?: string;
@@ -306,49 +300,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
           "padding-bottom": `${sidebar().bottomOffsetPx}px`,
         }}
       >
-        <div class="sticky top-0 z-40 flex items-center justify-between gap-2 overflow-hidden border-b border-neutral-800 bg-neutral-900 p-1" style={{ height: `${RULER_HEIGHT}px` }}>
-          <button
-            class={cn(
-              "shrink-0 whitespace-nowrap rounded-md px-1 py-0.5 text-xs font-medium leading-none transition-transform ease-out active:scale-97",
-              sidebar().syncMix
-                ? "bg-blue-500/15 text-blue-300 ring-1 ring-blue-400/30"
-                : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-300",
-            )}
-            onClick={sidebar().onToggleSyncMix}
-            title="Toggle syncing mute/solo across users"
-          >
-            Sync Mix
-          </button>
-          <div class="flex min-w-0 items-center gap-2 overflow-hidden pr-2">
-            <button
-              class="shrink-0 cursor-pointer whitespace-nowrap text-sm text-neutral-400 transition-transform ease-out active:scale-97 hover:text-neutral-300"
-              onClick={sidebar().onAddTrack}
-            >
-              Add Track
-            </button>
-            <button
-              class="shrink-0 cursor-pointer whitespace-nowrap rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700"
-              onClick={() => sidebar().onAddReturnTrack?.()}
-              title="Add return track"
-            >
-              + Return
-            </button>
-            <button
-              class="shrink-0 cursor-pointer whitespace-nowrap rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700"
-              onClick={() => sidebar().onAddGroupTrack?.()}
-              title="Add group bus"
-            >
-              + Group
-            </button>
-            <button
-              class="shrink-0 cursor-pointer whitespace-nowrap rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-300 transition-transform ease-out active:scale-97 hover:bg-neutral-700"
-              onClick={() => sidebar().onAddInstrumentTrack?.()}
-              title="Add instrument track (for MIDI clips)"
-            >
-              + Inst
-            </button>
-          </div>
-        </div>
+        <div class="sticky top-0 z-40 border-b border-neutral-800 bg-neutral-900" style={{ height: `${RULER_HEIGHT}px` }} />
         <For each={sidebar().tracks}>
           {(track) => {
             const lockedByOther =

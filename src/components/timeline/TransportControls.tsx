@@ -51,6 +51,14 @@ type TransportControlsProps = {
   onPause: () => void;
   onStop: () => void;
   onAddAudio: () => void;
+  tracksMenu: {
+    syncMix: boolean;
+    onToggleSyncMix: () => void;
+    onAddTrack: () => void | Promise<void>;
+    onAddReturnTrack: () => void | Promise<void>;
+    onAddGroupTrack: () => void | Promise<void>;
+    onAddInstrumentTrack: () => void | Promise<void>;
+  };
   onMasterFX: () => void;
   onShare?: () => void;
   bpm: number;
@@ -1156,6 +1164,51 @@ const ProjectMediaMenu: Component = () => {
   );
 };
 
+const TracksMenu: Component = () => {
+  const context = useToolbar();
+  const tracksMenu = () => context.toolbar.tracksMenu;
+
+  return (
+    <MenubarMenu value="tracks">
+      <NativeMenuTrigger label="Tracks" />
+      <MenubarContent class="w-64 border-neutral-800 bg-neutral-900">
+        <MenubarItem
+          class={cn(nativeMenuItemClass, tracksMenu().syncMix && "text-blue-300")}
+          onSelect={tracksMenu().onToggleSyncMix}
+        >
+          Sync Mix
+        </MenubarItem>
+        <MenubarSeparator />
+        <MenubarItem class={nativeMenuItemClass} onSelect={tracksMenu().onAddTrack}>
+          <span>Add Track</span>
+          <MenubarShortcut>Shift + T</MenubarShortcut>
+        </MenubarItem>
+        <MenubarItem
+          class={nativeMenuItemClass}
+          onSelect={tracksMenu().onAddReturnTrack}
+        >
+          <span>Return</span>
+          <MenubarShortcut>Shift + R</MenubarShortcut>
+        </MenubarItem>
+        <MenubarItem
+          class={nativeMenuItemClass}
+          onSelect={tracksMenu().onAddGroupTrack}
+        >
+          <span>Group</span>
+          <MenubarShortcut>Shift + G</MenubarShortcut>
+        </MenubarItem>
+        <MenubarItem
+          class={nativeMenuItemClass}
+          onSelect={tracksMenu().onAddInstrumentTrack}
+        >
+          <span>Instrument</span>
+          <MenubarShortcut>Ctrl/Cmd + Shift + T</MenubarShortcut>
+        </MenubarItem>
+      </MenubarContent>
+    </MenubarMenu>
+  );
+};
+
 const TransportBar: Component<{ transport: TransportBarController }> = (
   props,
 ) => {
@@ -1268,31 +1321,29 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
         </Button>
         <Button
           variant="ghost"
-          size="sm"
+          size="icon"
           onClick={transport().onToggleLoop}
           aria-pressed={transport().loopEnabled}
           aria-label="Toggle loop region"
           class={cn(
-            nativeMenuTriggerClass,
+            centerIconButtonClass,
             transport().loopEnabled && "text-green-400",
           )}
         >
           <Icon name="repeat" class="h-4 w-4" />
-          <span class="text-xs">Loop</span>
         </Button>
         <Button
           variant="ghost"
-          size="sm"
+          size="icon"
           onClick={transport().onToggleGrid}
           aria-pressed={transport().gridEnabled}
           aria-label="Toggle snap to grid"
           class={cn(
-            nativeMenuTriggerClass,
+            centerIconButtonClass,
             transport().gridEnabled && "text-green-400",
           )}
         >
           <Icon name="grid" class="h-4 w-4" />
-          <span class="text-xs">Grid</span>
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger>
@@ -1469,6 +1520,14 @@ const ShortcutsSubMenu: Component = () => (
           <MenubarShortcut>Shift + T</MenubarShortcut>
         </MenubarItem>
         <MenubarItem disabled>
+          Add Return Track
+          <MenubarShortcut>Shift + R</MenubarShortcut>
+        </MenubarItem>
+        <MenubarItem disabled>
+          Add Group Track
+          <MenubarShortcut>Shift + G</MenubarShortcut>
+        </MenubarItem>
+        <MenubarItem disabled>
           Add Instrument Track
           <MenubarShortcut>Ctrl/Cmd + Shift + T</MenubarShortcut>
         </MenubarItem>
@@ -1626,6 +1685,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
             <ProjectsMenu />
             <ProjectMediaMenu />
             <SettingsMenu />
+            <TracksMenu />
             <ShareMenu
               share={{
                 onOpenChange: shareMenu.onOpenChange,

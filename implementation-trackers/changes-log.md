@@ -2,6 +2,39 @@
 
 Tracks review-driven follow-up work before merging the audio refactor branch.
 
+## 2026-05-18 — Tracks Menu Relocation
+
+### Scope
+
+- Created the `move-track-controls-menu` branch from `master`.
+- Moved the track creation and mix-sync controls from the top row of `src/components/timeline/TrackSidebar.tsx` into a new `Tracks` menu in `src/components/timeline/TransportControls.tsx`.
+
+### Menu and Shortcut Changes
+
+- Added a top-level `Tracks` menu immediately to the left of `Share`.
+- Moved `Sync Mix`, `Add Track`, `Return`, `Group`, and `Instrument` into the new menu.
+- Kept `Sync Mix` visually stateful in the menu when enabled.
+- Replaced temporary descriptive menu subtext with actual shortcut labels where keybinds exist.
+- Added `Shift + R` for adding return tracks and `Shift + G` for adding group tracks through `src/hooks/useTimelineKeyboard.ts`.
+- Surfaced `Shift + T`, `Shift + R`, `Shift + G`, and `Ctrl/Cmd + Shift + T` in the `Tracks` menu and the existing `Settings > Shortcuts` list.
+- Removed the track-sidebar header buttons while preserving the sticky ruler-height spacer so sidebar rows remain aligned with the timeline ruler.
+- Removed the visible `Loop` and `Grid` labels from the center transport controls, leaving icon-sized buttons with the existing accessibility labels and active-state color.
+
+### Review Follow-Up
+
+- Simplify review found duplicated track-creation handlers between keyboard shortcuts and the `Tracks` menu; consolidated them into shared local handlers in `src/components/Timeline.tsx`.
+- A follow-up simplify review found the `Tracks` menu props were being passed as separate transport props; grouped them into a single `tracksMenu` prop in `src/components/timeline/TransportControls.tsx`.
+- Simplify review found no scoped efficiency cleanup needed.
+- Defensive-code review found no high-confidence redundant guards, duplicated validation, or impossible-state branches in the tracks menu follow-up.
+
+### Validation
+
+- `bun run typecheck` and `bun run build` passed after moving the controls into the `Tracks` menu.
+- `bun run typecheck` and `bun run build` passed after adding return/group shortcuts and updating shortcut labels.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after simplify cleanup and defensive-code-review.
+- `bun run typecheck` and `bun run build` passed after removing the center transport `Loop` and `Grid` button labels.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the follow-up `tracksMenu` prop grouping.
+
 ## 2026-05-18 — Center Transport Controls Redesign
 
 ### Scope

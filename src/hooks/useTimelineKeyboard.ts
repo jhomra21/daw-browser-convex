@@ -5,6 +5,8 @@ type KeyboardHandlers = {
   onDelete: () => void;
   onDuplicate?: () => void;
   onAddAudioTrack?: () => void;
+  onAddReturnTrack?: () => void;
+  onAddGroupTrack?: () => void;
   onAddInstrumentTrack?: () => void;
   onUndo?: () => void;
   onRedo?: () => void;
@@ -45,6 +47,30 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
       e.preventDefault();
       e.stopPropagation();
       handlers.onAddAudioTrack?.();
+      return;
+    }
+    // Return: Shift + R (no Ctrl/Cmd)
+    if (
+      !e.ctrlKey &&
+      !e.metaKey &&
+      e.shiftKey &&
+      (e.key === "r" || e.key === "R")
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      handlers.onAddReturnTrack?.();
+      return;
+    }
+    // Group: Shift + G (no Ctrl/Cmd)
+    if (
+      !e.ctrlKey &&
+      !e.metaKey &&
+      e.shiftKey &&
+      (e.key === "g" || e.key === "G")
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      handlers.onAddGroupTrack?.();
       return;
     }
 

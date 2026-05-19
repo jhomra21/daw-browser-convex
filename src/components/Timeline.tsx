@@ -601,6 +601,19 @@ const Timeline: Component = () => {
   toggleRecordingSession = nextToggleRecordingSession;
   stopRecordingSession = nextStopRecordingSession;
 
+  const addAudioTrack = async () => {
+    await createTimelineTrack();
+  };
+  const addReturnTrack = async () => {
+    await createTimelineTrack({ channelRole: "return" });
+  };
+  const addGroupTrack = async () => {
+    await createTimelineTrack({ channelRole: "group" });
+  };
+  const addInstrumentTrack = async () => {
+    await createTimelineTrack({ kind: "instrument" });
+  };
+
   useTimelineKeyboard({
     onSpace: () => {
       if (isRecording()) {
@@ -614,11 +627,13 @@ const Timeline: Component = () => {
       void duplicateSelectedClips();
     },
     onAddAudioTrack: () => {
-      void (async () => {
-        try {
-          await createTimelineTrack();
-        } catch {}
-      })();
+      void addAudioTrack().catch(() => {});
+    },
+    onAddReturnTrack: () => {
+      void addReturnTrack().catch(() => {});
+    },
+    onAddGroupTrack: () => {
+      void addGroupTrack().catch(() => {});
     },
     onUndo: () => {
       handleUndo();
@@ -627,11 +642,7 @@ const Timeline: Component = () => {
       handleRedo();
     },
     onAddInstrumentTrack: () => {
-      void (async () => {
-        try {
-          await createTimelineTrack({ kind: "instrument" });
-        } catch {}
-      })();
+      void addInstrumentTrack().catch(() => {});
     },
   });
 
@@ -725,6 +736,14 @@ const Timeline: Component = () => {
         onPause={handleTransportPause}
         onStop={handleTransportStop}
         onAddAudio={() => handleAddAudio()}
+        tracksMenu={{
+          syncMix: syncMix(),
+          onToggleSyncMix: toggleSyncMix,
+          onAddTrack: addAudioTrack,
+          onAddReturnTrack: addReturnTrack,
+          onAddGroupTrack: addGroupTrack,
+          onAddInstrumentTrack: addInstrumentTrack,
+        }}
         onShare={handleShare}
         onMasterFX={() => {
           selection.setSelectedFXTarget("master");
@@ -924,7 +943,6 @@ const Timeline: Component = () => {
                   sidebarWidth: sidebarWidth(),
                   isPlaying: isPlaying(),
                   bottomOffsetPx: bottomFXOpen() ? FX_OFFSET_PX : 0,
-                  syncMix: syncMix(),
                   recordArmTrackId: recordArmTrackId(),
                   currentUserId: userId(),
                   getTrackLevel: (id) => {
@@ -946,18 +964,6 @@ const Timeline: Component = () => {
                       clearClipSelection: true,
                     });
                   },
-                  onAddTrack: async () => {
-                    await createTimelineTrack();
-                  },
-                  onAddReturnTrack: async () => {
-                    await createTimelineTrack({ channelRole: "return" });
-                  },
-                  onAddGroupTrack: async () => {
-                    await createTimelineTrack({ channelRole: "group" });
-                  },
-                  onAddInstrumentTrack: async () => {
-                    await createTimelineTrack({ kind: "instrument" });
-                  },
                   canWriteTrackRouting: canWriteTrack,
                   onTrackSendsChange: (trackId, sends) => {
                     localMix.persist(trackId, { sends });
@@ -972,7 +978,6 @@ const Timeline: Component = () => {
                   onVolumeChange: setTrackVolume,
                   onToggleMute: handleToggleTrackMute,
                   onToggleSolo: handleToggleTrackSolo,
-                  onToggleSyncMix: toggleSyncMix,
                   onSidebarPointerDown,
                   onToggleRecordArm: handleToggleRecordArm,
                 }}

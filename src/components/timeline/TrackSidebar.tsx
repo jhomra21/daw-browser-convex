@@ -16,6 +16,11 @@ import { LANE_HEIGHT, RULER_HEIGHT } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Track, TrackSend } from "~/types/timeline";
 
+type TrackStereoLevels = {
+  left: number;
+  right: number;
+};
+
 type TrackSidebarProps = {
   sidebar: {
     tracks: Track[];
@@ -36,8 +41,14 @@ type TrackSidebarProps = {
     onToggleRecordArm: (trackId: Track["id"]) => void;
     currentUserId?: string;
     isPlaying: boolean;
-    getTrackLevel: (trackId: Track["id"]) => number;
-    getTrackLevels?: (trackId: Track["id"]) => [number, number];
+    subscribeTrackLevels: (
+      listener: (trackId: string, levels: TrackStereoLevels) => void,
+    ) => () => void;
+    onVolumePreview: (
+      trackId: Track["id"],
+      volume: number,
+      muted: boolean,
+    ) => void;
     bottomOffsetPx: number;
   };
 };
@@ -54,81 +65,37 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const [selectedSendTargets, setSelectedSendTargets] = createSignal<
     Map<Track["id"], string>
   >(new Map());
-  let rafId: number | null = null;
-  let lastTs: number | null = null;
-  const releasePerSec = 3.0;
-
-  // Event-driven meter updates are not exposed by the audio engine yet, so keep this
-  // RAF loop local to the sidebar and tear it down deterministically on cleanup.
-  const scheduleTick = () => {
-    if (rafId == null) rafId = requestAnimationFrame(tick);
-  };
-
-  const tick = () => {
-    rafId = null;
-    const now =
-      typeof performance !== "undefined" ? performance.now() : Date.now();
-    const dt = lastTs == null ? 0 : Math.max(0, (now - lastTs) / 1000);
-    lastTs = now;
-    const prev = meters();
-    const next: Record<string, { L: number; R: number }> = {};
-    const playing = !!sidebar().isPlaying;
-
-    for (const track of sidebar().tracks) {
-      let srcL = 0;
-      let srcR = 0;
-      if (playing) {
-        const stereo = sidebar().getTrackLevels?.(track.id);
-        if (stereo) {
-          srcL = stereo[0];
-          srcR = stereo[1];
-        } else {
-          const mono = sidebar().getTrackLevel(track.id);
-          srcL = mono;
-          srcR = mono;
-        }
-      }
-      const previous = prev[track.id] || { L: 0, R: 0 };
-      const decay = releasePerSec * dt;
-      const left =
-        srcL >= previous.L ? srcL : Math.max(srcL, previous.L - decay);
-      const right =
-        srcR >= previous.R ? srcR : Math.max(srcR, previous.R - decay);
-      next[track.id] = {
-        L: clampUnit(left),
-        R: clampUnit(right),
-      };
-    }
-
-    const metersChanged =
-      sidebar().tracks.some((track) => {
-        const previous = prev[track.id];
-        const current = next[track.id];
-        return (
-          !previous ||
-          previous.L !== current.L ||
-          previous.R !== current.R
-        );
-      }) || Object.keys(prev).length !== sidebar().tracks.length;
-    if (metersChanged) setMeters(next);
-    if (playing) scheduleTick();
-  };
 
   createEffect(() => {
-    if (sidebar().isPlaying) {
-      scheduleTick();
+    if (!sidebar().isPlaying) {
+      setMeters((current) => (Object.keys(current).length === 0 ? current : {}));
       return;
     }
-    if (rafId != null) {
-      cancelAnimationFrame(rafId);
-      rafId = null;
-    }
-    setMeters((current) => (Object.keys(current).length === 0 ? current : {}));
-    lastTs = null;
+    const unsubscribe = sidebar().subscribeTrackLevels((trackId, levels) => {
+      setMeters((current) => {
+        const previous = current[trackId];
+        const next = {
+          L: clampUnit(levels.left),
+          R: clampUnit(levels.right),
+        };
+        if (previous?.L === next.L && previous.R === next.R) return current;
+        return { ...current, [trackId]: next };
+      });
+    });
+    onCleanup(unsubscribe);
   });
 
-  onCleanup(() => {
-    if (rafId != null) cancelAnimationFrame(rafId);
+  createEffect(() => {
+    const trackIds = new Set<string>(sidebar().tracks.map((track) => track.id));
+    setMeters((current) => {
+      let next: Record<string, { L: number; R: number }> | null = null;
+      for (const trackId of Object.keys(current)) {
+        if (trackIds.has(trackId)) continue;
+        if (!next) next = { ...current };
+        delete next[trackId];
+      }
+      return next ?? current;
+    });
   });
 
   const groupTracks = createMemo(() =>
@@ -249,9 +216,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     ]);
   };
 
-  let activeVolumePointerId: number | null = null;
-  let activeVolumeTrackId: Track["id"] | null = null;
-  let activeVolumeValue: number | null = null;
+  const [activeVolumeDrag, setActiveVolumeDrag] = createSignal<{
+    pointerId: number;
+    trackId: Track["id"];
+    startValue: number;
+    value: number;
+  } | null>(null);
 
   const clampUnit = (value: number) => Math.max(0, Math.min(1, value));
   const clampVolume = (volume: number) => clampUnit(volume);
@@ -264,15 +234,23 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     return quantizeVolume((clientX - rect.left) / width);
   };
 
-  const updateTrackVolume = (track: Track, volume: number) => {
+  const displayVolume = (track: Track) => {
+    const active = activeVolumeDrag();
+    return active?.trackId === track.id ? active.value : track.volume ?? 0.8;
+  };
+
+  const previewTrackVolume = (track: Track, volume: number) => {
     const nextVolume = quantizeVolume(volume);
-    if (activeVolumeTrackId === track.id) {
-      if (activeVolumeValue === nextVolume) return;
-      activeVolumeValue = nextVolume;
-    } else if (nextVolume === quantizeVolume(track.volume ?? 0.8)) {
-      return;
-    }
-    sidebar().onVolumeChange(track.id, nextVolume);
+    setActiveVolumeDrag((active) => {
+      if (!active || active.trackId !== track.id || active.value === nextVolume) return active;
+      return { ...active, value: nextVolume };
+    });
+    sidebar().onVolumePreview(track.id, nextVolume, !!track.muted);
+  };
+
+  const commitTrackVolume = (trackId: Track["id"], volume: number, previousVolume: number) => {
+    if (volume === previousVolume) return;
+    sidebar().onVolumeChange(trackId, volume);
   };
 
   const updateVolumeFromPointer = (
@@ -280,7 +258,16 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     input: HTMLInputElement,
     clientX: number,
   ) => {
-    updateTrackVolume(track, volumeFromPointer(input, clientX));
+    previewTrackVolume(track, volumeFromPointer(input, clientX));
+  };
+
+  const releaseVolumePointerCapture = (
+    input: HTMLInputElement,
+    pointerId: number,
+  ) => {
+    if (input.hasPointerCapture(pointerId)) {
+      input.releasePointerCapture(pointerId);
+    }
   };
 
   return (
@@ -314,7 +301,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const volumeDisabled = lockedByOther;
             const recordDisabled =
               lockedByOther || !canTrackReceiveAudioClip(track);
-            const volume = () => track.volume ?? 0.8;
+            const volume = () => displayVolume(track);
             const muted = () => !!track.muted;
             const soloed = () => !!track.soloed;
             const currentSendTargetId = () => selectedSendTargetId(track);
@@ -557,11 +544,13 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             event.stopPropagation();
                             if (volumeDisabled) return;
                             event.preventDefault();
-                            activeVolumePointerId = event.pointerId;
-                            activeVolumeTrackId = track.id;
-                            activeVolumeValue = quantizeVolume(
-                              track.volume ?? 0.8,
-                            );
+                            const startValue = quantizeVolume(track.volume ?? 0.8);
+                            setActiveVolumeDrag({
+                              pointerId: event.pointerId,
+                              trackId: track.id,
+                              startValue,
+                              value: startValue,
+                            });
                             event.currentTarget.setPointerCapture(
                               event.pointerId,
                             );
@@ -572,8 +561,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             );
                           }}
                           onPointerMove={(event) => {
-                            if (activeVolumePointerId !== event.pointerId)
-                              return;
+                            const active = activeVolumeDrag();
+                            if (active?.pointerId !== event.pointerId) return;
                             event.stopPropagation();
                             updateVolumeFromPointer(
                               track,
@@ -582,35 +571,49 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             );
                           }}
                           onPointerUp={(event) => {
-                            if (activeVolumePointerId !== event.pointerId)
-                              return;
+                            const active = activeVolumeDrag();
+                            if (active?.pointerId !== event.pointerId) return;
                             event.stopPropagation();
-                            activeVolumePointerId = null;
-                            activeVolumeTrackId = null;
-                            activeVolumeValue = null;
-                            if (
-                              event.currentTarget.hasPointerCapture(
-                                event.pointerId,
-                              )
-                            ) {
-                              event.currentTarget.releasePointerCapture(
-                                event.pointerId,
-                              );
-                            }
+                            commitTrackVolume(
+                              active.trackId,
+                              active.value,
+                              active.startValue,
+                            );
+                            setActiveVolumeDrag(null);
+                            releaseVolumePointerCapture(
+                              event.currentTarget,
+                              event.pointerId,
+                            );
                           }}
                           onPointerCancel={(event) => {
-                            if (activeVolumePointerId !== event.pointerId)
-                              return;
-                            activeVolumePointerId = null;
-                            activeVolumeTrackId = null;
-                            activeVolumeValue = null;
+                            const active = activeVolumeDrag();
+                            if (active?.pointerId !== event.pointerId) return;
+                            sidebar().onVolumePreview(
+                              active.trackId,
+                              active.startValue,
+                              !!track.muted,
+                            );
+                            setActiveVolumeDrag(null);
+                            releaseVolumePointerCapture(
+                              event.currentTarget,
+                              event.pointerId,
+                            );
                           }}
                           onInput={(event) => {
                             event.stopPropagation();
                             if (volumeDisabled) return;
-                            updateTrackVolume(
-                              track,
+                            const nextVolume = quantizeVolume(
                               parseFloat(event.currentTarget.value),
+                            );
+                            const active = activeVolumeDrag();
+                            if (active?.trackId === track.id) {
+                              previewTrackVolume(track, nextVolume);
+                              return;
+                            }
+                            commitTrackVolume(
+                              track.id,
+                              nextVolume,
+                              quantizeVolume(track.volume ?? 0.8),
                             );
                           }}
                           class={cn(

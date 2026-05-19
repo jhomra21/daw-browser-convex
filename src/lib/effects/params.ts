@@ -42,6 +42,15 @@ export function createDefaultEqParams(): EqParams {
   }
 }
 
+export function serializeEqParams(params: EqParams): string {
+  return [
+    params.enabled ? 1 : 0,
+    ...params.bands.map((band) =>
+      `${band.id}:${band.enabled ? 1 : 0}:${band.type}:${band.frequency}:${band.gainDb}:${band.q}`,
+    ),
+  ].join('|')
+}
+
 export type ReverbParams = {
   enabled: boolean
   wet: number
@@ -58,6 +67,10 @@ export function createDefaultReverbParams(): ReverbParams {
     decaySec: 2.2,
     preDelayMs: 20,
   }
+}
+
+export function serializeReverbParams(params: ReverbParams): string {
+  return `${params.enabled ? 1 : 0}|${params.wet}|${params.decaySec}|${params.preDelayMs}`
 }
 
 export type SynthWave = 'sine' | 'square' | 'sawtooth' | 'triangle'

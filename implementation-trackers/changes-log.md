@@ -2,6 +2,69 @@
 
 Tracks review-driven follow-up work before merging the audio refactor branch.
 
+## 2026-05-19 — Audio Performance Trace Follow-Up
+
+### Scope
+
+- Re-reviewed Chrome heap timeline, heap profile, and heap snapshot captures from local playback after earlier live-routing changes.
+- Re-reviewed the follow-up heap/profile/trace captures after the first performance pass to confirm the impulse/reverb allocation stacks were gone and isolate the remaining lag/audio-glitch sources.
+- Confirmed the strongest initial lag sources were repeated reverb impulse allocation, unchanged reverb reapplication, track-meter hot-path allocation, and smaller spectrum/timeline churn.
+- Confirmed the remaining follow-up hotspots were non-idempotent EQ graph mutation, volume-drag mixer fanout, playback playhead UI publication on every RAF, sidebar meter sampling, and effects-panel spectrum sampling.
+
+### Performance Fixes
+
+- Kept the existing live mixer routing signature work in `src/lib/mixer/apply-live-routing.ts` so unchanged routing no longer disconnects/reconnects track graph nodes or meters every update.
+- Added pre-allocation impulse metadata in `src/lib/effects/dsp.ts` so `src/lib/audio-engine.ts` can check the impulse cache before creating an expensive `AudioBuffer`.
+- Added a shared `serializeReverbParams` helper in `src/lib/effects/params.ts` and engine-owned track/master reverb signatures so unchanged reverb params do not rebuild convolver chains or track/master routing.
+- Updated `src/lib/effects/chain.ts` so disabled reverb updates adjust gains and delay state without generating an unused impulse response.
+- Changed stereo meter reads from tuple allocation to a reusable `{ left, right }` result object owned by the audio engine, updated `TrackSidebar` to consume the new shape, and wired `Timeline` through the meter subscription path.
+- Added `serializeEqParams` and engine-owned track/master EQ signatures so unchanged EQ params do not rebuild or reconnect biquad graph nodes.
+- Added direct audio-engine track-volume preview during sidebar slider drags, with mixer/history updates committed only at pointer release.
+- Replaced the sidebar meter RAF loop with audio-engine-owned AudioWorklet push metering and a `subscribeTrackStereoLevels` callback path.
+- Removed the continuous effects-panel spectrum RAF loop; spectrum now samples on demand when the panel is open and its audio target changes.
+- Added the throttled transport playhead as an effects-panel spectrum resample trigger so panels opened before analyser data exists can populate once playback advances.
+- Throttled Solid playhead UI state publication to about 30Hz while preserving the RAF transport clock and per-frame loop checks.
+- Flush the current transport playhead on pause so the throttled UI state remains authoritative for resume scheduling.
+
+### Review Follow-Up
+
+- Plan validation confirmed the root-level fix belongs in the DSP/audio-engine hot paths rather than hook-local guards.
+- Simplify review reused the new RMS and companding helpers from mono meter sampling and removed duplicate impulse cache-key construction.
+- Efficiency review found no additional scoped hot-path cleanup needed.
+- Defensive-code review removed the unreachable stereo analyser null guard after verifying the typed construction path is the only `stereoAnalysers` insertion path.
+- Review validation confirmed EQ graph churn, volume-drag fanout, playback UI pressure, meter sampling, and spectrum sampling were supported by the trace; the EQ-to-clipping link remains a mitigation hypothesis pending runtime confirmation.
+- Simplify review disabled AudioWorklet meter processing while no sidebar meter subscribers are registered; broader worklet string-module extraction was left unchanged to keep the follow-up focused.
+- Defensive-code review removed redundant pending-effect signature checks, made required sidebar meter/volume-preview callbacks non-optional, removed the redundant live-routing send-gain cleanup callback, simplified meter subscription cleanup, and corrected the meter-shape log wording.
+- A later simplify loop added pointer-cancel capture release for sidebar volume drags, then reuse, quality, and efficiency reviews returned LGTM for that pass.
+- A later defensive-code-review loop returned LGTM for audio, UI/hooks, and changes-log accuracy.
+- Code review found a real pause/resume edge case from throttled playhead publication; plan validation confirmed the root fix belongs in the playback hook's shared transport-position computation.
+- Follow-up code review found the on-demand spectrum sampler can stay `null` when the effects panel opens before analyser data exists; review validation confirmed the root fix should reuse the existing throttled `playheadSec` transport signal as the open-panel resample trigger instead of restoring a dedicated spectrum RAF loop.
+- Post-review simplify extracted the AudioWorklet processor name into a shared constant; broader lazy worklet allocation and meter update batching suggestions were left unchanged to avoid expanding the focused follow-up.
+- Post-review defensive-code-review removed a redundant non-empty RMS length fallback and reworded earlier "final" review-loop log entries now superseded by later follow-ups.
+- Follow-up simplify reused the shared EQ/reverb serializers in the effects panel and decoupled the sidebar's meter prop shape from the audio-engine type export.
+- Follow-up defensive-code-review removed unreachable live-routing fallbacks now proven redundant by resolved mixer graph normalization and track-node construction.
+- A later simplify rerun replaced the meter AudioWorklet boolean control message with a small object payload and shared sidebar pointer-capture release logic between volume drag completion and cancellation.
+- A later defensive-code-review rerun found no additional high-confidence redundant guards or impossible branches in audio internals, UI/hooks, or the changes log.
+
+### Validation
+
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the performance fixes.
+- `bun run typecheck` and `git diff --check` passed after simplify cleanup.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after defensive-code-review cleanup, log update, and final diff review.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the EQ idempotence, volume preview, AudioWorklet metering, and on-demand spectrum fixes.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the playhead UI throttling follow-up.
+- `bun run typecheck` and `git diff --check` passed after the first simplify cleanup.
+- `bun run typecheck` and `git diff --check` passed after the simplify rerun cleanup.
+- `bun run typecheck` passed after defensive-code-review cleanup before the final validation pass.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the post-implementation review rerun, log update, and final diff review.
+- `bun run typecheck` and `git diff --check` passed after the final simplify pointer-cancel cleanup.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the pause playhead flush fix.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after wiring the playhead-driven spectrum resample trigger.
+- `bun run typecheck` and `git diff --check` passed after post-review simplify cleanup.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the follow-up cleanup review rerun.
+- `bun run typecheck` and `git diff --check` passed after the latest simplify rerun before defensive-code-review.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the latest post-implementation review log update and final diff review.
+
 ## 2026-05-18 — Tracks Menu Relocation
 
 ### Scope

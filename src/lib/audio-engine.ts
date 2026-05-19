@@ -1,7 +1,7 @@
 import { getPlayableAudioWindow, getScheduledMidiEvents } from '~/lib/audio-scheduling'
-import { normalizeSynthParams, type ArpParams, type EqParamsLite, type ReverbParamsLite, type SynthParamsInput } from '~/lib/effects/params'
+import { normalizeSynthParams, serializeEqParams, serializeReverbParams, type ArpParams, type EqParamsLite, type ReverbParamsLite, type SynthParamsInput } from '~/lib/effects/params'
 import { connectParallelFxChain, createReverbNodeChain, disconnectAudioNodes, applyReverbNodeChainParams, type ReverbNodeChain } from '~/lib/effects/chain'
-import { createEqNodes, createImpulseResponseBuffer } from '~/lib/effects/dsp'
+import { createEqNodes, createImpulseResponseBuffer, getImpulseResponseBufferInfo } from '~/lib/effects/dsp'
 import { applyLiveMixerGraph } from '~/lib/mixer/apply-live-routing'
 import { createMixerChannels } from '~/lib/mixer/channels'
 import { resolveMixerGraph } from '~/lib/mixer/resolve-routing'
@@ -13,6 +13,7 @@ const MASTER_FADE_DOWN_SEC = 0.002
 const MASTER_FADE_HOLD_SEC = 0.001
 const MASTER_FADE_UP_SEC = 0.006
 const MASTER_STOP_DELAY_SEC = 0.004
+const TRACK_METER_PROCESSOR_NAME = 'track-meter-processor'
 
 type ScheduleOptions = {
   atCtxTime?: number
@@ -53,7 +54,15 @@ type TrackStereoMeters = {
   right: AnalyserNode
   leftArr: Float32Array | null
   rightArr: Float32Array | null
+  levels: TrackStereoLevels
 }
+
+export type TrackStereoLevels = {
+  left: number
+  right: number
+}
+
+type TrackStereoLevelsListener = (trackId: string, levels: TrackStereoLevels) => void
 
 export class AudioEngine {
   private audioCtx: AudioContext | null = null
@@ -64,6 +73,7 @@ export class AudioEngine {
     gains: new Map<string, GainNode>(),
     outputs: new Map<string, GainNode>(),
     sendGains: new Map<string, Map<string, GainNode>>(),
+    routingSignatures: new Map<string, string>(),
   }
   private activeSources: AudioScheduledSourceNode[] = []
   private activeSourcesByClip = new Map<string, Set<AudioScheduledSourceNode>>()
@@ -72,15 +82,19 @@ export class AudioEngine {
     inputs: new Map<string, GainNode>(),
     eqChains: new Map<string, BiquadFilterNode[]>(),
     pendingEqParams: new Map<string, EqParamsLite>(),
+    eqSignatures: new Map<string, string>(),
     reverbs: new Map<string, ReverbNodeChain>(),
     pendingReverbParams: new Map<string, ReverbParamsLite>(),
+    reverbSignatures: new Map<string, string>(),
   }
   private masterEqChain: BiquadFilterNode[] = []
+  private masterEqSignature: string | null = null
   private masterAnalyser: AnalyserNode | null = null
   private masterSpectrumTmp: Uint8Array | null = null
   private masterSpectrumLast: SpectrumFrame | null = null
   private masterAnalyserConnected = false
   private masterReverb: ReverbNodeChain | null = null
+  private masterReverbSignature: string | null = null
   private pendingMasterEqParams: EqParamsLite | null = null
   private pendingMasterReverbParams: ReverbParamsLite | null = null
   private readonly impulseBucketSize = 0.1
@@ -110,6 +124,120 @@ export class AudioEngine {
     spectrumTmp: new Map<string, Uint8Array>(),
     spectrumLast: new Map<string, SpectrumFrame>(),
   }
+  private meterWorkletReady: Promise<boolean> | null = null
+  private meterWorkletNodes = new Map<string, AudioWorkletNode>()
+  private meterWorkletLevels = new Map<string, TrackStereoLevels>()
+  private meterListeners = new Set<TrackStereoLevelsListener>()
+
+  private ensureMeterWorkletModule() {
+    if (!this.audioCtx) return Promise.resolve(false)
+    if (this.meterWorkletReady) return this.meterWorkletReady
+    const source = `
+      class TrackMeterProcessor extends AudioWorkletProcessor {
+        constructor() {
+          super()
+          this.active = false
+          this.frames = 0
+          this.sumL = 0
+          this.sumR = 0
+          this.reportEveryFrames = 2048
+          this.port.onmessage = (event) => {
+            this.active = event.data?.active === true
+            if (!this.active) {
+              this.frames = 0
+              this.sumL = 0
+              this.sumR = 0
+            }
+          }
+        }
+        process(inputs) {
+          if (!this.active) return true
+          const input = inputs[0]
+          const left = input && input[0]
+          if (!left) return true
+          const right = input[1] || left
+          for (let i = 0; i < left.length; i++) {
+            const l = left[i] || 0
+            const r = right[i] || 0
+            this.sumL += l * l
+            this.sumR += r * r
+          }
+          this.frames += left.length
+          if (this.frames >= this.reportEveryFrames) {
+            this.port.postMessage({
+              left: Math.min(1, Math.max(0, Math.sqrt(Math.sqrt(this.sumL / this.frames)))),
+              right: Math.min(1, Math.max(0, Math.sqrt(Math.sqrt(this.sumR / this.frames)))),
+            })
+            this.frames = 0
+            this.sumL = 0
+            this.sumR = 0
+          }
+          return true
+        }
+      }
+      registerProcessor('${TRACK_METER_PROCESSOR_NAME}', TrackMeterProcessor)
+    `
+    const url = URL.createObjectURL(new Blob([source], { type: 'application/javascript' }))
+    this.meterWorkletReady = this.audioCtx.audioWorklet.addModule(url)
+      .then(() => true)
+      .catch(() => false)
+      .finally(() => URL.revokeObjectURL(url))
+    return this.meterWorkletReady
+  }
+
+  private emitTrackStereoLevels(trackId: string, levels: TrackStereoLevels) {
+    for (const listener of this.meterListeners) {
+      listener(trackId, levels)
+    }
+  }
+
+  private updateMeterWorkletSubscriptionState() {
+    const active = this.meterListeners.size > 0
+    for (const node of this.meterWorkletNodes.values()) {
+      node.port.postMessage({ active })
+    }
+  }
+
+  private ensureTrackMeterWorklet(trackId: string, gain: GainNode) {
+    if (!this.audioCtx) return
+    const existing = this.meterWorkletNodes.get(trackId)
+    if (existing) {
+      try { gain.connect(existing) } catch {}
+      return
+    }
+    void this.ensureMeterWorkletModule().then((ready) => {
+      if (!ready || !this.audioCtx || this.meterWorkletNodes.has(trackId)) return
+      if (this.mixerRuntime.outputs.get(trackId) !== gain) return
+      const node = new AudioWorkletNode(this.audioCtx, TRACK_METER_PROCESSOR_NAME, {
+        numberOfInputs: 1,
+        numberOfOutputs: 0,
+        channelCount: 2,
+        channelCountMode: 'explicit',
+        channelInterpretation: 'speakers',
+      })
+      node.port.postMessage({ active: this.meterListeners.size > 0 })
+      node.port.onmessage = (event) => {
+        const data = event.data
+        const next = {
+          left: typeof data?.left === 'number' ? data.left : 0,
+          right: typeof data?.right === 'number' ? data.right : 0,
+        }
+        this.meterWorkletLevels.set(trackId, next)
+        this.emitTrackStereoLevels(trackId, next)
+      }
+      try { gain.connect(node) } catch {}
+      this.meterWorkletNodes.set(trackId, node)
+    })
+  }
+
+  subscribeTrackStereoLevels(listener: TrackStereoLevelsListener) {
+    this.meterListeners.add(listener)
+    this.updateMeterWorkletSubscriptionState()
+    return () => {
+      this.meterListeners.delete(listener)
+      this.updateMeterWorkletSubscriptionState()
+    }
+  }
 
   private ensureTrackAnalyser(trackId: string, gain: GainNode) {
     if (!this.audioCtx) return
@@ -122,6 +250,7 @@ export class AudioEngine {
     }
     try { gain.connect(a) } catch {}
     this.ensureTrackAnalysersStereo(trackId, gain)
+    this.ensureTrackMeterWorklet(trackId, gain)
   }
 
   private ensureTrackAnalysersStereo(trackId: string, gain: GainNode) {
@@ -135,7 +264,7 @@ export class AudioEngine {
       left.smoothingTimeConstant = 0.7; right.smoothingTimeConstant = 0.7
       try { splitter.connect(left, 0) } catch {}
       try { splitter.connect(right, 1) } catch {}
-      entry = { splitter, left, right, leftArr: null, rightArr: null }
+      entry = { splitter, left, right, leftArr: null, rightArr: null, levels: { left: 0, right: 0 } }
       this.meterRuntime.stereoAnalysers.set(trackId, entry)
     }
     try { gain.connect(entry.splitter) } catch {}
@@ -172,38 +301,40 @@ export class AudioEngine {
     } catch {
       return 0
     }
+    return this.getCompandedLevel(this.getRms(arr))
+  }
+
+  private getRms(arr: Float32Array) {
     let sum = 0
     for (let i = 0; i < arr.length; i++) {
       const v = arr[i]
       sum += v * v
     }
-    const rms = Math.sqrt(sum / Math.max(1, arr.length))
-    // Light companding for visual feel
-    const norm = Math.min(1, Math.max(0, Math.sqrt(rms)))
-    return norm
+    return Math.sqrt(sum / arr.length)
   }
 
-  // Returns normalized 0..1 RMS per channel [L, R]
-  getTrackLevelsStereo(trackId: string): [number, number] {
+  private getCompandedLevel(value: number) {
+    return Math.min(1, Math.max(0, Math.sqrt(value)))
+  }
+
+  // Returns normalized 0..1 RMS per channel.
+  getTrackLevelsStereo(trackId: string): TrackStereoLevels {
+    const workletLevels = this.meterWorkletLevels.get(trackId)
+    if (workletLevels) return workletLevels
     const e = this.meterRuntime.stereoAnalysers.get(trackId)
     if (!e) {
       const m = this.getTrackLevel(trackId)
-      return [m, m]
+      return { left: m, right: m }
     }
     const { left, right } = e
-    if (!left || !right) return [0, 0]
     // Ensure arrays
     if (!e.leftArr || e.leftArr.length !== left.fftSize) e.leftArr = new Float32Array(left.fftSize)
     if (!e.rightArr || e.rightArr.length !== right.fftSize) e.rightArr = new Float32Array(right.fftSize)
-    try { left.getFloatTimeDomainData(e.leftArr! as any) } catch { return [0, 0] }
-    try { right.getFloatTimeDomainData(e.rightArr! as any) } catch { return [0, 0] }
-    const rms = (arr: Float32Array) => {
-      let sum = 0
-      for (let i = 0; i < arr.length; i++) { const v = arr[i]; sum += v * v }
-      return Math.sqrt(sum / Math.max(1, arr.length))
-    }
-    const comp = (x: number) => Math.min(1, Math.max(0, Math.sqrt(x)))
-    return [comp(rms(e.leftArr!)), comp(rms(e.rightArr!))]
+    try { left.getFloatTimeDomainData(e.leftArr! as any) } catch { return e.levels }
+    try { right.getFloatTimeDomainData(e.rightArr! as any) } catch { return e.levels }
+    e.levels.left = this.getCompandedLevel(this.getRms(e.leftArr!))
+    e.levels.right = this.getCompandedLevel(this.getRms(e.rightArr!))
+    return e.levels
   }
 
   getAudioContext() {
@@ -625,12 +756,15 @@ export class AudioEngine {
   private createImpulseResponse(decaySec: number) {
     if (!this.audioCtx) return null
     const ctx = this.audioCtx
-    const { buffer, bucketIndex, length } = createImpulseResponseBuffer(ctx, decaySec, {
+    const info = getImpulseResponseBufferInfo(ctx, decaySec, {
       bucketSize: this.impulseBucketSize,
     })
-    const cacheKey = `${ctx.sampleRate}:${bucketIndex}:${length}`
+    const cacheKey = `${ctx.sampleRate}:${info.bucketIndex}:${info.length}`
     const cached = this.impulseCache.get(cacheKey)
     if (cached) return cached
+    const { buffer } = createImpulseResponseBuffer(ctx, decaySec, {
+      bucketSize: this.impulseBucketSize,
+    })
     this.impulseCache.set(cacheKey, buffer)
     return buffer
   }
@@ -640,6 +774,8 @@ export class AudioEngine {
       this.effectsRuntime.pendingReverbParams.set(trackId, params)
       return
     }
+    const signature = serializeReverbParams(params)
+    if (this.effectsRuntime.reverbSignatures.get(trackId) === signature) return
     this.ensureTrackNodes(trackId)
     const createImpulseResponse = (decaySec: number) => this.createImpulseResponse(decaySec)
     let rv = this.effectsRuntime.reverbs.get(trackId)
@@ -649,6 +785,7 @@ export class AudioEngine {
     } else {
       applyReverbNodeChainParams(rv, params, createImpulseResponse)
     }
+    this.effectsRuntime.reverbSignatures.set(trackId, signature)
     this.rebuildTrackRouting(trackId)
   }
 
@@ -657,12 +794,15 @@ export class AudioEngine {
       this.pendingMasterReverbParams = params
       return
     }
+    const signature = serializeReverbParams(params)
+    if (this.masterReverbSignature === signature) return
     const createImpulseResponse = (decaySec: number) => this.createImpulseResponse(decaySec)
     if (!this.masterReverb) {
       this.masterReverb = createReverbNodeChain(this.audioCtx, params, createImpulseResponse)
     } else {
       applyReverbNodeChainParams(this.masterReverb, params, createImpulseResponse)
     }
+    this.masterReverbSignature = signature
     this.rebuildMasterRouting()
   }
 
@@ -722,12 +862,21 @@ export class AudioEngine {
     connectParallelFxChain(input, g, chain, this.effectsRuntime.reverbs.get(trackId))
   }
 
+  previewTrackVolume(trackId: string, volume: number, muted: boolean) {
+    const gain = this.mixerRuntime.gains.get(trackId)
+    if (!gain) return
+    const next = !muted && Number.isFinite(volume) ? Math.max(0, volume) : 0
+    try { gain.gain.value = next } catch {}
+  }
+
   setTrackEq(trackId: string, params: EqParamsLite) {
     if (!this.audioCtx) {
       // Defer until audio context exists
       this.effectsRuntime.pendingEqParams.set(trackId, params)
       return
     }
+    const signature = serializeEqParams(params)
+    if (this.effectsRuntime.eqSignatures.get(trackId) === signature) return
     this.ensureTrackNodes(trackId)
     // Tear down existing chain
     const old = this.effectsRuntime.eqChains.get(trackId)
@@ -737,6 +886,7 @@ export class AudioEngine {
     const targetChannels = this.destination?.maxChannelCount ?? this.audioCtx.destination.maxChannelCount ?? 2
     const nodes = createEqNodes(this.audioCtx, params, targetChannels)
     this.effectsRuntime.eqChains.set(trackId, nodes)
+    this.effectsRuntime.eqSignatures.set(trackId, signature)
     // Rewire
     this.rebuildTrackRouting(trackId)
   }
@@ -761,9 +911,9 @@ export class AudioEngine {
       masterInput: this.masterGain,
       trackNodes,
       trackSendGains: this.mixerRuntime.sendGains,
+      trackRoutingSignatures: this.mixerRuntime.routingSignatures,
       createGain: () => this.audioCtx!.createGain(),
       reconnectTrackMeters: (trackId, gain) => this.reconnectTrackMeters(trackId, gain),
-      cleanupTrackSendGains: (trackId) => this.cleanupTrackSendGains(trackId),
     })
 
     const activeTrackIds = new Set<string>(graph.channels.map((entry) => entry.channel.id))
@@ -771,6 +921,7 @@ export class AudioEngine {
       if (activeTrackIds.has(id)) continue
       try { g.disconnect() } catch {}
       this.mixerRuntime.gains.delete(id)
+      this.mixerRuntime.routingSignatures.delete(id)
       this.cleanupTrackSendGains(id)
       const input = this.effectsRuntime.inputs.get(id)
       if (input) {
@@ -787,6 +938,7 @@ export class AudioEngine {
         for (const n of nodes) { try { n.disconnect() } catch {} }
         this.effectsRuntime.eqChains.delete(id)
       }
+      this.effectsRuntime.eqSignatures.delete(id)
       const rv = this.effectsRuntime.reverbs.get(id)
       if (rv) {
         disconnectAudioNodes([rv.dryGain, rv.wetGain, rv.preDelay, rv.convolver])
@@ -806,10 +958,18 @@ export class AudioEngine {
         try { stereo.right.disconnect() } catch {}
         this.meterRuntime.stereoAnalysers.delete(id)
       }
+      const meterNode = this.meterWorkletNodes.get(id)
+      if (meterNode) {
+        try { meterNode.disconnect() } catch {}
+        meterNode.port.onmessage = null
+        this.meterWorkletNodes.delete(id)
+      }
+      this.meterWorkletLevels.delete(id)
       this.meterRuntime.spectrumTmp.delete(id)
       this.meterRuntime.spectrumLast.delete(id)
       this.effectsRuntime.pendingEqParams.delete(id)
       this.effectsRuntime.pendingReverbParams.delete(id)
+      this.effectsRuntime.reverbSignatures.delete(id)
     }
   }
 
@@ -1070,8 +1230,19 @@ export class AudioEngine {
     this.stopAllSources()
     this.clearMetronomeInterval()
     this.impulseCache.clear()
+    this.effectsRuntime.eqSignatures.clear()
+    this.effectsRuntime.reverbSignatures.clear()
+    this.masterEqSignature = null
+    this.masterReverbSignature = null
     this.meterRuntime.spectrumTmp.clear()
     this.meterRuntime.spectrumLast.clear()
+    for (const meterNode of this.meterWorkletNodes.values()) {
+      try { meterNode.disconnect() } catch {}
+      meterNode.port.onmessage = null
+    }
+    this.meterWorkletNodes.clear()
+    this.meterWorkletLevels.clear()
+    this.meterWorkletReady = null
     for (const sendMap of this.mixerRuntime.sendGains.values()) {
       for (const sendGain of sendMap.values()) {
         try { sendGain.disconnect() } catch {}
@@ -1108,9 +1279,12 @@ export class AudioEngine {
       this.pendingMasterEqParams = params
       return
     }
+    const signature = serializeEqParams(params)
+    if (this.masterEqSignature === signature) return
     // Tear down existing nodes
     for (const n of this.masterEqChain) { try { n.disconnect() } catch {} }
     this.masterEqChain = createEqNodes(this.audioCtx, params, this.audioCtx.destination.maxChannelCount || 2)
+    this.masterEqSignature = signature
     this.rebuildMasterRouting()
   }
 

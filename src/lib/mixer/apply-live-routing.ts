@@ -11,26 +11,38 @@ type ApplyLiveMixerGraphOptions = {
   masterInput: GainNode
   trackNodes: Map<string, LiveTrackNodes>
   trackSendGains: Map<string, Map<string, GainNode>>
+  trackRoutingSignatures: Map<string, string>
   createGain: () => GainNode
   reconnectTrackMeters: (trackId: string, output: GainNode) => void
-  cleanupTrackSendGains?: (trackId: string) => void
 }
+
+const getRoutingSignature = (resolvedTrack: ResolvedMixerGraph['channels'][number]) =>
+  [
+    resolvedTrack.outputTargetId ?? '',
+    ...resolvedTrack.sends.map((send) => send.targetId).sort(),
+  ].join('|')
 
 export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
   const activeTrackIds = new Set<string>(options.graph.channels.map((entry) => entry.channel.id))
 
   for (const resolvedTrack of options.graph.channels) {
     const channelId = resolvedTrack.channel.id
-    const nodes = options.trackNodes.get(channelId)
-    if (!nodes) continue
+    const nodes = options.trackNodes.get(channelId)!
 
     nodes.gain.gain.value = resolvedTrack.gain
     nodes.output.gain.value = resolvedTrack.outputGain
-    try { nodes.gain.disconnect() } catch {}
-    try { nodes.output.disconnect() } catch {}
-    const outputTarget = resolvedTrack.outputTargetId ? options.trackNodes.get(resolvedTrack.outputTargetId)?.input : undefined
-    nodes.gain.connect(nodes.output)
-    nodes.output.connect(outputTarget ?? options.masterInput)
+    const routingSignature = getRoutingSignature(resolvedTrack)
+    const shouldReconnect = options.trackRoutingSignatures.get(channelId) !== routingSignature
+    const outputTarget = resolvedTrack.outputTargetId
+      ? options.trackNodes.get(resolvedTrack.outputTargetId)!.input
+      : options.masterInput
+    if (shouldReconnect) {
+      try { nodes.gain.disconnect() } catch {}
+      try { nodes.output.disconnect() } catch {}
+      nodes.gain.connect(nodes.output)
+      nodes.output.connect(outputTarget)
+      options.trackRoutingSignatures.set(channelId, routingSignature)
+    }
 
     let sendMap = options.trackSendGains.get(channelId)
 
@@ -47,11 +59,14 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
       if (!sendGain) {
         sendGain = options.createGain()
         sendMap.set(send.targetId, sendGain)
+        nodes.gain.connect(sendGain)
+        sendGain.connect(target.input)
+      } else if (shouldReconnect) {
+        try { sendGain.disconnect() } catch {}
+        nodes.gain.connect(sendGain)
+        sendGain.connect(target.input)
       }
       sendGain.gain.value = send.amount
-      try { sendGain.disconnect() } catch {}
-      nodes.gain.connect(sendGain)
-      sendGain.connect(target.input)
     }
 
     if (sendMap) {
@@ -63,7 +78,7 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
       if (sendMap.size === 0) options.trackSendGains.delete(channelId)
     }
 
-    options.reconnectTrackMeters(channelId, nodes.output)
+    if (shouldReconnect) options.reconnectTrackMeters(channelId, nodes.output)
   }
 
   for (const [trackId, sendMap] of Array.from(options.trackSendGains.entries())) {
@@ -72,6 +87,6 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
       try { sendGain.disconnect() } catch {}
     }
     options.trackSendGains.delete(trackId)
-    options.cleanupTrackSendGains?.(trackId)
+    options.trackRoutingSignatures.delete(trackId)
   }
 }

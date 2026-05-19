@@ -11,6 +11,10 @@ type LoopOptions = {
 }
 
 const LOOP_EPS = 1e-3
+const PLAYHEAD_UI_UPDATE_INTERVAL_MS = 1000 / 30
+
+const readNowMs = () =>
+  typeof performance !== 'undefined' ? performance.now() : Date.now()
 
 export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: LoopOptions) {
   const [isPlaying, setIsPlaying] = createSignal(false)
@@ -20,6 +24,8 @@ export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: Loop
   const [startedCtxTime, setStartedCtxTime] = createSignal(0)
   const [startedPlayheadSec, setStartedPlayheadSec] = createSignal(0)
   const [lastTracks, setLastTracks] = createSignal<Track[]>([])
+  let lastPlayheadUiUpdateMs = 0
+  let lastPublishedPlayheadSec = 0
   // Schedule a little ahead to avoid past-time starts under scheduling jitter.
   // This keeps metronome ticks and clip audio locked to the same transport timestamp.
   const SCHED_AHEAD_SEC = 0.02
@@ -67,14 +73,31 @@ export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: Loop
     return { sec: wrapped, looped: true }
   }
 
-  const tick = () => {
-    if (!isPlaying()) return
+  const resolveCurrentPlayhead = () => {
     const elapsedRaw = audioEngine.currentTime - startedCtxTime()
     const latency = audioEngine.outputLatencySec || 0
     const elapsed = Math.max(0, elapsedRaw - latency)
     const nextSec = startedPlayheadSec() + elapsed
-    const { sec } = applyLoopIfNeeded(nextSec)
+    return applyLoopIfNeeded(nextSec)
+  }
+
+  const publishPlayhead = (sec: number) => {
+    lastPublishedPlayheadSec = sec
+    lastPlayheadUiUpdateMs = readNowMs()
     setPlayheadSec(sec)
+  }
+
+  const tick = () => {
+    if (!isPlaying()) return
+    const { sec, looped } = resolveCurrentPlayhead()
+    const nowMs = readNowMs()
+    if (
+      looped ||
+      nowMs - lastPlayheadUiUpdateMs >= PLAYHEAD_UI_UPDATE_INTERVAL_MS ||
+      Math.abs(sec - lastPublishedPlayheadSec) >= 0.25
+    ) {
+      publishPlayhead(sec)
+    }
     setRafId(requestAnimationFrame(tick))
   }
 
@@ -84,6 +107,8 @@ export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: Loop
     setIsPlaying(true)
     setStartedCtxTime(audioEngine.currentTime)
     setStartedPlayheadSec(playheadSec())
+    lastPublishedPlayheadSec = playheadSec()
+    lastPlayheadUiUpdateMs = 0
     setLastTracks(tracks)
     audioEngine.onTransportStart(playheadSec())
     audioEngine.onTransportSeek(playheadSec(), SCHED_AHEAD_SEC)
@@ -94,6 +119,8 @@ export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: Loop
 
   const handlePause = () => {
     if (!isPlaying()) return
+    const { sec } = resolveCurrentPlayhead()
+    publishPlayhead(sec)
     setIsPlaying(false)
     audioEngine.stopAllSources()
     audioEngine.onTransportPause()
@@ -102,6 +129,8 @@ export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: Loop
 
   const handleStop = () => {
     handlePause()
+    lastPublishedPlayheadSec = 0
+    lastPlayheadUiUpdateMs = 0
     setPlayheadSec(0)
     setStartedCtxTime(audioEngine.currentTime)
     setStartedPlayheadSec(0)
@@ -109,7 +138,7 @@ export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: Loop
   }
 
   const setPlayhead = (sec: number, tracks: Track[]) => {
-    setPlayheadSec(sec)
+    publishPlayhead(sec)
     setLastTracks(tracks)
     if (isPlaying()) {
       setStartedCtxTime(audioEngine.currentTime)

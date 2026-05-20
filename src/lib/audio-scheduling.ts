@@ -22,6 +22,41 @@ type PlayableAudioWindow = {
   durationSec: number
 }
 
+const arpeggiatedNotesCache = new WeakMap<MidiNote[], Map<string, MidiNote[]>>()
+const MAX_ARPEGGIATOR_CACHE_ENTRIES = 4
+
+function getArpeggiatorCacheKey(params: ArpParams, clipDurationBeats: number) {
+  return [
+    params.enabled ? 1 : 0,
+    params.rate,
+    params.pattern,
+    params.octaves,
+    params.gate,
+    params.hold ? 1 : 0,
+    clipDurationBeats,
+  ].join('|')
+}
+
+function getArpeggiatedNotes(notes: MidiNote[], params: ArpParams, clipDurationBeats: number) {
+  const key = getArpeggiatorCacheKey(params, clipDurationBeats)
+  let cache = arpeggiatedNotesCache.get(notes)
+  if (!cache) {
+    cache = new Map<string, MidiNote[]>()
+    arpeggiatedNotesCache.set(notes, cache)
+  }
+  const cached = cache.get(key)
+  if (cached) return cached
+  const next = applyArpeggiatorToNotes(notes, params, clipDurationBeats)
+  if (cache.size >= MAX_ARPEGGIATOR_CACHE_ENTRIES) {
+    for (const oldestKey of cache.keys()) {
+      cache.delete(oldestKey)
+      break
+    }
+  }
+  cache.set(key, next)
+  return next
+}
+
 export function getScheduledMidiEvents(input: {
   clip: Pick<Clip, 'startSec' | 'duration' | 'midiOffsetBeats'>
   bpm: number
@@ -39,7 +74,7 @@ export function getScheduledMidiEvents(input: {
 
   let notesToSchedule = input.notes
   if (input.arp?.enabled) {
-    notesToSchedule = applyArpeggiatorToNotes(notesToSchedule, input.arp, clipDurationBeats)
+    notesToSchedule = getArpeggiatedNotes(notesToSchedule, input.arp, clipDurationBeats)
   }
 
   const events: ScheduledMidiEvent[] = []

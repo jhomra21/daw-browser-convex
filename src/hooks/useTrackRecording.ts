@@ -103,6 +103,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   const [isRecordingInternal, setIsRecordingInternal] = createSignal(false)
   const [recordArmTrackId, setRecordArmTrackId] = createSignal<Track['id'] | null>(null)
   const livePreviewPoints: { offset: number; amplitude: number }[] = []
+  let livePreviewStartIndex = 0
   const [previewPoints, setPreviewPoints] = createSignal<{ offset: number; amplitude: number }[]>([], { equals: false })
   const [previewStartSec, setPreviewStartSec] = createSignal<number | null>(null)
   const [currentRecordingTrackId, setCurrentRecordingTrackId] = createSignal<Track['id'] | null>(null)
@@ -160,6 +161,12 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     })
   }
 
+  const resetPreviewState = () => {
+    livePreviewPoints.length = 0
+    livePreviewStartIndex = 0
+    setPreviewPoints(livePreviewPoints)
+  }
+
   const cleanupRecording = async () => {
     const ctx = activeCtx
     activeCtx = null
@@ -176,6 +183,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       setPreviewStartSec,
       setCurrentRecordingTrackId,
     })
+    livePreviewStartIndex = 0
   }
 
   const haltLivePreview = () => {
@@ -186,6 +194,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       setPreviewPoints,
       setPreviewStartSec,
     })
+    livePreviewStartIndex = 0
   }
 
   const handleAutoCreatedTrackFailure = async (track: Track | null) => {
@@ -425,14 +434,18 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
           sum += value * value
         }
         const rms = Math.sqrt(sum / input.length)
-        const ctxTime = ctxRef?.currentTime ?? 0
+        const ctxTime = ctxRef.currentTime
         const offset = Math.max(0, ctxTime - startCtxTime)
         const cutoff = Math.max(0, offset - 5)
         livePreviewPoints.push({ offset, amplitude: Math.min(1, rms) })
-        while (livePreviewPoints.length > 0 && livePreviewPoints[0].offset < cutoff) {
-          livePreviewPoints.shift()
+        while (livePreviewStartIndex < livePreviewPoints.length && livePreviewPoints[livePreviewStartIndex].offset < cutoff) {
+          livePreviewStartIndex++
         }
-        setPreviewPoints(livePreviewPoints)
+        if (livePreviewStartIndex > 128) {
+          livePreviewPoints.splice(0, livePreviewStartIndex)
+          livePreviewStartIndex = 0
+        }
+        setPreviewPoints(livePreviewStartIndex === 0 ? livePreviewPoints : livePreviewPoints.slice(livePreviewStartIndex))
       }
       source.connect(analyser)
       analyser.connect(scriptProcessor)
@@ -485,8 +498,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     setIsRecording(true)
     setIsRecordingInternal(true)
     setCurrentRecordingTrackId(trackId)
-    livePreviewPoints.length = 0
-    setPreviewPoints(livePreviewPoints)
+    resetPreviewState()
     setPreviewStartSec(startSec)
 
     try {

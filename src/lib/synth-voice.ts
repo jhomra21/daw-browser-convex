@@ -121,13 +121,15 @@ export function createSynthVoiceOscillators(
   },
 ) {
   const osc1 = ctx.createOscillator()
-  const osc2 = ctx.createOscillator()
   const frequency = getMidiNoteFrequency(options.pitch)
 
   try { osc1.type = options.wave1 } catch {}
-  try { osc2.type = options.wave2 } catch {}
   osc1.frequency.setValueAtTime(frequency, options.startTime)
+  if (options.wave1 === options.wave2) return [osc1]
+
+  const osc2 = ctx.createOscillator()
+  try { osc2.type = options.wave2 } catch {}
   osc2.frequency.setValueAtTime(frequency, options.startTime)
 
-  return { osc1, osc2 }
+  return [osc1, osc2]
 }

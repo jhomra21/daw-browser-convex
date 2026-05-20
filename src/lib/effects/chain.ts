@@ -57,6 +57,7 @@ export function applyReverbNodeChainParams(
   chain.dryGain.gain.value = 1 - clamp(params.wet, 0, 1)
   chain.wetGain.gain.value = clamp(params.wet, 0, 1)
   chain.preDelay.delayTime.value = clamp(params.preDelayMs / 1000, 0, 0.2)
+  if (!chain.enabled) return
   const impulse = createImpulseResponse(params.decaySec)
   if (impulse) {
     chain.convolver.buffer = impulse

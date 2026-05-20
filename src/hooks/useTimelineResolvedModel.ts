@@ -61,6 +61,9 @@ type UseTimelineResolvedModelReturn = {
 export function useTimelineResolvedModel(
   options: UseTimelineResolvedModelOptions,
 ): UseTimelineResolvedModelReturn {
+  const emptyDraftClipEditsById = new Map<string, ClipTimelinePatch>()
+  const emptyPreviewClipsByTrackId = new Map<Track['id'], Track['clips']>()
+
   function resolveTracks(input: {
     draftClipEditsById: Map<string, ClipTimelinePatch>
     previewClipsByTrackId: Map<Track['id'], Track['clips']>
@@ -104,22 +107,26 @@ export function useTimelineResolvedModel(
 
   const resolvedTracks = createMemo(() => {
     return resolveTracks({
-      draftClipEditsById: new Map<string, ClipTimelinePatch>(),
-      previewClipsByTrackId: new Map(),
+      draftClipEditsById: emptyDraftClipEditsById,
+      previewClipsByTrackId: emptyPreviewClipsByTrackId,
     })
   })
 
   const placementTracks = createMemo(() => {
+    const draftClipEditsById = options.projection.draftClipEditsById()
+    if (draftClipEditsById.size === 0) return resolvedTracks()
     return resolveTracks({
-      draftClipEditsById: options.projection.draftClipEditsById(),
-      previewClipsByTrackId: new Map(),
+      draftClipEditsById,
+      previewClipsByTrackId: emptyPreviewClipsByTrackId,
     })
   })
 
   const renderTracks = createMemo(() => {
+    const previewClipsByTrackId = options.projection.previewClipsByTrackId()
+    if (previewClipsByTrackId.size === 0) return placementTracks()
     return resolveTracks({
       draftClipEditsById: options.projection.draftClipEditsById(),
-      previewClipsByTrackId: options.projection.previewClipsByTrackId(),
+      previewClipsByTrackId,
     })
   })
 

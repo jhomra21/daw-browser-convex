@@ -1,4 +1,4 @@
-import { supportsGain, type ArpParams, type EqParamsLite } from '~/lib/effects/params'
+import { supportsGain, type ArpParams, type EqBandParams, type EqParamsLite } from '~/lib/effects/params'
 
 type MidiNote = { beat: number; length: number; pitch: number; velocity?: number }
 
@@ -17,7 +17,7 @@ function createSeededRandom(seed: number) {
   }
 }
 
-function getImpulseBucket(decaySec: number, bucketSize = 0.1): ImpulseBucket {
+export function getImpulseBucket(decaySec: number, bucketSize = 0.1): ImpulseBucket {
   const clampedDecay = Math.min(10, Math.max(0.05, decaySec))
   const bucketIndex = Math.max(1, Math.round(clampedDecay / bucketSize))
   return {
@@ -26,25 +26,37 @@ function getImpulseBucket(decaySec: number, bucketSize = 0.1): ImpulseBucket {
   }
 }
 
+export function getImpulseResponseBufferInfo(
+  ctx: BaseAudioContext,
+  decaySec: number,
+  options?: { bucketSize?: number },
+) {
+  const bucket = getImpulseBucket(decaySec, options?.bucketSize)
+  return {
+    bucketIndex: bucket.bucketIndex,
+    bucketSec: bucket.bucketSec,
+    length: Math.max(1, Math.floor(ctx.sampleRate * bucket.bucketSec)),
+  }
+}
+
 export function createImpulseResponseBuffer(
   ctx: BaseAudioContext,
   decaySec: number,
   options?: { bucketSize?: number; channelCount?: number },
 ) {
-  const bucket = getImpulseBucket(decaySec, options?.bucketSize)
-  const length = Math.max(1, Math.floor(ctx.sampleRate * bucket.bucketSec))
+  const info = getImpulseResponseBufferInfo(ctx, decaySec, options)
   const channelCount = Math.max(1, Math.min(2, options?.channelCount ?? 2))
-  const impulse = ctx.createBuffer(channelCount, length, ctx.sampleRate)
+  const impulse = ctx.createBuffer(channelCount, info.length, ctx.sampleRate)
   for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
     const data = impulse.getChannelData(channel)
-    const noise = createSeededRandom(bucket.bucketIndex * 0x9E3779B1 + channel * 0x85EBCA77)
-    for (let frame = 0; frame < length; frame++) {
-      const t = frame / length
+    const noise = createSeededRandom(info.bucketIndex * 0x9E3779B1 + channel * 0x85EBCA77)
+    for (let frame = 0; frame < info.length; frame++) {
+      const t = frame / info.length
       const decay = Math.pow(1 - t, 3)
       data[frame] = (noise() * 2 - 1) * decay
     }
   }
-  return { buffer: impulse, bucketIndex: bucket.bucketIndex, bucketSec: bucket.bucketSec, length }
+  return { buffer: impulse, bucketIndex: info.bucketIndex, bucketSec: info.bucketSec, length: info.length }
 }
 
 export function createEqNodes(ctx: BaseAudioContext, params?: EqParamsLite, channels = 2): BiquadFilterNode[] {
@@ -60,13 +72,32 @@ export function createEqNodes(ctx: BaseAudioContext, params?: EqParamsLite, chan
     } catch {
       // Some browsers may not allow changing channel configuration.
     }
-    filter.type = band.type
-    filter.frequency.value = Math.max(20, Math.min(20000, band.frequency))
-    filter.Q.value = Math.max(0.001, band.q)
-    filter.gain.value = supportsGain(band.type) ? band.gainDb : 0
+    applyEqBandParams(filter, band)
     nodes.push(filter)
   }
   return nodes
+}
+
+export function getEqTopologySignature(params?: EqParamsLite): string {
+  if (!params?.enabled) return ''
+  return params.bands
+    .filter((band) => band.enabled)
+    .map((band) => `${band.id}:${band.type}`)
+    .join('|')
+}
+
+export function applyEqNodeParams(nodes: BiquadFilterNode[], params: EqParamsLite) {
+  const bands = params.enabled ? params.bands.filter((band) => band.enabled) : []
+  for (let index = 0; index < nodes.length; index++) {
+    applyEqBandParams(nodes[index], bands[index])
+  }
+}
+
+function applyEqBandParams(filter: BiquadFilterNode, band: EqBandParams) {
+  filter.type = band.type
+  filter.frequency.value = Math.max(20, Math.min(20000, band.frequency))
+  filter.Q.value = Math.max(0.001, band.q)
+  filter.gain.value = supportsGain(band.type) ? band.gainDb : 0
 }
 
 export function applyArpeggiatorToNotes(

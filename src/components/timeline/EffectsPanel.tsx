@@ -26,6 +26,8 @@ import {
   createDefaultEqParams,
   createDefaultReverbParams,
   normalizeSynthParams,
+  serializeEqParams,
+  serializeReverbParams,
   type EqParams,
   type ReverbParams,
 } from "~/lib/effects/params";
@@ -450,7 +452,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     row: () => currentTargetId() === "master" ? eqMasterQuery.data : eqTrackQuery.data,
     readQueryParams: (row) => row?.params,
     createInitialParams: () => createDefaultEqParams(),
-    serializeParams: (params) => JSON.stringify(params),
+    serializeParams: serializeEqParams,
     applyToEngine: (targetId, params) => {
       if (targetId === "master") {
         props.audioEngine?.setMasterEq(params);
@@ -559,7 +561,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     row: () => currentTargetId() === "master" ? reverbMasterQuery.data : reverbTrackQuery.data,
     readQueryParams: (row) => row?.params,
     createInitialParams: () => createDefaultReverbParams(),
-    serializeParams: (params) => JSON.stringify(params),
+    serializeParams: serializeReverbParams,
     applyToEngine: (targetId, params) => {
       if (targetId === "master") {
         props.audioEngine?.setMasterReverb(params);
@@ -637,6 +639,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     currentTargetId,
     tracks: () => props.tracks,
     audioEngine: () => props.audioEngine,
+    playheadSec: () => props.playheadSec,
     localDraftEffects: {
       eq: eqState.readDraftForTarget,
       reverb: reverbState.readDraftForTarget,

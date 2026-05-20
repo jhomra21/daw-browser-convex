@@ -95,14 +95,14 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
           const noteDur = event.endSec - event.startSec
           if (noteDur <= 0) continue
 
-          const { osc1, osc2 } = createSynthVoiceOscillators(ctx, {
+          const oscs = createSynthVoiceOscillators(ctx, {
             startTime: when,
             pitch: event.pitch,
             wave1: voice.wave1,
             wave2: voice.wave2,
           })
           const gain = ctx.createGain()
-          const peakGain = (getSynthVoiceVelocity(event.velocity) * voice.clipGain * voice.synthGain) / 2
+          const peakGain = (getSynthVoiceVelocity(event.velocity) * voice.clipGain * voice.synthGain) / oscs.length
           const envelope = scheduleSynthVoiceEnvelope(gain.gain, {
             startTime: when,
             durationSec: noteDur,
@@ -110,13 +110,12 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
             releaseSec: voice.releaseSec,
             peakGain,
           })
-          osc1.connect(gain)
-          osc2.connect(gain)
+          for (const osc of oscs) osc.connect(gain)
           gain.connect(trackInput)
-          try { osc1.start(when) } catch {}
-          try { osc2.start(when) } catch {}
-          try { osc1.stop(envelope.endTime) } catch {}
-          try { osc2.stop(envelope.endTime) } catch {}
+          for (const osc of oscs) {
+            try { osc.start(when) } catch {}
+            try { osc.stop(envelope.endTime) } catch {}
+          }
         }
         continue
       }

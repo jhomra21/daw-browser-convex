@@ -900,6 +900,7 @@ const Timeline: Component = () => {
                 <TimelineOverlays
                   timeline={{
                     tracks: renderTracks(),
+                    trackLookup: trackLookup(),
                     durationSec: duration(),
                     bpm: bpm(),
                     gridDenominator: gridDenominator(),
@@ -945,20 +946,8 @@ const Timeline: Component = () => {
                   bottomOffsetPx: bottomFXOpen() ? FX_OFFSET_PX : 0,
                   recordArmTrackId: recordArmTrackId(),
                   currentUserId: userId(),
-                  getTrackLevel: (id) => {
-                    try {
-                      return audioEngine.getTrackLevel(id);
-                    } catch {
-                      return 0;
-                    }
-                  },
-                  getTrackLevels: (id) => {
-                    try {
-                      return audioEngine.getTrackLevelsStereo(id);
-                    } catch {
-                      return [0, 0];
-                    }
-                  },
+                  subscribeTrackLevels: (listener) =>
+                    audioEngine.subscribeTrackStereoLevels(listener),
                   onTrackClick: (id) => {
                     selection.selectTrackTarget(id, {
                       clearClipSelection: true,
@@ -974,6 +963,9 @@ const Timeline: Component = () => {
                       outputTargetId: outputTargetId ?? null,
                     });
                     updateTrackOutputTargetId(trackId, outputTargetId);
+                  },
+                  onVolumePreview: (trackId, volume, muted) => {
+                    audioEngine.previewTrackVolume(trackId, volume, muted);
                   },
                   onVolumeChange: setTrackVolume,
                   onToggleMute: handleToggleTrackMute,

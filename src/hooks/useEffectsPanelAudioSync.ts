@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
+import { createEffect, createSignal, type Accessor } from "solid-js";
 import {
   createDefaultEqParams,
   createDefaultReverbParams,
@@ -19,6 +19,7 @@ type UseEffectsPanelAudioSyncOptions = {
   currentTargetId: Accessor<string>;
   tracks: Accessor<Track[]>;
   audioEngine: Accessor<AudioEngine | undefined>;
+  playheadSec?: Accessor<number | undefined>;
   localDraftEffects?: {
     eq?: (targetId: string) => EqParams | undefined;
     reverb?: (targetId: string) => ReverbParams | undefined;
@@ -181,30 +182,21 @@ export function useEffectsPanelAudioSync(
   const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null);
 
   createEffect(() => {
-    if (!options.isOpen()) return;
-    let raf = 0;
-    const loop = () => {
-      try {
-        const audioEngine = options.audioEngine();
-        const id = options.currentTargetId();
-        const data = id === "master"
-          ? audioEngine?.getMasterSpectrum()
-          : audioEngine?.getTrackSpectrum(id);
-        if (data) setSpectrum(data);
-      } catch {}
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    onCleanup(() => {
-      try {
-        cancelAnimationFrame(raf);
-      } catch {}
-    });
-  });
-
-  createEffect(() => {
-    void options.currentTargetId();
-    setSpectrum(null);
+    if (!options.isOpen()) {
+      setSpectrum(null);
+      return;
+    }
+    options.playheadSec?.();
+    try {
+      const audioEngine = options.audioEngine();
+      const id = options.currentTargetId();
+      const data = id === "master"
+        ? audioEngine?.getMasterSpectrum()
+        : audioEngine?.getTrackSpectrum(id);
+      setSpectrum(data ?? null);
+    } catch {
+      setSpectrum(null);
+    }
   });
 
   return {

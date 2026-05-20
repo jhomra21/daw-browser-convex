@@ -7,6 +7,8 @@ import {
   createSignal,
   onCleanup,
 } from "solid-js";
+import { createStore, produce } from "solid-js/store";
+import type { TrackStereoLevels } from "~/lib/audio-engine";
 import {
   canTrackReceiveAudioClip,
   getTrackChannelRole,
@@ -15,11 +17,6 @@ import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
 import { LANE_HEIGHT, RULER_HEIGHT } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Track, TrackSend } from "~/types/timeline";
-
-type TrackStereoLevels = {
-  left: number;
-  right: number;
-};
 
 type TrackSidebarProps = {
   sidebar: {
@@ -42,7 +39,7 @@ type TrackSidebarProps = {
     currentUserId?: string;
     isPlaying: boolean;
     subscribeTrackLevels: (
-      listener: (trackId: string, levels: TrackStereoLevels) => void,
+      listener: (levels: ReadonlyMap<string, TrackStereoLevels>) => void,
     ) => () => void;
     onVolumePreview: (
       trackId: Track["id"],
@@ -56,9 +53,7 @@ type TrackSidebarProps = {
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const sidebar = () => props.sidebar;
 
-  const [meters, setMeters] = createSignal<
-    Record<string, { L: number; R: number }>
-  >({});
+  const [meters, setMeters] = createStore<Record<string, TrackStereoLevels>>({});
   const [selectedOutputTargets, setSelectedOutputTargets] = createSignal<
     Map<Track["id"], string>
   >(new Map());
@@ -68,34 +63,34 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   createEffect(() => {
     if (!sidebar().isPlaying) {
-      setMeters((current) => (Object.keys(current).length === 0 ? current : {}));
+      setMeters(produce((current) => {
+        for (const trackId of Object.keys(current)) delete current[trackId];
+      }));
       return;
     }
-    const unsubscribe = sidebar().subscribeTrackLevels((trackId, levels) => {
-      setMeters((current) => {
-        const previous = current[trackId];
-        const next = {
-          L: clampUnit(levels.left),
-          R: clampUnit(levels.right),
-        };
-        if (previous?.L === next.L && previous.R === next.R) return current;
-        return { ...current, [trackId]: next };
-      });
+    const unsubscribe = sidebar().subscribeTrackLevels((levelsByTrackId) => {
+      setMeters(produce((current) => {
+        for (const [trackId, levels] of levelsByTrackId) {
+          const next = {
+            left: clampUnit(levels.left),
+            right: clampUnit(levels.right),
+          };
+          const previous = current[trackId];
+          if (previous?.left === next.left && previous.right === next.right) continue;
+          current[trackId] = next;
+        }
+      }));
     });
     onCleanup(unsubscribe);
   });
 
   createEffect(() => {
     const trackIds = new Set<string>(sidebar().tracks.map((track) => track.id));
-    setMeters((current) => {
-      let next: Record<string, { L: number; R: number }> | null = null;
+    setMeters(produce((current) => {
       for (const trackId of Object.keys(current)) {
-        if (trackIds.has(trackId)) continue;
-        if (!next) next = { ...current };
-        delete next[trackId];
+        if (!trackIds.has(trackId)) delete current[trackId];
       }
-      return next ?? current;
-    });
+    }));
   });
 
   const groupTracks = createMemo(() =>
@@ -633,10 +628,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       <div class="absolute inset-0 flex items-end justify-center gap-1">
                         {(() => {
                           const meter = sidebar().isPlaying
-                            ? meters()[track.id]
+                            ? meters[track.id]
                             : undefined;
-                          const left = clampUnit(meter?.L ?? 0);
-                          const right = clampUnit(meter?.R ?? 0);
+                          const left = meter?.left ?? 0;
+                          const right = meter?.right ?? 0;
                           const leftColor =
                             left >= 0.98 ? "bg-red-500" : "bg-green-500";
                           const rightColor =

@@ -355,21 +355,24 @@ export function useTimelineProjectionState(
     replaceDraftClipMoves: (moves) => {
       const moveIds = new Set(moves.map((move) => move.clipId))
       setDraftClipEditsById((current) => {
-        const next = new Map(current)
+        let next: Map<string, ClipTimelinePatch> | null = null
         for (const [clipId, patch] of current) {
           if (!moveIds.has(clipId)) continue
           if (patch.duration !== undefined || patch.leftPadSec !== undefined || patch.bufferOffsetSec !== undefined || patch.midiOffsetBeats !== undefined) continue
+          if (!next) next = new Map(current)
           next.delete(clipId)
         }
         for (const move of moves) {
           const previous = current.get(move.clipId)
+          if (previous?.trackId === move.trackId && previous.startSec === move.startSec) continue
+          if (!next) next = new Map(current)
           next.set(move.clipId, {
             ...previous,
             trackId: move.trackId,
             startSec: move.startSec,
           })
         }
-        return next
+        return next ?? current
       })
     },
     clearDraftClipMoves,

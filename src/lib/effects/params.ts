@@ -43,12 +43,11 @@ export function createDefaultEqParams(): EqParams {
 }
 
 export function serializeEqParams(params: EqParams): string {
-  return [
-    params.enabled ? 1 : 0,
-    ...params.bands.map((band) =>
-      `${band.id}:${band.enabled ? 1 : 0}:${band.type}:${band.frequency}:${band.gainDb}:${band.q}`,
-    ),
-  ].join('|')
+  let signature = params.enabled ? '1' : '0'
+  for (const band of params.bands) {
+    signature += `|${band.id}:${band.enabled ? 1 : 0}:${band.type}:${band.frequency}:${band.gainDb}:${band.q}`
+  }
+  return signature
 }
 
 export type ReverbParams = {

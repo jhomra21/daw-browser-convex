@@ -104,6 +104,9 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
   // Ctrl-drag duplication state
   let duplicationActive = false
   let creatingTrackDuringDrag = false
+  let lastDraftMoves: Array<{ clipId: string; trackId: Track['id']; startSec: number }> | null = null
+  let dragTracksSnapshot: Track[] | null = null
+  let dragTrackLookup: ReturnType<typeof createTimelineTrackIndex> | null = null
 
   const PREVIEW_PREFIX = '__dup_preview:'
   const getScrollRef = () => getScrollElement()
@@ -135,6 +138,26 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     addedTrackDuringDrag = null
     creatingTrackDuringDrag = false
     draggingIds = null
+    lastDraftMoves = null
+    dragTracksSnapshot = null
+    dragTrackLookup = null
+  }
+
+  const draftMovesChanged = (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => {
+    if (!lastDraftMoves || lastDraftMoves.length !== moves.length) return true
+    for (let i = 0; i < moves.length; i++) {
+      const prev = lastDraftMoves[i]
+      const next = moves[i]
+      if (prev.clipId !== next.clipId || prev.trackId !== next.trackId || prev.startSec !== next.startSec) return true
+    }
+    return false
+  }
+
+  const getDragTrackLookup = (tracks: Track[]) => {
+    if (dragTracksSnapshot === tracks && dragTrackLookup) return dragTrackLookup
+    dragTracksSnapshot = tracks
+    dragTrackLookup = createTimelineTrackIndex(tracks)
+    return dragTrackLookup
   }
 
   const resetDragState = () => {
@@ -300,12 +323,14 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
     if (laneIdx >= snapshot.length) {
       if (!addedTrackDuringDrag && !creatingTrackDuringDrag) {
-        await ensureAddedTrackDuringDrag(snapshot, createTimelineTrackIndex(snapshot))
+        await ensureAddedTrackDuringDrag(snapshot, getDragTrackLookup(snapshot))
         snapshot = placementTracks()
+        dragTracksSnapshot = null
+        dragTrackLookup = null
       }
     }
 
-    const lookup = createTimelineTrackIndex(snapshot)
+    const lookup = getDragTrackLookup(snapshot)
     const targetId = resolveNonDupTargetTrackId(snapshot, laneIdx, addedTrackDuringDrag)
     if (!targetId) {
       if (duplicationActive) setPreviewClipsByTrack(new Map<TrackId, Clip[]>())
@@ -370,10 +395,14 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       })
       if (plannedPlacement.status === 'needs-track' || plannedPlacement.status === 'invalid') {
         clearDraftClipMoves(prePositions.keys())
+        lastDraftMoves = null
         return
       }
 
-      replaceDraftClipMoves(plannedPlacement.moves)
+      if (draftMovesChanged(plannedPlacement.moves)) {
+        replaceDraftClipMoves(plannedPlacement.moves)
+        lastDraftMoves = plannedPlacement.moves
+      }
       if (draggingIds.trackId !== plannedPlacement.targetTrackId) {
         const clipId = draggingIds.clipId
         draggingIds = { trackId: plannedPlacement.targetTrackId, clipId }

@@ -1,4 +1,4 @@
-import { supportsGain, type ArpParams, type EqParamsLite } from '~/lib/effects/params'
+import { supportsGain, type ArpParams, type EqBandParams, type EqParamsLite } from '~/lib/effects/params'
 
 type MidiNote = { beat: number; length: number; pitch: number; velocity?: number }
 
@@ -72,13 +72,32 @@ export function createEqNodes(ctx: BaseAudioContext, params?: EqParamsLite, chan
     } catch {
       // Some browsers may not allow changing channel configuration.
     }
-    filter.type = band.type
-    filter.frequency.value = Math.max(20, Math.min(20000, band.frequency))
-    filter.Q.value = Math.max(0.001, band.q)
-    filter.gain.value = supportsGain(band.type) ? band.gainDb : 0
+    applyEqBandParams(filter, band)
     nodes.push(filter)
   }
   return nodes
+}
+
+export function getEqTopologySignature(params?: EqParamsLite): string {
+  if (!params?.enabled) return ''
+  return params.bands
+    .filter((band) => band.enabled)
+    .map((band) => `${band.id}:${band.type}`)
+    .join('|')
+}
+
+export function applyEqNodeParams(nodes: BiquadFilterNode[], params: EqParamsLite) {
+  const bands = params.enabled ? params.bands.filter((band) => band.enabled) : []
+  for (let index = 0; index < nodes.length; index++) {
+    applyEqBandParams(nodes[index], bands[index])
+  }
+}
+
+function applyEqBandParams(filter: BiquadFilterNode, band: EqBandParams) {
+  filter.type = band.type
+  filter.frequency.value = Math.max(20, Math.min(20000, band.frequency))
+  filter.Q.value = Math.max(0.001, band.q)
+  filter.gain.value = supportsGain(band.type) ? band.gainDb : 0
 }
 
 export function applyArpeggiatorToNotes(

@@ -2,6 +2,49 @@
 
 Tracks review-driven follow-up work before merging the audio refactor branch.
 
+## 2026-05-19 — Scale Performance Follow-Up
+
+### Scope
+
+- Implemented the validated scale findings from the follow-up trace/heap review across audio metering, runtime disposal, MIDI scheduling, EQ updates, spectrum sampling, and drag/projection churn.
+
+### Performance Fixes
+
+- Reduced track meter worklet message frequency and stopped creating analyser/splitter spectrum nodes for every track unless spectrum data is requested.
+- Batched meter publications per animation frame and only keeps live meter nodes for audible routed tracks.
+- Changed sidebar meters to fine-grained Solid store updates so one track meter tick does not clone and republish the full meter object.
+- Centralized track audio runtime disposal and expanded `AudioEngine.close()` cleanup for mixer, effects, synth, meter, spectrum, master, and pending-param state.
+- Removed per-note MIDI cleanup timers; synth-note cleanup now follows oscillator end events and disconnects note gain nodes once oscillators finish.
+- Avoided creating a duplicate synth oscillator when both configured waves are identical, including offline export.
+- Cached arpeggiator expansion per MIDI notes array and arp signature to avoid recomputing generated notes during repeated scheduling.
+- Added a cached playback scheduling index that skips clips outside the active playback window before touching per-track audio nodes.
+- Updated track/master EQ changes in place when the enabled-band topology is unchanged, avoiding graph rebuilds for pure parameter changes.
+- Reused spectrum output buffers for track and master spectrum reads.
+- Cached drag-session track lookups, skipped duplicate drag draft move publications, and avoided cloning projection draft maps when incoming move data is unchanged.
+- Replaced recording-preview front-array shifting with a bounded ring-style start index and periodic compaction.
+- Removed array/map allocation from EQ parameter serialization.
+
+### Review Follow-Up
+
+- Code review found the timerless MIDI cleanup path still needed live oscillator stops so `onended` cleanup can run; scheduled live synth oscillators to stop at the envelope end time, matching offline export.
+- Code review found drag draft no-op suppression could keep a stale move key after invalid placement cleared draft moves; reset the cached move key whenever active drag draft moves are cleared.
+- Simplify review found no scoped reuse cleanup needed.
+- Simplify review aligned sidebar meter store state with the audio-engine `{ left, right }` level shape instead of reshaping it to local `L/R` fields.
+- A later simplify review reused the exported audio-engine `TrackStereoLevels` type in `TrackSidebar` and zeroed disposed meter tracks so routed-away tracks cannot keep stale visible meter levels.
+- Post-review simplify removed the stale stereo-analyser fallback path after worklet-batched metering became the only consumer path.
+- Post-review simplify replaced drag draft move string keys with structural move comparison and capped per-note-array arpeggiator cache entries.
+- Simplify review reset the recording preview ring start index consistently across delegated cleanup and halt paths.
+- Simplify review replaced MIDI note cleanup membership scans with a per-note remaining-oscillator counter and changed playback scheduling lookup to jump past clips ending before the playhead.
+- Defensive-code review removed redundant EQ topology, sidebar meter, and recording-context guards already proven by their callers/write paths.
+- A final defensive-code review removed redundant arpeggiator cache key, ensured-track-node, and recording preview reset guards already proven by local map/caller invariants.
+- Defensive-code review found no duplicate, stale, conflicting, or overly verbose log entries in the scale follow-up.
+
+### Validation
+
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the scale performance follow-up.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the code-review follow-up fixes.
+- `bun run typecheck` and `git diff --check` passed after simplify cleanup before defensive-code-review.
+
 ## 2026-05-19 — Audio Performance Trace Follow-Up
 
 ### Scope

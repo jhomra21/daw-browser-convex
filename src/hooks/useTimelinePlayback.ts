@@ -102,7 +102,7 @@ export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: Loop
   }
 
   const handlePlay = async (tracks: Track[]) => {
-    audioEngine.ensureAudio()
+    audioEngine.ensureAudio({ applyCachedTrackGains: false })
     await audioEngine.resume()
     setIsPlaying(true)
     setStartedCtxTime(audioEngine.currentTime)

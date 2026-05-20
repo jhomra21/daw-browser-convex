@@ -2,6 +2,49 @@
 
 Tracks review-driven follow-up work before merging the audio refactor branch.
 
+## 2026-05-20 — Post-Trace Performance Follow-Up
+
+### Scope
+
+- Compared the new CDP trace, CPU profile, heap sampling profile, and heap snapshot captures against the earlier local playback captures.
+- Confirmed the previous performance commits materially reduced baseline playback cost before making additional changes.
+- Validated the remaining findings against the codebase before implementation and rejected speculative Convex subscription changes until a follow-up trace proves the root cause.
+
+### Performance Fixes
+
+- Removed duplicate cold-path `updateTrackGains` work from `AudioEngine.ensureAudio()` because playback scheduling already updates track gains with the current render tracks.
+- Kept cached track-gain application as the default `ensureAudio()` behavior for non-playback audio gestures, while letting playback opt out because scheduling immediately applies current render tracks.
+- Removed eager metronome node setup from `ensureAudio()` so metronome nodes are created only from the existing metronome-enabled and transport-start paths.
+- Kept the master analyser lazy by reconnecting an existing analyser during master routing rebuilds without creating a new analyser unless spectrum data is requested.
+- Reused stable empty draft and preview maps in `useTimelineResolvedModel`.
+- Reused `resolvedTracks()` when there are no draft clip edits and reused `placementTracks()` when there are no preview clips, avoiding repeated full timeline resolution for the common idle/playback path.
+- Passed the existing `Timeline` `trackLookup()` into `TimelineOverlays` instead of rebuilding a duplicate timeline track index inside the overlays layer.
+- Replaced the EQ draw effect's `props.bands.map(...).join('|')` dependency signature with direct band-field reads and merged the duplicate spectrum redraw effect into the same draw effect.
+
+### Profiling Follow-Up
+
+- Captured a matching active-playback CDP profile by reloading the open app tab through Helium/CDP, clicking Play, profiling playback, clicking Stop, and taking heap artifacts.
+- Confirmed `ensureAudio` dropped from the prior dominant CPU hotspot to roughly `1.3ms` in the matching active-playback capture.
+- Added a fuller interactive capture workload that keeps playback running while dragging track 1 and track 2 volume sliders and sweeping EQ canvas bands.
+- The interactive workload exposed EQ canvas response/draw work as the main remaining app CPU hotspot, with track-volume interactions visible but much smaller.
+
+### Review Follow-Up
+
+- Code review found that removing cached `updateTrackGains` from `ensureAudio()` could leave MIDI audition/live-note preview unrouted when the first audio gesture was not playback.
+- Review validation confirmed the root cause was `updateTrackGains()` owning both pre-audio track caching and post-audio live mixer graph application.
+- Added an `ensureAudio({ applyCachedTrackGains: false })` playback opt-out so non-playback callers still apply the cached mixer graph after `AudioContext` creation, while Play avoids the duplicate first-play graph update before scheduling.
+- A follow-up code review returned LGTM for the full uncommitted performance diff.
+- Simplify review found no scoped reuse, quality, or efficiency cleanup needed for the post-trace performance diff.
+- Defensive-code review found no high-confidence redundant guards, duplicated validation, impossible branches, or stale log entries.
+
+### Validation
+
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the low-risk performance fixes.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the cached-track-gains review fix.
+- `bun run typecheck`, `bun run build`, and `git diff --check` passed after the post-implementation simplify and defensive-code reviews plus log update.
+- Matching active-playback artifacts were written to `/Users/juan/Downloads/daw-cdp-capture-2026-05-20T14-44-42-613Z`.
+- Interactive playback/volume/EQ artifacts were written to `/Users/juan/Downloads/daw-cdp-capture-2026-05-20T15-13-25-929Z`.
+
 ## 2026-05-19 — Scale Performance Follow-Up
 
 ### Scope

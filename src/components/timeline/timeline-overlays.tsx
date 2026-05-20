@@ -1,5 +1,5 @@
 import { type Component, Show, Suspense, createMemo, lazy } from 'solid-js'
-import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
+import type { TimelineTrackIndex } from '~/lib/timeline-track-index'
 import { LANE_HEIGHT, PPS } from '~/lib/timeline-utils'
 import type { Clip, Track } from '~/types/timeline'
 
@@ -13,6 +13,7 @@ type MarqueeRect = { x: number; y: number; width: number; height: number } | nul
 type TimelineOverlaysProps = {
   timeline: {
     tracks: Track[]
+    trackLookup: TimelineTrackIndex
     durationSec: number
     bpm: number
     gridDenominator: number
@@ -44,12 +45,10 @@ type TimelineOverlaysProps = {
 }
 
 const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
-  const trackIndex = createMemo(() => createTimelineTrackIndex(props.timeline.tracks))
-
   const midiClip = createMemo<Clip | undefined>(() => {
     const id = props.midi.clipId
     if (!id) return undefined
-    return trackIndex().clipById.get(id)
+    return props.timeline.trackLookup.clipById.get(id)
   })
 
   const recordingPreview = createMemo(() => {
@@ -57,7 +56,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
     const points = props.recording.previewPoints
     const trackId = props.recording.recordingTrackId
     if (!props.recording.isRecording || start == null || points.length === 0 || !trackId) return null
-    const trackIndexValue = trackIndex().trackIndexById.get(trackId)
+    const trackIndexValue = props.timeline.trackLookup.trackIndexById.get(trackId)
     if (trackIndexValue == null) return null
     return {
       start,

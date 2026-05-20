@@ -344,7 +344,7 @@ export class AudioEngine {
     }
   }
 
-  ensureAudio() {
+  ensureAudio(opts?: { applyCachedTrackGains?: boolean }) {
     if (!this.audioCtx) {
       this.audioCtx = new AudioContext()
       this.masterGain = this.audioCtx.createGain()
@@ -364,8 +364,9 @@ export class AudioEngine {
       }
       // If nothing pending, ensure we at least connect master to destination
       this.rebuildMasterRouting()
-      this.updateTrackGains(this.tracksSnapshot)
-      this.ensureMetronomeNodes()
+      if (opts?.applyCachedTrackGains !== false) {
+        this.updateTrackGains(this.tracksSnapshot)
+      }
     }
   }
 
@@ -1341,7 +1342,12 @@ export class AudioEngine {
     const eq = this.masterEqChain
     const finalDest = this.destination ?? this.audioCtx.destination
     connectParallelFxChain(this.masterGain, finalDest, eq, this.masterReverb)
-    this.ensureMasterAnalyser()
+    if (this.masterAnalyser) {
+      try {
+        this.masterGain.connect(this.masterAnalyser)
+        this.masterAnalyserConnected = true
+      } catch {}
+    }
   }
 
   setMasterEq(params: EqParamsLite) {

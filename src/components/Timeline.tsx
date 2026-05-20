@@ -900,6 +900,7 @@ const Timeline: Component = () => {
                 <TimelineOverlays
                   timeline={{
                     tracks: renderTracks(),
+                    trackLookup: trackLookup(),
                     durationSec: duration(),
                     bpm: bpm(),
                     gridDenominator: gridDenominator(),

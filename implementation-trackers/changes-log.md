@@ -2,6 +2,17 @@
 
 Tracks review-driven follow-up work before merging the audio refactor branch.
 
+## 2026-05-21 — Local-First Refactor Phase 16
+
+### Scope
+
+- Added `.dawproject` archive import/export using a zip package with `manifest.json` shared with the cloud backup manifest shape and project-owned assets stored under stable asset IDs.
+- Routed archive imports through the shared manifest migration/assertion path and restored imported projects into local IndexedDB plus project-owned asset storage.
+
+### Validation
+
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed.
+
 ## 2026-05-21 — Local-First Refactor Phases 14–15
 
 ### Scope

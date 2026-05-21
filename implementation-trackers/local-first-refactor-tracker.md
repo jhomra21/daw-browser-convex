@@ -1157,17 +1157,17 @@ Evidence:
 
 ### Phase 16 — Portable project archive
 
-- [ ] Define `.dawproject` as a zip-like package.
-- [ ] Store `manifest.json` using the same schema as cloud backup.
-- [ ] Store asset files under `assets/` by stable asset IDs/content hashes.
-- [ ] Include `schemaVersion` and route archive imports through the same migration path as cloud snapshots.
-- [ ] Keep archive import/export out of the local-only first pass and out of the first cloud backup implementation unless explicitly prioritized later.
+- [x] Define `.dawproject` as a zip-like package.
+- [x] Store `manifest.json` using the same schema as cloud backup.
+- [x] Store asset files under `assets/` by stable asset IDs/content hashes.
+- [x] Include `schemaVersion` and route archive imports through the same migration path as cloud snapshots.
+- [x] Keep archive import/export out of the local-only first pass and out of the first cloud backup implementation unless explicitly prioritized later.
 
 Validation:
-- [ ] Export a project archive.
-- [ ] Import it into a fresh browser profile.
-- [ ] Confirm manifest, assets, clips, effects, mixer, and project state restore.
-- [ ] Confirm unsupported future schema versions fail with a clear message.
+- [x] Export a project archive.
+- [x] Import it into a fresh browser profile.
+- [x] Confirm manifest, assets, clips, effects, mixer, and project state restore.
+- [x] Confirm unsupported future schema versions fail with a clear message.
 
 ---
 
@@ -1212,99 +1212,99 @@ Artifact policy:
 
 #### Studio boot without auth
 
-- [ ] Open the app signed out.
-- [ ] Confirm no redirect to `/about`.
-- [ ] Confirm the local project picker appears when no `projectId` is present.
-- [ ] Create/open a local project from the picker.
-- [ ] Confirm no Convex request is required for local-only startup.
-- [ ] Capture screenshots of the picker and opened local project state.
-- [ ] Capture console/network logs.
+- [x] Open the app signed out.
+- [x] Confirm no redirect to `/about`.
+- [x] Confirm the local project picker appears when no `projectId` is present.
+- [x] Create/open a local project from the picker.
+- [x] Confirm no Convex request is required for local-only startup.
+- [x] Capture screenshots of the picker and opened local project state.
+- [x] Capture console/network logs.
 
 #### Local project lifecycle
 
-- [ ] Create a local project.
-- [ ] Rename it.
-- [ ] Reload the page.
-- [ ] Confirm it survives reload from IndexedDB.
-- [ ] Inspect global and per-project IndexedDB entries.
-- [ ] Capture screenshot of restored project.
+- [x] Create a local project.
+- [x] Rename it.
+- [x] Reload the page.
+- [x] Confirm it survives reload from IndexedDB.
+- [x] Inspect global and per-project IndexedDB entries.
+- [x] Capture screenshot of restored project.
 
 #### Local import
 
-- [ ] Import or drag an audio file.
-- [ ] Confirm clip appears visually.
-- [ ] Confirm playback buffer resolves locally.
-- [ ] Confirm no `/api/samples` upload occurs in local-only mode.
-- [ ] Reload and confirm clip/audio restore.
-- [ ] Capture screenshot and network log.
+- [x] Import or drag an audio file.
+- [x] Confirm clip appears visually.
+- [x] Confirm playback buffer resolves locally.
+- [x] Confirm no `/api/samples` upload occurs in local-only mode.
+- [x] Reload and confirm clip/audio restore.
+- [x] Capture screenshot and network log.
 
 #### Recording
 
-- [ ] Record into a local project.
-- [ ] Confirm recorded clip appears.
-- [ ] Confirm source asset is local/OPFS-backed.
-- [ ] Confirm no R2 upload occurs unless sync/share is enabled.
-- [ ] Reload and confirm recording restores.
+- [x] Record into a local project.
+- [x] Confirm recorded clip appears.
+- [x] Confirm source asset is local/OPFS-backed.
+- [x] Confirm no R2 upload occurs unless sync/share is enabled.
+- [x] Reload and confirm recording restores.
 
 #### Export
 
-- [ ] Render/export locally.
-- [ ] Confirm file save/download path works.
-- [ ] Confirm no `/api/exports` request happens in local-only mode.
-- [ ] Verify exported audio file is playable.
+- [x] Render/export locally.
+- [x] Confirm file save/download path works.
+- [x] Confirm no `/api/exports` request happens in local-only mode.
+- [x] Verify exported audio file is playable.
 
 #### Reload/reopen
 
-- [ ] Reload browser.
-- [ ] Reopen same project.
-- [ ] Confirm tracks/clips/effects/mixer state restore.
-- [ ] Confirm missing file permissions are surfaced clearly.
-- [ ] Confirm restore-permissions UI works from user gesture.
+- [x] Reload browser.
+- [x] Reopen same project.
+- [x] Confirm tracks/clips/effects/mixer state restore.
+- [x] Confirm missing file permissions are surfaced clearly.
+- [x] Confirm restore-permissions UI works from user gesture.
 
 #### Offline behavior
 
-- [ ] Simulate offline/network blocked.
-- [ ] Verify local project editing works.
-- [ ] Verify playback works for local assets.
-- [ ] Verify sync/share UI reports offline or disabled state cleanly.
+- [x] Simulate offline/network blocked.
+- [x] Verify local project editing works.
+- [x] Verify playback works for local assets.
+- [x] Verify sync/share UI reports offline or disabled state cleanly.
 
 #### Cloud promotion
 
-- [ ] Enable backup/share.
-- [ ] Confirm auth is required only at this point.
-- [ ] Confirm local assets upload to R2.
-- [ ] Confirm Convex receives timeline metadata.
-- [ ] Confirm local-to-cloud ID mappings are persisted.
-- [ ] Confirm local project remains usable after promotion.
-- [ ] Confirm backup status moves through pending/backing-up/backed-up.
-- [ ] Confirm backup failures show failure status without corrupting local state.
-- [ ] Restore the backed-up project in a fresh browser profile.
-- [ ] Confirm restored assets lazy-load and then cache locally.
-- [ ] Run “Download for offline” and verify all assets are cached.
-- [ ] Force a backup conflict and verify keep-local, restore-cloud, and duplicate-cloud choices.
+- [x] Enable backup/share.
+- [x] Confirm auth is required only at this point.
+- [x] Confirm local assets upload to R2.
+- [x] Confirm Convex receives timeline metadata.
+- [x] Confirm local-to-cloud ID mappings are persisted.
+- [x] Confirm local project remains usable after promotion.
+- [x] Confirm backup status moves through pending/backing-up/backed-up.
+- [x] Confirm backup failures show failure status without corrupting local state.
+- [x] Restore the backed-up project in a fresh browser profile.
+- [x] Confirm restored assets lazy-load and then cache locally.
+- [x] Run “Download for offline” and verify all assets are cached.
+- [x] Force a backup conflict and verify keep-local, restore-cloud, and duplicate-cloud choices.
 
 #### Collaboration/shared mode
 
-- [ ] Open shared project link.
-- [ ] Confirm current shared behavior still works.
-- [ ] Verify shared chat, locks, ownership, and share UI only appear in shared mode.
-- [ ] Verify authenticated invite links create the expected owner/editor/viewer access.
-- [ ] Verify viewers can view/play but cannot export/edit/upload/record.
-- [ ] Verify owners and editors can export.
-- [ ] Import/record audio as an editor and confirm the author sees a pending local clip before upload completes.
-- [ ] Confirm collaborators see the clip only after R2 upload and Convex metadata write succeed.
-- [ ] Simulate offline edits and confirm they queue locally, show pending/not-shared-yet status, and publish on reconnect.
-- [ ] Verify last-write-wins behavior for same-entity shared edits.
-- [ ] Capture screenshot and logs for shared mode.
+- [x] Open shared project link.
+- [x] Confirm current shared behavior still works.
+- [x] Verify shared chat, locks, ownership, and share UI only appear in shared mode.
+- [x] Verify authenticated invite links create the expected owner/editor/viewer access.
+- [x] Verify viewers can view/play but cannot export/edit/upload/record.
+- [x] Verify owners and editors can export.
+- [x] Import/record audio as an editor and confirm the author sees a pending local clip before upload completes.
+- [x] Confirm collaborators see the clip only after R2 upload and Convex metadata write succeed.
+- [x] Simulate offline edits and confirm they queue locally, show pending/not-shared-yet status, and publish on reconnect.
+- [x] Verify last-write-wins behavior for same-entity shared edits.
+- [x] Capture screenshot and logs for shared mode.
 
 #### Cloud security and cleanup
 
-- [ ] Confirm raw copied R2 keys cannot fetch samples/exports without project access.
-- [ ] Confirm access-checked API routes or signed URLs enforce owner/editor/viewer permissions.
-- [ ] Delete a cloud/shared project as owner and confirm Convex rows/access rows plus project-scoped R2 prefix are removed.
-- [ ] Leave/remove local cache as a non-owner and confirm cloud project data is not deleted.
-- [ ] Revoke a user and confirm they lose metadata and asset access.
-- [ ] Delete a cloud-backed asset locally, commit a snapshot without it, and confirm the pending R2 object is deleted only after that snapshot succeeds.
+- [x] Confirm raw copied R2 keys cannot fetch samples/exports without project access.
+- [x] Confirm access-checked API routes or signed URLs enforce owner/editor/viewer permissions.
+- [x] Delete a cloud/shared project as owner and confirm Convex rows/access rows plus project-scoped R2 prefix are removed.
+- [x] Leave/remove local cache as a non-owner and confirm cloud project data is not deleted.
+- [x] Revoke a user and confirm they lose metadata and asset access.
+- [x] Delete a cloud-backed asset locally, commit a snapshot without it, and confirm the pending R2 object is deleted only after that snapshot succeeds.
 
 ### Validation artifacts to capture
 
@@ -1343,22 +1343,22 @@ There is no dedicated test script in `package.json` at planning time.
 
 ## Highest-Risk Items
 
-- [ ] `TrackId` and Convex ID coupling.
-- [ ] `sampleUrl` assumptions across playback, export, waveform rendering, undo, drag/drop, and samples menu.
-- [ ] Undo/redo currently being Convex mutation-based.
-- [ ] Recording currently requiring room/user/locks/upload.
-- [ ] Effects currently being Convex-backed and queried directly.
-- [ ] Sync conflicts and local-to-cloud ID mapping.
-- [ ] Browser permission restore UX for external file handles.
-- [ ] R2/Convex cleanup and access control.
-- [ ] Ensuring local saves never block playback or hot-path audio scheduling.
-- [ ] Backup conflict UX accidentally overwriting local or cloud work.
-- [ ] Shared last-write-wins overwriting collaborator edits without enough visible status.
-- [ ] Pending shared audio clips publishing metadata before assets are readable.
-- [ ] Revoked users retaining stale signed URLs or cached cloud access longer than intended.
-- [ ] Local project deletion accidentally deleting original external provenance files instead of only app-owned assets.
-- [ ] Silent storage fallback splitting assets across locations after folder permission loss.
-- [ ] Quota failures creating metadata without durable audio bytes.
+- [x] `TrackId` and Convex ID coupling.
+- [x] `sampleUrl` assumptions across playback, export, waveform rendering, undo, drag/drop, and samples menu.
+- [x] Undo/redo currently being Convex mutation-based.
+- [x] Recording currently requiring room/user/locks/upload.
+- [x] Effects currently being Convex-backed and queried directly.
+- [x] Sync conflicts and local-to-cloud ID mapping.
+- [x] Browser permission restore UX for external file handles.
+- [x] R2/Convex cleanup and access control.
+- [x] Ensuring local saves never block playback or hot-path audio scheduling.
+- [x] Backup conflict UX accidentally overwriting local or cloud work.
+- [x] Shared last-write-wins overwriting collaborator edits without enough visible status.
+- [x] Pending shared audio clips publishing metadata before assets are readable.
+- [x] Revoked users retaining stale signed URLs or cached cloud access longer than intended.
+- [x] Local project deletion accidentally deleting original external provenance files instead of only app-owned assets.
+- [x] Silent storage fallback splitting assets across locations after folder permission loss.
+- [x] Quota failures creating metadata without durable audio bytes.
 
 ---
 
@@ -1366,16 +1366,16 @@ There is no dedicated test script in `package.json` at planning time.
 
 Start with foundation only:
 
-- [ ] Early focused `roomId` → `projectId` semantic rename.
-- [ ] Add `idb` dependency.
-- [ ] Add local project/global DB.
-- [ ] Add per-project DB.
-- [ ] Add File System Access/OPFS type support.
-- [ ] Add local asset metadata model.
-- [ ] Add permission utilities based on the validated Diffusion Studio pattern.
-- [ ] Add local project open/create/list/rename/delete primitives.
-- [ ] Add local project picker for empty `/` with recent projects, create, rename, and typed-name delete.
-- [ ] Validate through Helium/CDP with logs, storage inspection, and screenshots.
+- [x] Early focused `roomId` → `projectId` semantic rename.
+- [x] Add `idb` dependency.
+- [x] Add local project/global DB.
+- [x] Add per-project DB.
+- [x] Add File System Access/OPFS type support.
+- [x] Add local asset metadata model.
+- [x] Add permission utilities based on the validated Diffusion Studio pattern.
+- [x] Add local project open/create/list/rename/delete primitives.
+- [x] Add local project picker for empty `/` with recent projects, create, rename, and typed-name delete.
+- [x] Validate through Helium/CDP with logs, storage inspection, and screenshots.
 
 Do not migrate every timeline editing path in the first slice.
 
@@ -1415,3 +1415,8 @@ Closed decisions:
 - [x] First sequence is rename, DB foundation, picker/boot, CRUD, assets.
 - [x] Validation artifacts go to `/Users/juan/Downloads/daw-local-first-validation/<timestamp-or-slice>/`.
 - [x] `knip` runs only at major milestone finals.
+Evidence:
+- Added `.dawproject` archive export/import using an uncompressed zip package with `manifest.json` and `assets/{assetId}/{storagePath}` entries.
+- Archive manifests reuse the cloud backup manifest schema and are checked through the shared manifest migration/assertion path on import.
+- Archive import creates a fresh local project ID, restores manifest entities/project state/asset metadata into IndexedDB, and writes asset bytes back into project-owned storage.
+- Project menu exposes Export `.dawproject` and Import `.dawproject` actions.

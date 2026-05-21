@@ -2,9 +2,9 @@ import { createLocalProjectId } from '~/lib/local-ids'
 import { listLocalAssets, readLocalAssetBytes, writeLocalAssetFile } from '~/lib/local-assets'
 import { importLocalProject } from '~/lib/local-project-db'
 import {
-  assertSupportedProjectManifest,
   buildProjectManifest,
   createRestoredProjectEntry,
+  migrateProjectManifest,
   type ProjectManifest,
 } from '~/lib/project-manifest'
 
@@ -107,8 +107,7 @@ export const importDawProjectArchive = async (file: File): Promise<string> => {
   const entries = await readZip(file)
   const manifestBytes = entries.get('manifest.json')
   if (!manifestBytes) throw new Error('Archive is missing manifest.json.')
-  const manifest = JSON.parse(decoder.decode(manifestBytes)) as ProjectManifest
-  assertSupportedProjectManifest(manifest)
+  const manifest = migrateProjectManifest(JSON.parse(decoder.decode(manifestBytes)) as ProjectManifest)
   const projectId = createLocalProjectId()
   const project = createRestoredProjectEntry({ ...manifest, projectId }, manifest.name)
   await importLocalProject(project, {

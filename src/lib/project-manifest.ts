@@ -48,13 +48,18 @@ export const buildProjectManifest = async (
   }
 }
 
-export const assertSupportedProjectManifest = (manifest: ProjectManifest): void => {
+const assertSupportedProjectManifest = (manifest: ProjectManifest): void => {
   if (manifest.schemaVersion !== PROJECT_MANIFEST_SCHEMA_VERSION) {
     throw new Error(`Unsupported project manifest schema version ${manifest.schemaVersion}.`)
   }
   if (!manifest.projectId || !manifest.name) {
     throw new Error('Project manifest is missing required identity fields.')
   }
+}
+
+export const migrateProjectManifest = (manifest: ProjectManifest): ProjectManifest => {
+  assertSupportedProjectManifest(manifest)
+  return manifest
 }
 
 export const createRestoredProjectEntry = (manifest: ProjectManifest, name = manifest.name) => {

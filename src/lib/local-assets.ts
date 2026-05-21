@@ -86,6 +86,18 @@ const writeFile = async (
   }
 }
 
+export const writeLocalAssetFile = async (
+  projectId: string,
+  path: string,
+  file: File,
+): Promise<void> => {
+  const root = await getWritableProjectRoot(projectId)
+  if (!root) {
+    throw new LocalAssetWriteError('permission-denied', 'Project storage permission is required.')
+  }
+  await writeFile(root, path, file)
+}
+
 export const createLocalAsset = async (input: CreateLocalAssetInput): Promise<LocalProjectAssetRow> => {
   const root = await getWritableProjectRoot(input.projectId)
   if (!root) {

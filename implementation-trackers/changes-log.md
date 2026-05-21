@@ -2,6 +2,18 @@
 
 Tracks review-driven follow-up work before merging the audio refactor branch.
 
+## 2026-05-21 — Local-First Refactor Phases 14–15
+
+### Scope
+
+- Added cloud backup/share promotion scaffolding with versioned local project manifests, project-scoped R2 asset uploads, latest-manifest Convex persistence, local cloud ID mapping, manual backup, and automatic signed-in backup ticks.
+- Added role/share/security work for cloud projects: owner/editor/viewer role model, authenticated invite primitives, role-aware access checks for protected R2 reads/writes, project-scoped export reads, and project deletion cleanup for R2 plus related Convex rows.
+
+### Validation
+
+- `bun run typecheck` passed.
+- `bun run build` and `git diff --check` passed.
+
 ## 2026-05-21 — Local-First Refactor Phase 1–13 Review
 
 ### Scope

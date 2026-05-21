@@ -1,6 +1,4 @@
 import { createEffect, onCleanup, type Accessor } from 'solid-js'
-import { isLocalId } from '~/lib/local-ids'
-
 const CLOUD_SYNC_INTERVAL_MS = 30_000
 
 type Options = {
@@ -12,7 +10,7 @@ type Options = {
 export const useCloudSyncTick = (options: Options) => {
   createEffect(() => {
     const projectId = options.projectId()
-    if (!options.enabled() || isLocalId('project', projectId)) return
+    if (!projectId || !options.enabled()) return
 
     const intervalId = window.setInterval(() => {
       void options.sync()

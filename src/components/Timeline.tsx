@@ -68,6 +68,8 @@ import {
   createLocalAsset,
   setLocalProjectAssetDirectory,
 } from "~/lib/local-assets";
+import { runProjectBackup } from "~/lib/cloud-backup";
+import { exportDawProjectArchive, importDawProjectArchive } from "~/lib/project-archive";
 import { buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import {
   createLocalTimelineRepository,
@@ -115,8 +117,8 @@ const Timeline: Component = () => {
 
   useCloudSyncTick({
     projectId,
-    enabled: () => false,
-    sync: flushLocalTimelineWrites,
+    enabled: () => Boolean(userId() && isLocalId("project", projectId())),
+    sync: () => backUpNow(),
   });
   const {
     sidebarWidth,
@@ -532,6 +534,7 @@ const Timeline: Component = () => {
   // DOM refs
   let scrollRef: HTMLDivElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
+  let archiveInputRef: HTMLInputElement | undefined;
   let containerRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
 
@@ -844,6 +847,44 @@ const Timeline: Component = () => {
     input.value = "";
   };
 
+  const onArchiveInput: JSX.EventHandler<HTMLInputElement, Event> = async (e) => {
+    const input = e.currentTarget;
+    const file = input.files?.[0];
+    if (file) {
+      try {
+        const nextProjectId = await importDawProjectArchive(file);
+        navigateToRoom(nextProjectId);
+      } catch (error) {
+        setLocalSaveFailure(error instanceof Error ? error.message : "Archive import failed.");
+      }
+    }
+    input.value = "";
+  };
+
+  const backUpNow = async () => {
+    if (!projectId() || !isLocalId("project", projectId())) return;
+    const result = await runProjectBackup(projectId());
+    if (!result.ok) {
+      setLocalSaveFailure(result.conflict
+        ? "Cloud backup conflict detected. Use Back up now again after reviewing the cloud project, or restore from backup in a fresh profile."
+        : result.error ?? "Cloud backup failed.");
+    }
+  };
+
+  const exportArchive = async () => {
+    try {
+      const blob = await exportDawProjectArchive(projectId());
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${projectId()}.dawproject`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setLocalSaveFailure(error instanceof Error ? error.message : "Archive export failed.");
+    }
+  };
+
   const duration = () => timelineDurationSec(renderTracks());
 
   createEffect(() => {
@@ -894,6 +935,15 @@ const Timeline: Component = () => {
         accept="audio/*"
         class="hidden"
         onChange={onFileInput}
+      />
+      <input
+        ref={(el) => {
+          archiveInputRef = el;
+        }}
+        type="file"
+        accept=".dawproject,application/vnd.dawproject,application/zip"
+        class="hidden"
+        onChange={onArchiveInput}
       />
 
       <TransportControls
@@ -947,6 +997,9 @@ const Timeline: Component = () => {
         onRenameProject={renameProject}
         onOpenExport={() => setExportOpen(true)}
         onChooseProjectFolder={chooseProjectStorageFolder}
+        onBackUpNow={backUpNow}
+        onExportArchive={exportArchive}
+        onImportArchive={() => archiveInputRef?.click()}
       />
       <Show when={localSaveFailure()}>
         {(message) => (

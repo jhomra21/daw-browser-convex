@@ -22,6 +22,33 @@ async function canAccessAgentRoom(
   return canAccess
 }
 
+async function requireProjectRoleForApi(
+  c: any,
+  projectId: string,
+  roles: Array<'owner' | 'editor' | 'viewer'>,
+) {
+  const user = c.get('user')
+  if (!user) return null
+  const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
+  const role = await convex.query((convexApi as any).projectAccess.roleForUser, { projectId, userId: user.id })
+  return role && roles.includes(role) ? user : null
+}
+
+const hashFile = async (file: File) => {
+  const hash = await crypto.subtle.digest('SHA-256', await file.arrayBuffer())
+  return Array.from(new Uint8Array(hash)).map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+const deleteR2Prefix = async (bucket: R2Bucket, prefix: string) => {
+  let cursor: string | undefined
+  do {
+    const page: any = await bucket.list({ prefix, cursor, limit: 1000 })
+    const keys = Array.isArray(page?.objects) ? page.objects.map((entry: any) => entry.key).filter(Boolean) : []
+    if (keys.length > 0) await bucket.delete(keys)
+    cursor = page?.truncated ? page.cursor : undefined
+  } while (cursor)
+}
+
 const app = new Hono<{
   Bindings: Env;
   Variables: Variables;
@@ -233,6 +260,9 @@ app.post('/api/samples', async (c) => {
     if (!projectId || !assetKey || !(file instanceof File)) {
       return c.json({ error: 'Missing projectId, assetKey or file' }, 400)
     }
+    if (!await requireProjectRoleForApi(c, projectId, ['owner', 'editor'])) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
 
     // Sanitize filename for use as a key segment
     const baseName = file.name?.toString() || 'audio'
@@ -244,7 +274,8 @@ app.post('/api/samples', async (c) => {
       .slice(0, 180)                      // keep key short-ish
     // Primary layout: rooms/<projectId>/clips/<filename>
     // Handle collisions by appending " (n)" or timestamp.
-    const clipsPrefix = `rooms/${projectId}/clips/`
+    const contentHash = await hashFile(file)
+    const clipsPrefix = `projects/${projectId}/assets/${assetKey}/${contentHash}/`
     const splitIdx = sanitized.lastIndexOf('.')
     const base = splitIdx > 0 ? sanitized.slice(0, splitIdx) : sanitized
     const ext = splitIdx > 0 ? sanitized.slice(splitIdx) : ''
@@ -300,6 +331,11 @@ app.get('/api/samples/:projectId/:sourceId', async (c) => {
     // Require exact key so we don't list buckets or rely on pointers
     const key = c.req.query('key')
     if (!key) return c.json({ error: 'Missing key query parameter' }, 400)
+    const projectId = c.req.param('projectId')
+    if (!key.startsWith(`projects/${projectId}/assets/`)) return c.json({ error: 'Invalid key' }, 400)
+    if (!await requireProjectRoleForApi(c, projectId, ['owner', 'editor', 'viewer'])) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
 
     const obj = await c.env.daw_audio_samples.get(key)
     if (!obj) return c.json({ error: 'Not found' }, 404)
@@ -388,6 +424,87 @@ app.get('/api/default-samples', async (c) => {
   }
 })
 
+app.post('/api/cloud-backups', async (c) => {
+  try {
+    const user = c.get('user')
+    if (!user) return c.json({ error: 'Unauthorized' }, 401)
+    const form = await c.req.formData()
+    const projectId = form.get('projectId')?.toString()
+    const manifestRaw = form.get('manifest')?.toString()
+    const conflictAction = form.get('conflictAction') === 'overwrite' ? 'overwrite' : 'detect'
+    if (!projectId || !manifestRaw) return c.json({ error: 'Missing projectId or manifest' }, 400)
+
+    const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
+    await convex.mutation((convexApi as any).projects.ensureOwnedRoom, { projectId, userId: user.id })
+    const manifest = JSON.parse(manifestRaw)
+    const uploadedAssetKeys: Record<string, string> = {}
+    for (const [key, value] of form.entries()) {
+      if (!key.startsWith('asset:') || !(value instanceof File)) continue
+      const assetId = key.slice('asset:'.length)
+      const hash = await hashFile(value)
+      const ext = value.name.includes('.') ? value.name.slice(value.name.lastIndexOf('.')) : ''
+      const r2Key = `projects/${projectId}/assets/${assetId}/${hash}${ext}`
+      await c.env.daw_audio_samples.put(r2Key, value.stream(), {
+        httpMetadata: { contentType: value.type || 'application/octet-stream' },
+        customMetadata: {
+          projectId,
+          assetId,
+          contentHash: hash,
+          uploadedBy: user.id,
+          uploadedAt: new Date().toISOString(),
+        },
+      })
+      uploadedAssetKeys[assetId] = r2Key
+    }
+    manifest.assets = Array.isArray(manifest.assets)
+      ? manifest.assets.map((asset: any) => ({ ...asset, cloudKey: uploadedAssetKeys[asset.id] ?? asset.cloudKey }))
+      : []
+    manifest.assetCount = manifest.assets.length
+
+    const result: any = await convex.mutation((convexApi as any).cloudBackups.upsertLatest, {
+      projectId,
+      userId: user.id,
+      manifest,
+      conflictAction,
+    })
+    if (result?.conflict) return c.json({ ok: false, conflict: result.conflict }, 409)
+    return c.json({ ok: true, manifestVersion: result?.manifestVersion, uploadedAssetKeys })
+  } catch (err) {
+    console.error('Cloud backup error', err)
+    return c.json({ error: 'Failed to back up project' }, 500)
+  }
+})
+
+app.get('/api/cloud-backups/:projectId', async (c) => {
+  try {
+    const projectId = c.req.param('projectId')
+    const user = c.get('user')
+    if (!user) return c.json({ error: 'Unauthorized' }, 401)
+    const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
+    const row: any = await convex.query((convexApi as any).cloudBackups.getLatest, { projectId, userId: user.id })
+    if (!row) return c.json({ error: 'Not found' }, 404)
+    return c.json({ manifest: row.manifest, manifestVersion: row.manifestVersion })
+  } catch (err) {
+    console.error('Cloud backup fetch error', err)
+    return c.json({ error: 'Failed to fetch backup' }, 500)
+  }
+})
+
+app.delete('/api/cloud-projects/:projectId', async (c) => {
+  try {
+    const projectId = c.req.param('projectId')
+    const user = await requireProjectRoleForApi(c, projectId, ['owner'])
+    if (!user) return c.json({ error: 'Forbidden' }, 403)
+    await deleteR2Prefix(c.env.daw_audio_samples, `projects/${projectId}/`)
+    const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
+    const result = await convex.mutation((convexApi as any).projects.deleteOwnedInRoom, { projectId, userId: user.id })
+    return c.json({ ok: true, result })
+  } catch (err) {
+    console.error('Cloud project delete error', err)
+    return c.json({ error: 'Failed to delete cloud project' }, 500)
+  }
+})
+
 app.get('/api/default-sample', async (c) => {
   try {
     const key = c.req.query('key')
@@ -431,6 +548,9 @@ app.post('/api/exports', async (c) => {
     if (!projectId || !(file instanceof File)) {
       return c.json({ error: 'Missing projectId or file' }, 400)
     }
+    if (!await requireProjectRoleForApi(c, projectId, ['owner', 'editor'])) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
 
     // Sanitize filename or generate one
     if (!name) {
@@ -444,7 +564,7 @@ app.post('/api/exports', async (c) => {
       .replace(/[^A-Za-z0-9._-]/g, '_')
       .slice(0, 180)
 
-    const exportsPrefix = `rooms/${projectId}/exports/`
+    const exportsPrefix = `projects/${projectId}/exports/`
     const splitIdx = sanitized.lastIndexOf('.')
     const base = splitIdx > 0 ? sanitized.slice(0, splitIdx) : sanitized
     const ext = splitIdx > 0 ? sanitized.slice(splitIdx) : ''
@@ -478,7 +598,7 @@ app.post('/api/exports', async (c) => {
       },
     })
 
-    const url = `/api/export?key=${encodeURIComponent(key)}`
+    const url = `/api/export/${encodeURIComponent(projectId)}?key=${encodeURIComponent(key)}`
     return c.json({ key, url, sizeBytes: (putRes as any)?.size })
   } catch (err) {
     console.error('Export upload error', err)
@@ -486,12 +606,16 @@ app.post('/api/exports', async (c) => {
   }
 })
 
-// Stream an export from R2 by key
-app.get('/api/export', async (c) => {
+// Stream an export from R2 by project-scoped key
+app.get('/api/export/:projectId', async (c) => {
   try {
     const key = c.req.query('key')
     if (!key) return c.json({ error: 'Missing key query parameter' }, 400)
-    if (!key.startsWith('rooms/')) return c.json({ error: 'Invalid key' }, 400)
+    const projectId = c.req.param('projectId')
+    if (!key.startsWith(`projects/${projectId}/exports/`)) return c.json({ error: 'Invalid key' }, 400)
+    if (!await requireProjectRoleForApi(c, projectId, ['owner', 'editor'])) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
 
     const obj = await c.env.daw_audio_samples.get(key)
     if (!obj) return c.json({ error: 'Not found' }, 404)

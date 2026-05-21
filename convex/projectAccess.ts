@@ -110,11 +110,47 @@ export async function hasProjectAccess(
   return projectsRaw.length > 0 || ownershipsRaw.length > 0;
 }
 
+export type ProjectRole = "owner" | "editor" | "viewer";
+
+export async function getProjectRole(
+  ctx: any,
+  projectId: string,
+  userId: string,
+): Promise<ProjectRole | null> {
+  const projects = await listProjectsByUser(ctx, projectId, userId);
+  if (projects.length > 0) return "owner";
+  const ownerships = await ctx.db
+    .query("ownerships")
+    .withIndex("by_room_owner", (q: any) => q.eq("projectId", projectId).eq("ownerUserId", userId))
+    .collect();
+  if (ownerships.length === 0) return null;
+  const role = ownerships.find((ownership: any) => !ownership.trackId && !ownership.clipId)?.role;
+  return role === "owner" || role === "editor" || role === "viewer" ? role : "editor";
+}
+
+export async function requireProjectRole(
+  ctx: any,
+  projectId: string,
+  userId: string,
+  allowed: ProjectRole[],
+) {
+  const role = await getProjectRole(ctx, projectId, userId);
+  if (role && allowed.includes(role)) return role;
+  throw new Error("You do not have permission for this project action.");
+}
+
 export const canAccess = query({
   args: { projectId: v.string(), userId: v.string() },
   returns: v.boolean(),
   handler: async (ctx, { projectId, userId }) => {
     return hasProjectAccess(ctx, projectId, userId);
+  },
+});
+
+export const roleForUser = query({
+  args: { projectId: v.string(), userId: v.string() },
+  handler: async (ctx, { projectId, userId }) => {
+    return getProjectRole(ctx, projectId, userId);
   },
 });
 
@@ -132,8 +168,7 @@ export async function hasProjectAdminCapability(
   projectId: string,
   userId: string,
 ): Promise<boolean> {
-  const projects = await listProjectsByUser(ctx, projectId, userId);
-  return projects.length > 0;
+  return (await getProjectRole(ctx, projectId, userId)) === "owner";
 }
 
 export async function requireProjectAdminCapability(

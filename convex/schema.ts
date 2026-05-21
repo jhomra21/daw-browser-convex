@@ -88,6 +88,7 @@ export default defineSchema({
   ownerships: defineTable({
     projectId: v.string(),
     ownerUserId: v.string(),
+    role: v.optional(v.union(v.literal("owner"), v.literal("editor"), v.literal("viewer"))),
     clipId: v.optional(v.id("clips")),
     trackId: v.optional(v.id("tracks")),
   })
@@ -95,6 +96,29 @@ export default defineSchema({
     .index("by_track", ["trackId"])
     .index("by_room", ["projectId"])
     .index("by_owner", ["ownerUserId"])
+    .index("by_room_owner", ["projectId", "ownerUserId"]),
+
+  shareInvites: defineTable({
+    projectId: v.string(),
+    role: v.union(v.literal("editor"), v.literal("viewer")),
+    token: v.string(),
+    createdBy: v.string(),
+    revokedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_token", ["token"])
+    .index("by_room", ["projectId"]),
+
+  cloudBackups: defineTable({
+    projectId: v.string(),
+    ownerUserId: v.string(),
+    manifest: v.any(),
+    manifestVersion: v.string(),
+    updatedAt: v.number(),
+    entityCount: v.number(),
+    assetCount: v.number(),
+  })
+    .index("by_room", ["projectId"])
     .index("by_room_owner", ["projectId", "ownerUserId"]),
 
   effects: defineTable({

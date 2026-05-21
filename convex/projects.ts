@@ -166,6 +166,24 @@ async function deleteOwnedRoomFromPreflight(
   preflight: Awaited<ReturnType<typeof getOwnedRoomDeletePreflight>>,
   userId: string,
 ) {
+  const deleteRows = async (table: any, index = "by_room") => {
+    const rows = await ctx.db
+      .query(table)
+      .withIndex(index, (q: any) => q.eq("projectId", projectId))
+      .collect();
+    await Promise.all(rows.map((row: any) => ctx.db.delete(row._id)));
+  };
+
+  await Promise.all([
+    deleteRows("samples"),
+    deleteRows("exports"),
+    deleteRows("effects"),
+    deleteRows("chatHistories", "by_room_owner"),
+    deleteRows("projectMessages"),
+    deleteRows("shareInvites"),
+    deleteRows("cloudBackups"),
+  ]);
+
   for (const ownership of preflight.ownedClipOwnerships) {
     const clipId = ownership.clipId;
     if (!clipId) continue;

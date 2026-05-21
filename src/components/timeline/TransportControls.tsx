@@ -91,6 +91,9 @@ type TransportControlsProps = {
   onRenameProject: (projectId: string, name: string) => void | Promise<void>;
   onOpenExport: () => void;
   onChooseProjectFolder?: () => void | Promise<void>;
+  onBackUpNow?: () => void | Promise<void>;
+  onExportArchive?: () => void | Promise<void>;
+  onImportArchive?: () => void | Promise<void>;
 };
 
 type TransportBarController = {
@@ -280,15 +283,40 @@ const ProjectsMenu: Component = () => {
                 variant="secondary"
                 size="sm"
                 class="justify-center"
-                disabled={!toolbar().currentUserId || !toolbar().onShare}
-                onClick={() => toolbar().onShare?.()}
+                disabled={!toolbar().currentUserId || !toolbar().onBackUpNow}
+                onClick={() => void toolbar().onBackUpNow?.()}
                 title={
                   toolbar().currentUserId
-                    ? "Share this project"
+                    ? "Back up this project to the cloud"
                     : "Sign in to enable backup and share"
                 }
               >
-                Share / sync
+                Back up now
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                class="justify-center"
+                disabled={!toolbar().currentUserId || !toolbar().onShare}
+                onClick={() => toolbar().onShare?.()}
+              >
+                Share
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                class="justify-center"
+                onClick={() => void toolbar().onExportArchive?.()}
+              >
+                Export .dawproject
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                class="justify-center"
+                onClick={() => void toolbar().onImportArchive?.()}
+              >
+                Import .dawproject
               </Button>
               <Show when={isCurrentProjectLocal() && toolbar().onChooseProjectFolder}>
                 <Button

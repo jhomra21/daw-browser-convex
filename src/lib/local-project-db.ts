@@ -213,6 +213,57 @@ export const renameLocalProject = async (
   return next
 }
 
+export const setLocalProjectMode = async (
+  projectId: string,
+  mode: LocalProjectMode,
+): Promise<LocalProjectEntry | undefined> => {
+  const db = await openGlobalProjectsDb()
+  const project = await db.get('projects', projectId)
+  if (!project) return undefined
+  const timestamp = now()
+  const next = {
+    ...project,
+    mode,
+    updatedAt: timestamp,
+    lastOpenedAt: timestamp,
+  }
+  await db.put('projects', next)
+  return next
+}
+
+export const importLocalProject = async (
+  project: LocalProjectEntry,
+  rows: {
+    entities: LocalProjectEntityRow[]
+    assets: LocalProjectAssetRow[]
+    projectState: LocalProjectStateRow[]
+    syncState?: LocalProjectSyncStateRow[]
+  },
+): Promise<void> => {
+  const globalDb = await openGlobalProjectsDb()
+  await globalDb.put('projects', project)
+  const projectDb = await openLocalProjectDb(project.id)
+  const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'syncState'], 'readwrite')
+  await Promise.all([
+    ...rows.entities.map((row) => tx.objectStore('entities').put(row)),
+    ...rows.assets.map((row) => tx.objectStore('assets').put(row)),
+    ...rows.projectState.map((row) => tx.objectStore('projectState').put(row)),
+    ...(rows.syncState ?? []).map((row) => tx.objectStore('syncState').put(row)),
+    tx.done,
+  ])
+}
+
+export const exportLocalProjectRows = async (projectId: string) => {
+  const db = await openLocalProjectDb(projectId)
+  const [entities, assets, projectState, syncState] = await Promise.all([
+    db.getAll('entities'),
+    db.getAll('assets'),
+    db.getAll('projectState'),
+    db.getAll('syncState'),
+  ])
+  return { entities, assets, projectState, syncState }
+}
+
 export const deleteLocalProject = async (projectId: string): Promise<void> => {
   const db = await openGlobalProjectsDb()
   const tx = db.transaction(['projects', 'directoryHandles'], 'readwrite')

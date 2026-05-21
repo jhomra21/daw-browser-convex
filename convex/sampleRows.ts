@@ -8,7 +8,7 @@ import {
 export type { AudioSourceKind } from '../src/lib/audio-source-rules'
 
 export type UpsertSampleRowInput = {
-  roomId: string
+  projectId: string
   url?: string
   assetKey?: string
   sourceKind?: string
@@ -24,12 +24,12 @@ const numbersDiffer = (left: number | undefined, right: number | undefined, epsi
   return Math.abs(left - right) > epsilon
 }
 
-export async function findSampleRow(ctx: any, input: { roomId: string; assetKey?: string }) {
+export async function findSampleRow(ctx: any, input: { projectId: string; assetKey?: string }) {
   const assetKey = sanitizeAssetKey(input.assetKey)
   if (!assetKey) return null
   const rows = await ctx.db
     .query('samples')
-    .withIndex('by_room_assetKey', (q: any) => q.eq('roomId', input.roomId).eq('assetKey', assetKey))
+    .withIndex('by_room_assetKey', (q: any) => q.eq('projectId', input.projectId).eq('assetKey', assetKey))
     .collect()
   return rows[0] ?? null
 }
@@ -45,7 +45,7 @@ export async function upsertSampleRow(ctx: any, input: UpsertSampleRowInput) {
   const channelCount = sanitizePositiveInt(input.channelCount)
   if (!assetKey || !sourceKind || duration === undefined || sampleRate === undefined || channelCount === undefined) return null
 
-  const existingRow = await findSampleRow(ctx, { roomId: input.roomId, assetKey })
+  const existingRow = await findSampleRow(ctx, { projectId: input.projectId, assetKey })
   if (existingRow) {
     const patch: Record<string, unknown> = {}
     if (existingRow.url !== url) patch.url = url
@@ -63,7 +63,7 @@ export async function upsertSampleRow(ctx: any, input: UpsertSampleRowInput) {
   }
 
   return await ctx.db.insert('samples', {
-    roomId: input.roomId,
+    projectId: input.projectId,
     url,
     assetKey,
     sourceKind,

@@ -1,6 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { requireMasterBusWriteAccess } from "./roomAccess";
+import { requireMasterBusWriteAccess } from "./projectAccess";
 import { getTrackWriteAccess } from "./trackWrites";
 import { normalizeSynthParams } from "../src/lib/effects/params";
 
@@ -28,11 +28,11 @@ const sanitizeArpParams = (params: {
 
 // Return the EQ effect row for a track if it exists (we use a single EQ per track for now)
 export const listByRoom = query({
-  args: { roomId: v.string() },
-  handler: async (ctx, { roomId }) => {
+  args: { projectId: v.string() },
+  handler: async (ctx, { projectId }) => {
     const rows = await ctx.db
       .query("effects")
-      .withIndex("by_room", q => q.eq("roomId", roomId))
+      .withIndex("by_room", q => q.eq("projectId", projectId))
       .collect();
     rows.sort((a, b) => {
       if ((a.targetType ?? '') !== (b.targetType ?? '')) return (a.targetType ?? '').localeCompare(b.targetType ?? '');
@@ -84,7 +84,7 @@ export const getArpeggiatorForTrack = query({
 // Synth: set or create synth params for a track
 export const setSynthParams = mutation({
   args: {
-    roomId: v.string(),
+    projectId: v.string(),
     trackId: v.id('tracks'),
     userId: v.string(),
     params: v.object({
@@ -105,10 +105,10 @@ export const setSynthParams = mutation({
       releaseMs: v.optional(v.number()),
     }),
   },
-  handler: async (ctx, { roomId, trackId, userId, params }) => {
+  handler: async (ctx, { projectId, trackId, userId, params }) => {
     const sanitized = normalizeSynthParams(params)
     const access = await getTrackWriteAccess(ctx, trackId, userId)
-    if (!access || access.track.roomId !== roomId) return
+    if (!access || access.track.projectId !== projectId) return
 
     const existing = await ctx.db
       .query('effects')
@@ -122,7 +122,7 @@ export const setSynthParams = mutation({
     }
     const newIndex = existing.length
     const id = await ctx.db.insert('effects', {
-      roomId,
+      projectId,
       targetType: 'track',
       trackId,
       index: newIndex,
@@ -137,7 +137,7 @@ export const setSynthParams = mutation({
 // Arpeggiator: set or create arpeggiator params for a track
 export const setArpeggiatorParams = mutation({
   args: {
-    roomId: v.string(),
+    projectId: v.string(),
     trackId: v.id('tracks'),
     userId: v.string(),
     params: v.object({
@@ -159,10 +159,10 @@ export const setArpeggiatorParams = mutation({
       hold: v.boolean(), // Keep arpeggiation looping until clip ends
     }),
   },
-  handler: async (ctx, { roomId, trackId, userId, params }) => {
+  handler: async (ctx, { projectId, trackId, userId, params }) => {
     const sanitized = sanitizeArpParams(params)
     const access = await getTrackWriteAccess(ctx, trackId, userId)
-    if (!access || access.track.roomId !== roomId) return
+    if (!access || access.track.projectId !== projectId) return
 
     const existing = await ctx.db
       .query('effects')
@@ -176,7 +176,7 @@ export const setArpeggiatorParams = mutation({
     }
     const newIndex = existing.length
     const id = await ctx.db.insert('effects', {
-      roomId,
+      projectId,
       targetType: 'track',
       trackId,
       index: newIndex,
@@ -191,7 +191,7 @@ export const setArpeggiatorParams = mutation({
 // Set or create the Reverb params for a given track
 export const setReverbParams = mutation({
   args: {
-    roomId: v.string(),
+    projectId: v.string(),
     trackId: v.id("tracks"),
     userId: v.string(),
     params: v.object({
@@ -201,9 +201,9 @@ export const setReverbParams = mutation({
       preDelayMs: v.number(), // 0..200
     }),
   },
-  handler: async (ctx, { roomId, trackId, userId, params }) => {
+  handler: async (ctx, { projectId, trackId, userId, params }) => {
     const access = await getTrackWriteAccess(ctx, trackId, userId);
-    if (!access || access.track.roomId !== roomId) return;
+    if (!access || access.track.projectId !== projectId) return;
 
     const existing = await ctx.db
       .query("effects")
@@ -217,7 +217,7 @@ export const setReverbParams = mutation({
     }
     const newIndex = existing.length;
     const id = await ctx.db.insert("effects", {
-      roomId,
+      projectId,
       targetType: 'track',
       trackId,
       index: newIndex,
@@ -231,7 +231,7 @@ export const setReverbParams = mutation({
 
 export const setMasterReverbParams = mutation({
   args: {
-    roomId: v.string(),
+    projectId: v.string(),
     userId: v.string(),
     params: v.object({
       enabled: v.boolean(),
@@ -240,12 +240,12 @@ export const setMasterReverbParams = mutation({
       preDelayMs: v.number(),
     }),
   },
-  handler: async (ctx, { roomId, userId, params }) => {
-    await requireMasterBusWriteAccess(ctx, roomId, userId)
+  handler: async (ctx, { projectId, userId, params }) => {
+    await requireMasterBusWriteAccess(ctx, projectId, userId)
 
     const existing = await ctx.db
       .query('effects')
-      .withIndex('by_room', q => q.eq('roomId', roomId))
+      .withIndex('by_room', q => q.eq('projectId', projectId))
       .collect();
     const byIndex = existing.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
     const row = byIndex.find(r => r.type === 'reverb' && r.targetType === 'master') ?? null;
@@ -255,7 +255,7 @@ export const setMasterReverbParams = mutation({
     }
     const countMaster = existing.filter(r => r.targetType === 'master').length;
     const id = await ctx.db.insert('effects', {
-      roomId,
+      projectId,
       targetType: 'master',
       index: countMaster,
       type: 'reverb',
@@ -268,11 +268,11 @@ export const setMasterReverbParams = mutation({
 
 // Master-level EQ (per room)
 export const getEqForMaster = query({
-  args: { roomId: v.string() },
-  handler: async (ctx, { roomId }) => {
+  args: { projectId: v.string() },
+  handler: async (ctx, { projectId }) => {
     const rows = await ctx.db
       .query("effects")
-      .withIndex("by_room", q => q.eq("roomId", roomId))
+      .withIndex("by_room", q => q.eq("projectId", projectId))
       .collect();
     rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
     return rows.find(r => r.type === 'eq' && r.targetType === 'master') ?? null;
@@ -294,11 +294,11 @@ export const getReverbForTrack = query({
 
 // Reverb: get first master reverb row for room
 export const getReverbForMaster = query({
-  args: { roomId: v.string() },
-  handler: async (ctx, { roomId }) => {
+  args: { projectId: v.string() },
+  handler: async (ctx, { projectId }) => {
     const rows = await ctx.db
       .query("effects")
-      .withIndex("by_room", q => q.eq("roomId", roomId))
+      .withIndex("by_room", q => q.eq("projectId", projectId))
       .collect();
     rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
     return rows.find(r => r.type === 'reverb' && r.targetType === 'master') ?? null;
@@ -308,7 +308,7 @@ export const getReverbForMaster = query({
 // Set or create the EQ params for a given track. We enforce ownership based on the track owner.
 export const setEqParams = mutation({
   args: {
-    roomId: v.string(),
+    projectId: v.string(),
     trackId: v.id("tracks"),
     userId: v.string(),
     params: v.object({
@@ -323,9 +323,9 @@ export const setEqParams = mutation({
       })),
     }),
   },
-  handler: async (ctx, { roomId, trackId, userId, params }) => {
+  handler: async (ctx, { projectId, trackId, userId, params }) => {
     const access = await getTrackWriteAccess(ctx, trackId, userId);
-    if (!access || access.track.roomId !== roomId) return;
+    if (!access || access.track.projectId !== projectId) return;
 
     const existing = await ctx.db
       .query("effects")
@@ -342,7 +342,7 @@ export const setEqParams = mutation({
     // Insert as index 0; if there are other effects, append at current length
     const newIndex = existing.length; // append
     const id = await ctx.db.insert("effects", {
-      roomId,
+      projectId,
       targetType: 'track',
       trackId,
       index: newIndex,
@@ -357,7 +357,7 @@ export const setEqParams = mutation({
 // Set or create the EQ params for the room master bus. We enforce that the user owns the project for this room.
 export const setMasterEqParams = mutation({
   args: {
-    roomId: v.string(),
+    projectId: v.string(),
     userId: v.string(),
     params: v.object({
       enabled: v.boolean(),
@@ -371,13 +371,13 @@ export const setMasterEqParams = mutation({
       })),
     }),
   },
-  handler: async (ctx, { roomId, userId, params }) => {
-    await requireMasterBusWriteAccess(ctx, roomId, userId)
+  handler: async (ctx, { projectId, userId, params }) => {
+    await requireMasterBusWriteAccess(ctx, projectId, userId)
 
     // Find existing master EQ
     const existing = await ctx.db
       .query('effects')
-      .withIndex('by_room', q => q.eq('roomId', roomId))
+      .withIndex('by_room', q => q.eq('projectId', projectId))
       .collect();
     const byIndex = existing.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
     const eqRow = byIndex.find(r => r.type === 'eq' && r.targetType === 'master') ?? null;
@@ -389,7 +389,7 @@ export const setMasterEqParams = mutation({
 
     const countMaster = existing.filter(r => r.targetType === 'master').length;
     const id = await ctx.db.insert('effects', {
-      roomId,
+      projectId,
       targetType: 'master',
       index: countMaster,
       type: 'eq',

@@ -4,8 +4,10 @@ import { uploadClipSampleUrl } from '~/lib/clip-sample-url'
 import { primeClipSourceAsset } from '~/lib/clip-source-client'
 import { convexApi } from '~/lib/convex'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { getClipHistoryRef } from '~/lib/undo/refs'
 import type { HistoryClipSnapshot, HistoryEntry } from '~/lib/undo/types'
+import type { Id } from '../../convex/_generated/dataModel'
 import type { Clip, TrackId } from '~/types/timeline'
 
 export type ClipTimingSnapshot = {
@@ -28,7 +30,7 @@ export type ClipCreateSnapshot = {
 }
 
 type BuildClipCreatePayloadInput = {
-  roomId: string
+  projectId: string
   userId: string
   trackId: TrackId
   clip: ClipCreateSnapshot
@@ -42,7 +44,7 @@ type BuildLocalClipInput = {
 }
 
 type UploadedAudioClipInput = {
-  roomId: string
+  projectId: string
   userId: string
   trackId: TrackId
   trackRef?: string
@@ -56,7 +58,7 @@ type UploadedAudioClipInput = {
   insertLocalClip: (trackId: TrackId, clip: Clip) => void
   selectClip?: (trackId: TrackId, clipId: string) => void
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
-  uploadToR2: (roomId: string, assetKey: string, file: File, duration?: number) => Promise<string | null>
+  uploadToR2: (projectId: string, assetKey: string, file: File, duration?: number) => Promise<string | null>
   audioBufferCache: Map<string, AudioBuffer>
   grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
   grantScope?: OptimisticGrantScope
@@ -67,6 +69,23 @@ type UploadedAudioClipInput = {
 type UploadedAudioClipResult = {
   clipId: string
   clip: ClipCreateSnapshot
+}
+
+type LocalAudioClipInput = {
+  projectId: string
+  trackId: TrackId
+  trackRef?: string
+  startSec: number
+  fileName: string
+  decoded: AudioBuffer
+  source: AudioSourceMetadata
+  sourceAssetKey: string
+  sourceKind: AudioSourceKind
+  insertLocalClip: (trackId: TrackId, clip: Clip) => void
+  selectClip?: (trackId: TrackId, clipId: string) => void
+  historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
+  audioBufferCache: Map<string, AudioBuffer>
+  color?: string
 }
 
 export type BatchClipCreateItem = {
@@ -111,7 +130,7 @@ function buildClipSnapshotFields(clip: Clip) {
 export function buildClipCreatePayload(
   input: BuildClipCreatePayloadInput,
 ): FunctionArgs<typeof convexApi.clips.create> {
-  const { roomId, userId, trackId, clip } = input
+  const { projectId, userId, trackId, clip } = input
   if (!clip.midi) {
     if (
       !clip.sampleUrl
@@ -126,8 +145,8 @@ export function buildClipCreatePayload(
     }
   }
   return {
-    roomId,
-    trackId,
+    projectId,
+    trackId: trackId as Id<'tracks'>,
     startSec: clip.startSec,
     duration: clip.duration,
     userId,
@@ -181,7 +200,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
   }
 
   const sampleUrl = await uploadClipSampleUrl({
-    roomId: input.roomId,
+    projectId: input.projectId,
     assetKey: input.sourceAssetKey,
     file: input.file,
     duration: input.decoded.duration,
@@ -192,7 +211,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
   let clipId: string
   try {
     clipId = await input.createServerClip(buildClipCreatePayload({
-      roomId: input.roomId,
+      projectId: input.projectId,
       userId: input.userId,
       trackId: input.trackId,
       clip,
@@ -218,7 +237,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
   if (input.pushHistory !== false) {
     pushClipCreateHistory({
       historyPush: input.historyPush,
-      roomId: input.roomId,
+      projectId: input.projectId,
       trackId: input.trackId,
       trackRef: input.trackRef,
       clipId,
@@ -230,8 +249,52 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
   return { clipId, clip }
 }
 
+export async function createLocalAudioClip(input: LocalAudioClipInput): Promise<UploadedAudioClipResult> {
+  const clip: ClipCreateSnapshot = {
+    startSec: input.startSec,
+    duration: input.decoded.duration,
+    name: input.fileName,
+    source: input.source,
+    sourceAssetKey: input.sourceAssetKey,
+    sourceKind: input.sourceKind,
+  }
+  const row = await createLocalTimelineRepository(input.projectId).createClip({
+    trackId: input.trackId,
+    name: input.fileName,
+    startSec: input.startSec,
+    duration: input.decoded.duration,
+    color: input.color ?? getDefaultClipColor(clip),
+    sourceAssetId: input.sourceAssetKey,
+    sourceAssetKey: input.sourceAssetKey,
+    sourceKind: input.sourceKind,
+    sourceDurationSec: input.source.durationSec,
+    sourceSampleRate: input.source.sampleRate,
+    sourceChannelCount: input.source.channelCount,
+  })
+
+  const localClip = buildLocalClip({
+    id: row.id,
+    clip: { ...clip, historyRef: row.historyRef },
+    buffer: input.decoded,
+    color: row.color,
+  })
+  input.insertLocalClip(input.trackId, localClip)
+  input.audioBufferCache.set(row.id, input.decoded)
+  input.selectClip?.(input.trackId, row.id)
+  pushClipCreateHistory({
+    historyPush: input.historyPush,
+    projectId: input.projectId,
+    trackId: input.trackId,
+    trackRef: input.trackRef,
+    clipId: row.id,
+    clip,
+  })
+
+  return { clipId: row.id, clip }
+}
+
 export async function createManyClips(input: {
-  roomId: string
+  projectId: string
   userId: string
   items: readonly BatchClipCreateItem[]
   createMany: (items: ReturnType<typeof buildClipCreatePayload>[]) => Promise<string[]>
@@ -244,7 +307,7 @@ export async function createManyClips(input: {
   }
 
   const clipIds = await input.createMany(input.items.map((item) => buildClipCreatePayload({
-    roomId: input.roomId,
+    projectId: input.projectId,
     userId: input.userId,
     trackId: item.trackId,
     clip: item.clip,
@@ -275,7 +338,7 @@ export async function createManyClips(input: {
 }
 
 export async function createProjectedClips(input: {
-  roomId: string
+  projectId: string
   userId: string
   items: readonly BatchClipCreateItem[]
   createMany: (items: ReturnType<typeof buildClipCreatePayload>[]) => Promise<string[]>
@@ -325,7 +388,7 @@ export function buildClipHistorySnapshot(clip: Clip): HistoryClipSnapshot {
 }
 
 function buildClipCreateHistoryEntry(input: {
-  roomId: string
+  projectId: string
   trackId: TrackId
   trackRef?: string
   clipId: string
@@ -334,7 +397,7 @@ function buildClipCreateHistoryEntry(input: {
   const localClip = buildLocalClip({ id: input.clipId, clip: input.clip })
   return {
     type: 'clip-create',
-    roomId: input.roomId,
+    projectId: input.projectId,
     data: {
       trackRef: input.trackRef ?? input.trackId,
       clip: {
@@ -347,16 +410,16 @@ function buildClipCreateHistoryEntry(input: {
 
 export function pushClipCreateHistory(input: {
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
-  roomId?: string
+  projectId?: string
   trackId: TrackId
   trackRef?: string
   clipId: string
   clip: ClipCreateSnapshot
 }) {
-  if (!input.roomId || typeof input.historyPush !== 'function') return
+  if (!input.projectId || typeof input.historyPush !== 'function') return
 
   input.historyPush(buildClipCreateHistoryEntry({
-    roomId: input.roomId,
+    projectId: input.projectId,
     trackId: input.trackId,
     trackRef: input.trackRef,
     clipId: input.clipId,

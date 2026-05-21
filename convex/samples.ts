@@ -4,30 +4,30 @@ import { v } from 'convex/values'
 import { findSampleRow } from './sampleRows'
 
 export const listByRoom = query({
-  args: { roomId: v.string() },
-  handler: async (ctx, { roomId }) => {
+  args: { projectId: v.string() },
+  handler: async (ctx, { projectId }) => {
     return await ctx.db
       .query('samples')
-      .withIndex('by_room', q => q.eq('roomId', roomId))
+      .withIndex('by_room', q => q.eq('projectId', projectId))
       .collect()
   },
 })
 
 export const removeFromRoom = mutation({
   args: {
-    roomId: v.string(),
+    projectId: v.string(),
     assetKey: v.optional(v.string()),
     userId: v.string(),
   },
-  handler: async (ctx, { roomId, assetKey, userId }) => {
+  handler: async (ctx, { projectId, assetKey, userId }) => {
     if (!assetKey) return
-    const row = await findSampleRow(ctx, { roomId, assetKey })
+    const row = await findSampleRow(ctx, { projectId, assetKey })
     if (!row) return
     if (row.ownerUserId !== userId) return
 
     const clips = await ctx.db
       .query('clips')
-      .withIndex('by_room', q => q.eq('roomId', roomId))
+      .withIndex('by_room', q => q.eq('projectId', projectId))
       .collect()
     const inUse = clips.some((clip) => clip.sourceAssetKey === assetKey)
     if (inUse) return

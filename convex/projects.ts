@@ -2,7 +2,7 @@ import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { deleteOwnedTrack, getTrackDeletePreflight } from "./tracks";
-import { listAccessibleRooms } from "./roomAccess";
+import { listAccessibleProjects } from "./projectAccess";
 
 type DeleteConflictReason = "foreign-clips" | "not-empty" | "locked";
 
@@ -36,7 +36,7 @@ type DeleteOwnedInRoomDeletedResult = {
 
 type DeleteCurrentOwnedInRoomDeletedResult = {
   status: "deleted"
-  destinationRoomId: string
+  destinationProjectId: string
 }
 
 function buildDeleteConflictResult(
@@ -58,22 +58,22 @@ function buildDeleteOwnedInRoomDeletedResult(): DeleteOwnedInRoomDeletedResult {
 }
 
 function buildDeleteCurrentOwnedInRoomDeletedResult(
-  destinationRoomId: string,
+  destinationProjectId: string,
 ): DeleteCurrentOwnedInRoomDeletedResult {
   return {
     status: "deleted",
-    destinationRoomId,
+    destinationProjectId,
   };
 }
 
 async function getOwnedRoomDeletePreflight(
   ctx: MutationCtx,
-  roomId: string,
+  projectId: string,
   userId: string,
 ) {
   const ownerships: Doc<"ownerships">[] = await ctx.db
     .query("ownerships")
-    .withIndex("by_room", (q) => q.eq("roomId", roomId))
+    .withIndex("by_room", (q) => q.eq("projectId", projectId))
     .collect();
   const ownedTrackOwnerships: Doc<"ownerships">[] = [];
   const ownedClipOwnerships: Doc<"ownerships">[] = [];
@@ -130,23 +130,23 @@ async function getOwnedRoomDeletePreflight(
 
 async function ensureOwnedRoomRecords(
   ctx: MutationCtx,
-  roomId: string,
+  projectId: string,
   userId: string,
 ) {
   const [projRows, ownershipRows]: [Doc<"projects">[], Doc<"ownerships">[]] = await Promise.all([
     ctx.db
       .query("projects")
-      .withIndex("by_room_owner", (q) => q.eq("roomId", roomId).eq("ownerUserId", userId))
+      .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
       .collect(),
     ctx.db
       .query("ownerships")
-      .withIndex("by_room_owner", (q) => q.eq("roomId", roomId).eq("ownerUserId", userId))
+      .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
       .collect(),
   ]);
   const markerOwnership = ownershipRows.find((ownership) => !ownership.trackId && !ownership.clipId);
   if (!projRows[0]) {
     await ctx.db.insert("projects", {
-      roomId,
+      projectId,
       ownerUserId: userId,
       name: "Untitled",
       createdAt: Date.now(),
@@ -154,7 +154,7 @@ async function ensureOwnedRoomRecords(
   }
   if (!markerOwnership) {
     await ctx.db.insert("ownerships", {
-      roomId,
+      projectId,
       ownerUserId: userId,
     });
   }
@@ -162,7 +162,7 @@ async function ensureOwnedRoomRecords(
 
 async function deleteOwnedRoomFromPreflight(
   ctx: MutationCtx,
-  roomId: string,
+  projectId: string,
   preflight: Awaited<ReturnType<typeof getOwnedRoomDeletePreflight>>,
   userId: string,
 ) {
@@ -196,7 +196,7 @@ async function deleteOwnedRoomFromPreflight(
 
   const projects: Doc<"projects">[] = await ctx.db
     .query("projects")
-    .withIndex("by_room_owner", (q) => q.eq("roomId", roomId).eq("ownerUserId", userId))
+    .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
     .collect();
   for (const project of projects) {
     await ctx.db.delete(project._id);
@@ -205,34 +205,34 @@ async function deleteOwnedRoomFromPreflight(
 
 export const listMineDetailed = query({
   args: { userId: v.string() },
-  returns: v.array(v.object({ roomId: v.string(), name: v.string() })),
+  returns: v.array(v.object({ projectId: v.string(), name: v.string() })),
   handler: async (ctx, { userId }) => {
-    return listAccessibleRooms(ctx, userId);
+    return listAccessibleProjects(ctx, userId);
   },
 });
 
 export const ensureOwnedRoom = mutation({
-  args: { roomId: v.string(), userId: v.string() },
+  args: { projectId: v.string(), userId: v.string() },
   returns: v.null(),
-  handler: async (ctx, { roomId, userId }) => {
-    await ensureOwnedRoomRecords(ctx, roomId, userId);
+  handler: async (ctx, { projectId, userId }) => {
+    await ensureOwnedRoomRecords(ctx, projectId, userId);
     return null;
   },
 });
 
 export const deleteOwnedInRoom = mutation({
-  args: { roomId: v.string(), userId: v.string() },
+  args: { projectId: v.string(), userId: v.string() },
   returns: v.object({
     status: v.union(v.literal("deleted"), v.literal("conflict")),
     conflictTrackIds: v.array(v.string()),
     conflicts: v.array(deleteConflict),
   }),
-  handler: async (ctx, { roomId, userId }) => {
-    const preflight = await getOwnedRoomDeletePreflight(ctx, roomId, userId);
+  handler: async (ctx, { projectId, userId }) => {
+    const preflight = await getOwnedRoomDeletePreflight(ctx, projectId, userId);
     if (preflight.conflicts.length > 0) {
       return buildDeleteConflictResult(preflight);
     }
-    await deleteOwnedRoomFromPreflight(ctx, roomId, preflight, userId);
+    await deleteOwnedRoomFromPreflight(ctx, projectId, preflight, userId);
 
     return buildDeleteOwnedInRoomDeletedResult();
   },
@@ -240,26 +240,26 @@ export const deleteOwnedInRoom = mutation({
 
 async function ensureDeleteDestinationRoom(
   ctx: MutationCtx,
-  roomId: string,
+  projectId: string,
   userId: string,
 ) {
-  const alternateRoom = (await listAccessibleRooms(ctx, userId))
-    .find((entry) => entry.roomId !== roomId);
-  if (alternateRoom?.roomId) {
-    return alternateRoom.roomId;
+  const alternateRoom = (await listAccessibleProjects(ctx, userId))
+    .find((entry) => entry.projectId !== projectId);
+  if (alternateRoom?.projectId) {
+    return alternateRoom.projectId;
   }
 
-  const destinationRoomId = crypto.randomUUID();
-  await ensureOwnedRoomRecords(ctx, destinationRoomId, userId);
-  return destinationRoomId;
+  const destinationProjectId = crypto.randomUUID();
+  await ensureOwnedRoomRecords(ctx, destinationProjectId, userId);
+  return destinationProjectId;
 }
 
 export const deleteCurrentOwnedInRoom = mutation({
-  args: { roomId: v.string(), userId: v.string() },
+  args: { projectId: v.string(), userId: v.string() },
   returns: v.union(
     v.object({
       status: v.literal("deleted"),
-      destinationRoomId: v.string(),
+      destinationProjectId: v.string(),
     }),
     v.object({
       status: v.literal("conflict"),
@@ -267,34 +267,34 @@ export const deleteCurrentOwnedInRoom = mutation({
       conflicts: v.array(deleteConflict),
     }),
   ),
-  handler: async (ctx, { roomId, userId }) => {
-    const preflight = await getOwnedRoomDeletePreflight(ctx, roomId, userId);
+  handler: async (ctx, { projectId, userId }) => {
+    const preflight = await getOwnedRoomDeletePreflight(ctx, projectId, userId);
     if (preflight.conflicts.length > 0) {
       return buildDeleteConflictResult(preflight);
     }
 
-    const destinationRoomId = await ensureDeleteDestinationRoom(ctx, roomId, userId);
-    await deleteOwnedRoomFromPreflight(ctx, roomId, preflight, userId);
+    const destinationProjectId = await ensureDeleteDestinationRoom(ctx, projectId, userId);
+    await deleteOwnedRoomFromPreflight(ctx, projectId, preflight, userId);
 
-    return buildDeleteCurrentOwnedInRoomDeletedResult(destinationRoomId);
+    return buildDeleteCurrentOwnedInRoomDeletedResult(destinationProjectId);
   },
 });
 
 export const setName = mutation({
-  args: { roomId: v.string(), userId: v.string(), name: v.string() },
+  args: { projectId: v.string(), userId: v.string(), name: v.string() },
   returns: v.null(),
-  handler: async (ctx, { roomId, userId, name }) => {
+  handler: async (ctx, { projectId, userId, name }) => {
     const trimmed = name.trim().slice(0, 120);
     const existing = await ctx.db
       .query("projects")
-      .withIndex("by_room_owner", (q) => q.eq("roomId", roomId).eq("ownerUserId", userId))
+      .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
       .collect();
     const row = existing[0];
     if (row) {
       await ctx.db.patch(row._id, { name: trimmed.length ? trimmed : "Untitled" });
     } else {
       await ctx.db.insert("projects", {
-        roomId,
+        projectId,
         ownerUserId: userId,
         name: trimmed.length ? trimmed : "Untitled",
         createdAt: Date.now(),

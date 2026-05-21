@@ -3,8 +3,8 @@ import { createEffect, createSignal, onCleanup, onMount } from 'solid-js'
 import { hasAncestorDatasetValue } from '~/lib/dom-dataset'
 
 type UseProjectsMenuControllerOptions = {
-  onDeleteProject: (roomId: string) => void | Promise<void>
-  onRenameProject: (roomId: string, name: string) => void | Promise<void>
+  onDeleteProject: (projectId: string) => void | Promise<void>
+  onRenameProject: (projectId: string, name: string) => void | Promise<void>
 }
 
 type UseProjectsMenuControllerReturn = {
@@ -15,10 +15,10 @@ type UseProjectsMenuControllerReturn = {
   renamingProjectId: () => string | null
   setConfirmingProjectId: (value: string | null) => void
   setEditingName: (value: string) => void
-  beginProjectRename: (roomId: string, name: string) => void
+  beginProjectRename: (projectId: string, name: string) => void
   cancelProjectRename: () => void
-  confirmProjectRename: (roomId: string) => Promise<void>
-  confirmProjectDelete: (roomId: string) => Promise<void>
+  confirmProjectRename: (projectId: string) => Promise<void>
+  confirmProjectDelete: (projectId: string) => Promise<void>
   stopPropagation: (event: Event) => void
   stopMenuPress: (event: Event) => void
 }
@@ -55,8 +55,8 @@ export function useProjectsMenuController(
     event.preventDefault()
   }
 
-  const beginProjectRename = (roomId: string, name: string) => {
-    setEditingProjectId(roomId)
+  const beginProjectRename = (projectId: string, name: string) => {
+    setEditingProjectId(projectId)
     setEditingName(name)
   }
 
@@ -64,26 +64,26 @@ export function useProjectsMenuController(
     setEditingProjectId(null)
   }
 
-  const confirmProjectRename = async (roomId: string) => {
-    if (renamingProjectId() === roomId) return
+  const confirmProjectRename = async (projectId: string) => {
+    if (renamingProjectId() === projectId) return
     const name = editingName().trim()
     if (!name) {
       cancelProjectRename()
       return
     }
-    setRenamingProjectId(roomId)
+    setRenamingProjectId(projectId)
     try {
-      await options.onRenameProject(roomId, name)
+      await options.onRenameProject(projectId, name)
     } finally {
       setRenamingProjectId(null)
       cancelProjectRename()
     }
   }
 
-  const confirmProjectDelete = async (roomId: string) => {
-    setDeletingProjectId(roomId)
+  const confirmProjectDelete = async (projectId: string) => {
+    setDeletingProjectId(projectId)
     try {
-      await options.onDeleteProject(roomId)
+      await options.onDeleteProject(projectId)
     } finally {
       setDeletingProjectId(null)
       setConfirmingProjectId(null)
@@ -125,12 +125,12 @@ export function useProjectsMenuController(
   })
 
   createEffect(() => {
-    const roomId = editingProjectId()
+    const projectId = editingProjectId()
     clearRenameFocus()
-    if (!roomId) return
+    if (!projectId) return
     const tryFocus = () => {
       try {
-        const element = document.querySelector(`input[data-project-input="${escapeCssValue(roomId)}"]`)
+        const element = document.querySelector(`input[data-project-input="${escapeCssValue(projectId)}"]`)
         if (element instanceof HTMLInputElement) {
           element.focus()
           element.select?.()

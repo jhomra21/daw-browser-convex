@@ -1,7 +1,5 @@
-import type { Id } from '../../convex/_generated/dataModel'
 import type { AudioSourceKind } from '~/lib/audio-source'
-
-export type TrackId = Id<'tracks'>
+export type TrackId = string
 
 export type TrackSend = {
   targetId: TrackId
@@ -20,9 +18,11 @@ export type Clip = {
   historyRef?: string
   name: string
   buffer?: AudioBuffer | null
+  mediaStatus?: 'missing' | 'permission-denied'
   startSec: number
   duration: number
   sourceAssetKey?: string
+  waveformAssetKey?: string
   sourceKind?: AudioSourceKind
   sourceDurationSec?: number
   sourceSampleRate?: number

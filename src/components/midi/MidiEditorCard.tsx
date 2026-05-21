@@ -1,5 +1,7 @@
 import { type Component, createMemo, createSignal, onCleanup, createEffect, For, onMount } from 'solid-js'
 import { convexClient, convexApi } from '~/lib/convex'
+import { isLocalId } from '~/lib/local-ids'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { cn } from '~/lib/utils'
 import type { Clip } from '~/types/timeline'
 
@@ -21,7 +23,7 @@ export type MidiEditorCardProps = {
   // Optional: preview note when adding/dragging
   onAuditionNote?: (pitch: number, velocity?: number, durSec?: number) => void
   // Local-only: current room id for per-room persistence
-  roomId?: string
+  projectId?: string
   // Live note callbacks for computer keyboard play
   onStartLiveNote?: (pitch: number, velocity?: number) => void
   onStopLiveNote?: (pitch: number) => void
@@ -34,14 +36,15 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   const [resizing, setResizing] = createSignal(false)
   const [notes, setNotes] = createSignal<Array<{ beat: number; length: number; pitch: number; velocity?: number }>>([])
   // Local-only toggle to capture keyboard for playing notes
-  const storageKey = () => `mb:midi_kb:${props.roomId || 'default'}`
+  const storageKey = () => `mb:midi_kb:${props.projectId || 'default'}`
   const [kbEnabled, setKbEnabled] = createSignal(false)
-  const octaveKey = () => `mb:midi_kb_oct:${props.roomId || 'default'}`
+  const octaveKey = () => `mb:midi_kb_oct:${props.projectId || 'default'}`
   const [octave, setOctave] = createSignal(0)
   // Track active rows for gutter highlighting
   const [activeRows, setActiveRows] = createSignal<Set<number>>(new Set(), { equals: false })
-  const canPersist = () => Boolean(props.userId)
-  const warnMissingUser = () => console.warn('[MidiEditorCard] Cannot edit or persist MIDI without `userId`.')
+  const isLocalProject = () => Boolean(props.projectId && isLocalId('project', props.projectId))
+  const canPersist = () => isLocalProject() || Boolean(props.userId)
+  const warnMissingUser = () => console.warn('[MidiEditorCard] Cannot edit or persist MIDI without a writable project.')
   // Grid derived from BPM/denominator/clip length
   const stepsPerBeat = () => Math.max(1, Math.round((props.gridDenominator || 4) / 4))
   const secondsPerBeat = () => 60 / Math.max(1e-6, props.bpm || 120)
@@ -79,6 +82,10 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
           wave: props.midi?.wave ?? 'sawtooth',
           gain: props.midi?.gain ?? 0.8,
           notes: notes().slice().sort((a, b) => a.beat - b.beat || b.pitch - a.pitch),
+        }
+        if (props.projectId && isLocalId('project', props.projectId)) {
+          await createLocalTimelineRepository(props.projectId).updateClip({ clipId: props.clipId, midi })
+          return
         }
         if (!props.userId) return
         await convexClient.mutation((convexApi as any).clips.setMidi, { clipId: props.clipId as any, midi, userId: props.userId })

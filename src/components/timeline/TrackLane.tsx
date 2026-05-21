@@ -13,6 +13,9 @@ type TrackLaneProps = {
   onClipResizeStart: (trackId: Track['id'], clipId: string, edge: 'left' | 'right', e: PointerEvent) => void
   isDropTarget?: boolean
   onClipDblClick?: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
+  onRetryMedia?: (clipId: string) => void
+  onReplaceMedia?: (trackId: Track['id'], clipId: string) => void
+  onRemoveMissingMedia?: (trackId: Track['id'], clipId: string) => void
   bpm: number
 }
 
@@ -33,6 +36,9 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
             onPointerUp={props.onClipPointerUp}
             onResizeStart={props.onClipResizeStart}
             onDblClick={props.onClipDblClick}
+            onRetryMedia={props.onRetryMedia}
+            onReplaceMedia={props.onReplaceMedia}
+            onRemoveMissingMedia={props.onRemoveMissingMedia}
             bpm={props.bpm}
           />
         )}

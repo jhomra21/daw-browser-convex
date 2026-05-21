@@ -2,11 +2,11 @@ import { mutation, query } from "./_generated/server"
 import { v } from "convex/values"
 
 export const listByRoom = query({
-  args: { roomId: v.string() },
-  handler: async (ctx, { roomId }) => {
+  args: { projectId: v.string() },
+  handler: async (ctx, { projectId }) => {
     const rows = await ctx.db
       .query("exports")
-      .withIndex("by_room_createdAt", q => q.eq("roomId", roomId))
+      .withIndex("by_room_createdAt", q => q.eq("projectId", projectId))
       .collect()
     // Sort desc by createdAt client-side to be safe
     return rows.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
@@ -15,7 +15,7 @@ export const listByRoom = query({
 
 export const create = mutation({
   args: {
-    roomId: v.string(),
+    projectId: v.string(),
     name: v.string(),
     url: v.string(),
     r2Key: v.string(),
@@ -25,9 +25,9 @@ export const create = mutation({
     sizeBytes: v.optional(v.number()),
     userId: v.string(),
   },
-  handler: async (ctx, { roomId, name, url, r2Key, format, duration, sampleRate, sizeBytes, userId }) => {
+  handler: async (ctx, { projectId, name, url, r2Key, format, duration, sampleRate, sizeBytes, userId }) => {
     return await ctx.db.insert("exports", {
-      roomId,
+      projectId,
       name,
       url,
       r2Key,

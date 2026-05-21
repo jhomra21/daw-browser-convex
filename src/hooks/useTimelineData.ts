@@ -3,10 +3,18 @@ import type { Accessor } from 'solid-js'
 
 import { useConvexQuery, convexClient, convexApi } from '~/lib/convex'
 import { getProjectDeleteConflictMessage, type DeleteConflictReason } from '~/lib/delete-conflict-messages'
+import { isLocalId } from '~/lib/local-ids'
+import {
+  createLocalProject,
+  deleteLocalProject,
+  listLocalProjects,
+  markLocalProjectOpened,
+  renameLocalProject,
+} from '~/lib/local-project-db'
 import { useSessionQuery } from '~/lib/session'
 
 export type TimelineProject = {
-  roomId: string
+  projectId: string
   name: string
 }
 
@@ -21,7 +29,7 @@ type DeleteOwnedRoomResult =
   | { status: 'error' }
 
 type DeleteCurrentOwnedRoomResult =
-  | { status: 'deleted'; destinationRoomId: string }
+  | { status: 'deleted'; destinationProjectId: string }
   | { status: 'conflict'; conflictTrackIds: string[]; conflicts: ProjectDeleteConflict[] }
   | { status: 'error' }
 
@@ -34,45 +42,46 @@ type EnsureOwnedRoomOptions = {
 }
 
 type UseTimelineDataReturn = {
-  roomId: Accessor<string>
-  setRoomId: (roomId: string) => void
+  projectId: Accessor<string>
+  setProjectId: (projectId: string) => void
   userId: () => string
   projects: Accessor<TimelineProject[]>
   fullView: ReturnType<typeof useConvexQuery>
-  navigateToRoom: (roomId: string) => void
+  navigateToRoom: (projectId: string) => void
   createProject: () => Promise<void>
-  renameProject: (roomId: string, name: string) => Promise<void>
-  deleteProject: (roomId: string) => Promise<void>
+  renameProject: (projectId: string, name: string) => Promise<void>
+  deleteProject: (projectId: string) => Promise<void>
 }
 
 const normalizeProjects = (value: unknown): TimelineProject[] => {
   if (!Array.isArray(value)) return []
   return value.flatMap((project) => {
     if (!project || typeof project !== 'object') return []
-    const roomId = 'roomId' in project && typeof project.roomId === 'string' ? project.roomId : ''
+    const projectId = 'projectId' in project && typeof project.projectId === 'string' ? project.projectId : ''
     const name = 'name' in project && typeof project.name === 'string' ? project.name : ''
-    if (!roomId || !name) return []
-    return [{ roomId, name }]
+    if (!projectId || !name) return []
+    return [{ projectId, name }]
   })
 }
 
 export function useTimelineData(): UseTimelineDataReturn {
-  const [roomId, setRoomIdState] = createSignal<string>('')
-  const [bootstrapRoomId, setBootstrapRoomId] = createSignal<string | null>(null)
+  const [projectId, setProjectIdState] = createSignal<string>('')
+  const [bootstrapProjectId, setBootstrapProjectId] = createSignal<string | null>(null)
+  const [localProjects, setLocalProjects] = createSignal<TimelineProject[]>([])
   const pendingOwnedRoomKeys = new Set<string>()
 
   const session = useSessionQuery()
   const userId = () => session.data?.user.id ?? ''
 
-  const setRoomId = (nextRoomId: string) => {
-    setBootstrapRoomId(null)
-    setRoomIdState(nextRoomId)
+  const setProjectId = (nextProjectId: string) => {
+    setBootstrapProjectId(null)
+    setProjectIdState(nextProjectId)
   }
 
   const updateRoomUrl = (rid: string, mode: 'push' | 'replace') => {
     try {
       const url = new URL(window.location.href)
-      url.searchParams.set('roomId', rid)
+      url.searchParams.set('projectId', rid)
       if (mode === 'replace') {
         history.replaceState(null, '', url.toString())
       } else {
@@ -92,8 +101,8 @@ export function useTimelineData(): UseTimelineDataReturn {
       updateRoomUrl(rid, options.history)
     }
     batch(() => {
-      setBootstrapRoomId(options?.bootstrap ?? null)
-      setRoomIdState(rid)
+      setBootstrapProjectId(options?.bootstrap ?? null)
+      setProjectIdState(rid)
     })
   }
 
@@ -103,12 +112,21 @@ export function useTimelineData(): UseTimelineDataReturn {
 
   const navigateToRoom = (rid: string) => {
     resolveRoom(rid, { history: 'push' })
+    if (isLocalId('project', rid)) void markLocalProjectOpened(rid).then(loadLocalProjects)
   }
 
-  const readRoomIdFromLocation = () => {
+  const loadLocalProjects = async () => {
+    const rows = await listLocalProjects()
+    setLocalProjects(rows.map((project) => ({
+      projectId: project.id,
+      name: project.name,
+    })))
+  }
+
+  const readProjectIdFromLocation = () => {
     try {
       const url = new URL(window.location.href)
-      const rid = url.searchParams.get('roomId')
+      const rid = url.searchParams.get('projectId')
       return rid && rid.trim() ? rid : null
     } catch {
       return null
@@ -116,32 +134,33 @@ export function useTimelineData(): UseTimelineDataReturn {
   }
 
   onMount(() => {
+    void loadLocalProjects()
     const syncRoomFromHistory = () => {
-      const nextRoomId = readRoomIdFromLocation()
-      if (nextRoomId) {
-        resolveRoom(nextRoomId)
+      const nextProjectId = readProjectIdFromLocation()
+      if (nextProjectId) {
+        resolveRoom(nextProjectId)
         return
       }
-      const currentRoomId = roomId()
-      if (currentRoomId) {
-        replaceRoom(currentRoomId)
+      const currentProjectId = projectId()
+      if (currentProjectId) {
+        replaceRoom(currentProjectId)
         return
       }
-      const fallbackRoomId = crypto.randomUUID()
-      resolveRoom(fallbackRoomId, {
+      const fallbackProjectId = crypto.randomUUID()
+      resolveRoom(fallbackProjectId, {
         history: 'replace',
-        bootstrap: fallbackRoomId,
+        bootstrap: fallbackProjectId,
       })
     }
 
-    const initialRoomId = readRoomIdFromLocation()
-    if (initialRoomId) {
-      resolveRoom(initialRoomId)
+    const initialProjectId = readProjectIdFromLocation()
+    if (initialProjectId) {
+      resolveRoom(initialProjectId)
     } else {
-      const generatedRoomId = crypto.randomUUID()
-      resolveRoom(generatedRoomId, {
+      const generatedProjectId = crypto.randomUUID()
+      resolveRoom(generatedProjectId, {
         history: 'replace',
-        bootstrap: generatedRoomId,
+        bootstrap: generatedProjectId,
       })
     }
 
@@ -158,21 +177,24 @@ export function useTimelineData(): UseTimelineDataReturn {
   )
   const projectsLoaded = createMemo(() => myProjects.status === 'success')
   const projects = createMemo<TimelineProject[]>(() => {
-    return normalizeProjects(myProjects.data)
+    const byId = new Map<string, TimelineProject>()
+    for (const project of localProjects()) byId.set(project.projectId, project)
+    for (const project of normalizeProjects(myProjects.data)) byId.set(project.projectId, project)
+    return [...byId.values()]
   })
 
   const fullView = useConvexQuery(
     convexApi.timeline.fullView,
     () => {
-      const rid = roomId()
+      const rid = projectId()
       const uid = userId()
-      if (!rid || !uid || bootstrapRoomId() === rid) return null
-      return { roomId: rid, userId: uid }
+      if (!rid || isLocalId('project', rid) || !uid || bootstrapProjectId() === rid) return null
+      return { projectId: rid, userId: uid }
     },
     () => {
-      const rid = roomId()
+      const rid = projectId()
       const uid = userId()
-      const bootstrapRid = bootstrapRoomId()
+      const bootstrapRid = bootstrapProjectId()
       return ['timeline', rid, uid, bootstrapRid]
     }
   )
@@ -189,7 +211,7 @@ export function useTimelineData(): UseTimelineDataReturn {
 
     pendingOwnedRoomKeys.add(key)
     try {
-      await convexClient.mutation(convexApi.projects.ensureOwnedRoom, { roomId: rid, userId: uid })
+      await convexClient.mutation(convexApi.projects.ensureOwnedRoom, { projectId: rid, userId: uid })
       return { status: 'created' }
     } catch {
       if (options?.showAlertOnError) {
@@ -204,7 +226,7 @@ export function useTimelineData(): UseTimelineDataReturn {
   createEffect(() => {
     const uid = userId()
     if (!uid) return
-    const bootstrapRid = bootstrapRoomId()
+    const bootstrapRid = bootstrapProjectId()
     if (!bootstrapRid) return
     const accessibleProjects = projects()
     const key = `${uid}:${bootstrapRid}`
@@ -213,22 +235,22 @@ export function useTimelineData(): UseTimelineDataReturn {
     if (!projectsLoaded()) return
 
     if (accessibleProjects.length > 0) {
-      const target = accessibleProjects[0]?.roomId
-      if (target && target !== roomId()) {
+      const target = accessibleProjects[0]?.projectId
+      if (target && target !== projectId()) {
         replaceRoom(target)
       } else {
-        setBootstrapRoomId(null)
+        setBootstrapProjectId(null)
       }
       return
     }
 
     void ensureOwnedRoom(bootstrapRid, uid, { showAlertOnError: true }).then((result) => {
-      if (bootstrapRoomId() !== bootstrapRid) return
-      if (result.status === 'created' && roomId() !== bootstrapRid) {
+      if (bootstrapProjectId() !== bootstrapRid) return
+      if (result.status === 'created' && projectId() !== bootstrapRid) {
         replaceRoom(bootstrapRid)
         return
       }
-      setBootstrapRoomId(null)
+      setBootstrapProjectId(null)
     })
   })
 
@@ -237,10 +259,10 @@ export function useTimelineData(): UseTimelineDataReturn {
     window.alert(getProjectDeleteConflictMessage(conflicts.map((conflict) => conflict.reason)))
   }
 
-  const deleteOwnedRoom = async (targetRoomId: string, ownerUserId: string): Promise<DeleteOwnedRoomResult> => {
+  const deleteOwnedRoom = async (targetProjectId: string, ownerUserId: string): Promise<DeleteOwnedRoomResult> => {
     try {
       const result = await convexClient.mutation(convexApi.projects.deleteOwnedInRoom, {
-        roomId: targetRoomId,
+        projectId: targetProjectId,
         userId: ownerUserId,
       })
       if (result?.status === 'conflict') {
@@ -254,12 +276,12 @@ export function useTimelineData(): UseTimelineDataReturn {
   }
 
   const deleteCurrentOwnedRoom = async (
-    targetRoomId: string,
+    targetProjectId: string,
     ownerUserId: string,
   ): Promise<DeleteCurrentOwnedRoomResult> => {
     try {
       const result = await convexClient.mutation(convexApi.projects.deleteCurrentOwnedInRoom, {
-        roomId: targetRoomId,
+        projectId: targetProjectId,
         userId: ownerUserId,
       })
       if (result?.status === 'conflict') {
@@ -273,20 +295,42 @@ export function useTimelineData(): UseTimelineDataReturn {
   }
 
   const createProject = async () => {
-    const nextRoomId = crypto.randomUUID()
+    const currentProjectId = projectId()
+    if (!userId() || isLocalId('project', currentProjectId)) {
+      try {
+        const project = await createLocalProject('Untitled')
+        await loadLocalProjects()
+        navigateToRoom(project.id)
+      } catch {
+        window.alert('This local project could not be created.')
+      }
+      return
+    }
+
+    const nextProjectId = crypto.randomUUID()
     const ownerUserId = userId()
     if (!ownerUserId) return
-    const result = await ensureOwnedRoom(nextRoomId, ownerUserId, { showAlertOnError: true })
+    const result = await ensureOwnedRoom(nextProjectId, ownerUserId, { showAlertOnError: true })
     if (result.status !== 'created') return
-    navigateToRoom(nextRoomId)
+    navigateToRoom(nextProjectId)
   }
 
-  const renameProject = async (targetRoomId: string, name: string) => {
+  const renameProject = async (targetProjectId: string, name: string) => {
+    if (isLocalId('project', targetProjectId)) {
+      try {
+        await renameLocalProject(targetProjectId, name)
+        await loadLocalProjects()
+      } catch {
+        window.alert('This local project could not be renamed.')
+      }
+      return
+    }
+
     const ownerUserId = userId()
     if (!ownerUserId) return
     try {
       await convexClient.mutation(convexApi.projects.setName, {
-        roomId: targetRoomId,
+        projectId: targetProjectId,
         userId: ownerUserId,
         name,
       })
@@ -295,12 +339,27 @@ export function useTimelineData(): UseTimelineDataReturn {
     }
   }
 
-  const deleteProject = async (targetRoomId: string) => {
+  const deleteProject = async (targetProjectId: string) => {
+    if (isLocalId('project', targetProjectId)) {
+      try {
+        await deleteLocalProject(targetProjectId)
+        await loadLocalProjects()
+        if (targetProjectId === projectId()) {
+          const replacement = await createLocalProject('Untitled')
+          await loadLocalProjects()
+          navigateToRoom(replacement.id)
+        }
+      } catch {
+        window.alert('This local project could not be deleted.')
+      }
+      return
+    }
+
     const ownerUserId = userId()
     if (!ownerUserId) return
 
-    if (targetRoomId !== roomId()) {
-      const result = await deleteOwnedRoom(targetRoomId, ownerUserId)
+    if (targetProjectId !== projectId()) {
+      const result = await deleteOwnedRoom(targetProjectId, ownerUserId)
       if (result.status === 'conflict') {
         showProjectDeleteConflict(result)
       }
@@ -308,7 +367,7 @@ export function useTimelineData(): UseTimelineDataReturn {
     }
 
     const result = await deleteCurrentOwnedRoom(
-      targetRoomId,
+      targetProjectId,
       ownerUserId,
     )
     if (result.status === 'conflict') {
@@ -318,12 +377,12 @@ export function useTimelineData(): UseTimelineDataReturn {
     if (result.status !== 'deleted') {
       return
     }
-    navigateToRoom(result.destinationRoomId)
+    navigateToRoom(result.destinationProjectId)
   }
 
   return {
-    roomId,
-    setRoomId,
+    projectId,
+    setProjectId,
     userId,
     projects,
     fullView,

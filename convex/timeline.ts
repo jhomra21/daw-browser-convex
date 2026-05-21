@@ -1,17 +1,17 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
-import { listRoomTracksWithMixerChannels } from "./mixerChannels";
-import { requireRoomAccess } from "./roomAccess";
+import { listProjectTracksWithMixerChannels } from "./mixerChannels";
+import { requireProjectAccess } from "./projectAccess";
 
 export const fullView = query({
-  args: { roomId: v.string(), userId: v.string() },
-  handler: async (ctx, { roomId, userId }) => {
-    await requireRoomAccess(ctx, roomId, userId);
+  args: { projectId: v.string(), userId: v.string() },
+  handler: async (ctx, { projectId, userId }) => {
+    await requireProjectAccess(ctx, projectId, userId);
 
-    const tracks = await listRoomTracksWithMixerChannels(ctx, roomId);
+    const tracks = await listProjectTracksWithMixerChannels(ctx, projectId);
     const clips = await ctx.db
       .query("clips")
-      .withIndex("by_room", q => q.eq("roomId", roomId))
+      .withIndex("by_room", q => q.eq("projectId", projectId))
       .collect();
 
     return { tracks, clips };

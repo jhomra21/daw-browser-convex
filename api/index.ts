@@ -15,10 +15,10 @@ type Variables = {
 
 async function canAccessAgentRoom(
   convex: ConvexHttpClient,
-  roomId: string,
+  projectId: string,
   userId: string,
 ) {
-  const canAccess = await convex.query(convexApi.roomAccess.canAccess as any, { roomId, userId } as any)
+  const canAccess = await convex.query(convexApi.projectAccess.canAccess as any, { projectId, userId } as any)
   return canAccess
 }
 
@@ -88,27 +88,27 @@ app.post('/api/agent/execute', async (c) => {
     const user = c.get('user')
     if (!user) return c.json({ error: 'Unauthorized' }, 401)
     const body = await c.req.json().catch(() => null) as any
-    if (!body || typeof body.roomId !== 'string' || !body.commands) {
+    if (!body || typeof body.projectId !== 'string' || !body.commands) {
       return c.json({ error: 'Invalid body' }, 400)
     }
-    const roomId: string = body.roomId
+    const projectId: string = body.projectId
     const parsed = CommandsEnvelopeSchema.safeParse({ commands: body.commands })
     if (!parsed.success) {
       return c.json({ error: 'Invalid commands', issues: parsed.error.issues }, 400)
     }
     const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
-    if (!(await canAccessAgentRoom(convex, roomId, (user as any).id))) {
+    if (!(await canAccessAgentRoom(convex, projectId, (user as any).id))) {
       return c.json({ error: 'Forbidden' }, 403)
     }
-    const trackList: any[] = await convex.query(convexApi.tracks.listByRoom as any, { roomId } as any)
+    const trackList: any[] = await convex.query(convexApi.tracks.listByRoom as any, { projectId } as any)
     const agentActions = createAgentActions({
       convex,
       convexApi,
-      roomId,
+      projectId,
       userId: (user as any).id,
       getTracks: async () => trackList,
       refreshTracks: async () => {
-        const updated: any[] = await convex.query(convexApi.tracks.listByRoom as any, { roomId } as any)
+        const updated: any[] = await convex.query(convexApi.tracks.listByRoom as any, { projectId } as any)
         trackList.splice(0, trackList.length, ...updated)
         return trackList
       },
@@ -225,13 +225,13 @@ app.post('/api/samples', async (c) => {
     }
 
     const form = await c.req.formData()
-    const roomId = form.get('roomId')?.toString()
+    const projectId = form.get('projectId')?.toString()
     const assetKey = form.get('assetKey')?.toString()
     const file = form.get('file')
     const durationStr = form.get('duration')?.toString()
 
-    if (!roomId || !assetKey || !(file instanceof File)) {
-      return c.json({ error: 'Missing roomId, assetKey or file' }, 400)
+    if (!projectId || !assetKey || !(file instanceof File)) {
+      return c.json({ error: 'Missing projectId, assetKey or file' }, 400)
     }
 
     // Sanitize filename for use as a key segment
@@ -242,9 +242,9 @@ app.post('/api/samples', async (c) => {
       .pop()!
       .replace(/[^A-Za-z0-9._-]/g, '_')  // safe chars
       .slice(0, 180)                      // keep key short-ish
-    // Primary layout: rooms/<roomId>/clips/<filename>
+    // Primary layout: rooms/<projectId>/clips/<filename>
     // Handle collisions by appending " (n)" or timestamp.
-    const clipsPrefix = `rooms/${roomId}/clips/`
+    const clipsPrefix = `rooms/${projectId}/clips/`
     const splitIdx = sanitized.lastIndexOf('.')
     const base = splitIdx > 0 ? sanitized.slice(0, splitIdx) : sanitized
     const ext = splitIdx > 0 ? sanitized.slice(splitIdx) : ''
@@ -274,7 +274,7 @@ app.post('/api/samples', async (c) => {
         contentDisposition: `inline; filename="${file.name}"`,
       },
       customMetadata: {
-        roomId,
+        projectId,
         assetKey,
         filename: chosenName,
         originalFilename: file.name,
@@ -286,7 +286,7 @@ app.post('/api/samples', async (c) => {
     })
 
     // Return a URL that includes the exact key so the GET route can fetch without indirection
-    const url = `/api/samples/${roomId}/${encodeURIComponent(assetKey)}?key=${encodeURIComponent(key)}`
+    const url = `/api/samples/${projectId}/${encodeURIComponent(assetKey)}?key=${encodeURIComponent(key)}`
     return c.json({ key, url })
   } catch (err) {
     console.error('Upload error', err)
@@ -295,7 +295,7 @@ app.post('/api/samples', async (c) => {
 })
 
 // Stream a sample from R2
-app.get('/api/samples/:roomId/:sourceId', async (c) => {
+app.get('/api/samples/:projectId/:sourceId', async (c) => {
   try {
     // Require exact key so we don't list buckets or rely on pointers
     const key = c.req.query('key')
@@ -421,15 +421,15 @@ app.post('/api/exports', async (c) => {
     if (!user) return c.json({ error: 'Unauthorized' }, 401)
 
     const form = await c.req.formData()
-    const roomId = form.get('roomId')?.toString()
+    const projectId = form.get('projectId')?.toString()
     const format = 'wav'
     const durationStr = form.get('duration')?.toString()
     const sampleRateStr = form.get('sampleRate')?.toString()
     const file = form.get('file')
     let name = form.get('name')?.toString()
 
-    if (!roomId || !(file instanceof File)) {
-      return c.json({ error: 'Missing roomId or file' }, 400)
+    if (!projectId || !(file instanceof File)) {
+      return c.json({ error: 'Missing projectId or file' }, 400)
     }
 
     // Sanitize filename or generate one
@@ -444,7 +444,7 @@ app.post('/api/exports', async (c) => {
       .replace(/[^A-Za-z0-9._-]/g, '_')
       .slice(0, 180)
 
-    const exportsPrefix = `rooms/${roomId}/exports/`
+    const exportsPrefix = `rooms/${projectId}/exports/`
     const splitIdx = sanitized.lastIndexOf('.')
     const base = splitIdx > 0 ? sanitized.slice(0, splitIdx) : sanitized
     const ext = splitIdx > 0 ? sanitized.slice(splitIdx) : ''
@@ -469,7 +469,7 @@ app.post('/api/exports', async (c) => {
         contentDisposition: `inline; filename="${chosenName}"`,
       },
       customMetadata: {
-        roomId,
+        projectId,
         format,
         durationSec: durationStr || '',
         sampleRate: sampleRateStr || '',
@@ -524,13 +524,13 @@ app.post('/api/agent/chat', async (c) => {
       return c.json({ error: 'Invalid body' }, 400)
     }
 
-    const roomId = (body.roomId as string | undefined) ?? undefined
+    const projectId = (body.projectId as string | undefined) ?? undefined
     const clientBpm = (typeof body.bpm === 'number') ? Math.max(20, Math.min(300, Number(body.bpm))) : undefined
 
     const openrouter = createOpenRouter({ apiKey: c.env.OPENROUTER_API_KEY })
     const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
-    if (roomId) {
-      if (!(await canAccessAgentRoom(convex, roomId, (user as any).id))) {
+    if (projectId) {
+      if (!(await canAccessAgentRoom(convex, projectId, (user as any).id))) {
         return c.json({ error: 'Forbidden' }, 403)
       }
     }
@@ -538,20 +538,20 @@ app.post('/api/agent/chat', async (c) => {
     const modelName = 'openai/gpt-oss-20b:free'
     const today = new Date().toISOString().slice(0, 10)
 
-    let system = `You are a DAW assistant for MediaBunny. Date: ${today}.${roomId ? ` Room: ${roomId}.` : ''}`
+    let system = `You are a DAW assistant for MediaBunny. Date: ${today}.${projectId ? ` Room: ${projectId}.` : ''}`
     // Optional context: include current BPM and sample names to improve sample matching
     let contextNote = ''
     try {
-      const list: any[] = roomId ? (await convex.query(convexApi.samples.listByRoom as any, { roomId } as any)) : []
+      const list: any[] = projectId ? (await convex.query(convexApi.samples.listByRoom as any, { projectId } as any)) : []
       const sampleNames = Array.isArray(list) && list.length ? list.map((sample) => (sample.name || sample.url || '')).filter(Boolean).slice(0, 20) : []
 
       let tracksLine = ''
       let clipsLine = ''
       let effectsLine = ''
-      if (roomId) {
+      if (projectId) {
         try {
-          const tracks: any[] = await convex.query(convexApi.tracks.listByRoom as any, { roomId } as any)
-          const clips: any[] = await convex.query(convexApi.clips.listByRoom as any, { roomId } as any)
+          const tracks: any[] = await convex.query(convexApi.tracks.listByRoom as any, { projectId } as any)
+          const clips: any[] = await convex.query(convexApi.clips.listByRoom as any, { projectId } as any)
           const audioCount = tracks.filter((track) => (track.kind ?? 'audio') === 'audio').length
           const instrumentCount = tracks.filter((track) => (track.kind ?? 'audio') === 'instrument').length
           const perTrackCounts = (() => {
@@ -581,8 +581,8 @@ app.post('/api/agent/chat', async (c) => {
               if (arp) arpCount += 1
             } catch {}
           }
-          const masterEq = await convex.query(convexApi.effects.getEqForMaster as any, { roomId } as any).catch(() => null)
-          const masterReverb = await convex.query(convexApi.effects.getReverbForMaster as any, { roomId } as any).catch(() => null)
+          const masterEq = await convex.query(convexApi.effects.getEqForMaster as any, { projectId } as any).catch(() => null)
+          const masterReverb = await convex.query(convexApi.effects.getReverbForMaster as any, { projectId } as any).catch(() => null)
 
           tracksLine = tracks.length ? `Tracks: ${tracks.length} (audio ${audioCount}, instrument ${instrumentCount}).` : ''
           clipsLine = (clips.length || tracks.length) ? `Clips: ${clips.length} total; per track: [${perTrackCounts.join(', ')}].` : ''

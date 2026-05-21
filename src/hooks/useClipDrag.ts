@@ -11,9 +11,12 @@ import {
   type MultiDragSnapshot,
 } from '~/lib/clip-drag-placement'
 import { useDrag } from '~/hooks/useDrag'
+import { isLocalId } from '~/lib/local-ids'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
 import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
+import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
 import { createOptimisticTrack, pushTrackCreateHistory } from '~/lib/tracks'
 import { PPS, yToLaneIndex, quantizeSecToGrid } from '~/lib/timeline-utils'
 import { buildClipsMoveHistoryEntry } from '~/lib/undo/builders'
@@ -41,7 +44,7 @@ type ClipDragOptions = {
   commitClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
   canWriteClip: (clipId: string) => boolean
   selection: TimelineSelectionController
-  roomId: Accessor<string>
+  projectId: Accessor<string>
   userId: () => string
   convexClient: typeof import('~/lib/convex').convexClient
   convexApi: typeof import('~/lib/convex').convexApi
@@ -86,7 +89,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     commitClipMoves,
     canWriteClip,
     selection,
-    roomId,
+    projectId,
     userId,
     convexClient,
     convexApi,
@@ -121,6 +124,12 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     if (!trackId) return
     const track = resolvedTracks().find(entry => entry.id === trackId)
     if (track && track.clips.length > 0) return
+    if (isLocalId('project', projectId())) {
+      void createLocalTimelineRepository(projectId()).deleteTrack(trackId)
+        .then(() => removeLocalTrack(trackId))
+        .catch(() => null)
+      return
+    }
     const uid = userId()
     if (!uid) return
     void convexClient.mutation(convexApi.tracks.remove, buildTrackDeleteMutationInput({ trackId, userId: uid }))
@@ -177,15 +186,25 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     creatingTrackDuringDrag = true
     try {
       const kind = getDraggedTrackKind(ts, lookup)
+      if (isLocalId('project', projectId())) {
+        const row = await createLocalTimelineRepository(projectId()).createTrack({
+          index: placementTracks().length,
+          kind,
+        })
+        const track = toLocalTimelineTrack(row)
+        insertLocalTrack(track, placementTracks().length)
+        addedTrackDuringDrag = track.id
+        return track.id
+      }
       const track = await createOptimisticTrack({
         convexClient,
         convexApi,
-        roomId: roomId(),
+        projectId: projectId(),
         userId: userId(),
         insertLocalTrack,
         index: placementTracks().length,
         grantWrite,
-        grantScope: { roomId: roomId(), userId: userId() },
+        grantScope: { projectId: projectId(), userId: userId() },
         kind,
       })
       if (!track) return null
@@ -509,7 +528,62 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       }))
 
       // Create duplicates on server
-      const rid = roomId()
+      const rid = projectId()
+      if (isLocalId('project', rid)) {
+        const repository = createLocalTimelineRepository(rid)
+        const created = []
+        for (const item of plan) {
+          const row = await repository.createClip({
+            trackId: item.trackId,
+            name: item.clip.name,
+            startSec: item.clip.startSec,
+            duration: item.clip.duration,
+            color: item.clip.midi ? 'clip-midi' : 'clip-audio',
+            sourceAssetKey: item.clip.sourceAssetKey,
+            sourceKind: item.clip.sourceKind,
+            sourceDurationSec: item.clip.source?.durationSec,
+            sourceSampleRate: item.clip.source?.sampleRate,
+            sourceChannelCount: item.clip.source?.channelCount,
+            leftPadSec: item.clip.timing?.leftPadSec,
+            bufferOffsetSec: item.clip.timing?.bufferOffsetSec,
+            sampleUrl: item.clip.sampleUrl,
+            midi: item.clip.midi,
+            midiOffsetBeats: item.clip.timing?.midiOffsetBeats,
+          })
+          insertLocalClip(item.trackId, {
+            id: row.id,
+            historyRef: row.historyRef,
+            name: row.name,
+            buffer: item.buffer,
+            startSec: row.startSec,
+            duration: row.duration,
+            color: row.color,
+            sampleUrl: row.sampleUrl,
+            sourceAssetKey: row.sourceAssetKey,
+            sourceKind: row.sourceKind,
+            sourceDurationSec: row.sourceDurationSec,
+            sourceSampleRate: row.sourceSampleRate,
+            sourceChannelCount: row.sourceChannelCount,
+            leftPadSec: row.leftPadSec,
+            bufferOffsetSec: row.bufferOffsetSec,
+            midi: row.midi,
+            midiOffsetBeats: row.midiOffsetBeats,
+          })
+          if (item.buffer) options.audioBufferCache.set(row.id, item.buffer)
+          created.push({ trackId: item.trackId, clipId: row.id, clip: { ...item.clip, historyRef: row.historyRef } })
+        }
+        setPreviewClipsByTrack(new Map<TrackId, Clip[]>())
+        const nextSelection = buildCreatedClipSelection(created)
+        if (nextSelection) {
+          selection.selectClipGroup(nextSelection)
+        }
+        if (addedTrackDuringDrag && created.some((item) => item.trackId === addedTrackDuringDrag)) {
+          addedTrackDuringDrag = null
+        }
+        dragging = false
+        resetDragState()
+        return
+      }
       const createUserId = userId()
       if (!rid || !createUserId) {
         resetDragState()
@@ -518,14 +592,14 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       let created: Awaited<ReturnType<typeof createProjectedClips>>
       try {
         created = await createProjectedClips({
-          roomId: rid,
+          projectId: rid,
           userId: createUserId,
           items: plan,
           createMany: async (items) => await convexClient.mutation(convexApi.clips.createMany, { items }),
           insertLocalClip,
           audioBufferCache: options.audioBufferCache,
           grantClipWrites,
-          grantScope: { roomId: rid, userId: createUserId },
+          grantScope: { projectId: rid, userId: createUserId },
         })
       } catch {
         setPreviewClipsByTrack(new Map<TrackId, Clip[]>())
@@ -545,13 +619,13 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
       // finalize
       if (addedTrackDuringDrag && created.some((item) => item.trackId === addedTrackDuringDrag)) {
-        pushTrackCreateHistory(options.historyPush, roomId(), placementTracks(), placementTracks().find((entry) => entry.id === addedTrackDuringDrag))
+        pushTrackCreateHistory(options.historyPush, projectId(), placementTracks(), placementTracks().find((entry) => entry.id === addedTrackDuringDrag))
       }
-      const historyRoomId = roomId()
+      const historyProjectId = projectId()
       for (const item of created) {
         pushClipCreateHistory({
           historyPush: options.historyPush,
-          roomId: historyRoomId,
+          projectId: historyProjectId,
           trackId: item.trackId,
           trackRef: getTrackHistoryRef(base.find((entry) => entry.id === item.trackId)),
           clipId: item.clipId,
@@ -626,7 +700,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     }))
     const selectionAfterCommit = plannedPlacement.selection
     const preserveCommittedSelection = plannedPlacement.selection.preserveClipIds ? { preserveClipIds: true } : undefined
-    const historyRoomId = roomId()
+    const historyProjectId = projectId()
     const addedTrackIdForCommit = addedTrackDuringDrag
     const trackSnapshotForHistory = finalTracks
 
@@ -636,6 +710,23 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       preserveCommittedSelection,
     )
     resetDragState()
+
+    if (isLocalId('project', projectId())) {
+      const repository = createLocalTimelineRepository(projectId())
+      void Promise.all(plannedMoves.map((move) => repository.updateClip({
+        clipId: move.clipId,
+        trackId: move.trackId,
+        startSec: move.startSec,
+      }))).then(() => {
+        options.onCommitMoves?.(plannedMoves.map((move) => move.clipId))
+      }).catch(() => {
+        commitClipMoves(previousMoves)
+        if (addedTrackIdForCommit && previousMoves.some((move) => move.trackId === addedTrackIdForCommit)) {
+          cleanupUnusedAddedTrack(addedTrackIdForCommit)
+        }
+      })
+      return
+    }
 
     void Promise.all(plannedMoves.map(async (move) => {
       try {
@@ -673,12 +764,12 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       if (successfulMoves.length > 0) {
         try { options.onCommitMoves?.(successfulMoves.map((move) => move.clipId)) } catch {}
         try {
-          if (historyRoomId && typeof options.historyPush === 'function') {
+          if (historyProjectId && typeof options.historyPush === 'function') {
             if (addedTrackIdForCommit && successfulMoves.some((move) => move.trackId === addedTrackIdForCommit)) {
-              pushTrackCreateHistory(options.historyPush, historyRoomId, trackSnapshotForHistory, trackSnapshotForHistory.find((entry) => entry.id === addedTrackIdForCommit))
+              pushTrackCreateHistory(options.historyPush, historyProjectId, trackSnapshotForHistory, trackSnapshotForHistory.find((entry) => entry.id === addedTrackIdForCommit))
             }
             options.historyPush(buildClipsMoveHistoryEntry({
-              roomId: historyRoomId,
+              projectId: historyProjectId,
               tracks: trackSnapshotForHistory,
               moves: successfulMoves.map((move) => ({
                 clipId: move.clipId,

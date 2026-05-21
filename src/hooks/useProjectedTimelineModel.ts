@@ -3,6 +3,7 @@ import type { Accessor } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
 
 import { convexApi, useConvexQuery } from '~/lib/convex'
+import { isLocalId } from '~/lib/local-ids'
 import {
   buildOptimisticGrantScopeKey,
   isOptimisticGrantScopeCurrent,
@@ -17,7 +18,7 @@ type OptimisticGrantState = 'pending' | 'seen'
 type PendingClipCreate = { trackId: Track['id']; clip: Track['clips'][number] }
 
 type UseProjectedTimelineModelOptions = {
-  roomId: Accessor<string>
+  projectId: Accessor<string>
   userId: Accessor<string>
   fullViewData: Accessor<FunctionReturnType<typeof convexApi.timeline.fullView> | undefined>
   pendingTrackEntriesById: Accessor<Map<Track['id'], PendingTrackEntry>>
@@ -108,30 +109,24 @@ export function useProjectedTimelineModel(
   const ownedTracksQ = useConvexQuery(
     convexApi.ownerships.listOwnedTrackIds,
     () => {
-      const roomId = options.roomId()
+      const projectId = options.projectId()
       const userId = options.userId()
-      return roomId && userId ? { roomId, ownerUserId: userId } : null
+      if (isLocalId('project', projectId)) return null
+      return projectId && userId ? { projectId, ownerUserId: userId } : null
     },
-    () => ['owned-tracks', options.roomId(), options.userId()],
+    () => ['owned-tracks', options.projectId(), options.userId()],
   )
-
-  const ownedTrackIds = createMemo(() => {
-    return new Set<Track['id']>(ownedTracksQ.data ?? [])
-  })
 
   const ownedClipsQ = useConvexQuery(
     convexApi.ownerships.listOwnedClipIds,
     () => {
-      const roomId = options.roomId()
+      const projectId = options.projectId()
       const userId = options.userId()
-      return roomId && userId ? { roomId, ownerUserId: userId } : null
+      if (isLocalId('project', projectId)) return null
+      return projectId && userId ? { projectId, ownerUserId: userId } : null
     },
-    () => ['owned-clips', options.roomId(), options.userId()],
+    () => ['owned-clips', options.projectId(), options.userId()],
   )
-
-  const ownedClipIds = createMemo(() => {
-    return new Set<string>((ownedClipsQ.data ?? []).map((value: string) => String(value)))
-  })
 
   const existingTrackIds = createMemo(() => {
     const trackIds = new Set<Track['id']>()
@@ -166,6 +161,16 @@ export function useProjectedTimelineModel(
     return clipIds
   })
 
+  const ownedTrackIds = createMemo(() => {
+    if (isLocalId('project', options.projectId())) return existingTrackIds()
+    return new Set<Track['id']>(ownedTracksQ.data ?? [])
+  })
+
+  const ownedClipIds = createMemo(() => {
+    if (isLocalId('project', options.projectId())) return existingClipIds()
+    return new Set<string>((ownedClipsQ.data ?? []).map((value: string) => String(value)))
+  })
+
   const writableTrackIds = createMemo(() => {
     const optimistic = optimisticTrackWriteIds()
     return optimistic.size === 0 ? ownedTrackIds() : mergeIdSets(ownedTrackIds(), optimistic.keys())
@@ -176,7 +181,7 @@ export function useProjectedTimelineModel(
   })
   const optimisticTrackIds = createMemo(() => new Set<Track['id']>(optimisticTrackWriteIds().keys()))
   const currentGrantScopeKey = createMemo(() => buildOptimisticGrantScopeKey({
-    roomId: options.roomId(),
+    projectId: options.projectId(),
     userId: options.userId(),
   }))
 

@@ -4,6 +4,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '~/components/ui/button'
 import { renderMixdown, encodeAudioBuffer, type ExportRange } from '~/lib/export-mixdown'
 import { convexClient, convexApi } from '~/lib/convex'
+import { isLocalId } from '~/lib/local-ids'
+import { saveBlobLocally } from '~/lib/local-export'
+import { saveLocalExportMetadata } from '~/lib/local-export-metadata'
 
 type Props = {
   isOpen: boolean
@@ -13,7 +16,7 @@ type Props = {
   loopEnabled: boolean
   loopStartSec: number
   loopEndSec: number
-  roomId?: string
+  projectId?: string
   userId?: string
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
 }
@@ -25,6 +28,7 @@ const ExportDialog: Component<Props> = (props) => {
   const [busy, setBusy] = createSignal(false)
   const [error, setError] = createSignal<string | null>(null)
   const [resultUrl, setResultUrl] = createSignal<string | null>(null)
+  const [localSavedName, setLocalSavedName] = createSignal<string | null>(null)
 
   const computeRange = (): ExportRange => {
     const m = mode()
@@ -66,17 +70,19 @@ const ExportDialog: Component<Props> = (props) => {
   async function handleExport() {
     setError(null)
     setResultUrl(null)
+    setLocalSavedName(null)
     setBusy(true)
     try {
       const range = computeRange()
       await ensureBuffersForRange(range)
+      const localOnly = props.projectId ? isLocalId('project', props.projectId) : false
       // Fetch effects (master + per-track) from Convex
       const fx: any = { trackFx: {} as Record<string, { eq?: any; reverb?: any }> }
-      try {
-        if (props.roomId) {
+      if (!localOnly) try {
+        if (props.projectId) {
           const [mEq, mRv] = await Promise.all([
-            convexClient.query((convexApi as any).effects.getEqForMaster, { roomId: props.roomId } as any).catch(() => null),
-            convexClient.query((convexApi as any).effects.getReverbForMaster, { roomId: props.roomId } as any).catch(() => null),
+            convexClient.query((convexApi as any).effects.getEqForMaster, { projectId: props.projectId } as any).catch(() => null),
+            convexClient.query((convexApi as any).effects.getReverbForMaster, { projectId: props.projectId } as any).catch(() => null),
           ])
           if (mEq?.params) fx.masterEq = mEq.params
           if (mRv?.params) fx.masterReverb = mRv.params
@@ -95,14 +101,35 @@ const ExportDialog: Component<Props> = (props) => {
 
       const rendered = await renderMixdown({ tracks: props.tracks, bpm: props.bpm, range, fx })
       const enc = await encodeAudioBuffer(rendered)
+      const fname = `mixdown_${new Date().toISOString().replace(/[-:TZ.]/g, '')}${enc.fileExtension}`
+      if (localOnly) {
+        await saveBlobLocally({
+          blob: enc.blob,
+          suggestedName: fname,
+          types: [{
+            description: 'WAV audio',
+            accept: { [enc.mimeType]: [enc.fileExtension] },
+          }],
+        })
+        if (props.projectId) {
+          await saveLocalExportMetadata(props.projectId, {
+            name: fname,
+            format: 'wav',
+            durationSec: enc.durationSec,
+            sampleRate: enc.sampleRate,
+            sizeBytes: enc.blob.size,
+          })
+        }
+        setLocalSavedName(fname)
+        return
+      }
       // Upload to R2 via worker
-      const rid = props.roomId
+      const rid = props.projectId
       if (!rid) throw new Error('Missing room')
       const fd = new FormData()
-      fd.append('roomId', rid)
+      fd.append('projectId', rid)
       fd.append('duration', String(enc.durationSec))
       fd.append('sampleRate', String(enc.sampleRate))
-      const fname = `mixdown_${new Date().toISOString().replace(/[-:TZ.]/g, '')}${enc.fileExtension}`
       fd.append('name', fname)
       fd.append('file', enc.blob, fname)
       const res = await fetch('/api/exports', { method: 'POST', body: fd })
@@ -117,7 +144,7 @@ const ExportDialog: Component<Props> = (props) => {
       if (props.userId) {
         try {
           await convexClient.mutation((convexApi as any).exports.create, {
-            roomId: rid,
+            projectId: rid,
             name: fname,
             url,
             r2Key: key,
@@ -169,6 +196,9 @@ const ExportDialog: Component<Props> = (props) => {
             <div class="text-sm">
               Saved export: <a class="text-green-400 underline" href={resultUrl()!} target="_blank">Open</a>
             </div>
+          </Show>
+          <Show when={localSavedName()}>
+            <div class="text-sm text-green-400">Saved export locally: {localSavedName()}</div>
           </Show>
         </div>
         <DialogFooter>

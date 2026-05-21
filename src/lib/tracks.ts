@@ -35,7 +35,7 @@ type CreateOptimisticTrackOptions = Omit<CreateLocalTrackOptions, 'id' | 'index'
   index?: number
   convexClient: ConvexClientType
   convexApi: ConvexApiType
-  roomId: string
+  projectId: string
   userId: string
   insertLocalTrack: (track: Track, index: number) => void
   grantWrite?: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
@@ -95,7 +95,7 @@ function ensureLocalTrack(options: EnsureLocalTrackOptions): Track {
 
 export async function createOptimisticTrack(options: CreateOptimisticTrackOptions): Promise<Track | null> {
   const payload = buildTrackCreateMutationInput({
-    roomId: options.roomId,
+    projectId: options.projectId,
     userId: options.userId,
     index: options.index,
     kind: options.kind,
@@ -126,15 +126,15 @@ export async function createOptimisticTrack(options: CreateOptimisticTrackOption
 
 export function pushTrackCreateHistory(
   historyPush: HistoryPush | undefined,
-  roomId: string | undefined,
+  projectId: string | undefined,
   tracks: Track[],
   track: Pick<Track, 'id' | 'kind' | 'channelRole'> | null | undefined,
 ) {
-  if (!track || !roomId || typeof historyPush !== 'function') return
+  if (!track || !projectId || typeof historyPush !== 'function') return
   const index = tracks.findIndex((entry) => entry.id === track.id)
 
   historyPush(buildTrackCreateHistoryEntry({
-    roomId,
+    projectId,
     trackId: track.id,
     index,
     kind: track.kind,
@@ -146,6 +146,6 @@ export async function createOptimisticTrackWithHistory(
   options: CreateOptimisticTrackWithHistoryOptions,
 ): Promise<Track | null> {
   const track = await createOptimisticTrack(options)
-  pushTrackCreateHistory(options.historyPush, options.roomId, options.tracks(), track)
+  pushTrackCreateHistory(options.historyPush, options.projectId, options.tracks(), track)
   return track
 }

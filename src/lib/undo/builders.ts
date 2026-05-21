@@ -12,7 +12,7 @@ import type {
 } from './types'
 
 export function buildTrackCreateHistoryEntry(input: {
-  roomId: string
+  projectId: string
   trackId: Track['id']
   index: number
   kind?: 'audio' | 'instrument'
@@ -20,7 +20,7 @@ export function buildTrackCreateHistoryEntry(input: {
 }): Extract<HistoryEntry, { type: 'track-create' }> {
   return {
     type: 'track-create',
-    roomId: input.roomId,
+    projectId: input.projectId,
     data: {
       trackRef: input.trackId,
       currentTrackId: input.trackId,
@@ -32,12 +32,12 @@ export function buildTrackCreateHistoryEntry(input: {
 }
 
 export function buildTrackDeleteHistoryEntry(input: {
-  roomId: string
+  projectId: string
   track: Track
   tracks: Track[]
   effects?: TrackEffectSnapshot
 }): Extract<HistoryEntry, { type: 'track-delete' }> {
-  const { roomId, track, tracks, effects } = input
+  const { projectId, track, tracks, effects } = input
   const trackRef = getTrackHistoryRef(track)
   const trackIndex = tracks.findIndex((entry) => entry.id === track.id)
   const inboundRouting = tracks
@@ -54,7 +54,7 @@ export function buildTrackDeleteHistoryEntry(input: {
 
   return {
     type: 'track-delete',
-    roomId,
+    projectId,
     data: {
       track: {
         trackRef,
@@ -75,7 +75,7 @@ export function buildTrackDeleteHistoryEntry(input: {
 }
 
 export function buildTrackVolumeHistoryEntry(input: {
-  roomId: string
+  projectId: string
   track: Track
   scope: HistoryScope
   from: number
@@ -83,7 +83,7 @@ export function buildTrackVolumeHistoryEntry(input: {
 }): Extract<HistoryEntry, { type: 'track-volume' }> {
   return {
     type: 'track-volume',
-    roomId: input.roomId,
+    projectId: input.projectId,
     data: {
       trackRef: getTrackHistoryRef(input.track),
       scope: input.scope,
@@ -95,7 +95,7 @@ export function buildTrackVolumeHistoryEntry(input: {
 
 export function buildTrackBooleanHistoryEntry(input: {
   type: 'track-mute' | 'track-solo'
-  roomId: string
+  projectId: string
   track: Track
   scope: HistoryScope
   from: boolean
@@ -103,7 +103,7 @@ export function buildTrackBooleanHistoryEntry(input: {
 }): Extract<HistoryEntry, { type: 'track-mute' | 'track-solo' }> {
   return {
     type: input.type,
-    roomId: input.roomId,
+    projectId: input.projectId,
     data: {
       trackRef: getTrackHistoryRef(input.track),
       scope: input.scope,
@@ -114,7 +114,7 @@ export function buildTrackBooleanHistoryEntry(input: {
 }
 
 export function buildTrackRoutingHistoryEntry(input: {
-  roomId: string
+  projectId: string
   track: Track
   tracks: Track[]
   from: TrackRouting
@@ -122,7 +122,7 @@ export function buildTrackRoutingHistoryEntry(input: {
 }): Extract<HistoryEntry, { type: 'track-routing' }> {
   return {
     type: 'track-routing',
-    roomId: input.roomId,
+    projectId: input.projectId,
     data: {
       trackRef: getTrackHistoryRef(input.track),
       from: buildTrackRoutingHistorySnapshot(input.from, input.tracks),
@@ -132,7 +132,7 @@ export function buildTrackRoutingHistoryEntry(input: {
 }
 
 type EffectParamsHistoryEntryInput = {
-  roomId: string
+  projectId: string
   tracks: Track[]
   payload: EffectParamsCommitPayload
 }
@@ -144,7 +144,7 @@ export function buildEffectParamsHistoryEntry(input: EffectParamsHistoryEntryInp
     case 'eq':
       return {
         type: 'effect-params',
-        roomId: input.roomId,
+        projectId: input.projectId,
         data: {
           effect: input.payload.effect,
           trackRef,
@@ -155,7 +155,7 @@ export function buildEffectParamsHistoryEntry(input: EffectParamsHistoryEntryInp
     case 'reverb':
       return {
         type: 'effect-params',
-        roomId: input.roomId,
+        projectId: input.projectId,
         data: {
           effect: input.payload.effect,
           trackRef,
@@ -166,7 +166,7 @@ export function buildEffectParamsHistoryEntry(input: EffectParamsHistoryEntryInp
     case 'synth':
       return {
         type: 'effect-params',
-        roomId: input.roomId,
+        projectId: input.projectId,
         data: {
           effect: input.payload.effect,
           trackRef,
@@ -177,7 +177,7 @@ export function buildEffectParamsHistoryEntry(input: EffectParamsHistoryEntryInp
     case 'arp':
       return {
         type: 'effect-params',
-        roomId: input.roomId,
+        projectId: input.projectId,
         data: {
           effect: input.payload.effect,
           trackRef,
@@ -188,7 +188,7 @@ export function buildEffectParamsHistoryEntry(input: EffectParamsHistoryEntryInp
     case 'master-eq':
       return {
         type: 'effect-params',
-        roomId: input.roomId,
+        projectId: input.projectId,
         data: {
           effect: input.payload.effect,
           trackRef,
@@ -199,7 +199,7 @@ export function buildEffectParamsHistoryEntry(input: EffectParamsHistoryEntryInp
     case 'master-reverb':
       return {
         type: 'effect-params',
-        roomId: input.roomId,
+        projectId: input.projectId,
         data: {
           effect: input.payload.effect,
           trackRef,
@@ -211,14 +211,14 @@ export function buildEffectParamsHistoryEntry(input: EffectParamsHistoryEntryInp
 }
 
 export function buildClipDeleteHistoryEntry(input: {
-  roomId: string
+  projectId: string
   tracks: Track[]
   clipIds: Iterable<string>
 }): Extract<HistoryEntry, { type: 'clip-delete' }> {
   const selectedIds = new Set(input.clipIds)
   return {
     type: 'clip-delete',
-    roomId: input.roomId,
+    projectId: input.projectId,
     data: {
       items: input.tracks.flatMap((track) => track.clips
         .filter((clip) => selectedIds.has(clip.id))
@@ -231,7 +231,7 @@ export function buildClipDeleteHistoryEntry(input: {
 }
 
 export function buildClipsMoveHistoryEntry(input: {
-  roomId: string
+  projectId: string
   tracks: Track[]
   moves: Array<{
     clipId: string
@@ -242,7 +242,7 @@ export function buildClipsMoveHistoryEntry(input: {
   const trackIndex = createTimelineTrackIndex(input.tracks)
   return {
     type: 'clips-move',
-    roomId: input.roomId,
+    projectId: input.projectId,
     data: {
       moves: input.moves.map((move) => ({
         clipRef: getClipHistoryRef(trackIndex.clipById.get(move.clipId)),
@@ -260,14 +260,14 @@ export function buildClipsMoveHistoryEntry(input: {
 }
 
 export function buildClipTimingHistoryEntry(input: {
-  roomId: string
+  projectId: string
   clip: Track['clips'][number]
   from: Extract<HistoryEntry, { type: 'clip-timing' }>['data']['from']
   to: Extract<HistoryEntry, { type: 'clip-timing' }>['data']['to']
 }): Extract<HistoryEntry, { type: 'clip-timing' }> {
   return {
     type: 'clip-timing',
-    roomId: input.roomId,
+    projectId: input.projectId,
     data: {
       clipRef: getClipHistoryRef(input.clip),
       from: input.from,

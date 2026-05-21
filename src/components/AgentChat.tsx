@@ -268,7 +268,7 @@ function stripCommandJSON(text: string): string {
 type AgentChatProps = {
   isOpen: boolean
   onClose: () => void
-  roomId?: string
+  projectId?: string
   bottomOffsetPx?: number
   bpm?: number
   userId?: string
@@ -382,7 +382,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
   // Load history when panel opens or identifiers change
   createEffect(() => {
     const open = props.isOpen
-    const rid = props.roomId
+    const rid = props.projectId
     const uid = props.userId
     if (!open || !rid || !uid) return
     setLoaded(false)
@@ -394,8 +394,8 @@ const AgentChat: Component<AgentChatProps> = (props) => {
     })
     ;(async () => {
       try {
-        const history = await convexClient.query((convexApi as any).chat.getHistory, { roomId: rid, ownerUserId: uid } as any)
-        if (cancelled || props.roomId !== rid || props.userId !== uid || !props.isOpen) return
+        const history = await convexClient.query((convexApi as any).chat.getHistory, { projectId: rid, ownerUserId: uid } as any)
+        if (cancelled || props.projectId !== rid || props.userId !== uid || !props.isOpen) return
         if (Array.isArray(history)) {
           setMessages(history as any)
           setForceScrollNext(true)
@@ -404,7 +404,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
         }
         setLoaded(true)
       } catch {
-        if (cancelled || props.roomId !== rid || props.userId !== uid || !props.isOpen) return
+        if (cancelled || props.projectId !== rid || props.userId !== uid || !props.isOpen) return
         setLoaded(true)
       }
     })()
@@ -419,7 +419,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
   }
 
   function scheduleSaveHistory(nextMessages: Msg[]) {
-    const rid = props.roomId
+    const rid = props.projectId
     const uid = props.userId
     if (!rid || !uid) return
     clearSaveHistoryTimer()
@@ -428,7 +428,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
       saveTimer = null
       try {
         void convexClient.mutation((convexApi as any).chat.setHistory, {
-          roomId: rid,
+          projectId: rid,
           ownerUserId: uid,
           messages: messagesSnapshot,
         } as any).catch(() => {})
@@ -439,7 +439,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
   createEffect(() => {
     // Trigger on message list changes; debounce to avoid excessive writes during streaming
     const _ms = messages()
-    const rid = props.roomId
+    const rid = props.projectId
     const uid = props.userId
     const open = props.isOpen
     if (!open || !rid || !uid || !loaded()) return
@@ -529,7 +529,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
 
   async function applyCommands() {
     const payload = parsedCommands()
-    if (!payload || !props.roomId || executing()) return
+    if (!payload || !props.projectId || executing()) return
     setExecuting(true)
     setExecuteError(null)
     try {
@@ -574,7 +574,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
       const res = await fetch('/api/agent/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roomId: props.roomId, commands: effectiveCommands }),
+        body: JSON.stringify({ projectId: props.projectId, commands: effectiveCommands }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
@@ -676,7 +676,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          roomId: props.roomId,
+          projectId: props.projectId,
           bpm: typeof props.bpm === 'number' ? props.bpm : undefined,
           // Use current messages but exclude the trailing placeholder assistant
           messages: [{

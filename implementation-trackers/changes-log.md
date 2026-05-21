@@ -2,6 +2,27 @@
 
 Tracks review-driven follow-up work before merging the audio refactor branch.
 
+## 2026-05-21 — Local-First Refactor Phase 1–13 Review
+
+### Scope
+
+- Completed the local-first refactor through Phase 13, covering signed-out local project boot, IndexedDB/OPFS persistence, local audio import/recording/export, missing-media recovery actions, local project state ownership, local samples, undo/redo, and local/cloud boundary scaffolding.
+- Updated `implementation-trackers/local-first-refactor-tracker.md` so phases 1–13 and their validation items are checked with runtime evidence.
+
+### Review Follow-Up
+
+- Simplify review extracted the repeated local timeline track-row to `Track` adapter into `src/lib/timeline-repository/track-row-adapter.ts` and reused it from track creation, import-created tracks, and drag-created tracks.
+- Simplify review parallelized default-sample metadata cache/fallback loading in `src/hooks/useProjectSamples.ts`.
+- Simplify review reused the previous assets directory handle once during project storage-folder moves in `src/lib/local-assets.ts`.
+- Broader local/cloud repository routing and local-effect-state consolidation suggestions were left unchanged to avoid destabilizing the validated phase boundary.
+- Defensive-code review found possible redundant non-null guards in recording/backend paths, but they were kept because TypeScript does not preserve those filtered invariants across the current persisted/auth boundaries without adding less-clear assertions.
+
+### Validation
+
+- `bun run typecheck` and `git diff --check` passed after simplify cleanup.
+- `bun run typecheck` and `git diff --check` passed after the defensive-code review pass.
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the review cleanup and log updates.
+
 ## 2026-05-20 — Post-Trace Performance Follow-Up
 
 ### Scope

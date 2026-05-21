@@ -15,7 +15,7 @@ import type { Track } from "~/types/timeline";
 
 type UseEffectsPanelAudioSyncOptions = {
   isOpen: Accessor<boolean>;
-  roomId: Accessor<string | undefined>;
+  projectId: Accessor<string | undefined>;
   currentTargetId: Accessor<string>;
   tracks: Accessor<Track[]>;
   audioEngine: Accessor<AudioEngine | undefined>;
@@ -39,16 +39,16 @@ export function useEffectsPanelAudioSync(
   const roomEffects = useConvexQuery(
     convexApi.effects.listByRoom,
     () => {
-      const roomId = options.roomId();
-      return roomId ? { roomId } : null;
+      const projectId = options.projectId();
+      return projectId ? { projectId } : null;
     },
-    () => ["effects", "room", options.roomId()],
+    () => ["effects", "room", options.projectId()],
   );
 
   const disabledEq = { ...createDefaultEqParams(), enabled: false };
   const disabledReverb = { ...createDefaultReverbParams(), enabled: false };
   let syncedTrackIds = new Set<Track["id"]>();
-  let syncedRoomId: string | null = null;
+  let syncedProjectId: string | null = null;
 
   const clearSyncedTrackState = (audioEngine: AudioEngine, trackIds: Iterable<Track["id"]>) => {
     for (const trackId of trackIds) {
@@ -66,18 +66,18 @@ export function useEffectsPanelAudioSync(
 
   createEffect(() => {
     const audioEngine = options.audioEngine();
-    const roomId = options.roomId();
+    const projectId = options.projectId();
     if (!audioEngine) return;
-    if (roomId) return;
+    if (projectId) return;
     clearSyncedTrackState(audioEngine, syncedTrackIds);
     clearSyncedMasterState(audioEngine);
     syncedTrackIds = new Set();
-    syncedRoomId = null;
+    syncedProjectId = null;
   });
 
   createEffect(() => {
     const audioEngine = options.audioEngine();
-    const roomId = options.roomId();
+    const projectId = options.projectId();
     const effects = roomEffects.data;
     if (!audioEngine) return;
 
@@ -85,16 +85,16 @@ export function useEffectsPanelAudioSync(
     const tracks = options.tracks();
     const currentTrackIds = new Set(tracks.map((track) => track.id));
     if (effects === undefined) {
-      if (roomId && syncedRoomId !== roomId) {
+      if (projectId && syncedProjectId !== projectId) {
         clearSyncedTrackState(audioEngine, new Set([...syncedTrackIds, ...currentTrackIds]));
         clearSyncedMasterState(audioEngine);
         syncedTrackIds = new Set(currentTrackIds);
-        syncedRoomId = roomId;
+        syncedProjectId = projectId;
       }
       return;
     }
 
-    if (!roomId) return;
+    if (!projectId) return;
 
     const eqByTrackId = new Map<string, EqParams>();
     const reverbByTrackId = new Map<string, ReverbParams>();
@@ -176,7 +176,7 @@ export function useEffectsPanelAudioSync(
     }
 
     syncedTrackIds = new Set(currentTrackIds);
-    syncedRoomId = roomId;
+    syncedProjectId = projectId;
   });
 
   const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null);

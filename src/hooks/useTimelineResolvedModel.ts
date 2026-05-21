@@ -22,6 +22,7 @@ type ServerTrackState = {
 } | null
 
 type UseTimelineResolvedModelOptions = {
+  projectId: Accessor<string | undefined>
   fullViewData: Accessor<FullTimelineView | undefined>
   syncMix: Accessor<boolean>
   writableTrackIds: Accessor<Set<Track['id']>>
@@ -48,6 +49,7 @@ type UseTimelineResolvedModelOptions = {
     rememberClipHistoryRef: (clip: Pick<Track['clips'][number], 'id' | 'historyRef'> | null | undefined) => void
   }
   audioBufferCache: Map<string, AudioBuffer>
+  clipMediaStatus: Map<string, Clip['mediaStatus']>
   bufferVersion: Accessor<number>
 }
 
@@ -70,6 +72,7 @@ export function useTimelineResolvedModel(
   }): Track[] {
     options.bufferVersion()
     return resolveTimelineTracks({
+      projectId: options.projectId(),
       server: {
         data: options.fullViewData(),
         trackState: options.serverTrackState(),
@@ -101,6 +104,7 @@ export function useTimelineResolvedModel(
       },
       buffers: {
         audioBufferCache: options.audioBufferCache,
+        clipMediaStatus: options.clipMediaStatus,
       },
     })
   }

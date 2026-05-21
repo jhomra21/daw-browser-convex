@@ -6,7 +6,7 @@ import { cn } from '~/lib/utils'
 export type SharedChatProps = {
   isOpen: boolean
   onClose: () => void
-  roomId?: string
+  projectId?: string
   userId?: string
   bottomOffsetPx?: number
 }
@@ -14,7 +14,7 @@ export type SharedChatProps = {
 // One row per message from Convex
 type MessageRow = {
   _id: string
-  roomId: string
+  projectId: string
   senderUserId: string
   content: string
   createdAt: number
@@ -40,8 +40,8 @@ const SharedChat: Component<SharedChatProps> = (props) => {
   // Real-time latest messages for the room (bounded)
   const messagesQ = useConvexQuery(
     (convexApi as any).sharedChat.listLatest,
-    () => props.roomId && props.userId ? ({ roomId: props.roomId, userId: props.userId, limit: 200 } as any) : null,
-    () => ['shared-chat', props.roomId, props.userId]
+    () => props.projectId && props.userId ? ({ projectId: props.projectId, userId: props.userId, limit: 200 } as any) : null,
+    () => ['shared-chat', props.projectId, props.userId]
   )
 
   const messages = (): MessageRow[] => {
@@ -85,7 +85,7 @@ const SharedChat: Component<SharedChatProps> = (props) => {
   }
 
   async function send() {
-    const rid = props.roomId
+    const rid = props.projectId
     const uid = props.userId
     if (!rid || !uid) return
     const content = input().trim()
@@ -102,7 +102,7 @@ const SharedChat: Component<SharedChatProps> = (props) => {
 
     try {
       await convexClient.mutation((convexApi as any).sharedChat.send, {
-        roomId: rid,
+        projectId: rid,
         senderUserId: uid,
         content,
         senderName: displayName(),

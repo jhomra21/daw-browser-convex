@@ -1,9 +1,12 @@
 import { batch, createSignal, onCleanup, type Accessor, type Setter } from 'solid-js'
 
-import { createUploadedAudioClip, pushClipCreateHistory } from '~/lib/clip-create'
+import { createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory } from '~/lib/clip-create'
 import { createAudioAssetKey, getAudioSourceMetadata } from '~/lib/audio-source'
 import type { AudioEngine } from '~/lib/audio-engine'
+import { createLocalAsset, LocalAssetWriteError } from '~/lib/local-assets'
+import { isLocalId } from '~/lib/local-ids'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import {
   acquireTrackRecordingLock,
   cleanupRecordingSession,
@@ -45,7 +48,7 @@ type UseTrackRecordingOptions = {
   playheadSec: Accessor<number>
   uploadToR2: UploadToR2
   audioBufferCache: Map<string, AudioBuffer>
-  roomId: Accessor<string | undefined>
+  projectId: Accessor<string | undefined>
   userId: Accessor<string | undefined>
   convexClient: ConvexClientType
   convexApi: ConvexApiType
@@ -88,7 +91,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     playheadSec,
     uploadToR2,
     audioBufferCache,
-    roomId,
+    projectId,
     userId,
     convexClient,
     convexApi,
@@ -151,6 +154,11 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   }
 
   const releaseTrackLock = async (trackId: Track['id'], locker: string | undefined) => {
+    const rid = projectId()
+    if (rid && isLocalId('project', rid)) {
+      clearTrackLock(trackId)
+      return
+    }
     await releaseTrackRecordingLock({
       trackId,
       locker,
@@ -201,7 +209,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     await finalizeAutoCreatedTrackFailure({
       track,
       tracks: tracks(),
-      roomId: roomId(),
+      projectId: projectId(),
       userId: userId(),
       historyPush,
       convexClient,
@@ -215,7 +223,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   const commitCreatedTrack = (track: Track | null) => {
     commitAutoCreatedTrack({
       historyPush,
-      roomId: roomId(),
+      projectId: projectId(),
       tracks: tracks(),
       track,
     })
@@ -224,10 +232,11 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   const finalizeRecording = async () => {
     if (!activeCtx) return
     const ctx = activeCtx
-    const rid = roomId()
+    const rid = projectId()
     const uid = userId()
-    if (!rid || !uid) {
-      emit('Missing room or user context; recording discarded.')
+    const isLocalProject = rid ? isLocalId('project', rid) : false
+    if (!rid || (!isLocalProject && !uid)) {
+      emit(isLocalProject ? 'Missing project context; recording discarded.' : 'Missing project or user context; recording discarded.')
       await cleanupRecording()
       await handleAutoCreatedTrackFailure(ctx.createdTrack)
       return
@@ -276,10 +285,53 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       ? calcNonOverlapStart(targetTrack.clips, null, desiredStart, baseDuration)
       : desiredStart
 
+    if (isLocalProject) {
+      try {
+        const asset = await createLocalAsset({
+          projectId: rid,
+          file,
+          metadata: {
+            durationSec: sourceMetadata.durationSec,
+            sampleRate: sourceMetadata.sampleRate,
+            originalFileName: file.name,
+            originalLastModified: file.lastModified,
+          },
+        })
+        await createLocalAudioClip({
+          projectId: rid,
+          trackId: ctx.trackId,
+          trackRef: getTrackHistoryRef(tracks().find((entry) => entry.id === ctx.trackId) ?? targetTrack),
+          startSec: nonOverlapStart,
+          fileName: file.name,
+          decoded,
+          source: sourceMetadata,
+          sourceAssetKey: asset.id,
+          sourceKind: 'recording',
+          insertLocalClip,
+          selectClip: (trackId, clipId) => {
+            selection.selectPrimaryClip({ trackId, clipId })
+          },
+          historyPush,
+          audioBufferCache,
+          color: 'clip-recording',
+        })
+        await cleanupRecording()
+        if (ctx.createdTrack) commitCreatedTrack(ctx.createdTrack)
+      } catch (err) {
+        console.error('[useTrackRecording] local recording clip creation failed', err)
+        emit(err instanceof LocalAssetWriteError
+          ? `${err.message} Free browser storage or choose a project folder, then retry.`
+          : 'Failed to save recorded audio locally.')
+        await cleanupRecording()
+        await handleAutoCreatedTrackFailure(ctx.createdTrack)
+      }
+      return
+    }
+
     try {
       const createdClip = await createUploadedAudioClip({
-        roomId: rid,
-        userId: uid,
+        projectId: rid,
+        userId: uid ?? '',
         trackId: ctx.trackId,
         trackRef: getTrackHistoryRef(targetTrack),
         startSec: nonOverlapStart,
@@ -296,7 +348,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         uploadToR2,
         audioBufferCache,
         grantClipWrite,
-        grantScope: { roomId: rid, userId: uid },
+        grantScope: uid ? { projectId: rid, userId: uid } : undefined,
         color: 'clip-recording',
         pushHistory: false,
       })
@@ -306,7 +358,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       }
       pushClipCreateHistory({
         historyPush,
-        roomId: rid,
+        projectId: rid,
         trackId: ctx.trackId,
         trackRef: getTrackHistoryRef(tracks().find((entry) => entry.id === ctx.trackId) ?? targetTrack),
         clipId: createdClip.clipId,
@@ -330,9 +382,10 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   const startRecording = async (trackId: Track['id'], createdTrack: Track | null = null): Promise<StartRecordingResult> => {
     if (isRecordingInternal()) return { ok: false, reason: 'Already recording' }
     const uid = userId()
-    const rid = roomId()
-    if (!uid || !rid) {
-      emit('You must be signed in and inside a project to record.')
+    const rid = projectId()
+    const isLocalProject = rid ? isLocalId('project', rid) : false
+    if (!rid || (!isLocalProject && !uid)) {
+      emit(isLocalProject ? 'You must be inside a project to record.' : 'You must be signed in and inside a project to record.')
       return { ok: false, reason: 'Missing session context' }
     }
 
@@ -341,7 +394,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       emit('Selected track no longer exists.')
       return { ok: false, reason: 'Track not found' }
     }
-    if (track.lockedBy && track.lockedBy !== uid) {
+    if (!isLocalProject && track.lockedBy && track.lockedBy !== uid) {
       emit('Track is locked by another collaborator.')
       return { ok: false, reason: 'Track locked' }
     }
@@ -352,17 +405,19 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       return { ok: false, reason: 'Recorder unsupported' }
     }
 
-    const lockRes = await acquireTrackRecordingLock({
-      trackId,
-      locker: uid,
-      convexClient,
-      convexApi,
-      setTrackLock,
-      clearTrackLock,
-    })
-    if (!lockRes.ok) {
-      emit(lockRes.reason ?? 'Unable to lock track for recording.')
-      return { ok: false, reason: lockRes.reason }
+    if (!isLocalProject) {
+      const lockRes = await acquireTrackRecordingLock({
+        trackId,
+        locker: uid ?? '',
+        convexClient,
+        convexApi,
+        setTrackLock,
+        clearTrackLock,
+      })
+      if (!lockRes.ok) {
+        emit(lockRes.reason ?? 'Unable to lock track for recording.')
+        return { ok: false, reason: lockRes.reason }
+      }
     }
 
     let stream: MediaStream
@@ -464,7 +519,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       recorder,
       chunks,
       mimeType: mimeType || recorder.mimeType,
-      lockedByUserId: uid,
+      lockedByUserId: uid ?? '',
       analyser,
       scriptProcessor,
       analysisCtx,
@@ -476,15 +531,17 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
     ensureRecordingAudioContext(audioEngine)
     lockHeartbeatTimer = clearRecordingLockHeartbeat(lockHeartbeatTimer)
-    lockHeartbeatTimer = startRecordingLockHeartbeat({
-      trackId,
-      locker: uid,
-      convexClient,
-      convexApi,
-      onError: (error) => {
-        console.warn('[useTrackRecording] failed to refresh track lock', error)
-      },
-    })
+    if (!isLocalProject) {
+      lockHeartbeatTimer = startRecordingLockHeartbeat({
+        trackId,
+        locker: uid ?? '',
+        convexClient,
+        convexApi,
+        onError: (error) => {
+          console.warn('[useTrackRecording] failed to refresh track lock', error)
+        },
+      })
+    }
 
     try {
       recorder.start()
@@ -538,7 +595,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       return { ok: true, trackId: activeTrackId }
     }
     const target = await ensureTrackForRecording({
-      roomId: roomId(),
+      projectId: projectId(),
       userId: userId(),
       tracks: tracks(),
       recordArmTrackId: recordArmTrackId(),
@@ -556,7 +613,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       await finalizeAutoCreatedTrackFailure({
         track: target.track,
         tracks: tracks(),
-        roomId: roomId(),
+        projectId: projectId(),
         userId: userId(),
         historyPush,
         convexClient,

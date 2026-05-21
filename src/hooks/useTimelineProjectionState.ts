@@ -29,7 +29,7 @@ type TimelineProjectionSnapshot<TTrackId extends string = Track['id']> = {
 }
 
 type UseTimelineProjectionStateOptions = {
-  roomId: Accessor<string>
+  projectId: Accessor<string>
   serverData: Accessor<FullTimelineView | undefined>
   rememberTrackProjection: (track: Pick<Track, 'id' | 'historyRef' | 'name'> | null | undefined) => void
   rememberClipHistoryRef: (clip: Pick<Track['clips'][number], 'id' | 'historyRef'> | null | undefined) => void
@@ -182,7 +182,7 @@ export function useTimelineProjectionState(
   const [draftClipEditsById, setDraftClipEditsById] = createSignal<Map<string, ClipTimelinePatch>>(new Map())
   const [previewClipsByTrackId, setPreviewClipsByTrackId] = createSignal<Map<Track['id'], Track['clips']>>(new Map())
 
-  createEffect(on(options.roomId, () => {
+  createEffect(on(options.projectId, () => {
     setPendingTrackEntriesById(new Map())
     setPendingClipCreatesById(new Map())
     setRemovedTrackIds(new Set<Track['id']>())

@@ -1,9 +1,12 @@
 import type { Accessor } from 'solid-js'
 
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
+import { isLocalId } from '~/lib/local-ids'
 import { ensureRoomShareLink } from '~/lib/timeline-share'
 import { PPS } from '~/lib/timeline-utils'
-import { createOptimisticTrack, createOptimisticTrackWithHistory } from '~/lib/tracks'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
+import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
+import { createOptimisticTrack, createOptimisticTrackWithHistory, pushTrackCreateHistory } from '~/lib/tracks'
 import type { TimelineTrackIndex } from '~/lib/timeline-track-index'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Track } from '~/types/timeline'
@@ -22,8 +25,8 @@ type TimelineTrackCreateBehavior = {
 
 type UseTimelineActionsOptions = {
   room: {
-    roomId: Accessor<string>
-    setRoomId: (roomId: string) => void
+    projectId: Accessor<string>
+    setProjectId: (projectId: string) => void
     userId: Accessor<string>
   }
   creation: {
@@ -69,35 +72,55 @@ export function useTimelineActions(
     trackOptions: TimelineTrackCreateOptions = {},
     behavior: TimelineTrackCreateBehavior = {},
   ): Promise<Track | null> {
-    const roomId = options.room.roomId()
-    const userId = options.room.userId()
-    if (!roomId || !userId) return null
+    const projectId = options.room.projectId()
+    if (!projectId) return null
 
     const channelRole = trackOptions.channelRole ?? 'track'
     const index = options.creation.renderTracks().length
+    if (isLocalId('project', projectId)) {
+      const row = await createLocalTimelineRepository(projectId).createTrack({
+        index,
+        kind: trackOptions.kind,
+        channelRole,
+      })
+      const track = toLocalTimelineTrack(row)
+      options.creation.insertLocalTrack(track, index)
+      options.creation.grantTrackWrite(track.id, { projectId, userId: options.room.userId() })
+      if (behavior.pushHistory !== false) {
+        pushTrackCreateHistory(options.creation.pushHistory, projectId, options.creation.renderTracks(), track)
+      }
+      if (behavior.select !== false) {
+        options.creation.selection.selectTrackTarget(track.id)
+      }
+      return track
+    }
+
+    const userId = options.room.userId()
+    if (!userId) return null
+
     const track = behavior.pushHistory === false
       ? await createOptimisticTrack({
           convexClient: options.creation.convexClient,
           convexApi: options.creation.convexApi,
-          roomId,
+          projectId,
           userId,
           insertLocalTrack: options.creation.insertLocalTrack,
           index,
           grantWrite: options.creation.grantTrackWrite,
-          grantScope: { roomId, userId },
+          grantScope: { projectId, userId },
           kind: trackOptions.kind,
           channelRole,
         })
       : await createOptimisticTrackWithHistory({
           convexClient: options.creation.convexClient,
           convexApi: options.creation.convexApi,
-          roomId,
+          projectId,
           userId,
           tracks: options.creation.renderTracks,
           insertLocalTrack: options.creation.insertLocalTrack,
           index,
           grantWrite: options.creation.grantTrackWrite,
-          grantScope: { roomId, userId },
+          grantScope: { projectId, userId },
           kind: trackOptions.kind,
           channelRole,
           historyPush: options.creation.pushHistory,
@@ -130,7 +153,7 @@ export function useTimelineActions(
   }
 
   function handleShare(): void {
-    ensureRoomShareLink(options.room.roomId(), options.room.setRoomId)
+    ensureRoomShareLink(options.room.projectId(), options.room.setProjectId)
   }
 
   function jumpToClip(trackId: Track['id'], clipId: string, startSec: number): void {

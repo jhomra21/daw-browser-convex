@@ -5,6 +5,9 @@ import { useConvexQuery, convexApi } from '~/lib/convex'
 import { useQuery } from '@tanstack/solid-query'
 import { getPersistedAudioSource, type AudioSourceKind, type AudioSourceMetadata } from '~/lib/audio-source'
 import { ensureDefaultSampleMetadata, loadCachedDefaultSampleMetadata } from '~/lib/default-sample-cache'
+import { listLocalAssets } from '~/lib/local-assets'
+import { isLocalId } from '~/lib/local-ids'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { Track } from '~/types/timeline'
 
 type SampleRow = FunctionReturnType<typeof convexApi.samples.listByRoom>[number]
@@ -71,13 +74,14 @@ type DefaultSampleListItem = {
 }
 
 type UseProjectSamplesArgs = {
-  roomId: Accessor<string>
+  projectId: Accessor<string>
   enabled?: Accessor<boolean>
 }
 
 type UseProjectSamplesResult = {
   samples: Accessor<ProjectSampleListItem[]>
   defaultSamples: Accessor<DefaultSampleListItem[]>
+  refreshSamples: () => void
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
@@ -95,6 +99,8 @@ const readString = (value: unknown) => {
 const readAudioSourceKind = (value: unknown): AudioSourceKind | undefined => {
   return value === 'upload' || value === 'url' || value === 'recording' ? value : undefined
 }
+
+const toTrackId = (value: string): Track['id'] => value as Track['id']
 
 const readAudioSourceMetadata = (value: unknown): AudioSourceMetadata | undefined => {
   if (!isRecord(value)) return undefined
@@ -218,25 +224,33 @@ function mergeDefaultSampleMetadata(
 }
 
 export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSamplesResult {
-  const { roomId, enabled } = options
+  const { projectId, enabled } = options
+  const [refreshKey, setRefreshKey] = createSignal(0)
+  const [localSamples, setLocalSamples] = createSignal<ProjectSampleListItem[]>([])
+  const isLocalProject = createMemo(() => {
+    const id = projectId()
+    return Boolean(id && isLocalId('project', id))
+  })
   const inventory = useConvexQuery(
     convexApi.samples.listByRoom,
     () => {
       if (enabled && !enabled()) return null
-      const rid = roomId()
-      return rid ? ({ roomId: rid }) : null
+      const rid = projectId()
+      if (rid && isLocalId('project', rid)) return null
+      return rid ? ({ projectId: rid }) : null
     },
-    () => ['samples', 'by_room', roomId()]
+    () => ['samples', 'by_room', projectId()]
   )
 
   const clips = useConvexQuery(
     convexApi.clips.listByRoom,
     () => {
       if (enabled && !enabled()) return null
-      const rid = roomId()
-      return rid ? ({ roomId: rid }) : null
+      const rid = projectId()
+      if (rid && isLocalId('project', rid)) return null
+      return rid ? ({ projectId: rid }) : null
     },
-    () => ['clips', 'by_room', roomId()]
+    () => ['clips', 'by_room', projectId()]
   )
 
   const [cachedDefaultSampleMetadataByKey, setCachedDefaultSampleMetadataByKey] = createSignal<Map<string, AudioSourceMetadata>>(new Map())
@@ -257,6 +271,73 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
   }))
 
   createEffect(on(
+    () => [projectId(), enabled ? enabled() : true, refreshKey()] as const,
+    ([rid, isEnabled]) => {
+      if (!rid || !isEnabled || !isLocalId('project', rid)) {
+        setLocalSamples([])
+        return
+      }
+
+      void (async () => {
+        const [assets, snapshot] = await Promise.all([
+          listLocalAssets(rid),
+          createLocalTimelineRepository(rid).loadSnapshot(),
+        ])
+        const usagesByAsset = new Map<string, ProjectSampleUsage[]>()
+        for (const clip of snapshot.clips) {
+          if (!clip.sourceAssetKey || !clip.sourceKind || !clip.sourceDurationSec || !clip.sourceSampleRate || !clip.sourceChannelCount) continue
+          const usage: ProjectSampleUsage = {
+            assetKey: clip.sourceAssetKey,
+            sourceKind: clip.sourceKind,
+            clipId: clip.id,
+            trackId: toTrackId(clip.trackId),
+            startSec: clip.startSec,
+            name: clip.name,
+            source: {
+              durationSec: clip.sourceDurationSec,
+              sampleRate: clip.sourceSampleRate,
+              channelCount: clip.sourceChannelCount,
+            },
+          }
+          const list = usagesByAsset.get(clip.sourceAssetKey)
+          if (list) list.push(usage); else usagesByAsset.set(clip.sourceAssetKey, [usage])
+        }
+
+        const items: ProjectSampleListItem[] = []
+        for (const asset of assets) {
+          const source = asset.durationSec && asset.sampleRate
+            ? {
+                durationSec: asset.durationSec,
+                sampleRate: asset.sampleRate,
+                channelCount: 2,
+              }
+            : undefined
+          if (!source) continue
+          const usages = usagesByAsset.get(asset.id) ?? []
+          const earliest = usages.reduce<ProjectSampleUsage | undefined>((current, candidate) => {
+            if (!current) return candidate
+            return candidate.startSec < current.startSec ? candidate : current
+          }, undefined)
+          items.push({
+            key: asset.id,
+            assetKey: asset.id,
+            sourceKind: earliest?.sourceKind ?? 'upload',
+            url: `local-asset:${asset.id}`,
+            name: asset.name || earliest?.name || 'Sample',
+            duration: source.durationSec,
+            source,
+            createdAt: asset.createdAt,
+            ownerUserId: 'local',
+            count: usages.length,
+            earliestClip: earliest,
+          })
+        }
+        setLocalSamples(items)
+      })()
+    },
+  ))
+
+  createEffect(on(
     () => defaultSamplesQuery.data,
     (data) => {
       const list = Array.isArray(data) ? data : []
@@ -264,18 +345,25 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
 
       void (async () => {
         const next = new Map<string, AudioSourceMetadata>()
-        for (const sample of list) {
-          const source = sample.source ?? await loadCachedDefaultSampleMetadata(sample.assetKey)
+        const cachedSources = await Promise.all(list.map(async (sample) => ({
+          sample,
+          source: sample.source ?? await loadCachedDefaultSampleMetadata(sample.assetKey),
+        })))
+        for (const { sample, source } of cachedSources) {
           if (source) {
             next.set(sample.key, source)
           }
         }
-        for (const sample of list) {
-          if (next.has(sample.key) || sample.source) continue
-          const source = await ensureDefaultSampleMetadata({
-            assetKey: sample.assetKey,
-            url: sample.url,
-          })
+        const uncachedSources = await Promise.all(list
+          .filter((sample) => !next.has(sample.key) && !sample.source)
+          .map(async (sample) => ({
+            sample,
+            source: await ensureDefaultSampleMetadata({
+              assetKey: sample.assetKey,
+              url: sample.url,
+            }),
+          })))
+        for (const { sample, source } of uncachedSources) {
           if (source) {
             next.set(sample.key, source)
           }
@@ -300,6 +388,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
   })
 
   const samples = createMemo<ProjectSampleListItem[]>(() => {
+    if (isLocalProject()) return localSamples()
     const inventoryData = inventory.data
     const clipsData = clips.data
     if (!Array.isArray(inventoryData)) return []
@@ -373,5 +462,6 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
   return {
     samples,
     defaultSamples,
+    refreshSamples: () => setRefreshKey((value) => value + 1),
   }
 }

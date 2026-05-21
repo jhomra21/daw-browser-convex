@@ -1,4 +1,6 @@
 import { pushTrackCreateHistory } from '~/lib/tracks'
+import { isLocalId } from '~/lib/local-ids'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
 import { canTrackReceiveAudioClip } from '~/lib/track-routing'
 import type { HistoryEntry } from '~/lib/undo/types'
@@ -16,7 +18,7 @@ type RecordingTrackTarget = {
 }
 
 export async function ensureTrackForRecording(options: {
-  roomId: string | undefined
+  projectId: string | undefined
   userId: string | undefined
   tracks: Track[]
   recordArmTrackId: Track['id'] | null
@@ -24,19 +26,20 @@ export async function ensureTrackForRecording(options: {
   createTrackForRecording: () => Promise<Track | null>
   emit: (message: string) => void
 }): Promise<RecordingTrackTarget | null> {
-  if (!options.userId || !options.roomId) {
-    options.emit('Recording is only available when signed in to a project.')
+  const isLocalProject = options.projectId ? isLocalId('project', options.projectId) : false
+  if (!options.projectId || (!isLocalProject && !options.userId)) {
+    options.emit(isLocalProject ? 'Recording requires an open project.' : 'Recording is only available when signed in to a project.')
     return null
   }
 
   if (options.recordArmTrackId) {
     const armedTrack = options.tracks.find((track) => track.id === options.recordArmTrackId)
-    if (armedTrack && canTrackReceiveAudioClip(armedTrack) && (!armedTrack.lockedBy || armedTrack.lockedBy === options.userId)) {
+    if (armedTrack && canTrackReceiveAudioClip(armedTrack) && (isLocalProject || !armedTrack.lockedBy || armedTrack.lockedBy === options.userId)) {
       return { track: armedTrack, createdDuringSetup: false }
     }
   }
 
-  const availableTrack = options.tracks.find((track) => canTrackReceiveAudioClip(track) && (!track.lockedBy || track.lockedBy === options.userId))
+  const availableTrack = options.tracks.find((track) => canTrackReceiveAudioClip(track) && (isLocalProject || !track.lockedBy || track.lockedBy === options.userId))
   if (availableTrack) {
     options.setRecordArmTrackId(availableTrack.id)
     return { track: availableTrack, createdDuringSetup: false }
@@ -56,15 +59,16 @@ export async function ensureTrackForRecording(options: {
 
 export function commitAutoCreatedTrack(options: {
   historyPush?: HistoryPush
-  roomId: string | undefined
+  projectId: string | undefined
   tracks: Track[]
   track: Track | null | undefined
 }): void {
-  pushTrackCreateHistory(options.historyPush, options.roomId, options.tracks, options.track)
+  pushTrackCreateHistory(options.historyPush, options.projectId, options.tracks, options.track)
 }
 
 async function discardAutoCreatedTrack(options: {
   trackId: Track['id']
+  projectId: string | undefined
   userId: string | undefined
   convexClient: ConvexClientType
   convexApi: ConvexApiType
@@ -72,6 +76,11 @@ async function discardAutoCreatedTrack(options: {
   clearRecordArmForTrack: (trackId: Track['id']) => void
 }): Promise<boolean> {
   options.clearRecordArmForTrack(options.trackId)
+  if (options.projectId && isLocalId('project', options.projectId)) {
+    await createLocalTimelineRepository(options.projectId).deleteTrack(options.trackId)
+    options.removeLocalTrack(options.trackId)
+    return true
+  }
   if (!options.userId) return false
   try {
     const result = await options.convexClient.mutation(
@@ -90,7 +99,7 @@ async function discardAutoCreatedTrack(options: {
 export async function finalizeAutoCreatedTrackFailure(options: {
   track: Track | null
   tracks: Track[]
-  roomId: string | undefined
+  projectId: string | undefined
   userId: string | undefined
   historyPush?: HistoryPush
   convexClient: ConvexClientType
@@ -105,7 +114,7 @@ export async function finalizeAutoCreatedTrackFailure(options: {
   if (currentTrack.clips.length > 0) {
     commitAutoCreatedTrack({
       historyPush: options.historyPush,
-      roomId: options.roomId,
+      projectId: options.projectId,
       tracks: options.tracks,
       track: currentTrack,
     })
@@ -113,6 +122,7 @@ export async function finalizeAutoCreatedTrackFailure(options: {
   }
   const discarded = await discardAutoCreatedTrack({
     trackId: currentTrack.id,
+    projectId: options.projectId,
     userId: options.userId,
     convexClient: options.convexClient,
     convexApi: options.convexApi,
@@ -122,7 +132,7 @@ export async function finalizeAutoCreatedTrackFailure(options: {
   if (discarded) return
   commitAutoCreatedTrack({
     historyPush: options.historyPush,
-    roomId: options.roomId,
+    projectId: options.projectId,
     tracks: options.tracks,
     track: currentTrack,
   })

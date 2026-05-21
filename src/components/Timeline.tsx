@@ -3,6 +3,7 @@ import {
   type Component,
   type JSX,
   For,
+  Show,
   createEffect,
   createMemo,
   createSignal,
@@ -16,7 +17,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "~/components/ui/dialog";
-import type { Track } from "~/types/timeline";
+import type { Clip, Track } from "~/types/timeline";
 import { getAudioEngine, resetAudioEngine } from "~/lib/audio-engine-singleton";
 import {
   timelineDurationSec,
@@ -25,7 +26,6 @@ import {
   LANE_HEIGHT,
   FX_OFFSET_PX,
 } from "~/lib/timeline-utils";
-import { saveLocalMix } from "~/lib/timeline-storage";
 import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
 import { useTimelineClipImport } from "~/hooks/useTimelineClipImport";
 import { useTimelineClipActions } from "~/hooks/useTimelineClipActions";
@@ -42,6 +42,7 @@ import { useClipResize } from "~/hooks/useClipResize";
 import { useTimelineSelection } from "~/hooks/useTimelineSelection";
 import { useClipBuffers } from "~/hooks/useClipBuffers";
 import { normalizeCommandTrackIndices } from "~/lib/agent-command-targets";
+import { getAudioSourceMetadata } from "~/lib/audio-source";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
 import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
@@ -61,6 +62,17 @@ import { useTimelineIdentity } from "~/hooks/useTimelineIdentity";
 import { useTimelineLocalMix } from "~/hooks/useTimelineLocalMix";
 import { useTimelineProjectionState } from "~/hooks/useTimelineProjectionState";
 import { useTimelineSelectionState } from "~/hooks/useTimelineSelectionState";
+import { useCloudSyncTick } from "~/hooks/useCloudSyncTick";
+import { isLocalId } from "~/lib/local-ids";
+import {
+  createLocalAsset,
+  setLocalProjectAssetDirectory,
+} from "~/lib/local-assets";
+import { buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
+import {
+  createLocalTimelineRepository,
+  flushLocalTimelineWrites,
+} from "~/lib/timeline-repository/local-timeline-repository";
 
 type AgentMixOp = {
   type: "setMute" | "setSolo";
@@ -82,13 +94,16 @@ const Timeline: Component = () => {
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
   const [isRecording, setIsRecording] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
+  const [localSaveFailure, setLocalSaveFailure] = createSignal<string | null>(
+    null,
+  );
 
   // Audio engine
   const audioEngine = getAudioEngine();
-  // Collaboration: roomId from ?roomId=; ownership tied to Better Auth userId
+  // Collaboration: projectId from ?projectId=; ownership tied to Better Auth userId
   const {
-    roomId,
-    setRoomId,
+    projectId,
+    setProjectId,
     userId,
     projects,
     fullView,
@@ -97,6 +112,12 @@ const Timeline: Component = () => {
     renameProject,
     deleteProject,
   } = useTimelineData();
+
+  useCloudSyncTick({
+    projectId,
+    enabled: () => false,
+    sync: flushLocalTimelineWrites,
+  });
   const {
     sidebarWidth,
     setSidebarWidth,
@@ -114,20 +135,20 @@ const Timeline: Component = () => {
     loopStartSec,
     loopEndSec,
     setLoopRegion,
-  } = useTimelinePreferences({ roomId });
+  } = useTimelinePreferences({ projectId });
   const identity = useTimelineIdentity({
-    roomId,
+    projectId,
     serverData: () => fullView.data,
   });
   const projection = useTimelineProjectionState({
-    roomId,
+    projectId,
     serverData: () => fullView.data,
     rememberTrackProjection: identity.rememberTrackProjection,
     rememberClipHistoryRef: identity.rememberClipHistoryRef,
   });
   let renderTracks: Accessor<Track[]> = () => [];
   const selection = useTimelineSelectionState({
-    roomId,
+    projectId,
     tracks: () => renderTracks(),
     effectsPanel: {
       isOpen: bottomFXOpen,
@@ -144,7 +165,7 @@ const Timeline: Component = () => {
     grantClipWrites,
     serverTrackState,
   } = useProjectedTimelineModel({
-    roomId,
+    projectId,
     userId,
     fullViewData: () => fullView.data,
     pendingTrackEntriesById: projection.pendingTrackEntriesById,
@@ -153,7 +174,7 @@ const Timeline: Component = () => {
     removedClipIds: projection.removedClipIds,
   });
   const localMix = useTimelineLocalMix({
-    roomId,
+    projectId,
     writableTrackIds,
   });
   let ensureClipBuffer: (
@@ -165,11 +186,12 @@ const Timeline: Component = () => {
   let audioBufferCache = new Map<string, AudioBuffer>();
   const clipBuffers = useClipBuffers({
     audioEngine,
+    projectId,
     tracks: () => resolvedTracks(),
     onBufferChange: () => setBufferVersion((current) => current + 1),
   });
   const { pushHistory, handleUndo, handleRedo } = useTimelineHistory({
-    roomId,
+    projectId,
     userId,
     getTracks: () => resolvedTracks(),
     convexClient,
@@ -179,7 +201,8 @@ const Timeline: Component = () => {
       clipBuffers.ensureClipBuffer(clipId, sampleUrl),
     grantTrackWrite,
     grantClipWrite,
-    persistLocalMix: saveLocalMix,
+    persistLocalMix: (_projectId, trackId, patch) =>
+      localMix.persist(trackId, patch),
     getActions: () => ({
       insertLocalTrack: (track, index) =>
         projection.insertLocalTrack(track, index),
@@ -222,7 +245,7 @@ const Timeline: Component = () => {
     updateTrackSends,
     updateTrackOutputTargetId,
   } = useTimelineMixerController({
-    roomId,
+    projectId,
     userId,
     syncMix,
     tracks: () => renderTracks(),
@@ -240,6 +263,7 @@ const Timeline: Component = () => {
     renderTracks: resolvedRenderTracks,
     trackLookup,
   } = useTimelineResolvedModel({
+    projectId,
     fullViewData: () => fullView.data,
     syncMix,
     writableTrackIds,
@@ -266,6 +290,7 @@ const Timeline: Component = () => {
       rememberClipHistoryRef: identity.rememberClipHistoryRef,
     },
     audioBufferCache: clipBuffers.audioBufferCache,
+    clipMediaStatus: clipBuffers.clipMediaStatus,
     bufferVersion,
   });
   renderTracks = resolvedRenderTracks;
@@ -296,7 +321,7 @@ const Timeline: Component = () => {
 
   const applyAgentMixOps = (ops: AgentMixOp[]) => {
     try {
-      if (!roomId() || !Array.isArray(ops) || ops.length === 0) return;
+      if (!projectId() || !Array.isArray(ops) || ops.length === 0) return;
       const currentTracks = renderTracks();
       const ownedSet = writableTrackIds();
       for (const op of ops) {
@@ -335,15 +360,146 @@ const Timeline: Component = () => {
           );
         }
       }
+
     } catch {}
   };
 
+  const removeMissingMediaClip = async (
+    trackId: Track["id"],
+    clipId: string,
+  ) => {
+    const rid = projectId();
+    if (!rid) return;
+    if (isLocalId("project", rid)) {
+      await createLocalTimelineRepository(rid).deleteClip(clipId);
+      projection.removeLocalClips([clipId]);
+    } else {
+      const uid = userId();
+      if (!uid) return;
+      const result = await convexClient.mutation(
+        convexApi.clips.removeMany,
+        buildClipRemoveManyMutationInput({ clipIds: [clipId], userId: uid }),
+      );
+      if (
+        !Array.isArray(result?.removedClipIds) ||
+        result.removedClipIds.length === 0
+      ) return;
+      projection.removeLocalClips([clipId]);
+    }
+    if (selection.selectedClip()?.clipId === clipId) {
+      selection.setSelectedClip(null);
+    }
+    selection.setSelectedClipIds((current) => {
+      const next = new Set(current);
+      next.delete(clipId);
+      return next;
+    });
+    selection.selectTrackTarget(trackId, {
+      clearClipSelection: false,
+      clearPrimaryClip: false,
+    });
+  };
+
+  const pickReplacementAudioFile = async (): Promise<File | null> => {
+    const openFilePicker = window.showOpenFilePicker;
+    if (openFilePicker) {
+      try {
+        const [handle] = await openFilePicker({
+          multiple: false,
+          types: [{ description: "Audio", accept: { "audio/*": [] } }],
+        });
+        return await handle.getFile();
+      } catch {
+        return null;
+      }
+    }
+
+    return await new Promise((resolve) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "audio/*";
+      input.onchange = () => resolve(input.files?.[0] ?? null);
+      input.click();
+    });
+  };
+
+  const replaceMissingMediaClip = async (
+    trackId: Track["id"],
+    clipId: string,
+  ) => {
+    const rid = projectId();
+    if (!rid || !isLocalId("project", rid)) return;
+    const track = renderTracks().find((entry) => entry.id === trackId);
+    const clip = track?.clips.find((entry) => entry.id === clipId);
+    if (!clip) return;
+    const file = await pickReplacementAudioFile();
+    if (!file) return;
+    const decoded = await audioEngine.decodeAudioData(await file.arrayBuffer());
+    const source = getAudioSourceMetadata(decoded);
+    const asset = await createLocalAsset({
+      projectId: rid,
+      file,
+      metadata: {
+        durationSec: source.durationSec,
+        sampleRate: source.sampleRate,
+        originalFileName: file.name,
+        originalLastModified: file.lastModified,
+      },
+    });
+    const sourceKind: Clip["sourceKind"] = "upload";
+    const updated = {
+      ...clip,
+      name: file.name || clip.name,
+      buffer: decoded,
+      mediaStatus: undefined,
+      duration: decoded.duration,
+      sourceAssetKey: asset.id,
+      sourceKind,
+      sourceDurationSec: source.durationSec,
+      sourceSampleRate: source.sampleRate,
+      sourceChannelCount: source.channelCount,
+      sampleUrl: undefined,
+    };
+    await createLocalTimelineRepository(rid).updateClip({
+      clipId,
+      name: updated.name,
+      duration: updated.duration,
+      sourceAssetId: asset.id,
+      sourceAssetKey: asset.id,
+      sourceKind,
+      sourceDurationSec: source.durationSec,
+      sourceSampleRate: source.sampleRate,
+      sourceChannelCount: source.channelCount,
+    });
+    audioBufferCache.set(clipId, decoded);
+    projection.removeLocalClips([clipId]);
+    projection.insertLocalClip(trackId, updated);
+  };
+
+  const chooseProjectStorageFolder = async () => {
+    const rid = projectId();
+    const openDirectoryPicker = window.showDirectoryPicker;
+    if (!rid || !isLocalId("project", rid) || !openDirectoryPicker) {
+      window.alert("Folder storage is not supported in this browser.");
+      return;
+    }
+
+    try {
+      const handle = await openDirectoryPicker();
+      await setLocalProjectAssetDirectory(rid, handle);
+      setLocalSaveFailure(null);
+      window.alert("Project storage folder is ready.");
+    } catch {
+      window.alert("Project storage folder was not changed.");
+    }
+  };
+
   const pushEffectParamsHistory = (payload: EffectParamsCommitPayload) => {
-    const rid = roomId();
+    const rid = projectId();
     if (!rid) return;
     pushHistory(
       buildEffectParamsHistoryEntry({
-        roomId: rid,
+        projectId: rid,
         tracks: renderTracks(),
         payload,
       }),
@@ -392,8 +548,8 @@ const Timeline: Component = () => {
     jumpToClip,
   } = useTimelineActions({
     room: {
-      roomId,
-      setRoomId,
+      projectId,
+      setProjectId,
       userId,
     },
     creation: {
@@ -435,7 +591,7 @@ const Timeline: Component = () => {
     insertLocalClip: projection.insertLocalClip,
     selection,
     playheadSec,
-    roomId,
+    projectId,
     userId,
     convexClient,
     convexApi,
@@ -449,6 +605,7 @@ const Timeline: Component = () => {
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
     grantWrite: grantTrackWrite,
     grantClipWrite,
+    onLocalSaveFailed: setLocalSaveFailure,
   });
 
   const {
@@ -476,7 +633,7 @@ const Timeline: Component = () => {
     commitClipMoves: projection.commitClipMoves,
     canWriteClip,
     selection,
-    roomId,
+    projectId,
     userId,
     convexClient,
     convexApi,
@@ -507,7 +664,7 @@ const Timeline: Component = () => {
     gridEnabled,
     gridDenominator,
     rescheduleChangedClips,
-    roomId,
+    projectId,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
   });
 
@@ -525,7 +682,7 @@ const Timeline: Component = () => {
     selection,
     setPendingDeleteTrackId,
     setConfirmOpen,
-    roomId,
+    projectId,
     userId,
     convexClient,
     convexApi,
@@ -557,7 +714,7 @@ const Timeline: Component = () => {
   } = useTimelineMidiOverlay({
     audioEngine,
     tracks: () => renderTracks(),
-    roomId,
+    projectId,
     selection,
   });
   openMidiEditorFor = nextOpenMidiEditorFor;
@@ -573,7 +730,7 @@ const Timeline: Component = () => {
     playheadSec,
     uploadToR2,
     audioBufferCache,
-    roomId,
+    projectId,
     userId,
     convexClient,
     convexApi,
@@ -583,6 +740,9 @@ const Timeline: Component = () => {
     setIsRecording,
     notify: (message) => {
       console.warn("[Timeline][recording]", message);
+      if (message.includes("local") || message.includes("storage")) {
+        setLocalSaveFailure(message);
+      }
     },
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
     grantClipWrite,
@@ -699,6 +859,13 @@ const Timeline: Component = () => {
   });
 
   createEffect(() => {
+    projectId();
+    onCleanup(() => {
+      void flushLocalTimelineWrites();
+    });
+  });
+
+  createEffect(() => {
     const nextTracks = resolvedTracks();
     reconcileRecordArm(nextTracks);
   });
@@ -769,7 +936,7 @@ const Timeline: Component = () => {
         onInsertSample={(payload) => {
           void handleInsertSample(payload);
         }}
-        currentRoomId={roomId()}
+        currentProjectId={projectId()}
         currentUserId={userId()}
         projects={projects()}
         onOpenProject={(rid) => {
@@ -779,13 +946,45 @@ const Timeline: Component = () => {
         onDeleteProject={deleteProject}
         onRenameProject={renameProject}
         onOpenExport={() => setExportOpen(true)}
+        onChooseProjectFolder={chooseProjectStorageFolder}
       />
+      <Show when={localSaveFailure()}>
+        {(message) => (
+          <div class="border-b border-amber-900/60 bg-amber-950/50 px-4 py-3 text-sm text-amber-100">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div class="font-semibold">Local save needs attention</div>
+                <div class="mt-1 text-amber-100/80">
+                  {message()} Retry the last action after freeing browser storage,
+                  restoring folder permission, or exporting a backup copy.
+                </div>
+              </div>
+              <div class="flex shrink-0 items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setExportOpen(true)}
+                >
+                  Export backup
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setLocalSaveFailure(null)}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Show>
       <TimelinePanels
         chat={{
           bottomOffsetPx: bottomFXOpen() ? FX_OFFSET_PX : 0,
           agentPanelOpen: agentPanelOpen(),
           sharedChatOpen: sharedChatOpen(),
-          roomId: roomId(),
+          projectId: projectId(),
           userId: userId(),
           bpm: bpm(),
           toggleAgentPanel: () => setAgentPanelOpen((value) => !value),
@@ -799,7 +998,7 @@ const Timeline: Component = () => {
           selectedFXTarget: selection.selectedFXTarget(),
           tracks: renderTracks(),
           playheadSec: playheadSec(),
-          roomId: roomId(),
+          projectId: projectId(),
           userId: userId(),
           audioEngine,
           canWriteTrackRouting: canWriteTrack,
@@ -816,7 +1015,7 @@ const Timeline: Component = () => {
           loopEnabled: loopEnabled(),
           loopStartSec: loopStartSec(),
           loopEndSec: loopEndSec(),
-          roomId: roomId(),
+          projectId: projectId(),
           userId: userId(),
           ensureClipBuffer,
           onClose: () => setExportOpen(false),
@@ -883,6 +1082,15 @@ const Timeline: Component = () => {
                       onClipPointerDown={onClipPointerDown}
                       onClipPointerUp={onClipPointerUp}
                       onClipResizeStart={onClipResizeStart}
+                      onRetryMedia={(clipId) => {
+                        void ensureClipBuffer(clipId);
+                      }}
+                      onReplaceMedia={(trackId, clipId) => {
+                        void replaceMissingMediaClip(trackId, clipId);
+                      }}
+                      onRemoveMissingMedia={(trackId, clipId) => {
+                        void removeMissingMediaClip(trackId, clipId);
+                      }}
                       bpm={bpm()}
                       onClipDblClick={(_, clipId) => {
                         const match = trackLookup().clipEntryById.get(clipId);
@@ -922,7 +1130,7 @@ const Timeline: Component = () => {
                     clipId: midiEditorClipId(),
                     card: midiCard(),
                     userId: userId(),
-                    roomId: roomId(),
+                    projectId: projectId(),
                     close: closeMidiEditor,
                     changeBounds: changeMidiCardBounds,
                     auditionNote,

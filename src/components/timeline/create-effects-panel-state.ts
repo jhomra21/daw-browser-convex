@@ -1,4 +1,5 @@
 import {
+  createEffect,
   createMemo,
   createSignal,
   onCleanup,
@@ -13,6 +14,8 @@ import { createPersistedEffectState } from "~/components/timeline/create-persist
 import { buildClipCreatePayload } from "~/lib/clip-create";
 import { convexApi, convexClient, useConvexQuery } from "~/lib/convex";
 import { buildTrackEffectMutationInput, buildTrackEffectQueryArgs } from "~/lib/effect-track-args";
+import { getLocalEffect, setLocalEffect, type LocalEffectRow } from "~/lib/local-effects";
+import { isLocalId } from "~/lib/local-ids";
 import {
   createDefaultArpeggiatorParams,
   createDefaultSynthParams,
@@ -32,10 +35,12 @@ import type { AudioEngine } from "~/lib/audio-engine";
 import type { Track } from "~/types/timeline";
 type TrackArpRow = FunctionReturnType<typeof convexApi.effects.getArpeggiatorForTrack>;
 type TrackSynthRow = FunctionReturnType<typeof convexApi.effects.getSynthForTrack>;
+type LocalArpRow = LocalEffectRow<ArpeggiatorParams>;
+type LocalSynthRow = LocalEffectRow<SynthParams>;
 
 type EffectsPanelContext = {
   audioEngine?: AudioEngine;
-  roomId?: string;
+  projectId?: string;
   userId?: string;
   playheadSec?: number;
   grantClipWrite?: OptimisticGrantWrite;
@@ -98,15 +103,43 @@ export function createEffectsPanelState(
     return resolveTrackById(targetId);
   }
 
+  const isLocalProject = () => Boolean(context.projectId && isLocalId("project", context.projectId));
+  const [localArpRows, setLocalArpRows] = createSignal<Record<string, LocalArpRow | undefined>>({});
+  const [localSynthRows, setLocalSynthRows] = createSignal<Record<string, LocalSynthRow | undefined>>({});
+
+  createEffect(() => {
+    const projectId = context.projectId;
+    const targetId = getTrackTargetId();
+    if (!projectId || !targetId || !isLocalProject()) return;
+    void getLocalEffect<ArpeggiatorParams>(projectId, targetId, "arp").then((row) => {
+      setLocalArpRows((prev) => ({ ...prev, [targetId]: row }));
+    });
+  });
+
+  createEffect(() => {
+    const projectId = context.projectId;
+    const targetId = getTrackTargetId();
+    if (!projectId || !targetId || !isLocalProject()) return;
+    void getLocalEffect<SynthParams>(projectId, targetId, "synth").then((row) => {
+      setLocalSynthRows((prev) => ({ ...prev, [targetId]: row }));
+    });
+  });
+
   function persistArpeggiator(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setArpeggiatorParams>["params"]) {
-    const roomId = context.roomId;
+    const projectId = context.projectId;
     const userId = context.userId;
-    if (!roomId || !userId) return;
+    if (!projectId) return;
+    if (isLocalId("project", projectId)) {
+      return setLocalEffect(projectId, trackId, "arp", params).then((row) => {
+        setLocalArpRows((prev) => ({ ...prev, [trackId]: row }));
+      });
+    }
+    if (!userId) return;
 
     return convexClient.mutation(
       convexApi.effects.setArpeggiatorParams,
       buildTrackEffectMutationInput({
-        roomId,
+        projectId,
         trackId,
         userId,
         params,
@@ -115,14 +148,20 @@ export function createEffectsPanelState(
   }
 
   function persistSynth(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setSynthParams>["params"]) {
-    const roomId = context.roomId;
+    const projectId = context.projectId;
     const userId = context.userId;
-    if (!roomId || !userId) return;
+    if (!projectId) return;
+    if (isLocalId("project", projectId)) {
+      return setLocalEffect<SynthParams>(projectId, trackId, "synth", normalizeSynthParams(params)).then((row) => {
+        setLocalSynthRows((prev) => ({ ...prev, [trackId]: row }));
+      });
+    }
+    if (!userId) return;
 
     return convexClient.mutation(
       convexApi.effects.setSynthParams,
       buildTrackEffectMutationInput({
-        roomId,
+        projectId,
         trackId,
         userId,
         params,
@@ -177,14 +216,14 @@ export function createEffectsPanelState(
     convexApi.effects.getArpeggiatorForTrack,
     () => {
       const targetId = getTrackTargetId();
-      return targetId ? buildTrackEffectQueryArgs(targetId) : null;
+      return targetId && !isLocalId("track", targetId) ? buildTrackEffectQueryArgs(targetId) : null;
     },
     () => ["effects", "arpeggiator", currentTargetId()],
   );
 
   const arpState = createPersistedEffectState<TrackArpRow, ArpeggiatorParams>({
     targetId: getTrackTargetId,
-    row: () => arpQuery.data,
+    row: () => isLocalProject() ? localArpRows()[getTrackTargetId() ?? ""] : arpQuery.data,
     readQueryParams: (row) => row?.params,
     createInitialParams: () => createDefaultArpeggiatorParams(),
     serializeParams: (params) => JSON.stringify(params),
@@ -211,14 +250,14 @@ export function createEffectsPanelState(
     convexApi.effects.getSynthForTrack,
     () => {
       const targetId = getTrackTargetId();
-      return targetId ? buildTrackEffectQueryArgs(targetId) : null;
+      return targetId && !isLocalId("track", targetId) ? buildTrackEffectQueryArgs(targetId) : null;
     },
     () => ["effects", "synth", currentTargetId()],
   );
 
   const synthState = createPersistedEffectState<TrackSynthRow, SynthParams>({
     targetId: getTrackTargetId,
-    row: () => synthQuery.data,
+    row: () => isLocalProject() ? localSynthRows()[getTrackTargetId() ?? ""] : synthQuery.data,
     readQueryParams: (row) => {
       return row?.params
         ? normalizeSynthParams(row.params)
@@ -291,17 +330,17 @@ export function createEffectsPanelState(
     if (!track || track.kind !== "instrument") return;
 
     const grantScope = readOptimisticGrantScope({
-      roomId: context.roomId,
+      projectId: context.projectId,
       userId: context.userId,
     });
     if (!grantScope) return;
-    const { roomId, userId } = grantScope;
+    const { projectId, userId } = grantScope;
 
     const start = Math.max(0, Math.round((context.playheadSec ?? 0) * 1000) / 1000);
 
     try {
       const clipId = await convexClient.mutation(convexApi.clips.create, buildClipCreatePayload({
-        roomId,
+        projectId,
         userId,
         trackId: track.id,
         clip: {
@@ -319,7 +358,7 @@ export function createEffectsPanelState(
 
       context.grantClipWrite?.(clipId, grantScope);
       const currentScope = readOptimisticGrantScope({
-        roomId: context.roomId,
+        projectId: context.projectId,
         userId: context.userId,
       });
       if (!currentScope || didOptimisticGrantScopeChange(grantScope, currentScope)) return;

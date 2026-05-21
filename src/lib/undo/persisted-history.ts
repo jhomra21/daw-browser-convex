@@ -133,7 +133,7 @@ function buildLegacyClipRef(prefix: string, index: number) {
 
 function readLegacyEntry(entry: Record<string, unknown>): HistoryEntry | null {
   const type = readString(entry, 'type')
-  const roomId = readString(entry, 'roomId') ?? ''
+  const projectId = readString(entry, 'projectId') ?? ''
   const data = readRecord(entry, 'data')
   if (!type || !data) return null
 
@@ -144,7 +144,7 @@ function readLegacyEntry(entry: Record<string, unknown>): HistoryEntry | null {
     if (!trackId || !clipRecord || !clipRef) return null
     return {
       type,
-      roomId,
+      projectId,
       data: {
         trackRef: trackId,
         clip: {
@@ -182,7 +182,7 @@ function readLegacyEntry(entry: Record<string, unknown>): HistoryEntry | null {
     const recreatedClipIds = readArray(data, 'recreatedClipIds')
     return {
       type,
-      roomId,
+      projectId,
       data: {
         items,
         recreatedClips: items.flatMap((item, index) => {
@@ -212,7 +212,7 @@ function readLegacyEntry(entry: Record<string, unknown>): HistoryEntry | null {
     return moves.length > 0
       ? {
           type,
-          roomId,
+          projectId,
           data: { moves },
         }
       : null
@@ -225,7 +225,7 @@ function readLegacyEntry(entry: Record<string, unknown>): HistoryEntry | null {
     if (!clipId) return null
     return {
       type,
-      roomId,
+      projectId,
       data: {
         clipRef: clipId,
         from: {
@@ -251,7 +251,7 @@ function readLegacyEntry(entry: Record<string, unknown>): HistoryEntry | null {
     if (!trackId) return null
     return {
       type,
-      roomId,
+      projectId,
       data: {
         trackRef: trackId,
         currentTrackId: trackId,
@@ -274,7 +274,7 @@ function readLegacyEntry(entry: Record<string, unknown>): HistoryEntry | null {
     const recreatedClipIds = readArray(data, 'recreatedClipIds')
     return {
       type,
-      roomId,
+      projectId,
       data: {
         track: {
           trackRef: trackId,
@@ -310,7 +310,7 @@ function readLegacyEntry(entry: Record<string, unknown>): HistoryEntry | null {
     if (!trackId) return null
     return {
       type,
-      roomId,
+      projectId,
       data: {
         trackRef: trackId,
         scope: 'shared',
@@ -325,7 +325,7 @@ function readLegacyEntry(entry: Record<string, unknown>): HistoryEntry | null {
     if (!trackId) return null
     return {
       type,
-      roomId,
+      projectId,
       data: {
         trackRef: trackId,
         scope: 'shared',
@@ -340,7 +340,7 @@ function readLegacyEntry(entry: Record<string, unknown>): HistoryEntry | null {
     if (!trackId) return null
     return {
       type,
-      roomId,
+      projectId,
       data: {
         trackRef: trackId,
         scope: 'shared',
@@ -354,12 +354,12 @@ function readLegacyEntry(entry: Record<string, unknown>): HistoryEntry | null {
     const effect = readString(data, 'effect')
     const targetId = readString(data, 'targetId')
     const trackRef = targetId && targetId !== 'master' ? targetId : undefined
-    if (effect === 'eq') return { type, roomId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'reverb') return { type, roomId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'synth') return { type, roomId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'arp') return { type, roomId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'master-eq') return { type, roomId, data: { effect, trackRef: undefined, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'master-reverb') return { type, roomId, data: { effect, trackRef: undefined, from: readAny(data, 'from'), to: readAny(data, 'to') } }
+    if (effect === 'eq') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
+    if (effect === 'reverb') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
+    if (effect === 'synth') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
+    if (effect === 'arp') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
+    if (effect === 'master-eq') return { type, projectId, data: { effect, trackRef: undefined, from: readAny(data, 'from'), to: readAny(data, 'to') } }
+    if (effect === 'master-reverb') return { type, projectId, data: { effect, trackRef: undefined, from: readAny(data, 'from'), to: readAny(data, 'to') } }
   }
 
   return null
@@ -367,7 +367,7 @@ function readLegacyEntry(entry: Record<string, unknown>): HistoryEntry | null {
 
 function readCurrentEntry(entry: Record<string, unknown>): HistoryEntry | null {
   const type = readString(entry, 'type')
-  const roomId = readString(entry, 'roomId') ?? ''
+  const projectId = readString(entry, 'projectId') ?? ''
   const data = readRecord(entry, 'data')
   if (!type || !data) return null
 
@@ -378,7 +378,7 @@ function readCurrentEntry(entry: Record<string, unknown>): HistoryEntry | null {
     if (!trackRef || !clip) return null
     return {
       type,
-      roomId,
+      projectId,
       data: {
         trackRef,
         clip: {
@@ -399,7 +399,7 @@ function readCurrentEntry(entry: Record<string, unknown>): HistoryEntry | null {
     })
     return {
       type,
-      roomId,
+      projectId,
       data: {
         items,
         recreatedClips: readArray(data, 'recreatedClips').flatMap((item) => {
@@ -416,7 +416,7 @@ function readCurrentEntry(entry: Record<string, unknown>): HistoryEntry | null {
   if (type === 'clips-move') {
     return {
       type,
-      roomId,
+      projectId,
       data: {
         moves: readArray(data, 'moves').flatMap((move) => {
           const record = isRecord(move) ? move : undefined
@@ -443,7 +443,7 @@ function readCurrentEntry(entry: Record<string, unknown>): HistoryEntry | null {
     if (!clipRef) return null
     return {
       type,
-      roomId,
+      projectId,
       data: {
         clipRef,
         from: {
@@ -469,7 +469,7 @@ function readCurrentEntry(entry: Record<string, unknown>): HistoryEntry | null {
     if (!trackRef) return null
     return {
       type,
-      roomId,
+      projectId,
       data: {
         trackRef,
         currentTrackId: readString(data, 'currentTrackId'),
@@ -486,7 +486,7 @@ function readCurrentEntry(entry: Record<string, unknown>): HistoryEntry | null {
     if (!trackRef) return null
     return {
       type,
-      roomId,
+      projectId,
       data: {
         track: {
           trackRef,
@@ -538,7 +538,7 @@ function readCurrentEntry(entry: Record<string, unknown>): HistoryEntry | null {
     if (!trackRef) return null
     return {
       type,
-      roomId,
+      projectId,
       data: {
         trackRef,
         scope: readString(data, 'scope') === 'local' ? 'local' : 'shared',
@@ -553,7 +553,7 @@ function readCurrentEntry(entry: Record<string, unknown>): HistoryEntry | null {
     if (!trackRef) return null
     return {
       type,
-      roomId,
+      projectId,
       data: {
         trackRef,
         scope: readString(data, 'scope') === 'local' ? 'local' : 'shared',
@@ -568,7 +568,7 @@ function readCurrentEntry(entry: Record<string, unknown>): HistoryEntry | null {
     if (!trackRef) return null
     return {
       type,
-      roomId,
+      projectId,
       data: {
         trackRef,
         scope: readString(data, 'scope') === 'local' ? 'local' : 'shared',
@@ -583,7 +583,7 @@ function readCurrentEntry(entry: Record<string, unknown>): HistoryEntry | null {
     if (!trackRef) return null
     return {
       type,
-      roomId,
+      projectId,
       data: {
         trackRef,
         from: readRoutingSnapshot(readRecord(data, 'from')),
@@ -595,12 +595,12 @@ function readCurrentEntry(entry: Record<string, unknown>): HistoryEntry | null {
   if (type === 'effect-params') {
     const effect = readString(data, 'effect')
     const trackRef = readString(data, 'trackRef')
-    if (effect === 'eq') return { type, roomId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'reverb') return { type, roomId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'synth') return { type, roomId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'arp') return { type, roomId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'master-eq') return { type, roomId, data: { effect, trackRef: undefined, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'master-reverb') return { type, roomId, data: { effect, trackRef: undefined, from: readAny(data, 'from'), to: readAny(data, 'to') } }
+    if (effect === 'eq') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
+    if (effect === 'reverb') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
+    if (effect === 'synth') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
+    if (effect === 'arp') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
+    if (effect === 'master-eq') return { type, projectId, data: { effect, trackRef: undefined, from: readAny(data, 'from'), to: readAny(data, 'to') } }
+    if (effect === 'master-reverb') return { type, projectId, data: { effect, trackRef: undefined, from: readAny(data, 'from'), to: readAny(data, 'to') } }
   }
 
   return null

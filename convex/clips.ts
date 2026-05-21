@@ -34,7 +34,7 @@ const clipDeleteResult = v.object({
 })
 
 type ClipCreateInput = {
-  roomId: string
+  projectId: string
   trackId: any
   startSec: number
   duration: number
@@ -70,11 +70,11 @@ const sanitizeClipKind = (value: string | undefined): ClipKind => {
 const getCompatibleMergedTrack = async (
   ctx: any,
   trackId: any,
-  roomId: string,
+  projectId: string,
   clipKind: ClipKind,
 ) => {
   const track = await getMergedTrack(ctx, trackId)
-  if (!track || track.roomId !== roomId) return null
+  if (!track || track.projectId !== projectId) return null
   if (!isClipKindCompatibleWithTrack(track as any, clipKind)) return null
   return track
 }
@@ -83,12 +83,12 @@ const getWritableCompatibleMergedTrack = async (
   ctx: any,
   trackId: any,
   userId: string,
-  roomId: string,
+  projectId: string,
   clipKind: ClipKind,
 ) => {
   const access = await getTrackWriteAccess(ctx, trackId, userId)
   if (!access) return null
-  return await getCompatibleMergedTrack(ctx, trackId, roomId, clipKind)
+  return await getCompatibleMergedTrack(ctx, trackId, projectId, clipKind)
 }
 
 const isMergedTrackLockedByOther = (
@@ -111,7 +111,7 @@ const buildClipCreatePatch = (
   metadata: AudioSourceMetadataInput,
 ) => {
   const patch: Record<string, unknown> = {
-    roomId: item.roomId,
+    projectId: item.projectId,
     trackId: item.trackId,
     startSec: item.startSec,
     duration: item.duration,
@@ -130,7 +130,7 @@ const buildClipCreatePatch = (
 const upsertSampleRowForClip = async (
   ctx: any,
   clip: {
-    roomId: string
+    projectId: string
     name?: string
     sampleUrl?: string
     sourceAssetKey?: string
@@ -143,7 +143,7 @@ const upsertSampleRowForClip = async (
 ) => {
   const duration = sanitizePositiveNumber(clip.sourceDurationSec)
   await upsertSampleRow(ctx, {
-    roomId: clip.roomId,
+    projectId: clip.projectId,
     url: clip.sampleUrl,
     assetKey: clip.sourceAssetKey,
     sourceKind: clip.sourceKind,
@@ -160,7 +160,7 @@ const createOwnedClip = async (
   item: ClipCreateInput,
 ) => {
   const clipKind = sanitizeClipKind(item.clipKind ?? (item.midi ? 'midi' : 'audio'))
-  const track = await getWritableCompatibleMergedTrack(ctx, item.trackId, item.userId, item.roomId, clipKind)
+  const track = await getWritableCompatibleMergedTrack(ctx, item.trackId, item.userId, item.projectId, clipKind)
   if (!track) return null
 
   const sourceMetadata = normalizeAudioSourceMetadataPatch(item)
@@ -181,7 +181,7 @@ const createOwnedClip = async (
   const clipId = await ctx.db.insert('clips', clipPatch)
 
   await ctx.db.insert('ownerships', {
-    roomId: item.roomId,
+    projectId: item.projectId,
     ownerUserId: item.userId,
     clipId,
   })
@@ -189,7 +189,7 @@ const createOwnedClip = async (
   await upsertSampleRowForClip(
     ctx,
     {
-      roomId: item.roomId,
+      projectId: item.projectId,
       name: item.name,
       sampleUrl: item.sampleUrl,
       sourceAssetKey: sourceMetadata.assetKey,
@@ -205,18 +205,18 @@ const createOwnedClip = async (
 }
 
 export const listByRoom = query({
-  args: { roomId: v.string() },
-  handler: async (ctx, { roomId }) => {
+  args: { projectId: v.string() },
+  handler: async (ctx, { projectId }) => {
     return await ctx.db
       .query('clips')
-      .withIndex('by_room', q => q.eq('roomId', roomId))
+      .withIndex('by_room', q => q.eq('projectId', projectId))
       .collect()
   },
 })
 
 export const create = mutation({
   args: {
-    roomId: v.string(),
+    projectId: v.string(),
     trackId: v.id('tracks'),
     startSec: v.number(),
     duration: v.number(),
@@ -266,7 +266,7 @@ export const move = mutation({
       const targetTrack = await getCompatibleMergedTrack(
         ctx,
         toTrackId,
-        clip.roomId,
+        clip.projectId,
         sanitizeClipKind((clip as any).midi ? 'midi' : 'audio'),
       )
       if (!targetTrack) return { status: 'rejected' as const }
@@ -363,7 +363,7 @@ export const setMidi = mutation({
 export const createMany = mutation({
   args: {
     items: v.array(v.object({
-      roomId: v.string(),
+      projectId: v.string(),
       trackId: v.id('tracks'),
       startSec: v.number(),
       duration: v.number(),

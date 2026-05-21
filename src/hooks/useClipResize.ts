@@ -1,6 +1,8 @@
 import { onCleanup, type Accessor } from 'solid-js'
 
 import { persistClipTiming } from '~/lib/clip-mutations'
+import { isLocalId } from '~/lib/local-ids'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { buildClipTimingHistoryEntry } from '~/lib/undo/builders'
 import { PPS, quantizeSecToGrid } from '~/lib/timeline-utils'
 import type { Track } from '~/types/timeline'
@@ -29,7 +31,7 @@ type ClipResizeOptions = {
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
   rescheduleChangedClips: (clipIds: string[]) => void
-  roomId: Accessor<string | undefined>
+  projectId: Accessor<string | undefined>
   historyPush: (entry: import('~/lib/undo/types').HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
 }
 
@@ -252,8 +254,19 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         bufferOffsetSec: clip.bufferOffsetSec,
         midiOffsetBeats: clip.midiOffsetBeats,
       })
-      const uid = userId()
-      if (uid) {
+      const rid = options.projectId()
+      if (rid && isLocalId('project', rid)) {
+        void createLocalTimelineRepository(rid).updateClip({
+          clipId: clip.id,
+          startSec: clip.startSec,
+          duration: clip.duration,
+          leftPadSec: clip.leftPadSec ?? 0,
+          bufferOffsetSec: clip.bufferOffsetSec ?? 0,
+          midiOffsetBeats: clip.midiOffsetBeats ?? 0,
+        })
+      } else {
+        const uid = userId()
+        if (uid) {
         void persistClipTiming(convexClient, convexApi, uid, {
           clipId: clip.id,
           startSec: clip.startSec,
@@ -262,9 +275,9 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           bufferOffsetSec: clip.bufferOffsetSec ?? 0,
           midiOffsetBeats: clip.midiOffsetBeats ?? 0,
         })
+        }
       }
       try {
-        const rid = options.roomId()
         if (rid) {
           const from = {
             startSec: resizeOrigStart,
@@ -287,7 +300,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
             Math.abs((from.bufferOffsetSec ?? 0) - (to.bufferOffsetSec ?? 0)) < 1e-6 &&
             Math.abs((from.midiOffsetBeats ?? 0) - (to.midiOffsetBeats ?? 0)) < 1e-6
           if (!sameTiming) {
-            options.historyPush(buildClipTimingHistoryEntry({ roomId: rid, clip, from, to }))
+            options.historyPush(buildClipTimingHistoryEntry({ projectId: rid, clip, from, to }))
           }
         }
       } catch {}

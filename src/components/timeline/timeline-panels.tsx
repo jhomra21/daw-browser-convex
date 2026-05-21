@@ -15,7 +15,7 @@ type TimelinePanelsProps = {
     bottomOffsetPx: number
     agentPanelOpen: boolean
     sharedChatOpen: boolean
-    roomId?: string
+    projectId?: string
     userId?: string
     bpm: number
     toggleAgentPanel: () => void
@@ -29,7 +29,7 @@ type TimelinePanelsProps = {
     selectedFXTarget: Track['id'] | 'master'
     tracks: Track[]
     playheadSec: number
-    roomId?: string
+    projectId?: string
     userId?: string
     audioEngine: AudioEngine
     canWriteTrackRouting: (trackId: Track['id']) => boolean
@@ -46,7 +46,7 @@ type TimelinePanelsProps = {
     loopEnabled: boolean
     loopStartSec: number
     loopEndSec: number
-    roomId?: string
+    projectId?: string
     userId?: string
     ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
     onClose: () => void
@@ -85,7 +85,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
           <AgentChat
             isOpen={props.chat.agentPanelOpen}
             onClose={props.chat.closeAgentPanel}
-            roomId={props.chat.roomId}
+            projectId={props.chat.projectId}
             userId={props.chat.userId}
             bpm={props.chat.bpm}
             bottomOffsetPx={props.chat.bottomOffsetPx}
@@ -99,7 +99,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
           <SharedChat
             isOpen={props.chat.sharedChatOpen}
             onClose={props.chat.closeSharedChat}
-            roomId={props.chat.roomId}
+            projectId={props.chat.projectId}
             userId={props.chat.userId}
             bottomOffsetPx={props.chat.bottomOffsetPx}
           />
@@ -114,7 +114,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
           onClose={props.effectsPanel.onClose}
           onOpen={props.effectsPanel.onOpen}
           audioEngine={props.effectsPanel.audioEngine}
-          roomId={props.effectsPanel.roomId}
+          projectId={props.effectsPanel.projectId}
           userId={props.effectsPanel.userId}
           canWriteTrackRouting={props.effectsPanel.canWriteTrackRouting}
           grantClipWrite={props.effectsPanel.grantClipWrite}
@@ -134,7 +134,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
             loopEnabled={props.exportDialog.loopEnabled}
             loopStartSec={props.exportDialog.loopStartSec}
             loopEndSec={props.exportDialog.loopEndSec}
-            roomId={props.exportDialog.roomId}
+            projectId={props.exportDialog.projectId}
             userId={props.exportDialog.userId}
             ensureClipBuffer={props.exportDialog.ensureClipBuffer}
           />

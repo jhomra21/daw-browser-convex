@@ -39,6 +39,7 @@ import { useShareMenuController } from "~/hooks/useShareMenuController";
 import { useTransportTempoController } from "~/hooks/useTransportTempoController";
 import type { TimelineProject } from "~/hooks/useTimelineData";
 import { authClient } from "~/lib/auth-client";
+import { isLocalId } from "~/lib/local-ids";
 import { queryClient } from "~/lib/query-client";
 import { useSessionQuery } from "~/lib/session";
 import { cn } from "~/lib/utils";
@@ -81,14 +82,15 @@ type TransportControlsProps = {
     startSec: number,
   ) => void;
   onInsertSample: (input: InsertSampleInput) => void | Promise<void>;
-  currentRoomId: string;
+  currentProjectId: string;
   currentUserId?: string;
   projects: TimelineProject[];
-  onOpenProject: (roomId: string) => void;
+  onOpenProject: (projectId: string) => void;
   onCreateProject: () => void | Promise<void>;
-  onDeleteProject: (roomId: string) => void | Promise<void>;
-  onRenameProject: (roomId: string, name: string) => void | Promise<void>;
+  onDeleteProject: (projectId: string) => void | Promise<void>;
+  onRenameProject: (projectId: string, name: string) => void | Promise<void>;
   onOpenExport: () => void;
+  onChooseProjectFolder?: () => void | Promise<void>;
 };
 
 type TransportBarController = {
@@ -225,6 +227,14 @@ const ProjectsMenu: Component = () => {
   const context = useToolbar();
   const toolbar = () => context.toolbar;
   const menu = () => context.projectsMenu;
+  const isCurrentProjectLocal = () =>
+    isLocalId("project", toolbar().currentProjectId);
+  const currentSaveLabel = () =>
+    isCurrentProjectLocal()
+      ? "Saved locally on this device"
+      : toolbar().currentUserId
+        ? "Saved to cloud project"
+        : "Sign in to sync this project";
 
   return (
     <MenubarMenu value="project">
@@ -234,6 +244,65 @@ const ProjectsMenu: Component = () => {
         style={{ width: "min(92vw, 24rem)" }}
       >
         <div class="w-full p-2">
+          <div class="mb-2 rounded-lg border border-neutral-800 bg-neutral-950/80 p-3">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <div class="text-xs uppercase tracking-wide text-neutral-500">
+                  Save status
+                </div>
+                <div class="mt-1 text-sm font-medium text-neutral-100">
+                  {currentSaveLabel()}
+                </div>
+              </div>
+              <span
+                class={cn(
+                  "shrink-0 rounded-full border px-2 py-1 text-[11px] font-medium",
+                  isCurrentProjectLocal()
+                    ? "border-emerald-900/70 bg-emerald-950/40 text-emerald-300"
+                    : toolbar().currentUserId
+                      ? "border-sky-900/70 bg-sky-950/40 text-sky-300"
+                      : "border-amber-900/70 bg-amber-950/40 text-amber-300",
+                )}
+              >
+                {isCurrentProjectLocal() ? "Local" : "Cloud"}
+              </span>
+            </div>
+            <div class="mt-3 grid grid-cols-2 gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                class="justify-center"
+                onClick={toolbar().onOpenExport}
+              >
+                Export backup
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                class="justify-center"
+                disabled={!toolbar().currentUserId || !toolbar().onShare}
+                onClick={() => toolbar().onShare?.()}
+                title={
+                  toolbar().currentUserId
+                    ? "Share this project"
+                    : "Sign in to enable backup and share"
+                }
+              >
+                Share / sync
+              </Button>
+              <Show when={isCurrentProjectLocal() && toolbar().onChooseProjectFolder}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  class="col-span-2 justify-center"
+                  onClick={() => void toolbar().onChooseProjectFolder?.()}
+                  title="Choose or regrant a local project storage folder"
+                >
+                  Choose storage folder
+                </Button>
+              </Show>
+            </div>
+          </div>
           <div class="flex items-center justify-between px-1 pb-2">
             <span class="text-sm font-semibold text-neutral-100">
               My Projects
@@ -266,21 +335,21 @@ const ProjectsMenu: Component = () => {
           <div class="max-h-72 overflow-y-auto">
             <For each={toolbar().projects}>
               {(project) => {
-                const roomId = project.roomId;
-                const isEditing = () => menu().editingProjectId() === roomId;
+                const projectId = project.projectId;
+                const isEditing = () => menu().editingProjectId() === projectId;
                 const isConfirmingDelete = () =>
-                  menu().confirmingProjectId() === roomId;
-                const isRenaming = () => menu().renamingProjectId() === roomId;
+                  menu().confirmingProjectId() === projectId;
+                const isRenaming = () => menu().renamingProjectId() === projectId;
 
                 return (
                   <Show
                     when={!isEditing() && !isConfirmingDelete()}
                     fallback={
                       <div
-                        data-project-rid={roomId}
+                        data-project-rid={projectId}
                         class={cn(
                           "group relative flex w-full items-center justify-between gap-2 pr-12",
-                          toolbar().currentRoomId === roomId &&
+                          toolbar().currentProjectId === projectId &&
                             "text-green-400",
                         )}
                         onPointerDown={(event) => event.stopPropagation()}
@@ -308,7 +377,7 @@ const ProjectsMenu: Component = () => {
                               <span
                                 class={cn(
                                   "max-w-56 truncate font-mono text-xs",
-                                  toolbar().currentRoomId === roomId
+                                  toolbar().currentProjectId === projectId
                                     ? "text-green-400"
                                     : "text-neutral-200",
                                 )}
@@ -323,11 +392,11 @@ const ProjectsMenu: Component = () => {
                               onSubmit={async (event) => {
                                 event.preventDefault();
                                 event.stopPropagation();
-                                await menu().confirmProjectRename(roomId);
+                                await menu().confirmProjectRename(projectId);
                               }}
                             >
                               <input
-                                data-project-input={roomId}
+                                data-project-input={projectId}
                                 value={menu().editingName()}
                                 onInput={(event) => {
                                   menu().stopPropagation(event);
@@ -343,7 +412,7 @@ const ProjectsMenu: Component = () => {
                                     event.code === "NumpadEnter"
                                   ) {
                                     event.preventDefault();
-                                    await menu().confirmProjectRename(roomId);
+                                    await menu().confirmProjectRename(projectId);
                                     return;
                                   }
                                   if (event.key === "Escape") {
@@ -401,21 +470,21 @@ const ProjectsMenu: Component = () => {
                             <button
                               class={cn(
                                 "rounded p-1",
-                                menu().deletingProjectId() === roomId
+                                menu().deletingProjectId() === projectId
                                   ? "cursor-not-allowed text-neutral-400 opacity-60"
                                   : "cursor-pointer text-green-500 hover:text-green-400",
                               )}
                               aria-label={
-                                menu().deletingProjectId() === roomId
+                                menu().deletingProjectId() === projectId
                                   ? "Deleting…"
                                   : "Confirm delete"
                               }
-                              disabled={menu().deletingProjectId() === roomId}
+                              disabled={menu().deletingProjectId() === projectId}
                               onPointerDown={menu().stopMenuPress}
                               onPointerUp={menu().stopMenuPress}
                               onClick={async (event) => {
                                 menu().stopMenuPress(event);
-                                await menu().confirmProjectDelete(roomId);
+                                await menu().confirmProjectDelete(projectId);
                               }}
                             >
                               <svg
@@ -437,12 +506,12 @@ const ProjectsMenu: Component = () => {
                             <button
                               class={cn(
                                 "rounded p-1",
-                                menu().deletingProjectId() === roomId
+                                menu().deletingProjectId() === projectId
                                   ? "cursor-not-allowed text-neutral-400 opacity-60"
                                   : "cursor-pointer text-neutral-400 hover:text-neutral-300",
                               )}
                               aria-label="Cancel delete"
-                              disabled={menu().deletingProjectId() === roomId}
+                              disabled={menu().deletingProjectId() === projectId}
                               onPointerDown={menu().stopMenuPress}
                               onPointerUp={menu().stopMenuPress}
                               onClick={(event) => {
@@ -484,7 +553,7 @@ const ProjectsMenu: Component = () => {
                                 onPointerUp={menu().stopMenuPress}
                                 onClick={async (event) => {
                                   menu().stopMenuPress(event);
-                                  await menu().confirmProjectRename(roomId);
+                                  await menu().confirmProjectRename(projectId);
                                 }}
                               >
                                 <svg
@@ -542,14 +611,14 @@ const ProjectsMenu: Component = () => {
                     }
                   >
                     <MenubarItem
-                      data-project-rid={roomId}
+                      data-project-rid={projectId}
                       class={cn(
                         "group relative flex w-full cursor-pointer items-center justify-between gap-2 pr-12 hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100",
-                        toolbar().currentRoomId === roomId && "text-green-400",
+                        toolbar().currentProjectId === projectId && "text-green-400",
                       )}
                       onSelect={() => {
                         menu().setConfirmingProjectId(null);
-                        toolbar().onOpenProject(roomId);
+                        toolbar().onOpenProject(projectId);
                       }}
                     >
                       <div class="flex min-w-0 flex-1 items-center gap-2">
@@ -571,7 +640,7 @@ const ProjectsMenu: Component = () => {
                         <span
                           class={cn(
                             "max-w-56 truncate font-mono text-xs",
-                            toolbar().currentRoomId === roomId
+                            toolbar().currentProjectId === projectId
                               ? "text-green-400 group-hover:text-green-300"
                               : "text-neutral-200 group-hover:text-neutral-100",
                           )}
@@ -592,7 +661,7 @@ const ProjectsMenu: Component = () => {
                             onPointerUp={menu().stopMenuPress}
                             onClick={(event) => {
                               menu().stopMenuPress(event);
-                              menu().beginProjectRename(roomId, project.name);
+                              menu().beginProjectRename(projectId, project.name);
                             }}
                           >
                             <svg
@@ -626,7 +695,7 @@ const ProjectsMenu: Component = () => {
                             onPointerUp={menu().stopMenuPress}
                             onClick={(event) => {
                               menu().stopMenuPress(event);
-                              menu().setConfirmingProjectId(roomId);
+                              menu().setConfirmingProjectId(projectId);
                             }}
                           >
                             <svg
@@ -1645,24 +1714,24 @@ const SettingsMenu: Component = () => {
 };
 
 const TransportControls: Component<TransportControlsProps> = (props) => {
-  const currentRoomId = () => props.currentRoomId;
+  const currentProjectId = () => props.currentProjectId;
   const currentUserId = () => props.currentUserId;
   const projectsMenu = useProjectsMenuController({
     onDeleteProject: props.onDeleteProject,
     onRenameProject: props.onRenameProject,
   });
   const samplesMenu = useSamplesMenuController({
-    currentRoomId,
+    currentProjectId,
     currentUserId,
     onInsertSample: props.onInsertSample,
     onJumpToClip: props.onJumpToClip,
   });
   const exportsMenu = useExportsMenuController({
-    currentRoomId,
+    currentProjectId,
   });
   const shareMenu = useShareMenuController({
     onShare: props.onShare,
-    roomId: currentRoomId,
+    projectId: currentProjectId,
   });
   const tempo = useTransportTempoController({
     bpm: () => props.bpm,
@@ -1674,6 +1743,12 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
     samplesMenu,
     exportsMenu,
   };
+  const saveStatus = () =>
+    isLocalId("project", currentProjectId())
+      ? { label: "Saved locally", class: "border-emerald-900/70 bg-emerald-950/40 text-emerald-300" }
+      : currentUserId()
+        ? { label: "Cloud saved", class: "border-sky-900/70 bg-sky-950/40 text-sky-300" }
+        : { label: "Sign in to sync", class: "border-amber-900/70 bg-amber-950/40 text-amber-300" };
 
   return (
     <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-neutral-800 bg-neutral-950 p-2">
@@ -1729,6 +1804,14 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
       />
 
       <div class="justify-self-end flex items-center gap-3">
+        <span
+          class={cn(
+            "rounded-full border px-2 py-1 text-[11px] font-medium",
+            saveStatus().class,
+          )}
+        >
+          {saveStatus().label}
+        </span>
         <div class="flex items-center gap-2 text-xs">
           <span class="text-neutral-500">Playhead</span>
           <span class="tabular-nums text-neutral-200">

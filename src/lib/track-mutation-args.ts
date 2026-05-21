@@ -1,17 +1,20 @@
 import type { FunctionArgs } from 'convex/server'
 
 import { convexApi } from '~/lib/convex'
+import type { Id } from '../../convex/_generated/dataModel'
 import type { TrackId } from '~/types/timeline'
 
+const toCloudTrackId = (trackId: TrackId): Id<'tracks'> => trackId as Id<'tracks'>
+
 export function buildTrackCreateMutationInput(input: {
-  roomId: string
+  projectId: string
   userId: string
   index?: number
   kind?: 'audio' | 'instrument'
   channelRole?: 'track' | 'group' | 'return'
 }): FunctionArgs<typeof convexApi.tracks.create> {
   return {
-    roomId: input.roomId,
+    projectId: input.projectId,
     userId: input.userId,
     index: input.index,
     kind: input.kind,
@@ -24,7 +27,7 @@ export function buildTrackDeleteMutationInput(input: {
   userId: string
 }): FunctionArgs<typeof convexApi.tracks.remove> {
   return {
-    trackId: input.trackId,
+    trackId: toCloudTrackId(input.trackId),
     userId: input.userId,
   }
 }
@@ -34,7 +37,7 @@ export function buildTrackLockMutationInput(input: {
   userId: string
 }): FunctionArgs<typeof convexApi.tracks.lock> {
   return {
-    trackId: input.trackId,
+    trackId: toCloudTrackId(input.trackId),
     userId: input.userId,
   }
 }
@@ -44,7 +47,7 @@ export function buildTrackUnlockMutationInput(input: {
   userId: string
 }): FunctionArgs<typeof convexApi.tracks.unlock> {
   return {
-    trackId: input.trackId,
+    trackId: toCloudTrackId(input.trackId),
     userId: input.userId,
   }
 }
@@ -55,7 +58,7 @@ export function buildTrackVolumeMutationInput(input: {
   userId: string
 }): FunctionArgs<typeof convexApi.tracks.setVolume> {
   return {
-    trackId: input.trackId,
+    trackId: toCloudTrackId(input.trackId),
     volume: input.volume,
     userId: input.userId,
   }
@@ -68,7 +71,7 @@ export function buildTrackMixMutationInput(input: {
   soloed?: boolean
 }): FunctionArgs<typeof convexApi.tracks.setMix> {
   return {
-    trackId: input.trackId,
+    trackId: toCloudTrackId(input.trackId),
     userId: input.userId,
     muted: input.muted,
     soloed: input.soloed,

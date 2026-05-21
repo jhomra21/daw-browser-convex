@@ -1,12 +1,16 @@
 import type { Accessor } from 'solid-js'
 
-import { buildClipCreatePayload, buildLocalClip, createUploadedAudioClip, pushClipCreateHistory, type ClipCreateSnapshot } from '~/lib/clip-create'
+import { buildClipCreatePayload, buildLocalClip, createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory, type ClipCreateSnapshot } from '~/lib/clip-create'
 import { createAudioAssetKey, getAudioSourceMetadata, type AudioSourceKind } from '~/lib/audio-source'
 import type { AudioEngine } from '~/lib/audio-engine'
+import { createLocalAsset, LocalAssetWriteError, readLocalAssetBytes } from '~/lib/local-assets'
+import { isLocalId } from '~/lib/local-ids'
 import { canTrackReceiveAudioClip, getTrackChannelRole } from '~/lib/track-routing'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE, type SampleDragData } from '~/lib/sample-drag-data'
 import { clientXToSec, yToLaneIndex, willOverlap, calcNonOverlapStart, quantizeSecToGrid, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
+import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
 import { createOptimisticTrackWithHistory } from '~/lib/tracks'
@@ -19,7 +23,7 @@ type ConvexClientType = typeof import('~/lib/convex').convexClient
 type ConvexApiType = typeof import('~/lib/convex').convexApi
 
 type UploadToR2 = (
-  roomId: string,
+  projectId: string,
   assetKey: string,
   file: File,
   durationSec?: number,
@@ -34,7 +38,7 @@ type TimelineClipImportOptions = {
   insertLocalClip: (trackId: Track['id'], clip: Clip) => void
   selection: TimelineSelectionController
   playheadSec: Accessor<number>
-  roomId: Accessor<string | undefined>
+  projectId: Accessor<string | undefined>
   userId: Accessor<string | undefined>
   convexClient: ConvexClientType
   convexApi: ConvexApiType
@@ -48,6 +52,7 @@ type TimelineClipImportOptions = {
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   grantWrite?: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
   grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
+  onLocalSaveFailed?: (message: string) => void
 }
 
 type TimelineClipImportHandlers = {
@@ -65,7 +70,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     insertLocalClip,
     selection,
     playheadSec,
-    roomId,
+    projectId,
     userId,
     convexClient,
     convexApi,
@@ -89,20 +94,30 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
   }
 
   const createAudioTrack = async () => {
-    const rid = roomId()
+    const rid = projectId()
+    if (!rid) return null
+
+    if (isLocalId('project', rid)) {
+      const row = await createLocalTimelineRepository(rid).createTrack({ index: tracks().length })
+      const track = toLocalTimelineTrack(row)
+      insertLocalTrack(track, tracks().length)
+      selection.selectTrackTarget(track.id)
+      return track
+    }
+
     const uid = userId()
-    if (!rid || !uid) return null
+    if (!uid) return null
 
     const track = await createOptimisticTrackWithHistory({
       convexClient,
       convexApi,
-      roomId: rid,
+      projectId: rid,
       userId: uid,
       tracks,
       insertLocalTrack,
       index: tracks().length,
       grantWrite,
-      grantScope: { roomId: rid, userId: uid },
+      grantScope: { projectId: rid, userId: uid },
       historyPush: options.historyPush,
     })
     if (!track) return null
@@ -163,12 +178,12 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
   }
 
   const createServerClip = async (trackId: Track['id'], clip: ClipCreateSnapshot) => {
-    const rid = roomId()
+    const rid = projectId()
     const uid = userId()
     if (!rid || !uid) return null
     return await convexClient.mutation(
       convexApi.clips.create,
-      buildClipCreatePayload({ roomId: rid, userId: uid, trackId, clip }),
+      buildClipCreatePayload({ projectId: rid, userId: uid, trackId, clip }),
     )
   }
 
@@ -196,9 +211,9 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     assetKey: string
     sourceKind: AudioSourceKind
   }) => {
-    const rid = roomId()
+    const rid = projectId()
     const uid = userId()
-    const grantScope = rid && uid ? { roomId: rid, userId: uid } : null
+    const grantScope = rid && uid ? { projectId: rid, userId: uid } : null
     const clipName = input.name?.trim()?.length ? input.name : 'Sample'
     const clipSnapshot: ClipCreateSnapshot = {
       startSec: input.startSec,
@@ -208,6 +223,40 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
       source: input.source,
       sourceAssetKey: input.assetKey,
       sourceKind: input.sourceKind,
+    }
+
+    if (rid && isLocalId('project', rid) && isLocalId('asset', input.assetKey)) {
+      const row = await createLocalTimelineRepository(rid).createClip({
+        trackId: input.trackId,
+        name: clipName,
+        startSec: input.startSec,
+        duration: input.duration,
+        color: 'clip-audio',
+        sourceAssetId: input.assetKey,
+        sourceAssetKey: input.assetKey,
+        sourceKind: input.sourceKind,
+        sourceDurationSec: input.source.durationSec,
+        sourceSampleRate: input.source.sampleRate,
+        sourceChannelCount: input.source.channelCount,
+      })
+      const clip = buildLocalClip({ id: row.id, clip: clipSnapshot })
+      insertLocalClip(input.trackId, clip)
+      const bytes = await readLocalAssetBytes(rid, input.assetKey)
+      if (bytes.status === 'ready') {
+        try {
+          audioBufferCache.set(row.id, await audioEngine.decodeAudioData(await bytes.file.arrayBuffer()))
+        } catch {}
+      }
+      applySelectionAfterCreate(input.trackId, row.id)
+      pushClipCreateHistory({
+        historyPush: options.historyPush,
+        projectId: rid,
+        trackId: input.trackId,
+        trackRef: getTrackHistoryRef(tracks().find((entry) => entry.id === input.trackId)),
+        clipId: row.id,
+        clip: clipSnapshot,
+      })
+      return row.id
     }
 
     const createdClipId = await createServerClip(input.trackId, clipSnapshot)
@@ -222,7 +271,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     applySelectionAfterCreate(input.trackId, createdClipId)
     pushClipCreateHistory({
       historyPush: options.historyPush,
-      roomId: rid,
+      projectId: rid,
       trackId: input.trackId,
       trackRef: getTrackHistoryRef(tracks().find((entry) => entry.id === input.trackId)),
       clipId: createdClipId,
@@ -236,7 +285,6 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     const ab = await file.arrayBuffer()
     const decoded = await audioEngine.decodeAudioData(ab)
     const sourceMetadata = getAudioSourceMetadata(decoded)
-    const sourceAssetKey = createAudioAssetKey()
 
     const targetTrack = await ensureTargetAudioTrack(trackId)
     if (!targetTrack) return
@@ -247,13 +295,56 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
       decoded.duration,
     )
 
-    const rid = roomId()
+    const rid = projectId()
+    if (!rid) return
+
+    if (isLocalId('project', rid)) {
+      let asset: Awaited<ReturnType<typeof createLocalAsset>>
+      try {
+        asset = await createLocalAsset({
+          projectId: rid,
+          file,
+          metadata: {
+            durationSec: sourceMetadata.durationSec,
+            sampleRate: sourceMetadata.sampleRate,
+            originalFileName: file.name,
+            originalLastModified: file.lastModified,
+          },
+        })
+      } catch (error) {
+        const message = error instanceof LocalAssetWriteError
+          ? error.message
+          : 'Audio could not be saved to local project storage.'
+        const guidance = `${message} Free browser storage or choose a smaller file, then retry the import.`
+        options.onLocalSaveFailed?.(guidance)
+        window.alert(guidance)
+        return
+      }
+      await createLocalAudioClip({
+        projectId: rid,
+        trackId: resolvedTrackId,
+        trackRef: getTrackHistoryRef(tracks().find((entry) => entry.id === resolvedTrackId)),
+        startSec,
+        fileName: file.name,
+        decoded,
+        source: sourceMetadata,
+        sourceAssetKey: asset.id,
+        sourceKind: 'upload',
+        insertLocalClip,
+        selectClip: applySelectionAfterCreate,
+        historyPush: options.historyPush,
+        audioBufferCache,
+      })
+      return
+    }
+
     const uid = userId()
-    if (!rid || !uid) return
+    if (!uid) return
+    const sourceAssetKey = createAudioAssetKey()
 
     try {
       await createUploadedAudioClip({
-        roomId: rid,
+        projectId: rid,
         userId: uid,
         trackId: resolvedTrackId,
         trackRef: getTrackHistoryRef(tracks().find((entry) => entry.id === resolvedTrackId)),
@@ -270,7 +361,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
         uploadToR2,
         audioBufferCache,
         grantClipWrite,
-        grantScope: { roomId: rid, userId: uid },
+        grantScope: { projectId: rid, userId: uid },
       })
     } catch {}
   }

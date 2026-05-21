@@ -5,9 +5,11 @@ import { buildClipCreateSnapshot, buildCreatedClipSelection, createProjectedClip
 import { buildClipRemoveManyMutationInput } from '~/lib/clip-mutation-args'
 import { getTrackDeleteConflictMessage } from '~/lib/delete-conflict-messages'
 import { buildTrackEffectQueryArgs } from '~/lib/effect-track-args'
+import { isLocalId } from '~/lib/local-ids'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { isClipCompatibleWithTrack } from '~/lib/track-routing'
 import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { calcNonOverlapStart, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import { buildClipDeleteHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
@@ -30,7 +32,7 @@ type TimelineClipActionsOptions = {
   selection: TimelineSelectionController
   setPendingDeleteTrackId: Setter<Track['id'] | null>
   setConfirmOpen: Setter<boolean>
-  roomId: Accessor<string | undefined>
+  projectId: Accessor<string | undefined>
   userId: Accessor<string | undefined>
   convexClient: ConvexClientType
   convexApi: ConvexApiType
@@ -59,7 +61,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     selection,
     setPendingDeleteTrackId,
     setConfirmOpen,
-    roomId,
+    projectId,
     userId,
     convexClient,
     convexApi,
@@ -125,10 +127,38 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     const writableSelectedIds = getWritableSelectedClipIds(selectedIds)
     if (writableSelectedIds.size === 0) return
 
+    const rid = projectId()
+    const snapshot = tracks()
+    if (rid && isLocalId('project', rid)) {
+      const repository = createLocalTimelineRepository(rid)
+      await Promise.all(Array.from(writableSelectedIds).map((clipId) => repository.deleteClip(clipId)))
+
+      const remainingSelectedIds = new Set(Array.from(selectedIds).filter((clipId) => !writableSelectedIds.has(clipId)))
+      const nextPrimary: SelectedClip = (() => {
+        if (remainingSelectedIds.size === 0) return null
+        for (const track of snapshot) {
+          const clip = track.clips.find((entry) => remainingSelectedIds.has(entry.id))
+          if (clip) return { trackId: track.id, clipId: clip.id }
+        }
+        return null
+      })()
+
+      removeLocalClips(writableSelectedIds)
+
+      batch(() => {
+        selection.setSelectedClip(nextPrimary)
+        selection.setSelectedClipIds(remainingSelectedIds)
+        if (nextPrimary) {
+          selection.setSelectedTrackId(nextPrimary.trackId)
+          selection.setSelectedFXTarget(nextPrimary.trackId)
+        }
+      })
+      return
+    }
+
     const uid = userId()
     if (!uid) return
 
-    const snapshot = tracks()
     const result = await convexClient.mutation(
       convexApi.clips.removeMany,
       buildClipRemoveManyMutationInput({ clipIds: Array.from(writableSelectedIds), userId: uid }),
@@ -151,9 +181,9 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     })()
 
     try {
-      const rid = roomId()
+      const rid = projectId()
       if (rid && typeof historyPush === 'function') {
-        const entry = buildClipDeleteHistoryEntry({ roomId: rid, tracks: snapshot, clipIds: removedIds })
+        const entry = buildClipDeleteHistoryEntry({ projectId: rid, tracks: snapshot, clipIds: removedIds })
         if (entry.data.items.length > 0) historyPush(entry)
       }
     } catch {}
@@ -213,25 +243,84 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       }
     }
 
-    const rid = roomId()
+    const rid = projectId()
+    if (rid && isLocalId('project', rid) && pending.length > 0) {
+      const repository = createLocalTimelineRepository(rid)
+      const created = []
+      for (const item of pending) {
+        const row = await repository.createClip({
+          trackId: item.trackId,
+          name: item.clip.name,
+          startSec: item.clip.startSec,
+          duration: item.clip.duration,
+          color: item.clip.midi ? 'clip-midi' : 'clip-audio',
+          sourceAssetKey: item.clip.sourceAssetKey,
+          sourceKind: item.clip.sourceKind,
+          sourceDurationSec: item.clip.source?.durationSec,
+          sourceSampleRate: item.clip.source?.sampleRate,
+          sourceChannelCount: item.clip.source?.channelCount,
+          leftPadSec: item.clip.timing?.leftPadSec,
+          bufferOffsetSec: item.clip.timing?.bufferOffsetSec,
+          sampleUrl: item.clip.sampleUrl,
+          midi: item.clip.midi,
+          midiOffsetBeats: item.clip.timing?.midiOffsetBeats,
+        })
+        const clip: Clip = {
+          id: row.id,
+          historyRef: row.historyRef,
+          name: row.name,
+          buffer: item.buffer,
+          startSec: row.startSec,
+          duration: row.duration,
+          color: row.color,
+          sampleUrl: row.sampleUrl,
+          sourceAssetKey: row.sourceAssetKey,
+          sourceKind: row.sourceKind,
+          sourceDurationSec: row.sourceDurationSec,
+          sourceSampleRate: row.sourceSampleRate,
+          sourceChannelCount: row.sourceChannelCount,
+          leftPadSec: row.leftPadSec,
+          bufferOffsetSec: row.bufferOffsetSec,
+          midi: row.midi,
+          midiOffsetBeats: row.midiOffsetBeats,
+        }
+        insertLocalClip(item.trackId, clip)
+        if (item.buffer) audioBufferCache.set(row.id, item.buffer)
+        created.push({
+          trackId: item.trackId,
+          clipId: row.id,
+          clip: {
+            ...item.clip,
+            historyRef: row.historyRef,
+          },
+        })
+      }
+
+      const nextSelection = buildCreatedClipSelection(created)
+      if (nextSelection) {
+        selection.selectClipGroup(nextSelection)
+      }
+      return
+    }
+
     const uid = userId()
     if (!rid || !uid || pending.length === 0) return
 
     const created = await createProjectedClips({
-      roomId: rid,
+      projectId: rid,
       userId: uid,
       items: pending,
       createMany: async (items) => await convexClient.mutation(convexApi.clips.createMany, { items }),
       insertLocalClip,
       audioBufferCache,
       grantClipWrites,
-      grantScope: { roomId: rid, userId: uid },
+      grantScope: { projectId: rid, userId: uid },
     })
 
     for (const item of created) {
       pushClipCreateHistory({
         historyPush,
-        roomId: rid,
+        projectId: rid,
         trackId: item.trackId,
         trackRef: getTrackHistoryRef(tsSnapshot.find((entry) => entry.id === item.trackId)),
         clipId: item.clipId,
@@ -246,19 +335,33 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
   }
 
   const performDeleteTrack = async (trackId: Track['id']) => {
-    const uid = userId()
-    if (!uid) return
-
     const snapshot = tracks()
     const track = snapshot.find(entry => entry.id === trackId)
     if (!track) return
+    const rid = projectId()
+
+    if (rid && isLocalId('project', rid)) {
+      await createLocalTimelineRepository(rid).deleteTrack(trackId)
+      removeLocalTrack(trackId)
+      const next = snapshot.filter(entry => entry.id !== trackId)
+      batch(() => {
+        if (next.length > 0) {
+          selection.selectTrackTarget(next[0].id, { clearClipSelection: true })
+        } else {
+          selection.selectMasterTarget()
+        }
+      })
+      return
+    }
+
+    const uid = userId()
+    if (!uid) return
 
     let historyEntry: ReturnType<typeof buildTrackDeleteHistoryEntry> | null = null
     try {
-      const rid = roomId()
       if (rid && typeof historyPush === 'function') {
         historyEntry = buildTrackDeleteHistoryEntry({
-          roomId: rid,
+          projectId: rid,
           track,
           tracks: snapshot,
           effects: await loadTrackDeleteEffects(trackId),

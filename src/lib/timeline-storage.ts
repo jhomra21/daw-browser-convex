@@ -21,7 +21,7 @@ export type LocalMixMap = Record<string, LocalMixPatch>
 type LocalRoutingPatch = Pick<LocalMixPatch, 'sends' | 'outputTargetId'>
 type LocalRoutingMap = Record<string, LocalRoutingPatch>
 type HistoryStorageScope = {
-  roomId?: string
+  projectId?: string
   userId?: string
 }
 
@@ -240,8 +240,8 @@ export const saveLoopSettings = (rid: string | undefined, value: LoopSettings) =
 }
 
 const toHistoryStorageKey = (scope: HistoryStorageScope) => {
-  if (!scope.roomId) return null
-  return scope.userId ? `${scope.roomId}:${scope.userId}` : scope.roomId
+  if (!scope.projectId) return null
+  return scope.userId ? `${scope.projectId}:${scope.userId}` : scope.projectId
 }
 
 const toHistoryLocalStorageKey = (storageKey: string) => `${HISTORY_KEY_PREFIX}${storageKey}`
@@ -253,7 +253,7 @@ const readStoredHistory = (storageKey: string) => {
 }
 
 export const loadHistory = (scope: HistoryStorageScope): PersistedHistory => {
-  if (!scope.roomId || !canUseLocalStorage()) return { undo: [], redo: [] }
+  if (!scope.projectId || !canUseLocalStorage()) return { undo: [], redo: [] }
   try {
     const scopedKey = toHistoryStorageKey(scope)
     if (scopedKey) {
@@ -263,7 +263,7 @@ export const loadHistory = (scope: HistoryStorageScope): PersistedHistory => {
       }
     }
 
-    const legacyHistory = readStoredHistory(scope.roomId)
+    const legacyHistory = readStoredHistory(scope.projectId)
     if (legacyHistory === null) {
       return { undo: [], redo: [] }
     }
@@ -271,7 +271,7 @@ export const loadHistory = (scope: HistoryStorageScope): PersistedHistory => {
     if (scope.userId && scopedKey) {
       try {
         localStorage.setItem(toHistoryLocalStorageKey(scopedKey), JSON.stringify(serializePersistedHistory(normalized)))
-        localStorage.removeItem(toHistoryLocalStorageKey(scope.roomId))
+        localStorage.removeItem(toHistoryLocalStorageKey(scope.projectId))
       } catch {}
     }
     return normalized

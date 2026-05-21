@@ -2,7 +2,9 @@ import { buildClipCreatePayload, buildLocalClip, createManyClips } from '~/lib/c
 import { buildClipMoveMutationInput, buildClipRemoveManyMutationInput } from '~/lib/clip-mutation-args'
 import { buildTrackEffectMutationInput } from '~/lib/effect-track-args'
 import { persistClipTiming } from '~/lib/clip-mutations'
+import { isLocalId } from '~/lib/local-ids'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import { buildTrackRoutingMutationInput } from '~/lib/track-routing-state'
 import { buildTrackCreateMutationInput, buildTrackDeleteMutationInput, buildTrackMixMutationInput, buildTrackVolumeMutationInput } from '~/lib/track-mutation-args'
@@ -19,9 +21,9 @@ type Deps = {
   convexApi: typeof import('~/lib/convex').convexApi
   getTracks: () => Track[]
   getHistoryEntries: () => HistoryEntry[]
-  roomId: string
+  projectId: string
   userId: string
-  persistLocalMix: (roomId: string, trackId: Track['id'], patch: LocalMixPatch) => void
+  persistLocalMix: (projectId: string, trackId: Track['id'], patch: LocalMixPatch) => void
   audioEngine: AudioEngine
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
   grantTrackWrite: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
@@ -81,6 +83,32 @@ function buildHistoryContext(deps: Deps) {
   }
 }
 
+function isLocalProject(deps: Deps) {
+  return isLocalId('project', deps.projectId)
+}
+
+function toCreateClipInput(trackId: Track['id'], clip: Track['clips'][number]) {
+  return {
+    id: clip.id,
+    historyRef: clip.historyRef,
+    trackId,
+    name: clip.name,
+    startSec: clip.startSec,
+    duration: clip.duration,
+    color: clip.color,
+    sourceAssetKey: clip.sourceAssetKey,
+    sourceKind: clip.sourceKind,
+    sourceDurationSec: clip.sourceDurationSec,
+    sourceSampleRate: clip.sourceSampleRate,
+    sourceChannelCount: clip.sourceChannelCount,
+    leftPadSec: clip.leftPadSec,
+    bufferOffsetSec: clip.bufferOffsetSec,
+    sampleUrl: clip.sampleUrl,
+    midi: clip.midi,
+    midiOffsetBeats: clip.midiOffsetBeats,
+  }
+}
+
 function requireResolved<T>(value: T | null | undefined, message: string): T {
   if (value === null || value === undefined) {
     throw new Error(message)
@@ -100,6 +128,11 @@ function buildTrackIdByClipId(tracks: Track[]) {
 
 async function removeClipIdsOrThrow(deps: Deps, clipIds: string[], message: string) {
   if (clipIds.length === 0) return
+  if (isLocalProject(deps)) {
+    const repo = createLocalTimelineRepository(deps.projectId)
+    await Promise.all(clipIds.map((clipId) => repo.deleteClip(clipId)))
+    return
+  }
   const result = await deps.convexClient.mutation(
     deps.convexApi.clips.removeMany,
     buildClipRemoveManyMutationInput({ clipIds, userId: deps.userId }),
@@ -115,6 +148,10 @@ async function removeClipIdsOrThrow(deps: Deps, clipIds: string[], message: stri
 }
 
 async function removeTrackOrThrow(deps: Deps, trackId: Track['id'], message: string) {
+  if (isLocalProject(deps)) {
+    await createLocalTimelineRepository(deps.projectId).deleteTrack(trackId)
+    return
+  }
   const result = await deps.convexClient.mutation(
     deps.convexApi.tracks.remove,
     buildTrackDeleteMutationInput({ trackId, userId: deps.userId }),
@@ -175,8 +212,10 @@ async function applyTrackVolumeEntry(entry: Extract<HistoryEntry, { type: 'track
   const trackId = requireResolved(resolveTrackId(index, entry.data.trackRef), 'Track not found for track-volume history entry')
   const volume = pickDirectionalValue(direction, entry.data.from, entry.data.to)
   deps.actions.cancelTrackVolumeWrite(trackId)
-  if (entry.data.scope === 'local') {
-    deps.persistLocalMix(deps.roomId, trackId, { volume })
+  if (isLocalProject(deps)) {
+    await createLocalTimelineRepository(deps.projectId).updateTrack({ trackId, volume })
+  } else if (entry.data.scope === 'local') {
+    deps.persistLocalMix(deps.projectId, trackId, { volume })
   } else {
     await deps.convexClient.mutation(
       deps.convexApi.tracks.setVolume,
@@ -196,10 +235,12 @@ async function applyTrackBooleanEntry(
   const value = pickDirectionalValue(direction, entry.data.from, entry.data.to)
   const patch = entry.type === 'track-mute' ? { muted: value } : { soloed: value }
   deps.actions.cancelTrackMixWrite(trackId)
-  if (entry.data.scope !== 'local') {
+  if (isLocalProject(deps)) {
+    await createLocalTimelineRepository(deps.projectId).updateTrack({ trackId, ...patch })
+  } else if (entry.data.scope !== 'local') {
     await persistTrackMixState(deps.convexClient, deps.convexApi, deps.userId, trackId, patch)
   } else {
-    deps.persistLocalMix(deps.roomId, trackId, patch)
+    deps.persistLocalMix(deps.projectId, trackId, patch)
   }
   deps.actions.applyTrackMixState(trackId, patch, entry.data.scope)
 }
@@ -211,7 +252,15 @@ async function applyTrackRoutingEntry(entry: Extract<HistoryEntry, { type: 'trac
   const routing = resolveTrackRoutingSnapshot(index, pickDirectionalValue(direction, entry.data.from, entry.data.to))
   const normalizedRouting = track ? normalizeTrackRouting(track, routing, deps.getTracks()) : routing
   deps.actions.cancelTrackRoutingWrite(trackId)
-  await persistTrackRouting(deps.convexClient, deps.convexApi, deps.userId, trackId, normalizedRouting)
+  if (isLocalProject(deps)) {
+    await createLocalTimelineRepository(deps.projectId).updateTrack({
+      trackId,
+      outputTargetId: normalizedRouting.outputTargetId ?? null,
+      sends: normalizedRouting.sends ?? [],
+    })
+  } else {
+    await persistTrackRouting(deps.convexClient, deps.convexApi, deps.userId, trackId, normalizedRouting)
+  }
   deps.actions.applyTrackRouting(trackId, normalizedRouting)
 }
 
@@ -226,13 +275,13 @@ async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, dire
   switch (entry.data.effect) {
     case 'master-eq': {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-      await deps.convexClient.mutation(deps.convexApi.effects.setMasterEqParams, { roomId: deps.roomId, userId: deps.userId, params })
+      await deps.convexClient.mutation(deps.convexApi.effects.setMasterEqParams, { projectId: deps.projectId, userId: deps.userId, params })
       try { deps.audioEngine.setMasterEq(params) } catch {}
       return
     }
     case 'master-reverb': {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-      await deps.convexClient.mutation(deps.convexApi.effects.setMasterReverbParams, { roomId: deps.roomId, userId: deps.userId, params })
+      await deps.convexClient.mutation(deps.convexApi.effects.setMasterReverbParams, { projectId: deps.projectId, userId: deps.userId, params })
       try { deps.audioEngine.setMasterReverb(params) } catch {}
       return
     }
@@ -241,7 +290,7 @@ async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, dire
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
       await deps.convexClient.mutation(
         deps.convexApi.effects.setEqParams,
-        buildTrackEffectMutationInput({ roomId: deps.roomId, trackId, userId: deps.userId, params }),
+        buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params }),
       )
       try { deps.audioEngine.setTrackEq(trackId, params) } catch {}
       return
@@ -251,7 +300,7 @@ async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, dire
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
       await deps.convexClient.mutation(
         deps.convexApi.effects.setReverbParams,
-        buildTrackEffectMutationInput({ roomId: deps.roomId, trackId, userId: deps.userId, params }),
+        buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params }),
       )
       try { deps.audioEngine.setTrackReverb(trackId, params) } catch {}
       return
@@ -261,7 +310,7 @@ async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, dire
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
       await deps.convexClient.mutation(
         deps.convexApi.effects.setSynthParams,
-        buildTrackEffectMutationInput({ roomId: deps.roomId, trackId, userId: deps.userId, params }),
+        buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params }),
       )
       try { deps.audioEngine.setTrackSynth(trackId, params) } catch {}
       return
@@ -271,7 +320,7 @@ async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, dire
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
       await deps.convexClient.mutation(
         deps.convexApi.effects.setArpeggiatorParams,
-        buildTrackEffectMutationInput({ roomId: deps.roomId, trackId, userId: deps.userId, params }),
+        buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params }),
       )
       try { deps.audioEngine.setTrackArpeggiator(trackId, params) } catch {}
       return
@@ -283,6 +332,20 @@ async function applyClipTimingEntry(entry: Extract<HistoryEntry, { type: 'clip-t
   const index = buildRefIndex(deps)
   const clipId = requireResolved(resolveClipId(index, entry.data.clipRef), 'Clip not found for clip-timing history entry')
   const timing = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+  if (isLocalProject(deps)) {
+    const applied = await createLocalTimelineRepository(deps.projectId).updateClip({
+      clipId,
+      startSec: timing.startSec,
+      duration: timing.duration,
+      leftPadSec: timing.leftPadSec,
+      bufferOffsetSec: timing.bufferOffsetSec,
+      midiOffsetBeats: timing.midiOffsetBeats,
+    })
+    if (!applied) throw new Error('Failed to apply local clip timing during history replay')
+    deps.actions.commitClipTiming(clipId, timing)
+    deps.actions.rescheduleChangedClips([clipId])
+    return
+  }
   const applied = await persistClipTiming(deps.convexClient, deps.convexApi, deps.userId, {
     clipId,
     startSec: timing.startSec,
@@ -299,7 +362,7 @@ async function applyClipTimingEntry(entry: Extract<HistoryEntry, { type: 'clip-t
 }
 
 async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-delete' }>, deps: Deps) {
-  const grantScope = { roomId: deps.roomId, userId: deps.userId }
+  const grantScope = { projectId: deps.projectId, userId: deps.userId }
   const index = buildRefIndex(deps)
   const sourceItems = entry.data.items ?? []
   if (sourceItems.length === 0) return
@@ -314,14 +377,22 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
   const recreatedClipIdsByRef = new Map((entry.data.recreatedClips ?? []).map((item) => [item.clipRef, item.clipId]))
   const pendingItems = items.filter((item) => !recreatedClipIdsByRef.has(item.clip.clipRef!))
   if (pendingItems.length > 0) {
-    const created = await createManyClips({
-      roomId: deps.roomId,
-      userId: deps.userId,
-      items: pendingItems,
-      createMany: async (clipPayloads) => await deps.convexClient.mutation(deps.convexApi.clips.createMany, { items: clipPayloads }),
-    })
-    for (let indexValue = 0; indexValue < created.length; indexValue++) {
-      recreatedClipIdsByRef.set(pendingItems[indexValue].clip.clipRef!, created[indexValue].clipId)
+    if (isLocalProject(deps)) {
+      const repo = createLocalTimelineRepository(deps.projectId)
+      for (const item of pendingItems) {
+        const row = await repo.createClip(toCreateClipInput(item.trackId, buildLocalClip({ id: item.clip.clipRef!, clip: item.clip })))
+        recreatedClipIdsByRef.set(item.clip.clipRef!, row.id)
+      }
+    } else {
+      const created = await createManyClips({
+        projectId: deps.projectId,
+        userId: deps.userId,
+        items: pendingItems,
+        createMany: async (clipPayloads) => await deps.convexClient.mutation(deps.convexApi.clips.createMany, { items: clipPayloads }),
+      })
+      for (let indexValue = 0; indexValue < created.length; indexValue++) {
+        recreatedClipIdsByRef.set(pendingItems[indexValue].clip.clipRef!, created[indexValue].clipId)
+      }
     }
   }
 
@@ -351,11 +422,11 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
 }
 
 async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: HistoryDirection) {
-  if (entry.roomId !== deps.roomId) {
-    throw new Error(`History entry room mismatch: expected ${deps.roomId}, received ${entry.roomId}`)
+  if (entry.projectId !== deps.projectId) {
+    throw new Error(`History entry room mismatch: expected ${deps.projectId}, received ${entry.projectId}`)
   }
-  const { convexClient, convexApi, roomId, userId } = deps
-  const grantScope = { roomId, userId }
+  const { convexClient, convexApi, projectId, userId } = deps
+  const grantScope = { projectId, userId }
   const historyContext = buildHistoryContext(deps)
 
   switch (entry.type) {
@@ -373,7 +444,9 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       const trackId = requireResolved(resolveTrackId(index, entry.data.trackRef), 'Track not found for clip-create redo')
       const existingId = entry.data.clip.currentId
       const clipSnapshot = entry.data.clip
-      const newId = existingId || await convexClient.mutation(convexApi.clips.create, buildClipCreatePayload({ roomId, userId, trackId, clip: clipSnapshot }))
+      const newId = existingId || (isLocalProject(deps)
+        ? (await createLocalTimelineRepository(projectId).createClip(toCreateClipInput(trackId, buildLocalClip({ id: clipSnapshot.clipRef!, clip: clipSnapshot })))).id
+        : await convexClient.mutation(convexApi.clips.create, buildClipCreatePayload({ projectId, userId, trackId, clip: clipSnapshot })))
       if (!newId) throw new Error('Failed to recreate clip')
       entry.data.clip.currentId = newId
       deps.grantClipWrite(newId, grantScope)
@@ -405,12 +478,17 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
         const clipId = requireResolved(resolveClipId(index, move.clipRef), 'Clip not found for clips-move history entry')
         const target = pickDirectionalValue(direction, move.from, move.to)
         const toTrackId = requireResolved(resolveTrackId(index, target.trackRef), 'Target track not found for clips-move history entry')
-        const result = await convexClient.mutation(
-          convexApi.clips.move,
-          buildClipMoveMutationInput({ clipId, userId, startSec: target.startSec, toTrackId }),
-        )
-        if (result?.status !== 'applied') {
-          throw new Error('Failed to move clip during history replay')
+        if (isLocalProject(deps)) {
+          const updated = await createLocalTimelineRepository(projectId).updateClip({ clipId, trackId: toTrackId, startSec: target.startSec })
+          if (!updated) throw new Error('Failed to move local clip during history replay')
+        } else {
+          const result = await convexClient.mutation(
+            convexApi.clips.move,
+            buildClipMoveMutationInput({ clipId, userId, startSec: target.startSec, toTrackId }),
+          )
+          if (result?.status !== 'applied') {
+            throw new Error('Failed to move clip during history replay')
+          }
         }
         deps.actions.commitClipMoves([{ clipId, trackId: toTrackId, startSec: target.startSec }])
         movedClipIds.push(clipId)
@@ -437,16 +515,26 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
 
       let newId = resolveStoredTrackId(deps.getTracks(), entry.data.currentTrackId)
       if (!newId) {
-        newId = await convexClient.mutation(
-          convexApi.tracks.create,
-          buildTrackCreateMutationInput({
-            roomId,
-            userId,
+        if (isLocalProject(deps)) {
+          newId = (await createLocalTimelineRepository(projectId).createTrack({
+            id: entry.data.trackRef,
+            historyRef: entry.data.trackRef,
             index: entry.data.index,
             kind: entry.data.kind,
             channelRole: entry.data.channelRole,
-          }),
-        )
+          })).id as Track['id']
+        } else {
+          newId = await convexClient.mutation(
+            convexApi.tracks.create,
+            buildTrackCreateMutationInput({
+              projectId,
+              userId,
+              index: entry.data.index,
+              kind: entry.data.kind,
+              channelRole: entry.data.channelRole,
+            }),
+          )
+        }
       }
       if (!newId) throw new Error('Failed to recreate track')
       entry.data.currentTrackId = newId
@@ -476,23 +564,40 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
 
       let newTrackId = resolveStoredTrackId(deps.getTracks(), entry.data.recreatedTrackId)
       if (!newTrackId) {
-        newTrackId = await convexClient.mutation(
-          convexApi.tracks.create,
-          buildTrackCreateMutationInput({
-            roomId,
-            userId,
+        if (isLocalProject(deps)) {
+          newTrackId = (await createLocalTimelineRepository(projectId).createTrack({
+            id: entry.data.track.trackRef,
+            historyRef: entry.data.track.trackRef,
+            name: entry.data.track.name,
             index: entry.data.track.index,
+            volume: entry.data.track.volume,
+            muted: entry.data.track.muted,
+            soloed: entry.data.track.soloed,
             kind: entry.data.track.kind,
             channelRole: entry.data.track.channelRole,
-          }),
-        )
+            sends: [],
+          })).id as Track['id']
+        } else {
+          newTrackId = await convexClient.mutation(
+            convexApi.tracks.create,
+            buildTrackCreateMutationInput({
+              projectId,
+              userId,
+              index: entry.data.track.index,
+              kind: entry.data.track.kind,
+              channelRole: entry.data.track.channelRole,
+            }),
+          )
+        }
       }
       if (!newTrackId) throw new Error('Failed to recreate deleted track')
       entry.data.recreatedTrackId = newTrackId
       deps.grantTrackWrite(newTrackId, grantScope)
       syncTrackCreateEntryId(deps.getHistoryEntries(), entry.data.track.trackRef, newTrackId)
-      await convexClient.mutation(convexApi.tracks.setVolume, buildTrackVolumeMutationInput({ trackId: newTrackId, volume: entry.data.track.volume, userId }))
-      await persistTrackMixState(convexClient, convexApi, userId, newTrackId, { muted: entry.data.track.muted, soloed: entry.data.track.soloed })
+      if (!isLocalProject(deps)) {
+        await convexClient.mutation(convexApi.tracks.setVolume, buildTrackVolumeMutationInput({ trackId: newTrackId, volume: entry.data.track.volume, userId }))
+        await persistTrackMixState(convexClient, convexApi, userId, newTrackId, { muted: entry.data.track.muted, soloed: entry.data.track.soloed })
+      }
 
       deps.actions.insertLocalTrack(createLocalTrack({
         id: newTrackId,
@@ -509,17 +614,21 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
         outputTargetId: undefined,
       }), entry.data.track.index)
 
-      if (entry.data.effects?.eq) await convexClient.mutation(convexApi.effects.setEqParams, buildTrackEffectMutationInput({ roomId, trackId: newTrackId, userId, params: entry.data.effects.eq }))
-      if (entry.data.effects?.reverb) await convexClient.mutation(convexApi.effects.setReverbParams, buildTrackEffectMutationInput({ roomId, trackId: newTrackId, userId, params: entry.data.effects.reverb }))
-      if (entry.data.effects?.synth) await convexClient.mutation(convexApi.effects.setSynthParams, buildTrackEffectMutationInput({ roomId, trackId: newTrackId, userId, params: entry.data.effects.synth }))
-      if (entry.data.effects?.arp) await convexClient.mutation(convexApi.effects.setArpeggiatorParams, buildTrackEffectMutationInput({ roomId, trackId: newTrackId, userId, params: entry.data.effects.arp }))
+      if (!isLocalProject(deps)) {
+        if (entry.data.effects?.eq) await convexClient.mutation(convexApi.effects.setEqParams, buildTrackEffectMutationInput({ projectId, trackId: newTrackId, userId, params: entry.data.effects.eq }))
+        if (entry.data.effects?.reverb) await convexClient.mutation(convexApi.effects.setReverbParams, buildTrackEffectMutationInput({ projectId, trackId: newTrackId, userId, params: entry.data.effects.reverb }))
+        if (entry.data.effects?.synth) await convexClient.mutation(convexApi.effects.setSynthParams, buildTrackEffectMutationInput({ projectId, trackId: newTrackId, userId, params: entry.data.effects.synth }))
+        if (entry.data.effects?.arp) await convexClient.mutation(convexApi.effects.setArpeggiatorParams, buildTrackEffectMutationInput({ projectId, trackId: newTrackId, userId, params: entry.data.effects.arp }))
+      }
 
       const recreatedClipIdsByRef = new Map((entry.data.recreatedClips ?? []).map((item) => [item.clipRef, item.clipId]))
       const restoredClipIds: string[] = []
       for (const clip of entry.data.clips) {
         const clipRef = requireResolved(clip.clipRef, 'Missing clip reference for track-delete history entry')
         const clipSnapshot = clip
-        const newId = recreatedClipIdsByRef.get(clipRef) || await convexClient.mutation(convexApi.clips.create, buildClipCreatePayload({ roomId, userId, trackId: newTrackId, clip: clipSnapshot }))
+        const newId = recreatedClipIdsByRef.get(clipRef) || (isLocalProject(deps)
+          ? (await createLocalTimelineRepository(projectId).createClip(toCreateClipInput(newTrackId, buildLocalClip({ id: clipRef, clip: clipSnapshot })))).id
+          : await convexClient.mutation(convexApi.clips.create, buildClipCreatePayload({ projectId, userId, trackId: newTrackId, clip: clipSnapshot })))
         if (!newId) throw new Error('Failed to recreate deleted track clip')
         recreatedClipIdsByRef.set(clipRef, newId)
         deps.grantClipWrite(newId, grantScope)
@@ -539,7 +648,11 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       const restoredTrack = deps.getTracks().find((track) => track.id === newTrackId)
       if (restoredTrack) {
         const ownRouting = normalizeTrackRouting(restoredTrack, resolveTrackRoutingSnapshot(refreshedIndex, entry.data.track.routing), deps.getTracks())
-        await persistTrackRouting(convexClient, convexApi, userId, newTrackId, ownRouting)
+        if (isLocalProject(deps)) {
+          await createLocalTimelineRepository(projectId).updateTrack({ trackId: newTrackId, outputTargetId: ownRouting.outputTargetId ?? null, sends: ownRouting.sends ?? [] })
+        } else {
+          await persistTrackRouting(convexClient, convexApi, userId, newTrackId, ownRouting)
+        }
         deps.actions.applyTrackRouting(newTrackId, ownRouting)
       }
 
@@ -553,7 +666,11 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
           resolveTrackRoutingSnapshot(refreshedIndex, inbound),
         )
         const normalized = normalizeTrackRouting(sourceTrack, merged, deps.getTracks())
-        await persistTrackRouting(convexClient, convexApi, userId, sourceTrackId, normalized)
+        if (isLocalProject(deps)) {
+          await createLocalTimelineRepository(projectId).updateTrack({ trackId: sourceTrackId, outputTargetId: normalized.outputTargetId ?? null, sends: normalized.sends ?? [] })
+        } else {
+          await persistTrackRouting(convexClient, convexApi, userId, sourceTrackId, normalized)
+        }
         deps.actions.applyTrackRouting(sourceTrackId, normalized)
       }
       return

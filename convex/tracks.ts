@@ -5,7 +5,7 @@ import {
   deleteMixerStateForTrack,
   ensureMixerChannelForTrack,
   getMergedTrack,
-  listRoomTracksWithMixerChannels,
+  listProjectTracksWithMixerChannels,
   normalizeMixerLockState,
   removeTrackRoutingReferences,
 } from "./mixerChannels";
@@ -14,7 +14,7 @@ import {
   sanitizeTrackRouting,
 } from "./trackRouting";
 import { getTrackWriteAccess, requireTrackOwnerForWrite } from "./trackWrites";
-import { requireRoomAccess } from "./roomAccess";
+import { requireProjectAccess } from "./projectAccess";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -155,13 +155,13 @@ async function deleteTrackFromPreflight(
     }
   }
 
-  await removeTrackRoutingReferences(ctx, track.roomId, track._id);
+  await removeTrackRoutingReferences(ctx, track.projectId, track._id);
   await deleteMixerStateForTrack(ctx, track._id);
   await ctx.db.delete(owner._id);
   await ctx.db.delete(track._id);
   const remaining = await ctx.db
     .query("tracks")
-    .withIndex("by_room_index", (q: any) => q.eq("roomId", track.roomId))
+    .withIndex("by_room_index", (q: any) => q.eq("projectId", track.projectId))
     .collect();
   for (const remainingTrack of remaining) {
     if (remainingTrack.index <= track.index) continue;
@@ -182,20 +182,20 @@ export async function deleteOwnedTrack(
 }
 
 export const listByRoom = query({
-  args: { roomId: v.string() },
-  handler: async (ctx, { roomId }) => {
-    return await listRoomTracksWithMixerChannels(ctx, roomId);
+  args: { projectId: v.string() },
+  handler: async (ctx, { projectId }) => {
+    return await listProjectTracksWithMixerChannels(ctx, projectId);
   },
 });
 
 export const create = mutation({
-  args: { roomId: v.string(), userId: v.string(), index: v.optional(v.number()), kind: v.optional(v.string()), channelRole: v.optional(v.string()) },
-  handler: async (ctx, { roomId, userId, index, kind, channelRole }) => {
-    await requireRoomAccess(ctx, roomId, userId);
+  args: { projectId: v.string(), userId: v.string(), index: v.optional(v.number()), kind: v.optional(v.string()), channelRole: v.optional(v.string()) },
+  handler: async (ctx, { projectId, userId, index, kind, channelRole }) => {
+    await requireProjectAccess(ctx, projectId, userId);
 
     const existing = await ctx.db
       .query("tracks")
-      .withIndex("by_room_index", q => q.eq("roomId", roomId))
+      .withIndex("by_room_index", q => q.eq("projectId", projectId))
       .collect();
     let nextIndex = existing.length;
     if (index !== undefined) {
@@ -208,18 +208,18 @@ export const create = mutation({
     }
 
     const trackId = await ctx.db.insert("tracks", {
-      roomId,
+      projectId,
       index: nextIndex,
       kind,
     });
     await ctx.db.insert(
       "mixerChannels",
-      buildMixerChannelInsert(roomId, trackId, {
+      buildMixerChannelInsert(projectId, trackId, {
         channelRole: sanitizeChannelRole(channelRole),
       }),
     );
     await ctx.db.insert("ownerships", {
-      roomId,
+      projectId,
       ownerUserId: userId,
       trackId,
     });
@@ -275,7 +275,7 @@ export const setRouting = mutation({
     const mergedTrack = await getMergedTrack(ctx, trackId);
     if (!mergedTrack) return;
 
-    const tracksInRoom = await listRoomTracksWithMixerChannels(ctx, track.roomId);
+    const tracksInRoom = await listProjectTracksWithMixerChannels(ctx, track.projectId);
 
     const nextSends = sends === undefined ? mergedTrack.sends : sends;
     const nextOutputTargetId = outputTargetId === undefined

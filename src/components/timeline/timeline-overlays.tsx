@@ -35,7 +35,7 @@ type TimelineOverlaysProps = {
     clipId: string | null
     card: TimelineMidiBounds
     userId?: string
-    roomId?: string
+    projectId?: string
     close: () => void
     changeBounds: (next: TimelineMidiBounds) => void
     auditionNote: (pitch: number, velocity?: number, durSec?: number) => void
@@ -149,7 +149,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
                   onChangeBounds={props.midi.changeBounds}
                   midi={clip().midi}
                   userId={props.midi.userId}
-                  roomId={props.midi.roomId}
+                  projectId={props.midi.projectId}
                   onAuditionNote={props.midi.auditionNote}
                   onStartLiveNote={props.midi.startLiveNote}
                   onStopLiveNote={props.midi.stopLiveNote}

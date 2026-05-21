@@ -3,7 +3,7 @@ import { useConvexQuery, convexApi } from '~/lib/convex'
 
 type ProjectExportItem = {
   _id: string
-  roomId: string
+  projectId: string
   name: string
   url: string
   r2Key: string
@@ -16,7 +16,7 @@ type ProjectExportItem = {
 }
 
 type UseProjectExportsArgs = {
-  roomId: Accessor<string>
+  projectId: Accessor<string>
   enabled?: Accessor<boolean>
 }
 
@@ -25,16 +25,16 @@ type UseProjectExportsResult = {
 }
 
 export function useProjectExports(options: UseProjectExportsArgs): UseProjectExportsResult {
-  const { roomId, enabled } = options
+  const { projectId, enabled } = options
 
   const raw = useConvexQuery(
     (convexApi as any).exports.listByRoom,
     () => {
       if (enabled && !enabled()) return null
-      const rid = roomId()
-      return rid ? ({ roomId: rid }) : null
+      const rid = projectId()
+      return rid ? ({ projectId: rid }) : null
     },
-    () => ['exports', 'by_room', roomId()]
+    () => ['exports', 'by_room', projectId()]
   )
 
   const list = createMemo<ProjectExportItem[]>(() => {

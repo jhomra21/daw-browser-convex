@@ -12,7 +12,7 @@ import type { TimelineSelectionController } from './useTimelineSelectionState'
 type UseTimelineMidiOverlayOptions = {
   audioEngine: AudioEngine
   tracks: Accessor<Track[]>
-  roomId: Accessor<string>
+  projectId: Accessor<string>
   selection: TimelineSelectionController
 }
 
@@ -56,8 +56,8 @@ export function useTimelineMidiOverlay(
   const trackIndex = createMemo(() => createTimelineTrackIndex(options.tracks()))
 
   const midiCardStorageKey = () => {
-    const roomId = options.roomId() || 'default'
-    return `mb:midi_card:${roomId}`
+    const projectId = options.projectId() || 'default'
+    return `mb:midi_card:${projectId}`
   }
 
   const persistMidiCard = () => {

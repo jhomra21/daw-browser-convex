@@ -5,7 +5,7 @@ import { getRoomShareUrl } from '~/lib/timeline-share'
 
 type UseShareMenuControllerOptions = {
   onShare?: () => void | Promise<void>
-  roomId?: Accessor<string | undefined>
+  projectId?: Accessor<string | undefined>
 }
 
 type UseShareMenuControllerReturn = {
@@ -31,7 +31,7 @@ export function useShareMenuController(
     copiedResetTimer = null
   }
 
-  const shareUrl = () => getRoomShareUrl(options.roomId?.()) ?? ''
+  const shareUrl = () => getRoomShareUrl(options.projectId?.()) ?? ''
 
   const onOpen = async () => {
     try {

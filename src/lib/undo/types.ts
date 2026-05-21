@@ -96,7 +96,7 @@ export type EffectParamsCommitPayload<Effect extends EffectType = EffectType> = 
 type EffectParamsHistoryEntryMap = {
   [Effect in EffectType]: {
     type: 'effect-params'
-    roomId: string
+    projectId: string
     data: {
       trackRef?: TrackRef
       effect: Effect
@@ -111,7 +111,7 @@ export type EffectParamsHistoryEntry<Effect extends EffectType = EffectType> = E
 export type HistoryEntry =
   | {
       type: 'clip-create'
-      roomId: string
+      projectId: string
       data: {
         trackRef: TrackRef
         clip: {
@@ -131,7 +131,7 @@ export type HistoryEntry =
     }
   | {
       type: 'clip-delete'
-      roomId: string
+      projectId: string
       data: {
         items: Array<{ trackRef: TrackRef; clip: HistoryClipSnapshot }>
         recreatedClips?: Array<{ clipRef: ClipRef; clipId: string }>
@@ -139,7 +139,7 @@ export type HistoryEntry =
     }
   | {
       type: 'clips-move'
-      roomId: string
+      projectId: string
       data: {
         moves: Array<{
           clipRef: ClipRef
@@ -150,7 +150,7 @@ export type HistoryEntry =
     }
   | {
       type: 'clip-timing'
-      roomId: string
+      projectId: string
       data: {
         clipRef: ClipRef
         from: ClipTiming
@@ -159,12 +159,12 @@ export type HistoryEntry =
     }
   | {
       type: 'track-create'
-      roomId: string
+      projectId: string
       data: { trackRef: TrackRef; currentTrackId?: string; index: number; kind?: 'audio' | 'instrument'; channelRole?: TrackChannelRole }
     }
   | {
     type: 'track-delete'
-      roomId: string
+      projectId: string
       data: {
         track: TrackSnapshot
         clips: HistoryClipSnapshot[]
@@ -176,22 +176,22 @@ export type HistoryEntry =
     }
   | {
       type: 'track-volume'
-      roomId: string
+      projectId: string
       data: { trackRef: TrackRef; scope: HistoryScope; from: number; to: number }
     }
   | {
       type: 'track-mute'
-      roomId: string
+      projectId: string
       data: { trackRef: TrackRef; scope: HistoryScope; from: boolean; to: boolean }
     }
   | {
       type: 'track-solo'
-      roomId: string
+      projectId: string
       data: { trackRef: TrackRef; scope: HistoryScope; from: boolean; to: boolean }
     }
   | {
       type: 'track-routing'
-      roomId: string
+      projectId: string
       data: { trackRef: TrackRef; from: TrackRoutingHistorySnapshot; to: TrackRoutingHistorySnapshot }
     }
   | EffectParamsHistoryEntry

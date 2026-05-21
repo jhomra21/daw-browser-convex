@@ -93,13 +93,13 @@ function buildMixerChannelStateRecord(fields: MixerChannelStateOverrides = {}, n
 }
 
 export function buildMixerChannelInsert(
-  roomId: string,
+  projectId: string,
   trackId: Id<"tracks">,
   fields: MixerChannelStateOverrides = {},
   now = Date.now(),
 ) {
   return {
-    roomId,
+    projectId,
     trackId,
     ...buildMixerChannelStateRecord(fields, now),
   };
@@ -107,7 +107,7 @@ export function buildMixerChannelInsert(
 
 function buildMixerChannelInsertForExistingTrack(track: Doc<"tracks">) {
   const legacyTrack: LegacyTrackDoc = track;
-  return buildMixerChannelInsert(track.roomId, track._id, {
+  return buildMixerChannelInsert(track.projectId, track._id, {
     volume: typeof legacyTrack.volume === "number" ? legacyTrack.volume : undefined,
     muted: typeof legacyTrack.muted === "boolean" ? legacyTrack.muted : undefined,
     soloed: typeof legacyTrack.soloed === "boolean" ? legacyTrack.soloed : undefined,
@@ -191,12 +191,12 @@ export async function deleteMixerStateForTrack(ctx: any, trackId: Id<"tracks">) 
 
 export async function removeTrackRoutingReferences(
   ctx: any,
-  roomId: string,
+  projectId: string,
   trackId: Id<"tracks">,
 ) {
   const roomChannels = await ctx.db
     .query("mixerChannels")
-    .withIndex("by_room", (q: any) => q.eq("roomId", roomId))
+    .withIndex("by_room", (q: any) => q.eq("projectId", projectId))
     .collect();
 
   for (const roomChannel of roomChannels as Doc<"mixerChannels">[]) {
@@ -216,10 +216,10 @@ export async function ensureMixerChannelForTrack(ctx: any, track: Doc<"tracks">)
   return rows[0];
 }
 
-export async function listRoomTracksWithMixerChannels(ctx: any, roomId: string): Promise<MergedTrackDoc[]> {
+export async function listProjectTracksWithMixerChannels(ctx: any, projectId: string): Promise<MergedTrackDoc[]> {
   const [tracksRaw, channelsRaw] = await Promise.all([
-    ctx.db.query("tracks").withIndex("by_room", (q: any) => q.eq("roomId", roomId)).collect(),
-    ctx.db.query("mixerChannels").withIndex("by_room", (q: any) => q.eq("roomId", roomId)).collect(),
+    ctx.db.query("tracks").withIndex("by_room", (q: any) => q.eq("projectId", projectId)).collect(),
+    ctx.db.query("mixerChannels").withIndex("by_room", (q: any) => q.eq("projectId", projectId)).collect(),
   ]);
   const tracks = tracksRaw as Doc<"tracks">[];
   const channels = channelsRaw as Doc<"mixerChannels">[];
@@ -252,15 +252,15 @@ export async function getMergedTrack(ctx: any, trackId: Id<"tracks">): Promise<M
 
 export const backfillMissingMixerChannels = internalMutation({
   args: {
-    roomId: v.optional(v.string()),
+    projectId: v.optional(v.string()),
     paginationOpts: paginationOptsValidator,
   },
-  handler: async (ctx, { roomId, paginationOpts }) => {
-    const page = roomId === undefined
+  handler: async (ctx, { projectId, paginationOpts }) => {
+    const page = projectId === undefined
       ? await ctx.db.query("tracks").paginate(paginationOpts)
       : await ctx.db
         .query("tracks")
-        .withIndex("by_room", (q) => q.eq("roomId", roomId))
+        .withIndex("by_room", (q) => q.eq("projectId", projectId))
         .paginate(paginationOpts);
     const tracks = page.page;
     const channelCounts = await Promise.all(

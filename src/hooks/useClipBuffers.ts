@@ -1,19 +1,22 @@
 import { type Accessor, untrack } from 'solid-js'
 
 import { clearWaveformAssetCache } from '~/lib/audio-peaks/asset-store'
+import { readLocalAssetBytes } from '~/lib/local-assets'
+import { isLocalId } from '~/lib/local-ids'
 import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
 
 import type { AudioEngine } from '~/lib/audio-engine'
 import type { Track } from '~/types/timeline'
 
 const audioBufferCache = new Map<string, AudioBuffer>()
+const clipMediaStatus = new Map<string, 'missing' | 'permission-denied'>()
 const loadingClipIds = new Set<string>()
 const sampleBufferLoader = createSampleBufferLoader()
 
 export type UploadToR2Result = string | null
 
 export type UploadToR2 = (
-  roomId: string,
+  projectId: string,
   assetKey: string,
   file: File,
   durationSec?: number,
@@ -23,12 +26,14 @@ type EnsureClipBuffer = (clipId: string, sampleUrl?: string) => Promise<void>
 
 type ClipBufferOptions = {
   audioEngine: AudioEngine
+  projectId?: Accessor<string>
   tracks: Accessor<Track[]>
   onBufferChange?: () => void
 }
 
 type ClipBufferControls = {
   audioBufferCache: Map<string, AudioBuffer>
+  clipMediaStatus: Map<string, 'missing' | 'permission-denied'>
   ensureClipBuffer: EnsureClipBuffer
   uploadToR2: UploadToR2
   clearClipBufferCaches: () => void
@@ -48,13 +53,20 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
   const cacheBuffer = (clipId: string, buffer: AudioBuffer) => {
     if (audioBufferCache.get(clipId) === buffer) return false
     audioBufferCache.set(clipId, buffer)
+    clipMediaStatus.delete(clipId)
     return true
+  }
+
+  const setMediaStatus = (clipId: string, status: 'missing' | 'permission-denied') => {
+    if (clipMediaStatus.get(clipId) === status) return
+    clipMediaStatus.set(clipId, status)
+    publishBufferUpdate()
   }
 
   const uploadToR2: UploadToR2 = async (room, assetKey, file, durationSec) => {
     try {
       const fd = new FormData()
-      fd.append('roomId', room)
+      fd.append('projectId', room)
       fd.append('assetKey', assetKey)
       fd.append('file', file, file.name)
       if (typeof durationSec === 'number' && isFinite(durationSec)) {
@@ -108,6 +120,17 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
     loadingClipIds.add(clipId)
     try {
       const existing = untrack(() => tracks().flatMap(t => t.clips).find(c => c.id === clipId))
+      const projectId = options.projectId?.()
+      if (projectId && isLocalId('project', projectId) && existing?.sourceAssetKey && isLocalId('asset', existing.sourceAssetKey)) {
+        const bytes = await readLocalAssetBytes(projectId, existing.sourceAssetKey)
+        if (bytes.status === 'ready') {
+          const decoded = await audioEngine.decodeAudioData(await bytes.file.arrayBuffer())
+          await applyBuffer(decoded)
+          return
+        }
+        setMediaStatus(clipId, bytes.status)
+        return
+      }
       if (existing?.sampleUrl) {
         const decoded = await sampleBufferLoader.load(existing.sampleUrl, (arrayBuffer) => audioEngine.decodeAudioData(arrayBuffer))
         if (!decoded) return
@@ -123,6 +146,7 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
     const hadEntries = loadingClipIds.size > 0 || audioBufferCache.size > 0
     loadingClipIds.clear()
     audioBufferCache.clear()
+    clipMediaStatus.clear()
     sampleBufferLoader.clear()
     clearWaveformAssetCache()
     if (hadEntries) publishBufferUpdate()
@@ -130,6 +154,7 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
 
   return {
     audioBufferCache,
+    clipMediaStatus,
     ensureClipBuffer,
     uploadToR2,
     clearClipBufferCaches,

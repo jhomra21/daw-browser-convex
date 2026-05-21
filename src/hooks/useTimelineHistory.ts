@@ -2,6 +2,8 @@ import { createEffect } from 'solid-js'
 import type { Accessor } from 'solid-js'
 
 import type { AudioEngine } from '~/lib/audio-engine'
+import { loadLocalHistory, saveLocalHistory } from '~/lib/local-history'
+import { isLocalId } from '~/lib/local-ids'
 import {
   buildOptimisticGrantScopeKey,
   readOptimisticGrantScope,
@@ -16,7 +18,7 @@ import type { Track, TrackRouting } from '~/types/timeline'
 type TimelineHistoryActions = Parameters<typeof execUndo>[1]['actions']
 
 type UseTimelineHistoryOptions = {
-  roomId: Accessor<string>
+  projectId: Accessor<string>
   userId: Accessor<string>
   getTracks: () => Track[]
   convexClient: typeof import('~/lib/convex').convexClient
@@ -25,7 +27,7 @@ type UseTimelineHistoryOptions = {
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
   grantTrackWrite: (trackId: Track['id'] | null | undefined, scope?: OptimisticGrantScope | null) => void
   grantClipWrite: (clipId: string | null | undefined, scope?: OptimisticGrantScope | null) => void
-  persistLocalMix: (roomId: string, trackId: Track['id'], patch: LocalMixPatch) => void
+  persistLocalMix: (projectId: string, trackId: Track['id'], patch: LocalMixPatch) => void
   getActions: () => TimelineHistoryActions
 }
 
@@ -39,6 +41,7 @@ type HistoryScopeContext = {
   manager: UndoManager
   tracks: Track[]
   pendingRun: Promise<void>
+  hydratedFromLocalDb?: boolean
 }
 
 const cloneClip = (clip: Track['clips'][number]): Track['clips'][number] => ({
@@ -178,8 +181,8 @@ export function useTimelineHistory(
   const scopeContexts = new Map<string, HistoryScopeContext>()
 
   const readCurrentScope = () => readOptimisticGrantScope({
-    roomId: options.roomId(),
-    userId: options.userId(),
+    projectId: options.projectId(),
+    userId: isLocalId('project', options.projectId()) ? 'local' : options.userId(),
   })
 
   const readCurrentScopeKey = () => {
@@ -192,12 +195,23 @@ export function useTimelineHistory(
     const existing = scopeContexts.get(scopeKey)
     if (existing) return existing
 
+    const localProject = isLocalId('project', scope.projectId)
+    let hydrating = false
     const manager = createUndoManager({
-      onChange: (state) => saveHistory(scope, state),
+      onChange: (state) => {
+        if (hydrating) return
+        if (localProject) {
+          void saveLocalHistory(scope.projectId, state)
+          return
+        }
+        saveHistory(scope, state)
+      },
     })
     try {
+      hydrating = true
       manager.hydrate(loadHistory(scope))
     } catch {}
+    hydrating = false
 
     const context: HistoryScopeContext = {
       manager,
@@ -205,6 +219,19 @@ export function useTimelineHistory(
       pendingRun: Promise.resolve(),
     }
     scopeContexts.set(scopeKey, context)
+    if (localProject) {
+      void loadLocalHistory(scope.projectId)
+        .then((state) => {
+          if (!state || context.hydratedFromLocalDb || manager.canUndo() || manager.canRedo()) return
+          hydrating = true
+          manager.hydrate(state)
+          hydrating = false
+          context.hydratedFromLocalDb = true
+        })
+        .catch(() => {
+          context.hydratedFromLocalDb = true
+        })
+    }
     return context
   }
 
@@ -218,7 +245,7 @@ export function useTimelineHistory(
 
   const pushHistory = (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => {
     const scope = readCurrentScope()
-    if (!scope || scope.roomId !== entry.roomId) return
+    if (!scope || scope.projectId !== entry.projectId) return
     getScopeContext(scope).manager.push(entry, mergeKey, mergeWindowMs)
   }
 
@@ -302,7 +329,7 @@ export function useTimelineHistory(
             const currentSnapshot = manager.snapshot()
             return [...currentSnapshot.undo, ...currentSnapshot.redo, entry]
           },
-          roomId: scope.roomId,
+          projectId: scope.projectId,
           userId: scope.userId,
           persistLocalMix: options.persistLocalMix,
           audioEngine: options.audioEngine,

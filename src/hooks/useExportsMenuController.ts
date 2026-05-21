@@ -4,7 +4,7 @@ import { useProjectExports } from '~/hooks/useProjectExports'
 import { copyText } from '~/lib/clipboard'
 
 type UseExportsMenuControllerOptions = {
-  currentRoomId: Accessor<string>
+  currentProjectId: Accessor<string>
 }
 
 type UseExportsMenuControllerReturn = {
@@ -19,7 +19,7 @@ export function useExportsMenuController(
 ): UseExportsMenuControllerReturn {
   const [open, setOpen] = createSignal(false)
   const exportsQ = useProjectExports({
-    roomId: options.currentRoomId,
+    projectId: options.currentProjectId,
     enabled: open,
   })
 

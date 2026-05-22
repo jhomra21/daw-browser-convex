@@ -488,13 +488,14 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       }
     },
     persistParams: (targetId, params) => {
-      if (!props.projectId || !props.userId) return Promise.resolve();
+      if (!props.projectId) return Promise.resolve();
       if (isLocalId("project", props.projectId)) {
         const effect = targetId === "master" ? "master-eq" : "eq";
         return setLocalEffect(props.projectId, targetId, effect, params).then((row) => {
           setLocalEqRows((prev) => ({ ...prev, [targetId]: row }));
         });
       }
+      if (!props.userId) return Promise.resolve();
       if (targetId === "master") {
         return convexClient.mutation(convexApi.effects.setMasterEqParams, {
           projectId: props.projectId,
@@ -603,13 +604,14 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       }
     },
     persistParams: (targetId, params) => {
-      if (!props.projectId || !props.userId) return Promise.resolve();
+      if (!props.projectId) return Promise.resolve();
       if (isLocalId("project", props.projectId)) {
         const effect = targetId === "master" ? "master-reverb" : "reverb";
         return setLocalEffect(props.projectId, targetId, effect, params).then((row) => {
           setLocalReverbRows((prev) => ({ ...prev, [targetId]: row }));
         });
       }
+      if (!props.userId) return Promise.resolve();
       if (targetId === "master") {
         return convexClient.mutation(convexApi.effects.setMasterReverbParams, {
           projectId: props.projectId,

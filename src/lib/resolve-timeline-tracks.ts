@@ -324,7 +324,8 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
     const trackId = trackRow._id
     if (options.client.tracks.removedIds.has(trackId)) continue
 
-    const historyRef = options.client.tracks.historyRefsById.get(trackId) ?? trackId
+    const localTrackRow = localSnapshot ? localSnapshot.tracks[index] : undefined
+    const historyRef = options.client.tracks.historyRefsById.get(trackId) ?? localTrackRow?.historyRef ?? trackId
     const serverVolume = options.server.trackState?.serverVolumes.get(trackId)
 
     projectedTracks.push({
@@ -332,18 +333,19 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
       historyRef,
       name: resolveTrackName({
         historyRef,
+        explicitName: localTrackRow?.name,
         fallbackIndex: index + 1,
         namesByHistoryRef: options.client.tracks.namesByHistoryRef,
       }),
-      volume: serverVolume ?? 0.8,
+      volume: serverVolume ?? localTrackRow?.volume ?? 0.8,
       clips: [],
       muted: typeof trackRow.muted === 'boolean' ? trackRow.muted : false,
       soloed: typeof trackRow.soloed === 'boolean' ? trackRow.soloed : false,
       lockedBy: typeof trackRow.lockedBy === 'string' ? trackRow.lockedBy : null,
       kind: normalizeTrackKind(trackRow.kind) ?? 'audio',
       channelRole: normalizeChannelRole(trackRow.channelRole) ?? 'track',
-      sends: [],
-      outputTargetId: undefined,
+      sends: localTrackRow?.sends ?? [],
+      outputTargetId: localTrackRow?.outputTargetId,
     })
     projectedTrackIds.add(trackId)
   }

@@ -685,12 +685,6 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       return
     }
 
-    const uid = userId()
-    if (!uid) {
-      resetDragState()
-      return
-    }
-
     const plannedMoves = plannedPlacement.moves
     const previousPositions = new Map(prePositions)
     const previousMoves = plannedMoves.map((move) => ({
@@ -725,6 +719,12 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           cleanupUnusedAddedTrack(addedTrackIdForCommit)
         }
       })
+      return
+    }
+
+    const uid = userId()
+    if (!uid) {
+      resetDragState()
       return
     }
 

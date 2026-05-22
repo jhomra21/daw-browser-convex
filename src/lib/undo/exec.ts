@@ -2,6 +2,7 @@ import { buildClipCreatePayload, buildLocalClip, createManyClips } from '~/lib/c
 import { buildClipMoveMutationInput, buildClipRemoveManyMutationInput } from '~/lib/clip-mutation-args'
 import { buildTrackEffectMutationInput } from '~/lib/effect-track-args'
 import { persistClipTiming } from '~/lib/clip-mutations'
+import { setLocalEffect } from '~/lib/local-effects'
 import { isLocalId } from '~/lib/local-ids'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
@@ -271,7 +272,55 @@ function readEffectTrackId(entry: EffectParamsEntry, deps: Deps) {
   return requireResolved(resolveTrackId(index, entry.data.trackRef), `Track not found for ${entry.data.effect} history entry`)
 }
 
+async function persistLocalEffectParams(entry: EffectParamsEntry, deps: Deps, direction: HistoryDirection) {
+  const targetId = entry.data.effect === 'master-eq' || entry.data.effect === 'master-reverb'
+    ? 'master'
+    : readEffectTrackId(entry, deps)
+  switch (entry.data.effect) {
+    case 'master-eq': {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+      await setLocalEffect(deps.projectId, targetId, entry.data.effect, params)
+      try { deps.audioEngine.setMasterEq(params) } catch {}
+      return
+    }
+    case 'master-reverb': {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+      await setLocalEffect(deps.projectId, targetId, entry.data.effect, params)
+      try { deps.audioEngine.setMasterReverb(params) } catch {}
+      return
+    }
+    case 'eq': {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+      await setLocalEffect(deps.projectId, targetId, entry.data.effect, params)
+      try { deps.audioEngine.setTrackEq(targetId, params) } catch {}
+      return
+    }
+    case 'reverb': {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+      await setLocalEffect(deps.projectId, targetId, entry.data.effect, params)
+      try { deps.audioEngine.setTrackReverb(targetId, params) } catch {}
+      return
+    }
+    case 'synth': {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+      await setLocalEffect(deps.projectId, targetId, entry.data.effect, params)
+      try { deps.audioEngine.setTrackSynth(targetId, params) } catch {}
+      return
+    }
+    case 'arp': {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+      await setLocalEffect(deps.projectId, targetId, entry.data.effect, params)
+      try { deps.audioEngine.setTrackArpeggiator(targetId, params) } catch {}
+      return
+    }
+  }
+}
+
 async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, direction: HistoryDirection) {
+  if (isLocalProject(deps)) {
+    await persistLocalEffectParams(entry, deps, direction)
+    return
+  }
   switch (entry.data.effect) {
     case 'master-eq': {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)

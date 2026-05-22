@@ -11,11 +11,12 @@ import {
   type SynthCardBounds,
 } from "~/components/effects/synth-card-bounds";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
-import { buildClipCreatePayload } from "~/lib/clip-create";
+import { buildClipCreatePayload, type ClipCreateSnapshot } from "~/lib/clip-create";
 import { convexApi, convexClient, useConvexQuery } from "~/lib/convex";
 import { buildTrackEffectMutationInput, buildTrackEffectQueryArgs } from "~/lib/effect-track-args";
 import { getLocalEffect, setLocalEffect, type LocalEffectRow } from "~/lib/local-effects";
 import { isLocalId } from "~/lib/local-ids";
+import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import {
   createDefaultArpeggiatorParams,
   createDefaultSynthParams,
@@ -329,30 +330,42 @@ export function createEffectsPanelState(
     const track = currentTrack();
     if (!track || track.kind !== "instrument") return;
 
+    const projectId = context.projectId;
+    if (!projectId) return;
     const grantScope = readOptimisticGrantScope({
-      projectId: context.projectId,
+      projectId,
       userId: context.userId,
     });
-    if (!grantScope) return;
-    const { projectId, userId } = grantScope;
 
     const start = Math.max(0, Math.round((context.playheadSec ?? 0) * 1000) / 1000);
+    const clip: ClipCreateSnapshot = {
+      startSec: start,
+      duration: 1,
+      name: "MIDI Clip",
+      midi: {
+        wave: "sawtooth",
+        gain: 0.8,
+        notes: [],
+      },
+    };
 
     try {
+      if (isLocalId("project", projectId)) {
+        const row = await createLocalTimelineRepository(projectId).createClip({
+          trackId: track.id,
+          ...clip,
+        });
+        context.onSelectClip?.(track.id, row.id, start);
+        return;
+      }
+
+      if (!grantScope) return;
+      const { userId } = grantScope;
       const clipId = await convexClient.mutation(convexApi.clips.create, buildClipCreatePayload({
         projectId,
         userId,
         trackId: track.id,
-        clip: {
-          startSec: start,
-          duration: 1,
-          name: "MIDI Clip",
-          midi: {
-            wave: "sawtooth",
-            gain: 0.8,
-            notes: [],
-          },
-        },
+        clip,
       }));
       if (!clipId) return;
 

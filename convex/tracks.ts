@@ -14,7 +14,7 @@ import {
   sanitizeTrackRouting,
 } from "./trackRouting";
 import { getTrackWriteAccess, requireTrackOwnerForWrite } from "./trackWrites";
-import { requireProjectAccess } from "./projectAccess";
+import { requireProjectRole } from "./projectAccess";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -191,7 +191,7 @@ export const listByRoom = query({
 export const create = mutation({
   args: { projectId: v.string(), userId: v.string(), index: v.optional(v.number()), kind: v.optional(v.string()), channelRole: v.optional(v.string()) },
   handler: async (ctx, { projectId, userId, index, kind, channelRole }) => {
-    await requireProjectAccess(ctx, projectId, userId);
+    await requireProjectRole(ctx, projectId, userId, ["owner", "editor"]);
 
     const existing = await ctx.db
       .query("tracks")

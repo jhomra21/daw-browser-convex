@@ -1,6 +1,6 @@
 import { createLocalProjectId } from '~/lib/local-ids'
 import { listLocalAssets, readLocalAssetBytes, writeLocalAssetFile } from '~/lib/local-assets'
-import { importLocalProject } from '~/lib/local-project-db'
+import { deleteLocalProject, importLocalProject } from '~/lib/local-project-db'
 import {
   buildProjectManifest,
   createRestoredProjectEntry,
@@ -93,12 +93,13 @@ export const exportDawProjectArchive = async (projectId: string): Promise<Blob> 
   ]
   for (const asset of await listLocalAssets(projectId)) {
     const result = await readLocalAssetBytes(projectId, asset.id)
-    if (result.status === 'ready') {
-      entries.push({
-        name: `assets/${asset.id}/${asset.storagePath}`,
-        bytes: new Uint8Array(await result.file.arrayBuffer()),
-      })
+    if (result.status !== 'ready') {
+      throw new Error(`Archive export failed because "${asset.name}" is not readable.`)
     }
+    entries.push({
+      name: `assets/${asset.id}/${asset.storagePath}`,
+      bytes: new Uint8Array(await result.file.arrayBuffer()),
+    })
   }
   return createZip(entries)
 }
@@ -110,17 +111,25 @@ export const importDawProjectArchive = async (file: File): Promise<string> => {
   const manifest = migrateProjectManifest(JSON.parse(decoder.decode(manifestBytes)) as ProjectManifest)
   const projectId = createLocalProjectId()
   const project = createRestoredProjectEntry({ ...manifest, projectId }, manifest.name)
-  await importLocalProject(project, {
-    entities: manifest.entities,
-    assets: manifest.assets,
-    projectState: manifest.projectState,
-  })
-  await Promise.all(manifest.assets.map(async (asset) => {
+  const assetFiles = manifest.assets.map((asset) => {
     const bytes = entries.get(`assets/${asset.id}/${asset.storagePath}`)
-    if (!bytes) return
-    const assetBytes = new ArrayBuffer(bytes.byteLength)
-    new Uint8Array(assetBytes).set(bytes)
-    await writeLocalAssetFile(projectId, asset.storagePath, new File([assetBytes], asset.name, { type: asset.mimeType }))
-  }))
+    if (!bytes) throw new Error(`Archive is missing asset bytes for "${asset.name}".`)
+    return { asset, bytes }
+  })
+  try {
+    await importLocalProject(project, {
+      entities: manifest.entities,
+      assets: manifest.assets,
+      projectState: manifest.projectState,
+    })
+    await Promise.all(assetFiles.map(async ({ asset, bytes }) => {
+      const assetBytes = new ArrayBuffer(bytes.byteLength)
+      new Uint8Array(assetBytes).set(bytes)
+      await writeLocalAssetFile(projectId, asset.storagePath, new File([assetBytes], asset.name, { type: asset.mimeType }))
+    }))
+  } catch (error) {
+    await deleteLocalProject(projectId)
+    throw error
+  }
   return projectId
 }

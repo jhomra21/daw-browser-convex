@@ -48,6 +48,7 @@ export function useSamplesMenuController(
 
   const samples = useProjectSamples({
     projectId: options.currentProjectId,
+    userId: () => options.currentUserId() ?? '',
     enabled: open,
   })
 

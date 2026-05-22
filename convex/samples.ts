@@ -2,10 +2,12 @@ import { mutation, query } from './_generated/server'
 import { v } from 'convex/values'
 
 import { findSampleRow } from './sampleRows'
+import { requireProjectAccess } from './projectAccess'
 
 export const listByRoom = query({
-  args: { projectId: v.string() },
-  handler: async (ctx, { projectId }) => {
+  args: { projectId: v.string(), userId: v.string() },
+  handler: async (ctx, { projectId, userId }) => {
+    await requireProjectAccess(ctx, projectId, userId)
     return await ctx.db
       .query('samples')
       .withIndex('by_room', q => q.eq('projectId', projectId))

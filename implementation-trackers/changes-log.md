@@ -9,6 +9,11 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Added `.dawproject` archive import/export using a zip package with `manifest.json` shared with the cloud backup manifest shape and project-owned assets stored under stable asset IDs.
 - Routed archive imports through the shared manifest migration/assertion path and restored imported projects into local IndexedDB plus project-owned asset storage.
 
+### PR Review Follow-Up
+
+- Validated PR review findings against the real codebase and fixed the confirmed ownership, metadata access, local timeline hydration, storage-folder migration, archive integrity, archive rollback, and app-owned asset cleanup issues.
+- Kept the fixes at the existing API/Convex access, local repository hydration, local asset, and archive boundaries instead of adding parallel validation flows.
+
 ### Validation
 
 - `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed.

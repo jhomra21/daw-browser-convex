@@ -719,6 +719,7 @@ export function createAgentActions(context: AgentActionContext) {
 
       const samples = await context.convex.query(context.convexApi.samples.listByRoom as any, {
         projectId: context.projectId,
+        userId: context.userId,
       } as any) as SampleDoc[]
       const sample = pickMatchingSample(query, samples)
       if (!sample) return { error: 'Sample not found in project' }

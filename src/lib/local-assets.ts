@@ -150,15 +150,15 @@ export const setLocalProjectAssetDirectory = async (
   const previousRoot = await getWritableProjectRoot(projectId)
   if (previousRoot) {
     const rows = await listLocalAssets(projectId)
-    try {
-      const previousAssetsDir = await previousRoot.getDirectoryHandle(ASSETS_DIRECTORY_NAME)
-      await Promise.all(rows.map(async (row) => {
-        try {
-          const previousFileHandle = await previousAssetsDir.getFileHandle(row.storagePath)
-          await writeFile(nextRoot, row.storagePath, await previousFileHandle.getFile())
-        } catch {}
-      }))
-    } catch {}
+    if (rows.length === 0) {
+      await saveProjectDirectoryHandle(projectId, nextRoot)
+      return
+    }
+    const previousAssetsDir = await previousRoot.getDirectoryHandle(ASSETS_DIRECTORY_NAME)
+    await Promise.all(rows.map(async (row) => {
+      const previousFileHandle = await previousAssetsDir.getFileHandle(row.storagePath)
+      await writeFile(nextRoot, row.storagePath, await previousFileHandle.getFile())
+    }))
   }
   await saveProjectDirectoryHandle(projectId, nextRoot)
 }

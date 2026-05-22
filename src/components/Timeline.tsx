@@ -138,6 +138,26 @@ const Timeline: Component = () => {
     loopEndSec,
     setLoopRegion,
   } = useTimelinePreferences({ projectId });
+  const [localTimelineSnapshot, setLocalTimelineSnapshot] = createSignal<
+    Awaited<ReturnType<ReturnType<typeof createLocalTimelineRepository>["loadSnapshot"]>> | null
+  >(null);
+
+  createEffect(() => {
+    const rid = projectId();
+    if (!isLocalId("project", rid)) {
+      setLocalTimelineSnapshot(null);
+      return;
+    }
+    let cancelled = false;
+    void createLocalTimelineRepository(rid).loadSnapshot().then((snapshot) => {
+      if (!cancelled && projectId() === rid) setLocalTimelineSnapshot(snapshot);
+    }).catch(() => {
+      if (!cancelled && projectId() === rid) setLocalTimelineSnapshot(null);
+    });
+    onCleanup(() => {
+      cancelled = true;
+    });
+  });
   const identity = useTimelineIdentity({
     projectId,
     serverData: () => fullView.data,
@@ -267,6 +287,7 @@ const Timeline: Component = () => {
   } = useTimelineResolvedModel({
     projectId,
     fullViewData: () => fullView.data,
+    localSnapshot: localTimelineSnapshot,
     syncMix,
     writableTrackIds,
     serverTrackState,

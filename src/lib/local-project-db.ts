@@ -264,8 +264,30 @@ export const exportLocalProjectRows = async (projectId: string) => {
   return { entities, assets, projectState, syncState }
 }
 
+const deleteLocalProjectAssetFiles = async (
+  projectId: string,
+  directoryHandle?: FileSystemDirectoryHandle,
+): Promise<void> => {
+  await Promise.all([
+    (async () => {
+      try {
+        const root = await navigator.storage.getDirectory()
+        await root.removeEntry(projectId, { recursive: true })
+      } catch {}
+    })(),
+    (async () => {
+      if (!directoryHandle) return
+      try {
+        await directoryHandle.removeEntry('assets', { recursive: true })
+      } catch {}
+    })(),
+  ])
+}
+
 export const deleteLocalProject = async (projectId: string): Promise<void> => {
   const db = await openGlobalProjectsDb()
+  const directoryEntry = await db.get('directoryHandles', projectId)
+  await deleteLocalProjectAssetFiles(projectId, directoryEntry?.handle)
   const tx = db.transaction(['projects', 'directoryHandles'], 'readwrite')
   await Promise.all([
     tx.objectStore('projects').delete(projectId),

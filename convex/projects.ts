@@ -238,6 +238,18 @@ export const ensureOwnedRoom = mutation({
   },
 });
 
+export const exists = query({
+  args: { projectId: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, { projectId }) => {
+    const row = await ctx.db
+      .query("projects")
+      .withIndex("by_room", (q) => q.eq("projectId", projectId))
+      .first();
+    return Boolean(row);
+  },
+});
+
 export const deleteOwnedInRoom = mutation({
   args: { projectId: v.string(), userId: v.string() },
   returns: v.object({

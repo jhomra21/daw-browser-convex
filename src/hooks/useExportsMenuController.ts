@@ -5,6 +5,7 @@ import { copyText } from '~/lib/clipboard'
 
 type UseExportsMenuControllerOptions = {
   currentProjectId: Accessor<string>
+  currentUserId: Accessor<string | undefined>
 }
 
 type UseExportsMenuControllerReturn = {
@@ -20,6 +21,7 @@ export function useExportsMenuController(
   const [open, setOpen] = createSignal(false)
   const exportsQ = useProjectExports({
     projectId: options.currentProjectId,
+    userId: () => options.currentUserId() ?? '',
     enabled: open,
   })
 

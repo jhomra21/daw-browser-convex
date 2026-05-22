@@ -17,6 +17,7 @@ type ProjectExportItem = {
 
 type UseProjectExportsArgs = {
   projectId: Accessor<string>
+  userId: Accessor<string>
   enabled?: Accessor<boolean>
 }
 
@@ -25,16 +26,17 @@ type UseProjectExportsResult = {
 }
 
 export function useProjectExports(options: UseProjectExportsArgs): UseProjectExportsResult {
-  const { projectId, enabled } = options
+  const { projectId, userId, enabled } = options
 
   const raw = useConvexQuery(
     (convexApi as any).exports.listByRoom,
     () => {
       if (enabled && !enabled()) return null
       const rid = projectId()
-      return rid ? ({ projectId: rid }) : null
+      const uid = userId()
+      return rid && uid ? ({ projectId: rid, userId: uid }) : null
     },
-    () => ['exports', 'by_room', projectId()]
+    () => ['exports', 'by_room', projectId(), userId()]
   )
 
   const list = createMemo<ProjectExportItem[]>(() => {

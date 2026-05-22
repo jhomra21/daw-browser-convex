@@ -1,9 +1,11 @@
 import { mutation, query } from "./_generated/server"
 import { v } from "convex/values"
+import { requireProjectRole } from "./projectAccess"
 
 export const listByRoom = query({
-  args: { projectId: v.string() },
-  handler: async (ctx, { projectId }) => {
+  args: { projectId: v.string(), userId: v.string() },
+  handler: async (ctx, { projectId, userId }) => {
+    await requireProjectRole(ctx, projectId, userId, ["owner", "editor"])
     const rows = await ctx.db
       .query("exports")
       .withIndex("by_room_createdAt", q => q.eq("projectId", projectId))

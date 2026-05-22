@@ -75,6 +75,7 @@ type DefaultSampleListItem = {
 
 type UseProjectSamplesArgs = {
   projectId: Accessor<string>
+  userId?: Accessor<string>
   enabled?: Accessor<boolean>
 }
 
@@ -224,7 +225,7 @@ function mergeDefaultSampleMetadata(
 }
 
 export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSamplesResult {
-  const { projectId, enabled } = options
+  const { projectId, enabled, userId } = options
   const [refreshKey, setRefreshKey] = createSignal(0)
   const [localSamples, setLocalSamples] = createSignal<ProjectSampleListItem[]>([])
   const isLocalProject = createMemo(() => {
@@ -237,9 +238,10 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
       if (enabled && !enabled()) return null
       const rid = projectId()
       if (rid && isLocalId('project', rid)) return null
-      return rid ? ({ projectId: rid }) : null
+      const uid = userId ? userId() : ''
+      return rid && uid ? ({ projectId: rid, userId: uid }) : null
     },
-    () => ['samples', 'by_room', projectId()]
+    () => ['samples', 'by_room', projectId(), userId ? userId() : '']
   )
 
   const clips = useConvexQuery(

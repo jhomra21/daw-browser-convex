@@ -1756,6 +1756,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
   });
   const exportsMenu = useExportsMenuController({
     currentProjectId,
+    currentUserId,
   });
   const shareMenu = useShareMenuController({
     onShare: props.onShare,

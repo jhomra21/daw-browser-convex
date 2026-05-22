@@ -7,6 +7,7 @@ import {
   type ClipTimelinePatch,
   type PendingTrackEntry,
 } from '~/lib/resolve-timeline-tracks'
+import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
 import { createTimelineTrackIndex, type TimelineTrackIndex } from '~/lib/timeline-track-index'
 import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
 import type { LocalMixMap } from '~/lib/timeline-storage'
@@ -24,6 +25,7 @@ type ServerTrackState = {
 type UseTimelineResolvedModelOptions = {
   projectId: Accessor<string | undefined>
   fullViewData: Accessor<FullTimelineView | undefined>
+  localSnapshot: Accessor<TimelineSnapshot | null>
   syncMix: Accessor<boolean>
   writableTrackIds: Accessor<Set<Track['id']>>
   serverTrackState: Accessor<ServerTrackState>
@@ -75,6 +77,7 @@ export function useTimelineResolvedModel(
       projectId: options.projectId(),
       server: {
         data: options.fullViewData(),
+        localSnapshot: options.localSnapshot(),
         trackState: options.serverTrackState(),
       },
       client: {

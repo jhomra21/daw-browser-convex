@@ -435,7 +435,10 @@ app.post('/api/cloud-backups', async (c) => {
     if (!projectId || !manifestRaw) return c.json({ error: 'Missing projectId or manifest' }, 400)
 
     const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
-    await convex.mutation((convexApi as any).projects.ensureOwnedRoom, { projectId, userId: user.id })
+    const projectExists = await convex.query((convexApi as any).projects.exists, { projectId })
+    if (!projectExists) {
+      await convex.mutation((convexApi as any).projects.ensureOwnedRoom, { projectId, userId: user.id })
+    }
     const manifest = JSON.parse(manifestRaw)
     const uploadedAssetKeys: Record<string, string> = {}
     for (const [key, value] of form.entries()) {
@@ -666,7 +669,7 @@ app.post('/api/agent/chat', async (c) => {
     // Optional context: include current BPM and sample names to improve sample matching
     let contextNote = ''
     try {
-      const list: any[] = projectId ? (await convex.query(convexApi.samples.listByRoom as any, { projectId } as any)) : []
+      const list: any[] = projectId ? (await convex.query(convexApi.samples.listByRoom as any, { projectId, userId: user.id } as any)) : []
       const sampleNames = Array.isArray(list) && list.length ? list.map((sample) => (sample.name || sample.url || '')).filter(Boolean).slice(0, 20) : []
 
       let tracksLine = ''

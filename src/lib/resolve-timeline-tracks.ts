@@ -5,6 +5,7 @@ import { sanitizeAudioSourceKind } from '~/lib/audio-source-rules'
 import { isLocalId } from '~/lib/local-ids'
 import { resolveTrackMixView } from '~/lib/timeline-mix-authority'
 import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
+import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
 import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
 import type { LocalMixMap } from '~/lib/timeline-storage'
 import { normalizeTrackRouting } from '~/lib/track-routing'
@@ -48,6 +49,7 @@ type ResolveTimelineTracksOptions = {
   projectId?: string
   server: {
     data?: FullTimelineView
+    localSnapshot?: TimelineSnapshot | null
     trackState?: TimelineRoutingState | null
   }
   client: {
@@ -302,8 +304,20 @@ export function isClipPatchReflected<TTrackId extends string>(
 export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Track[] {
   const projectedTracks: Track[] = []
   const projectedTrackIds = new Set<Track['id']>()
-  const serverTracks = options.server.data?.tracks ?? []
-  const serverClips = options.server.data?.clips ?? []
+  const localSnapshot = options.server.localSnapshot
+  const serverTracks = localSnapshot
+    ? localSnapshot.tracks.map((track) => ({
+        ...track,
+        _id: track.id,
+        lockedBy: null,
+      }))
+    : options.server.data?.tracks ?? []
+  const serverClips = localSnapshot
+    ? localSnapshot.clips.map((clip) => ({
+        ...clip,
+        _id: clip.id,
+      }))
+    : options.server.data?.clips ?? []
 
   for (let index = 0; index < serverTracks.length; index++) {
     const trackRow = serverTracks[index]

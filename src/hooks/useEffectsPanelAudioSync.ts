@@ -11,6 +11,8 @@ import {
 } from "~/lib/effects/params";
 import type { AudioEngine, SpectrumFrame } from "~/lib/audio-engine";
 import { convexApi, useConvexQuery } from "~/lib/convex";
+import { listLocalEffects, type LocalEffectRow } from "~/lib/local-effects";
+import { isLocalId } from "~/lib/local-ids";
 import type { Track } from "~/types/timeline";
 
 type UseEffectsPanelAudioSyncOptions = {
@@ -40,10 +42,22 @@ export function useEffectsPanelAudioSync(
     convexApi.effects.listByRoom,
     () => {
       const projectId = options.projectId();
+      if (projectId && isLocalId("project", projectId)) return null;
       return projectId ? { projectId } : null;
     },
     () => ["effects", "room", options.projectId()],
   );
+  const [localEffects, setLocalEffects] = createSignal<LocalEffectRow[] | undefined>(undefined);
+
+  createEffect(() => {
+    const projectId = options.projectId();
+    options.tracks();
+    if (!projectId || !isLocalId("project", projectId)) {
+      setLocalEffects(undefined);
+      return;
+    }
+    void listLocalEffects(projectId).then(setLocalEffects).catch(() => setLocalEffects([]));
+  });
 
   const disabledEq = { ...createDefaultEqParams(), enabled: false };
   const disabledReverb = { ...createDefaultReverbParams(), enabled: false };
@@ -78,7 +92,7 @@ export function useEffectsPanelAudioSync(
   createEffect(() => {
     const audioEngine = options.audioEngine();
     const projectId = options.projectId();
-    const effects = roomEffects.data;
+    const effects = projectId && isLocalId("project", projectId) ? localEffects() : roomEffects.data;
     if (!audioEngine) return;
 
     const activeTargetId = options.currentTargetId();
@@ -104,6 +118,36 @@ export function useEffectsPanelAudioSync(
     let hasMasterReverb = false;
 
     for (const row of effects) {
+      if (row?.effect === "master-eq") {
+        if (activeTargetId !== "master") {
+          hasMasterEq = true;
+          audioEngine.setMasterEq(row.params);
+        }
+        continue;
+      }
+      if (row?.effect === "master-reverb") {
+        if (activeTargetId !== "master") {
+          hasMasterReverb = true;
+          audioEngine.setMasterReverb(row.params);
+        }
+        continue;
+      }
+      if (row?.effect === "eq") {
+        if (row.targetId !== activeTargetId) eqByTrackId.set(row.targetId, row.params);
+        continue;
+      }
+      if (row?.effect === "reverb") {
+        if (row.targetId !== activeTargetId) reverbByTrackId.set(row.targetId, row.params);
+        continue;
+      }
+      if (row?.effect === "synth") {
+        if (row.targetId !== activeTargetId) synthByTrackId.set(row.targetId, normalizeSynthParams(row.params));
+        continue;
+      }
+      if (row?.effect === "arp") {
+        if (row.targetId !== activeTargetId) arpByTrackId.set(row.targetId, row.params);
+        continue;
+      }
       if (row?.targetType === "master") {
         if (activeTargetId === "master") continue;
         if (row.type === "eq" && row.params) {

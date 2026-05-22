@@ -38,6 +38,8 @@ const readExports = async (projectId: string): Promise<LocalExportMetadata[]> =>
   return Array.isArray(rows) ? rows.filter(isExportMetadata) : []
 }
 
+export const listLocalExportMetadata = readExports
+
 export const saveLocalExportMetadata = async (
   projectId: string,
   input: Omit<LocalExportMetadata, 'id' | 'createdAt'>,

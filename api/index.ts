@@ -501,7 +501,7 @@ app.delete('/api/cloud-projects/:projectId', async (c) => {
     const user = await requireProjectRoleForApi(c, projectId, ['owner'])
     if (!user) return c.json({ error: 'Forbidden' }, 403)
     const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
-    const result = await convex.mutation((convexApi as any).projects.deleteOwnedInRoom, { projectId, userId: user.id })
+    const result = await convex.mutation((convexApi as any).projects.deleteRoomAsOwner, { projectId, userId: user.id })
     if (result?.status !== 'deleted') return c.json({ ok: false, result }, 409)
     await deleteR2Prefix(c.env.daw_audio_samples, `projects/${projectId}/`)
     return c.json({ ok: true, result })

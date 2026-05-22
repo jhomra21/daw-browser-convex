@@ -221,6 +221,31 @@ async function deleteOwnedRoomFromPreflight(
   }
 }
 
+async function deleteRoomRows(ctx: MutationCtx, projectId: string) {
+  const deleteRows = async (table: any, index = "by_room") => {
+    const rows = await ctx.db
+      .query(table)
+      .withIndex(index, (q: any) => q.eq("projectId", projectId))
+      .collect();
+    await Promise.all(rows.map((row: any) => ctx.db.delete(row._id)));
+  };
+
+  await Promise.all([
+    deleteRows("samples"),
+    deleteRows("exports"),
+    deleteRows("effects"),
+    deleteRows("chatHistories", "by_room_owner"),
+    deleteRows("projectMessages"),
+    deleteRows("shareInvites"),
+    deleteRows("cloudBackups"),
+    deleteRows("mixerChannels"),
+    deleteRows("clips"),
+    deleteRows("tracks"),
+    deleteRows("ownerships"),
+    deleteRows("projects"),
+  ]);
+}
+
 export const listMineDetailed = query({
   args: { userId: v.string() },
   returns: v.array(v.object({ projectId: v.string(), name: v.string() })),
@@ -264,6 +289,26 @@ export const deleteOwnedInRoom = mutation({
     }
     await deleteOwnedRoomFromPreflight(ctx, projectId, preflight, userId);
 
+    return buildDeleteOwnedInRoomDeletedResult();
+  },
+});
+
+export const deleteRoomAsOwner = mutation({
+  args: { projectId: v.string(), userId: v.string() },
+  returns: v.object({
+    status: v.union(v.literal("deleted"), v.literal("conflict")),
+    conflictTrackIds: v.array(v.string()),
+    conflicts: v.array(deleteConflict),
+  }),
+  handler: async (ctx, { projectId, userId }) => {
+    const ownerProject = await ctx.db
+      .query("projects")
+      .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
+      .first();
+    if (!ownerProject) {
+      throw new Error("Only project owners can delete this project.");
+    }
+    await deleteRoomRows(ctx, projectId);
     return buildDeleteOwnedInRoomDeletedResult();
   },
 });

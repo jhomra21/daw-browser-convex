@@ -2,7 +2,7 @@ import { openLocalProjectDb, type LocalProjectEntityRow } from '~/lib/local-proj
 
 export type LocalEffectKind = 'eq' | 'reverb' | 'synth' | 'arp' | 'master-eq' | 'master-reverb'
 
-export type LocalEffectRow<TParams = unknown> = {
+export type LocalEffectRow<TParams = any> = {
   id: string
   targetId: string
   effect: LocalEffectKind
@@ -42,6 +42,12 @@ export const getLocalEffect = async <TParams>(
   const db = await openLocalProjectDb(projectId)
   const row = await db.get('entities', [EFFECT_KIND, effectId(targetId, effect)])
   return isLocalEffectRow(row?.value) ? row.value as LocalEffectRow<TParams> : undefined
+}
+
+export const listLocalEffects = async (projectId: string): Promise<LocalEffectRow[]> => {
+  const db = await openLocalProjectDb(projectId)
+  const rows = await db.getAllFromIndex('entities', 'by-kind', EFFECT_KIND)
+  return rows.flatMap((row) => isLocalEffectRow(row.value) ? [row.value] : [])
 }
 
 export const setLocalEffect = async <TParams>(

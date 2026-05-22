@@ -5,6 +5,7 @@ import { buildClipCreateSnapshot, buildCreatedClipSelection, createProjectedClip
 import { buildClipRemoveManyMutationInput } from '~/lib/clip-mutation-args'
 import { getTrackDeleteConflictMessage } from '~/lib/delete-conflict-messages'
 import { buildTrackEffectQueryArgs } from '~/lib/effect-track-args'
+import { getLocalEffect } from '~/lib/local-effects'
 import { isLocalId } from '~/lib/local-ids'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { isClipCompatibleWithTrack } from '~/lib/track-routing'
@@ -13,7 +14,7 @@ import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-t
 import { calcNonOverlapStart, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import { buildClipDeleteHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
-import type { HistoryEntry } from '~/lib/undo/types'
+import type { HistoryEntry, TrackEffectSnapshot } from '~/lib/undo/types'
 import type { Clip, SelectedClip, Track } from '~/types/timeline'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
@@ -121,6 +122,22 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     }
   }
 
+  const loadLocalTrackDeleteEffects = async (projectId: string, trackId: Track['id']): Promise<TrackEffectSnapshot> => {
+    const [eqRow, rvRow, synthRow, arpRow] = await Promise.all([
+      getLocalEffect<TrackEffectSnapshot['eq']>(projectId, trackId, 'eq'),
+      getLocalEffect<TrackEffectSnapshot['reverb']>(projectId, trackId, 'reverb'),
+      getLocalEffect<TrackEffectSnapshot['synth']>(projectId, trackId, 'synth'),
+      getLocalEffect<TrackEffectSnapshot['arp']>(projectId, trackId, 'arp'),
+    ])
+
+    return {
+      eq: eqRow?.params,
+      reverb: rvRow?.params,
+      synth: synthRow?.params,
+      arp: arpRow?.params,
+    }
+  }
+
   const deleteSelectedClips = async () => {
     const selectedIds = selectedClipIds()
     if (selectedIds.size === 0) return
@@ -132,6 +149,12 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     if (rid && isLocalId('project', rid)) {
       const repository = createLocalTimelineRepository(rid)
       await Promise.all(Array.from(writableSelectedIds).map((clipId) => repository.deleteClip(clipId)))
+      try {
+        if (typeof historyPush === 'function') {
+          const entry = buildClipDeleteHistoryEntry({ projectId: rid, tracks: snapshot, clipIds: writableSelectedIds })
+          if (entry.data.items.length > 0) historyPush(entry)
+        }
+      } catch {}
 
       const remainingSelectedIds = new Set(Array.from(selectedIds).filter((clipId) => !writableSelectedIds.has(clipId)))
       const nextPrimary: SelectedClip = (() => {
@@ -341,7 +364,21 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     const rid = projectId()
 
     if (rid && isLocalId('project', rid)) {
+      let historyEntry: ReturnType<typeof buildTrackDeleteHistoryEntry> | null = null
+      try {
+        if (typeof historyPush === 'function') {
+          historyEntry = buildTrackDeleteHistoryEntry({
+            projectId: rid,
+            track,
+            tracks: snapshot,
+            effects: await loadLocalTrackDeleteEffects(rid, trackId),
+          })
+        }
+      } catch {}
       await createLocalTimelineRepository(rid).deleteTrack(trackId)
+      if (historyEntry && typeof historyPush === 'function') {
+        historyPush(historyEntry)
+      }
       removeLocalTrack(trackId)
       const next = snapshot.filter(entry => entry.id !== trackId)
       batch(() => {

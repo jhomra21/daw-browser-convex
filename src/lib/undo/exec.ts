@@ -668,6 +668,11 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
         if (entry.data.effects?.reverb) await convexClient.mutation(convexApi.effects.setReverbParams, buildTrackEffectMutationInput({ projectId, trackId: newTrackId, userId, params: entry.data.effects.reverb }))
         if (entry.data.effects?.synth) await convexClient.mutation(convexApi.effects.setSynthParams, buildTrackEffectMutationInput({ projectId, trackId: newTrackId, userId, params: entry.data.effects.synth }))
         if (entry.data.effects?.arp) await convexClient.mutation(convexApi.effects.setArpeggiatorParams, buildTrackEffectMutationInput({ projectId, trackId: newTrackId, userId, params: entry.data.effects.arp }))
+      } else {
+        if (entry.data.effects?.eq) await setLocalEffect(projectId, newTrackId, 'eq', entry.data.effects.eq)
+        if (entry.data.effects?.reverb) await setLocalEffect(projectId, newTrackId, 'reverb', entry.data.effects.reverb)
+        if (entry.data.effects?.synth) await setLocalEffect(projectId, newTrackId, 'synth', entry.data.effects.synth)
+        if (entry.data.effects?.arp) await setLocalEffect(projectId, newTrackId, 'arp', entry.data.effects.arp)
       }
 
       const recreatedClipIdsByRef = new Map((entry.data.recreatedClips ?? []).map((item) => [item.clipRef, item.clipId]))

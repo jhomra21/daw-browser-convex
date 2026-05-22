@@ -35,7 +35,10 @@ const appendProjectAssets = async (form: FormData, projectId: string): Promise<v
         active++
         void readLocalAssetBytes(projectId, asset.id)
           .then((result) => {
-            if (result.status === 'ready') form.append(`asset:${asset.id}`, result.file)
+            if (result.status !== 'ready') {
+              throw new Error(`Could not read asset ${asset.id} for backup.`)
+            }
+            form.append(`asset:${asset.id}`, result.file)
           })
           .then(() => {
             active--

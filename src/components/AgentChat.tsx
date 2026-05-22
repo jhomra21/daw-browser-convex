@@ -394,7 +394,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
     })
     ;(async () => {
       try {
-        const history = await convexClient.query((convexApi as any).chat.getHistory, { projectId: rid, ownerUserId: uid } as any)
+        const history = await convexClient.query((convexApi as any).chat.getHistory, { projectId: rid, ownerUserId: uid, requestingUserId: uid } as any)
         if (cancelled || props.projectId !== rid || props.userId !== uid || !props.isOpen) return
         if (Array.isArray(history)) {
           setMessages(history as any)
@@ -430,6 +430,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
         void convexClient.mutation((convexApi as any).chat.setHistory, {
           projectId: rid,
           ownerUserId: uid,
+          requestingUserId: uid,
           messages: messagesSnapshot,
         } as any).catch(() => {})
       } catch {}

@@ -41,6 +41,7 @@ type TimelineOverlaysProps = {
     auditionNote: (pitch: number, velocity?: number, durSec?: number) => void
     startLiveNote: (pitch: number, velocity?: number) => void
     stopLiveNote: (pitch: number) => void
+    onLocalMidiSaved: (clipId: string, midi: Clip['midi']) => void
   }
 }
 
@@ -153,6 +154,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
                   onAuditionNote={props.midi.auditionNote}
                   onStartLiveNote={props.midi.startLiveNote}
                   onStopLiveNote={props.midi.stopLiveNote}
+                  onLocalMidiSaved={props.midi.onLocalMidiSaved}
                 />
               )
             }}

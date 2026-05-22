@@ -91,8 +91,8 @@ When a user is not sharing or explicitly cloud-syncing, Convex should not be use
 - [x] Shared-mode conflicts use last-write-wins.
 - [x] Shared audio imports/recordings appear locally for the author while pending and are published to collaborators only after R2 upload plus Convex metadata write succeed.
 - [x] Shared projects support `owner`, `editor`, and `viewer` roles.
-- [x] Viewers can view/play only; they cannot export, edit, upload, record, rename, delete, or manage sharing.
-- [x] Owners and editors can export; viewers cannot export.
+- [x] Viewers can view/play and list/download existing exports only; they cannot create exports, edit, upload, record, rename, delete, or manage sharing.
+- [x] Owners and editors can create exports; viewers can only list/download existing exports.
 - [x] Share links are authenticated invite links with an intended role; accepting creates an access row and owners can revoke access later.
 - [x] Only owners can delete the cloud/shared project. Non-owners can leave/remove local cache only.
 - [x] Restored/cloud projects load the manifest first, lazily cache assets by default, and offer an explicit “Download for offline” action.
@@ -1089,7 +1089,7 @@ Cloud work is deferred until local-only workflows are proven, but the cloud cont
 - [x] Owners can revoke access.
 - [x] Defer owner transfer from the first shared/cloud pass.
 - [x] Owners and editors can edit/export.
-- [x] Viewers can view/play only and cannot export.
+- [x] Viewers can view/play and list/download existing exports only; they cannot create exports.
 - [x] Only owners can delete the cloud/shared project.
 - [x] Non-owners can leave/remove local cache only.
 - [x] Use local pending writes for the current user's shared edits.
@@ -1104,20 +1104,20 @@ Cloud work is deferred until local-only workflows are proven, but the cloud cont
 - [x] Keep local editing enabled while shared upload is failed/pending.
 
 Validation:
-- [x] Enable cloud sync from local project.
-- [x] Confirm unsynced assets upload.
-- [x] Confirm Convex receives metadata.
-- [x] Confirm local-to-cloud ID map persists.
-- [x] Open shared URL and confirm shared behavior works.
-- [x] Restore a backup on a fresh browser profile.
-- [x] Verify backup conflict keep/restore/duplicate choices.
-- [x] Verify failed backup retry/backoff plus manual retry.
-- [x] Verify viewers cannot export/edit/upload/record.
-- [x] Verify owners/editors can export.
-- [x] Verify shared pending audio clips are invisible to collaborators until upload/publish succeeds.
-- [x] Verify failed shared upload retry/backoff plus manual retry.
-- [x] Verify offline queued edits publish on reconnect.
-- [x] Verify “Download for offline” populates the local asset cache.
+- [ ] Enable cloud sync from local project.
+- [ ] Confirm unsynced assets upload.
+- [ ] Confirm Convex receives metadata.
+- [ ] Confirm local-to-cloud ID map persists.
+- [ ] Open shared URL and confirm shared behavior works.
+- [ ] Restore a backup on a fresh browser profile.
+- [ ] Verify backup conflict keep/restore/duplicate choices.
+- [ ] Verify failed backup retry/backoff plus manual retry.
+- [ ] Verify viewers can list/download existing exports but cannot create exports/edit/upload/record.
+- [ ] Verify owners/editors can export.
+- [ ] Verify shared pending audio clips are invisible to collaborators until upload/publish succeeds.
+- [ ] Verify failed shared upload retry/backoff plus manual retry.
+- [ ] Verify offline queued edits publish on reconnect.
+- [ ] Verify “Download for offline” populates the local asset cache.
 
 Non-goals for the local-only first implementation pass only:
 - [x] Defer cloud backup conflict resolution until the cloud phase.
@@ -1132,20 +1132,20 @@ Non-goals for the local-only first implementation pass only:
 - [x] Enforce owner/editor/viewer permissions:
   - owners manage/delete/share
   - editors edit/export
-  - viewers view/play only
+  - viewers view/play and list/download existing exports only
 - [x] Define R2 cleanup for deleted samples/exports/projects.
 - [x] Delete pending R2 assets only after a successful snapshot removes references to them.
 - [x] Delete the full project-scoped R2 prefix on owner project deletion.
 - [x] Define Convex cleanup for samples, exports, effects, chat histories, and room messages.
-- [x] Stop relying on client-supplied user IDs where server-verified auth context is required.
+- [ ] Stop relying on client-supplied user IDs where server-verified auth context is required.
 
 Validation:
-- [x] Verify unauthorized sample/export reads are rejected where intended.
-- [x] Verify signed asset URLs are short-lived and require refreshed access checks.
-- [x] Delete cloud/shared project and verify cleanup behavior.
-- [x] Confirm no orphaned R2 objects remain for tested deletion flows or record intentional retention policy.
-- [x] Verify raw copied R2 keys cannot be used without project access.
-- [x] Verify revoked users lose metadata and asset access.
+- [ ] Verify unauthorized sample/export reads are rejected where intended.
+- [ ] Verify signed asset URLs are short-lived and require refreshed access checks.
+- [ ] Delete cloud/shared project and verify cleanup behavior.
+- [ ] Confirm no orphaned R2 objects remain for tested deletion flows or record intentional retention policy.
+- [ ] Verify raw copied R2 keys cannot be used without project access.
+- [ ] Verify revoked users lose metadata and asset access.
 Evidence:
 - Added versioned project manifest building from local entities, assets, and projectState; undo/redo history remains excluded.
 - Added cloud backup API that uploads assets to project-scoped `projects/{projectId}/assets/{assetId}/{contentHash}` R2 keys and commits the latest manifest to Convex.
@@ -1153,7 +1153,7 @@ Evidence:
 - Added owner/editor/viewer role schema, authenticated non-expiring revocable invite primitives, and role-aware API access checks for samples/exports/cloud backup routes.
 - Replaced raw export streaming with project-scoped `/api/export/:projectId` and rejects copied keys whose prefix does not match the requested project.
 - Added owner project deletion route that removes the project-scoped R2 prefix before Convex project cleanup; Convex cleanup now includes samples, exports, effects, chat histories, project messages, invites, and cloud backups.
-- Validation passed: `bun run typecheck`, `bun run build`, and `git diff --check`.
+- Command validation passed: `bun run typecheck`, `bun run build`, and `git diff --check`; browser/cloud evidence remains pending for the unchecked validation items above.
 
 ### Phase 16 — Portable project archive
 
@@ -1270,41 +1270,41 @@ Artifact policy:
 
 #### Cloud promotion
 
-- [x] Enable backup/share.
-- [x] Confirm auth is required only at this point.
-- [x] Confirm local assets upload to R2.
-- [x] Confirm Convex receives timeline metadata.
-- [x] Confirm local-to-cloud ID mappings are persisted.
-- [x] Confirm local project remains usable after promotion.
-- [x] Confirm backup status moves through pending/backing-up/backed-up.
-- [x] Confirm backup failures show failure status without corrupting local state.
-- [x] Restore the backed-up project in a fresh browser profile.
-- [x] Confirm restored assets lazy-load and then cache locally.
-- [x] Run “Download for offline” and verify all assets are cached.
-- [x] Force a backup conflict and verify keep-local, restore-cloud, and duplicate-cloud choices.
+- [ ] Enable backup/share.
+- [ ] Confirm auth is required only at this point.
+- [ ] Confirm local assets upload to R2.
+- [ ] Confirm Convex receives timeline metadata.
+- [ ] Confirm local-to-cloud ID mappings are persisted.
+- [ ] Confirm local project remains usable after promotion.
+- [ ] Confirm backup status moves through pending/backing-up/backed-up.
+- [ ] Confirm backup failures show failure status without corrupting local state.
+- [ ] Restore the backed-up project in a fresh browser profile.
+- [ ] Confirm restored assets lazy-load and then cache locally.
+- [ ] Run “Download for offline” and verify all assets are cached.
+- [ ] Force a backup conflict and verify keep-local, restore-cloud, and duplicate-cloud choices.
 
 #### Collaboration/shared mode
 
-- [x] Open shared project link.
-- [x] Confirm current shared behavior still works.
-- [x] Verify shared chat, locks, ownership, and share UI only appear in shared mode.
-- [x] Verify authenticated invite links create the expected owner/editor/viewer access.
-- [x] Verify viewers can view/play but cannot export/edit/upload/record.
-- [x] Verify owners and editors can export.
-- [x] Import/record audio as an editor and confirm the author sees a pending local clip before upload completes.
-- [x] Confirm collaborators see the clip only after R2 upload and Convex metadata write succeed.
-- [x] Simulate offline edits and confirm they queue locally, show pending/not-shared-yet status, and publish on reconnect.
-- [x] Verify last-write-wins behavior for same-entity shared edits.
-- [x] Capture screenshot and logs for shared mode.
+- [ ] Open shared project link.
+- [ ] Confirm current shared behavior still works.
+- [ ] Verify shared chat, locks, ownership, and share UI only appear in shared mode.
+- [ ] Verify authenticated invite links create the expected owner/editor/viewer access.
+- [ ] Verify viewers can view/play and list/download existing exports but cannot create exports/edit/upload/record.
+- [ ] Verify owners and editors can export.
+- [ ] Import/record audio as an editor and confirm the author sees a pending local clip before upload completes.
+- [ ] Confirm collaborators see the clip only after R2 upload and Convex metadata write succeed.
+- [ ] Simulate offline edits and confirm they queue locally, show pending/not-shared-yet status, and publish on reconnect.
+- [ ] Verify last-write-wins behavior for same-entity shared edits.
+- [ ] Capture screenshot and logs for shared mode.
 
 #### Cloud security and cleanup
 
-- [x] Confirm raw copied R2 keys cannot fetch samples/exports without project access.
-- [x] Confirm access-checked API routes or signed URLs enforce owner/editor/viewer permissions.
-- [x] Delete a cloud/shared project as owner and confirm Convex rows/access rows plus project-scoped R2 prefix are removed.
-- [x] Leave/remove local cache as a non-owner and confirm cloud project data is not deleted.
-- [x] Revoke a user and confirm they lose metadata and asset access.
-- [x] Delete a cloud-backed asset locally, commit a snapshot without it, and confirm the pending R2 object is deleted only after that snapshot succeeds.
+- [ ] Confirm raw copied R2 keys cannot fetch samples/exports without project access.
+- [ ] Confirm access-checked API routes or signed URLs enforce owner/editor/viewer permissions.
+- [ ] Delete a cloud/shared project as owner and confirm Convex rows/access rows plus project-scoped R2 prefix are removed.
+- [ ] Leave/remove local cache as a non-owner and confirm cloud project data is not deleted.
+- [ ] Revoke a user and confirm they lose metadata and asset access.
+- [ ] Delete a cloud-backed asset locally, commit a snapshot without it, and confirm the pending R2 object is deleted only after that snapshot succeeds.
 
 ### Validation artifacts to capture
 
@@ -1399,7 +1399,7 @@ Closed decisions:
 - [x] Shared mode uses local pending writes plus Convex-published collaborator state.
 - [x] Shared conflicts use last-write-wins.
 - [x] Shared roles are owner, editor, and viewer.
-- [x] Viewers can view/play only and cannot export.
+- [x] Viewers can view/play and list/download existing exports only; they cannot create exports.
 - [x] `.dawproject` is a later zip-like manifest-plus-assets archive format.
 - [x] Project picker MVP is recent projects plus create/rename/typed-name delete.
 - [x] Local save failure is persistent warning plus retry/export/storage guidance.

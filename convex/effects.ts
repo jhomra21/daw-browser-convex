@@ -1,6 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { requireMasterBusWriteAccess } from "./projectAccess";
+import { requireMasterBusWriteAccess, requireProjectAccess } from "./projectAccess";
 import { getTrackWriteAccess } from "./trackWrites";
 import { normalizeSynthParams } from "../src/lib/effects/params";
 
@@ -28,8 +28,9 @@ const sanitizeArpParams = (params: {
 
 // Return the EQ effect row for a track if it exists (we use a single EQ per track for now)
 export const listByRoom = query({
-  args: { projectId: v.string() },
-  handler: async (ctx, { projectId }) => {
+  args: { projectId: v.string(), userId: v.string() },
+  handler: async (ctx, { projectId, userId }) => {
+    await requireProjectAccess(ctx, projectId, userId);
     const rows = await ctx.db
       .query("effects")
       .withIndex("by_room", q => q.eq("projectId", projectId))
@@ -44,8 +45,11 @@ export const listByRoom = query({
 });
 
 export const getEqForTrack = query({
-  args: { trackId: v.id("tracks") },
-  handler: async (ctx, { trackId }) => {
+  args: { projectId: v.string(), trackId: v.id("tracks"), userId: v.string() },
+  handler: async (ctx, { projectId, trackId, userId }) => {
+    await requireProjectAccess(ctx, projectId, userId);
+    const track = await ctx.db.get(trackId);
+    if (!track || track.projectId !== projectId) return null;
     const rows = await ctx.db
       .query("effects")
       .withIndex("by_track", q => q.eq("trackId", trackId))
@@ -57,8 +61,11 @@ export const getEqForTrack = query({
 
 // Synth: get synth row for a track
 export const getSynthForTrack = query({
-  args: { trackId: v.id('tracks') },
-  handler: async (ctx, { trackId }) => {
+  args: { projectId: v.string(), trackId: v.id('tracks'), userId: v.string() },
+  handler: async (ctx, { projectId, trackId, userId }) => {
+    await requireProjectAccess(ctx, projectId, userId);
+    const track = await ctx.db.get(trackId);
+    if (!track || track.projectId !== projectId) return null;
     const rows = await ctx.db
       .query('effects')
       .withIndex('by_track', q => q.eq('trackId', trackId))
@@ -70,8 +77,11 @@ export const getSynthForTrack = query({
 
 // Arpeggiator: get arpeggiator row for a track
 export const getArpeggiatorForTrack = query({
-  args: { trackId: v.id('tracks') },
-  handler: async (ctx, { trackId }) => {
+  args: { projectId: v.string(), trackId: v.id('tracks'), userId: v.string() },
+  handler: async (ctx, { projectId, trackId, userId }) => {
+    await requireProjectAccess(ctx, projectId, userId);
+    const track = await ctx.db.get(trackId);
+    if (!track || track.projectId !== projectId) return null;
     const rows = await ctx.db
       .query('effects')
       .withIndex('by_track', q => q.eq('trackId', trackId))
@@ -268,8 +278,9 @@ export const setMasterReverbParams = mutation({
 
 // Master-level EQ (per room)
 export const getEqForMaster = query({
-  args: { projectId: v.string() },
-  handler: async (ctx, { projectId }) => {
+  args: { projectId: v.string(), userId: v.string() },
+  handler: async (ctx, { projectId, userId }) => {
+    await requireProjectAccess(ctx, projectId, userId);
     const rows = await ctx.db
       .query("effects")
       .withIndex("by_room", q => q.eq("projectId", projectId))
@@ -281,8 +292,11 @@ export const getEqForMaster = query({
 
 // Reverb: get first reverb row for a track
 export const getReverbForTrack = query({
-  args: { trackId: v.id("tracks") },
-  handler: async (ctx, { trackId }) => {
+  args: { projectId: v.string(), trackId: v.id("tracks"), userId: v.string() },
+  handler: async (ctx, { projectId, trackId, userId }) => {
+    await requireProjectAccess(ctx, projectId, userId);
+    const track = await ctx.db.get(trackId);
+    if (!track || track.projectId !== projectId) return null;
     const rows = await ctx.db
       .query("effects")
       .withIndex("by_track", q => q.eq("trackId", trackId))
@@ -294,8 +308,9 @@ export const getReverbForTrack = query({
 
 // Reverb: get first master reverb row for room
 export const getReverbForMaster = query({
-  args: { projectId: v.string() },
-  handler: async (ctx, { projectId }) => {
+  args: { projectId: v.string(), userId: v.string() },
+  handler: async (ctx, { projectId, userId }) => {
+    await requireProjectAccess(ctx, projectId, userId);
     const rows = await ctx.db
       .query("effects")
       .withIndex("by_room", q => q.eq("projectId", projectId))

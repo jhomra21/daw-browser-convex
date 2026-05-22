@@ -277,16 +277,18 @@ const ProjectsMenu: Component = () => {
                 class="justify-center"
                 onClick={toolbar().onOpenExport}
               >
-                Export backup
+                Export audio
               </Button>
               <Button
                 variant="secondary"
                 size="sm"
                 class="justify-center"
-                disabled={!toolbar().currentUserId || !toolbar().onBackUpNow}
+                disabled={!isCurrentProjectLocal() || !toolbar().currentUserId || !toolbar().onBackUpNow}
                 onClick={() => void toolbar().onBackUpNow?.()}
                 title={
-                  toolbar().currentUserId
+                  !isCurrentProjectLocal()
+                    ? "Back up local projects from this button"
+                    : toolbar().currentUserId
                     ? "Back up this project to the cloud"
                     : "Sign in to enable backup and share"
                 }
@@ -297,8 +299,9 @@ const ProjectsMenu: Component = () => {
                 variant="secondary"
                 size="sm"
                 class="justify-center"
-                disabled={!toolbar().currentUserId || !toolbar().onShare}
+                disabled={isCurrentProjectLocal() || !toolbar().currentUserId || !toolbar().onShare}
                 onClick={() => toolbar().onShare?.()}
+                title={isCurrentProjectLocal() ? "Back up this local project before sharing" : undefined}
               >
                 Share
               </Button>
@@ -306,7 +309,9 @@ const ProjectsMenu: Component = () => {
                 variant="secondary"
                 size="sm"
                 class="justify-center"
+                disabled={!isCurrentProjectLocal() || !toolbar().onExportArchive}
                 onClick={() => void toolbar().onExportArchive?.()}
+                title={!isCurrentProjectLocal() ? "Export local projects as .dawproject archives" : undefined}
               >
                 Export .dawproject
               </Button>

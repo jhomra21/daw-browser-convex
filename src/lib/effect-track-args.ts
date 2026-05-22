@@ -10,8 +10,16 @@ type TrackEffectMutationInput =
   | FunctionArgs<typeof convexApi.effects.setSynthParams>
   | FunctionArgs<typeof convexApi.effects.setArpeggiatorParams>
 
-export function buildTrackEffectQueryArgs(trackId: TrackId) {
-  return { trackId: trackId as Id<'tracks'> }
+export function buildTrackEffectQueryArgs(input: {
+  projectId: string
+  userId: string
+  trackId: TrackId
+}) {
+  return {
+    projectId: input.projectId,
+    userId: input.userId,
+    trackId: input.trackId as Id<'tracks'>,
+  }
 }
 
 export function buildTrackEffectMutationInput(input: {

@@ -37,6 +37,7 @@ type ClipDragOptions = {
   resolvedTracks: Accessor<Track[]>
   insertLocalTrack: (track: Track, index: number) => void
   insertLocalClip: (trackId: Track['id'], clip: Clip) => void
+  removeLocalClips: (clipIds: Iterable<string>) => void
   removeLocalTrack: (trackId: Track['id']) => void
   replaceDraftClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
   clearDraftClipMoves: (clipIds: Iterable<string>) => void
@@ -82,6 +83,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     resolvedTracks,
     insertLocalTrack,
     insertLocalClip,
+    removeLocalClips,
     removeLocalTrack,
     replaceDraftClipMoves,
     clearDraftClipMoves,
@@ -532,45 +534,58 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       if (isLocalId('project', rid)) {
         const repository = createLocalTimelineRepository(rid)
         const created = []
-        for (const item of plan) {
-          const row = await repository.createClip({
-            trackId: item.trackId,
-            name: item.clip.name,
-            startSec: item.clip.startSec,
-            duration: item.clip.duration,
-            color: item.clip.midi ? 'clip-midi' : 'clip-audio',
-            sourceAssetKey: item.clip.sourceAssetKey,
-            sourceKind: item.clip.sourceKind,
-            sourceDurationSec: item.clip.source?.durationSec,
-            sourceSampleRate: item.clip.source?.sampleRate,
-            sourceChannelCount: item.clip.source?.channelCount,
-            leftPadSec: item.clip.timing?.leftPadSec,
-            bufferOffsetSec: item.clip.timing?.bufferOffsetSec,
-            sampleUrl: item.clip.sampleUrl,
-            midi: item.clip.midi,
-            midiOffsetBeats: item.clip.timing?.midiOffsetBeats,
-          })
-          insertLocalClip(item.trackId, {
-            id: row.id,
-            historyRef: row.historyRef,
-            name: row.name,
-            buffer: item.buffer,
-            startSec: row.startSec,
-            duration: row.duration,
-            color: row.color,
-            sampleUrl: row.sampleUrl,
-            sourceAssetKey: row.sourceAssetKey,
-            sourceKind: row.sourceKind,
-            sourceDurationSec: row.sourceDurationSec,
-            sourceSampleRate: row.sourceSampleRate,
-            sourceChannelCount: row.sourceChannelCount,
-            leftPadSec: row.leftPadSec,
-            bufferOffsetSec: row.bufferOffsetSec,
-            midi: row.midi,
-            midiOffsetBeats: row.midiOffsetBeats,
-          })
-          if (item.buffer) options.audioBufferCache.set(row.id, item.buffer)
-          created.push({ trackId: item.trackId, clipId: row.id, clip: { ...item.clip, historyRef: row.historyRef } })
+        try {
+          for (const item of plan) {
+            const row = await repository.createClip({
+              trackId: item.trackId,
+              name: item.clip.name,
+              startSec: item.clip.startSec,
+              duration: item.clip.duration,
+              color: item.clip.midi ? 'clip-midi' : 'clip-audio',
+              sourceAssetKey: item.clip.sourceAssetKey,
+              sourceKind: item.clip.sourceKind,
+              sourceDurationSec: item.clip.source?.durationSec,
+              sourceSampleRate: item.clip.source?.sampleRate,
+              sourceChannelCount: item.clip.source?.channelCount,
+              leftPadSec: item.clip.timing?.leftPadSec,
+              bufferOffsetSec: item.clip.timing?.bufferOffsetSec,
+              sampleUrl: item.clip.sampleUrl,
+              midi: item.clip.midi,
+              midiOffsetBeats: item.clip.timing?.midiOffsetBeats,
+            })
+            insertLocalClip(item.trackId, {
+              id: row.id,
+              historyRef: row.historyRef,
+              name: row.name,
+              buffer: item.buffer,
+              startSec: row.startSec,
+              duration: row.duration,
+              color: row.color,
+              sampleUrl: row.sampleUrl,
+              sourceAssetKey: row.sourceAssetKey,
+              sourceKind: row.sourceKind,
+              sourceDurationSec: row.sourceDurationSec,
+              sourceSampleRate: row.sourceSampleRate,
+              sourceChannelCount: row.sourceChannelCount,
+              leftPadSec: row.leftPadSec,
+              bufferOffsetSec: row.bufferOffsetSec,
+              midi: row.midi,
+              midiOffsetBeats: row.midiOffsetBeats,
+            })
+            if (item.buffer) options.audioBufferCache.set(row.id, item.buffer)
+            created.push({ trackId: item.trackId, clipId: row.id, clip: { ...item.clip, historyRef: row.historyRef } })
+          }
+        } catch {
+          const createdClipIds = created.map((item) => item.clipId)
+          await Promise.all(createdClipIds.map((clipId) => repository.deleteClip(clipId).catch(() => null)))
+          for (const clipId of createdClipIds) options.audioBufferCache.delete(clipId)
+          removeLocalClips(createdClipIds)
+          setPreviewClipsByTrack(new Map<TrackId, Clip[]>())
+          if (addedTrackDuringDrag) {
+            cleanupUnusedAddedTrack(addedTrackDuringDrag)
+          }
+          resetDragState()
+          return
         }
         setPreviewClipsByTrack(new Map<TrackId, Clip[]>())
         const nextSelection = buildCreatedClipSelection(created)
@@ -578,7 +593,18 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           selection.selectClipGroup(nextSelection)
         }
         if (addedTrackDuringDrag && created.some((item) => item.trackId === addedTrackDuringDrag)) {
+          pushTrackCreateHistory(options.historyPush, rid, placementTracks(), placementTracks().find((entry) => entry.id === addedTrackDuringDrag))
           addedTrackDuringDrag = null
+        }
+        for (const item of created) {
+          pushClipCreateHistory({
+            historyPush: options.historyPush,
+            projectId: rid,
+            trackId: item.trackId,
+            trackRef: getTrackHistoryRef(base.find((entry) => entry.id === item.trackId)),
+            clipId: item.clipId,
+            clip: item.clip,
+          })
         }
         dragging = false
         resetDragState()
@@ -707,15 +733,25 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
     if (isLocalId('project', projectId())) {
       const repository = createLocalTimelineRepository(projectId())
-      void Promise.all(plannedMoves.map((move) => repository.updateClip({
-        clipId: move.clipId,
-        trackId: move.trackId,
-        startSec: move.startSec,
-      }))).then(() => {
+      void repository.moveClips(plannedMoves).then(() => {
         options.onCommitMoves?.(plannedMoves.map((move) => move.clipId))
+        if (historyProjectId && typeof options.historyPush === 'function') {
+          if (addedTrackIdForCommit && plannedMoves.some((move) => move.trackId === addedTrackIdForCommit)) {
+            pushTrackCreateHistory(options.historyPush, historyProjectId, trackSnapshotForHistory, trackSnapshotForHistory.find((entry) => entry.id === addedTrackIdForCommit))
+          }
+          options.historyPush(buildClipsMoveHistoryEntry({
+            projectId: historyProjectId,
+            tracks: trackSnapshotForHistory,
+            moves: plannedMoves.map((move) => ({
+              clipId: move.clipId,
+              from: previousPositions.get(move.clipId) ?? { trackId: move.trackId, startSec: move.startSec },
+              to: { trackId: move.trackId, startSec: move.startSec },
+            })),
+          }))
+        }
       }).catch(() => {
         commitClipMoves(previousMoves)
-        if (addedTrackIdForCommit && previousMoves.some((move) => move.trackId === addedTrackIdForCommit)) {
+        if (addedTrackIdForCommit && plannedMoves.some((move) => move.trackId === addedTrackIdForCommit)) {
           cleanupUnusedAddedTrack(addedTrackIdForCommit)
         }
       })
@@ -746,7 +782,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
       if (failedMoves.length > 0) {
         commitClipMoves(failedMoves)
-        if (addedTrackIdForCommit && failedMoves.some((move) => move.trackId === addedTrackIdForCommit)) {
+        if (addedTrackIdForCommit && plannedMoves.some((move, index) => !moveApplied[index] && move.trackId === addedTrackIdForCommit)) {
           cleanupUnusedAddedTrack(addedTrackIdForCommit)
         }
         if (failedMoves.some((move) => move.clipId === selectionAfterCommit.clipId)) {

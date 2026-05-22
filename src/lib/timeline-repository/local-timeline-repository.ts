@@ -9,6 +9,8 @@ import type {
   TimelineClipRow,
   TimelineRepository,
   TimelineSnapshot,
+  TimelineClipId,
+  MoveClipInput,
   TimelineTrackId,
   TimelineTrackRow,
 } from '~/lib/timeline-repository/types'
@@ -95,6 +97,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
   }
 
   const createTrack = async (input: CreateTrackInput): Promise<TimelineTrackRow> => {
+    await writeQueue.flush()
     const db = await openLocalProjectDb(projectId)
     const tracks = (await db.getAllFromIndex('entities', 'by-kind', TRACK_KIND))
       .flatMap((row) => isTrackRow(row.value) ? [row.value] : [])
@@ -116,14 +119,23 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       createdAt: timestamp,
       updatedAt: timestamp,
     }
-    writeQueue.enqueue(`${projectId}:track:${track.id}`, async () => {
-      const latestDb = await openLocalProjectDb(projectId)
-      await latestDb.put('entities', toEntityRow(TRACK_KIND, track.id, track, timestamp))
-    })
+    const tx = db.transaction('entities', 'readwrite')
+    await Promise.all([
+      ...tracks
+        .filter((row) => row.id !== track.id && row.index >= index)
+        .map((row) => tx.store.put(toEntityRow(TRACK_KIND, row.id, {
+          ...row,
+          index: row.index + 1,
+          updatedAt: timestamp,
+        }, timestamp))),
+      tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp)),
+    ])
+    await tx.done
     return track
   }
 
   const createClip = async (input: CreateClipInput): Promise<TimelineClipRow> => {
+    await writeQueue.flush()
     const db = await openLocalProjectDb(projectId)
     const timestamp = now()
     const id = input.id ?? createLocalClipId()
@@ -149,10 +161,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       createdAt: timestamp,
       updatedAt: timestamp,
     }
-    writeQueue.enqueue(`${projectId}:clip:${clip.id}`, async () => {
-      const latestDb = await openLocalProjectDb(projectId)
-      await latestDb.put('entities', toEntityRow(CLIP_KIND, clip.id, clip, timestamp))
-    })
+    await db.put('entities', toEntityRow(CLIP_KIND, clip.id, clip, timestamp))
     return clip
   }
 
@@ -180,11 +189,25 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     const db = await openLocalProjectDb(projectId)
     const tx = db.transaction('entities', 'readwrite')
     const rows = await tx.store.getAll()
+    const trackRow = rows.find((row) => row.kind === TRACK_KIND && row.id === trackId && isTrackRow(row.value))
+    const deletedIndex = trackRow && isTrackRow(trackRow.value) ? trackRow.value.index : null
+    const timestamp = now()
     await Promise.all([
       tx.store.delete([TRACK_KIND, trackId]),
       ...rows
         .filter((row) => row.kind === CLIP_KIND && isClipRow(row.value) && row.value.trackId === trackId)
         .map((row) => tx.store.delete([row.kind, row.id])),
+      ...rows
+        .filter((row) => deletedIndex !== null && row.kind === TRACK_KIND && row.id !== trackId && isTrackRow(row.value) && row.value.index > deletedIndex)
+        .map((row) => {
+          if (!isTrackRow(row.value)) return Promise.resolve()
+          const track: TimelineTrackRow = {
+            ...row.value,
+            index: row.value.index - 1,
+            updatedAt: timestamp,
+          }
+          return tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))
+        }),
     ])
     await tx.done
   }
@@ -193,6 +216,38 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     await writeQueue.flush()
     const db = await openLocalProjectDb(projectId)
     await db.delete('entities', [CLIP_KIND, clipId])
+  }
+
+  const deleteClips = async (clipIds: TimelineClipId[]): Promise<void> => {
+    if (clipIds.length === 0) return
+    await writeQueue.flush()
+    const db = await openLocalProjectDb(projectId)
+    const tx = db.transaction('entities', 'readwrite')
+    await Promise.all(clipIds.map((clipId) => tx.store.delete([CLIP_KIND, clipId])))
+    await tx.done
+  }
+
+  const moveClips = async (moves: MoveClipInput[]): Promise<void> => {
+    if (moves.length === 0) return
+    await writeQueue.flush()
+    const db = await openLocalProjectDb(projectId)
+    const tx = db.transaction('entities', 'readwrite')
+    const timestamp = now()
+    const rows = await Promise.all(moves.map((move) => tx.store.get([CLIP_KIND, move.clipId])))
+    const updates = rows.map((row, index) => {
+      if (!row || !isClipRow(row.value)) {
+        throw new Error('Failed to move local clip because a clip was not found.')
+      }
+      const move = moves[index]
+      return {
+        ...row.value,
+        trackId: move.trackId,
+        startSec: move.startSec,
+        updatedAt: timestamp,
+      }
+    })
+    await Promise.all(updates.map((clip) => tx.store.put(toEntityRow(CLIP_KIND, clip.id, clip, timestamp))))
+    await tx.done
   }
 
   const updateClip = async (input: UpdateClipInput): Promise<TimelineClipRow | null> => {
@@ -229,7 +284,9 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     updateTrack,
     createClip,
     updateClip,
+    moveClips,
     deleteTrack,
     deleteClip,
+    deleteClips,
   }
 }

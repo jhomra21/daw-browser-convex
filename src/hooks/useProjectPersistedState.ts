@@ -23,11 +23,13 @@ export function useProjectPersistedState<TValue>(
   const initialProjectId = options.projectId()
   const [currentValue, setCurrentValue] = createSignal(initialProjectId ? options.load(initialProjectId) : options.createInitial())
   let hydratedProjectId = initialProjectId
+  let valueRevision = 0
 
   const syncHydratedValue = () => {
     const projectId = options.projectId()
     if (projectId === hydratedProjectId) return
     hydratedProjectId = projectId
+    valueRevision += 1
     if (!projectId) {
       setCurrentValue(() => options.createInitial())
       return
@@ -42,14 +44,16 @@ export function useProjectPersistedState<TValue>(
 
   createEffect(on(options.projectId, (projectId) => {
     if (!projectId || !options.loadAsync) return
+    const loadRevision = valueRevision
     void options.loadAsync(projectId).then((loaded) => {
-      if (loaded === undefined || options.projectId() !== projectId) return
+      if (loaded === undefined || options.projectId() !== projectId || valueRevision !== loadRevision) return
       setCurrentValue(() => loaded)
     })
   }, { defer: false }))
 
   const applyValue: RoomPersistedSetter<TValue> = (next) => {
     syncHydratedValue()
+    valueRevision += 1
     return setCurrentValue(next)
   }
 
@@ -59,6 +63,7 @@ export function useProjectPersistedState<TValue>(
     const resolved = setCurrentValue(next)
     const projectId = options.projectId()
     if (projectId && resolved !== previous) {
+      valueRevision += 1
       options.save(projectId, resolved)
       if (options.saveAsync) {
         void options.saveAsync(projectId, resolved)

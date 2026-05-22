@@ -23,6 +23,10 @@ const crc32 = (bytes: Uint8Array) => {
   return (c ^ 0xffffffff) >>> 0
 }
 
+const readU32 = (bytes: Uint8Array, offset: number) => (
+  (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0
+)
+
 const u16 = (value: number) => new Uint8Array([value & 255, (value >>> 8) & 255])
 const u32 = (value: number) => new Uint8Array([value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255])
 
@@ -72,16 +76,25 @@ const readZip = async (file: File): Promise<Map<string, Uint8Array>> => {
   const entries = new Map<string, Uint8Array>()
   let offset = 0
   while (offset + 30 < bytes.length) {
-    const sig = bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)
+    const sig = readU32(bytes, offset)
     if (sig !== 0x04034b50) break
-    const compressedSize = bytes[offset + 18] | (bytes[offset + 19] << 8) | (bytes[offset + 20] << 16) | (bytes[offset + 21] << 24)
+    const expectedCrc = readU32(bytes, offset + 14)
+    const compressedSize = readU32(bytes, offset + 18)
     const nameLength = bytes[offset + 26] | (bytes[offset + 27] << 8)
     const extraLength = bytes[offset + 28] | (bytes[offset + 29] << 8)
     const nameStart = offset + 30
     const dataStart = nameStart + nameLength + extraLength
+    const dataEnd = dataStart + compressedSize
+    if (nameStart > bytes.length || dataStart > bytes.length || dataEnd > bytes.length) {
+      throw new Error('Archive contains a truncated zip entry.')
+    }
     const name = decoder.decode(bytes.slice(nameStart, nameStart + nameLength))
-    entries.set(name, bytes.slice(dataStart, dataStart + compressedSize))
-    offset = dataStart + compressedSize
+    const data = bytes.slice(dataStart, dataEnd)
+    if (crc32(data) !== expectedCrc) {
+      throw new Error(`Archive contains corrupt bytes for "${name}".`)
+    }
+    entries.set(name, data)
+    offset = dataEnd
   }
   return entries
 }
@@ -121,6 +134,7 @@ export const importDawProjectArchive = async (file: File): Promise<string> => {
       entities: manifest.entities,
       assets: manifest.assets,
       projectState: manifest.projectState,
+      syncState: manifest.syncState,
     })
     await Promise.all(assetFiles.map(async ({ asset, bytes }) => {
       const assetBytes = new ArrayBuffer(bytes.byteLength)

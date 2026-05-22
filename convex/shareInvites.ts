@@ -35,7 +35,10 @@ export const accept = mutation({
       .query("ownerships")
       .withIndex("by_room_owner", (q) => q.eq("projectId", invite.projectId).eq("ownerUserId", userId))
       .collect();
-    if (!existing.find((entry) => !entry.trackId && !entry.clipId)) {
+    const projectOwnership = existing.find((entry) => !entry.trackId && !entry.clipId);
+    if (projectOwnership) {
+      await ctx.db.patch(projectOwnership._id, { role: invite.role });
+    } else {
       await ctx.db.insert("ownerships", {
         projectId: invite.projectId,
         ownerUserId: userId,

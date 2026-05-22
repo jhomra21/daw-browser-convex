@@ -3,6 +3,7 @@ import { v } from 'convex/values'
 
 import { getClipOwnership, getClipWriteAccess } from './clipWrites'
 import { getMergedTrack } from './mixerChannels'
+import { requireProjectAccess } from './projectAccess'
 import { upsertSampleRow } from './sampleRows'
 import { isClipKindCompatibleWithTrack } from './trackRouting'
 import { getTrackWriteAccess } from './trackWrites'
@@ -205,8 +206,9 @@ const createOwnedClip = async (
 }
 
 export const listByRoom = query({
-  args: { projectId: v.string() },
-  handler: async (ctx, { projectId }) => {
+  args: { projectId: v.string(), userId: v.string() },
+  handler: async (ctx, { projectId, userId }) => {
+    await requireProjectAccess(ctx, projectId, userId)
     return await ctx.db
       .query('clips')
       .withIndex('by_room', q => q.eq('projectId', projectId))

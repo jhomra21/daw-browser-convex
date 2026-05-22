@@ -5,7 +5,7 @@ import { requireProjectRole } from "./projectAccess"
 export const listByRoom = query({
   args: { projectId: v.string(), userId: v.string() },
   handler: async (ctx, { projectId, userId }) => {
-    await requireProjectRole(ctx, projectId, userId, ["owner", "editor"])
+    await requireProjectRole(ctx, projectId, userId, ["owner", "editor", "viewer"])
     const rows = await ctx.db
       .query("exports")
       .withIndex("by_room_createdAt", q => q.eq("projectId", projectId))
@@ -28,6 +28,7 @@ export const create = mutation({
     userId: v.string(),
   },
   handler: async (ctx, { projectId, name, url, r2Key, format, duration, sampleRate, sizeBytes, userId }) => {
+    await requireProjectRole(ctx, projectId, userId, ["owner", "editor"])
     return await ctx.db.insert("exports", {
       projectId,
       name,
@@ -48,6 +49,7 @@ export const remove = mutation({
   handler: async (ctx, { exportId, userId }) => {
     const row = await ctx.db.get(exportId)
     if (!row) return
+    await requireProjectRole(ctx, row.projectId, userId, ["owner", "editor"])
     if (row.createdBy !== userId) return
     await ctx.db.delete(exportId)
   },

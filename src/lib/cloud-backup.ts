@@ -1,7 +1,7 @@
 import { listLocalAssets, readLocalAssetBytes } from '~/lib/local-assets'
 import { setLocalProjectMode } from '~/lib/local-project-db'
 import { saveCloudIdMapping } from '~/lib/local-cloud-id-map'
-import { buildProjectManifest, type ProjectManifest } from '~/lib/project-manifest'
+import { buildProjectManifest } from '~/lib/project-manifest'
 
 type BackupResult = {
   ok: boolean
@@ -81,11 +81,4 @@ export const runProjectBackup = async (
     }
   }
   return { ok: false, error: 'Backup failed.' }
-}
-
-const fetchCloudBackupManifest = async (projectId: string): Promise<ProjectManifest> => {
-  const response = await fetch(`/api/cloud-backups/${encodeURIComponent(projectId)}`)
-  if (!response.ok) throw new Error('Could not restore cloud backup.')
-  const data = await response.json() as { manifest: ProjectManifest }
-  return data.manifest
 }

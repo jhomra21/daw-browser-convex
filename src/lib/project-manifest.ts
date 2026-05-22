@@ -5,7 +5,9 @@ import {
   type LocalProjectAssetRow,
   type LocalProjectEntityRow,
   type LocalProjectStateRow,
+  type LocalProjectSyncStateRow,
 } from '~/lib/local-project-db'
+import { flushLocalTimelineWrites } from '~/lib/timeline-repository/local-timeline-repository'
 
 const PROJECT_MANIFEST_SCHEMA_VERSION = 1
 
@@ -24,7 +26,19 @@ export type ProjectManifest = {
   entities: LocalProjectEntityRow[]
   assets: ProjectManifestAsset[]
   projectState: LocalProjectStateRow[]
+  syncState: LocalProjectSyncStateRow[]
 }
+
+const latestLocalProjectUpdate = (
+  projectUpdatedAt: number,
+  rows: Awaited<ReturnType<typeof exportLocalProjectRows>>,
+) => Math.max(
+  projectUpdatedAt,
+  ...rows.entities.map((row) => row.updatedAt),
+  ...rows.assets.map((row) => row.updatedAt),
+  ...rows.projectState.map((row) => row.updatedAt),
+  ...rows.syncState.map((row) => row.updatedAt),
+)
 
 export const buildProjectManifest = async (
   projectId: string,
@@ -32,8 +46,9 @@ export const buildProjectManifest = async (
 ): Promise<ProjectManifest> => {
   const project = await getLocalProject(projectId)
   if (!project) throw new Error('Local project not found.')
+  await flushLocalTimelineWrites()
   const rows = await exportLocalProjectRows(projectId)
-  const updatedAt = Date.now()
+  const updatedAt = latestLocalProjectUpdate(project.updatedAt, rows)
   return {
     schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION,
     projectId,
@@ -45,6 +60,7 @@ export const buildProjectManifest = async (
     entities: rows.entities,
     assets: rows.assets,
     projectState: rows.projectState,
+    syncState: rows.syncState,
   }
 }
 

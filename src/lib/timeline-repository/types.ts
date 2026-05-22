@@ -109,6 +109,12 @@ export type UpdateClipInput = {
   midiOffsetBeats?: number
 }
 
+export type MoveClipInput = {
+  clipId: TimelineClipId
+  trackId: TimelineTrackId
+  startSec: number
+}
+
 export type UpdateTrackInput = {
   trackId: TimelineTrackId
   volume?: number
@@ -124,6 +130,8 @@ export type TimelineRepository = {
   updateTrack: (input: UpdateTrackInput) => Promise<TimelineTrackRow | null>
   createClip: (input: CreateClipInput) => Promise<TimelineClipRow>
   updateClip: (input: UpdateClipInput) => Promise<TimelineClipRow | null>
+  moveClips: (moves: MoveClipInput[]) => Promise<void>
   deleteTrack: (trackId: TimelineTrackId) => Promise<void>
   deleteClip: (clipId: TimelineClipId) => Promise<void>
+  deleteClips: (clipIds: TimelineClipId[]) => Promise<void>
 }

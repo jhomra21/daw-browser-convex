@@ -153,9 +153,9 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     }
   }
 
-  const releaseTrackLock = async (trackId: Track['id'], locker: string | undefined) => {
+  const releaseTrackLock = async (trackId: Track['id'], locker: string | undefined, isLocalProject?: boolean) => {
     const rid = projectId()
-    if (rid && isLocalId('project', rid)) {
+    if (isLocalProject ?? (rid ? isLocalId('project', rid) : false)) {
       clearTrackLock(trackId)
       return
     }
@@ -205,12 +205,15 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     livePreviewStartIndex = 0
   }
 
-  const handleAutoCreatedTrackFailure = async (track: Track | null) => {
+  const handleAutoCreatedTrackFailure = async (
+    track: Track | null,
+    context?: { projectId: string; userId: string | undefined; tracks: Track[] },
+  ) => {
     await finalizeAutoCreatedTrackFailure({
       track,
-      tracks: tracks(),
-      projectId: projectId(),
-      userId: userId(),
+      tracks: context?.tracks ?? tracks(),
+      projectId: context?.projectId ?? projectId(),
+      userId: context?.userId ?? userId(),
       historyPush,
       convexClient,
       convexApi,
@@ -220,11 +223,14 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     })
   }
 
-  const commitCreatedTrack = (track: Track | null) => {
+  const commitCreatedTrack = (
+    track: Track | null,
+    context?: { projectId: string; tracks: Track[] },
+  ) => {
     commitAutoCreatedTrack({
       historyPush,
-      projectId: projectId(),
-      tracks: tracks(),
+      projectId: context?.projectId ?? projectId(),
+      tracks: context?.tracks ?? tracks(),
       track,
     })
   }
@@ -232,13 +238,13 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   const finalizeRecording = async () => {
     if (!activeCtx) return
     const ctx = activeCtx
-    const rid = projectId()
-    const uid = userId()
-    const isLocalProject = rid ? isLocalId('project', rid) : false
+    const rid = ctx.projectId
+    const uid = ctx.userId
+    const isLocalProject = ctx.isLocalProject
     if (!rid || (!isLocalProject && !uid)) {
       emit(isLocalProject ? 'Missing project context; recording discarded.' : 'Missing project or user context; recording discarded.')
       await cleanupRecording()
-      await handleAutoCreatedTrackFailure(ctx.createdTrack)
+      await handleAutoCreatedTrackFailure(ctx.createdTrack, ctx)
       return
     }
 
@@ -246,7 +252,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     if (!blob.size) {
       emit('Recording contained no audio data.')
       await cleanupRecording()
-      await handleAutoCreatedTrackFailure(ctx.createdTrack)
+      await handleAutoCreatedTrackFailure(ctx.createdTrack, ctx)
       return
     }
 
@@ -264,16 +270,16 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     if (!decoded) {
       emit('Failed to decode recorded audio; skipping clip creation.')
       await cleanupRecording()
-      await handleAutoCreatedTrackFailure(ctx.createdTrack)
+      await handleAutoCreatedTrackFailure(ctx.createdTrack, ctx)
       return
     }
 
-    const existingTracks = tracks()
-    const targetTrack = existingTracks.find(t => t.id === ctx.trackId)
+    const existingTracks = ctx.tracks
+    const targetTrack = ctx.targetTrack
     if (!targetTrack) {
       emit('Recording target track missing; clip skipped.')
       await cleanupRecording()
-      await handleAutoCreatedTrackFailure(ctx.createdTrack)
+      await handleAutoCreatedTrackFailure(ctx.createdTrack, ctx)
       return
     }
 
@@ -300,7 +306,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         await createLocalAudioClip({
           projectId: rid,
           trackId: ctx.trackId,
-          trackRef: getTrackHistoryRef(tracks().find((entry) => entry.id === ctx.trackId) ?? targetTrack),
+          trackRef: getTrackHistoryRef(existingTracks.find((entry) => entry.id === ctx.trackId) ?? targetTrack),
           startSec: nonOverlapStart,
           fileName: file.name,
           decoded,
@@ -316,14 +322,14 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
           color: 'clip-recording',
         })
         await cleanupRecording()
-        if (ctx.createdTrack) commitCreatedTrack(ctx.createdTrack)
+        if (ctx.createdTrack) commitCreatedTrack(ctx.createdTrack, ctx)
       } catch (err) {
         console.error('[useTrackRecording] local recording clip creation failed', err)
         emit(err instanceof LocalAssetWriteError
           ? `${err.message} Free browser storage or choose a project folder, then retry.`
           : 'Failed to save recorded audio locally.')
         await cleanupRecording()
-        await handleAutoCreatedTrackFailure(ctx.createdTrack)
+        await handleAutoCreatedTrackFailure(ctx.createdTrack, ctx)
       }
       return
     }
@@ -354,13 +360,13 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       })
       await cleanupRecording()
       if (ctx.createdTrack) {
-        commitCreatedTrack(ctx.createdTrack)
+        commitCreatedTrack(ctx.createdTrack, ctx)
       }
       pushClipCreateHistory({
         historyPush,
         projectId: rid,
         trackId: ctx.trackId,
-        trackRef: getTrackHistoryRef(tracks().find((entry) => entry.id === ctx.trackId) ?? targetTrack),
+        trackRef: getTrackHistoryRef(existingTracks.find((entry) => entry.id === ctx.trackId) ?? targetTrack),
         clipId: createdClip.clipId,
         clip: createdClip.clip,
       })
@@ -374,7 +380,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         emit('Failed to create recorded clip on server.')
       }
       await cleanupRecording()
-      await handleAutoCreatedTrackFailure(ctx.createdTrack)
+      await handleAutoCreatedTrackFailure(ctx.createdTrack, ctx)
       return
     }
   }
@@ -512,7 +518,12 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     }
 
     activeCtx = {
+      projectId: rid,
+      userId: uid,
+      isLocalProject,
       trackId,
+      targetTrack: track,
+      tracks: tracks(),
       createdTrack,
       startSec,
       stream,
@@ -578,7 +589,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       console.error('[useTrackRecording] recorder.stop failed', err)
       ctx.rejectStopPromise(err)
       await cleanupRecording()
-      await handleAutoCreatedTrackFailure(ctx.createdTrack)
+      await handleAutoCreatedTrackFailure(ctx.createdTrack, ctx)
     }
     haltLivePreview()
     try {

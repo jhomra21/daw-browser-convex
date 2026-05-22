@@ -1,5 +1,6 @@
 import { buildClipCreatePayload } from '~/lib/clip-create'
 import { convexApi } from '~/lib/convex'
+import { buildClipRemoveManyMutationInput } from '~/lib/clip-mutation-args'
 import { buildTrackDeleteMutationInput, buildTrackMixMutationInput, buildTrackVolumeMutationInput } from '~/lib/track-mutation-args'
 import { buildTrackRoutingMutationInput } from '~/lib/track-routing-state'
 import type {
@@ -202,11 +203,22 @@ export function createCloudTimelineRepository(input: {
       const snapshot = await loadSnapshot()
       return snapshot.clips.find((clip) => clip.id === clipInput.clipId) ?? null
     },
+    moveClips: async (moves) => {
+      await Promise.all(moves.map((move) => convexClient.mutation(convexApi.clips.move, {
+        clipId: toCloudClipId(move.clipId),
+        userId,
+        startSec: move.startSec,
+        toTrackId: toCloudTrackId(move.trackId),
+      })))
+    },
     deleteTrack: async (trackId) => {
       await convexClient.mutation(convexApi.tracks.remove, buildTrackDeleteMutationInput({ trackId, userId }))
     },
     deleteClip: async (clipId) => {
       await convexClient.mutation(convexApi.clips.remove, { clipId: toCloudClipId(clipId), userId })
+    },
+    deleteClips: async (clipIds) => {
+      await convexClient.mutation(convexApi.clips.removeMany, buildClipRemoveManyMutationInput({ clipIds, userId }))
     },
   }
 }

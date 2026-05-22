@@ -27,6 +27,7 @@ export type MidiEditorCardProps = {
   // Live note callbacks for computer keyboard play
   onStartLiveNote?: (pitch: number, velocity?: number) => void
   onStopLiveNote?: (pitch: number) => void
+  onLocalMidiSaved?: (clipId: string, midi: Clip['midi']) => void
 }
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v))
@@ -70,6 +71,21 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   let resizeStartH = 0
   let pointerId: number | null = null
   let saveTimer: number | null = null
+  const currentMidi = (): Clip['midi'] => ({
+    wave: props.midi?.wave ?? 'sawtooth',
+    gain: props.midi?.gain ?? 0.8,
+    notes: notes().slice().sort((a, b) => a.beat - b.beat || b.pitch - a.pitch),
+  })
+  const saveNow = async () => {
+    const midi = currentMidi()
+    if (props.projectId && isLocalId('project', props.projectId)) {
+      await createLocalTimelineRepository(props.projectId).updateClip({ clipId: props.clipId, midi })
+      props.onLocalMidiSaved?.(props.clipId, midi)
+      return
+    }
+    if (!props.userId) return
+    await convexClient.mutation((convexApi as any).clips.setMidi, { clipId: props.clipId as any, midi, userId: props.userId })
+  }
   const scheduleSave = () => {
     if (!canPersist()) {
       warnMissingUser()
@@ -78,17 +94,8 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = window.setTimeout(async () => {
       try {
-        const midi = {
-          wave: props.midi?.wave ?? 'sawtooth',
-          gain: props.midi?.gain ?? 0.8,
-          notes: notes().slice().sort((a, b) => a.beat - b.beat || b.pitch - a.pitch),
-        }
-        if (props.projectId && isLocalId('project', props.projectId)) {
-          await createLocalTimelineRepository(props.projectId).updateClip({ clipId: props.clipId, midi })
-          return
-        }
-        if (!props.userId) return
-        await convexClient.mutation((convexApi as any).clips.setMidi, { clipId: props.clipId as any, midi, userId: props.userId })
+        saveTimer = null
+        await saveNow()
       } catch {}
     }, 200)
   }
@@ -144,7 +151,11 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
 
   onCleanup(() => {
     try { window.removeEventListener('pointermove', onPointerMove) } catch {}
-    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+    if (saveTimer) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+      void saveNow().catch(() => {})
+    }
   })
 
   // Sync incoming midi

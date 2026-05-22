@@ -127,7 +127,7 @@ app.post('/api/agent/execute', async (c) => {
     if (!(await canAccessAgentRoom(convex, projectId, (user as any).id))) {
       return c.json({ error: 'Forbidden' }, 403)
     }
-    const trackList: any[] = await convex.query(convexApi.tracks.listByRoom as any, { projectId } as any)
+    const trackList: any[] = await convex.query(convexApi.tracks.listByRoom as any, { projectId, userId: (user as any).id } as any)
     const agentActions = createAgentActions({
       convex,
       convexApi,
@@ -135,7 +135,7 @@ app.post('/api/agent/execute', async (c) => {
       userId: (user as any).id,
       getTracks: async () => trackList,
       refreshTracks: async () => {
-        const updated: any[] = await convex.query(convexApi.tracks.listByRoom as any, { projectId } as any)
+        const updated: any[] = await convex.query(convexApi.tracks.listByRoom as any, { projectId, userId: (user as any).id } as any)
         trackList.splice(0, trackList.length, ...updated)
         return trackList
       },
@@ -434,6 +434,13 @@ app.post('/api/cloud-backups', async (c) => {
     const conflictAction = form.get('conflictAction') === 'overwrite' ? 'overwrite' : 'detect'
     if (!projectId || !manifestRaw) return c.json({ error: 'Missing projectId or manifest' }, 400)
 
+    let manifest: any
+    try {
+      manifest = JSON.parse(manifestRaw)
+    } catch {
+      return c.json({ error: 'Invalid manifest' }, 400)
+    }
+
     const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
     const projectExists = await convex.query((convexApi as any).projects.exists, { projectId })
     if (!projectExists) {
@@ -441,7 +448,14 @@ app.post('/api/cloud-backups', async (c) => {
     } else if (!await requireProjectRoleForApi(c, projectId, ['owner', 'editor'])) {
       return c.json({ error: 'Forbidden' }, 403)
     }
-    const manifest = JSON.parse(manifestRaw)
+    if (conflictAction === 'detect') {
+      const conflict = await convex.query((convexApi as any).cloudBackups.checkConflict, {
+        projectId,
+        userId: user.id,
+        manifest,
+      })
+      if (conflict) return c.json({ ok: false, conflict }, 409)
+    }
     const uploadedAssetKeys: Record<string, string> = {}
     for (const [key, value] of form.entries()) {
       if (!key.startsWith('asset:') || !(value instanceof File)) continue
@@ -619,7 +633,7 @@ app.get('/api/export/:projectId', async (c) => {
     if (!key) return c.json({ error: 'Missing key query parameter' }, 400)
     const projectId = c.req.param('projectId')
     if (!key.startsWith(`projects/${projectId}/exports/`)) return c.json({ error: 'Invalid key' }, 400)
-    if (!await requireProjectRoleForApi(c, projectId, ['owner', 'editor'])) {
+    if (!await requireProjectRoleForApi(c, projectId, ['owner', 'editor', 'viewer'])) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
@@ -680,8 +694,8 @@ app.post('/api/agent/chat', async (c) => {
       let effectsLine = ''
       if (projectId) {
         try {
-          const tracks: any[] = await convex.query(convexApi.tracks.listByRoom as any, { projectId } as any)
-          const clips: any[] = await convex.query(convexApi.clips.listByRoom as any, { projectId } as any)
+          const tracks: any[] = await convex.query(convexApi.tracks.listByRoom as any, { projectId, userId: user.id } as any)
+          const clips: any[] = await convex.query(convexApi.clips.listByRoom as any, { projectId, userId: user.id } as any)
           const audioCount = tracks.filter((track) => (track.kind ?? 'audio') === 'audio').length
           const instrumentCount = tracks.filter((track) => (track.kind ?? 'audio') === 'instrument').length
           const perTrackCounts = (() => {
@@ -697,26 +711,24 @@ app.post('/api/agent/chat', async (c) => {
           let eqCount = 0
           let reverbCount = 0
           let arpCount = 0
-          for (const track of tracks.slice(0, 24)) {
-            try {
-              const [synth, eq, reverb, arp] = await Promise.all([
-                convex.query(convexApi.effects.getSynthForTrack as any, { trackId: track._id } as any).catch(() => null),
-                convex.query(convexApi.effects.getEqForTrack as any, { trackId: track._id } as any).catch(() => null),
-                convex.query(convexApi.effects.getReverbForTrack as any, { trackId: track._id } as any).catch(() => null),
-                convex.query(convexApi.effects.getArpeggiatorForTrack as any, { trackId: track._id } as any).catch(() => null),
-              ])
-              if (synth) synthCount += 1
-              if (eq) eqCount += 1
-              if (reverb) reverbCount += 1
-              if (arp) arpCount += 1
-            } catch {}
+          let hasMasterEq = false
+          let hasMasterReverb = false
+          const effects: any[] = await convex.query(convexApi.effects.listByRoom as any, { projectId, userId: user.id } as any).catch(() => [])
+          for (const row of effects) {
+            if (row?.targetType === 'master') {
+              if (row.type === 'eq') hasMasterEq = true
+              if (row.type === 'reverb') hasMasterReverb = true
+              continue
+            }
+            if (row?.type === 'synth') synthCount += 1
+            if (row?.type === 'eq') eqCount += 1
+            if (row?.type === 'reverb') reverbCount += 1
+            if (row?.type === 'arpeggiator') arpCount += 1
           }
-          const masterEq = await convex.query(convexApi.effects.getEqForMaster as any, { projectId } as any).catch(() => null)
-          const masterReverb = await convex.query(convexApi.effects.getReverbForMaster as any, { projectId } as any).catch(() => null)
 
           tracksLine = tracks.length ? `Tracks: ${tracks.length} (audio ${audioCount}, instrument ${instrumentCount}).` : ''
           clipsLine = (clips.length || tracks.length) ? `Clips: ${clips.length} total; per track: [${perTrackCounts.join(', ')}].` : ''
-          effectsLine = tracks.length ? `Effects: synth ${synthCount}, eq ${eqCount}, reverb ${reverbCount}, arp ${arpCount}; master eq: ${masterEq ? 'yes' : 'no'}, master reverb: ${masterReverb ? 'yes' : 'no'}.` : ''
+          effectsLine = tracks.length ? `Effects: synth ${synthCount}, eq ${eqCount}, reverb ${reverbCount}, arp ${arpCount}; master eq: ${hasMasterEq ? 'yes' : 'no'}, master reverb: ${hasMasterReverb ? 'yes' : 'no'}.` : ''
         } catch {}
       }
 

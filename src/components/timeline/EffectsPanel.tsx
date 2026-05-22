@@ -22,7 +22,7 @@ import {
   EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
   EFFECT_PANEL_SAVE_DEBOUNCE_MS,
 } from "~/components/timeline/create-effects-panel-state";
-import { buildTrackEffectMutationInput, buildTrackEffectQueryArgs } from "~/lib/effect-track-args";
+import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
 import {
   type ArpeggiatorParams,
   createDefaultEqParams,
@@ -41,7 +41,7 @@ import { useEffectsPanelTarget } from "~/hooks/useEffectsPanelTarget";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import { FX_PANEL_HEIGHT_PX } from "~/lib/timeline-utils";
-import type { Track } from "~/types/timeline";
+import type { Clip, Track } from "~/types/timeline";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -57,13 +57,13 @@ type EffectsPanelProps = {
   // Timeline context
   playheadSec?: number;
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
+  insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>) => void;
 };
 
 type EffectKind = "eq" | "reverb";
 type InstrumentPanelState = ReturnType<typeof createEffectsPanelState>;
-type TrackEqRow = FunctionReturnType<typeof convexApi.effects.getEqForTrack>;
-type TrackReverbRow = FunctionReturnType<typeof convexApi.effects.getReverbForTrack>;
+type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
 type LocalEqRow = LocalEffectRow<EqParams>;
 type LocalReverbRow = LocalEffectRow<ReverbParams>;
 
@@ -370,7 +370,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     currentTargetId,
     targetName,
     currentTrack,
-    currentTrackId,
     isInstrumentTrack,
     canWriteCurrentTrackRouting,
     resolveTrackByTargetId,
@@ -432,7 +431,39 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     appendEffectOrder(targetId, kind);
   }
 
-  const instrumentState = createEffectsPanelState(props, currentTargetId, currentTrack, resolveTrackByTargetId);
+  const roomEffectsQuery = useConvexQuery(
+    convexApi.effects.listByRoom,
+    () => {
+      const projectId = props.projectId;
+      if (projectId && isLocalId("project", projectId)) return null;
+      return projectId && props.userId ? { projectId, userId: props.userId } : null;
+    },
+    () => ["effects", "room", props.projectId, props.userId],
+  );
+  const remoteEffectForTarget = (targetId: string, effectType: "eq" | "reverb") => {
+    const targetType = targetId === "master" ? "master" : "track";
+    return roomEffectsQuery.data?.find((row: RoomEffectRow) => {
+      if (row.type !== effectType || row.targetType !== targetType) return false;
+      return targetType === "master" ? true : row.trackId === targetId;
+    });
+  };
+
+  const instrumentState = createEffectsPanelState(
+    {
+      audioEngine: () => props.audioEngine,
+      projectId: () => props.projectId,
+      userId: () => props.userId,
+      playheadSec: () => props.playheadSec,
+      roomEffects: () => roomEffectsQuery.data,
+      grantClipWrite: props.grantClipWrite,
+      onSelectClip: props.onSelectClip,
+      insertLocalClip: props.insertLocalClip,
+      onEffectParamsCommitted: props.onEffectParamsCommitted,
+    },
+    currentTargetId,
+    currentTrack,
+    resolveTrackByTargetId,
+  );
   const canWriteCurrentTargetEffects = createMemo(() => currentTargetId() === "master" || canWriteCurrentTrackRouting());
   const isCurrentTargetReadOnly = createMemo(() => currentTargetId() !== "master" && !canWriteCurrentTrackRouting());
   const [localEqRows, setLocalEqRows] = createSignal<Record<string, LocalEqRow | undefined>>({});
@@ -445,6 +476,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     if (!projectId || !targetId || !isLocalProject()) return;
     const effect = targetId === "master" ? "master-eq" : "eq";
     void getLocalEffect<EqParams>(projectId, targetId, effect).then((row) => {
+      if (props.projectId !== projectId || currentTargetId() !== targetId) return;
       setLocalEqRows((prev) => ({ ...prev, [targetId]: row }));
     });
   });
@@ -455,28 +487,14 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     if (!projectId || !targetId || !isLocalProject()) return;
     const effect = targetId === "master" ? "master-reverb" : "reverb";
     void getLocalEffect<ReverbParams>(projectId, targetId, effect).then((row) => {
+      if (props.projectId !== projectId || currentTargetId() !== targetId) return;
       setLocalReverbRows((prev) => ({ ...prev, [targetId]: row }));
     });
   });
 
-  const eqMasterQuery = useConvexQuery(
-    convexApi.effects.getEqForMaster,
-    () => (props.projectId && !isLocalId("project", props.projectId) ? { projectId: props.projectId } : null),
-    () => ["effects", "eq", "master", props.projectId],
-  );
-
-  const eqTrackQuery = useConvexQuery(
-    convexApi.effects.getEqForTrack,
-    () => {
-      const trackId = currentTrackId();
-      return trackId && !isLocalId("track", trackId) ? buildTrackEffectQueryArgs(trackId) : null;
-    },
-    () => ["effects", "eq", "track", currentTargetId()],
-  );
-
-  const eqState = createPersistedEffectState<TrackEqRow, EqParams>({
+  const eqState = createPersistedEffectState<RoomEffectRow | undefined, EqParams>({
     targetId: currentTargetId,
-    row: () => isLocalProject() ? localEqRows()[currentTargetId()] : currentTargetId() === "master" ? eqMasterQuery.data : eqTrackQuery.data,
+    row: () => isLocalProject() ? localEqRows()[currentTargetId()] : remoteEffectForTarget(currentTargetId(), "eq"),
     readQueryParams: (row) => row?.params,
     createInitialParams: () => createDefaultEqParams(),
     serializeParams: serializeEqParams,
@@ -575,24 +593,9 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     eqState.update(() => createDefaultEqParams());
   };
 
-  const reverbMasterQuery = useConvexQuery(
-    convexApi.effects.getReverbForMaster,
-    () => (props.projectId && !isLocalId("project", props.projectId) ? { projectId: props.projectId } : null),
-    () => ["effects", "reverb", "master", props.projectId],
-  );
-
-  const reverbTrackQuery = useConvexQuery(
-    convexApi.effects.getReverbForTrack,
-    () => {
-      const trackId = currentTrackId();
-      return trackId && !isLocalId("track", trackId) ? buildTrackEffectQueryArgs(trackId) : null;
-    },
-    () => ["effects", "reverb", "track", currentTargetId()],
-  );
-
-  const reverbState = createPersistedEffectState<TrackReverbRow, ReverbParams>({
+  const reverbState = createPersistedEffectState<RoomEffectRow | undefined, ReverbParams>({
     targetId: currentTargetId,
-    row: () => isLocalProject() ? localReverbRows()[currentTargetId()] : currentTargetId() === "master" ? reverbMasterQuery.data : reverbTrackQuery.data,
+    row: () => isLocalProject() ? localReverbRows()[currentTargetId()] : remoteEffectForTarget(currentTargetId(), "reverb"),
     readQueryParams: (row) => row?.params,
     createInitialParams: () => createDefaultReverbParams(),
     serializeParams: serializeReverbParams,
@@ -674,12 +677,13 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     reverbState.update(() => createDefaultReverbParams());
   };
 
-  const { roomEffects, spectrum } = useEffectsPanelAudioSync({
+  const { spectrum } = useEffectsPanelAudioSync({
     isOpen: () => props.isOpen,
     projectId: () => props.projectId,
     currentTargetId,
     tracks: () => props.tracks,
     audioEngine: () => props.audioEngine,
+    roomEffects: () => roomEffectsQuery.data,
     playheadSec: () => props.playheadSec,
     localDraftEffects: {
       eq: eqState.readDraftForTarget,
@@ -690,7 +694,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   });
 
   createEffect(() => {
-    const effects = roomEffects.data;
+    const effects = roomEffectsQuery.data;
     if (effects === undefined) return;
     const activeTarget = currentTargetId();
     const synthByTrackId = new Map<string, ReturnType<typeof normalizeSynthParams>>();

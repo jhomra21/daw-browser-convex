@@ -41,7 +41,9 @@ export function useProjectExports(options: UseProjectExportsArgs): UseProjectExp
       setLocalExports([])
       return
     }
+    const isCurrentProject = () => (!enabled || enabled()) && projectId() === rid && isLocalId('project', rid)
     void listLocalExportMetadata(rid).then((rows) => {
+      if (!isCurrentProject()) return
       setLocalExports(rows.map((row) => ({
         _id: row.id,
         projectId: rid,
@@ -55,7 +57,9 @@ export function useProjectExports(options: UseProjectExportsArgs): UseProjectExp
         createdAt: row.createdAt,
         createdBy: 'local',
       })))
-    }).catch(() => setLocalExports([]))
+    }).catch(() => {
+      if (isCurrentProject()) setLocalExports([])
+    })
   })
 
   const raw = useConvexQuery(

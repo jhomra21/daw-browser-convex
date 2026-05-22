@@ -115,6 +115,7 @@ export default defineSchema({
     manifest: v.any(),
     manifestVersion: v.string(),
     updatedAt: v.number(),
+    manifestUpdatedAt: v.number(),
     entityCount: v.number(),
     assetCount: v.number(),
   })

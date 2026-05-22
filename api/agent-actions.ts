@@ -248,6 +248,7 @@ export function createAgentActions(context: AgentActionContext) {
 
   const listRoomClips = async () => await context.convex.query(context.convexApi.clips.listByRoom as any, {
     projectId: context.projectId,
+    userId: context.userId,
   } as any) as any[]
 
   const listOwnedClipIds = async () => {
@@ -445,6 +446,8 @@ export function createAgentActions(context: AgentActionContext) {
       if ((track.kind ?? 'audio') !== 'instrument') return { error: 'Target track is not an instrument track' }
       const { trackIndex, ...updates } = input
       const row = await context.convex.query(context.convexApi.effects.getSynthForTrack as any, {
+        projectId: context.projectId,
+        userId: context.userId,
         trackId: track._id,
       } as any)
       const params = normalizeSynthParams({

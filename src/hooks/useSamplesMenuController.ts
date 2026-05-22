@@ -100,6 +100,7 @@ export function useSamplesMenuController(
     setDeletingSampleKey(sample.key)
     try {
       if (isLocalId('project', projectId) && isLocalId('asset', sample.assetKey)) {
+        if (sample.count > 0) return
         await deleteLocalAsset(projectId, sample.assetKey)
         samples.refreshSamples()
         setConfirmingSampleKey(null)

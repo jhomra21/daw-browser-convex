@@ -46,6 +46,7 @@ type UseTimelineProjectionStateReturn = {
   previewClipsByTrackId: Accessor<Map<Track['id'], Track['clips']>>
   insertLocalTrack: (track: Track, index: number) => void
   insertLocalClip: (trackId: Track['id'], clip: Track['clips'][number]) => void
+  replaceLocalClip: (trackId: Track['id'], clip: Track['clips'][number]) => void
   removeLocalClips: (clipIds: Iterable<string>) => void
   removeLocalTrack: (trackId: Track['id']) => void
   setDraftClipTiming: (clipId: string, patch: ClipTimelinePatch | null) => void
@@ -297,6 +298,14 @@ export function useTimelineProjectionState(
         next.delete(clip.id)
         return next
       })
+      setPendingClipCreatesById((current) => {
+        const next = new Map(current)
+        next.set(clip.id, { trackId, clip })
+        return next
+      })
+    },
+    replaceLocalClip: (trackId, clip) => {
+      options.rememberClipHistoryRef(clip)
       setPendingClipCreatesById((current) => {
         const next = new Map(current)
         next.set(clip.id, { trackId, clip })

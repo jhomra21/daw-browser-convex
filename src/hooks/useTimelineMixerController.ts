@@ -18,7 +18,7 @@ import type { Track, TrackRouting, TrackSend } from '~/types/timeline'
 type LocalTrackRouting = TrackRouting & { sends: TrackSend[] }
 type PendingTrackMixField = keyof PendingTrackMixState
 type PendingTrackMixWriteAt = Partial<Record<PendingTrackMixField, number>>
-type ScheduledTrackWrite = { timer: number; token: number }
+type ScheduledTrackWrite = { timer: number; token: number; write: () => Promise<unknown> }
 
 const readMixIssuedAt = () => typeof performance !== 'undefined' ? performance.now() : Date.now()
 
@@ -159,6 +159,14 @@ export function useTimelineMixerController(
     timers.clear()
   }
 
+  const flushTimers = (timers: Map<Track['id'], ScheduledTrackWrite>) => {
+    for (const [trackId, scheduled] of timers) {
+      clearTimeout(scheduled.timer)
+      timers.delete(trackId)
+      void scheduled.write()
+    }
+  }
+
   const clearScheduledWrite = (timers: Map<Track['id'], ScheduledTrackWrite>, trackId: Track['id']) => {
     const timer = timers.get(trackId)
     if (!timer) return
@@ -258,8 +266,7 @@ export function useTimelineMixerController(
     const previous = timers.get(trackId)
     if (previous) clearTimeout(previous.timer)
     const token = (previous?.token ?? 0) + 1
-    // Coalesce fast slider/toggle updates into one shared write and clear the
-    // timer map whenever the room changes or the controller unmounts.
+    // Coalesce fast slider/toggle updates into one write.
     const timer = window.setTimeout(() => {
       void write().finally(() => {
         const current = timers.get(trackId)
@@ -268,7 +275,7 @@ export function useTimelineMixerController(
         }
       })
     }, 150)
-    timers.set(trackId, { timer, token })
+    timers.set(trackId, { timer, token, write })
   }
 
   const persistLocalTrackRouting = (trackId: Track['id'], routing: LocalTrackRouting) => {
@@ -299,9 +306,10 @@ export function useTimelineMixerController(
   }
 
   const persistTrackRouting = (trackId: Track['id'], routing: LocalTrackRouting) => {
-    if (isLocalId('project', options.projectId())) {
+    const projectId = options.projectId()
+    if (isLocalId('project', projectId)) {
       scheduleTrackWrite(routingTimers, trackId, () =>
-        createLocalTimelineRepository(options.projectId()).updateTrack({
+        createLocalTimelineRepository(projectId).updateTrack({
           trackId,
           outputTargetId: routing.outputTargetId ?? null,
           sends: routing.sends,
@@ -384,9 +392,10 @@ export function useTimelineMixerController(
   }
 
   const persistTrackVolume = (trackId: Track['id'], volume: number) => {
-    if (isLocalId('project', options.projectId())) {
+    const projectId = options.projectId()
+    if (isLocalId('project', projectId)) {
       scheduleTrackWrite(volumeTimers, trackId, () =>
-        createLocalTimelineRepository(options.projectId()).updateTrack({ trackId, volume }),
+        createLocalTimelineRepository(projectId).updateTrack({ trackId, volume }),
       )
       return
     }
@@ -459,10 +468,11 @@ export function useTimelineMixerController(
   }
 
   const persistTrackMixState = (trackId: Track['id']) => {
-    if (isLocalId('project', options.projectId())) {
+    const projectId = options.projectId()
+    if (isLocalId('project', projectId)) {
       scheduleTrackWrite(mixTimers, trackId, () => {
         const pendingMix = rawPendingSharedTrackMix().get(trackId)
-        return createLocalTimelineRepository(options.projectId()).updateTrack({
+        return createLocalTimelineRepository(projectId).updateTrack({
           trackId,
           muted: pendingMix?.muted,
           soloed: pendingMix?.soloed,
@@ -640,9 +650,9 @@ export function useTimelineMixerController(
 
   createEffect(() => {
     options.projectId()
-    clearTimers(volumeTimers)
-    clearTimers(routingTimers)
-    clearTimers(mixTimers)
+    flushTimers(volumeTimers)
+    flushTimers(routingTimers)
+    flushTimers(mixTimers)
     setRawPendingSharedTrackVolumes(new Map())
     setRawPendingSharedTrackRouting(new Map())
     setRawPendingSharedTrackMix(new Map())
@@ -797,9 +807,9 @@ export function useTimelineMixerController(
   }, new Map())
 
   onCleanup(() => {
-    clearTimers(volumeTimers)
-    clearTimers(routingTimers)
-    clearTimers(mixTimers)
+    flushTimers(volumeTimers)
+    flushTimers(routingTimers)
+    flushTimers(mixTimers)
   })
 
   return {

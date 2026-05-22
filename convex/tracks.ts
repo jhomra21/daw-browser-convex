@@ -14,7 +14,7 @@ import {
   sanitizeTrackRouting,
 } from "./trackRouting";
 import { getTrackWriteAccess, requireTrackOwnerForWrite } from "./trackWrites";
-import { requireProjectRole } from "./projectAccess";
+import { requireProjectAccess, requireProjectRole } from "./projectAccess";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -182,8 +182,9 @@ export async function deleteOwnedTrack(
 }
 
 export const listByRoom = query({
-  args: { projectId: v.string() },
-  handler: async (ctx, { projectId }) => {
+  args: { projectId: v.string(), userId: v.string() },
+  handler: async (ctx, { projectId, userId }) => {
+    await requireProjectAccess(ctx, projectId, userId);
     return await listProjectTracksWithMixerChannels(ctx, projectId);
   },
 });

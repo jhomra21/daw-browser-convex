@@ -7,6 +7,7 @@ import { convexClient, convexApi } from '~/lib/convex'
 import { isLocalId } from '~/lib/local-ids'
 import { saveBlobLocally } from '~/lib/local-export'
 import { saveLocalExportMetadata } from '~/lib/local-export-metadata'
+import { listLocalEffects, type LocalEffectRow } from '~/lib/local-effects'
 
 type Props = {
   isOpen: boolean
@@ -29,6 +30,24 @@ const ExportDialog: Component<Props> = (props) => {
   const [error, setError] = createSignal<string | null>(null)
   const [resultUrl, setResultUrl] = createSignal<string | null>(null)
   const [localSavedName, setLocalSavedName] = createSignal<string | null>(null)
+
+  const applyLocalEffectRowsToFx = (fx: any, rows: LocalEffectRow[]) => {
+    for (const row of rows) {
+      if (row.effect === 'master-eq') {
+        fx.masterEq = row.params
+        continue
+      }
+      if (row.effect === 'master-reverb') {
+        fx.masterReverb = row.params
+        continue
+      }
+      const previous = fx.trackFx[row.targetId] ?? {}
+      if (row.effect === 'eq') fx.trackFx[row.targetId] = { ...previous, eq: row.params }
+      if (row.effect === 'reverb') fx.trackFx[row.targetId] = { ...previous, reverb: row.params }
+      if (row.effect === 'arp') fx.trackFx[row.targetId] = { ...previous, arp: row.params }
+      if (row.effect === 'synth') fx.trackFx[row.targetId] = { ...previous, synth: row.params }
+    }
+  }
 
   const computeRange = (): ExportRange => {
     const m = mode()
@@ -76,27 +95,29 @@ const ExportDialog: Component<Props> = (props) => {
       const range = computeRange()
       await ensureBuffersForRange(range)
       const localOnly = props.projectId ? isLocalId('project', props.projectId) : false
-      // Fetch effects (master + per-track) from Convex
       const fx: any = { trackFx: {} as Record<string, { eq?: any; reverb?: any }> }
-      if (!localOnly) try {
-        if (props.projectId) {
-          const [mEq, mRv] = await Promise.all([
-            convexClient.query((convexApi as any).effects.getEqForMaster, { projectId: props.projectId } as any).catch(() => null),
-            convexClient.query((convexApi as any).effects.getReverbForMaster, { projectId: props.projectId } as any).catch(() => null),
-          ])
-          if (mEq?.params) fx.masterEq = mEq.params
-          if (mRv?.params) fx.masterReverb = mRv.params
+      if (localOnly && props.projectId) try {
+        applyLocalEffectRowsToFx(fx, await listLocalEffects(props.projectId))
+      } catch {}
+      if (!localOnly && props.projectId && props.userId) try {
+        const rows = await convexClient.query((convexApi as any).effects.listByRoom, {
+          projectId: props.projectId,
+          userId: props.userId,
+        } as any).catch(() => [])
+        for (const row of rows) {
+          if (row?.targetType === 'master') {
+            if (row.type === 'eq' && row.params) fx.masterEq = row.params
+            if (row.type === 'reverb' && row.params) fx.masterReverb = row.params
+            continue
+          }
+          const trackId = row?.trackId
+          if (!trackId || !row.params) continue
+          const previous = fx.trackFx[trackId] ?? {}
+          if (row.type === 'eq') fx.trackFx[trackId] = { ...previous, eq: row.params }
+          if (row.type === 'reverb') fx.trackFx[trackId] = { ...previous, reverb: row.params }
+          if (row.type === 'arpeggiator') fx.trackFx[trackId] = { ...previous, arp: row.params }
+          if (row.type === 'synth') fx.trackFx[trackId] = { ...previous, synth: row.params }
         }
-        const perTrack = await Promise.all(props.tracks.map(async (t) => {
-          const [eqRow, rvRow, arpRow, synthRow] = await Promise.all([
-            convexClient.query((convexApi as any).effects.getEqForTrack, { trackId: t.id as any } as any).catch(() => null),
-            convexClient.query((convexApi as any).effects.getReverbForTrack, { trackId: t.id as any } as any).catch(() => null),
-            convexClient.query((convexApi as any).effects.getArpeggiatorForTrack, { trackId: t.id as any } as any).catch(() => null),
-            convexClient.query((convexApi as any).effects.getSynthForTrack, { trackId: t.id as any } as any).catch(() => null),
-          ])
-          return [t.id, { eq: eqRow?.params, reverb: rvRow?.params, arp: arpRow?.params, synth: synthRow?.params }] as const
-        }))
-        for (const [id, vals] of perTrack) fx.trackFx[id] = vals
       } catch {}
 
       const rendered = await renderMixdown({ tracks: props.tracks, bpm: props.bpm, range, fx })

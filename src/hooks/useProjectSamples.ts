@@ -250,9 +250,10 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
       if (enabled && !enabled()) return null
       const rid = projectId()
       if (rid && isLocalId('project', rid)) return null
-      return rid ? ({ projectId: rid }) : null
+      const uid = userId ? userId() : ''
+      return rid && uid ? ({ projectId: rid, userId: uid }) : null
     },
-    () => ['clips', 'by_room', projectId()]
+    () => ['clips', 'by_room', projectId(), userId ? userId() : '']
   )
 
   const [cachedDefaultSampleMetadataByKey, setCachedDefaultSampleMetadataByKey] = createSignal<Map<string, AudioSourceMetadata>>(new Map())
@@ -280,6 +281,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
         return
       }
 
+      const isCurrentProject = () => projectId() === rid && (!enabled || enabled()) && isLocalId('project', rid)
       void (async () => {
         const [assets, snapshot] = await Promise.all([
           listLocalAssets(rid),
@@ -334,6 +336,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
             earliestClip: earliest,
           })
         }
+        if (!isCurrentProject()) return
         setLocalSamples(items)
       })()
     },

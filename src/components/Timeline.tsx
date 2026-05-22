@@ -499,6 +499,15 @@ const Timeline: Component = () => {
     projection.insertLocalClip(trackId, updated);
   };
 
+  const handleLocalMidiSaved = (clipId: string, midi: Clip["midi"]) => {
+    const match = trackLookup().clipEntryById.get(clipId);
+    if (!match) return;
+    projection.replaceLocalClip(match.trackId, {
+      ...match.clip,
+      midi,
+    });
+  };
+
   const chooseProjectStorageFolder = async () => {
     const rid = projectId();
     const openDirectoryPicker = window.showDirectoryPicker;
@@ -650,6 +659,7 @@ const Timeline: Component = () => {
     resolvedTracks: () => resolvedTracks(),
     insertLocalTrack: projection.insertLocalTrack,
     insertLocalClip: projection.insertLocalClip,
+    removeLocalClips: projection.removeLocalClips,
     removeLocalTrack: projection.removeLocalTrack,
     replaceDraftClipMoves: projection.replaceDraftClipMoves,
     clearDraftClipMoves: projection.clearDraftClipMoves,
@@ -893,6 +903,7 @@ const Timeline: Component = () => {
   };
 
   const exportArchive = async () => {
+    if (!isLocalId("project", projectId())) return;
     try {
       const blob = await exportDawProjectArchive(projectId());
       const url = URL.createObjectURL(blob);
@@ -1037,7 +1048,7 @@ const Timeline: Component = () => {
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => setExportOpen(true)}
+                  onClick={() => void exportArchive()}
                 >
                   Export backup
                 </Button>
@@ -1078,6 +1089,7 @@ const Timeline: Component = () => {
           canWriteTrackRouting: canWriteTrack,
           grantClipWrite,
           onSelectClip: jumpToClip,
+          insertLocalClip: projection.insertLocalClip,
           onClose: () => setBottomFXOpen(false),
           onOpen: () => setBottomFXOpen(true),
           onEffectParamsCommitted: pushEffectParamsHistory,
@@ -1210,6 +1222,7 @@ const Timeline: Component = () => {
                     auditionNote,
                     startLiveNote,
                     stopLiveNote,
+                    onLocalMidiSaved: handleLocalMidiSaved,
                   }}
                 />
               </div>

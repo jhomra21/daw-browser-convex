@@ -17,7 +17,12 @@ const RECORDING_MIME_TYPES = [
 const RECORDING_LOCK_KEEPALIVE_MS = 30_000
 
 export type RecordingContext = {
+  projectId: string
+  userId: string | undefined
+  isLocalProject: boolean
   trackId: Track['id']
+  targetTrack: Track
+  tracks: Track[]
   createdTrack: Track | null
   startSec: number
   stream: MediaStream
@@ -172,7 +177,7 @@ export function startRecordingLockHeartbeat(options: {
 export async function cleanupRecordingSession(options: {
   activeCtx: RecordingContext | null
   clearLockHeartbeat: () => void
-  releaseTrackLock: (trackId: Track['id'], locker: string | undefined) => Promise<void>
+  releaseTrackLock: (trackId: Track['id'], locker: string | undefined, isLocalProject: boolean) => Promise<void>
   setIsRecording: (value: boolean) => void
   setIsRecordingInternal: (value: boolean) => void
   livePreviewPoints: { offset: number; amplitude: number }[]
@@ -199,7 +204,7 @@ export async function cleanupRecordingSession(options: {
   } catch {}
   try { await ctx.analysisCtx?.close() } catch {}
 
-  await options.releaseTrackLock(ctx.trackId, ctx.lockedByUserId)
+  await options.releaseTrackLock(ctx.trackId, ctx.lockedByUserId, ctx.isLocalProject)
   options.setIsRecording(false)
   options.setIsRecordingInternal(false)
   options.livePreviewPoints.length = 0

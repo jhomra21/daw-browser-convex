@@ -12,11 +12,12 @@ import {
 } from "~/components/effects/synth-card-bounds";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import { buildClipCreatePayload, type ClipCreateSnapshot } from "~/lib/clip-create";
-import { convexApi, convexClient, useConvexQuery } from "~/lib/convex";
-import { buildTrackEffectMutationInput, buildTrackEffectQueryArgs } from "~/lib/effect-track-args";
+import { convexApi, convexClient } from "~/lib/convex";
+import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
 import { getLocalEffect, setLocalEffect, type LocalEffectRow } from "~/lib/local-effects";
 import { isLocalId } from "~/lib/local-ids";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
+import type { TimelineClipRow } from "~/lib/timeline-repository/types";
 import {
   createDefaultArpeggiatorParams,
   createDefaultSynthParams,
@@ -33,19 +34,22 @@ import {
 import type { EffectParamsByEffect, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import type { AudioEngine } from "~/lib/audio-engine";
-import type { Track } from "~/types/timeline";
-type TrackArpRow = FunctionReturnType<typeof convexApi.effects.getArpeggiatorForTrack>;
-type TrackSynthRow = FunctionReturnType<typeof convexApi.effects.getSynthForTrack>;
+import type { Clip, Track } from "~/types/timeline";
+type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
 type LocalArpRow = LocalEffectRow<ArpeggiatorParams>;
 type LocalSynthRow = LocalEffectRow<SynthParams>;
+type ArpRow = RoomEffectRow | LocalArpRow | undefined;
+type SynthRow = RoomEffectRow | LocalSynthRow | undefined;
 
 type EffectsPanelContext = {
-  audioEngine?: AudioEngine;
-  projectId?: string;
-  userId?: string;
-  playheadSec?: number;
+  audioEngine: Accessor<AudioEngine | undefined>;
+  projectId: Accessor<string | undefined>;
+  userId: Accessor<string | undefined>;
+  playheadSec: Accessor<number | undefined>;
+  roomEffects?: Accessor<RoomEffectRow[] | undefined>;
   grantClipWrite?: OptimisticGrantWrite;
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
+  insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>) => void;
 };
 
@@ -88,6 +92,26 @@ type EffectsPanelState = {
 export const EFFECT_PANEL_SAVE_DEBOUNCE_MS = 200;
 export const EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS = 800;
 
+const toLocalTimelineClip = (row: TimelineClipRow): Clip => ({
+  id: row.id,
+  historyRef: row.historyRef,
+  name: row.name,
+  buffer: null,
+  startSec: row.startSec,
+  duration: row.duration,
+  sourceAssetKey: row.sourceAssetKey,
+  sourceKind: row.sourceKind,
+  sourceDurationSec: row.sourceDurationSec,
+  sourceSampleRate: row.sourceSampleRate,
+  sourceChannelCount: row.sourceChannelCount,
+  leftPadSec: row.leftPadSec,
+  bufferOffsetSec: row.bufferOffsetSec,
+  color: row.color,
+  sampleUrl: row.sampleUrl,
+  midi: row.midi,
+  midiOffsetBeats: row.midiOffsetBeats,
+});
+
 export function createEffectsPanelState(
   context: EffectsPanelContext,
   currentTargetId: Accessor<string>,
@@ -104,12 +128,15 @@ export function createEffectsPanelState(
     return resolveTrackById(targetId);
   }
 
-  const isLocalProject = () => Boolean(context.projectId && isLocalId("project", context.projectId));
+  const isLocalProject = () => {
+    const projectId = context.projectId();
+    return Boolean(projectId && isLocalId("project", projectId));
+  };
   const [localArpRows, setLocalArpRows] = createSignal<Record<string, LocalArpRow | undefined>>({});
   const [localSynthRows, setLocalSynthRows] = createSignal<Record<string, LocalSynthRow | undefined>>({});
 
   createEffect(() => {
-    const projectId = context.projectId;
+    const projectId = context.projectId();
     const targetId = getTrackTargetId();
     if (!projectId || !targetId || !isLocalProject()) return;
     void getLocalEffect<ArpeggiatorParams>(projectId, targetId, "arp").then((row) => {
@@ -118,7 +145,7 @@ export function createEffectsPanelState(
   });
 
   createEffect(() => {
-    const projectId = context.projectId;
+    const projectId = context.projectId();
     const targetId = getTrackTargetId();
     if (!projectId || !targetId || !isLocalProject()) return;
     void getLocalEffect<SynthParams>(projectId, targetId, "synth").then((row) => {
@@ -127,8 +154,8 @@ export function createEffectsPanelState(
   });
 
   function persistArpeggiator(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setArpeggiatorParams>["params"]) {
-    const projectId = context.projectId;
-    const userId = context.userId;
+    const projectId = context.projectId();
+    const userId = context.userId();
     if (!projectId) return;
     if (isLocalId("project", projectId)) {
       return setLocalEffect(projectId, trackId, "arp", params).then((row) => {
@@ -149,8 +176,8 @@ export function createEffectsPanelState(
   }
 
   function persistSynth(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setSynthParams>["params"]) {
-    const projectId = context.projectId;
-    const userId = context.userId;
+    const projectId = context.projectId();
+    const userId = context.userId();
     if (!projectId) return;
     if (isLocalId("project", projectId)) {
       return setLocalEffect<SynthParams>(projectId, trackId, "synth", normalizeSynthParams(params)).then((row) => {
@@ -213,26 +240,22 @@ export function createEffectsPanelState(
       : undefined;
   };
 
-  const arpQuery = useConvexQuery(
-    convexApi.effects.getArpeggiatorForTrack,
-    () => {
-      const targetId = getTrackTargetId();
-      return targetId && !isLocalId("track", targetId) ? buildTrackEffectQueryArgs(targetId) : null;
-    },
-    () => ["effects", "arpeggiator", currentTargetId()],
-  );
+  const remoteEffectForTarget = (targetId: string | undefined, effectType: "synth" | "arpeggiator") => {
+    if (!targetId || isLocalProject()) return undefined;
+    return context.roomEffects?.()?.find((row) => row.trackId === targetId && row.type === effectType && row.targetType === "track");
+  };
 
-  const arpState = createPersistedEffectState<TrackArpRow, ArpeggiatorParams>({
+  const arpState = createPersistedEffectState<ArpRow, ArpeggiatorParams>({
     targetId: getTrackTargetId,
-    row: () => isLocalProject() ? localArpRows()[getTrackTargetId() ?? ""] : arpQuery.data,
+    row: () => isLocalProject() ? localArpRows()[getTrackTargetId() ?? ""] : remoteEffectForTarget(getTrackTargetId(), "arpeggiator"),
     readQueryParams: (row) => row?.params,
     createInitialParams: () => createDefaultArpeggiatorParams(),
     serializeParams: (params) => JSON.stringify(params),
     applyToEngine: (targetId, params) => {
-      context.audioEngine?.setTrackArpeggiator(targetId, params);
+      context.audioEngine()?.setTrackArpeggiator(targetId, params);
     },
     clearFromEngine: (targetId) => {
-      context.audioEngine?.clearTrackArpeggiator?.(targetId);
+      context.audioEngine()?.clearTrackArpeggiator?.(targetId);
     },
     persistParams: (targetId, params) => {
       const track = getTrackByTargetId(targetId);
@@ -247,18 +270,9 @@ export function createEffectsPanelState(
     },
   });
 
-  const synthQuery = useConvexQuery(
-    convexApi.effects.getSynthForTrack,
-    () => {
-      const targetId = getTrackTargetId();
-      return targetId && !isLocalId("track", targetId) ? buildTrackEffectQueryArgs(targetId) : null;
-    },
-    () => ["effects", "synth", currentTargetId()],
-  );
-
-  const synthState = createPersistedEffectState<TrackSynthRow, SynthParams>({
+  const synthState = createPersistedEffectState<SynthRow, SynthParams>({
     targetId: getTrackTargetId,
-    row: () => isLocalProject() ? localSynthRows()[getTrackTargetId() ?? ""] : synthQuery.data,
+    row: () => isLocalProject() ? localSynthRows()[getTrackTargetId() ?? ""] : remoteEffectForTarget(getTrackTargetId(), "synth"),
     readQueryParams: (row) => {
       return row?.params
         ? normalizeSynthParams(row.params)
@@ -268,10 +282,10 @@ export function createEffectsPanelState(
     createInitialParams: readSynthDefaults,
     serializeParams: serializeSynthParams,
     applyToEngine: (targetId, params) => {
-      context.audioEngine?.setTrackSynth(targetId, params);
+      context.audioEngine()?.setTrackSynth(targetId, params);
     },
     clearFromEngine: (targetId) => {
-      context.audioEngine?.clearTrackSynth?.(targetId);
+      context.audioEngine()?.clearTrackSynth?.(targetId);
     },
     persistParams: (targetId, params) => {
       const track = getTrackByTargetId(targetId);
@@ -330,14 +344,14 @@ export function createEffectsPanelState(
     const track = currentTrack();
     if (!track || track.kind !== "instrument") return;
 
-    const projectId = context.projectId;
+    const projectId = context.projectId();
     if (!projectId) return;
     const grantScope = readOptimisticGrantScope({
       projectId,
-      userId: context.userId,
+      userId: context.userId(),
     });
 
-    const start = Math.max(0, Math.round((context.playheadSec ?? 0) * 1000) / 1000);
+    const start = Math.max(0, Math.round((context.playheadSec() ?? 0) * 1000) / 1000);
     const clip: ClipCreateSnapshot = {
       startSec: start,
       duration: 1,
@@ -355,6 +369,7 @@ export function createEffectsPanelState(
           trackId: track.id,
           ...clip,
         });
+        context.insertLocalClip?.(track.id, toLocalTimelineClip(row));
         context.onSelectClip?.(track.id, row.id, start);
         return;
       }
@@ -371,8 +386,8 @@ export function createEffectsPanelState(
 
       context.grantClipWrite?.(clipId, grantScope);
       const currentScope = readOptimisticGrantScope({
-        projectId: context.projectId,
-        userId: context.userId,
+        projectId: context.projectId(),
+        userId: context.userId(),
       });
       if (!currentScope || didOptimisticGrantScopeChange(grantScope, currentScope)) return;
       context.onSelectClip?.(track.id, clipId, start);

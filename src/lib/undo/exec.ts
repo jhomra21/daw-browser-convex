@@ -131,7 +131,7 @@ async function removeClipIdsOrThrow(deps: Deps, clipIds: string[], message: stri
   if (clipIds.length === 0) return
   if (isLocalProject(deps)) {
     const repo = createLocalTimelineRepository(deps.projectId)
-    await Promise.all(clipIds.map((clipId) => repo.deleteClip(clipId)))
+    await repo.deleteClips(clipIds)
     return
   }
   const result = await deps.convexClient.mutation(

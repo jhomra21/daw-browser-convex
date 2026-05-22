@@ -407,11 +407,20 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
   }
 
   for (const [clipId, pending] of options.client.clips.pendingCreatesById) {
-    if (options.client.clips.removedIds.has(clipId) || clipById.has(clipId)) continue
+    if (options.client.clips.removedIds.has(clipId)) continue
     const track = trackById.get(pending.trackId)
     if (!track) continue
     const clip = attachClipBuffer(cloneClip(pending.clip), options.projectId, options.buffers.audioBufferCache, options.buffers.clipMediaStatus)
-    pushClipToTrack(track, clip)
+    const currentTrackId = clipTrackIdById.get(clipId)
+    const currentTrack = currentTrackId ? trackById.get(currentTrackId) : undefined
+    if (currentTrack && currentTrack !== track) {
+      removeClipFromTrack(currentTrack, clipId)
+    }
+    if (currentTrack === track) {
+      track.clips = track.clips.map((entry) => entry.id === clipId ? clip : entry)
+    } else {
+      pushClipToTrack(track, clip)
+    }
     clipById.set(clipId, clip)
     clipTrackIdById.set(clipId, pending.trackId)
   }

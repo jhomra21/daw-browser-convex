@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { createAuth, type Session } from './auth'
 import { streamText } from 'ai'
@@ -7,30 +7,137 @@ import { ConvexHttpClient } from 'convex/browser'
 import { api as convexApi } from '../convex/_generated/api'
 import { CommandsEnvelopeSchema } from '../src/lib/agent-commands'
 import { createAgentActions } from './agent-actions'
+import { parseProjectManifest, type ProjectManifest, withProjectManifestAssetKeys } from '../src/lib/project-manifest-contract'
+import type { ProjectRole } from '../convex/projectAccess'
 
 type Variables = {
   user: Session['user'] | null;
   session: Session['session'] | null;
 }
 
+type ApiContext = Context<{
+  Bindings: Env;
+  Variables: Variables;
+}>
+
+type CloudBackupRow = {
+  manifest: Omit<ProjectManifest, 'syncState'> & {
+    syncState?: ProjectManifest['syncState']
+  }
+  manifestVersion: string
+}
+
+type BackupConflict = {
+  localUpdatedAt: number
+  cloudUpdatedAt: number
+  localEntityCount: number
+  cloudEntityCount: number
+  localAssetCount: number
+  cloudAssetCount: number
+}
+
+type BackupUpsertResult = {
+  ok: boolean
+  manifestVersion?: string
+  conflict?: BackupConflict
+  supersededCloudKeys?: string[]
+}
+
+type BackupAssetUploadValidation =
+  | { ok: true; manifestAssetIds: Set<string> }
+  | { ok: false; error: string }
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+
+const readAgentExecuteBody = (value: unknown) => {
+  if (!isRecord(value) || typeof value.projectId !== 'string' || value.commands === undefined) return null
+  return {
+    projectId: value.projectId,
+    commands: value.commands,
+  }
+}
+
+const readAgentChatBody = (value: unknown) => {
+  if (!isRecord(value) || !Array.isArray(value.messages)) return null
+  return {
+    messages: value.messages,
+    projectId: typeof value.projectId === 'string' ? value.projectId : undefined,
+    bpm: typeof value.bpm === 'number' ? value.bpm : undefined,
+  }
+}
+
+const projectExistsForBackup = async (convex: ConvexHttpClient, projectId: string): Promise<boolean> => (
+  await convex.query(convexApi.projects.exists, { projectId })
+)
+
+const ensureOwnedProjectForBackup = async (
+  convex: ConvexHttpClient,
+  projectId: string,
+  userId: string,
+) => {
+  await convex.mutation(convexApi.projects.ensureOwnedRoom, { projectId, userId })
+}
+
+const checkBackupConflict = async (
+  convex: ConvexHttpClient,
+  projectId: string,
+  userId: string,
+  manifest: ProjectManifest,
+): Promise<BackupConflict | null> => (
+  await convex.query(convexApi.cloudBackups.checkConflict, { projectId, userId, manifest })
+)
+
+const upsertLatestBackup = async (
+  convex: ConvexHttpClient,
+  projectId: string,
+  userId: string,
+  manifest: ProjectManifest,
+  conflictAction: 'detect' | 'overwrite',
+): Promise<BackupUpsertResult> => (
+  await convex.mutation(convexApi.cloudBackups.upsertLatest, {
+    projectId,
+    userId,
+    manifest,
+    conflictAction,
+  })
+)
+
+const getLatestBackup = async (
+  convex: ConvexHttpClient,
+  projectId: string,
+  userId: string,
+): Promise<CloudBackupRow | null> => (
+  await convex.query(convexApi.cloudBackups.getLatest, { projectId, userId })
+)
+
+const deleteCloudProjectAsOwner = async (
+  convex: ConvexHttpClient,
+  projectId: string,
+  userId: string,
+) => (
+  await convex.mutation(convexApi.projects.deleteRoomAsOwner, { projectId, userId })
+)
+
 async function canAccessAgentRoom(
   convex: ConvexHttpClient,
   projectId: string,
   userId: string,
 ) {
-  const canAccess = await convex.query(convexApi.projectAccess.canAccess as any, { projectId, userId } as any)
+  const canAccess = await convex.query(convexApi.projectAccess.canAccess, { projectId, userId })
   return canAccess
 }
 
 async function requireProjectRoleForApi(
-  c: any,
+  c: ApiContext,
   projectId: string,
-  roles: Array<'owner' | 'editor' | 'viewer'>,
+  roles: ProjectRole[],
 ) {
   const user = c.get('user')
   if (!user) return null
   const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
-  const role = await convex.query((convexApi as any).projectAccess.roleForUser, { projectId, userId: user.id })
+  const role = await convex.query(convexApi.projectAccess.roleForUser, { projectId, userId: user.id })
   return role && roles.includes(role) ? user : null
 }
 
@@ -42,11 +149,34 @@ const hashFile = async (file: File) => {
 const deleteR2Prefix = async (bucket: R2Bucket, prefix: string) => {
   let cursor: string | undefined
   do {
-    const page: any = await bucket.list({ prefix, cursor, limit: 1000 })
-    const keys = Array.isArray(page?.objects) ? page.objects.map((entry: any) => entry.key).filter(Boolean) : []
+    const page = await bucket.list({ prefix, cursor, limit: 1000 })
+    const keys = page.objects.map((entry) => entry.key).filter(Boolean)
     if (keys.length > 0) await bucket.delete(keys)
-    cursor = page?.truncated ? page.cursor : undefined
+    cursor = page.truncated ? page.cursor : undefined
   } while (cursor)
+}
+
+const deleteR2Keys = async (bucket: R2Bucket, keys: string[]) => {
+  if (keys.length === 0) return
+  await bucket.delete(keys)
+}
+
+const validateBackupAssetUploads = (form: FormData, manifest: ProjectManifest): BackupAssetUploadValidation => {
+  const manifestAssetIds = new Set(manifest.assets.map((asset) => asset.id))
+  const uploadedAssetIds = new Set<string>()
+  for (const [key, value] of form.entries()) {
+    if (!key.startsWith('asset:') || !(value instanceof File)) continue
+    const assetId = key.slice('asset:'.length)
+    if (!manifestAssetIds.has(assetId)) continue
+    if (uploadedAssetIds.has(assetId)) {
+      return { ok: false, error: 'Duplicate backup asset upload' }
+    }
+    uploadedAssetIds.add(assetId)
+  }
+  if (manifest.assets.some((asset) => !asset.missing && !uploadedAssetIds.has(asset.id))) {
+    return { ok: false, error: 'Missing backup asset upload' }
+  }
+  return { ok: true, manifestAssetIds }
 }
 
 const app = new Hono<{
@@ -114,34 +244,34 @@ app.post('/api/agent/execute', async (c) => {
   try {
     const user = c.get('user')
     if (!user) return c.json({ error: 'Unauthorized' }, 401)
-    const body = await c.req.json().catch(() => null) as any
-    if (!body || typeof body.projectId !== 'string' || !body.commands) {
+    const body = readAgentExecuteBody(await c.req.json().catch(() => null))
+    if (!body) {
       return c.json({ error: 'Invalid body' }, 400)
     }
-    const projectId: string = body.projectId
+    const projectId = body.projectId
     const parsed = CommandsEnvelopeSchema.safeParse({ commands: body.commands })
     if (!parsed.success) {
       return c.json({ error: 'Invalid commands', issues: parsed.error.issues }, 400)
     }
     const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
-    if (!(await canAccessAgentRoom(convex, projectId, (user as any).id))) {
+    if (!(await canAccessAgentRoom(convex, projectId, user.id))) {
       return c.json({ error: 'Forbidden' }, 403)
     }
-    const trackList: any[] = await convex.query(convexApi.tracks.listByRoom as any, { projectId, userId: (user as any).id } as any)
+    const trackList = await convex.query(convexApi.tracks.listByRoom, { projectId, userId: user.id })
     const agentActions = createAgentActions({
       convex,
       convexApi,
       projectId,
-      userId: (user as any).id,
+      userId: user.id,
       getTracks: async () => trackList,
       refreshTracks: async () => {
-        const updated: any[] = await convex.query(convexApi.tracks.listByRoom as any, { projectId, userId: (user as any).id } as any)
+        const updated = await convex.query(convexApi.tracks.listByRoom, { projectId, userId: user.id })
         trackList.splice(0, trackList.length, ...updated)
         return trackList
       },
     })
 
-    const results: any[] = []
+    const results: Array<Record<string, unknown>> = []
     for (const cmd of parsed.data.commands) {
       try {
         switch (cmd.type) {
@@ -218,10 +348,10 @@ app.post('/api/agent/execute', async (c) => {
             break
           }
           default:
-            results.push({ type: (cmd as any).type, error: 'Unsupported' })
+            results.push({ error: 'Unsupported' })
         }
       } catch (e) {
-        results.push({ type: (cmd as any).type, error: 'Execution failed' })
+        results.push({ type: cmd.type, error: 'Execution failed' })
       }
     }
 
@@ -365,21 +495,19 @@ app.get('/api/default-samples', async (c) => {
     }
     const prefix = 'default/'
     let cursor: string | undefined
-    const objects: any[] = []
+    const objects: R2Object[] = []
 
     do {
-      const page: any = await bucket.list({
+      const page = await bucket.list({
         prefix,
         cursor,
         limit: 1000,
       })
-      if (Array.isArray(page?.objects)) {
-        objects.push(...page.objects)
-      }
-      cursor = page?.truncated ? page?.cursor : undefined
+      objects.push(...page.objects)
+      cursor = page.truncated ? page.cursor : undefined
     } while (cursor)
 
-    const samples: any[] = []
+    const samples: Array<Record<string, unknown>> = []
     for (const obj of objects) {
       if (!obj || typeof obj.key !== 'string' || !obj.key.startsWith(prefix)) continue
       if (obj.key === prefix || obj.key.endsWith('/')) continue
@@ -415,7 +543,7 @@ app.get('/api/default-samples', async (c) => {
       })
     }
 
-    samples.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+    samples.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' }))
 
     return c.json({ samples })
   } catch (err) {
@@ -434,60 +562,71 @@ app.post('/api/cloud-backups', async (c) => {
     const conflictAction = form.get('conflictAction') === 'overwrite' ? 'overwrite' : 'detect'
     if (!projectId || !manifestRaw) return c.json({ error: 'Missing projectId or manifest' }, 400)
 
-    let manifest: any
+    let manifest: ProjectManifest
     try {
-      manifest = JSON.parse(manifestRaw)
+      manifest = parseProjectManifest(manifestRaw)
     } catch {
       return c.json({ error: 'Invalid manifest' }, 400)
     }
+    if (manifest.projectId !== projectId) {
+      return c.json({ error: 'Manifest projectId mismatch' }, 400)
+    }
+    const uploadValidation = validateBackupAssetUploads(form, manifest)
+    if (!uploadValidation.ok) {
+      return c.json({ error: uploadValidation.error }, 400)
+    }
 
     const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
-    const projectExists = await convex.query((convexApi as any).projects.exists, { projectId })
+    const projectExists = await projectExistsForBackup(convex, projectId)
     if (!projectExists) {
-      await convex.mutation((convexApi as any).projects.ensureOwnedRoom, { projectId, userId: user.id })
+      await ensureOwnedProjectForBackup(convex, projectId, user.id)
     } else if (!await requireProjectRoleForApi(c, projectId, ['owner', 'editor'])) {
       return c.json({ error: 'Forbidden' }, 403)
     }
     if (conflictAction === 'detect') {
-      const conflict = await convex.query((convexApi as any).cloudBackups.checkConflict, {
-        projectId,
-        userId: user.id,
-        manifest,
-      })
+      const conflict = await checkBackupConflict(convex, projectId, user.id, manifest)
       if (conflict) return c.json({ ok: false, conflict }, 409)
     }
     const uploadedAssetKeys: Record<string, string> = {}
-    for (const [key, value] of form.entries()) {
-      if (!key.startsWith('asset:') || !(value instanceof File)) continue
-      const assetId = key.slice('asset:'.length)
-      const hash = await hashFile(value)
-      const ext = value.name.includes('.') ? value.name.slice(value.name.lastIndexOf('.')) : ''
-      const r2Key = `projects/${projectId}/assets/${assetId}/${hash}${ext}`
-      await c.env.daw_audio_samples.put(r2Key, value.stream(), {
-        httpMetadata: { contentType: value.type || 'application/octet-stream' },
-        customMetadata: {
-          projectId,
-          assetId,
-          contentHash: hash,
-          uploadedBy: user.id,
-          uploadedAt: new Date().toISOString(),
-        },
-      })
-      uploadedAssetKeys[assetId] = r2Key
-    }
-    manifest.assets = Array.isArray(manifest.assets)
-      ? manifest.assets.map((asset: any) => ({ ...asset, cloudKey: uploadedAssetKeys[asset.id] ?? asset.cloudKey }))
-      : []
-    manifest.assetCount = manifest.assets.length
+    const uploadedR2Keys: string[] = []
+    try {
+      for (const [key, value] of form.entries()) {
+        if (!key.startsWith('asset:') || !(value instanceof File)) continue
+        const assetId = key.slice('asset:'.length)
+        if (!uploadValidation.manifestAssetIds.has(assetId)) continue
+        const hash = await hashFile(value)
+        const ext = value.name.includes('.') ? value.name.slice(value.name.lastIndexOf('.')) : ''
+        const r2Key = `projects/${projectId}/assets/${assetId}/${crypto.randomUUID()}-${hash}${ext}`
+        await c.env.daw_audio_samples.put(r2Key, value.stream(), {
+          httpMetadata: { contentType: value.type || 'application/octet-stream' },
+          customMetadata: {
+            projectId,
+            assetId,
+            contentHash: hash,
+            uploadedBy: user.id,
+            uploadedAt: new Date().toISOString(),
+          },
+        })
+        uploadedAssetKeys[assetId] = r2Key
+        uploadedR2Keys.push(r2Key)
+      }
+      manifest = withProjectManifestAssetKeys(manifest, uploadedAssetKeys)
 
-    const result: any = await convex.mutation((convexApi as any).cloudBackups.upsertLatest, {
-      projectId,
-      userId: user.id,
-      manifest,
-      conflictAction,
-    })
-    if (result?.conflict) return c.json({ ok: false, conflict: result.conflict }, 409)
-    return c.json({ ok: true, manifestVersion: result?.manifestVersion, uploadedAssetKeys })
+      const result = await upsertLatestBackup(convex, projectId, user.id, manifest, conflictAction)
+      if (result?.conflict) {
+        await deleteR2Keys(c.env.daw_audio_samples, uploadedR2Keys)
+        return c.json({ ok: false, conflict: result.conflict }, 409)
+      }
+      try {
+        await deleteR2Keys(c.env.daw_audio_samples, result?.supersededCloudKeys ?? [])
+      } catch (cleanupError) {
+        console.warn('Failed to delete superseded backup assets', cleanupError)
+      }
+      return c.json({ ok: true, manifestVersion: result?.manifestVersion, uploadedAssetKeys })
+    } catch (err) {
+      await deleteR2Keys(c.env.daw_audio_samples, uploadedR2Keys)
+      throw err
+    }
   } catch (err) {
     console.error('Cloud backup error', err)
     return c.json({ error: 'Failed to back up project' }, 500)
@@ -500,7 +639,7 @@ app.get('/api/cloud-backups/:projectId', async (c) => {
     const user = c.get('user')
     if (!user) return c.json({ error: 'Unauthorized' }, 401)
     const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
-    const row: any = await convex.query((convexApi as any).cloudBackups.getLatest, { projectId, userId: user.id })
+    const row = await getLatestBackup(convex, projectId, user.id)
     if (!row) return c.json({ error: 'Not found' }, 404)
     return c.json({ manifest: row.manifest, manifestVersion: row.manifestVersion })
   } catch (err) {
@@ -515,7 +654,7 @@ app.delete('/api/cloud-projects/:projectId', async (c) => {
     const user = await requireProjectRoleForApi(c, projectId, ['owner'])
     if (!user) return c.json({ error: 'Forbidden' }, 403)
     const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
-    const result = await convex.mutation((convexApi as any).projects.deleteRoomAsOwner, { projectId, userId: user.id })
+    const result = await deleteCloudProjectAsOwner(convex, projectId, user.id)
     if (result?.status !== 'deleted') return c.json({ ok: false, result }, 409)
     await deleteR2Prefix(c.env.daw_audio_samples, `projects/${projectId}/`)
     return c.json({ ok: true, result })
@@ -619,7 +758,7 @@ app.post('/api/exports', async (c) => {
     })
 
     const url = `/api/export/${encodeURIComponent(projectId)}?key=${encodeURIComponent(key)}`
-    return c.json({ key, url, sizeBytes: (putRes as any)?.size })
+    return c.json({ key, url, sizeBytes: putRes.size })
   } catch (err) {
     console.error('Export upload error', err)
     return c.json({ error: 'Failed to upload export' }, 500)
@@ -663,18 +802,18 @@ app.post('/api/agent/chat', async (c) => {
     const user = c.get('user')
     if (!user) return c.json({ error: 'Unauthorized' }, 401)
 
-    const body = await c.req.json().catch(() => null) as any
-    if (!body || !Array.isArray(body.messages)) {
+    const body = readAgentChatBody(await c.req.json().catch(() => null))
+    if (!body) {
       return c.json({ error: 'Invalid body' }, 400)
     }
 
-    const projectId = (body.projectId as string | undefined) ?? undefined
+    const projectId = body.projectId
     const clientBpm = (typeof body.bpm === 'number') ? Math.max(20, Math.min(300, Number(body.bpm))) : undefined
 
     const openrouter = createOpenRouter({ apiKey: c.env.OPENROUTER_API_KEY })
     const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
     if (projectId) {
-      if (!(await canAccessAgentRoom(convex, projectId, (user as any).id))) {
+      if (!(await canAccessAgentRoom(convex, projectId, user.id))) {
         return c.json({ error: 'Forbidden' }, 403)
       }
     }
@@ -686,7 +825,7 @@ app.post('/api/agent/chat', async (c) => {
     // Optional context: include current BPM and sample names to improve sample matching
     let contextNote = ''
     try {
-      const list: any[] = projectId ? (await convex.query(convexApi.samples.listByRoom as any, { projectId, userId: user.id } as any)) : []
+      const list = projectId ? (await convex.query(convexApi.samples.listByRoom, { projectId, userId: user.id })) : []
       const sampleNames = Array.isArray(list) && list.length ? list.map((sample) => (sample.name || sample.url || '')).filter(Boolean).slice(0, 20) : []
 
       let tracksLine = ''
@@ -694,8 +833,8 @@ app.post('/api/agent/chat', async (c) => {
       let effectsLine = ''
       if (projectId) {
         try {
-          const tracks: any[] = await convex.query(convexApi.tracks.listByRoom as any, { projectId, userId: user.id } as any)
-          const clips: any[] = await convex.query(convexApi.clips.listByRoom as any, { projectId, userId: user.id } as any)
+          const tracks = await convex.query(convexApi.tracks.listByRoom, { projectId, userId: user.id })
+          const clips = await convex.query(convexApi.clips.listByRoom, { projectId, userId: user.id })
           const audioCount = tracks.filter((track) => (track.kind ?? 'audio') === 'audio').length
           const instrumentCount = tracks.filter((track) => (track.kind ?? 'audio') === 'instrument').length
           const perTrackCounts = (() => {
@@ -713,7 +852,7 @@ app.post('/api/agent/chat', async (c) => {
           let arpCount = 0
           let hasMasterEq = false
           let hasMasterReverb = false
-          const effects: any[] = await convex.query(convexApi.effects.listByRoom as any, { projectId, userId: user.id } as any).catch(() => [])
+          const effects = await convex.query(convexApi.effects.listByRoom, { projectId, userId: user.id }).catch(() => [])
           for (const row of effects) {
             if (row?.targetType === 'master') {
               if (row.type === 'eq') hasMasterEq = true
@@ -768,8 +907,8 @@ Output policy:
 - If the user didn't ask for changes, output ONLY text (no JSON).
 - If the user asked for changes, output text THEN exactly one JSON commands block, and nothing after it.`
 
-    const options: any = {
-      model: openrouter(modelName as any),
+    const options = {
+      model: openrouter(modelName),
       messages: body.messages,
       temperature: 0.4,
       system,

@@ -1,4 +1,5 @@
 import { openLocalProjectDb, type LocalProjectEntityRow } from '~/lib/local-project-db'
+import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 
 export type LocalEffectKind = 'eq' | 'reverb' | 'synth' | 'arp' | 'master-eq' | 'master-reverb'
 
@@ -68,5 +69,6 @@ export const setLocalEffect = async <TParams>(
     updatedAt: timestamp,
   }
   await db.put('entities', toEntityRow(row))
+  notifyLocalProjectChanged(projectId)
   return row
 }

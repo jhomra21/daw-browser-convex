@@ -105,6 +105,7 @@ export type UpdateClipInput = {
   sourceDurationSec?: number
   sourceSampleRate?: number
   sourceChannelCount?: number
+  sampleUrl?: string | null
   midi?: TimelineClipRow['midi']
   midiOffsetBeats?: number
 }

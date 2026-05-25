@@ -8,6 +8,7 @@ import {
   type LocalProjectAssetRow,
 } from '~/lib/local-project-db'
 import { createLocalAssetId } from '~/lib/local-ids'
+import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 
 type LocalAssetMetadata = {
   durationSec?: number
@@ -86,6 +87,19 @@ const writeFile = async (
   }
 }
 
+const removeFileIfPresent = async (
+  root: FileSystemDirectoryHandle,
+  path: string,
+): Promise<void> => {
+  try {
+    const assetsDir = await root.getDirectoryHandle(ASSETS_DIRECTORY_NAME)
+    await assetsDir.removeEntry(path)
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'NotFoundError') return
+    throw error
+  }
+}
+
 export const writeLocalAssetFile = async (
   projectId: string,
   path: string,
@@ -125,7 +139,13 @@ export const createLocalAsset = async (input: CreateLocalAssetInput): Promise<Lo
   }
 
   const db = await openLocalProjectDb(input.projectId)
-  await db.put('assets', row)
+  try {
+    await db.put('assets', row)
+  } catch (error) {
+    await removeFileIfPresent(root, storagePath).catch(() => null)
+    throw error
+  }
+  notifyLocalProjectChanged(input.projectId)
   return row
 }
 
@@ -192,13 +212,11 @@ export const deleteLocalAsset = async (
 ): Promise<void> => {
   const row = await getLocalAsset(projectId, assetId)
   const db = await openLocalProjectDb(projectId)
-  await db.delete('assets', assetId)
-  if (!row) return
-
-  try {
+  if (row) {
     const directoryHandle = await getProjectDirectoryHandle(projectId)
     const root = directoryHandle ?? await getProjectOpfsRoot(projectId)
-    const assetsDir = await root.getDirectoryHandle(ASSETS_DIRECTORY_NAME)
-    await assetsDir.removeEntry(row.storagePath)
-  } catch {}
+    await removeFileIfPresent(root, row.storagePath)
+  }
+  await db.delete('assets', assetId)
+  notifyLocalProjectChanged(projectId)
 }

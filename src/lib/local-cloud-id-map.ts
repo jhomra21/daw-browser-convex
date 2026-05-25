@@ -36,6 +36,20 @@ export const saveCloudIdMapping = async (
   historyRef = localId,
 ): Promise<CloudIdMapping> => {
   const db = await openLocalProjectDb(projectId)
+  const [existingMappingRow, existingIndexRow] = await Promise.all([
+    db.get('syncState', keyFor(kind, localId)),
+    db.get('syncState', indexKeyFor(kind, cloudId)),
+  ])
+  if (
+    isMapping(existingMappingRow?.value)
+    && existingMappingRow.value.kind === kind
+    && existingMappingRow.value.localId === localId
+    && existingMappingRow.value.cloudId === cloudId
+    && existingMappingRow.value.historyRef === historyRef
+    && existingIndexRow?.value === localId
+  ) {
+    return existingMappingRow.value
+  }
   const mapping = {
     kind,
     localId,

@@ -1,5 +1,6 @@
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import { createLocalProjectId } from '~/lib/local-ids'
+import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 
 export const LOCAL_PROJECT_SCHEMA_VERSION = 1
 
@@ -210,6 +211,7 @@ export const renameLocalProject = async (
     lastOpenedAt: timestamp,
   }
   await db.put('projects', next)
+  notifyLocalProjectChanged(projectId)
   return next
 }
 
@@ -224,7 +226,6 @@ export const setLocalProjectMode = async (
   const next = {
     ...project,
     mode,
-    updatedAt: timestamp,
     lastOpenedAt: timestamp,
   }
   await db.put('projects', next)
@@ -240,8 +241,6 @@ export const importLocalProject = async (
     syncState?: LocalProjectSyncStateRow[]
   },
 ): Promise<void> => {
-  const globalDb = await openGlobalProjectsDb()
-  await globalDb.put('projects', project)
   const projectDb = await openLocalProjectDb(project.id)
   const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'syncState'], 'readwrite')
   await Promise.all([
@@ -251,6 +250,8 @@ export const importLocalProject = async (
     ...(rows.syncState ?? []).map((row) => tx.objectStore('syncState').put(row)),
     tx.done,
   ])
+  const globalDb = await openGlobalProjectsDb()
+  await globalDb.put('projects', project)
 }
 
 export const exportLocalProjectRows = async (projectId: string) => {

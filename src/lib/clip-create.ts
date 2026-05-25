@@ -360,6 +360,57 @@ export async function createProjectedClips(input: {
   return created
 }
 
+export async function createProjectedLocalClips(input: {
+  projectId: string
+  items: readonly BatchClipCreateItem[]
+  insertLocalClip: (trackId: TrackId, clip: Clip) => void
+  removeLocalClips: (clipIds: Iterable<string>) => void
+  audioBufferCache?: Map<string, AudioBuffer>
+}) {
+  const repository = createLocalTimelineRepository(input.projectId)
+  const created: BatchClipCreateResult[] = []
+  try {
+    for (const item of input.items) {
+      const row = await repository.createClip({
+        trackId: item.trackId,
+        name: item.clip.name,
+        startSec: item.clip.startSec,
+        duration: item.clip.duration,
+        color: item.clip.midi ? 'clip-midi' : 'clip-audio',
+        sourceAssetKey: item.clip.sourceAssetKey,
+        sourceKind: item.clip.sourceKind,
+        sourceDurationSec: item.clip.source?.durationSec,
+        sourceSampleRate: item.clip.source?.sampleRate,
+        sourceChannelCount: item.clip.source?.channelCount,
+        leftPadSec: item.clip.timing?.leftPadSec,
+        bufferOffsetSec: item.clip.timing?.bufferOffsetSec,
+        sampleUrl: item.clip.sampleUrl,
+        midi: item.clip.midi,
+        midiOffsetBeats: item.clip.timing?.midiOffsetBeats,
+      })
+      input.insertLocalClip(item.trackId, buildLocalClip({
+        id: row.id,
+        clip: { ...item.clip, historyRef: row.historyRef },
+        buffer: item.buffer,
+        color: row.color,
+      }))
+      if (item.buffer) input.audioBufferCache?.set(row.id, item.buffer)
+      created.push({
+        trackId: item.trackId,
+        clipId: row.id,
+        clip: { ...item.clip, historyRef: row.historyRef },
+      })
+    }
+    return created
+  } catch (error) {
+    const createdClipIds = created.map((item) => item.clipId)
+    await Promise.all(createdClipIds.map((clipId) => repository.deleteClip(clipId).catch(() => null)))
+    for (const clipId of createdClipIds) input.audioBufferCache?.delete(clipId)
+    input.removeLocalClips(createdClipIds)
+    throw error
+  }
+}
+
 export function buildCreatedClipSelection(created: readonly BatchClipCreateResult[]) {
   const primary = created[created.length - 1]
   if (!primary) return null

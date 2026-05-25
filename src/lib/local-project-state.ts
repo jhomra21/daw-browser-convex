@@ -1,4 +1,5 @@
 import { openLocalProjectDb } from '~/lib/local-project-db'
+import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 
 const now = () => Date.now()
 
@@ -22,4 +23,5 @@ export const saveLocalProjectState = async <TValue>(
     value,
     updatedAt: now(),
   })
+  notifyLocalProjectChanged(projectId)
 }

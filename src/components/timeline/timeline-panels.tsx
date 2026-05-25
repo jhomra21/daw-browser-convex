@@ -11,7 +11,7 @@ const SharedChat = lazy(() => import('~/components/SharedChat'))
 const EffectsPanel = lazy(() => import('~/components/timeline/EffectsPanel'))
 const ExportDialog = lazy(() => import('~/components/timeline/ExportDialog'))
 
-type TimelinePanelsProps = {
+export type TimelinePanelsProps = {
   chat: {
     bottomOffsetPx: number
     agentPanelOpen: boolean

@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { projectManifestValidator } from "./projectManifestValidator";
 
 // Minimal shared model for collaboration
 // - We intentionally DO NOT store track names or any audio URLs here
@@ -112,7 +113,7 @@ export default defineSchema({
   cloudBackups: defineTable({
     projectId: v.string(),
     ownerUserId: v.string(),
-    manifest: v.any(),
+    manifest: projectManifestValidator,
     manifestVersion: v.string(),
     updatedAt: v.number(),
     manifestUpdatedAt: v.number(),

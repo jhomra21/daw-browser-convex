@@ -17,7 +17,7 @@ type UseSamplesMenuControllerOptions = {
   onJumpToClip: (clipId: string, trackId: Track['id'], startSec: number) => void
 }
 
-type UseSamplesMenuControllerReturn = {
+export type SamplesMenuController = {
   open: Accessor<boolean>
   onOpenChange: (open: boolean) => void
   isDraggingSample: Accessor<boolean>
@@ -38,7 +38,7 @@ type UseSamplesMenuControllerReturn = {
 
 export function useSamplesMenuController(
   options: UseSamplesMenuControllerOptions,
-): UseSamplesMenuControllerReturn {
+): SamplesMenuController {
   const [open, setOpen] = createSignal(false)
   const [isDraggingSample, setIsDraggingSample] = createSignal(false)
   const [confirmingSampleKey, setConfirmingSampleKey] = createSignal<string | null>(null)

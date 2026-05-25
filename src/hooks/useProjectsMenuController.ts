@@ -7,7 +7,7 @@ type UseProjectsMenuControllerOptions = {
   onRenameProject: (projectId: string, name: string) => void | Promise<void>
 }
 
-type UseProjectsMenuControllerReturn = {
+export type ProjectsMenuController = {
   confirmingProjectId: () => string | null
   deletingProjectId: () => string | null
   editingProjectId: () => string | null
@@ -25,7 +25,7 @@ type UseProjectsMenuControllerReturn = {
 
 export function useProjectsMenuController(
   options: UseProjectsMenuControllerOptions,
-): UseProjectsMenuControllerReturn {
+): ProjectsMenuController {
   const [confirmingProjectId, setConfirmingProjectId] = createSignal<string | null>(null)
   const [deletingProjectId, setDeletingProjectId] = createSignal<string | null>(null)
   const [editingProjectId, setEditingProjectId] = createSignal<string | null>(null)

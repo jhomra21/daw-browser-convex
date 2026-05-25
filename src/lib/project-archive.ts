@@ -5,7 +5,6 @@ import {
   buildProjectManifest,
   createRestoredProjectEntry,
   migrateProjectManifest,
-  type ProjectManifest,
 } from '~/lib/project-manifest'
 
 const encoder = new TextEncoder()
@@ -89,6 +88,9 @@ const readZip = async (file: File): Promise<Map<string, Uint8Array>> => {
       throw new Error('Archive contains a truncated zip entry.')
     }
     const name = decoder.decode(bytes.slice(nameStart, nameStart + nameLength))
+    if (entries.has(name)) {
+      throw new Error(`Archive contains duplicate entry "${name}".`)
+    }
     const data = bytes.slice(dataStart, dataEnd)
     if (crc32(data) !== expectedCrc) {
       throw new Error(`Archive contains corrupt bytes for "${name}".`)
@@ -121,7 +123,7 @@ export const importDawProjectArchive = async (file: File): Promise<string> => {
   const entries = await readZip(file)
   const manifestBytes = entries.get('manifest.json')
   if (!manifestBytes) throw new Error('Archive is missing manifest.json.')
-  const manifest = migrateProjectManifest(JSON.parse(decoder.decode(manifestBytes)) as ProjectManifest)
+  const manifest = migrateProjectManifest(JSON.parse(decoder.decode(manifestBytes)))
   const projectId = createLocalProjectId()
   const project = createRestoredProjectEntry({ ...manifest, projectId }, manifest.name)
   const assetFiles = manifest.assets.map((asset) => {
@@ -130,17 +132,17 @@ export const importDawProjectArchive = async (file: File): Promise<string> => {
     return { asset, bytes }
   })
   try {
+    await Promise.all(assetFiles.map(async ({ asset, bytes }) => {
+      const assetBytes = new ArrayBuffer(bytes.byteLength)
+      new Uint8Array(assetBytes).set(bytes)
+      await writeLocalAssetFile(projectId, asset.storagePath, new File([assetBytes], asset.name, { type: asset.mimeType }))
+    }))
     await importLocalProject(project, {
       entities: manifest.entities,
       assets: manifest.assets,
       projectState: manifest.projectState,
       syncState: manifest.syncState,
     })
-    await Promise.all(assetFiles.map(async ({ asset, bytes }) => {
-      const assetBytes = new ArrayBuffer(bytes.byteLength)
-      new Uint8Array(assetBytes).set(bytes)
-      await writeLocalAssetFile(projectId, asset.storagePath, new File([assetBytes], asset.name, { type: asset.mimeType }))
-    }))
   } catch (error) {
     await deleteLocalProject(projectId)
     throw error

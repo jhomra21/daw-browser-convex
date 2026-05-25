@@ -8,7 +8,7 @@ type UseExportsMenuControllerOptions = {
   currentUserId: Accessor<string | undefined>
 }
 
-type UseExportsMenuControllerReturn = {
+export type ExportsMenuController = {
   open: Accessor<boolean>
   onOpenChange: (open: boolean) => void
   exports: ReturnType<typeof useProjectExports>['exports']
@@ -17,7 +17,7 @@ type UseExportsMenuControllerReturn = {
 
 export function useExportsMenuController(
   options: UseExportsMenuControllerOptions,
-): UseExportsMenuControllerReturn {
+): ExportsMenuController {
   const [open, setOpen] = createSignal(false)
   const exportsQ = useProjectExports({
     projectId: options.currentProjectId,

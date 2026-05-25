@@ -21,7 +21,7 @@ type PlannedClipMove = {
   startSec: number
 }
 
-type DuplicatedClipPlacement = {
+export type DuplicatedClipPlacement = {
   trackId: Track['id']
   originalClip: Clip
   startSec: number

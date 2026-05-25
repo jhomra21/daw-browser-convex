@@ -1,14 +1,11 @@
 import { buildClipCreatePayload, buildLocalClip, createManyClips } from '~/lib/clip-create'
-import { buildClipMoveMutationInput, buildClipRemoveManyMutationInput } from '~/lib/clip-mutation-args'
 import { buildTrackEffectMutationInput } from '~/lib/effect-track-args'
-import { persistClipTiming } from '~/lib/clip-mutations'
 import { setLocalEffect } from '~/lib/local-effects'
-import { isLocalId } from '~/lib/local-ids'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import { buildTrackRoutingMutationInput } from '~/lib/track-routing-state'
-import { buildTrackCreateMutationInput, buildTrackDeleteMutationInput, buildTrackMixMutationInput, buildTrackVolumeMutationInput } from '~/lib/track-mutation-args'
+import { buildTrackCreateMutationInput, buildTrackVolumeMutationInput } from '~/lib/track-mutation-args'
 import { normalizeTrackRouting } from '~/lib/track-routing'
 import type { AudioEngine } from '~/lib/audio-engine'
 import { createLocalTrack } from '~/lib/tracks'
@@ -16,8 +13,19 @@ import type { Track, TrackRouting } from '~/types/timeline'
 
 import { buildHistoryRefIndex, resolveClipId, resolveStoredTrackId, resolveTrackId, resolveTrackRoutingSnapshot } from './refs'
 import type { HistoryEntry } from './types'
+import {
+  isLocalHistoryProject,
+  persistHistoryClipMoveOrThrow,
+  persistHistoryClipTimingOrThrow,
+  persistHistoryTrackMix,
+  persistHistoryTrackMixState,
+  persistHistoryTrackRouting,
+  persistHistoryTrackVolume,
+  removeHistoryClipIdsOrThrow,
+  removeHistoryTrackOrThrow,
+} from './history-persistence'
 
-type Deps = {
+export type Deps = {
   convexClient: typeof import('~/lib/convex').convexClient
   convexApi: typeof import('~/lib/convex').convexApi
   getTracks: () => Track[]
@@ -84,9 +92,7 @@ function buildHistoryContext(deps: Deps) {
   }
 }
 
-function isLocalProject(deps: Deps) {
-  return isLocalId('project', deps.projectId)
-}
+const isLocalProject = isLocalHistoryProject
 
 function toCreateClipInput(trackId: Track['id'], clip: Track['clips'][number]) {
   return {
@@ -127,40 +133,8 @@ function buildTrackIdByClipId(tracks: Track[]) {
   return next
 }
 
-async function removeClipIdsOrThrow(deps: Deps, clipIds: string[], message: string) {
-  if (clipIds.length === 0) return
-  if (isLocalProject(deps)) {
-    const repo = createLocalTimelineRepository(deps.projectId)
-    await repo.deleteClips(clipIds)
-    return
-  }
-  const result = await deps.convexClient.mutation(
-    deps.convexApi.clips.removeMany,
-    buildClipRemoveManyMutationInput({ clipIds, userId: deps.userId }),
-  )
-  const removedIds = new Set(
-    Array.isArray(result?.removedClipIds)
-      ? result.removedClipIds.map((clipId: unknown) => String(clipId))
-      : [],
-  )
-  if (clipIds.some((clipId) => !removedIds.has(String(clipId)))) {
-    throw new Error(message)
-  }
-}
-
-async function removeTrackOrThrow(deps: Deps, trackId: Track['id'], message: string) {
-  if (isLocalProject(deps)) {
-    await createLocalTimelineRepository(deps.projectId).deleteTrack(trackId)
-    return
-  }
-  const result = await deps.convexClient.mutation(
-    deps.convexApi.tracks.remove,
-    buildTrackDeleteMutationInput({ trackId, userId: deps.userId }),
-  )
-  if (result?.status !== 'deleted') {
-    throw new Error(message)
-  }
-}
+const removeClipIdsOrThrow = removeHistoryClipIdsOrThrow
+const removeTrackOrThrow = removeHistoryTrackOrThrow
 
 function readCurrentTrackRouting(track: Pick<Track, 'sends' | 'outputTargetId'> | null | undefined): TrackRouting {
   return {
@@ -192,37 +166,13 @@ async function persistTrackRouting(
   )
 }
 
-async function persistTrackMixState(
-  convexClient: Deps['convexClient'],
-  convexApi: Deps['convexApi'],
-  userId: string,
-  trackId: Track['id'],
-  mix: { muted?: boolean; soloed?: boolean },
-) {
-  if (typeof mix.muted !== 'boolean' && typeof mix.soloed !== 'boolean') return
-  await convexClient.mutation(convexApi.tracks.setMix, buildTrackMixMutationInput({
-    trackId,
-    userId,
-    muted: mix.muted,
-    soloed: mix.soloed,
-  }))
-}
 
 async function applyTrackVolumeEntry(entry: Extract<HistoryEntry, { type: 'track-volume' }>, deps: Deps, direction: HistoryDirection) {
   const index = buildRefIndex(deps)
   const trackId = requireResolved(resolveTrackId(index, entry.data.trackRef), 'Track not found for track-volume history entry')
   const volume = pickDirectionalValue(direction, entry.data.from, entry.data.to)
   deps.actions.cancelTrackVolumeWrite(trackId)
-  if (isLocalProject(deps)) {
-    await createLocalTimelineRepository(deps.projectId).updateTrack({ trackId, volume })
-  } else if (entry.data.scope === 'local') {
-    deps.persistLocalMix(deps.projectId, trackId, { volume })
-  } else {
-    await deps.convexClient.mutation(
-      deps.convexApi.tracks.setVolume,
-      buildTrackVolumeMutationInput({ trackId, volume, userId: deps.userId }),
-    )
-  }
+  await persistHistoryTrackVolume(deps, trackId, volume, entry.data.scope)
   deps.actions.applyTrackVolume(trackId, volume, entry.data.scope)
 }
 
@@ -236,13 +186,7 @@ async function applyTrackBooleanEntry(
   const value = pickDirectionalValue(direction, entry.data.from, entry.data.to)
   const patch = entry.type === 'track-mute' ? { muted: value } : { soloed: value }
   deps.actions.cancelTrackMixWrite(trackId)
-  if (isLocalProject(deps)) {
-    await createLocalTimelineRepository(deps.projectId).updateTrack({ trackId, ...patch })
-  } else if (entry.data.scope !== 'local') {
-    await persistTrackMixState(deps.convexClient, deps.convexApi, deps.userId, trackId, patch)
-  } else {
-    deps.persistLocalMix(deps.projectId, trackId, patch)
-  }
+  await persistHistoryTrackMix(deps, trackId, patch, entry.data.scope)
   deps.actions.applyTrackMixState(trackId, patch, entry.data.scope)
 }
 
@@ -253,15 +197,7 @@ async function applyTrackRoutingEntry(entry: Extract<HistoryEntry, { type: 'trac
   const routing = resolveTrackRoutingSnapshot(index, pickDirectionalValue(direction, entry.data.from, entry.data.to))
   const normalizedRouting = track ? normalizeTrackRouting(track, routing, deps.getTracks()) : routing
   deps.actions.cancelTrackRoutingWrite(trackId)
-  if (isLocalProject(deps)) {
-    await createLocalTimelineRepository(deps.projectId).updateTrack({
-      trackId,
-      outputTargetId: normalizedRouting.outputTargetId ?? null,
-      sends: normalizedRouting.sends ?? [],
-    })
-  } else {
-    await persistTrackRouting(deps.convexClient, deps.convexApi, deps.userId, trackId, normalizedRouting)
-  }
+  await persistHistoryTrackRouting(deps, trackId, normalizedRouting)
   deps.actions.applyTrackRouting(trackId, normalizedRouting)
 }
 
@@ -381,31 +317,7 @@ async function applyClipTimingEntry(entry: Extract<HistoryEntry, { type: 'clip-t
   const index = buildRefIndex(deps)
   const clipId = requireResolved(resolveClipId(index, entry.data.clipRef), 'Clip not found for clip-timing history entry')
   const timing = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-  if (isLocalProject(deps)) {
-    const applied = await createLocalTimelineRepository(deps.projectId).updateClip({
-      clipId,
-      startSec: timing.startSec,
-      duration: timing.duration,
-      leftPadSec: timing.leftPadSec,
-      bufferOffsetSec: timing.bufferOffsetSec,
-      midiOffsetBeats: timing.midiOffsetBeats,
-    })
-    if (!applied) throw new Error('Failed to apply local clip timing during history replay')
-    deps.actions.commitClipTiming(clipId, timing)
-    deps.actions.rescheduleChangedClips([clipId])
-    return
-  }
-  const applied = await persistClipTiming(deps.convexClient, deps.convexApi, deps.userId, {
-    clipId,
-    startSec: timing.startSec,
-    duration: timing.duration,
-    leftPadSec: timing.leftPadSec ?? 0,
-    bufferOffsetSec: timing.bufferOffsetSec ?? 0,
-    midiOffsetBeats: timing.midiOffsetBeats ?? 0,
-  })
-  if (!applied) {
-    throw new Error('Failed to apply clip timing during history replay')
-  }
+  await persistHistoryClipTimingOrThrow(deps, clipId, timing, 'Failed to apply clip timing during history replay')
   deps.actions.commitClipTiming(clipId, timing)
   deps.actions.rescheduleChangedClips([clipId])
 }
@@ -527,18 +439,7 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
         const clipId = requireResolved(resolveClipId(index, move.clipRef), 'Clip not found for clips-move history entry')
         const target = pickDirectionalValue(direction, move.from, move.to)
         const toTrackId = requireResolved(resolveTrackId(index, target.trackRef), 'Target track not found for clips-move history entry')
-        if (isLocalProject(deps)) {
-          const updated = await createLocalTimelineRepository(projectId).updateClip({ clipId, trackId: toTrackId, startSec: target.startSec })
-          if (!updated) throw new Error('Failed to move local clip during history replay')
-        } else {
-          const result = await convexClient.mutation(
-            convexApi.clips.move,
-            buildClipMoveMutationInput({ clipId, userId, startSec: target.startSec, toTrackId }),
-          )
-          if (result?.status !== 'applied') {
-            throw new Error('Failed to move clip during history replay')
-          }
-        }
+        await persistHistoryClipMoveOrThrow(deps, { clipId, trackId: toTrackId, startSec: target.startSec }, 'Failed to move clip during history replay')
         deps.actions.commitClipMoves([{ clipId, trackId: toTrackId, startSec: target.startSec }])
         movedClipIds.push(clipId)
       }
@@ -645,7 +546,7 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       syncTrackCreateEntryId(deps.getHistoryEntries(), entry.data.track.trackRef, newTrackId)
       if (!isLocalProject(deps)) {
         await convexClient.mutation(convexApi.tracks.setVolume, buildTrackVolumeMutationInput({ trackId: newTrackId, volume: entry.data.track.volume, userId }))
-        await persistTrackMixState(convexClient, convexApi, userId, newTrackId, { muted: entry.data.track.muted, soloed: entry.data.track.soloed })
+        await persistHistoryTrackMixState(deps, newTrackId, { muted: entry.data.track.muted, soloed: entry.data.track.soloed })
       }
 
       deps.actions.insertLocalTrack(createLocalTrack({

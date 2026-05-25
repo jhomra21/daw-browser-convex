@@ -1,7 +1,7 @@
 import type { FunctionReturnType } from 'convex/server'
 import { batch, type Accessor, type Setter } from 'solid-js'
 
-import { buildClipCreateSnapshot, buildCreatedClipSelection, createProjectedClips, pushClipCreateHistory, type BatchClipCreateItem } from '~/lib/clip-create'
+import { buildClipCreateSnapshot, buildCreatedClipSelection, createProjectedClips, createProjectedLocalClips, pushClipCreateHistory, type BatchClipCreateItem } from '~/lib/clip-create'
 import { buildClipRemoveManyMutationInput } from '~/lib/clip-mutation-args'
 import { getTrackDeleteConflictMessage } from '~/lib/delete-conflict-messages'
 import { buildTrackEffectQueryArgs } from '~/lib/effect-track-args'
@@ -279,65 +279,13 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
     const rid = projectId()
     if (rid && isLocalId('project', rid) && pending.length > 0) {
-      const repository = createLocalTimelineRepository(rid)
-      const created = []
-      try {
-        for (const item of pending) {
-          const row = await repository.createClip({
-            trackId: item.trackId,
-            name: item.clip.name,
-            startSec: item.clip.startSec,
-            duration: item.clip.duration,
-            color: item.clip.midi ? 'clip-midi' : 'clip-audio',
-            sourceAssetKey: item.clip.sourceAssetKey,
-            sourceKind: item.clip.sourceKind,
-            sourceDurationSec: item.clip.source?.durationSec,
-            sourceSampleRate: item.clip.source?.sampleRate,
-            sourceChannelCount: item.clip.source?.channelCount,
-            leftPadSec: item.clip.timing?.leftPadSec,
-            bufferOffsetSec: item.clip.timing?.bufferOffsetSec,
-            sampleUrl: item.clip.sampleUrl,
-            midi: item.clip.midi,
-            midiOffsetBeats: item.clip.timing?.midiOffsetBeats,
-          })
-          const clip: Clip = {
-            id: row.id,
-            historyRef: row.historyRef,
-            name: row.name,
-            buffer: item.buffer,
-            startSec: row.startSec,
-            duration: row.duration,
-            color: row.color,
-            sampleUrl: row.sampleUrl,
-            sourceAssetKey: row.sourceAssetKey,
-            sourceKind: row.sourceKind,
-            sourceDurationSec: row.sourceDurationSec,
-            sourceSampleRate: row.sourceSampleRate,
-            sourceChannelCount: row.sourceChannelCount,
-            leftPadSec: row.leftPadSec,
-            bufferOffsetSec: row.bufferOffsetSec,
-            midi: row.midi,
-            midiOffsetBeats: row.midiOffsetBeats,
-          }
-          insertLocalClip(item.trackId, clip)
-          if (item.buffer) audioBufferCache.set(row.id, item.buffer)
-          created.push({
-            trackId: item.trackId,
-            clipId: row.id,
-            clip: {
-              ...item.clip,
-              historyRef: row.historyRef,
-            },
-          })
-        }
-      } catch (err) {
-        const createdClipIds = created.map((item) => item.clipId)
-        await Promise.all(createdClipIds.map((clipId) => repository.deleteClip(clipId).catch(() => null)))
-        for (const clipId of createdClipIds) audioBufferCache.delete(clipId)
-        removeLocalClips(createdClipIds)
-        throw err
-      }
-
+      const created = await createProjectedLocalClips({
+        projectId: rid,
+        items: pending,
+        insertLocalClip,
+        removeLocalClips,
+        audioBufferCache,
+      })
       const nextSelection = buildCreatedClipSelection(created)
       if (nextSelection) {
         selection.selectClipGroup(nextSelection)

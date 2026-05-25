@@ -160,7 +160,7 @@ function buildLegacyClipRef(prefix: string, index: number) {
 
 function readLegacyEntry(entry: Record<string, unknown>): HistoryEntry | null {
   const type = readString(entry, 'type')
-  const projectId = readString(entry, 'projectId') ?? ''
+  const projectId = readString(entry, 'projectId') ?? readString(entry, 'roomId') ?? ''
   const data = readRecord(entry, 'data')
   if (!type || !data) return null
 
@@ -389,7 +389,7 @@ function readLegacyEntry(entry: Record<string, unknown>): HistoryEntry | null {
 
 function readCurrentEntry(entry: Record<string, unknown>): HistoryEntry | null {
   const type = readString(entry, 'type')
-  const projectId = readString(entry, 'projectId') ?? ''
+  const projectId = readString(entry, 'projectId') ?? readString(entry, 'roomId') ?? ''
   const data = readRecord(entry, 'data')
   if (!type || !data) return null
 

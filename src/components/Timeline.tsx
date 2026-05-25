@@ -162,6 +162,7 @@ const Timeline: Component = () => {
     renderTracks: () => renderTracks(),
     audioEngine,
     audioBufferCache: clipBuffers.audioBufferCache,
+    clipMediaStatus: clipBuffers.clipMediaStatus,
     projection,
     selection,
   });

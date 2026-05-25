@@ -658,16 +658,18 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
           <ProjectMediaMenu samples={samplesMenu} exportsMenu={exportsMenu} />
           <SettingsMenu toolbar={props} />
           <TracksMenu tracksMenu={props.tracksMenu} />
-          <ShareMenu
-            share={{
-              onOpenChange: shareMenu.onOpenChange,
-              onOpen: shareMenu.onOpen,
-              onClose: shareMenu.onClose,
-              copied: shareMenu.copied(),
-              shareUrl: shareMenu.shareUrl(),
-              onCopy: shareMenu.onCopy,
-            }}
-          />
+          <Show when={!isLocalId("project", props.currentProjectId)}>
+            <ShareMenu
+              share={{
+                onOpenChange: shareMenu.onOpenChange,
+                onOpen: shareMenu.onOpen,
+                onClose: shareMenu.onClose,
+                copied: shareMenu.copied(),
+                shareUrl: shareMenu.shareUrl(),
+                onCopy: shareMenu.onCopy,
+              }}
+            />
+          </Show>
         </Menubar>
       </div>
 

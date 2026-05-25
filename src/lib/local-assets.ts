@@ -213,8 +213,10 @@ export const deleteLocalAsset = async (
   const row = await getLocalAsset(projectId, assetId)
   const db = await openLocalProjectDb(projectId)
   if (row) {
-    const directoryHandle = await getProjectDirectoryHandle(projectId)
-    const root = directoryHandle ?? await getProjectOpfsRoot(projectId)
+    const root = await getWritableProjectRoot(projectId)
+    if (!root) {
+      throw new LocalAssetWriteError('permission-denied', 'Project storage permission is required.')
+    }
     await removeFileIfPresent(root, row.storagePath)
   }
   await db.delete('assets', assetId)

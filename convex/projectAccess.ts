@@ -124,7 +124,9 @@ export async function getProjectRole(
     .withIndex("by_room_owner", (q: any) => q.eq("projectId", projectId).eq("ownerUserId", userId))
     .collect();
   if (ownerships.length === 0) return null;
-  const role = ownerships.find((ownership: any) => !ownership.trackId && !ownership.clipId)?.role;
+  const projectOwnership = ownerships.find((ownership: any) => !ownership.trackId && !ownership.clipId);
+  if (!projectOwnership) return null;
+  const role = projectOwnership.role;
   return role === "owner" || role === "editor" || role === "viewer" ? role : "editor";
 }
 

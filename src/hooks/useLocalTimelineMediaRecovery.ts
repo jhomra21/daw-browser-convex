@@ -27,6 +27,7 @@ type Input = {
   renderTracks: Accessor<Track[]>;
   audioEngine: AudioEngine;
   audioBufferCache: Map<string, AudioBuffer>;
+  clipMediaStatus: Map<string, Clip["mediaStatus"]>;
   removeClip: (input: { trackId: Track["id"]; clipId: string }) => Promise<boolean>;
   projection: ProjectionActions;
   selection: SelectionActions;
@@ -139,6 +140,7 @@ export const useMissingMediaRecovery = (input: Input) => {
       sampleUrl: null,
     });
     input.audioBufferCache.set(clipId, decoded);
+    input.clipMediaStatus.delete(clipId);
     input.projection.removeLocalClips([clipId]);
     input.projection.insertLocalClip(trackId, updated);
   };

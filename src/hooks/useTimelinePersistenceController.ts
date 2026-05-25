@@ -31,6 +31,7 @@ type Input = {
   renderTracks: Accessor<Track[]>;
   audioEngine: AudioEngine;
   audioBufferCache: Map<string, AudioBuffer>;
+  clipMediaStatus: Map<string, Clip["mediaStatus"]>;
   projection: ProjectionActions;
   selection: SelectionActions;
 };
@@ -46,6 +47,7 @@ export const useTimelinePersistenceController = (input: Input) => {
     renderTracks: input.renderTracks,
     audioEngine: input.audioEngine,
     audioBufferCache: input.audioBufferCache,
+    clipMediaStatus: input.clipMediaStatus,
     removeClip: async ({ clipId }) => {
       const projectId = input.projectId();
       if (isLocalId("project", projectId)) {

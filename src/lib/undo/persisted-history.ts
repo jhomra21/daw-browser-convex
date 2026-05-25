@@ -93,6 +93,33 @@ function readRoutingSnapshot(value: Record<string, unknown> | undefined): TrackR
   }
 }
 
+function readEffectParamsEntry(
+  projectId: string,
+  effect: string | undefined,
+  trackRef: string | undefined,
+  data: Record<string, unknown>,
+): HistoryEntry | null {
+  const from = readAny(data, 'from')
+  const to = readAny(data, 'to')
+
+  switch (effect) {
+    case 'eq':
+      return { type: 'effect-params', projectId, data: { effect, trackRef, from, to } }
+    case 'reverb':
+      return { type: 'effect-params', projectId, data: { effect, trackRef, from, to } }
+    case 'synth':
+      return { type: 'effect-params', projectId, data: { effect, trackRef, from, to } }
+    case 'arp':
+      return { type: 'effect-params', projectId, data: { effect, trackRef, from, to } }
+    case 'master-eq':
+      return { type: 'effect-params', projectId, data: { effect, trackRef: undefined, from, to } }
+    case 'master-reverb':
+      return { type: 'effect-params', projectId, data: { effect, trackRef: undefined, from, to } }
+    default:
+      return null
+  }
+}
+
 function readClipSnapshot(value: Record<string, unknown> | undefined): HistoryClipSnapshot | null {
   const clipRef = readString(value, 'clipRef')
   if (!clipRef) return null
@@ -354,12 +381,7 @@ function readLegacyEntry(entry: Record<string, unknown>): HistoryEntry | null {
     const effect = readString(data, 'effect')
     const targetId = readString(data, 'targetId')
     const trackRef = targetId && targetId !== 'master' ? targetId : undefined
-    if (effect === 'eq') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'reverb') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'synth') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'arp') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'master-eq') return { type, projectId, data: { effect, trackRef: undefined, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'master-reverb') return { type, projectId, data: { effect, trackRef: undefined, from: readAny(data, 'from'), to: readAny(data, 'to') } }
+    return readEffectParamsEntry(projectId, effect, trackRef, data)
   }
 
   return null
@@ -595,12 +617,7 @@ function readCurrentEntry(entry: Record<string, unknown>): HistoryEntry | null {
   if (type === 'effect-params') {
     const effect = readString(data, 'effect')
     const trackRef = readString(data, 'trackRef')
-    if (effect === 'eq') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'reverb') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'synth') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'arp') return { type, projectId, data: { effect, trackRef, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'master-eq') return { type, projectId, data: { effect, trackRef: undefined, from: readAny(data, 'from'), to: readAny(data, 'to') } }
-    if (effect === 'master-reverb') return { type, projectId, data: { effect, trackRef: undefined, from: readAny(data, 'from'), to: readAny(data, 'to') } }
+    return readEffectParamsEntry(projectId, effect, trackRef, data)
   }
 
   return null

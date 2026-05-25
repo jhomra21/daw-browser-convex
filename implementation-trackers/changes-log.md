@@ -44,6 +44,10 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Made local multi-clip deletion atomic at the repository boundary and reopened the broad server-verified Convex auth tracker item as a deferred architecture follow-up.
 - Flushed pending MIDI saves on editor cleanup, made cloud resize history wait for persistence, made local clip creation durable before success, rejected corrupt archive entries, and aligned remaining viewer export validation wording.
 - Made local multi-clip drag moves atomic at the repository boundary so partial IndexedDB move failures cannot diverge durable clip positions from the rolled-back UI.
+- Removed the unused cloud timeline repository surface, dropped its stale `knip` exemption, and kept timeline writes on the validated local repository plus existing Convex mutation paths.
+- Tightened agent-action and cloud-backup response type boundaries so sample/effect command handling and backup upload/conflict parsing no longer depend on broad unvalidated response shapes.
+- Simplify review removed duplicated clip-delete selection reconciliation, made manifest mode parsing avoid a misleading fallback, and shared undo effect-params history entry parsing between legacy and current readers.
+- Defensive-code review found no high-confidence redundant guards to remove; persistence, network/API, auth, async-staleness, and UI optional-handler guards were kept because they protect real boundary ambiguity.
 
 ### Validation
 
@@ -60,6 +64,7 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the atomic local multi-clip delete and Convex auth tracker status fixes.
 - `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the MIDI cleanup flush, cloud resize rollback, durable local clip creation, archive CRC validation, and tracker wording fixes.
 - `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the atomic local multi-clip drag move fix.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, and `bun run knip` passed after the final simplify cleanup and defensive-code review pass.
 
 ## 2026-05-21 — Local-First Refactor Phase 16
 

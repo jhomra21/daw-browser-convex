@@ -142,10 +142,10 @@ export const normalizeProjectManifest = (raw: unknown): ProjectManifest => {
   if (schemaVersion !== PROJECT_MANIFEST_SCHEMA_VERSION) {
     throw new Error(`Unsupported project manifest schema version ${schemaVersion}.`);
   }
-  const mode: ProjectManifest["mode"] = raw.mode === "backup" || raw.mode === "shared" ? raw.mode : "backup";
   if (raw.mode !== "backup" && raw.mode !== "shared") {
     throw new Error("Project manifest has invalid mode.");
   }
+  const mode: ProjectManifest["mode"] = raw.mode === "backup" ? "backup" : "shared";
   const entities = readArray(raw.entities, "entities").map(readEntityRow);
   const assets = readArray(raw.assets, "assets").map((asset) => {
     if (!isRecord(asset)) throw new Error("Project manifest has invalid asset.");

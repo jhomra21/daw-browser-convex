@@ -157,6 +157,27 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
     const rid = projectId()
     const snapshot = tracks()
+    const reconcileSelectionAfterDelete = (removedIds: Set<string>) => {
+      const remainingSelectedIds = new Set(Array.from(selectedIds).filter((clipId) => !removedIds.has(clipId)))
+      const nextPrimary: SelectedClip = (() => {
+        if (remainingSelectedIds.size === 0) return null
+        for (const track of snapshot) {
+          const clip = track.clips.find((entry) => remainingSelectedIds.has(entry.id))
+          if (clip) return { trackId: track.id, clipId: clip.id }
+        }
+        return null
+      })()
+
+      batch(() => {
+        selection.setSelectedClip(nextPrimary)
+        selection.setSelectedClipIds(remainingSelectedIds)
+        if (nextPrimary) {
+          selection.setSelectedTrackId(nextPrimary.trackId)
+          selection.setSelectedFXTarget(nextPrimary.trackId)
+        }
+      })
+    }
+
     if (rid && isLocalId('project', rid)) {
       const repository = createLocalTimelineRepository(rid)
       await repository.deleteClips(Array.from(writableSelectedIds))
@@ -167,26 +188,8 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         }
       } catch {}
 
-      const remainingSelectedIds = new Set(Array.from(selectedIds).filter((clipId) => !writableSelectedIds.has(clipId)))
-      const nextPrimary: SelectedClip = (() => {
-        if (remainingSelectedIds.size === 0) return null
-        for (const track of snapshot) {
-          const clip = track.clips.find((entry) => remainingSelectedIds.has(entry.id))
-          if (clip) return { trackId: track.id, clipId: clip.id }
-        }
-        return null
-      })()
-
       removeLocalClips(writableSelectedIds)
-
-      batch(() => {
-        selection.setSelectedClip(nextPrimary)
-        selection.setSelectedClipIds(remainingSelectedIds)
-        if (nextPrimary) {
-          selection.setSelectedTrackId(nextPrimary.trackId)
-          selection.setSelectedFXTarget(nextPrimary.trackId)
-        }
-      })
+      reconcileSelectionAfterDelete(writableSelectedIds)
       return
     }
 
@@ -204,16 +207,6 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     )
     if (removedIds.size === 0) return
 
-    const remainingSelectedIds = new Set(Array.from(selectedIds).filter((clipId) => !removedIds.has(clipId)))
-    const nextPrimary: SelectedClip = (() => {
-      if (remainingSelectedIds.size === 0) return null
-      for (const track of snapshot) {
-        const clip = track.clips.find((entry) => remainingSelectedIds.has(entry.id))
-        if (clip) return { trackId: track.id, clipId: clip.id }
-      }
-      return null
-    })()
-
     try {
       const rid = projectId()
       if (rid && typeof historyPush === 'function') {
@@ -223,15 +216,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     } catch {}
 
     removeLocalClips(removedIds)
-
-    batch(() => {
-      selection.setSelectedClip(nextPrimary)
-      selection.setSelectedClipIds(remainingSelectedIds)
-      if (nextPrimary) {
-        selection.setSelectedTrackId(nextPrimary.trackId)
-        selection.setSelectedFXTarget(nextPrimary.trackId)
-      }
-    })
+    reconcileSelectionAfterDelete(removedIds)
   }
 
   const duplicateSelectedClips = async () => {

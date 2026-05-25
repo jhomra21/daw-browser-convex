@@ -509,4 +509,3 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
     </MenubarMenu>
   );
 };
-

@@ -19,4 +19,3 @@ export const NativeMenuTrigger: Component<NativeMenuTriggerProps> = (props) => (
     {props.label}
   </MenubarTrigger>
 );
-

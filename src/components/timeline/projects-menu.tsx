@@ -559,4 +559,3 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
     </MenubarMenu>
   );
 };
-

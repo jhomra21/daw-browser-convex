@@ -18,6 +18,66 @@ type BackupResult = {
   error?: string
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+
+const readNumber = (value: unknown): number | undefined => (
+  typeof value === 'number' && Number.isFinite(value) ? value : undefined
+)
+
+const readStringRecord = (value: unknown): Record<string, string> | undefined => {
+  if (!isRecord(value)) return undefined
+  const result: Record<string, string> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (!key || typeof entry !== 'string' || !entry) return undefined
+    result[key] = entry
+  }
+  return result
+}
+
+const readBackupConflict = (value: unknown): BackupResult['conflict'] | undefined => {
+  if (!isRecord(value)) return undefined
+  const localUpdatedAt = readNumber(value.localUpdatedAt)
+  const cloudUpdatedAt = readNumber(value.cloudUpdatedAt)
+  const localEntityCount = readNumber(value.localEntityCount)
+  const cloudEntityCount = readNumber(value.cloudEntityCount)
+  const localAssetCount = readNumber(value.localAssetCount)
+  const cloudAssetCount = readNumber(value.cloudAssetCount)
+  if (
+    localUpdatedAt === undefined ||
+    cloudUpdatedAt === undefined ||
+    localEntityCount === undefined ||
+    cloudEntityCount === undefined ||
+    localAssetCount === undefined ||
+    cloudAssetCount === undefined
+  ) {
+    return undefined
+  }
+  return {
+    localUpdatedAt,
+    cloudUpdatedAt,
+    localEntityCount,
+    cloudEntityCount,
+    localAssetCount,
+    cloudAssetCount,
+  }
+}
+
+const readBackupResult = (value: unknown): BackupResult | null => {
+  if (!isRecord(value) || typeof value.ok !== 'boolean') return null
+  const result: BackupResult = { ok: value.ok }
+  if (typeof value.manifestVersion === 'string') result.manifestVersion = value.manifestVersion
+  const uploadedAssetKeys = readStringRecord(value.uploadedAssetKeys)
+  if (uploadedAssetKeys) result.uploadedAssetKeys = uploadedAssetKeys
+  const conflict = readBackupConflict(value.conflict)
+  if (conflict) result.conflict = conflict
+  if (typeof value.error === 'string') result.error = value.error
+  if (value.ok && value.uploadedAssetKeys !== undefined && !uploadedAssetKeys) return null
+  if (!value.ok && value.conflict !== undefined && !conflict) return null
+  return result
+}
+
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 const LAST_BACKED_UP_PROJECT_UPDATED_AT_KEY = 'cloudBackup:lastProjectUpdatedAt'
 
@@ -85,7 +145,7 @@ export const runProjectBackup = async (
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
       const response = await fetch('/api/cloud-backups', { method: 'POST', body: form })
-      const data = await response.json().catch(() => null) as BackupResult | null
+      const data = readBackupResult(await response.json().catch(() => null))
       if (response.status === 409 && data?.conflict) return data
       if (!response.ok || !data?.ok) throw new Error(data?.error ?? 'Backup failed.')
       await setLocalProjectMode(projectId, 'backup')

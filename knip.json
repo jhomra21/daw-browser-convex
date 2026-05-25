@@ -10,9 +10,6 @@
       "exports",
       "types"
     ],
-    "src/lib/timeline-repository/cloud-timeline-repository.ts": [
-      "files"
-    ],
     "src/lib/effects/dsp.ts": [
       "exports"
     ],

@@ -1,4 +1,7 @@
 import type { z } from 'zod'
+import type { ConvexHttpClient } from 'convex/browser'
+import { api as generatedConvexApi } from '../convex/_generated/api'
+import type { Id } from '../convex/_generated/dataModel'
 import {
   AddMidiClipCommandSchema,
   AddSampleClipsCommandSchema,
@@ -21,8 +24,9 @@ import {
 } from '../src/lib/agent-commands'
 import { buildClipCreatePayload } from '../src/lib/clip-create'
 import { getPersistableAudioSourceMetadata } from '../src/lib/audio-source'
+import { sanitizeAudioSourceKind } from '../src/lib/audio-source-rules'
 import { normalizeSynthParams } from '../src/lib/effects/params'
-import type { Track } from '../src/types/timeline'
+import type { Clip, Track } from '../src/types/timeline'
 import { getClipKindFromClip, getClipTargetError } from './clip-targets'
 import { listSortedClipsForTrack, resolveTrackClip, selectTrackClips, trackAtIndex as trackAtIndexImpl } from './indexing'
 import { resolveAgentMixTargetIndices } from '../src/lib/agent-command-targets'
@@ -47,7 +51,7 @@ type SetSoloInput = z.infer<typeof SetSoloCommandSchema>
 type AddSampleClipsInput = z.infer<typeof AddSampleClipsCommandSchema>
 
 type TrackDoc = {
-  _id: Track['id']
+  _id: Id<'tracks'>
   kind?: string
   channelRole?: string
 }
@@ -64,13 +68,23 @@ type SampleDoc = {
 }
 
 type ConvexClientLike = {
-  query: (...args: any[]) => Promise<any>
-  mutation: (...args: any[]) => Promise<any>
+  query: ConvexHttpClient['query']
+  mutation: ConvexHttpClient['mutation']
 }
+
+type ConvexApi = typeof generatedConvexApi
+type AgentEffectParams =
+  | { enabled: boolean; bands: SetEqParamsInput['bands'] }
+  | {
+    enabled: boolean
+    wet: number
+    decaySec: number
+    preDelayMs: number
+  }
 
 type AgentActionContext = {
   convex: ConvexClientLike
-  convexApi: any
+  convexApi: ConvexApi
   projectId: string
   userId: string
   getTracks: () => Promise<TrackDoc[]>
@@ -110,6 +124,22 @@ function pickMatchingSample(query: string, samples: SampleDoc[]) {
   return bestScore > 0 ? best : null
 }
 
+function normalizeClipMidi(midi: {
+  wave: string
+  gain?: number
+  notes: NonNullable<Clip['midi']>['notes']
+} | undefined): Clip['midi'] | undefined {
+  if (!midi) return undefined
+  const wave = midi.wave === 'sine' || midi.wave === 'square' || midi.wave === 'sawtooth' || midi.wave === 'triangle'
+    ? midi.wave
+    : 'sawtooth'
+  return {
+    wave,
+    gain: midi.gain,
+    notes: midi.notes,
+  }
+}
+
 function buildAgentSampleClipPayload(input: {
   projectId: string
   userId: string
@@ -135,13 +165,13 @@ function buildAgentSampleClipPayload(input: {
       sampleUrl: input.sample.url,
       source,
       sourceAssetKey: input.sample.assetKey,
-      sourceKind: input.sample.sourceKind as any,
+      sourceKind: sanitizeAudioSourceKind(input.sample.sourceKind),
     },
   })
 }
 
 export function createAgentActions(context: AgentActionContext) {
-  const trackAtIndex = async (value: any) => trackAtIndexImpl(await context.getTracks(), value)
+  const trackAtIndex = async (value: number | undefined) => trackAtIndexImpl(await context.getTracks(), value)
 
   const trackIndices = async (
     input: { trackIndex?: number; trackIndices?: number[] },
@@ -159,27 +189,40 @@ export function createAgentActions(context: AgentActionContext) {
 
   const mutateEffectTarget = async (input: {
     target: number | 'master'
-    params: any
-    masterMutation: any
-    trackMutation: any
+    params: AgentEffectParams
   }) => {
     if (input.target === 'master') {
-      await context.convex.mutation(input.masterMutation, {
-        projectId: context.projectId,
-        userId: context.userId,
-        params: input.params,
-      } as any)
+      if ('bands' in input.params) {
+        await context.convex.mutation(context.convexApi.effects.setMasterEqParams, {
+          projectId: context.projectId,
+          userId: context.userId,
+          params: input.params,
+        })
+      } else {
+        await context.convex.mutation(context.convexApi.effects.setMasterReverbParams, {
+          projectId: context.projectId,
+          userId: context.userId,
+          params: input.params,
+        })
+      }
       return { ok: true } as const
     }
 
     const track = await trackAtIndex(input.target)
     if (!track) return { error: `No track at index ${input.target}` } as const
-    const result = await context.convex.mutation(input.trackMutation, {
-      projectId: context.projectId,
-      trackId: track._id,
-      userId: context.userId,
-      params: input.params,
-    } as any)
+    const result = 'bands' in input.params
+      ? await context.convex.mutation(context.convexApi.effects.setEqParams, {
+          projectId: context.projectId,
+          trackId: track._id,
+          userId: context.userId,
+          params: input.params,
+        })
+      : await context.convex.mutation(context.convexApi.effects.setReverbParams, {
+          projectId: context.projectId,
+          trackId: track._id,
+          userId: context.userId,
+          params: input.params,
+        })
     return result ? { ok: true } as const : { error: 'Effect update did not apply' } as const
   }
 
@@ -195,11 +238,11 @@ export function createAgentActions(context: AgentActionContext) {
       if (typeof input.skipIndex === 'number' && index === input.skipIndex) continue
       const track = input.trackList[index]
       if (!track) continue
-      const result = await context.convex.mutation(context.convexApi.tracks.setMix as any, {
+      const result = await context.convex.mutation(context.convexApi.tracks.setMix, {
         trackId: track._id,
         [input.key]: input.value,
         userId: context.userId,
-      } as any)
+      })
       if (result?.status === 'applied') {
         appliedIndices.push(index)
       }
@@ -246,16 +289,16 @@ export function createAgentActions(context: AgentActionContext) {
     } as const
   }
 
-  const listRoomClips = async () => await context.convex.query(context.convexApi.clips.listByRoom as any, {
+  const listRoomClips = async () => await context.convex.query(context.convexApi.clips.listByRoom, {
     projectId: context.projectId,
     userId: context.userId,
-  } as any) as any[]
+  })
 
   const listOwnedClipIds = async () => {
-    return new Set<string>((await context.convex.query(context.convexApi.ownerships.listOwnedClipIds as any, {
+    return new Set<string>((await context.convex.query(context.convexApi.ownerships.listOwnedClipIds, {
       projectId: context.projectId,
       ownerUserId: context.userId,
-    } as any) as any[]).map((clipId) => String(clipId)))
+    }) as Array<Id<'clips'>>).map((clipId) => String(clipId)))
   }
 
   const listOwnedRoomClips = async () => {
@@ -360,12 +403,12 @@ export function createAgentActions(context: AgentActionContext) {
 
   return {
     async createTrack(input: Omit<CreateTrackInput, 'type'>) {
-      const trackId = await context.convex.mutation(context.convexApi.tracks.create as any, {
+      const trackId = await context.convex.mutation(context.convexApi.tracks.create, {
         projectId: context.projectId,
         userId: context.userId,
         kind: input.kind,
         channelRole: input.channelRole,
-      } as any)
+      })
       await context.refreshTracks()
       return { trackId }
     },
@@ -373,7 +416,7 @@ export function createAgentActions(context: AgentActionContext) {
     async setTrackRouting(input: Omit<SetTrackRoutingInput, 'type'>) {
       const resolved = await toTrackRoutingPayload({ type: 'setTrackRouting', ...input })
       if ('error' in resolved) return resolved
-      await context.convex.mutation(context.convexApi.tracks.setRouting as any, resolved.payload as any)
+      await context.convex.mutation(context.convexApi.tracks.setRouting, resolved.payload)
       return { ok: true }
     },
 
@@ -385,11 +428,11 @@ export function createAgentActions(context: AgentActionContext) {
       const track = trackAtIndexImpl(trackList, input.trackIndex)
         ?? (typeof fallbackIndex === 'number' ? trackList[fallbackIndex] : undefined)
       if (!track) return { error: 'Track not found' }
-      await context.convex.mutation(context.convexApi.tracks.setVolume as any, {
+      await context.convex.mutation(context.convexApi.tracks.setVolume, {
         trackId: track._id,
         volume: input.volume,
         userId: context.userId,
-      } as any)
+      })
       return { ok: true }
     },
 
@@ -398,7 +441,7 @@ export function createAgentActions(context: AgentActionContext) {
       if (!track) return { error: `No track at index ${input.trackIndex}` }
       const targetError = getClipTargetError(track, 'midi')
       if (targetError) return { error: targetError }
-      const clipId = await context.convex.mutation(context.convexApi.clips.create as any, {
+      const clipId = await context.convex.mutation(context.convexApi.clips.create, {
         projectId: context.projectId,
         trackId: track._id,
         startSec: input.startSec,
@@ -411,7 +454,7 @@ export function createAgentActions(context: AgentActionContext) {
           gain: input.gain,
           notes: input.notes ?? [],
         },
-      } as any)
+      })
       return clipId ? { clipId } : { error: 'Failed to create clip' }
     },
 
@@ -420,8 +463,6 @@ export function createAgentActions(context: AgentActionContext) {
       return mutateEffectTarget({
         target: input.target,
         params,
-        masterMutation: context.convexApi.effects.setMasterEqParams as any,
-        trackMutation: context.convexApi.effects.setEqParams as any,
       })
     },
 
@@ -435,8 +476,6 @@ export function createAgentActions(context: AgentActionContext) {
       return mutateEffectTarget({
         target: input.target,
         params,
-        masterMutation: context.convexApi.effects.setMasterReverbParams as any,
-        trackMutation: context.convexApi.effects.setReverbParams as any,
       })
     },
 
@@ -445,31 +484,31 @@ export function createAgentActions(context: AgentActionContext) {
       if (!track) return { error: `No track at index ${input.trackIndex}` }
       if ((track.kind ?? 'audio') !== 'instrument') return { error: 'Target track is not an instrument track' }
       const { trackIndex, ...updates } = input
-      const row = await context.convex.query(context.convexApi.effects.getSynthForTrack as any, {
+      const row = await context.convex.query(context.convexApi.effects.getSynthForTrack, {
         projectId: context.projectId,
         userId: context.userId,
         trackId: track._id,
-      } as any)
+      })
       const params = normalizeSynthParams({
         ...normalizeSynthParams(row?.params ?? {}),
         ...updates,
       })
-      const result = await context.convex.mutation(context.convexApi.effects.setSynthParams as any, {
+      const result = await context.convex.mutation(context.convexApi.effects.setSynthParams, {
         projectId: context.projectId,
         trackId: track._id,
         userId: context.userId,
         params,
-      } as any)
+      })
       return result ? { ok: true } : { error: 'Effect update did not apply' }
     },
 
     async deleteTrack(input: Omit<DeleteTrackInput, 'type'>) {
       const track = await trackAtIndex(input.trackIndex)
       if (!track) return { error: 'Track not found' }
-      const result = await context.convex.mutation(context.convexApi.tracks.remove as any, {
+      const result = await context.convex.mutation(context.convexApi.tracks.remove, {
         trackId: track._id,
         userId: context.userId,
-      } as any)
+      })
       if (result?.status === 'deleted') {
         await context.refreshTracks()
         return { ok: true }
@@ -495,12 +534,12 @@ export function createAgentActions(context: AgentActionContext) {
         if (targetError) return { error: targetError }
       }
 
-      const result = await context.convex.mutation(context.convexApi.clips.move as any, {
+      const result = await context.convex.mutation(context.convexApi.clips.move, {
         clipId: resolved.clip._id,
         userId: context.userId,
         startSec: input.newStartSec,
         toTrackId: toTrack?._id,
-      } as any)
+      })
 
       return isAppliedClipMutationResult(result)
         ? { ok: true, clipId: resolved.clip._id }
@@ -515,10 +554,10 @@ export function createAgentActions(context: AgentActionContext) {
       })
       if ('error' in resolved) return resolved
 
-      const result = await context.convex.mutation(context.convexApi.clips.removeMany as any, {
+      const result = await context.convex.mutation(context.convexApi.clips.removeMany, {
         clipIds: [resolved.clip._id],
         userId: context.userId,
-      } as any)
+      })
       const removedIds = new Set(
         Array.isArray(result?.removedClipIds)
           ? result.removedClipIds.map((clipId: unknown) => String(clipId))
@@ -531,7 +570,7 @@ export function createAgentActions(context: AgentActionContext) {
       const track = await trackAtIndex(input.trackIndex)
       if (!track) return { error: `No track at index ${input.trackIndex}` }
       if ((track.kind ?? 'audio') !== 'instrument') return { error: 'Not an instrument track' }
-      const result = await context.convex.mutation(context.convexApi.effects.setArpeggiatorParams as any, {
+      const result = await context.convex.mutation(context.convexApi.effects.setArpeggiatorParams, {
         projectId: context.projectId,
         trackId: track._id,
         userId: context.userId,
@@ -543,7 +582,7 @@ export function createAgentActions(context: AgentActionContext) {
           gate: input.gate,
           hold: input.hold,
         },
-      } as any)
+      })
       return result ? { ok: true } : { error: 'Effect update did not apply' }
     },
 
@@ -555,7 +594,7 @@ export function createAgentActions(context: AgentActionContext) {
       })
       if ('error' in resolved) return resolved
 
-      const result = await context.convex.mutation(context.convexApi.clips.setTiming as any, {
+      const result = await context.convex.mutation(context.convexApi.clips.setTiming, {
         clipId: resolved.clip._id,
         userId: context.userId,
         startSec: input.startSec,
@@ -563,7 +602,7 @@ export function createAgentActions(context: AgentActionContext) {
         leftPadSec: input.leftPadSec,
         bufferOffsetSec: input.bufferOffsetSec,
         midiOffsetBeats: input.midiOffsetBeats,
-      } as any)
+      })
 
       return isAppliedClipMutationResult(result) ? { ok: true } : { error: 'Timing change did not apply' }
     },
@@ -587,12 +626,12 @@ export function createAgentActions(context: AgentActionContext) {
         const requestedStart = typeof input.newStartSec === 'number'
           ? (input.keepRelativePositions !== false ? input.newStartSec + (clip.startSec - base) : input.newStartSec)
           : clip.startSec
-        const result = await context.convex.mutation(context.convexApi.clips.move as any, {
+        const result = await context.convex.mutation(context.convexApi.clips.move, {
           clipId: clip._id,
           userId: context.userId,
           startSec: requestedStart,
           toTrackId: resolved.toTrack?._id,
-        } as any)
+        })
         if (isAppliedClipMutationResult(result)) {
           moved += 1
         }
@@ -625,7 +664,7 @@ export function createAgentActions(context: AgentActionContext) {
           : clip.startSec
         return buildClipCreatePayload({
           projectId: context.projectId,
-          trackId: resolved.toTrack!._id as any,
+          trackId: resolved.toTrack!._id,
           userId: context.userId,
           clip: {
             startSec,
@@ -638,8 +677,8 @@ export function createAgentActions(context: AgentActionContext) {
               sourceChannelCount: clip.sourceChannelCount,
             }),
             sourceAssetKey: clip.sourceAssetKey,
-            sourceKind: clip.sourceKind,
-            midi: clip.midi,
+            sourceKind: sanitizeAudioSourceKind(clip.sourceKind),
+            midi: normalizeClipMidi(clip.midi),
             timing: {
               leftPadSec: clip.leftPadSec,
               bufferOffsetSec: clip.bufferOffsetSec,
@@ -648,7 +687,7 @@ export function createAgentActions(context: AgentActionContext) {
           },
         })
       })
-      const ids = await context.convex.mutation(context.convexApi.clips.createMany as any, { items } as any)
+      const ids = await context.convex.mutation(context.convexApi.clips.createMany, { items })
       const created = Array.isArray(ids) ? ids.filter(Boolean).length : 0
       const skipped = resolved.skippedByOwnership + (items.length - created)
       if (created === 0) return { error: 'No clips were copied' }
@@ -663,10 +702,10 @@ export function createAgentActions(context: AgentActionContext) {
       const targets = clipsOnTrack.filter((clip) => clip.startSec >= input.rangeStartSec && clip.startSec < input.rangeEndSec)
       const targetIds = targets.map((clip) => clip._id)
       if (targetIds.length === 0) return { ok: true, removed: 0 }
-      const result = await context.convex.mutation(context.convexApi.clips.removeMany as any, {
+      const result = await context.convex.mutation(context.convexApi.clips.removeMany, {
         clipIds: targetIds,
         userId: context.userId,
-      } as any)
+      })
       const removed = Array.isArray(result?.removedClipIds)
         ? result.removedClipIds.length
         : 0
@@ -720,10 +759,10 @@ export function createAgentActions(context: AgentActionContext) {
       const query = normalizeText(input.sampleQuery)
       if (!query) return { error: 'Missing sampleQuery' }
 
-      const samples = await context.convex.query(context.convexApi.samples.listByRoom as any, {
+      const samples = await context.convex.query(context.convexApi.samples.listByRoom, {
         projectId: context.projectId,
         userId: context.userId,
-      } as any) as SampleDoc[]
+      }) as SampleDoc[]
       const sample = pickMatchingSample(query, samples)
       if (!sample) return { error: 'Sample not found in project' }
 
@@ -738,11 +777,11 @@ export function createAgentActions(context: AgentActionContext) {
         return { error: `No track at index ${input.trackIndex}` }
       }
       if (!targetTrack) {
-        const trackId = await context.convex.mutation(context.convexApi.tracks.create as any, {
+        const trackId = await context.convex.mutation(context.convexApi.tracks.create, {
           projectId: context.projectId,
           userId: context.userId,
           kind: 'audio',
-        } as any)
+        })
         trackList = await context.refreshTracks()
         targetTrack = trackList.find((track) => String(track._id) === String(trackId))
       }
@@ -784,7 +823,7 @@ export function createAgentActions(context: AgentActionContext) {
           sample,
         })
       ))
-      const created = await context.convex.mutation(context.convexApi.clips.createMany as any, { items } as any)
+      const created = await context.convex.mutation(context.convexApi.clips.createMany, { items })
       const createdCount = Array.isArray(created) ? created.filter(Boolean).length : 0
       return createdCount > 0 ? { ok: true, created: createdCount } : { error: 'Failed to create sample clips' }
     },

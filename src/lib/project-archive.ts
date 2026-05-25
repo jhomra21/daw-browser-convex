@@ -141,7 +141,7 @@ export const importDawProjectArchive = async (file: File): Promise<string> => {
       entities: manifest.entities,
       assets: manifest.assets,
       projectState: manifest.projectState,
-      syncState: manifest.syncState,
+      syncState: [],
     })
   } catch (error) {
     await deleteLocalProject(projectId)

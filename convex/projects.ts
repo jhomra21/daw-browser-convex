@@ -236,10 +236,17 @@ export const listMineDetailed = query({
   },
 });
 
-export const ensureOwnedRoom = mutation({
+export const createOwnedRoom = mutation({
   args: { projectId: v.string(), userId: v.string() },
   returns: v.null(),
   handler: async (ctx, { projectId, userId }) => {
+    const existingProject = await ctx.db
+      .query("projects")
+      .withIndex("by_room", (q) => q.eq("projectId", projectId))
+      .first();
+    if (existingProject) {
+      throw new Error("Project already exists.");
+    }
     await ensureOwnedRoomRecords(ctx, projectId, userId);
     return null;
   },

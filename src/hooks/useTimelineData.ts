@@ -199,7 +199,7 @@ export function useTimelineData(): UseTimelineDataReturn {
     }
   )
 
-  const ensureOwnedRoom = async (
+  const createOwnedRoom = async (
     rid: string,
     uid: string,
     options?: EnsureOwnedRoomOptions,
@@ -211,7 +211,7 @@ export function useTimelineData(): UseTimelineDataReturn {
 
     pendingOwnedRoomKeys.add(key)
     try {
-      await convexClient.mutation(convexApi.projects.ensureOwnedRoom, { projectId: rid, userId: uid })
+      await convexClient.mutation(convexApi.projects.createOwnedRoom, { projectId: rid, userId: uid })
       return { status: 'created' }
     } catch {
       if (options?.showAlertOnError) {
@@ -244,7 +244,7 @@ export function useTimelineData(): UseTimelineDataReturn {
       return
     }
 
-    void ensureOwnedRoom(bootstrapRid, uid, { showAlertOnError: true }).then((result) => {
+    void createOwnedRoom(bootstrapRid, uid, { showAlertOnError: true }).then((result) => {
       if (bootstrapProjectId() !== bootstrapRid) return
       if (result.status === 'created' && projectId() !== bootstrapRid) {
         replaceRoom(bootstrapRid)
@@ -310,7 +310,7 @@ export function useTimelineData(): UseTimelineDataReturn {
     const nextProjectId = crypto.randomUUID()
     const ownerUserId = userId()
     if (!ownerUserId) return
-    const result = await ensureOwnedRoom(nextProjectId, ownerUserId, { showAlertOnError: true })
+    const result = await createOwnedRoom(nextProjectId, ownerUserId, { showAlertOnError: true })
     if (result.status !== 'created') return
     navigateToRoom(nextProjectId)
   }

@@ -72,12 +72,12 @@ const projectExistsForBackup = async (convex: ConvexHttpClient, projectId: strin
   await convex.query(convexApi.projects.exists, { projectId })
 )
 
-const ensureOwnedProjectForBackup = async (
+const createOwnedProjectForBackup = async (
   convex: ConvexHttpClient,
   projectId: string,
   userId: string,
 ) => {
-  await convex.mutation(convexApi.projects.ensureOwnedRoom, { projectId, userId })
+  await convex.mutation(convexApi.projects.createOwnedRoom, { projectId, userId })
 }
 
 const checkBackupConflict = async (
@@ -579,7 +579,7 @@ app.post('/api/cloud-backups', async (c) => {
     const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
     const projectExists = await projectExistsForBackup(convex, projectId)
     if (!projectExists) {
-      await ensureOwnedProjectForBackup(convex, projectId, user.id)
+      await createOwnedProjectForBackup(convex, projectId, user.id)
     } else if (!await requireProjectRoleForApi(c, projectId, ['owner', 'editor'])) {
       return c.json({ error: 'Forbidden' }, 403)
     }

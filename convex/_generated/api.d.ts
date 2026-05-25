@@ -17,6 +17,7 @@ import type * as exports from "../exports.js";
 import type * as mixerChannels from "../mixerChannels.js";
 import type * as ownerships from "../ownerships.js";
 import type * as projectAccess from "../projectAccess.js";
+import type * as projectManifestValidator from "../projectManifestValidator.js";
 import type * as projects from "../projects.js";
 import type * as sampleRows from "../sampleRows.js";
 import type * as samples from "../samples.js";
@@ -43,6 +44,7 @@ declare const fullApi: ApiFromModules<{
   mixerChannels: typeof mixerChannels;
   ownerships: typeof ownerships;
   projectAccess: typeof projectAccess;
+  projectManifestValidator: typeof projectManifestValidator;
   projects: typeof projects;
   sampleRows: typeof sampleRows;
   samples: typeof samples;

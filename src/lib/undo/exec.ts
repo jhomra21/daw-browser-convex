@@ -15,7 +15,7 @@ import { buildHistoryRefIndex, resolveClipId, resolveStoredTrackId, resolveTrack
 import type { HistoryEntry } from './types'
 import {
   isLocalHistoryProject,
-  persistHistoryClipMoveOrThrow,
+  persistHistoryClipMovesOrThrow,
   persistHistoryClipTimingOrThrow,
   persistHistoryTrackMix,
   persistHistoryTrackMixState,
@@ -434,16 +434,15 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
 
     case 'clips-move': {
       const index = buildRefIndex(deps)
-      const movedClipIds: string[] = []
-      for (const move of entry.data.moves) {
+      const moves = entry.data.moves.map((move) => {
         const clipId = requireResolved(resolveClipId(index, move.clipRef), 'Clip not found for clips-move history entry')
         const target = pickDirectionalValue(direction, move.from, move.to)
         const toTrackId = requireResolved(resolveTrackId(index, target.trackRef), 'Target track not found for clips-move history entry')
-        await persistHistoryClipMoveOrThrow(deps, { clipId, trackId: toTrackId, startSec: target.startSec }, 'Failed to move clip during history replay')
-        deps.actions.commitClipMoves([{ clipId, trackId: toTrackId, startSec: target.startSec }])
-        movedClipIds.push(clipId)
-      }
-      deps.actions.rescheduleChangedClips(movedClipIds)
+        return { clipId, trackId: toTrackId, startSec: target.startSec }
+      })
+      await persistHistoryClipMovesOrThrow(deps, moves, 'Failed to move clip during history replay')
+      deps.actions.commitClipMoves(moves)
+      deps.actions.rescheduleChangedClips(moves.map((move) => move.clipId))
       return
     }
 

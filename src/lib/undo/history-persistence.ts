@@ -85,30 +85,28 @@ export const persistHistoryClipTimingOrThrow = async (
   if (!applied) throw new Error(message);
 };
 
-export const persistHistoryClipMoveOrThrow = async (
+export const persistHistoryClipMovesOrThrow = async (
   deps: Deps,
-  move: ClipMove,
+  moves: ClipMove[],
   message: string,
 ) => {
+  if (moves.length === 0) return;
   if (isLocalHistoryProject(deps)) {
-    const updated = await createLocalTimelineRepository(deps.projectId).updateClip({
-      clipId: move.clipId,
-      trackId: move.trackId,
-      startSec: move.startSec,
-    });
-    if (!updated) throw new Error(message);
+    await createLocalTimelineRepository(deps.projectId).moveClips(moves);
     return;
   }
-  const result = await deps.convexClient.mutation(
-    deps.convexApi.clips.move,
-    buildClipMoveMutationInput({
-      clipId: move.clipId,
-      userId: deps.userId,
-      startSec: move.startSec,
-      toTrackId: move.trackId,
-    }),
-  );
-  if (result?.status !== "applied") throw new Error(message);
+  for (const move of moves) {
+    const result = await deps.convexClient.mutation(
+      deps.convexApi.clips.move,
+      buildClipMoveMutationInput({
+        clipId: move.clipId,
+        userId: deps.userId,
+        startSec: move.startSec,
+        toTrackId: move.trackId,
+      }),
+    );
+    if (result?.status !== "applied") throw new Error(message);
+  }
 };
 
 export const persistHistoryTrackRouting = async (deps: Deps, trackId: Track["id"], routing: TrackRouting) => {

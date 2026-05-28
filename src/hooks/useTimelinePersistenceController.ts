@@ -1,10 +1,8 @@
 import type { Accessor } from "solid-js";
 import type { AudioEngine } from "~/lib/audio-engine";
-import { buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
-import { convexApi, convexClient } from "~/lib/convex";
 import { isLocalId } from "~/lib/local-ids";
 import type { LocalProjectMode } from "~/lib/local-project-db";
-import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
+import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
 import type { Clip, Track } from "~/types/timeline";
 import { useCloudSyncTick } from "./useCloudSyncTick";
 import { useLocalProjectActions } from "./useLocalProjectActions";
@@ -50,17 +48,11 @@ export const useTimelinePersistenceController = (input: Input) => {
     clipMediaStatus: input.clipMediaStatus,
     removeClip: async ({ clipId }) => {
       const projectId = input.projectId();
-      if (isLocalId("project", projectId)) {
-        await createLocalTimelineRepository(projectId).deleteClip(clipId);
-        return true;
-      }
-      const userId = input.userId();
-      if (!userId) return false;
-      const result = await convexClient.mutation(
-        convexApi.clips.removeMany,
-        buildClipRemoveManyMutationInput({ clipIds: [clipId], userId }),
-      );
-      return Array.isArray(result?.removedClipIds) && result.removedClipIds.length > 0;
+      const removedIds = await createTimelineClipWriteAdapter({
+        projectId,
+        userId: input.userId(),
+      }).deleteClips([clipId]);
+      return removedIds.has(clipId);
     },
     projection: input.projection,
     selection: input.selection,

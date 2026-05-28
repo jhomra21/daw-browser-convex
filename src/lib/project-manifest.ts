@@ -3,9 +3,7 @@ import {
   getLocalProject,
   LOCAL_PROJECT_SCHEMA_VERSION,
 } from '~/lib/local-project-db'
-import { flushPendingPersistedEffectWrites } from '~/lib/local-effect-write-flush'
-import { flushPendingProjectStateWrites } from '~/lib/local-project-state-write-flush'
-import { flushLocalTimelineWrites } from '~/lib/timeline-repository/local-timeline-repository'
+import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writes'
 import {
   normalizeProjectManifest,
   type ProjectManifest,
@@ -33,9 +31,7 @@ export const buildProjectManifest = async (
 ): Promise<ProjectManifest> => {
   const project = await getLocalProject(projectId)
   if (!project) throw new Error('Local project not found.')
-  await flushPendingPersistedEffectWrites(projectId)
-  await flushPendingProjectStateWrites(projectId)
-  await flushLocalTimelineWrites()
+  await flushLocalProjectPendingWrites(projectId)
   const rows = await exportLocalProjectRows(projectId)
   const updatedAt = latestLocalProjectUpdate(project.updatedAt, rows)
   return {

@@ -80,6 +80,7 @@ type ShareMenuController = {
   onClose: () => void;
   copied: boolean;
   shareUrl: string;
+  shareError: string;
   onCopy: () => Promise<void>;
 };
 
@@ -448,6 +449,11 @@ const ShareMenu: Component<{ share: ShareMenuController }> = (props) => {
               </Show>
             </Button>
           </div>
+          <Show when={share().shareError}>
+            <div class="mt-2 text-xs text-red-300">
+              {share().shareError}
+            </div>
+          </Show>
         </div>
       </MenubarContent>
     </MenubarMenu>
@@ -666,6 +672,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                 onClose: shareMenu.onClose,
                 copied: shareMenu.copied(),
                 shareUrl: shareMenu.shareUrl(),
+                shareError: shareMenu.shareError(),
                 onCopy: shareMenu.onCopy,
               }}
             />

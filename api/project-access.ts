@@ -14,3 +14,14 @@ export async function requireProjectRoleForApi(
   const role = await convex.query(convexApi.projectAccess.roleForUser, { projectId, userId: user.id })
   return role && roles.includes(role) ? user : null
 }
+
+export async function requireProjectDeleteOwnerForApi(
+  c: ApiContext,
+  projectId: string,
+) {
+  const user = c.get('user')
+  if (!user) return null
+  const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
+  const role = await convex.query(convexApi.projectAccess.roleForUserIncludingPending, { projectId, userId: user.id })
+  return role === 'owner' ? user : null
+}

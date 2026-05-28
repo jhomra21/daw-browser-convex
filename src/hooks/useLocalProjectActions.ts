@@ -11,6 +11,7 @@ type Input = {
 
 export const useLocalProjectActions = (input: Input) => {
   const [localSaveFailure, setLocalSaveFailure] = createSignal<string | null>(null);
+  const [backupConflictProjectId, setBackupConflictProjectId] = createSignal<string | null>(null);
 
   const chooseProjectStorageFolder = async () => {
     const rid = input.projectId();
@@ -47,12 +48,21 @@ export const useLocalProjectActions = (input: Input) => {
   const backUpNow = async (options: { skipIfUnchanged?: boolean } = {}) => {
     const rid = input.projectId();
     if (!rid || !isLocalId("project", rid)) return;
-    const result = await runProjectBackup(rid, "detect", options);
+    const conflictAction = backupConflictProjectId() === rid
+      && !options.skipIfUnchanged
+      && window.confirm("Overwrite the existing cloud backup with this local project?")
+      ? "overwrite"
+      : "detect";
+    const result = await runProjectBackup(rid, conflictAction, options);
     if (!result.ok) {
+      setBackupConflictProjectId(result.conflict ? rid : null);
       setLocalSaveFailure(result.conflict
         ? "Cloud backup conflict detected. Use Back up now again after reviewing the cloud project, or restore from backup in a fresh profile."
         : result.error ?? "Cloud backup failed.");
+      return;
     }
+    setBackupConflictProjectId(null);
+    setLocalSaveFailure(null);
   };
 
   const exportArchive = async () => {

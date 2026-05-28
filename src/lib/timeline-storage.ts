@@ -97,7 +97,7 @@ export const saveLocalRoutingMap = (
   } catch {}
 }
 
-export const stripSharedTrackBooleanOverrides = (
+export const stripSharedTrackLocalOverrides = (
   map: LocalMixMap,
   writableTrackIds: Iterable<string>,
 ): LocalMixMap => {
@@ -105,20 +105,19 @@ export const stripSharedTrackBooleanOverrides = (
   for (const trackId of writableTrackIds) {
     const entry = (next ?? map)[trackId]
     if (!entry) continue
-    if (entry.muted === undefined && entry.soloed === undefined) continue
-    if (!next) next = { ...map }
     if (
-      entry.volume === undefined
+      entry.muted === undefined
+      && entry.soloed === undefined
       && entry.sends === undefined
       && entry.outputTargetId === undefined
-    ) {
+    ) continue
+    if (!next) next = { ...map }
+    if (entry.volume === undefined) {
       delete next[trackId]
       continue
     }
     next[trackId] = {
       volume: entry.volume,
-      sends: entry.sends,
-      outputTargetId: entry.outputTargetId,
     }
   }
   return next ?? map

@@ -42,6 +42,7 @@ type HistoryScopeContext = {
   tracks: Track[]
   pendingRun: Promise<void>
   pendingLocalHistorySave: Promise<void>
+  baseLocalHistoryState?: PersistedHistory
   hydratedFromLocalDb?: boolean
   pendingLocalHistoryState?: PersistedHistory
 }
@@ -195,10 +196,23 @@ export function useTimelineHistory(
   const mergeLocalHistoryStates = (
     persisted: PersistedHistory,
     pending: PersistedHistory,
+    base?: PersistedHistory,
   ): PersistedHistory => ({
-    undo: [...persisted.undo, ...pending.undo].slice(-50),
+    undo: [
+      ...persisted.undo,
+      ...pending.undo.slice(hasHistoryPrefix(pending.undo, base?.undo) ? base?.undo.length : 0),
+    ].slice(-50),
     redo: pending.redo,
   })
+
+  const hasHistoryPrefix = (
+    entries: readonly HistoryEntry[],
+    prefix: readonly HistoryEntry[] | undefined,
+  ) => {
+    if (!prefix) return false
+    if (entries.length < prefix.length) return false
+    return prefix.every((entry, index) => JSON.stringify(entry) === JSON.stringify(entries[index]))
+  }
 
   const saveLocalHistoryInOrder = (context: HistoryScopeContext, projectId: string, state: PersistedHistory) => {
     context.pendingLocalHistorySave = context.pendingLocalHistorySave
@@ -233,9 +247,14 @@ export function useTimelineHistory(
         saveHistory(scope, state)
       },
     })
+    let contextBaseLocalHistoryState: PersistedHistory | undefined
     try {
       hydrating = true
-      manager.hydrate(loadHistory(scope))
+      const storedHistory = loadHistory(scope)
+      manager.hydrate(storedHistory)
+      if (localProject) {
+        contextBaseLocalHistoryState = storedHistory
+      }
     } catch {}
     hydrating = false
 
@@ -244,6 +263,7 @@ export function useTimelineHistory(
       tracks: [],
       pendingRun: Promise.resolve(),
       pendingLocalHistorySave: Promise.resolve(),
+      baseLocalHistoryState: contextBaseLocalHistoryState,
     }
     scopeContexts.set(scopeKey, context)
     if (localProject) {
@@ -253,7 +273,7 @@ export function useTimelineHistory(
           const pendingState = context.pendingLocalHistoryState
           hydrating = true
           if (state && pendingState) {
-            const merged = mergeLocalHistoryStates(state, pendingState)
+            const merged = mergeLocalHistoryStates(state, pendingState, context.baseLocalHistoryState)
             manager.hydrate(merged)
             saveLocalHistoryInOrder(context, scope.projectId, merged)
           } else if (state) {

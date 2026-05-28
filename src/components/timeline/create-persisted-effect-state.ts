@@ -25,7 +25,12 @@ type PersistedEffectStateOptions<TRow, TParams> = {
   persistParams: (targetId: string, params: TParams, context: PersistedEffectContext) => void | Promise<unknown>
   createPersistContext?: () => PersistedEffectContext
   onPersistError?: (error: unknown) => void
-  onParamsCommitted?: (targetId: string, previous: TParams | undefined, next: TParams) => void
+  onParamsCommitted?: (
+    targetId: string,
+    previous: TParams | undefined,
+    next: TParams,
+    context: PersistedEffectContext,
+  ) => void
   onQueryRow?: (targetId: string, row: TRow) => void
   debounceMs?: number
   remoteOverwriteAfterMs?: number
@@ -43,6 +48,13 @@ type PersistedEffectState<TParams> = {
   updateForTarget: (targetId: string, updater: (prev: TParams) => TParams) => void
 }
 
+type PendingParamsCommit<TParams> = {
+  targetId: string
+  previous: TParams | undefined
+  next: TParams
+  serialized: string
+}
+
 export function createPersistedEffectState<TRow, TParams>(
   options: PersistedEffectStateOptions<TRow, TParams>,
 ): PersistedEffectState<TParams> {
@@ -53,6 +65,7 @@ export function createPersistedEffectState<TRow, TParams>(
   const persistAttemptByTarget = new Map<string, number>()
   const persistContextByTarget = new Map<string, PersistedEffectContext>()
   const targetByKey = new Map<string, string>()
+  const pendingCommitByTarget = new Map<string, PendingParamsCommit<TParams>>()
   const pendingWritesByProject = new Map<string, Set<Promise<void>>>()
   const registeredFlushers = new Map<string, () => void>()
 
@@ -69,6 +82,23 @@ export function createPersistedEffectState<TRow, TParams>(
     }
     persistAttemptByTarget.delete(key)
     persistContextByTarget.delete(key)
+    targetByKey.delete(key)
+    pendingCommitByTarget.delete(key)
+    lastLocalEdit.delete(key)
+    setDraftByTarget((prev) => {
+      if (!(key in prev)) return prev
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+  }
+
+  function clearReconciledDraft(targetId: string, key = keyForTarget(targetId)) {
+    const timer = saveTimers.get(key)
+    if (timer) {
+      clearTimeout(timer)
+      saveTimers.delete(key)
+    }
     targetByKey.delete(key)
     lastLocalEdit.delete(key)
     setDraftByTarget((prev) => {
@@ -102,15 +132,30 @@ export function createPersistedEffectState<TRow, TParams>(
     const serialized = options.serializeParams(params)
     const write = Promise.resolve()
       .then(() => options.persistParams(targetId, params, context))
+      .then(
+        () => {
+          if (persistAttemptByTarget.get(key) !== attempt) return
+          const pendingCommit = pendingCommitByTarget.get(key)
+          if (!pendingCommit || pendingCommit.serialized !== serialized) return
+          options.onParamsCommitted?.(pendingCommit.targetId, pendingCommit.previous, pendingCommit.next, context)
+          pendingCommitByTarget.delete(key)
+          const current = draftByTarget()[key]
+          if (!current || options.serializeParams(current) === serialized) {
+            persistAttemptByTarget.delete(key)
+            persistContextByTarget.delete(key)
+          }
+        },
+        (error) => {
+          if (persistAttemptByTarget.get(key) !== attempt) return
+          const current = draftByTarget()[key]
+          if (!current) return
+          if (options.serializeParams(current) !== serialized) return
+          options.onPersistError?.(error)
+          clearDraft(targetId, key)
+          throw error
+        },
+      )
       .then(() => undefined)
-      .catch((error) => {
-        if (persistAttemptByTarget.get(key) !== attempt) return
-        const current = draftByTarget()[key]
-        if (!current) return
-        if (options.serializeParams(current) !== serialized) return
-        options.onPersistError?.(error)
-        throw error
-      })
       .finally(() => {
         if (!context.projectId) return
         const pendingWrites = pendingWritesByProject.get(context.projectId)
@@ -154,6 +199,7 @@ export function createPersistedEffectState<TRow, TParams>(
     if (!initial) return
 
     const next = updater(initial)
+    const pendingCommit = pendingCommitByTarget.get(key)
     lastLocalEdit.set(key, Date.now())
     const context = options.createPersistContext?.() ?? {}
     if (context.projectId) ensureProjectFlusher(context.projectId)
@@ -163,8 +209,13 @@ export function createPersistedEffectState<TRow, TParams>(
       ...prev,
       [key]: next,
     }))
+    pendingCommitByTarget.set(key, {
+      targetId,
+      previous: pendingCommit?.previous ?? previous,
+      next,
+      serialized: options.serializeParams(next),
+    })
     persistOrSchedule(targetId, key, next)
-    options.onParamsCommitted?.(targetId, previous, next)
   }
 
   const params = createMemo(() => {
@@ -186,7 +237,7 @@ export function createPersistedEffectState<TRow, TParams>(
     const nextSerialized = nextParams ? options.serializeParams(nextParams) : undefined
     const draftSerialized = options.serializeParams(draft)
     if (nextSerialized && draftSerialized === nextSerialized) {
-      clearDraft(targetId, key)
+      clearReconciledDraft(targetId, key)
       return
     }
 

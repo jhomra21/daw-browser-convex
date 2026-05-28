@@ -21,7 +21,6 @@ export type RecordingContext = {
   userId: string | undefined
   isLocalProject: boolean
   trackId: Track['id']
-  targetTrack: Track
   tracks: Track[]
   createdTrack: Track | null
   startSec: number

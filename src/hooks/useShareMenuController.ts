@@ -15,6 +15,7 @@ type UseShareMenuControllerReturn = {
   onClose: () => void
   copied: Accessor<boolean>
   shareUrl: Accessor<string>
+  shareError: Accessor<string>
   onCopy: () => Promise<void>
 }
 
@@ -24,6 +25,7 @@ export function useShareMenuController(
   const [open, setOpen] = createSignal(false)
   const [copied, setCopied] = createSignal(false)
   const [generatedShareUrl, setGeneratedShareUrl] = createSignal('')
+  const [shareError, setShareError] = createSignal('')
   let copiedResetTimer: number | null = null
 
   const clearCopiedResetTimer = () => {
@@ -32,18 +34,27 @@ export function useShareMenuController(
     copiedResetTimer = null
   }
 
-  const shareUrl = () => generatedShareUrl() || getRoomShareUrl(options.projectId?.()) || ''
+  const shareUrl = () => {
+    const generated = generatedShareUrl()
+    if (generated || options.onShare) return generated
+    return getRoomShareUrl(options.projectId?.()) || ''
+  }
 
   const onOpen = async () => {
+    setShareError('')
     try {
       const nextShareUrl = await options.onShare?.()
       if (nextShareUrl) setGeneratedShareUrl(nextShareUrl)
-    } catch {}
+    } catch {
+      setShareError('Share invite could not be created.')
+    }
     setOpen(true)
   }
 
   const onCopy = async () => {
-    await copyText(shareUrl())
+    const currentShareUrl = shareUrl()
+    if (!currentShareUrl) return
+    await copyText(currentShareUrl)
     setCopied(true)
     clearCopiedResetTimer()
     copiedResetTimer = window.setTimeout(() => {
@@ -58,6 +69,7 @@ export function useShareMenuController(
       clearCopiedResetTimer()
       setCopied(false)
       setGeneratedShareUrl('')
+      setShareError('')
     }
   }
 
@@ -76,6 +88,7 @@ export function useShareMenuController(
     onClose,
     copied,
     shareUrl,
+    shareError,
     onCopy,
   }
 }

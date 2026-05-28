@@ -8,6 +8,7 @@ import {
   renameLocalProject,
   type LocalProjectEntry,
 } from '~/lib/local-project-db'
+import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writes'
 
 type LocalProjectPickerProps = {
   onOpenProject: (projectId: string) => void
@@ -61,6 +62,7 @@ export default function LocalProjectPicker(props: LocalProjectPickerProps) {
     if (confirmation !== project.name) return
     setBusy(true)
     try {
+      await flushLocalProjectPendingWrites(project.id)
       await deleteLocalProject(project.id)
       reload()
     } catch {

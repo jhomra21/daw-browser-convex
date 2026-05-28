@@ -19,6 +19,19 @@ const requireServerSecret = (serverSecret: string) => {
 
 type CloudBackup = Doc<"cloudBackups">;
 
+const assertProjectNotDeleting = async (
+  ctx: Pick<QueryCtx, "db">,
+  projectId: string,
+) => {
+  const project = await ctx.db
+    .query("projects")
+    .withIndex("by_room", (q) => q.eq("projectId", projectId))
+    .first();
+  if (project?.deletionPendingAt !== undefined) {
+    throw new Error("Project deletion is pending.");
+  }
+};
+
 const listBackupsNewestFirst = async (
   ctx: Pick<QueryCtx, "db">,
   projectId: string,
@@ -117,6 +130,7 @@ export const checkConflict = query({
   handler: async (ctx, { projectId, userId, manifest, serverSecret }) => {
     requireServerSecret(serverSecret);
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor"]);
+    await assertProjectNotDeleting(ctx, projectId);
     assertConflictManifest(projectId, manifest);
     return readBackupConflict(await latestBackup(ctx, projectId), manifest);
   },
@@ -133,6 +147,7 @@ export const upsertLatest = mutation({
   handler: async (ctx, { projectId, userId, manifest, conflictAction, serverSecret }) => {
     requireServerSecret(serverSecret);
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor"]);
+    await assertProjectNotDeleting(ctx, projectId);
     assertPublishManifest(projectId, manifest);
     const { latest: existing, duplicateManifests } = await normalizeLatestBackup(ctx, projectId);
     const conflict = readBackupConflict(existing, manifest);

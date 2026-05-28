@@ -59,7 +59,7 @@ type EffectsPanelProps = {
   playheadSec?: number;
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
-  onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>) => void;
+  onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
   onLocalSaveFailed?: (message: string) => void;
 };
 
@@ -536,7 +536,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         setEffectOrderForTarget(targetId, "eq", typeof row.index === "number" ? row.index : undefined);
       }
     },
-    onParamsCommitted: (targetId, previous, next) => {
+    onParamsCommitted: (targetId, previous, next, context) => {
       if (previous === undefined) return;
       if (targetId === "master") {
         props.onEffectParamsCommitted?.({
@@ -544,7 +544,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
           effect: "master-eq",
           from: previous,
           to: next,
-        });
+        }, context.projectId);
         return;
       }
       const track = resolveTrackByTargetId(targetId);
@@ -554,7 +554,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         effect: "eq",
         from: previous,
         to: next,
-      });
+      }, context.projectId);
     },
   });
 
@@ -640,7 +640,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         setEffectOrderForTarget(targetId, "reverb", typeof row.index === "number" ? row.index : undefined);
       }
     },
-    onParamsCommitted: (targetId, previous, next) => {
+    onParamsCommitted: (targetId, previous, next, context) => {
       if (previous === undefined) return;
       if (targetId === "master") {
         props.onEffectParamsCommitted?.({
@@ -648,7 +648,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
           effect: "master-reverb",
           from: previous,
           to: next,
-        });
+        }, context.projectId);
         return;
       }
       const track = resolveTrackByTargetId(targetId);
@@ -658,7 +658,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         effect: "reverb",
         from: previous,
         to: next,
-      });
+      }, context.projectId);
     },
   });
 

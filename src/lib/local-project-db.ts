@@ -269,6 +269,7 @@ export const exportLocalProjectRows = async (projectId: string) => {
 const deleteLocalProjectAssetFiles = async (
   projectId: string,
   directoryHandle?: FileSystemDirectoryHandle,
+  assetPaths: string[] = [],
 ): Promise<void> => {
   await Promise.all([
     (async () => {
@@ -280,7 +281,8 @@ const deleteLocalProjectAssetFiles = async (
     (async () => {
       if (!directoryHandle) return
       try {
-        await directoryHandle.removeEntry('assets', { recursive: true })
+        const assetsDir = await directoryHandle.getDirectoryHandle('assets')
+        await Promise.all(assetPaths.map((path) => assetsDir.removeEntry(path).catch(() => undefined)))
       } catch {}
     })(),
   ])
@@ -289,7 +291,9 @@ const deleteLocalProjectAssetFiles = async (
 export const deleteLocalProject = async (projectId: string): Promise<void> => {
   const db = await openGlobalProjectsDb()
   const directoryEntry = await db.get('directoryHandles', projectId)
-  await deleteLocalProjectAssetFiles(projectId, directoryEntry?.handle)
+  const projectDb = await openLocalProjectDb(projectId)
+  const assetPaths = (await projectDb.getAll('assets')).map((asset) => asset.storagePath)
+  await deleteLocalProjectAssetFiles(projectId, directoryEntry?.handle, assetPaths)
   const tx = db.transaction(['projects', 'directoryHandles'], 'readwrite')
   await Promise.all([
     tx.objectStore('projects').delete(projectId),

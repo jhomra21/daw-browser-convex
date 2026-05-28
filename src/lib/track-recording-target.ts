@@ -57,7 +57,7 @@ export async function ensureTrackForRecording(options: {
   return { track: newTrack, createdDuringSetup: true }
 }
 
-export function commitAutoCreatedTrack(options: {
+function commitAutoCreatedTrack(options: {
   historyPush?: HistoryPush
   projectId: string | undefined
   tracks: Track[]
@@ -76,13 +76,13 @@ async function discardAutoCreatedTrack(options: {
   clearRecordArmForTrack: (trackId: Track['id']) => void
 }): Promise<boolean> {
   options.clearRecordArmForTrack(options.trackId)
-  if (options.projectId && isLocalId('project', options.projectId)) {
-    await createLocalTimelineRepository(options.projectId).deleteTrack(options.trackId)
-    options.removeLocalTrack(options.trackId)
-    return true
-  }
-  if (!options.userId) return false
   try {
+    if (options.projectId && isLocalId('project', options.projectId)) {
+      await createLocalTimelineRepository(options.projectId).deleteTrack(options.trackId)
+      options.removeLocalTrack(options.trackId)
+      return true
+    }
+    if (!options.userId) return false
     const result = await options.convexClient.mutation(
       options.convexApi.tracks.remove,
       buildTrackDeleteMutationInput({ trackId: options.trackId, userId: options.userId }),

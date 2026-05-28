@@ -5,10 +5,9 @@ import {
   createEffect,
   createMemo,
   createSignal,
-  onCleanup,
 } from "solid-js";
 import type { Clip, Track } from "~/types/timeline";
-import { getAudioEngine, resetAudioEngine } from "~/lib/audio-engine-singleton";
+import { getAudioEngine } from "~/lib/audio-engine-singleton";
 import {
   timelineDurationSec,
   FX_OFFSET_PX,
@@ -40,8 +39,8 @@ import { useTimelineIdentity } from "~/hooks/useTimelineIdentity";
 import { useTimelineLocalMix } from "~/hooks/useTimelineLocalMix";
 import { useTimelineProjectionState } from "~/hooks/useTimelineProjectionState";
 import { useTimelineSelectionState } from "~/hooks/useTimelineSelectionState";
-import { flushLocalTimelineWrites } from "~/lib/timeline-repository/local-timeline-repository";
 import { useTimelinePersistenceController } from "~/hooks/useTimelinePersistenceController";
+import { useTimelineAudioLifecycle } from "~/hooks/useTimelineAudioLifecycle";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import TimelineChrome from "./timeline/timeline-chrome";
 import DeleteTrackDialog from "./timeline/delete-track-dialog";
@@ -127,29 +126,6 @@ const Timeline: Component = () => {
       setOpen: setBottomFXOpen,
     },
   });
-  const {
-    writableTrackIds,
-    optimisticTrackIds,
-    canWriteTrack,
-    canWriteClip,
-    grantTrackWrite,
-    grantClipWrite,
-    grantClipWrites,
-    serverTrackState,
-  } = useProjectedTimelineModel({
-    projectId,
-    userId,
-    fullViewData: () => fullView.data,
-    pendingTrackEntriesById: projection.pendingTrackEntriesById,
-    pendingClipCreatesById: projection.pendingClipCreatesById,
-    removedTrackIds: projection.removedTrackIds,
-    removedClipIds: projection.removedClipIds,
-  });
-  const localMix = useTimelineLocalMix({
-    projectId,
-    writableTrackIds,
-    onLocalSaveFailed: localProject.setLocalSaveFailure,
-  });
   const clipBuffers = useClipBuffers({
     audioEngine,
     projectId,
@@ -168,6 +144,30 @@ const Timeline: Component = () => {
     localProject,
     projection,
     selection,
+  });
+  const {
+    writableTrackIds,
+    optimisticTrackIds,
+    canWriteTrack,
+    canWriteClip,
+    grantTrackWrite,
+    grantClipWrite,
+    grantClipWrites,
+    serverTrackState,
+  } = useProjectedTimelineModel({
+    projectId,
+    userId,
+    fullViewData: () => fullView.data,
+    localSnapshot: mediaRecovery.localTimelineSnapshot,
+    pendingTrackEntriesById: projection.pendingTrackEntriesById,
+    pendingClipCreatesById: projection.pendingClipCreatesById,
+    removedTrackIds: projection.removedTrackIds,
+    removedClipIds: projection.removedClipIds,
+  });
+  const localMix = useTimelineLocalMix({
+    projectId,
+    writableTrackIds,
+    onLocalSaveFailed: localProject.setLocalSaveFailure,
   });
   const { pushHistory, handleUndo, handleRedo } = useTimelineHistory({
     projectId,
@@ -232,6 +232,7 @@ const Timeline: Component = () => {
     optimisticTrackIds,
     canWriteTrack,
     pushHistory,
+    onLocalSaveFailed: localProject.setLocalSaveFailure,
     serverTrackState,
   });
 
@@ -349,9 +350,10 @@ const Timeline: Component = () => {
     });
   };
 
-  const pushEffectParamsHistory = (payload: EffectParamsCommitPayload) => {
-    const rid = projectId();
+  const pushEffectParamsHistory = (payload: EffectParamsCommitPayload, committedProjectId?: string) => {
+    const rid = committedProjectId ?? projectId();
     if (!rid) return;
+    if (rid !== projectId()) return;
     pushHistory(
       buildEffectParamsHistoryEntry({
         projectId: rid,
@@ -701,34 +703,18 @@ const Timeline: Component = () => {
 
   const duration = () => timelineDurationSec(renderTracks());
 
-  createEffect(() => {
-    audioEngine.updateTrackGains(renderTracks());
-  });
-
-  createEffect(() => {
-    audioEngine.setBpm(bpm());
-  });
-
-  createEffect(() => {
-    audioEngine.setMetronomeEnabled(metronomeEnabled());
-  });
-
-  createEffect(() => {
-    projectId();
-    onCleanup(() => {
-      void flushLocalTimelineWrites();
-    });
+  useTimelineAudioLifecycle({
+    audioEngine,
+    tracks: () => renderTracks(),
+    bpm,
+    metronomeEnabled,
+    projectId,
+    clearClipBufferCaches: clipBuffers.clearClipBufferCaches,
   });
 
   createEffect(() => {
     const nextTracks = resolvedTracks();
     reconcileRecordArm(nextTracks);
-  });
-
-  onCleanup(() => {
-    audioEngine.close();
-    resetAudioEngine();
-    clipBuffers.clearClipBufferCaches();
   });
 
   const transportProps = () => ({
@@ -914,14 +900,8 @@ const Timeline: Component = () => {
             selection.selectTrackTarget(id, { clearClipSelection: true });
           },
           canWriteTrackRouting: canWriteTrack,
-          onTrackSendsChange: (trackId, sends) => {
-            localMix.persist(trackId, { sends });
-            updateTrackSends(trackId, sends);
-          },
-          onTrackOutputTargetChange: (trackId, outputTargetId) => {
-            localMix.persist(trackId, { outputTargetId: outputTargetId ?? null });
-            updateTrackOutputTargetId(trackId, outputTargetId);
-          },
+          onTrackSendsChange: updateTrackSends,
+          onTrackOutputTargetChange: updateTrackOutputTargetId,
           onVolumePreview: (trackId, volume, muted) => {
             audioEngine.previewTrackVolume(trackId, volume, muted);
           },

@@ -15,6 +15,10 @@ function isProjectOwnership(ownership: RoomOwnership) {
   return !ownership.trackId && !ownership.clipId;
 }
 
+function isProjectDeletionPending(project: ProjectRecord) {
+  return project.deletionPendingAt !== undefined;
+}
+
 async function listProjectsByUser(
   ctx: ProjectAccessCtx,
   projectId: string,
@@ -63,30 +67,32 @@ export async function listAccessibleProjects(
       .collect(),
   ]);
 
-  const nameByProjectId = buildProjectNameByRoom(projects);
+  const activeProjects = projects.filter((project) => !isProjectDeletionPending(project));
+  const nameByProjectId = buildProjectNameByRoom(activeProjects);
   const projectIds = new Set<string>();
 
-  for (const project of projects) {
+  for (const project of activeProjects) {
     projectIds.add(project.projectId);
   }
-  for (const ownership of ownerships) {
-    if (!isProjectOwnership(ownership)) continue;
-    projectIds.add(ownership.projectId);
-  }
-
-  const missingProjectIds = Array.from(projectIds).filter((projectId) => !nameByProjectId.has(projectId));
-  if (missingProjectIds.length > 0) {
-    const missingNames = await Promise.all(
-      missingProjectIds.map(async (projectId) => {
+  const ownershipProjectIds = Array.from(new Set(
+    ownerships.flatMap((ownership) => isProjectOwnership(ownership) ? [ownership.projectId] : []),
+  ));
+  if (ownershipProjectIds.length > 0) {
+    const ownershipRooms = await Promise.all(
+      ownershipProjectIds.map(async (projectId) => {
         const roomProjects = await ctx.db
           .query("projects")
           .withIndex("by_room", (q) => q.eq("projectId", projectId))
           .collect();
-        return [projectId, pickProjectName(roomProjects)] as const;
+        return [projectId, roomProjects] as const;
       }),
     );
-    for (const [projectId, name] of missingNames) {
-      nameByProjectId.set(projectId, name);
+    for (const [projectId, roomProjects] of ownershipRooms) {
+      if (roomProjects.some(isProjectDeletionPending)) continue;
+      projectIds.add(projectId);
+      if (!nameByProjectId.has(projectId)) {
+        nameByProjectId.set(projectId, pickProjectName(roomProjects));
+      }
     }
   }
 
@@ -109,6 +115,26 @@ export async function hasProjectAccess(
 export type ProjectRole = "owner" | "editor" | "viewer";
 
 export async function getProjectRole(
+  ctx: ProjectAccessCtx,
+  projectId: string,
+  userId: string,
+): Promise<ProjectRole | null> {
+  if (await isRoomDeletionPending(ctx, projectId)) return null;
+  return getProjectRoleIncludingPending(ctx, projectId, userId);
+}
+
+async function isRoomDeletionPending(
+  ctx: ProjectAccessCtx,
+  projectId: string,
+) {
+  const project = await ctx.db
+    .query("projects")
+    .withIndex("by_room", (q) => q.eq("projectId", projectId))
+    .first();
+  return project ? isProjectDeletionPending(project) : false;
+}
+
+async function getProjectRoleIncludingPending(
   ctx: ProjectAccessCtx,
   projectId: string,
   userId: string,
@@ -149,6 +175,13 @@ export const roleForUser = query({
   args: { projectId: v.string(), userId: v.string() },
   handler: async (ctx, { projectId, userId }) => {
     return getProjectRole(ctx, projectId, userId);
+  },
+});
+
+export const roleForUserIncludingPending = query({
+  args: { projectId: v.string(), userId: v.string() },
+  handler: async (ctx, { projectId, userId }) => {
+    return getProjectRoleIncludingPending(ctx, projectId, userId);
   },
 });
 

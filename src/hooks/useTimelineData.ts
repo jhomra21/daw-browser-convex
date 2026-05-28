@@ -12,6 +12,7 @@ import {
   markLocalProjectOpened,
   renameLocalProject,
 } from '~/lib/local-project-db'
+import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writes'
 import { subscribeToLocalProjectChanges } from '~/lib/local-project-changes'
 import { useSessionQuery } from '~/lib/session'
 
@@ -164,16 +165,6 @@ export function useTimelineData(): UseTimelineDataReturn {
         resolveRoom(nextProjectId)
         return
       }
-      const currentProjectId = projectId()
-      if (currentProjectId) {
-        replaceRoom(currentProjectId)
-        return
-      }
-      const fallbackProjectId = crypto.randomUUID()
-      resolveRoom(fallbackProjectId, {
-        history: 'replace',
-        bootstrap: fallbackProjectId,
-      })
     }
 
     const initialProjectId = readProjectIdFromLocation()
@@ -209,8 +200,8 @@ export function useTimelineData(): UseTimelineDataReturn {
   const projectsLoaded = createMemo(() => myProjects.status === 'success')
   const projects = createMemo<TimelineProject[]>(() => {
     const byId = new Map<string, TimelineProject>()
-    for (const project of localProjects()) byId.set(project.projectId, project)
     for (const project of normalizeProjects(myProjects.data)) byId.set(project.projectId, project)
+    for (const project of localProjects()) byId.set(project.projectId, project)
     return [...byId.values()]
   })
   const hasLocalProject = (rid: string) => localProjects().some((project) => project.projectId === rid)
@@ -220,7 +211,7 @@ export function useTimelineData(): UseTimelineDataReturn {
     () => {
       const rid = projectId()
       const uid = userId()
-      if (!rid || (isLocalId('project', rid) && hasLocalProject(rid)) || !uid || bootstrapProjectId() === rid || acceptingShareToken()) return null
+      if (!rid || isLocalId('project', rid) || !uid || bootstrapProjectId() === rid || acceptingShareToken()) return null
       return { projectId: rid, userId: uid }
     },
     () => {
@@ -321,18 +312,35 @@ export function useTimelineData(): UseTimelineDataReturn {
     window.alert(getProjectDeleteConflictMessage(conflicts.map((conflict) => conflict.reason)))
   }
 
-  const deleteOwnedRoom = async (targetProjectId: string, ownerUserId: string): Promise<DeleteOwnedRoomResult> => {
+  const isDeleteConflictResult = (value: unknown): value is Extract<DeleteOwnedRoomResult, { status: 'conflict' }> => {
+    if (!value || typeof value !== 'object') return false
+    if (!('status' in value) || value.status !== 'conflict') return false
+    if (!('conflictTrackIds' in value) || !Array.isArray(value.conflictTrackIds)) return false
+    return 'conflicts' in value && Array.isArray(value.conflicts)
+  }
+
+  const readCloudDeleteResult = (payload: unknown) => {
+    if (!payload || typeof payload !== 'object') return null
+    if ('result' in payload) return payload.result
+    return payload
+  }
+
+  const deleteOwnedRoom = async (
+    targetProjectId: string,
+    options?: { showAlertOnError?: boolean },
+  ): Promise<DeleteOwnedRoomResult> => {
     try {
-      const result = await convexClient.mutation(convexApi.projects.deleteOwnedInRoom, {
-        projectId: targetProjectId,
-        userId: ownerUserId,
-      })
-      if (result?.status === 'conflict') {
+      const response = await fetch(`/api/cloud-projects/${encodeURIComponent(targetProjectId)}`, { method: 'DELETE' })
+      const result = readCloudDeleteResult(await response.json().catch(() => null))
+      if (response.status === 409 && isDeleteConflictResult(result)) {
         return result
       }
+      if (!response.ok) throw new Error('Project delete failed.')
       return { status: 'deleted' as const }
     } catch {
-      window.alert('This project could not be deleted.')
+      if (options?.showAlertOnError !== false) {
+        window.alert('This project could not be deleted.')
+      }
       return { status: 'error' as const }
     }
   }
@@ -341,18 +349,28 @@ export function useTimelineData(): UseTimelineDataReturn {
     targetProjectId: string,
     ownerUserId: string,
   ): Promise<DeleteCurrentOwnedRoomResult> => {
-    try {
-      const result = await convexClient.mutation(convexApi.projects.deleteCurrentOwnedInRoom, {
-        projectId: targetProjectId,
-        userId: ownerUserId,
-      })
-      if (result?.status === 'conflict') {
-        return result
+    const existingDestination = projects().find((project) => project.projectId !== targetProjectId)?.projectId
+    const destinationProjectId = existingDestination ?? crypto.randomUUID()
+    let createdDestination = false
+    if (!existingDestination) {
+      const created = await createOwnedRoom(destinationProjectId, ownerUserId, { showAlertOnError: true })
+      if (created.status !== 'created') {
+        return { status: 'error' as const }
+      }
+      createdDestination = true
+    }
+
+    const result = await deleteOwnedRoom(targetProjectId)
+    if (result.status !== 'deleted') {
+      if (createdDestination) {
+        await deleteOwnedRoom(destinationProjectId, { showAlertOnError: false })
       }
       return result
-    } catch {
-      window.alert('This project could not be deleted.')
-      return { status: 'error' as const }
+    }
+
+    return {
+      status: 'deleted' as const,
+      destinationProjectId,
     }
   }
 
@@ -402,8 +420,9 @@ export function useTimelineData(): UseTimelineDataReturn {
   }
 
   const deleteProject = async (targetProjectId: string) => {
-    if (isLocalId('project', targetProjectId)) {
+    if (isLocalId('project', targetProjectId) && hasLocalProject(targetProjectId)) {
       try {
+        await flushLocalProjectPendingWrites(targetProjectId)
         await deleteLocalProject(targetProjectId)
         await loadLocalProjects()
         if (targetProjectId === projectId()) {
@@ -421,7 +440,7 @@ export function useTimelineData(): UseTimelineDataReturn {
     if (!ownerUserId) return
 
     if (targetProjectId !== projectId()) {
-      const result = await deleteOwnedRoom(targetProjectId, ownerUserId)
+      const result = await deleteOwnedRoom(targetProjectId)
       if (result.status === 'conflict') {
         showProjectDeleteConflict(result)
       }

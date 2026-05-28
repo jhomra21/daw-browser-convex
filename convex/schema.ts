@@ -81,6 +81,7 @@ export default defineSchema({
     ownerUserId: v.string(),
     name: v.string(),
     createdAt: v.number(),
+    deletionPendingAt: v.optional(v.number()),
   })
     .index("by_owner", ["ownerUserId"])
     .index("by_room", ["projectId"])

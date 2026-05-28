@@ -43,6 +43,11 @@ type LocalAssetBytesResult =
 
 const ASSETS_DIRECTORY_NAME = 'assets'
 
+const isPermissionError = (error: unknown) => (
+  error instanceof DOMException
+  && (error.name === 'NotAllowedError' || error.name === 'SecurityError')
+)
+
 const now = () => Date.now()
 
 const getAssetFileName = (assetId: string, fileName: string) => {
@@ -199,16 +204,19 @@ export const readLocalAssetBytes = async (
 
   const directoryHandle = await getProjectDirectoryHandle(projectId)
   const root = directoryHandle ?? await getProjectOpfsRoot(projectId)
-  if (directoryHandle) {
-    const permission = await queryFileSystemHandlePermission(directoryHandle, 'read')
-    if (permission !== 'granted') return { status: 'permission-denied' }
-  }
 
   try {
+    if (directoryHandle) {
+      const permission = await queryFileSystemHandlePermission(directoryHandle, 'read')
+      const readable = permission === 'granted'
+        || await requestFileSystemHandlePermission(directoryHandle, 'read') === 'granted'
+      if (!readable) return { status: 'permission-denied' }
+    }
     const assetsDir = await root.getDirectoryHandle(ASSETS_DIRECTORY_NAME)
     const fileHandle = await assetsDir.getFileHandle(row.storagePath)
     return { status: 'ready', file: await fileHandle.getFile() }
-  } catch {
+  } catch (error) {
+    if (isPermissionError(error)) return { status: 'permission-denied' }
     return { status: 'missing' }
   }
 }

@@ -25,10 +25,12 @@ type ProjectsMenuProps = {
 
 export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
   const menu = () => props.menu;
+  const currentProject = () =>
+    props.projects.find((project) => project.projectId === props.currentProjectId);
   const isCurrentProjectLocal = () =>
     isLocalId("project", props.currentProjectId);
   const canShareCurrentProject = () =>
-    !isCurrentProjectLocal();
+    !isCurrentProjectLocal() || currentProject()?.mode === "backup" || currentProject()?.mode === "shared";
   const currentSaveLabel = () =>
     isCurrentProjectLocal()
       ? "Saved locally on this device"
@@ -104,7 +106,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                 class="justify-center"
                 disabled={!canShareCurrentProject() || !props.currentUserId || !props.onShare}
                 onClick={() => void onShare()}
-                title={!canShareCurrentProject() ? "Shared project promotion is required before sharing" : undefined}
+                title={!canShareCurrentProject() ? "Back up this project before sharing" : undefined}
               >
                 Share
               </Button>

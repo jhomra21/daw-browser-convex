@@ -20,6 +20,8 @@ import type {
 const TRACK_KIND = 'track'
 const CLIP_KIND = 'clip'
 const writeQueue = createLocalWriteQueue()
+const pendingLocalTimelineFlushers = new Map<string, Set<() => Promise<void>>>()
+const pendingRepositoryWritesByProject = new Map<string, Set<Promise<unknown>>>()
 let lifecycleFlushAttached = false
 
 const now = () => Date.now()
@@ -85,7 +87,7 @@ const attachLifecycleFlush = () => {
   if (lifecycleFlushAttached || typeof window === 'undefined') return
   lifecycleFlushAttached = true
   const flush = () => {
-    void writeQueue.flush()
+    void flushLocalTimelineWrites()
   }
   window.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') flush()
@@ -94,7 +96,42 @@ const attachLifecycleFlush = () => {
   window.addEventListener('beforeunload', flush)
 }
 
-export const flushLocalTimelineWrites = () => writeQueue.flush()
+export const registerPendingLocalTimelineFlusher = (projectId: string, flush: () => Promise<void>): (() => void) => {
+  const projectFlushers = pendingLocalTimelineFlushers.get(projectId) ?? new Set<() => Promise<void>>()
+  projectFlushers.add(flush)
+  pendingLocalTimelineFlushers.set(projectId, projectFlushers)
+  return () => {
+    projectFlushers.delete(flush)
+    if (projectFlushers.size === 0) pendingLocalTimelineFlushers.delete(projectId)
+  }
+}
+
+export const flushLocalTimelineWrites = async (projectId?: string) => {
+  const flushers = projectId
+    ? Array.from(pendingLocalTimelineFlushers.get(projectId) ?? [])
+    : Array.from(pendingLocalTimelineFlushers.values()).flatMap((projectFlushers) => Array.from(projectFlushers))
+  await Promise.all(flushers.map((flush) => flush()))
+  for (;;) {
+    const writes = projectId
+      ? Array.from(pendingRepositoryWritesByProject.get(projectId) ?? [])
+      : Array.from(pendingRepositoryWritesByProject.values()).flatMap((projectWrites) => Array.from(projectWrites))
+    if (writes.length === 0) break
+    await Promise.all(writes)
+  }
+  await writeQueue.flush()
+}
+
+const trackRepositoryWrite = <T>(projectId: string, write: Promise<T>): Promise<T> => {
+  const tracked = write.finally(() => {
+    const writes = pendingRepositoryWritesByProject.get(projectId)
+    writes?.delete(tracked)
+    if (writes?.size === 0) pendingRepositoryWritesByProject.delete(projectId)
+  })
+  const writes = pendingRepositoryWritesByProject.get(projectId) ?? new Set<Promise<unknown>>()
+  writes.add(tracked)
+  pendingRepositoryWritesByProject.set(projectId, writes)
+  return tracked
+}
 
 export const createLocalTimelineRepository = (projectId: string): TimelineRepository => {
   attachLifecycleFlush()
@@ -349,13 +386,13 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
 
   return {
     loadSnapshot,
-    createTrack,
-    updateTrack,
-    createClip,
-    updateClip,
-    moveClips,
-    deleteTrack,
-    deleteClip,
-    deleteClips,
+    createTrack: (input) => trackRepositoryWrite(projectId, createTrack(input)),
+    updateTrack: (input) => trackRepositoryWrite(projectId, updateTrack(input)),
+    createClip: (input) => trackRepositoryWrite(projectId, createClip(input)),
+    updateClip: (input) => trackRepositoryWrite(projectId, updateClip(input)),
+    moveClips: (moves) => trackRepositoryWrite(projectId, moveClips(moves)),
+    deleteTrack: (trackId) => trackRepositoryWrite(projectId, deleteTrack(trackId)),
+    deleteClip: (clipId) => trackRepositoryWrite(projectId, deleteClip(clipId)),
+    deleteClips: (clipIds) => trackRepositoryWrite(projectId, deleteClips(clipIds)),
   }
 }

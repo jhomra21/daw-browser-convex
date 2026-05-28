@@ -58,11 +58,14 @@ export const saveCloudIdMapping = async (
     updatedAt: now(),
   }
   const tx = db.transaction('syncState', 'readwrite')
-  await Promise.all([
+  const writes: Promise<unknown>[] = [
     tx.store.put({ key: keyFor(kind, localId), value: mapping, updatedAt: mapping.updatedAt }),
     tx.store.put({ key: indexKeyFor(kind, cloudId), value: localId, updatedAt: mapping.updatedAt }),
-    tx.done,
-  ])
+  ]
+  if (isMapping(existingMappingRow?.value) && existingMappingRow.value.cloudId !== cloudId) {
+    writes.push(tx.store.delete(indexKeyFor(kind, existingMappingRow.value.cloudId)))
+  }
+  await Promise.all([...writes, tx.done])
   return mapping
 }
 

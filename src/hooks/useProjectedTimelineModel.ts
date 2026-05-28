@@ -10,6 +10,7 @@ import {
   type OptimisticGrantScope,
 } from '~/lib/optimistic-grant-scope'
 import type { PendingTrackEntry } from '~/lib/resolve-timeline-tracks'
+import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
 import type { Track, TrackRouting, TrackSend } from '~/types/timeline'
 
 type ProjectedTimelineRouting = TrackRouting & { sends: TrackSend[] }
@@ -21,6 +22,7 @@ type UseProjectedTimelineModelOptions = {
   projectId: Accessor<string>
   userId: Accessor<string>
   fullViewData: Accessor<FunctionReturnType<typeof convexApi.timeline.fullView> | undefined>
+  localSnapshot: Accessor<TimelineSnapshot | null>
   pendingTrackEntriesById: Accessor<Map<Track['id'], PendingTrackEntry>>
   pendingClipCreatesById: Accessor<Map<string, PendingClipCreate>>
   removedTrackIds: Accessor<Set<Track['id']>>
@@ -138,6 +140,16 @@ export function useProjectedTimelineModel(
         }
       }
     }
+    if (isLocalId('project', options.projectId())) {
+      const localSnapshot = options.localSnapshot()
+      if (localSnapshot) {
+        for (const track of localSnapshot.tracks) {
+          if (!options.removedTrackIds().has(track.id)) {
+            trackIds.add(track.id)
+          }
+        }
+      }
+    }
     for (const [trackId] of options.pendingTrackEntriesById()) {
       trackIds.add(trackId)
     }
@@ -152,6 +164,16 @@ export function useProjectedTimelineModel(
         const clipId = String(clip._id)
         if (!options.removedClipIds().has(clipId)) {
           clipIds.add(clipId)
+        }
+      }
+    }
+    if (isLocalId('project', options.projectId())) {
+      const localSnapshot = options.localSnapshot()
+      if (localSnapshot) {
+        for (const clip of localSnapshot.clips) {
+          if (!options.removedClipIds().has(clip.id)) {
+            clipIds.add(clip.id)
+          }
         }
       }
     }

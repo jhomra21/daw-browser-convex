@@ -39,7 +39,7 @@ export type TimelinePanelsProps = {
     insertLocalClip: (trackId: Track['id'], clip: Clip) => void
     onClose: () => void
     onOpen: () => void
-    onEffectParamsCommitted: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>) => void
+    onEffectParamsCommitted: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void
     onLocalSaveFailed?: (message: string) => void
   }
   exportDialog: {

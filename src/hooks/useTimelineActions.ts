@@ -132,7 +132,6 @@ export function useTimelineActions(
     const projectId = ensureRoomShareLink(options.room.projectId(), options.room.setProjectId)
     const userId = options.room.userId()
     if (!projectId || !userId) return undefined
-    if (isLocalId('project', projectId)) return undefined
     const response = await fetch('/api/share-invites', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

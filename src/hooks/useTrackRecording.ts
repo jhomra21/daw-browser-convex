@@ -22,7 +22,6 @@ import {
 import {
   ensureTrackForRecording,
   finalizeAutoCreatedTrackFailure,
-  commitAutoCreatedTrack,
 } from '~/lib/track-recording-target'
 import { canTrackReceiveAudioClip } from '~/lib/track-routing'
 import { calcNonOverlapStart, willOverlap } from '~/lib/timeline-utils'
@@ -209,10 +208,11 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     track: Track | null,
     context?: { projectId: string; userId: string | undefined; tracks: Track[] },
   ) => {
+    const targetProjectId = context?.projectId ?? projectId()
     await finalizeAutoCreatedTrackFailure({
       track,
-      tracks: context?.tracks ?? tracks(),
-      projectId: context?.projectId ?? projectId(),
+      tracks: targetProjectId === projectId() ? tracks() : context?.tracks ?? tracks(),
+      projectId: targetProjectId,
       userId: context?.userId ?? userId(),
       historyPush,
       convexClient,
@@ -223,19 +223,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     })
   }
 
-  const commitCreatedTrack = (
-    track: Track | null,
-    context?: { projectId: string; tracks: Track[] },
-  ) => {
-    commitAutoCreatedTrack({
-      historyPush,
-      projectId: context?.projectId ?? projectId(),
-      tracks: context?.tracks ?? tracks(),
-      track,
-    })
-  }
-
-  const pushLocalTrackClipCreateHistory = (projectId: string, track: Track, clipId: string, clip: ClipCreateSnapshot) => {
+  const pushTrackClipCreateHistory = (projectId: string, track: Track, clipId: string, clip: ClipCreateSnapshot) => {
     if (typeof historyPush !== 'function') return
     const index = tracks().findIndex((entry) => entry.id === track.id)
     historyPush({
@@ -298,8 +286,8 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       return
     }
 
-    const existingTracks = ctx.tracks
-    const targetTrack = ctx.targetTrack
+    const existingTracks = tracks()
+    const targetTrack = existingTracks.find((entry) => entry.id === ctx.trackId)
     if (!targetTrack) {
       emit('Recording target track missing; clip skipped.')
       await cleanupRecording()
@@ -351,7 +339,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         })
         await cleanupRecording()
         if (ctx.createdTrack && projectId() === rid && tracks().some((entry) => entry.id === ctx.trackId)) {
-          pushLocalTrackClipCreateHistory(rid, ctx.createdTrack, created.clipId, created.clip)
+          pushTrackClipCreateHistory(rid, ctx.createdTrack, created.clipId, created.clip)
         }
       } catch (err) {
         if (assetId) {
@@ -393,10 +381,11 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         canProject: () => projectId() === rid && tracks().some((entry) => entry.id === ctx.trackId),
       })
       await cleanupRecording()
-      if (ctx.createdTrack) {
-        commitCreatedTrack(ctx.createdTrack, ctx)
-      }
       if (projectId() !== rid || !tracks().some((entry) => entry.id === ctx.trackId)) return
+      if (ctx.createdTrack) {
+        pushTrackClipCreateHistory(rid, ctx.createdTrack, createdClip.clipId, createdClip.clip)
+        return
+      }
       pushClipCreateHistory({
         historyPush,
         projectId: rid,
@@ -557,7 +546,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       userId: uid,
       isLocalProject,
       trackId,
-      targetTrack: track,
       tracks: tracks(),
       createdTrack,
       startSec,

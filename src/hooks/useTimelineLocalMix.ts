@@ -7,7 +7,7 @@ import {
   loadLocalRoutingMap,
   saveLocalMixMap,
   saveLocalRoutingMap,
-  stripSharedTrackBooleanOverrides,
+  stripSharedTrackLocalOverrides,
   type LocalMixMap,
   type LocalMixPatch,
 } from '~/lib/timeline-storage'
@@ -119,7 +119,7 @@ export function useTimelineLocalMix(
   })
 
   createEffect(on(options.writableTrackIds, (writableTrackIds) => {
-    persistedState.setValue((current) => stripSharedTrackBooleanOverrides(current, writableTrackIds))
+    persistedState.setValue((current) => stripSharedTrackLocalOverrides(current, writableTrackIds))
   }))
 
   return {

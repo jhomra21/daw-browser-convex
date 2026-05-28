@@ -51,7 +51,7 @@ type EffectsPanelContext = {
   grantClipWrite?: OptimisticGrantWrite;
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
-  onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>) => void;
+  onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
   onLocalSaveFailed?: (message: string) => void;
 };
 
@@ -190,6 +190,7 @@ export function createEffectsPanelState(
     targetId: Track["id"],
     previous: EffectParamsByEffect["arp"] | undefined,
     next: EffectParamsByEffect["arp"],
+    projectId?: string,
   ): void {
     if (previous === undefined) return;
     context.onEffectParamsCommitted?.({
@@ -197,13 +198,14 @@ export function createEffectsPanelState(
       effect: "arp",
       from: previous,
       to: next,
-    });
+    }, projectId);
   }
 
   function commitSynthChange(
     targetId: Track["id"],
     previous: EffectParamsByEffect["synth"] | undefined,
     next: EffectParamsByEffect["synth"],
+    projectId?: string,
   ): void {
     if (previous === undefined) return;
     context.onEffectParamsCommitted?.({
@@ -211,7 +213,7 @@ export function createEffectsPanelState(
       effect: "synth",
       from: previous,
       to: next,
-    });
+    }, projectId);
   }
 
   const synthDefaultsByTarget = new Map<string, SynthParams>();
@@ -258,10 +260,10 @@ export function createEffectsPanelState(
       if (!isLocalProject()) return;
       context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
     },
-    onParamsCommitted: (targetId, previous, next) => {
+    onParamsCommitted: (targetId, previous, next, persistContext) => {
       const track = getTrackByTargetId(targetId);
       if (!track) return;
-      commitArpChange(track.id, previous, next);
+      commitArpChange(track.id, previous, next, persistContext.projectId);
     },
   });
 
@@ -295,10 +297,10 @@ export function createEffectsPanelState(
       if (!isLocalProject()) return;
       context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
     },
-    onParamsCommitted: (targetId, previous, next) => {
+    onParamsCommitted: (targetId, previous, next, persistContext) => {
       const track = getTrackByTargetId(targetId);
       if (!track) return;
-      commitSynthChange(track.id, previous, next);
+      commitSynthChange(track.id, previous, next, persistContext.projectId);
     },
   });
 

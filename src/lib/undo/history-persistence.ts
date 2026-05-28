@@ -1,12 +1,16 @@
-import { buildClipMoveMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
+import { buildClipCreatePayload, buildLocalClip, type ClipCreateSnapshot } from "~/lib/clip-create";
+import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipTiming } from "~/lib/clip-mutations";
+import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
+import { setLocalEffect } from "~/lib/local-effects";
 import { isLocalId } from "~/lib/local-ids";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
-import { buildTrackDeleteMutationInput, buildTrackMixMutationInput, buildTrackVolumeMutationInput } from "~/lib/track-mutation-args";
+import { buildTrackCreateMutationInput, buildTrackDeleteMutationInput, buildTrackMixMutationInput, buildTrackVolumeMutationInput } from "~/lib/track-mutation-args";
 import { buildTrackRoutingMutationInput } from "~/lib/track-routing-state";
 import type { LocalMixPatch } from "~/lib/timeline-storage";
 import type { Track, TrackRouting } from "~/types/timeline";
 import type { Deps } from "./exec";
+import type { HistoryEntry } from "./types";
 
 type ClipMove = { clipId: string; trackId: Track["id"]; startSec: number };
 
@@ -21,6 +25,133 @@ type ClipTimingPatch = {
 export const isLocalHistoryProject = (deps: Pick<Deps, "projectId">) => (
   isLocalId("project", deps.projectId)
 );
+
+const toHistoryCreateClipInput = (trackId: Track["id"], clip: Track["clips"][number]) => ({
+  id: clip.id,
+  historyRef: clip.historyRef,
+  trackId,
+  name: clip.name,
+  startSec: clip.startSec,
+  duration: clip.duration,
+  color: clip.color,
+  sourceAssetKey: clip.sourceAssetKey,
+  sourceKind: clip.sourceKind,
+  sourceDurationSec: clip.sourceDurationSec,
+  sourceSampleRate: clip.sourceSampleRate,
+  sourceChannelCount: clip.sourceChannelCount,
+  leftPadSec: clip.leftPadSec,
+  bufferOffsetSec: clip.bufferOffsetSec,
+  sampleUrl: clip.sampleUrl,
+  midi: clip.midi,
+  midiOffsetBeats: clip.midiOffsetBeats,
+});
+
+export const syncHistoryTrackCreateEntryId = (
+  entries: HistoryEntry[],
+  trackRef: string | undefined,
+  trackId: Track["id"],
+) => {
+  if (!trackRef) return;
+  for (const entry of entries) {
+    if (entry.type === "track-create" && entry.data.trackRef === trackRef) {
+      entry.data.currentTrackId = trackId;
+    }
+  }
+};
+
+export const syncHistoryClipCreateEntryIds = (
+  entries: HistoryEntry[],
+  clipIdsByRef: ReadonlyMap<string, string>,
+) => {
+  if (clipIdsByRef.size === 0) return;
+  for (const entry of entries) {
+    if (entry.type !== "clip-create") continue;
+    const clipId = clipIdsByRef.get(entry.data.clip.clipRef);
+    if (clipId) {
+      entry.data.clip.currentId = clipId;
+    }
+  }
+};
+
+export const createHistoryTrack = async (
+  deps: Deps,
+  track: {
+    trackRef?: string;
+    index: number;
+    name?: string;
+    volume?: number;
+    muted?: boolean;
+    soloed?: boolean;
+    kind?: Track["kind"];
+    channelRole?: Track["channelRole"];
+    sends?: TrackRouting["sends"];
+  },
+) => {
+  if (isLocalHistoryProject(deps)) {
+    const row = await createLocalTimelineRepository(deps.projectId).createTrack({
+      id: track.trackRef,
+      historyRef: track.trackRef,
+      name: track.name,
+      index: track.index,
+      volume: track.volume,
+      muted: track.muted,
+      soloed: track.soloed,
+      kind: track.kind,
+      channelRole: track.channelRole,
+      sends: track.sends,
+    });
+    return row.id;
+  }
+  return await deps.convexClient.mutation(
+    deps.convexApi.tracks.create,
+    buildTrackCreateMutationInput({
+      projectId: deps.projectId,
+      userId: deps.userId,
+      index: track.index,
+      kind: track.kind,
+      channelRole: track.channelRole,
+    }),
+  );
+};
+
+export const createHistoryClip = async (
+  deps: Deps,
+  trackId: Track["id"],
+  clip: ClipCreateSnapshot & { clipRef?: string; currentId?: string },
+) => {
+  if (isLocalHistoryProject(deps)) {
+    const clipRef = clip.clipRef ?? clip.currentId;
+    if (!clipRef) throw new Error("Missing clip reference for local history clip creation");
+    return (await createLocalTimelineRepository(deps.projectId).createClip(
+      toHistoryCreateClipInput(trackId, buildLocalClip({ id: clipRef, clip })),
+    )).id;
+  }
+  return await deps.convexClient.mutation(
+    deps.convexApi.clips.create,
+    buildClipCreatePayload({ projectId: deps.projectId, userId: deps.userId, trackId, clip }),
+  );
+};
+
+type TrackDeleteEffects = NonNullable<Extract<HistoryEntry, { type: "track-delete" }>["data"]["effects"]>;
+
+export const persistHistoryTrackEffects = async (
+  deps: Deps,
+  trackId: Track["id"],
+  effects: TrackDeleteEffects | undefined,
+) => {
+  if (!effects) return;
+  if (isLocalHistoryProject(deps)) {
+    if (effects.eq) await setLocalEffect(deps.projectId, trackId, "eq", effects.eq);
+    if (effects.reverb) await setLocalEffect(deps.projectId, trackId, "reverb", effects.reverb);
+    if (effects.synth) await setLocalEffect(deps.projectId, trackId, "synth", effects.synth);
+    if (effects.arp) await setLocalEffect(deps.projectId, trackId, "arp", effects.arp);
+    return;
+  }
+  if (effects.eq) await deps.convexClient.mutation(deps.convexApi.effects.setEqParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params: effects.eq }));
+  if (effects.reverb) await deps.convexClient.mutation(deps.convexApi.effects.setReverbParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params: effects.reverb }));
+  if (effects.synth) await deps.convexClient.mutation(deps.convexApi.effects.setSynthParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params: effects.synth }));
+  if (effects.arp) await deps.convexClient.mutation(deps.convexApi.effects.setArpeggiatorParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params: effects.arp }));
+};
 
 export const removeHistoryClipIdsOrThrow = async (deps: Deps, clipIds: string[], message: string) => {
   if (clipIds.length === 0) return;
@@ -95,18 +226,18 @@ export const persistHistoryClipMovesOrThrow = async (
     await createLocalTimelineRepository(deps.projectId).moveClips(moves);
     return;
   }
-  for (const move of moves) {
-    const result = await deps.convexClient.mutation(
-      deps.convexApi.clips.move,
-      buildClipMoveMutationInput({
+  const result = await deps.convexClient.mutation(
+    deps.convexApi.clips.moveMany,
+    buildClipMoveManyMutationInput({
+      moves: moves.map((move) => ({
         clipId: move.clipId,
-        userId: deps.userId,
         startSec: move.startSec,
         toTrackId: move.trackId,
-      }),
-    );
-    if (result?.status !== "applied") throw new Error(message);
-  }
+      })),
+      userId: deps.userId,
+    }),
+  );
+  if (result?.status !== "applied") throw new Error(message);
 };
 
 export const persistHistoryTrackRouting = async (deps: Deps, trackId: Track["id"], routing: TrackRouting) => {

@@ -19,6 +19,7 @@ import { useProjectPersistedState } from './useProjectPersistedState'
 
 type UseTimelinePreferencesOptions = {
   projectId: Accessor<string>
+  onLocalSaveFailed?: (message: string) => void
 }
 
 type UseTimelinePreferencesReturn = {
@@ -50,6 +51,9 @@ export function useTimelinePreferences(
   const saveLocalState = async <TValue,>(projectId: string, key: string, value: TValue) => {
     if (isLocalId('project', projectId)) await saveLocalProjectState(projectId, key, value)
   }
+  const onLocalSaveError = (error: unknown) => {
+    options.onLocalSaveFailed?.(error instanceof Error ? error.message : 'Local project settings could not be saved.')
+  }
 
   const syncMixState = useProjectPersistedState<boolean>({
     projectId: options.projectId,
@@ -60,6 +64,7 @@ export function useTimelinePreferences(
       if (!isLocalId('project', projectId)) saveMixSyncFlag(projectId, value)
     },
     saveAsync: (projectId, value) => saveLocalState(projectId, 'syncMix', value),
+    onSaveAsyncError: onLocalSaveError,
   })
 
   const bpmState = useProjectPersistedState<number>({
@@ -71,6 +76,7 @@ export function useTimelinePreferences(
       if (!isLocalId('project', projectId)) saveBpm(projectId, value)
     },
     saveAsync: (projectId, value) => saveLocalState(projectId, 'bpm', value),
+    onSaveAsyncError: onLocalSaveError,
   })
 
   const gridState = useProjectPersistedState<{ enabled: boolean; denominator: number }>({
@@ -82,6 +88,7 @@ export function useTimelinePreferences(
       if (!isLocalId('project', projectId)) saveGridSettings(projectId, value.enabled, value.denominator)
     },
     saveAsync: (projectId, value) => saveLocalState(projectId, 'grid', value),
+    onSaveAsyncError: onLocalSaveError,
   })
 
   const loopState = useProjectPersistedState<{ enabled: boolean; startSec: number; endSec: number }>({
@@ -93,6 +100,7 @@ export function useTimelinePreferences(
       if (!isLocalId('project', projectId)) saveLoopSettings(projectId, value)
     },
     saveAsync: (projectId, value) => saveLocalState(projectId, 'loop', value),
+    onSaveAsyncError: onLocalSaveError,
   })
 
   const syncMix = syncMixState.value

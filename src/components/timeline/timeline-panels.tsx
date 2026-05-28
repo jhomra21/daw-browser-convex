@@ -40,6 +40,7 @@ export type TimelinePanelsProps = {
     onClose: () => void
     onOpen: () => void
     onEffectParamsCommitted: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>) => void
+    onLocalSaveFailed?: (message: string) => void
   }
   exportDialog: {
     isOpen: boolean
@@ -139,6 +140,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
           onSelectClip={props.effectsPanel.onSelectClip}
           insertLocalClip={props.effectsPanel.insertLocalClip}
           onEffectParamsCommitted={props.effectsPanel.onEffectParamsCommitted}
+          onLocalSaveFailed={props.effectsPanel.onLocalSaveFailed}
         />
       </Suspense>
 

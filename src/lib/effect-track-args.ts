@@ -1,14 +1,6 @@
-import type { FunctionArgs } from 'convex/server'
-
+import { toCloudTrackId } from '~/lib/cloud-id-args'
 import { convexApi } from '~/lib/convex'
-import type { Id } from '../../convex/_generated/dataModel'
 import type { TrackId } from '~/types/timeline'
-
-type TrackEffectMutationInput =
-  | FunctionArgs<typeof convexApi.effects.setEqParams>
-  | FunctionArgs<typeof convexApi.effects.setReverbParams>
-  | FunctionArgs<typeof convexApi.effects.setSynthParams>
-  | FunctionArgs<typeof convexApi.effects.setArpeggiatorParams>
 
 export function buildTrackEffectQueryArgs(input: {
   projectId: string
@@ -18,18 +10,18 @@ export function buildTrackEffectQueryArgs(input: {
   return {
     projectId: input.projectId,
     userId: input.userId,
-    trackId: input.trackId as Id<'tracks'>,
+    trackId: toCloudTrackId(input.trackId),
   }
 }
 
-export function buildTrackEffectMutationInput(input: {
+export function buildTrackEffectMutationInput<TParams>(input: {
   projectId: string
   userId: string
   trackId: TrackId
-  params: unknown
-}): any {
+  params: TParams
+}) {
   return {
     ...input,
-    trackId: input.trackId as Id<'tracks'>,
+    trackId: toCloudTrackId(input.trackId),
   }
 }

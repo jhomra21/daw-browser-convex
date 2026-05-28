@@ -502,6 +502,33 @@ function readCurrentEntry(entry: Record<string, unknown>): HistoryEntry | null {
     }
   }
 
+  if (type === 'track-clip-create') {
+    const track = readRecord(data, 'track')
+    const clipRecord = readRecord(data, 'clip')
+    const trackRef = readString(track, 'trackRef')
+    const clipTrackRef = readString(clipRecord, 'trackRef')
+    const clip = readClipSnapshot(clipRecord)
+    if (!trackRef || !clipTrackRef || !clip) return null
+    return {
+      type,
+      projectId,
+      data: {
+        track: {
+          trackRef,
+          currentTrackId: readString(track, 'currentTrackId'),
+          index: readNumber(track, 'index') ?? 0,
+          kind: readTrackKind(track, 'kind'),
+          channelRole: readTrackChannelRole(track, 'channelRole'),
+        },
+        clip: {
+          ...clip,
+          trackRef: clipTrackRef,
+          currentId: readString(clipRecord, 'currentId'),
+        },
+      },
+    }
+  }
+
   if (type === 'track-delete') {
     const track = readRecord(data, 'track')
     const trackRef = readString(track, 'trackRef')

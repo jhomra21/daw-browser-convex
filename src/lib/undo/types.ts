@@ -163,6 +163,27 @@ export type HistoryEntry =
       data: { trackRef: TrackRef; currentTrackId?: string; index: number; kind?: 'audio' | 'instrument'; channelRole?: TrackChannelRole }
     }
   | {
+      type: 'track-clip-create'
+      projectId: string
+      data: {
+        track: { trackRef: TrackRef; currentTrackId?: string; index: number; kind?: 'audio' | 'instrument'; channelRole?: TrackChannelRole }
+        clip: {
+          trackRef: TrackRef
+          clipRef: ClipRef
+          currentId?: string
+          startSec: number
+          duration: number
+          name?: string
+          sampleUrl?: string
+          source?: AudioSourceMetadata
+          sourceAssetKey?: string
+          sourceKind?: AudioSourceKind
+          midi?: any
+          timing?: ClipOffsets
+        }
+      }
+    }
+  | {
     type: 'track-delete'
       projectId: string
       data: {

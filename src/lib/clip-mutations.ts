@@ -1,4 +1,5 @@
 import { normalizeClipTimingPatch } from '~/lib/clip-timing'
+import { toCloudClipId } from '~/lib/cloud-id-args'
 
 type ConvexClientType = typeof import('~/lib/convex').convexClient
 
@@ -21,7 +22,7 @@ export async function persistClipTiming(
 ) {
   const timing = normalizeClipTimingPatch(input)
   const result = await convexClient.mutation(convexApi.clips.setTiming, {
-    clipId: input.clipId as any,
+    clipId: toCloudClipId(input.clipId),
     userId,
     startSec: timing.startSec,
     duration: timing.duration,

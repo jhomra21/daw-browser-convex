@@ -167,18 +167,25 @@ export const setLocalProjectAssetDirectory = async (
   projectId: string,
   nextRoot: FileSystemDirectoryHandle,
 ): Promise<void> => {
+  const rows = await listLocalAssets(projectId)
   const previousRoot = await getWritableProjectRoot(projectId)
-  if (previousRoot) {
-    const rows = await listLocalAssets(projectId)
-    if (rows.length === 0) {
-      await saveProjectDirectoryHandle(projectId, nextRoot)
-      return
-    }
+  if (rows.length === 0) {
+    await saveProjectDirectoryHandle(projectId, nextRoot)
+    return
+  }
+  if (!previousRoot) {
+    throw new LocalAssetWriteError('permission-denied', 'Project storage permission is required before changing folders.')
+  }
+
+  try {
     const previousAssetsDir = await previousRoot.getDirectoryHandle(ASSETS_DIRECTORY_NAME)
     await Promise.all(rows.map(async (row) => {
       const previousFileHandle = await previousAssetsDir.getFileHandle(row.storagePath)
       await writeFile(nextRoot, row.storagePath, await previousFileHandle.getFile())
     }))
+  } catch (error) {
+    if (error instanceof LocalAssetWriteError) throw error
+    throw new LocalAssetWriteError('write-failed', 'Existing project audio could not be copied to the new folder.')
   }
   await saveProjectDirectoryHandle(projectId, nextRoot)
 }

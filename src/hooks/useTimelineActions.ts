@@ -2,7 +2,7 @@ import type { Accessor } from 'solid-js'
 
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { isLocalId } from '~/lib/local-ids'
-import { ensureRoomShareLink } from '~/lib/timeline-share'
+import { ensureRoomShareLink, getInviteShareUrl } from '~/lib/timeline-share'
 import { PPS } from '~/lib/timeline-utils'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
@@ -38,13 +38,6 @@ type UseTimelineActionsOptions = {
     convexClient: typeof import('~/lib/convex').convexClient
     convexApi: typeof import('~/lib/convex').convexApi
   }
-  transport: {
-    isRecording: Accessor<boolean>
-    handlePause: () => void
-    handleStop: () => void
-    stopRecording: () => Promise<void>
-    toggleRecording: () => Promise<unknown>
-  }
   navigation: {
     renderTracks: Accessor<Track[]>
     trackLookup: Accessor<TimelineTrackIndex>
@@ -58,10 +51,7 @@ type UseTimelineActionsOptions = {
 
 type UseTimelineActionsReturn = {
   createTimelineTrack: (options?: TimelineTrackCreateOptions, behavior?: TimelineTrackCreateBehavior) => Promise<Track | null>
-  handleTransportPause: () => void
-  handleTransportStop: () => void
-  handleRecordToggle: () => Promise<void>
-  handleShare: () => void
+  handleShare: () => Promise<string | undefined>
   jumpToClip: (trackId: Track['id'], clipId: string, startSec: number) => void
 }
 
@@ -83,6 +73,10 @@ export function useTimelineActions(
         kind: trackOptions.kind,
         channelRole,
       })
+      if (options.room.projectId() !== projectId) {
+        await createLocalTimelineRepository(projectId).deleteTrack(row.id)
+        return null
+      }
       const track = toLocalTimelineTrack(row)
       options.creation.insertLocalTrack(track, index)
       options.creation.grantTrackWrite(track.id, { projectId, userId: options.room.userId() })
@@ -134,26 +128,19 @@ export function useTimelineActions(
     return track
   }
 
-  function handleTransportPause(): void {
-    if (options.transport.isRecording()) {
-      void options.transport.stopRecording()
-    }
-    options.transport.handlePause()
-  }
-
-  function handleTransportStop(): void {
-    if (options.transport.isRecording()) {
-      void options.transport.stopRecording()
-    }
-    options.transport.handleStop()
-  }
-
-  async function handleRecordToggle(): Promise<void> {
-    await options.transport.toggleRecording()
-  }
-
-  function handleShare(): void {
-    ensureRoomShareLink(options.room.projectId(), options.room.setProjectId)
+  async function handleShare(): Promise<string | undefined> {
+    const projectId = ensureRoomShareLink(options.room.projectId(), options.room.setProjectId)
+    const userId = options.room.userId()
+    if (!projectId || !userId) return undefined
+    if (isLocalId('project', projectId)) return undefined
+    const response = await fetch('/api/share-invites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId, role: 'viewer' }),
+    })
+    if (!response.ok) throw new Error('Failed to create share invite.')
+    const result = await response.json()
+    return typeof result?.token === 'string' ? getInviteShareUrl(projectId, result.token) : undefined
   }
 
   function jumpToClip(trackId: Track['id'], clipId: string, startSec: number): void {
@@ -178,9 +165,6 @@ export function useTimelineActions(
 
   return {
     createTimelineTrack,
-    handleTransportPause,
-    handleTransportStop,
-    handleRecordToggle,
     handleShare,
     jumpToClip,
   }

@@ -3,11 +3,14 @@ import type { AudioEngine } from "~/lib/audio-engine";
 import { buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { convexApi, convexClient } from "~/lib/convex";
 import { isLocalId } from "~/lib/local-ids";
+import type { LocalProjectMode } from "~/lib/local-project-db";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import type { Clip, Track } from "~/types/timeline";
 import { useCloudSyncTick } from "./useCloudSyncTick";
 import { useLocalProjectActions } from "./useLocalProjectActions";
 import { useMissingMediaRecovery } from "./useLocalTimelineMediaRecovery";
+
+type LocalProjectActions = ReturnType<typeof useLocalProjectActions>;
 
 type ProjectionActions = {
   insertLocalClip: (trackId: Track["id"], clip: Clip) => void;
@@ -26,21 +29,18 @@ type SelectionActions = {
 
 type Input = {
   projectId: Accessor<string>;
+  localProjectMode: Accessor<LocalProjectMode | undefined>;
   userId: Accessor<string | undefined>;
-  navigateToRoom: (projectId: string) => void;
   renderTracks: Accessor<Track[]>;
   audioEngine: AudioEngine;
   audioBufferCache: Map<string, AudioBuffer>;
   clipMediaStatus: Map<string, Clip["mediaStatus"]>;
+  localProject: LocalProjectActions;
   projection: ProjectionActions;
   selection: SelectionActions;
 };
 
 export const useTimelinePersistenceController = (input: Input) => {
-  const localProject = useLocalProjectActions({
-    projectId: input.projectId,
-    navigateToRoom: input.navigateToRoom,
-  });
   const mediaRecovery = useMissingMediaRecovery({
     projectId: input.projectId,
     userId: input.userId,
@@ -67,9 +67,12 @@ export const useTimelinePersistenceController = (input: Input) => {
   });
   useCloudSyncTick({
     projectId: input.projectId,
-    enabled: () => Boolean(input.userId() && isLocalId("project", input.projectId())),
-    sync: () => localProject.backUpNow({ skipIfUnchanged: true }),
+    enabled: () => {
+      const mode = input.localProjectMode();
+      return Boolean(input.userId() && isLocalId("project", input.projectId()) && (mode === "backup" || mode === "shared"));
+    },
+    sync: () => input.localProject.backUpNow({ skipIfUnchanged: true }),
   });
 
-  return { localProject, mediaRecovery };
+  return { mediaRecovery };
 };

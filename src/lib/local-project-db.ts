@@ -229,6 +229,7 @@ export const setLocalProjectMode = async (
     lastOpenedAt: timestamp,
   }
   await db.put('projects', next)
+  notifyLocalProjectChanged(projectId)
   return next
 }
 

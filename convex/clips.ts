@@ -1,4 +1,5 @@
-import { mutation, query } from './_generated/server'
+import type { Id } from './_generated/dataModel'
+import { mutation, query, type MutationCtx, type QueryCtx } from './_generated/server'
 import { v } from 'convex/values'
 
 import { getClipOwnership, getClipWriteAccess } from './clipWrites'
@@ -36,7 +37,7 @@ const clipDeleteResult = v.object({
 
 type ClipCreateInput = {
   projectId: string
-  trackId: any
+  trackId: Id<'tracks'>
   startSec: number
   duration: number
   userId: string
@@ -63,26 +64,46 @@ type ClipCreateInput = {
   clipKind?: string
 }
 
+type ClipDbCtx = MutationCtx | QueryCtx
+
+type ClipCreatePatch = {
+  projectId: string
+  trackId: Id<'tracks'>
+  startSec: number
+  duration: number
+  name?: string
+  sampleUrl?: string
+  sourceAssetKey?: string
+  sourceKind?: AudioSourceKind
+  sourceDurationSec?: number
+  sourceSampleRate?: number
+  sourceChannelCount?: number
+  leftPadSec?: number
+  midi?: ClipCreateInput['midi']
+  bufferOffsetSec?: number
+  midiOffsetBeats?: number
+}
+
 const sanitizeClipKind = (value: string | undefined): ClipKind => {
   if (value === 'midi') return 'midi'
   return 'audio'
 }
 
 const getCompatibleMergedTrack = async (
-  ctx: any,
-  trackId: any,
+  ctx: ClipDbCtx,
+  trackId: Id<'tracks'>,
   projectId: string,
   clipKind: ClipKind,
 ) => {
   const track = await getMergedTrack(ctx, trackId)
   if (!track || track.projectId !== projectId) return null
-  if (!isClipKindCompatibleWithTrack(track as any, clipKind)) return null
+  if (!isClipKindCompatibleWithTrack(track, clipKind)) return null
   return track
 }
 
 const getWritableCompatibleMergedTrack = async (
-  ctx: any,
-  trackId: any,
+  ctx: ClipDbCtx,
+  trackId: Id<'tracks'>,
   userId: string,
   projectId: string,
   clipKind: ClipKind,
@@ -98,8 +119,8 @@ const isMergedTrackLockedByOther = (
 ) => !!track.lockedBy && track.lockedBy !== userId
 
 const isTrackLockedByOther = async (
-  ctx: any,
-  trackId: any,
+  ctx: ClipDbCtx,
+  trackId: Id<'tracks'>,
   userId: string,
 ) => {
   const track = await getMergedTrack(ctx, trackId)
@@ -111,7 +132,7 @@ const buildClipCreatePatch = (
   item: ClipCreateInput,
   metadata: AudioSourceMetadataInput,
 ) => {
-  const patch: Record<string, unknown> = {
+  const patch: ClipCreatePatch = {
     projectId: item.projectId,
     trackId: item.trackId,
     startSec: item.startSec,
@@ -129,7 +150,7 @@ const buildClipCreatePatch = (
 }
 
 const upsertSampleRowForClip = async (
-  ctx: any,
+  ctx: MutationCtx,
   clip: {
     projectId: string
     name?: string
@@ -157,9 +178,9 @@ const upsertSampleRowForClip = async (
 }
 
 const createOwnedClip = async (
-  ctx: any,
+  ctx: MutationCtx,
   item: ClipCreateInput,
-) => {
+): Promise<Id<'clips'> | null> => {
   const clipKind = sanitizeClipKind(item.clipKind ?? (item.midi ? 'midi' : 'audio'))
   const track = await getWritableCompatibleMergedTrack(ctx, item.trackId, item.userId, item.projectId, clipKind)
   if (!track) return null
@@ -269,7 +290,7 @@ export const move = mutation({
         ctx,
         toTrackId,
         clip.projectId,
-        sanitizeClipKind((clip as any).midi ? 'midi' : 'audio'),
+        sanitizeClipKind(clip.midi ? 'midi' : 'audio'),
       )
       if (!targetTrack) return { status: 'rejected' as const }
       if (isMergedTrackLockedByOther(targetTrack, userId)) return { status: 'rejected' as const }
@@ -278,6 +299,49 @@ export const move = mutation({
       startSec: nextStartSec,
       trackId: nextTrackId,
     })
+    return { status: 'applied' as const }
+  },
+})
+
+export const moveMany = mutation({
+  args: {
+    moves: v.array(v.object({
+      clipId: v.id('clips'),
+      startSec: v.number(),
+      toTrackId: v.optional(v.id('tracks')),
+    })),
+    userId: v.string(),
+  },
+  handler: async (ctx, { moves, userId }) => {
+    const patches: Array<{ clipId: typeof moves[number]['clipId']; startSec: number; trackId: typeof moves[number]['toTrackId'] }> = []
+    for (const move of moves) {
+      const access = await getClipWriteAccess(ctx, move.clipId, userId)
+      if (!access) return { status: 'rejected' as const }
+      const clip = access.clip
+      const nextTrackId = move.toTrackId ?? clip.trackId
+      if (await isTrackLockedByOther(ctx, clip.trackId, userId)) return { status: 'rejected' as const }
+      if (move.toTrackId) {
+        const targetTrack = await getCompatibleMergedTrack(
+          ctx,
+          move.toTrackId,
+          clip.projectId,
+          sanitizeClipKind(clip.midi ? 'midi' : 'audio'),
+        )
+        if (!targetTrack) return { status: 'rejected' as const }
+        if (isMergedTrackLockedByOther(targetTrack, userId)) return { status: 'rejected' as const }
+      }
+      patches.push({
+        clipId: move.clipId,
+        startSec: normalizeClipStartSec(move.startSec),
+        trackId: nextTrackId,
+      })
+    }
+    for (const patch of patches) {
+      await ctx.db.patch(patch.clipId, {
+        startSec: patch.startSec,
+        trackId: patch.trackId,
+      })
+    }
     return { status: 'applied' as const }
   },
 })
@@ -356,7 +420,7 @@ export const setMidi = mutation({
     if (!access) return
 
     const track = await getMergedTrack(ctx, access.clip.trackId)
-    if (!track || !isClipKindCompatibleWithTrack(track as any, 'midi')) return
+    if (!track || !isClipKindCompatibleWithTrack(track, 'midi')) return
 
     await ctx.db.patch(clipId, { midi })
   },
@@ -394,7 +458,7 @@ export const createMany = mutation({
     })),
   },
   handler: async (ctx, { items }) => {
-    const createdIds: any[] = []
+    const createdIds: Array<Id<'clips'> | null> = []
     for (const item of items) {
       const clipId = await createOwnedClip(ctx, item)
       createdIds.push(clipId ?? null)
@@ -407,8 +471,8 @@ export const removeMany = mutation({
   args: { clipIds: v.array(v.id('clips')), userId: v.string() },
   returns: clipDeleteResult,
   handler: async (ctx, { clipIds, userId }) => {
-    const removedClipIds: any[] = []
-    const skipped: Array<{ clipId: any; reason: 'access-denied' | 'not-found' }> = []
+    const removedClipIds: Id<'clips'>[] = []
+    const skipped: Array<{ clipId: Id<'clips'>; reason: 'access-denied' | 'not-found' }> = []
     const ownerships = await Promise.all(clipIds.map(async (clipId) => ({
       clipId,
       ownership: await getClipOwnership(ctx, clipId),

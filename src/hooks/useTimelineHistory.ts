@@ -11,7 +11,7 @@ import {
 } from '~/lib/optimistic-grant-scope'
 import { loadHistory, saveHistory, type LocalMixPatch } from '~/lib/timeline-storage'
 import { createUndoManager, type UndoManager } from '~/lib/undo/manager'
-import type { HistoryEntry } from '~/lib/undo/types'
+import type { HistoryEntry, PersistedHistory } from '~/lib/undo/types'
 import { execRedo, execUndo } from '~/lib/undo/exec'
 import type { Track, TrackRouting } from '~/types/timeline'
 
@@ -41,7 +41,9 @@ type HistoryScopeContext = {
   manager: UndoManager
   tracks: Track[]
   pendingRun: Promise<void>
+  pendingLocalHistorySave: Promise<void>
   hydratedFromLocalDb?: boolean
+  pendingLocalHistoryState?: PersistedHistory
 }
 
 const cloneClip = (clip: Track['clips'][number]): Track['clips'][number] => ({
@@ -190,6 +192,21 @@ export function useTimelineHistory(
     return scope ? buildOptimisticGrantScopeKey(scope) : null
   }
 
+  const mergeLocalHistoryStates = (
+    persisted: PersistedHistory,
+    pending: PersistedHistory,
+  ): PersistedHistory => ({
+    undo: [...persisted.undo, ...pending.undo].slice(-50),
+    redo: pending.redo,
+  })
+
+  const saveLocalHistoryInOrder = (context: HistoryScopeContext, projectId: string, state: PersistedHistory) => {
+    context.pendingLocalHistorySave = context.pendingLocalHistorySave
+      .catch(() => undefined)
+      .then(() => saveLocalHistory(projectId, state))
+    void context.pendingLocalHistorySave
+  }
+
   const getScopeContext = (scope: OptimisticGrantScope) => {
     const scopeKey = buildOptimisticGrantScopeKey(scope)
     const existing = scopeContexts.get(scopeKey)
@@ -201,7 +218,16 @@ export function useTimelineHistory(
       onChange: (state) => {
         if (hydrating) return
         if (localProject) {
-          void saveLocalHistory(scope.projectId, state)
+          const context = scopeContexts.get(scopeKey)
+          if (context && !context.hydratedFromLocalDb) {
+            context.pendingLocalHistoryState = state
+            return
+          }
+          if (!context) {
+            void saveLocalHistory(scope.projectId, state)
+            return
+          }
+          saveLocalHistoryInOrder(context, scope.projectId, state)
           return
         }
         saveHistory(scope, state)
@@ -217,18 +243,33 @@ export function useTimelineHistory(
       manager,
       tracks: [],
       pendingRun: Promise.resolve(),
+      pendingLocalHistorySave: Promise.resolve(),
     }
     scopeContexts.set(scopeKey, context)
     if (localProject) {
       void loadLocalHistory(scope.projectId)
         .then((state) => {
-          if (!state || context.hydratedFromLocalDb || manager.canUndo() || manager.canRedo()) return
+          if (context.hydratedFromLocalDb) return
+          const pendingState = context.pendingLocalHistoryState
           hydrating = true
-          manager.hydrate(state)
+          if (state && pendingState) {
+            const merged = mergeLocalHistoryStates(state, pendingState)
+            manager.hydrate(merged)
+            saveLocalHistoryInOrder(context, scope.projectId, merged)
+          } else if (state) {
+            manager.hydrate(state)
+          } else if (pendingState) {
+            manager.hydrate(pendingState)
+            saveLocalHistoryInOrder(context, scope.projectId, pendingState)
+          }
+          context.pendingLocalHistoryState = undefined
           hydrating = false
           context.hydratedFromLocalDb = true
         })
         .catch(() => {
+          const pendingState = context.pendingLocalHistoryState
+          if (pendingState) saveLocalHistoryInOrder(context, scope.projectId, pendingState)
+          context.pendingLocalHistoryState = undefined
           context.hydratedFromLocalDb = true
         })
     }

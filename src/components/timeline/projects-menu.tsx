@@ -1,6 +1,7 @@
 import { type Component, For, Show } from "solid-js";
 import { Button } from "~/components/ui/button";
 import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator } from "~/components/ui/menubar";
+import { copyText } from "~/lib/clipboard";
 import { isLocalId } from "~/lib/local-ids";
 import { cn } from "~/lib/utils";
 import type { ProjectsMenuController } from "~/hooks/useProjectsMenuController";
@@ -14,7 +15,7 @@ type ProjectsMenuProps = {
   onOpenProject: (projectId: string) => void;
   onCreateProject: () => void | Promise<void>;
   onOpenExport: () => void;
-  onShare?: () => void;
+  onShare?: () => string | void | Promise<string | void>;
   onChooseProjectFolder?: () => void | Promise<void>;
   onBackUpNow?: () => void | Promise<void>;
   onExportArchive?: () => void | Promise<void>;
@@ -26,12 +27,20 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
   const menu = () => props.menu;
   const isCurrentProjectLocal = () =>
     isLocalId("project", props.currentProjectId);
+  const canShareCurrentProject = () =>
+    !isCurrentProjectLocal();
   const currentSaveLabel = () =>
     isCurrentProjectLocal()
       ? "Saved locally on this device"
       : props.currentUserId
         ? "Saved to cloud project"
         : "Sign in to sync this project";
+  const onShare = async () => {
+    const shareUrl = await props.onShare?.();
+    if (!shareUrl) return;
+    await copyText(shareUrl);
+    window.alert("Share link copied to clipboard.");
+  };
 
   return (
     <MenubarMenu value="project">
@@ -93,9 +102,9 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                 variant="secondary"
                 size="sm"
                 class="justify-center"
-                disabled={isCurrentProjectLocal() || !props.currentUserId || !props.onShare}
-                onClick={() => props.onShare?.()}
-                title={isCurrentProjectLocal() ? "Back up this local project before sharing" : undefined}
+                disabled={!canShareCurrentProject() || !props.currentUserId || !props.onShare}
+                onClick={() => void onShare()}
+                title={!canShareCurrentProject() ? "Shared project promotion is required before sharing" : undefined}
               >
                 Share
               </Button>

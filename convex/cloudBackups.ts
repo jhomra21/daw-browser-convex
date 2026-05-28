@@ -9,6 +9,14 @@ import {
   type ProjectManifest,
 } from "../src/lib/project-manifest-contract";
 
+declare const process: { env: { CLOUD_PROJECTS_SERVICE_TOKEN?: string } };
+
+const requireServerSecret = (serverSecret: string) => {
+  if (!serverSecret || serverSecret !== process.env.CLOUD_PROJECTS_SERVICE_TOKEN) {
+    throw new Error("Unauthorized cloud backup request.");
+  }
+};
+
 type CloudBackup = Doc<"cloudBackups">;
 
 const listBackupsNewestFirst = async (
@@ -96,16 +104,18 @@ const readSupersededCloudKeys = (
 };
 
 export const getLatest = query({
-  args: { projectId: v.string(), userId: v.string() },
-  handler: async (ctx, { projectId, userId }) => {
+  args: { projectId: v.string(), userId: v.string(), serverSecret: v.string() },
+  handler: async (ctx, { projectId, userId, serverSecret }) => {
+    requireServerSecret(serverSecret);
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor", "viewer"]);
     return await latestBackup(ctx, projectId) ?? null;
   },
 });
 
 export const checkConflict = query({
-  args: { projectId: v.string(), userId: v.string(), manifest: projectManifestValidator },
-  handler: async (ctx, { projectId, userId, manifest }) => {
+  args: { projectId: v.string(), userId: v.string(), manifest: projectManifestValidator, serverSecret: v.string() },
+  handler: async (ctx, { projectId, userId, manifest, serverSecret }) => {
+    requireServerSecret(serverSecret);
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor"]);
     assertConflictManifest(projectId, manifest);
     return readBackupConflict(await latestBackup(ctx, projectId), manifest);
@@ -118,8 +128,10 @@ export const upsertLatest = mutation({
     userId: v.string(),
     manifest: projectManifestValidator,
     conflictAction: v.union(v.literal("detect"), v.literal("overwrite")),
+    serverSecret: v.string(),
   },
-  handler: async (ctx, { projectId, userId, manifest, conflictAction }) => {
+  handler: async (ctx, { projectId, userId, manifest, conflictAction, serverSecret }) => {
+    requireServerSecret(serverSecret);
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor"]);
     assertPublishManifest(projectId, manifest);
     const { latest: existing, duplicateManifests } = await normalizeLatestBackup(ctx, projectId);

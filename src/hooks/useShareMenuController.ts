@@ -4,7 +4,7 @@ import { copyText } from '~/lib/clipboard'
 import { getRoomShareUrl } from '~/lib/timeline-share'
 
 type UseShareMenuControllerOptions = {
-  onShare?: () => void | Promise<void>
+  onShare?: () => string | void | Promise<string | void>
   projectId?: Accessor<string | undefined>
 }
 
@@ -23,6 +23,7 @@ export function useShareMenuController(
 ): UseShareMenuControllerReturn {
   const [open, setOpen] = createSignal(false)
   const [copied, setCopied] = createSignal(false)
+  const [generatedShareUrl, setGeneratedShareUrl] = createSignal('')
   let copiedResetTimer: number | null = null
 
   const clearCopiedResetTimer = () => {
@@ -31,11 +32,12 @@ export function useShareMenuController(
     copiedResetTimer = null
   }
 
-  const shareUrl = () => getRoomShareUrl(options.projectId?.()) ?? ''
+  const shareUrl = () => generatedShareUrl() || getRoomShareUrl(options.projectId?.()) || ''
 
   const onOpen = async () => {
     try {
-      await options.onShare?.()
+      const nextShareUrl = await options.onShare?.()
+      if (nextShareUrl) setGeneratedShareUrl(nextShareUrl)
     } catch {}
     setOpen(true)
   }
@@ -55,6 +57,7 @@ export function useShareMenuController(
     if (!nextOpen) {
       clearCopiedResetTimer()
       setCopied(false)
+      setGeneratedShareUrl('')
     }
   }
 

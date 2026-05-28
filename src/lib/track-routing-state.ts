@@ -1,10 +1,8 @@
 import type { FunctionArgs } from 'convex/server'
+import { toCloudTrackId } from '~/lib/cloud-id-args'
 import { convexApi } from '~/lib/convex'
 import type { TrackRoutingSnapshot } from '~/lib/undo/types'
-import type { Id } from '../../convex/_generated/dataModel'
 import type { TrackId } from '~/types/timeline'
-
-const toCloudTrackId = (trackId: TrackId): Id<'tracks'> => trackId as Id<'tracks'>
 
 export function isTrackRoutingEqual(left: TrackRoutingSnapshot, right: TrackRoutingSnapshot) {
   if (left.outputTargetId !== right.outputTargetId) return false

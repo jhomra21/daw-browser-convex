@@ -5,9 +5,16 @@ import {
   onCleanup,
   type Accessor,
 } from 'solid-js'
+import { registerPendingEffectFlusher } from '~/lib/local-effect-write-flush'
+
+type PersistedEffectContext = {
+  projectId?: string
+  userId?: string
+}
 
 type PersistedEffectStateOptions<TRow, TParams> = {
   targetId: Accessor<string | undefined>
+  scopeId?: Accessor<string | undefined>
   row: Accessor<TRow>
   readQueryParams: (row: TRow) => TParams | undefined
   readVisibleParams?: (targetId: string) => TParams | undefined
@@ -15,7 +22,9 @@ type PersistedEffectStateOptions<TRow, TParams> = {
   serializeParams: (params: TParams) => string
   applyToEngine: (targetId: string, params: TParams) => void
   clearFromEngine?: (targetId: string) => void
-  persistParams: (targetId: string, params: TParams) => void | Promise<unknown>
+  persistParams: (targetId: string, params: TParams, context: PersistedEffectContext) => void | Promise<unknown>
+  createPersistContext?: () => PersistedEffectContext
+  onPersistError?: (error: unknown) => void
   onParamsCommitted?: (targetId: string, previous: TParams | undefined, next: TParams) => void
   onQueryRow?: (targetId: string, row: TRow) => void
   debounceMs?: number
@@ -24,7 +33,7 @@ type PersistedEffectStateOptions<TRow, TParams> = {
 
 type PersistedEffectState<TParams> = {
   add: () => void
-  flushPending: () => void
+  flushPending: () => Promise<void>
   params: Accessor<TParams | undefined>
   readDraftForTarget: (targetId: string) => TParams | undefined
   readForTarget: (targetId: string) => TParams | undefined
@@ -42,80 +51,119 @@ export function createPersistedEffectState<TRow, TParams>(
   const saveTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const lastLocalEdit = new Map<string, number>()
   const persistAttemptByTarget = new Map<string, number>()
+  const persistContextByTarget = new Map<string, PersistedEffectContext>()
+  const targetByKey = new Map<string, string>()
+  const pendingWritesByProject = new Map<string, Set<Promise<void>>>()
+  const registeredFlushers = new Map<string, () => void>()
 
-  function clearDraft(targetId: string) {
-    const timer = saveTimers.get(targetId)
+  function keyForTarget(targetId: string) {
+    const scopeId = options.scopeId?.()
+    return scopeId ? `${scopeId}:${targetId}` : targetId
+  }
+
+  function clearDraft(targetId: string, key = keyForTarget(targetId)) {
+    const timer = saveTimers.get(key)
     if (timer) {
       clearTimeout(timer)
-      saveTimers.delete(targetId)
+      saveTimers.delete(key)
     }
-    persistAttemptByTarget.delete(targetId)
-    lastLocalEdit.delete(targetId)
+    persistAttemptByTarget.delete(key)
+    persistContextByTarget.delete(key)
+    targetByKey.delete(key)
+    lastLocalEdit.delete(key)
     setDraftByTarget((prev) => {
-      if (!(targetId in prev)) return prev
+      if (!(key in prev)) return prev
       const next = { ...prev }
-      delete next[targetId]
+      delete next[key]
       return next
     })
   }
 
   function readCurrent(targetId: string) {
-    return draftByTarget()[targetId]
-      ?? remoteByTarget()[targetId]
+    const key = keyForTarget(targetId)
+    return draftByTarget()[key]
+      ?? remoteByTarget()[key]
       ?? options.readVisibleParams?.(targetId)
   }
 
-  function flushTarget(targetId: string) {
-    const timer = saveTimers.get(targetId)
+  function flushTarget(targetId: string, key = keyForTarget(targetId)) {
+    const timer = saveTimers.get(key)
     if (!timer) return
     clearTimeout(timer)
-    saveTimers.delete(targetId)
-    const params = draftByTarget()[targetId]
+    saveTimers.delete(key)
+    const params = draftByTarget()[key]
     if (!params) return
-    persistNow(targetId, params)
+    persistNow(targetId, key, params, persistContextByTarget.get(key) ?? {})
   }
 
-  function persistNow(targetId: string, params: TParams) {
-    const attempt = (persistAttemptByTarget.get(targetId) ?? 0) + 1
-    persistAttemptByTarget.set(targetId, attempt)
+  function persistNow(targetId: string, key: string, params: TParams, context: PersistedEffectContext) {
+    const attempt = (persistAttemptByTarget.get(key) ?? 0) + 1
+    persistAttemptByTarget.set(key, attempt)
     const serialized = options.serializeParams(params)
-    void Promise.resolve()
-      .then(() => options.persistParams(targetId, params))
-      .catch(() => {
-      if (persistAttemptByTarget.get(targetId) !== attempt) return
-      const current = draftByTarget()[targetId]
-      if (!current) return
-      if (options.serializeParams(current) !== serialized) return
-      clearDraft(targetId)
+    const write = Promise.resolve()
+      .then(() => options.persistParams(targetId, params, context))
+      .then(() => undefined)
+      .catch((error) => {
+        if (persistAttemptByTarget.get(key) !== attempt) return
+        const current = draftByTarget()[key]
+        if (!current) return
+        if (options.serializeParams(current) !== serialized) return
+        options.onPersistError?.(error)
+        throw error
       })
+      .finally(() => {
+        if (!context.projectId) return
+        const pendingWrites = pendingWritesByProject.get(context.projectId)
+        pendingWrites?.delete(write)
+        if (pendingWrites?.size === 0) pendingWritesByProject.delete(context.projectId)
+      })
+    if (context.projectId) {
+      const pendingWrites = pendingWritesByProject.get(context.projectId) ?? new Set<Promise<void>>()
+      pendingWrites.add(write)
+      pendingWritesByProject.set(context.projectId, pendingWrites)
+    }
+    void write.catch(() => undefined)
   }
 
-  function persistOrSchedule(targetId: string, params: TParams) {
+  function ensureProjectFlusher(projectId: string) {
+    if (registeredFlushers.has(projectId)) return
+    registeredFlushers.set(projectId, registerPendingEffectFlusher(projectId, async () => {
+      await flushPending(projectId)
+    }))
+  }
+
+  function persistOrSchedule(targetId: string, key: string, params: TParams) {
+    targetByKey.set(key, targetId)
     const debounceMs = options.debounceMs ?? 0
     if (debounceMs <= 0) {
-      persistNow(targetId, params)
+      persistNow(targetId, key, params, persistContextByTarget.get(key) ?? {})
       return
     }
 
-    const previousTimer = saveTimers.get(targetId)
+    const previousTimer = saveTimers.get(key)
     if (previousTimer) clearTimeout(previousTimer)
     // Batch quick effect tweaks into one persistence write and cancel any
     // leftover timers during cleanup.
-    saveTimers.set(targetId, setTimeout(() => flushTarget(targetId), debounceMs))
+    saveTimers.set(key, setTimeout(() => flushTarget(targetId, key), debounceMs))
   }
 
   function applyUpdate(targetId: string, updater: (prev: TParams) => TParams) {
+    const key = keyForTarget(targetId)
     const previous = readCurrent(targetId)
     const initial = previous ?? options.createInitialParams(targetId)
     if (!initial) return
 
     const next = updater(initial)
-    lastLocalEdit.set(targetId, Date.now())
+    lastLocalEdit.set(key, Date.now())
+    const context = options.createPersistContext?.() ?? {}
+    if (context.projectId) ensureProjectFlusher(context.projectId)
+    persistContextByTarget.set(key, context)
+    targetByKey.set(key, targetId)
     setDraftByTarget((prev) => ({
       ...prev,
-      [targetId]: next,
+      [key]: next,
     }))
-    persistOrSchedule(targetId, next)
+    persistOrSchedule(targetId, key, next)
     options.onParamsCommitted?.(targetId, previous, next)
   }
 
@@ -126,26 +174,27 @@ export function createPersistedEffectState<TRow, TParams>(
   })
 
   function syncRemote(targetId: string, nextParams: TParams | undefined) {
+    const key = keyForTarget(targetId)
     setRemoteByTarget((prev) => {
-      if (prev[targetId] === nextParams) return prev
-      return { ...prev, [targetId]: nextParams }
+      if (prev[key] === nextParams) return prev
+      return { ...prev, [key]: nextParams }
     })
 
-    const draft = draftByTarget()[targetId]
+    const draft = draftByTarget()[key]
     if (!draft) return
 
     const nextSerialized = nextParams ? options.serializeParams(nextParams) : undefined
     const draftSerialized = options.serializeParams(draft)
     if (nextSerialized && draftSerialized === nextSerialized) {
-      clearDraft(targetId)
+      clearDraft(targetId, key)
       return
     }
 
     const overwriteAfterMs = options.remoteOverwriteAfterMs ?? 0
-    if (overwriteAfterMs <= 0 || saveTimers.has(targetId)) return
-    const lastEdit = lastLocalEdit.get(targetId) ?? 0
+    if (overwriteAfterMs <= 0 || saveTimers.has(key)) return
+    const lastEdit = lastLocalEdit.get(key) ?? 0
     if (Date.now() - lastEdit >= overwriteAfterMs) {
-      clearDraft(targetId)
+      clearDraft(targetId, key)
     }
   }
 
@@ -172,11 +221,28 @@ export function createPersistedEffectState<TRow, TParams>(
     options.applyToEngine(targetId, next)
   })
 
-  onCleanup(() => {
-    for (const timer of saveTimers.values()) {
+  const flushPending = async (projectId?: string) => {
+    for (const [key, timer] of Array.from(saveTimers.entries())) {
+      const context = persistContextByTarget.get(key)
+      if (projectId && context?.projectId !== projectId) continue
+      const targetId = targetByKey.get(key)
+      if (!targetId) continue
       clearTimeout(timer)
+      saveTimers.delete(key)
+      const params = draftByTarget()[key]
+      if (params) persistNow(targetId, key, params, context ?? {})
     }
-    saveTimers.clear()
+    const pendingWrites = projectId
+      ? pendingWritesByProject.get(projectId)
+      : new Set(Array.from(pendingWritesByProject.values()).flatMap((writes) => Array.from(writes)))
+    await Promise.all(Array.from(pendingWrites ?? []))
+  }
+
+  onCleanup(() => {
+    void flushPending().finally(() => {
+      for (const unregister of registeredFlushers.values()) unregister()
+      registeredFlushers.clear()
+    })
   })
 
   return {
@@ -187,14 +253,9 @@ export function createPersistedEffectState<TRow, TParams>(
       if (!initial) return
       applyUpdate(targetId, () => initial)
     },
-    flushPending: () => {
-      for (const targetId of Array.from(saveTimers.keys())) {
-        flushTarget(targetId)
-      }
-      saveTimers.clear()
-    },
+    flushPending,
     params,
-    readDraftForTarget: (targetId) => draftByTarget()[targetId],
+    readDraftForTarget: (targetId) => draftByTarget()[keyForTarget(targetId)],
     readForTarget: readCurrent,
     reset: () => {
       const targetId = options.targetId()

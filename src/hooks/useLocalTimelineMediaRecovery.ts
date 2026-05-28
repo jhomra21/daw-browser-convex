@@ -1,7 +1,7 @@
 import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
 import type { AudioEngine } from "~/lib/audio-engine";
 import { getAudioSourceMetadata } from "~/lib/audio-source";
-import { createLocalAsset } from "~/lib/local-assets";
+import { createLocalAsset, deleteLocalAsset } from "~/lib/local-assets";
 import { isLocalId } from "~/lib/local-ids";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import type { Clip, Track } from "~/types/timeline";
@@ -127,7 +127,7 @@ export const useMissingMediaRecovery = (input: Input) => {
       sourceChannelCount: source.channelCount,
       sampleUrl: undefined,
     };
-    await createLocalTimelineRepository(rid).updateClip({
+    const row = await createLocalTimelineRepository(rid).updateClip({
       clipId,
       name: updated.name,
       duration: updated.duration,
@@ -139,6 +139,13 @@ export const useMissingMediaRecovery = (input: Input) => {
       sourceChannelCount: source.channelCount,
       sampleUrl: null,
     });
+    if (!row) {
+      await deleteLocalAsset(rid, asset.id);
+      return;
+    }
+    const activeTrack = input.renderTracks().find((entry) => entry.id === trackId);
+    const activeClip = activeTrack?.clips.find((entry) => entry.id === clipId);
+    if (input.projectId() !== rid || !activeClip) return;
     input.audioBufferCache.set(clipId, decoded);
     input.clipMediaStatus.delete(clipId);
     input.projection.removeLocalClips([clipId]);

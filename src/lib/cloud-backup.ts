@@ -1,7 +1,7 @@
 import { listLocalAssets, readLocalAssetBytes } from '~/lib/local-assets'
 import { openLocalProjectDb, setLocalProjectMode } from '~/lib/local-project-db'
 import { saveCloudIdMapping } from '~/lib/local-cloud-id-map'
-import { buildProjectManifest } from '~/lib/project-manifest'
+import { buildProjectManifest, CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY } from '~/lib/project-manifest'
 
 type BackupResult = {
   ok: boolean
@@ -79,7 +79,7 @@ const readBackupResult = (value: unknown): BackupResult | null => {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
-const LAST_BACKED_UP_PROJECT_UPDATED_AT_KEY = 'cloudBackup:lastProjectUpdatedAt'
+const LAST_BACKED_UP_PROJECT_UPDATED_AT_KEY = CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY
 
 const readLastBackedUpProjectUpdatedAt = async (projectId: string) => {
   const db = await openLocalProjectDb(projectId)
@@ -132,34 +132,38 @@ export const runProjectBackup = async (
   conflictAction: 'detect' | 'overwrite' = 'detect',
   options: { skipIfUnchanged?: boolean } = {},
 ): Promise<BackupResult> => {
-  const manifest = await buildProjectManifest(projectId, 'backup')
-  if (options.skipIfUnchanged && await readLastBackedUpProjectUpdatedAt(projectId) === manifest.updatedAt) {
-    return { ok: true }
-  }
-  const form = new FormData()
-  form.set('projectId', projectId)
-  form.set('manifest', JSON.stringify(manifest))
-  form.set('conflictAction', conflictAction)
-  await appendProjectAssets(form, projectId)
-
-  for (let attempt = 0; attempt < 4; attempt++) {
-    try {
-      const response = await fetch('/api/cloud-backups', { method: 'POST', body: form })
-      const data = readBackupResult(await response.json().catch(() => null))
-      if (response.status === 409 && data?.conflict) return data
-      if (!response.ok || !data?.ok) throw new Error(data?.error ?? 'Backup failed.')
-      await setLocalProjectMode(projectId, 'backup')
-      await Promise.all(Object.entries(data.uploadedAssetKeys ?? {}).map(([localId, cloudId]) => (
-        saveCloudIdMapping(projectId, 'asset', localId, cloudId, localId)
-      )))
-      await writeLastBackedUpProjectUpdatedAt(projectId, manifest.updatedAt)
-      return data
-    } catch (error) {
-      if (attempt === 3) {
-        return { ok: false, error: error instanceof Error ? error.message : 'Backup failed.' }
-      }
-      await sleep(Math.min(8000, 500 * 2 ** attempt))
+  try {
+    const manifest = await buildProjectManifest(projectId, 'backup')
+    if (options.skipIfUnchanged && await readLastBackedUpProjectUpdatedAt(projectId) === manifest.updatedAt) {
+      return { ok: true }
     }
+    const form = new FormData()
+    form.set('projectId', projectId)
+    form.set('manifest', JSON.stringify(manifest))
+    form.set('conflictAction', conflictAction)
+    await appendProjectAssets(form, projectId)
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const response = await fetch('/api/cloud-backups', { method: 'POST', body: form })
+        const data = readBackupResult(await response.json().catch(() => null))
+        if (response.status === 409 && data?.conflict) return data
+        if (!response.ok || !data?.ok) throw new Error(data?.error ?? 'Backup failed.')
+        await setLocalProjectMode(projectId, 'backup')
+        await Promise.all(Object.entries(data.uploadedAssetKeys ?? {}).map(([localId, cloudId]) => (
+          saveCloudIdMapping(projectId, 'asset', localId, cloudId, localId)
+        )))
+        await writeLastBackedUpProjectUpdatedAt(projectId, manifest.updatedAt)
+        return data
+      } catch (error) {
+        if (attempt === 3) {
+          return { ok: false, error: error instanceof Error ? error.message : 'Backup failed.' }
+        }
+        await sleep(Math.min(8000, 500 * 2 ** attempt))
+      }
+    }
+    return { ok: false, error: 'Backup failed.' }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Backup failed.' }
   }
-  return { ok: false, error: 'Backup failed.' }
 }

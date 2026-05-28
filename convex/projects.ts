@@ -4,6 +4,14 @@ import { v } from "convex/values";
 import { deleteOwnedTrack, getTrackDeletePreflight } from "./tracks";
 import { listAccessibleProjects, requireProjectRole } from "./projectAccess";
 
+declare const process: { env: { CLOUD_PROJECTS_SERVICE_TOKEN?: string } };
+
+const requireServerSecret = (serverSecret: string) => {
+  if (!serverSecret || serverSecret !== process.env.CLOUD_PROJECTS_SERVICE_TOKEN) {
+    throw new Error("Unauthorized project request.");
+  }
+};
+
 type DeleteConflictReason = "foreign-clips" | "not-empty" | "locked";
 
 const deleteConflictReason = v.union(
@@ -37,6 +45,10 @@ type DeleteOwnedInRoomDeletedResult = {
 type DeleteCurrentOwnedInRoomDeletedResult = {
   status: "deleted"
   destinationProjectId: string
+}
+
+type RollbackCreatedRoomResult = {
+  status: "deleted" | "skipped"
 }
 
 function buildDeleteConflictResult(
@@ -204,28 +216,97 @@ async function deleteOwnedRoomFromPreflight(
 }
 
 async function deleteRoomRows(ctx: MutationCtx, projectId: string) {
-  const deleteRows = async (table: any, index = "by_room") => {
-    const rows = await ctx.db
-      .query(table)
-      .withIndex(index, (q: any) => q.eq("projectId", projectId))
-      .collect();
-    await Promise.all(rows.map((row: any) => ctx.db.delete(row._id)));
-  };
-
   await Promise.all([
-    deleteRows("samples"),
-    deleteRows("exports"),
-    deleteRows("effects"),
-    deleteRows("chatHistories", "by_room_owner"),
-    deleteRows("projectMessages"),
-    deleteRows("shareInvites"),
-    deleteRows("cloudBackups"),
-    deleteRows("mixerChannels"),
-    deleteRows("clips"),
-    deleteRows("tracks"),
-    deleteRows("ownerships"),
-    deleteRows("projects"),
+    ctx.db.query("samples").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("exports").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("effects").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("chatHistories").withIndex("by_room_owner", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("projectMessages").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("shareInvites").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("cloudBackups").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("clips").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("ownerships").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("projects").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
   ]);
+}
+
+async function hasProjectDataRows(ctx: MutationCtx, projectId: string) {
+  const [
+    sample,
+    exportedMix,
+    effect,
+    chatHistory,
+    projectMessage,
+    shareInvite,
+    cloudBackup,
+    mixerChannel,
+    clip,
+    track,
+  ] = await Promise.all([
+    ctx.db.query("samples").withIndex("by_room", (q) => q.eq("projectId", projectId)).first(),
+    ctx.db.query("exports").withIndex("by_room", (q) => q.eq("projectId", projectId)).first(),
+    ctx.db.query("effects").withIndex("by_room", (q) => q.eq("projectId", projectId)).first(),
+    ctx.db.query("chatHistories").withIndex("by_room_owner", (q) => q.eq("projectId", projectId)).first(),
+    ctx.db.query("projectMessages").withIndex("by_room", (q) => q.eq("projectId", projectId)).first(),
+    ctx.db.query("shareInvites").withIndex("by_room", (q) => q.eq("projectId", projectId)).first(),
+    ctx.db.query("cloudBackups").withIndex("by_room", (q) => q.eq("projectId", projectId)).first(),
+    ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", projectId)).first(),
+    ctx.db.query("clips").withIndex("by_room", (q) => q.eq("projectId", projectId)).first(),
+    ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).first(),
+  ]);
+  return Boolean(
+    sample
+    || exportedMix
+    || effect
+    || chatHistory
+    || projectMessage
+    || shareInvite
+    || cloudBackup
+    || mixerChannel
+    || clip
+    || track
+  );
+}
+
+async function rollbackEmptyOwnedRoom(
+  ctx: MutationCtx,
+  projectId: string,
+  userId: string,
+) {
+  const [projects, ownerships] = await Promise.all([
+    ctx.db
+      .query("projects")
+      .withIndex("by_room", (q) => q.eq("projectId", projectId))
+      .collect(),
+    ctx.db
+      .query("ownerships")
+      .withIndex("by_room", (q) => q.eq("projectId", projectId))
+      .collect(),
+  ]);
+  if (projects.some((project) => project.ownerUserId !== userId)) return false;
+  if (ownerships.some((ownership) => (
+    ownership.ownerUserId !== userId || ownership.trackId || ownership.clipId
+  ))) return false;
+  if (await hasProjectDataRows(ctx, projectId)) return false;
+  await Promise.all([
+    ...ownerships.map((ownership) => ctx.db.delete(ownership._id)),
+    ...projects.map((project) => ctx.db.delete(project._id)),
+  ]);
+  return true;
 }
 
 export const listMineDetailed = query({
@@ -237,9 +318,10 @@ export const listMineDetailed = query({
 });
 
 export const createOwnedRoom = mutation({
-  args: { projectId: v.string(), userId: v.string() },
+  args: { projectId: v.string(), userId: v.string(), serverSecret: v.string() },
   returns: v.null(),
-  handler: async (ctx, { projectId, userId }) => {
+  handler: async (ctx, { projectId, userId, serverSecret }) => {
+    requireServerSecret(serverSecret);
     const existingProject = await ctx.db
       .query("projects")
       .withIndex("by_room", (q) => q.eq("projectId", projectId))
@@ -283,13 +365,14 @@ export const deleteOwnedInRoom = mutation({
 });
 
 export const deleteRoomAsOwner = mutation({
-  args: { projectId: v.string(), userId: v.string() },
+  args: { projectId: v.string(), userId: v.string(), serverSecret: v.string() },
   returns: v.object({
     status: v.union(v.literal("deleted"), v.literal("conflict")),
     conflictTrackIds: v.array(v.string()),
     conflicts: v.array(deleteConflict),
   }),
-  handler: async (ctx, { projectId, userId }) => {
+  handler: async (ctx, { projectId, userId, serverSecret }) => {
+    requireServerSecret(serverSecret);
     const ownerProject = await ctx.db
       .query("projects")
       .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
@@ -299,6 +382,17 @@ export const deleteRoomAsOwner = mutation({
     }
     await deleteRoomRows(ctx, projectId);
     return buildDeleteOwnedInRoomDeletedResult();
+  },
+});
+
+export const rollbackCreatedRoomIfEmpty = mutation({
+  args: { projectId: v.string(), userId: v.string(), serverSecret: v.string() },
+  returns: v.object({ status: v.union(v.literal("deleted"), v.literal("skipped")) }),
+  handler: async (ctx, { projectId, userId, serverSecret }): Promise<RollbackCreatedRoomResult> => {
+    requireServerSecret(serverSecret);
+    const deleted = await rollbackEmptyOwnedRoom(ctx, projectId, userId);
+    if (deleted) return { status: "deleted" };
+    return { status: "skipped" };
   },
 });
 

@@ -1,9 +1,9 @@
 import { batch, createSignal, onCleanup, type Accessor, type Setter } from 'solid-js'
 
-import { createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory } from '~/lib/clip-create'
+import { createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory, type ClipCreateSnapshot } from '~/lib/clip-create'
 import { createAudioAssetKey, getAudioSourceMetadata } from '~/lib/audio-source'
 import type { AudioEngine } from '~/lib/audio-engine'
-import { createLocalAsset, LocalAssetWriteError } from '~/lib/local-assets'
+import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError } from '~/lib/local-assets'
 import { isLocalId } from '~/lib/local-ids'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
@@ -235,6 +235,30 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     })
   }
 
+  const pushLocalTrackClipCreateHistory = (projectId: string, track: Track, clipId: string, clip: ClipCreateSnapshot) => {
+    if (typeof historyPush !== 'function') return
+    const index = tracks().findIndex((entry) => entry.id === track.id)
+    historyPush({
+      type: 'track-clip-create',
+      projectId,
+      data: {
+        track: {
+          trackRef: getTrackHistoryRef(track),
+          currentTrackId: track.id,
+          index,
+          kind: track.kind,
+          channelRole: track.channelRole,
+        },
+        clip: {
+          trackRef: getTrackHistoryRef(track),
+          clipRef: clipId,
+          currentId: clipId,
+          ...clip,
+        },
+      },
+    })
+  }
+
   const finalizeRecording = async () => {
     if (!activeCtx) return
     const ctx = activeCtx
@@ -292,6 +316,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       : desiredStart
 
     if (isLocalProject) {
+      let assetId: string | undefined
       try {
         const asset = await createLocalAsset({
           projectId: rid,
@@ -303,7 +328,8 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
             originalLastModified: file.lastModified,
           },
         })
-        await createLocalAudioClip({
+        assetId = asset.id
+        const created = await createLocalAudioClip({
           projectId: rid,
           trackId: ctx.trackId,
           trackRef: getTrackHistoryRef(existingTracks.find((entry) => entry.id === ctx.trackId) ?? targetTrack),
@@ -318,12 +344,19 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
             selection.selectPrimaryClip({ trackId, clipId })
           },
           historyPush,
+          skipHistory: Boolean(ctx.createdTrack),
           audioBufferCache,
           color: 'clip-recording',
+          canProject: () => projectId() === rid && tracks().some((entry) => entry.id === ctx.trackId),
         })
         await cleanupRecording()
-        if (ctx.createdTrack) commitCreatedTrack(ctx.createdTrack, ctx)
+        if (ctx.createdTrack && projectId() === rid && tracks().some((entry) => entry.id === ctx.trackId)) {
+          pushLocalTrackClipCreateHistory(rid, ctx.createdTrack, created.clipId, created.clip)
+        }
       } catch (err) {
+        if (assetId) {
+          await deleteLocalAsset(rid, assetId).catch(() => null)
+        }
         console.error('[useTrackRecording] local recording clip creation failed', err)
         emit(err instanceof LocalAssetWriteError
           ? `${err.message} Free browser storage or choose a project folder, then retry.`
@@ -357,11 +390,13 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         grantScope: uid ? { projectId: rid, userId: uid } : undefined,
         color: 'clip-recording',
         pushHistory: false,
+        canProject: () => projectId() === rid && tracks().some((entry) => entry.id === ctx.trackId),
       })
       await cleanupRecording()
       if (ctx.createdTrack) {
         commitCreatedTrack(ctx.createdTrack, ctx)
       }
+      if (projectId() !== rid || !tracks().some((entry) => entry.id === ctx.trackId)) return
       pushClipCreateHistory({
         historyPush,
         projectId: rid,

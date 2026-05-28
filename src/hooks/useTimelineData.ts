@@ -7,15 +7,18 @@ import { isLocalId } from '~/lib/local-ids'
 import {
   createLocalProject,
   deleteLocalProject,
+  type LocalProjectMode,
   listLocalProjects,
   markLocalProjectOpened,
   renameLocalProject,
 } from '~/lib/local-project-db'
+import { subscribeToLocalProjectChanges } from '~/lib/local-project-changes'
 import { useSessionQuery } from '~/lib/session'
 
 export type TimelineProject = {
   projectId: string
   name: string
+  mode?: LocalProjectMode
 }
 
 type ProjectDeleteConflict = {
@@ -68,6 +71,7 @@ export function useTimelineData(): UseTimelineDataReturn {
   const [projectId, setProjectIdState] = createSignal<string>('')
   const [bootstrapProjectId, setBootstrapProjectId] = createSignal<string | null>(null)
   const [localProjects, setLocalProjects] = createSignal<TimelineProject[]>([])
+  const [acceptingShareToken, setAcceptingShareToken] = createSignal<string | null>(null)
   const pendingOwnedRoomKeys = new Set<string>()
 
   const session = useSessionQuery()
@@ -120,6 +124,7 @@ export function useTimelineData(): UseTimelineDataReturn {
     setLocalProjects(rows.map((project) => ({
       projectId: project.id,
       name: project.name,
+      mode: project.mode,
     })))
   }
 
@@ -131,6 +136,24 @@ export function useTimelineData(): UseTimelineDataReturn {
     } catch {
       return null
     }
+  }
+
+  const readShareTokenFromLocation = () => {
+    try {
+      const url = new URL(window.location.href)
+      const token = url.searchParams.get('shareToken')
+      return token && token.trim() ? token : null
+    } catch {
+      return null
+    }
+  }
+
+  const clearShareTokenFromUrl = () => {
+    try {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('shareToken')
+      history.replaceState(null, '', url.toString())
+    } catch {}
   }
 
   onMount(() => {
@@ -154,6 +177,7 @@ export function useTimelineData(): UseTimelineDataReturn {
     }
 
     const initialProjectId = readProjectIdFromLocation()
+    setAcceptingShareToken(readShareTokenFromLocation())
     if (initialProjectId) {
       resolveRoom(initialProjectId)
     } else {
@@ -170,6 +194,13 @@ export function useTimelineData(): UseTimelineDataReturn {
     })
   })
 
+  createEffect(() => {
+    const rid = projectId()
+    if (!isLocalId('project', rid)) return
+    const unsubscribe = subscribeToLocalProjectChanges(rid, () => void loadLocalProjects())
+    onCleanup(unsubscribe)
+  })
+
   const myProjects = useConvexQuery(
     convexApi.projects.listMineDetailed,
     () => userId() ? ({ userId: userId() }) : null,
@@ -182,13 +213,14 @@ export function useTimelineData(): UseTimelineDataReturn {
     for (const project of normalizeProjects(myProjects.data)) byId.set(project.projectId, project)
     return [...byId.values()]
   })
+  const hasLocalProject = (rid: string) => localProjects().some((project) => project.projectId === rid)
 
   const fullView = useConvexQuery(
     convexApi.timeline.fullView,
     () => {
       const rid = projectId()
       const uid = userId()
-      if (!rid || isLocalId('project', rid) || !uid || bootstrapProjectId() === rid) return null
+      if (!rid || (isLocalId('project', rid) && hasLocalProject(rid)) || !uid || bootstrapProjectId() === rid || acceptingShareToken()) return null
       return { projectId: rid, userId: uid }
     },
     () => {
@@ -198,6 +230,31 @@ export function useTimelineData(): UseTimelineDataReturn {
       return ['timeline', rid, uid, bootstrapRid]
     }
   )
+
+  createEffect(() => {
+    const token = acceptingShareToken()
+    const uid = userId()
+    if (!token || !uid) return
+    void fetch('/api/share-invites/accept', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Share invite accept failed.')
+        return await response.json()
+      })
+      .then((result) => {
+        setAcceptingShareToken(null)
+        clearShareTokenFromUrl()
+        if (result?.projectId) replaceRoom(result.projectId)
+      })
+      .catch(() => {
+        setAcceptingShareToken(null)
+        clearShareTokenFromUrl()
+        window.alert('This share link could not be accepted.')
+      })
+  })
 
   const createOwnedRoom = async (
     rid: string,
@@ -211,7 +268,12 @@ export function useTimelineData(): UseTimelineDataReturn {
 
     pendingOwnedRoomKeys.add(key)
     try {
-      await convexClient.mutation(convexApi.projects.createOwnedRoom, { projectId: rid, userId: uid })
+      const response = await fetch('/api/cloud-projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: rid }),
+      })
+      if (!response.ok) throw new Error('Project create failed')
       return { status: 'created' }
     } catch {
       if (options?.showAlertOnError) {

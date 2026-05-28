@@ -1,5 +1,5 @@
 import type { Doc } from "./_generated/dataModel";
-import { query } from "./_generated/server";
+import { query, type DatabaseReader } from "./_generated/server";
 import { v } from "convex/values";
 
 type RoomSummary = {
@@ -9,15 +9,20 @@ type RoomSummary = {
 
 type ProjectRecord = Doc<"projects">;
 type RoomOwnership = Doc<"ownerships">;
+type ProjectAccessCtx = { db: DatabaseReader };
+
+function isProjectOwnership(ownership: RoomOwnership) {
+  return !ownership.trackId && !ownership.clipId;
+}
 
 async function listProjectsByUser(
-  ctx: any,
+  ctx: ProjectAccessCtx,
   projectId: string,
   userId: string,
 ) {
   return await ctx.db
     .query("projects")
-    .withIndex("by_room_owner", (q: any) => q.eq("projectId", projectId).eq("ownerUserId", userId))
+    .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
     .collect();
 }
 
@@ -44,22 +49,20 @@ function pickProjectName(projects: ProjectRecord[]) {
 }
 
 export async function listAccessibleProjects(
-  ctx: any,
+  ctx: ProjectAccessCtx,
   userId: string,
 ): Promise<RoomSummary[]> {
-  const [projectsRaw, ownershipsRaw] = await Promise.all([
+  const [projects, ownerships] = await Promise.all([
     ctx.db
       .query("projects")
-      .withIndex("by_owner", (q: any) => q.eq("ownerUserId", userId))
+      .withIndex("by_owner", (q) => q.eq("ownerUserId", userId))
       .collect(),
     ctx.db
       .query("ownerships")
-      .withIndex("by_owner", (q: any) => q.eq("ownerUserId", userId))
+      .withIndex("by_owner", (q) => q.eq("ownerUserId", userId))
       .collect(),
   ]);
 
-  const projects = projectsRaw as ProjectRecord[];
-  const ownerships = ownershipsRaw as RoomOwnership[];
   const nameByProjectId = buildProjectNameByRoom(projects);
   const projectIds = new Set<string>();
 
@@ -67,6 +70,7 @@ export async function listAccessibleProjects(
     projectIds.add(project.projectId);
   }
   for (const ownership of ownerships) {
+    if (!isProjectOwnership(ownership)) continue;
     projectIds.add(ownership.projectId);
   }
 
@@ -74,11 +78,11 @@ export async function listAccessibleProjects(
   if (missingProjectIds.length > 0) {
     const missingNames = await Promise.all(
       missingProjectIds.map(async (projectId) => {
-        const roomProjectsRaw = await ctx.db
+        const roomProjects = await ctx.db
           .query("projects")
-          .withIndex("by_room", (q: any) => q.eq("projectId", projectId))
+          .withIndex("by_room", (q) => q.eq("projectId", projectId))
           .collect();
-        return [projectId, pickProjectName(roomProjectsRaw as ProjectRecord[])] as const;
+        return [projectId, pickProjectName(roomProjects)] as const;
       }),
     );
     for (const [projectId, name] of missingNames) {
@@ -95,25 +99,17 @@ export async function listAccessibleProjects(
 }
 
 export async function hasProjectAccess(
-  ctx: any,
+  ctx: ProjectAccessCtx,
   projectId: string,
   userId: string,
 ): Promise<boolean> {
-  const [projectsRaw, ownershipsRaw] = await Promise.all([
-    listProjectsByUser(ctx, projectId, userId),
-    ctx.db
-      .query("ownerships")
-      .withIndex("by_room_owner", (q: any) => q.eq("projectId", projectId).eq("ownerUserId", userId))
-      .collect(),
-  ]);
-
-  return projectsRaw.length > 0 || ownershipsRaw.length > 0;
+  return (await getProjectRole(ctx, projectId, userId)) !== null;
 }
 
 export type ProjectRole = "owner" | "editor" | "viewer";
 
 export async function getProjectRole(
-  ctx: any,
+  ctx: ProjectAccessCtx,
   projectId: string,
   userId: string,
 ): Promise<ProjectRole | null> {
@@ -121,17 +117,17 @@ export async function getProjectRole(
   if (projects.length > 0) return "owner";
   const ownerships = await ctx.db
     .query("ownerships")
-    .withIndex("by_room_owner", (q: any) => q.eq("projectId", projectId).eq("ownerUserId", userId))
+    .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
     .collect();
   if (ownerships.length === 0) return null;
-  const projectOwnership = ownerships.find((ownership: any) => !ownership.trackId && !ownership.clipId);
+  const projectOwnership = ownerships.find(isProjectOwnership);
   if (!projectOwnership) return null;
   const role = projectOwnership.role;
   return role === "owner" || role === "editor" || role === "viewer" ? role : "editor";
 }
 
 export async function requireProjectRole(
-  ctx: any,
+  ctx: ProjectAccessCtx,
   projectId: string,
   userId: string,
   allowed: ProjectRole[],
@@ -157,7 +153,7 @@ export const roleForUser = query({
 });
 
 export async function requireProjectAccess(
-  ctx: any,
+  ctx: ProjectAccessCtx,
   projectId: string,
   userId: string,
 ) {
@@ -166,7 +162,7 @@ export async function requireProjectAccess(
 }
 
 export async function hasProjectAdminCapability(
-  ctx: any,
+  ctx: ProjectAccessCtx,
   projectId: string,
   userId: string,
 ): Promise<boolean> {
@@ -174,7 +170,7 @@ export async function hasProjectAdminCapability(
 }
 
 export async function requireProjectAdminCapability(
-  ctx: any,
+  ctx: ProjectAccessCtx,
   projectId: string,
   userId: string,
 ) {
@@ -183,7 +179,7 @@ export async function requireProjectAdminCapability(
 }
 
 export async function requireMasterBusWriteAccess(
-  ctx: any,
+  ctx: ProjectAccessCtx,
   projectId: string,
   userId: string,
 ) {

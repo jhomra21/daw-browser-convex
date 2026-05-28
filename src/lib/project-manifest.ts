@@ -3,6 +3,8 @@ import {
   getLocalProject,
   LOCAL_PROJECT_SCHEMA_VERSION,
 } from '~/lib/local-project-db'
+import { flushPendingPersistedEffectWrites } from '~/lib/local-effect-write-flush'
+import { flushPendingProjectStateWrites } from '~/lib/local-project-state-write-flush'
 import { flushLocalTimelineWrites } from '~/lib/timeline-repository/local-timeline-repository'
 import {
   normalizeProjectManifest,
@@ -10,6 +12,7 @@ import {
 } from '~/lib/project-manifest-contract'
 
 const PROJECT_MANIFEST_SCHEMA_VERSION = 1
+export const CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY = 'cloudBackup:lastProjectUpdatedAt'
 
 const latestLocalProjectUpdate = (
   projectUpdatedAt: number,
@@ -19,6 +22,9 @@ const latestLocalProjectUpdate = (
   ...rows.entities.map((row) => row.updatedAt),
   ...rows.assets.map((row) => row.updatedAt),
   ...rows.projectState.map((row) => row.updatedAt),
+  ...rows.syncState
+    .filter((row) => row.key !== CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY)
+    .map((row) => row.updatedAt),
 )
 
 export const buildProjectManifest = async (
@@ -27,6 +33,8 @@ export const buildProjectManifest = async (
 ): Promise<ProjectManifest> => {
   const project = await getLocalProject(projectId)
   if (!project) throw new Error('Local project not found.')
+  await flushPendingPersistedEffectWrites(projectId)
+  await flushPendingProjectStateWrites(projectId)
   await flushLocalTimelineWrites()
   const rows = await exportLocalProjectRows(projectId)
   const updatedAt = latestLocalProjectUpdate(project.updatedAt, rows)

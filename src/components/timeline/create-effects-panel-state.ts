@@ -11,10 +11,11 @@ import {
   type SynthCardBounds,
 } from "~/components/effects/synth-card-bounds";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
+import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
 import { buildClipCreatePayload, type ClipCreateSnapshot } from "~/lib/clip-create";
 import { convexApi, convexClient } from "~/lib/convex";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
-import { getLocalEffect, setLocalEffect, type LocalEffectRow } from "~/lib/local-effects";
+import type { LocalEffectRow } from "~/lib/local-effects";
 import { isLocalId } from "~/lib/local-ids";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import type { TimelineClipRow } from "~/lib/timeline-repository/types";
@@ -51,6 +52,7 @@ type EffectsPanelContext = {
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>) => void;
+  onLocalSaveFailed?: (message: string) => void;
 };
 
 type ExpandedSynthBounds = SynthCardBounds & {
@@ -65,7 +67,7 @@ type ExpandedSynthCard = ExpandedSynthBounds & {
 
 type EffectsPanelState = {
   addMidiClip: () => Promise<void>;
-  flushPending: () => void;
+  flushPending: () => Promise<void>;
   arp: {
     add: () => void;
     change: (updates: Partial<ArpeggiatorParams>) => void;
@@ -132,35 +134,24 @@ export function createEffectsPanelState(
     const projectId = context.projectId();
     return Boolean(projectId && isLocalId("project", projectId));
   };
-  const [localArpRows, setLocalArpRows] = createSignal<Record<string, LocalArpRow | undefined>>({});
-  const [localSynthRows, setLocalSynthRows] = createSignal<Record<string, LocalSynthRow | undefined>>({});
-
-  createEffect(() => {
-    const projectId = context.projectId();
-    const targetId = getTrackTargetId();
-    if (!projectId || !targetId || !isLocalProject()) return;
-    void getLocalEffect<ArpeggiatorParams>(projectId, targetId, "arp").then((row) => {
-      setLocalArpRows((prev) => ({ ...prev, [targetId]: row }));
-    });
+  const localArp = createLocalEffectRows<ArpeggiatorParams>({
+    projectId: context.projectId,
+    targetId: getTrackTargetId,
+    effect: "arp",
+  });
+  const localSynth = createLocalEffectRows<SynthParams>({
+    projectId: context.projectId,
+    targetId: getTrackTargetId,
+    effect: "synth",
+    normalize: normalizeSynthParams,
   });
 
-  createEffect(() => {
-    const projectId = context.projectId();
-    const targetId = getTrackTargetId();
-    if (!projectId || !targetId || !isLocalProject()) return;
-    void getLocalEffect<SynthParams>(projectId, targetId, "synth").then((row) => {
-      setLocalSynthRows((prev) => ({ ...prev, [targetId]: row }));
-    });
-  });
-
-  function persistArpeggiator(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setArpeggiatorParams>["params"]) {
-    const projectId = context.projectId();
-    const userId = context.userId();
+  function persistArpeggiator(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setArpeggiatorParams>["params"], persistContext: { projectId?: string; userId?: string }) {
+    const projectId = persistContext.projectId;
+    const userId = persistContext.userId;
     if (!projectId) return;
     if (isLocalId("project", projectId)) {
-      return setLocalEffect(projectId, trackId, "arp", params).then((row) => {
-        setLocalArpRows((prev) => ({ ...prev, [trackId]: row }));
-      });
+      return localArp.persist(projectId, trackId, params);
     }
     if (!userId) return;
 
@@ -175,14 +166,12 @@ export function createEffectsPanelState(
     );
   }
 
-  function persistSynth(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setSynthParams>["params"]) {
-    const projectId = context.projectId();
-    const userId = context.userId();
+  function persistSynth(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setSynthParams>["params"], persistContext: { projectId?: string; userId?: string }) {
+    const projectId = persistContext.projectId;
+    const userId = persistContext.userId;
     if (!projectId) return;
     if (isLocalId("project", projectId)) {
-      return setLocalEffect<SynthParams>(projectId, trackId, "synth", normalizeSynthParams(params)).then((row) => {
-        setLocalSynthRows((prev) => ({ ...prev, [trackId]: row }));
-      });
+      return localSynth.persist(projectId, trackId, normalizeSynthParams(params));
     }
     if (!userId) return;
 
@@ -247,7 +236,8 @@ export function createEffectsPanelState(
 
   const arpState = createPersistedEffectState<ArpRow, ArpeggiatorParams>({
     targetId: getTrackTargetId,
-    row: () => isLocalProject() ? localArpRows()[getTrackTargetId() ?? ""] : remoteEffectForTarget(getTrackTargetId(), "arpeggiator"),
+    scopeId: context.projectId,
+    row: () => isLocalProject() ? localArp.row(getTrackTargetId()) : remoteEffectForTarget(getTrackTargetId(), "arpeggiator"),
     readQueryParams: (row) => row?.params,
     createInitialParams: () => createDefaultArpeggiatorParams(),
     serializeParams: (params) => JSON.stringify(params),
@@ -257,12 +247,17 @@ export function createEffectsPanelState(
     clearFromEngine: (targetId) => {
       context.audioEngine()?.clearTrackArpeggiator?.(targetId);
     },
-    persistParams: (targetId, params) => {
+    createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
+    persistParams: (targetId, params, persistContext) => {
       const track = getTrackByTargetId(targetId);
       if (!track) return;
-      persistArpeggiator(track.id, params);
+      return persistArpeggiator(track.id, params, persistContext);
     },
     remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
+    onPersistError: (error) => {
+      if (!isLocalProject()) return;
+      context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
+    },
     onParamsCommitted: (targetId, previous, next) => {
       const track = getTrackByTargetId(targetId);
       if (!track) return;
@@ -272,7 +267,8 @@ export function createEffectsPanelState(
 
   const synthState = createPersistedEffectState<SynthRow, SynthParams>({
     targetId: getTrackTargetId,
-    row: () => isLocalProject() ? localSynthRows()[getTrackTargetId() ?? ""] : remoteEffectForTarget(getTrackTargetId(), "synth"),
+    scopeId: context.projectId,
+    row: () => isLocalProject() ? localSynth.row(getTrackTargetId()) : remoteEffectForTarget(getTrackTargetId(), "synth"),
     readQueryParams: (row) => {
       return row?.params
         ? normalizeSynthParams(row.params)
@@ -287,13 +283,18 @@ export function createEffectsPanelState(
     clearFromEngine: (targetId) => {
       context.audioEngine()?.clearTrackSynth?.(targetId);
     },
-    persistParams: (targetId, params) => {
+    createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
+    persistParams: (targetId, params, persistContext) => {
       const track = getTrackByTargetId(targetId);
       if (!track) return;
-      persistSynth(track.id, params);
+      return persistSynth(track.id, params, persistContext);
     },
     debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
     remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
+    onPersistError: (error) => {
+      if (!isLocalProject()) return;
+      context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
+    },
     onParamsCommitted: (targetId, previous, next) => {
       const track = getTrackByTargetId(targetId);
       if (!track) return;
@@ -416,13 +417,15 @@ export function createEffectsPanelState(
     () => expandedSynth()?.targetId === currentTargetId(),
   );
 
-  const flushPending = () => {
-    arpState.flushPending();
-    synthState.flushPending();
+  const flushPending = async () => {
+    await Promise.all([
+      arpState.flushPending(),
+      synthState.flushPending(),
+    ]);
   };
 
   onCleanup(() => {
-    flushPending();
+    void flushPending();
   });
 
   return {

@@ -155,6 +155,10 @@ export const openLocalProjectDb = (projectId: string): Promise<IDBPDatabase<Proj
         db.createObjectStore('syncState', { keyPath: 'key' })
       }
     },
+    blocking(_currentVersion, _blockedVersion, event) {
+      const target = event.target
+      if (target instanceof IDBDatabase) target.close()
+    },
   })
 )
 
@@ -292,14 +296,18 @@ export const deleteLocalProject = async (projectId: string): Promise<void> => {
   const db = await openGlobalProjectsDb()
   const directoryEntry = await db.get('directoryHandles', projectId)
   const projectDb = await openLocalProjectDb(projectId)
-  const assetPaths = (await projectDb.getAll('assets')).map((asset) => asset.storagePath)
-  await deleteLocalProjectAssetFiles(projectId, directoryEntry?.handle, assetPaths)
-  const tx = db.transaction(['projects', 'directoryHandles'], 'readwrite')
-  await Promise.all([
-    tx.objectStore('projects').delete(projectId),
-    tx.objectStore('directoryHandles').delete(projectId),
-    tx.done,
-  ])
+  try {
+    const assetPaths = (await projectDb.getAll('assets')).map((asset) => asset.storagePath)
+    await deleteLocalProjectAssetFiles(projectId, directoryEntry?.handle, assetPaths)
+    const tx = db.transaction(['projects', 'directoryHandles'], 'readwrite')
+    await Promise.all([
+      tx.objectStore('projects').delete(projectId),
+      tx.objectStore('directoryHandles').delete(projectId),
+      tx.done,
+    ])
+  } finally {
+    projectDb.close()
+  }
   await deleteDB(getProjectDbName(projectId))
 }
 

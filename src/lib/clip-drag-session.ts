@@ -39,10 +39,6 @@ export const buildClipDragStart = (input: {
   }
 
   if (!isMultiDrag) {
-    prePositions.set(input.clipId, { clipId: input.clipId, trackId: input.trackId, startSec: input.clip.startSec });
-  }
-
-  if (!isMultiDrag) {
     return {
       draggingIds: { trackId: input.trackId, clipId: input.clipId },
       prePositions,

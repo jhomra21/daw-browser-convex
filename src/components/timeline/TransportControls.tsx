@@ -609,6 +609,26 @@ const SettingsMenu: Component<{ toolbar: TransportControlsProps }> = (props) => 
   );
 };
 
+const SaveStatus: Component<{ projectId: string; userId?: string }> = (props) => {
+  const status = () =>
+    isLocalId("project", props.projectId)
+      ? { label: "Saved locally", class: "border-emerald-900/70 bg-emerald-950/40 text-emerald-300" }
+      : props.userId
+        ? { label: "Cloud saved", class: "border-sky-900/70 bg-sky-950/40 text-sky-300" }
+        : { label: "Sign in to sync", class: "border-amber-900/70 bg-amber-950/40 text-amber-300" };
+
+  return (
+    <span
+      class={cn(
+        "rounded-full border px-2 py-1 text-[11px] font-medium",
+        status().class,
+      )}
+    >
+      {status().label}
+    </span>
+  );
+};
+
 const TransportControls: Component<TransportControlsProps> = (props) => {
   const currentProjectId = () => props.currentProjectId;
   const currentUserId = () => props.currentUserId;
@@ -634,13 +654,6 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
     bpm: () => props.bpm,
     onChangeBpm: props.onChangeBpm,
   });
-  const saveStatus = () =>
-    isLocalId("project", currentProjectId())
-      ? { label: "Saved locally", class: "border-emerald-900/70 bg-emerald-950/40 text-emerald-300" }
-      : currentUserId()
-        ? { label: "Cloud saved", class: "border-sky-900/70 bg-sky-950/40 text-sky-300" }
-        : { label: "Sign in to sync", class: "border-amber-900/70 bg-amber-950/40 text-amber-300" };
-
   return (
     <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-neutral-800 bg-neutral-950 p-2">
       <div class="justify-self-start flex items-center gap-1">
@@ -709,14 +722,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
       />
 
       <div class="justify-self-end flex items-center gap-3">
-        <span
-          class={cn(
-            "rounded-full border px-2 py-1 text-[11px] font-medium",
-            saveStatus().class,
-          )}
-        >
-          {saveStatus().label}
-        </span>
+        <SaveStatus projectId={currentProjectId()} userId={currentUserId()} />
         <div class="flex items-center gap-2 text-xs">
           <span class="text-neutral-500">Playhead</span>
           <span class="tabular-nums text-neutral-200">

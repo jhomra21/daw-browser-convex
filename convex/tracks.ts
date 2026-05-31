@@ -4,7 +4,6 @@ import {
   buildMixerChannelInsert,
   deleteMixerStateForTrack,
   ensureMixerChannelForTrack,
-  getMergedTrack,
   listProjectTracksWithMixerChannels,
   normalizeMixerLockState,
   removeTrackRoutingReferences,
@@ -80,12 +79,10 @@ export async function getTrackDeletePreflight(
   }
 
   const { owner, track } = access;
-  const mergedTrack = await getMergedTrack(ctx, trackId);
-  if (mergedTrack) {
-    const lockState = normalizeMixerLockState(mergedTrack.lockedBy, mergedTrack.lockedAt);
-    if (lockState.isLocked) {
-      return { ok: false, reason: "locked" };
-    }
+  const channel = await ensureMixerChannelForTrack(ctx, track);
+  const lockState = normalizeMixerLockState(channel.lockedBy, channel.lockedAt);
+  if (lockState.isLocked) {
+    return { ok: false, reason: "locked" };
   }
   const clips = await ctx.db
     .query("clips")
@@ -273,18 +270,16 @@ export const setRouting = mutation({
     const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
 
     const channel = await ensureMixerChannelForTrack(ctx, track);
-    const mergedTrack = await getMergedTrack(ctx, trackId);
-    if (!mergedTrack) return;
 
     const tracksInRoom = await listProjectTracksWithMixerChannels(ctx, track.projectId);
 
-    const nextSends = sends === undefined ? mergedTrack.sends : sends;
+    const nextSends = sends === undefined ? channel.sends : sends;
     const nextOutputTargetId = outputTargetId === undefined
-      ? mergedTrack.outputTargetId
+      ? channel.outputTargetId
       : outputTargetId ?? undefined;
 
     const normalizedRouting = sanitizeTrackRouting(
-      { _id: trackId, channelRole: mergedTrack.channelRole },
+      { _id: trackId, channelRole: channel.channelRole },
       {
         sends: nextSends,
         outputTargetId: nextOutputTargetId,
@@ -302,15 +297,15 @@ export const setRouting = mutation({
 export const lock = mutation({
   args: { trackId: v.id("tracks"), userId: v.string() },
   handler: async (ctx, { trackId, userId }) => {
-    const track = await ctx.db.get(trackId);
-    if (!track) {
+    const access = await getTrackWriteAccess(ctx, trackId, userId);
+    if (!access) {
       return { ok: false, reason: "Track not found" };
     }
+    const track = access.track;
+    await requireProjectRole(ctx, track.projectId, userId, ["owner", "editor"]);
     const channel = await ensureMixerChannelForTrack(ctx, track);
-    const mergedTrack = await getMergedTrack(ctx, trackId);
-    if (!mergedTrack) return { ok: false, reason: "Track not found" };
     const now = Date.now();
-    const lockState = normalizeMixerLockState(mergedTrack.lockedBy, mergedTrack.lockedAt, now);
+    const lockState = normalizeMixerLockState(channel.lockedBy, channel.lockedAt, now);
     if (lockState.isLocked && lockState.lockedBy !== userId) {
       return { ok: false, reason: "Track locked by another user" };
     }
@@ -322,12 +317,12 @@ export const lock = mutation({
 export const unlock = mutation({
   args: { trackId: v.id("tracks"), userId: v.string() },
   handler: async (ctx, { trackId, userId }) => {
-    const track = await ctx.db.get(trackId);
-    if (!track) return { ok: false };
+    const access = await getTrackWriteAccess(ctx, trackId, userId);
+    if (!access) return { ok: false };
+    const track = access.track;
+    await requireProjectRole(ctx, track.projectId, userId, ["owner", "editor"]);
     const channel = await ensureMixerChannelForTrack(ctx, track);
-    const mergedTrack = await getMergedTrack(ctx, trackId);
-    if (!mergedTrack) return { ok: false };
-    const lockState = normalizeMixerLockState(mergedTrack.lockedBy, mergedTrack.lockedAt);
+    const lockState = normalizeMixerLockState(channel.lockedBy, channel.lockedAt);
     if (lockState.isLocked && lockState.lockedBy !== userId) {
       return { ok: false };
     }

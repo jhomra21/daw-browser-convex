@@ -25,40 +25,61 @@ type Input = {
 export const createClipDragPersistence = (input: Input) => {
   const isLocalProject = () => isLocalId("project", input.projectId());
 
-  const deleteEmptyTrack = async (trackId: Track["id"]) => {
-    if (isLocalProject()) {
-      await createLocalTimelineRepository(input.projectId()).deleteTrack(trackId);
+  const deleteEmptyTrack = async (
+    trackId: Track["id"],
+    scope: { projectId: string; userId: string } = { projectId: input.projectId(), userId: input.userId() },
+  ) => {
+    if (isLocalId("project", scope.projectId)) {
+      await createLocalTimelineRepository(scope.projectId).deleteTrack(trackId);
       input.removeLocalTrack(trackId);
       return;
     }
-    const userId = input.userId();
-    if (!userId) return;
+    if (!scope.userId) return;
     const result = await input.convexClient.mutation(
       input.convexApi.tracks.remove,
-      buildTrackDeleteMutationInput({ trackId, userId }),
+      buildTrackDeleteMutationInput({ trackId, userId: scope.userId }),
     );
     if (result?.status === "deleted") input.removeLocalTrack(trackId);
   };
 
   const createTrackForDrag = async (kind: Track["kind"]) => {
+    const projectId = input.projectId();
+    const userId = input.userId();
     const index = input.placementTrackCount();
-    if (isLocalProject()) {
-      const row = await createLocalTimelineRepository(input.projectId()).createTrack({ index, kind });
+    if (isLocalId("project", projectId)) {
+      const repository = createLocalTimelineRepository(projectId);
+      const row = await repository.createTrack({ index, kind });
+      if (input.projectId() !== projectId) {
+        await repository.deleteTrack(row.id).catch(() => null);
+        return null;
+      }
       const track = toLocalTimelineTrack(row);
       input.insertLocalTrack(track, index);
       return track.id;
     }
+    let inserted = false;
     const track = await createOptimisticTrack({
       convexClient: input.convexClient,
       convexApi: input.convexApi,
-      projectId: input.projectId(),
-      userId: input.userId(),
-      insertLocalTrack: input.insertLocalTrack,
+      projectId,
+      userId,
+      insertLocalTrack: (track, trackIndex) => {
+        if (input.projectId() !== projectId) return;
+        inserted = true;
+        input.insertLocalTrack(track, trackIndex);
+      },
       index,
       grantWrite: input.grantWrite,
-      grantScope: { projectId: input.projectId(), userId: input.userId() },
+      grantScope: { projectId, userId },
       kind,
     });
+    if (track && !inserted) {
+      await input.convexClient.mutation(
+        input.convexApi.tracks.remove,
+        buildTrackDeleteMutationInput({ trackId: track.id, userId }),
+      ).catch(() => null);
+      return null;
+    }
     return track?.id ?? null;
   };
 

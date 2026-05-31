@@ -385,11 +385,21 @@ export async function createProjectedLocalClips(input: {
   insertLocalClip: (trackId: TrackId, clip: Clip) => void
   removeLocalClips: (clipIds: Iterable<string>) => void
   audioBufferCache?: Map<string, AudioBuffer>
+  canProject?: () => boolean
 }) {
   const repository = createLocalTimelineRepository(input.projectId)
   const created: BatchClipCreateResult[] = []
+  const cleanupCreatedClips = async (clipIds: string[]) => {
+    await Promise.all(clipIds.map((clipId) => repository.deleteClip(clipId).catch(() => null)))
+    for (const clipId of clipIds) input.audioBufferCache?.delete(clipId)
+    input.removeLocalClips(clipIds)
+  }
   try {
     for (const item of input.items) {
+      if (input.canProject && !input.canProject()) {
+        await cleanupCreatedClips(created.map((entry) => entry.clipId))
+        return []
+      }
       const row = await repository.createClip({
         trackId: item.trackId,
         name: item.clip.name,
@@ -407,6 +417,10 @@ export async function createProjectedLocalClips(input: {
         midi: item.clip.midi,
         midiOffsetBeats: item.clip.timing?.midiOffsetBeats,
       })
+      if (input.canProject && !input.canProject()) {
+        await cleanupCreatedClips([...created.map((entry) => entry.clipId), row.id])
+        return []
+      }
       input.insertLocalClip(item.trackId, buildLocalClip({
         id: row.id,
         clip: { ...item.clip, historyRef: row.historyRef },
@@ -423,9 +437,7 @@ export async function createProjectedLocalClips(input: {
     return created
   } catch (error) {
     const createdClipIds = created.map((item) => item.clipId)
-    await Promise.all(createdClipIds.map((clipId) => repository.deleteClip(clipId).catch(() => null)))
-    for (const clipId of createdClipIds) input.audioBufferCache?.delete(clipId)
-    input.removeLocalClips(createdClipIds)
+    await cleanupCreatedClips(createdClipIds)
     throw error
   }
 }

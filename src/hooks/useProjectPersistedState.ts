@@ -1,5 +1,5 @@
 import { createEffect, createSignal, on, onCleanup, type Accessor } from 'solid-js'
-import { registerPendingProjectStateFlusher } from '~/lib/local-project-state-write-flush'
+import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
 
 type RoomPersistedSetter<TValue> = (value: Exclude<TValue, Function> | ((current: TValue) => TValue)) => TValue
 
@@ -41,7 +41,7 @@ export function useProjectPersistedState<TValue>(
 
   const ensureProjectFlusher = (projectId: string) => {
     if (registeredFlushers.has(projectId)) return
-    registeredFlushers.set(projectId, registerPendingProjectStateFlusher(projectId, async () => {
+    registeredFlushers.set(projectId, registerPendingLocalProjectWriteFlusher('project-state', projectId, async () => {
       await Promise.all(Array.from(pendingAsyncSavesByProject.get(projectId) ?? []))
     }))
   }
@@ -99,8 +99,12 @@ export function useProjectPersistedState<TValue>(
   }
 
   onCleanup(() => {
-    for (const unregister of registeredFlushers.values()) unregister()
+    const cleanupEntries = Array.from(registeredFlushers.entries())
     registeredFlushers.clear()
+    void Promise.all(cleanupEntries.map(async ([projectId, unregister]) => {
+      await Promise.allSettled(Array.from(pendingAsyncSavesByProject.get(projectId) ?? []))
+      unregister()
+    }))
   })
 
   return {

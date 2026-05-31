@@ -6,9 +6,11 @@ import { isLocalId } from '~/lib/local-ids'
 import { resolveTrackMixView } from '~/lib/timeline-mix-authority'
 import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
 import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
+import { cloneTimelineClip, cloneTimelineTrack } from '~/lib/timeline-clone'
 import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
 import type { LocalMixMap } from '~/lib/timeline-storage'
 import { normalizeTrackRouting } from '~/lib/track-routing'
+import { normalizeTrackChannelRole } from '~/lib/track-routing-core'
 import type { Track, Clip, TrackRouting, TrackSend } from '~/types/timeline'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
@@ -102,11 +104,6 @@ const normalizeTrackKind = (value: string | undefined): Track['kind'] => {
   return undefined
 }
 
-const normalizeChannelRole = (value: string | undefined): Track['channelRole'] => {
-  if (value === 'track' || value === 'group' || value === 'return') return value
-  return undefined
-}
-
 const normalizeSourceKind = (value: string | undefined): Clip['sourceKind'] => {
   return sanitizeAudioSourceKind(value)
 }
@@ -136,22 +133,6 @@ const getWaveformAssetKey = (projectId: string | undefined, sourceAssetKey: stri
 const withWaveformAssetKey = (clip: Clip, projectId: string | undefined): Clip => ({
   ...clip,
   waveformAssetKey: getWaveformAssetKey(projectId, clip.sourceAssetKey),
-})
-
-const cloneClip = (clip: Clip): Clip => ({
-  ...clip,
-  midi: clip.midi
-    ? {
-        ...clip.midi,
-        notes: clip.midi.notes.map((note) => ({ ...note })),
-      }
-    : undefined,
-})
-
-const cloneTrack = (track: Track): Track => ({
-  ...track,
-  clips: track.clips.map((clip) => cloneClip(clip)),
-  sends: track.sends?.map((send) => ({ ...send })),
 })
 
 const sortTrackClips = (track: Track) => {
@@ -343,7 +324,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
       soloed: typeof trackRow.soloed === 'boolean' ? trackRow.soloed : false,
       lockedBy: typeof trackRow.lockedBy === 'string' ? trackRow.lockedBy : null,
       kind: normalizeTrackKind(trackRow.kind) ?? 'audio',
-      channelRole: normalizeChannelRole(trackRow.channelRole) ?? 'track',
+      channelRole: normalizeTrackChannelRole(trackRow.channelRole),
       sends: localTrackRow?.sends ?? [],
       outputTargetId: localTrackRow?.outputTargetId,
     })
@@ -357,7 +338,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
   for (const entry of pendingTrackEntries) {
     if (projectedTrackIds.has(entry.track.id)) continue
     const insertIndex = Math.max(0, Math.min(projectedTracks.length, entry.index))
-    const clonedTrack = cloneTrack(entry.track)
+    const clonedTrack = cloneTimelineTrack(entry.track)
     const historyRef = clonedTrack.historyRef ?? clonedTrack.id
     clonedTrack.historyRef = historyRef
     clonedTrack.name = resolveTrackName({
@@ -410,7 +391,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
     if (options.client.clips.removedIds.has(clipId)) continue
     const track = trackById.get(pending.trackId)
     if (!track) continue
-    const clip = attachClipBuffer(cloneClip(pending.clip), options.projectId, options.buffers.audioBufferCache, options.buffers.clipMediaStatus)
+    const clip = attachClipBuffer(cloneTimelineClip(pending.clip), options.projectId, options.buffers.audioBufferCache, options.buffers.clipMediaStatus)
     const currentTrackId = clipTrackIdById.get(clipId)
     const currentTrack = currentTrackId ? trackById.get(currentTrackId) : undefined
     if (currentTrack && currentTrack !== track) {
@@ -460,7 +441,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
     const track = trackById.get(trackId)
     if (!track) continue
     for (const clip of clips) {
-      pushClipToTrack(track, attachClipBuffer(cloneClip(clip), options.projectId, options.buffers.audioBufferCache, options.buffers.clipMediaStatus))
+      pushClipToTrack(track, attachClipBuffer(cloneTimelineClip(clip), options.projectId, options.buffers.audioBufferCache, options.buffers.clipMediaStatus))
     }
   }
 

@@ -4,6 +4,7 @@ import type { Accessor } from 'solid-js'
 import { useConvexQuery, convexApi } from '~/lib/convex'
 import { useQuery } from '@tanstack/solid-query'
 import { getPersistedAudioSource, type AudioSourceKind, type AudioSourceMetadata } from '~/lib/audio-source'
+import { sanitizeAudioSourceKind } from '~/lib/audio-source-rules'
 import { ensureDefaultSampleMetadata, loadCachedDefaultSampleMetadata } from '~/lib/default-sample-cache'
 import { listLocalAssets } from '~/lib/local-assets'
 import { isLocalId } from '~/lib/local-ids'
@@ -98,7 +99,7 @@ const readString = (value: unknown) => {
 }
 
 const readAudioSourceKind = (value: unknown): AudioSourceKind | undefined => {
-  return value === 'upload' || value === 'url' || value === 'recording' ? value : undefined
+  return typeof value === 'string' ? sanitizeAudioSourceKind(value) : undefined
 }
 
 const toTrackId = (value: string): Track['id'] => value as Track['id']
@@ -338,7 +339,9 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
         }
         if (!isCurrentProject()) return
         setLocalSamples(items)
-      })()
+      })().catch(() => {
+        if (isCurrentProject()) setLocalSamples([])
+      })
     },
   ))
 

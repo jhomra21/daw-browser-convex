@@ -11,6 +11,85 @@ type ProjectMediaMenuProps = {
   exportsMenu: ExportsMenuController;
 };
 
+const stopMenuButtonEvent = (event: Event) => {
+  event.stopPropagation();
+  event.preventDefault();
+};
+
+const CopyUrlButton: Component<{
+  label: string;
+  url?: string;
+  onCopy: (url?: string) => Promise<void>;
+}> = (props) => (
+  <button
+    class="cursor-pointer p-1 text-neutral-400 hover:text-neutral-200 disabled:opacity-50"
+    aria-label={props.label}
+    disabled={!props.url}
+    onPointerDown={stopMenuButtonEvent}
+    onPointerUp={stopMenuButtonEvent}
+    onClick={async (event) => {
+      stopMenuButtonEvent(event);
+      await props.onCopy(props.url);
+    }}
+  >
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      class="h-4 w-4"
+    >
+      <g
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <rect width="8" height="8" x="8" y="8" rx="2" />
+        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+      </g>
+      <title>Copy URL</title>
+    </svg>
+  </button>
+);
+
+const InsertSampleButton: Component<{
+  label: string;
+  disabled: boolean;
+  inserting: boolean;
+  onInsert: () => Promise<void>;
+}> = (props) => (
+  <button
+    class={cn(
+      "cursor-pointer p-1 text-neutral-400 hover:text-neutral-100 disabled:opacity-50",
+      props.inserting && "cursor-not-allowed opacity-60",
+    )}
+    aria-label={props.label}
+    disabled={props.disabled || props.inserting}
+    onPointerDown={stopMenuButtonEvent}
+    onPointerUp={stopMenuButtonEvent}
+    onClick={async (event) => {
+      stopMenuButtonEvent(event);
+      await props.onInsert();
+    }}
+  >
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      class="h-4 w-4"
+    >
+      <path
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        d="M4 11h16M12 4v16"
+      />
+      <title>Insert</title>
+    </svg>
+  </button>
+);
+
 export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
   const samples = () => props.samples;
   const exportsMenu = () => props.exportsMenu;
@@ -101,79 +180,13 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
                           </span>
                         </div>
                         <div class="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
-                          <button
-                            class="cursor-pointer p-1 text-neutral-400 hover:text-neutral-200 disabled:opacity-50"
-                            aria-label="Copy sample URL"
+                          <CopyUrlButton label="Copy sample URL" url={sample.url} onCopy={samples().copyText} />
+                          <InsertSampleButton
+                            label="Insert sample"
                             disabled={!sample.url}
-                            onPointerDown={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onPointerUp={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onClick={async (event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                              await samples().copyText(sample.url);
-                            }}
-                          >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 24 24"
-                              class="h-4 w-4"
-                            >
-                              <g
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                              >
-                                <rect width="8" height="8" x="8" y="8" rx="2" />
-                                <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
-                              </g>
-                              <title>Copy URL</title>
-                            </svg>
-                          </button>
-                          <button
-                            class={cn(
-                              "cursor-pointer p-1 text-neutral-400 hover:text-neutral-100 disabled:opacity-50",
-                              isInserting() && "cursor-not-allowed opacity-60",
-                            )}
-                            aria-label="Insert sample"
-                            disabled={!sample.url || isInserting()}
-                            onPointerDown={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onPointerUp={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onClick={async (event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                              await samples().onInsertSample(sample);
-                            }}
-                          >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 24 24"
-                              class="h-4 w-4"
-                            >
-                              <path
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                d="M4 11h16M12 4v16"
-                              />
-                              <title>Insert</title>
-                            </svg>
-                          </button>
+                            inserting={isInserting()}
+                            onInsert={() => samples().onInsertSample(sample)}
+                          />
                           <Show
                             when={isConfirming()}
                             fallback={
@@ -190,17 +203,10 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
                                     : "Delete sample"
                                 }
                                 disabled={sample.count > 0}
-                                onPointerDown={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                }}
-                                onPointerUp={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                }}
+                                onPointerDown={stopMenuButtonEvent}
+                                onPointerUp={stopMenuButtonEvent}
                                 onClick={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
+                                  stopMenuButtonEvent(event);
                                   if (sample.count === 0) {
                                     samples().setConfirmingSampleKey(sampleKey);
                                   }
@@ -236,17 +242,10 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
                                   isDeleting() ? "Deleting…" : "Confirm delete"
                                 }
                                 disabled={isDeleting()}
-                                onPointerDown={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                }}
-                                onPointerUp={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                }}
+                                onPointerDown={stopMenuButtonEvent}
+                                onPointerUp={stopMenuButtonEvent}
                                 onClick={async (event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
+                                  stopMenuButtonEvent(event);
                                   await samples().onDeleteSample(sample);
                                 }}
                               >
@@ -269,17 +268,10 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
                               <button
                                 class="cursor-pointer p-1 text-neutral-400 hover:text-neutral-300"
                                 aria-label="Cancel delete"
-                                onPointerDown={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                }}
-                                onPointerUp={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                }}
+                                onPointerDown={stopMenuButtonEvent}
+                                onPointerUp={stopMenuButtonEvent}
                                 onClick={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
+                                  stopMenuButtonEvent(event);
                                   samples().setConfirmingSampleKey(null);
                                 }}
                               >
@@ -324,7 +316,6 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
                       <MenubarItem
                         data-sample-key={sample.key}
                         class="group relative flex w-full cursor-pointer items-center justify-between gap-2 pr-16 hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100"
-                        onSelect={() => {}}
                       >
                         <div
                           class="flex min-w-0 flex-1 items-center gap-2"
@@ -351,79 +342,13 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
                           </Show>
                         </div>
                         <div class="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
-                          <button
-                            class="cursor-pointer p-1 text-neutral-400 hover:text-neutral-200 disabled:opacity-50"
-                            aria-label="Copy sample URL"
+                          <CopyUrlButton label="Copy sample URL" url={sample.url} onCopy={samples().copyText} />
+                          <InsertSampleButton
+                            label="Insert default sample"
                             disabled={!sample.url}
-                            onPointerDown={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onPointerUp={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onClick={async (event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                              await samples().copyText(sample.url);
-                            }}
-                          >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 24 24"
-                              class="h-4 w-4"
-                            >
-                              <g
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                              >
-                                <rect width="8" height="8" x="8" y="8" rx="2" />
-                                <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
-                              </g>
-                              <title>Copy URL</title>
-                            </svg>
-                          </button>
-                          <button
-                            class={cn(
-                              "cursor-pointer p-1 text-neutral-400 hover:text-neutral-100 disabled:opacity-50",
-                              isInserting() && "cursor-not-allowed opacity-60",
-                            )}
-                            aria-label="Insert default sample"
-                            disabled={!sample.url || isInserting()}
-                            onPointerDown={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onPointerUp={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onClick={async (event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                              await samples().onInsertSample(sample);
-                            }}
-                          >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 24 24"
-                              class="h-4 w-4"
-                            >
-                              <path
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                d="M4 11h16M12 4v16"
-                              />
-                              <title>Insert</title>
-                            </svg>
-                          </button>
+                            inserting={isInserting()}
+                            onInsert={() => samples().onInsertSample(sample)}
+                          />
                         </div>
                       </MenubarItem>
                     );
@@ -462,42 +387,9 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
                           {item.format}
                         </span>
                       </div>
-                      <button
-                        class="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer p-1 text-neutral-400 hover:text-neutral-200 disabled:opacity-50"
-                        aria-label="Copy export URL"
-                        disabled={!item.url}
-                        onPointerDown={(event) => {
-                          event.stopPropagation();
-                          event.preventDefault();
-                        }}
-                        onPointerUp={(event) => {
-                          event.stopPropagation();
-                          event.preventDefault();
-                        }}
-                        onClick={async (event) => {
-                          event.stopPropagation();
-                          event.preventDefault();
-                          await exportsMenu().copyText(item.url);
-                        }}
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          class="h-4 w-4"
-                        >
-                          <g
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                          >
-                            <rect width="8" height="8" x="8" y="8" rx="2" />
-                            <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
-                          </g>
-                          <title>Copy URL</title>
-                        </svg>
-                      </button>
+                      <div class="absolute right-2 top-1/2 -translate-y-1/2">
+                        <CopyUrlButton label="Copy export URL" url={item.url} onCopy={exportsMenu().copyText} />
+                      </div>
                     </MenubarItem>
                   )}
                 </For>

@@ -85,6 +85,7 @@ export default defineSchema({
   })
     .index("by_owner", ["ownerUserId"])
     .index("by_room", ["projectId"])
+    .index("by_room_createdAt", ["projectId", "createdAt"])
     .index("by_room_owner", ["projectId", "ownerUserId"]),
 
   ownerships: defineTable({
@@ -98,6 +99,7 @@ export default defineSchema({
     .index("by_track", ["trackId"])
     .index("by_room", ["projectId"])
     .index("by_owner", ["ownerUserId"])
+    .index("by_owner_project_marker", ["ownerUserId", "trackId", "clipId"])
     .index("by_room_owner", ["projectId", "ownerUserId"]),
 
   shareInvites: defineTable({
@@ -122,6 +124,7 @@ export default defineSchema({
     assetCount: v.number(),
   })
     .index("by_room", ["projectId"])
+    .index("by_room_updatedAt", ["projectId", "updatedAt"])
     .index("by_room_owner", ["projectId", "ownerUserId"]),
 
   effects: defineTable({

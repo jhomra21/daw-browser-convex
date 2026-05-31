@@ -133,6 +133,12 @@ export const createHistoryClip = async (
 };
 
 type TrackDeleteEffects = NonNullable<Extract<HistoryEntry, { type: "track-delete" }>["data"]["effects"]>;
+type EffectParamsEntry = Extract<HistoryEntry, { type: "effect-params" }>;
+type HistoryDirection = "undo" | "redo";
+
+function pickDirectionalValue<T>(direction: HistoryDirection, from: T, to: T) {
+  return direction === "undo" ? from : to;
+}
 
 export const persistHistoryTrackEffects = async (
   deps: Deps,
@@ -151,6 +157,51 @@ export const persistHistoryTrackEffects = async (
   if (effects.reverb) await deps.convexClient.mutation(deps.convexApi.effects.setReverbParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params: effects.reverb }));
   if (effects.synth) await deps.convexClient.mutation(deps.convexApi.effects.setSynthParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params: effects.synth }));
   if (effects.arp) await deps.convexClient.mutation(deps.convexApi.effects.setArpeggiatorParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params: effects.arp }));
+};
+
+export const persistHistoryEffectParams = async (
+  deps: Deps,
+  entry: EffectParamsEntry,
+  targetId: Track["id"] | "master",
+  direction: HistoryDirection,
+) => {
+  if (isLocalHistoryProject(deps)) {
+    const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+    await setLocalEffect(deps.projectId, targetId, entry.data.effect, params);
+    return;
+  }
+  switch (entry.data.effect) {
+    case "master-eq": {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+      await deps.convexClient.mutation(deps.convexApi.effects.setMasterEqParams, { projectId: deps.projectId, userId: deps.userId, params });
+      return;
+    }
+    case "master-reverb": {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+      await deps.convexClient.mutation(deps.convexApi.effects.setMasterReverbParams, { projectId: deps.projectId, userId: deps.userId, params });
+      return;
+    }
+    case "eq": {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+      await deps.convexClient.mutation(deps.convexApi.effects.setEqParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId: targetId, userId: deps.userId, params }));
+      return;
+    }
+    case "reverb": {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+      await deps.convexClient.mutation(deps.convexApi.effects.setReverbParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId: targetId, userId: deps.userId, params }));
+      return;
+    }
+    case "synth": {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+      await deps.convexClient.mutation(deps.convexApi.effects.setSynthParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId: targetId, userId: deps.userId, params }));
+      return;
+    }
+    case "arp": {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+      await deps.convexClient.mutation(deps.convexApi.effects.setArpeggiatorParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId: targetId, userId: deps.userId, params }));
+      return;
+    }
+  }
 };
 
 export const removeHistoryClipIdsOrThrow = async (deps: Deps, clipIds: string[], message: string) => {

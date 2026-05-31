@@ -1,5 +1,6 @@
 import type { App } from '../app-types'
 import { requireProjectRoleForApi } from '../project-access'
+import { sanitizeFileNameSegment } from '../sanitize-file-name-segment'
 
 export function registerExportRoutes(app: App) {
 // Upload an export to R2 (protected route)
@@ -28,12 +29,7 @@ export function registerExportRoutes(app: App) {
       const ts = new Date().toISOString().replace(/[-:TZ.]/g, '')
       name = `export_${ts}.wav`
     }
-    const sanitized = name
-      .replace(/\\/g, '/')
-      .split('/')
-      .pop()!
-      .replace(/[^A-Za-z0-9._-]/g, '_')
-      .slice(0, 180)
+    const sanitized = sanitizeFileNameSegment(name, 'export.wav')
 
     const exportsPrefix = `projects/${projectId}/exports/`
     const splitIdx = sanitized.lastIndexOf('.')
@@ -43,7 +39,7 @@ export function registerExportRoutes(app: App) {
     let attempts = 0
     while (attempts < 5) {
       const probeKey = exportsPrefix + chosenName
-      const existing = await c.env.daw_audio_samples.get(probeKey)
+      const existing = await c.env.daw_audio_samples.head(probeKey)
       if (!existing) break
       attempts++
       chosenName = `${base} (${attempts})${ext}`

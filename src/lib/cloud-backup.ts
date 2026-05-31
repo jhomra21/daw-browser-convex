@@ -1,7 +1,8 @@
-import { listLocalAssets, readLocalAssetBytes } from '~/lib/local-assets'
+import { readLocalAssetBytes } from '~/lib/local-assets'
 import { openLocalProjectDb, setLocalProjectMode } from '~/lib/local-project-db'
 import { saveCloudIdMapping } from '~/lib/local-cloud-id-map'
-import { buildProjectManifest, CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY } from '~/lib/project-manifest'
+import { buildProjectManifest, CLOUD_BACKUP_LAST_MANIFEST_VERSION_KEY, CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY } from '~/lib/project-manifest'
+import type { ProjectManifest } from '~/lib/project-manifest-contract'
 
 type BackupResult = {
   ok: boolean
@@ -80,6 +81,7 @@ const readBackupResult = (value: unknown): BackupResult | null => {
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 const LAST_BACKED_UP_PROJECT_UPDATED_AT_KEY = CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY
+const LAST_BACKED_UP_MANIFEST_VERSION_KEY = CLOUD_BACKUP_LAST_MANIFEST_VERSION_KEY
 
 const readLastBackedUpProjectUpdatedAt = async (projectId: string) => {
   const db = await openLocalProjectDb(projectId)
@@ -96,35 +98,32 @@ const writeLastBackedUpProjectUpdatedAt = async (projectId: string, updatedAt: n
   })
 }
 
-const appendProjectAssets = async (form: FormData, projectId: string): Promise<void> => {
-  const assets = await listLocalAssets(projectId)
-  let active = 0
-  let index = 0
-  await new Promise<void>((resolve, reject) => {
-    const next = () => {
-      if (index >= assets.length && active === 0) {
-        resolve()
-        return
-      }
-      while (active < 2 && index < assets.length) {
-        const asset = assets[index++]
-        active++
-        void readLocalAssetBytes(projectId, asset.id)
-          .then((result) => {
-            if (result.status !== 'ready') {
-              throw new Error(`Could not read asset ${asset.id} for backup.`)
-            }
-            form.append(`asset:${asset.id}`, result.file)
-          })
-          .then(() => {
-            active--
-            next()
-          })
-          .catch(reject)
-      }
-    }
-    next()
+const readLastBackedUpManifestVersion = async (projectId: string) => {
+  const db = await openLocalProjectDb(projectId)
+  const row = await db.get('syncState', LAST_BACKED_UP_MANIFEST_VERSION_KEY)
+  return typeof row?.value === 'string' ? row.value : undefined
+}
+
+const writeLastBackedUpManifestVersion = async (projectId: string, manifestVersion: string) => {
+  const db = await openLocalProjectDb(projectId)
+  await db.put('syncState', {
+    key: LAST_BACKED_UP_MANIFEST_VERSION_KEY,
+    value: manifestVersion,
+    updatedAt: Date.now(),
   })
+}
+
+const appendProjectAssets = async (form: FormData, projectId: string, manifest: ProjectManifest): Promise<void> => {
+  const assets = manifest.assets.filter((asset) => !asset.missing && !asset.cloudKey)
+  for (let index = 0; index < assets.length; index += 2) {
+    await Promise.all(assets.slice(index, index + 2).map(async (asset) => {
+      const result = await readLocalAssetBytes(projectId, asset.id)
+      if (result.status !== 'ready') {
+        throw new Error(`Could not read asset ${asset.id} for backup.`)
+      }
+      form.append(`asset:${asset.id}`, result.file)
+    }))
+  }
 }
 
 export const runProjectBackup = async (
@@ -134,14 +133,16 @@ export const runProjectBackup = async (
 ): Promise<BackupResult> => {
   try {
     const manifest = await buildProjectManifest(projectId, 'backup')
-    if (options.skipIfUnchanged && await readLastBackedUpProjectUpdatedAt(projectId) === manifest.updatedAt) {
+    const baseManifestVersion = await readLastBackedUpManifestVersion(projectId)
+    if (options.skipIfUnchanged && baseManifestVersion && await readLastBackedUpProjectUpdatedAt(projectId) === manifest.updatedAt) {
       return { ok: true }
     }
     const form = new FormData()
     form.set('projectId', projectId)
     form.set('manifest', JSON.stringify(manifest))
     form.set('conflictAction', conflictAction)
-    await appendProjectAssets(form, projectId)
+    if (baseManifestVersion) form.set('baseManifestVersion', baseManifestVersion)
+    await appendProjectAssets(form, projectId, manifest)
 
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
@@ -154,6 +155,7 @@ export const runProjectBackup = async (
           saveCloudIdMapping(projectId, 'asset', localId, cloudId, localId)
         )))
         await writeLastBackedUpProjectUpdatedAt(projectId, manifest.updatedAt)
+        if (data.manifestVersion) await writeLastBackedUpManifestVersion(projectId, data.manifestVersion)
         return data
       } catch (error) {
         if (attempt === 3) {

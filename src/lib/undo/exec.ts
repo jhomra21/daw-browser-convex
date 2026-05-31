@@ -1,9 +1,8 @@
 import { buildLocalClip, createManyClips } from '~/lib/clip-create'
-import { buildTrackEffectMutationInput } from '~/lib/effect-track-args'
-import { setLocalEffect } from '~/lib/local-effects'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '~/lib/audio-engine'
+import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
 import { normalizeTrackRouting } from '~/lib/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
 import type { Track, TrackRouting } from '~/types/timeline'
@@ -13,6 +12,7 @@ import { buildHistoryRefIndex, resolveClipId, resolveStoredTrackId, resolveTrack
 import type { HistoryEntry } from './types'
 import {
   isLocalHistoryProject,
+  persistHistoryEffectParams,
   persistHistoryClipMovesOrThrow,
   persistHistoryClipTimingOrThrow,
   createHistoryClip,
@@ -64,35 +64,12 @@ function buildRefIndex(deps: Deps) {
   return buildHistoryRefIndex(deps.getHistoryEntries(), deps.getTracks())
 }
 
-function buildHistoryContext(deps: Deps) {
-  const tracks = deps.getTracks()
-  return {
-    refIndex: buildHistoryRefIndex(deps.getHistoryEntries(), tracks),
-    trackIdByClipId: buildTrackIdByClipId(tracks),
-  }
-}
-
-const isLocalProject = isLocalHistoryProject
-
 function requireResolved<T>(value: T | null | undefined, message: string): T {
   if (value === null || value === undefined) {
     throw new Error(message)
   }
   return value
 }
-
-function buildTrackIdByClipId(tracks: Track[]) {
-  const next = new Map<string, Track['id']>()
-  for (const track of tracks) {
-    for (const clip of track.clips) {
-      next.set(clip.id, track.id)
-    }
-  }
-  return next
-}
-
-const removeClipIdsOrThrow = removeHistoryClipIdsOrThrow
-const removeTrackOrThrow = removeHistoryTrackOrThrow
 
 async function applyTrackVolumeEntry(entry: Extract<HistoryEntry, { type: 'track-volume' }>, deps: Deps, direction: HistoryDirection) {
   const index = buildRefIndex(deps)
@@ -135,109 +112,49 @@ function readEffectTrackId(entry: EffectParamsEntry, deps: Deps) {
   return requireResolved(resolveTrackId(index, entry.data.trackRef), `Track not found for ${entry.data.effect} history entry`)
 }
 
-async function persistLocalEffectParams(entry: EffectParamsEntry, deps: Deps, direction: HistoryDirection) {
-  const targetId = entry.data.effect === 'master-eq' || entry.data.effect === 'master-reverb'
-    ? 'master'
-    : readEffectTrackId(entry, deps)
-  switch (entry.data.effect) {
-    case 'master-eq': {
-      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-      await setLocalEffect(deps.projectId, targetId, entry.data.effect, params)
-      try { deps.audioEngine.setMasterEq(params) } catch {}
-      return
+function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetId: string, direction: HistoryDirection) {
+  try {
+    switch (entry.data.effect) {
+      case 'master-eq': {
+        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+        deps.audioEngine.setMasterEq(params)
+        return
+      }
+      case 'master-reverb': {
+        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+        deps.audioEngine.setMasterReverb(params)
+        return
+      }
+      case 'eq': {
+        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+        deps.audioEngine.setTrackEq(targetId, params)
+        return
+      }
+      case 'reverb': {
+        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+        deps.audioEngine.setTrackReverb(targetId, params)
+        return
+      }
+      case 'synth': {
+        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+        deps.audioEngine.setTrackSynth(targetId, params)
+        return
+      }
+      case 'arp': {
+        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+        deps.audioEngine.setTrackArpeggiator(targetId, params)
+        return
+      }
     }
-    case 'master-reverb': {
-      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-      await setLocalEffect(deps.projectId, targetId, entry.data.effect, params)
-      try { deps.audioEngine.setMasterReverb(params) } catch {}
-      return
-    }
-    case 'eq': {
-      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-      await setLocalEffect(deps.projectId, targetId, entry.data.effect, params)
-      try { deps.audioEngine.setTrackEq(targetId, params) } catch {}
-      return
-    }
-    case 'reverb': {
-      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-      await setLocalEffect(deps.projectId, targetId, entry.data.effect, params)
-      try { deps.audioEngine.setTrackReverb(targetId, params) } catch {}
-      return
-    }
-    case 'synth': {
-      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-      await setLocalEffect(deps.projectId, targetId, entry.data.effect, params)
-      try { deps.audioEngine.setTrackSynth(targetId, params) } catch {}
-      return
-    }
-    case 'arp': {
-      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-      await setLocalEffect(deps.projectId, targetId, entry.data.effect, params)
-      try { deps.audioEngine.setTrackArpeggiator(targetId, params) } catch {}
-      return
-    }
-  }
+  } catch {}
 }
 
 async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, direction: HistoryDirection) {
-  if (isLocalProject(deps)) {
-    await persistLocalEffectParams(entry, deps, direction)
-    return
-  }
-  switch (entry.data.effect) {
-    case 'master-eq': {
-      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-      await deps.convexClient.mutation(deps.convexApi.effects.setMasterEqParams, { projectId: deps.projectId, userId: deps.userId, params })
-      try { deps.audioEngine.setMasterEq(params) } catch {}
-      return
-    }
-    case 'master-reverb': {
-      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-      await deps.convexClient.mutation(deps.convexApi.effects.setMasterReverbParams, { projectId: deps.projectId, userId: deps.userId, params })
-      try { deps.audioEngine.setMasterReverb(params) } catch {}
-      return
-    }
-    case 'eq': {
-      const trackId = readEffectTrackId(entry, deps)
-      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-      await deps.convexClient.mutation(
-        deps.convexApi.effects.setEqParams,
-        buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params }),
-      )
-      try { deps.audioEngine.setTrackEq(trackId, params) } catch {}
-      return
-    }
-    case 'reverb': {
-      const trackId = readEffectTrackId(entry, deps)
-      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-      await deps.convexClient.mutation(
-        deps.convexApi.effects.setReverbParams,
-        buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params }),
-      )
-      try { deps.audioEngine.setTrackReverb(trackId, params) } catch {}
-      return
-    }
-    case 'synth': {
-      const trackId = readEffectTrackId(entry, deps)
-      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-      await deps.convexClient.mutation(
-        deps.convexApi.effects.setSynthParams,
-        buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params }),
-      )
-      try { deps.audioEngine.setTrackSynth(trackId, params) } catch {}
-      return
-    }
-    case 'arp': {
-      const trackId = readEffectTrackId(entry, deps)
-      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-      await deps.convexClient.mutation(
-        deps.convexApi.effects.setArpeggiatorParams,
-        buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params }),
-      )
-      try { deps.audioEngine.setTrackArpeggiator(trackId, params) } catch {}
-      return
-    }
-  }
+  const targetId = entry.data.effect === 'master-eq' || entry.data.effect === 'master-reverb'
+    ? 'master'
+    : readEffectTrackId(entry, deps)
+  await persistHistoryEffectParams(deps, entry, targetId, direction)
+  applyEffectParamsToEngine(entry, deps, targetId, direction)
 }
 
 async function applyClipTimingEntry(entry: Extract<HistoryEntry, { type: 'clip-timing' }>, deps: Deps, direction: HistoryDirection) {
@@ -263,13 +180,13 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
   })
 
   const recreatedClipIdsByRef = new Map((entry.data.recreatedClips ?? []).map((item) => [item.clipRef, item.clipId]))
-  const pendingItems = items.filter((item) => !recreatedClipIdsByRef.has(item.clip.clipRef!))
+  const pendingItems = items.filter((item) => !recreatedClipIdsByRef.has(item.clip.clipRef))
   if (pendingItems.length > 0) {
-    if (isLocalProject(deps)) {
+    if (isLocalHistoryProject(deps)) {
       for (const item of pendingItems) {
         const clipId = await createHistoryClip(deps, item.trackId, item.clip)
         if (!clipId) throw new Error('Failed to recreate clip')
-        recreatedClipIdsByRef.set(item.clip.clipRef!, clipId)
+        recreatedClipIdsByRef.set(item.clip.clipRef, clipId)
       }
     } else {
       const created = await createManyClips({
@@ -279,14 +196,14 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
         createMany: async (clipPayloads) => await deps.convexClient.mutation(deps.convexApi.clips.createMany, { items: clipPayloads }),
       })
       for (let indexValue = 0; indexValue < created.length; indexValue++) {
-        recreatedClipIdsByRef.set(pendingItems[indexValue].clip.clipRef!, created[indexValue].clipId)
+        recreatedClipIdsByRef.set(pendingItems[indexValue].clip.clipRef, created[indexValue].clipId)
       }
     }
   }
 
   const perTrackAdds = new Map<Track['id'], Track['clips']>()
   for (const item of items) {
-    const clipId = requireResolved(recreatedClipIdsByRef.get(item.clip.clipRef!), 'Missing recreated clip id')
+    const clipId = requireResolved(recreatedClipIdsByRef.get(item.clip.clipRef), 'Missing recreated clip id')
     deps.grantClipWrite(clipId, grantScope)
     if (item.clip.sampleUrl) {
       await deps.ensureClipBuffer?.(clipId, item.clip.sampleUrl)
@@ -309,23 +226,21 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
   syncHistoryClipCreateEntryIds(deps.getHistoryEntries(), recreatedClipIdsByRef)
 }
 
-type HistoryContext = ReturnType<typeof buildHistoryContext>
-
 async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: HistoryDirection) {
   if (entry.projectId !== deps.projectId) {
     throw new Error(`History entry room mismatch: expected ${deps.projectId}, received ${entry.projectId}`)
   }
-  const { convexClient, convexApi, projectId, userId } = deps
+  const { projectId, userId } = deps
   const grantScope = { projectId, userId }
-  const historyContext = buildHistoryContext(deps)
 
   switch (entry.type) {
     case 'clip-create': {
-      const index = historyContext.refIndex
+      const index = buildRefIndex(deps)
       if (direction === 'undo') {
         const clipId = requireResolved(resolveClipId(index, entry.data.clip.clipRef) ?? entry.data.clip.currentId, 'Clip not found for clip-create undo')
-        requireResolved(historyContext.trackIdByClipId.get(clipId) ?? resolveTrackId(index, entry.data.trackRef), 'Track not found for clip-create undo')
-        await removeClipIdsOrThrow(deps, [clipId], 'Failed to remove clip during clip-create undo')
+        const trackIdByClipId = createTimelineTrackIndex(deps.getTracks()).clipTrackIdById
+        requireResolved(trackIdByClipId.get(clipId) ?? resolveTrackId(index, entry.data.trackRef), 'Track not found for clip-create undo')
+        await removeHistoryClipIdsOrThrow(deps, [clipId], 'Failed to remove clip during clip-create undo')
         deps.actions.removeLocalClips([clipId])
         entry.data.clip.currentId = undefined
         return
@@ -353,7 +268,7 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       }
       const ids = (entry.data.recreatedClips ?? []).map((item) => item.clipId)
       if (ids.length === 0) return
-      await removeClipIdsOrThrow(deps, ids, 'Failed to remove clips during clip-delete redo')
+      await removeHistoryClipIdsOrThrow(deps, ids, 'Failed to remove clips during clip-delete redo')
       deps.actions.removeLocalClips(ids)
       entry.data.recreatedClips = []
       return
@@ -379,11 +294,12 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
 
     case 'track-create': {
       if (direction === 'undo') {
+        const index = buildRefIndex(deps)
         const trackId = requireResolved(
-          resolveTrackId(historyContext.refIndex, entry.data.trackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.currentTrackId),
+          resolveTrackId(index, entry.data.trackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.currentTrackId),
           'Track not found for track-create undo',
         )
-        await removeTrackOrThrow(deps, trackId, 'Failed to remove track during track-create undo')
+        await removeHistoryTrackOrThrow(deps, trackId, 'Failed to remove track during track-create undo')
         deps.actions.removeLocalTrack(trackId)
         entry.data.currentTrackId = undefined
         return
@@ -412,11 +328,13 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
     }
 
     case 'track-clip-create': {
+      const historyContext = { refIndex: buildRefIndex(deps) }
       await applyTrackClipCreateEntry(entry, deps, direction, historyContext)
       return
     }
 
     case 'track-delete': {
+      const historyContext = { refIndex: buildRefIndex(deps) }
       await applyTrackDeleteEntry(entry, deps, direction, historyContext)
       return
     }

@@ -22,6 +22,5 @@ export async function requireProjectDeleteOwnerForApi(
   const user = c.get('user')
   if (!user) return null
   const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
-  const role = await convex.query(convexApi.projectAccess.roleForUserIncludingPending, { projectId, userId: user.id })
-  return role === 'owner' ? user : null
+  return await convex.query(convexApi.projects.canDeleteAsOwner, { projectId, userId: user.id }) ? user : null
 }

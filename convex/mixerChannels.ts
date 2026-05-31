@@ -1,7 +1,5 @@
-import { paginationOptsValidator } from "convex/server";
-import { v } from "convex/values";
-import { internalMutation } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
+import type { DatabaseReader, MutationCtx } from "./_generated/server";
 
 export type MixerSend = {
   targetId: Id<"tracks">;
@@ -34,13 +32,7 @@ type MixerChannelStateOverrides = Partial<Omit<MixerChannelState, "sends">> & {
   sends?: MixerSend[];
 };
 
-type LegacyTrackDoc = Doc<"tracks"> & {
-  volume?: unknown;
-  muted?: unknown;
-  soloed?: unknown;
-  lockedBy?: unknown;
-  lockedAt?: unknown;
-};
+type MixerReadCtx = { db: DatabaseReader };
 
 export const STALE_LOCK_MS = 60_000;
 
@@ -105,17 +97,6 @@ export function buildMixerChannelInsert(
   };
 }
 
-function buildMixerChannelInsertForExistingTrack(track: Doc<"tracks">) {
-  const legacyTrack: LegacyTrackDoc = track;
-  return buildMixerChannelInsert(track.projectId, track._id, {
-    volume: typeof legacyTrack.volume === "number" ? legacyTrack.volume : undefined,
-    muted: typeof legacyTrack.muted === "boolean" ? legacyTrack.muted : undefined,
-    soloed: typeof legacyTrack.soloed === "boolean" ? legacyTrack.soloed : undefined,
-    lockedBy: typeof legacyTrack.lockedBy === "string" ? legacyTrack.lockedBy : undefined,
-    lockedAt: typeof legacyTrack.lockedAt === "number" ? legacyTrack.lockedAt : undefined,
-  });
-}
-
 function removeRoutingReferencesFromFields(
   fields: {
     outputTargetId?: Id<"tracks">;
@@ -174,15 +155,14 @@ function mergeTrackWithMixerState(
   };
 }
 
-export async function listMixerChannelsForTrack(ctx: any, trackId: Id<"tracks">) {
-  const rows = await ctx.db
+export async function listMixerChannelsForTrack(ctx: MixerReadCtx, trackId: Id<"tracks">) {
+  return await ctx.db
     .query("mixerChannels")
-    .withIndex("by_track", (q: any) => q.eq("trackId", trackId))
+    .withIndex("by_track", (q) => q.eq("trackId", trackId))
     .collect();
-  return rows as Doc<"mixerChannels">[];
 }
 
-export async function deleteMixerStateForTrack(ctx: any, trackId: Id<"tracks">) {
+export async function deleteMixerStateForTrack(ctx: MutationCtx, trackId: Id<"tracks">) {
   const rows = await listMixerChannelsForTrack(ctx, trackId);
   for (const row of rows) {
     await ctx.db.delete(row._id);
@@ -190,16 +170,16 @@ export async function deleteMixerStateForTrack(ctx: any, trackId: Id<"tracks">) 
 }
 
 export async function removeTrackRoutingReferences(
-  ctx: any,
+  ctx: MutationCtx,
   projectId: string,
   trackId: Id<"tracks">,
 ) {
   const roomChannels = await ctx.db
     .query("mixerChannels")
-    .withIndex("by_room", (q: any) => q.eq("projectId", projectId))
+    .withIndex("by_room", (q) => q.eq("projectId", projectId))
     .collect();
 
-  for (const roomChannel of roomChannels as Doc<"mixerChannels">[]) {
+  for (const roomChannel of roomChannels) {
     if (String(roomChannel.trackId) === String(trackId)) continue;
 
     const patch = removeRoutingReferencesFromFields(roomChannel, trackId);
@@ -208,7 +188,7 @@ export async function removeTrackRoutingReferences(
   }
 }
 
-export async function ensureMixerChannelForTrack(ctx: any, track: Doc<"tracks">) {
+export async function ensureMixerChannelForTrack(ctx: MixerReadCtx, track: Doc<"tracks">) {
   const rows = await listMixerChannelsForTrack(ctx, track._id);
   if (rows.length !== 1) {
     throw new Error(`Expected exactly one mixer channel for track ${String(track._id)}.`);
@@ -216,13 +196,11 @@ export async function ensureMixerChannelForTrack(ctx: any, track: Doc<"tracks">)
   return rows[0];
 }
 
-export async function listProjectTracksWithMixerChannels(ctx: any, projectId: string): Promise<MergedTrackDoc[]> {
-  const [tracksRaw, channelsRaw] = await Promise.all([
-    ctx.db.query("tracks").withIndex("by_room", (q: any) => q.eq("projectId", projectId)).collect(),
-    ctx.db.query("mixerChannels").withIndex("by_room", (q: any) => q.eq("projectId", projectId)).collect(),
+export async function listProjectTracksWithMixerChannels(ctx: MixerReadCtx, projectId: string): Promise<MergedTrackDoc[]> {
+  const [tracks, channels] = await Promise.all([
+    ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect(),
+    ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect(),
   ]);
-  const tracks = tracksRaw as Doc<"tracks">[];
-  const channels = channelsRaw as Doc<"mixerChannels">[];
   const channelByTrackId = new Map<string, Doc<"mixerChannels">>();
   for (const channel of channels) {
     const trackId = String(channel.trackId);
@@ -243,54 +221,9 @@ export async function listProjectTracksWithMixerChannels(ctx: any, projectId: st
     .sort((a: MergedTrackDoc, b: MergedTrackDoc) => (a.index ?? 0) - (b.index ?? 0));
 }
 
-export async function getMergedTrack(ctx: any, trackId: Id<"tracks">): Promise<MergedTrackDoc | null> {
+export async function getMergedTrack(ctx: MixerReadCtx, trackId: Id<"tracks">): Promise<MergedTrackDoc | null> {
   const track = await ctx.db.get(trackId);
   if (!track) return null;
   const channel = await ensureMixerChannelForTrack(ctx, track);
   return mergeTrackWithMixerState(track, channel);
 }
-
-export const backfillMissingMixerChannels = internalMutation({
-  args: {
-    projectId: v.optional(v.string()),
-    paginationOpts: paginationOptsValidator,
-  },
-  handler: async (ctx, { projectId, paginationOpts }) => {
-    const page = projectId === undefined
-      ? await ctx.db.query("tracks").paginate(paginationOpts)
-      : await ctx.db
-        .query("tracks")
-        .withIndex("by_room", (q) => q.eq("projectId", projectId))
-        .paginate(paginationOpts);
-    const tracks = page.page;
-    const channelCounts = await Promise.all(
-      tracks.map(async (track) => ({
-        track,
-        count: (await listMixerChannelsForTrack(ctx, track._id)).length,
-      })),
-    );
-    let created = 0;
-    let skippedExisting = 0;
-    let skippedDuplicate = 0;
-    for (const { track, count } of channelCounts) {
-      if (count === 1) {
-        skippedExisting += 1;
-        continue;
-      }
-      if (count > 1) {
-        skippedDuplicate += 1;
-        continue;
-      }
-      await ctx.db.insert("mixerChannels", buildMixerChannelInsertForExistingTrack(track));
-      created += 1;
-    }
-
-    return {
-      created,
-      skippedExisting,
-      skippedDuplicate,
-      continueCursor: page.continueCursor,
-      isDone: page.isDone,
-    };
-  },
-});

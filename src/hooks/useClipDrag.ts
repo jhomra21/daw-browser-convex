@@ -118,6 +118,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
   // Ctrl-drag duplication state
   let duplicationActive = false
   let creatingTrackDuringDrag = false
+  let addedTrackDuringDragScope: { projectId: string; userId: string } | null = null
   let lastDraftMoves: Array<{ clipId: string; trackId: Track['id']; startSec: number }> | null = null
   const dragLookupCache = createDragTrackLookupCache()
 
@@ -134,7 +135,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     if (!trackId) return
     const track = resolvedTracks().find(entry => entry.id === trackId)
     if (track && track.clips.length > 0) return
-    void persistence.deleteEmptyTrack(trackId).catch(() => null)
+    void persistence.deleteEmptyTrack(trackId, addedTrackDuringDragScope ?? undefined).catch(() => null)
   }
 
   const clearDragLocals = () => {
@@ -142,6 +143,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     duplicationActive = false
     multiDragging = null
     addedTrackDuringDrag = null
+    addedTrackDuringDragScope = null
     creatingTrackDuringDrag = false
     draggingIds = null
     lastDraftMoves = null
@@ -165,9 +167,11 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     creatingTrackDuringDrag = true
     try {
       const kind = getDraggedTrackKind(ts, lookup)
+      const scope = { projectId: projectId(), userId: userId() }
       const trackId = await persistence.createTrackForDrag(kind)
       if (!trackId) return null
       addedTrackDuringDrag = trackId
+      addedTrackDuringDragScope = scope
       return trackId
     } finally {
       creatingTrackDuringDrag = false
@@ -454,6 +458,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           insertLocalClip,
           removeLocalClips,
           audioBufferCache: options.audioBufferCache,
+          canProject: () => projectId() === rid,
           grantClipWrites,
           historyPush: options.historyPush,
           createManyCloudClips: async (items) => await convexClient.mutation(convexApi.clips.createMany, { items }),

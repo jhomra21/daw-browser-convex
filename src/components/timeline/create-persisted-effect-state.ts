@@ -5,7 +5,7 @@ import {
   onCleanup,
   type Accessor,
 } from 'solid-js'
-import { registerPendingEffectFlusher } from '~/lib/local-effect-write-flush'
+import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
 
 type PersistedEffectContext = {
   projectId?: string
@@ -151,7 +151,7 @@ export function createPersistedEffectState<TRow, TParams>(
           if (!current) return
           if (options.serializeParams(current) !== serialized) return
           options.onPersistError?.(error)
-          clearDraft(targetId, key)
+          persistAttemptByTarget.delete(key)
           throw error
         },
       )
@@ -172,7 +172,7 @@ export function createPersistedEffectState<TRow, TParams>(
 
   function ensureProjectFlusher(projectId: string) {
     if (registeredFlushers.has(projectId)) return
-    registeredFlushers.set(projectId, registerPendingEffectFlusher(projectId, async () => {
+    registeredFlushers.set(projectId, registerPendingLocalProjectWriteFlusher('effects', projectId, async () => {
       await flushPending(projectId)
     }))
   }
@@ -199,6 +199,8 @@ export function createPersistedEffectState<TRow, TParams>(
     if (!initial) return
 
     const next = updater(initial)
+    const serializedNext = options.serializeParams(next)
+    if (previous !== undefined && options.serializeParams(previous) === serializedNext) return
     const pendingCommit = pendingCommitByTarget.get(key)
     lastLocalEdit.set(key, Date.now())
     const context = options.createPersistContext?.() ?? {}
@@ -213,7 +215,7 @@ export function createPersistedEffectState<TRow, TParams>(
       targetId,
       previous: pendingCommit?.previous ?? previous,
       next,
-      serialized: options.serializeParams(next),
+      serialized: serializedNext,
     })
     persistOrSchedule(targetId, key, next)
   }
@@ -282,6 +284,13 @@ export function createPersistedEffectState<TRow, TParams>(
       saveTimers.delete(key)
       const params = draftByTarget()[key]
       if (params) persistNow(targetId, key, params, context ?? {})
+    }
+    for (const [key, params] of Object.entries(draftByTarget())) {
+      if (saveTimers.has(key) || persistAttemptByTarget.has(key)) continue
+      const context = persistContextByTarget.get(key)
+      if (projectId && context?.projectId !== projectId) continue
+      const targetId = targetByKey.get(key)
+      if (targetId && params) persistNow(targetId, key, params, context ?? {})
     }
     const pendingWrites = projectId
       ? pendingWritesByProject.get(projectId)

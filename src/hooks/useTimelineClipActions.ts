@@ -2,7 +2,6 @@ import type { FunctionReturnType } from 'convex/server'
 import { batch, type Accessor, type Setter } from 'solid-js'
 
 import { buildClipCreateSnapshot, buildCreatedClipSelection, createProjectedClips, createProjectedLocalClips, pushClipCreateHistory, type BatchClipCreateItem } from '~/lib/clip-create'
-import { buildClipRemoveManyMutationInput } from '~/lib/clip-mutation-args'
 import { getTrackDeleteConflictMessage } from '~/lib/delete-conflict-messages'
 import { buildTrackEffectQueryArgs } from '~/lib/effect-track-args'
 import { getLocalEffect } from '~/lib/local-effects'
@@ -11,6 +10,7 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { isClipCompatibleWithTrack } from '~/lib/track-routing'
 import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
+import { createTimelineClipWriteAdapter } from '~/lib/timeline-clip-write-adapter'
 import { calcNonOverlapStart, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import { buildClipDeleteHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
@@ -156,6 +156,8 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     if (writableSelectedIds.size === 0) return
 
     const rid = projectId()
+    const uid = userId()
+    if (!rid || (!isLocalId('project', rid) && !uid)) return
     const snapshot = tracks()
     const reconcileSelectionAfterDelete = (removedIds: Set<string>) => {
       const remainingSelectedIds = new Set(Array.from(selectedIds).filter((clipId) => !removedIds.has(clipId)))
@@ -178,38 +180,11 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       })
     }
 
-    if (rid && isLocalId('project', rid)) {
-      const repository = createLocalTimelineRepository(rid)
-      await repository.deleteClips(Array.from(writableSelectedIds))
-      try {
-        if (typeof historyPush === 'function') {
-          const entry = buildClipDeleteHistoryEntry({ projectId: rid, tracks: snapshot, clipIds: writableSelectedIds })
-          if (entry.data.items.length > 0) historyPush(entry)
-        }
-      } catch {}
-
-      removeLocalClips(writableSelectedIds)
-      reconcileSelectionAfterDelete(writableSelectedIds)
-      return
-    }
-
-    const uid = userId()
-    if (!uid) return
-
-    const result = await convexClient.mutation(
-      convexApi.clips.removeMany,
-      buildClipRemoveManyMutationInput({ clipIds: Array.from(writableSelectedIds), userId: uid }),
-    )
-    const removedIds = new Set<string>(
-      Array.isArray(result?.removedClipIds)
-        ? result.removedClipIds.map((clipId: unknown) => String(clipId))
-        : [],
-    )
+    const removedIds = await createTimelineClipWriteAdapter({ projectId: rid, userId: uid }).deleteClips(Array.from(writableSelectedIds))
     if (removedIds.size === 0) return
 
     try {
-      const rid = projectId()
-      if (rid && typeof historyPush === 'function') {
+      if (typeof historyPush === 'function') {
         const entry = buildClipDeleteHistoryEntry({ projectId: rid, tracks: snapshot, clipIds: removedIds })
         if (entry.data.items.length > 0) historyPush(entry)
       }
@@ -226,17 +201,15 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     if (writableSelectedIds.size === 0) return
 
     const tsSnapshot = tracks()
-    const byTrack = new Map<Track['id'], Clip[]>()
+    const byTrack = new Map<Track['id'], { track: Track; clips: Clip[] }>()
     for (const track of tsSnapshot) {
       const selected = track.clips.filter(clip => writableSelectedIds.has(clip.id))
-      if (selected.length > 0) byTrack.set(track.id, selected)
+      if (selected.length > 0) byTrack.set(track.id, { track, clips: selected })
     }
 
     const pending: BatchClipCreateItem[] = []
 
-    for (const [trackId, clipsToDup] of byTrack.entries()) {
-      const track = tsSnapshot.find(entry => entry.id === trackId)
-      if (!track) continue
+    for (const [trackId, { track, clips: clipsToDup }] of byTrack.entries()) {
       const sorted = clipsToDup.slice().sort((left, right) => left.startSec - right.startSec)
       const groupStart = Math.min(...sorted.map(clip => clip.startSec))
       const groupEnd = Math.max(...sorted.map(clip => clip.startSec + clip.duration))
@@ -270,6 +243,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         insertLocalClip,
         removeLocalClips,
         audioBufferCache,
+        canProject: () => projectId() === rid,
       })
       const nextSelection = buildCreatedClipSelection(created)
       if (nextSelection) {

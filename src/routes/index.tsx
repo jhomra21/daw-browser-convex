@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/solid-router'
 import { createSignal, onCleanup, onMount, Suspense, lazy } from 'solid-js'
 import LocalProjectPicker from '~/components/LocalProjectPicker'
 import { isLocalId } from '~/lib/local-ids'
+import { readLocationSearchParam } from '~/lib/location-search-param'
 import { markLocalProjectOpened } from '~/lib/local-project-db'
 import { useSessionQuery } from '~/lib/session'
 
@@ -11,32 +12,39 @@ export const Route = createFileRoute('/')({
   component: Index,
 })
 
-const readProjectIdFromLocation = () => {
-  try {
-    const url = new URL(window.location.href)
-    const projectId = url.searchParams.get('projectId')
-    return projectId && projectId.trim() ? projectId : null
-  } catch {
-    return null
-  }
-}
-
 function Index() {
   const [projectId, setProjectId] = createSignal<string | null>(null)
+  const [shareToken, setShareToken] = createSignal<string | null>(null)
   const session = useSessionQuery()
 
+  const readProjectIdFromLocation = () => {
+    const nextProjectId = readLocationSearchParam('projectId')
+    const legacyRoomId = readLocationSearchParam('roomId')
+    if (legacyRoomId && !nextProjectId) {
+      const url = new URL(window.location.href)
+      url.searchParams.set('projectId', legacyRoomId)
+      url.searchParams.delete('roomId')
+      history.replaceState(null, '', url.toString())
+    }
+    return nextProjectId ?? legacyRoomId
+  }
+
   onMount(() => {
-    const syncProjectId = () => setProjectId(readProjectIdFromLocation())
-    syncProjectId()
-    window.addEventListener('popstate', syncProjectId)
+    const syncLocationState = () => {
+      setProjectId(readProjectIdFromLocation())
+      setShareToken(readLocationSearchParam('shareToken'))
+    }
+    syncLocationState()
+    window.addEventListener('popstate', syncLocationState)
     onCleanup(() => {
-      window.removeEventListener('popstate', syncProjectId)
+      window.removeEventListener('popstate', syncLocationState)
     })
   })
 
   const openProject = (nextProjectId: string) => {
     const url = new URL(window.location.href)
     url.searchParams.set('projectId', nextProjectId)
+    url.searchParams.delete('roomId')
     history.pushState(null, '', url.toString())
     setProjectId(nextProjectId)
     void markLocalProjectOpened(nextProjectId)
@@ -44,7 +52,7 @@ function Index() {
 
   const requiresCloudLogin = () => {
     const rid = projectId()
-    return Boolean(rid && !isLocalId('project', rid) && session.data === null)
+    return Boolean(((rid && !isLocalId('project', rid)) || shareToken()) && session.data === null)
   }
 
   const loginUrl = () => `/Login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`
@@ -66,7 +74,7 @@ function Index() {
             </a>
           </div>
         </section>
-      ) : projectId() ? (
+      ) : projectId() || shareToken() ? (
           <Suspense fallback={<div class="flex h-full items-center justify-center text-sm text-neutral-400">Loading studio...</div>}>
             <Timeline />
           </Suspense>

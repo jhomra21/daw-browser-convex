@@ -4,9 +4,7 @@ import { isLocalId } from '~/lib/local-ids'
 import { loadLocalProjectState, saveLocalProjectState } from '~/lib/local-project-state'
 import {
   loadLocalMixMap,
-  loadLocalRoutingMap,
   saveLocalMixMap,
-  saveLocalRoutingMap,
   stripSharedTrackLocalOverrides,
   type LocalMixMap,
   type LocalMixPatch,
@@ -61,36 +59,12 @@ function mergeLocalMixPatch(current: LocalMixMap, trackId: Track['id'], patch: L
 
 const loadLocalTrackState = (projectId: string): LocalMixMap => {
   if (isLocalId('project', projectId)) return {}
-  const mix = loadLocalMixMap(projectId)
-  const routing = loadLocalRoutingMap(projectId)
-  let next: LocalMixMap | null = null
-  for (const [trackId, patch] of Object.entries(routing)) {
-    if (patch.sends === undefined && patch.outputTargetId === undefined) continue
-    if (!next) next = { ...mix }
-    next[trackId] = {
-      ...(next[trackId] ?? {}),
-      sends: patch.sends,
-      outputTargetId: patch.outputTargetId,
-    }
-  }
-  return next ?? mix
+  return loadLocalMixMap(projectId)
 }
 
 const saveLocalTrackState = (projectId: string, value: LocalMixMap) => {
   if (isLocalId('project', projectId)) return
   saveLocalMixMap(projectId, value)
-  const routing = Object.fromEntries(
-    Object.entries(value)
-      .filter(([, patch]) => patch.sends !== undefined || patch.outputTargetId !== undefined)
-      .map(([trackId, patch]) => [
-        trackId,
-        {
-          sends: patch.sends,
-          outputTargetId: patch.outputTargetId,
-        },
-      ]),
-  )
-  saveLocalRoutingMap(projectId, routing)
 }
 
 const loadProjectTrackState = async (projectId: string): Promise<LocalMixMap | undefined> => {

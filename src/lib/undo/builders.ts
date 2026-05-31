@@ -1,4 +1,4 @@
-import { buildClipHistorySnapshot } from '~/lib/clip-create'
+import { buildClipHistorySnapshot, type ClipCreateSnapshot } from '~/lib/clip-create'
 import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
 import type { Track, TrackRouting } from '~/types/timeline'
 
@@ -27,6 +27,35 @@ export function buildTrackCreateHistoryEntry(input: {
       index: input.index,
       kind: input.kind,
       channelRole: input.channelRole,
+    },
+  }
+}
+
+export function buildTrackClipCreateHistoryEntry(input: {
+  projectId: string
+  track: Track
+  tracks: Track[]
+  clipId: string
+  clip: ClipCreateSnapshot
+}): Extract<HistoryEntry, { type: 'track-clip-create' }> {
+  const trackRef = getTrackHistoryRef(input.track)
+  return {
+    type: 'track-clip-create',
+    projectId: input.projectId,
+    data: {
+      track: {
+        trackRef,
+        currentTrackId: input.track.id,
+        index: input.tracks.findIndex((entry) => entry.id === input.track.id),
+        kind: input.track.kind,
+        channelRole: input.track.channelRole,
+      },
+      clip: {
+        trackRef,
+        clipRef: input.clipId,
+        currentId: input.clipId,
+        ...input.clip,
+      },
     },
   }
 }

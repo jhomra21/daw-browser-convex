@@ -10,7 +10,7 @@ import { clientXToSec, yToLaneIndex, willOverlap, calcNonOverlapStart, quantizeS
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
 import { createAudioImportTransaction, removeAutoCreatedCloudTrack } from '~/lib/timeline-audio-import'
-import { getTrackHistoryRef } from '~/lib/undo/refs'
+import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
 import type { HistoryEntry } from '~/lib/undo/types'
 import { createOptimisticTrackWithHistory } from '~/lib/tracks'
 import type { Clip, Track } from '~/types/timeline'
@@ -157,26 +157,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     const historyPush = options.historyPush
     const rid = projectId()
     if (!rid || typeof historyPush !== 'function') return
-    const index = tracks().findIndex((entry) => entry.id === track.id)
-    historyPush({
-      type: 'track-clip-create',
-      projectId: rid,
-      data: {
-        track: {
-          trackRef: getTrackHistoryRef(track),
-          currentTrackId: track.id,
-          index,
-          kind: track.kind,
-          channelRole: track.channelRole,
-        },
-        clip: {
-          trackRef: getTrackHistoryRef(track),
-          clipRef: clipId,
-          currentId: clipId,
-          ...clip,
-        },
-      },
-    })
+    historyPush(buildTrackClipCreateHistoryEntry({ projectId: rid, track, tracks: tracks(), clipId, clip }))
   }
 
   const ensureTargetAudioTrack = async (trackId?: Track['id'], message?: string): Promise<TargetAudioTrack | null> => {

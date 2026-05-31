@@ -652,8 +652,9 @@ export function createAgentActions(context: AgentActionContext) {
         return { error: 'No writable clips selected' }
       }
 
+      const toTrack = resolved.toTrack
       for (const clip of resolved.writableSelectedClips) {
-        const targetError = getClipTargetError(resolved.toTrack, getClipKindFromClip(clip))
+        const targetError = getClipTargetError(toTrack, getClipKindFromClip(clip))
         if (targetError) return { error: targetError }
       }
 
@@ -664,7 +665,7 @@ export function createAgentActions(context: AgentActionContext) {
           : clip.startSec
         return buildClipCreatePayload({
           projectId: context.projectId,
-          trackId: resolved.toTrack!._id,
+          trackId: toTrack._id,
           userId: context.userId,
           clip: {
             startSec,
@@ -812,13 +813,15 @@ export function createAgentActions(context: AgentActionContext) {
       if (!intervalSec) intervalSec = baseDuration
       if (!count) count = 1
 
+      const targetTrackId = targetTrack._id
+      const clipIntervalSec = intervalSec
       const startSec = typeof input.startSec === 'number' ? Math.max(0, Number(input.startSec)) : 0
       const items = Array.from({ length: count }).map((_, index) => (
         buildAgentSampleClipPayload({
           projectId: context.projectId,
           userId: context.userId,
-          trackId: targetTrack!._id,
-          startSec: startSec + index * intervalSec!,
+          trackId: targetTrackId,
+          startSec: startSec + index * clipIntervalSec,
           duration: baseDuration,
           sample,
         })

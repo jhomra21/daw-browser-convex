@@ -322,6 +322,10 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                               onPointerUp={menu().stopMenuPress}
                               onClick={async (event) => {
                                 menu().stopMenuPress(event);
+                                if (isLocalId("project", projectId)) {
+                                  const confirmation = window.prompt(`Type "${project.name}" to delete this local project.`);
+                                  if (confirmation !== project.name) return;
+                                }
                                 await menu().confirmProjectDelete(projectId);
                               }}
                             >

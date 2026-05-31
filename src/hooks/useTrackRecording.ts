@@ -25,6 +25,7 @@ import {
 } from '~/lib/track-recording-target'
 import { canTrackReceiveAudioClip } from '~/lib/track-routing'
 import { calcNonOverlapStart, willOverlap } from '~/lib/timeline-utils'
+import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { UploadToR2 } from '~/hooks/useClipBuffers'
@@ -225,26 +226,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
   const pushTrackClipCreateHistory = (projectId: string, track: Track, clipId: string, clip: ClipCreateSnapshot) => {
     if (typeof historyPush !== 'function') return
-    const index = tracks().findIndex((entry) => entry.id === track.id)
-    historyPush({
-      type: 'track-clip-create',
-      projectId,
-      data: {
-        track: {
-          trackRef: getTrackHistoryRef(track),
-          currentTrackId: track.id,
-          index,
-          kind: track.kind,
-          channelRole: track.channelRole,
-        },
-        clip: {
-          trackRef: getTrackHistoryRef(track),
-          clipRef: clipId,
-          currentId: clipId,
-          ...clip,
-        },
-      },
-    })
+    historyPush(buildTrackClipCreateHistoryEntry({ projectId, track, tracks: tracks(), clipId, clip }))
   }
 
   const finalizeRecording = async () => {
@@ -253,8 +235,8 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     const rid = ctx.projectId
     const uid = ctx.userId
     const isLocalProject = ctx.isLocalProject
-    if (!rid || (!isLocalProject && !uid)) {
-      emit(isLocalProject ? 'Missing project context; recording discarded.' : 'Missing project or user context; recording discarded.')
+    if (!isLocalProject && !uid) {
+      emit('Missing project or user context; recording discarded.')
       await cleanupRecording()
       await handleAutoCreatedTrackFailure(ctx.createdTrack, ctx)
       return
@@ -286,7 +268,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       return
     }
 
-    const existingTracks = tracks()
+    const existingTracks = projectId() === ctx.projectId ? tracks() : ctx.tracks
     const targetTrack = existingTracks.find((entry) => entry.id === ctx.trackId)
     if (!targetTrack) {
       emit('Recording target track missing; clip skipped.')
@@ -320,7 +302,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         const created = await createLocalAudioClip({
           projectId: rid,
           trackId: ctx.trackId,
-          trackRef: getTrackHistoryRef(existingTracks.find((entry) => entry.id === ctx.trackId) ?? targetTrack),
+          trackRef: getTrackHistoryRef(targetTrack),
           startSec: nonOverlapStart,
           fileName: file.name,
           decoded,
@@ -390,7 +372,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         historyPush,
         projectId: rid,
         trackId: ctx.trackId,
-        trackRef: getTrackHistoryRef(existingTracks.find((entry) => entry.id === ctx.trackId) ?? targetTrack),
+        trackRef: getTrackHistoryRef(targetTrack),
         clipId: createdClip.clipId,
         clip: createdClip.clip,
       })
@@ -414,8 +396,12 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     const uid = userId()
     const rid = projectId()
     const isLocalProject = rid ? isLocalId('project', rid) : false
-    if (!rid || (!isLocalProject && !uid)) {
-      emit(isLocalProject ? 'You must be inside a project to record.' : 'You must be signed in and inside a project to record.')
+    if (!rid) {
+      emit('You must be inside a project to record.')
+      return { ok: false, reason: 'Missing session context' }
+    }
+    if (!isLocalProject && !uid) {
+      emit('You must be signed in and inside a project to record.')
       return { ok: false, reason: 'Missing session context' }
     }
 
@@ -455,7 +441,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     } catch {
       emit('Microphone access denied.')
-      await releaseTrackLock(trackId, uid)
+      await releaseTrackLock(trackId, uid, isLocalProject)
       return { ok: false, reason: 'Permission denied' }
     }
 
@@ -467,7 +453,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       console.error('[useTrackRecording] failed to create MediaRecorder', err)
       emit('Recording is not supported in this browser.')
       stream.getTracks().forEach(track => track.stop())
-      await releaseTrackLock(trackId, uid)
+      await releaseTrackLock(trackId, uid, isLocalProject)
       return { ok: false, reason: 'Recorder unsupported' }
     }
 

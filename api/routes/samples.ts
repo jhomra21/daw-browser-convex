@@ -1,11 +1,7 @@
 import type { App } from '../app-types'
+import { hashFile } from '../hash-file'
 import { requireProjectRoleForApi } from '../project-access'
-
-const hashFile = async (file: File) => {
-  const hash = await crypto.subtle.digest('SHA-256', await file.arrayBuffer())
-  return Array.from(new Uint8Array(hash)).map((byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
+import { sanitizeFileNameSegment } from '../sanitize-file-name-segment'
 
 export function registerSampleRoutes(app: App) {
 // Upload a sample to R2 (protected route)
@@ -29,41 +25,17 @@ export function registerSampleRoutes(app: App) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    // Sanitize filename for use as a key segment
-    const baseName = file.name?.toString() || 'audio'
-    const sanitized = baseName
-      .replace(/\\/g, '/')              // normalize separators
-      .split('/')
-      .pop()!
-      .replace(/[^A-Za-z0-9._-]/g, '_')  // safe chars
-      .slice(0, 180)                      // keep key short-ish
+    const sanitized = sanitizeFileNameSegment(file.name, 'audio')
     // Primary layout: rooms/<projectId>/clips/<filename>
     // Handle collisions by appending " (n)" or timestamp.
     const contentHash = await hashFile(file)
     const clipsPrefix = `projects/${projectId}/assets/${assetKey}/${contentHash}/`
-    const splitIdx = sanitized.lastIndexOf('.')
-    const base = splitIdx > 0 ? sanitized.slice(0, splitIdx) : sanitized
-    const ext = splitIdx > 0 ? sanitized.slice(splitIdx) : ''
-    let chosenName = sanitized
-    let attempts = 0
-    while (attempts < 5) {
-      const probeKey = clipsPrefix + chosenName
-      const existing = await c.env.daw_audio_samples.get(probeKey)
-      if (!existing) {
-        break
-      }
-      const existingAssetKey = existing.customMetadata?.assetKey
-      if (existingAssetKey === assetKey) {
-        break
-      }
-      attempts++
-      chosenName = `${base} (${attempts})${ext}`
-    }
-    if (attempts >= 5) {
-      const ts = new Date().toISOString().replace(/[-:TZ.]/g, '')
-      chosenName = `${base}_${ts}${ext}`
-    }
+    const chosenName = sanitized
     const key = clipsPrefix + chosenName
+    if (await c.env.daw_audio_samples.head(key)) {
+      const url = `/api/samples/${projectId}/${encodeURIComponent(assetKey)}?key=${encodeURIComponent(key)}`
+      return c.json({ key, url })
+    }
     await c.env.daw_audio_samples.put(key, file.stream(), {
       httpMetadata: {
         contentType: file.type || 'application/octet-stream',

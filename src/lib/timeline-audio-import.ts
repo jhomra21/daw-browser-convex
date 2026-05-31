@@ -147,6 +147,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
             }
           } catch {}
         }
+        if (!context.project.isActiveProjectTrack(projectId, input.trackId)) return row.id
         context.clips.selectClip(input.trackId, row.id)
         if (input.autoCreatedTrack) {
           context.clips.pushTrackClipCreateHistory(input.autoCreatedTrack, row.id, clipSnapshot)

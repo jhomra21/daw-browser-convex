@@ -1,5 +1,5 @@
 import type { Doc } from "./_generated/dataModel";
-import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { requireProjectRole } from "./projectAccess";
 import { projectManifestValidator } from "./projectManifestValidator";
@@ -17,12 +17,15 @@ const requireServerSecret = (serverSecret: string) => {
   }
 };
 
-type CloudBackup = Doc<"cloudBackups">;
+const latestBackup = async (ctx: Pick<QueryCtx, "db">, projectId: string) => (
+  await ctx.db
+    .query("cloudBackups")
+    .withIndex("by_room_updatedAt", (q) => q.eq("projectId", projectId))
+    .order("desc")
+    .first()
+);
 
-const assertProjectNotDeleting = async (
-  ctx: Pick<QueryCtx, "db">,
-  projectId: string,
-) => {
+const assertProjectNotDeleting = async (ctx: Pick<QueryCtx, "db">, projectId: string) => {
   const project = await ctx.db
     .query("projects")
     .withIndex("by_room", (q) => q.eq("projectId", projectId))
@@ -32,47 +35,24 @@ const assertProjectNotDeleting = async (
   }
 };
 
-const listBackupsNewestFirst = async (
-  ctx: Pick<QueryCtx, "db">,
-  projectId: string,
-): Promise<CloudBackup[]> => {
-  const rows = await ctx.db
-    .query("cloudBackups")
-    .withIndex("by_room", (q) => q.eq("projectId", projectId))
-    .collect();
-  return rows.sort((left, right) => right.updatedAt - left.updatedAt);
-};
-
-const latestBackup = async (ctx: Pick<QueryCtx, "db">, projectId: string) => (
-  (await listBackupsNewestFirst(ctx, projectId))[0]
-);
-
-const normalizeLatestBackup = async (ctx: MutationCtx, projectId: string) => {
-  const rows = await listBackupsNewestFirst(ctx, projectId);
-  const [latest, ...duplicates] = rows;
-  for (const duplicate of duplicates) {
-    await ctx.db.delete(duplicate._id);
-  }
-  return {
-    latest,
-    duplicateManifests: duplicates.map((row) => row.manifest),
-  };
-};
-
 const readBackupConflict = (
-  existing: Pick<CloudBackup, "manifestUpdatedAt" | "entityCount" | "assetCount"> | undefined,
-  manifest: BackupManifestForValidation,
+  existing: Pick<Doc<"cloudBackups">, "manifestVersion" | "manifestUpdatedAt" | "entityCount" | "assetCount"> | null | undefined,
+  manifest: ProjectManifest,
+  baseManifestVersion?: string,
 ) => {
   const manifestUpdatedAt = Number(manifest.updatedAt) || 0;
-  if (!existing || manifestUpdatedAt >= existing.manifestUpdatedAt) return null;
-  return {
-    localUpdatedAt: manifestUpdatedAt,
-    cloudUpdatedAt: existing.manifestUpdatedAt,
-    localEntityCount: Number(manifest.entityCount) || 0,
-    cloudEntityCount: existing.entityCount,
-    localAssetCount: Number(manifest.assetCount) || 0,
-    cloudAssetCount: existing.assetCount,
-  };
+  if (!existing) return null;
+  if (baseManifestVersion !== existing.manifestVersion || manifestUpdatedAt < existing.manifestUpdatedAt) {
+    return {
+      localUpdatedAt: manifestUpdatedAt,
+      cloudUpdatedAt: existing.manifestUpdatedAt,
+      localEntityCount: Number(manifest.entityCount) || 0,
+      cloudEntityCount: existing.entityCount,
+      localAssetCount: Number(manifest.assetCount) || 0,
+      cloudAssetCount: existing.assetCount,
+    };
+  }
+  return null;
 };
 
 const assertManifestProject = (projectId: string, manifest: { projectId: string }) => {
@@ -81,27 +61,17 @@ const assertManifestProject = (projectId: string, manifest: { projectId: string 
   }
 };
 
-type BackupManifestForValidation = Omit<ProjectManifest, "syncState"> & {
-  syncState?: ProjectManifest["syncState"];
-};
-
-const assertConflictManifest = (projectId: string, manifest: BackupManifestForValidation) => {
+const assertConflictManifest = (projectId: string, manifest: ProjectManifest) => {
   assertManifestProject(projectId, manifest);
-  assertProjectManifestBaseIntegrity({
-    ...manifest,
-    syncState: manifest.syncState ?? [],
-  });
+  assertProjectManifestBaseIntegrity(manifest);
 };
 
-const assertPublishManifest = (projectId: string, manifest: BackupManifestForValidation) => {
+const assertPublishManifest = (projectId: string, manifest: ProjectManifest) => {
   assertManifestProject(projectId, manifest);
-  assertProjectManifestPublishIntegrity({
-    ...manifest,
-    syncState: manifest.syncState ?? [],
-  });
+  assertProjectManifestPublishIntegrity(manifest);
 };
 
-const readManifestCloudKeys = (projectId: string, manifest: BackupManifestForValidation | undefined) => (
+const readManifestCloudKeys = (projectId: string, manifest: ProjectManifest | undefined) => (
   manifest?.assets
     .flatMap((asset) => asset.cloudKey ? [asset.cloudKey] : [])
     .filter((key) => key.startsWith(`projects/${projectId}/assets/`)) ?? []
@@ -109,8 +79,8 @@ const readManifestCloudKeys = (projectId: string, manifest: BackupManifestForVal
 
 const readSupersededCloudKeys = (
   projectId: string,
-  previousManifest: BackupManifestForValidation | undefined,
-  nextManifest: BackupManifestForValidation,
+  previousManifest: ProjectManifest | undefined,
+  nextManifest: ProjectManifest,
 ) => {
   const nextKeys = new Set(readManifestCloudKeys(projectId, nextManifest));
   return readManifestCloudKeys(projectId, previousManifest).filter((key) => !nextKeys.has(key));
@@ -121,18 +91,18 @@ export const getLatest = query({
   handler: async (ctx, { projectId, userId, serverSecret }) => {
     requireServerSecret(serverSecret);
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor", "viewer"]);
-    return await latestBackup(ctx, projectId) ?? null;
+    return await latestBackup(ctx, projectId);
   },
 });
 
 export const checkConflict = query({
-  args: { projectId: v.string(), userId: v.string(), manifest: projectManifestValidator, serverSecret: v.string() },
-  handler: async (ctx, { projectId, userId, manifest, serverSecret }) => {
+  args: { projectId: v.string(), userId: v.string(), manifest: projectManifestValidator, baseManifestVersion: v.optional(v.string()), serverSecret: v.string() },
+  handler: async (ctx, { projectId, userId, manifest, baseManifestVersion, serverSecret }) => {
     requireServerSecret(serverSecret);
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor"]);
     await assertProjectNotDeleting(ctx, projectId);
     assertConflictManifest(projectId, manifest);
-    return readBackupConflict(await latestBackup(ctx, projectId), manifest);
+    return readBackupConflict(await latestBackup(ctx, projectId), manifest, baseManifestVersion);
   },
 });
 
@@ -142,22 +112,20 @@ export const upsertLatest = mutation({
     userId: v.string(),
     manifest: projectManifestValidator,
     conflictAction: v.union(v.literal("detect"), v.literal("overwrite")),
+    baseManifestVersion: v.optional(v.string()),
     serverSecret: v.string(),
   },
-  handler: async (ctx, { projectId, userId, manifest, conflictAction, serverSecret }) => {
+  handler: async (ctx, { projectId, userId, manifest, conflictAction, baseManifestVersion, serverSecret }) => {
     requireServerSecret(serverSecret);
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor"]);
     await assertProjectNotDeleting(ctx, projectId);
     assertPublishManifest(projectId, manifest);
-    const { latest: existing, duplicateManifests } = await normalizeLatestBackup(ctx, projectId);
-    const conflict = readBackupConflict(existing, manifest);
+    const existing = await latestBackup(ctx, projectId);
+    const conflict = readBackupConflict(existing, manifest, baseManifestVersion);
     if (conflictAction === "detect" && conflict) {
       return { ok: false, conflict };
     }
-    const supersededCloudKeys = [
-      ...readSupersededCloudKeys(projectId, existing?.manifest, manifest),
-      ...duplicateManifests.flatMap((duplicateManifest) => readSupersededCloudKeys(projectId, duplicateManifest, manifest)),
-    ];
+    const supersededCloudKeys = readSupersededCloudKeys(projectId, existing?.manifest, manifest);
 
     const now = Date.now();
     const manifestVersion = `${now}`;

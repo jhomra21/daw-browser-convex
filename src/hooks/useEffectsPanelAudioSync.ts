@@ -1,4 +1,4 @@
-import { createEffect, createSignal, type Accessor } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, type Accessor } from "solid-js";
 import type { FunctionReturnType } from "convex/server";
 import {
   createDefaultEqParams,
@@ -14,6 +14,7 @@ import type { AudioEngine, SpectrumFrame } from "~/lib/audio-engine";
 import { convexApi } from "~/lib/convex";
 import { listLocalEffects, type LocalEffectRow } from "~/lib/local-effects";
 import { isLocalId } from "~/lib/local-ids";
+import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import type { Track } from "~/types/timeline";
 
 type UseEffectsPanelAudioSyncOptions = {
@@ -44,15 +45,13 @@ export function useEffectsPanelAudioSync(
 ): UseEffectsPanelAudioSyncReturn {
   const [localEffects, setLocalEffects] = createSignal<LocalEffectRow[] | undefined>(undefined);
 
-  createEffect(() => {
-    const projectId = options.projectId();
-    options.tracks();
+  createEffect(on(options.projectId, (projectId) => {
     if (!projectId || !isLocalId("project", projectId)) {
       setLocalEffects(undefined);
       return;
     }
-    const isCurrentProject = () => options.projectId() === projectId && isLocalId("project", projectId);
-    void listLocalEffects(projectId).then((rows) => {
+    const isCurrentProject = () => options.projectId() === projectId;
+    const reloadLocalEffects = () => listLocalEffects(projectId).then((rows) => {
       if (isCurrentProject()) {
         setLocalEffects(rows);
       }
@@ -61,7 +60,12 @@ export function useEffectsPanelAudioSync(
         setLocalEffects([]);
       }
     });
-  });
+    void reloadLocalEffects();
+    const unsubscribe = subscribeToLocalProjectChanges(projectId, () => {
+      void reloadLocalEffects();
+    })
+    onCleanup(unsubscribe)
+  }));
 
   const disabledEq = { ...createDefaultEqParams(), enabled: false };
   const disabledReverb = { ...createDefaultReverbParams(), enabled: false };

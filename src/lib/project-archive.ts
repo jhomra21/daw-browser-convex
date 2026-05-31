@@ -4,8 +4,8 @@ import { deleteLocalProject, importLocalProject } from '~/lib/local-project-db'
 import {
   buildProjectManifest,
   createRestoredProjectEntry,
-  migrateProjectManifest,
 } from '~/lib/project-manifest'
+import { normalizeProjectManifest } from '~/lib/project-manifest-contract'
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -123,7 +123,7 @@ export const importDawProjectArchive = async (file: File): Promise<string> => {
   const entries = await readZip(file)
   const manifestBytes = entries.get('manifest.json')
   if (!manifestBytes) throw new Error('Archive is missing manifest.json.')
-  const manifest = migrateProjectManifest(JSON.parse(decoder.decode(manifestBytes)))
+  const manifest = normalizeProjectManifest(JSON.parse(decoder.decode(manifestBytes)))
   const projectId = createLocalProjectId()
   const project = createRestoredProjectEntry({ ...manifest, projectId }, manifest.name)
   const assetFiles = manifest.assets.map((asset) => {
@@ -131,6 +131,7 @@ export const importDawProjectArchive = async (file: File): Promise<string> => {
     if (!bytes) throw new Error(`Archive is missing asset bytes for "${asset.name}".`)
     return { asset, bytes }
   })
+  const localAssets = manifest.assets.map(({ cloudKey, ...asset }) => asset)
   try {
     await Promise.all(assetFiles.map(async ({ asset, bytes }) => {
       const assetBytes = new ArrayBuffer(bytes.byteLength)
@@ -139,7 +140,7 @@ export const importDawProjectArchive = async (file: File): Promise<string> => {
     }))
     await importLocalProject(project, {
       entities: manifest.entities,
-      assets: manifest.assets,
+      assets: localAssets,
       projectState: manifest.projectState,
       syncState: [],
     })

@@ -39,5 +39,5 @@ export const projectManifestValidator = v.object({
     cloudKey: v.optional(v.string()),
   })),
   projectState: v.array(manifestStateRowValidator),
-  syncState: v.optional(v.array(manifestStateRowValidator)),
+  syncState: v.array(manifestStateRowValidator),
 });

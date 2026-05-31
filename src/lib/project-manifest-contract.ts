@@ -35,7 +35,7 @@ export type ProjectManifest = {
   syncState: LocalProjectSyncStateRow[];
 };
 
-const PROJECT_MANIFEST_SCHEMA_VERSION = 1;
+export const PROJECT_MANIFEST_SCHEMA_VERSION = 1;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -57,11 +57,6 @@ const readString = (value: unknown, field: string) => {
 const readArray = (value: unknown, field: string) => {
   if (!Array.isArray(value)) throw new Error(`Project manifest has invalid ${field}.`);
   return value;
-};
-
-const readOptionalArray = (value: unknown, field: string) => {
-  if (value === undefined) return [];
-  return readArray(value, field);
 };
 
 const readOptionalString = (value: unknown) => typeof value === "string" && value ? value : undefined;
@@ -120,6 +115,7 @@ export const assertProjectManifestBaseIntegrity = (manifest: ProjectManifest) =>
   }
   assertUnique(manifest.entities, (row) => JSON.stringify([row.kind, row.id]), "entity identity");
   assertUnique(manifest.assets, (row) => row.id, "asset id");
+  assertUnique(manifest.assets, (row) => row.storagePath, "asset storage path");
   assertUnique(manifest.projectState, (row) => row.key, "project state key");
   assertUnique(manifest.syncState, (row) => row.key, "sync state key");
 };
@@ -177,7 +173,7 @@ export const normalizeProjectManifest = (raw: unknown): ProjectManifest => {
     entities,
     assets,
     projectState: readArray(raw.projectState, "projectState").map(readProjectStateRow),
-    syncState: readOptionalArray(raw.syncState, "syncState").map(readSyncStateRow),
+    syncState: readArray(raw.syncState, "syncState").map(readSyncStateRow),
   };
   assertProjectManifestBaseIntegrity(manifest);
   return manifest;
@@ -191,7 +187,7 @@ export const withProjectManifestAssetKeys = (
 ): ProjectManifest => {
   const assets = manifest.assets.map((asset) => ({
     ...asset,
-    cloudKey: uploadedAssetKeys[asset.id],
+    cloudKey: uploadedAssetKeys[asset.id] ?? asset.cloudKey,
   }));
   return {
     ...manifest,

@@ -27,6 +27,7 @@ type DuplicateCommitInput = {
   insertLocalClip: (trackId: Track["id"], clip: Clip) => void;
   removeLocalClips: (clipIds: Iterable<string>) => void;
   audioBufferCache: Map<string, AudioBuffer>;
+  canProject?: () => boolean;
   grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void;
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void;
   createManyCloudClips: Parameters<typeof createProjectedClips>[0]["createMany"];
@@ -41,6 +42,7 @@ export const commitDuplicatedClipDrag = async (input: DuplicateCommitInput) => {
       insertLocalClip: input.insertLocalClip,
       removeLocalClips: input.removeLocalClips,
       audioBufferCache: input.audioBufferCache,
+      canProject: input.canProject,
     })
     : await createProjectedCloudClips(input);
 
@@ -152,13 +154,13 @@ export const commitMovedClipDrag = async (input: MoveCommitInput) => {
     if (input.addedTrackId && input.plannedMoves.some((move, index) => !moveApplied[index] && move.trackId === input.addedTrackId)) {
       input.cleanupUnusedAddedTrack(input.addedTrackId);
     }
-    if (failedMoves.some((move) => move.clipId === input.selectionAfterCommit.clipId)) {
-      const rollbackAnchor = failedMoves.find((move) => move.clipId === input.selectionAfterCommit.clipId) ?? failedMoves[0];
-      if (rollbackAnchor) {
+    for (const rollbackAnchor of failedMoves) {
+      if (rollbackAnchor.clipId === input.selectionAfterCommit.clipId) {
         input.selection.selectPrimaryClip(
           { trackId: rollbackAnchor.trackId, clipId: rollbackAnchor.clipId },
           input.selectionAfterCommit.preserveClipIds ? { preserveClipIds: true } : undefined,
         );
+        break;
       }
     }
   }

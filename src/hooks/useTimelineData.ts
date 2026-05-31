@@ -1,8 +1,7 @@
-import { batch, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
 import type { Accessor } from 'solid-js'
 
 import { useConvexQuery, convexClient, convexApi } from '~/lib/convex'
-import { getProjectDeleteConflictMessage, type DeleteConflictReason } from '~/lib/delete-conflict-messages'
 import { isLocalId } from '~/lib/local-ids'
 import {
   createLocalProject,
@@ -15,6 +14,7 @@ import {
 import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writes'
 import { subscribeToLocalProjectChanges } from '~/lib/local-project-changes'
 import { useSessionQuery } from '~/lib/session'
+import { clearShareTokenFromUrl, useTimelineProjectRoute } from './useTimelineProjectRoute'
 
 export type TimelineProject = {
   projectId: string
@@ -22,19 +22,12 @@ export type TimelineProject = {
   mode?: LocalProjectMode
 }
 
-type ProjectDeleteConflict = {
-  trackId: string
-  reason: DeleteConflictReason
-}
-
 type DeleteOwnedRoomResult =
   | { status: 'deleted' }
-  | { status: 'conflict'; conflictTrackIds: string[]; conflicts: ProjectDeleteConflict[] }
   | { status: 'error' }
 
 type DeleteCurrentOwnedRoomResult =
   | { status: 'deleted'; destinationProjectId: string }
-  | { status: 'conflict'; conflictTrackIds: string[]; conflicts: ProjectDeleteConflict[] }
   | { status: 'error' }
 
 type CreateOwnedRoomResult =
@@ -69,56 +62,11 @@ const normalizeProjects = (value: unknown): TimelineProject[] => {
 }
 
 export function useTimelineData(): UseTimelineDataReturn {
-  const [projectId, setProjectIdState] = createSignal<string>('')
-  const [bootstrapProjectId, setBootstrapProjectId] = createSignal<string | null>(null)
   const [localProjects, setLocalProjects] = createSignal<TimelineProject[]>([])
-  const [acceptingShareToken, setAcceptingShareToken] = createSignal<string | null>(null)
   const pendingOwnedRoomKeys = new Set<string>()
 
   const session = useSessionQuery()
   const userId = () => session.data?.user.id ?? ''
-
-  const setProjectId = (nextProjectId: string) => {
-    setBootstrapProjectId(null)
-    setProjectIdState(nextProjectId)
-  }
-
-  const updateRoomUrl = (rid: string, mode: 'push' | 'replace') => {
-    try {
-      const url = new URL(window.location.href)
-      url.searchParams.set('projectId', rid)
-      if (mode === 'replace') {
-        history.replaceState(null, '', url.toString())
-      } else {
-        history.pushState(null, '', url.toString())
-      }
-    } catch {}
-  }
-
-  const resolveRoom = (
-    rid: string,
-    options?: {
-      history?: 'push' | 'replace'
-      bootstrap?: string | null
-    },
-  ) => {
-    if (options?.history) {
-      updateRoomUrl(rid, options.history)
-    }
-    batch(() => {
-      setBootstrapProjectId(options?.bootstrap ?? null)
-      setProjectIdState(rid)
-    })
-  }
-
-  const replaceRoom = (rid: string) => {
-    resolveRoom(rid, { history: 'replace' })
-  }
-
-  const navigateToRoom = (rid: string) => {
-    resolveRoom(rid, { history: 'push' })
-    if (isLocalId('project', rid)) void markLocalProjectOpened(rid).then(loadLocalProjects)
-  }
 
   const loadLocalProjects = async () => {
     const rows = await listLocalProjects()
@@ -129,60 +77,20 @@ export function useTimelineData(): UseTimelineDataReturn {
     })))
   }
 
-  const readProjectIdFromLocation = () => {
-    try {
-      const url = new URL(window.location.href)
-      const rid = url.searchParams.get('projectId')
-      return rid && rid.trim() ? rid : null
-    } catch {
-      return null
-    }
-  }
-
-  const readShareTokenFromLocation = () => {
-    try {
-      const url = new URL(window.location.href)
-      const token = url.searchParams.get('shareToken')
-      return token && token.trim() ? token : null
-    } catch {
-      return null
-    }
-  }
-
-  const clearShareTokenFromUrl = () => {
-    try {
-      const url = new URL(window.location.href)
-      url.searchParams.delete('shareToken')
-      history.replaceState(null, '', url.toString())
-    } catch {}
-  }
+  const route = useTimelineProjectRoute({
+    onLocalProjectOpened: (rid) => void markLocalProjectOpened(rid).then(loadLocalProjects),
+  })
+  const projectId = route.projectId
+  const bootstrapProjectId = route.bootstrapProjectId
+  const acceptingShareToken = route.acceptingShareToken
+  const setAcceptingShareToken = route.setAcceptingShareToken
+  const setProjectId = route.setProjectId
+  const replaceRoom = route.replaceRoom
+  const navigateToRoom = route.navigateToRoom
+  const clearBootstrapProjectId = route.clearBootstrapProjectId
 
   onMount(() => {
     void loadLocalProjects()
-    const syncRoomFromHistory = () => {
-      const nextProjectId = readProjectIdFromLocation()
-      if (nextProjectId) {
-        resolveRoom(nextProjectId)
-        return
-      }
-    }
-
-    const initialProjectId = readProjectIdFromLocation()
-    setAcceptingShareToken(readShareTokenFromLocation())
-    if (initialProjectId) {
-      resolveRoom(initialProjectId)
-    } else {
-      const generatedProjectId = crypto.randomUUID()
-      resolveRoom(generatedProjectId, {
-        history: 'replace',
-        bootstrap: generatedProjectId,
-      })
-    }
-
-    window.addEventListener('popstate', syncRoomFromHistory)
-    onCleanup(() => {
-      window.removeEventListener('popstate', syncRoomFromHistory)
-    })
   })
 
   createEffect(() => {
@@ -292,7 +200,7 @@ export function useTimelineData(): UseTimelineDataReturn {
       if (target && target !== projectId()) {
         replaceRoom(target)
       } else {
-        setBootstrapProjectId(null)
+        clearBootstrapProjectId()
       }
       return
     }
@@ -303,27 +211,9 @@ export function useTimelineData(): UseTimelineDataReturn {
         replaceRoom(bootstrapRid)
         return
       }
-      setBootstrapProjectId(null)
+      clearBootstrapProjectId()
     })
   })
-
-  const showProjectDeleteConflict = (result: { conflicts?: ProjectDeleteConflict[] } | null | undefined) => {
-    const conflicts = Array.isArray(result?.conflicts) ? result.conflicts : []
-    window.alert(getProjectDeleteConflictMessage(conflicts.map((conflict) => conflict.reason)))
-  }
-
-  const isDeleteConflictResult = (value: unknown): value is Extract<DeleteOwnedRoomResult, { status: 'conflict' }> => {
-    if (!value || typeof value !== 'object') return false
-    if (!('status' in value) || value.status !== 'conflict') return false
-    if (!('conflictTrackIds' in value) || !Array.isArray(value.conflictTrackIds)) return false
-    return 'conflicts' in value && Array.isArray(value.conflicts)
-  }
-
-  const readCloudDeleteResult = (payload: unknown) => {
-    if (!payload || typeof payload !== 'object') return null
-    if ('result' in payload) return payload.result
-    return payload
-  }
 
   const deleteOwnedRoom = async (
     targetProjectId: string,
@@ -331,10 +221,6 @@ export function useTimelineData(): UseTimelineDataReturn {
   ): Promise<DeleteOwnedRoomResult> => {
     try {
       const response = await fetch(`/api/cloud-projects/${encodeURIComponent(targetProjectId)}`, { method: 'DELETE' })
-      const result = readCloudDeleteResult(await response.json().catch(() => null))
-      if (response.status === 409 && isDeleteConflictResult(result)) {
-        return result
-      }
       if (!response.ok) throw new Error('Project delete failed.')
       return { status: 'deleted' as const }
     } catch {
@@ -376,7 +262,8 @@ export function useTimelineData(): UseTimelineDataReturn {
 
   const createProject = async () => {
     const currentProjectId = projectId()
-    if (!userId() || isLocalId('project', currentProjectId)) {
+    const ownerUserId = userId()
+    if (!ownerUserId || isLocalId('project', currentProjectId)) {
       try {
         const project = await createLocalProject('Untitled')
         await loadLocalProjects()
@@ -388,8 +275,6 @@ export function useTimelineData(): UseTimelineDataReturn {
     }
 
     const nextProjectId = crypto.randomUUID()
-    const ownerUserId = userId()
-    if (!ownerUserId) return
     const result = await createOwnedRoom(nextProjectId, ownerUserId, { showAlertOnError: true })
     if (result.status !== 'created') return
     navigateToRoom(nextProjectId)
@@ -440,10 +325,7 @@ export function useTimelineData(): UseTimelineDataReturn {
     if (!ownerUserId) return
 
     if (targetProjectId !== projectId()) {
-      const result = await deleteOwnedRoom(targetProjectId)
-      if (result.status === 'conflict') {
-        showProjectDeleteConflict(result)
-      }
+      await deleteOwnedRoom(targetProjectId)
       return
     }
 
@@ -451,10 +333,6 @@ export function useTimelineData(): UseTimelineDataReturn {
       targetProjectId,
       ownerUserId,
     )
-    if (result.status === 'conflict') {
-      showProjectDeleteConflict(result)
-      return
-    }
     if (result.status !== 'deleted') {
       return
     }

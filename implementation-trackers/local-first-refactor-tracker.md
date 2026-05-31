@@ -1055,7 +1055,7 @@ Cloud work is deferred until local-only workflows are proven, but the cloud cont
 #### Backup mode
 
 - [x] Require auth only when enabling sync/share.
-- [x] Add backup enable/disable flow.
+- [ ] Add backup disable flow.
 - [x] Add explicit “Back up now” action.
 - [x] Add automatic debounced backup for backup-enabled projects.
 - [x] Build full versioned project manifest from local `entities`, `assets`, and `projectState`.
@@ -1063,21 +1063,21 @@ Cloud work is deferred until local-only workflows are proven, but the cloud cont
 - [x] Commit latest backup manifest to Convex by canonical `projectId`.
 - [x] Exclude undo/redo history from cloud backup.
 - [x] Detect backup conflicts when local and cloud both changed since the last acknowledged snapshot.
-- [x] Surface explicit conflict actions:
+- [ ] Surface explicit conflict actions:
   - keep local and overwrite cloud
   - restore cloud over local
   - duplicate cloud as a new local project
-- [x] Show conflict summary with project names, local/cloud timestamps, and cheap changed counts if available.
+- [ ] Show conflict summary with project names, local/cloud timestamps, and cheap changed counts if available.
 - [x] Do not build deep timeline diff for the first backup conflict UI.
 - [x] Add capped exponential backoff for failed backup uploads.
 - [x] Add manual retry for failed backup uploads.
 - [x] Keep local editing enabled while backup is failed/pending.
 - [x] Use initial cloud transfer limits of 2 concurrent uploads and 3 concurrent downloads.
-- [x] Mark locally deleted cloud assets as pending deletion.
-- [x] Delete pending R2 assets immediately after a new snapshot commits without them.
+- [ ] Mark locally deleted cloud assets as pending deletion.
+- [x] Delete superseded R2 assets immediately after a new snapshot commits without them.
 - [x] Delete the project-scoped R2 prefix when an owner deletes the cloud project.
-- [x] Restore by loading manifest first and lazy-caching assets by default.
-- [x] Add explicit “Download for offline” action for cloud-backed assets.
+- [ ] Restore by loading manifest first and lazy-caching assets by default.
+- [ ] Add explicit “Download for offline” action for cloud-backed assets.
 
 #### Shared mode
 
@@ -1092,16 +1092,16 @@ Cloud work is deferred until local-only workflows are proven, but the cloud cont
 - [x] Viewers can view/play and list/download existing exports only; they cannot create exports.
 - [x] Only owners can delete the cloud/shared project.
 - [x] Non-owners can leave/remove local cache only.
-- [x] Use local pending writes for the current user's shared edits.
-- [x] Publish pending writes to Convex; collaborators only see Convex-published state.
-- [x] Pull remote entities/assets from Convex/R2 into local cache.
+- [ ] Use local pending writes for the current user's shared edits.
+- [ ] Publish pending writes to Convex; collaborators only see Convex-published state.
+- [ ] Pull remote entities/assets from Convex/R2 into local cache.
 - [x] Use last-write-wins for shared conflicts.
-- [x] For imported/recorded shared audio, show a local pending clip immediately to the author.
-- [x] Publish shared audio clips to collaborators only after R2 upload and Convex metadata write succeed.
-- [x] Queue local shared edits while offline and publish on reconnect with visible pending/not-shared-yet state.
-- [x] Add capped exponential backoff for failed shared uploads.
-- [x] Add manual retry for failed shared uploads.
-- [x] Keep local editing enabled while shared upload is failed/pending.
+- [ ] For imported/recorded shared audio, show a local pending clip immediately to the author.
+- [ ] Publish shared audio clips to collaborators only after R2 upload and Convex metadata write succeed.
+- [ ] Queue local shared edits while offline and publish on reconnect with visible pending/not-shared-yet state.
+- [ ] Add capped exponential backoff for failed shared uploads.
+- [ ] Add manual retry for failed shared uploads.
+- [ ] Keep local editing enabled while shared upload is failed/pending.
 
 Validation:
 - [ ] Enable cloud sync from local project.
@@ -1133,7 +1133,7 @@ Non-goals for the local-only first implementation pass only:
   - owners manage/delete/share
   - editors edit/export
   - viewers view/play and list/download existing exports only
-- [x] Define R2 cleanup for deleted samples/exports/projects.
+- [ ] Define R2 cleanup for deleted samples/exports; project prefix cleanup exists.
 - [x] Delete pending R2 assets only after a successful snapshot removes references to them.
 - [x] Delete the full project-scoped R2 prefix on owner project deletion.
 - [x] Define Convex cleanup for samples, exports, effects, chat histories, and room messages.
@@ -1160,7 +1160,7 @@ Evidence:
 - [x] Define `.dawproject` as a zip-like package.
 - [x] Store `manifest.json` using the same schema as cloud backup.
 - [x] Store asset files under `assets/` by stable asset IDs/content hashes.
-- [x] Include `schemaVersion` and route archive imports through the same migration path as cloud snapshots.
+- [x] Include `schemaVersion` and route archive imports through the same manifest parser as cloud snapshots.
 - [x] Keep archive import/export out of the local-only first pass and out of the first cloud backup implementation unless explicitly prioritized later.
 
 Validation:

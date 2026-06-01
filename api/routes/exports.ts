@@ -1,5 +1,6 @@
 import type { App } from '../app-types'
 import { requireProjectRoleForApi } from '../project-access'
+import { createR2ObjectResponse } from '../r2-object-response'
 import { sanitizeFileNameSegment } from '../sanitize-file-name-segment'
 
 export function registerExportRoutes(app: App) {
@@ -87,17 +88,7 @@ export function registerExportRoutes(app: App) {
     const obj = await c.env.daw_audio_samples.get(key)
     if (!obj) return c.json({ error: 'Not found' }, 404)
 
-    const headers = new Headers()
-    headers.set('Content-Type', obj.httpMetadata?.contentType || 'application/octet-stream')
-    headers.set('Cache-Control', 'public, max-age=31536000, immutable')
-    headers.set('Access-Control-Allow-Origin', '*')
-    headers.set('Access-Control-Allow-Credentials', 'true')
-    if (obj.httpMetadata?.contentDisposition) {
-      headers.set('Content-Disposition', obj.httpMetadata.contentDisposition)
-    }
-    headers.set('X-R2-Key', key)
-
-    return new Response(obj.body, { headers })
+    return createR2ObjectResponse(obj, key, 'private, no-store')
   } catch (err) {
     console.error('Export fetch error', err)
     return c.json({ error: 'Failed to fetch export' }, 500)

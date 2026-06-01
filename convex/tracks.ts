@@ -78,7 +78,7 @@ export async function getTrackDeletePreflight(
     return { ok: false, reason: "access-denied" };
   }
 
-  const { owner, track } = access;
+  const { owner, track, projectWriter } = access;
   const channel = await ensureMixerChannelForTrack(ctx, track);
   const lockState = normalizeMixerLockState(channel.lockedBy, channel.lockedAt);
   if (lockState.isLocked) {
@@ -105,7 +105,7 @@ export async function getTrackDeletePreflight(
   for (let index = 0; index < clips.length; index += 1) {
     const clip = clips[index];
     const clipOwner = clipOwnerships[index] ?? null;
-    const ownedByUser = !!clipOwner && clipOwner.ownerUserId === userId;
+    const ownedByUser = projectWriter || (!!clipOwner && clipOwner.ownerUserId === userId);
     clipOwnersByClipId.set(String(clip._id), clipOwner);
     if (!ownedByUser) {
       hasForeignClips = true;

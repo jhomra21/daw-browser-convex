@@ -14,8 +14,15 @@ export const saveBlobLocally = async (input: SaveBlobInput): Promise<void> => {
     if (!writable) {
       throw new Error('Writable file streams are not supported.')
     }
-    await writable.write(input.blob)
-    await writable.close()
+    try {
+      await writable.write(input.blob)
+      await writable.close()
+    } catch (error) {
+      try {
+        await writable.abort()
+      } catch {}
+      throw error
+    }
     return
   }
 

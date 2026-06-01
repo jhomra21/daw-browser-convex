@@ -18,7 +18,7 @@ import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
 import type { LocalEffectRow } from "~/lib/local-effects";
 import { isLocalId } from "~/lib/local-ids";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
-import type { TimelineClipRow } from "~/lib/timeline-repository/types";
+import { toLocalTimelineClip } from "~/lib/timeline-repository/track-row-adapter";
 import {
   createDefaultArpeggiatorParams,
   createDefaultSynthParams,
@@ -93,26 +93,6 @@ type EffectsPanelState = {
 
 export const EFFECT_PANEL_SAVE_DEBOUNCE_MS = 200;
 export const EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS = 800;
-
-const toLocalTimelineClip = (row: TimelineClipRow): Clip => ({
-  id: row.id,
-  historyRef: row.historyRef,
-  name: row.name,
-  buffer: null,
-  startSec: row.startSec,
-  duration: row.duration,
-  sourceAssetKey: row.sourceAssetKey,
-  sourceKind: row.sourceKind,
-  sourceDurationSec: row.sourceDurationSec,
-  sourceSampleRate: row.sourceSampleRate,
-  sourceChannelCount: row.sourceChannelCount,
-  leftPadSec: row.leftPadSec,
-  bufferOffsetSec: row.bufferOffsetSec,
-  color: row.color,
-  sampleUrl: row.sampleUrl,
-  midi: row.midi,
-  midiOffsetBeats: row.midiOffsetBeats,
-});
 
 export function createEffectsPanelState(
   context: EffectsPanelContext,

@@ -42,6 +42,8 @@ When a user is not sharing or explicitly cloud-syncing, Convex should not be use
 
 ## Decisions From Grill Review
 
+Checked items in the decision sections mean the decision is resolved; implementation status is tracked in the phase checklists below.
+
 - [x] Match Diffusion Studio's IndexedDB approach by adding and using `idb` (`openDB` / `deleteDB`) rather than building raw IndexedDB wrappers.
 - [x] Match Diffusion Studio's project storage shape where practical:
   - global DB for project and directory entries
@@ -85,7 +87,7 @@ When a user is not sharing or explicitly cloud-syncing, Convex should not be use
 - [x] R2 reads must be authorized by canonical `projectId` and user/share access; raw key-based reads are not acceptable.
 - [x] Backup mode keeps only the latest successful cloud snapshot in the first cloud pass.
 - [x] Deleted cloud assets are marked pending deletion locally, removed from the next committed snapshot, then deleted from R2 immediately after that snapshot succeeds.
-- [x] Project deletion deletes the project-scoped R2 prefix.
+- [x] Project deletion attempts best-effort cleanup of the project-scoped R2 prefix after Convex deletion.
 - [x] Shared mode uses local pending writes for the current user, but Convex-published state is what collaborators can see.
 - [x] Shared-mode remote entities/assets are pulled from Convex/R2 into the local cache.
 - [x] Shared-mode conflicts use last-write-wins.
@@ -93,7 +95,7 @@ When a user is not sharing or explicitly cloud-syncing, Convex should not be use
 - [x] Shared projects support `owner`, `editor`, and `viewer` roles.
 - [x] Viewers can view/play and list/download existing exports only; they cannot create exports, edit, upload, record, rename, delete, or manage sharing.
 - [x] Owners and editors can create exports; viewers can only list/download existing exports.
-- [x] Share links are authenticated invite links with an intended role; accepting creates an access row and owners can revoke access later.
+- [x] Share links are authenticated invite links with an intended role; accepting creates an access row. Invite-token revocation is implemented; accepted access-row revocation remains tracked in the shared-mode phase checklist.
 - [x] Only owners can delete the cloud/shared project. Non-owners can leave/remove local cache only.
 - [x] Restored/cloud projects load the manifest first, lazily cache assets by default, and offer an explicit “Download for offline” action.
 - [x] Cloud-backed/shared projects can queue local edits offline and publish on reconnect with visible pending/not-shared-yet status.
@@ -117,9 +119,9 @@ When a user is not sharing or explicitly cloud-syncing, Convex should not be use
 - [x] Backup conflict UI does not include deep timeline diff in the first version.
 - [x] Failed cloud backup/shared uploads retry with capped exponential backoff plus manual retry.
 - [x] Local editing remains enabled during failed/pending cloud retries.
-- [x] Initial cloud transfer limits are 2 concurrent uploads and 3 concurrent downloads, tunable after validation.
+- [x] Initial cloud transfer targets are 2 concurrent uploads and 3 concurrent downloads, tunable after validation; upload limiting is implemented and download limiting remains tied to unchecked restore/offline-download work.
 - [x] Invite links are non-expiring but revocable.
-- [x] Signed asset URLs are short-lived and refreshed only after access checks.
+- [x] Asset reads must either stream through access-checked `private, no-store` API routes or, if signed URLs are later introduced, mint only short-lived URLs after access checks.
 - [x] Owner transfer is deferred from the first shared/cloud pass.
 
 ## Decisions From Rollout / Sequencing Grill Review
@@ -151,6 +153,60 @@ When a user is not sharing or explicitly cloud-syncing, Convex should not be use
   - local-only complete
   - cloud complete
   - archive complete if implemented
+
+## All-In-One Completion PR Plan — 2026-06-01
+
+The remaining unchecked cloud/shared work will be completed in this PR, split into reviewable commits. Each commit must leave the repo buildable when practical, and the tracker/changelog must be updated as bugs, edge cases, validation artifacts, and design corrections are discovered.
+
+### Plan validation notes
+
+- [x] The previous broad plan was grilled against the repo before implementation.
+- [x] The PR will use schema additions where needed for idempotency, local/cloud mapping, retry state, and tombstones.
+- [x] Revoked accepted collaborators must have their local shared/cloud cache purged, not merely marked read-only.
+- [x] R2 cleanup failures must be durable/retriable, not only best-effort.
+- [x] The security concern is direct browser access to the public Convex deployment with caller-supplied `userId` arguments, not normal app UI using the Better Auth session. New or touched sensitive write paths should derive identity through authenticated Worker routes or require API-only service tokens.
+- [x] Full Convex Auth migration is not required for this PR unless implementation proves the Worker gateway approach cannot satisfy a touched flow.
+- [x] Diffusion patterns are inspiration for local DB/cache/restore discipline; its local-only write queue must not be copied directly as shared sync because this app also needs auth, R2 upload ordering, Convex idempotency, and multi-user reconciliation.
+
+### Commit sequence
+
+1. Tracker and plan grounding.
+2. Auth/access foundation:
+   - accepted access-row revocation
+   - revoked-user cache purge
+   - API-only/server-secret protection for touched sensitive operations
+3. Shared sync schema/outbox foundation:
+   - durable pending operations
+   - idempotent operation keys
+   - local/cloud ID mapping reuse
+   - retry status and tombstones where needed
+4. Cloud backup completion:
+   - disable backup action
+   - restore cloud over local
+   - duplicate cloud backup as local project
+   - conflict summary/actions
+5. Cloud asset restore/offline cache:
+   - lazy cloud asset fetch through access-checked routes
+   - "Download for offline"
+   - 3-concurrent download limiter
+6. Durable R2 cleanup:
+   - pending deleted cloud assets
+   - deleted sample R2 cleanup
+   - deleted export R2 cleanup
+   - retry queue and status
+7. Shared local-first completion:
+   - ordered local outbox publishing
+   - pending audio upload before Convex publish
+   - remote pull/reconcile into local cache
+   - offline retry/manual retry/status UI
+8. Final validation and tracker closure.
+
+### Bugs / findings log for this pass
+
+- [ ] Finding: broad Convex `userId` hardening remains architecture-sensitive because the browser currently creates a direct `ConvexClient` from public `VITE_CONVEX_URL`; touched sensitive flows must not add more client-trusted identity checks.
+- [ ] Finding: backup restore primitives must be implemented before conflict actions and offline download can be truthful.
+- [ ] Finding: shared pending UI maps are ephemeral projection helpers and must not be used as the durable offline queue.
+- [ ] Finding: R2 cleanup must tolerate partial failure and retry after reload.
 
 ---
 
@@ -682,7 +738,7 @@ Later archive format:
 - `.dawproject`
 - zip-like package
 - `manifest.json` using the same schema as cloud backup
-- `assets/` folder keyed by the same asset IDs/content hashes
+- `assets/` folder keyed by stable asset IDs and stored asset paths
 
 Decision:
 - Define the format in the plan, but do not implement it before local-first and cloud backup work.
@@ -851,7 +907,7 @@ Evidence:
 
 - [x] Add `src/lib/timeline-repository/types.ts`.
 - [x] Add `local-timeline-repository.ts`.
-- [x] Add `cloud-timeline-repository.ts` wrapping existing Convex behavior.
+- [ ] Add `cloud-timeline-repository.ts` wrapping existing Convex behavior. Current cloud/shared paths still use direct Convex write adapters.
 - [x] Route core create/move/delete/timing/mixer/effect operations through the repository.
 
 Touchpoints:
@@ -880,7 +936,7 @@ Validation:
 
 Evidence:
 - `/Users/juan/Downloads/daw-local-first-validation/local-track-create-before.png`
-- `bun run typecheck && bun run build && git diff --check` after adding `src/lib/timeline-repository/cloud-timeline-repository.ts`.
+- `bun run typecheck && bun run build && git diff --check` after adding the local timeline repository and write adapters.
 - Helium local project reload smoke test after cloud adapter addition: app shell loaded; existing generic API/resource noise remained unchanged.
 - `/Users/juan/Downloads/daw-local-first-validation/local-track-create-after.png`
 - Browser network log for the local track-create flow showed no captured Convex requests.
@@ -916,7 +972,7 @@ Evidence:
 - Helium Phase 1 validation created a temporary local project from the picker, inspected `daw-browser-projects`, confirmed the picker survived reload, and verified project lifecycle entries in IndexedDB.
 - Helium Phase 2 validation confirmed `showOpenFilePicker`, `showDirectoryPicker`, `showSaveFilePicker`, and `navigator.storage.getDirectory` are available; OPFS permission query/request both returned `granted`.
 - Added `src/lib/local-cloud-id-map.ts` to persist local-to-cloud track/clip/asset mappings and stable `historyRef` values in each project's `syncState` store.
-- Added `src/hooks/useCloudSyncTick.ts`; the 30-second tick is interval-scoped, cleaned up through Solid cleanup, and gated off for `project:*` local-only projects.
+- Added `src/hooks/useCloudSyncTick.ts`; the 30-second debounced backup timer is scoped, cleaned up through Solid cleanup, and gated off for local-only projects.
 - Helium Phase 6 validation imported `/tmp/daw-phase-validation.wav` into a local project, confirmed local asset metadata in IndexedDB, captured no `/api/samples`, recorded `/tmp/daw-phase6-trace.json`, and verified rapid BPM edits persisted while playback continued.
 - Helium Phase 6 quota validation monkey-patched OPFS to throw `QuotaExceededError`; clip count stayed unchanged, confirming no broken clip was created.
 - Helium Phase 10 now stores local export metadata in `projectState/exports` after successful browser save/download while continuing to avoid `/api/exports` for local-only exports.
@@ -1072,10 +1128,11 @@ Cloud work is deferred until local-only workflows are proven, but the cloud cont
 - [x] Add capped exponential backoff for failed backup uploads.
 - [x] Add manual retry for failed backup uploads.
 - [x] Keep local editing enabled while backup is failed/pending.
-- [x] Use initial cloud transfer limits of 2 concurrent uploads and 3 concurrent downloads.
+- [x] Use an initial cloud upload transfer limit of 2.
+- [ ] Use an initial cloud download transfer limit of 3 when restore/offline-download flows are implemented.
 - [ ] Mark locally deleted cloud assets as pending deletion.
 - [x] Delete superseded R2 assets immediately after a new snapshot commits without them.
-- [x] Delete the project-scoped R2 prefix when an owner deletes the cloud project.
+- [x] Attempt best-effort deletion of the project-scoped R2 prefix when an owner deletes the cloud project.
 - [ ] Restore by loading manifest first and lazy-caching assets by default.
 - [ ] Add explicit “Download for offline” action for cloud-backed assets.
 
@@ -1086,7 +1143,8 @@ Cloud work is deferred until local-only workflows are proven, but the cloud cont
 - [x] Add authenticated invite links with intended role.
 - [x] Make invite links non-expiring but revocable.
 - [x] Accepting a share link creates an access row for the authenticated user.
-- [x] Owners can revoke access.
+- [x] Owners can revoke invite links.
+- [ ] Owners can revoke already accepted access rows.
 - [x] Defer owner transfer from the first shared/cloud pass.
 - [x] Owners and editors can edit/export.
 - [x] Viewers can view/play and list/download existing exports only; they cannot create exports.
@@ -1135,13 +1193,13 @@ Non-goals for the local-only first implementation pass only:
   - viewers view/play and list/download existing exports only
 - [ ] Define R2 cleanup for deleted samples/exports; project prefix cleanup exists.
 - [x] Delete pending R2 assets only after a successful snapshot removes references to them.
-- [x] Delete the full project-scoped R2 prefix on owner project deletion.
+- [x] Attempt best-effort deletion of the full project-scoped R2 prefix on owner project deletion.
 - [x] Define Convex cleanup for samples, exports, effects, chat histories, and room messages.
 - [ ] Stop relying on client-supplied user IDs where server-verified auth context is required.
 
 Validation:
 - [ ] Verify unauthorized sample/export reads are rejected where intended.
-- [ ] Verify signed asset URLs are short-lived and require refreshed access checks.
+- [ ] Verify access-checked asset routes enforce fresh permissions; if signed URLs are introduced, verify they are short-lived.
 - [ ] Delete cloud/shared project and verify cleanup behavior.
 - [ ] Confirm no orphaned R2 objects remain for tested deletion flows or record intentional retention policy.
 - [ ] Verify raw copied R2 keys cannot be used without project access.
@@ -1149,17 +1207,17 @@ Validation:
 Evidence:
 - Added versioned project manifest building from local entities, assets, and projectState; undo/redo history remains excluded.
 - Added cloud backup API that uploads assets to project-scoped `projects/{projectId}/assets/{assetId}/{contentHash}` R2 keys and commits the latest manifest to Convex.
-- Added backup enable/manual backup and automatic 30-second signed-in backup tick wiring while keeping local editing available if backup fails.
-- Added owner/editor/viewer role schema, authenticated non-expiring revocable invite primitives, and role-aware API access checks for samples/exports/cloud backup routes.
+- Added backup enable/manual backup and automatic 30-second debounced signed-in backup wiring while keeping local editing available if backup fails.
+- Added owner/editor/viewer role schema, authenticated non-expiring revocable invite primitives, and role-aware API access checks for samples/exports/cloud backup routes. Accepted access-row revocation remains pending.
 - Replaced raw export streaming with project-scoped `/api/export/:projectId` and rejects copied keys whose prefix does not match the requested project.
-- Added owner project deletion route that removes the project-scoped R2 prefix before Convex project cleanup; Convex cleanup now includes samples, exports, effects, chat histories, project messages, invites, and cloud backups.
+- Added owner project deletion route that finalizes Convex cleanup and then best-effort removes the project-scoped R2 prefix; Convex cleanup includes samples, exports, effects, chat histories, project messages, invites, and cloud backups.
 - Command validation passed: `bun run typecheck`, `bun run build`, and `git diff --check`; browser/cloud evidence remains pending for the unchecked validation items above.
 
 ### Phase 16 — Portable project archive
 
 - [x] Define `.dawproject` as a zip-like package.
 - [x] Store `manifest.json` using the same schema as cloud backup.
-- [x] Store asset files under `assets/` by stable asset IDs/content hashes.
+- [x] Store asset files under `assets/` by stable asset IDs and stored asset paths.
 - [x] Include `schemaVersion` and route archive imports through the same manifest parser as cloud snapshots.
 - [x] Keep archive import/export out of the local-only first pass and out of the first cloud backup implementation unless explicitly prioritized later.
 
@@ -1407,8 +1465,8 @@ Closed decisions:
 - [x] Missing media uses visible muted placeholders with restore/replace/remove.
 - [x] Chosen folder permission loss requires regrant or explicit storage move.
 - [x] Cloud retries use capped exponential backoff plus manual retry.
-- [x] Initial transfer concurrency is 2 uploads and 3 downloads.
-- [x] Invite links are non-expiring/revocable; signed asset URLs are short-lived.
+- [x] Initial transfer targets are 2 uploads and 3 downloads; the upload limit is implemented, and the download limit remains tied to unchecked restore/offline-download work.
+- [x] Invite links are non-expiring/revocable; asset reads use access-checked no-store streaming routes unless short-lived signed URLs are introduced later.
 - [x] Owner transfer is deferred.
 - [x] No runtime feature flag.
 - [x] Use buildable milestone slices.

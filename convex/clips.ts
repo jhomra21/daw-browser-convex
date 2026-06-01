@@ -4,7 +4,7 @@ import { v } from 'convex/values'
 
 import { getClipOwnership, getClipWriteAccess } from './clipWrites'
 import { getMergedTrack } from './mixerChannels'
-import { requireProjectAccess } from './projectAccess'
+import { getProjectRole, requireProjectAccess } from './projectAccess'
 import { upsertSampleRow } from './sampleRows'
 import { isClipKindCompatibleWithTrack } from './trackRouting'
 import { getTrackWriteAccess } from './trackWrites'
@@ -65,6 +65,8 @@ type ClipCreateInput = {
 }
 
 type ClipDbCtx = MutationCtx | QueryCtx
+
+const canWriteProject = (role: string | null) => role === 'owner' || role === 'editor'
 
 type ClipCreatePatch = {
   projectId: string
@@ -482,7 +484,7 @@ export const removeMany = mutation({
         skipped.push({ clipId, reason: 'not-found' })
         continue
       }
-      if (ownership.owner.ownerUserId !== userId) {
+      if (ownership.owner.ownerUserId !== userId && !canWriteProject(await getProjectRole(ctx, ownership.clip.projectId, userId))) {
         skipped.push({ clipId, reason: 'access-denied' })
         continue
       }

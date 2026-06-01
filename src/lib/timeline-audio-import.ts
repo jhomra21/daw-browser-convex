@@ -103,11 +103,14 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
     const userId = context.project.userId()
     const grantScope = projectId && userId ? { projectId, userId } : null
     const clipName = input.name?.trim()?.length ? input.name : 'Sample'
+    const sampleUrl = projectId && isLocalId('project', projectId) && isLocalId('asset', input.assetKey)
+      ? undefined
+      : input.url
     const clipSnapshot: ClipCreateSnapshot = {
       startSec: input.startSec,
       duration: input.duration,
       name: clipName,
-      sampleUrl: input.url,
+      sampleUrl,
       source: input.source,
       sourceAssetKey: input.assetKey,
       sourceKind: input.sourceKind,
@@ -127,7 +130,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
           sourceDurationSec: input.source.durationSec,
           sourceSampleRate: input.source.sampleRate,
           sourceChannelCount: input.source.channelCount,
-          sampleUrl: input.url,
+          sampleUrl,
         })
         const clip = buildLocalClip({ id: row.id, clip: clipSnapshot })
         if (!context.project.isActiveProjectTrack(projectId, input.trackId)) return row.id
@@ -190,14 +193,18 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
     }))
 
     context.clips.selectClip(input.trackId, createdClipId)
-    pushClipCreateHistory({
-      historyPush: context.clips.historyPush,
-      projectId,
-      trackId: input.trackId,
-      trackRef: getTrackHistoryRef(context.project.tracks().find((entry) => entry.id === input.trackId)),
-      clipId: createdClipId,
-      clip: clipSnapshot,
-    })
+    if (input.autoCreatedTrack) {
+      context.clips.pushTrackClipCreateHistory(input.autoCreatedTrack, createdClipId, clipSnapshot)
+    } else {
+      pushClipCreateHistory({
+        historyPush: context.clips.historyPush,
+        projectId,
+        trackId: input.trackId,
+        trackRef: getTrackHistoryRef(context.project.tracks().find((entry) => entry.id === input.trackId)),
+        clipId: createdClipId,
+        clip: clipSnapshot,
+      })
+    }
 
     return createdClipId
   }
@@ -263,7 +270,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
     const sourceAssetKey = createAudioAssetKey()
 
     try {
-      await createUploadedAudioClip({
+      const created = await createUploadedAudioClip({
         projectId,
         userId,
         trackId: input.track.id,
@@ -282,8 +289,12 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         audioBufferCache: context.clips.audioBufferCache,
         grantClipWrite: context.clips.grantClipWrite,
         grantScope: { projectId, userId },
+        pushHistory: !input.autoCreatedTrack,
         canProject: () => context.project.isActiveProjectTrack(projectId, input.track.id),
       })
+      if (input.autoCreatedTrack && context.project.isActiveProjectTrack(projectId, input.track.id)) {
+        context.clips.pushTrackClipCreateHistory(input.autoCreatedTrack, created.clipId, created.clip)
+      }
     } catch {
       await context.rollback.removeCloudTrack(input.autoCreatedTrack)
       return { status: 'failed', message: 'Audio could not be uploaded. Please retry the import.' }

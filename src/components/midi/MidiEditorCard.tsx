@@ -71,31 +71,51 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   let resizeStartH = 0
   let pointerId: number | null = null
   let saveTimer: number | null = null
+  type PendingMidiSave = {
+    clipId: string
+    projectId?: string
+    userId?: string
+    midi: Clip['midi']
+  }
+  let pendingMidiSave: PendingMidiSave | null = null
   const currentMidi = (): Clip['midi'] => ({
     wave: props.midi?.wave ?? 'sawtooth',
     gain: props.midi?.gain ?? 0.8,
     notes: notes().slice().sort((a, b) => a.beat - b.beat || b.pitch - a.pitch),
   })
-  const saveNow = async () => {
-    const midi = currentMidi()
-    if (props.projectId && isLocalId('project', props.projectId)) {
-      await createLocalTimelineRepository(props.projectId).updateClip({ clipId: props.clipId, midi })
-      props.onLocalMidiSaved?.(props.clipId, midi)
+  const canPersistSave = (save: PendingMidiSave) => (
+    Boolean(save.projectId && isLocalId('project', save.projectId)) || Boolean(save.userId)
+  )
+  const saveMidi = async (save: PendingMidiSave) => {
+    if (save.projectId && isLocalId('project', save.projectId)) {
+      const updated = await createLocalTimelineRepository(save.projectId).updateClip({ clipId: save.clipId, midi: save.midi })
+      if (updated && props.projectId === save.projectId && props.clipId === save.clipId) {
+        props.onLocalMidiSaved?.(save.clipId, save.midi)
+      }
       return
     }
-    if (!props.userId) return
-    await convexClient.mutation((convexApi as any).clips.setMidi, { clipId: props.clipId as any, midi, userId: props.userId })
+    if (!save.userId) return
+    await convexClient.mutation((convexApi as any).clips.setMidi, { clipId: save.clipId as any, midi: save.midi, userId: save.userId })
   }
   const scheduleSave = () => {
-    if (!canPersist()) {
+    const pending = {
+      clipId: props.clipId,
+      projectId: props.projectId,
+      userId: props.userId,
+      midi: currentMidi(),
+    }
+    if (!canPersistSave(pending)) {
       warnMissingUser()
       return
     }
+    pendingMidiSave = pending
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = window.setTimeout(async () => {
       try {
         saveTimer = null
-        await saveNow()
+        const save = pendingMidiSave
+        pendingMidiSave = null
+        if (save) await saveMidi(save)
       } catch {}
     }, 200)
   }
@@ -154,7 +174,9 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     if (saveTimer) {
       clearTimeout(saveTimer)
       saveTimer = null
-      void saveNow().catch(() => {})
+      const save = pendingMidiSave
+      pendingMidiSave = null
+      if (save) void saveMidi(save).catch(() => {})
     }
   })
 

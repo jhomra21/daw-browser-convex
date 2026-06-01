@@ -1,6 +1,7 @@
 import type { App } from '../app-types'
 import { hashFile } from '../hash-file'
 import { requireProjectRoleForApi } from '../project-access'
+import { createR2ObjectResponse } from '../r2-object-response'
 import { sanitizeFileNameSegment } from '../sanitize-file-name-segment'
 
 export function registerSampleRoutes(app: App) {
@@ -39,7 +40,7 @@ export function registerSampleRoutes(app: App) {
     await c.env.daw_audio_samples.put(key, file.stream(), {
       httpMetadata: {
         contentType: file.type || 'application/octet-stream',
-        contentDisposition: `inline; filename="${file.name}"`,
+        contentDisposition: `inline; filename="${chosenName}"`,
       },
       customMetadata: {
         projectId,
@@ -69,7 +70,8 @@ export function registerSampleRoutes(app: App) {
     const key = c.req.query('key')
     if (!key) return c.json({ error: 'Missing key query parameter' }, 400)
     const projectId = c.req.param('projectId')
-    if (!key.startsWith(`projects/${projectId}/assets/`)) return c.json({ error: 'Invalid key' }, 400)
+    const sourceId = c.req.param('sourceId')
+    if (!key.startsWith(`projects/${projectId}/assets/${sourceId}/`)) return c.json({ error: 'Invalid key' }, 400)
     if (!await requireProjectRoleForApi(c, projectId, ['owner', 'editor', 'viewer'])) {
       return c.json({ error: 'Forbidden' }, 403)
     }
@@ -77,17 +79,7 @@ export function registerSampleRoutes(app: App) {
     const obj = await c.env.daw_audio_samples.get(key)
     if (!obj) return c.json({ error: 'Not found' }, 404)
 
-    const headers = new Headers()
-    headers.set('Content-Type', obj.httpMetadata?.contentType || 'application/octet-stream')
-    headers.set('Cache-Control', 'public, max-age=31536000, immutable')
-    headers.set('Access-Control-Allow-Origin', '*')
-    headers.set('Access-Control-Allow-Credentials', 'true')
-    if (obj.httpMetadata?.contentDisposition) {
-      headers.set('Content-Disposition', obj.httpMetadata.contentDisposition)
-    }
-    headers.set('X-R2-Key', key)
-
-    return new Response(obj.body, { headers })
+    return createR2ObjectResponse(obj, key, 'private, no-store')
   } catch (err) {
     console.error('Fetch error', err)
     return c.json({ error: 'Failed to fetch sample' }, 500)
@@ -168,17 +160,7 @@ export function registerSampleRoutes(app: App) {
     const obj = await c.env.daw_audio_samples.get(key)
     if (!obj) return c.json({ error: 'Not found' }, 404)
 
-    const headers = new Headers()
-    headers.set('Content-Type', obj.httpMetadata?.contentType || 'application/octet-stream')
-    headers.set('Cache-Control', 'public, max-age=31536000, immutable')
-    headers.set('Access-Control-Allow-Origin', '*')
-    headers.set('Access-Control-Allow-Credentials', 'true')
-    if (obj.httpMetadata?.contentDisposition) {
-      headers.set('Content-Disposition', obj.httpMetadata.contentDisposition)
-    }
-    headers.set('X-R2-Key', key)
-
-    return new Response(obj.body, { headers })
+    return createR2ObjectResponse(obj, key, 'public, max-age=31536000, immutable')
   } catch (err) {
     console.error('Default sample fetch error', err)
     return c.json({ error: 'Failed to fetch default sample' }, 500)

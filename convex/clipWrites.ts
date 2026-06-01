@@ -1,3 +1,7 @@
+import { getProjectRole } from './projectAccess'
+
+const canWriteProject = (role: string | null) => role === 'owner' || role === 'editor'
+
 export async function getClipOwnership(ctx: any, clipId: any) {
   const clip = await ctx.db.get(clipId)
   if (!clip) return null
@@ -12,6 +16,8 @@ export async function getClipOwnership(ctx: any, clipId: any) {
 
 export async function getClipWriteAccess(ctx: any, clipId: any, userId: string) {
   const access = await getClipOwnership(ctx, clipId)
-  if (!access || access.owner.ownerUserId !== userId) return null
-  return access
+  if (!access) return null
+  if (access.owner.ownerUserId === userId) return access
+  if (canWriteProject(await getProjectRole(ctx, access.clip.projectId, userId))) return access
+  return null
 }

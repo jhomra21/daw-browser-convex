@@ -35,9 +35,18 @@ export function createLocalEffectRows<TParams>(input: {
     const targetId = input.targetId();
     if (!projectId || !targetId || !isLocalProject()) return;
     const effect = resolveEffect(input.effect, targetId);
+    const key = scopeKey(projectId, targetId, effect);
+    const isCurrentScope = () => (
+      input.projectId() === projectId
+      && input.targetId() === targetId
+      && isLocalProject()
+    );
     void getLocalEffect<TParams>(projectId, targetId, effect).then((row) => {
-      if (input.projectId() !== projectId || input.targetId() !== targetId || !isLocalProject()) return;
-      setRows((prev) => ({ ...prev, [scopeKey(projectId, targetId, effect)]: row }));
+      if (!isCurrentScope()) return;
+      setRows((prev) => ({ ...prev, [key]: row }));
+    }).catch(() => {
+      if (!isCurrentScope()) return;
+      setRows((prev) => ({ ...prev, [key]: undefined }));
     });
   });
 

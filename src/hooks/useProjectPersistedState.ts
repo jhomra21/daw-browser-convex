@@ -64,12 +64,13 @@ export function useProjectPersistedState<TValue>(
   }
 
   createEffect(on(options.projectId, (projectId) => {
+    syncHydratedValue()
     if (!projectId || !options.loadAsync) return
     const loadRevision = valueRevision
     void options.loadAsync(projectId).then((loaded) => {
       if (loaded === undefined || options.projectId() !== projectId || valueRevision !== loadRevision) return
       setCurrentValue(() => loaded)
-    })
+    }).catch(() => undefined)
   }, { defer: false }))
 
   const applyValue: RoomPersistedSetter<TValue> = (next) => {

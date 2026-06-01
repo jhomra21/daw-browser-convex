@@ -12,7 +12,7 @@ import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapte
 import { createAudioImportTransaction, removeAutoCreatedCloudTrack } from '~/lib/timeline-audio-import'
 import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
 import type { HistoryEntry } from '~/lib/undo/types'
-import { createOptimisticTrackWithHistory } from '~/lib/tracks'
+import { createOptimisticTrack } from '~/lib/tracks'
 import type { Clip, Track } from '~/types/timeline'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
@@ -121,17 +121,15 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     const uid = userId()
     if (!uid) return null
 
-    const track = await createOptimisticTrackWithHistory({
+    const track = await createOptimisticTrack({
       convexClient,
       convexApi,
       projectId: rid,
       userId: uid,
-      tracks,
       insertLocalTrack,
       index: tracks().length,
       grantWrite,
       grantScope: { projectId: rid, userId: uid },
-      historyPush: options.historyPush,
     })
     if (!track) return null
 

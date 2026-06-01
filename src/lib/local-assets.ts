@@ -42,6 +42,7 @@ type LocalAssetBytesResult =
   | { status: 'permission-denied' }
 
 const ASSETS_DIRECTORY_NAME = 'assets'
+const MAX_ASSET_EXTENSION_LENGTH = 16
 
 const isPermissionError = (error: unknown) => (
   error instanceof DOMException
@@ -52,7 +53,16 @@ const now = () => Date.now()
 
 const getAssetFileName = (assetId: string, fileName: string) => {
   const safeName = fileName.trim().replace(/[/\\:]/g, '-')
-  return `${assetId}-${safeName || 'audio'}`
+  const extensionStart = safeName.lastIndexOf('.')
+  const extension = extensionStart > 0 ? safeName.slice(extensionStart) : ''
+  return `${assetId}${extension.length <= MAX_ASSET_EXTENSION_LENGTH ? extension : ''}`
+}
+
+const requireWritableDirectory = async (root: FileSystemDirectoryHandle) => {
+  const permission = await queryFileSystemHandlePermission(root)
+  if (permission === 'granted') return
+  if (await requestFileSystemHandlePermission(root) === 'granted') return
+  throw new LocalAssetWriteError('permission-denied', 'Project storage permission is required.')
 }
 
 const getWritableProjectRoot = async (projectId: string) => {
@@ -173,6 +183,7 @@ export const setLocalProjectAssetDirectory = async (
   nextRoot: FileSystemDirectoryHandle,
 ): Promise<void> => {
   const rows = await listLocalAssets(projectId)
+  await requireWritableDirectory(nextRoot)
   const previousRoot = await getWritableProjectRoot(projectId)
   if (rows.length === 0) {
     await saveProjectDirectoryHandle(projectId, nextRoot)

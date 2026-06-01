@@ -208,6 +208,11 @@ export function registerCloudBackupRoutes(app: App) {
       await deleteUploadedBackupAssetsBestEffort(c.env.daw_audio_samples, uploadedR2Keys)
       if (createdCloudProject) {
         try {
+          await convex.mutation(convexApi.projects.prepareCloudRoomDeleteAsOwner, {
+            projectId,
+            userId: user.id,
+            serverSecret: c.env.CLOUD_PROJECTS_SERVICE_TOKEN,
+          })
           await convex.mutation(convexApi.projects.finalizeCloudRoomDeleteAsOwner, {
             projectId,
             userId: user.id,
@@ -241,6 +246,24 @@ export function registerCloudBackupRoutes(app: App) {
   } catch (err) {
     console.error('Cloud backup fetch error', err)
     return c.json({ error: 'Failed to fetch backup' }, 500)
+  }
+})
+
+  app.delete('/api/cloud-projects/:projectId/access', async (c) => {
+  try {
+    const projectId = c.req.param('projectId')
+    const user = c.get('user')
+    if (!user) return c.json({ error: 'Unauthorized' }, 401)
+    const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
+    const result = await convex.mutation(convexApi.projects.leaveCloudRoomAccess, {
+      projectId,
+      userId: user.id,
+      serverSecret: c.env.CLOUD_PROJECTS_SERVICE_TOKEN,
+    })
+    return c.json({ ok: true, result })
+  } catch (err) {
+    console.error('Cloud project leave error', err)
+    return c.json({ error: 'Failed to leave cloud project' }, 500)
   }
 })
 

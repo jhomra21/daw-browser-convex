@@ -18,15 +18,7 @@ function Index() {
   const session = useSessionQuery()
 
   const readProjectIdFromLocation = () => {
-    const nextProjectId = readLocationSearchParam('projectId')
-    const legacyRoomId = readLocationSearchParam('roomId')
-    if (legacyRoomId && !nextProjectId) {
-      const url = new URL(window.location.href)
-      url.searchParams.set('projectId', legacyRoomId)
-      url.searchParams.delete('roomId')
-      history.replaceState(null, '', url.toString())
-    }
-    return nextProjectId ?? legacyRoomId
+    return readLocationSearchParam('projectId')
   }
 
   onMount(() => {

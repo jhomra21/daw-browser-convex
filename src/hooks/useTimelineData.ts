@@ -26,6 +26,10 @@ type DeleteOwnedRoomResult =
   | { status: 'deleted' }
   | { status: 'error' }
 
+type LeaveCloudProjectResult =
+  | { status: 'left' }
+  | { status: 'error' }
+
 type DeleteCurrentOwnedRoomResult =
   | { status: 'deleted'; destinationProjectId: string }
   | { status: 'error' }
@@ -231,6 +235,19 @@ export function useTimelineData(): UseTimelineDataReturn {
     }
   }
 
+  const leaveCloudProject = async (
+    targetProjectId: string,
+  ): Promise<LeaveCloudProjectResult> => {
+    try {
+      const response = await fetch(`/api/cloud-projects/${encodeURIComponent(targetProjectId)}/access`, { method: 'DELETE' })
+      if (!response.ok) throw new Error('Project leave failed.')
+      return { status: 'left' as const }
+    } catch {
+      window.alert('This project could not be removed from your account.')
+      return { status: 'error' as const }
+    }
+  }
+
   const deleteCurrentOwnedRoom = async (
     targetProjectId: string,
     ownerUserId: string,
@@ -323,6 +340,24 @@ export function useTimelineData(): UseTimelineDataReturn {
 
     const ownerUserId = userId()
     if (!ownerUserId) return
+
+    const canDeleteAsOwner = await convexClient.query(convexApi.projects.canDeleteAsOwner, {
+      projectId: targetProjectId,
+      userId: ownerUserId,
+    }).catch(() => false)
+    if (!canDeleteAsOwner) {
+      const result = await leaveCloudProject(targetProjectId)
+      if (result.status !== 'left' || targetProjectId !== projectId()) return
+      const destinationProjectId = projects().find((project) => project.projectId !== targetProjectId)?.projectId
+      if (destinationProjectId) {
+        navigateToRoom(destinationProjectId)
+        return
+      }
+      const replacement = await createLocalProject('Untitled')
+      await loadLocalProjects()
+      navigateToRoom(replacement.id)
+      return
+    }
 
     if (targetProjectId !== projectId()) {
       await deleteOwnedRoom(targetProjectId)

@@ -119,22 +119,35 @@ export const createProjectId = createLocalProjectId
 export const getProjectDbName = (projectId: string) => `${PROJECT_DB_PREFIX}${projectId}`
 
 const now = () => Date.now()
+let globalDbPromise: Promise<IDBPDatabase<GlobalProjectsDB>> | undefined
+const projectDbPromises = new Map<string, Promise<IDBPDatabase<ProjectDB>>>()
 
-const openGlobalProjectsDb = () => openDB<GlobalProjectsDB>(GLOBAL_DB_NAME, GLOBAL_DB_VERSION, {
-  upgrade(db) {
-    if (!db.objectStoreNames.contains('projects')) {
-      const projects = db.createObjectStore('projects', { keyPath: 'id' })
-      projects.createIndex('by-last-opened', 'lastOpenedAt')
-      projects.createIndex('by-updated-at', 'updatedAt')
-    }
-    if (!db.objectStoreNames.contains('directoryHandles')) {
-      db.createObjectStore('directoryHandles', { keyPath: 'projectId' })
-    }
-  },
-})
+const openGlobalProjectsDb = () => {
+  if (globalDbPromise) return globalDbPromise
+  const promise = openDB<GlobalProjectsDB>(GLOBAL_DB_NAME, GLOBAL_DB_VERSION, {
+    upgrade(db) {
+      if (!db.objectStoreNames.contains('projects')) {
+        const projects = db.createObjectStore('projects', { keyPath: 'id' })
+        projects.createIndex('by-last-opened', 'lastOpenedAt')
+        projects.createIndex('by-updated-at', 'updatedAt')
+      }
+      if (!db.objectStoreNames.contains('directoryHandles')) {
+        db.createObjectStore('directoryHandles', { keyPath: 'projectId' })
+      }
+    },
+  })
+  globalDbPromise = promise
+  void promise.catch(() => {
+    if (globalDbPromise === promise) globalDbPromise = undefined
+  })
+  return promise
+}
 
-export const openLocalProjectDb = (projectId: string): Promise<IDBPDatabase<ProjectDB>> => (
-  openDB<ProjectDB>(getProjectDbName(projectId), PROJECT_DB_VERSION, {
+export const openLocalProjectDb = (projectId: string): Promise<IDBPDatabase<ProjectDB>> => {
+  const dbName = getProjectDbName(projectId)
+  const cached = projectDbPromises.get(dbName)
+  if (cached) return cached
+  const promise = openDB<ProjectDB>(dbName, PROJECT_DB_VERSION, {
     upgrade(db) {
       if (!db.objectStoreNames.contains('entities')) {
         const entities = db.createObjectStore('entities', { keyPath: ['kind', 'id'] })
@@ -156,11 +169,17 @@ export const openLocalProjectDb = (projectId: string): Promise<IDBPDatabase<Proj
       }
     },
     blocking(_currentVersion, _blockedVersion, event) {
+      projectDbPromises.delete(dbName)
       const target = event.target
       if (target instanceof IDBDatabase) target.close()
     },
   })
-)
+  projectDbPromises.set(dbName, promise)
+  void promise.catch(() => {
+    projectDbPromises.delete(dbName)
+  })
+  return promise
+}
 
 export const listLocalProjects = async (): Promise<LocalProjectEntry[]> => {
   const db = await openGlobalProjectsDb()
@@ -226,6 +245,7 @@ export const setLocalProjectMode = async (
   const db = await openGlobalProjectsDb()
   const project = await db.get('projects', projectId)
   if (!project) return undefined
+  if (project.mode === mode) return project
   const timestamp = now()
   const next = {
     ...project,
@@ -295,6 +315,7 @@ const deleteLocalProjectAssetFiles = async (
 export const deleteLocalProject = async (projectId: string): Promise<void> => {
   const db = await openGlobalProjectsDb()
   const directoryEntry = await db.get('directoryHandles', projectId)
+  const dbName = getProjectDbName(projectId)
   const projectDb = await openLocalProjectDb(projectId)
   try {
     const assetPaths = (await projectDb.getAll('assets')).map((asset) => asset.storagePath)
@@ -307,8 +328,9 @@ export const deleteLocalProject = async (projectId: string): Promise<void> => {
     ])
   } finally {
     projectDb.close()
+    projectDbPromises.delete(dbName)
   }
-  await deleteDB(getProjectDbName(projectId))
+  await deleteDB(dbName)
 }
 
 export const saveProjectDirectoryHandle = async (

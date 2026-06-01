@@ -90,6 +90,22 @@ async function findOwnedProject(ctx: { db: DatabaseReader }, projectId: string, 
     .first();
 }
 
+async function listRoomProjectRows(ctx: { db: DatabaseReader }, projectId: string) {
+  return await ctx.db
+    .query("projects")
+    .withIndex("by_room", (q) => q.eq("projectId", projectId))
+    .collect();
+}
+
+async function setRoomProjectDeletionPendingAt(
+  ctx: MutationCtx,
+  projectId: string,
+  deletionPendingAt: number | undefined,
+) {
+  const projects = await listRoomProjectRows(ctx, projectId);
+  await Promise.all(projects.map((project) => ctx.db.patch(project._id, { deletionPendingAt })));
+}
+
 export const listMineDetailed = query({
   args: { userId: v.string() },
   returns: v.array(v.object({ projectId: v.string(), name: v.string() })),
@@ -103,12 +119,10 @@ export const createOwnedRoom = mutation({
   returns: v.object({ status: v.union(v.literal("created"), v.literal("exists")) }),
   handler: async (ctx, { projectId, userId, serverSecret }) => {
     requireServerSecret(serverSecret);
-    const existingProject = await ctx.db
-      .query("projects")
-      .withIndex("by_room", (q) => q.eq("projectId", projectId))
-      .first();
+    const existingProjects = await listRoomProjectRows(ctx, projectId);
+    const existingProject = existingProjects[0];
     if (existingProject) {
-      if (existingProject.deletionPendingAt !== undefined) {
+      if (existingProjects.some((project) => project.deletionPendingAt !== undefined)) {
         throw new Error("Project deletion is pending.");
       }
       if (existingProject.ownerUserId === userId) {
@@ -145,13 +159,14 @@ export const canDeleteAsOwner = query({
 
 export const prepareCloudRoomDeleteAsOwner = mutation({
   args: { projectId: v.string(), userId: v.string(), serverSecret: v.string() },
-  returns: v.object({ status: v.literal("deleted") }),
+  returns: v.object({ status: v.literal("pending") }),
   handler: async (ctx, { projectId, userId, serverSecret }) => {
     requireServerSecret(serverSecret);
     const ownerProject = await findOwnedProject(ctx, projectId, userId);
     if (!ownerProject) throw new Error("Only project owners can delete this project.");
-    await ctx.db.patch(ownerProject._id, { deletionPendingAt: Date.now() });
-    const result: { status: "deleted" } = { status: "deleted" };
+    const deletionPendingAt = ownerProject.deletionPendingAt ?? Date.now();
+    await setRoomProjectDeletionPendingAt(ctx, projectId, deletionPendingAt);
+    const result: { status: "pending" } = { status: "pending" };
     return result;
   },
 });
@@ -165,6 +180,9 @@ export const finalizeCloudRoomDeleteAsOwner = mutation({
     if (!ownerProject) {
       const result: { status: "deleted" } = { status: "deleted" };
       return result;
+    }
+    if (ownerProject.deletionPendingAt === undefined) {
+      throw new Error("Project deletion is not pending.");
     }
     await deleteRoomRows(ctx, projectId);
     const result: { status: "deleted" } = { status: "deleted" };
@@ -182,8 +200,25 @@ export const clearCloudRoomDeletePendingAsOwner = mutation({
       const result: { status: "skipped" } = { status: "skipped" };
       return result;
     }
-    await ctx.db.patch(ownerProject._id, { deletionPendingAt: undefined });
+    await setRoomProjectDeletionPendingAt(ctx, projectId, undefined);
     const result: { status: "cleared" } = { status: "cleared" };
+    return result;
+  },
+});
+
+export const leaveCloudRoomAccess = mutation({
+  args: { projectId: v.string(), userId: v.string(), serverSecret: v.string() },
+  returns: v.object({ status: v.literal("left") }),
+  handler: async (ctx, { projectId, userId, serverSecret }) => {
+    requireServerSecret(serverSecret);
+    const role = await requireProjectRole(ctx, projectId, userId, ["owner", "editor", "viewer"]);
+    if (role === "owner") throw new Error("Project owners cannot leave without deleting or transferring the project.");
+    const rows = await ctx.db
+      .query("ownerships")
+      .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
+      .collect();
+    await Promise.all(rows.map((row) => ctx.db.delete(row._id)));
+    const result: { status: "left" } = { status: "left" };
     return result;
   },
 });

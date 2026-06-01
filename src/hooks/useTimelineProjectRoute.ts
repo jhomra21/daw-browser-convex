@@ -65,12 +65,10 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
   onMount(() => {
     const syncLocationState = (options?: { bootstrapIfEmpty?: boolean }) => {
       const nextProjectId = readLocationSearchParam('projectId')
-      const legacyRoomId = readLocationSearchParam('roomId')
       const nextShareToken = readLocationSearchParam('shareToken')
-      const routeProjectId = nextProjectId ?? legacyRoomId
       setAcceptingShareToken(nextShareToken)
-      if (routeProjectId) {
-        resolveRoom(routeProjectId, legacyRoomId && !nextProjectId ? { history: 'replace' } : undefined)
+      if (nextProjectId) {
+        resolveRoom(nextProjectId)
         return
       }
       batch(() => {

@@ -15,6 +15,10 @@ function isProjectOwnership(ownership: RoomOwnership) {
   return !ownership.trackId && !ownership.clipId;
 }
 
+const hasDeletionPending = (projects: ProjectRecord[]) => (
+  projects.some((project) => project.deletionPendingAt !== undefined)
+);
+
 async function listProjectsByUser(
   ctx: ProjectAccessCtx,
   projectId: string,
@@ -26,15 +30,15 @@ async function listProjectsByUser(
     .collect();
 }
 
-async function isProjectDeletionPending(
+export async function isProjectDeletionPending(
   ctx: ProjectAccessCtx,
   projectId: string,
 ) {
-  const project = await ctx.db
+  const projects = await ctx.db
     .query("projects")
     .withIndex("by_room", (q) => q.eq("projectId", projectId))
-    .first();
-  return project?.deletionPendingAt !== undefined;
+    .collect();
+  return hasDeletionPending(projects);
 }
 
 function buildProjectNameByRoom(projects: ProjectRecord[]) {
@@ -56,7 +60,7 @@ async function readAccessibleProjectNameByRoom(
     .withIndex("by_room_createdAt", (q) => q.eq("projectId", projectId))
     .order("asc")
     .collect();
-  if (projects.some((project) => project.deletionPendingAt !== undefined)) return null;
+  if (hasDeletionPending(projects)) return null;
   const project = projects[0];
   return project?.name.trim() ? project.name : "Untitled";
 }
@@ -129,7 +133,7 @@ export async function getProjectRole(
   userId: string,
 ): Promise<ProjectRole | null> {
   const projects = await listProjectsByUser(ctx, projectId, userId);
-  if (projects.length > 0) return projects.some((project) => project.deletionPendingAt !== undefined) ? null : "owner";
+  if (projects.length > 0) return hasDeletionPending(projects) ? null : "owner";
   const ownerships = await ctx.db
     .query("ownerships")
     .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
@@ -199,5 +203,5 @@ export async function requireMasterBusWriteAccess(
   projectId: string,
   userId: string,
 ) {
-  await requireProjectAdminCapability(ctx, projectId, userId);
+  await requireProjectRole(ctx, projectId, userId, ["owner", "editor"]);
 }

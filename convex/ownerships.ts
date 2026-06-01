@@ -1,19 +1,31 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+import { getProjectRole } from "./projectAccess";
+
+const canWriteProject = (role: string | null) => role === "owner" || role === "editor";
 
 // Return IDs of tracks owned by the given user in a room
 export const listOwnedTrackIds = query({
   args: { projectId: v.string(), ownerUserId: v.string() },
   returns: v.array(v.id("tracks")),
   handler: async (ctx, { projectId, ownerUserId }) => {
+    const role = await getProjectRole(ctx, projectId, ownerUserId);
+    if (canWriteProject(role)) {
+      const tracks = await ctx.db
+        .query("tracks")
+        .withIndex("by_room_index", (q) => q.eq("projectId", projectId))
+        .collect();
+      return tracks.map((track) => track._id);
+    }
     const rows = await ctx.db
       .query("ownerships")
       .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", ownerUserId))
       .collect();
-    const ids = rows
-      .filter((r) => r.trackId)
-      .map((r) => r.trackId!)
-    return ids as any;
+    const ids = [];
+    for (const row of rows) {
+      if (row.trackId) ids.push(row.trackId);
+    }
+    return ids;
   },
 });
 
@@ -21,13 +33,22 @@ export const listOwnedClipIds = query({
   args: { projectId: v.string(), ownerUserId: v.string() },
   returns: v.array(v.id("clips")),
   handler: async (ctx, { projectId, ownerUserId }) => {
+    const role = await getProjectRole(ctx, projectId, ownerUserId);
+    if (canWriteProject(role)) {
+      const clips = await ctx.db
+        .query("clips")
+        .withIndex("by_room", (q) => q.eq("projectId", projectId))
+        .collect();
+      return clips.map((clip) => clip._id);
+    }
     const rows = await ctx.db
       .query("ownerships")
       .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", ownerUserId))
       .collect();
-    const ids = rows
-      .filter((r) => r.clipId)
-      .map((r) => r.clipId!)
-    return ids as any;
+    const ids = [];
+    for (const row of rows) {
+      if (row.clipId) ids.push(row.clipId);
+    }
+    return ids;
   },
 });

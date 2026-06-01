@@ -1,7 +1,7 @@
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { requireProjectRole } from "./projectAccess";
+import { isProjectDeletionPending, requireProjectRole } from "./projectAccess";
 import { projectManifestValidator } from "./projectManifestValidator";
 import {
   assertProjectManifestBaseIntegrity,
@@ -26,11 +26,7 @@ const latestBackup = async (ctx: Pick<QueryCtx, "db">, projectId: string) => (
 );
 
 const assertProjectNotDeleting = async (ctx: Pick<QueryCtx, "db">, projectId: string) => {
-  const project = await ctx.db
-    .query("projects")
-    .withIndex("by_room", (q) => q.eq("projectId", projectId))
-    .first();
-  if (project?.deletionPendingAt !== undefined) {
+  if (await isProjectDeletionPending(ctx, projectId)) {
     throw new Error("Project deletion is pending.");
   }
 };
@@ -128,7 +124,7 @@ export const upsertLatest = mutation({
     const supersededCloudKeys = readSupersededCloudKeys(projectId, existing?.manifest, manifest);
 
     const now = Date.now();
-    const manifestVersion = `${now}`;
+    const manifestVersion = `${now}-${crypto.randomUUID()}`;
     const row = {
       projectId,
       ownerUserId: userId,

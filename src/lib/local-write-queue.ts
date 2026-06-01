@@ -16,9 +16,17 @@ type ScheduledIdleFlush = {
   cancel: () => void
 }
 
+const INITIAL_RETRY_DELAY_MS = 250
+const MAX_RETRY_DELAY_MS = 30_000
+
 const entityKey = (kind: string, id: string) => `${kind}:${id}`
 
-const scheduleIdleFlush = (callback: () => void): ScheduledIdleFlush => {
+// Failed durable writes are retried with a capped timer; successful writes stay idle-scheduled.
+const scheduleIdleFlush = (callback: () => void, delayMs: number): ScheduledIdleFlush => {
+  if (delayMs > 0) {
+    const handle = globalThis.setTimeout(callback, delayMs)
+    return { cancel: () => globalThis.clearTimeout(handle) }
+  }
   if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
     const handle = window.requestIdleCallback(callback)
     return { cancel: () => window.cancelIdleCallback(handle) }
@@ -30,9 +38,9 @@ const scheduleIdleFlush = (callback: () => void): ScheduledIdleFlush => {
 export class LocalEntityWriteQueue {
   private puts = new Map<string, QueuedEntityWrite>()
   private deletes = new Map<string, QueuedEntityDelete>()
-  private scheduled = false
   private scheduledFlush: ScheduledIdleFlush | null = null
   private flushPromise: Promise<void> | null = null
+  private retryDelayMs = 0
 
   public constructor(private projectId: string) {}
 
@@ -83,21 +91,18 @@ export class LocalEntityWriteQueue {
   }
 
   private scheduleFlush() {
-    if (this.scheduled) return
-    this.scheduled = true
+    if (this.scheduledFlush) return
     this.scheduledFlush = scheduleIdleFlush(() => {
-      this.scheduled = false
       this.scheduledFlush = null
       void this.flush().catch((error) => {
         console.error('Failed to flush local entity writes', error)
       })
-    })
+    }, this.retryDelayMs)
   }
 
   private cancelScheduledFlush() {
     this.scheduledFlush?.cancel()
     this.scheduledFlush = null
-    this.scheduled = false
   }
 
   private async flushBatches(): Promise<void> {
@@ -115,6 +120,7 @@ export class LocalEntityWriteQueue {
           ...deletes.map((entry) => tx.store.delete([entry.kind, entry.id])),
         ])
         await tx.done
+        this.retryDelayMs = 0
       } catch (error) {
         for (const write of puts) {
           const key = entityKey(write.kind, write.id)
@@ -124,7 +130,9 @@ export class LocalEntityWriteQueue {
           const key = entityKey(entry.kind, entry.id)
           if (!this.puts.has(key) && !this.deletes.has(key)) this.deletes.set(key, entry)
         }
-        this.scheduleFlush()
+        this.retryDelayMs = this.retryDelayMs === 0
+          ? INITIAL_RETRY_DELAY_MS
+          : Math.min(this.retryDelayMs * 2, MAX_RETRY_DELAY_MS)
         throw error
       }
     }

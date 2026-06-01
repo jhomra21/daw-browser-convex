@@ -333,6 +333,20 @@ export const deleteLocalProject = async (projectId: string): Promise<void> => {
   await deleteDB(dbName)
 }
 
+export const purgeLocalProjectCache = async (projectId: string): Promise<void> => {
+  const db = await openGlobalProjectsDb()
+  const project = await db.get('projects', projectId)
+  if (project) {
+    await deleteLocalProject(projectId)
+    return
+  }
+  const dbName = getProjectDbName(projectId)
+  const cached = await projectDbPromises.get(dbName)?.catch(() => undefined)
+  cached?.close()
+  projectDbPromises.delete(dbName)
+  await deleteDB(dbName)
+}
+
 export const saveProjectDirectoryHandle = async (
   projectId: string,
   handle: FileSystemDirectoryHandle,

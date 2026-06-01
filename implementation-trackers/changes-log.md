@@ -10,6 +10,7 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Validated prior review findings before implementation and kept the broad caller-supplied Convex `userId` authorization issue as a separate architecture follow-up requiring verified Convex auth or authenticated API-only boundaries.
 - Started the all-in-one completion pass for remaining local-first cloud/shared tracker work, with implementation planned as milestone commits inside this PR rather than separate PRs.
 - Recorded the grilled plan corrections: restore primitives before conflict/offline download, durable shared outbox instead of ephemeral pending maps, durable R2 retry state, revoked-user local cache purge, and Worker/API-derived identity for touched sensitive flows.
+- Added accepted collaborator revocation routes backed by service-token Convex mutations and a local cache purge path for explicit leave/access-loss handling.
 
 ### Review Follow-Up
 

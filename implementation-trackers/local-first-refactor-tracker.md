@@ -207,6 +207,9 @@ The remaining unchecked cloud/shared work will be completed in this PR, split in
 - [ ] Finding: backup restore primitives must be implemented before conflict actions and offline download can be truthful.
 - [ ] Finding: shared pending UI maps are ephemeral projection helpers and must not be used as the durable offline queue.
 - [ ] Finding: R2 cleanup must tolerate partial failure and retry after reload.
+- [x] Implemented accepted access-row revocation through authenticated Worker routes plus service-token Convex mutations; owners cannot revoke themselves or another owner through this path.
+- [x] Implemented local cache purge for explicit leave/access-loss handling so revoked shared/cloud project caches are removed from IndexedDB before navigation.
+- [x] Validated auth/access foundation with `bun run typecheck`.
 
 ---
 

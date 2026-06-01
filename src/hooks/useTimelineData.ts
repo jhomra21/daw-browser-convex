@@ -9,6 +9,7 @@ import {
   type LocalProjectMode,
   listLocalProjects,
   markLocalProjectOpened,
+  purgeLocalProjectCache,
   renameLocalProject,
 } from '~/lib/local-project-db'
 import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writes'
@@ -241,12 +242,38 @@ export function useTimelineData(): UseTimelineDataReturn {
     try {
       const response = await fetch(`/api/cloud-projects/${encodeURIComponent(targetProjectId)}/access`, { method: 'DELETE' })
       if (!response.ok) throw new Error('Project leave failed.')
+      await purgeLocalProjectCache(targetProjectId)
+      await loadLocalProjects()
       return { status: 'left' as const }
     } catch {
       window.alert('This project could not be removed from your account.')
       return { status: 'error' as const }
     }
   }
+
+  const navigateAfterAccessLoss = async (targetProjectId: string) => {
+    await purgeLocalProjectCache(targetProjectId)
+    await loadLocalProjects()
+    const destinationProjectId = projects().find((project) => project.projectId !== targetProjectId)?.projectId
+    if (destinationProjectId) {
+      navigateToRoom(destinationProjectId)
+      return
+    }
+    const replacement = await createLocalProject('Untitled')
+    await loadLocalProjects()
+    navigateToRoom(replacement.id)
+  }
+
+  createEffect(() => {
+    if (fullView.status !== 'error') return
+    const currentProjectId = projectId()
+    if (!currentProjectId || isLocalId('project', currentProjectId)) return
+    const error = fullView.error
+    const message = error instanceof Error ? error.message : ''
+    const lowerMessage = message.toLowerCase()
+    if (!lowerMessage.includes('access') && !lowerMessage.includes('permission')) return
+    void navigateAfterAccessLoss(currentProjectId)
+  })
 
   const deleteCurrentOwnedRoom = async (
     targetProjectId: string,

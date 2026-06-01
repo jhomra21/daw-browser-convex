@@ -1,4 +1,4 @@
-import { mutation } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireProjectRole } from "./projectAccess";
 
@@ -79,5 +79,63 @@ export const revoke = mutation({
     await requireProjectRole(ctx, invite.projectId, userId, ["owner"]);
     await ctx.db.patch(invite._id, { revokedAt: Date.now() });
     return null;
+  },
+});
+
+export const listAcceptedAccess = query({
+  args: { projectId: v.string(), userId: v.string(), serverSecret: v.string() },
+  returns: v.array(v.object({
+    userId: v.string(),
+    role: v.union(v.literal("editor"), v.literal("viewer")),
+  })),
+  handler: async (ctx, { projectId, userId, serverSecret }) => {
+    requireServerSecret(serverSecret);
+    await requireProjectRole(ctx, projectId, userId, ["owner"]);
+    const rows = await ctx.db
+      .query("ownerships")
+      .withIndex("by_room", (q) => q.eq("projectId", projectId))
+      .collect();
+    return rows.flatMap((row) => {
+      if (row.trackId || row.clipId) return [];
+      if (row.ownerUserId === userId) return [];
+      if (row.role !== "editor" && row.role !== "viewer") return [];
+      return [{ userId: row.ownerUserId, role: row.role }];
+    });
+  },
+});
+
+export const revokeAcceptedAccess = mutation({
+  args: {
+    projectId: v.string(),
+    userId: v.string(),
+    targetUserId: v.string(),
+    serverSecret: v.string(),
+  },
+  returns: v.object({
+    status: v.union(v.literal("revoked"), v.literal("not-found")),
+  }),
+  handler: async (ctx, { projectId, userId, targetUserId, serverSecret }) => {
+    requireServerSecret(serverSecret);
+    await requireProjectRole(ctx, projectId, userId, ["owner"]);
+    if (targetUserId === userId) {
+      throw new Error("Project owners cannot revoke themselves.");
+    }
+
+    const targetRows = await ctx.db
+      .query("ownerships")
+      .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", targetUserId))
+      .collect();
+    const projectAccess = targetRows.find((row) => !row.trackId && !row.clipId);
+    if (!projectAccess) {
+      const result: { status: "not-found" } = { status: "not-found" };
+      return result;
+    }
+    if (projectAccess.role === "owner") {
+      throw new Error("Owner access cannot be revoked through invite access removal.");
+    }
+
+    await Promise.all(targetRows.map((row) => ctx.db.delete(row._id)));
+    const result: { status: "revoked" } = { status: "revoked" };
+    return result;
   },
 });

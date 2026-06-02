@@ -16,7 +16,7 @@ import { buildClipCreatePayload, type ClipCreateSnapshot } from "~/lib/clip-crea
 import { convexApi } from "~/lib/convex";
 import type { LocalEffectRow } from "~/lib/local-effects";
 import { isLocalId } from "~/lib/local-ids";
-import { publishSharedTimelineOperationOrQueue } from "~/lib/shared-outbox";
+import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import { buildSharedClipCreateOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { toLocalTimelineClip } from "~/lib/timeline-repository/track-row-adapter";
@@ -140,7 +140,7 @@ export function createEffectsPanelState(
       kind: "effects.setArpeggiatorParams",
       payload: { trackId, params },
     };
-    return publishSharedTimelineOperationOrQueue({ projectId, userId, operation });
+    return publishDurableSharedTimelineOperation({ projectId, userId, operation });
   }
 
   function persistSynth(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setSynthParams>["params"], persistContext: { projectId?: string; userId?: string }) {
@@ -156,7 +156,7 @@ export function createEffectsPanelState(
       kind: "effects.setSynthParams",
       payload: { trackId, params },
     };
-    return publishSharedTimelineOperationOrQueue({ projectId, userId, operation });
+    return publishDurableSharedTimelineOperation({ projectId, userId, operation });
   }
 
   function commitArpChange(
@@ -358,7 +358,7 @@ export function createEffectsPanelState(
           clip,
         }),
       );
-      const result = await publishSharedTimelineOperationOrQueue({ projectId, userId: grantScope.userId, operation });
+      const result = await publishDurableSharedTimelineOperation({ projectId, userId: grantScope.userId, operation });
       const clipId = typeof result === "string" ? result : null;
       if (!clipId) return;
 

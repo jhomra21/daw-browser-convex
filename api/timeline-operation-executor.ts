@@ -1,5 +1,5 @@
 import { api as convexApi } from '../convex/_generated/api'
-import type { SharedTimelineOperation } from '../src/lib/shared-timeline-operations'
+import { readSharedTimelineOperationTargets, type SharedTimelineOperation } from '../src/lib/shared-timeline-operations'
 import type { createAuthenticatedConvexClient } from './convex-auth'
 
 type AuthenticatedConvexClient = Awaited<ReturnType<typeof createAuthenticatedConvexClient>>
@@ -20,55 +20,8 @@ const verifyTimelineOperationTargets = async (
   context: TimelineOperationContext,
   operation: SharedTimelineOperation,
 ) => {
-  const trackIds = new Set<string>()
-  const clipIds = new Set<string>()
-
-  switch (operation.kind) {
-    case 'tracks.lock':
-    case 'tracks.unlock':
-    case 'tracks.setVolume':
-    case 'tracks.setMix':
-      trackIds.add(operation.payload.trackId)
-      break
-    case 'tracks.setRouting':
-      trackIds.add(operation.payload.trackId)
-      if (operation.payload.routing.outputTargetId) {
-        trackIds.add(operation.payload.routing.outputTargetId)
-      }
-      for (const send of operation.payload.routing.sends ?? []) {
-        trackIds.add(send.targetId)
-      }
-      break
-    case 'clips.removeMany':
-      for (const clipId of operation.payload.clipIds) {
-        clipIds.add(clipId)
-      }
-      break
-    case 'clips.moveMany':
-      for (const move of operation.payload.moves) {
-        clipIds.add(move.clipId)
-        if (move.trackId) trackIds.add(move.trackId)
-      }
-      break
-    case 'clips.create':
-      trackIds.add(operation.payload.trackId)
-      break
-    case 'clips.createMany':
-      for (const item of operation.payload.items) {
-        trackIds.add(item.trackId)
-      }
-      break
-    case 'effects.setEqParams':
-    case 'effects.setReverbParams':
-    case 'effects.setSynthParams':
-    case 'effects.setArpeggiatorParams':
-      trackIds.add(operation.payload.trackId)
-      break
-    case 'tracks.create':
-    case 'effects.setMasterEqParams':
-    case 'effects.setMasterReverbParams':
-      return
-  }
+  const targets = readSharedTimelineOperationTargets(operation)
+  const { trackIds, clipIds } = targets
 
   if (trackIds.size === 0 && clipIds.size === 0) return
 

@@ -4,10 +4,10 @@ import type { AudioEngine } from '~/lib/audio-engine'
 import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError, readLocalAssetBytes } from '~/lib/local-assets'
 import { isLocalId } from '~/lib/local-ids'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
-import { isSharedOutboxQueuedError, publishSharedTimelineOperationOrQueue } from '~/lib/shared-outbox'
+import { isSharedOutboxQueuedError, publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import {
   buildSharedClipCreateOperation,
-  publishSharedTimelineOperation,
+  publishTransientSharedTimelineOperation,
 } from '~/lib/shared-timeline-operations-api'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
@@ -99,7 +99,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
     const userId = context.project.userId()
     if (!projectId || !userId) return null
     const operation = buildSharedClipCreateOperation(buildClipCreatePayload({ projectId, trackId, clip }))
-    const result = await publishSharedTimelineOperationOrQueue({ projectId, userId, operation, throwQueued: true })
+    const result = await publishDurableSharedTimelineOperation({ projectId, userId, operation, throwQueued: true })
     return typeof result === 'string' ? result : null
   }
 
@@ -289,7 +289,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         sourceAssetKey,
         sourceKind: 'upload',
         createServerClip: async (payload) => {
-          const result = await publishSharedTimelineOperation(projectId, {
+          const result = await publishTransientSharedTimelineOperation(projectId, {
             kind: 'clips.create',
             payload,
           })

@@ -1,5 +1,5 @@
 import { isLocalId } from '~/lib/local-ids'
-import { publishSharedTimelineOperationOrQueue } from '~/lib/shared-outbox'
+import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import type { UpdateTrackInput } from '~/lib/timeline-repository/types'
 import type { TrackRouting } from '~/types/timeline'
 
@@ -43,7 +43,7 @@ export const createTimelineTrackWriteAdapter = (context: TrackWriteContext) => {
         outputTargetId: routing.outputTargetId ?? null,
         sends: routing.sends ?? [],
       },
-      async (userId) => await publishSharedTimelineOperationOrQueue({
+      async (userId) => await publishDurableSharedTimelineOperation({
         projectId: context.projectId,
         userId,
         operation: {
@@ -61,7 +61,7 @@ export const createTimelineTrackWriteAdapter = (context: TrackWriteContext) => {
     ),
     setVolume: async (trackId: string, volume: number) => await updateLocalOrCloudTrack(
       { trackId, volume },
-      async (userId) => await publishSharedTimelineOperationOrQueue({
+      async (userId) => await publishDurableSharedTimelineOperation({
         projectId: context.projectId,
         userId,
         operation: { kind: 'tracks.setVolume', payload: { trackId, volume } },
@@ -76,7 +76,7 @@ export const createTimelineTrackWriteAdapter = (context: TrackWriteContext) => {
       }
       if (!context.userId) return undefined
       const userId = context.userId
-      const result = await publishSharedTimelineOperationOrQueue({
+      const result = await publishDurableSharedTimelineOperation({
         projectId: context.projectId,
         userId,
         operation: {

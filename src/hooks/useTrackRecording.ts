@@ -7,7 +7,7 @@ import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError } from '~/lib/
 import { isLocalId } from '~/lib/local-ids'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { isSharedOutboxQueuedError } from '~/lib/shared-outbox'
-import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
+import { publishTransientSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import {
   acquireTrackRecordingLock,
@@ -358,7 +358,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         sourceAssetKey,
         sourceKind: 'recording',
         createServerClip: async (payload) => {
-          const result = await publishSharedTimelineOperation(rid, {
+          const result = await publishTransientSharedTimelineOperation(rid, {
             kind: 'clips.create',
             payload,
           })

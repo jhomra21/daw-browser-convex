@@ -1,5 +1,5 @@
 import { isLocalId } from '~/lib/local-ids'
-import { publishSharedTimelineOperationOrQueue } from '~/lib/shared-outbox'
+import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { MoveClipInput } from '~/lib/timeline-repository/types'
 
@@ -21,7 +21,7 @@ export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
     }
     if (!context.userId) return new Set<string>()
     const userId = context.userId
-    const result = await publishSharedTimelineOperationOrQueue({
+    const result = await publishDurableSharedTimelineOperation({
       projectId: context.projectId,
       userId,
       operation: { kind: 'clips.removeMany', payload: { clipIds } },
@@ -41,7 +41,7 @@ export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
     }
     if (!context.userId) return false
     const userId = context.userId
-    const result = await publishSharedTimelineOperationOrQueue({
+    const result = await publishDurableSharedTimelineOperation({
       projectId: context.projectId,
       userId,
       operation: { kind: 'clips.moveMany', payload: { moves } },

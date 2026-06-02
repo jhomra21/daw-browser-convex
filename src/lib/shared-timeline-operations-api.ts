@@ -32,7 +32,7 @@ export const publishSharedTimelineOperationParts = async (
   return await response.json().catch(() => null)
 }
 
-export const publishSharedTimelineOperation = async (
+export const publishTransientSharedTimelineOperation = async (
   projectId: string,
   operation: SharedTimelineOperation,
 ): Promise<unknown> => await publishSharedTimelineOperationParts(projectId, operation.kind, operation.payload)

@@ -3,7 +3,7 @@ import type { Accessor } from 'solid-js'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import {
   buildSharedTrackCreateOperation,
-  publishSharedTimelineOperation,
+  publishTransientSharedTimelineOperation,
 } from '~/lib/shared-timeline-operations-api'
 import { buildTrackCreateMutationInput } from '~/lib/track-mutation-args'
 import { buildTrackCreateHistoryEntry } from '~/lib/undo/builders'
@@ -109,7 +109,7 @@ export async function createOptimisticTrack(options: CreateOptimisticTrackOption
     kind: payload.kind,
     channelRole: payload.channelRole,
   })
-  const result = await publishSharedTimelineOperation(options.projectId, operation)
+  const result = await publishTransientSharedTimelineOperation(options.projectId, operation)
   const trackId = typeof result === 'string' ? result : null
   if (!trackId) return null
 

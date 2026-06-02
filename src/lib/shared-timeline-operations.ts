@@ -65,6 +65,64 @@ export type SharedTimelineOperation =
 
 export type SharedTimelineOperationKind = SharedTimelineOperation['kind']
 
+type SharedTimelineOperationTargets = {
+  trackIds: Set<string>
+  clipIds: Set<string>
+}
+
+const sharedTimelineOperationTargets = (): SharedTimelineOperationTargets => ({ trackIds: new Set(), clipIds: new Set() })
+
+const sharedTimelineTrackTargets = (trackId: string): SharedTimelineOperationTargets => ({
+  trackIds: new Set([trackId]),
+  clipIds: new Set(),
+})
+
+export const readSharedTimelineOperationTargets = (operation: SharedTimelineOperation): SharedTimelineOperationTargets => {
+  switch (operation.kind) {
+    case 'tracks.lock':
+    case 'tracks.unlock':
+    case 'tracks.setVolume':
+    case 'tracks.setMix':
+      return sharedTimelineTrackTargets(operation.payload.trackId)
+    case 'tracks.setRouting': {
+      const targets = sharedTimelineTrackTargets(operation.payload.trackId)
+      if (operation.payload.routing.outputTargetId) targets.trackIds.add(operation.payload.routing.outputTargetId)
+      for (const send of operation.payload.routing.sends ?? []) {
+        targets.trackIds.add(send.targetId)
+      }
+      return targets
+    }
+    case 'clips.removeMany':
+      return { trackIds: new Set(), clipIds: new Set(operation.payload.clipIds) }
+    case 'clips.moveMany': {
+      const targets = sharedTimelineOperationTargets()
+      for (const move of operation.payload.moves) {
+        if (move.trackId) targets.trackIds.add(move.trackId)
+        targets.clipIds.add(move.clipId)
+      }
+      return targets
+    }
+    case 'clips.create':
+      return sharedTimelineTrackTargets(operation.payload.trackId)
+    case 'clips.createMany': {
+      const targets = sharedTimelineOperationTargets()
+      for (const item of operation.payload.items) {
+        targets.trackIds.add(item.trackId)
+      }
+      return targets
+    }
+    case 'effects.setEqParams':
+    case 'effects.setReverbParams':
+    case 'effects.setSynthParams':
+    case 'effects.setArpeggiatorParams':
+      return sharedTimelineTrackTargets(operation.payload.trackId)
+    case 'tracks.create':
+    case 'effects.setMasterEqParams':
+    case 'effects.setMasterReverbParams':
+      return sharedTimelineOperationTargets()
+  }
+}
+
 const sharedTimelineOperationKinds: SharedTimelineOperationKind[] = [
   'tracks.create',
   'tracks.lock',

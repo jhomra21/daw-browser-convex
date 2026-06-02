@@ -219,7 +219,7 @@ export const enqueueSharedTimelineOperationOnFailure = async (
   error: input.error,
 })
 
-export const publishSharedTimelineOperationOrQueue = async <T = undefined>(
+export const publishDurableSharedTimelineOperation = async <T = undefined>(
   input: {
     projectId: string
     userId: string

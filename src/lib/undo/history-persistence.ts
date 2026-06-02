@@ -4,7 +4,7 @@ import { persistClipTiming } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
 import { setLocalEffect } from "~/lib/local-effects";
 import { isLocalId } from "~/lib/local-ids";
-import { publishSharedTimelineOperationOrQueue } from "~/lib/shared-outbox";
+import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { buildTrackCreateMutationInput, buildTrackDeleteMutationInput, buildTrackMixMutationInput, buildTrackVolumeMutationInput } from "~/lib/track-mutation-args";
@@ -115,7 +115,7 @@ export const createHistoryTrack = async (
     kind: payload.kind,
     channelRole: payload.channelRole,
   });
-  const result = await publishSharedTimelineOperationOrQueue({ projectId: deps.projectId, userId: deps.userId, operation });
+  const result = await publishDurableSharedTimelineOperation({ projectId: deps.projectId, userId: deps.userId, operation });
   if (typeof result !== "string") throw new Error("Failed to create history track");
   return result;
 };
@@ -133,7 +133,7 @@ export const createHistoryClip = async (
     )).id;
   }
   const operation = buildSharedClipCreateOperation(buildClipCreatePayload({ projectId: deps.projectId, trackId, clip }));
-  const result = await publishSharedTimelineOperationOrQueue({ projectId: deps.projectId, userId: deps.userId, operation });
+  const result = await publishDurableSharedTimelineOperation({ projectId: deps.projectId, userId: deps.userId, operation });
   return typeof result === "string" ? result : null;
 };
 
@@ -146,7 +146,7 @@ function pickDirectionalValue<T>(direction: HistoryDirection, from: T, to: T) {
 }
 
 const publishHistoryOperation = async (deps: Deps, operation: SharedTimelineOperation) => {
-  await publishSharedTimelineOperationOrQueue({ projectId: deps.projectId, userId: deps.userId, operation });
+  await publishDurableSharedTimelineOperation({ projectId: deps.projectId, userId: deps.userId, operation });
 };
 
 export const persistHistoryTrackEffects = async (

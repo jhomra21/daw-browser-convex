@@ -39,7 +39,7 @@ import { convexApi, useConvexQuery } from "~/lib/convex";
 import { useEffectsPanelAudioSync } from "~/hooks/useEffectsPanelAudioSync";
 import { useEffectsPanelTarget } from "~/hooks/useEffectsPanelTarget";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
-import { publishSharedTimelineOperationOrQueue } from "~/lib/shared-outbox";
+import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import { FX_PANEL_HEIGHT_PX } from "~/lib/timeline-utils";
@@ -490,7 +490,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     projectId: string,
     userId: string,
     operation: SharedTimelineOperation,
-  ) => publishSharedTimelineOperationOrQueue({ projectId, userId, operation });
+  ) => publishDurableSharedTimelineOperation({ projectId, userId, operation });
 
   const eqState = createPersistedEffectState<RoomEffectRow | undefined, EqParams>({
     targetId: currentTargetId,

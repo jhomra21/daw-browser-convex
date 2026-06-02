@@ -2,11 +2,13 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { createAuth } from './auth'
 import type { ApiBindings } from './app-types'
+import { registerConvexAuthRoutes } from './convex-auth'
 import { registerAgentRoutes } from './routes/agent'
 import { registerCloudBackupRoutes } from './routes/cloud-backups'
 import { registerExportRoutes } from './routes/exports'
 import { registerSampleRoutes } from './routes/samples'
 import { registerShareInviteRoutes } from './routes/share-invites'
+import { registerTimelineOperationRoutes } from './routes/timeline-operations'
 
 const app = new Hono<ApiBindings>()
 
@@ -67,6 +69,7 @@ app.get('/api/session', (c) => {
 
 
 registerShareInviteRoutes(app)
+registerConvexAuthRoutes(app)
 registerAgentRoutes(app)
 // Protected route example
 app.get('/api/protected', (c) => {
@@ -83,5 +86,6 @@ app.get('/api/protected', (c) => {
 registerSampleRoutes(app)
 registerCloudBackupRoutes(app)
 registerExportRoutes(app)
+registerTimelineOperationRoutes(app)
 
 export default app

@@ -3,7 +3,7 @@ import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
 import TrackSidebar from "~/components/timeline/TrackSidebar";
 import TimelineOverlays from "~/components/timeline/timeline-overlays";
-import { FX_OFFSET_PX, LANE_HEIGHT, PPS, RULER_HEIGHT } from "~/lib/timeline-utils";
+import { FX_PANEL_HEIGHT_PX, LANE_HEIGHT, PPS, RULER_HEIGHT } from "~/lib/timeline-utils";
 import type { AudioEngine } from "~/lib/audio-engine";
 import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionState";
 import type { Clip, Track, TrackId, TrackSend } from "~/types/timeline";
@@ -78,25 +78,26 @@ type Props = {
 export default function TimelineWorkspace(props: Props) {
   const trackAreaHeight = () => (props.tracks.length + (props.dropAtNewTrack ? 1 : 0)) * LANE_HEIGHT;
   const fullHeight = () => RULER_HEIGHT + trackAreaHeight();
+  const scrollContentHeight = () => fullHeight() + (props.bottomFXOpen ? FX_PANEL_HEIGHT_PX : 0);
   return (
     <div class="flex-1 flex min-h-0" ref={props.containerRef}>
       <div
         class="flex-1 relative overflow-auto timeline-scroll"
-        style={{ "padding-bottom": props.bottomFXOpen ? `${FX_OFFSET_PX}px` : "0px" }}
         ref={props.scrollRef}
       >
         <div
           class="relative flex select-none"
           style={{
             width: `${props.durationSec * PPS + props.sidebarWidth}px`,
-            height: `${fullHeight()}px`,
+            height: `${scrollContentHeight()}px`,
+            "min-height": "100%",
           }}
         >
           <div
             class="relative shrink-0"
             style={{
               width: `${props.durationSec * PPS}px`,
-              height: `${fullHeight()}px`,
+              height: "100%",
             }}
             onPointerDown={props.onLanePointerDown}
           >
@@ -113,8 +114,8 @@ export default function TimelineWorkspace(props: Props) {
             />
 
             <div
-              class="absolute left-0 right-0"
-              style={{ top: `${RULER_HEIGHT}px`, height: `${trackAreaHeight()}px` }}
+              class="absolute left-0 right-0 bg-neutral-950"
+              style={{ top: `${RULER_HEIGHT}px`, height: `calc(100% - ${RULER_HEIGHT}px)` }}
             >
               <For each={props.tracks}>
                 {(track, i) => (
@@ -166,14 +167,13 @@ export default function TimelineWorkspace(props: Props) {
             </div>
           </div>
 
-          <div class="sticky right-0 z-40 flex shrink-0" style={{ width: `${props.sidebarWidth}px` }}>
+          <div class="sticky right-0 z-40 flex h-full shrink-0" style={{ width: `${props.sidebarWidth}px` }}>
             <TrackSidebar
               sidebar={{
                 tracks: props.tracks,
                 selectedTrackId: props.selection.selectedTrackId(),
                 sidebarWidth: props.sidebarWidth,
                 isPlaying: props.sidebar.isPlaying,
-                bottomOffsetPx: props.bottomFXOpen ? FX_OFFSET_PX : 0,
                 recordArmTrackId: props.recording.recordArmTrackId,
                 currentUserId: props.sidebar.currentUserId,
                 subscribeTrackLevels: props.sidebar.subscribeTrackLevels,

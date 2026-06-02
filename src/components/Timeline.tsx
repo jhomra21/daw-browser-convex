@@ -43,6 +43,8 @@ import { useTimelinePersistenceController } from "~/hooks/useTimelinePersistence
 import { useTimelineAudioLifecycle } from "~/hooks/useTimelineAudioLifecycle";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import TimelineChrome from "./timeline/timeline-chrome";
+import AppMessageDialog, { type AppMessageDialogState } from "./timeline/app-message-dialog";
+import CloudBackupDialog from "./timeline/cloud-backup-dialog";
 import DeleteTrackDialog from "./timeline/delete-track-dialog";
 import TimelineWorkspace from "./timeline/timeline-workspace";
 
@@ -59,6 +61,7 @@ const Timeline: Component = () => {
   const [agentPanelOpen, setAgentPanelOpen] = createSignal(false);
   const [sharedChatOpen, setSharedChatOpen] = createSignal(false);
   const [confirmOpen, setConfirmOpen] = createSignal(false);
+  const [appMessage, setAppMessage] = createSignal<AppMessageDialogState | null>(null);
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<
     Track["id"] | null
   >(null);
@@ -70,6 +73,10 @@ const Timeline: Component = () => {
   // Audio engine
   const audioEngine = getAudioEngine();
   // Collaboration: projectId from ?projectId=; ownership tied to Better Auth userId
+  const notify = (title: string, message: string) => {
+    setAppMessage({ title, message });
+  };
+
   const {
     projectId,
     setProjectId,
@@ -80,9 +87,10 @@ const Timeline: Component = () => {
     createProject,
     renameProject,
     deleteProject,
-  } = useTimelineData();
+  } = useTimelineData({ notify });
   const localProject = useLocalProjectActions({
     projectId,
+    userId,
     navigateToRoom,
   });
 
@@ -135,6 +143,7 @@ const Timeline: Component = () => {
   const currentLocalProjectMode = createMemo(() => projects().find((project) => project.projectId === projectId())?.mode);
   const { mediaRecovery } = useTimelinePersistenceController({
     projectId,
+    remoteTimelineAvailable: () => Boolean(fullView.data),
     localProjectMode: currentLocalProjectMode,
     userId,
     renderTracks: () => renderTracks(),
@@ -450,6 +459,7 @@ const Timeline: Component = () => {
     insertLocalTrack: projection.insertLocalTrack,
     removeLocalTrack: projection.removeLocalTrack,
     insertLocalClip: projection.insertLocalClip,
+    removeLocalClips: projection.removeLocalClips,
     selection,
     playheadSec,
     projectId,
@@ -467,6 +477,7 @@ const Timeline: Component = () => {
     grantWrite: grantTrackWrite,
     grantClipWrite,
     onLocalSaveFailed: localProject.setLocalSaveFailure,
+    notify,
   });
 
   const {
@@ -554,6 +565,7 @@ const Timeline: Component = () => {
     gridDenominator,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
     grantClipWrites,
+    notify,
   });
 
   const { marqueeRect, onLanePointerDown } = useTimelineSelection({
@@ -571,6 +583,7 @@ const Timeline: Component = () => {
     clearTrackLock: projection.clearTrackLock,
     removeLocalTrack: projection.removeLocalTrack,
     insertLocalClip: projection.insertLocalClip,
+    removeLocalClips: projection.removeLocalClips,
     selection,
     playheadSec,
     uploadToR2: clipBuffers.uploadToR2,
@@ -732,7 +745,28 @@ const Timeline: Component = () => {
       onAddGroupTrack: addGroupTrack,
       onAddInstrumentTrack: addInstrumentTrack,
     },
-    onShare: handleShare,
+    projectMenu: {
+      currentProjectId: projectId(),
+      currentUserId: userId(),
+      projects: projects(),
+      onOpenProject: navigateToRoom,
+      onCreateProject: createProject,
+      onDeleteProject: deleteProject,
+      onRenameProject: renameProject,
+      onOpenExport: () => setExportOpen(true),
+      onShare: handleShare,
+      onChooseProjectFolder: localProject.chooseProjectStorageFolder,
+      onBackUpNow: localProject.backUpNow,
+      onDisableBackup: localProject.disableBackup,
+      onRestoreCloudBackup: localProject.restoreCloudBackup,
+      onDuplicateCloudBackup: localProject.duplicateCloudBackup,
+      onDownloadForOffline: localProject.downloadForOffline,
+      cloudBackupStatus: localProject.cloudBackupStatus(),
+      sharedOutboxStatus: localProject.sharedOutboxStatus(),
+      onRetrySharedChanges: localProject.retrySharedChanges,
+      onExportArchive: localProject.exportArchive,
+      onImportArchive: () => archiveInputRef?.click(),
+    },
     onMasterFX: () => {
       selection.setSelectedFXTarget("master");
       setBottomFXOpen(true);
@@ -755,18 +789,6 @@ const Timeline: Component = () => {
     onInsertSample: (payload: Parameters<typeof handleInsertSample>[0]) => {
       void handleInsertSample(payload);
     },
-    currentProjectId: projectId(),
-    currentUserId: userId(),
-    projects: projects(),
-    onOpenProject: navigateToRoom,
-    onCreateProject: createProject,
-    onDeleteProject: deleteProject,
-    onRenameProject: renameProject,
-    onOpenExport: () => setExportOpen(true),
-    onChooseProjectFolder: localProject.chooseProjectStorageFolder,
-    onBackUpNow: localProject.backUpNow,
-    onExportArchive: localProject.exportArchive,
-    onImportArchive: () => archiveInputRef?.click(),
   });
 
   const panelsProps = () => ({
@@ -838,6 +860,20 @@ const Timeline: Component = () => {
         onExportArchive={localProject.exportArchive}
         onDismissLocalSaveFailure={() => localProject.setLocalSaveFailure(null)}
         panels={panelsProps()}
+      />
+
+      <CloudBackupDialog
+        state={localProject.cloudBackupDialog()}
+        busy={localProject.cloudBackupBusy()}
+        onOpenChange={(open) => { if (!open) localProject.setCloudBackupDialog(null); }}
+        onOverwriteCloud={localProject.overwriteCloudBackup}
+        onRestoreCloud={localProject.confirmRestoreCloudBackup}
+        onDuplicateCloud={localProject.duplicateCloudBackup}
+      />
+
+      <AppMessageDialog
+        state={appMessage()}
+        onOpenChange={(open) => { if (!open) setAppMessage(null); }}
       />
 
       <TimelineWorkspace

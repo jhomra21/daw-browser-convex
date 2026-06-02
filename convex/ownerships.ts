@@ -1,14 +1,13 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
-import { getProjectRole } from "./projectAccess";
-
-const canWriteProject = (role: string | null) => role === "owner" || role === "editor";
+import { canWriteProject, getProjectRole, requireAuthenticatedUserId } from "./projectAccess";
 
 // Return IDs of tracks owned by the given user in a room
 export const listOwnedTrackIds = query({
-  args: { projectId: v.string(), ownerUserId: v.string() },
+  args: { projectId: v.string() },
   returns: v.array(v.id("tracks")),
-  handler: async (ctx, { projectId, ownerUserId }) => {
+  handler: async (ctx, { projectId }) => {
+    const ownerUserId = await requireAuthenticatedUserId(ctx);
     const role = await getProjectRole(ctx, projectId, ownerUserId);
     if (canWriteProject(role)) {
       const tracks = await ctx.db
@@ -30,9 +29,10 @@ export const listOwnedTrackIds = query({
 });
 
 export const listOwnedClipIds = query({
-  args: { projectId: v.string(), ownerUserId: v.string() },
+  args: { projectId: v.string() },
   returns: v.array(v.id("clips")),
-  handler: async (ctx, { projectId, ownerUserId }) => {
+  handler: async (ctx, { projectId }) => {
+    const ownerUserId = await requireAuthenticatedUserId(ctx);
     const role = await getProjectRole(ctx, projectId, ownerUserId);
     if (canWriteProject(role)) {
       const clips = await ctx.db

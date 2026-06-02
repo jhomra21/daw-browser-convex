@@ -36,6 +36,7 @@ type TimelineClipImportOptions = {
   insertLocalTrack: (track: Track, index: number) => void
   removeLocalTrack: (trackId: Track['id']) => void
   insertLocalClip: (trackId: Track['id'], clip: Clip) => void
+  removeLocalClips: (clipIds: Iterable<string>) => void
   selection: TimelineSelectionController
   playheadSec: Accessor<number>
   projectId: Accessor<string | undefined>
@@ -49,10 +50,11 @@ type TimelineClipImportOptions = {
   bpm: Accessor<number>
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
-  historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
+  historyPush: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   grantWrite?: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
   grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
   onLocalSaveFailed?: (message: string) => void
+  notify: (title: string, message: string) => void
 }
 
 type TimelineClipImportHandlers = {
@@ -74,6 +76,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     insertLocalTrack,
     removeLocalTrack,
     insertLocalClip,
+    removeLocalClips,
     selection,
     playheadSec,
     projectId,
@@ -89,6 +92,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     gridDenominator,
     grantWrite,
     grantClipWrite,
+    notify,
   } = options
 
   const requireAudioTrack = (track: Track | undefined, message = '[Import] Cannot insert audio into this track') => {
@@ -154,7 +158,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
   const pushLocalTrackClipCreateHistory = (track: Track, clipId: string, clip: ClipCreateSnapshot) => {
     const historyPush = options.historyPush
     const rid = projectId()
-    if (!rid || typeof historyPush !== 'function') return
+    if (!rid) return
     historyPush(buildTrackClipCreateHistoryEntry({ projectId: rid, track, tracks: tracks(), clipId, clip }))
   }
 
@@ -237,6 +241,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
       audioEngine,
       audioBufferCache,
       insertLocalClip,
+      removeLocalClips,
       selectClip: applySelectionAfterCreate,
       historyPush: options.historyPush,
       pushTrackClipCreateHistory: pushLocalTrackClipCreateHistory,
@@ -276,7 +281,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
       autoCreatedTrack: autoCreatedTrack ?? (target.autoCreated ? target.track : undefined),
     })
     if (result.status === 'local-save-failed' || result.status === 'failed') {
-      window.alert(result.message)
+      notify('Audio import failed', result.message)
     }
   }
 

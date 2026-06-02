@@ -16,6 +16,12 @@ const isLocalSyncMetadataKey = (key: string) => (
   || key.startsWith('local-id:')
 )
 
+export const isProjectManifestSyncStateKey = (key: string) => (
+  !key.startsWith('cloud-delete:')
+  && !key.startsWith('shared-outbox:')
+  && key !== 'shared-outbox-status'
+)
+
 const latestLocalProjectUpdate = (
   projectUpdatedAt: number,
   rows: Awaited<ReturnType<typeof exportLocalProjectRows>>,
@@ -60,6 +66,7 @@ export const buildProjectManifest = async (
     const cloudKey = assetCloudKeys.get(asset.id)
     return cloudKey ? { ...asset, cloudKey } : asset
   })
+  const syncState = rows.syncState.filter((row) => isProjectManifestSyncStateKey(row.key))
   return {
     schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION,
     projectId,
@@ -71,7 +78,7 @@ export const buildProjectManifest = async (
     entities: rows.entities,
     assets,
     projectState: rows.projectState,
-    syncState: rows.syncState,
+    syncState,
   }
 }
 

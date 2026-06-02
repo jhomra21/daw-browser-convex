@@ -1,5 +1,5 @@
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from 'idb'
-import { createLocalProjectId } from '~/lib/local-ids'
+import { createLocalProjectId, createLocalTrackId } from '~/lib/local-ids'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 
 export const LOCAL_PROJECT_SCHEMA_VERSION = 1
@@ -195,6 +195,7 @@ export const getLocalProject = async (projectId: string): Promise<LocalProjectEn
 export const createLocalProject = async (name: string): Promise<LocalProjectEntry> => {
   const db = await openGlobalProjectsDb()
   const timestamp = now()
+  const trackId = createLocalTrackId()
   const project: LocalProjectEntry = {
     id: createProjectId(),
     name: name.trim() || 'Untitled',
@@ -206,7 +207,26 @@ export const createLocalProject = async (name: string): Promise<LocalProjectEntr
     lastOpenedAt: timestamp,
   }
   await db.put('projects', project)
-  await openLocalProjectDb(project.id)
+  const projectDb = await openLocalProjectDb(project.id)
+  await projectDb.put('entities', {
+    kind: 'track',
+    id: trackId,
+    value: {
+      id: trackId,
+      historyRef: trackId,
+      name: 'Track 1',
+      index: 0,
+      volume: 0.8,
+      muted: false,
+      soloed: false,
+      kind: 'audio',
+      channelRole: 'track',
+      sends: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
+    updatedAt: timestamp,
+  })
   return project
 }
 
@@ -263,7 +283,7 @@ export const importLocalProject = async (
     entities: LocalProjectEntityRow[]
     assets: LocalProjectAssetRow[]
     projectState: LocalProjectStateRow[]
-    syncState?: LocalProjectSyncStateRow[]
+    syncState: LocalProjectSyncStateRow[]
   },
 ): Promise<void> => {
   const projectDb = await openLocalProjectDb(project.id)
@@ -272,11 +292,44 @@ export const importLocalProject = async (
     ...rows.entities.map((row) => tx.objectStore('entities').put(row)),
     ...rows.assets.map((row) => tx.objectStore('assets').put(row)),
     ...rows.projectState.map((row) => tx.objectStore('projectState').put(row)),
-    ...(rows.syncState ?? []).map((row) => tx.objectStore('syncState').put(row)),
+    ...rows.syncState.map((row) => tx.objectStore('syncState').put(row)),
     tx.done,
   ])
   const globalDb = await openGlobalProjectsDb()
   await globalDb.put('projects', project)
+}
+
+export const replaceLocalProject = async (
+  project: LocalProjectEntry,
+  rows: {
+    entities: LocalProjectEntityRow[]
+    assets: LocalProjectAssetRow[]
+    projectState: LocalProjectStateRow[]
+    syncState: LocalProjectSyncStateRow[]
+  },
+): Promise<void> => {
+  const globalDb = await openGlobalProjectsDb()
+  const directoryEntry = await globalDb.get('directoryHandles', project.id)
+  const projectDb = await openLocalProjectDb(project.id)
+  const previousAssetPaths = (await projectDb.getAll('assets')).map((asset) => asset.storagePath)
+  const nextAssetPaths = new Set(rows.assets.map((asset) => asset.storagePath))
+  const staleAssetPaths = previousAssetPaths.filter((path) => !nextAssetPaths.has(path))
+  const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'history', 'syncState'], 'readwrite')
+  await Promise.all([
+    tx.objectStore('entities').clear(),
+    tx.objectStore('assets').clear(),
+    tx.objectStore('projectState').clear(),
+    tx.objectStore('history').clear(),
+    tx.objectStore('syncState').clear(),
+    ...rows.entities.map((row) => tx.objectStore('entities').put(row)),
+    ...rows.assets.map((row) => tx.objectStore('assets').put(row)),
+    ...rows.projectState.map((row) => tx.objectStore('projectState').put(row)),
+    ...rows.syncState.map((row) => tx.objectStore('syncState').put(row)),
+    tx.done,
+  ])
+  await globalDb.put('projects', project)
+  notifyLocalProjectChanged(project.id)
+  await deleteLocalProjectAssetFiles(project.id, directoryEntry?.handle, staleAssetPaths)
 }
 
 export const exportLocalProjectRows = async (projectId: string) => {
@@ -292,14 +345,21 @@ export const exportLocalProjectRows = async (projectId: string) => {
 
 const deleteLocalProjectAssetFiles = async (
   projectId: string,
-  directoryHandle?: FileSystemDirectoryHandle,
-  assetPaths: string[] = [],
+  directoryHandle: FileSystemDirectoryHandle | undefined,
+  assetPaths: string[],
+  options: { removeProjectRoot?: boolean } = {},
 ): Promise<void> => {
   await Promise.all([
     (async () => {
       try {
         const root = await navigator.storage.getDirectory()
-        await root.removeEntry(projectId, { recursive: true })
+        if (options.removeProjectRoot) {
+          await root.removeEntry(projectId, { recursive: true })
+          return
+        }
+        const projectDir = await root.getDirectoryHandle(projectId)
+        const assetsDir = await projectDir.getDirectoryHandle('assets')
+        await Promise.all(assetPaths.map((path) => assetsDir.removeEntry(path).catch(() => undefined)))
       } catch {}
     })(),
     (async () => {
@@ -319,7 +379,7 @@ export const deleteLocalProject = async (projectId: string): Promise<void> => {
   const projectDb = await openLocalProjectDb(projectId)
   try {
     const assetPaths = (await projectDb.getAll('assets')).map((asset) => asset.storagePath)
-    await deleteLocalProjectAssetFiles(projectId, directoryEntry?.handle, assetPaths)
+    await deleteLocalProjectAssetFiles(projectId, directoryEntry?.handle, assetPaths, { removeProjectRoot: true })
     const tx = db.transaction(['projects', 'directoryHandles'], 'readwrite')
     await Promise.all([
       tx.objectStore('projects').delete(projectId),

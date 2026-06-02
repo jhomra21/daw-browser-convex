@@ -13,7 +13,8 @@ import {
   sanitizeTrackRouting,
 } from "./trackRouting";
 import { getTrackWriteAccess, requireTrackOwnerForWrite } from "./trackWrites";
-import { requireProjectAccess, requireProjectRole } from "./projectAccess";
+import { requireAuthenticatedUserId, requireProjectAccess, requireProjectRole } from "./projectAccess";
+import { runSharedOperationOnce } from "./sharedOperationResults";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -179,162 +180,295 @@ export async function deleteOwnedTrack(
 }
 
 export const listByRoom = query({
-  args: { projectId: v.string(), userId: v.string() },
-  handler: async (ctx, { projectId, userId }) => {
+  args: { projectId: v.string() },
+  handler: async (ctx, { projectId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectAccess(ctx, projectId, userId);
     return await listProjectTracksWithMixerChannels(ctx, projectId);
   },
 });
 
+const createTrackForUser = async (
+  ctx: any,
+  input: {
+    projectId: string
+    userId: string
+    index?: number
+    kind?: string
+    channelRole?: string
+    operationId?: string
+  },
+) => {
+  return await runSharedOperationOnce(ctx, {
+    projectId: input.projectId,
+    userId: input.userId,
+    operationId: input.operationId,
+    isResult: (value): value is string => typeof value === "string",
+    run: async () => {
+      await requireProjectRole(ctx, input.projectId, input.userId, ["owner", "editor"]);
+      const existing = await ctx.db
+        .query("tracks")
+        .withIndex("by_room_index", (q: any) => q.eq("projectId", input.projectId))
+        .collect();
+      let nextIndex = existing.length;
+      if (input.index !== undefined) {
+        nextIndex = Math.max(0, Math.min(input.index, existing.length));
+      }
+      for (let existingIndex = existing.length - 1; existingIndex >= 0; existingIndex -= 1) {
+        const track = existing[existingIndex];
+        if (track.index < nextIndex) break;
+        await ctx.db.patch(track._id, { index: track.index + 1 });
+      }
+      const trackId = await ctx.db.insert("tracks", {
+        projectId: input.projectId,
+        index: nextIndex,
+        kind: input.kind,
+      });
+      await ctx.db.insert(
+        "mixerChannels",
+        buildMixerChannelInsert(input.projectId, trackId, {
+          channelRole: sanitizeChannelRole(input.channelRole),
+        }),
+      );
+      await ctx.db.insert("ownerships", {
+        projectId: input.projectId,
+        ownerUserId: input.userId,
+        trackId,
+      });
+      return trackId;
+    },
+  });
+}
+
+const setTrackVolumeForUser = async (ctx: any, trackId: any, userId: string, volume: number) => {
+  const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
+  const channel = await ensureMixerChannelForTrack(ctx, track);
+  await ctx.db.patch(channel._id, { volume });
+}
+
+const setTrackMixForUser = async (
+  ctx: any,
+  input: { trackId: any; userId: string; muted?: boolean; soloed?: boolean },
+) => {
+  const track = await ctx.db.get(input.trackId);
+  if (!track) return { status: "not-found" as const };
+  const access = await getTrackWriteAccess(ctx, input.trackId, input.userId);
+  if (!access) return { status: "access-denied" as const };
+  const channel = await ensureMixerChannelForTrack(ctx, access.track);
+  const patch: any = {};
+  if (input.muted !== undefined) patch.muted = input.muted;
+  if (input.soloed !== undefined) patch.soloed = input.soloed;
+  if (Object.keys(patch).length === 0) return { status: "noop" as const };
+  await ctx.db.patch(channel._id, patch);
+  return { status: "applied" as const };
+}
+
+const setTrackRoutingForUser = async (
+  ctx: any,
+  input: {
+    trackId: any
+    userId: string
+    outputTargetId?: any | null
+    sends?: Array<{ targetId: any; amount: number }>
+  },
+) => {
+  const { track } = await requireTrackOwnerForWrite(ctx, input.trackId, input.userId);
+  const channel = await ensureMixerChannelForTrack(ctx, track);
+  const tracksInRoom = await listProjectTracksWithMixerChannels(ctx, track.projectId);
+  const nextSends = input.sends === undefined ? channel.sends : input.sends;
+  const nextOutputTargetId = input.outputTargetId === undefined
+    ? channel.outputTargetId
+    : input.outputTargetId ?? undefined;
+  const normalizedRouting = sanitizeTrackRouting(
+    { _id: input.trackId, channelRole: channel.channelRole },
+    { sends: nextSends, outputTargetId: nextOutputTargetId },
+    tracksInRoom as any,
+  );
+  await ctx.db.patch(channel._id, {
+    sends: normalizedRouting.sends as any,
+    outputTargetId: normalizedRouting.outputTargetId as any,
+  });
+}
+
+const lockTrackForUser = async (ctx: any, trackId: any, userId: string) => {
+  const access = await getTrackWriteAccess(ctx, trackId, userId);
+  if (!access) return { ok: false, reason: "Track not found" };
+  const track = access.track;
+  await requireProjectRole(ctx, track.projectId, userId, ["owner", "editor"]);
+  const channel = await ensureMixerChannelForTrack(ctx, track);
+  const now = Date.now();
+  const lockState = normalizeMixerLockState(channel.lockedBy, channel.lockedAt, now);
+  if (lockState.isLocked && lockState.lockedBy !== userId) {
+    return { ok: false, reason: "Track locked by another user" };
+  }
+  await ctx.db.patch(channel._id, { lockedBy: userId, lockedAt: now });
+  return { ok: true };
+}
+
+const unlockTrackForUser = async (ctx: any, trackId: any, userId: string) => {
+  const access = await getTrackWriteAccess(ctx, trackId, userId);
+  if (!access) return { ok: false };
+  const track = access.track;
+  await requireProjectRole(ctx, track.projectId, userId, ["owner", "editor"]);
+  const channel = await ensureMixerChannelForTrack(ctx, track);
+  const lockState = normalizeMixerLockState(channel.lockedBy, channel.lockedAt);
+  if (lockState.isLocked && lockState.lockedBy !== userId) return { ok: false };
+  await ctx.db.patch(channel._id, { lockedBy: undefined, lockedAt: undefined });
+  return { ok: true };
+}
+
 export const create = mutation({
-  args: { projectId: v.string(), userId: v.string(), index: v.optional(v.number()), kind: v.optional(v.string()), channelRole: v.optional(v.string()) },
-  handler: async (ctx, { projectId, userId, index, kind, channelRole }) => {
-    await requireProjectRole(ctx, projectId, userId, ["owner", "editor"]);
+  args: { projectId: v.string(), index: v.optional(v.number()), kind: v.optional(v.string()), channelRole: v.optional(v.string()), operationId: v.optional(v.string()) },
+  handler: async (ctx, { projectId, index, kind, channelRole, operationId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    return await createTrackForUser(ctx, { projectId, userId, index, kind, channelRole, operationId });
+  },
+});
 
-    const existing = await ctx.db
-      .query("tracks")
-      .withIndex("by_room_index", q => q.eq("projectId", projectId))
-      .collect();
-    let nextIndex = existing.length;
-    if (index !== undefined) {
-      nextIndex = Math.max(0, Math.min(index, existing.length));
-    }
-    for (let existingIndex = existing.length - 1; existingIndex >= 0; existingIndex -= 1) {
-      const track = existing[existingIndex];
-      if (track.index < nextIndex) break;
-      await ctx.db.patch(track._id, { index: track.index + 1 });
-    }
-
-    const trackId = await ctx.db.insert("tracks", {
-      projectId,
-      index: nextIndex,
-      kind,
-    });
-    await ctx.db.insert(
-      "mixerChannels",
-      buildMixerChannelInsert(projectId, trackId, {
-        channelRole: sanitizeChannelRole(channelRole),
-      }),
-    );
-    await ctx.db.insert("ownerships", {
-      projectId,
-      ownerUserId: userId,
-      trackId,
-    });
-    return trackId;
+export const serverCreate = mutation({
+  args: {
+    projectId: v.string(),
+    index: v.optional(v.number()),
+    kind: v.optional(v.string()),
+    channelRole: v.optional(v.string()),
+    operationId: v.optional(v.string()),
+  },
+  handler: async (ctx, { projectId, index, kind, channelRole, operationId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    return await createTrackForUser(ctx, { projectId, userId, index, kind, channelRole, operationId });
   },
 });
 
 export const setVolume = mutation({
-  args: { trackId: v.id("tracks"), volume: v.number(), userId: v.string() },
-  handler: async (ctx, { trackId, volume, userId }) => {
-    const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
-    const channel = await ensureMixerChannelForTrack(ctx, track);
-    await ctx.db.patch(channel._id, { volume });
+  args: { trackId: v.id("tracks"), volume: v.number() },
+  handler: async (ctx, { trackId, volume }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    await setTrackVolumeForUser(ctx, trackId, userId, volume);
+  },
+});
+
+export const serverSetVolume = mutation({
+  args: { trackId: v.string(), volume: v.number() },
+  handler: async (ctx, { trackId, volume }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
+    if (!normalizedTrackId) throw new Error("Track not found.");
+    await setTrackVolumeForUser(ctx, normalizedTrackId, userId, volume);
   },
 });
 
 export const setMix = mutation({
-  args: { trackId: v.id("tracks"), muted: v.optional(v.boolean()), soloed: v.optional(v.boolean()), userId: v.string() },
+  args: { trackId: v.id("tracks"), muted: v.optional(v.boolean()), soloed: v.optional(v.boolean()) },
   returns: trackMixWriteResult,
-  handler: async (ctx, { trackId, muted, soloed, userId }) => {
-    const track = await ctx.db.get(trackId);
-    if (!track) return { status: "not-found" as const };
+  handler: async (ctx, { trackId, muted, soloed }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    return await setTrackMixForUser(ctx, { trackId, userId, muted, soloed });
+  },
+});
 
-    const access = await getTrackWriteAccess(ctx, trackId, userId);
-    if (!access) return { status: "access-denied" as const };
-
-    const channel = await ensureMixerChannelForTrack(ctx, access.track);
-
-    const patch: any = {};
-    if (muted !== undefined) patch.muted = muted;
-    if (soloed !== undefined) patch.soloed = soloed;
-    if (Object.keys(patch).length === 0) return { status: "noop" as const };
-
-    await ctx.db.patch(channel._id, patch);
-    return { status: "applied" as const };
+export const serverSetMix = mutation({
+  args: { trackId: v.string(), muted: v.optional(v.boolean()), soloed: v.optional(v.boolean()) },
+  returns: trackMixWriteResult,
+  handler: async (ctx, { trackId, muted, soloed }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
+    if (!normalizedTrackId) return { status: "not-found" as const };
+    return await setTrackMixForUser(ctx, { trackId: normalizedTrackId, userId, muted, soloed });
   },
 });
 
 export const setRouting = mutation({
   args: {
     trackId: v.id("tracks"),
-    userId: v.string(),
     outputTargetId: v.optional(v.union(v.id("tracks"), v.null())),
     sends: v.optional(v.array(v.object({
       targetId: v.id("tracks"),
       amount: v.number(),
     }))),
   },
-  handler: async (ctx, { trackId, userId, outputTargetId, sends }) => {
-    const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
+  handler: async (ctx, { trackId, outputTargetId, sends }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    await setTrackRoutingForUser(ctx, { trackId, userId, outputTargetId, sends });
+  },
+});
 
-    const channel = await ensureMixerChannelForTrack(ctx, track);
+export const serverSetRouting = mutation({
+  args: {
+    trackId: v.string(),
+    outputTargetId: v.optional(v.union(v.string(), v.null())),
+    sends: v.optional(v.array(v.object({
+      targetId: v.string(),
+      amount: v.number(),
+    }))),
+  },
+  handler: async (ctx, { trackId, outputTargetId, sends }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
+    if (!normalizedTrackId) throw new Error("Track not found.");
+    const normalizedOutputTargetId = typeof outputTargetId === "string"
+      ? ctx.db.normalizeId("tracks", outputTargetId)
+      : outputTargetId;
+    if (typeof outputTargetId === "string" && !normalizedOutputTargetId) {
+      throw new Error("Output target track not found.");
+    }
+    const normalizedSends = sends?.flatMap((send) => {
+      const targetId = ctx.db.normalizeId("tracks", send.targetId);
+      return targetId ? [{ targetId, amount: send.amount }] : [];
+    });
+    if (sends && normalizedSends?.length !== sends.length) {
+      throw new Error("Send target track not found.");
+    }
 
-    const tracksInRoom = await listProjectTracksWithMixerChannels(ctx, track.projectId);
-
-    const nextSends = sends === undefined ? channel.sends : sends;
-    const nextOutputTargetId = outputTargetId === undefined
-      ? channel.outputTargetId
-      : outputTargetId ?? undefined;
-
-    const normalizedRouting = sanitizeTrackRouting(
-      { _id: trackId, channelRole: channel.channelRole },
-      {
-        sends: nextSends,
-        outputTargetId: nextOutputTargetId,
-      },
-      tracksInRoom as any,
-    );
-
-    await ctx.db.patch(channel._id, {
-      sends: normalizedRouting.sends as any,
-      outputTargetId: normalizedRouting.outputTargetId as any,
+    await setTrackRoutingForUser(ctx, {
+      trackId: normalizedTrackId,
+      userId,
+      outputTargetId: normalizedOutputTargetId,
+      sends: normalizedSends,
     });
   },
 });
 
 export const lock = mutation({
-  args: { trackId: v.id("tracks"), userId: v.string() },
-  handler: async (ctx, { trackId, userId }) => {
-    const access = await getTrackWriteAccess(ctx, trackId, userId);
-    if (!access) {
-      return { ok: false, reason: "Track not found" };
-    }
-    const track = access.track;
-    await requireProjectRole(ctx, track.projectId, userId, ["owner", "editor"]);
-    const channel = await ensureMixerChannelForTrack(ctx, track);
-    const now = Date.now();
-    const lockState = normalizeMixerLockState(channel.lockedBy, channel.lockedAt, now);
-    if (lockState.isLocked && lockState.lockedBy !== userId) {
-      return { ok: false, reason: "Track locked by another user" };
-    }
-    await ctx.db.patch(channel._id, { lockedBy: userId, lockedAt: now });
-    return { ok: true };
+  args: { trackId: v.id("tracks") },
+  handler: async (ctx, { trackId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    return await lockTrackForUser(ctx, trackId, userId);
+  },
+});
+
+export const serverLock = mutation({
+  args: { trackId: v.string() },
+  handler: async (ctx, { trackId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
+    if (!normalizedTrackId) return { ok: false, reason: "Track not found" };
+    return await lockTrackForUser(ctx, normalizedTrackId, userId);
   },
 });
 
 export const unlock = mutation({
-  args: { trackId: v.id("tracks"), userId: v.string() },
-  handler: async (ctx, { trackId, userId }) => {
-    const access = await getTrackWriteAccess(ctx, trackId, userId);
-    if (!access) return { ok: false };
-    const track = access.track;
-    await requireProjectRole(ctx, track.projectId, userId, ["owner", "editor"]);
-    const channel = await ensureMixerChannelForTrack(ctx, track);
-    const lockState = normalizeMixerLockState(channel.lockedBy, channel.lockedAt);
-    if (lockState.isLocked && lockState.lockedBy !== userId) {
-      return { ok: false };
-    }
-    await ctx.db.patch(channel._id, { lockedBy: undefined, lockedAt: undefined });
-    return { ok: true };
+  args: { trackId: v.id("tracks") },
+  handler: async (ctx, { trackId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    return await unlockTrackForUser(ctx, trackId, userId);
+  },
+});
+
+export const serverUnlock = mutation({
+  args: { trackId: v.string() },
+  handler: async (ctx, { trackId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
+    if (!normalizedTrackId) return { ok: false };
+    return await unlockTrackForUser(ctx, normalizedTrackId, userId);
   },
 });
 
 export const remove = mutation({
-  args: { trackId: v.id("tracks"), userId: v.string() },
+  args: { trackId: v.id("tracks") },
   returns: trackDeleteResult,
-  handler: async (ctx, { trackId, userId }) => {
+  handler: async (ctx, { trackId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     const preflight = await getTrackDeletePreflight(ctx, trackId, userId);
     if (!preflight.ok) {
       if (preflight.reason === "access-denied") {

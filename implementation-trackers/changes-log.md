@@ -11,6 +11,16 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Started the all-in-one completion pass for remaining local-first cloud/shared tracker work, with implementation planned as milestone commits inside this PR rather than separate PRs.
 - Recorded the grilled plan corrections: restore primitives before conflict/offline download, durable shared outbox instead of ephemeral pending maps, durable R2 retry state, revoked-user local cache purge, and Worker/API-derived identity for touched sensitive flows.
 - Added accepted collaborator revocation routes backed by service-token Convex mutations and a local cache purge path for explicit leave/access-loss handling.
+- Added cloud-backup restore/duplicate actions, manifest-first lazy cloud asset reads, an explicit download-for-offline path with a 3-download concurrency limit, and conflict summary messaging with timestamps/counts.
+- Added durable R2 deletion queueing for superseded backup assets, locally deleted cloud assets, deleted sample/export rows, and owner project-prefix cleanup.
+- Added a durable shared outbox for failed/offline clip move/delete and track mix/routing/volume publishes, plus reconnect/manual retry and Project menu status.
+- Moved sample/export delete metadata cleanup behind authenticated Hono routes with service-token Convex mutations and retained durable R2 cleanup draining.
+- Added author-visible pending shared audio clips for import/recording while R2 upload and Convex clip publish complete before collaborators can see the clip.
+- Added a remote timeline cache that persists shared Convex tracks/clips plus cloud asset references locally, uses the cache when live remote data is unavailable, and lets shared R2 assets lazy-cache through the existing offline download path.
+- Routed selected shared timeline writes (clip move/delete and track mix/routing/volume), including durable outbox retries, through an authenticated Hono timeline-operation gateway backed by server-secret Convex mutations.
+- Routed remaining shared timeline create/effect/recording-lock writes and shared full-view reads through authenticated Hono routes so touched shared browser paths no longer send caller-supplied `userId` directly to Convex.
+- Added local-dev service-token binding fallback helpers for authenticated API routes and returned `404` for deleted/revoked backup metadata fetches instead of surfacing Convex access errors as `500`.
+- Ran a Convex deployment/table inspection against the development deployment to confirm expected tables and indexes are present for the validation pass.
 
 ### Review Follow-Up
 

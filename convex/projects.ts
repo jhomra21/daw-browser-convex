@@ -1,14 +1,7 @@
 import { mutation, query, type DatabaseReader, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { listAccessibleProjects, requireProjectRole } from "./projectAccess";
-
-declare const process: { env: { CLOUD_PROJECTS_SERVICE_TOKEN?: string } };
-
-const requireServerSecret = (serverSecret: string) => {
-  if (!serverSecret || serverSecret !== process.env.CLOUD_PROJECTS_SERVICE_TOKEN) {
-    throw new Error("Unauthorized project request.");
-  }
-};
+import { listAccessibleProjects, requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
+import { enqueueR2DeleteRows } from "./r2Deletes";
 
 async function ensureOwnedRoomRecords(
   ctx: MutationCtx,
@@ -107,18 +100,19 @@ async function setRoomProjectDeletionPendingAt(
 }
 
 export const listMineDetailed = query({
-  args: { userId: v.string() },
+  args: {},
   returns: v.array(v.object({ projectId: v.string(), name: v.string() })),
-  handler: async (ctx, { userId }) => {
+  handler: async (ctx) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     return listAccessibleProjects(ctx, userId);
   },
 });
 
 export const createOwnedRoom = mutation({
-  args: { projectId: v.string(), userId: v.string(), serverSecret: v.string() },
+  args: { projectId: v.string() },
   returns: v.object({ status: v.union(v.literal("created"), v.literal("exists")) }),
-  handler: async (ctx, { projectId, userId, serverSecret }) => {
-    requireServerSecret(serverSecret);
+  handler: async (ctx, { projectId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     const existingProjects = await listRoomProjectRows(ctx, projectId);
     const existingProject = existingProjects[0];
     if (existingProject) {
@@ -150,18 +144,19 @@ export const exists = query({
 });
 
 export const canDeleteAsOwner = query({
-  args: { projectId: v.string(), userId: v.string() },
+  args: { projectId: v.string() },
   returns: v.boolean(),
-  handler: async (ctx, { projectId, userId }) => {
+  handler: async (ctx, { projectId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     return Boolean(await findOwnedProject(ctx, projectId, userId));
   },
 });
 
 export const prepareCloudRoomDeleteAsOwner = mutation({
-  args: { projectId: v.string(), userId: v.string(), serverSecret: v.string() },
+  args: { projectId: v.string() },
   returns: v.object({ status: v.literal("pending") }),
-  handler: async (ctx, { projectId, userId, serverSecret }) => {
-    requireServerSecret(serverSecret);
+  handler: async (ctx, { projectId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     const ownerProject = await findOwnedProject(ctx, projectId, userId);
     if (!ownerProject) throw new Error("Only project owners can delete this project.");
     const deletionPendingAt = ownerProject.deletionPendingAt ?? Date.now();
@@ -172,10 +167,10 @@ export const prepareCloudRoomDeleteAsOwner = mutation({
 });
 
 export const finalizeCloudRoomDeleteAsOwner = mutation({
-  args: { projectId: v.string(), userId: v.string(), serverSecret: v.string() },
+  args: { projectId: v.string() },
   returns: v.object({ status: v.literal("deleted") }),
-  handler: async (ctx, { projectId, userId, serverSecret }) => {
-    requireServerSecret(serverSecret);
+  handler: async (ctx, { projectId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     const ownerProject = await findOwnedProject(ctx, projectId, userId);
     if (!ownerProject) {
       const result: { status: "deleted" } = { status: "deleted" };
@@ -184,6 +179,7 @@ export const finalizeCloudRoomDeleteAsOwner = mutation({
     if (ownerProject.deletionPendingAt === undefined) {
       throw new Error("Project deletion is not pending.");
     }
+    await enqueueR2DeleteRows(ctx, { projectId, keys: [`projects/${projectId}/`], kind: "project-prefix" });
     await deleteRoomRows(ctx, projectId);
     const result: { status: "deleted" } = { status: "deleted" };
     return result;
@@ -191,10 +187,10 @@ export const finalizeCloudRoomDeleteAsOwner = mutation({
 });
 
 export const clearCloudRoomDeletePendingAsOwner = mutation({
-  args: { projectId: v.string(), userId: v.string(), serverSecret: v.string() },
+  args: { projectId: v.string() },
   returns: v.object({ status: v.union(v.literal("cleared"), v.literal("skipped")) }),
-  handler: async (ctx, { projectId, userId, serverSecret }) => {
-    requireServerSecret(serverSecret);
+  handler: async (ctx, { projectId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     const ownerProject = await findOwnedProject(ctx, projectId, userId);
     if (!ownerProject?.deletionPendingAt) {
       const result: { status: "skipped" } = { status: "skipped" };
@@ -207,10 +203,10 @@ export const clearCloudRoomDeletePendingAsOwner = mutation({
 });
 
 export const leaveCloudRoomAccess = mutation({
-  args: { projectId: v.string(), userId: v.string(), serverSecret: v.string() },
+  args: { projectId: v.string() },
   returns: v.object({ status: v.literal("left") }),
-  handler: async (ctx, { projectId, userId, serverSecret }) => {
-    requireServerSecret(serverSecret);
+  handler: async (ctx, { projectId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     const role = await requireProjectRole(ctx, projectId, userId, ["owner", "editor", "viewer"]);
     if (role === "owner") throw new Error("Project owners cannot leave without deleting or transferring the project.");
     const rows = await ctx.db
@@ -224,9 +220,10 @@ export const leaveCloudRoomAccess = mutation({
 });
 
 export const setName = mutation({
-  args: { projectId: v.string(), userId: v.string(), name: v.string() },
+  args: { projectId: v.string(), name: v.string() },
   returns: v.null(),
-  handler: async (ctx, { projectId, userId, name }) => {
+  handler: async (ctx, { projectId, name }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, projectId, userId, ["owner"]);
     const trimmed = name.trim().slice(0, 120);
     const row = await findOwnedProject(ctx, projectId, userId);

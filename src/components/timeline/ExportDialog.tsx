@@ -102,7 +102,6 @@ const ExportDialog: Component<Props> = (props) => {
       if (!localOnly && props.projectId && props.userId) try {
         const rows = await convexClient.query((convexApi as any).effects.listByRoom, {
           projectId: props.projectId,
-          userId: props.userId,
         } as any).catch(() => [])
         for (const row of rows) {
           if (row?.targetType === 'master') {
@@ -173,7 +172,6 @@ const ExportDialog: Component<Props> = (props) => {
             duration: enc.durationSec,
             sampleRate: enc.sampleRate,
             sizeBytes,
-            userId: props.userId,
           })
         } catch {}
       }

@@ -240,7 +240,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
       const rid = projectId()
       if (rid && isLocalId('project', rid)) return null
       const uid = userId ? userId() : ''
-      return rid && uid ? ({ projectId: rid, userId: uid }) : null
+      return rid && uid ? ({ projectId: rid }) : null
     },
     () => ['samples', 'by_room', projectId(), userId ? userId() : '']
   )
@@ -252,7 +252,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
       const rid = projectId()
       if (rid && isLocalId('project', rid)) return null
       const uid = userId ? userId() : ''
-      return rid && uid ? ({ projectId: rid, userId: uid }) : null
+      return rid && uid ? ({ projectId: rid }) : null
     },
     () => ['clips', 'by_room', projectId(), userId ? userId() : '']
   )

@@ -20,6 +20,7 @@ import {
 } from '~/lib/clip-drag-placement'
 import { useDrag } from '~/hooks/useDrag'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
+import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
 import { PPS } from '~/lib/timeline-utils'
 import type { Track, Clip, TrackId } from '~/types/timeline'
@@ -461,7 +462,10 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           canProject: () => projectId() === rid,
           grantClipWrites,
           historyPush: options.historyPush,
-          createManyCloudClips: async (items) => await convexClient.mutation(convexApi.clips.createMany, { items }),
+          createManyCloudClips: async (items, operationId) => {
+            const result = await publishSharedTimelineOperation(rid, buildSharedClipCreateManyOperation({ items }, operationId))
+            return Array.isArray(result) ? result.map((item) => typeof item === 'string' ? item : null) : []
+          },
           selection,
         })
         setPreviewClipsByTrack(new Map<TrackId, Clip[]>())

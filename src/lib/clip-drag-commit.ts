@@ -78,7 +78,6 @@ const createProjectedCloudClips = async (input: DuplicateCommitInput) => {
   }
   return await createProjectedClips({
     projectId: input.projectId,
-    userId: input.userId,
     items: input.items,
     createMany: input.createManyCloudClips,
     insertLocalClip: input.insertLocalClip,

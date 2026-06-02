@@ -3,10 +3,10 @@ import { createSignal, onCleanup, onMount, type Accessor } from 'solid-js'
 import type { InsertSampleInput } from '~/hooks/useTimelineClipImport'
 import { copyText } from '~/lib/clipboard'
 import { useProjectSamples, type ProjectSampleListItem } from '~/hooks/useProjectSamples'
-import { convexApi, convexClient } from '~/lib/convex'
 import { hasAncestorDatasetValue } from '~/lib/dom-dataset'
 import { deleteLocalAsset } from '~/lib/local-assets'
 import { isLocalId } from '~/lib/local-ids'
+import { deleteProjectSample } from '~/lib/project-samples-api'
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData } from '~/lib/sample-drag-data'
 import type { Track } from '~/types/timeline'
 
@@ -107,11 +107,7 @@ export function useSamplesMenuController(
         return
       }
       if (!userId) return
-      await convexClient.mutation(convexApi.samples.removeFromRoom, {
-        projectId,
-        assetKey: sample.assetKey,
-        userId,
-      })
+      await deleteProjectSample(projectId, sample.assetKey)
       setConfirmingSampleKey(null)
     } finally {
       setDeletingSampleKey(null)

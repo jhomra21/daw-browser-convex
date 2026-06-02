@@ -1,5 +1,6 @@
 import { buildLocalClip, createManyClips } from '~/lib/clip-create'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
+import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '~/lib/audio-engine'
 import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
@@ -191,9 +192,14 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
     } else {
       const created = await createManyClips({
         projectId: deps.projectId,
-        userId: deps.userId,
         items: pendingItems,
-        createMany: async (clipPayloads) => await deps.convexClient.mutation(deps.convexApi.clips.createMany, { items: clipPayloads }),
+        createMany: async (clipPayloads, operationId) => {
+          const result = await publishSharedTimelineOperation(
+            deps.projectId,
+            buildSharedClipCreateManyOperation({ items: clipPayloads }, operationId),
+          )
+          return Array.isArray(result) ? result.map((item) => typeof item === 'string' ? item : null) : []
+        },
       })
       for (let indexValue = 0; indexValue < created.length; indexValue++) {
         recreatedClipIdsByRef.set(pendingItems[indexValue].clip.clipRef, created[indexValue].clipId)

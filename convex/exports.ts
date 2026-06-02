@@ -1,10 +1,13 @@
 import { mutation, query } from "./_generated/server"
 import { v } from "convex/values"
-import { requireProjectRole } from "./projectAccess"
+import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess"
+import { isValidR2DeleteKey } from "../src/lib/r2-delete-keys"
+import { enqueueR2DeleteRows } from "./r2Deletes"
 
 export const listByRoom = query({
-  args: { projectId: v.string(), userId: v.string() },
-  handler: async (ctx, { projectId, userId }) => {
+  args: { projectId: v.string() },
+  handler: async (ctx, { projectId }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor", "viewer"])
     const rows = await ctx.db
       .query("exports")
@@ -25,10 +28,13 @@ export const create = mutation({
     duration: v.optional(v.number()),
     sampleRate: v.optional(v.number()),
     sizeBytes: v.optional(v.number()),
-    userId: v.string(),
   },
-  handler: async (ctx, { projectId, name, url, r2Key, format, duration, sampleRate, sizeBytes, userId }) => {
+  handler: async (ctx, { projectId, name, url, r2Key, format, duration, sampleRate, sizeBytes }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor"])
+    if (!isValidR2DeleteKey(projectId, "export", r2Key)) {
+      throw new Error("Invalid export key.")
+    }
     return await ctx.db.insert("exports", {
       projectId,
       name,
@@ -45,12 +51,16 @@ export const create = mutation({
 })
 
 export const remove = mutation({
-  args: { exportId: v.id("exports"), userId: v.string() },
-  handler: async (ctx, { exportId, userId }) => {
-    const row = await ctx.db.get(exportId)
+  args: { exportId: v.string() },
+  handler: async (ctx, { exportId }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const normalizedExportId = ctx.db.normalizeId("exports", exportId)
+    if (!normalizedExportId) return
+    const row = await ctx.db.get(normalizedExportId)
     if (!row) return
     await requireProjectRole(ctx, row.projectId, userId, ["owner", "editor"])
-    if (row.createdBy !== userId) return
-    await ctx.db.delete(exportId)
+    await enqueueR2DeleteRows(ctx, { projectId: row.projectId, keys: [row.r2Key], kind: "export" })
+    await ctx.db.delete(normalizedExportId)
+    return { projectId: row.projectId }
   },
 })

@@ -1,14 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { requireProjectRole } from "./projectAccess";
-
-declare const process: { env: { SHARE_INVITES_SERVICE_TOKEN?: string } };
-
-const requireServerSecret = (serverSecret: string) => {
-  if (!serverSecret || serverSecret !== process.env.SHARE_INVITES_SERVICE_TOKEN) {
-    throw new Error("Unauthorized share invite request.");
-  }
-};
+import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
 
 const roleRank = (role: "owner" | "editor" | "viewer" | undefined) => (
   role === "owner" ? 3 : role === "viewer" ? 1 : 2
@@ -17,12 +9,10 @@ const roleRank = (role: "owner" | "editor" | "viewer" | undefined) => (
 export const create = mutation({
   args: {
     projectId: v.string(),
-    userId: v.string(),
     role: v.union(v.literal("editor"), v.literal("viewer")),
-    serverSecret: v.string(),
   },
-  handler: async (ctx, { projectId, userId, role, serverSecret }) => {
-    requireServerSecret(serverSecret);
+  handler: async (ctx, { projectId, role }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, projectId, userId, ["owner"]);
     const token = crypto.randomUUID();
     await ctx.db.insert("shareInvites", {
@@ -37,9 +27,9 @@ export const create = mutation({
 });
 
 export const accept = mutation({
-  args: { token: v.string(), userId: v.string(), serverSecret: v.string() },
-  handler: async (ctx, { token, userId, serverSecret }) => {
-    requireServerSecret(serverSecret);
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     const rows = await ctx.db
       .query("shareInvites")
       .withIndex("by_token", (q) => q.eq("token", token))
@@ -67,9 +57,9 @@ export const accept = mutation({
 });
 
 export const revoke = mutation({
-  args: { token: v.string(), userId: v.string(), serverSecret: v.string() },
-  handler: async (ctx, { token, userId, serverSecret }) => {
-    requireServerSecret(serverSecret);
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     const rows = await ctx.db
       .query("shareInvites")
       .withIndex("by_token", (q) => q.eq("token", token))
@@ -83,13 +73,13 @@ export const revoke = mutation({
 });
 
 export const listAcceptedAccess = query({
-  args: { projectId: v.string(), userId: v.string(), serverSecret: v.string() },
+  args: { projectId: v.string() },
   returns: v.array(v.object({
     userId: v.string(),
     role: v.union(v.literal("editor"), v.literal("viewer")),
   })),
-  handler: async (ctx, { projectId, userId, serverSecret }) => {
-    requireServerSecret(serverSecret);
+  handler: async (ctx, { projectId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, projectId, userId, ["owner"]);
     const rows = await ctx.db
       .query("ownerships")
@@ -107,15 +97,13 @@ export const listAcceptedAccess = query({
 export const revokeAcceptedAccess = mutation({
   args: {
     projectId: v.string(),
-    userId: v.string(),
     targetUserId: v.string(),
-    serverSecret: v.string(),
   },
   returns: v.object({
     status: v.union(v.literal("revoked"), v.literal("not-found")),
   }),
-  handler: async (ctx, { projectId, userId, targetUserId, serverSecret }) => {
-    requireServerSecret(serverSecret);
+  handler: async (ctx, { projectId, targetUserId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, projectId, userId, ["owner"]);
     if (targetUserId === userId) {
       throw new Error("Project owners cannot revoke themselves.");

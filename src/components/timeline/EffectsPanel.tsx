@@ -23,7 +23,6 @@ import {
   EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
   EFFECT_PANEL_SAVE_DEBOUNCE_MS,
 } from "~/components/timeline/create-effects-panel-state";
-import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
 import {
   type ArpeggiatorParams,
   createDefaultEqParams,
@@ -36,10 +35,12 @@ import {
 } from "~/lib/effects/params";
 import type { FunctionReturnType } from "convex/server";
 import type { AudioEngine, SpectrumFrame } from "~/lib/audio-engine";
-import { convexApi, convexClient, useConvexQuery } from "~/lib/convex";
+import { convexApi, useConvexQuery } from "~/lib/convex";
 import { useEffectsPanelAudioSync } from "~/hooks/useEffectsPanelAudioSync";
 import { useEffectsPanelTarget } from "~/hooks/useEffectsPanelTarget";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
+import { publishSharedTimelineOperationOrQueue } from "~/lib/shared-outbox";
+import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import { FX_PANEL_HEIGHT_PX } from "~/lib/timeline-utils";
 import type { Clip, Track } from "~/types/timeline";
@@ -50,7 +51,7 @@ type EffectsPanelProps = {
   tracks: Track[];
   onClose: () => void;
   onOpen: () => void;
-  audioEngine?: AudioEngine;
+  audioEngine: AudioEngine;
   projectId?: string;
   userId?: string;
   canWriteTrackRouting?: (trackId: Track["id"]) => boolean;
@@ -442,7 +443,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     () => {
       const projectId = props.projectId;
       if (projectId && isLocalId("project", projectId)) return null;
-      return projectId && props.userId ? { projectId, userId: props.userId } : null;
+      return projectId && props.userId ? { projectId } : null;
     },
     () => ["effects", "room", props.projectId, props.userId],
   );
@@ -485,6 +486,12 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   });
   const isLocalProject = localEq.isLocalProject;
 
+  const publishEffectOperation = (
+    projectId: string,
+    userId: string,
+    operation: SharedTimelineOperation,
+  ) => publishSharedTimelineOperationOrQueue({ projectId, userId, operation });
+
   const eqState = createPersistedEffectState<RoomEffectRow | undefined, EqParams>({
     targetId: currentTargetId,
     scopeId: () => props.projectId,
@@ -494,9 +501,9 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     serializeParams: serializeEqParams,
     applyToEngine: (targetId, params) => {
       if (targetId === "master") {
-        props.audioEngine?.setMasterEq(params);
+      props.audioEngine.setMasterEq(params);
       } else {
-        props.audioEngine?.setTrackEq(targetId, params);
+      props.audioEngine.setTrackEq(targetId, params);
       }
     },
     createPersistContext: () => ({ projectId: props.projectId, userId: props.userId }),
@@ -507,23 +514,17 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       }
       if (!context.userId) return Promise.resolve();
       if (targetId === "master") {
-        return convexClient.mutation(convexApi.effects.setMasterEqParams, {
-          projectId: context.projectId,
-          userId: context.userId,
-          params,
+        return publishEffectOperation(context.projectId, context.userId, {
+          kind: "effects.setMasterEqParams",
+          payload: { params },
         });
       }
       const track = resolveTrackByTargetId(targetId);
       if (!track) return Promise.resolve();
-      return convexClient.mutation(
-        convexApi.effects.setEqParams,
-        buildTrackEffectMutationInput({
-          projectId: context.projectId,
-          trackId: track.id,
-          userId: context.userId,
-          params,
-        }),
-      );
+      return publishEffectOperation(context.projectId, context.userId, {
+        kind: "effects.setEqParams",
+        payload: { trackId: track.id, params },
+      });
     },
     debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
     remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
@@ -598,9 +599,9 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     serializeParams: serializeReverbParams,
     applyToEngine: (targetId, params) => {
       if (targetId === "master") {
-        props.audioEngine?.setMasterReverb(params);
+      props.audioEngine.setMasterReverb(params);
       } else {
-        props.audioEngine?.setTrackReverb(targetId, params);
+      props.audioEngine.setTrackReverb(targetId, params);
       }
     },
     createPersistContext: () => ({ projectId: props.projectId, userId: props.userId }),
@@ -611,23 +612,17 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       }
       if (!context.userId) return Promise.resolve();
       if (targetId === "master") {
-        return convexClient.mutation(convexApi.effects.setMasterReverbParams, {
-          projectId: context.projectId,
-          userId: context.userId,
-          params,
+        return publishEffectOperation(context.projectId, context.userId, {
+          kind: "effects.setMasterReverbParams",
+          payload: { params },
         });
       }
       const track = resolveTrackByTargetId(targetId);
       if (!track) return Promise.resolve();
-      return convexClient.mutation(
-        convexApi.effects.setReverbParams,
-        buildTrackEffectMutationInput({
-          projectId: context.projectId,
-          trackId: track.id,
-          userId: context.userId,
-          params,
-        }),
-      );
+      return publishEffectOperation(context.projectId, context.userId, {
+        kind: "effects.setReverbParams",
+        payload: { trackId: track.id, params },
+      });
     },
     debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
     remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,

@@ -17,13 +17,11 @@ type PersistClipTimingInput = {
 export async function persistClipTiming(
   convexClient: ConvexClientType,
   convexApi: ConvexApiType,
-  userId: string,
   input: PersistClipTimingInput,
 ) {
   const timing = normalizeClipTimingPatch(input)
   const result = await convexClient.mutation(convexApi.clips.setTiming, {
     clipId: toCloudClipId(input.clipId),
-    userId,
     startSec: timing.startSec,
     duration: timing.duration,
     leftPadSec: timing.leftPadSec,

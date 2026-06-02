@@ -19,12 +19,10 @@ export function isTrackRoutingEqual(left: TrackRoutingSnapshot, right: TrackRout
 
 export function buildTrackRoutingMutationInput(input: {
   trackId: TrackId
-  userId: string
   routing: TrackRoutingSnapshot
 }): FunctionArgs<typeof convexApi.tracks.setRouting> {
   return {
     trackId: toCloudTrackId(input.trackId),
-    userId: input.userId,
     outputTargetId: input.routing.outputTargetId ? toCloudTrackId(input.routing.outputTargetId) : null,
     sends: input.routing.sends.map(send => ({
       targetId: toCloudTrackId(send.targetId),

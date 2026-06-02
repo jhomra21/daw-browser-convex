@@ -4,6 +4,11 @@ import type { AudioEngine } from '~/lib/audio-engine'
 import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError, readLocalAssetBytes } from '~/lib/local-assets'
 import { isLocalId } from '~/lib/local-ids'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
+import { isSharedOutboxQueuedError, publishSharedTimelineOperationOrQueue } from '~/lib/shared-outbox'
+import {
+  buildSharedClipCreateOperation,
+  publishSharedTimelineOperation,
+} from '~/lib/shared-timeline-operations-api'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
@@ -32,6 +37,7 @@ type ImportClipContext = {
   audioEngine: AudioEngine
   audioBufferCache: Map<string, AudioBuffer>
   insertLocalClip: (trackId: TrackId, clip: Clip) => void
+  removeLocalClips?: (clipIds: Iterable<string>) => void
   selectClip: (trackId: TrackId, clipId: string) => void
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   pushTrackClipCreateHistory: (track: Track, clipId: string, clip: ClipCreateSnapshot) => void
@@ -92,10 +98,9 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
     const projectId = context.project.projectId()
     const userId = context.project.userId()
     if (!projectId || !userId) return null
-    return await context.cloud.convexClient.mutation(
-      context.cloud.convexApi.clips.create,
-      buildClipCreatePayload({ projectId, userId, trackId, clip }),
-    )
+    const operation = buildSharedClipCreateOperation(buildClipCreatePayload({ projectId, trackId, clip }))
+    const result = await publishSharedTimelineOperationOrQueue({ projectId, userId, operation, throwQueued: true })
+    return typeof result === 'string' ? result : null
   }
 
   const createAudioSourceClip = async (input: AudioSourceClipInput) => {
@@ -181,7 +186,9 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         return null
       }
     } catch (error) {
-      await context.rollback.removeCloudTrack(input.autoCreatedTrack)
+      if (!isSharedOutboxQueuedError(error)) {
+        await context.rollback.removeCloudTrack(input.autoCreatedTrack)
+      }
       throw error
     }
     context.clips.grantClipWrite?.(createdClipId, grantScope)
@@ -281,8 +288,15 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         source: sourceMetadata,
         sourceAssetKey,
         sourceKind: 'upload',
-        createServerClip: async (payload) => await context.cloud.convexClient.mutation(context.cloud.convexApi.clips.create, payload),
+        createServerClip: async (payload) => {
+          const result = await publishSharedTimelineOperation(projectId, {
+            kind: 'clips.create',
+            payload,
+          })
+          return typeof result === 'string' ? result : null
+        },
         insertLocalClip: context.clips.insertLocalClip,
+        removeLocalClips: context.clips.removeLocalClips,
         selectClip: context.clips.selectClip,
         historyPush: context.clips.historyPush,
         uploadToR2: context.cloud.uploadToR2,
@@ -295,9 +309,13 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
       if (input.autoCreatedTrack && context.project.isActiveProjectTrack(projectId, input.track.id)) {
         context.clips.pushTrackClipCreateHistory(input.autoCreatedTrack, created.clipId, created.clip)
       }
-    } catch {
-      await context.rollback.removeCloudTrack(input.autoCreatedTrack)
-      return { status: 'failed', message: 'Audio could not be uploaded. Please retry the import.' }
+    } catch (error) {
+      if (!isSharedOutboxQueuedError(error)) {
+        await context.rollback.removeCloudTrack(input.autoCreatedTrack)
+      }
+      return { status: 'failed', message: isSharedOutboxQueuedError(error)
+        ? 'Audio import was queued and will retry when sync resumes.'
+        : 'Audio could not be uploaded. Please retry the import.' }
     }
     return { status: 'created' }
   }
@@ -319,7 +337,7 @@ export async function removeAutoCreatedCloudTrack(input: {
   try {
     const result = await input.convexClient.mutation(
       input.convexApi.tracks.remove,
-      buildTrackDeleteMutationInput({ trackId: input.track.id, userId: input.userId }),
+      buildTrackDeleteMutationInput({ trackId: input.track.id }),
     )
     if (result?.status === 'deleted') input.removeLocalTrack(input.track.id)
   } catch {}

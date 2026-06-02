@@ -22,7 +22,7 @@ type UseEffectsPanelAudioSyncOptions = {
   projectId: Accessor<string | undefined>;
   currentTargetId: Accessor<string>;
   tracks: Accessor<Track[]>;
-  audioEngine: Accessor<AudioEngine | undefined>;
+  audioEngine: Accessor<AudioEngine>;
   roomEffects: Accessor<RoomEffectRow[] | undefined>;
   playheadSec?: Accessor<number | undefined>;
   localDraftEffects?: {
@@ -76,8 +76,8 @@ export function useEffectsPanelAudioSync(
     for (const trackId of trackIds) {
       audioEngine.setTrackEq(trackId, disabledEq);
       audioEngine.setTrackReverb(trackId, disabledReverb);
-      audioEngine.clearTrackSynth?.(trackId);
-      audioEngine.clearTrackArpeggiator?.(trackId);
+      audioEngine.clearTrackSynth(trackId);
+      audioEngine.clearTrackArpeggiator(trackId);
     }
   };
 
@@ -89,7 +89,6 @@ export function useEffectsPanelAudioSync(
   createEffect(() => {
     const audioEngine = options.audioEngine();
     const projectId = options.projectId();
-    if (!audioEngine) return;
     if (projectId) return;
     clearSyncedTrackState(audioEngine, syncedTrackIds);
     clearSyncedMasterState(audioEngine);
@@ -103,7 +102,6 @@ export function useEffectsPanelAudioSync(
     const effects: SyncedEffectRow[] | undefined = projectId && isLocalId("project", projectId)
       ? localEffects()
       : options.roomEffects();
-    if (!audioEngine) return;
 
     const activeTargetId = options.currentTargetId();
     const tracks = options.tracks();
@@ -222,14 +220,14 @@ export function useEffectsPanelAudioSync(
       if (track.kind === "instrument") {
         const synth = options.localDraftEffects?.synth?.(track.id) ?? synthByTrackId.get(track.id);
         if (synth) audioEngine.setTrackSynth(track.id, synth);
-        else audioEngine.clearTrackSynth?.(track.id);
+        else audioEngine.clearTrackSynth(track.id);
         const arp = options.localDraftEffects?.arp?.(track.id) ?? arpByTrackId.get(track.id);
         if (arp) audioEngine.setTrackArpeggiator(track.id, arp);
-        else audioEngine.clearTrackArpeggiator?.(track.id);
+        else audioEngine.clearTrackArpeggiator(track.id);
         continue;
       }
-      audioEngine.clearTrackSynth?.(track.id);
-      audioEngine.clearTrackArpeggiator?.(track.id);
+      audioEngine.clearTrackSynth(track.id);
+      audioEngine.clearTrackArpeggiator(track.id);
     }
 
     syncedTrackIds = new Set(currentTrackIds);
@@ -248,8 +246,8 @@ export function useEffectsPanelAudioSync(
       const audioEngine = options.audioEngine();
       const id = options.currentTargetId();
       const data = id === "master"
-        ? audioEngine?.getMasterSpectrum()
-        : audioEngine?.getTrackSpectrum(id);
+        ? audioEngine.getMasterSpectrum()
+        : audioEngine.getTrackSpectrum(id);
       setSpectrum(data ?? null);
     } catch {
       setSpectrum(null);

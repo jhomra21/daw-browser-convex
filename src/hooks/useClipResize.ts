@@ -325,7 +325,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
       } else {
         const uid = userId()
         if (uid) {
-          void persistClipTiming(convexClient, convexApi, uid, {
+          void persistClipTiming(convexClient, convexApi, {
             clipId: clip.id,
             startSec: clip.startSec,
             duration: clip.duration,

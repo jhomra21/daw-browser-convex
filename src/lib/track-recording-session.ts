@@ -1,5 +1,5 @@
 import type { AudioEngine } from '~/lib/audio-engine'
-import { buildTrackLockMutationInput, buildTrackUnlockMutationInput } from '~/lib/track-mutation-args'
+import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { Track } from '~/types/timeline'
 
 type ConvexClientType = typeof import('~/lib/convex').convexClient
@@ -15,6 +15,10 @@ const RECORDING_MIME_TYPES = [
 ]
 
 const RECORDING_LOCK_KEEPALIVE_MS = 30_000
+
+const isLockResult = (value: unknown): value is { ok?: boolean; reason?: string } => (
+  typeof value === 'object' && value !== null
+)
 
 export type RecordingContext = {
   projectId: string
@@ -97,6 +101,7 @@ export function ensureRecordingAudioContext(audioEngine: AudioEngine): void {
 }
 
 export async function acquireTrackRecordingLock(options: {
+  projectId: string
   trackId: Track['id']
   locker: string
   convexClient: ConvexClientType
@@ -105,13 +110,13 @@ export async function acquireTrackRecordingLock(options: {
   clearTrackLock: (trackId: Track['id']) => void
 }): Promise<{ ok: boolean; reason?: string }> {
   try {
-    const res = await options.convexClient.mutation(
-      options.convexApi.tracks.lock,
-      buildTrackLockMutationInput({ trackId: options.trackId, userId: options.locker }),
-    )
-    if (!res?.ok) {
+    const res = await publishSharedTimelineOperation(options.projectId, {
+      kind: 'tracks.lock',
+      payload: { trackId: options.trackId },
+    })
+    if (!isLockResult(res) || !res.ok) {
       options.clearTrackLock(options.trackId)
-      return { ok: false, reason: res?.reason }
+      return { ok: false, reason: isLockResult(res) ? res.reason : undefined }
     }
     options.setTrackLock(options.trackId, options.locker)
     return { ok: true }
@@ -123,6 +128,7 @@ export async function acquireTrackRecordingLock(options: {
 }
 
 export async function releaseTrackRecordingLock(options: {
+  projectId: string
   trackId: Track['id']
   locker: string | undefined
   convexClient: ConvexClientType
@@ -135,11 +141,11 @@ export async function releaseTrackRecordingLock(options: {
     return
   }
   try {
-    const result = await options.convexClient.mutation(
-      options.convexApi.tracks.unlock,
-      buildTrackUnlockMutationInput({ trackId: options.trackId, userId: options.locker }),
-    )
-    if (!result?.ok) {
+    const result = await publishSharedTimelineOperation(options.projectId, {
+      kind: 'tracks.unlock',
+      payload: { trackId: options.trackId },
+    })
+    if (!isLockResult(result) || !result.ok) {
       options.clearTrackLock(options.trackId)
       return
     }
@@ -157,6 +163,7 @@ export function clearRecordingLockHeartbeat(lockHeartbeatTimer: number | null): 
 }
 
 export function startRecordingLockHeartbeat(options: {
+  projectId: string
   trackId: Track['id']
   locker: string
   convexClient: ConvexClientType
@@ -164,10 +171,10 @@ export function startRecordingLockHeartbeat(options: {
   onError?: (error: unknown) => void
 }): number {
   return window.setInterval(() => {
-    void options.convexClient.mutation(
-      options.convexApi.tracks.lock,
-      buildTrackLockMutationInput({ trackId: options.trackId, userId: options.locker }),
-    ).catch((error) => {
+    void publishSharedTimelineOperation(options.projectId, {
+      kind: 'tracks.lock',
+      payload: { trackId: options.trackId },
+    }).catch((error) => {
       options.onError?.(error)
     })
   }, RECORDING_LOCK_KEEPALIVE_MS)

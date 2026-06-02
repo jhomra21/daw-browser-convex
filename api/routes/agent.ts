@@ -1,41 +1,24 @@
 import { streamText } from 'ai'
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
-import { ConvexHttpClient } from 'convex/browser'
 import { api as convexApi } from '../../convex/_generated/api'
 import { CommandsEnvelopeSchema } from '../../src/lib/agent-commands'
-import { createAgentActions } from '../agent-actions'
+import { createAgentActions, executeAgentCommands } from '../agent-actions'
 import type { App } from '../app-types'
+import { parseJsonBody } from '../json-body'
+import { requireAuthenticatedConvexForApi, requireProjectRoleContextForApi } from '../project-access'
+import { z } from 'zod'
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
+type AgentChatMessages = NonNullable<Parameters<typeof streamText>[0]['messages']>
 
-const readAgentExecuteBody = (value: unknown) => {
-  if (!isRecord(value) || typeof value.projectId !== 'string' || value.commands === undefined) return null
-  return {
-    projectId: value.projectId,
-    commands: value.commands,
-  }
-}
+const agentExecuteBodySchema = CommandsEnvelopeSchema.extend({
+  projectId: z.string(),
+})
 
-const readAgentChatBody = (value: unknown) => {
-  if (!isRecord(value) || !Array.isArray(value.messages)) return null
-  return {
-    messages: value.messages,
-    projectId: typeof value.projectId === 'string' ? value.projectId : undefined,
-    bpm: typeof value.bpm === 'number' ? value.bpm : undefined,
-  }
-}
-
-async function canAccessAgentRoom(
-  convex: ConvexHttpClient,
-  projectId: string,
-  userId: string,
-) {
-  const canAccess = await convex.query(convexApi.projectAccess.canAccess, { projectId, userId })
-  return canAccess
-}
-
+const agentChatBodySchema = z.object({
+  messages: z.custom<AgentChatMessages>(Array.isArray),
+  projectId: z.string().optional(),
+  bpm: z.number().optional(),
+})
 
 export function registerAgentRoutes(app: App) {
 // Execute JSON commands (no tool-calls path)
@@ -43,116 +26,29 @@ export function registerAgentRoutes(app: App) {
   try {
     const user = c.get('user')
     if (!user) return c.json({ error: 'Unauthorized' }, 401)
-    const body = readAgentExecuteBody(await c.req.json().catch(() => null))
+    const body = await parseJsonBody(c, agentExecuteBodySchema)
     if (!body) {
       return c.json({ error: 'Invalid body' }, 400)
     }
     const projectId = body.projectId
-    const parsed = CommandsEnvelopeSchema.safeParse({ commands: body.commands })
-    if (!parsed.success) {
-      return c.json({ error: 'Invalid commands', issues: parsed.error.issues }, 400)
-    }
-    const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
-    if (!(await canAccessAgentRoom(convex, projectId, user.id))) {
-      return c.json({ error: 'Forbidden' }, 403)
-    }
-    const trackList = await convex.query(convexApi.tracks.listByRoom, { projectId, userId: user.id })
+    const access = await requireProjectRoleContextForApi(c, projectId, ['owner', 'editor'])
+    if (!access) return c.json({ error: 'Forbidden' }, 403)
+    const convex = access.convex
+    const trackList = await convex.query(convexApi.tracks.listByRoom, { projectId })
     const agentActions = createAgentActions({
       convex,
       convexApi,
       projectId,
-      userId: user.id,
+      userId: access.user.id,
       getTracks: async () => trackList,
       refreshTracks: async () => {
-        const updated = await convex.query(convexApi.tracks.listByRoom, { projectId, userId: user.id })
+        const updated = await convex.query(convexApi.tracks.listByRoom, { projectId })
         trackList.splice(0, trackList.length, ...updated)
         return trackList
       },
     })
 
-    const results: Array<Record<string, unknown>> = []
-    for (const cmd of parsed.data.commands) {
-      try {
-        switch (cmd.type) {
-          case 'createTrack': {
-            results.push({ type: cmd.type, ...(await agentActions.createTrack(cmd)) })
-            break
-          }
-          case 'setTrackRouting': {
-            results.push({ type: cmd.type, ...(await agentActions.setTrackRouting(cmd)) })
-            break
-          }
-          case 'addSampleClips': {
-            results.push({ type: cmd.type, ...(await agentActions.addSampleClips(cmd)) })
-            break
-          }
-          case 'setTrackVolume': {
-            results.push({ type: cmd.type, ...(await agentActions.setTrackVolume(cmd)) })
-            break
-          }
-          case 'addMidiClip': {
-            results.push({ type: cmd.type, ...(await agentActions.addMidiClip(cmd)) })
-            break
-          }
-          case 'setEqParams': {
-            results.push({ type: cmd.type, ...(await agentActions.setEqParams(cmd)) })
-            break
-          }
-          case 'setReverbParams': {
-            results.push({ type: cmd.type, ...(await agentActions.setReverbParams(cmd)) })
-            break
-          }
-          case 'setSynthParams': {
-            results.push({ type: cmd.type, ...(await agentActions.setSynthParams(cmd)) })
-            break
-          }
-          case 'deleteTrack': {
-            results.push({ type: cmd.type, ...(await agentActions.deleteTrack(cmd)) })
-            break
-          }
-          case 'moveClip': {
-            results.push({ type: cmd.type, ...(await agentActions.moveClip(cmd)) })
-            break
-          }
-          case 'removeClip': {
-            results.push({ type: cmd.type, ...(await agentActions.removeClip(cmd)) })
-            break
-          }
-          case 'setArpeggiatorParams': {
-            results.push({ type: cmd.type, ...(await agentActions.setArpeggiatorParams(cmd)) })
-            break
-          }
-          case 'setTiming': {
-            results.push({ type: cmd.type, ...(await agentActions.setTiming(cmd)) })
-            break
-          }
-          case 'moveClips': {
-            results.push({ type: cmd.type, ...(await agentActions.moveClips(cmd)) })
-            break
-          }
-          case 'copyClips': {
-            results.push({ type: cmd.type, ...(await agentActions.copyClips(cmd)) })
-            break
-          }
-          case 'removeMany': {
-            results.push({ type: cmd.type, ...(await agentActions.removeMany(cmd)) })
-            break
-          }
-          case 'setMute': {
-            results.push({ type: cmd.type, ...(await agentActions.setMute(cmd)) })
-            break
-          }
-          case 'setSolo': {
-            results.push({ type: cmd.type, ...(await agentActions.setSolo(cmd)) })
-            break
-          }
-          default:
-            results.push({ error: 'Unsupported' })
-        }
-      } catch (e) {
-        results.push({ type: cmd.type, error: 'Execution failed' })
-      }
-    }
+    const results = await executeAgentCommands(agentActions, body.commands)
 
     return c.json({ ok: true, results })
   } catch (err) {
@@ -166,7 +62,7 @@ export function registerAgentRoutes(app: App) {
     const user = c.get('user')
     if (!user) return c.json({ error: 'Unauthorized' }, 401)
 
-    const body = readAgentChatBody(await c.req.json().catch(() => null))
+    const body = await parseJsonBody(c, agentChatBodySchema)
     if (!body) {
       return c.json({ error: 'Invalid body' }, 400)
     }
@@ -175,12 +71,11 @@ export function registerAgentRoutes(app: App) {
     const clientBpm = (typeof body.bpm === 'number') ? Math.max(20, Math.min(300, Number(body.bpm))) : undefined
 
     const openrouter = createOpenRouter({ apiKey: c.env.OPENROUTER_API_KEY })
-    const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
-    if (projectId) {
-      if (!(await canAccessAgentRoom(convex, projectId, user.id))) {
-        return c.json({ error: 'Forbidden' }, 403)
-      }
-    }
+    const access = projectId
+      ? await requireProjectRoleContextForApi(c, projectId, ['owner', 'editor', 'viewer'])
+      : await requireAuthenticatedConvexForApi(c)
+    if (!access) return c.json({ error: 'Forbidden' }, 403)
+    const convex = access.convex
 
     const modelName = 'openai/gpt-oss-20b:free'
     const today = new Date().toISOString().slice(0, 10)
@@ -189,16 +84,21 @@ export function registerAgentRoutes(app: App) {
     // Optional context: include current BPM and sample names to improve sample matching
     let contextNote = ''
     try {
-      const list = projectId ? (await convex.query(convexApi.samples.listByRoom, { projectId, userId: user.id })) : []
-      const sampleNames = Array.isArray(list) && list.length ? list.map((sample) => (sample.name || sample.url || '')).filter(Boolean).slice(0, 20) : []
-
       let tracksLine = ''
       let clipsLine = ''
       let effectsLine = ''
+      let sampleNames: string[] = []
       if (projectId) {
         try {
-          const tracks = await convex.query(convexApi.tracks.listByRoom, { projectId, userId: user.id })
-          const clips = await convex.query(convexApi.clips.listByRoom, { projectId, userId: user.id })
+          const [samples, tracks, clips, effects] = await Promise.all([
+            convex.query(convexApi.samples.listByRoom, { projectId }),
+            convex.query(convexApi.tracks.listByRoom, { projectId }),
+            convex.query(convexApi.clips.listByRoom, { projectId }),
+            convex.query(convexApi.effects.listByRoom, { projectId }).catch(() => []),
+          ])
+          sampleNames = Array.isArray(samples) && samples.length
+            ? samples.map((sample) => (sample.name || sample.url || '')).filter(Boolean).slice(0, 20)
+            : []
           const audioCount = tracks.filter((track) => (track.kind ?? 'audio') === 'audio').length
           const instrumentCount = tracks.filter((track) => (track.kind ?? 'audio') === 'instrument').length
           const perTrackCounts = (() => {
@@ -216,7 +116,6 @@ export function registerAgentRoutes(app: App) {
           let arpCount = 0
           let hasMasterEq = false
           let hasMasterReverb = false
-          const effects = await convex.query(convexApi.effects.listByRoom, { projectId, userId: user.id }).catch(() => [])
           for (const row of effects) {
             if (row?.targetType === 'master') {
               if (row.type === 'eq') hasMasterEq = true

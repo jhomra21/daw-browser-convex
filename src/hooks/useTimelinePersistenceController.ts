@@ -1,7 +1,9 @@
 import type { Accessor } from "solid-js";
+import { createEffect, onCleanup } from "solid-js";
 import type { AudioEngine } from "~/lib/audio-engine";
 import { isLocalId } from "~/lib/local-ids";
 import type { LocalProjectMode } from "~/lib/local-project-db";
+import { flushSharedOutbox } from "~/lib/shared-outbox";
 import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
 import type { Clip, Track } from "~/types/timeline";
 import { useCloudSyncTick } from "./useCloudSyncTick";
@@ -27,6 +29,7 @@ type SelectionActions = {
 
 type Input = {
   projectId: Accessor<string>;
+  remoteTimelineAvailable: Accessor<boolean>;
   localProjectMode: Accessor<LocalProjectMode | undefined>;
   userId: Accessor<string | undefined>;
   renderTracks: Accessor<Track[]>;
@@ -41,6 +44,7 @@ type Input = {
 export const useTimelinePersistenceController = (input: Input) => {
   const mediaRecovery = useMissingMediaRecovery({
     projectId: input.projectId,
+    remoteTimelineAvailable: input.remoteTimelineAvailable,
     userId: input.userId,
     renderTracks: input.renderTracks,
     audioEngine: input.audioEngine,
@@ -63,7 +67,18 @@ export const useTimelinePersistenceController = (input: Input) => {
       const mode = input.localProjectMode();
       return Boolean(input.userId() && isLocalId("project", input.projectId()) && (mode === "backup" || mode === "shared"));
     },
-    sync: () => input.localProject.backUpNow({ skipIfUnchanged: true }),
+    sync: (projectId) => input.localProject.backUpNow({ projectId, skipIfUnchanged: true }),
+  });
+  createEffect(() => {
+    const projectId = input.projectId();
+    const userId = input.userId();
+    if (!projectId || isLocalId("project", projectId) || !userId) return;
+    const flush = () => {
+      void flushSharedOutbox(projectId, userId).catch(() => undefined);
+    };
+    flush();
+    window.addEventListener("online", flush);
+    onCleanup(() => window.removeEventListener("online", flush));
   });
 
   return { mediaRecovery };

@@ -1,13 +1,11 @@
 import type { Doc, Id } from "./_generated/dataModel";
-import { getProjectRole } from "./projectAccess";
+import { canWriteProject, getProjectRole } from "./projectAccess";
 
 type TrackWriteAccess = {
   owner: Doc<"ownerships">;
   track: Doc<"tracks">;
   projectWriter: boolean;
 };
-
-const canWriteProject = (role: string | null) => role === "owner" || role === "editor";
 
 async function readTrackWriteAccess(ctx: any, trackId: Id<"tracks">) {
   const track = await ctx.db.get(trackId);

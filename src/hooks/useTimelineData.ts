@@ -1,5 +1,7 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
 import type { Accessor } from 'solid-js'
+import type { FunctionReturnType } from 'convex/server'
+import type { UseQueryResult } from '@tanstack/solid-query'
 
 import { useConvexQuery, convexClient, convexApi } from '~/lib/convex'
 import { isLocalId } from '~/lib/local-ids'
@@ -15,6 +17,7 @@ import {
 import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writes'
 import { subscribeToLocalProjectChanges } from '~/lib/local-project-changes'
 import { useSessionQuery } from '~/lib/session'
+import { cacheRemoteTimelineSnapshot } from '~/lib/remote-timeline-cache'
 import { clearShareTokenFromUrl, useTimelineProjectRoute } from './useTimelineProjectRoute'
 
 export type TimelineProject = {
@@ -43,12 +46,16 @@ type EnsureOwnedRoomOptions = {
   showAlertOnError?: boolean
 }
 
+type UseTimelineDataInput = {
+  notify: (title: string, message: string) => void
+}
+
 type UseTimelineDataReturn = {
   projectId: Accessor<string>
   setProjectId: (projectId: string) => void
   userId: () => string
   projects: Accessor<TimelineProject[]>
-  fullView: ReturnType<typeof useConvexQuery>
+  fullView: UseQueryResult<FunctionReturnType<typeof convexApi.timeline.fullViewAuthed>, Error>
   navigateToRoom: (projectId: string) => void
   createProject: () => Promise<void>
   renameProject: (projectId: string, name: string) => Promise<void>
@@ -66,7 +73,7 @@ const normalizeProjects = (value: unknown): TimelineProject[] => {
   })
 }
 
-export function useTimelineData(): UseTimelineDataReturn {
+export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataReturn {
   const [localProjects, setLocalProjects] = createSignal<TimelineProject[]>([])
   const pendingOwnedRoomKeys = new Set<string>()
 
@@ -107,7 +114,7 @@ export function useTimelineData(): UseTimelineDataReturn {
 
   const myProjects = useConvexQuery(
     convexApi.projects.listMineDetailed,
-    () => userId() ? ({ userId: userId() }) : null,
+    () => userId() ? ({}) : null,
     () => ['my-projects', userId()]
   )
   const projectsLoaded = createMemo(() => myProjects.status === 'success')
@@ -120,20 +127,22 @@ export function useTimelineData(): UseTimelineDataReturn {
   const hasLocalProject = (rid: string) => localProjects().some((project) => project.projectId === rid)
 
   const fullView = useConvexQuery(
-    convexApi.timeline.fullView,
+    convexApi.timeline.fullViewAuthed,
     () => {
       const rid = projectId()
       const uid = userId()
       if (!rid || isLocalId('project', rid) || !uid || bootstrapProjectId() === rid || acceptingShareToken()) return null
-      return { projectId: rid, userId: uid }
+      return { projectId: rid }
     },
-    () => {
-      const rid = projectId()
-      const uid = userId()
-      const bootstrapRid = bootstrapProjectId()
-      return ['timeline', rid, uid, bootstrapRid]
-    }
+    () => ['timeline-full-view-authed', projectId(), userId(), bootstrapProjectId(), acceptingShareToken()]
   )
+
+  createEffect(() => {
+    const rid = projectId()
+    const data = fullView.data
+    if (!rid || isLocalId('project', rid) || !data) return
+    void cacheRemoteTimelineSnapshot(rid, data).catch(() => undefined)
+  })
 
   createEffect(() => {
     const token = acceptingShareToken()
@@ -156,7 +165,7 @@ export function useTimelineData(): UseTimelineDataReturn {
       .catch(() => {
         setAcceptingShareToken(null)
         clearShareTokenFromUrl()
-        window.alert('This share link could not be accepted.')
+        input.notify('Share link failed', 'This share link could not be accepted.')
       })
   })
 
@@ -181,7 +190,7 @@ export function useTimelineData(): UseTimelineDataReturn {
       return { status: 'created' }
     } catch {
       if (options?.showAlertOnError) {
-        window.alert('This project could not be created.')
+        input.notify('Project create failed', 'This project could not be created.')
       }
       return { status: 'error' }
     } finally {
@@ -230,7 +239,7 @@ export function useTimelineData(): UseTimelineDataReturn {
       return { status: 'deleted' as const }
     } catch {
       if (options?.showAlertOnError !== false) {
-        window.alert('This project could not be deleted.')
+        input.notify('Project delete failed', 'This project could not be deleted.')
       }
       return { status: 'error' as const }
     }
@@ -246,7 +255,7 @@ export function useTimelineData(): UseTimelineDataReturn {
       await loadLocalProjects()
       return { status: 'left' as const }
     } catch {
-      window.alert('This project could not be removed from your account.')
+      input.notify('Project remove failed', 'This project could not be removed from your account.')
       return { status: 'error' as const }
     }
   }
@@ -313,7 +322,7 @@ export function useTimelineData(): UseTimelineDataReturn {
         await loadLocalProjects()
         navigateToRoom(project.id)
       } catch {
-        window.alert('This local project could not be created.')
+        input.notify('Local project create failed', 'This local project could not be created.')
       }
       return
     }
@@ -330,7 +339,7 @@ export function useTimelineData(): UseTimelineDataReturn {
         await renameLocalProject(targetProjectId, name)
         await loadLocalProjects()
       } catch {
-        window.alert('This local project could not be renamed.')
+        input.notify('Local project rename failed', 'This local project could not be renamed.')
       }
       return
     }
@@ -340,11 +349,10 @@ export function useTimelineData(): UseTimelineDataReturn {
     try {
       await convexClient.mutation(convexApi.projects.setName, {
         projectId: targetProjectId,
-        userId: ownerUserId,
         name,
       })
     } catch {
-      window.alert('This project could not be renamed.')
+      input.notify('Project rename failed', 'This project could not be renamed.')
     }
   }
 
@@ -360,7 +368,7 @@ export function useTimelineData(): UseTimelineDataReturn {
           navigateToRoom(replacement.id)
         }
       } catch {
-        window.alert('This local project could not be deleted.')
+        input.notify('Local project delete failed', 'This local project could not be deleted.')
       }
       return
     }
@@ -370,7 +378,6 @@ export function useTimelineData(): UseTimelineDataReturn {
 
     const canDeleteAsOwner = await convexClient.query(convexApi.projects.canDeleteAsOwner, {
       projectId: targetProjectId,
-      userId: ownerUserId,
     }).catch(() => false)
     if (!canDeleteAsOwner) {
       const result = await leaveCloudProject(targetProjectId)

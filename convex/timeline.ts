@@ -1,19 +1,32 @@
-import { query } from "./_generated/server";
+import { query, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
-import { requireProjectAccess } from "./projectAccess";
+import { requireAuthenticatedUserId, requireProjectAccess } from "./projectAccess";
 
-export const fullView = query({
-  args: { projectId: v.string(), userId: v.string() },
-  handler: async (ctx, { projectId, userId }) => {
-    await requireProjectAccess(ctx, projectId, userId);
+const readFullTimelineView = async (
+  ctx: QueryCtx,
+  projectId: string,
+) => {
+  const userId = await requireAuthenticatedUserId(ctx);
+  await requireProjectAccess(ctx, projectId, userId);
 
-    const tracks = await listProjectTracksWithMixerChannels(ctx, projectId);
-    const clips = await ctx.db
+  const [tracks, clips] = await Promise.all([
+    listProjectTracksWithMixerChannels(ctx, projectId),
+    ctx.db
       .query("clips")
       .withIndex("by_room", q => q.eq("projectId", projectId))
-      .collect();
+      .collect(),
+  ]);
 
-    return { tracks, clips };
-  }
+  return { tracks, clips };
+};
+
+export const fullView = query({
+  args: { projectId: v.string() },
+  handler: async (ctx, { projectId }) => await readFullTimelineView(ctx, projectId),
+});
+
+export const fullViewAuthed = query({
+  args: { projectId: v.string() },
+  handler: async (ctx, { projectId }) => await readFullTimelineView(ctx, projectId),
 });

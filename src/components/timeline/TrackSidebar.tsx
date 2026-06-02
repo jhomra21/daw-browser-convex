@@ -46,7 +46,6 @@ type TrackSidebarProps = {
       volume: number,
       muted: boolean,
     ) => void;
-    bottomOffsetPx: number;
   };
 };
 
@@ -275,11 +274,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       </div>
 
       <div
-        class="track-sidebar-scroll overflow-x-clip border-l border-neutral-800 bg-neutral-900 p-0"
+        class="track-sidebar-scroll h-full overflow-x-clip border-l border-neutral-800 bg-neutral-900 p-0"
         style={{
           width: `${sidebar().sidebarWidth}px`,
           "min-width": `${TIMELINE_SIDEBAR_MIN_WIDTH}px`,
-          "padding-bottom": `${sidebar().bottomOffsetPx}px`,
         }}
       >
         <div class="sticky top-0 z-40 border-b border-neutral-800 bg-neutral-900" style={{ height: `${RULER_HEIGHT}px` }} />

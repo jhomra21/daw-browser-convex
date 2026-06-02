@@ -10,6 +10,11 @@ type RoomSummary = {
 type ProjectRecord = Doc<"projects">;
 type RoomOwnership = Doc<"ownerships">;
 type ProjectAccessCtx = { db: DatabaseReader };
+type AuthenticatedCtx = {
+  auth: {
+    getUserIdentity: () => Promise<{ subject: string } | null>;
+  };
+};
 
 function isProjectOwnership(ownership: RoomOwnership) {
   return !ownership.trackId && !ownership.clipId;
@@ -127,6 +132,8 @@ export async function hasProjectAccess(
 
 export type ProjectRole = "owner" | "editor" | "viewer";
 
+export const canWriteProject = (role: ProjectRole | null) => role === "owner" || role === "editor";
+
 export async function getProjectRole(
   ctx: ProjectAccessCtx,
   projectId: string,
@@ -158,16 +165,18 @@ export async function requireProjectRole(
 }
 
 export const canAccess = query({
-  args: { projectId: v.string(), userId: v.string() },
+  args: { projectId: v.string() },
   returns: v.boolean(),
-  handler: async (ctx, { projectId, userId }) => {
+  handler: async (ctx, { projectId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     return hasProjectAccess(ctx, projectId, userId);
   },
 });
 
 export const roleForUser = query({
-  args: { projectId: v.string(), userId: v.string() },
-  handler: async (ctx, { projectId, userId }) => {
+  args: { projectId: v.string() },
+  handler: async (ctx, { projectId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     return getProjectRole(ctx, projectId, userId);
   },
 });
@@ -179,6 +188,12 @@ export async function requireProjectAccess(
 ) {
   if (await hasProjectAccess(ctx, projectId, userId)) return;
   throw new Error("You do not have access to this room.");
+}
+
+export async function requireAuthenticatedUserId(ctx: AuthenticatedCtx) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) throw new Error("Authentication required.");
+  return identity.subject;
 }
 
 export async function hasProjectAdminCapability(

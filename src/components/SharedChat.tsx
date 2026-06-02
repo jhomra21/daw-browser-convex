@@ -40,7 +40,7 @@ const SharedChat: Component<SharedChatProps> = (props) => {
   // Real-time latest messages for the room (bounded)
   const messagesQ = useConvexQuery(
     (convexApi as any).sharedChat.listLatest,
-    () => props.projectId && props.userId ? ({ projectId: props.projectId, userId: props.userId, limit: 200 } as any) : null,
+    () => props.projectId && props.userId ? ({ projectId: props.projectId, limit: 200 } as any) : null,
     () => ['shared-chat', props.projectId, props.userId]
   )
 
@@ -103,7 +103,6 @@ const SharedChat: Component<SharedChatProps> = (props) => {
     try {
       await convexClient.mutation((convexApi as any).sharedChat.send, {
         projectId: rid,
-        senderUserId: uid,
         content,
         senderName: displayName(),
       } as any)

@@ -1,21 +1,15 @@
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { isProjectDeletionPending, requireProjectRole } from "./projectAccess";
+import { isProjectDeletionPending, requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
 import { projectManifestValidator } from "./projectManifestValidator";
 import {
   assertProjectManifestBaseIntegrity,
   assertProjectManifestPublishIntegrity,
+  readProjectManifestCloudKeys,
   type ProjectManifest,
 } from "../src/lib/project-manifest-contract";
-
-declare const process: { env: { CLOUD_PROJECTS_SERVICE_TOKEN?: string } };
-
-const requireServerSecret = (serverSecret: string) => {
-  if (!serverSecret || serverSecret !== process.env.CLOUD_PROJECTS_SERVICE_TOKEN) {
-    throw new Error("Unauthorized cloud backup request.");
-  }
-};
+import { enqueueR2DeleteRows } from "./r2Deletes";
 
 const latestBackup = async (ctx: Pick<QueryCtx, "db">, projectId: string) => (
   await ctx.db
@@ -67,34 +61,28 @@ const assertPublishManifest = (projectId: string, manifest: ProjectManifest) => 
   assertProjectManifestPublishIntegrity(manifest);
 };
 
-const readManifestCloudKeys = (projectId: string, manifest: ProjectManifest | undefined) => (
-  manifest?.assets
-    .flatMap((asset) => asset.cloudKey ? [asset.cloudKey] : [])
-    .filter((key) => key.startsWith(`projects/${projectId}/assets/`)) ?? []
-);
-
 const readSupersededCloudKeys = (
   projectId: string,
   previousManifest: ProjectManifest | undefined,
   nextManifest: ProjectManifest,
 ) => {
-  const nextKeys = new Set(readManifestCloudKeys(projectId, nextManifest));
-  return readManifestCloudKeys(projectId, previousManifest).filter((key) => !nextKeys.has(key));
+  const nextKeys = new Set(readProjectManifestCloudKeys(projectId, nextManifest));
+  return readProjectManifestCloudKeys(projectId, previousManifest).filter((key) => !nextKeys.has(key));
 };
 
 export const getLatest = query({
-  args: { projectId: v.string(), userId: v.string(), serverSecret: v.string() },
-  handler: async (ctx, { projectId, userId, serverSecret }) => {
-    requireServerSecret(serverSecret);
+  args: { projectId: v.string() },
+  handler: async (ctx, { projectId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor", "viewer"]);
     return await latestBackup(ctx, projectId);
   },
 });
 
 export const checkConflict = query({
-  args: { projectId: v.string(), userId: v.string(), manifest: projectManifestValidator, baseManifestVersion: v.optional(v.string()), serverSecret: v.string() },
-  handler: async (ctx, { projectId, userId, manifest, baseManifestVersion, serverSecret }) => {
-    requireServerSecret(serverSecret);
+  args: { projectId: v.string(), manifest: projectManifestValidator, baseManifestVersion: v.optional(v.string()) },
+  handler: async (ctx, { projectId, manifest, baseManifestVersion }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor"]);
     await assertProjectNotDeleting(ctx, projectId);
     assertConflictManifest(projectId, manifest);
@@ -105,14 +93,13 @@ export const checkConflict = query({
 export const upsertLatest = mutation({
   args: {
     projectId: v.string(),
-    userId: v.string(),
     manifest: projectManifestValidator,
     conflictAction: v.union(v.literal("detect"), v.literal("overwrite")),
     baseManifestVersion: v.optional(v.string()),
-    serverSecret: v.string(),
+    pendingDeletedCloudKeys: v.optional(v.array(v.string())),
   },
-  handler: async (ctx, { projectId, userId, manifest, conflictAction, baseManifestVersion, serverSecret }) => {
-    requireServerSecret(serverSecret);
+  handler: async (ctx, { projectId, manifest, conflictAction, baseManifestVersion, pendingDeletedCloudKeys }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor"]);
     await assertProjectNotDeleting(ctx, projectId);
     assertPublishManifest(projectId, manifest);
@@ -122,6 +109,8 @@ export const upsertLatest = mutation({
       return { ok: false, conflict };
     }
     const supersededCloudKeys = readSupersededCloudKeys(projectId, existing?.manifest, manifest);
+    const queuedDeletedCloudKeys = [...new Set([...(pendingDeletedCloudKeys ?? []), ...supersededCloudKeys])];
+    await enqueueR2DeleteRows(ctx, { projectId, keys: queuedDeletedCloudKeys, kind: "backup-asset" });
 
     const now = Date.now();
     const manifestVersion = `${now}-${crypto.randomUUID()}`;
@@ -140,6 +129,6 @@ export const upsertLatest = mutation({
     } else {
       await ctx.db.insert("cloudBackups", row);
     }
-    return { ok: true, manifestVersion, supersededCloudKeys };
+    return { ok: true, manifestVersion, supersededCloudKeys, queuedDeletedCloudKeys };
   },
 });

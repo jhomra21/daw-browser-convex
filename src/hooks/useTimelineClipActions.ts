@@ -7,6 +7,7 @@ import { buildTrackEffectQueryArgs } from '~/lib/effect-track-args'
 import { getLocalEffect } from '~/lib/local-effects'
 import { isLocalId } from '~/lib/local-ids'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
+import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { isClipCompatibleWithTrack } from '~/lib/track-routing'
 import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
@@ -41,8 +42,9 @@ type TimelineClipActionsOptions = {
   bpm: Accessor<number>
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
-  historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
+  historyPush: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void
+  notify: (title: string, message: string) => void
 }
 
 type TimelineClipActionsHandlers = {
@@ -72,6 +74,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     gridDenominator,
     historyPush,
     grantClipWrites,
+    notify,
   } = options
 
   const onClipPointerUp = (trackId: Track['id'], clipId: string, event: PointerEvent) => {
@@ -92,10 +95,10 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
   const showTrackDeleteFailure = (result: TrackDeleteResult | null | undefined) => {
     if (result?.status === 'conflict') {
-      window.alert(getTrackDeleteConflictMessage(result.reason))
+      notify('Track delete blocked', getTrackDeleteConflictMessage(result.reason))
       return
     }
-    window.alert('This track could not be deleted.')
+    notify('Track delete failed', 'This track could not be deleted.')
   }
 
   const queryTrackEffect = async <TRow>(read: () => Promise<TRow>): Promise<TRow | null> => {
@@ -117,7 +120,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         arp: undefined,
       }
     }
-    const args = buildTrackEffectQueryArgs({ projectId: rid, userId: uid, trackId })
+    const args = buildTrackEffectQueryArgs({ projectId: rid, trackId })
     const [eqRow, rvRow, synthRow, arpRow] = await Promise.all([
       queryTrackEffect(() => convexClient.query(convexApi.effects.getEqForTrack, args)),
       queryTrackEffect(() => convexClient.query(convexApi.effects.getReverbForTrack, args)),
@@ -184,10 +187,8 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     if (removedIds.size === 0) return
 
     try {
-      if (typeof historyPush === 'function') {
-        const entry = buildClipDeleteHistoryEntry({ projectId: rid, tracks: snapshot, clipIds: removedIds })
-        if (entry.data.items.length > 0) historyPush(entry)
-      }
+      const entry = buildClipDeleteHistoryEntry({ projectId: rid, tracks: snapshot, clipIds: removedIds })
+      if (entry.data.items.length > 0) historyPush(entry)
     } catch {}
 
     removeLocalClips(removedIds)
@@ -267,9 +268,11 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
     const created = await createProjectedClips({
       projectId: rid,
-      userId: uid,
       items: pending,
-      createMany: async (items) => await convexClient.mutation(convexApi.clips.createMany, { items }),
+      createMany: async (items, operationId) => {
+        const result = await publishSharedTimelineOperation(rid, buildSharedClipCreateManyOperation({ items }, operationId))
+        return Array.isArray(result) ? result.map((item) => typeof item === 'string' ? item : null) : []
+      },
       insertLocalClip,
       audioBufferCache,
       grantClipWrites,
@@ -302,19 +305,15 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     if (rid && isLocalId('project', rid)) {
       let historyEntry: ReturnType<typeof buildTrackDeleteHistoryEntry> | null = null
       try {
-        if (typeof historyPush === 'function') {
-          historyEntry = buildTrackDeleteHistoryEntry({
-            projectId: rid,
-            track,
-            tracks: snapshot,
-            effects: await loadLocalTrackDeleteEffects(rid, trackId),
-          })
-        }
+        historyEntry = buildTrackDeleteHistoryEntry({
+          projectId: rid,
+          track,
+          tracks: snapshot,
+          effects: await loadLocalTrackDeleteEffects(rid, trackId),
+        })
       } catch {}
       await createLocalTimelineRepository(rid).deleteTrack(trackId)
-      if (historyEntry && typeof historyPush === 'function') {
-        historyPush(historyEntry)
-      }
+      if (historyEntry) historyPush(historyEntry)
       removeLocalTrack(trackId)
       const next = snapshot.filter(entry => entry.id !== trackId)
       batch(() => {
@@ -332,7 +331,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
     let historyEntry: ReturnType<typeof buildTrackDeleteHistoryEntry> | null = null
     try {
-      if (rid && typeof historyPush === 'function') {
+      if (rid) {
         historyEntry = buildTrackDeleteHistoryEntry({
           projectId: rid,
           track,
@@ -344,16 +343,14 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
     const result = await convexClient.mutation(
       convexApi.tracks.remove,
-      buildTrackDeleteMutationInput({ trackId, userId: uid }),
+      buildTrackDeleteMutationInput({ trackId }),
     )
     if (result?.status !== 'deleted') {
       showTrackDeleteFailure(result)
       return
     }
 
-    if (historyEntry && typeof historyPush === 'function') {
-      historyPush(historyEntry)
-    }
+    if (historyEntry) historyPush(historyEntry)
 
     removeLocalTrack(trackId)
 

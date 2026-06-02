@@ -204,7 +204,7 @@ const CommandSchema = z.discriminatedUnion('type', [
   AddSampleClipsCommandSchema,
 ])
 
-type AgentCommand = z.infer<typeof CommandSchema>
+export type AgentCommand = z.infer<typeof CommandSchema>
 
 export const CommandsEnvelopeSchema = z.object({
   commands: z.array(CommandSchema).min(1),

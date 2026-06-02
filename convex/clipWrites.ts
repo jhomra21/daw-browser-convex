@@ -1,6 +1,4 @@
-import { getProjectRole } from './projectAccess'
-
-const canWriteProject = (role: string | null) => role === 'owner' || role === 'editor'
+import { canWriteProject, getProjectRole } from './projectAccess'
 
 export async function getClipOwnership(ctx: any, clipId: any) {
   const clip = await ctx.db.get(clipId)

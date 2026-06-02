@@ -6,13 +6,11 @@ import { convexApi } from '~/lib/convex'
 
 export function buildClipMoveMutationInput(input: {
   clipId: string
-  userId: string
   startSec: number
   toTrackId?: string
 }): FunctionArgs<typeof convexApi.clips.move> {
   return {
     clipId: toCloudClipId(input.clipId),
-    userId: input.userId,
     startSec: normalizeClipStartSec(input.startSec),
     toTrackId: toCloudTrackIdOptional(input.toTrackId),
   }
@@ -24,7 +22,6 @@ export function buildClipMoveManyMutationInput(input: {
     startSec: number
     toTrackId?: string
   }>
-  userId: string
 }): FunctionArgs<typeof convexApi.clips.moveMany> {
   return {
     moves: input.moves.map((move) => ({
@@ -32,16 +29,13 @@ export function buildClipMoveManyMutationInput(input: {
       startSec: normalizeClipStartSec(move.startSec),
       toTrackId: toCloudTrackIdOptional(move.toTrackId),
     })),
-    userId: input.userId,
   }
 }
 
 export function buildClipRemoveManyMutationInput(input: {
   clipIds: string[]
-  userId: string
 }): FunctionArgs<typeof convexApi.clips.removeMany> {
   return {
     clipIds: input.clipIds.map(toCloudClipId),
-    userId: input.userId,
   }
 }

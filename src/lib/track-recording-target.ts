@@ -85,7 +85,7 @@ async function discardAutoCreatedTrack(options: {
     if (!options.userId) return false
     const result = await options.convexClient.mutation(
       options.convexApi.tracks.remove,
-      buildTrackDeleteMutationInput({ trackId: options.trackId, userId: options.userId }),
+      buildTrackDeleteMutationInput({ trackId: options.trackId }),
     )
     if (result?.status !== 'deleted') return false
     options.removeLocalTrack(options.trackId)

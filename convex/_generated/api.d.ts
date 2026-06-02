@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as authIdentity from "../authIdentity.js";
 import type * as chat from "../chat.js";
 import type * as clipWrites from "../clipWrites.js";
 import type * as clips from "../clips.js";
@@ -19,10 +20,12 @@ import type * as ownerships from "../ownerships.js";
 import type * as projectAccess from "../projectAccess.js";
 import type * as projectManifestValidator from "../projectManifestValidator.js";
 import type * as projects from "../projects.js";
+import type * as r2Deletes from "../r2Deletes.js";
 import type * as sampleRows from "../sampleRows.js";
 import type * as samples from "../samples.js";
 import type * as shareInvites from "../shareInvites.js";
 import type * as sharedChat from "../sharedChat.js";
+import type * as sharedOperationResults from "../sharedOperationResults.js";
 import type * as timeline from "../timeline.js";
 import type * as trackRouting from "../trackRouting.js";
 import type * as trackWrites from "../trackWrites.js";
@@ -35,6 +38,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  authIdentity: typeof authIdentity;
   chat: typeof chat;
   clipWrites: typeof clipWrites;
   clips: typeof clips;
@@ -46,10 +50,12 @@ declare const fullApi: ApiFromModules<{
   projectAccess: typeof projectAccess;
   projectManifestValidator: typeof projectManifestValidator;
   projects: typeof projects;
+  r2Deletes: typeof r2Deletes;
   sampleRows: typeof sampleRows;
   samples: typeof samples;
   shareInvites: typeof shareInvites;
   sharedChat: typeof sharedChat;
+  sharedOperationResults: typeof sharedOperationResults;
   timeline: typeof timeline;
   trackRouting: typeof trackRouting;
   trackWrites: typeof trackWrites;

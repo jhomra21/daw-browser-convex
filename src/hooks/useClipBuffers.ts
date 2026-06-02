@@ -1,7 +1,7 @@
 import { type Accessor, untrack } from 'solid-js'
 
 import { clearWaveformAssetCache } from '~/lib/audio-peaks/asset-store'
-import { readLocalAssetBytes } from '~/lib/local-assets'
+import { readLocalOrCloudAssetFile } from '~/lib/cloud-asset-cache'
 import { isLocalId } from '~/lib/local-ids'
 import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
 
@@ -26,9 +26,9 @@ type EnsureClipBuffer = (clipId: string, sampleUrl?: string) => Promise<void>
 
 type ClipBufferOptions = {
   audioEngine: AudioEngine
-  projectId?: Accessor<string>
+  projectId: Accessor<string>
   tracks: Accessor<Track[]>
-  onBufferChange?: () => void
+  onBufferChange: () => void
 }
 
 type ClipBufferControls = {
@@ -47,7 +47,7 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
   const { audioEngine, tracks } = options
 
   const publishBufferUpdate = () => {
-    options.onBufferChange?.()
+    options.onBufferChange()
   }
 
   const cacheBuffer = (clipId: string, buffer: AudioBuffer) => {
@@ -120,9 +120,9 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
     loadingClipIds.add(clipId)
     try {
       const existing = untrack(() => tracks().flatMap(t => t.clips).find(c => c.id === clipId))
-      const projectId = options.projectId?.()
-      if (projectId && isLocalId('project', projectId) && existing?.sourceAssetKey && isLocalId('asset', existing.sourceAssetKey)) {
-        const bytes = await readLocalAssetBytes(projectId, existing.sourceAssetKey)
+      const projectId = options.projectId()
+      if (projectId && existing?.sourceAssetKey && isLocalId('asset', existing.sourceAssetKey)) {
+        const bytes = await readLocalOrCloudAssetFile(projectId, existing.sourceAssetKey)
         if (bytes.status === 'ready') {
           const decoded = await audioEngine.decodeAudioData(await bytes.file.arrayBuffer())
           await applyBuffer(decoded)

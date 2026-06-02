@@ -63,13 +63,13 @@ export function useProjectExports(options: UseProjectExportsArgs): UseProjectExp
   })
 
   const raw = useConvexQuery(
-    (convexApi as any).exports.listByRoom,
+    convexApi.exports.listByRoom,
     () => {
       if (enabled && !enabled()) return null
       const rid = projectId()
       if (isLocalId('project', rid)) return null
       const uid = userId()
-      return rid && uid ? ({ projectId: rid, userId: uid }) : null
+      return rid && uid ? ({ projectId: rid }) : null
     },
     () => ['exports', 'by_room', projectId(), userId()]
   )

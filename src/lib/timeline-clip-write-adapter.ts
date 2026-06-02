@@ -1,6 +1,5 @@
-import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from '~/lib/clip-mutation-args'
-import { convexApi, convexClient } from '~/lib/convex'
 import { isLocalId } from '~/lib/local-ids'
+import { publishSharedTimelineOperationOrQueue } from '~/lib/shared-outbox'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { MoveClipInput } from '~/lib/timeline-repository/types'
 
@@ -8,6 +7,10 @@ type ClipWriteContext = {
   projectId: string
   userId: string | undefined
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
 
 export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
   deleteClips: async (clipIds: string[]) => {
@@ -17,12 +20,15 @@ export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
       return new Set(clipIds)
     }
     if (!context.userId) return new Set<string>()
-    const result = await convexClient.mutation(
-      convexApi.clips.removeMany,
-      buildClipRemoveManyMutationInput({ clipIds, userId: context.userId }),
-    )
+    const userId = context.userId
+    const result = await publishSharedTimelineOperationOrQueue({
+      projectId: context.projectId,
+      userId,
+      operation: { kind: 'clips.removeMany', payload: { clipIds } },
+      queuedResult: { removedClipIds: clipIds },
+    })
     return new Set(
-      Array.isArray(result?.removedClipIds)
+      isRecord(result) && Array.isArray(result.removedClipIds)
         ? result.removedClipIds.map((clipId: unknown) => String(clipId))
         : [],
     )
@@ -34,17 +40,13 @@ export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
       return true
     }
     if (!context.userId) return false
-    const result = await convexClient.mutation(
-      convexApi.clips.moveMany,
-      buildClipMoveManyMutationInput({
-        moves: moves.map((move) => ({
-          clipId: move.clipId,
-          startSec: move.startSec,
-          toTrackId: move.trackId,
-        })),
-        userId: context.userId,
-      }),
-    )
-    return result?.status === 'applied'
+    const userId = context.userId
+    const result = await publishSharedTimelineOperationOrQueue({
+      projectId: context.projectId,
+      userId,
+      operation: { kind: 'clips.moveMany', payload: { moves } },
+      queuedResult: { status: 'applied' },
+    })
+    return isRecord(result) && result.status === 'applied'
   },
 })

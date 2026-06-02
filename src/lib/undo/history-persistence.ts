@@ -4,6 +4,8 @@ import { persistClipTiming } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
 import { setLocalEffect } from "~/lib/local-effects";
 import { isLocalId } from "~/lib/local-ids";
+import { publishSharedTimelineOperationOrQueue } from "~/lib/shared-outbox";
+import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { buildTrackCreateMutationInput, buildTrackDeleteMutationInput, buildTrackMixMutationInput, buildTrackVolumeMutationInput } from "~/lib/track-mutation-args";
 import { buildTrackRoutingMutationInput } from "~/lib/track-routing-state";
@@ -102,16 +104,20 @@ export const createHistoryTrack = async (
     });
     return row.id;
   }
-  return await deps.convexClient.mutation(
-    deps.convexApi.tracks.create,
-    buildTrackCreateMutationInput({
-      projectId: deps.projectId,
-      userId: deps.userId,
-      index: track.index,
-      kind: track.kind,
-      channelRole: track.channelRole,
-    }),
-  );
+  const payload = buildTrackCreateMutationInput({
+    projectId: deps.projectId,
+    index: track.index,
+    kind: track.kind,
+    channelRole: track.channelRole,
+  });
+  const operation = buildSharedTrackCreateOperation({
+    index: payload.index,
+    kind: payload.kind,
+    channelRole: payload.channelRole,
+  });
+  const result = await publishSharedTimelineOperationOrQueue({ projectId: deps.projectId, userId: deps.userId, operation });
+  if (typeof result !== "string") throw new Error("Failed to create history track");
+  return result;
 };
 
 export const createHistoryClip = async (
@@ -126,10 +132,9 @@ export const createHistoryClip = async (
       toHistoryCreateClipInput(trackId, buildLocalClip({ id: clipRef, clip })),
     )).id;
   }
-  return await deps.convexClient.mutation(
-    deps.convexApi.clips.create,
-    buildClipCreatePayload({ projectId: deps.projectId, userId: deps.userId, trackId, clip }),
-  );
+  const operation = buildSharedClipCreateOperation(buildClipCreatePayload({ projectId: deps.projectId, trackId, clip }));
+  const result = await publishSharedTimelineOperationOrQueue({ projectId: deps.projectId, userId: deps.userId, operation });
+  return typeof result === "string" ? result : null;
 };
 
 type TrackDeleteEffects = NonNullable<Extract<HistoryEntry, { type: "track-delete" }>["data"]["effects"]>;
@@ -140,6 +145,10 @@ function pickDirectionalValue<T>(direction: HistoryDirection, from: T, to: T) {
   return direction === "undo" ? from : to;
 }
 
+const publishHistoryOperation = async (deps: Deps, operation: SharedTimelineOperation) => {
+  await publishSharedTimelineOperationOrQueue({ projectId: deps.projectId, userId: deps.userId, operation });
+};
+
 export const persistHistoryTrackEffects = async (
   deps: Deps,
   trackId: Track["id"],
@@ -147,16 +156,20 @@ export const persistHistoryTrackEffects = async (
 ) => {
   if (!effects) return;
   if (isLocalHistoryProject(deps)) {
-    if (effects.eq) await setLocalEffect(deps.projectId, trackId, "eq", effects.eq);
-    if (effects.reverb) await setLocalEffect(deps.projectId, trackId, "reverb", effects.reverb);
-    if (effects.synth) await setLocalEffect(deps.projectId, trackId, "synth", effects.synth);
-    if (effects.arp) await setLocalEffect(deps.projectId, trackId, "arp", effects.arp);
+    await Promise.all([
+      effects.eq ? setLocalEffect(deps.projectId, trackId, "eq", effects.eq) : null,
+      effects.reverb ? setLocalEffect(deps.projectId, trackId, "reverb", effects.reverb) : null,
+      effects.synth ? setLocalEffect(deps.projectId, trackId, "synth", effects.synth) : null,
+      effects.arp ? setLocalEffect(deps.projectId, trackId, "arp", effects.arp) : null,
+    ]);
     return;
   }
-  if (effects.eq) await deps.convexClient.mutation(deps.convexApi.effects.setEqParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params: effects.eq }));
-  if (effects.reverb) await deps.convexClient.mutation(deps.convexApi.effects.setReverbParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params: effects.reverb }));
-  if (effects.synth) await deps.convexClient.mutation(deps.convexApi.effects.setSynthParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params: effects.synth }));
-  if (effects.arp) await deps.convexClient.mutation(deps.convexApi.effects.setArpeggiatorParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId, userId: deps.userId, params: effects.arp }));
+  await Promise.all([
+    effects.eq ? publishHistoryOperation(deps, { kind: "effects.setEqParams", payload: { trackId, params: effects.eq } }) : null,
+    effects.reverb ? publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId, params: effects.reverb } }) : null,
+    effects.synth ? publishHistoryOperation(deps, { kind: "effects.setSynthParams", payload: { trackId, params: effects.synth } }) : null,
+    effects.arp ? publishHistoryOperation(deps, { kind: "effects.setArpeggiatorParams", payload: { trackId, params: effects.arp } }) : null,
+  ]);
 };
 
 export const persistHistoryEffectParams = async (
@@ -173,32 +186,32 @@ export const persistHistoryEffectParams = async (
   switch (entry.data.effect) {
     case "master-eq": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await deps.convexClient.mutation(deps.convexApi.effects.setMasterEqParams, { projectId: deps.projectId, userId: deps.userId, params });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterEqParams", payload: { params } });
       return;
     }
     case "master-reverb": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await deps.convexClient.mutation(deps.convexApi.effects.setMasterReverbParams, { projectId: deps.projectId, userId: deps.userId, params });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterReverbParams", payload: { params } });
       return;
     }
     case "eq": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await deps.convexClient.mutation(deps.convexApi.effects.setEqParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId: targetId, userId: deps.userId, params }));
+      await publishHistoryOperation(deps, { kind: "effects.setEqParams", payload: { trackId: targetId, params } });
       return;
     }
     case "reverb": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await deps.convexClient.mutation(deps.convexApi.effects.setReverbParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId: targetId, userId: deps.userId, params }));
+      await publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId: targetId, params } });
       return;
     }
     case "synth": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await deps.convexClient.mutation(deps.convexApi.effects.setSynthParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId: targetId, userId: deps.userId, params }));
+      await publishHistoryOperation(deps, { kind: "effects.setSynthParams", payload: { trackId: targetId, params } });
       return;
     }
     case "arp": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await deps.convexClient.mutation(deps.convexApi.effects.setArpeggiatorParams, buildTrackEffectMutationInput({ projectId: deps.projectId, trackId: targetId, userId: deps.userId, params }));
+      await publishHistoryOperation(deps, { kind: "effects.setArpeggiatorParams", payload: { trackId: targetId, params } });
       return;
     }
   }
@@ -212,7 +225,7 @@ export const removeHistoryClipIdsOrThrow = async (deps: Deps, clipIds: string[],
   }
   const result = await deps.convexClient.mutation(
     deps.convexApi.clips.removeMany,
-    buildClipRemoveManyMutationInput({ clipIds, userId: deps.userId }),
+    buildClipRemoveManyMutationInput({ clipIds }),
   );
   const removedIds = new Set(
     Array.isArray(result?.removedClipIds)
@@ -231,7 +244,7 @@ export const removeHistoryTrackOrThrow = async (deps: Deps, trackId: Track["id"]
   }
   const result = await deps.convexClient.mutation(
     deps.convexApi.tracks.remove,
-    buildTrackDeleteMutationInput({ trackId, userId: deps.userId }),
+    buildTrackDeleteMutationInput({ trackId }),
   );
   if (result?.status !== "deleted") {
     throw new Error(message);
@@ -256,7 +269,7 @@ export const persistHistoryClipTimingOrThrow = async (
     if (!applied) throw new Error(message);
     return;
   }
-  const applied = await persistClipTiming(deps.convexClient, deps.convexApi, deps.userId, {
+  const applied = await persistClipTiming(deps.convexClient, deps.convexApi, {
     clipId,
     startSec: timing.startSec,
     duration: timing.duration,
@@ -285,7 +298,6 @@ export const persistHistoryClipMovesOrThrow = async (
         startSec: move.startSec,
         toTrackId: move.trackId,
       })),
-      userId: deps.userId,
     }),
   );
   if (result?.status !== "applied") throw new Error(message);
@@ -304,7 +316,6 @@ export const persistHistoryTrackRouting = async (deps: Deps, trackId: Track["id"
     deps.convexApi.tracks.setRouting,
     buildTrackRoutingMutationInput({
       trackId,
-      userId: deps.userId,
       routing: { sends: routing.sends ?? [], outputTargetId: routing.outputTargetId },
     }),
   );
@@ -318,7 +329,6 @@ export const persistHistoryTrackMixState = async (
   if (typeof mix.muted !== "boolean" && typeof mix.soloed !== "boolean") return;
   await deps.convexClient.mutation(deps.convexApi.tracks.setMix, buildTrackMixMutationInput({
     trackId,
-    userId: deps.userId,
     muted: mix.muted,
     soloed: mix.soloed,
   }));
@@ -337,7 +347,7 @@ export const persistHistoryTrackVolume = async (
   } else {
     await deps.convexClient.mutation(
       deps.convexApi.tracks.setVolume,
-      buildTrackVolumeMutationInput({ trackId, volume, userId: deps.userId }),
+      buildTrackVolumeMutationInput({ trackId, volume }),
     );
   }
 };

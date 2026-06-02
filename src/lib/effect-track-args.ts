@@ -4,24 +4,22 @@ import type { TrackId } from '~/types/timeline'
 
 export function buildTrackEffectQueryArgs(input: {
   projectId: string
-  userId: string
   trackId: TrackId
 }) {
   return {
     projectId: input.projectId,
-    userId: input.userId,
     trackId: toCloudTrackId(input.trackId),
   }
 }
 
 export function buildTrackEffectMutationInput<TParams>(input: {
   projectId: string
-  userId: string
   trackId: TrackId
   params: TParams
 }) {
   return {
-    ...input,
+    projectId: input.projectId,
     trackId: toCloudTrackId(input.trackId),
+    params: input.params,
   }
 }

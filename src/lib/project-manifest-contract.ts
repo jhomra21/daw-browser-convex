@@ -181,6 +181,15 @@ export const normalizeProjectManifest = (raw: unknown): ProjectManifest => {
 
 export const parseProjectManifest = (json: string) => normalizeProjectManifest(JSON.parse(json));
 
+export const readProjectManifestCloudKeys = (
+  projectId: string,
+  manifest: ProjectManifest | undefined,
+) => (
+  manifest?.assets
+    .flatMap((asset) => asset.cloudKey ? [asset.cloudKey] : [])
+    .filter((key) => key.startsWith(`projects/${projectId}/assets/`)) ?? []
+);
+
 export const withProjectManifestAssetKeys = (
   manifest: ProjectManifest,
   uploadedAssetKeys: Readonly<Record<string, string>>,

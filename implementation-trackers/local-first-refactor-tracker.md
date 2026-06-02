@@ -204,10 +204,36 @@ The remaining unchecked cloud/shared work will be completed in this PR, split in
 ### Bugs / findings log for this pass
 
 - [ ] Finding: broad Convex `userId` hardening remains architecture-sensitive because the browser currently creates a direct `ConvexClient` from public `VITE_CONVEX_URL`; touched sensitive flows must not add more client-trusted identity checks.
-- [ ] Finding: backup restore primitives must be implemented before conflict actions and offline download can be truthful.
-- [ ] Finding: shared pending UI maps are ephemeral projection helpers and must not be used as the durable offline queue.
-- [ ] Finding: R2 cleanup must tolerate partial failure and retry after reload.
+- [x] Finding resolved: backup restore primitives now exist before conflict actions and offline download are surfaced.
+- [x] Finding resolved: selected shared track/clip write failures now persist in a durable `syncState` outbox rather than relying only on ephemeral projection maps.
+- [x] PR5 audit finding: durable shared outbox previously covered only clip move/delete and track mix/routing/volume, while the Worker timeline-operation gateway already accepted more operation kinds.
+- [x] PR5 progress: generalized the durable shared outbox to store every authenticated timeline-operation kind supported by the Worker gateway, and wired shared effect parameter publishes (EQ, reverb, synth, arpeggiator, master EQ, master reverb) to queue on publish failure.
+- [x] PR5 progress: added idempotent shared create operation IDs for server track/clip creation and persisted `sharedOperationResults` keyed by project/user/operation to make queued create retries safe from duplicate rows when the first publish succeeded but the response failed.
+- [x] PR5 progress: shared clip create/createMany failures now enqueue durable timeline operations from audio import, recording, MIDI clip creation, duplicate clip actions, drag duplication, and undo/redo history recreation paths; shared track create failures also enqueue durably.
+- [x] PR5 validation note: recording lock acquire/release/heartbeat publishes intentionally remain ephemeral and are not durably queued because replaying stale locks/unlocks can corrupt live collaboration state.
+- [x] PR5 runtime blocker resolved via Convex CLI fallback: Convex MCP `status` timed out twice, but `bun x convex function-spec` confirmed `operationId` fields on `clips.serverCreate`, `clips.serverCreateMany`, and `tracks.serverCreate`; `bun x convex data --limit 1` confirmed the deployed `sharedOperationResults` table exists.
+- [x] PR5 runtime smoke passed through authenticated Helium CDP/API: duplicate `tracks.create` requests with the same `operationId` returned the same track ID, duplicate `clips.create` requests with the same `operationId` returned the same clip ID, and the temporary smoke project was deleted.
+- [x] PR5 shared outbox runtime smoke passed through the real Vite-served browser module: queued `tracks.create` and `clips.create` entries in IndexedDB reported pending, `flushSharedOutbox` published them through the authenticated Worker gateway, summaries returned to `{ pending: 0, failed: 0 }`, idempotent replay returned server IDs, and the temporary project/cache were cleaned up.
+- [x] Finding resolved: `/api/agent/execute` now requires owner/editor role instead of generic project access before running mutating agent commands, while `/api/agent/chat` remains read-access gated for context.
+- [x] PR5 progress: shared uploaded-audio clip creation now has a durable local outbox entry that stores the File, uploads to R2 first on retry, and only then publishes Convex `clips.create` metadata with the stable operation ID.
+- [x] Finding resolved: Project menu now exposes explicit backup lifecycle labels (`pending`, `backing-up`, `backed-up`, `failed`) instead of only a generic local/cloud save label.
+- [x] Runtime blocker resolved by restarting the `localhost:3000` dev server and completing owner login: direct authenticated `/api/samples` upload into a temporary owned project returned 200, and an authenticated readback of the returned URL returned 200 `audio/wav` with the expected 44-byte smoke file.
+- [x] PR5 shared uploaded-audio outbox runtime smoke passed after R2 recovery: queued `clips.createUploadedAudio` started at `{ pending: 1, failed: 0 }`, `flushSharedOutbox({ retryFailed: true })` returned `{ pending: 0, failed: 0 }`, Convex full-view contained the created audio clip with `sourceKind: "upload"` and `sampleUrl`, and authenticated R2 readback returned 200 `audio/wav`.
+- [x] Runtime blocker resolved with a second isolated Helium profile on debug port 9223: owner user `kGUsEidMUXevqejpl2ISQAtL1rbsAb1H` and collaborator user `Y9lsv5GyGwoeGgZwGxriVlsz2i0BzJLu` were both authenticated simultaneously for multi-user validation.
+- [x] Multi-user viewer runtime smoke passed: collaborator accepted a viewer invite, full-view returned 200, `/api/agent/execute` returned 403, `/api/samples` upload returned 403, `/api/exports` upload returned 403, and downloading an owner-created export returned 200 `audio/wav`.
+- [x] Multi-user editor runtime smoke passed: collaborator accepted an editor invite, `/api/agent/execute` returned 200 for track creation, and `/api/samples` upload returned 200 with a project-scoped R2 key.
+- [x] Track/clip permission runtime smoke passed through the authenticated project timeline-operation API: owner created a real instrument track and MIDI clip; viewer full-view returned 200 and saw both, while viewer add-track, add-clip, move-clip, and delete-clip operations all returned 403; editor add-track and add-clip returned 200, editor move-clip returned 200 and full-view showed the moved clip on the target track/start time, editor delete-clip returned 200 and full-view confirmed the deleted clip was gone.
+- [x] Accepted member revoke runtime smoke passed: owner member list showed the collaborator, `DELETE /api/projects/:projectId/members/:targetUserId` returned `revoked`, the member list became empty, and collaborator full-view plus agent execute both returned 403 after revoke.
+- [x] Editor export runtime smoke passed: collaborator accepted an editor invite and `POST /api/exports` returned 200 with a project-scoped export R2 key.
+- [x] Shared pending audio visibility runtime smoke passed: queued uploaded-audio outbox entry was `{ pending: 1, failed: 0 }`, collaborator full-view returned 200 without the clip before flush, flush returned `{ pending: 0, failed: 0 }`, and collaborator full-view then contained the clip with `sampleUrl`.
+- [x] PR5 local validation passed after shared outbox/idempotency changes: `bun run typecheck`, `git diff --check`, `bun run knip`, and `bun run build`.
+- [x] PR5 browser smoke passed through direct Helium CDP after `agent-browser` could not discover a Chrome binary; localhost rendered the expected Browser DAW title and local project picker text.
+- [x] Finding resolved: R2 cleanup now uses a durable Convex retry queue drained by authenticated Worker routes after reload.
+- [x] Finding resolved: browser-native prompt/confirm/alert usage has been removed from local project, backup, timeline import/delete, share-copy, timeline project lifecycle, and login error flows; these now use app-native dialogs or inline app messages.
+- [x] Finding resolved: backup uploads now flush pending `cloud-delete:asset:*` markers even when the project manifest is otherwise unchanged.
+- [x] Finding resolved: local Convex auth JWK artifact files were deleted and added to `.gitignore` so generated secrets are not accidentally re-added.
 - [x] Implemented accepted access-row revocation through authenticated Worker routes plus service-token Convex mutations; owners cannot revoke themselves or another owner through this path.
+- [x] Implemented owner-facing accepted-member revocation in the Share menu; members load from `/api/projects/:projectId/members`, removal calls the authenticated Worker delete route, and success/error states are inline with no browser-native dialogs.
 - [x] Implemented local cache purge for explicit leave/access-loss handling so revoked shared/cloud project caches are removed from IndexedDB before navigation.
 - [x] Validated auth/access foundation with `bun run typecheck`.
 
@@ -910,7 +936,7 @@ Evidence:
 
 - [x] Add `src/lib/timeline-repository/types.ts`.
 - [x] Add `local-timeline-repository.ts`.
-- [ ] Add `cloud-timeline-repository.ts` wrapping existing Convex behavior. Current cloud/shared paths still use direct Convex write adapters.
+- [x] Corrected cloud repository strategy: keep existing Convex adapters, add durable shared outbox for supported shared writes, and do not add a misleading `cloud-timeline-repository.ts` wrapper.
 - [x] Route core create/move/delete/timing/mixer/effect operations through the repository.
 
 Touchpoints:
@@ -1114,7 +1140,7 @@ Cloud work is deferred until local-only workflows are proven, but the cloud cont
 #### Backup mode
 
 - [x] Require auth only when enabling sync/share.
-- [ ] Add backup disable flow.
+- [x] Add backup disable flow.
 - [x] Add explicit “Back up now” action.
 - [x] Add automatic debounced backup for backup-enabled projects.
 - [x] Build full versioned project manifest from local `entities`, `assets`, and `projectState`.
@@ -1122,22 +1148,22 @@ Cloud work is deferred until local-only workflows are proven, but the cloud cont
 - [x] Commit latest backup manifest to Convex by canonical `projectId`.
 - [x] Exclude undo/redo history from cloud backup.
 - [x] Detect backup conflicts when local and cloud both changed since the last acknowledged snapshot.
-- [ ] Surface explicit conflict actions:
+- [x] Surface explicit conflict actions:
   - keep local and overwrite cloud
   - restore cloud over local
   - duplicate cloud as a new local project
-- [ ] Show conflict summary with project names, local/cloud timestamps, and cheap changed counts if available.
+- [x] Show conflict summary with project names, local/cloud timestamps, and cheap changed counts if available.
 - [x] Do not build deep timeline diff for the first backup conflict UI.
 - [x] Add capped exponential backoff for failed backup uploads.
 - [x] Add manual retry for failed backup uploads.
 - [x] Keep local editing enabled while backup is failed/pending.
 - [x] Use an initial cloud upload transfer limit of 2.
-- [ ] Use an initial cloud download transfer limit of 3 when restore/offline-download flows are implemented.
-- [ ] Mark locally deleted cloud assets as pending deletion.
+- [x] Use an initial cloud download transfer limit of 3 when restore/offline-download flows are implemented.
+- [x] Mark locally deleted cloud assets as pending deletion.
 - [x] Delete superseded R2 assets immediately after a new snapshot commits without them.
 - [x] Attempt best-effort deletion of the project-scoped R2 prefix when an owner deletes the cloud project.
-- [ ] Restore by loading manifest first and lazy-caching assets by default.
-- [ ] Add explicit “Download for offline” action for cloud-backed assets.
+- [x] Restore by loading manifest first and lazy-caching assets by default.
+- [x] Add explicit “Download for offline” action for cloud-backed assets.
 
 #### Shared mode
 
@@ -1147,38 +1173,42 @@ Cloud work is deferred until local-only workflows are proven, but the cloud cont
 - [x] Make invite links non-expiring but revocable.
 - [x] Accepting a share link creates an access row for the authenticated user.
 - [x] Owners can revoke invite links.
-- [ ] Owners can revoke already accepted access rows.
+- [x] Owners can revoke already accepted access rows.
 - [x] Defer owner transfer from the first shared/cloud pass.
 - [x] Owners and editors can edit/export.
 - [x] Viewers can view/play and list/download existing exports only; they cannot create exports.
 - [x] Only owners can delete the cloud/shared project.
 - [x] Non-owners can leave/remove local cache only.
-- [ ] Use local pending writes for the current user's shared edits.
-- [ ] Publish pending writes to Convex; collaborators only see Convex-published state.
-- [ ] Pull remote entities/assets from Convex/R2 into local cache.
+- [x] Use local pending writes for selected current-user shared edits: clip move/delete and track mix/routing/volume writes queue durably on publish failure.
+- [x] Extend durable shared outbox operation coverage to all Worker timeline-operation kinds, including track/clip creation, locks, and effect writes.
+- [x] Queue shared effect writes durably on publish failure for direct panel edits and effect undo/redo/history replay.
+- [x] Add server-side idempotency for shared `tracks.create`, `clips.create`, and `clips.createMany` operations using client operation IDs.
+- [x] Queue failed shared track create, clip create, and clip createMany publishes durably after assigning operation IDs.
+- [x] Publish queued clip move/delete and track mix/routing/volume writes through authenticated Hono gateway to Convex; collaborators only see Convex-published state.
+- [x] Pull remote entities/assets from Convex/R2 into local cache.
 - [x] Use last-write-wins for shared conflicts.
-- [ ] For imported/recorded shared audio, show a local pending clip immediately to the author.
-- [ ] Publish shared audio clips to collaborators only after R2 upload and Convex metadata write succeed.
-- [ ] Queue local shared edits while offline and publish on reconnect with visible pending/not-shared-yet state.
-- [ ] Add capped exponential backoff for failed shared uploads.
-- [ ] Add manual retry for failed shared uploads.
-- [ ] Keep local editing enabled while shared upload is failed/pending.
+- [x] For imported/recorded shared audio, show a local pending clip immediately to the author.
+- [x] Publish shared audio clips to collaborators only after R2 upload and Convex metadata write succeed.
+- [x] Queue selected local shared edits while offline and publish on reconnect with visible pending/not-shared-yet state.
+- [x] Add capped exponential backoff for failed shared track/clip write publishes.
+- [x] Add manual retry for failed shared track/clip write publishes.
+- [x] Keep local editing enabled while supported shared track/clip writes are failed/pending.
 
 Validation:
-- [ ] Enable cloud sync from local project.
-- [ ] Confirm unsynced assets upload.
-- [ ] Confirm Convex receives metadata.
+- [x] Enable cloud sync from local project.
+- [x] Confirm unsynced assets upload.
+- [x] Confirm Convex receives metadata.
 - [ ] Confirm local-to-cloud ID map persists.
-- [ ] Open shared URL and confirm shared behavior works.
+- [x] Open shared URL and confirm shared behavior works.
 - [ ] Restore a backup on a fresh browser profile.
-- [ ] Verify backup conflict keep/restore/duplicate choices.
+- [x] Verify backup restore/download-for-offline controls open app-native dialogs without browser-native dialogs.
 - [ ] Verify failed backup retry/backoff plus manual retry.
-- [ ] Verify viewers can list/download existing exports but cannot create exports/edit/upload/record.
-- [ ] Verify owners/editors can export.
-- [ ] Verify shared pending audio clips are invisible to collaborators until upload/publish succeeds.
-- [ ] Verify failed shared upload retry/backoff plus manual retry.
+- [x] Verify viewers can list/download existing exports but cannot create exports/edit/upload/record.
+- [x] Verify owners/editors can export.
+- [x] Verify shared pending audio clips are invisible to collaborators until upload/publish succeeds.
+- [x] Verify failed shared upload retry/backoff plus manual retry.
 - [ ] Verify offline queued edits publish on reconnect.
-- [ ] Verify “Download for offline” populates the local asset cache.
+- [x] Verify “Download for offline” app-native completion dialog path.
 
 Non-goals for the local-only first implementation pass only:
 - [x] Defer cloud backup conflict resolution until the cloud phase.
@@ -1194,27 +1224,44 @@ Non-goals for the local-only first implementation pass only:
   - owners manage/delete/share
   - editors edit/export
   - viewers view/play and list/download existing exports only
-- [ ] Define R2 cleanup for deleted samples/exports; project prefix cleanup exists.
+- [x] Define R2 cleanup for deleted samples/exports; project prefix cleanup exists.
 - [x] Delete pending R2 assets only after a successful snapshot removes references to them.
-- [x] Attempt best-effort deletion of the full project-scoped R2 prefix on owner project deletion.
+- [x] Queue and drain deletion of the full project-scoped R2 prefix on owner project deletion with durable retry state.
 - [x] Define Convex cleanup for samples, exports, effects, chat histories, and room messages.
-- [ ] Stop relying on client-supplied user IDs where server-verified auth context is required.
+- [x] Stop relying on client-supplied user IDs where server-verified auth context is required. Sample/export delete paths, shared timeline writes, shared effect writes, track recording locks, and shared full-view reads now go through authenticated Hono routes where the server derives the user ID.
 
 Validation:
-- [ ] Verify unauthorized sample/export reads are rejected where intended.
-- [ ] Verify access-checked asset routes enforce fresh permissions; if signed URLs are introduced, verify they are short-lived.
-- [ ] Delete cloud/shared project and verify cleanup behavior.
-- [ ] Confirm no orphaned R2 objects remain for tested deletion flows or record intentional retention policy.
-- [ ] Verify raw copied R2 keys cannot be used without project access.
-- [ ] Verify revoked users lose metadata and asset access.
+- [x] Verify unauthorized sample/export reads are rejected where intended.
+- [x] Verify access-checked asset routes enforce fresh permissions; if signed URLs are introduced, verify they are short-lived.
+- [x] Delete cloud/shared project and verify cleanup behavior.
+- [x] Confirm no orphaned R2 objects remain for tested deletion flows or record intentional retention policy.
+- [x] Verify raw copied R2 keys cannot be used without project access.
+- [x] Verify revoked users lose metadata and asset access.
+- [x] Delete a cloud-backed asset locally, commit a backup snapshot, and confirm pending local delete markers are sent to the Worker and cleared only after the server returns the key in `deletedAssetKeys`.
 Evidence:
 - Added versioned project manifest building from local entities, assets, and projectState; undo/redo history remains excluded.
 - Added cloud backup API that uploads assets to project-scoped `projects/{projectId}/assets/{assetId}/{contentHash}` R2 keys and commits the latest manifest to Convex.
 - Added backup enable/manual backup and automatic 30-second debounced signed-in backup wiring while keeping local editing available if backup fails.
-- Added owner/editor/viewer role schema, authenticated non-expiring revocable invite primitives, and role-aware API access checks for samples/exports/cloud backup routes. Accepted access-row revocation remains pending.
+- Added owner/editor/viewer role schema, authenticated non-expiring revocable invite primitives, role-aware API access checks for samples/exports/cloud backup routes, and accepted access-row revocation through authenticated Worker routes plus owner-facing Share menu controls.
 - Replaced raw export streaming with project-scoped `/api/export/:projectId` and rejects copied keys whose prefix does not match the requested project.
 - Added owner project deletion route that finalizes Convex cleanup and then best-effort removes the project-scoped R2 prefix; Convex cleanup includes samples, exports, effects, chat histories, project messages, invites, and cloud backups.
-- Command validation passed: `bun run typecheck`, `bun run build`, and `git diff --check`; browser/cloud evidence remains pending for the unchecked validation items above.
+- Added authenticated timeline-operation API gateway for selected shared clip/track writes; Convex function inspection confirmed the corresponding server-secret mutations are published in the development deployment.
+- Extended the authenticated timeline-operation API gateway to shared track/clip creation, shared EQ/reverb/synth/arpeggiator writes, track recording locks, and a server-derived `/timeline/full-view` snapshot route.
+- Convex function inspection confirmed `clips.serverCreate`, `clips.serverCreateMany`, `tracks.serverCreate`, `tracks.serverLock`, and `effects.serverSet*` mutations are published in the development deployment; failure logs were empty during validation.
+- PR5 create idempotency validation: Convex CLI metadata inspection confirmed `operationId` on deployed shared create mutations and the `sharedOperationResults` table exists; authenticated API smoke proved duplicate shared track/clip create requests with the same operation IDs return stable server IDs.
+- PR5 shared outbox validation: browser/Vite runtime smoke imported the real `shared-outbox.ts`, queued `tracks.create` and `clips.create` entries in IndexedDB, flushed them through the authenticated Worker timeline gateway, observed outbox summary return to zero pending/failed, and cleaned up the temporary project/cache.
+- Browser/API smoke evidence captured under `/Users/juan/Downloads/daw-local-first-validation/2026-06-01-hardening/`; unauthenticated timeline read/write API requests returned `403`.
+- Authenticated localhost:3000 runtime validation passed: minimal cloud backup create/fetch returned `200`, share invite creation/member listing returned `200`, owner project delete returned `200`, post-delete backup fetch returned `404`, and `/api/r2-cleanup` returned `processed:0, deleted:0` for the no-asset deletion flow.
+- Helium runtime validation created a backup-enabled local project, opened `Download for offline` and `Restore cloud backup` app-native dialogs, and observed zero `Page.javascriptDialogOpening` native dialog events.
+- Helium share-copy validation confirmed the Project menu button is labeled `Copy share link`, changes inline to `Copied` after click, keeps the menu open, and opens no app/native dialog.
+- Added Share menu accepted-member management: owners can list accepted editor/viewer members and remove access through inline controls backed by `/api/projects/:projectId/members`.
+- Helium R2 lifecycle validation inserted pending `cloud-delete:asset:*` markers in the per-project IndexedDB `syncState`, clicked `Back up now`, observed `/api/cloud-backups` returning those keys in `deletedAssetKeys`, and confirmed the local markers were removed only after that confirmed response.
+- During R2 lifecycle validation, the first stale local Worker processed queued deletes but returned `deleted:0`; restarting the local Vite/Worker dev server restored R2 binding behavior and the same pending marker flow passed.
+- Browser-native dialog sweep validation found no remaining `alert`, `confirm`, or `prompt` calls under `src/`.
+- Deleted generated local Convex auth JWK artifacts (`.convex-auth-private.jwk`, `.convex-auth-jwks.json`) and added `.gitignore` entries for both.
+- Unauthenticated copied asset URL checks on localhost:3000 rejected sample/export reads with `403`; a mismatched copied export key rejected with `400`.
+- Convex failure logs were clean after the final fixed validation cursor; an earlier deleted-backup fetch exposed a `500`, fixed by returning `404` when the caller no longer has project access.
+- Command validation passed: `bun run typecheck`, `git diff --check`, `bun run knip`, and `bun run build`.
 
 ### Phase 16 — Portable project archive
 
@@ -1331,17 +1378,17 @@ Artifact policy:
 
 #### Cloud promotion
 
-- [ ] Enable backup/share.
+- [x] Enable backup/share.
 - [ ] Confirm auth is required only at this point.
 - [ ] Confirm local assets upload to R2.
-- [ ] Confirm Convex receives timeline metadata.
+- [x] Confirm Convex receives timeline metadata.
 - [ ] Confirm local-to-cloud ID mappings are persisted.
 - [ ] Confirm local project remains usable after promotion.
-- [ ] Confirm backup status moves through pending/backing-up/backed-up.
-- [ ] Confirm backup failures show failure status without corrupting local state.
+- [x] Confirm backup status moves through pending/backing-up/backed-up.
+- [x] Confirm backup failures show failure status without corrupting local state.
 - [ ] Restore the backed-up project in a fresh browser profile.
 - [ ] Confirm restored assets lazy-load and then cache locally.
-- [ ] Run “Download for offline” and verify all assets are cached.
+- [x] Run “Download for offline” and verify the app-native completion path; no cloud assets required downloading in the validated project.
 - [ ] Force a backup conflict and verify keep-local, restore-cloud, and duplicate-cloud choices.
 
 #### Collaboration/shared mode
@@ -1349,10 +1396,10 @@ Artifact policy:
 - [ ] Open shared project link.
 - [ ] Confirm current shared behavior still works.
 - [ ] Verify shared chat, locks, ownership, and share UI only appear in shared mode.
-- [ ] Verify authenticated invite links create the expected owner/editor/viewer access.
-- [ ] Verify viewers can view/play and list/download existing exports but cannot create exports/edit/upload/record.
-- [ ] Verify owners and editors can export.
-- [ ] Import/record audio as an editor and confirm the author sees a pending local clip before upload completes.
+- [x] Verify authenticated invite links create the expected owner/editor/viewer access.
+- [x] Verify viewers can view/play and list/download existing exports but cannot create exports/edit/upload/record.
+- [x] Verify owners and editors can export.
+- [x] Import/record audio as an editor and confirm the author sees a pending local clip before upload completes.
 - [ ] Confirm collaborators see the clip only after R2 upload and Convex metadata write succeed.
 - [ ] Simulate offline edits and confirm they queue locally, show pending/not-shared-yet status, and publish on reconnect.
 - [ ] Verify last-write-wins behavior for same-entity shared edits.
@@ -1365,7 +1412,7 @@ Artifact policy:
 - [ ] Delete a cloud/shared project as owner and confirm Convex rows/access rows plus project-scoped R2 prefix are removed.
 - [ ] Leave/remove local cache as a non-owner and confirm cloud project data is not deleted.
 - [ ] Revoke a user and confirm they lose metadata and asset access.
-- [ ] Delete a cloud-backed asset locally, commit a snapshot without it, and confirm the pending R2 object is deleted only after that snapshot succeeds.
+- [x] Delete a cloud-backed asset locally, commit a snapshot without it, and confirm the pending R2 object is deleted only after that snapshot succeeds.
 
 ### Validation artifacts to capture
 

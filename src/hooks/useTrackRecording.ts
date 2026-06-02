@@ -6,6 +6,8 @@ import type { AudioEngine } from '~/lib/audio-engine'
 import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError } from '~/lib/local-assets'
 import { isLocalId } from '~/lib/local-ids'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
+import { isSharedOutboxQueuedError } from '~/lib/shared-outbox'
+import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import {
   acquireTrackRecordingLock,
@@ -44,6 +46,7 @@ type UseTrackRecordingOptions = {
   clearTrackLock: (trackId: Track['id']) => void
   removeLocalTrack: (trackId: Track['id']) => void
   insertLocalClip: (trackId: Track['id'], clip: Track['clips'][number]) => void
+  removeLocalClips: (clipIds: Iterable<string>) => void
   selection: TimelineSelectionController
   playheadSec: Accessor<number>
   uploadToR2: UploadToR2
@@ -55,8 +58,8 @@ type UseTrackRecordingOptions = {
   requestTransportPlay: () => Promise<void>
   createTrackForRecording: () => Promise<Track | null>
   setIsRecording: Setter<boolean>
-  notify?: (message: string) => void
-  historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
+  notify: (message: string) => void
+  historyPush: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
 }
 
@@ -87,6 +90,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     clearTrackLock,
     removeLocalTrack,
     insertLocalClip,
+    removeLocalClips,
     selection,
     playheadSec,
     uploadToR2,
@@ -117,7 +121,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   const emit = (message: string) => {
     console.warn('[useTrackRecording]', message)
     try {
-      notify?.(message)
+      notify(message)
     } catch (err) {
       console.warn('[useTrackRecording] notify handler failed', err)
     }
@@ -159,7 +163,12 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       clearTrackLock(trackId)
       return
     }
+    if (!rid) {
+      clearTrackLock(trackId)
+      return
+    }
     await releaseTrackRecordingLock({
+      projectId: rid,
       trackId,
       locker,
       convexClient,
@@ -225,7 +234,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   }
 
   const pushTrackClipCreateHistory = (projectId: string, track: Track, clipId: string, clip: ClipCreateSnapshot) => {
-    if (typeof historyPush !== 'function') return
     historyPush(buildTrackClipCreateHistoryEntry({ projectId, track, tracks: tracks(), clipId, clip }))
   }
 
@@ -349,8 +357,15 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         source: sourceMetadata,
         sourceAssetKey,
         sourceKind: 'recording',
-        createServerClip: async (payload) => await convexClient.mutation(convexApi.clips.create, payload),
+        createServerClip: async (payload) => {
+          const result = await publishSharedTimelineOperation(rid, {
+            kind: 'clips.create',
+            payload,
+          })
+          return typeof result === 'string' ? result : null
+        },
         insertLocalClip,
+        removeLocalClips,
         selectClip: (trackId, clipId) => {
           selection.selectPrimaryClip({ trackId, clipId })
         },
@@ -377,7 +392,9 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         clip: createdClip.clip,
       })
     } catch (err) {
-      if (err instanceof Error && err.message === 'sample-upload-failed') {
+      if (isSharedOutboxQueuedError(err)) {
+        emit('Recorded audio was queued and will retry when sync resumes.')
+      } else if (err instanceof Error && err.message === 'sample-upload-failed') {
         emit('Failed to upload recorded audio.')
       } else {
         if (!(err instanceof Error && err.message === 'clip-create-failed')) {
@@ -386,7 +403,9 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         emit('Failed to create recorded clip on server.')
       }
       await cleanupRecording()
-      await handleAutoCreatedTrackFailure(ctx.createdTrack, ctx)
+      if (!isSharedOutboxQueuedError(err)) {
+        await handleAutoCreatedTrackFailure(ctx.createdTrack, ctx)
+      }
       return
     }
   }
@@ -423,6 +442,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
     if (!isLocalProject) {
       const lockRes = await acquireTrackRecordingLock({
+        projectId: rid,
         trackId,
         locker: uid ?? '',
         convexClient,
@@ -553,6 +573,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     lockHeartbeatTimer = clearRecordingLockHeartbeat(lockHeartbeatTimer)
     if (!isLocalProject) {
       lockHeartbeatTimer = startRecordingLockHeartbeat({
+        projectId: rid,
         trackId,
         locker: uid ?? '',
         convexClient,

@@ -23,6 +23,7 @@ type SelectionActions = {
 
 type Input = {
   projectId: Accessor<string>;
+  remoteTimelineAvailable: Accessor<boolean>;
   userId: Accessor<string | undefined>;
   renderTracks: Accessor<Track[]>;
   audioEngine: AudioEngine;
@@ -63,13 +64,16 @@ export const useMissingMediaRecovery = (input: Input) => {
 
   createEffect(() => {
     const rid = input.projectId();
-    if (!isLocalId("project", rid)) {
+    const isLocalProject = isLocalId("project", rid);
+    if (!isLocalProject && input.remoteTimelineAvailable()) {
       setLocalTimelineSnapshot(null);
       return;
     }
     let cancelled = false;
     void createLocalTimelineRepository(rid).loadSnapshot().then((snapshot) => {
-      if (!cancelled && input.projectId() === rid) setLocalTimelineSnapshot(snapshot);
+      if (!cancelled && input.projectId() === rid) {
+        setLocalTimelineSnapshot(snapshot.tracks.length > 0 || isLocalProject ? snapshot : null);
+      }
     }).catch(() => {
       if (!cancelled && input.projectId() === rid) setLocalTimelineSnapshot(null);
     });

@@ -1,8 +1,6 @@
-import { convexApi, convexClient } from '~/lib/convex'
 import { isLocalId } from '~/lib/local-ids'
+import { publishSharedTimelineOperationOrQueue } from '~/lib/shared-outbox'
 import type { UpdateTrackInput } from '~/lib/timeline-repository/types'
-import { buildTrackMixMutationInput, buildTrackVolumeMutationInput } from '~/lib/track-mutation-args'
-import { buildTrackRoutingMutationInput } from '~/lib/track-routing-state'
 import type { TrackRouting } from '~/types/timeline'
 
 type TrackWriteContext = {
@@ -12,6 +10,19 @@ type TrackWriteContext = {
 }
 
 type TrackMixWriteResult = { status?: 'access-denied' | 'applied' | 'noop' | 'not-found' }
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+
+const readTrackMixWriteResult = (value: unknown): TrackMixWriteResult => {
+  if (!isRecord(value)) return { status: 'applied' }
+  const status = value.status
+  if (status === 'access-denied' || status === 'applied' || status === 'noop' || status === 'not-found') {
+    return { status }
+  }
+  return { status: 'applied' }
+}
 
 export const createTimelineTrackWriteAdapter = (context: TrackWriteContext) => {
   const updateLocalOrCloudTrack = async (
@@ -32,24 +43,30 @@ export const createTimelineTrackWriteAdapter = (context: TrackWriteContext) => {
         outputTargetId: routing.outputTargetId ?? null,
         sends: routing.sends ?? [],
       },
-      async (userId) => await convexClient.mutation(
-        convexApi.tracks.setRouting,
-        buildTrackRoutingMutationInput({
-          trackId,
-          userId,
-          routing: {
-            sends: routing.sends ?? [],
-            outputTargetId: routing.outputTargetId,
+      async (userId) => await publishSharedTimelineOperationOrQueue({
+        projectId: context.projectId,
+        userId,
+        operation: {
+          kind: 'tracks.setRouting',
+          payload: {
+            trackId,
+            routing: {
+              sends: routing.sends ?? [],
+              outputTargetId: routing.outputTargetId,
+            },
           },
-        }),
-      ),
+        },
+        queuedResult: { status: 'applied' },
+      }),
     ),
     setVolume: async (trackId: string, volume: number) => await updateLocalOrCloudTrack(
       { trackId, volume },
-      async (userId) => await convexClient.mutation(
-        convexApi.tracks.setVolume,
-        buildTrackVolumeMutationInput({ trackId, volume, userId }),
-      ),
+      async (userId) => await publishSharedTimelineOperationOrQueue({
+        projectId: context.projectId,
+        userId,
+        operation: { kind: 'tracks.setVolume', payload: { trackId, volume } },
+        queuedResult: { status: 'applied' },
+      }),
     ),
     setMix: async (trackId: string, patch: { muted?: boolean; soloed?: boolean }): Promise<TrackMixWriteResult | undefined> => {
       if (patch.muted === undefined && patch.soloed === undefined) return undefined
@@ -58,12 +75,21 @@ export const createTimelineTrackWriteAdapter = (context: TrackWriteContext) => {
         return { status: 'applied' }
       }
       if (!context.userId) return undefined
-      return await convexClient.mutation(convexApi.tracks.setMix, buildTrackMixMutationInput({
-        trackId,
-        userId: context.userId,
-        muted: patch.muted,
-        soloed: patch.soloed,
-      }))
+      const userId = context.userId
+      const result = await publishSharedTimelineOperationOrQueue({
+        projectId: context.projectId,
+        userId,
+        operation: {
+          kind: 'tracks.setMix',
+          payload: {
+            trackId,
+            muted: patch.muted,
+            soloed: patch.soloed,
+          },
+        },
+        queuedResult: { status: 'applied' },
+      })
+      return readTrackMixWriteResult(result)
     },
   }
 }

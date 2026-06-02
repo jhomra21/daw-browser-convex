@@ -127,6 +127,30 @@ export default defineSchema({
     .index("by_room_updatedAt", ["projectId", "updatedAt"])
     .index("by_room_owner", ["projectId", "ownerUserId"]),
 
+  r2DeleteQueue: defineTable({
+    projectId: v.string(),
+    r2Key: v.string(),
+    kind: v.union(v.literal("backup-asset"), v.literal("sample"), v.literal("export"), v.literal("project-prefix")),
+    attempts: v.number(),
+    nextAttemptAt: v.number(),
+    lastError: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_key", ["r2Key"])
+    .index("by_due", ["nextAttemptAt"])
+    .index("by_room", ["projectId"])
+    .index("by_room_due", ["projectId", "nextAttemptAt"]),
+
+  sharedOperationResults: defineTable({
+    projectId: v.string(),
+    userId: v.string(),
+    operationId: v.string(),
+    result: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_room_user_operation", ["projectId", "userId", "operationId"]),
+
   effects: defineTable({
     projectId: v.string(),
     targetType: v.string(),

@@ -81,7 +81,12 @@ type ShareMenuController = {
   copied: boolean;
   shareUrl: string;
   shareError: string;
+  members: Array<{ userId: string; role: "editor" | "viewer" }>;
+  membersLoading: boolean;
+  membersError: string;
+  revokingMemberId: string;
   onCopy: () => Promise<void>;
+  onRevokeMember: (userId: string) => Promise<void>;
 };
 
 const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) => {
@@ -99,7 +104,7 @@ const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) => {
         </MenubarItem>
         <MenubarItem
           class={nativeMenuItemClass}
-          onSelect={toolbar().onOpenExport}
+          onSelect={toolbar().projectMenu.onOpenExport}
         >
           Export Mixdown...
         </MenubarItem>
@@ -454,6 +459,51 @@ const ShareMenu: Component<{ share: ShareMenuController }> = (props) => {
               {share().shareError}
             </div>
           </Show>
+          <div class="mt-4 border-t border-neutral-800 pt-3">
+            <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+              Members
+            </div>
+            <Show
+              when={!share().membersLoading}
+              fallback={<div class="text-xs text-neutral-500">Loading members...</div>}
+            >
+              <Show
+                when={share().members.length > 0}
+                fallback={<div class="text-xs text-neutral-500">No accepted members yet.</div>}
+              >
+                <div class="space-y-2">
+                  <For each={share().members}>
+                    {(member) => (
+                      <div class="flex items-center justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2">
+                        <div class="min-w-0">
+                          <div class="truncate text-xs text-neutral-200">{member.userId}</div>
+                          <div class="text-[11px] capitalize text-neutral-500">{member.role}</div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          class="shrink-0 text-red-300 hover:bg-red-950/40 hover:text-red-200"
+                          disabled={share().revokingMemberId === member.userId}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void share().onRevokeMember(member.userId);
+                          }}
+                        >
+                          {share().revokingMemberId === member.userId ? "Removing..." : "Remove"}
+                        </Button>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </Show>
+            <Show when={share().membersError}>
+              <div class="mt-2 text-xs text-red-300">
+                {share().membersError}
+              </div>
+            </Show>
+          </div>
         </div>
       </MenubarContent>
     </MenubarMenu>
@@ -630,11 +680,11 @@ const SaveStatus: Component<{ projectId: string; userId?: string }> = (props) =>
 };
 
 const TransportControls: Component<TransportControlsProps> = (props) => {
-  const currentProjectId = () => props.currentProjectId;
-  const currentUserId = () => props.currentUserId;
+  const currentProjectId = () => props.projectMenu.currentProjectId;
+  const currentUserId = () => props.projectMenu.currentUserId;
   const projectsMenu = useProjectsMenuController({
-    onDeleteProject: props.onDeleteProject,
-    onRenameProject: props.onRenameProject,
+    onDeleteProject: props.projectMenu.onDeleteProject,
+    onRenameProject: props.projectMenu.onRenameProject,
   });
   const samplesMenu = useSamplesMenuController({
     currentProjectId,
@@ -647,7 +697,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
     currentUserId,
   });
   const shareMenu = useShareMenuController({
-    onShare: props.onShare,
+    onShare: props.projectMenu.onShare,
     projectId: currentProjectId,
   });
   const tempo = useTransportTempoController({
@@ -661,23 +711,13 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
           <FileMenu toolbar={props} />
           <EditMenu toolbar={props} />
           <ProjectsMenu
-            currentProjectId={props.currentProjectId}
-            currentUserId={props.currentUserId}
-            projects={props.projects}
-            onOpenProject={props.onOpenProject}
-            onCreateProject={props.onCreateProject}
-            onOpenExport={props.onOpenExport}
-            onShare={props.onShare}
-            onChooseProjectFolder={props.onChooseProjectFolder}
-            onBackUpNow={props.onBackUpNow}
-            onExportArchive={props.onExportArchive}
-            onImportArchive={props.onImportArchive}
+            projectMenu={props.projectMenu}
             menu={projectsMenu}
           />
           <ProjectMediaMenu samples={samplesMenu} exportsMenu={exportsMenu} />
           <SettingsMenu toolbar={props} />
           <TracksMenu tracksMenu={props.tracksMenu} />
-          <Show when={!isLocalId("project", props.currentProjectId)}>
+          <Show when={!isLocalId("project", props.projectMenu.currentProjectId)}>
             <ShareMenu
               share={{
                 onOpenChange: shareMenu.onOpenChange,
@@ -686,7 +726,12 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                 copied: shareMenu.copied(),
                 shareUrl: shareMenu.shareUrl(),
                 shareError: shareMenu.shareError(),
+                members: shareMenu.members(),
+                membersLoading: shareMenu.membersLoading(),
+                membersError: shareMenu.membersError(),
+                revokingMemberId: shareMenu.revokingMemberId(),
                 onCopy: shareMenu.onCopy,
+                onRevokeMember: shareMenu.onRevokeMember,
               }}
             />
           </Show>

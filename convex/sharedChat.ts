@@ -1,11 +1,12 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireProjectAccess } from "./projectAccess";
+import { requireAuthenticatedUserId, requireProjectAccess } from "./projectAccess";
 
 // List the latest N messages for a room, ordered by createdAt ascending.
 export const listLatest = query({
-  args: { projectId: v.string(), userId: v.string(), limit: v.optional(v.number()) },
-  handler: async (ctx, { projectId, userId, limit }) => {
+  args: { projectId: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, { projectId, limit }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectAccess(ctx, projectId, userId);
 
     const rows = await ctx.db
@@ -24,12 +25,12 @@ export const listLatest = query({
 export const send = mutation({
   args: {
     projectId: v.string(),
-    senderUserId: v.string(),
     content: v.string(),
     senderName: v.optional(v.string()),
   },
   returns: v.null(),
-  handler: async (ctx, { projectId, senderUserId, content, senderName }) => {
+  handler: async (ctx, { projectId, content, senderName }) => {
+    const senderUserId = await requireAuthenticatedUserId(ctx);
     const text = content.trim();
     if (!text) return null;
 

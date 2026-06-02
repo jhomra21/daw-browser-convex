@@ -37,7 +37,7 @@ export const createClipDragPersistence = (input: Input) => {
     if (!scope.userId) return;
     const result = await input.convexClient.mutation(
       input.convexApi.tracks.remove,
-      buildTrackDeleteMutationInput({ trackId, userId: scope.userId }),
+      buildTrackDeleteMutationInput({ trackId }),
     );
     if (result?.status === "deleted") input.removeLocalTrack(trackId);
   };
@@ -76,7 +76,7 @@ export const createClipDragPersistence = (input: Input) => {
     if (track && !inserted) {
       await input.convexClient.mutation(
         input.convexApi.tracks.remove,
-        buildTrackDeleteMutationInput({ trackId: track.id, userId }),
+        buildTrackDeleteMutationInput({ trackId: track.id }),
       ).catch(() => null);
       return null;
     }
@@ -92,7 +92,6 @@ export const createClipDragPersistence = (input: Input) => {
       input.convexApi.clips.move,
       buildClipMoveMutationInput({
         clipId: move.clipId,
-        userId: input.userId(),
         startSec: move.startSec,
         toTrackId: move.trackId,
       }),

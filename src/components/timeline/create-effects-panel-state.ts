@@ -13,10 +13,11 @@ import {
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
 import { buildClipCreatePayload, type ClipCreateSnapshot } from "~/lib/clip-create";
-import { convexApi, convexClient } from "~/lib/convex";
-import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
+import { convexApi } from "~/lib/convex";
 import type { LocalEffectRow } from "~/lib/local-effects";
 import { isLocalId } from "~/lib/local-ids";
+import { publishSharedTimelineOperationOrQueue } from "~/lib/shared-outbox";
+import { buildSharedClipCreateOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { toLocalTimelineClip } from "~/lib/timeline-repository/track-row-adapter";
 import {
@@ -43,7 +44,7 @@ type ArpRow = RoomEffectRow | LocalArpRow | undefined;
 type SynthRow = RoomEffectRow | LocalSynthRow | undefined;
 
 type EffectsPanelContext = {
-  audioEngine: Accessor<AudioEngine | undefined>;
+  audioEngine: Accessor<AudioEngine>;
   projectId: Accessor<string | undefined>;
   userId: Accessor<string | undefined>;
   playheadSec: Accessor<number | undefined>;
@@ -135,15 +136,11 @@ export function createEffectsPanelState(
     }
     if (!userId) return;
 
-    return convexClient.mutation(
-      convexApi.effects.setArpeggiatorParams,
-      buildTrackEffectMutationInput({
-        projectId,
-        trackId,
-        userId,
-        params,
-      }),
-    );
+    const operation: SharedTimelineOperation = {
+      kind: "effects.setArpeggiatorParams",
+      payload: { trackId, params },
+    };
+    return publishSharedTimelineOperationOrQueue({ projectId, userId, operation });
   }
 
   function persistSynth(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setSynthParams>["params"], persistContext: { projectId?: string; userId?: string }) {
@@ -155,15 +152,11 @@ export function createEffectsPanelState(
     }
     if (!userId) return;
 
-    return convexClient.mutation(
-      convexApi.effects.setSynthParams,
-      buildTrackEffectMutationInput({
-        projectId,
-        trackId,
-        userId,
-        params,
-      }),
-    );
+    const operation: SharedTimelineOperation = {
+      kind: "effects.setSynthParams",
+      payload: { trackId, params },
+    };
+    return publishSharedTimelineOperationOrQueue({ projectId, userId, operation });
   }
 
   function commitArpChange(
@@ -224,10 +217,10 @@ export function createEffectsPanelState(
     createInitialParams: () => createDefaultArpeggiatorParams(),
     serializeParams: (params) => JSON.stringify(params),
     applyToEngine: (targetId, params) => {
-      context.audioEngine()?.setTrackArpeggiator(targetId, params);
+      context.audioEngine().setTrackArpeggiator(targetId, params);
     },
     clearFromEngine: (targetId) => {
-      context.audioEngine()?.clearTrackArpeggiator?.(targetId);
+      context.audioEngine().clearTrackArpeggiator(targetId);
     },
     createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
     persistParams: (targetId, params, persistContext) => {
@@ -260,10 +253,10 @@ export function createEffectsPanelState(
     createInitialParams: readSynthDefaults,
     serializeParams: serializeSynthParams,
     applyToEngine: (targetId, params) => {
-      context.audioEngine()?.setTrackSynth(targetId, params);
+      context.audioEngine().setTrackSynth(targetId, params);
     },
     clearFromEngine: (targetId) => {
-      context.audioEngine()?.clearTrackSynth?.(targetId);
+      context.audioEngine().clearTrackSynth(targetId);
     },
     createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
     persistParams: (targetId, params, persistContext) => {
@@ -358,13 +351,15 @@ export function createEffectsPanelState(
       }
 
       if (!grantScope) return;
-      const { userId } = grantScope;
-      const clipId = await convexClient.mutation(convexApi.clips.create, buildClipCreatePayload({
-        projectId,
-        userId,
-        trackId: track.id,
-        clip,
-      }));
+      const operation = buildSharedClipCreateOperation(
+        buildClipCreatePayload({
+          projectId,
+          trackId: track.id,
+          clip,
+        }),
+      );
+      const result = await publishSharedTimelineOperationOrQueue({ projectId, userId: grantScope.userId, operation });
+      const clipId = typeof result === "string" ? result : null;
       if (!clipId) return;
 
       context.grantClipWrite?.(clipId, grantScope);

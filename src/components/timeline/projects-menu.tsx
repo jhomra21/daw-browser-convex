@@ -1,48 +1,60 @@
 import { type Component, For, Show } from "solid-js";
+import { createEffect, createSignal } from "solid-js";
 import { Button } from "~/components/ui/button";
 import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator } from "~/components/ui/menubar";
 import { copyText } from "~/lib/clipboard";
 import { isLocalId } from "~/lib/local-ids";
 import { cn } from "~/lib/utils";
 import type { ProjectsMenuController } from "~/hooks/useProjectsMenuController";
-import type { TimelineProject } from "~/hooks/useTimelineData";
 import { NativeMenuTrigger } from "./toolbar-context";
+import type { TimelineProjectMenuModel } from "./transport-types";
 
 type ProjectsMenuProps = {
-  currentProjectId: string;
-  currentUserId?: string;
-  projects: TimelineProject[];
-  onOpenProject: (projectId: string) => void;
-  onCreateProject: () => void | Promise<void>;
-  onOpenExport: () => void;
-  onShare?: () => string | void | Promise<string | void>;
-  onChooseProjectFolder?: () => void | Promise<void>;
-  onBackUpNow?: () => void | Promise<void>;
-  onExportArchive?: () => void | Promise<void>;
-  onImportArchive?: () => void | Promise<void>;
+  projectMenu: TimelineProjectMenuModel;
   menu: ProjectsMenuController;
 };
 
 export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
+  const [shareCopied, setShareCopied] = createSignal(false);
   const menu = () => props.menu;
+  const projectMenu = () => props.projectMenu;
   const currentProject = () =>
-    props.projects.find((project) => project.projectId === props.currentProjectId);
+    projectMenu().projects.find((project) => project.projectId === projectMenu().currentProjectId);
   const isCurrentProjectLocal = () =>
-    isLocalId("project", props.currentProjectId);
+    isLocalId("project", projectMenu().currentProjectId);
+  const currentProjectMode = () => currentProject()?.mode;
+  const isBackupProject = () => isCurrentProjectLocal() && currentProjectMode() === "backup";
   const canShareCurrentProject = () =>
-    !isCurrentProjectLocal() || currentProject()?.mode === "backup" || currentProject()?.mode === "shared";
+    !isCurrentProjectLocal() || currentProjectMode() === "backup" || currentProjectMode() === "shared";
+  const hasSharedOutboxWork = () => Boolean((projectMenu().sharedOutboxStatus?.pending ?? 0) + (projectMenu().sharedOutboxStatus?.failed ?? 0));
+  const backupSaveLabel = () => {
+    if (!isBackupProject()) return null;
+    if (projectMenu().cloudBackupStatus === "backing-up") return "Backing up to cloud";
+    if (projectMenu().cloudBackupStatus === "backed-up") return "Backed up to cloud";
+    if (projectMenu().cloudBackupStatus === "failed") return "Cloud backup failed";
+    return "Cloud backup enabled";
+  };
   const currentSaveLabel = () =>
-    isCurrentProjectLocal()
+    hasSharedOutboxWork()
+      ? `${projectMenu().sharedOutboxStatus?.pending ?? 0} shared change${(projectMenu().sharedOutboxStatus?.pending ?? 0) === 1 ? "" : "s"} pending, ${projectMenu().sharedOutboxStatus?.failed ?? 0} failed`
+      : backupSaveLabel()
+        ?? (isCurrentProjectLocal()
       ? "Saved locally on this device"
-      : props.currentUserId
+      : projectMenu().currentUserId
         ? "Saved to cloud project"
-        : "Sign in to sync this project";
+        : "Sign in to sync this project");
   const onShare = async () => {
-    const shareUrl = await props.onShare?.();
+    setShareCopied(false);
+    const shareUrl = await projectMenu().onShare?.();
     if (!shareUrl) return;
     await copyText(shareUrl);
-    window.alert("Share link copied to clipboard.");
+    setShareCopied(true);
   };
+
+  createEffect(() => {
+    projectMenu().currentProjectId;
+    setShareCopied(false);
+  });
 
   return (
     <MenubarMenu value="project">
@@ -67,7 +79,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                   "shrink-0 rounded-full border px-2 py-1 text-[11px] font-medium",
                   isCurrentProjectLocal()
                     ? "border-emerald-900/70 bg-emerald-950/40 text-emerald-300"
-                    : props.currentUserId
+                    : projectMenu().currentUserId
                       ? "border-sky-900/70 bg-sky-950/40 text-sky-300"
                       : "border-amber-900/70 bg-amber-950/40 text-amber-300",
                 )}
@@ -80,7 +92,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                 variant="secondary"
                 size="sm"
                 class="justify-center"
-                onClick={props.onOpenExport}
+                onClick={projectMenu().onOpenExport}
               >
                 Export audio
               </Button>
@@ -88,12 +100,12 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                 variant="secondary"
                 size="sm"
                 class="justify-center"
-                disabled={!isCurrentProjectLocal() || !props.currentUserId || !props.onBackUpNow}
-                onClick={() => void props.onBackUpNow?.()}
+                disabled={!isCurrentProjectLocal() || !projectMenu().currentUserId || !projectMenu().onBackUpNow}
+                onClick={() => void projectMenu().onBackUpNow?.()}
                 title={
                   !isCurrentProjectLocal()
                     ? "Back up local projects from this button"
-                    : props.currentUserId
+                    : projectMenu().currentUserId
                     ? "Back up this project to the cloud"
                     : "Sign in to enable backup and share"
                 }
@@ -103,19 +115,28 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
               <Button
                 variant="secondary"
                 size="sm"
-                class="justify-center"
-                disabled={!canShareCurrentProject() || !props.currentUserId || !props.onShare}
-                onClick={() => void onShare()}
+                class={cn(
+                  "justify-center",
+                  shareCopied() && "border-emerald-700 bg-emerald-950/60 text-emerald-200 hover:bg-emerald-950/70",
+                )}
+                disabled={!canShareCurrentProject() || !projectMenu().currentUserId || !projectMenu().onShare}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void onShare();
+                }}
                 title={!canShareCurrentProject() ? "Back up this project before sharing" : undefined}
               >
-                Share
+                <Show when={shareCopied()} fallback="Copy share link">
+                  Copied
+                </Show>
               </Button>
               <Button
                 variant="secondary"
                 size="sm"
                 class="justify-center"
-                disabled={!isCurrentProjectLocal() || !props.onExportArchive}
-                onClick={() => void props.onExportArchive?.()}
+                disabled={!isCurrentProjectLocal() || !projectMenu().onExportArchive}
+                onClick={() => void projectMenu().onExportArchive?.()}
                 title={!isCurrentProjectLocal() ? "Export local projects as .dawproject archives" : undefined}
               >
                 Export .dawproject
@@ -124,19 +145,68 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                 variant="secondary"
                 size="sm"
                 class="justify-center"
-                onClick={() => void props.onImportArchive?.()}
+                onClick={() => void projectMenu().onImportArchive?.()}
               >
                 Import .dawproject
               </Button>
-              <Show when={isCurrentProjectLocal() && props.onChooseProjectFolder}>
+              <Show when={isCurrentProjectLocal() && projectMenu().onChooseProjectFolder}>
                 <Button
                   variant="secondary"
                   size="sm"
                   class="col-span-2 justify-center"
-                  onClick={() => void props.onChooseProjectFolder?.()}
+                  onClick={() => void projectMenu().onChooseProjectFolder?.()}
                   title="Choose or regrant a local project storage folder"
                 >
                   Choose storage folder
+                </Button>
+              </Show>
+              <Show when={isBackupProject()}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  class="justify-center"
+                  disabled={!projectMenu().onRestoreCloudBackup}
+                  onClick={() => void projectMenu().onRestoreCloudBackup?.()}
+                >
+                  Restore cloud backup
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  class="justify-center"
+                  disabled={!projectMenu().onDuplicateCloudBackup}
+                  onClick={() => void projectMenu().onDuplicateCloudBackup?.()}
+                >
+                  Duplicate cloud backup
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  class="justify-center"
+                  disabled={!projectMenu().onDownloadForOffline}
+                  onClick={() => void projectMenu().onDownloadForOffline?.()}
+                >
+                  Download for offline
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  class="justify-center"
+                  disabled={!projectMenu().onDisableBackup}
+                  onClick={() => void projectMenu().onDisableBackup?.()}
+                >
+                  Disable backup
+                </Button>
+              </Show>
+              <Show when={!isCurrentProjectLocal() && hasSharedOutboxWork()}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  class="col-span-2 justify-center"
+                  disabled={!projectMenu().onRetrySharedChanges}
+                  onClick={() => void projectMenu().onRetrySharedChanges?.()}
+                >
+                  Retry shared changes
                 </Button>
               </Show>
             </div>
@@ -149,7 +219,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
               variant="default"
               class="text-neutral-100"
               size="sm"
-              onClick={() => void props.onCreateProject()}
+              onClick={() => void projectMenu().onCreateProject()}
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -171,7 +241,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
           </div>
           <MenubarSeparator />
           <div class="max-h-72 overflow-y-auto">
-            <For each={props.projects}>
+            <For each={projectMenu().projects}>
               {(project) => {
                 const projectId = project.projectId;
                 const isEditing = () => menu().editingProjectId() === projectId;
@@ -187,7 +257,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                         data-project-rid={projectId}
                         class={cn(
                           "group relative flex w-full items-center justify-between gap-2 pr-12",
-                          props.currentProjectId === projectId &&
+                          projectMenu().currentProjectId === projectId &&
                             "text-green-400",
                         )}
                         onPointerDown={(event) => event.stopPropagation()}
@@ -215,7 +285,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                               <span
                                 class={cn(
                                   "max-w-56 truncate font-mono text-xs",
-                                  props.currentProjectId === projectId
+                                  projectMenu().currentProjectId === projectId
                                     ? "text-green-400"
                                     : "text-neutral-200",
                                 )}
@@ -322,10 +392,6 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                               onPointerUp={menu().stopMenuPress}
                               onClick={async (event) => {
                                 menu().stopMenuPress(event);
-                                if (isLocalId("project", projectId)) {
-                                  const confirmation = window.prompt(`Type "${project.name}" to delete this local project.`);
-                                  if (confirmation !== project.name) return;
-                                }
                                 await menu().confirmProjectDelete(projectId);
                               }}
                             >
@@ -456,11 +522,11 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                       data-project-rid={projectId}
                       class={cn(
                         "group relative flex w-full cursor-pointer items-center justify-between gap-2 pr-12 hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100",
-                        props.currentProjectId === projectId && "text-green-400",
+                        projectMenu().currentProjectId === projectId && "text-green-400",
                       )}
                       onSelect={() => {
                         menu().setConfirmingProjectId(null);
-                        props.onOpenProject(projectId);
+                        projectMenu().onOpenProject(projectId);
                       }}
                     >
                       <div class="flex min-w-0 flex-1 items-center gap-2">
@@ -482,7 +548,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                         <span
                           class={cn(
                             "max-w-56 truncate font-mono text-xs",
-                            props.currentProjectId === projectId
+                            projectMenu().currentProjectId === projectId
                               ? "text-green-400 group-hover:text-green-300"
                               : "text-neutral-200 group-hover:text-neutral-100",
                           )}
@@ -563,7 +629,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                 );
               }}
             </For>
-            <Show when={props.projects.length === 0}>
+            <Show when={projectMenu().projects.length === 0}>
               <div class="px-2 py-2 text-xs text-neutral-500">
                 No projects yet
               </div>

@@ -1,6 +1,10 @@
 import type { Accessor } from 'solid-js'
 
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
+import {
+  buildSharedTrackCreateOperation,
+  publishSharedTimelineOperation,
+} from '~/lib/shared-timeline-operations-api'
 import { buildTrackCreateMutationInput } from '~/lib/track-mutation-args'
 import { buildTrackCreateHistoryEntry } from '~/lib/undo/builders'
 import type { HistoryEntry } from '~/lib/undo/types'
@@ -96,12 +100,17 @@ function ensureLocalTrack(options: EnsureLocalTrackOptions): Track {
 export async function createOptimisticTrack(options: CreateOptimisticTrackOptions): Promise<Track | null> {
   const payload = buildTrackCreateMutationInput({
     projectId: options.projectId,
-    userId: options.userId,
     index: options.index,
     kind: options.kind,
     channelRole: options.channelRole,
   })
-  const trackId = await options.convexClient.mutation(options.convexApi.tracks.create, payload)
+  const operation = buildSharedTrackCreateOperation({
+    index: payload.index,
+    kind: payload.kind,
+    channelRole: payload.channelRole,
+  })
+  const result = await publishSharedTimelineOperation(options.projectId, operation)
+  const trackId = typeof result === 'string' ? result : null
   if (!trackId) return null
 
   options.grantWrite?.(trackId, options.grantScope)

@@ -114,7 +114,7 @@ export function useProjectedTimelineModel(
       const projectId = options.projectId()
       const userId = options.userId()
       if (isLocalId('project', projectId)) return null
-      return projectId && userId ? { projectId, ownerUserId: userId } : null
+      return projectId && userId ? { projectId } : null
     },
     () => ['owned-tracks', options.projectId(), options.userId()],
   )
@@ -125,7 +125,7 @@ export function useProjectedTimelineModel(
       const projectId = options.projectId()
       const userId = options.userId()
       if (isLocalId('project', projectId)) return null
-      return projectId && userId ? { projectId, ownerUserId: userId } : null
+      return projectId && userId ? { projectId } : null
     },
     () => ['owned-clips', options.projectId(), options.userId()],
   )

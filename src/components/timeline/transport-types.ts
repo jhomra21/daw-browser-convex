@@ -1,6 +1,30 @@
 import type { InsertSampleInput } from "~/hooks/useTimelineClipImport";
 import type { TimelineProject } from "~/hooks/useTimelineData";
+import type { CloudBackupStatus } from "~/hooks/useLocalProjectActions";
 import type { Track } from "~/types/timeline";
+
+export type TimelineProjectMenuModel = {
+  currentProjectId: string;
+  currentUserId?: string;
+  projects: TimelineProject[];
+  onOpenProject: (projectId: string) => void;
+  onCreateProject: () => void | Promise<void>;
+  onDeleteProject: (projectId: string) => void | Promise<void>;
+  onRenameProject: (projectId: string, name: string) => void | Promise<void>;
+  onOpenExport: () => void;
+  onShare?: () => string | void | Promise<string | void>;
+  onChooseProjectFolder?: () => void | Promise<void>;
+  onBackUpNow?: () => void | Promise<void>;
+  onDisableBackup?: () => void | Promise<void>;
+  onRestoreCloudBackup?: () => void | Promise<void>;
+  onDuplicateCloudBackup?: () => void | Promise<void>;
+  onDownloadForOffline?: () => void | Promise<void>;
+  cloudBackupStatus?: CloudBackupStatus;
+  sharedOutboxStatus?: { pending: number; failed: number };
+  onRetrySharedChanges?: () => void | Promise<void>;
+  onExportArchive?: () => void | Promise<void>;
+  onImportArchive?: () => void | Promise<void>;
+}
 
 export type TransportControlsProps = {
   isPlaying: boolean;
@@ -39,16 +63,5 @@ export type TransportControlsProps = {
     startSec: number,
   ) => void;
   onInsertSample: (input: InsertSampleInput) => void | Promise<void>;
-  currentProjectId: string;
-  currentUserId?: string;
-  projects: TimelineProject[];
-  onOpenProject: (projectId: string) => void;
-  onCreateProject: () => void | Promise<void>;
-  onDeleteProject: (projectId: string) => void | Promise<void>;
-  onRenameProject: (projectId: string, name: string) => void | Promise<void>;
-  onOpenExport: () => void;
-  onChooseProjectFolder?: () => void | Promise<void>;
-  onBackUpNow?: () => void | Promise<void>;
-  onExportArchive?: () => void | Promise<void>;
-  onImportArchive?: () => void | Promise<void>;
+  projectMenu: TimelineProjectMenuModel;
 };

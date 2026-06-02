@@ -238,13 +238,23 @@ export const deleteLocalAsset = async (
 ): Promise<void> => {
   const row = await getLocalAsset(projectId, assetId)
   const db = await openLocalProjectDb(projectId)
+  const cloudMapping = await db.get('syncState', `cloud-id:asset:${assetId}`)
+  const timestamp = now()
+  const tx = db.transaction(['assets', 'syncState'], 'readwrite')
+  await Promise.all([
+    tx.objectStore('assets').delete(assetId),
+    cloudMapping?.value
+      ? tx.objectStore('syncState').put({
+        key: `cloud-delete:asset:${assetId}`,
+        value: cloudMapping.value,
+        updatedAt: timestamp,
+      })
+      : Promise.resolve(),
+    tx.done,
+  ])
   if (row) {
     const root = await getWritableProjectRoot(projectId)
-    if (!root) {
-      throw new LocalAssetWriteError('permission-denied', 'Project storage permission is required.')
-    }
-    await removeFileIfPresent(root, row.storagePath)
+    if (root) await removeFileIfPresent(root, row.storagePath).catch(() => undefined)
   }
-  await db.delete('assets', assetId)
   notifyLocalProjectChanged(projectId)
 }

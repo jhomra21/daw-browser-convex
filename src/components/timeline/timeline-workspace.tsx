@@ -115,7 +115,10 @@ export default function TimelineWorkspace(props: Props) {
 
             <div
               class="absolute left-0 right-0 bg-neutral-950"
-              style={{ top: `${RULER_HEIGHT}px`, height: `calc(100% - ${RULER_HEIGHT}px)` }}
+              style={{
+                top: `${RULER_HEIGHT}px`,
+                bottom: props.bottomFXOpen ? `${FX_PANEL_HEIGHT_PX}px` : "0",
+              }}
             >
               <For each={props.tracks}>
                 {(track, i) => (

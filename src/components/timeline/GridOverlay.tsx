@@ -3,7 +3,6 @@ import { PPS } from '~/lib/timeline-utils'
 
 type GridOverlayProps = {
   durationSec: number
-  heightPx: number
   bpm: number
   denom: number
   enabled: boolean
@@ -48,7 +47,7 @@ const GridOverlay: Component<GridOverlayProps> = (props) => {
         class="absolute left-0 top-0 pointer-events-none z-10"
         style={{
           width: `${Math.max(0, props.durationSec * PPS)}px`,
-          height: `${props.heightPx}px`,
+          height: '100%',
           ...backgroundStyle(),
         }}
       />

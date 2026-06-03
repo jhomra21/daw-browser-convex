@@ -94,7 +94,6 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
       <Suspense fallback={null}>
         <GridOverlay
           durationSec={props.timeline.durationSec}
-          heightPx={(props.timeline.tracks.length + (props.timeline.dropAtNewTrack ? 1 : 0)) * LANE_HEIGHT}
           bpm={props.timeline.bpm}
           denom={props.timeline.gridDenominator}
           enabled={props.timeline.gridEnabled}

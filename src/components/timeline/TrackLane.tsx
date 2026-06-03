@@ -25,7 +25,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
       class={cn('absolute left-0 right-0 bg-neutral-950', props.isDropTarget && 'bg-green-500/10')}
       style={{ top: `${props.index * LANE_HEIGHT}px`, height: `${LANE_HEIGHT}px` }}
     >
-      <div class="absolute left-0 right-0 bottom-0 h-px bg-neutral-800" />
+      <div class="absolute left-0 right-0 bottom-0 h-[1.5px] bg-neutral-800" />
       <For each={props.track.clips}>
         {(clip) => (
           <ClipComponent

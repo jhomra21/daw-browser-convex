@@ -1,6 +1,6 @@
 import { buildLocalClip, createManyClips } from '~/lib/clip-create'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
-import { buildSharedClipCreateManyOperation, publishTransientSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
+import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '~/lib/audio-engine'
 import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
@@ -194,7 +194,7 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
         projectId: deps.projectId,
         items: pendingItems,
         createMany: async (clipPayloads, operationId) => {
-          const result = await publishTransientSharedTimelineOperation(
+          const result = await publishSharedTimelineOperation(
             deps.projectId,
             buildSharedClipCreateManyOperation({ items: clipPayloads }, operationId),
           )

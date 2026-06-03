@@ -8,7 +8,7 @@ import { buildTrackEffectQueryArgs } from '~/lib/effect-track-args'
 import { getLocalEffect } from '~/lib/local-effects'
 import { isLocalId } from '~/lib/local-ids'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
-import { buildSharedClipCreateManyOperation, publishTransientSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
+import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { isClipCompatibleWithTrack } from '~/lib/track-routing'
 import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
@@ -271,7 +271,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       projectId: rid,
       items: pending,
       createMany: async (items, operationId) => {
-        const result = await publishTransientSharedTimelineOperation(rid, buildSharedClipCreateManyOperation({ items }, operationId))
+        const result = await publishSharedTimelineOperation(rid, buildSharedClipCreateManyOperation({ items }, operationId))
         return Array.isArray(result) ? result.map((item) => typeof item === 'string' ? item : null) : []
       },
       insertLocalClip,

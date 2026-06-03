@@ -42,6 +42,7 @@ import { useTimelineSelectionState } from "~/hooks/useTimelineSelectionState";
 import { useTimelinePersistenceController } from "~/hooks/useTimelinePersistenceController";
 import { useTimelineAudioLifecycle } from "~/hooks/useTimelineAudioLifecycle";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
+import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
 import TimelineChrome from "./timeline/timeline-chrome";
 import AppMessageDialog, { type AppMessageDialogState } from "./timeline/app-message-dialog";
 import CloudBackupDialog from "./timeline/cloud-backup-dialog";
@@ -415,27 +416,33 @@ const Timeline: Component = () => {
     selection,
   });
 
+  const removeCreatedCloudTrack = (track: Track | undefined) => removeAutoCreatedCloudTrack({
+    convexClient,
+    convexApi,
+    userId: userId(),
+    track,
+    removeLocalTrack: projection.removeLocalTrack,
+  });
+
   const {
     createTimelineTrack,
     handleShare,
     jumpToClip,
   } = useTimelineActions({
+    tracks: renderTracks,
     room: {
       projectId,
       setProjectId,
       userId,
     },
     creation: {
-      renderTracks,
       selection,
       insertLocalTrack: projection.insertLocalTrack,
+      removeCloudTrack: removeCreatedCloudTrack,
       grantTrackWrite,
       pushHistory,
-      convexClient,
-      convexApi,
     },
     navigation: {
-      renderTracks,
       trackLookup,
       selection,
       setPlayhead,
@@ -453,7 +460,6 @@ const Timeline: Component = () => {
   } = useTimelineClipImport({
     audioEngine,
     tracks: () => renderTracks(),
-    insertLocalTrack: projection.insertLocalTrack,
     removeLocalTrack: projection.removeLocalTrack,
     insertLocalClip: projection.insertLocalClip,
     removeLocalClips: projection.removeLocalClips,
@@ -461,17 +467,15 @@ const Timeline: Component = () => {
     playheadSec,
     projectId,
     userId,
-    convexClient,
-    convexApi,
     clipBuffers,
-    uploadToR2: clipBuffers.uploadToR2,
     getScrollElement: () => scrollRef,
     getFileInput: () => fileInputRef,
     bpm,
     gridEnabled,
     gridDenominator,
+    createTimelineTrack,
+    removeCreatedCloudTrack,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
-    grantWrite: grantTrackWrite,
     grantClipWrite,
     onLocalSaveFailed: localProject.setLocalSaveFailure,
     notify,

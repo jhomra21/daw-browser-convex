@@ -1,18 +1,11 @@
-import type { Accessor } from 'solid-js'
-
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import {
   buildSharedTrackCreateOperation,
-  publishTransientSharedTimelineOperation,
+  publishSharedTimelineOperation,
 } from '~/lib/shared-timeline-operations-api'
-import { buildTrackCreateMutationInput } from '~/lib/track-mutation-args'
 import { buildTrackCreateHistoryEntry } from '~/lib/undo/builders'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Clip, Track } from '~/types/timeline'
-
-type ConvexClientType = typeof import('~/lib/convex').convexClient
-
-type ConvexApiType = typeof import('~/lib/convex').convexApi
 
 type CreateLocalTrackOptions = {
   id: Track['id']
@@ -35,23 +28,17 @@ type EnsureLocalTrackOptions = Omit<CreateLocalTrackOptions, 'index'> & {
   insertLocalTrack: (track: Track, index: number) => void
 }
 
-type CreateOptimisticTrackOptions = Omit<CreateLocalTrackOptions, 'id' | 'index'> & {
+type CreateOptimisticTrackOptions = {
   index?: number
-  convexClient: ConvexClientType
-  convexApi: ConvexApiType
   projectId: string
-  userId: string
   insertLocalTrack: (track: Track, index: number) => void
   grantWrite?: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
   grantScope?: OptimisticGrantScope
+  kind?: Track['kind']
+  channelRole?: Track['channelRole']
 }
 
 type HistoryPush = (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
-
-type CreateOptimisticTrackWithHistoryOptions = CreateOptimisticTrackOptions & {
-  tracks: Accessor<Track[]>
-  historyPush?: HistoryPush
-}
 
 export function createLocalTrack(options: CreateLocalTrackOptions): Track {
   const track: Track = {
@@ -74,10 +61,7 @@ export function createLocalTrack(options: CreateLocalTrackOptions): Track {
 }
 
 function ensureLocalTrack(options: EnsureLocalTrackOptions): Track {
-  let index = options.index
-  if (index === undefined) {
-    index = 0
-  }
+  const index = options.index ?? 0
   const next = createLocalTrack({
     id: options.id,
     historyRef: options.historyRef,
@@ -98,18 +82,12 @@ function ensureLocalTrack(options: EnsureLocalTrackOptions): Track {
 }
 
 export async function createOptimisticTrack(options: CreateOptimisticTrackOptions): Promise<Track | null> {
-  const payload = buildTrackCreateMutationInput({
-    projectId: options.projectId,
+  const operation = buildSharedTrackCreateOperation({
     index: options.index,
     kind: options.kind,
     channelRole: options.channelRole,
   })
-  const operation = buildSharedTrackCreateOperation({
-    index: payload.index,
-    kind: payload.kind,
-    channelRole: payload.channelRole,
-  })
-  const result = await publishTransientSharedTimelineOperation(options.projectId, operation)
+  const result = await publishSharedTimelineOperation(options.projectId, operation)
   const trackId = typeof result === 'string' ? result : null
   if (!trackId) return null
 
@@ -117,18 +95,9 @@ export async function createOptimisticTrack(options: CreateOptimisticTrackOption
 
   return ensureLocalTrack({
     id: trackId,
-    historyRef: options.historyRef,
     index: options.index,
-    name: options.name,
     kind: options.kind,
     channelRole: options.channelRole,
-    volume: options.volume,
-    muted: options.muted,
-    soloed: options.soloed,
-    lockedBy: options.lockedBy,
-    clips: options.clips,
-    sends: options.sends,
-    outputTargetId: options.outputTargetId,
     insertLocalTrack: options.insertLocalTrack,
   })
 }
@@ -149,12 +118,4 @@ export function pushTrackCreateHistory(
     kind: track.kind,
     channelRole: track.channelRole,
   }))
-}
-
-export async function createOptimisticTrackWithHistory(
-  options: CreateOptimisticTrackWithHistoryOptions,
-): Promise<Track | null> {
-  const track = await createOptimisticTrack(options)
-  pushTrackCreateHistory(options.historyPush, options.projectId, options.tracks(), track)
-  return track
 }

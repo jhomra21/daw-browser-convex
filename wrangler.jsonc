@@ -33,6 +33,7 @@
   "vars": {
     "BETTER_AUTH_URL": "https://daw-browser-convex.jhonra121.workers.dev",
     "CONVEX_AUTH_ISSUER": "https://daw-browser-convex.jhonra121.workers.dev/api/convex-auth",
+    "DEFAULT_SAMPLES_BASE_URL": "https://daw-browser-convex.jhonra121.workers.dev",
     "VITE_CONVEX_URL": "https://polite-peccary-245.convex.cloud",
   },
 }

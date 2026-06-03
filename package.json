@@ -11,6 +11,9 @@
     "serve": "vite preview",
     "knip": "knip"
   },
+  "overrides": {
+    "undici": "7.24.8"
+  },
   "license": "MIT",
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.25.6",

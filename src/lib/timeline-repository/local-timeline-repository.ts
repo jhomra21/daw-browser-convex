@@ -400,18 +400,20 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     const tracks = allRows.flatMap((row) => row.kind === TRACK_KIND && isTrackRow(row.value) ? [row.value] : [])
     requireTrackIds(moves.map((move) => move.trackId), tracks)
     const rows = await Promise.all(moves.map((move) => readEntityRow(projectId, CLIP_KIND, move.clipId)))
-    const updates = rows.map((row, index) => {
+    const updates = rows.flatMap((row, index) => {
       if (!row || !isClipRow(row.value)) {
         throw new Error('Failed to move local clip because a clip was not found.')
       }
       const move = moves[index]
-      return {
+      if (row.value.trackId === move.trackId && row.value.startSec === move.startSec) return []
+      return [{
         ...row.value,
         trackId: move.trackId,
         startSec: move.startSec,
         updatedAt: timestamp,
-      }
+      }]
     })
+    if (updates.length === 0) return
     markChanged()
     for (const clip of updates) entityQueue.schedulePut(toEntityRow(CLIP_KIND, clip.id, clip, timestamp))
     await entityQueue.flush()

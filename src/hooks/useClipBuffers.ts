@@ -91,31 +91,41 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
       return undefined
     }
 
-    const matchingClipIds = (matches: (clip: Track['clips'][number]) => boolean) => {
+    const matchingClipIdsForCurrentClip = (matches: (clip: Track['clips'][number]) => boolean) => {
       const snapshot = untrack(() => tracks())
       const clipIds: string[] = []
+      let currentFound = false
+      let currentMatches = false
       for (const track of snapshot) {
         for (const clip of track.clips) {
-          if (matches(clip)) clipIds.push(clip.id)
+          if (clip.id === clipId) currentFound = true
+          if (!matches(clip)) continue
+          clipIds.push(clip.id)
+          if (clip.id === clipId) currentMatches = true
         }
       }
-      return clipIds
+      return { clipIds, currentFound, currentMatches }
     }
 
-    const applyBuffer = (buffer: AudioBuffer, sharedClipIds?: string[]) => {
+    const applyMatchingBuffer = (
+      buffer: AudioBuffer,
+      matches: (clip: Track['clips'][number]) => boolean,
+      options?: { storeWhenCurrentMissing?: boolean },
+    ) => {
       if (isStaleLoad()) return
-      if (!sharedClipIds || sharedClipIds.length === 0) {
+      const match = matchingClipIdsForCurrentClip(matches)
+      if (match.currentMatches) {
+        audioBufferCache.storeSharedBuffer(match.clipIds, buffer)
+      } else if (!match.currentFound && options?.storeWhenCurrentMissing) {
         audioBufferCache.storeBuffer(clipId, buffer)
-        return
       }
-      audioBufferCache.storeSharedBuffer(sharedClipIds.includes(clipId) ? sharedClipIds : [clipId, ...sharedClipIds], buffer)
     }
 
     if (sampleUrl) {
       try {
         const decoded = await sampleBufferLoader.load(sampleUrl, (arrayBuffer) => audioEngine.decodeAudioData(arrayBuffer))
         if (!decoded || audioBufferCache.hasBuffer(clipId)) return
-        applyBuffer(decoded, matchingClipIds((clip) => resolveClipSampleUrl(clip) === sampleUrl))
+        applyMatchingBuffer(decoded, (clip) => resolveClipSampleUrl(clip) === sampleUrl, { storeWhenCurrentMissing: true })
       } catch {}
       return
     }
@@ -128,7 +138,7 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
       if (resolvedSampleUrl) {
         const decoded = await sampleBufferLoader.load(resolvedSampleUrl, (arrayBuffer) => audioEngine.decodeAudioData(arrayBuffer))
         if (!decoded || audioBufferCache.hasBuffer(clipId)) return
-        applyBuffer(decoded, matchingClipIds((clip) => resolveClipSampleUrl(clip) === resolvedSampleUrl))
+        applyMatchingBuffer(decoded, (clip) => resolveClipSampleUrl(clip) === resolvedSampleUrl)
         return
       }
       const projectId = options.projectId()
@@ -138,7 +148,7 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
         if (bytes.status === 'ready') {
           const decoded = await audioEngine.decodeAudioData(await bytes.file.arrayBuffer())
           if (audioBufferCache.hasBuffer(clipId)) return
-          applyBuffer(decoded, matchingClipIds((clip) => clip.sourceAssetKey === sourceAssetKey))
+          applyMatchingBuffer(decoded, (clip) => clip.sourceAssetKey === sourceAssetKey)
           return
         }
         if (isStaleLoad()) return

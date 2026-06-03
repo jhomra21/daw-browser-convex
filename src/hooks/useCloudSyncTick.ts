@@ -21,7 +21,6 @@ export const useCloudSyncTick = (options: Options) => {
     const timer = window.setTimeout(() => {
       timers.delete(projectId)
       if (!options.enabled()) {
-        pendingChanges.delete(projectId)
         return
       }
       pendingChanges.delete(projectId)
@@ -38,17 +37,22 @@ export const useCloudSyncTick = (options: Options) => {
     const projectId = options.projectId()
     if (!projectId) return
     const unsubscribe = subscribeToLocalProjectChanges(projectId, () => {
+      const alreadyPending = pendingChanges.has(projectId)
       pendingChanges.add(projectId)
-      scheduleSync(projectId)
-      setChangeVersion((version) => version + 1)
+      if (options.enabled()) {
+        scheduleSync(projectId)
+      } else if (!alreadyPending) {
+        setChangeVersion((version) => version + 1)
+      }
     })
     onCleanup(unsubscribe)
   })
 
   createEffect(() => {
     const projectId = options.projectId()
+    const enabled = options.enabled()
     changeVersion()
-    if (!projectId || !pendingChanges.has(projectId)) return
+    if (!projectId || !enabled || !pendingChanges.has(projectId)) return
     scheduleSync(projectId)
   })
 

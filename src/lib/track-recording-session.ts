@@ -1,5 +1,5 @@
 import type { AudioEngine } from '~/lib/audio-engine'
-import { publishTransientSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
+import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { Track } from '~/types/timeline'
 
 type ConvexClientType = typeof import('~/lib/convex').convexClient
@@ -110,7 +110,7 @@ export async function acquireTrackRecordingLock(options: {
   clearTrackLock: (trackId: Track['id']) => void
 }): Promise<{ ok: boolean; reason?: string }> {
   try {
-    const res = await publishTransientSharedTimelineOperation(options.projectId, {
+    const res = await publishSharedTimelineOperation(options.projectId, {
       kind: 'tracks.lock',
       payload: { trackId: options.trackId },
     })
@@ -141,7 +141,7 @@ export async function releaseTrackRecordingLock(options: {
     return
   }
   try {
-    const result = await publishTransientSharedTimelineOperation(options.projectId, {
+    const result = await publishSharedTimelineOperation(options.projectId, {
       kind: 'tracks.unlock',
       payload: { trackId: options.trackId },
     })
@@ -171,7 +171,7 @@ export function startRecordingLockHeartbeat(options: {
   onError?: (error: unknown) => void
 }): number {
   return window.setInterval(() => {
-    void publishTransientSharedTimelineOperation(options.projectId, {
+    void publishSharedTimelineOperation(options.projectId, {
       kind: 'tracks.lock',
       payload: { trackId: options.trackId },
     }).catch((error) => {

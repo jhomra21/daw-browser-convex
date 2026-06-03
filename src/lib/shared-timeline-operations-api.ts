@@ -1,6 +1,5 @@
 import type {
   SharedTimelineOperation,
-  SharedTimelineOperationKind,
 } from '~/lib/shared-timeline-operations'
 
 export type {
@@ -15,15 +14,14 @@ export class SharedTimelineOperationHttpError extends Error {
   }
 }
 
-export const publishSharedTimelineOperationParts = async (
+export const publishSharedTimelineOperation = async (
   projectId: string,
-  kind: SharedTimelineOperationKind,
-  payload: unknown,
+  operation: SharedTimelineOperation,
 ): Promise<unknown> => {
   const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/timeline/operations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ kind, payload }),
+    body: JSON.stringify(operation),
   })
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
@@ -31,11 +29,6 @@ export const publishSharedTimelineOperationParts = async (
   }
   return await response.json().catch(() => null)
 }
-
-export const publishTransientSharedTimelineOperation = async (
-  projectId: string,
-  operation: SharedTimelineOperation,
-): Promise<unknown> => await publishSharedTimelineOperationParts(projectId, operation.kind, operation.payload)
 
 export const buildSharedTrackCreateOperation = (
   payload: Omit<Extract<SharedTimelineOperation, { kind: 'tracks.create' }>['payload'], 'operationId'>,

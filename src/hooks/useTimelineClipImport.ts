@@ -9,32 +9,24 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE, type SampleDragData } from '~/lib/sample-drag-data'
 import { clientXToSec, yToLaneIndex, willOverlap, calcNonOverlapStart, quantizeSecToGrid, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
-import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
-import { createAudioImportTransaction, removeAutoCreatedCloudTrack } from '~/lib/timeline-audio-import'
+import { createAudioImportTransaction } from '~/lib/timeline-audio-import'
 import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
 import type { HistoryEntry } from '~/lib/undo/types'
-import { createOptimisticTrack } from '~/lib/tracks'
 import type { Clip, Track } from '~/types/timeline'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
-
-type ConvexClientType = typeof import('~/lib/convex').convexClient
-
-type ConvexApiType = typeof import('~/lib/convex').convexApi
-
-type UploadToR2 = (
-  projectId: string,
-  assetKey: string,
-  file: File,
-  durationSec?: number,
-) => Promise<string | null>
+import type { UploadToR2 } from './useClipBuffers'
 
 export type InsertSampleInput = SampleDragData
+
+type CreateTimelineTrack = (
+  options?: { kind?: 'audio' | 'instrument'; channelRole?: 'track' | 'return' | 'group' },
+  behavior?: { pushHistory?: boolean; select?: boolean },
+) => Promise<Track | null>
 
 type TimelineClipImportOptions = {
   audioEngine: AudioEngine
   tracks: Accessor<Track[]>
-  insertLocalTrack: (track: Track, index: number) => void
   removeLocalTrack: (trackId: Track['id']) => void
   insertLocalClip: (trackId: Track['id'], clip: Clip) => void
   removeLocalClips: (clipIds: Iterable<string>) => void
@@ -42,17 +34,15 @@ type TimelineClipImportOptions = {
   playheadSec: Accessor<number>
   projectId: Accessor<string | undefined>
   userId: Accessor<string | undefined>
-  convexClient: ConvexClientType
-  convexApi: ConvexApiType
-  clipBuffers: ClipBuffers
-  uploadToR2: UploadToR2
+  clipBuffers: ClipBuffers & { uploadToR2: UploadToR2 }
   getScrollElement: () => HTMLDivElement | undefined
   getFileInput: () => HTMLInputElement | undefined
   bpm: Accessor<number>
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
+  createTimelineTrack: CreateTimelineTrack
+  removeCreatedCloudTrack: (track: Track | undefined) => Promise<void>
   historyPush: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
-  grantWrite?: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
   grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
   onLocalSaveFailed?: (message: string) => void
   notify: (title: string, message: string) => void
@@ -74,7 +64,6 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
   const {
     audioEngine,
     tracks,
-    insertLocalTrack,
     removeLocalTrack,
     insertLocalClip,
     removeLocalClips,
@@ -82,16 +71,12 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     playheadSec,
     projectId,
     userId,
-    convexClient,
-    convexApi,
     clipBuffers,
-    uploadToR2,
     getScrollElement,
     getFileInput,
     bpm,
     gridEnabled,
     gridDenominator,
-    grantWrite,
     grantClipWrite,
     notify,
   } = options
@@ -107,54 +92,13 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
   const isActiveProjectTrack = (rid: string, trackId: Track['id']) =>
     projectId() === rid && tracks().some((entry) => entry.id === trackId)
 
-  const createAudioTrack = async () => {
-    const rid = projectId()
-    if (!rid) return null
-
-    if (isLocalId('project', rid)) {
-      const row = await createLocalTimelineRepository(rid).createTrack({ index: tracks().length })
-      if (projectId() !== rid) {
-        await createLocalTimelineRepository(rid).deleteTrack(row.id)
-        return null
-      }
-      const track = toLocalTimelineTrack(row)
-      insertLocalTrack(track, tracks().length)
-      selection.selectTrackTarget(track.id)
-      return track
-    }
-
-    const uid = userId()
-    if (!uid) return null
-
-    const track = await createOptimisticTrack({
-      convexClient,
-      convexApi,
-      projectId: rid,
-      userId: uid,
-      insertLocalTrack,
-      index: tracks().length,
-      grantWrite,
-      grantScope: { projectId: rid, userId: uid },
-    })
-    if (!track) return null
-
-    selection.selectTrackTarget(track.id)
-    return track
-  }
+  const createAudioTrack = () => options.createTimelineTrack({}, { pushHistory: false, select: true })
 
   const removeAutoCreatedLocalTrack = async (rid: string, track: Track | undefined) => {
-    if (!track || !rid || !isLocalId('project', rid)) return
+    if (!track || !isLocalId('project', rid)) return
     await createLocalTimelineRepository(rid).deleteTrack(track.id)
     if (projectId() === rid) removeLocalTrack(track.id)
   }
-
-  const removeCreatedCloudTrack = async (track: Track | undefined) => await removeAutoCreatedCloudTrack({
-    convexClient,
-    convexApi,
-    userId: userId(),
-    track,
-    removeLocalTrack,
-  })
 
   const pushLocalTrackClipCreateHistory = (track: Track, clipId: string, clip: ClipCreateSnapshot) => {
     const historyPush = options.historyPush
@@ -198,13 +142,13 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     const scroll = getScrollElement()
     if (!scroll) return null
 
-    let laneIdx = yToLaneIndex(clientY, scroll)
+    const laneIdx = yToLaneIndex(clientY, scroll)
     const snapshot = tracks()
     if (snapshot.length === 0 || laneIdx >= snapshot.length || laneIdx < 0) {
       const created = await createAudioTrack()
       return created ? { track: created, autoCreated: true } : null
     }
-    const track = requireAudioTrack(snapshot[Math.max(0, Math.min(laneIdx, snapshot.length - 1))])
+    const track = requireAudioTrack(snapshot[laneIdx])
     return track ? { track, autoCreated: false } : null
   }
 
@@ -248,13 +192,11 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
       grantClipWrite,
     },
     cloud: {
-      convexClient,
-      convexApi,
-      uploadToR2,
+      uploadToR2: clipBuffers.uploadToR2,
     },
     rollback: {
       removeLocalTrack: removeAutoCreatedLocalTrack,
-      removeCloudTrack: removeCreatedCloudTrack,
+      removeCloudTrack: options.removeCreatedCloudTrack,
     },
     onLocalSaveFailed: options.onLocalSaveFailed,
   })

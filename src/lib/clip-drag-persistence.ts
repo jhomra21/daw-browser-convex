@@ -59,10 +59,7 @@ export const createClipDragPersistence = (input: Input) => {
     }
     let inserted = false;
     const track = await createOptimisticTrack({
-      convexClient: input.convexClient,
-      convexApi: input.convexApi,
       projectId,
-      userId,
       insertLocalTrack: (track, trackIndex) => {
         if (input.projectId() !== projectId) return;
         inserted = true;

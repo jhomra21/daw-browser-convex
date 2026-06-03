@@ -1,8 +1,8 @@
 import { openLocalProjectDb, type LocalProjectSyncStateRow } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { isSharedTimelineOperationKind, readSharedTimelineClipCreatePayload, type SharedTimelineClipCreatePayload } from '~/lib/shared-timeline-operations'
+import { isSharedTimelineOperationKind, readSharedTimelineClipCreatePayload, sharedTimelineOperationSchema, type SharedTimelineClipCreatePayload } from '~/lib/shared-timeline-operations'
 import {
-  publishSharedTimelineOperationParts,
+  publishSharedTimelineOperation,
   SharedTimelineOperationHttpError,
   type SharedTimelineOperation,
   type SharedTimelineOperationKind,
@@ -200,13 +200,12 @@ const publishEntry = async (entry: SharedOutboxEntry) => {
     const payload = readUploadedAudioClipPayload(entry.payload)
     if (!payload) throw new Error('Invalid queued shared audio clip.')
     const sampleUrl = await uploadSharedAudioClipAsset(payload)
-    await publishSharedTimelineOperationParts(entry.projectId, 'clips.create', {
-      ...payload.clipPayload,
-      sampleUrl,
-    })
+    await publishSharedTimelineOperation(entry.projectId, { kind: 'clips.create', payload: { ...payload.clipPayload, sampleUrl } })
     return
   }
-  await publishSharedTimelineOperationParts(entry.projectId, entry.kind, entry.payload)
+  const operation = sharedTimelineOperationSchema.safeParse({ kind: entry.kind, payload: entry.payload })
+  if (!operation.success) throw new Error('Invalid queued shared timeline operation.')
+  await publishSharedTimelineOperation(entry.projectId, operation.data)
 }
 
 export const enqueueSharedTimelineOperationOnFailure = async (
@@ -227,10 +226,9 @@ export const publishDurableSharedTimelineOperation = async <T = undefined>(
     queuedResult?: T
     throwQueued?: boolean
   },
-): Promise<unknown | T | undefined> => await publishSharedTimelineOperationParts(
+): Promise<unknown | T | undefined> => await publishSharedTimelineOperation(
   input.projectId,
-  input.operation.kind,
-  input.operation.payload,
+  input.operation,
 ).catch(async (error) => {
   if (!shouldQueueSharedOperationError(error)) throw error
   await enqueueSharedTimelineOperationOnFailure(input)

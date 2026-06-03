@@ -6,7 +6,7 @@ import { registerConvexAuthRoutes } from './convex-auth'
 import { registerAgentRoutes } from './routes/agent'
 import { registerCloudBackupRoutes } from './routes/cloud-backups'
 import { registerExportRoutes } from './routes/exports'
-import { registerSampleRoutes } from './routes/samples'
+import { registerPublicSampleRoutes, registerSampleRoutes } from './routes/samples'
 import { registerShareInviteRoutes } from './routes/share-invites'
 import { registerTimelineOperationRoutes } from './routes/timeline-operations'
 
@@ -21,6 +21,8 @@ app.use('/api/auth/*', cors({
   maxAge: 600,
   credentials: true,
 }));
+
+registerPublicSampleRoutes(app)
 
 // Session middleware - adds user and session to context
 app.use('*', async (c, next) => {

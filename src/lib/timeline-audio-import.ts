@@ -8,7 +8,7 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { isSharedOutboxQueuedError, publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import {
   buildSharedClipCreateOperation,
-  publishTransientSharedTimelineOperation,
+  publishSharedTimelineOperation,
 } from '~/lib/shared-timeline-operations-api'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
@@ -45,8 +45,6 @@ type ImportClipContext = {
 }
 
 type ImportCloudContext = {
-  convexClient: ConvexClientType
-  convexApi: ConvexApiType
   uploadToR2: UploadToR2
 }
 
@@ -110,6 +108,34 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
     return typeof result === 'string' ? result : null
   }
 
+  const trackRefFor = (trackId: TrackId) =>
+    getTrackHistoryRef(context.project.tracks().find((entry) => entry.id === trackId))
+
+  const projectCreatedClip = (input: {
+    projectId: string
+    clipId: string
+    clip: ClipCreateSnapshot
+    source: AudioSourceClipInput
+    sampleUrl?: string
+  }) => {
+    if (!context.project.isActiveProjectTrack(input.projectId, input.source.trackId)) return
+    context.clips.insertLocalClip(input.source.trackId, buildLocalClip({ id: input.clipId, clip: input.clip }))
+    preloadProjectedClip(input.projectId, input.source.trackId, input.clipId, input.sampleUrl)
+    context.clips.selectClip(input.source.trackId, input.clipId)
+    if (input.source.autoCreatedTrack) {
+      context.clips.pushTrackClipCreateHistory(input.source.autoCreatedTrack, input.clipId, input.clip)
+      return
+    }
+    pushClipCreateHistory({
+      historyPush: context.clips.historyPush,
+      projectId: input.projectId,
+      trackId: input.source.trackId,
+      trackRef: trackRefFor(input.source.trackId),
+      clipId: input.clipId,
+      clip: input.clip,
+    })
+  }
+
   const createAudioSourceClip = async (input: AudioSourceClipInput) => {
     const projectId = context.project.projectId()
     const userId = context.project.userId()
@@ -144,23 +170,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
           sourceChannelCount: input.source.channelCount,
           sampleUrl,
         })
-        const clip = buildLocalClip({ id: row.id, clip: clipSnapshot })
-        if (!context.project.isActiveProjectTrack(projectId, input.trackId)) return row.id
-        context.clips.insertLocalClip(input.trackId, clip)
-        preloadProjectedClip(projectId, input.trackId, row.id, sampleUrl)
-        context.clips.selectClip(input.trackId, row.id)
-        if (input.autoCreatedTrack) {
-          context.clips.pushTrackClipCreateHistory(input.autoCreatedTrack, row.id, clipSnapshot)
-        } else {
-          pushClipCreateHistory({
-            historyPush: context.clips.historyPush,
-            projectId,
-            trackId: input.trackId,
-            trackRef: getTrackHistoryRef(context.project.tracks().find((entry) => entry.id === input.trackId)),
-            clipId: row.id,
-            clip: clipSnapshot,
-          })
-        }
+        projectCreatedClip({ projectId, clipId: row.id, clip: clipSnapshot, source: input, sampleUrl })
         return row.id
       } catch (error) {
         if (input.autoCreatedTrack) {
@@ -185,26 +195,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
     }
     context.clips.grantClipWrite?.(createdClipId, grantScope)
 
-    if (!projectId || !context.project.isActiveProjectTrack(projectId, input.trackId)) return createdClipId
-    context.clips.insertLocalClip(input.trackId, buildLocalClip({
-      id: createdClipId,
-      clip: clipSnapshot,
-    }))
-    preloadProjectedClip(projectId, input.trackId, createdClipId, sampleUrl)
-
-    context.clips.selectClip(input.trackId, createdClipId)
-    if (input.autoCreatedTrack) {
-      context.clips.pushTrackClipCreateHistory(input.autoCreatedTrack, createdClipId, clipSnapshot)
-    } else {
-      pushClipCreateHistory({
-        historyPush: context.clips.historyPush,
-        projectId,
-        trackId: input.trackId,
-        trackRef: getTrackHistoryRef(context.project.tracks().find((entry) => entry.id === input.trackId)),
-        clipId: createdClipId,
-        clip: clipSnapshot,
-      })
-    }
+    if (projectId) projectCreatedClip({ projectId, clipId: createdClipId, clip: clipSnapshot, source: input, sampleUrl })
 
     return createdClipId
   }
@@ -240,7 +231,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         const created = await createLocalAudioClip({
           projectId,
           trackId: input.track.id,
-          trackRef: getTrackHistoryRef(context.project.tracks().find((entry) => entry.id === input.track.id)),
+          trackRef: trackRefFor(input.track.id),
           startSec: input.startSec,
           fileName: input.file.name,
           decoded: input.decoded,
@@ -274,7 +265,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         projectId,
         userId,
         trackId: input.track.id,
-        trackRef: getTrackHistoryRef(context.project.tracks().find((entry) => entry.id === input.track.id)),
+        trackRef: trackRefFor(input.track.id),
         startSec: input.startSec,
         file: input.file,
         decoded: input.decoded,
@@ -282,7 +273,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         sourceAssetKey,
         sourceKind: 'upload',
         createServerClip: async (payload) => {
-          const result = await publishTransientSharedTimelineOperation(projectId, {
+          const result = await publishSharedTimelineOperation(projectId, {
             kind: 'clips.create',
             payload,
           })

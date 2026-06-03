@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
+import { removeProjectMemberAccessAndTransferEntities } from "./projectMembership";
 
 const roleRank = (role: "owner" | "editor" | "viewer" | undefined) => (
   role === "owner" ? 3 : role === "viewer" ? 1 : 2
@@ -109,20 +110,11 @@ export const revokeAcceptedAccess = mutation({
       throw new Error("Project owners cannot revoke themselves.");
     }
 
-    const targetRows = await ctx.db
-      .query("ownerships")
-      .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", targetUserId))
-      .collect();
-    const projectAccess = targetRows.find((row) => !row.trackId && !row.clipId);
-    if (!projectAccess) {
+    const removal = await removeProjectMemberAccessAndTransferEntities(ctx, projectId, targetUserId);
+    if (removal.status === "not-found") {
       const result: { status: "not-found" } = { status: "not-found" };
       return result;
     }
-    if (projectAccess.role === "owner") {
-      throw new Error("Owner access cannot be revoked through invite access removal.");
-    }
-
-    await Promise.all(targetRows.map((row) => ctx.db.delete(row._id)));
     const result: { status: "revoked" } = { status: "revoked" };
     return result;
   },

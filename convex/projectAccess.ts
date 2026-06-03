@@ -16,7 +16,7 @@ type AuthenticatedCtx = {
   };
 };
 
-function isProjectOwnership(ownership: RoomOwnership) {
+export function isProjectOwnership(ownership: RoomOwnership) {
   return !ownership.trackId && !ownership.clipId;
 }
 

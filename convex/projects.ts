@@ -1,6 +1,7 @@
 import { mutation, query, type DatabaseReader, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { listAccessibleProjects, requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
+import { removeProjectMemberAccessAndTransferEntities } from "./projectMembership";
 import { enqueueR2DeleteRows } from "./r2Deletes";
 
 async function ensureOwnedRoomRecords(
@@ -209,11 +210,7 @@ export const leaveCloudRoomAccess = mutation({
     const userId = await requireAuthenticatedUserId(ctx);
     const role = await requireProjectRole(ctx, projectId, userId, ["owner", "editor", "viewer"]);
     if (role === "owner") throw new Error("Project owners cannot leave without deleting or transferring the project.");
-    const rows = await ctx.db
-      .query("ownerships")
-      .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
-      .collect();
-    await Promise.all(rows.map((row) => ctx.db.delete(row._id)));
+    await removeProjectMemberAccessAndTransferEntities(ctx, projectId, userId);
     const result: { status: "left" } = { status: "left" };
     return result;
   },

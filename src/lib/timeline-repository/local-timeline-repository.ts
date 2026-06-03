@@ -70,6 +70,9 @@ const toEntityRow = (kind: string, id: string, value: unknown, updatedAt = now()
   updatedAt,
 })
 
+const trackValues = (rows: LocalProjectEntityRow[]) => rows.flatMap((row) => isTrackRow(row.value) ? [row.value] : [])
+const clipValues = (rows: LocalProjectEntityRow[]) => rows.flatMap((row) => isClipRow(row.value) ? [row.value] : [])
+
 const sendsEqual = (
   left: TimelineTrackRow['sends'],
   right: TimelineTrackRow['sends'],
@@ -216,21 +219,19 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
   const loadSnapshot = async (): Promise<TimelineSnapshot> => {
     await flushLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
-    const rows = await db.getAll('entities')
-    const tracks = rows
-      .flatMap((row) => row.kind === TRACK_KIND && isTrackRow(row.value) ? [row.value] : [])
-      .sort((left, right) => left.index - right.index)
-    const clips = rows
-      .flatMap((row) => row.kind === CLIP_KIND && isClipRow(row.value) ? [row.value] : [])
-      .sort((left, right) => left.startSec - right.startSec)
+    const [trackRows, clipRows] = await Promise.all([
+      db.getAllFromIndex('entities', 'by-kind', TRACK_KIND),
+      db.getAllFromIndex('entities', 'by-kind', CLIP_KIND),
+    ])
+    const tracks = trackValues(trackRows).sort((left, right) => left.index - right.index)
+    const clips = clipValues(clipRows).sort((left, right) => left.startSec - right.startSec)
     return { projectId, tracks, clips }
   }
 
   const createTrack = async (input: CreateTrackInput): Promise<TimelineTrackRow> => {
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
-    const tracks = (await db.getAllFromIndex('entities', 'by-kind', TRACK_KIND))
-      .flatMap((row) => isTrackRow(row.value) ? [row.value] : [])
+    const tracks = trackValues(await db.getAllFromIndex('entities', 'by-kind', TRACK_KIND))
     const timestamp = now()
     const index = input.index ?? tracks.length
     const id = input.id ?? createLocalTrackId()
@@ -306,7 +307,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       readEntityRow(projectId, TRACK_KIND, input.trackId),
       input.sends !== undefined || input.outputTargetId !== undefined
         ? readEntityRowsByKind(projectId, TRACK_KIND)
-          .then((rows) => rows.flatMap((trackRow) => isTrackRow(trackRow.value) ? [trackRow.value] : []))
+          .then(trackValues)
         : Promise.resolve([]),
     ])
     if (!row || !isTrackRow(row.value)) return null
@@ -339,16 +340,18 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
     const tx = db.transaction('entities', 'readwrite')
-    const rows = await tx.store.getAll()
-    const trackRow = rows.find((row) => row.kind === TRACK_KIND && row.id === trackId && isTrackRow(row.value))
+    const [trackRows, clipRows] = await Promise.all([
+      tx.store.index('by-kind').getAll(TRACK_KIND),
+      tx.store.index('by-kind').getAll(CLIP_KIND),
+    ])
+    const trackRow = trackRows.find((row) => row.id === trackId && isTrackRow(row.value))
     const deletedIndex = trackRow && isTrackRow(trackRow.value) ? trackRow.value.index : null
     const timestamp = now()
-    const remainingTracks = rows
-      .flatMap((row) => row.kind === TRACK_KIND && row.id !== trackId && isTrackRow(row.value) ? [row.value] : [])
+    const remainingTracks = trackValues(trackRows).filter((row) => row.id !== trackId)
     await Promise.all([
       tx.store.delete([TRACK_KIND, trackId]),
-      ...rows
-        .filter((row) => row.kind === CLIP_KIND && isClipRow(row.value) && row.value.trackId === trackId)
+      ...clipRows
+        .filter((row) => isClipRow(row.value) && row.value.trackId === trackId)
         .map((row) => tx.store.delete([row.kind, row.id])),
       ...remainingTracks.map((row) => {
         const routing = normalizeTrackRouting({
@@ -397,7 +400,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       TRACK_KIND,
       await db.getAllFromIndex('entities', 'by-kind', TRACK_KIND),
     )
-    const tracks = allRows.flatMap((row) => row.kind === TRACK_KIND && isTrackRow(row.value) ? [row.value] : [])
+    const tracks = trackValues(allRows)
     requireTrackIds(moves.map((move) => move.trackId), tracks)
     const rows = await Promise.all(moves.map((move) => readEntityRow(projectId, CLIP_KIND, move.clipId)))
     const updates = rows.flatMap((row, index) => {
@@ -424,7 +427,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       readEntityRow(projectId, CLIP_KIND, input.clipId),
       input.trackId
         ? readEntityRowsByKind(projectId, TRACK_KIND)
-          .then((rows) => rows.flatMap((trackRow) => isTrackRow(trackRow.value) ? [trackRow.value] : []))
+          .then(trackValues)
         : Promise.resolve([]),
     ])
     if (!row || !isClipRow(row.value)) return null

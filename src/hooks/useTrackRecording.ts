@@ -1,4 +1,4 @@
-import { batch, createSignal, onCleanup, type Accessor, type Setter } from 'solid-js'
+import { batch, createSignal, onCleanup, type Accessor } from 'solid-js'
 
 import { createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory, type ClipCreateSnapshot } from '~/lib/clip-create'
 import type { ClipBufferWriter } from '~/lib/clip-buffer-cache'
@@ -58,7 +58,6 @@ type UseTrackRecordingOptions = {
   convexApi: ConvexApiType
   requestTransportPlay: () => Promise<void>
   createTrackForRecording: () => Promise<Track | null>
-  setIsRecording: Setter<boolean>
   notify: (message: string) => void
   historyPush: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
@@ -102,7 +101,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     convexApi,
     requestTransportPlay,
     createTrackForRecording,
-    setIsRecording,
     notify,
     historyPush,
     grantClipWrite,
@@ -172,8 +170,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       projectId: rid,
       trackId,
       locker,
-      convexClient,
-      convexApi,
       setTrackLock,
       clearTrackLock,
     })
@@ -194,8 +190,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         lockHeartbeatTimer = clearRecordingLockHeartbeat(lockHeartbeatTimer)
       },
       releaseTrackLock,
-      setIsRecording,
-      setIsRecordingInternal,
+      setIsRecording: setIsRecordingInternal,
       livePreviewPoints,
       setPreviewPoints,
       setPreviewStartSec,
@@ -207,7 +202,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   const haltLivePreview = () => {
     haltRecordingPreview({
       activeCtx,
-      setIsRecording,
       livePreviewPoints,
       setPreviewPoints,
       setPreviewStartSec,
@@ -244,18 +238,19 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     const rid = ctx.projectId
     const uid = ctx.userId
     const isLocalProject = ctx.isLocalProject
-    if (!isLocalProject && !uid) {
-      emit('Missing project or user context; recording discarded.')
+    const discardRecording = async (message: string) => {
+      emit(message)
       await cleanupRecording()
       await handleAutoCreatedTrackFailure(ctx.createdTrack, ctx)
+    }
+    if (!isLocalProject && !uid) {
+      await discardRecording('Missing project or user context; recording discarded.')
       return
     }
 
     const blob = new Blob(ctx.chunks, { type: ctx.mimeType || 'audio/webm' })
     if (!blob.size) {
-      emit('Recording contained no audio data.')
-      await cleanupRecording()
-      await handleAutoCreatedTrackFailure(ctx.createdTrack, ctx)
+      await discardRecording('Recording contained no audio data.')
       return
     }
 
@@ -271,18 +266,14 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     }
 
     if (!decoded) {
-      emit('Failed to decode recorded audio; skipping clip creation.')
-      await cleanupRecording()
-      await handleAutoCreatedTrackFailure(ctx.createdTrack, ctx)
+      await discardRecording('Failed to decode recorded audio; skipping clip creation.')
       return
     }
 
     const existingTracks = projectId() === ctx.projectId ? tracks() : ctx.tracks
     const targetTrack = existingTracks.find((entry) => entry.id === ctx.trackId)
     if (!targetTrack) {
-      emit('Recording target track missing; clip skipped.')
-      await cleanupRecording()
-      await handleAutoCreatedTrackFailure(ctx.createdTrack, ctx)
+      await discardRecording('Recording target track missing; clip skipped.')
       return
     }
 
@@ -300,12 +291,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         const asset = await createLocalAsset({
           projectId: rid,
           file,
-          metadata: {
-            durationSec: sourceMetadata.durationSec,
-            sampleRate: sourceMetadata.sampleRate,
-            originalFileName: file.name,
-            originalLastModified: file.lastModified,
-          },
+          metadata: sourceMetadata,
         })
         assetId = asset.id
         const created = await createLocalAudioClip({
@@ -446,8 +432,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         projectId: rid,
         trackId,
         locker: uid ?? '',
-        convexClient,
-        convexApi,
         setTrackLock,
         clearTrackLock,
       })
@@ -577,8 +561,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         projectId: rid,
         trackId,
         locker: uid ?? '',
-        convexClient,
-        convexApi,
         onError: (error) => {
           console.warn('[useTrackRecording] failed to refresh track lock', error)
         },
@@ -594,7 +576,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       return { ok: false, reason: 'Recorder failed to start' }
     }
 
-    setIsRecording(true)
     setIsRecordingInternal(true)
     setCurrentRecordingTrackId(trackId)
     resetPreviewState()
@@ -652,18 +633,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       return result
     }
     if (target.createdDuringSetup) {
-      await finalizeAutoCreatedTrackFailure({
-        track: target.track,
-        tracks: tracks(),
-        projectId: projectId(),
-        userId: userId(),
-        historyPush,
-        convexClient,
-        convexApi,
-        removeLocalTrack,
-        clearRecordArmForTrack,
-        emit,
-      })
+      await handleAutoCreatedTrackFailure(target.track)
     }
     return result
   }

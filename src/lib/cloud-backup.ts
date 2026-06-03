@@ -25,9 +25,24 @@ type CloudBackupSnapshot = {
   manifestVersion: string
 }
 
+const CLOUD_ASSET_DELETE_PREFIX = 'cloud-delete:asset:'
+
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
 )
+
+const cloudAssetDeleteKeyRange = () => IDBKeyRange.bound(CLOUD_ASSET_DELETE_PREFIX, `${CLOUD_ASSET_DELETE_PREFIX}\uffff`)
+
+const readPendingDeletedCloudAssetRows = async (projectId: string) => {
+  const db = await openLocalProjectDb(projectId)
+  return await db.getAll('syncState', cloudAssetDeleteKeyRange())
+}
+
+const readPendingDeletedCloudAssetKey = (row: LocalProjectSyncStateRow): string | null => {
+  if (typeof row.value === 'string') return row.value
+  if (!isRecord(row.value) || typeof row.value.cloudId !== 'string') return null
+  return row.value.cloudId
+}
 
 const readNumber = (value: unknown): number | undefined => (
   typeof value === 'number' && Number.isFinite(value) ? value : undefined
@@ -122,13 +137,9 @@ const readLastBackedUpManifestVersion = async (projectId: string) => {
 }
 
 const readPendingDeletedCloudAssetKeys = async (projectId: string): Promise<string[]> => {
-  const db = await openLocalProjectDb(projectId)
-  const rows = await db.getAll('syncState')
-  return rows.flatMap((row) => {
-    if (!row.key.startsWith('cloud-delete:asset:')) return []
-    if (typeof row.value === 'string') return [row.value]
-    if (!isRecord(row.value) || typeof row.value.cloudId !== 'string') return []
-    return [row.value.cloudId]
+  return (await readPendingDeletedCloudAssetRows(projectId)).flatMap((row) => {
+    const cloudKey = readPendingDeletedCloudAssetKey(row)
+    return cloudKey === null ? [] : [cloudKey]
   })
 }
 
@@ -215,7 +226,7 @@ const applyCloudBackupCommit = async (
   result: BackupResult,
 ) => {
   const db = await openLocalProjectDb(projectId)
-  const rows = await db.getAll('syncState')
+  const pendingDeletedRows = await db.getAll('syncState', cloudAssetDeleteKeyRange())
   const deleted = new Set(result.deletedAssetKeys ?? [])
   const tx = db.transaction('syncState', 'readwrite')
   await Promise.all([
@@ -232,13 +243,8 @@ const applyCloudBackupCommit = async (
         updatedAt: Date.now(),
       })]
       : []),
-    ...rows.flatMap((row) => {
-      if (!row.key.startsWith('cloud-delete:asset:')) return []
-      const cloudKey = typeof row.value === 'string'
-        ? row.value
-        : isRecord(row.value) && typeof row.value.cloudId === 'string'
-          ? row.value.cloudId
-          : null
+    ...pendingDeletedRows.flatMap((row) => {
+      const cloudKey = readPendingDeletedCloudAssetKey(row)
       return cloudKey && deleted.has(cloudKey) ? [tx.objectStore('syncState').delete(row.key)] : []
     }),
     tx.done,

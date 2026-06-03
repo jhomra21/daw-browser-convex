@@ -386,9 +386,11 @@ const moveManyForUser = async (
         if (!targetTrack) return { status: 'rejected' as const }
         if (isMergedTrackLockedByOther(targetTrack, userId)) return { status: 'rejected' as const }
       }
+      const nextStartSec = normalizeClipStartSec(move.startSec)
+      if (clip.trackId === nextTrackId && clip.startSec === nextStartSec) continue
       patches.push({
         clipId: move.clipId,
-        startSec: normalizeClipStartSec(move.startSec),
+        startSec: nextStartSec,
         trackId: nextTrackId,
       })
     }

@@ -211,12 +211,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         asset = await createLocalAsset({
           projectId,
           file: input.file,
-          metadata: {
-            durationSec: sourceMetadata.durationSec,
-            sampleRate: sourceMetadata.sampleRate,
-            originalFileName: input.file.name,
-            originalLastModified: input.file.lastModified,
-          },
+          metadata: sourceMetadata,
         })
       } catch (error) {
         const message = error instanceof LocalAssetWriteError

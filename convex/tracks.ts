@@ -243,6 +243,7 @@ const createTrackForUser = async (
 const setTrackVolumeForUser = async (ctx: any, trackId: any, userId: string, volume: number) => {
   const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
   const channel = await ensureMixerChannelForTrack(ctx, track);
+  if (channel.volume === volume) return;
   await ctx.db.patch(channel._id, { volume });
 }
 
@@ -256,12 +257,20 @@ const setTrackMixForUser = async (
   if (!access) return { status: "access-denied" as const };
   const channel = await ensureMixerChannelForTrack(ctx, access.track);
   const patch: any = {};
-  if (input.muted !== undefined) patch.muted = input.muted;
-  if (input.soloed !== undefined) patch.soloed = input.soloed;
+  if (input.muted !== undefined && input.muted !== channel.muted) patch.muted = input.muted;
+  if (input.soloed !== undefined && input.soloed !== channel.soloed) patch.soloed = input.soloed;
   if (Object.keys(patch).length === 0) return { status: "noop" as const };
   await ctx.db.patch(channel._id, patch);
   return { status: "applied" as const };
 }
+
+const mixerSendsEqual = (
+  left: Array<{ targetId: string; amount: number }>,
+  right: Array<{ targetId: string; amount: number }>,
+) => (
+  left.length === right.length
+  && left.every((send, index) => send.targetId === right[index]?.targetId && send.amount === right[index]?.amount)
+)
 
 const setTrackRoutingForUser = async (
   ctx: any,
@@ -274,6 +283,7 @@ const setTrackRoutingForUser = async (
 ) => {
   const { track } = await requireTrackOwnerForWrite(ctx, input.trackId, input.userId);
   const channel = await ensureMixerChannelForTrack(ctx, track);
+  if (input.sends === undefined && input.outputTargetId === undefined) return;
   const tracksInRoom = await listProjectTracksWithMixerChannels(ctx, track.projectId);
   const nextSends = input.sends === undefined ? channel.sends : input.sends;
   const nextOutputTargetId = input.outputTargetId === undefined
@@ -284,6 +294,10 @@ const setTrackRoutingForUser = async (
     { sends: nextSends, outputTargetId: nextOutputTargetId },
     tracksInRoom as any,
   );
+  if (
+    normalizedRouting.outputTargetId === channel.outputTargetId
+    && mixerSendsEqual(normalizedRouting.sends, channel.sends)
+  ) return;
   await ctx.db.patch(channel._id, {
     sends: normalizedRouting.sends as any,
     outputTargetId: normalizedRouting.outputTargetId as any,

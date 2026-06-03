@@ -68,7 +68,6 @@ const Timeline: Component = () => {
   >(null);
   // Transport tempo & metronome
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
-  const [isRecording, setIsRecording] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
 
   // Audio engine
@@ -596,7 +595,6 @@ const Timeline: Component = () => {
     requestTransportPlay: requestPlay,
     createTrackForRecording: async () =>
       await createTimelineTrack({}, { pushHistory: false, select: false }),
-    setIsRecording,
     notify: (message) => {
       console.warn("[Timeline][recording]", message);
       if (message.includes("local") || message.includes("storage")) {
@@ -608,6 +606,7 @@ const Timeline: Component = () => {
   });
 
   const {
+    isRecording,
     recordArmTrackId,
     toggleRecording,
     toggleRecordArm: handleToggleRecordArm,

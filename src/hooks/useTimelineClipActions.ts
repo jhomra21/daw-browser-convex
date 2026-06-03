@@ -302,6 +302,18 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     const track = snapshot.find(entry => entry.id === trackId)
     if (!track) return
     const rid = projectId()
+    const completeDeletedTrack = (historyEntry: ReturnType<typeof buildTrackDeleteHistoryEntry> | null) => {
+      if (historyEntry) historyPush(historyEntry)
+      removeLocalTrack(trackId)
+      const next = snapshot.filter(entry => entry.id !== trackId)
+      batch(() => {
+        if (next.length > 0) {
+          selection.selectTrackTarget(next[0].id, { clearClipSelection: true })
+        } else {
+          selection.selectMasterTarget()
+        }
+      })
+    }
 
     if (rid && isLocalId('project', rid)) {
       let historyEntry: ReturnType<typeof buildTrackDeleteHistoryEntry> | null = null
@@ -314,16 +326,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         })
       } catch {}
       await createLocalTimelineRepository(rid).deleteTrack(trackId)
-      if (historyEntry) historyPush(historyEntry)
-      removeLocalTrack(trackId)
-      const next = snapshot.filter(entry => entry.id !== trackId)
-      batch(() => {
-        if (next.length > 0) {
-          selection.selectTrackTarget(next[0].id, { clearClipSelection: true })
-        } else {
-          selection.selectMasterTarget()
-        }
-      })
+      completeDeletedTrack(historyEntry)
       return
     }
 
@@ -350,19 +353,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       showTrackDeleteFailure(result)
       return
     }
-
-    if (historyEntry) historyPush(historyEntry)
-
-    removeLocalTrack(trackId)
-
-    const next = snapshot.filter(entry => entry.id !== trackId)
-    batch(() => {
-      if (next.length > 0) {
-        selection.selectTrackTarget(next[0].id, { clearClipSelection: true })
-      } else {
-        selection.selectMasterTarget()
-      }
-    })
+    completeDeletedTrack(historyEntry)
   }
 
   const requestDeleteSelectedTrack = () => {

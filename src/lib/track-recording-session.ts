@@ -2,10 +2,6 @@ import type { AudioEngine } from '~/lib/audio-engine'
 import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { Track } from '~/types/timeline'
 
-type ConvexClientType = typeof import('~/lib/convex').convexClient
-
-type ConvexApiType = typeof import('~/lib/convex').convexApi
-
 const RECORDING_MIME_TYPES = [
   'audio/webm;codecs=opus',
   'audio/webm',
@@ -104,8 +100,6 @@ export async function acquireTrackRecordingLock(options: {
   projectId: string
   trackId: Track['id']
   locker: string
-  convexClient: ConvexClientType
-  convexApi: ConvexApiType
   setTrackLock: (trackId: Track['id'], lockedBy: string | null) => void
   clearTrackLock: (trackId: Track['id']) => void
 }): Promise<{ ok: boolean; reason?: string }> {
@@ -131,8 +125,6 @@ export async function releaseTrackRecordingLock(options: {
   projectId: string
   trackId: Track['id']
   locker: string | undefined
-  convexClient: ConvexClientType
-  convexApi: ConvexApiType
   setTrackLock: (trackId: Track['id'], lockedBy: string | null) => void
   clearTrackLock: (trackId: Track['id']) => void
 }): Promise<void> {
@@ -166,8 +158,6 @@ export function startRecordingLockHeartbeat(options: {
   projectId: string
   trackId: Track['id']
   locker: string
-  convexClient: ConvexClientType
-  convexApi: ConvexApiType
   onError?: (error: unknown) => void
 }): number {
   return window.setInterval(() => {
@@ -185,7 +175,6 @@ export async function cleanupRecordingSession(options: {
   clearLockHeartbeat: () => void
   releaseTrackLock: (trackId: Track['id'], locker: string | undefined, isLocalProject: boolean) => Promise<void>
   setIsRecording: (value: boolean) => void
-  setIsRecordingInternal: (value: boolean) => void
   livePreviewPoints: { offset: number; amplitude: number }[]
   setPreviewPoints: (points: { offset: number; amplitude: number }[]) => void
   setPreviewStartSec: (value: number | null) => void
@@ -212,7 +201,6 @@ export async function cleanupRecordingSession(options: {
 
   await options.releaseTrackLock(ctx.trackId, ctx.lockedByUserId, ctx.isLocalProject)
   options.setIsRecording(false)
-  options.setIsRecordingInternal(false)
   options.livePreviewPoints.length = 0
   options.setPreviewPoints(options.livePreviewPoints)
   options.setPreviewStartSec(null)
@@ -221,7 +209,6 @@ export async function cleanupRecordingSession(options: {
 
 export function haltRecordingPreview(options: {
   activeCtx: RecordingContext | null
-  setIsRecording: (value: boolean) => void
   livePreviewPoints: { offset: number; amplitude: number }[]
   setPreviewPoints: (points: { offset: number; amplitude: number }[]) => void
   setPreviewStartSec: (value: number | null) => void
@@ -237,7 +224,6 @@ export function haltRecordingPreview(options: {
     ctx.scriptProcessor = null
     ctx.analysisCtx = null
   } catch {}
-  options.setIsRecording(false)
   options.livePreviewPoints.length = 0
   options.setPreviewPoints(options.livePreviewPoints)
   options.setPreviewStartSec(null)

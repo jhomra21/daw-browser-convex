@@ -61,6 +61,12 @@ const shouldQueueSharedOperationError = (error: unknown) => (
 )
 
 const keyFor = (id: string) => `${OUTBOX_PREFIX}${id}`
+const outboxKeyRange = () => IDBKeyRange.bound(OUTBOX_PREFIX, `${OUTBOX_PREFIX}\uffff`)
+
+const readOutboxRows = async (projectId: string) => {
+  const db = await openLocalProjectDb(projectId)
+  return await db.getAll('syncState', outboxKeyRange())
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -99,19 +105,24 @@ const readEntry = (value: unknown): SharedOutboxEntry | null => {
 }
 
 const summarizeOutboxRows = (rows: LocalProjectSyncStateRow[], userId: string) => (
-  rows.reduce<SharedOutboxSummary>((acc, row) => {
-    if (!row.key.startsWith(OUTBOX_PREFIX)) return acc
-    const entry = readEntry(row.value)
-    if (!entry || entry.userId !== userId) return acc
+  readOutboxEntries(rows, userId).reduce<SharedOutboxSummary>((acc, entry) => {
     return entry.status === 'failed'
       ? { ...acc, failed: acc.failed + 1 }
       : { ...acc, pending: acc.pending + 1 }
   }, { pending: 0, failed: 0 })
 )
 
+const readOutboxEntries = (rows: LocalProjectSyncStateRow[], userId: string) => (
+  rows
+    .flatMap((row) => {
+      const entry = readEntry(row.value)
+      return entry && entry.userId === userId ? [entry] : []
+    })
+)
+
 const writeSummary = async (projectId: string, userId: string, rows?: LocalProjectSyncStateRow[]) => {
   const db = await openLocalProjectDb(projectId)
-  const source = rows ?? await db.getAll('syncState')
+  const source = rows ?? await readOutboxRows(projectId)
   const summary = summarizeOutboxRows(source, userId)
   await db.put('syncState', { key: OUTBOX_STATUS_KEY, value: summary, updatedAt: now() })
   notifyLocalProjectChanged(projectId)
@@ -155,8 +166,7 @@ const uploadSharedAudioClipAsset = async (payload: UploadedAudioClipPayload) => 
 }
 
 export const readSharedOutboxSummary = async (projectId: string, userId: string): Promise<SharedOutboxSummary> => {
-  const db = await openLocalProjectDb(projectId)
-  return summarizeOutboxRows(await db.getAll('syncState'), userId)
+  return summarizeOutboxRows(await readOutboxRows(projectId), userId)
 }
 
 const enqueueSharedOutboxOperation = async (
@@ -188,10 +198,7 @@ const enqueueSharedOutboxOperation = async (
 }
 
 const listEntries = async (projectId: string, userId: string) => {
-  const db = await openLocalProjectDb(projectId)
-  return (await db.getAll('syncState'))
-    .flatMap((row) => row.key.startsWith(OUTBOX_PREFIX) ? [readEntry(row.value)].filter((entry) => entry !== null) : [])
-    .filter((entry) => entry.userId === userId)
+  return readOutboxEntries(await readOutboxRows(projectId), userId)
     .sort((left, right) => left.createdAt - right.createdAt)
 }
 

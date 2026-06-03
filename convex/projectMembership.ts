@@ -21,20 +21,16 @@ export async function removeProjectMemberAccessAndTransferEntities(
   projectId: string,
   targetUserId: string,
 ): Promise<MembershipRemovalResult> {
-  const projectAccessRows = await ctx.db
+  const targetRows = await ctx.db
     .query("ownerships")
-    .withIndex("by_owner_project_marker", (q) => q.eq("ownerUserId", targetUserId).eq("trackId", undefined).eq("clipId", undefined))
+    .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", targetUserId))
     .collect();
-  const projectAccess = projectAccessRows.find((row) => row.projectId === projectId);
+  const projectAccess = targetRows.find(isProjectOwnership);
   if (!projectAccess) return { status: "not-found" };
   if (projectAccess.role === "owner") {
     throw new Error("Project owner access cannot be removed through member access removal.");
   }
 
-  const targetRows = await ctx.db
-    .query("ownerships")
-    .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", targetUserId))
-    .collect();
   const entityRows = targetRows.filter((row) => !isProjectOwnership(row));
   if (entityRows.length === 0) {
     await ctx.db.delete(projectAccess._id);

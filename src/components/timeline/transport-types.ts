@@ -42,7 +42,6 @@ export type TransportControlsProps = {
     onAddInstrumentTrack: () => void | Promise<void>;
   };
   onMasterFX: () => void;
-  onShare?: () => string | void | Promise<string | void>;
   bpm: number;
   onChangeBpm: (next: number) => void;
   metronomeEnabled: boolean;

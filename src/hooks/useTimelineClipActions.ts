@@ -2,6 +2,7 @@ import type { FunctionReturnType } from 'convex/server'
 import { batch, type Accessor, type Setter } from 'solid-js'
 
 import { buildClipCreateSnapshot, buildCreatedClipSelection, createProjectedClips, createProjectedLocalClips, pushClipCreateHistory, type BatchClipCreateItem } from '~/lib/clip-create'
+import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import { getTrackDeleteConflictMessage } from '~/lib/delete-conflict-messages'
 import { buildTrackEffectQueryArgs } from '~/lib/effect-track-args'
 import { getLocalEffect } from '~/lib/local-effects'
@@ -38,7 +39,7 @@ type TimelineClipActionsOptions = {
   userId: Accessor<string | undefined>
   convexClient: ConvexClientType
   convexApi: ConvexApiType
-  audioBufferCache: Map<string, AudioBuffer>
+  audioBufferCache: ClipBuffers
   bpm: Accessor<number>
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
@@ -226,7 +227,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
           : calcNonOverlapStart(simulatedClips, null, desiredStart, clip.duration)
         pending.push({
           trackId,
-          buffer: clip.buffer ?? audioBufferCache.get(clip.id) ?? null,
+          buffer: clip.buffer ?? audioBufferCache.getBuffer(clip.id) ?? null,
           clip: {
             ...buildClipCreateSnapshot(clip, { preserveHistoryRef: false }),
             startSec: safeStart,
@@ -243,7 +244,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         items: pending,
         insertLocalClip,
         removeLocalClips,
-        audioBufferCache,
+        audioBufferCache: audioBufferCache.writer,
         canProject: () => projectId() === rid,
       })
       const nextSelection = buildCreatedClipSelection(created)
@@ -274,7 +275,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         return Array.isArray(result) ? result.map((item) => typeof item === 'string' ? item : null) : []
       },
       insertLocalClip,
-      audioBufferCache,
+      audioBufferCache: audioBufferCache.writer,
       grantClipWrites,
       grantScope: { projectId: rid, userId: uid },
     })

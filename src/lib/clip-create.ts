@@ -1,5 +1,7 @@
 import type { FunctionArgs } from 'convex/server'
 import { getPersistableAudioSourceMetadata, type AudioSourceKind, type AudioSourceMetadata } from '~/lib/audio-source'
+import { resolveClipSampleUrl } from '~/lib/audio-source-rules'
+import type { ClipBufferWriter } from '~/lib/clip-buffer-cache'
 import { uploadClipSampleUrl } from '~/lib/clip-sample-url'
 import { primeClipSourceAsset } from '~/lib/clip-source-client'
 import { toCloudTrackId } from '~/lib/cloud-id-args'
@@ -71,7 +73,7 @@ type UploadedAudioClipInput = {
   selectClip?: (trackId: TrackId, clipId: string) => void
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   uploadToR2: (projectId: string, assetKey: string, file: File, duration?: number) => Promise<string | null>
-  audioBufferCache: Map<string, AudioBuffer>
+  audioBufferCache: ClipBufferWriter
   grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
   grantScope?: OptimisticGrantScope
   color?: string
@@ -98,7 +100,7 @@ type LocalAudioClipInput = {
   selectClip?: (trackId: TrackId, clipId: string) => void
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   skipHistory?: boolean
-  audioBufferCache: Map<string, AudioBuffer>
+  audioBufferCache: ClipBufferWriter
   color?: string
   canProject?: () => boolean
 }
@@ -125,7 +127,7 @@ function buildClipSnapshotFields(clip: Clip) {
     startSec: clip.startSec,
     duration: clip.duration,
     name: clip.name,
-    sampleUrl: clip.sampleUrl,
+    sampleUrl: resolveClipSampleUrl(clip),
     source: getPersistableAudioSourceMetadata({
       sourceDurationSec: clip.sourceDurationSec,
       sourceSampleRate: clip.sourceSampleRate,
@@ -153,7 +155,7 @@ const hasCompleteAudioClipMetadata = (clip: ClipCreateSnapshot): clip is Complet
   )
 )
 
-const buildAudioClipCreatePayloadFields = (
+const buildAudioClipMetadataPayloadFields = (
   input: BuildClipCreatePayloadInput,
 ): SharedTimelineClipCreatePayload => {
   const { trackId, clip } = input
@@ -165,7 +167,7 @@ const buildAudioClipCreatePayloadFields = (
     startSec: clip.startSec,
     duration: clip.duration,
     name: clip.name,
-    sampleUrl: clip.sampleUrl,
+    sampleUrl: resolveClipSampleUrl(clip),
     assetKey: clip.sourceAssetKey,
     sourceKind: clip.sourceKind,
     durationSec: clip.source.durationSec,
@@ -178,14 +180,21 @@ const buildAudioClipCreatePayloadFields = (
   }
 }
 
+const buildAudioClipCreatePayloadFields = (
+  input: BuildClipCreatePayloadInput,
+): SharedTimelineClipCreatePayload => {
+  const payload = buildAudioClipMetadataPayloadFields(input)
+  if (!payload.sampleUrl) {
+    throw new Error('Audio clips require complete source metadata')
+  }
+  return payload
+}
+
 export function buildClipCreatePayload(
   input: BuildClipCreatePayloadInput,
 ): FunctionArgs<typeof convexApi.clips.create> {
   const { projectId, trackId, clip } = input
   if (!clip.midi) {
-    if (!clip.sampleUrl) {
-      throw new Error('Audio clips require complete source metadata')
-    }
     return {
       projectId,
       ...buildAudioClipCreatePayloadFields(input),
@@ -251,18 +260,18 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
       buffer: input.decoded,
       color: input.color,
     }))
-    input.audioBufferCache.set(pendingClipId, input.decoded)
+    input.audioBufferCache.storeBuffer(pendingClipId, input.decoded)
     input.selectClip?.(input.trackId, pendingClipId)
   }
   const removePendingClip = () => {
     if (!canProjectPending) return
     input.removeLocalClips?.([pendingClipId])
-    input.audioBufferCache.delete(pendingClipId)
+    input.audioBufferCache.removeBuffer(pendingClipId)
   }
 
   const operationId = crypto.randomUUID()
   const queuedClipPayload = {
-    ...buildAudioClipCreatePayloadFields({
+    ...buildAudioClipMetadataPayloadFields({
       projectId: input.projectId,
       trackId: input.trackId,
       clip,
@@ -328,7 +337,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
     buffer: input.decoded,
     color: input.color,
   }))
-  input.audioBufferCache.set(clipId, input.decoded)
+  input.audioBufferCache.storeBuffer(clipId, input.decoded)
   void primeClipSourceAsset({
     sourceAssetKey: input.sourceAssetKey,
     sampleUrl,
@@ -383,7 +392,7 @@ export async function createLocalAudioClip(input: LocalAudioClipInput): Promise<
     return { clipId: row.id, clip }
   }
   input.insertLocalClip(input.trackId, localClip)
-  input.audioBufferCache.set(row.id, input.decoded)
+  input.audioBufferCache.storeBuffer(row.id, input.decoded)
   input.selectClip?.(input.trackId, row.id)
   if (!input.skipHistory) {
     pushClipCreateHistory({
@@ -403,7 +412,7 @@ export async function createManyClips(input: {
   projectId: string
   items: readonly BatchClipCreateItem[]
   createMany: (items: ReturnType<typeof buildClipCreatePayload>[], operationId: string) => Promise<Array<string | null>>
-  audioBufferCache?: Map<string, AudioBuffer>
+  audioBufferCache?: ClipBufferWriter
   grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void
   grantScope?: OptimisticGrantScope
 }) {
@@ -423,15 +432,14 @@ export async function createManyClips(input: {
   }
 
   const created: BatchClipCreateResult[] = []
+  const bufferEntries: Array<readonly [string, AudioBuffer]> = []
   for (let index = 0; index < input.items.length; index++) {
     const item = input.items[index]
     const clipId = clipIds[index]
     if (!clipId) {
       throw new Error('Failed to create clips')
     }
-    if (item.buffer && input.audioBufferCache) {
-      input.audioBufferCache.set(clipId, item.buffer)
-    }
+    if (item.buffer) bufferEntries.push([clipId, item.buffer])
     created.push({
       trackId: item.trackId,
       clipId,
@@ -439,6 +447,7 @@ export async function createManyClips(input: {
     })
   }
 
+  input.audioBufferCache?.storeBuffers(bufferEntries)
   input.grantClipWrites?.(created.map((item) => item.clipId), input.grantScope)
   return created
 }
@@ -448,7 +457,7 @@ export async function createProjectedClips(input: {
   items: readonly BatchClipCreateItem[]
   createMany: (items: ReturnType<typeof buildClipCreatePayload>[], operationId: string) => Promise<Array<string | null>>
   insertLocalClip: (trackId: TrackId, clip: Clip) => void
-  audioBufferCache?: Map<string, AudioBuffer>
+  audioBufferCache: ClipBufferWriter
   grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void
   grantScope?: OptimisticGrantScope
 }) {
@@ -459,7 +468,7 @@ export async function createProjectedClips(input: {
     input.insertLocalClip(item.trackId, buildLocalClip({
       id: item.clipId,
       clip: item.clip,
-      buffer: pending?.buffer,
+      buffer: pending.buffer,
     }))
   }
   return created
@@ -470,14 +479,15 @@ export async function createProjectedLocalClips(input: {
   items: readonly BatchClipCreateItem[]
   insertLocalClip: (trackId: TrackId, clip: Clip) => void
   removeLocalClips: (clipIds: Iterable<string>) => void
-  audioBufferCache?: Map<string, AudioBuffer>
+  audioBufferCache: ClipBufferWriter
   canProject?: () => boolean
 }) {
   const repository = createLocalTimelineRepository(input.projectId)
   const created: BatchClipCreateResult[] = []
+  const bufferEntries: Array<readonly [string, AudioBuffer]> = []
   const cleanupCreatedClips = async (clipIds: string[]) => {
     await Promise.all(clipIds.map((clipId) => repository.deleteClip(clipId).catch(() => null)))
-    for (const clipId of clipIds) input.audioBufferCache?.delete(clipId)
+    for (const clipId of clipIds) input.audioBufferCache.removeBuffer(clipId)
     input.removeLocalClips(clipIds)
   }
   try {
@@ -513,13 +523,14 @@ export async function createProjectedLocalClips(input: {
         buffer: item.buffer,
         color: row.color,
       }))
-      if (item.buffer) input.audioBufferCache?.set(row.id, item.buffer)
+      if (item.buffer) bufferEntries.push([row.id, item.buffer])
       created.push({
         trackId: item.trackId,
         clipId: row.id,
         clip: { ...item.clip, historyRef: row.historyRef },
       })
     }
+    input.audioBufferCache.storeBuffers(bufferEntries)
     return created
   } catch (error) {
     const createdClipIds = created.map((item) => item.clipId)

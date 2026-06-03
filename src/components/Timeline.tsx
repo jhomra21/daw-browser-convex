@@ -148,8 +148,7 @@ const Timeline: Component = () => {
     userId,
     renderTracks: () => renderTracks(),
     audioEngine,
-    audioBufferCache: clipBuffers.audioBufferCache,
-    clipMediaStatus: clipBuffers.clipMediaStatus,
+    audioBufferCache: clipBuffers.writer,
     localProject,
     projection,
     selection,
@@ -185,8 +184,7 @@ const Timeline: Component = () => {
     convexClient,
     convexApi,
     audioEngine,
-    ensureClipBuffer: (clipId, sampleUrl) =>
-      clipBuffers.ensureClipBuffer(clipId, sampleUrl),
+    ensureClipBuffer: clipBuffers.preload,
     grantTrackWrite,
     grantClipWrite,
     persistLocalMix: (_projectId, trackId, patch) =>
@@ -279,8 +277,7 @@ const Timeline: Component = () => {
       rememberTrackProjection: identity.rememberTrackProjection,
       rememberClipHistoryRef: identity.rememberClipHistoryRef,
     },
-    audioBufferCache: clipBuffers.audioBufferCache,
-    clipMediaStatus: clipBuffers.clipMediaStatus,
+    buffers: clipBuffers,
     bufferVersion,
   });
   renderTracks = resolvedRenderTracks;
@@ -389,7 +386,7 @@ const Timeline: Component = () => {
   } = usePlayheadControls({
     audioEngine,
     tracks: () => renderTracks(),
-    ensureClipBuffer: clipBuffers.ensureClipBuffer,
+    ensureClipBuffer: clipBuffers.preload,
     loopEnabled,
     loopStartSec,
     loopEndSec,
@@ -443,7 +440,7 @@ const Timeline: Component = () => {
       selection,
       setPlayhead,
       openMidiEditorFor,
-      ensureClipBuffer: clipBuffers.ensureClipBuffer,
+      ensureClipBuffer: clipBuffers.preload,
       getScrollElement: () => scrollRef,
     },
   });
@@ -466,7 +463,7 @@ const Timeline: Component = () => {
     userId,
     convexClient,
     convexApi,
-    audioBufferCache: clipBuffers.audioBufferCache,
+    clipBuffers,
     uploadToR2: clipBuffers.uploadToR2,
     getScrollElement: () => scrollRef,
     getFileInput: () => fileInputRef,
@@ -514,7 +511,7 @@ const Timeline: Component = () => {
     bpm,
     gridEnabled,
     gridDenominator,
-    audioBufferCache: clipBuffers.audioBufferCache,
+    audioBufferCache: clipBuffers,
     onCommitMoves: (ids) => {
       rescheduleChangedClips(ids);
     },
@@ -559,7 +556,7 @@ const Timeline: Component = () => {
     userId,
     convexClient,
     convexApi,
-    audioBufferCache: clipBuffers.audioBufferCache,
+    audioBufferCache: clipBuffers,
     bpm,
     gridEnabled,
     gridDenominator,
@@ -587,7 +584,7 @@ const Timeline: Component = () => {
     selection,
     playheadSec,
     uploadToR2: clipBuffers.uploadToR2,
-    audioBufferCache: clipBuffers.audioBufferCache,
+    audioBufferCache: clipBuffers.writer,
     projectId,
     userId,
     convexClient,
@@ -831,7 +828,7 @@ const Timeline: Component = () => {
       loopEndSec: loopEndSec(),
       projectId: projectId(),
       userId: userId(),
-      ensureClipBuffer: clipBuffers.ensureClipBuffer,
+      ensureClipBuffer: clipBuffers.preload,
       onClose: () => setExportOpen(false),
     },
   });
@@ -902,7 +899,7 @@ const Timeline: Component = () => {
         onClipPointerDown={onClipPointerDown}
         onClipPointerUp={onClipPointerUp}
         onClipResizeStart={onClipResizeStart}
-        ensureClipBuffer={clipBuffers.ensureClipBuffer}
+        ensureClipBuffer={clipBuffers.preload}
         replaceMissingMediaClip={mediaRecovery.replaceMissingMediaClip}
         removeMissingMediaClip={mediaRecovery.removeMissingMediaClip}
         trackLookup={trackLookup()}

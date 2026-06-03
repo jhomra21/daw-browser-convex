@@ -19,6 +19,7 @@ import {
   type MultiDragSnapshot,
 } from '~/lib/clip-drag-placement'
 import { useDrag } from '~/hooks/useDrag'
+import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishTransientSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
@@ -55,7 +56,7 @@ type ClipDragOptions = {
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
   // buffer cache to prime newly created duplicates
-  audioBufferCache: Map<string, AudioBuffer>
+  audioBufferCache: ClipBuffers
   // Notify timeline that a set of clip moves has been committed (drop finished)
   onCommitMoves?: (clipIds: string[]) => void
   // optional history push
@@ -458,7 +459,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           placementTracks,
           insertLocalClip,
           removeLocalClips,
-          audioBufferCache: options.audioBufferCache,
+          audioBufferCache: options.audioBufferCache.writer,
           canProject: () => projectId() === rid,
           grantClipWrites,
           historyPush: options.historyPush,

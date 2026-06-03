@@ -179,7 +179,10 @@ const readSends = (value: unknown) => Array.isArray(value)
     ))
   : undefined
 
-export const readSharedTimelineClipCreatePayload = (value: unknown): SharedTimelineClipCreatePayload | null => {
+export const readSharedTimelineClipCreatePayload = (
+  value: unknown,
+  options?: { requireAudioSampleUrl?: boolean },
+): SharedTimelineClipCreatePayload | null => {
   if (!isRecord(value) || typeof value.trackId !== 'string' || typeof value.startSec !== 'number' || typeof value.duration !== 'number') return null
   const midi = isRecord(value.midi) && Array.isArray(value.midi.notes) && typeof value.midi.wave === 'string'
     ? {
@@ -202,7 +205,7 @@ export const readSharedTimelineClipCreatePayload = (value: unknown): SharedTimel
     : undefined
   const isMidiClip = Boolean(midi) || value.clipKind === 'midi'
   if (!isMidiClip && (
-    typeof value.sampleUrl !== 'string'
+    (options?.requireAudioSampleUrl !== false && typeof value.sampleUrl !== 'string')
     || typeof value.assetKey !== 'string'
     || typeof value.sourceKind !== 'string'
     || typeof value.durationSec !== 'number'

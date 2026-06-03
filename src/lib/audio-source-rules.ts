@@ -1,3 +1,6 @@
+import { isLocalId } from '~/lib/local-ids'
+import { defaultSampleKeyFromAssetKey, defaultSampleUrl } from '../../shared/default-sample-rules'
+
 export type AudioSourceKind = 'upload' | 'url' | 'recording'
 
 type AudioSourceMetadataPatchInput = {
@@ -44,6 +47,19 @@ export function sanitizeAudioAssetKey(value: string | undefined) {
 export function sanitizeAudioSourceKind(value: string | undefined): AudioSourceKind | undefined {
   if (value === 'upload' || value === 'url' || value === 'recording') return value
   return undefined
+}
+
+function defaultSampleUrlFromAssetKey(assetKey: string | undefined) {
+  const key = defaultSampleKeyFromAssetKey(assetKey)
+  return key ? defaultSampleUrl(key) : undefined
+}
+
+export function resolveClipSampleUrl(clip: { sampleUrl?: string; sourceAssetKey?: string }) {
+  return clip.sampleUrl ?? defaultSampleUrlFromAssetKey(clip.sourceAssetKey)
+}
+
+export function isLocalProjectAssetKey(assetKey: string) {
+  return isLocalId('asset', assetKey) && !defaultSampleKeyFromAssetKey(assetKey)
 }
 
 export function normalizeAudioSourceMetadataPatch(

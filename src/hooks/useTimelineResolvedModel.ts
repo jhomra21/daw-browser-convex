@@ -1,6 +1,7 @@
 import { createEffect, createMemo, type Accessor } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
 
+import type { ClipMediaCache } from '~/lib/clip-buffer-cache'
 import { convexApi } from '~/lib/convex'
 import {
   resolveTimelineTracks,
@@ -50,8 +51,7 @@ type UseTimelineResolvedModelOptions = {
     rememberTrackProjection: (track: Pick<Track, 'id' | 'historyRef' | 'name'> | null | undefined) => void
     rememberClipHistoryRef: (clip: Pick<Track['clips'][number], 'id' | 'historyRef'> | null | undefined) => void
   }
-  audioBufferCache: Map<string, AudioBuffer>
-  clipMediaStatus: Map<string, Clip['mediaStatus']>
+  buffers: ClipMediaCache
   bufferVersion: Accessor<number>
 }
 
@@ -105,10 +105,7 @@ export function useTimelineResolvedModel(
           historyRefsById: options.identity.clipHistoryRefsById(),
         },
       },
-      buffers: {
-        audioBufferCache: options.audioBufferCache,
-        clipMediaStatus: options.clipMediaStatus,
-      },
+      buffers: options.buffers,
     })
   }
 

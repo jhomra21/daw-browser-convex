@@ -1,4 +1,5 @@
 import { getPersistableAudioSourceMetadata } from "~/lib/audio-source";
+import type { ClipMediaCache } from "~/lib/clip-buffer-cache";
 import type { BatchClipCreateItem } from "~/lib/clip-create";
 import type { DuplicatedClipPlacement, MultiDragSnapshot } from "~/lib/clip-drag-placement";
 import { createTimelineTrackIndex, type TimelineTrackIndex } from "~/lib/timeline-track-index";
@@ -115,10 +116,10 @@ export const createDuplicatePreviews = (placements: DuplicatedClipPlacement[], p
 
 export const buildDuplicateClipCreateItems = (
   placements: DuplicatedClipPlacement[],
-  audioBufferCache: Map<string, AudioBuffer>,
+  audioBufferCache: ClipMediaCache,
 ): BatchClipCreateItem[] => placements.map((placement) => ({
   trackId: placement.trackId,
-  buffer: placement.originalClip.buffer ?? audioBufferCache.get(placement.originalClip.id) ?? null,
+  buffer: placement.originalClip.buffer ?? audioBufferCache.getBuffer(placement.originalClip.id) ?? null,
   clip: {
     startSec: placement.startSec,
     duration: placement.originalClip.duration,

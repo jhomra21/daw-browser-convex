@@ -7,6 +7,7 @@ import {
 
 import { drawWaveformPeaks } from "~/lib/audio-peaks/render-waveform";
 import { getWaveformSlice } from "~/lib/audio-peaks/select-waveform-window";
+import { resolveClipSampleUrl } from "~/lib/audio-source-rules";
 import { LANE_HEIGHT, PPS } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Clip, Track } from "~/types/timeline";
@@ -224,7 +225,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const midi: any = (props.clip as any).midi;
     const buffer = props.clip.buffer ?? null;
     const assetKey = props.clip.waveformAssetKey ?? props.clip.sourceAssetKey;
-    const sampleUrl = props.clip.sampleUrl;
+    const sampleUrl = resolveClipSampleUrl(props.clip);
     const cssW = Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS));
     const { sourceDurationSec, drawCols, sourceStartSec, sourceEndSec } =
       getAudioWaveformLayout(props.clip, cssW);
@@ -266,6 +267,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void props.clip.duration;
     void props.clip.buffer;
     void props.clip.sampleUrl;
+    void props.clip.sourceAssetKey;
     void props.clip.leftPadSec;
     void props.clip.bufferOffsetSec;
     void props.clip.sourceDurationSec;

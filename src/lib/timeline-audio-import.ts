@@ -1,7 +1,8 @@
 import { buildClipCreatePayload, buildLocalClip, createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory, type ClipCreateSnapshot } from '~/lib/clip-create'
 import { createAudioAssetKey, getAudioSourceMetadata, type AudioSourceKind } from '~/lib/audio-source'
-import type { AudioEngine } from '~/lib/audio-engine'
-import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError, readLocalAssetBytes } from '~/lib/local-assets'
+import { isLocalProjectAssetKey } from '~/lib/audio-source-rules'
+import type { ClipBuffers } from '~/lib/clip-buffer-cache'
+import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError } from '~/lib/local-assets'
 import { isLocalId } from '~/lib/local-ids'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { isSharedOutboxQueuedError, publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
@@ -34,8 +35,7 @@ type ImportProjectContext = {
 }
 
 type ImportClipContext = {
-  audioEngine: AudioEngine
-  audioBufferCache: Map<string, AudioBuffer>
+  buffers: ClipBuffers
   insertLocalClip: (trackId: TrackId, clip: Clip) => void
   removeLocalClips?: (clipIds: Iterable<string>) => void
   selectClip: (trackId: TrackId, clipId: string) => void
@@ -94,6 +94,13 @@ type AudioImportResult =
   | { status: 'failed'; message: string }
 
 export function createAudioImportTransaction(context: AudioImportTransactionContext) {
+  const preloadProjectedClip = (projectId: string, trackId: TrackId, clipId: string, sampleUrl?: string) => {
+    queueMicrotask(() => {
+      if (!context.project.isActiveProjectTrack(projectId, trackId)) return
+      void context.clips.buffers.preload(clipId, sampleUrl)
+    })
+  }
+
   const createServerClip = async (trackId: TrackId, clip: ClipCreateSnapshot) => {
     const projectId = context.project.projectId()
     const userId = context.project.userId()
@@ -108,7 +115,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
     const userId = context.project.userId()
     const grantScope = projectId && userId ? { projectId, userId } : null
     const clipName = input.name?.trim()?.length ? input.name : 'Sample'
-    const sampleUrl = projectId && isLocalId('project', projectId) && isLocalId('asset', input.assetKey)
+    const sampleUrl = projectId && isLocalId('project', projectId) && isLocalProjectAssetKey(input.assetKey)
       ? undefined
       : input.url
     const clipSnapshot: ClipCreateSnapshot = {
@@ -129,7 +136,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
           startSec: input.startSec,
           duration: input.duration,
           color: 'clip-audio',
-          sourceAssetId: isLocalId('asset', input.assetKey) ? input.assetKey : undefined,
+          sourceAssetId: isLocalProjectAssetKey(input.assetKey) ? input.assetKey : undefined,
           sourceAssetKey: input.assetKey,
           sourceKind: input.sourceKind,
           sourceDurationSec: input.source.durationSec,
@@ -140,22 +147,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         const clip = buildLocalClip({ id: row.id, clip: clipSnapshot })
         if (!context.project.isActiveProjectTrack(projectId, input.trackId)) return row.id
         context.clips.insertLocalClip(input.trackId, clip)
-        if (isLocalId('asset', input.assetKey)) {
-          const bytes = await readLocalAssetBytes(projectId, input.assetKey)
-          if (bytes.status === 'ready') {
-            try {
-              context.clips.audioBufferCache.set(row.id, await context.clips.audioEngine.decodeAudioData(await bytes.file.arrayBuffer()))
-            } catch {}
-          }
-        } else if (input.url) {
-          try {
-            const response = await fetch(input.url)
-            if (response.ok) {
-              context.clips.audioBufferCache.set(row.id, await context.clips.audioEngine.decodeAudioData(await response.arrayBuffer()))
-            }
-          } catch {}
-        }
-        if (!context.project.isActiveProjectTrack(projectId, input.trackId)) return row.id
+        preloadProjectedClip(projectId, input.trackId, row.id, sampleUrl)
         context.clips.selectClip(input.trackId, row.id)
         if (input.autoCreatedTrack) {
           context.clips.pushTrackClipCreateHistory(input.autoCreatedTrack, row.id, clipSnapshot)
@@ -198,6 +190,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
       id: createdClipId,
       clip: clipSnapshot,
     }))
+    preloadProjectedClip(projectId, input.trackId, createdClipId, sampleUrl)
 
     context.clips.selectClip(input.trackId, createdClipId)
     if (input.autoCreatedTrack) {
@@ -258,7 +251,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
           selectClip: context.clips.selectClip,
           historyPush: context.clips.historyPush,
           skipHistory: Boolean(input.autoCreatedTrack),
-          audioBufferCache: context.clips.audioBufferCache,
+          audioBufferCache: context.clips.buffers.writer,
           canProject: () => context.project.isActiveProjectTrack(projectId, input.track.id),
         })
         if (input.autoCreatedTrack && context.project.isActiveProjectTrack(projectId, input.track.id)) {
@@ -300,7 +293,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         selectClip: context.clips.selectClip,
         historyPush: context.clips.historyPush,
         uploadToR2: context.cloud.uploadToR2,
-        audioBufferCache: context.clips.audioBufferCache,
+        audioBufferCache: context.clips.buffers.writer,
         grantClipWrite: context.clips.grantClipWrite,
         grantScope: { projectId, userId },
         pushHistory: !input.autoCreatedTrack,

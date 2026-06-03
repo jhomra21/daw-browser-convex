@@ -1,4 +1,5 @@
 import { buildCreatedClipSelection, createProjectedClips, createProjectedLocalClips, pushClipCreateHistory, type BatchClipCreateItem } from "~/lib/clip-create";
+import type { ClipBufferWriter } from "~/lib/clip-buffer-cache";
 import { isLocalId } from "~/lib/local-ids";
 import type { OptimisticGrantScope } from "~/lib/optimistic-grant-scope";
 import { buildClipsMoveHistoryEntry } from "~/lib/undo/builders";
@@ -26,7 +27,7 @@ type DuplicateCommitInput = {
   placementTracks: () => Track[];
   insertLocalClip: (trackId: Track["id"], clip: Clip) => void;
   removeLocalClips: (clipIds: Iterable<string>) => void;
-  audioBufferCache: Map<string, AudioBuffer>;
+  audioBufferCache: ClipBufferWriter;
   canProject?: () => boolean;
   grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void;
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void;

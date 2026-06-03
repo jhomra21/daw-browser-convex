@@ -6,6 +6,7 @@ import { streamProjectR2Object } from '../project-r2-stream'
 import { drainR2DeleteQueue } from '../r2-delete-queue'
 import { createR2ObjectResponse } from '../r2-object-response'
 import { sanitizeFileNameSegment } from '../sanitize-file-name-segment'
+import { defaultSampleUrl, toDefaultSampleAssetKey } from '../../shared/default-sample-rules'
 
 export function registerSampleRoutes(app: App) {
 // Upload a sample to R2 (protected route)
@@ -138,10 +139,10 @@ export function registerSampleRoutes(app: App) {
         try {
           decodedName = decodeURIComponent(decodedName)
         } catch {}
-        const url = `/api/default-sample?key=${encodeURIComponent(key)}`
+        const url = defaultSampleUrl(key)
         samples.push({
           key,
-          assetKey: `asset:default:${key}`,
+          assetKey: toDefaultSampleAssetKey(key),
           sourceKind: 'url',
           name: decodedName,
           url,

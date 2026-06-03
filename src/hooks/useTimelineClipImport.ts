@@ -2,6 +2,7 @@ import type { Accessor } from 'solid-js'
 
 import type { ClipCreateSnapshot } from '~/lib/clip-create'
 import type { AudioEngine } from '~/lib/audio-engine'
+import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import { isLocalId } from '~/lib/local-ids'
 import { canTrackReceiveAudioClip, getTrackChannelRole } from '~/lib/track-routing'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
@@ -43,7 +44,7 @@ type TimelineClipImportOptions = {
   userId: Accessor<string | undefined>
   convexClient: ConvexClientType
   convexApi: ConvexApiType
-  audioBufferCache: Map<string, AudioBuffer>
+  clipBuffers: ClipBuffers
   uploadToR2: UploadToR2
   getScrollElement: () => HTMLDivElement | undefined
   getFileInput: () => HTMLInputElement | undefined
@@ -83,7 +84,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     userId,
     convexClient,
     convexApi,
-    audioBufferCache,
+    clipBuffers,
     uploadToR2,
     getScrollElement,
     getFileInput,
@@ -238,8 +239,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
       isActiveProjectTrack,
     },
     clips: {
-      audioEngine,
-      audioBufferCache,
+      buffers: clipBuffers,
       insertLocalClip,
       removeLocalClips,
       selectClip: applySelectionAfterCreate,

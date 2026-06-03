@@ -1,6 +1,7 @@
 import { batch, createSignal, onCleanup, type Accessor, type Setter } from 'solid-js'
 
 import { createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory, type ClipCreateSnapshot } from '~/lib/clip-create'
+import type { ClipBufferWriter } from '~/lib/clip-buffer-cache'
 import { createAudioAssetKey, getAudioSourceMetadata } from '~/lib/audio-source'
 import type { AudioEngine } from '~/lib/audio-engine'
 import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError } from '~/lib/local-assets'
@@ -50,7 +51,7 @@ type UseTrackRecordingOptions = {
   selection: TimelineSelectionController
   playheadSec: Accessor<number>
   uploadToR2: UploadToR2
-  audioBufferCache: Map<string, AudioBuffer>
+  audioBufferCache: ClipBufferWriter
   projectId: Accessor<string | undefined>
   userId: Accessor<string | undefined>
   convexClient: ConvexClientType

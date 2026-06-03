@@ -1,6 +1,6 @@
 import { openLocalProjectDb, type LocalProjectSyncStateRow } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { isSharedTimelineOperationKind, readSharedTimelineClipCreatePayload } from '~/lib/shared-timeline-operations'
+import { isSharedTimelineOperationKind, readSharedTimelineClipCreatePayload, type SharedTimelineClipCreatePayload } from '~/lib/shared-timeline-operations'
 import {
   publishSharedTimelineOperationParts,
   SharedTimelineOperationHttpError,
@@ -16,7 +16,7 @@ type UploadedAudioClipPayload = {
   assetKey: string
   file: File
   duration?: number
-  clipPayload: Extract<SharedTimelineOperation, { kind: 'clips.create' }>['payload']
+  clipPayload: SharedTimelineClipCreatePayload
 }
 
 type SharedOutboxEntry = {
@@ -120,7 +120,7 @@ const writeSummary = async (projectId: string, userId: string, rows?: LocalProje
 
 const readUploadedAudioClipPayload = (value: unknown): UploadedAudioClipPayload | null => {
   if (!isRecord(value)) return null
-  const clipPayload = readSharedTimelineClipCreatePayload(value.clipPayload)
+  const clipPayload = readSharedTimelineClipCreatePayload(value.clipPayload, { requireAudioSampleUrl: false })
   if (
     typeof value.projectId !== 'string'
     || typeof value.assetKey !== 'string'

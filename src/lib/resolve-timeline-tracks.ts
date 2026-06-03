@@ -1,7 +1,8 @@
 import type { FunctionReturnType } from 'convex/server'
 
+import type { ClipMediaCache } from '~/lib/clip-buffer-cache'
 import { convexApi } from '~/lib/convex'
-import { sanitizeAudioSourceKind } from '~/lib/audio-source-rules'
+import { isLocalProjectAssetKey, sanitizeAudioSourceKind } from '~/lib/audio-source-rules'
 import { isLocalId } from '~/lib/local-ids'
 import { resolveTrackMixView } from '~/lib/timeline-mix-authority'
 import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
@@ -79,10 +80,7 @@ type ResolveTimelineTracksOptions = {
       historyRefsById: Map<string, string>
     }
   }
-  buffers: {
-    audioBufferCache: Map<string, AudioBuffer>
-    clipMediaStatus: Map<string, Clip['mediaStatus']>
-  }
+  buffers: ClipMediaCache
 }
 
 type ServerTimelineIndex<TTrackId extends string = Track['id']> = {
@@ -125,15 +123,10 @@ const normalizeMidi = (value: FullTimelineView['clips'][number]['midi']): Clip['
 
 const getWaveformAssetKey = (projectId: string | undefined, sourceAssetKey: string | undefined) => {
   if (!projectId || !sourceAssetKey) return sourceAssetKey
-  return isLocalId('project', projectId) && isLocalId('asset', sourceAssetKey)
+  return isLocalId('project', projectId) && isLocalProjectAssetKey(sourceAssetKey)
     ? `${projectId}:${sourceAssetKey}`
     : sourceAssetKey
 }
-
-const withWaveformAssetKey = (clip: Clip, projectId: string | undefined): Clip => ({
-  ...clip,
-  waveformAssetKey: getWaveformAssetKey(projectId, clip.sourceAssetKey),
-})
 
 const sortTrackClips = (track: Track) => {
   track.clips.sort((left, right) => left.startSec - right.startSec)
@@ -142,12 +135,11 @@ const sortTrackClips = (track: Track) => {
 const attachClipBuffer = (
   clip: Clip,
   projectId: string | undefined,
-  audioBufferCache: Map<string, AudioBuffer>,
-  clipMediaStatus: Map<string, Clip['mediaStatus']>,
+  buffers: ClipMediaCache,
 ): Clip => ({
   ...clip,
-  buffer: audioBufferCache.get(clip.id) ?? clip.buffer ?? null,
-  mediaStatus: clipMediaStatus.get(clip.id),
+  buffer: buffers.getBuffer(clip.id) ?? clip.buffer ?? null,
+  mediaStatus: buffers.getMediaStatus(clip.id),
   waveformAssetKey: getWaveformAssetKey(projectId, clip.sourceAssetKey),
 })
 
@@ -365,8 +357,8 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
       id: clipId,
       historyRef: options.client.clips.historyRefsById.get(clipId) ?? clipId,
       name: clipRow.name ?? 'Clip',
-      buffer: options.buffers.audioBufferCache.get(clipId) ?? null,
-      mediaStatus: options.buffers.clipMediaStatus.get(clipId),
+      buffer: options.buffers.getBuffer(clipId) ?? null,
+      mediaStatus: options.buffers.getMediaStatus(clipId),
       startSec: clipRow.startSec,
       duration: clipRow.duration,
       sourceAssetKey: clipRow.sourceAssetKey,
@@ -391,7 +383,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
     if (options.client.clips.removedIds.has(clipId)) continue
     const track = trackById.get(pending.trackId)
     if (!track) continue
-    const clip = attachClipBuffer(cloneTimelineClip(pending.clip), options.projectId, options.buffers.audioBufferCache, options.buffers.clipMediaStatus)
+    const clip = attachClipBuffer(cloneTimelineClip(pending.clip), options.projectId, options.buffers)
     const currentTrackId = clipTrackIdById.get(clipId)
     const currentTrack = currentTrackId ? trackById.get(currentTrackId) : undefined
     if (currentTrack && currentTrack !== track) {
@@ -417,7 +409,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
       const nextTrack = nextTrackId ? trackById.get(nextTrackId) : undefined
       if (!nextTrack || !currentTrackId || !currentTrack) continue
       const resolvedNextTrackId = nextTrack.id
-      const nextClip = attachClipBuffer(applyClipPatch(currentClip, patch), options.projectId, options.buffers.audioBufferCache, options.buffers.clipMediaStatus)
+      const nextClip = attachClipBuffer(applyClipPatch(currentClip, patch), options.projectId, options.buffers)
       if (resolvedNextTrackId !== currentTrackId) {
         removeClipFromTrack(currentTrack, clipId)
         pushClipToTrack(nextTrack, nextClip)
@@ -441,7 +433,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
     const track = trackById.get(trackId)
     if (!track) continue
     for (const clip of clips) {
-      pushClipToTrack(track, attachClipBuffer(cloneTimelineClip(clip), options.projectId, options.buffers.audioBufferCache, options.buffers.clipMediaStatus))
+      pushClipToTrack(track, attachClipBuffer(cloneTimelineClip(clip), options.projectId, options.buffers))
     }
   }
 
@@ -452,8 +444,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
     applyTrackMix(track, options, projectedTracks)
     track.clips = track.clips
       .filter((clip) => !options.client.clips.removedIds.has(clip.id))
-      .map((clip) => attachClipBuffer(clip, options.projectId, options.buffers.audioBufferCache, options.buffers.clipMediaStatus))
-      .map((clip) => withWaveformAssetKey(clip, options.projectId))
+      .map((clip) => attachClipBuffer(clip, options.projectId, options.buffers))
     sortTrackClips(track)
   }
 

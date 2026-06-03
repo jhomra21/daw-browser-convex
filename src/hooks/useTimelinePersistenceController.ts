@@ -1,6 +1,7 @@
 import type { Accessor } from "solid-js";
 import { createEffect, onCleanup } from "solid-js";
 import type { AudioEngine } from "~/lib/audio-engine";
+import type { ClipBufferWriter } from "~/lib/clip-buffer-cache";
 import { isLocalId } from "~/lib/local-ids";
 import type { LocalProjectMode } from "~/lib/local-project-db";
 import { flushSharedOutbox } from "~/lib/shared-outbox";
@@ -34,8 +35,7 @@ type Input = {
   userId: Accessor<string | undefined>;
   renderTracks: Accessor<Track[]>;
   audioEngine: AudioEngine;
-  audioBufferCache: Map<string, AudioBuffer>;
-  clipMediaStatus: Map<string, Clip["mediaStatus"]>;
+  audioBufferCache: ClipBufferWriter;
   localProject: LocalProjectActions;
   projection: ProjectionActions;
   selection: SelectionActions;
@@ -49,7 +49,6 @@ export const useTimelinePersistenceController = (input: Input) => {
     renderTracks: input.renderTracks,
     audioEngine: input.audioEngine,
     audioBufferCache: input.audioBufferCache,
-    clipMediaStatus: input.clipMediaStatus,
     removeClip: async ({ clipId }) => {
       const projectId = input.projectId();
       const removedIds = await createTimelineClipWriteAdapter({

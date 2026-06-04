@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { isValidR2DeleteKey, type R2DeleteKind } from "../src/lib/r2-delete-keys";
 
 const retryDelayMs = (attempts: number) => Math.min(60 * 60 * 1000, 2 ** Math.min(attempts, 8) * 1000);
+const clampQueueLimit = (limit: number) => Math.max(1, Math.min(limit, 100));
 
 type WorkerAuthCtx = {
   auth: {
@@ -66,7 +67,21 @@ export const listDue = query({
     return await ctx.db
       .query("r2DeleteQueue")
       .withIndex("by_room_due", (q) => q.eq("projectId", projectId).lte("nextAttemptAt", now))
-      .take(Math.max(1, Math.min(limit, 100)));
+      .take(clampQueueLimit(limit));
+  },
+});
+
+export const listDueAny = query({
+  args: {
+    now: v.number(),
+    limit: v.number(),
+  },
+  handler: async (ctx, { now, limit }) => {
+    await requireWorkerQueueAccess(ctx);
+    return await ctx.db
+      .query("r2DeleteQueue")
+      .withIndex("by_due", (q) => q.lte("nextAttemptAt", now))
+      .take(clampQueueLimit(limit));
   },
 });
 

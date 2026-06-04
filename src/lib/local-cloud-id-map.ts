@@ -1,4 +1,5 @@
 import { openLocalProjectDb } from '~/lib/local-project-db'
+import type { LocalProjectSyncStateRow } from '~/lib/local-project-db'
 
 export type CloudMappedEntityKind = 'track' | 'clip' | 'asset'
 
@@ -7,12 +8,72 @@ export type CloudIdMapping = {
   localId: string
   cloudId: string
   historyRef: string
-  updatedAt: number
+  updatedAt?: number
 }
 
 const keyFor = (kind: CloudMappedEntityKind, localId: string) => `cloud-id:${kind}:${localId}`
 const indexKeyFor = (kind: CloudMappedEntityKind, cloudId: string) => `local-id:${kind}:${cloudId}`
 const now = () => Date.now()
+
+const isCloudMappedEntityKind = (value: unknown): value is CloudMappedEntityKind => (
+  value === 'track' || value === 'clip' || value === 'asset'
+)
+
+const createCloudIdMapping = (
+  kind: CloudMappedEntityKind,
+  mapping: {
+    localId: string
+    cloudId: string
+    historyRef?: string
+  },
+  updatedAt: number,
+): CloudIdMapping => ({
+  kind,
+  localId: mapping.localId,
+  cloudId: mapping.cloudId,
+  historyRef: mapping.historyRef ?? mapping.localId,
+  updatedAt,
+})
+
+export const assetCloudIdMappingKey = (assetId: string) => keyFor('asset', assetId)
+
+export const isCloudIdMappingMetadataKey = (key: string) => (
+  key.startsWith('cloud-id:') || key.startsWith('local-id:')
+)
+
+const cloudIdMappingRows = (
+  kind: CloudMappedEntityKind,
+  mappings: Iterable<{
+    localId: string
+    cloudId: string
+    historyRef?: string
+  }>,
+  updatedAt = now(),
+): LocalProjectSyncStateRow[] => {
+  const rows: LocalProjectSyncStateRow[] = []
+  for (const mapping of mappings) {
+    rows.push({
+      key: keyFor(kind, mapping.localId),
+      value: createCloudIdMapping(kind, mapping, updatedAt),
+      updatedAt,
+    })
+    rows.push({
+      key: indexKeyFor(kind, mapping.cloudId),
+      value: mapping.localId,
+      updatedAt,
+    })
+  }
+  return rows
+}
+
+export const assetCloudIdMappingRows = (
+  mappings: Iterable<{
+    localId: string
+    cloudId: string
+    historyRef?: string
+  }>,
+  updatedAt = now(),
+) => cloudIdMappingRows('asset', mappings, updatedAt)
 
 const isMapping = (value: unknown): value is CloudIdMapping => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
@@ -21,12 +82,23 @@ const isMapping = (value: unknown): value is CloudIdMapping => {
     && 'localId' in value
     && 'cloudId' in value
     && 'historyRef' in value
-    && typeof value.kind === 'string'
+    && isCloudMappedEntityKind(value.kind)
     && typeof value.localId === 'string'
     && typeof value.cloudId === 'string'
     && typeof value.historyRef === 'string'
+    && (!('updatedAt' in value) || typeof value.updatedAt === 'number')
   )
 }
+
+export const isCloudIdMappingValue = isMapping
+
+export const isAssetCloudMappingRow = (
+  row: LocalProjectSyncStateRow,
+): row is LocalProjectSyncStateRow & { value: CloudIdMapping } => (
+  isMapping(row.value)
+  && row.value.kind === 'asset'
+  && row.key === assetCloudIdMappingKey(row.value.localId)
+)
 
 export const saveCloudIdMapping = async (
   projectId: string,
@@ -50,18 +122,18 @@ export const saveCloudIdMapping = async (
   ) {
     return existingMappingRow.value
   }
-  const mapping = {
-    kind,
+  const updatedAt = now()
+  const mapping = createCloudIdMapping(kind, {
     localId,
     cloudId,
     historyRef,
-    updatedAt: now(),
-  }
+  }, updatedAt)
   const tx = db.transaction('syncState', 'readwrite')
-  const writes: Promise<unknown>[] = [
-    tx.store.put({ key: keyFor(kind, localId), value: mapping, updatedAt: mapping.updatedAt }),
-    tx.store.put({ key: indexKeyFor(kind, cloudId), value: localId, updatedAt: mapping.updatedAt }),
-  ]
+  const writes: Promise<unknown>[] = cloudIdMappingRows(
+    kind,
+    [{ localId, cloudId, historyRef }],
+    updatedAt,
+  ).map((row) => tx.store.put(row))
   if (isMapping(existingMappingRow?.value) && existingMappingRow.value.cloudId !== cloudId) {
     writes.push(tx.store.delete(indexKeyFor(kind, existingMappingRow.value.cloudId)))
   }

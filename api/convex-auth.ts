@@ -13,6 +13,16 @@ type ConvexAuthEnv = {
   BETTER_AUTH_URL?: string;
 }
 
+type ConvexAuthUser = Pick<Session['user'], 'id' | 'email' | 'name'> & {
+  image?: Session['user']['image']
+}
+
+const maintenanceWorkerUser: ConvexAuthUser = {
+  id: 'daw-worker',
+  email: 'worker@daw-browser-convex.local',
+  name: 'DAW Worker',
+}
+
 const readEnv = (c: ApiContext): ConvexAuthEnv => c.env
 
 const readIssuer = (c: ApiContext) => {
@@ -40,7 +50,7 @@ const readJwks = async (c: ApiContext) => {
 
 const issueConvexAuthToken = async (
   c: ApiContext,
-  user: Session['user'],
+  user: ConvexAuthUser,
   options?: { worker?: boolean },
 ) => {
   const now = Math.floor(Date.now() / 1000)
@@ -60,19 +70,28 @@ const issueConvexAuthToken = async (
     .sign(privateKey)
 }
 
-export const createAuthenticatedConvexClient = async (c: ApiContext, user: Session['user']) => {
+const createConvexClientWithAuth = async (
+  c: ApiContext,
+  user: ConvexAuthUser,
+  options?: { worker?: boolean },
+) => {
   const { ConvexHttpClient } = await import('convex/browser')
   const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
-  convex.setAuth(await issueConvexAuthToken(c, user))
+  convex.setAuth(await issueConvexAuthToken(c, user, options))
   return convex
 }
 
-export const createWorkerConvexClient = async (c: ApiContext, user: Session['user']) => {
-  const { ConvexHttpClient } = await import('convex/browser')
-  const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
-  convex.setAuth(await issueConvexAuthToken(c, user, { worker: true }))
-  return convex
-}
+export const createAuthenticatedConvexClient = async (c: ApiContext, user: Session['user']) => (
+  createConvexClientWithAuth(c, user)
+)
+
+export const createWorkerConvexClient = async (c: ApiContext, user: Session['user']) => (
+  createConvexClientWithAuth(c, user, { worker: true })
+)
+
+export const createMaintenanceWorkerConvexClient = async (c: ApiContext) => (
+  createConvexClientWithAuth(c, maintenanceWorkerUser, { worker: true })
+)
 
 export function registerConvexAuthRoutes(app: App) {
   app.get('/api/convex-auth/.well-known/jwks.json', async (c) => {

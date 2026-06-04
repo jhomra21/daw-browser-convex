@@ -7,6 +7,7 @@ import {
   saveProjectDirectoryHandle,
   type LocalProjectAssetRow,
 } from '~/lib/local-project-db'
+import { assetCloudIdMappingKey } from '~/lib/local-cloud-id-map'
 import { createLocalAssetId } from '~/lib/local-ids'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 
@@ -238,7 +239,7 @@ export const deleteLocalAsset = async (
 ): Promise<void> => {
   const row = await getLocalAsset(projectId, assetId)
   const db = await openLocalProjectDb(projectId)
-  const cloudMapping = await db.get('syncState', `cloud-id:asset:${assetId}`)
+  const cloudMapping = await db.get('syncState', assetCloudIdMappingKey(assetId))
   const timestamp = now()
   const tx = db.transaction(['assets', 'syncState'], 'readwrite')
   await Promise.all([

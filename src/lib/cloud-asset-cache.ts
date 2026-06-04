@@ -1,4 +1,5 @@
 import { getLocalAsset, readLocalAssetBytes, writeLocalAssetFile } from '~/lib/local-assets'
+import { assetCloudIdMappingKey, isCloudIdMappingValue } from '~/lib/local-cloud-id-map'
 import { openLocalProjectDb } from '~/lib/local-project-db'
 
 type CloudAssetReadResult =
@@ -18,14 +19,11 @@ const readCloudAssetReference = async (
   const [urlRow, sourceRow, mappingRow] = await Promise.all([
     db.get('syncState', `cloud-url:asset:${assetId}`),
     db.get('syncState', `cloud-source:asset:${assetId}`),
-    db.get('syncState', `cloud-id:asset:${assetId}`),
+    db.get('syncState', assetCloudIdMappingKey(assetId)),
   ])
   if (typeof urlRow?.value === 'string') return { kind: 'url', value: urlRow.value }
   if (typeof sourceRow?.value === 'string') return { kind: 'key', value: sourceRow.value }
-  const mapping = mappingRow?.value
-  if (typeof mapping === 'object' && mapping !== null && !Array.isArray(mapping) && 'cloudId' in mapping) {
-    return typeof mapping.cloudId === 'string' ? { kind: 'key', value: mapping.cloudId } : undefined
-  }
+  if (isCloudIdMappingValue(mappingRow?.value)) return { kind: 'key', value: mappingRow.value.cloudId }
   return undefined
 }
 

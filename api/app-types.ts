@@ -6,8 +6,12 @@ export type Variables = {
   session: Session['session'] | null;
 }
 
+type ApiEnv = Env & {
+  R2_DELETE_QUEUE_DRAIN_TOKEN?: string;
+}
+
 export type ApiBindings = {
-  Bindings: Env;
+  Bindings: ApiEnv;
   Variables: Variables;
 }
 

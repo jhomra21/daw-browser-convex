@@ -6,6 +6,7 @@ import { registerConvexAuthRoutes } from './convex-auth'
 import { registerAgentRoutes } from './routes/agent'
 import { registerCloudBackupRoutes } from './routes/cloud-backups'
 import { registerExportRoutes } from './routes/exports'
+import { registerMaintenanceRoutes } from './routes/maintenance'
 import { registerPublicSampleRoutes, registerSampleRoutes } from './routes/samples'
 import { registerShareInviteRoutes } from './routes/share-invites'
 import { registerTimelineOperationRoutes } from './routes/timeline-operations'
@@ -88,6 +89,7 @@ app.get('/api/protected', (c) => {
 registerSampleRoutes(app)
 registerCloudBackupRoutes(app)
 registerExportRoutes(app)
+registerMaintenanceRoutes(app)
 registerTimelineOperationRoutes(app)
 
 export default app

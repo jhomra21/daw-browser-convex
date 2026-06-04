@@ -1,4 +1,5 @@
 import { readLocalAssetBytes } from '~/lib/local-assets'
+import { assetCloudIdMappingRows, isCloudIdMappingValue } from '~/lib/local-cloud-id-map'
 import { createProjectId, importLocalProject, openLocalProjectDb, replaceLocalProject, setLocalProjectMode } from '~/lib/local-project-db'
 import { buildProjectManifest, CLOUD_BACKUP_LAST_MANIFEST_VERSION_KEY, CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY, createRestoredProjectEntry, isProjectManifestSyncStateKey } from '~/lib/project-manifest'
 import { normalizeProjectManifest, type ProjectManifest } from '~/lib/project-manifest-contract'
@@ -40,8 +41,7 @@ const readPendingDeletedCloudAssetRows = async (projectId: string) => {
 
 const readPendingDeletedCloudAssetKey = (row: LocalProjectSyncStateRow): string | null => {
   if (typeof row.value === 'string') return row.value
-  if (!isRecord(row.value) || typeof row.value.cloudId !== 'string') return null
-  return row.value.cloudId
+  return isCloudIdMappingValue(row.value) ? row.value.cloudId : null
 }
 
 const readNumber = (value: unknown): number | undefined => (
@@ -159,40 +159,10 @@ const cloudAssetSourceRows = (manifest: ProjectManifest): LocalProjectSyncStateR
   })
 }
 
-const assetCloudMappingRows = (
-  entries: Iterable<{ localId: string; cloudId: string }>,
-): LocalProjectSyncStateRow[] => {
-  const updatedAt = Date.now()
-  return Array.from(entries).flatMap(({ localId, cloudId }) => [
-    {
-      key: `cloud-id:asset:${localId}`,
-      value: {
-        kind: 'asset',
-        localId,
-        cloudId,
-        historyRef: localId,
-        updatedAt,
-      },
-      updatedAt,
-    },
-    {
-      key: `local-id:asset:${cloudId}`,
-      value: localId,
-      updatedAt,
-    },
-  ])
-}
-
 const cloudAssetMappingRows = (manifest: ProjectManifest): LocalProjectSyncStateRow[] => (
-  assetCloudMappingRows(manifest.assets.flatMap((asset) => {
-    if (!asset.cloudKey) return []
-    return [
-      {
-        localId: asset.id,
-        cloudId: asset.cloudKey,
-      },
-    ]
-  }))
+  assetCloudIdMappingRows(manifest.assets.flatMap((asset) => (
+    asset.cloudKey ? [{ localId: asset.id, cloudId: asset.cloudKey }] : []
+  )))
 )
 
 const backupBookkeepingRows = (
@@ -216,8 +186,12 @@ const backupBookkeepingRows = (
 
 const uploadedAssetMappingRows = (
   uploadedAssetKeys: Record<string, string>,
-): LocalProjectSyncStateRow[] => assetCloudMappingRows(
+): LocalProjectSyncStateRow[] => assetCloudIdMappingRows(
   Object.entries(uploadedAssetKeys).map(([localId, cloudId]) => ({ localId, cloudId })),
+)
+
+const dedupeSyncRows = (rows: LocalProjectSyncStateRow[]): LocalProjectSyncStateRow[] => (
+  Array.from(new Map(rows.map((row) => [row.key, row])).values())
 )
 
 const applyCloudBackupCommit = async (
@@ -256,12 +230,12 @@ const restoreSyncRows = (
   manifest: ProjectManifest,
   manifestVersion: string,
   options: { linkAssetsForBackup: boolean },
-): LocalProjectSyncStateRow[] => [
+): LocalProjectSyncStateRow[] => dedupeSyncRows([
   ...manifest.syncState.filter((row) => isProjectManifestSyncStateKey(row.key)),
   ...cloudAssetSourceRows(manifest),
   ...(options.linkAssetsForBackup ? cloudAssetMappingRows(manifest) : []),
   ...backupBookkeepingRows(manifest, manifestVersion),
-]
+])
 
 const fetchCloudBackupSnapshot = async (projectId: string): Promise<CloudBackupSnapshot> => {
   const response = await fetch(`/api/cloud-backups/${encodeURIComponent(projectId)}`)

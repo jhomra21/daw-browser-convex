@@ -3,6 +3,10 @@ import {
   getLocalProject,
   LOCAL_PROJECT_SCHEMA_VERSION,
 } from '~/lib/local-project-db'
+import {
+  isAssetCloudMappingRow,
+  isCloudIdMappingMetadataKey,
+} from '~/lib/local-cloud-id-map'
 import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writes'
 import { PROJECT_MANIFEST_SCHEMA_VERSION, type ProjectManifest } from '~/lib/project-manifest-contract'
 
@@ -12,8 +16,7 @@ export const CLOUD_BACKUP_LAST_MANIFEST_VERSION_KEY = 'cloudBackup:lastManifestV
 const isLocalSyncMetadataKey = (key: string) => (
   key === CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY
   || key === CLOUD_BACKUP_LAST_MANIFEST_VERSION_KEY
-  || key.startsWith('cloud-id:')
-  || key.startsWith('local-id:')
+  || isCloudIdMappingMetadataKey(key)
 )
 
 export const isProjectManifestSyncStateKey = (key: string) => (
@@ -41,10 +44,7 @@ const buildAssetCloudKeys = (
 ) => {
   const cloudKeys = new Map<string, string>()
   for (const row of rows.syncState) {
-    if (!row.key.startsWith('cloud-id:asset:')) continue
-    if (typeof row.value !== 'object' || row.value === null || Array.isArray(row.value)) continue
-    if (!('localId' in row.value) || !('cloudId' in row.value)) continue
-    if (typeof row.value.localId === 'string' && typeof row.value.cloudId === 'string') {
+    if (isAssetCloudMappingRow(row)) {
       cloudKeys.set(row.value.localId, row.value.cloudId)
     }
   }

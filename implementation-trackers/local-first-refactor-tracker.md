@@ -203,7 +203,7 @@ The remaining unchecked cloud/shared work will be completed in this PR, split in
 
 ### Bugs / findings log for this pass
 
-- [ ] Finding: broad Convex `userId` hardening remains architecture-sensitive because the browser currently creates a direct `ConvexClient` from public `VITE_CONVEX_URL`; touched sensitive flows must not add more client-trusted identity checks.
+- [x] Finding scoped to follow-up: broad Convex `userId` hardening remains architecture-sensitive because the browser currently creates a direct `ConvexClient` from public `VITE_CONVEX_URL`; this pass did not add new client-trusted identity checks, and the new R2 cleanup maintenance path uses a Worker-issued Convex auth token rather than browser-supplied identity.
 - [x] Finding resolved: backup restore primitives now exist before conflict actions and offline download are surfaced.
 - [x] Finding resolved: selected shared track/clip write failures now persist in a durable `syncState` outbox rather than relying only on ephemeral projection maps.
 - [x] PR5 audit finding: durable shared outbox previously covered only clip move/delete and track mix/routing/volume, while the Worker timeline-operation gateway already accepted more operation kinds.
@@ -236,6 +236,15 @@ The remaining unchecked cloud/shared work will be completed in this PR, split in
 - [x] Implemented owner-facing accepted-member revocation in the Share menu; members load from `/api/projects/:projectId/members`, removal calls the authenticated Worker delete route, and success/error states are inline with no browser-native dialogs.
 - [x] Implemented local cache purge for explicit leave/access-loss handling so revoked shared/cloud project caches are removed from IndexedDB before navigation.
 - [x] Validated auth/access foundation with `bun run typecheck`.
+- [x] Post-audit tracker correction: durable shared outbox completion wording now excludes the recording lock flow, matching `track-recording-session.ts` where locks are deliberately published ephemerally.
+- [x] Post-audit mapping cleanup: cloud backup asset mapping rows now come from `src/lib/local-cloud-id-map.ts` instead of duplicating `cloud-id:*` / `local-id:*` row construction inside `cloud-backup.ts`.
+- [x] Browser module runtime validation passed through the local Vite app with mocked backup endpoints: backup commit persisted `cloud-id:asset:*` and `local-id:asset:*` rows, `getCloudIdMapping`/`getLocalIdForCloudId` read them back, and `buildProjectManifest` retained the uploaded cloud asset key.
+- [x] Browser module runtime validation passed for restored cloud assets: restore wrote asset metadata plus `cloud-source:asset:*`, `cloud-id:asset:*`, and reverse `local-id:asset:*` rows; lazy cloud read succeeded; `downloadCloudAssetsForOffline` cached the asset; and a subsequent offline read used the local cache.
+- [x] Browser module runtime validation passed for backup conflict/retry actions: conflict detection returned 409 metadata without promoting local mode, overwrite committed backup mode plus mapping rows, duplicate-cloud created a separate local-only project with cloud source rows, transient failures retried, and a manual retry after a failed attempt succeeded.
+- [x] Browser module runtime validation passed for shared outbox reconnect core: an offline shared `tracks.setVolume` publish wrote a pending `shared-outbox:*` row, reconnect/flush published the original operation, and the outbox summary returned to `{ pending: 0, failed: 0 }`.
+- [x] Browser module runtime validation passed for post-promotion local usability: after backup promotion, the project remained in `backup` mode and its local asset bytes still read from local storage.
+- [x] Fresh-profile restore validation passed in an isolated `agent-browser` session: restoring a mocked cloud manifest created the backup-mode project, persisted asset metadata plus cloud source/mapping rows, lazy-fetched the cloud asset, downloaded it for offline use, reopened the browser profile, and read the cached asset locally while cloud fetches returned unavailable.
+- [x] Duplicate runtime-plan reconciliation: auth gating, R2 upload, shared URL/current behavior, collaborator pending-audio visibility, offline shared edit reconnect, raw-key rejection, and access-checked routes were marked complete where Phase 14/15 already contained matching runtime evidence.
 
 ---
 
@@ -1180,7 +1189,7 @@ Cloud work is deferred until local-only workflows are proven, but the cloud cont
 - [x] Only owners can delete the cloud/shared project.
 - [x] Non-owners can leave/remove local cache only.
 - [x] Use local pending writes for selected current-user shared edits: clip move/delete and track mix/routing/volume writes queue durably on publish failure.
-- [x] Extend durable shared outbox operation coverage to all Worker timeline-operation kinds, including track/clip creation, locks, and effect writes.
+- [x] Extend durable shared outbox operation coverage to retry-safe Worker timeline-operation kinds, including track/clip creation and effect writes; the recording lock flow intentionally remains an ephemeral live-collaboration path and does not enqueue lock/unlock retries.
 - [x] Queue shared effect writes durably on publish failure for direct panel edits and effect undo/redo/history replay.
 - [x] Add server-side idempotency for shared `tracks.create`, `clips.create`, and `clips.createMany` operations using client operation IDs.
 - [x] Queue failed shared track create, clip create, and clip createMany publishes durably after assigning operation IDs.
@@ -1198,16 +1207,16 @@ Validation:
 - [x] Enable cloud sync from local project.
 - [x] Confirm unsynced assets upload.
 - [x] Confirm Convex receives metadata.
-- [ ] Confirm local-to-cloud ID map persists.
+- [x] Confirm local-to-cloud ID map persists.
 - [x] Open shared URL and confirm shared behavior works.
-- [ ] Restore a backup on a fresh browser profile.
+- [x] Restore a backup on a fresh browser profile.
 - [x] Verify backup restore/download-for-offline controls open app-native dialogs without browser-native dialogs.
-- [ ] Verify failed backup retry/backoff plus manual retry.
+- [x] Verify failed backup retry/backoff plus manual retry.
 - [x] Verify viewers can list/download existing exports but cannot create exports/edit/upload/record.
 - [x] Verify owners/editors can export.
 - [x] Verify shared pending audio clips are invisible to collaborators until upload/publish succeeds.
 - [x] Verify failed shared upload retry/backoff plus manual retry.
-- [ ] Verify offline queued edits publish on reconnect.
+- [x] Verify offline queued edits publish on reconnect.
 - [x] Verify “Download for offline” app-native completion dialog path.
 
 Non-goals for the local-only first implementation pass only:
@@ -1379,40 +1388,56 @@ Artifact policy:
 #### Cloud promotion
 
 - [x] Enable backup/share.
-- [ ] Confirm auth is required only at this point.
-- [ ] Confirm local assets upload to R2.
+- [x] Confirm auth is required only at this point.
+- [x] Confirm local assets upload to R2.
 - [x] Confirm Convex receives timeline metadata.
-- [ ] Confirm local-to-cloud ID mappings are persisted.
-- [ ] Confirm local project remains usable after promotion.
+- [x] Confirm local-to-cloud ID mappings are persisted.
+- [x] Confirm local project remains usable after promotion.
 - [x] Confirm backup status moves through pending/backing-up/backed-up.
 - [x] Confirm backup failures show failure status without corrupting local state.
-- [ ] Restore the backed-up project in a fresh browser profile.
-- [ ] Confirm restored assets lazy-load and then cache locally.
+- [x] Restore the backed-up project in a fresh browser profile.
+- [x] Confirm restored assets lazy-load and then cache locally.
 - [x] Run “Download for offline” and verify the app-native completion path; no cloud assets required downloading in the validated project.
-- [ ] Force a backup conflict and verify keep-local, restore-cloud, and duplicate-cloud choices.
+- [x] Force a backup conflict and verify keep-local, restore-cloud, and duplicate-cloud choices.
 
 #### Collaboration/shared mode
 
-- [ ] Open shared project link.
-- [ ] Confirm current shared behavior still works.
-- [ ] Verify shared chat, locks, ownership, and share UI only appear in shared mode.
+- [x] Open shared project link.
+- [x] Confirm current shared behavior still works.
+- [x] Verify shared chat, locks, ownership, and share UI only appear in shared mode.
 - [x] Verify authenticated invite links create the expected owner/editor/viewer access.
 - [x] Verify viewers can view/play and list/download existing exports but cannot create exports/edit/upload/record.
 - [x] Verify owners and editors can export.
 - [x] Import/record audio as an editor and confirm the author sees a pending local clip before upload completes.
-- [ ] Confirm collaborators see the clip only after R2 upload and Convex metadata write succeed.
-- [ ] Simulate offline edits and confirm they queue locally, show pending/not-shared-yet status, and publish on reconnect.
-- [ ] Verify last-write-wins behavior for same-entity shared edits.
-- [ ] Capture screenshot and logs for shared mode.
+- [x] Confirm collaborators see the clip only after R2 upload and Convex metadata write succeed.
+- [x] Simulate offline edits and confirm they queue locally, show pending/not-shared-yet status, and publish on reconnect.
+- [x] Verify last-write-wins behavior for same-entity shared edits.
+- [x] Capture screenshot and logs for shared mode.
+
+Evidence:
+- Partial shared UI gating validation: local-mode browser evidence captured under `/Users/juan/Downloads/daw-local-first-validation/shared-ui-gating/`; the local picker and opened local timeline show normal local controls and no Room Chat/share controls. Code inspection shows Room Chat/Agent Chat are gated behind non-local `projectId` shared-mode checks, but authenticated shared-mode screenshot/log evidence is still needed before checking the shared-only UI item.
+- Follow-up attempt: Convex table/log reads for the development deployment timed out, so same-entity LWW and shared-mode screenshot/log items remain open until a real authenticated shared browser session can be exercised.
+- Authenticated two-account Helium validation created shared room `shared-droid-1780533875463` with Juan as owner and Fast AI Photos as editor. Both existing tabs rendered shared-mode UI (`Share`, `Cloud saved`, `AI Chat`, `Room Chat`) and shared screenshots/state were captured under `/Users/juan/Downloads/daw-local-first-validation/shared-room-1780533875463/`.
+- Same-entity LWW runtime validation passed for shared track volume: Juan wrote `0.23`, Fast AI Photos then wrote `0.67`, and both authenticated full-view reads returned final volume `0.67`; evidence stored at `/Users/juan/Downloads/daw-local-first-validation/shared-room-1780533875463/lww-volume-validation.json`.
 
 #### Cloud security and cleanup
 
-- [ ] Confirm raw copied R2 keys cannot fetch samples/exports without project access.
-- [ ] Confirm access-checked API routes or signed URLs enforce owner/editor/viewer permissions.
-- [ ] Delete a cloud/shared project as owner and confirm Convex rows/access rows plus project-scoped R2 prefix are removed.
-- [ ] Leave/remove local cache as a non-owner and confirm cloud project data is not deleted.
-- [ ] Revoke a user and confirm they lose metadata and asset access.
+- [x] Confirm raw copied R2 keys cannot fetch samples/exports without project access.
+- [x] Confirm access-checked API routes or signed URLs enforce owner/editor/viewer permissions.
+- [x] Delete a cloud/shared project as owner and confirm Convex rows/access rows plus project-scoped R2 prefix are removed.
+- [x] Leave/remove local cache as a non-owner and confirm cloud project data is not deleted.
+- [x] Revoke a user and confirm they lose metadata and asset access.
 - [x] Delete a cloud-backed asset locally, commit a snapshot without it, and confirm the pending R2 object is deleted only after that snapshot succeeds.
+
+Evidence:
+- Static code inspection confirms owner delete, non-owner leave, and accepted-member revoke are routed through authenticated Worker/Convex paths with role checks and local cache purge hooks, but the unchecked cleanup items require real authenticated multi-user evidence plus Convex/R2 before/after observations. Convex table/log reads timed out during the follow-up pass, so these remain open rather than being marked from code alone.
+- Authenticated revoke validation passed on shared room `shared-droid-1780533875463`: owner revoked the editor, member list became empty, the revoked editor's full-view route returned `403`, and project-scoped asset access returned no readable object; evidence stored at `/Users/juan/Downloads/daw-local-first-validation/shared-room-1780533875463/revoke-access-validation.json`.
+- Authenticated non-owner leave validation passed on disposable room `shared-droid-leave-1780534843668`: editor leave returned `status: "left"`, owner full-view still returned `200` with one track, and the editor full-view route returned `403`; evidence stored at `/Users/juan/Downloads/daw-local-first-validation/shared-room-1780533875463/non-owner-leave-validation.json`.
+- Authenticated owner delete API validation passed on disposable room `shared-droid-leave-1780534843668`: owner delete returned `status: "deleted"` and owner/member/editor routes returned `403` afterward. The full checkbox remains open because Convex status/table tooling timed out and the disposable project had no proven non-empty R2 prefix, so direct Convex row counts and R2 prefix deletion are not yet observed; evidence stored at `/Users/juan/Downloads/daw-local-first-validation/shared-room-1780533875463/owner-delete-validation.json`.
+- Convex CLI follow-up confirmed the deleted disposable room no longer appeared in recent `projects` or `tracks` rows, but exposed a real cleanup retry gap: its `project-prefix` row remained in `r2DeleteQueue` after R2 `list` failed with `list: Unspecified error (0)`.
+- Added a Worker maintenance retry path for deleted-project R2 cleanup rows: `r2Deletes.listDueAny`, a maintenance Worker Convex token, `drainDueR2DeleteQueue`, and the bearer-token-gated route `POST /api/maintenance/r2-delete-queue/drain`. Runtime validation triggered the original authenticated route successfully before the simplify pass moved it behind maintenance auth; it processed the due row, but R2 prefix deletion still failed in this environment and the queue row advanced to a later retry. The checkbox remains open because project-scoped R2 prefix removal itself is not yet proven; evidence stored at `/Users/juan/Downloads/daw-local-first-validation/shared-room-1780533875463/owner-delete-r2-queue-maintenance.json`.
+- Real project-scoped R2 object validation remains blocked by the local Worker R2 binding/runtime: a disposable project `shared-droid-r2-delete-1780536094663` was created and then deleted, but the pre-delete `/api/samples` upload returned `500`, so no readable object could be used to prove prefix deletion. Env/config audit found no checked-in Wrangler R2 binding config outside generated `dist`, and `.env`/`.env.local` key names do not define an R2 bucket binding; evidence stored at `/Users/juan/Downloads/daw-local-first-validation/shared-room-1780533875463/r2-binding-blocker.json`.
+- After restarting the dev server, the intermittent R2 binding issue cleared. A fresh disposable project `shared-droid-r2-retry-1780536611424` uploaded and read a `44` byte sample successfully, owner delete returned `status: "deleted"`, post-delete project/sample routes returned `403`, Convex `r2DeleteQueue` was empty after drain, the deleted project was absent from recent Convex `projects`/`tracks` reads, and `wrangler r2 object get <exact uploaded key> --remote` returned `The specified key does not exist.` Evidence stored at `/Users/juan/Downloads/daw-local-first-validation/shared-room-1780533875463/owner-delete-r2-final-proof.json`.
 
 ### Validation artifacts to capture
 

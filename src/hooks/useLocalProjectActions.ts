@@ -28,6 +28,7 @@ export const useLocalProjectActions = (input: Input) => {
   const [cloudBackupBusy, setCloudBackupBusy] = createSignal(false);
   const [cloudBackupStatus, setCloudBackupStatus] = createSignal<CloudBackupStatus>("idle");
   const [sharedOutboxStatus, setSharedOutboxStatus] = createSignal({ pending: 0, failed: 0 });
+  const [localTimelineReloadVersion, setLocalTimelineReloadVersion] = createSignal(0);
 
   createEffect(() => {
     const rid = input.projectId();
@@ -146,6 +147,7 @@ export const useLocalProjectActions = (input: Input) => {
     setCloudBackupBusy(true);
     try {
       await restoreCloudBackupToLocalProject(rid);
+      setLocalTimelineReloadVersion((version) => version + 1);
       setBackupConflictProjectId(null);
       setLocalSaveFailure(null);
       setCloudBackupDialog(null);
@@ -230,6 +232,7 @@ export const useLocalProjectActions = (input: Input) => {
     duplicateCloudBackup,
     downloadForOffline,
     sharedOutboxStatus,
+    localTimelineReloadVersion,
     retrySharedChanges,
     exportArchive,
   };

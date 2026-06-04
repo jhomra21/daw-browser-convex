@@ -45,6 +45,7 @@ export const useTimelinePersistenceController = (input: Input) => {
   const mediaRecovery = useMissingMediaRecovery({
     projectId: input.projectId,
     remoteTimelineAvailable: input.remoteTimelineAvailable,
+    localTimelineReloadVersion: input.localProject.localTimelineReloadVersion,
     userId: input.userId,
     renderTracks: input.renderTracks,
     audioEngine: input.audioEngine,

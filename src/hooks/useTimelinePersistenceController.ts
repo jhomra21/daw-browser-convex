@@ -64,7 +64,7 @@ export const useTimelinePersistenceController = (input: Input) => {
     projectId: input.projectId,
     enabled: () => {
       const mode = input.localProjectMode();
-      return Boolean(input.userId() && isLocalId("project", input.projectId()) && (mode === "backup" || mode === "shared"));
+      return Boolean(input.userId() && isLocalId("project", input.projectId()) && mode === "backup");
     },
     sync: (projectId) => input.localProject.backUpNow({ projectId, skipIfUnchanged: true }),
   });

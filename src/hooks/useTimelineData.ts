@@ -18,6 +18,7 @@ import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writ
 import { subscribeToLocalProjectChanges } from '~/lib/local-project-changes'
 import { useSessionQuery } from '~/lib/session'
 import { cacheRemoteTimelineSnapshot } from '~/lib/remote-timeline-cache'
+import { isProjectRole, type ProjectRole } from '../../shared/project-role'
 import { clearShareTokenFromUrl, useTimelineProjectRoute } from './useTimelineProjectRoute'
 
 export type TimelineProject = {
@@ -55,6 +56,7 @@ type UseTimelineDataReturn = {
   setProjectId: (projectId: string) => void
   userId: () => string
   projects: Accessor<TimelineProject[]>
+  currentProjectRole: Accessor<ProjectRole | null>
   fullView: UseQueryResult<FunctionReturnType<typeof convexApi.timeline.fullViewAuthed>, Error>
   navigateToRoom: (projectId: string) => void
   createProject: () => Promise<void>
@@ -136,6 +138,20 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     },
     () => ['timeline-full-view-authed', projectId(), userId(), bootstrapProjectId(), acceptingShareToken()]
   )
+
+  const projectRole = useConvexQuery(
+    convexApi.projectAccess.roleForUser,
+    () => {
+      const rid = projectId()
+      const uid = userId()
+      if (!rid || isLocalId('project', rid) || !uid || bootstrapProjectId() === rid || acceptingShareToken()) return null
+      return { projectId: rid }
+    },
+    () => ['timeline-project-role', projectId(), userId(), bootstrapProjectId(), acceptingShareToken()]
+  )
+  const currentProjectRole = createMemo<ProjectRole | null>(() => (
+    isProjectRole(projectRole.data) ? projectRole.data : null
+  ))
 
   createEffect(() => {
     const rid = projectId()
@@ -413,6 +429,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     setProjectId,
     userId,
     projects,
+    currentProjectRole,
     fullView,
     navigateToRoom,
     createProject,

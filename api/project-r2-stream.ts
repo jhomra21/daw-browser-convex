@@ -1,4 +1,4 @@
-import type { ProjectRole } from '../convex/projectAccess'
+import type { ProjectRole } from '../shared/project-role'
 import type { ApiContext } from './app-types'
 import { requireProjectRoleForApi } from './project-access'
 import { createR2ObjectResponse } from './r2-object-response'

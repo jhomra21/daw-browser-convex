@@ -6,6 +6,7 @@ import type { Track } from "~/types/timeline";
 export type TimelineProjectMenuModel = {
   currentProjectId: string;
   currentUserId?: string;
+  canManageSharing: boolean;
   projects: TimelineProject[];
   onOpenProject: (projectId: string) => void;
   onCreateProject: () => void | Promise<void>;

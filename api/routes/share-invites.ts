@@ -17,7 +17,7 @@ export function registerShareInviteRoutes(app: App) {
   app.get('/api/projects/:projectId/members', async (c) => {
     try {
       const projectId = c.req.param('projectId')
-      const access = await requireProjectRoleContextForApi(c, projectId, ['owner', 'editor', 'viewer'])
+      const access = await requireProjectRoleContextForApi(c, projectId, ['owner'])
       if (!access) return c.json({ error: 'Forbidden' }, 403)
       const members = await access.convex.query(convexApi.shareInvites.listAcceptedAccess, {
         projectId,

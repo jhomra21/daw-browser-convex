@@ -9,7 +9,7 @@ const GLOBAL_DB_VERSION = 1
 const PROJECT_DB_VERSION = 1
 const PROJECT_DB_PREFIX = 'daw-browser-project-'
 
-export type LocalProjectMode = 'local-only' | 'backup' | 'shared'
+export type LocalProjectMode = 'local-only' | 'backup'
 export type LocalProjectStorageKind = 'opfs' | 'directory'
 
 export type LocalProjectEntry = {

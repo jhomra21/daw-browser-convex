@@ -717,7 +717,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
           <ProjectMediaMenu samples={samplesMenu} exportsMenu={exportsMenu} />
           <SettingsMenu toolbar={props} />
           <TracksMenu tracksMenu={props.tracksMenu} />
-          <Show when={!isLocalId("project", props.projectMenu.currentProjectId)}>
+          <Show when={!isLocalId("project", props.projectMenu.currentProjectId) && props.projectMenu.canManageSharing}>
             <ShareMenu
               share={{
                 onOpenChange: shareMenu.onOpenChange,

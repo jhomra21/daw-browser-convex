@@ -82,6 +82,7 @@ const Timeline: Component = () => {
     setProjectId,
     userId,
     projects,
+    currentProjectRole,
     fullView,
     navigateToRoom,
     createProject,
@@ -748,6 +749,7 @@ const Timeline: Component = () => {
     projectMenu: {
       currentProjectId: projectId(),
       currentUserId: userId(),
+      canManageSharing: currentProjectRole() === "owner",
       projects: projects(),
       onOpenProject: navigateToRoom,
       onCreateProject: createProject,

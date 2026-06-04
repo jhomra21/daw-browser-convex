@@ -74,9 +74,9 @@ Tracks review-driven follow-up work before merging the audio refactor branch.
 - Excluded cloud-backup bookkeeping sync rows from manifest freshness while retaining real local/cloud ID-map `syncState` updates.
 - Kept auto-created local import/recording tracks and their clips in one replayable history entry, and cleaned up saved local assets if clip metadata persistence fails.
 - Protected cloud-backup and full-project-delete Convex entrypoints with an API-only service token, surfaced Project-menu share URLs by copying them to the clipboard, and preserved `track-clip-create` undo entries across reload.
-- Kept default/sample-library insertion local for local projects, rolled back auto-created cloud import tracks when upload/clip creation fails, and enabled sharing for backed-up local projects based on local project mode instead of only ID shape.
+- Kept default/sample-library insertion local for local projects and rolled back auto-created cloud import tracks when upload/clip creation fails.
 - Blocked backup-only local projects from issuing share invites until a real shared promotion flow exists, rolled back auto-created local sample tracks on clip persistence failure, made combined track+clip redo clean up recreated tracks on clip failure, and preserved IndexedDB history when edits happen before local history hydration finishes.
-- Preserved stronger existing project roles when accepting lower-role invite links and gated automatic local cloud backup ticks to explicitly backed-up/shared local projects.
+- Preserved stronger existing project roles when accepting lower-role invite links and gated automatic local cloud backup ticks to explicitly backed-up local projects.
 - Replayed cloud multi-clip undo/redo moves through one validated Convex batch mutation so partial move persistence cannot diverge durable timeline state from rolled-back history state.
 - Flushed debounced local effect writes before manifest export/backup, cleaned up auto-created cloud sample tracks when clip creation throws, and normalized IndexedDB undo history through the shared persisted-history parser.
 - Required project-level ownership for full-project read access, kept cleanup-triggered local effect flushes registered until writes settle, and guarded async local instrument effect loads against project switches.

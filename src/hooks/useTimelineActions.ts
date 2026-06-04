@@ -123,7 +123,9 @@ export function useTimelineActions(
   }
 
   async function handleShare(): Promise<string | undefined> {
-    const projectId = ensureRoomShareLink(options.room.projectId(), options.room.setProjectId)
+    const currentProjectId = options.room.projectId()
+    if (isLocalId('project', currentProjectId)) return undefined
+    const projectId = ensureRoomShareLink(currentProjectId, options.room.setProjectId)
     const userId = options.room.userId()
     if (!projectId || !userId) return undefined
     const response = await fetch('/api/share-invites', {

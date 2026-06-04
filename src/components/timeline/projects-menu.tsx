@@ -25,7 +25,10 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
   const currentProjectMode = () => currentProject()?.mode;
   const isBackupProject = () => isCurrentProjectLocal() && currentProjectMode() === "backup";
   const canShareCurrentProject = () =>
-    !isCurrentProjectLocal() || currentProjectMode() === "backup" || currentProjectMode() === "shared";
+    !isCurrentProjectLocal() && projectMenu().canManageSharing;
+  const shareDisabledTitle = () => (
+    isCurrentProjectLocal() ? "Open a cloud/shared project to copy an invite link" : "Only project owners can copy invite links"
+  );
   const hasSharedOutboxWork = () => Boolean((projectMenu().sharedOutboxStatus?.pending ?? 0) + (projectMenu().sharedOutboxStatus?.failed ?? 0));
   const backupSaveLabel = () => {
     if (!isBackupProject()) return null;
@@ -125,7 +128,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                   event.stopPropagation();
                   void onShare();
                 }}
-                title={!canShareCurrentProject() ? "Back up this project before sharing" : undefined}
+                title={!canShareCurrentProject() ? shareDisabledTitle() : undefined}
               >
                 <Show when={shareCopied()} fallback="Copy share link">
                   Copied

@@ -1,6 +1,7 @@
 import type { Doc } from "./_generated/dataModel";
 import { query, type DatabaseReader } from "./_generated/server";
 import { v } from "convex/values";
+import { isProjectRole, type ProjectRole } from "../shared/project-role";
 
 type RoomSummary = {
   projectId: string;
@@ -130,8 +131,6 @@ export async function hasProjectAccess(
   return (await getProjectRole(ctx, projectId, userId)) !== null;
 }
 
-export type ProjectRole = "owner" | "editor" | "viewer";
-
 export const canWriteProject = (role: ProjectRole | null) => role === "owner" || role === "editor";
 
 export async function getProjectRole(
@@ -150,7 +149,7 @@ export async function getProjectRole(
   if (!projectOwnership) return null;
   if (await isProjectDeletionPending(ctx, projectId)) return null;
   const role = projectOwnership.role;
-  return role === "owner" || role === "editor" || role === "viewer" ? role : "editor";
+  return isProjectRole(role) ? role : "editor";
 }
 
 export async function requireProjectRole(

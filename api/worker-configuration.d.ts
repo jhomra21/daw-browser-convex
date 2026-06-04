@@ -11,9 +11,12 @@ declare namespace Cloudflare {
 		VITE_CONVEX_URL: string;
 		BETTER_AUTH_SECRET: string;
 		BETTER_AUTH_URL: string;
+		DEFAULT_SAMPLES_BASE_URL: string;
 		GOOGLE_CLIENT_SECRET: string;
 		GOOGLE_CLIENT_ID: string;
 		OPENROUTER_API_KEY: string;
+		CONVEX_AUTH_PRIVATE_JWK: string;
+		CONVEX_AUTH_ISSUER: string;
 		daw_audio_samples: R2Bucket;
 		daw_convex_auth: D1Database;
 	}
@@ -23,7 +26,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "CONVEX_DEPLOYMENT" | "VITE_CONVEX_URL" | "BETTER_AUTH_SECRET" | "BETTER_AUTH_URL" | "GOOGLE_CLIENT_SECRET" | "GOOGLE_CLIENT_ID" | "OPENROUTER_API_KEY">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "CONVEX_DEPLOYMENT" | "VITE_CONVEX_URL" | "BETTER_AUTH_SECRET" | "BETTER_AUTH_URL" | "DEFAULT_SAMPLES_BASE_URL" | "GOOGLE_CLIENT_SECRET" | "GOOGLE_CLIENT_ID" | "OPENROUTER_API_KEY" | "CONVEX_AUTH_PRIVATE_JWK" | "CONVEX_AUTH_ISSUER">> {}
 }
 
 // Begin runtime types

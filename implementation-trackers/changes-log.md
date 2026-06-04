@@ -2,6 +2,175 @@
 
 Tracks review-driven follow-up work before merging the audio refactor branch.
 
+## 2026-05-22 — Local-First Refactor PR Review Follow-Up
+
+### Scope
+
+- Re-reviewed PR #9 (`local-first-refactor` into `master`) across the local-first timeline, archive/export, sharing, Convex access, and UI action flows.
+- Validated prior review findings before implementation and kept the broad caller-supplied Convex `userId` authorization issue as a separate architecture follow-up requiring verified Convex auth or authenticated API-only boundaries.
+- Started the all-in-one completion pass for remaining local-first cloud/shared tracker work, with implementation planned as milestone commits inside this PR rather than separate PRs.
+- Recorded the grilled plan corrections: restore primitives before conflict/offline download, durable shared outbox instead of ephemeral pending maps, durable R2 retry state, revoked-user local cache purge, and Worker/API-derived identity for touched sensitive flows.
+- Added accepted collaborator revocation routes backed by service-token Convex mutations and a local cache purge path for explicit leave/access-loss handling.
+- Added cloud-backup restore/duplicate actions, manifest-first lazy cloud asset reads, an explicit download-for-offline path with a 3-download concurrency limit, and conflict summary messaging with timestamps/counts.
+- Added durable R2 deletion queueing for superseded backup assets, locally deleted cloud assets, deleted sample/export rows, and owner project-prefix cleanup.
+- Added a durable shared outbox for failed/offline clip move/delete and track mix/routing/volume publishes, plus reconnect/manual retry and Project menu status.
+- Moved sample/export delete metadata cleanup behind authenticated Hono routes with service-token Convex mutations and retained durable R2 cleanup draining.
+- Added author-visible pending shared audio clips for import/recording while R2 upload and Convex clip publish complete before collaborators can see the clip.
+- Added a remote timeline cache that persists shared Convex tracks/clips plus cloud asset references locally, uses the cache when live remote data is unavailable, and lets shared R2 assets lazy-cache through the existing offline download path.
+- Routed selected shared timeline writes (clip move/delete and track mix/routing/volume), including durable outbox retries, through an authenticated Hono timeline-operation gateway backed by server-secret Convex mutations.
+- Routed remaining shared timeline create/effect/recording-lock writes and shared full-view reads through authenticated Hono routes so touched shared browser paths no longer send caller-supplied `userId` directly to Convex.
+- Added local-dev service-token binding fallback helpers for authenticated API routes and returned `404` for deleted/revoked backup metadata fetches instead of surfacing Convex access errors as `500`.
+- Ran a Convex deployment/table inspection against the development deployment to confirm expected tables and indexes are present for the validation pass.
+
+### Review Follow-Up
+
+- Protected public timeline list queries for tracks, clips, and effects with project access checks and updated cloud/API callers to pass the current user context.
+- Flushed queued local timeline writes before manifest export/backup so local archives and cloud backups include pending IndexedDB writes.
+- Added missing local undo history for drag moves, duplicate actions, and option-drag duplicates.
+- Relabeled the project menu's audio export action, disabled the cloud backup button for non-local projects, and disabled local-project sharing until the project is backed up to the cloud.
+- Added project access checks to direct effect reads, then replaced scalable UI/export/agent summary fanout with a single protected `effects.listByRoom` read and client-side track/master effect derivation.
+- Fixed project rename authorization so `projects.setName` can no longer create owner rows for arbitrary existing project IDs; project ownership creation remains isolated to the existing owned-room creation path.
+- Added Convex-side editor/owner checks to export metadata creation and removal so direct Convex calls cannot bypass the authenticated export API route's project authorization.
+- Restored local-project effect export parity by loading IndexedDB local effects into the same mixdown `fx` shape used by cloud project exports.
+- Guarded async project-persisted-state hydration with a local revision check so pending IndexedDB loads cannot overwrite newer in-memory edits.
+- Kept instrument effect panel state reactive across project switches by passing live accessors into the extracted instrument state helper instead of spreading Solid props into a frozen object.
+- Added local `syncState` rows to project manifests and archive restore so current cloud/local ID mappings survive backup/export/import flows.
+- Added a cloud-backup conflict preflight before R2 asset uploads while keeping the final Convex upsert conflict check authoritative.
+- Kept collaborator owned-slice deletion scoped to that user's tracks/clips/ownership rows so it no longer deletes shared project-level rows.
+- Guarded async local EQ/reverb IndexedDB loads against project/target switches before writing panel state.
+- Fixed drag-created track rollback cleanup so failed local/cloud move persistence removes the newly created empty lane when the failed planned move targeted it.
+- Removed the unused private cloud-backup restore helper until a real restore flow is implemented.
+- Hid and closed cloud-only AI Chat for local projects until a local agent path exists.
+- Guarded async local effects, sample inventory, and export metadata loads against local-project switches before publishing active UI/audio state.
+- Kept cloud-backup conflict detection based on the local project's latest persisted update time instead of the backup creation timestamp.
+- Protected per-user agent chat history with project access and owner-user checks.
+- Hid and closed cloud-only Room Chat for local projects until shared/cloud chat exists.
+- Prevented local sample deletion while clips still reference the asset.
+- Rolled back local clip resize commits when IndexedDB persistence fails and kept resize history behind successful local persistence.
+- Reopened unchecked cloud/shared browser validation items in the local-first tracker until artifact evidence is recorded.
+- Kept cloud-backup conflict rows on separate server backup and manifest update timestamps so repeat unchanged backups do not false-conflict.
+- Routed the local-save failure backup CTA to `.dawproject` archive export, kept archive export local-only in the project menu, and guarded the archive export handler from cloud project IDs.
+- Rolled back partially created local duplicate-drag clips and cleaned up previews/drag-created lanes when IndexedDB clip creation fails.
+- Allowed read-only collaborators to list/download existing project exports while keeping export creation/removal writer-only.
+- Updated invite acceptance to patch existing project-level roles, kept local MIDI create/edit paths projected into the active timeline, captured recording finalization context at start, and reindexed local tracks after deletes.
+- Flushed debounced local mixer writes on lifecycle cleanup, made local track middle inserts shift persisted indexes, parsed cloud backup manifests before project creation, rolled back partial local duplicate creates, and aligned tracker viewer/export wording.
+- Made local multi-clip deletion atomic at the repository boundary and reopened the broad server-verified Convex auth tracker item as a deferred architecture follow-up.
+- Flushed pending MIDI saves on editor cleanup, made cloud resize history wait for persistence, made local clip creation durable before success, rejected corrupt archive entries, and aligned remaining viewer export validation wording.
+- Made local multi-clip drag moves atomic at the repository boundary so partial IndexedDB move failures cannot diverge durable clip positions from the rolled-back UI.
+- Removed the unused cloud timeline repository surface, dropped its stale `knip` exemption, and kept timeline writes on the validated local repository plus existing Convex mutation paths.
+- Tightened agent-action and cloud-backup response type boundaries so sample/effect command handling and backup upload/conflict parsing no longer depend on broad unvalidated response shapes.
+- Simplify review removed duplicated clip-delete selection reconciliation, made manifest mode parsing avoid a misleading fallback, and shared undo effect-params history entry parsing between legacy and current readers.
+- Defensive-code review found no high-confidence redundant guards to remove; persistence, network/API, auth, async-staleness, and UI optional-handler guards were kept because they protect real boundary ambiguity.
+- Restricted cloud project ownership creation to the create-only owned-room path, routed backup/client project creation through it, and cleared imported archive `syncState` so restored local projects do not inherit stale cloud mappings.
+- Made local multi-clip undo/redo move replay persist through the atomic repository `moveClips` path before committing visible clip positions.
+- Required project-level ownership markers for Convex project roles, preserved legacy `roomId` when reading persisted history, hid the global share menu for local projects, cleared stale media-status rows after missing-media replacement, and requested writable local asset storage before deletion.
+- Surfaced async local project-state save failures through the existing local-save failure banner for timeline preferences, local mix writes, and cloud-sync actions by sharing one `localProject` action object across Timeline persistence paths.
+- Blocked local asset-directory switches when existing project audio cannot be read and copied from the previous storage root, avoiding a saved folder handle that strands referenced assets.
+- Included `syncState.updatedAt` rows in local project manifest freshness so cloud backup `skipIfUnchanged` cannot skip uploads after local/cloud ID mappings change.
+- Wired the share menu to create invite-token URLs and accept them before protected cloud project reads, while preserving existing owner roles if an owner opens an invite.
+- Guarded missing-media replacement on successful durable clip updates and removed newly created replacement assets when the target clip is stale.
+- Rolled back auto-created local import tracks when local asset persistence fails, keeping failed imports atomic instead of leaving empty durable lanes.
+- Routed share invite creation/acceptance through authenticated API endpoints and protected the Convex invite mutations with a service token so direct Convex calls cannot impersonate another `userId`.
+- Excluded cloud-backup bookkeeping sync rows from manifest freshness while retaining real local/cloud ID-map `syncState` updates.
+- Kept auto-created local import/recording tracks and their clips in one replayable history entry, and cleaned up saved local assets if clip metadata persistence fails.
+- Protected cloud-backup and full-project-delete Convex entrypoints with an API-only service token, surfaced Project-menu share URLs by copying them to the clipboard, and preserved `track-clip-create` undo entries across reload.
+- Kept default/sample-library insertion local for local projects and rolled back auto-created cloud import tracks when upload/clip creation fails.
+- Blocked backup-only local projects from issuing share invites until a real shared promotion flow exists, rolled back auto-created local sample tracks on clip persistence failure, made combined track+clip redo clean up recreated tracks on clip failure, and preserved IndexedDB history when edits happen before local history hydration finishes.
+- Preserved stronger existing project roles when accepting lower-role invite links and gated automatic local cloud backup ticks to explicitly backed-up local projects.
+- Replayed cloud multi-clip undo/redo moves through one validated Convex batch mutation so partial move persistence cannot diverge durable timeline state from rolled-back history state.
+- Flushed debounced local effect writes before manifest export/backup, cleaned up auto-created cloud sample tracks when clip creation throws, and normalized IndexedDB undo history through the shared persisted-history parser.
+- Required project-level ownership for full-project read access, kept cleanup-triggered local effect flushes registered until writes settle, and guarded async local instrument effect loads against project switches.
+- Guarded local audio import projection/history and missing-media replacement UI/cache side effects against project switches after async local writes settle.
+- Extended stale-project projection guards to local sample insertion, cloud audio import/recording, and serialized local history saves so older IndexedDB writes cannot overwrite newer undo stacks.
+- Guarded local recording projection/history against project switches and preserved dirty effect drafts when local IndexedDB effect persistence fails so manifest/cleanup flushers surface the failure.
+- Captured project/user context for debounced effect writes and guarded auto-created local track projection so stale effect/import/recording writes cannot publish into the active project after a switch.
+- Flushed pending local project-state writes before manifest export/backup and cleaned up auto-created local import tracks against their original project so project switches cannot leave stale durable lanes.
+- Kept cloud-backup pre-upload manifest and asset-read failures inside the `BackupResult` contract so backup callers surface local flush/read failures instead of leaking rejected promises.
+- Split the Worker entrypoint into route modules, scoped pending local effect/project-state flushes by project, extracted audio import transaction orchestration, and collapsed the undo switch's large track transaction branches behind entry-specific executors.
+
+### Validation
+
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the review fixes.
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after replacing per-track effect fanout with room-level effect derivation.
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the validated authorization, local export effects, and async hydration fixes.
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the reactive effect context, manifest `syncState`, and backup preflight fixes.
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the collaborator cleanup, async local effect guard, drag rollback, and dead helper fixes.
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the local AI Chat gate, stale local async guards, and backup timestamp fix.
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the agent history access, local Room Chat gate, sample delete guard, resize rollback, and tracker evidence fixes.
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the backup conflict timestamp split, archive CTA/gating fixes, and local duplicate-drag rollback cleanup.
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the export viewer, invite role, local MIDI projection, recording context, and local track reindex fixes.
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the mixer flush, local track insert reindex, backup manifest parse ordering, local duplicate rollback, and tracker wording fixes.
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the atomic local multi-clip delete and Convex auth tracker status fixes.
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the MIDI cleanup flush, cloud resize rollback, durable local clip creation, archive CRC validation, and tracker wording fixes.
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the atomic local multi-clip drag move fix.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, and `bun run knip` passed after the final simplify cleanup and defensive-code review pass.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after the ownership, atomic undo replay, local project save failure, asset-directory switch, and manifest freshness fixes.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after the invite share, missing-media replacement, and failed-import rollback fixes.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after the authenticated invite boundary, backup freshness bookkeeping, and atomic import/recording history fixes.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after the cloud-project service-token boundary, Project-menu share URL, and persisted `track-clip-create` fixes.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after the local sample insertion, cloud import rollback, and backup-mode share fixes.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after the backup-only share gate, local sample rollback, combined redo cleanup, and local history hydration fixes.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after the invite role downgrade guard and explicit auto-backup mode gate.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after the cloud multi-clip history replay batch mutation.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after the local effect flush, cloud sample rollback, and IndexedDB history normalization fixes.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after the project-access marker, cleanup effect flush, and stale instrument effect load fixes.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after the stale local import and missing-media replacement side-effect guards.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after extending stale projection guards and serializing local history saves.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after the local recording stale guard and local effect persistence failure preservation fixes.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after capturing debounced effect write context and stale auto-track projection cleanup.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after project-state manifest flushing and original-project import track cleanup fixes.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after keeping cloud-backup manifest/asset preparation failures in the `BackupResult` path.
+- `bun run typecheck`, `git diff --check`, `git diff --check origin/master`, `bun run knip`, and `bun run build` passed after the thermo-nuclear maintainability refactor.
+
+## 2026-05-21 — Local-First Refactor Phase 16
+
+### Scope
+
+- Added `.dawproject` archive import/export using a zip package with `manifest.json` shared with the cloud backup manifest shape and project-owned assets stored under stable asset IDs.
+- Routed archive imports through the shared manifest migration/assertion path and restored imported projects into local IndexedDB plus project-owned asset storage.
+
+### PR Review Follow-Up
+
+- Validated PR review findings against the real codebase and fixed the confirmed ownership, metadata access, local timeline hydration, storage-folder migration, archive integrity, archive rollback, and app-owned asset cleanup issues.
+- Kept the fixes at the existing API/Convex access, local repository hydration, local asset, and archive boundaries instead of adding parallel validation flows.
+
+### Validation
+
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed.
+
+## 2026-05-21 — Local-First Refactor Phases 14–15
+
+### Scope
+
+- Added cloud backup/share promotion scaffolding with versioned local project manifests, project-scoped R2 asset uploads, latest-manifest Convex persistence, local cloud ID mapping, manual backup, and automatic signed-in backup ticks.
+- Added role/share/security work for cloud projects: owner/editor/viewer role model, authenticated invite primitives, role-aware access checks for protected R2 reads/writes, project-scoped export reads, and project deletion cleanup for R2 plus related Convex rows.
+
+### Validation
+
+- `bun run typecheck` passed.
+- `bun run build` and `git diff --check` passed.
+
+## 2026-05-21 — Local-First Refactor Phase 1–13 Review
+
+### Scope
+
+- Completed the local-first refactor through Phase 13, covering signed-out local project boot, IndexedDB/OPFS persistence, local audio import/recording/export, missing-media recovery actions, local project state ownership, local samples, undo/redo, and local/cloud boundary scaffolding.
+- Updated `implementation-trackers/local-first-refactor-tracker.md` so phases 1–13 and their validation items are checked with runtime evidence.
+
+### Review Follow-Up
+
+- Simplify review extracted the repeated local timeline track-row to `Track` adapter into `src/lib/timeline-repository/track-row-adapter.ts` and reused it from track creation, import-created tracks, and drag-created tracks.
+- Simplify review parallelized default-sample metadata cache/fallback loading in `src/hooks/useProjectSamples.ts`.
+- Simplify review reused the previous assets directory handle once during project storage-folder moves in `src/lib/local-assets.ts`.
+- Broader local/cloud repository routing and local-effect-state consolidation suggestions were left unchanged to avoid destabilizing the validated phase boundary.
+- Defensive-code review found possible redundant non-null guards in recording/backend paths, but they were kept because TypeScript does not preserve those filtered invariants across the current persisted/auth boundaries without adding less-clear assertions.
+
+### Validation
+
+- `bun run typecheck` and `git diff --check` passed after simplify cleanup.
+- `bun run typecheck` and `git diff --check` passed after the defensive-code review pass.
+- `bun run typecheck`, `bun run build`, `git diff --check`, and `bun run knip` passed after the review cleanup and log updates.
+
 ## 2026-05-20 — Post-Trace Performance Follow-Up
 
 ### Scope

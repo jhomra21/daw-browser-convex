@@ -12,11 +12,14 @@ import {
   saveMixSyncFlag,
 } from '~/lib/timeline-storage'
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from '~/lib/timeline-layout'
+import { isLocalId } from '~/lib/local-ids'
+import { loadLocalProjectState, saveLocalProjectState } from '~/lib/local-project-state'
 
-import { useRoomPersistedState } from './useRoomPersistedState'
+import { useProjectPersistedState } from './useProjectPersistedState'
 
 type UseTimelinePreferencesOptions = {
-  roomId: Accessor<string>
+  projectId: Accessor<string>
+  onLocalSaveFailed?: (message: string) => void
 }
 
 type UseTimelinePreferencesReturn = {
@@ -42,33 +45,62 @@ export function useTimelinePreferences(
   options: UseTimelinePreferencesOptions,
 ): UseTimelinePreferencesReturn {
   const [sidebarWidth, setSidebarWidth] = createSignal(TIMELINE_SIDEBAR_MIN_WIDTH)
+  const loadLocalState = async <TValue,>(projectId: string, key: string) => (
+    isLocalId('project', projectId) ? await loadLocalProjectState<TValue>(projectId, key) : undefined
+  )
+  const saveLocalState = async <TValue,>(projectId: string, key: string, value: TValue) => {
+    if (isLocalId('project', projectId)) await saveLocalProjectState(projectId, key, value)
+  }
+  const onLocalSaveError = (error: unknown) => {
+    options.onLocalSaveFailed?.(error instanceof Error ? error.message : 'Local project settings could not be saved.')
+  }
 
-  const syncMixState = useRoomPersistedState<boolean>({
-    roomId: options.roomId,
+  const syncMixState = useProjectPersistedState<boolean>({
+    projectId: options.projectId,
     createInitial: () => false,
-    load: (roomId) => loadMixSyncFlag(roomId),
-    save: (roomId, value) => saveMixSyncFlag(roomId, value),
+    load: (projectId) => isLocalId('project', projectId) ? false : loadMixSyncFlag(projectId),
+    loadAsync: (projectId) => loadLocalState<boolean>(projectId, 'syncMix'),
+    save: (projectId, value) => {
+      if (!isLocalId('project', projectId)) saveMixSyncFlag(projectId, value)
+    },
+    saveAsync: (projectId, value) => saveLocalState(projectId, 'syncMix', value),
+    onSaveAsyncError: onLocalSaveError,
   })
 
-  const bpmState = useRoomPersistedState<number>({
-    roomId: options.roomId,
+  const bpmState = useProjectPersistedState<number>({
+    projectId: options.projectId,
     createInitial: () => 120,
-    load: (roomId) => loadBpm(roomId),
-    save: (roomId, value) => saveBpm(roomId, value),
+    load: (projectId) => isLocalId('project', projectId) ? 120 : loadBpm(projectId),
+    loadAsync: (projectId) => loadLocalState<number>(projectId, 'bpm'),
+    save: (projectId, value) => {
+      if (!isLocalId('project', projectId)) saveBpm(projectId, value)
+    },
+    saveAsync: (projectId, value) => saveLocalState(projectId, 'bpm', value),
+    onSaveAsyncError: onLocalSaveError,
   })
 
-  const gridState = useRoomPersistedState<{ enabled: boolean; denominator: number }>({
-    roomId: options.roomId,
+  const gridState = useProjectPersistedState<{ enabled: boolean; denominator: number }>({
+    projectId: options.projectId,
     createInitial: () => ({ enabled: true, denominator: 4 }),
-    load: (roomId) => loadGridSettings(roomId),
-    save: (roomId, value) => saveGridSettings(roomId, value.enabled, value.denominator),
+    load: (projectId) => isLocalId('project', projectId) ? { enabled: true, denominator: 4 } : loadGridSettings(projectId),
+    loadAsync: (projectId) => loadLocalState<{ enabled: boolean; denominator: number }>(projectId, 'grid'),
+    save: (projectId, value) => {
+      if (!isLocalId('project', projectId)) saveGridSettings(projectId, value.enabled, value.denominator)
+    },
+    saveAsync: (projectId, value) => saveLocalState(projectId, 'grid', value),
+    onSaveAsyncError: onLocalSaveError,
   })
 
-  const loopState = useRoomPersistedState<{ enabled: boolean; startSec: number; endSec: number }>({
-    roomId: options.roomId,
+  const loopState = useProjectPersistedState<{ enabled: boolean; startSec: number; endSec: number }>({
+    projectId: options.projectId,
     createInitial: () => ({ enabled: false, startSec: 0, endSec: 8 }),
-    load: (roomId) => loadLoopSettings(roomId),
-    save: (roomId, value) => saveLoopSettings(roomId, value),
+    load: (projectId) => isLocalId('project', projectId) ? { enabled: false, startSec: 0, endSec: 8 } : loadLoopSettings(projectId),
+    loadAsync: (projectId) => loadLocalState<{ enabled: boolean; startSec: number; endSec: number }>(projectId, 'loop'),
+    save: (projectId, value) => {
+      if (!isLocalId('project', projectId)) saveLoopSettings(projectId, value)
+    },
+    saveAsync: (projectId, value) => saveLocalState(projectId, 'loop', value),
+    onSaveAsyncError: onLocalSaveError,
   })
 
   const syncMix = syncMixState.value
@@ -87,8 +119,8 @@ export function useTimelinePreferences(
   }
 
   const toggleSyncMix = () => {
-    const roomId = options.roomId()
-    if (!roomId) return
+    const projectId = options.projectId()
+    if (!projectId) return
     setSyncMix((current) => !current)
   }
 

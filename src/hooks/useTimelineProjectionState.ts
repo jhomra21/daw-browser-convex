@@ -29,7 +29,7 @@ type TimelineProjectionSnapshot<TTrackId extends string = Track['id']> = {
 }
 
 type UseTimelineProjectionStateOptions = {
-  roomId: Accessor<string>
+  projectId: Accessor<string>
   serverData: Accessor<FullTimelineView | undefined>
   rememberTrackProjection: (track: Pick<Track, 'id' | 'historyRef' | 'name'> | null | undefined) => void
   rememberClipHistoryRef: (clip: Pick<Track['clips'][number], 'id' | 'historyRef'> | null | undefined) => void
@@ -46,6 +46,7 @@ type UseTimelineProjectionStateReturn = {
   previewClipsByTrackId: Accessor<Map<Track['id'], Track['clips']>>
   insertLocalTrack: (track: Track, index: number) => void
   insertLocalClip: (trackId: Track['id'], clip: Track['clips'][number]) => void
+  replaceLocalClip: (trackId: Track['id'], clip: Track['clips'][number]) => void
   removeLocalClips: (clipIds: Iterable<string>) => void
   removeLocalTrack: (trackId: Track['id']) => void
   setDraftClipTiming: (clipId: string, patch: ClipTimelinePatch | null) => void
@@ -182,7 +183,7 @@ export function useTimelineProjectionState(
   const [draftClipEditsById, setDraftClipEditsById] = createSignal<Map<string, ClipTimelinePatch>>(new Map())
   const [previewClipsByTrackId, setPreviewClipsByTrackId] = createSignal<Map<Track['id'], Track['clips']>>(new Map())
 
-  createEffect(on(options.roomId, () => {
+  createEffect(on(options.projectId, () => {
     setPendingTrackEntriesById(new Map())
     setPendingClipCreatesById(new Map())
     setRemovedTrackIds(new Set<Track['id']>())
@@ -297,6 +298,14 @@ export function useTimelineProjectionState(
         next.delete(clip.id)
         return next
       })
+      setPendingClipCreatesById((current) => {
+        const next = new Map(current)
+        next.set(clip.id, { trackId, clip })
+        return next
+      })
+    },
+    replaceLocalClip: (trackId, clip) => {
+      options.rememberClipHistoryRef(clip)
       setPendingClipCreatesById((current) => {
         const next = new Map(current)
         next.set(clip.id, { trackId, clip })

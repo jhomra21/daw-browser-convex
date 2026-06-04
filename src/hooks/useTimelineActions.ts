@@ -1,9 +1,12 @@
 import type { Accessor } from 'solid-js'
 
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
-import { ensureRoomShareLink } from '~/lib/timeline-share'
+import { isLocalId } from '~/lib/local-ids'
+import { ensureRoomShareLink, getInviteShareUrl } from '~/lib/timeline-share'
 import { PPS } from '~/lib/timeline-utils'
-import { createOptimisticTrack, createOptimisticTrackWithHistory } from '~/lib/tracks'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
+import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
+import { createOptimisticTrack, pushTrackCreateHistory } from '~/lib/tracks'
 import type { TimelineTrackIndex } from '~/lib/timeline-track-index'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Track } from '~/types/timeline'
@@ -21,29 +24,20 @@ type TimelineTrackCreateBehavior = {
 }
 
 type UseTimelineActionsOptions = {
+  tracks: Accessor<Track[]>
   room: {
-    roomId: Accessor<string>
-    setRoomId: (roomId: string) => void
+    projectId: Accessor<string>
+    setProjectId: (projectId: string) => void
     userId: Accessor<string>
   }
   creation: {
-    renderTracks: Accessor<Track[]>
     selection: TimelineSelectionController
     insertLocalTrack: (track: Track, index: number) => void
+    removeCloudTrack: (track: Track) => Promise<void>
     grantTrackWrite: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
     pushHistory: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
-    convexClient: typeof import('~/lib/convex').convexClient
-    convexApi: typeof import('~/lib/convex').convexApi
-  }
-  transport: {
-    isRecording: Accessor<boolean>
-    handlePause: () => void
-    handleStop: () => void
-    stopRecording: () => Promise<void>
-    toggleRecording: () => Promise<unknown>
   }
   navigation: {
-    renderTracks: Accessor<Track[]>
     trackLookup: Accessor<TimelineTrackIndex>
     selection: TimelineSelectionController
     setPlayhead: (nextSec: number, tracks: Track[]) => void
@@ -55,10 +49,7 @@ type UseTimelineActionsOptions = {
 
 type UseTimelineActionsReturn = {
   createTimelineTrack: (options?: TimelineTrackCreateOptions, behavior?: TimelineTrackCreateBehavior) => Promise<Track | null>
-  handleTransportPause: () => void
-  handleTransportStop: () => void
-  handleRecordToggle: () => Promise<void>
-  handleShare: () => void
+  handleShare: () => Promise<string | undefined>
   jumpToClip: (trackId: Track['id'], clipId: string, startSec: number) => void
 }
 
@@ -69,41 +60,61 @@ export function useTimelineActions(
     trackOptions: TimelineTrackCreateOptions = {},
     behavior: TimelineTrackCreateBehavior = {},
   ): Promise<Track | null> {
-    const roomId = options.room.roomId()
-    const userId = options.room.userId()
-    if (!roomId || !userId) return null
+    const projectId = options.room.projectId()
+    if (!projectId) return null
 
     const channelRole = trackOptions.channelRole ?? 'track'
-    const index = options.creation.renderTracks().length
-    const track = behavior.pushHistory === false
-      ? await createOptimisticTrack({
-          convexClient: options.creation.convexClient,
-          convexApi: options.creation.convexApi,
-          roomId,
-          userId,
-          insertLocalTrack: options.creation.insertLocalTrack,
-          index,
-          grantWrite: options.creation.grantTrackWrite,
-          grantScope: { roomId, userId },
-          kind: trackOptions.kind,
-          channelRole,
-        })
-      : await createOptimisticTrackWithHistory({
-          convexClient: options.creation.convexClient,
-          convexApi: options.creation.convexApi,
-          roomId,
-          userId,
-          tracks: options.creation.renderTracks,
-          insertLocalTrack: options.creation.insertLocalTrack,
-          index,
-          grantWrite: options.creation.grantTrackWrite,
-          grantScope: { roomId, userId },
-          kind: trackOptions.kind,
-          channelRole,
-          historyPush: options.creation.pushHistory,
-        })
-    if (!track) return null
+    const index = options.tracks().length
+    if (isLocalId('project', projectId)) {
+      const row = await createLocalTimelineRepository(projectId).createTrack({
+        index,
+        kind: trackOptions.kind,
+        channelRole,
+      })
+      if (options.room.projectId() !== projectId) {
+        await createLocalTimelineRepository(projectId).deleteTrack(row.id)
+        return null
+      }
+      const track = toLocalTimelineTrack(row)
+      options.creation.insertLocalTrack(track, index)
+      options.creation.grantTrackWrite(track.id, { projectId, userId: options.room.userId() })
+      if (behavior.pushHistory !== false) {
+        pushTrackCreateHistory(options.creation.pushHistory, projectId, options.tracks(), track)
+      }
+      if (behavior.select !== false) {
+        options.creation.selection.selectTrackTarget(track.id)
+      }
+      return track
+    }
 
+    const userId = options.room.userId()
+    if (!userId) return null
+
+    let inserted = false
+    const track = await createOptimisticTrack({
+      projectId,
+      insertLocalTrack: (createdTrack, trackIndex) => {
+        if (options.room.projectId() !== projectId) return
+        inserted = true
+        options.creation.insertLocalTrack(createdTrack, trackIndex)
+      },
+      index,
+      grantWrite: (trackId, scope) => {
+        if (options.room.projectId() === projectId) options.creation.grantTrackWrite(trackId, scope)
+      },
+      grantScope: { projectId, userId },
+      kind: trackOptions.kind,
+      channelRole,
+    })
+    if (!track) return null
+    if (!inserted) {
+      await options.creation.removeCloudTrack(track)
+      return null
+    }
+
+    if (behavior.pushHistory !== false) {
+      pushTrackCreateHistory(options.creation.pushHistory, projectId, options.tracks(), track)
+    }
     if (behavior.select !== false) {
       options.creation.selection.selectTrackTarget(track.id)
     }
@@ -111,31 +122,25 @@ export function useTimelineActions(
     return track
   }
 
-  function handleTransportPause(): void {
-    if (options.transport.isRecording()) {
-      void options.transport.stopRecording()
-    }
-    options.transport.handlePause()
-  }
-
-  function handleTransportStop(): void {
-    if (options.transport.isRecording()) {
-      void options.transport.stopRecording()
-    }
-    options.transport.handleStop()
-  }
-
-  async function handleRecordToggle(): Promise<void> {
-    await options.transport.toggleRecording()
-  }
-
-  function handleShare(): void {
-    ensureRoomShareLink(options.room.roomId(), options.room.setRoomId)
+  async function handleShare(): Promise<string | undefined> {
+    const currentProjectId = options.room.projectId()
+    if (isLocalId('project', currentProjectId)) return undefined
+    const projectId = ensureRoomShareLink(currentProjectId, options.room.setProjectId)
+    const userId = options.room.userId()
+    if (!projectId || !userId) return undefined
+    const response = await fetch('/api/share-invites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId, role: 'viewer' }),
+    })
+    if (!response.ok) throw new Error('Failed to create share invite.')
+    const result = await response.json()
+    return typeof result?.token === 'string' ? getInviteShareUrl(projectId, result.token) : undefined
   }
 
   function jumpToClip(trackId: Track['id'], clipId: string, startSec: number): void {
     options.navigation.selection.selectPrimaryClip({ trackId, clipId })
-    options.navigation.setPlayhead(Math.max(0, startSec), options.navigation.renderTracks())
+    options.navigation.setPlayhead(Math.max(0, startSec), options.tracks())
     options.navigation.openMidiEditorFor(clipId)
 
     try {
@@ -155,9 +160,6 @@ export function useTimelineActions(
 
   return {
     createTimelineTrack,
-    handleTransportPause,
-    handleTransportStop,
-    handleRecordToggle,
     handleShare,
     jumpToClip,
   }

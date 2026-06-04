@@ -1,21 +1,22 @@
 import { createEffect, on, type Accessor } from 'solid-js'
 
+import { isLocalId } from '~/lib/local-ids'
+import { loadLocalProjectState, saveLocalProjectState } from '~/lib/local-project-state'
 import {
   loadLocalMixMap,
-  loadLocalRoutingMap,
   saveLocalMixMap,
-  saveLocalRoutingMap,
-  stripSharedTrackBooleanOverrides,
+  stripSharedTrackLocalOverrides,
   type LocalMixMap,
   type LocalMixPatch,
 } from '~/lib/timeline-storage'
 import type { Track } from '~/types/timeline'
 
-import { useRoomPersistedState } from './useRoomPersistedState'
+import { useProjectPersistedState } from './useProjectPersistedState'
 
 type UseTimelineLocalMixOptions = {
-  roomId: Accessor<string>
+  projectId: Accessor<string>
   writableTrackIds: Accessor<Set<Track['id']>>
+  onLocalSaveFailed?: (message: string) => void
 }
 
 type UseTimelineLocalMixReturn = {
@@ -56,50 +57,43 @@ function mergeLocalMixPatch(current: LocalMixMap, trackId: Track['id'], patch: L
   }
 }
 
-const loadLocalTrackState = (roomId: string): LocalMixMap => {
-  const mix = loadLocalMixMap(roomId)
-  const routing = loadLocalRoutingMap(roomId)
-  let next: LocalMixMap | null = null
-  for (const [trackId, patch] of Object.entries(routing)) {
-    if (patch.sends === undefined && patch.outputTargetId === undefined) continue
-    if (!next) next = { ...mix }
-    next[trackId] = {
-      ...(next[trackId] ?? {}),
-      sends: patch.sends,
-      outputTargetId: patch.outputTargetId,
-    }
-  }
-  return next ?? mix
+const loadLocalTrackState = (projectId: string): LocalMixMap => {
+  if (isLocalId('project', projectId)) return {}
+  return loadLocalMixMap(projectId)
 }
 
-const saveLocalTrackState = (roomId: string, value: LocalMixMap) => {
-  saveLocalMixMap(roomId, value)
-  const routing = Object.fromEntries(
-    Object.entries(value)
-      .filter(([, patch]) => patch.sends !== undefined || patch.outputTargetId !== undefined)
-      .map(([trackId, patch]) => [
-        trackId,
-        {
-          sends: patch.sends,
-          outputTargetId: patch.outputTargetId,
-        },
-      ]),
-  )
-  saveLocalRoutingMap(roomId, routing)
+const saveLocalTrackState = (projectId: string, value: LocalMixMap) => {
+  if (isLocalId('project', projectId)) return
+  saveLocalMixMap(projectId, value)
+}
+
+const loadProjectTrackState = async (projectId: string): Promise<LocalMixMap | undefined> => {
+  if (!isLocalId('project', projectId)) return undefined
+  return await loadLocalProjectState<LocalMixMap>(projectId, 'localMix')
+}
+
+const saveProjectTrackState = async (projectId: string, value: LocalMixMap): Promise<void> => {
+  if (!isLocalId('project', projectId)) return
+  await saveLocalProjectState(projectId, 'localMix', value)
 }
 
 export function useTimelineLocalMix(
   options: UseTimelineLocalMixOptions,
 ): UseTimelineLocalMixReturn {
-  const persistedState = useRoomPersistedState<LocalMixMap>({
-    roomId: options.roomId,
+  const persistedState = useProjectPersistedState<LocalMixMap>({
+    projectId: options.projectId,
     createInitial: () => ({}),
-    load: (roomId) => loadLocalTrackState(roomId),
-    save: (roomId, value) => saveLocalTrackState(roomId, value),
+    load: (projectId) => loadLocalTrackState(projectId),
+    loadAsync: loadProjectTrackState,
+    save: (projectId, value) => saveLocalTrackState(projectId, value),
+    saveAsync: saveProjectTrackState,
+    onSaveAsyncError: (error) => {
+      options.onLocalSaveFailed?.(error instanceof Error ? error.message : 'Local mix could not be saved.')
+    },
   })
 
   createEffect(on(options.writableTrackIds, (writableTrackIds) => {
-    persistedState.setValue((current) => stripSharedTrackBooleanOverrides(current, writableTrackIds))
+    persistedState.setValue((current) => stripSharedTrackLocalOverrides(current, writableTrackIds))
   }))
 
   return {
@@ -108,8 +102,7 @@ export function useTimelineLocalMix(
       persistedState.setValueSilently((current) => mergeLocalMixPatch(current, trackId, patch))
     },
     persist: (trackId, patch) => {
-      const next = persistedState.setValueSilently((current) => mergeLocalMixPatch(current, trackId, patch))
-      saveLocalTrackState(options.roomId(), next)
+      persistedState.setValue((current) => mergeLocalMixPatch(current, trackId, patch))
     },
   }
 }

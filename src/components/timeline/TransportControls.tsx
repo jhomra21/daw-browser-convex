@@ -3,11 +3,8 @@ import {
   type Accessor,
   type Component,
   For,
-  type JSX,
   Show,
-  createContext,
   createMemo,
-  useContext,
 } from "solid-js";
 import Icon from "~/components/ui/Icon";
 import { Button } from "~/components/ui/button";
@@ -29,67 +26,22 @@ import {
   MenubarSub,
   MenubarSubContent,
   MenubarSubTrigger,
-  MenubarTrigger,
 } from "~/components/ui/menubar";
-import type { InsertSampleInput } from "~/hooks/useTimelineClipImport";
 import { useExportsMenuController } from "~/hooks/useExportsMenuController";
 import { useProjectsMenuController } from "~/hooks/useProjectsMenuController";
 import { useSamplesMenuController } from "~/hooks/useSamplesMenuController";
 import { useShareMenuController } from "~/hooks/useShareMenuController";
 import { useTransportTempoController } from "~/hooks/useTransportTempoController";
-import type { TimelineProject } from "~/hooks/useTimelineData";
 import { authClient } from "~/lib/auth-client";
+import { isLocalId } from "~/lib/local-ids";
 import { queryClient } from "~/lib/query-client";
 import { useSessionQuery } from "~/lib/session";
 import { cn } from "~/lib/utils";
 import type { Track } from "~/types/timeline";
-
-type TransportControlsProps = {
-  isPlaying: boolean;
-  playheadSec: number;
-  onPlay: () => void;
-  onPause: () => void;
-  onStop: () => void;
-  onAddAudio: () => void;
-  tracksMenu: {
-    syncMix: boolean;
-    onToggleSyncMix: () => void;
-    onAddTrack: () => void | Promise<void>;
-    onAddReturnTrack: () => void | Promise<void>;
-    onAddGroupTrack: () => void | Promise<void>;
-    onAddInstrumentTrack: () => void | Promise<void>;
-  };
-  onMasterFX: () => void;
-  onShare?: () => void;
-  bpm: number;
-  onChangeBpm: (next: number) => void;
-  metronomeEnabled: boolean;
-  onToggleMetronome: () => void;
-  gridEnabled: boolean;
-  onToggleGrid: () => void;
-  gridDenominator: number;
-  onChangeGridDenominator: (n: number) => void;
-  loopEnabled: boolean;
-  onToggleLoop: () => void;
-  isRecording: boolean;
-  onToggleRecord: () => void;
-  onUndo: () => void;
-  onRedo: () => void;
-  onJumpToClip: (
-    clipId: string,
-    trackId: Track["id"],
-    startSec: number,
-  ) => void;
-  onInsertSample: (input: InsertSampleInput) => void | Promise<void>;
-  currentRoomId: string;
-  currentUserId?: string;
-  projects: TimelineProject[];
-  onOpenProject: (roomId: string) => void;
-  onCreateProject: () => void | Promise<void>;
-  onDeleteProject: (roomId: string) => void | Promise<void>;
-  onRenameProject: (roomId: string, name: string) => void | Promise<void>;
-  onOpenExport: () => void;
-};
+import { ProjectsMenu } from "./projects-menu";
+import { ProjectMediaMenu } from "./project-media-menu";
+import { NativeMenuTrigger, nativeMenuTriggerClass } from "./toolbar-context";
+import type { TransportControlsProps } from "./transport-types";
 
 type TransportBarController = {
   isRecording: boolean;
@@ -117,24 +69,6 @@ type TransportBarController = {
   bpm: number;
 };
 
-type NativeMenuTriggerProps = {
-  label: string;
-};
-
-const nativeMenuTriggerClass =
-  "h-7 rounded px-2 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100";
-
-const NativeMenuTrigger: Component<NativeMenuTriggerProps> = (props) => (
-  <MenubarTrigger
-    class={cn(
-      nativeMenuTriggerClass,
-      "data-[expanded]:bg-neutral-800 data-[expanded]:text-neutral-100",
-    )}
-  >
-    {props.label}
-  </MenubarTrigger>
-);
-
 const nativeMenuItemClass =
   "cursor-pointer text-neutral-200 hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100";
 
@@ -146,40 +80,17 @@ type ShareMenuController = {
   onClose: () => void;
   copied: boolean;
   shareUrl: string;
+  shareError: string;
+  members: Array<{ userId: string; role: "editor" | "viewer" }>;
+  membersLoading: boolean;
+  membersError: string;
+  revokingMemberId: string;
   onCopy: () => Promise<void>;
+  onRevokeMember: (userId: string) => Promise<void>;
 };
 
-type ToolbarContextValue = {
-  toolbar: TransportControlsProps;
-  projectsMenu: ReturnType<typeof useProjectsMenuController>;
-  samplesMenu: ReturnType<typeof useSamplesMenuController>;
-  exportsMenu: ReturnType<typeof useExportsMenuController>;
-};
-
-const ToolbarContext = createContext<ToolbarContextValue>();
-
-const useToolbar = () => {
-  const context = useContext(ToolbarContext);
-
-  if (!context) {
-    throw new Error("useToolbar must be used inside ToolbarProvider");
-  }
-
-  return context;
-};
-
-const ToolbarProvider: Component<{
-  value: ToolbarContextValue;
-  children: JSX.Element;
-}> = (props) => (
-  <ToolbarContext.Provider value={props.value}>
-    {props.children}
-  </ToolbarContext.Provider>
-);
-
-const FileMenu: Component = () => {
-  const context = useToolbar();
-  const toolbar = () => context.toolbar;
+const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) => {
+  const toolbar = () => props.toolbar;
 
   return (
     <MenubarMenu value="file">
@@ -193,7 +104,7 @@ const FileMenu: Component = () => {
         </MenubarItem>
         <MenubarItem
           class={nativeMenuItemClass}
-          onSelect={toolbar().onOpenExport}
+          onSelect={toolbar().projectMenu.onOpenExport}
         >
           Export Mixdown...
         </MenubarItem>
@@ -202,9 +113,8 @@ const FileMenu: Component = () => {
   );
 };
 
-const EditMenu: Component = () => {
-  const context = useToolbar();
-  const toolbar = () => context.toolbar;
+const EditMenu: Component<{ toolbar: TransportControlsProps }> = (props) => {
+  const toolbar = () => props.toolbar;
 
   return (
     <MenubarMenu value="edit">
@@ -221,952 +131,8 @@ const EditMenu: Component = () => {
   );
 };
 
-const ProjectsMenu: Component = () => {
-  const context = useToolbar();
-  const toolbar = () => context.toolbar;
-  const menu = () => context.projectsMenu;
-
-  return (
-    <MenubarMenu value="project">
-      <NativeMenuTrigger label="Project" />
-      <MenubarContent
-        class="w-full border-neutral-800 bg-neutral-900"
-        style={{ width: "min(92vw, 24rem)" }}
-      >
-        <div class="w-full p-2">
-          <div class="flex items-center justify-between px-1 pb-2">
-            <span class="text-sm font-semibold text-neutral-100">
-              My Projects
-            </span>
-            <Button
-              variant="default"
-              class="text-neutral-100"
-              size="sm"
-              onClick={() => void toolbar().onCreateProject()}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                class="mr-1 h-4 w-4"
-              >
-                <path
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M12 5v14m-7-7h14"
-                />
-                <title>New</title>
-              </svg>
-              New
-            </Button>
-          </div>
-          <MenubarSeparator />
-          <div class="max-h-72 overflow-y-auto">
-            <For each={toolbar().projects}>
-              {(project) => {
-                const roomId = project.roomId;
-                const isEditing = () => menu().editingProjectId() === roomId;
-                const isConfirmingDelete = () =>
-                  menu().confirmingProjectId() === roomId;
-                const isRenaming = () => menu().renamingProjectId() === roomId;
-
-                return (
-                  <Show
-                    when={!isEditing() && !isConfirmingDelete()}
-                    fallback={
-                      <div
-                        data-project-rid={roomId}
-                        class={cn(
-                          "group relative flex w-full items-center justify-between gap-2 pr-12",
-                          toolbar().currentRoomId === roomId &&
-                            "text-green-400",
-                        )}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <div class="flex min-w-0 flex-1 items-center gap-2">
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            class="h-4 w-4 text-neutral-400"
-                          >
-                            <path
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              d="M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
-                            />
-                            <title>Project</title>
-                          </svg>
-                          <Show
-                            when={isEditing()}
-                            fallback={
-                              <span
-                                class={cn(
-                                  "max-w-56 truncate font-mono text-xs",
-                                  toolbar().currentRoomId === roomId
-                                    ? "text-green-400"
-                                    : "text-neutral-200",
-                                )}
-                                title={project.name}
-                              >
-                                {project.name}
-                              </span>
-                            }
-                          >
-                            <form
-                              class="flex min-w-0 w-full items-center gap-2"
-                              onSubmit={async (event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                await menu().confirmProjectRename(roomId);
-                              }}
-                            >
-                              <input
-                                data-project-input={roomId}
-                                value={menu().editingName()}
-                                onInput={(event) => {
-                                  menu().stopPropagation(event);
-                                  menu().setEditingName(
-                                    event.currentTarget.value,
-                                  );
-                                }}
-                                onKeyDown={async (event) => {
-                                  menu().stopPropagation(event);
-                                  if (
-                                    event.key === "Enter" ||
-                                    event.code === "Enter" ||
-                                    event.code === "NumpadEnter"
-                                  ) {
-                                    event.preventDefault();
-                                    await menu().confirmProjectRename(roomId);
-                                    return;
-                                  }
-                                  if (event.key === "Escape") {
-                                    event.preventDefault();
-                                    menu().cancelProjectRename();
-                                  }
-                                }}
-                                onKeyUp={menu().stopPropagation}
-                                onPointerUp={menu().stopPropagation}
-                                onPointerMove={menu().stopPropagation}
-                                class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 pr-12 text-xs text-neutral-100 outline-none focus:border-neutral-500"
-                                ref={(element) => {
-                                  const stopCapture = (event: Event) => {
-                                    event.stopPropagation();
-                                  };
-                                  element.addEventListener(
-                                    "pointermove",
-                                    stopCapture,
-                                    { capture: true },
-                                  );
-                                  element.addEventListener(
-                                    "pointerdown",
-                                    stopCapture,
-                                    { capture: true },
-                                  );
-                                  element.addEventListener(
-                                    "pointerup",
-                                    stopCapture,
-                                    { capture: true },
-                                  );
-                                }}
-                              />
-                              <div class="shrink-0" />
-                              <button
-                                type="submit"
-                                tabindex={-1}
-                                aria-hidden="true"
-                                class="hidden"
-                              />
-                            </form>
-                          </Show>
-                        </div>
-                        <div
-                          class="absolute right-2 top-1/2 -translate-y-1/2"
-                          data-project-controls
-                        >
-                          <div
-                            class={cn(
-                              "absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-1 transition-opacity duration-150",
-                              isConfirmingDelete()
-                                ? "opacity-100"
-                                : "pointer-events-none opacity-0",
-                            )}
-                          >
-                            <button
-                              class={cn(
-                                "rounded p-1",
-                                menu().deletingProjectId() === roomId
-                                  ? "cursor-not-allowed text-neutral-400 opacity-60"
-                                  : "cursor-pointer text-green-500 hover:text-green-400",
-                              )}
-                              aria-label={
-                                menu().deletingProjectId() === roomId
-                                  ? "Deleting…"
-                                  : "Confirm delete"
-                              }
-                              disabled={menu().deletingProjectId() === roomId}
-                              onPointerDown={menu().stopMenuPress}
-                              onPointerUp={menu().stopMenuPress}
-                              onClick={async (event) => {
-                                menu().stopMenuPress(event);
-                                await menu().confirmProjectDelete(roomId);
-                              }}
-                            >
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                class="h-4 w-4"
-                              >
-                                <path
-                                  fill="none"
-                                  stroke="currentColor"
-                                  stroke-width="2"
-                                  stroke-linecap="round"
-                                  stroke-linejoin="round"
-                                  d="m5 12l5 5L20 7"
-                                />
-                                <title>Confirm</title>
-                              </svg>
-                            </button>
-                            <button
-                              class={cn(
-                                "rounded p-1",
-                                menu().deletingProjectId() === roomId
-                                  ? "cursor-not-allowed text-neutral-400 opacity-60"
-                                  : "cursor-pointer text-neutral-400 hover:text-neutral-300",
-                              )}
-                              aria-label="Cancel delete"
-                              disabled={menu().deletingProjectId() === roomId}
-                              onPointerDown={menu().stopMenuPress}
-                              onPointerUp={menu().stopMenuPress}
-                              onClick={(event) => {
-                                menu().stopMenuPress(event);
-                                menu().setConfirmingProjectId(null);
-                              }}
-                            >
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                class="h-4 w-4"
-                              >
-                                <path
-                                  fill="none"
-                                  stroke="currentColor"
-                                  stroke-linecap="round"
-                                  stroke-linejoin="round"
-                                  stroke-width="2"
-                                  d="m7 7l10 10M17 7L7 17"
-                                />
-                                <title>Cancel</title>
-                              </svg>
-                            </button>
-                          </div>
-                          <Show when={isEditing()}>
-                            <div class="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-1">
-                              <button
-                                class={cn(
-                                  "rounded p-1",
-                                  isRenaming()
-                                    ? "cursor-not-allowed text-neutral-400 opacity-60"
-                                    : "cursor-pointer text-green-500 hover:text-green-400",
-                                )}
-                                aria-label={
-                                  isRenaming() ? "Renaming…" : "Confirm rename"
-                                }
-                                disabled={isRenaming()}
-                                onPointerDown={menu().stopMenuPress}
-                                onPointerUp={menu().stopMenuPress}
-                                onClick={async (event) => {
-                                  menu().stopMenuPress(event);
-                                  await menu().confirmProjectRename(roomId);
-                                }}
-                              >
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  viewBox="0 0 24 24"
-                                  class="h-4 w-4"
-                                >
-                                  <path
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    d="m5 12l5 5L20 7"
-                                  />
-                                  <title>Confirm</title>
-                                </svg>
-                              </button>
-                              <button
-                                class={cn(
-                                  "rounded p-1",
-                                  isRenaming()
-                                    ? "cursor-not-allowed text-neutral-400 opacity-60"
-                                    : "cursor-pointer text-neutral-400 hover:text-neutral-300",
-                                )}
-                                aria-label="Cancel rename"
-                                disabled={isRenaming()}
-                                onPointerDown={menu().stopMenuPress}
-                                onPointerUp={menu().stopMenuPress}
-                                onClick={(event) => {
-                                  menu().stopMenuPress(event);
-                                  menu().cancelProjectRename();
-                                }}
-                              >
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  viewBox="0 0 24 24"
-                                  class="h-4 w-4"
-                                >
-                                  <path
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="m7 7l10 10M17 7L7 17"
-                                  />
-                                  <title>Cancel</title>
-                                </svg>
-                              </button>
-                            </div>
-                          </Show>
-                        </div>
-                      </div>
-                    }
-                  >
-                    <MenubarItem
-                      data-project-rid={roomId}
-                      class={cn(
-                        "group relative flex w-full cursor-pointer items-center justify-between gap-2 pr-12 hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100",
-                        toolbar().currentRoomId === roomId && "text-green-400",
-                      )}
-                      onSelect={() => {
-                        menu().setConfirmingProjectId(null);
-                        toolbar().onOpenProject(roomId);
-                      }}
-                    >
-                      <div class="flex min-w-0 flex-1 items-center gap-2">
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          class="h-4 w-4 text-neutral-400 group-hover:text-neutral-200"
-                        >
-                          <path
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            d="M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
-                          />
-                          <title>Project</title>
-                        </svg>
-                        <span
-                          class={cn(
-                            "max-w-56 truncate font-mono text-xs",
-                            toolbar().currentRoomId === roomId
-                              ? "text-green-400 group-hover:text-green-300"
-                              : "text-neutral-200 group-hover:text-neutral-100",
-                          )}
-                          title={project.name}
-                        >
-                          {project.name}
-                        </span>
-                      </div>
-                      <div
-                        class="absolute right-2 top-1/2 -translate-y-1/2"
-                        data-project-controls
-                      >
-                        <div class="pointer-events-none flex items-center gap-1 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100">
-                          <button
-                            class="cursor-pointer p-1 text-neutral-400 hover:text-neutral-200"
-                            aria-label="Edit project name"
-                            onPointerDown={menu().stopMenuPress}
-                            onPointerUp={menu().stopMenuPress}
-                            onClick={(event) => {
-                              menu().stopMenuPress(event);
-                              menu().beginProjectRename(roomId, project.name);
-                            }}
-                          >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 24 24"
-                              class="h-4 w-4"
-                            >
-                              <path
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                d="M12 20h9"
-                              />
-                              <path
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"
-                              />
-                              <title>Edit</title>
-                            </svg>
-                          </button>
-                          <button
-                            class="cursor-pointer p-1 text-neutral-400 hover:text-red-500"
-                            aria-label="Delete project"
-                            onPointerDown={menu().stopMenuPress}
-                            onPointerUp={menu().stopMenuPress}
-                            onClick={(event) => {
-                              menu().stopMenuPress(event);
-                              menu().setConfirmingProjectId(roomId);
-                            }}
-                          >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 24 24"
-                              class="h-4 w-4"
-                            >
-                              <path
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m-1 0v14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V6m3 4v8m4-8v8"
-                              />
-                              <title>Delete</title>
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    </MenubarItem>
-                  </Show>
-                );
-              }}
-            </For>
-            <Show when={toolbar().projects.length === 0}>
-              <div class="px-2 py-2 text-xs text-neutral-500">
-                No projects yet
-              </div>
-            </Show>
-          </div>
-        </div>
-      </MenubarContent>
-    </MenubarMenu>
-  );
-};
-
-const ProjectMediaMenu: Component = () => {
-  const context = useToolbar();
-  const samples = () => context.samplesMenu;
-  const exportsMenu = () => context.exportsMenu;
-  const hasProjectSamples = () => samples().samples().length > 0;
-  const hasDefaultSamples = () => samples().defaultSamples().length > 0;
-  const hasExports = () => exportsMenu().exports().length > 0;
-  const hasMedia = () =>
-    hasProjectSamples() || hasDefaultSamples() || hasExports();
-
-  return (
-    <MenubarMenu
-      value="media"
-      onOpenChange={(open) => {
-        samples().onOpenChange(open);
-        exportsMenu().onOpenChange(open);
-      }}
-    >
-      <NativeMenuTrigger label="Media" />
-      <MenubarContent
-        class="w-full border-neutral-800 bg-neutral-900"
-        style={{
-          width: "min(92vw, 30rem)",
-          "pointer-events": samples().isDraggingSample() ? "none" : undefined,
-        }}
-      >
-        <div class="w-full p-2">
-          <div class="flex items-center justify-between px-1 pb-2">
-            <span class="text-sm font-semibold text-neutral-100">Media</span>
-          </div>
-          <MenubarSeparator />
-          <div class="max-h-80 overflow-x-hidden overflow-y-auto">
-            <Show
-              when={hasMedia()}
-              fallback={
-                <div class="px-2 py-2 text-xs text-neutral-500">
-                  No media yet
-                </div>
-              }
-            >
-              <Show when={hasProjectSamples()}>
-                <div class="px-2 pb-2 pt-1 text-xs uppercase tracking-wide text-neutral-500">
-                  Samples in Project
-                </div>
-                <For each={samples().samples()}>
-                  {(sample) => {
-                    const sampleKey = sample.key;
-                    const isConfirming = () =>
-                      samples().confirmingSampleKey() === sampleKey;
-                    const isDeleting = () =>
-                      samples().deletingSampleKey() === sampleKey;
-                    const isInserting = () =>
-                      samples().insertingSampleKey() === sampleKey;
-
-                    return (
-                      <MenubarItem
-                        data-sample-key={sampleKey}
-                        class="group relative flex w-full cursor-pointer items-center justify-between gap-2 pr-20 hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100"
-                        onSelect={() => {
-                          if (sample.earliestClip) {
-                            samples().onJumpToClip(
-                              sample.earliestClip.clipId,
-                              sample.earliestClip.trackId,
-                              sample.earliestClip.startSec,
-                            );
-                          }
-                        }}
-                      >
-                        <div
-                          class="flex min-w-0 flex-1 items-center gap-2"
-                          draggable={!!sample.url}
-                          onDragStart={(event) =>
-                            samples().onStartSampleDrag(event, sample)
-                          }
-                          onDragEnd={() => samples().setIsDraggingSample(false)}
-                        >
-                          <Icon
-                            name="file-audio"
-                            class="h-4 w-4 text-neutral-400 group-hover:text-neutral-200"
-                          />
-                          <span
-                            class="max-w-48 truncate font-mono text-xs text-neutral-200 group-hover:text-neutral-100"
-                            title={sample.name}
-                          >
-                            {sample.name}
-                          </span>
-                          <span class="shrink-0 text-xs text-neutral-400">
-                            x{sample.count}
-                          </span>
-                        </div>
-                        <div class="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
-                          <button
-                            class="cursor-pointer p-1 text-neutral-400 hover:text-neutral-200 disabled:opacity-50"
-                            aria-label="Copy sample URL"
-                            disabled={!sample.url}
-                            onPointerDown={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onPointerUp={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onClick={async (event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                              await samples().copyText(sample.url);
-                            }}
-                          >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 24 24"
-                              class="h-4 w-4"
-                            >
-                              <g
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                              >
-                                <rect width="8" height="8" x="8" y="8" rx="2" />
-                                <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
-                              </g>
-                              <title>Copy URL</title>
-                            </svg>
-                          </button>
-                          <button
-                            class={cn(
-                              "cursor-pointer p-1 text-neutral-400 hover:text-neutral-100 disabled:opacity-50",
-                              isInserting() && "cursor-not-allowed opacity-60",
-                            )}
-                            aria-label="Insert sample"
-                            disabled={!sample.url || isInserting()}
-                            onPointerDown={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onPointerUp={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onClick={async (event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                              await samples().onInsertSample(sample);
-                            }}
-                          >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 24 24"
-                              class="h-4 w-4"
-                            >
-                              <path
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                d="M4 11h16M12 4v16"
-                              />
-                              <title>Insert</title>
-                            </svg>
-                          </button>
-                          <Show
-                            when={isConfirming()}
-                            fallback={
-                              <button
-                                class={cn(
-                                  "cursor-pointer p-1",
-                                  sample.count > 0
-                                    ? "cursor-not-allowed text-neutral-500 opacity-50"
-                                    : "text-red-500 hover:text-red-400",
-                                )}
-                                aria-label={
-                                  sample.count > 0
-                                    ? "Cannot delete sample in use"
-                                    : "Delete sample"
-                                }
-                                disabled={sample.count > 0}
-                                onPointerDown={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                }}
-                                onPointerUp={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                }}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                  if (sample.count === 0) {
-                                    samples().setConfirmingSampleKey(sampleKey);
-                                  }
-                                }}
-                              >
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  viewBox="0 0 24 24"
-                                  class="h-4 w-4"
-                                >
-                                  <path
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m-1 0v14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V6m3 4v8m4-8v8"
-                                  />
-                                  <title>Delete</title>
-                                </svg>
-                              </button>
-                            }
-                          >
-                            <div class="flex items-center gap-1">
-                              <button
-                                class={cn(
-                                  "cursor-pointer p-1",
-                                  isDeleting()
-                                    ? "cursor-not-allowed text-neutral-400 opacity-60"
-                                    : "text-green-500 hover:text-green-400",
-                                )}
-                                aria-label={
-                                  isDeleting() ? "Deleting…" : "Confirm delete"
-                                }
-                                disabled={isDeleting()}
-                                onPointerDown={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                }}
-                                onPointerUp={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                }}
-                                onClick={async (event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                  await samples().onDeleteSample(sample);
-                                }}
-                              >
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  viewBox="0 0 24 24"
-                                  class="h-4 w-4"
-                                >
-                                  <path
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    d="m5 12l5 5L20 7"
-                                  />
-                                  <title>Confirm</title>
-                                </svg>
-                              </button>
-                              <button
-                                class="cursor-pointer p-1 text-neutral-400 hover:text-neutral-300"
-                                aria-label="Cancel delete"
-                                onPointerDown={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                }}
-                                onPointerUp={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                }}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                  samples().setConfirmingSampleKey(null);
-                                }}
-                              >
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  viewBox="0 0 24 24"
-                                  class="h-4 w-4"
-                                >
-                                  <path
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="m7 7l10 10M17 7L7 17"
-                                  />
-                                  <title>Cancel</title>
-                                </svg>
-                              </button>
-                            </div>
-                          </Show>
-                        </div>
-                      </MenubarItem>
-                    );
-                  }}
-                </For>
-              </Show>
-              <Show when={hasDefaultSamples()}>
-                <Show when={hasProjectSamples()}>
-                  <MenubarSeparator class="my-2" />
-                </Show>
-                <div class="px-2 pb-2 pt-1 text-xs uppercase tracking-wide text-neutral-500">
-                  Default Samples
-                </div>
-                <For each={samples().defaultSamples()}>
-                  {(sample) => {
-                    const isInserting = () =>
-                      samples().insertingSampleKey() === sample.key;
-                    const size = () => samples().formatBytes(sample.sizeBytes);
-
-                    return (
-                      <MenubarItem
-                        data-sample-key={sample.key}
-                        class="group relative flex w-full cursor-pointer items-center justify-between gap-2 pr-16 hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100"
-                        onSelect={() => {}}
-                      >
-                        <div
-                          class="flex min-w-0 flex-1 items-center gap-2"
-                          draggable={!!sample.url}
-                          onDragStart={(event) =>
-                            samples().onStartSampleDrag(event, sample)
-                          }
-                          onDragEnd={() => samples().setIsDraggingSample(false)}
-                        >
-                          <Icon
-                            name="file-audio"
-                            class="h-4 w-4 text-neutral-400 group-hover:text-neutral-200"
-                          />
-                          <span
-                            class="max-w-48 truncate font-mono text-xs text-neutral-200 group-hover:text-neutral-100"
-                            title={sample.name}
-                          >
-                            {sample.name}
-                          </span>
-                          <Show when={size()}>
-                            <span class="shrink-0 text-xs text-neutral-400">
-                              {size()}
-                            </span>
-                          </Show>
-                        </div>
-                        <div class="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
-                          <button
-                            class="cursor-pointer p-1 text-neutral-400 hover:text-neutral-200 disabled:opacity-50"
-                            aria-label="Copy sample URL"
-                            disabled={!sample.url}
-                            onPointerDown={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onPointerUp={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onClick={async (event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                              await samples().copyText(sample.url);
-                            }}
-                          >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 24 24"
-                              class="h-4 w-4"
-                            >
-                              <g
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                              >
-                                <rect width="8" height="8" x="8" y="8" rx="2" />
-                                <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
-                              </g>
-                              <title>Copy URL</title>
-                            </svg>
-                          </button>
-                          <button
-                            class={cn(
-                              "cursor-pointer p-1 text-neutral-400 hover:text-neutral-100 disabled:opacity-50",
-                              isInserting() && "cursor-not-allowed opacity-60",
-                            )}
-                            aria-label="Insert default sample"
-                            disabled={!sample.url || isInserting()}
-                            onPointerDown={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onPointerUp={(event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                            }}
-                            onClick={async (event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                              await samples().onInsertSample(sample);
-                            }}
-                          >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 24 24"
-                              class="h-4 w-4"
-                            >
-                              <path
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                d="M4 11h16M12 4v16"
-                              />
-                              <title>Insert</title>
-                            </svg>
-                          </button>
-                        </div>
-                      </MenubarItem>
-                    );
-                  }}
-                </For>
-              </Show>
-              <Show when={hasExports()}>
-                <Show when={hasProjectSamples() || hasDefaultSamples()}>
-                  <MenubarSeparator class="my-2" />
-                </Show>
-                <div class="px-2 pb-2 pt-1 text-xs uppercase tracking-wide text-neutral-500">
-                  Exports
-                </div>
-                <For each={exportsMenu().exports()}>
-                  {(item) => (
-                    <MenubarItem
-                      class="group relative flex w-full cursor-pointer items-center justify-between gap-2 pr-12 hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100"
-                      onSelect={() => {
-                        if (item.url) {
-                          window.open(item.url, "_blank");
-                        }
-                      }}
-                    >
-                      <div class="flex min-w-0 flex-1 items-center gap-2">
-                        <Icon
-                          name="file-audio"
-                          class="h-4 w-4 text-neutral-400 group-hover:text-neutral-200"
-                        />
-                        <span
-                          class="max-w-48 truncate font-mono text-xs text-neutral-200 group-hover:text-neutral-100"
-                          title={item.name}
-                        >
-                          {item.name}
-                        </span>
-                        <span class="shrink-0 text-xs uppercase text-neutral-400">
-                          {item.format}
-                        </span>
-                      </div>
-                      <button
-                        class="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer p-1 text-neutral-400 hover:text-neutral-200 disabled:opacity-50"
-                        aria-label="Copy export URL"
-                        disabled={!item.url}
-                        onPointerDown={(event) => {
-                          event.stopPropagation();
-                          event.preventDefault();
-                        }}
-                        onPointerUp={(event) => {
-                          event.stopPropagation();
-                          event.preventDefault();
-                        }}
-                        onClick={async (event) => {
-                          event.stopPropagation();
-                          event.preventDefault();
-                          await exportsMenu().copyText(item.url);
-                        }}
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          class="h-4 w-4"
-                        >
-                          <g
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                          >
-                            <rect width="8" height="8" x="8" y="8" rx="2" />
-                            <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
-                          </g>
-                          <title>Copy URL</title>
-                        </svg>
-                      </button>
-                    </MenubarItem>
-                  )}
-                </For>
-              </Show>
-            </Show>
-          </div>
-        </div>
-      </MenubarContent>
-    </MenubarMenu>
-  );
-};
-
-const TracksMenu: Component = () => {
-  const context = useToolbar();
-  const tracksMenu = () => context.toolbar.tracksMenu;
+const TracksMenu: Component<{ tracksMenu: TransportControlsProps["tracksMenu"] }> = (props) => {
+  const tracksMenu = () => props.tracksMenu;
 
   return (
     <MenubarMenu value="tracks">
@@ -1488,6 +454,56 @@ const ShareMenu: Component<{ share: ShareMenuController }> = (props) => {
               </Show>
             </Button>
           </div>
+          <Show when={share().shareError}>
+            <div class="mt-2 text-xs text-red-300">
+              {share().shareError}
+            </div>
+          </Show>
+          <div class="mt-4 border-t border-neutral-800 pt-3">
+            <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+              Members
+            </div>
+            <Show
+              when={!share().membersLoading}
+              fallback={<div class="text-xs text-neutral-500">Loading members...</div>}
+            >
+              <Show
+                when={share().members.length > 0}
+                fallback={<div class="text-xs text-neutral-500">No accepted members yet.</div>}
+              >
+                <div class="space-y-2">
+                  <For each={share().members}>
+                    {(member) => (
+                      <div class="flex items-center justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2">
+                        <div class="min-w-0">
+                          <div class="truncate text-xs text-neutral-200">{member.userId}</div>
+                          <div class="text-[11px] capitalize text-neutral-500">{member.role}</div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          class="shrink-0 text-red-300 hover:bg-red-950/40 hover:text-red-200"
+                          disabled={share().revokingMemberId === member.userId}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void share().onRevokeMember(member.userId);
+                          }}
+                        >
+                          {share().revokingMemberId === member.userId ? "Removing..." : "Remove"}
+                        </Button>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </Show>
+            <Show when={share().membersError}>
+              <div class="mt-2 text-xs text-red-300">
+                {share().membersError}
+              </div>
+            </Show>
+          </div>
         </div>
       </MenubarContent>
     </MenubarMenu>
@@ -1556,9 +572,8 @@ const ShortcutsSubMenu: Component = () => (
   </MenubarSub>
 );
 
-const SettingsMenu: Component = () => {
-  const context = useToolbar();
-  const toolbar = () => context.toolbar;
+const SettingsMenu: Component<{ toolbar: TransportControlsProps }> = (props) => {
+  const toolbar = () => props.toolbar;
   const navigate = useNavigate();
   const session = useSessionQuery();
   const user = createMemo(() => session.data?.user);
@@ -1644,48 +659,65 @@ const SettingsMenu: Component = () => {
   );
 };
 
+const SaveStatus: Component<{ projectId: string; userId?: string }> = (props) => {
+  const status = () =>
+    isLocalId("project", props.projectId)
+      ? { label: "Saved locally", class: "border-emerald-900/70 bg-emerald-950/40 text-emerald-300" }
+      : props.userId
+        ? { label: "Cloud saved", class: "border-sky-900/70 bg-sky-950/40 text-sky-300" }
+        : { label: "Sign in to sync", class: "border-amber-900/70 bg-amber-950/40 text-amber-300" };
+
+  return (
+    <span
+      class={cn(
+        "rounded-full border px-2 py-1 text-[11px] font-medium",
+        status().class,
+      )}
+    >
+      {status().label}
+    </span>
+  );
+};
+
 const TransportControls: Component<TransportControlsProps> = (props) => {
-  const currentRoomId = () => props.currentRoomId;
-  const currentUserId = () => props.currentUserId;
+  const currentProjectId = () => props.projectMenu.currentProjectId;
+  const currentUserId = () => props.projectMenu.currentUserId;
   const projectsMenu = useProjectsMenuController({
-    onDeleteProject: props.onDeleteProject,
-    onRenameProject: props.onRenameProject,
+    onDeleteProject: props.projectMenu.onDeleteProject,
+    onRenameProject: props.projectMenu.onRenameProject,
   });
   const samplesMenu = useSamplesMenuController({
-    currentRoomId,
+    currentProjectId,
     currentUserId,
     onInsertSample: props.onInsertSample,
     onJumpToClip: props.onJumpToClip,
   });
   const exportsMenu = useExportsMenuController({
-    currentRoomId,
+    currentProjectId,
+    currentUserId,
   });
   const shareMenu = useShareMenuController({
-    onShare: props.onShare,
-    roomId: currentRoomId,
+    onShare: props.projectMenu.onShare,
+    projectId: currentProjectId,
   });
   const tempo = useTransportTempoController({
     bpm: () => props.bpm,
     onChangeBpm: props.onChangeBpm,
   });
-  const toolbarContext = {
-    toolbar: props,
-    projectsMenu,
-    samplesMenu,
-    exportsMenu,
-  };
-
   return (
     <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-neutral-800 bg-neutral-950 p-2">
       <div class="justify-self-start flex items-center gap-1">
-        <ToolbarProvider value={toolbarContext}>
-          <Menubar class="flex items-center gap-1">
-            <FileMenu />
-            <EditMenu />
-            <ProjectsMenu />
-            <ProjectMediaMenu />
-            <SettingsMenu />
-            <TracksMenu />
+        <Menubar class="flex items-center gap-1">
+          <FileMenu toolbar={props} />
+          <EditMenu toolbar={props} />
+          <ProjectsMenu
+            projectMenu={props.projectMenu}
+            menu={projectsMenu}
+          />
+          <ProjectMediaMenu samples={samplesMenu} exportsMenu={exportsMenu} />
+          <SettingsMenu toolbar={props} />
+          <TracksMenu tracksMenu={props.tracksMenu} />
+          <Show when={!isLocalId("project", props.projectMenu.currentProjectId) && props.projectMenu.canManageSharing}>
             <ShareMenu
               share={{
                 onOpenChange: shareMenu.onOpenChange,
@@ -1693,11 +725,17 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
                 onClose: shareMenu.onClose,
                 copied: shareMenu.copied(),
                 shareUrl: shareMenu.shareUrl(),
+                shareError: shareMenu.shareError(),
+                members: shareMenu.members(),
+                membersLoading: shareMenu.membersLoading(),
+                membersError: shareMenu.membersError(),
+                revokingMemberId: shareMenu.revokingMemberId(),
                 onCopy: shareMenu.onCopy,
+                onRevokeMember: shareMenu.onRevokeMember,
               }}
             />
-          </Menubar>
-        </ToolbarProvider>
+          </Show>
+        </Menubar>
       </div>
 
       <TransportBar
@@ -1729,6 +767,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
       />
 
       <div class="justify-self-end flex items-center gap-3">
+        <SaveStatus projectId={currentProjectId()} userId={currentUserId()} />
         <div class="flex items-center gap-2 text-xs">
           <span class="text-neutral-500">Playhead</span>
           <span class="tabular-nums text-neutral-200">

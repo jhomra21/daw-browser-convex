@@ -12,11 +12,13 @@ const Login: Component = () => {
   const session = useSessionQuery();
   const search = Route.useSearch();
   const [loadingGoogle, setLoadingGoogle] = createSignal(false);
+  const [signInError, setSignInError] = createSignal<string | null>(null);
   const redirectTarget = () => normalizeAppRedirect(search().redirect);
 
   async function signInWithGoogle() {
     try {
       setLoadingGoogle(true);
+      setSignInError(null);
       await authClient.signIn.social({
         provider: 'google',
         callbackURL: redirectTarget(),
@@ -27,7 +29,7 @@ const Login: Component = () => {
       // Better Auth client usually surfaces errors via returned object or callbacks.
       // This is a safety net in case something throws.
       console.error('Google sign-in error:', err);
-      alert('Failed to start Google sign-in. Please try again.');
+      setSignInError('Failed to start Google sign-in. Please try again.');
       setLoadingGoogle(false);
     }
   }
@@ -44,6 +46,13 @@ const Login: Component = () => {
         <Show when={!session.data} fallback={<div class="text-xl font-semibold italic">Welcome</div>}>
           <h1 class="text-2xl font-semibold mb-2">Sign in</h1>
           <p class="text-neutral-400 mb-6">Use your Google account to continue.</p>
+          <Show when={signInError()}>
+            {(message) => (
+              <div class="mb-4 rounded-md border border-red-900/70 bg-red-950/40 p-3 text-sm text-red-200">
+                {message()}
+              </div>
+            )}
+          </Show>
         </Show>
 
         <Show

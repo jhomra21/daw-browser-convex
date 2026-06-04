@@ -3,12 +3,14 @@ import type { Accessor } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
 
 import { convexApi, useConvexQuery } from '~/lib/convex'
+import { isLocalId } from '~/lib/local-ids'
 import {
   buildOptimisticGrantScopeKey,
   isOptimisticGrantScopeCurrent,
   type OptimisticGrantScope,
 } from '~/lib/optimistic-grant-scope'
 import type { PendingTrackEntry } from '~/lib/resolve-timeline-tracks'
+import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
 import type { Track, TrackRouting, TrackSend } from '~/types/timeline'
 
 type ProjectedTimelineRouting = TrackRouting & { sends: TrackSend[] }
@@ -17,9 +19,10 @@ type OptimisticGrantState = 'pending' | 'seen'
 type PendingClipCreate = { trackId: Track['id']; clip: Track['clips'][number] }
 
 type UseProjectedTimelineModelOptions = {
-  roomId: Accessor<string>
+  projectId: Accessor<string>
   userId: Accessor<string>
   fullViewData: Accessor<FunctionReturnType<typeof convexApi.timeline.fullView> | undefined>
+  localSnapshot: Accessor<TimelineSnapshot | null>
   pendingTrackEntriesById: Accessor<Map<Track['id'], PendingTrackEntry>>
   pendingClipCreatesById: Accessor<Map<string, PendingClipCreate>>
   removedTrackIds: Accessor<Set<Track['id']>>
@@ -108,30 +111,24 @@ export function useProjectedTimelineModel(
   const ownedTracksQ = useConvexQuery(
     convexApi.ownerships.listOwnedTrackIds,
     () => {
-      const roomId = options.roomId()
+      const projectId = options.projectId()
       const userId = options.userId()
-      return roomId && userId ? { roomId, ownerUserId: userId } : null
+      if (isLocalId('project', projectId)) return null
+      return projectId && userId ? { projectId } : null
     },
-    () => ['owned-tracks', options.roomId(), options.userId()],
+    () => ['owned-tracks', options.projectId(), options.userId()],
   )
-
-  const ownedTrackIds = createMemo(() => {
-    return new Set<Track['id']>(ownedTracksQ.data ?? [])
-  })
 
   const ownedClipsQ = useConvexQuery(
     convexApi.ownerships.listOwnedClipIds,
     () => {
-      const roomId = options.roomId()
+      const projectId = options.projectId()
       const userId = options.userId()
-      return roomId && userId ? { roomId, ownerUserId: userId } : null
+      if (isLocalId('project', projectId)) return null
+      return projectId && userId ? { projectId } : null
     },
-    () => ['owned-clips', options.roomId(), options.userId()],
+    () => ['owned-clips', options.projectId(), options.userId()],
   )
-
-  const ownedClipIds = createMemo(() => {
-    return new Set<string>((ownedClipsQ.data ?? []).map((value: string) => String(value)))
-  })
 
   const existingTrackIds = createMemo(() => {
     const trackIds = new Set<Track['id']>()
@@ -140,6 +137,16 @@ export function useProjectedTimelineModel(
       for (const track of data.tracks) {
         if (!options.removedTrackIds().has(track._id)) {
           trackIds.add(track._id)
+        }
+      }
+    }
+    if (isLocalId('project', options.projectId())) {
+      const localSnapshot = options.localSnapshot()
+      if (localSnapshot) {
+        for (const track of localSnapshot.tracks) {
+          if (!options.removedTrackIds().has(track.id)) {
+            trackIds.add(track.id)
+          }
         }
       }
     }
@@ -160,10 +167,30 @@ export function useProjectedTimelineModel(
         }
       }
     }
+    if (isLocalId('project', options.projectId())) {
+      const localSnapshot = options.localSnapshot()
+      if (localSnapshot) {
+        for (const clip of localSnapshot.clips) {
+          if (!options.removedClipIds().has(clip.id)) {
+            clipIds.add(clip.id)
+          }
+        }
+      }
+    }
     for (const [clipId] of options.pendingClipCreatesById()) {
       clipIds.add(clipId)
     }
     return clipIds
+  })
+
+  const ownedTrackIds = createMemo(() => {
+    if (isLocalId('project', options.projectId())) return existingTrackIds()
+    return new Set<Track['id']>(ownedTracksQ.data ?? [])
+  })
+
+  const ownedClipIds = createMemo(() => {
+    if (isLocalId('project', options.projectId())) return existingClipIds()
+    return new Set<string>((ownedClipsQ.data ?? []).map((value: string) => String(value)))
   })
 
   const writableTrackIds = createMemo(() => {
@@ -176,7 +203,7 @@ export function useProjectedTimelineModel(
   })
   const optimisticTrackIds = createMemo(() => new Set<Track['id']>(optimisticTrackWriteIds().keys()))
   const currentGrantScopeKey = createMemo(() => buildOptimisticGrantScopeKey({
-    roomId: options.roomId(),
+    projectId: options.projectId(),
     userId: options.userId(),
   }))
 

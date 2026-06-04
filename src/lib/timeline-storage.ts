@@ -3,7 +3,6 @@ import type { PersistedHistory } from '~/lib/undo/types'
 import type { TrackId, TrackSend } from '~/types/timeline'
 
 const MIX_KEY_PREFIX = 'mb:mix:'
-const ROUTING_KEY_PREFIX = 'mb:routing:'
 const MIX_SYNC_KEY_PREFIX = 'mb:mix-sync:'
 const GRID_KEY_PREFIX = 'mb:grid:'
 const BPM_KEY_PREFIX = 'mb:bpm:'
@@ -18,10 +17,8 @@ export type LocalMixPatch = Partial<{
   outputTargetId: TrackId | null
 }>
 export type LocalMixMap = Record<string, LocalMixPatch>
-type LocalRoutingPatch = Pick<LocalMixPatch, 'sends' | 'outputTargetId'>
-type LocalRoutingMap = Record<string, LocalRoutingPatch>
 type HistoryStorageScope = {
-  roomId?: string
+  projectId?: string
   userId?: string
 }
 
@@ -53,51 +50,7 @@ export const saveLocalMixMap = (rid: string | undefined, map: LocalMixMap) => {
   } catch {}
 }
 
-export const saveLocalMix = (
-  rid: string | undefined,
-  trackId: string,
-  update: LocalMixPatch,
-) => {
-  if (!rid) return
-  if (!canUseLocalStorage()) return
-  const map = loadLocalMixMap(rid)
-  const nextEntry = { ...(map[trackId] ?? {}), ...update }
-  if (
-    nextEntry.volume === undefined
-    && nextEntry.muted === undefined
-    && nextEntry.soloed === undefined
-    && nextEntry.sends === undefined
-    && nextEntry.outputTargetId === undefined
-  ) {
-    delete map[trackId]
-  } else {
-    map[trackId] = nextEntry
-  }
-  saveLocalMixMap(rid, map)
-}
-
-export const loadLocalRoutingMap = (rid?: string): LocalRoutingMap => {
-  if (!rid) return {}
-  if (!canUseLocalStorage()) return {}
-  try {
-    return JSON.parse(localStorage.getItem(`${ROUTING_KEY_PREFIX}${rid}`) || '{}')
-  } catch {
-    return {}
-  }
-}
-
-export const saveLocalRoutingMap = (
-  rid: string | undefined,
-  map: LocalRoutingMap,
-) => {
-  if (!rid) return
-  if (!canUseLocalStorage()) return
-  try {
-    localStorage.setItem(`${ROUTING_KEY_PREFIX}${rid}`, JSON.stringify(map))
-  } catch {}
-}
-
-export const stripSharedTrackBooleanOverrides = (
+export const stripSharedTrackLocalOverrides = (
   map: LocalMixMap,
   writableTrackIds: Iterable<string>,
 ): LocalMixMap => {
@@ -105,20 +58,19 @@ export const stripSharedTrackBooleanOverrides = (
   for (const trackId of writableTrackIds) {
     const entry = (next ?? map)[trackId]
     if (!entry) continue
-    if (entry.muted === undefined && entry.soloed === undefined) continue
-    if (!next) next = { ...map }
     if (
-      entry.volume === undefined
+      entry.muted === undefined
+      && entry.soloed === undefined
       && entry.sends === undefined
       && entry.outputTargetId === undefined
-    ) {
+    ) continue
+    if (!next) next = { ...map }
+    if (entry.volume === undefined) {
       delete next[trackId]
       continue
     }
     next[trackId] = {
       volume: entry.volume,
-      sends: entry.sends,
-      outputTargetId: entry.outputTargetId,
     }
   }
   return next ?? map
@@ -240,8 +192,8 @@ export const saveLoopSettings = (rid: string | undefined, value: LoopSettings) =
 }
 
 const toHistoryStorageKey = (scope: HistoryStorageScope) => {
-  if (!scope.roomId) return null
-  return scope.userId ? `${scope.roomId}:${scope.userId}` : scope.roomId
+  if (!scope.projectId) return null
+  return scope.userId ? `${scope.projectId}:${scope.userId}` : scope.projectId
 }
 
 const toHistoryLocalStorageKey = (storageKey: string) => `${HISTORY_KEY_PREFIX}${storageKey}`
@@ -253,28 +205,11 @@ const readStoredHistory = (storageKey: string) => {
 }
 
 export const loadHistory = (scope: HistoryStorageScope): PersistedHistory => {
-  if (!scope.roomId || !canUseLocalStorage()) return { undo: [], redo: [] }
+  if (!scope.projectId || !canUseLocalStorage()) return { undo: [], redo: [] }
   try {
-    const scopedKey = toHistoryStorageKey(scope)
-    if (scopedKey) {
-      const scopedHistory = readStoredHistory(scopedKey)
-      if (scopedHistory !== null) {
-        return normalizePersistedHistory(scopedHistory)
-      }
-    }
-
-    const legacyHistory = readStoredHistory(scope.roomId)
-    if (legacyHistory === null) {
-      return { undo: [], redo: [] }
-    }
-    const normalized = normalizePersistedHistory(legacyHistory)
-    if (scope.userId && scopedKey) {
-      try {
-        localStorage.setItem(toHistoryLocalStorageKey(scopedKey), JSON.stringify(serializePersistedHistory(normalized)))
-        localStorage.removeItem(toHistoryLocalStorageKey(scope.roomId))
-      } catch {}
-    }
-    return normalized
+    const scopedKey = scope.userId ? `${scope.projectId}:${scope.userId}` : scope.projectId
+    const scopedHistory = readStoredHistory(scopedKey)
+    return scopedHistory === null ? { undo: [], redo: [] } : normalizePersistedHistory(scopedHistory)
   } catch {
     return { undo: [], redo: [] }
   }

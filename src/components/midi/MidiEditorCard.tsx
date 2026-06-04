@@ -1,5 +1,7 @@
 import { type Component, createMemo, createSignal, onCleanup, createEffect, For, onMount } from 'solid-js'
 import { convexClient, convexApi } from '~/lib/convex'
+import { isLocalId } from '~/lib/local-ids'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { cn } from '~/lib/utils'
 import type { Clip } from '~/types/timeline'
 
@@ -21,10 +23,11 @@ export type MidiEditorCardProps = {
   // Optional: preview note when adding/dragging
   onAuditionNote?: (pitch: number, velocity?: number, durSec?: number) => void
   // Local-only: current room id for per-room persistence
-  roomId?: string
+  projectId?: string
   // Live note callbacks for computer keyboard play
   onStartLiveNote?: (pitch: number, velocity?: number) => void
   onStopLiveNote?: (pitch: number) => void
+  onLocalMidiSaved?: (clipId: string, midi: Clip['midi']) => void
 }
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v))
@@ -34,14 +37,15 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   const [resizing, setResizing] = createSignal(false)
   const [notes, setNotes] = createSignal<Array<{ beat: number; length: number; pitch: number; velocity?: number }>>([])
   // Local-only toggle to capture keyboard for playing notes
-  const storageKey = () => `mb:midi_kb:${props.roomId || 'default'}`
+  const storageKey = () => `mb:midi_kb:${props.projectId || 'default'}`
   const [kbEnabled, setKbEnabled] = createSignal(false)
-  const octaveKey = () => `mb:midi_kb_oct:${props.roomId || 'default'}`
+  const octaveKey = () => `mb:midi_kb_oct:${props.projectId || 'default'}`
   const [octave, setOctave] = createSignal(0)
   // Track active rows for gutter highlighting
   const [activeRows, setActiveRows] = createSignal<Set<number>>(new Set(), { equals: false })
-  const canPersist = () => Boolean(props.userId)
-  const warnMissingUser = () => console.warn('[MidiEditorCard] Cannot edit or persist MIDI without `userId`.')
+  const isLocalProject = () => Boolean(props.projectId && isLocalId('project', props.projectId))
+  const canPersist = () => isLocalProject() || Boolean(props.userId)
+  const warnMissingUser = () => console.warn('[MidiEditorCard] Cannot edit or persist MIDI without a writable project.')
   // Grid derived from BPM/denominator/clip length
   const stepsPerBeat = () => Math.max(1, Math.round((props.gridDenominator || 4) / 4))
   const secondsPerBeat = () => 60 / Math.max(1e-6, props.bpm || 120)
@@ -67,21 +71,51 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   let resizeStartH = 0
   let pointerId: number | null = null
   let saveTimer: number | null = null
+  type PendingMidiSave = {
+    clipId: string
+    projectId?: string
+    userId?: string
+    midi: Clip['midi']
+  }
+  let pendingMidiSave: PendingMidiSave | null = null
+  const currentMidi = (): Clip['midi'] => ({
+    wave: props.midi?.wave ?? 'sawtooth',
+    gain: props.midi?.gain ?? 0.8,
+    notes: notes().slice().sort((a, b) => a.beat - b.beat || b.pitch - a.pitch),
+  })
+  const canPersistSave = (save: PendingMidiSave) => (
+    Boolean(save.projectId && isLocalId('project', save.projectId)) || Boolean(save.userId)
+  )
+  const saveMidi = async (save: PendingMidiSave) => {
+    if (save.projectId && isLocalId('project', save.projectId)) {
+      const updated = await createLocalTimelineRepository(save.projectId).updateClip({ clipId: save.clipId, midi: save.midi })
+      if (updated && props.projectId === save.projectId && props.clipId === save.clipId) {
+        props.onLocalMidiSaved?.(save.clipId, save.midi)
+      }
+      return
+    }
+    if (!save.userId) return
+    await convexClient.mutation((convexApi as any).clips.setMidi, { clipId: save.clipId as any, midi: save.midi })
+  }
   const scheduleSave = () => {
-    if (!canPersist()) {
+    const pending = {
+      clipId: props.clipId,
+      projectId: props.projectId,
+      userId: props.userId,
+      midi: currentMidi(),
+    }
+    if (!canPersistSave(pending)) {
       warnMissingUser()
       return
     }
+    pendingMidiSave = pending
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = window.setTimeout(async () => {
       try {
-        const midi = {
-          wave: props.midi?.wave ?? 'sawtooth',
-          gain: props.midi?.gain ?? 0.8,
-          notes: notes().slice().sort((a, b) => a.beat - b.beat || b.pitch - a.pitch),
-        }
-        if (!props.userId) return
-        await convexClient.mutation((convexApi as any).clips.setMidi, { clipId: props.clipId as any, midi, userId: props.userId })
+        saveTimer = null
+        const save = pendingMidiSave
+        pendingMidiSave = null
+        if (save) await saveMidi(save)
       } catch {}
     }, 200)
   }
@@ -137,7 +171,13 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
 
   onCleanup(() => {
     try { window.removeEventListener('pointermove', onPointerMove) } catch {}
-    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+    if (saveTimer) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+      const save = pendingMidiSave
+      pendingMidiSave = null
+      if (save) void saveMidi(save).catch(() => {})
+    }
   })
 
   // Sync incoming midi

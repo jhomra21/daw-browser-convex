@@ -1,4 +1,5 @@
 import type { FunctionArgs } from 'convex/server'
+import { toCloudTrackId } from '~/lib/cloud-id-args'
 import { convexApi } from '~/lib/convex'
 import type { TrackRoutingSnapshot } from '~/lib/undo/types'
 import type { TrackId } from '~/types/timeline'
@@ -18,15 +19,13 @@ export function isTrackRoutingEqual(left: TrackRoutingSnapshot, right: TrackRout
 
 export function buildTrackRoutingMutationInput(input: {
   trackId: TrackId
-  userId: string
   routing: TrackRoutingSnapshot
 }): FunctionArgs<typeof convexApi.tracks.setRouting> {
   return {
-    trackId: input.trackId,
-    userId: input.userId,
-    outputTargetId: input.routing.outputTargetId ?? null,
+    trackId: toCloudTrackId(input.trackId),
+    outputTargetId: input.routing.outputTargetId ? toCloudTrackId(input.routing.outputTargetId) : null,
     sends: input.routing.sends.map(send => ({
-      targetId: send.targetId,
+      targetId: toCloudTrackId(send.targetId),
       amount: send.amount,
     })),
   }

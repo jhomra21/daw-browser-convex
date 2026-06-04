@@ -2,38 +2,19 @@ import {
   type Accessor,
   type Component,
   type JSX,
-  For,
   createEffect,
   createMemo,
   createSignal,
-  onCleanup,
 } from "solid-js";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogFooter,
-  DialogTitle,
-  DialogDescription,
-} from "~/components/ui/dialog";
-import type { Track } from "~/types/timeline";
-import { getAudioEngine, resetAudioEngine } from "~/lib/audio-engine-singleton";
+import type { Clip, Track } from "~/types/timeline";
+import { getAudioEngine } from "~/lib/audio-engine-singleton";
 import {
   timelineDurationSec,
-  PPS,
-  RULER_HEIGHT,
-  LANE_HEIGHT,
   FX_OFFSET_PX,
 } from "~/lib/timeline-utils";
-import { saveLocalMix } from "~/lib/timeline-storage";
 import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
 import { useTimelineClipImport } from "~/hooks/useTimelineClipImport";
 import { useTimelineClipActions } from "~/hooks/useTimelineClipActions";
-import TransportControls from "./timeline/TransportControls";
-import TimelineRuler from "./timeline/TimelineRuler";
-import TrackLane from "./timeline/TrackLane";
-import TrackSidebar from "./timeline/TrackSidebar";
-import { Button } from "./ui/button";
 import { convexClient, convexApi } from "~/lib/convex";
 import { useTimelineData } from "~/hooks/useTimelineData";
 import { usePlayheadControls } from "~/hooks/usePlayheadControls";
@@ -45,12 +26,9 @@ import { normalizeCommandTrackIndices } from "~/lib/agent-command-targets";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
 import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
-import type { UploadToR2 } from "~/hooks/useClipBuffers";
 import { useTrackRecording } from "~/hooks/useTrackRecording";
 import { buildEffectParamsHistoryEntry } from "~/lib/undo/builders";
 import type { EffectParamsCommitPayload } from "~/lib/undo/types";
-import TimelineOverlays from "./timeline/timeline-overlays";
-import TimelinePanels from "./timeline/timeline-panels";
 import { useTimelinePreferences } from "~/hooks/useTimelinePreferences";
 import { useTimelineMidiOverlay } from "~/hooks/useTimelineMidiOverlay";
 import { useTimelineMixerController } from "~/hooks/useTimelineMixerController";
@@ -61,6 +39,15 @@ import { useTimelineIdentity } from "~/hooks/useTimelineIdentity";
 import { useTimelineLocalMix } from "~/hooks/useTimelineLocalMix";
 import { useTimelineProjectionState } from "~/hooks/useTimelineProjectionState";
 import { useTimelineSelectionState } from "~/hooks/useTimelineSelectionState";
+import { useTimelinePersistenceController } from "~/hooks/useTimelinePersistenceController";
+import { useTimelineAudioLifecycle } from "~/hooks/useTimelineAudioLifecycle";
+import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
+import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
+import TimelineChrome from "./timeline/timeline-chrome";
+import AppMessageDialog, { type AppMessageDialogState } from "./timeline/app-message-dialog";
+import CloudBackupDialog from "./timeline/cloud-backup-dialog";
+import DeleteTrackDialog from "./timeline/delete-track-dialog";
+import TimelineWorkspace from "./timeline/timeline-workspace";
 
 type AgentMixOp = {
   type: "setMute" | "setSolo";
@@ -75,28 +62,39 @@ const Timeline: Component = () => {
   const [agentPanelOpen, setAgentPanelOpen] = createSignal(false);
   const [sharedChatOpen, setSharedChatOpen] = createSignal(false);
   const [confirmOpen, setConfirmOpen] = createSignal(false);
+  const [appMessage, setAppMessage] = createSignal<AppMessageDialogState | null>(null);
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<
     Track["id"] | null
   >(null);
   // Transport tempo & metronome
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
-  const [isRecording, setIsRecording] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
 
   // Audio engine
   const audioEngine = getAudioEngine();
-  // Collaboration: roomId from ?roomId=; ownership tied to Better Auth userId
+  // Collaboration: projectId from ?projectId=; ownership tied to Better Auth userId
+  const notify = (title: string, message: string) => {
+    setAppMessage({ title, message });
+  };
+
   const {
-    roomId,
-    setRoomId,
+    projectId,
+    setProjectId,
     userId,
     projects,
+    currentProjectRole,
     fullView,
     navigateToRoom,
     createProject,
     renameProject,
     deleteProject,
-  } = useTimelineData();
+  } = useTimelineData({ notify });
+  const localProject = useLocalProjectActions({
+    projectId,
+    userId,
+    navigateToRoom,
+  });
+
   const {
     sidebarWidth,
     setSidebarWidth,
@@ -114,25 +112,47 @@ const Timeline: Component = () => {
     loopStartSec,
     loopEndSec,
     setLoopRegion,
-  } = useTimelinePreferences({ roomId });
+  } = useTimelinePreferences({
+    projectId,
+    onLocalSaveFailed: localProject.setLocalSaveFailure,
+  });
   const identity = useTimelineIdentity({
-    roomId,
+    projectId,
     serverData: () => fullView.data,
   });
   const projection = useTimelineProjectionState({
-    roomId,
+    projectId,
     serverData: () => fullView.data,
     rememberTrackProjection: identity.rememberTrackProjection,
     rememberClipHistoryRef: identity.rememberClipHistoryRef,
   });
   let renderTracks: Accessor<Track[]> = () => [];
   const selection = useTimelineSelectionState({
-    roomId,
+    projectId,
     tracks: () => renderTracks(),
     effectsPanel: {
       isOpen: bottomFXOpen,
       setOpen: setBottomFXOpen,
     },
+  });
+  const clipBuffers = useClipBuffers({
+    audioEngine,
+    projectId,
+    tracks: () => resolvedTracks(),
+    onBufferChange: () => setBufferVersion((current) => current + 1),
+  });
+  const currentLocalProjectMode = createMemo(() => projects().find((project) => project.projectId === projectId())?.mode);
+  const { mediaRecovery } = useTimelinePersistenceController({
+    projectId,
+    remoteTimelineAvailable: () => Boolean(fullView.data),
+    localProjectMode: currentLocalProjectMode,
+    userId,
+    renderTracks: () => renderTracks(),
+    audioEngine,
+    audioBufferCache: clipBuffers.writer,
+    localProject,
+    projection,
+    selection,
   });
   const {
     writableTrackIds,
@@ -144,42 +164,32 @@ const Timeline: Component = () => {
     grantClipWrites,
     serverTrackState,
   } = useProjectedTimelineModel({
-    roomId,
+    projectId,
     userId,
     fullViewData: () => fullView.data,
+    localSnapshot: mediaRecovery.localTimelineSnapshot,
     pendingTrackEntriesById: projection.pendingTrackEntriesById,
     pendingClipCreatesById: projection.pendingClipCreatesById,
     removedTrackIds: projection.removedTrackIds,
     removedClipIds: projection.removedClipIds,
   });
   const localMix = useTimelineLocalMix({
-    roomId,
+    projectId,
     writableTrackIds,
-  });
-  let ensureClipBuffer: (
-    clipId: string,
-    sampleUrl?: string,
-  ) => Promise<void> = async () => {};
-  let uploadToR2: UploadToR2 = async () => null;
-  let clearClipBufferCaches = () => {};
-  let audioBufferCache = new Map<string, AudioBuffer>();
-  const clipBuffers = useClipBuffers({
-    audioEngine,
-    tracks: () => resolvedTracks(),
-    onBufferChange: () => setBufferVersion((current) => current + 1),
+    onLocalSaveFailed: localProject.setLocalSaveFailure,
   });
   const { pushHistory, handleUndo, handleRedo } = useTimelineHistory({
-    roomId,
+    projectId,
     userId,
     getTracks: () => resolvedTracks(),
     convexClient,
     convexApi,
     audioEngine,
-    ensureClipBuffer: (clipId, sampleUrl) =>
-      clipBuffers.ensureClipBuffer(clipId, sampleUrl),
+    ensureClipBuffer: clipBuffers.preload,
     grantTrackWrite,
     grantClipWrite,
-    persistLocalMix: saveLocalMix,
+    persistLocalMix: (_projectId, trackId, patch) =>
+      localMix.persist(trackId, patch),
     getActions: () => ({
       insertLocalTrack: (track, index) =>
         projection.insertLocalTrack(track, index),
@@ -222,7 +232,7 @@ const Timeline: Component = () => {
     updateTrackSends,
     updateTrackOutputTargetId,
   } = useTimelineMixerController({
-    roomId,
+    projectId,
     userId,
     syncMix,
     tracks: () => renderTracks(),
@@ -230,6 +240,7 @@ const Timeline: Component = () => {
     optimisticTrackIds,
     canWriteTrack,
     pushHistory,
+    onLocalSaveFailed: localProject.setLocalSaveFailure,
     serverTrackState,
   });
 
@@ -240,7 +251,9 @@ const Timeline: Component = () => {
     renderTracks: resolvedRenderTracks,
     trackLookup,
   } = useTimelineResolvedModel({
+    projectId,
     fullViewData: () => fullView.data,
+    localSnapshot: mediaRecovery.localTimelineSnapshot,
     syncMix,
     writableTrackIds,
     serverTrackState,
@@ -265,14 +278,10 @@ const Timeline: Component = () => {
       rememberTrackProjection: identity.rememberTrackProjection,
       rememberClipHistoryRef: identity.rememberClipHistoryRef,
     },
-    audioBufferCache: clipBuffers.audioBufferCache,
+    buffers: clipBuffers,
     bufferVersion,
   });
   renderTracks = resolvedRenderTracks;
-  audioBufferCache = clipBuffers.audioBufferCache;
-  ensureClipBuffer = clipBuffers.ensureClipBuffer;
-  uploadToR2 = clipBuffers.uploadToR2;
-  clearClipBufferCaches = clipBuffers.clearClipBufferCaches;
   const pendingDeleteTrackClipCount = createMemo(() => {
     const trackId = pendingDeleteTrackId();
     if (!trackId) return 0;
@@ -296,7 +305,7 @@ const Timeline: Component = () => {
 
   const applyAgentMixOps = (ops: AgentMixOp[]) => {
     try {
-      if (!roomId() || !Array.isArray(ops) || ops.length === 0) return;
+      if (!projectId() || !Array.isArray(ops) || ops.length === 0) return;
       const currentTracks = renderTracks();
       const ownedSet = writableTrackIds();
       for (const op of ops) {
@@ -335,15 +344,26 @@ const Timeline: Component = () => {
           );
         }
       }
+
     } catch {}
   };
 
-  const pushEffectParamsHistory = (payload: EffectParamsCommitPayload) => {
-    const rid = roomId();
+  const handleLocalMidiSaved = (clipId: string, midi: Clip["midi"]) => {
+    const match = trackLookup().clipEntryById.get(clipId);
+    if (!match) return;
+    projection.replaceLocalClip(match.trackId, {
+      ...match.clip,
+      midi,
+    });
+  };
+
+  const pushEffectParamsHistory = (payload: EffectParamsCommitPayload, committedProjectId?: string) => {
+    const rid = committedProjectId ?? projectId();
     if (!rid) return;
+    if (rid !== projectId()) return;
     pushHistory(
       buildEffectParamsHistoryEntry({
-        roomId: rid,
+        projectId: rid,
         tracks: renderTracks(),
         payload,
       }),
@@ -367,7 +387,7 @@ const Timeline: Component = () => {
   } = usePlayheadControls({
     audioEngine,
     tracks: () => renderTracks(),
-    ensureClipBuffer,
+    ensureClipBuffer: clipBuffers.preload,
     loopEnabled,
     loopStartSec,
     loopEndSec,
@@ -376,49 +396,58 @@ const Timeline: Component = () => {
   // DOM refs
   let scrollRef: HTMLDivElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
+  let archiveInputRef: HTMLInputElement | undefined;
   let containerRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
 
-  let openMidiEditorFor = (_clipId: string) => {};
-  let stopRecordingSession: () => Promise<void> = async () => {};
-  let toggleRecordingSession: () => Promise<unknown> = async () => {};
+  const {
+    midiEditorClipId,
+    midiCard,
+    closeMidiEditor,
+    openMidiEditorFor,
+    changeMidiCardBounds,
+    auditionNote,
+    startLiveNote,
+    stopLiveNote,
+  } = useTimelineMidiOverlay({
+    audioEngine,
+    tracks: () => renderTracks(),
+    projectId,
+    selection,
+  });
+
+  const removeCreatedCloudTrack = (track: Track | undefined) => removeAutoCreatedCloudTrack({
+    convexClient,
+    convexApi,
+    userId: userId(),
+    track,
+    removeLocalTrack: projection.removeLocalTrack,
+  });
 
   const {
     createTimelineTrack,
-    handleTransportPause,
-    handleTransportStop,
-    handleRecordToggle,
     handleShare,
     jumpToClip,
   } = useTimelineActions({
+    tracks: renderTracks,
     room: {
-      roomId,
-      setRoomId,
+      projectId,
+      setProjectId,
       userId,
     },
     creation: {
-      renderTracks,
       selection,
       insertLocalTrack: projection.insertLocalTrack,
+      removeCloudTrack: removeCreatedCloudTrack,
       grantTrackWrite,
       pushHistory,
-      convexClient,
-      convexApi,
-    },
-    transport: {
-      isRecording,
-      handlePause,
-      handleStop,
-      stopRecording: () => stopRecordingSession(),
-      toggleRecording: () => toggleRecordingSession(),
     },
     navigation: {
-      renderTracks,
       trackLookup,
       selection,
       setPlayhead,
-      openMidiEditorFor: (clipId) => openMidiEditorFor(clipId),
-      ensureClipBuffer,
+      openMidiEditorFor,
+      ensureClipBuffer: clipBuffers.preload,
       getScrollElement: () => scrollRef,
     },
   });
@@ -431,24 +460,25 @@ const Timeline: Component = () => {
   } = useTimelineClipImport({
     audioEngine,
     tracks: () => renderTracks(),
-    insertLocalTrack: projection.insertLocalTrack,
+    removeLocalTrack: projection.removeLocalTrack,
     insertLocalClip: projection.insertLocalClip,
+    removeLocalClips: projection.removeLocalClips,
     selection,
     playheadSec,
-    roomId,
+    projectId,
     userId,
-    convexClient,
-    convexApi,
-    audioBufferCache,
-    uploadToR2,
+    clipBuffers,
     getScrollElement: () => scrollRef,
     getFileInput: () => fileInputRef,
     bpm,
     gridEnabled,
     gridDenominator,
+    createTimelineTrack,
+    removeCreatedCloudTrack,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
-    grantWrite: grantTrackWrite,
     grantClipWrite,
+    onLocalSaveFailed: localProject.setLocalSaveFailure,
+    notify,
   });
 
   const {
@@ -469,6 +499,7 @@ const Timeline: Component = () => {
     resolvedTracks: () => resolvedTracks(),
     insertLocalTrack: projection.insertLocalTrack,
     insertLocalClip: projection.insertLocalClip,
+    removeLocalClips: projection.removeLocalClips,
     removeLocalTrack: projection.removeLocalTrack,
     replaceDraftClipMoves: projection.replaceDraftClipMoves,
     clearDraftClipMoves: projection.clearDraftClipMoves,
@@ -476,7 +507,7 @@ const Timeline: Component = () => {
     commitClipMoves: projection.commitClipMoves,
     canWriteClip,
     selection,
-    roomId,
+    projectId,
     userId,
     convexClient,
     convexApi,
@@ -484,7 +515,7 @@ const Timeline: Component = () => {
     bpm,
     gridEnabled,
     gridDenominator,
-    audioBufferCache,
+    audioBufferCache: clipBuffers,
     onCommitMoves: (ids) => {
       rescheduleChangedClips(ids);
     },
@@ -507,7 +538,7 @@ const Timeline: Component = () => {
     gridEnabled,
     gridDenominator,
     rescheduleChangedClips,
-    roomId,
+    projectId,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
   });
 
@@ -525,16 +556,17 @@ const Timeline: Component = () => {
     selection,
     setPendingDeleteTrackId,
     setConfirmOpen,
-    roomId,
+    projectId,
     userId,
     convexClient,
     convexApi,
-    audioBufferCache,
+    audioBufferCache: clipBuffers,
     bpm,
     gridEnabled,
     gridDenominator,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
     grantClipWrites,
+    notify,
   });
 
   const { marqueeRect, onLanePointerDown } = useTimelineSelection({
@@ -545,23 +577,6 @@ const Timeline: Component = () => {
     stopScrub,
   });
 
-  const {
-    midiEditorClipId,
-    midiCard,
-    closeMidiEditor,
-    openMidiEditorFor: nextOpenMidiEditorFor,
-    changeMidiCardBounds,
-    auditionNote,
-    startLiveNote,
-    stopLiveNote,
-  } = useTimelineMidiOverlay({
-    audioEngine,
-    tracks: () => renderTracks(),
-    roomId,
-    selection,
-  });
-  openMidiEditorFor = nextOpenMidiEditorFor;
-
   const recordingControls = useTrackRecording({
     audioEngine,
     tracks: () => renderTracks(),
@@ -569,37 +584,53 @@ const Timeline: Component = () => {
     clearTrackLock: projection.clearTrackLock,
     removeLocalTrack: projection.removeLocalTrack,
     insertLocalClip: projection.insertLocalClip,
+    removeLocalClips: projection.removeLocalClips,
     selection,
     playheadSec,
-    uploadToR2,
-    audioBufferCache,
-    roomId,
+    uploadToR2: clipBuffers.uploadToR2,
+    audioBufferCache: clipBuffers.writer,
+    projectId,
     userId,
     convexClient,
     convexApi,
     requestTransportPlay: requestPlay,
     createTrackForRecording: async () =>
       await createTimelineTrack({}, { pushHistory: false, select: false }),
-    setIsRecording,
     notify: (message) => {
       console.warn("[Timeline][recording]", message);
+      if (message.includes("local") || message.includes("storage")) {
+        localProject.setLocalSaveFailure(message);
+      }
     },
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
     grantClipWrite,
   });
 
   const {
+    isRecording,
     recordArmTrackId,
-    toggleRecording: nextToggleRecordingSession,
+    toggleRecording,
     toggleRecordArm: handleToggleRecordArm,
     reconcileRecordArm,
-    stopRecording: nextStopRecordingSession,
+    stopRecording,
     previewPoints,
     previewStartSec,
     recordingTrackId,
   } = recordingControls;
-  toggleRecordingSession = nextToggleRecordingSession;
-  stopRecordingSession = nextStopRecordingSession;
+
+  const handleTransportPause = () => {
+    if (isRecording()) void stopRecording();
+    handlePause();
+  };
+
+  const handleTransportStop = () => {
+    if (isRecording()) void stopRecording();
+    handleStop();
+  };
+
+  const handleRecordToggle = async () => {
+    await toggleRecording();
+  };
 
   const addAudioTrack = async () => {
     await createTimelineTrack();
@@ -686,16 +717,13 @@ const Timeline: Component = () => {
 
   const duration = () => timelineDurationSec(renderTracks());
 
-  createEffect(() => {
-    audioEngine.updateTrackGains(renderTracks());
-  });
-
-  createEffect(() => {
-    audioEngine.setBpm(bpm());
-  });
-
-  createEffect(() => {
-    audioEngine.setMetronomeEnabled(metronomeEnabled());
+  useTimelineAudioLifecycle({
+    audioEngine,
+    tracks: () => renderTracks(),
+    bpm,
+    metronomeEnabled,
+    projectId,
+    clearClipBufferCaches: clipBuffers.clearClipBufferCaches,
   });
 
   createEffect(() => {
@@ -703,10 +731,111 @@ const Timeline: Component = () => {
     reconcileRecordArm(nextTracks);
   });
 
-  onCleanup(() => {
-    audioEngine.close();
-    resetAudioEngine();
-    clearClipBufferCaches();
+  const transportProps = () => ({
+    isPlaying: isPlaying(),
+    playheadSec: playheadSec(),
+    onPlay: () => requestPlay(),
+    onPause: handleTransportPause,
+    onStop: handleTransportStop,
+    onAddAudio: () => handleAddAudio(),
+    tracksMenu: {
+      syncMix: syncMix(),
+      onToggleSyncMix: toggleSyncMix,
+      onAddTrack: addAudioTrack,
+      onAddReturnTrack: addReturnTrack,
+      onAddGroupTrack: addGroupTrack,
+      onAddInstrumentTrack: addInstrumentTrack,
+    },
+    projectMenu: {
+      currentProjectId: projectId(),
+      currentUserId: userId(),
+      canManageSharing: currentProjectRole() === "owner",
+      projects: projects(),
+      onOpenProject: navigateToRoom,
+      onCreateProject: createProject,
+      onDeleteProject: deleteProject,
+      onRenameProject: renameProject,
+      onOpenExport: () => setExportOpen(true),
+      onShare: handleShare,
+      onChooseProjectFolder: localProject.chooseProjectStorageFolder,
+      onBackUpNow: localProject.backUpNow,
+      onDisableBackup: localProject.disableBackup,
+      onRestoreCloudBackup: localProject.restoreCloudBackup,
+      onDuplicateCloudBackup: localProject.duplicateCloudBackup,
+      onDownloadForOffline: localProject.downloadForOffline,
+      cloudBackupStatus: localProject.cloudBackupStatus(),
+      sharedOutboxStatus: localProject.sharedOutboxStatus(),
+      onRetrySharedChanges: localProject.retrySharedChanges,
+      onExportArchive: localProject.exportArchive,
+      onImportArchive: () => archiveInputRef?.click(),
+    },
+    onMasterFX: () => {
+      selection.setSelectedFXTarget("master");
+      setBottomFXOpen(true);
+    },
+    bpm: bpm(),
+    onChangeBpm: (next: number) => setBpm(clampBpm(next)),
+    metronomeEnabled: metronomeEnabled(),
+    onToggleMetronome: () => setMetronomeEnabled((prev) => !prev),
+    gridEnabled: gridEnabled(),
+    onToggleGrid: () => setGridEnabled((prev) => !prev),
+    gridDenominator: gridDenominator(),
+    onChangeGridDenominator: setGridDenominator,
+    loopEnabled: loopEnabled(),
+    onToggleLoop: () => setLoopEnabled((prev) => !prev),
+    isRecording: isRecording(),
+    onToggleRecord: handleRecordToggle,
+    onUndo: handleUndo,
+    onRedo: handleRedo,
+    onJumpToClip: (clipId: string, trackId: string, startSec: number) => jumpToClip(trackId, clipId, startSec),
+    onInsertSample: (payload: Parameters<typeof handleInsertSample>[0]) => {
+      void handleInsertSample(payload);
+    },
+  });
+
+  const panelsProps = () => ({
+    chat: {
+      bottomOffsetPx: bottomFXOpen() ? FX_OFFSET_PX : 0,
+      agentPanelOpen: agentPanelOpen(),
+      sharedChatOpen: sharedChatOpen(),
+      projectId: projectId(),
+      userId: userId(),
+      bpm: bpm(),
+      toggleAgentPanel: () => setAgentPanelOpen((value) => !value),
+      toggleSharedChat: () => setSharedChatOpen((value) => !value),
+      closeAgentPanel: () => setAgentPanelOpen(false),
+      closeSharedChat: () => setSharedChatOpen(false),
+      applyAgentMixOps,
+    },
+    effectsPanel: {
+      isOpen: bottomFXOpen(),
+      selectedFXTarget: selection.selectedFXTarget(),
+      tracks: renderTracks(),
+      playheadSec: playheadSec(),
+      projectId: projectId(),
+      userId: userId(),
+      audioEngine,
+      canWriteTrackRouting: canWriteTrack,
+      grantClipWrite,
+      onSelectClip: jumpToClip,
+      insertLocalClip: projection.insertLocalClip,
+      onClose: () => setBottomFXOpen(false),
+      onOpen: () => setBottomFXOpen(true),
+      onEffectParamsCommitted: pushEffectParamsHistory,
+      onLocalSaveFailed: localProject.setLocalSaveFailure,
+    },
+    exportDialog: {
+      isOpen: exportOpen(),
+      tracks: renderTracks(),
+      bpm: bpm(),
+      loopEnabled: loopEnabled(),
+      loopStartSec: loopStartSec(),
+      loopEndSec: loopEndSec(),
+      projectId: projectId(),
+      userId: userId(),
+      ensureClipBuffer: clipBuffers.preload,
+      onClose: () => setExportOpen(false),
+    },
   });
 
   return (
@@ -719,300 +848,124 @@ const Timeline: Component = () => {
       onDrop={handleRootDrop}
       onDragLeave={handleRootDragLeave}
     >
-      <input
-        ref={(el) => {
+      <TimelineChrome
+        fileInputRef={(el) => {
           fileInputRef = el;
         }}
-        type="file"
-        accept="audio/*"
-        class="hidden"
-        onChange={onFileInput}
+        archiveInputRef={(el) => {
+          archiveInputRef = el;
+        }}
+        onFileInput={onFileInput}
+        onArchiveInput={localProject.onArchiveInput}
+        transport={transportProps()}
+        localSaveFailure={localProject.localSaveFailure()}
+        onExportArchive={localProject.exportArchive}
+        onDismissLocalSaveFailure={() => localProject.setLocalSaveFailure(null)}
+        panels={panelsProps()}
       />
 
-      <TransportControls
-        isPlaying={isPlaying()}
-        playheadSec={playheadSec()}
-        onPlay={() => requestPlay()}
-        onPause={handleTransportPause}
-        onStop={handleTransportStop}
-        onAddAudio={() => handleAddAudio()}
-        tracksMenu={{
-          syncMix: syncMix(),
-          onToggleSyncMix: toggleSyncMix,
-          onAddTrack: addAudioTrack,
-          onAddReturnTrack: addReturnTrack,
-          onAddGroupTrack: addGroupTrack,
-          onAddInstrumentTrack: addInstrumentTrack,
+      <CloudBackupDialog
+        state={localProject.cloudBackupDialog()}
+        busy={localProject.cloudBackupBusy()}
+        onOpenChange={(open) => { if (!open) localProject.setCloudBackupDialog(null); }}
+        onOverwriteCloud={localProject.overwriteCloudBackup}
+        onRestoreCloud={localProject.confirmRestoreCloudBackup}
+        onDuplicateCloud={localProject.duplicateCloudBackup}
+      />
+
+      <AppMessageDialog
+        state={appMessage()}
+        onOpenChange={(open) => { if (!open) setAppMessage(null); }}
+      />
+
+      <TimelineWorkspace
+        containerRef={(el) => { containerRef = el; }}
+        scrollRef={(el) => {
+          scrollRef = el;
+          setScrollElement(el);
         }}
-        onShare={handleShare}
-        onMasterFX={() => {
-          selection.setSelectedFXTarget("master");
-          setBottomFXOpen(true);
-        }}
+        bottomFXOpen={bottomFXOpen()}
+        durationSec={duration()}
+        sidebarWidth={sidebarWidth()}
+        tracks={renderTracks()}
+        dropAtNewTrack={dropAtNewTrack()}
+        dropTargetLane={dropTargetLane()}
         bpm={bpm()}
-        onChangeBpm={(next) => setBpm(clampBpm(next))}
-        metronomeEnabled={metronomeEnabled()}
-        onToggleMetronome={() => setMetronomeEnabled((prev) => !prev)}
-        gridEnabled={gridEnabled()}
-        onToggleGrid={() => setGridEnabled((prev) => !prev)}
         gridDenominator={gridDenominator()}
-        onChangeGridDenominator={(n: number) => setGridDenominator(n)}
+        gridEnabled={gridEnabled()}
         loopEnabled={loopEnabled()}
-        onToggleLoop={() => setLoopEnabled((prev) => !prev)}
-        isRecording={isRecording()}
-        onToggleRecord={handleRecordToggle}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        onJumpToClip={(clipId, trackId, startSec) =>
-          jumpToClip(trackId, clipId, startSec)
-        }
-        onInsertSample={(payload) => {
-          void handleInsertSample(payload);
+        loopStartSec={loopStartSec()}
+        loopEndSec={loopEndSec()}
+        playheadSec={playheadSec()}
+        onSetLoopRegion={(s, e) => setLoopRegion(s, e)}
+        onLanePointerDown={handleLanePointerDown}
+        onRulerPointerDown={onRulerPointerDown}
+        selection={selection}
+        onClipPointerDown={onClipPointerDown}
+        onClipPointerUp={onClipPointerUp}
+        onClipResizeStart={onClipResizeStart}
+        ensureClipBuffer={clipBuffers.preload}
+        replaceMissingMediaClip={mediaRecovery.replaceMissingMediaClip}
+        removeMissingMediaClip={mediaRecovery.removeMissingMediaClip}
+        trackLookup={trackLookup()}
+        openMidiEditorFor={openMidiEditorFor}
+        marqueeRect={marqueeRect()}
+        recording={{
+          isRecording: isRecording(),
+          previewStartSec: previewStartSec(),
+          previewPoints: previewPoints(),
+          recordingTrackId: recordingTrackId(),
+          recordArmTrackId: recordArmTrackId(),
         }}
-        currentRoomId={roomId()}
-        currentUserId={userId()}
-        projects={projects()}
-        onOpenProject={(rid) => {
-          navigateToRoom(rid);
-        }}
-        onCreateProject={createProject}
-        onDeleteProject={deleteProject}
-        onRenameProject={renameProject}
-        onOpenExport={() => setExportOpen(true)}
-      />
-      <TimelinePanels
-        chat={{
-          bottomOffsetPx: bottomFXOpen() ? FX_OFFSET_PX : 0,
-          agentPanelOpen: agentPanelOpen(),
-          sharedChatOpen: sharedChatOpen(),
-          roomId: roomId(),
+        midi={{
+          clipId: midiEditorClipId(),
+          card: midiCard(),
           userId: userId(),
-          bpm: bpm(),
-          toggleAgentPanel: () => setAgentPanelOpen((value) => !value),
-          toggleSharedChat: () => setSharedChatOpen((value) => !value),
-          closeAgentPanel: () => setAgentPanelOpen(false),
-          closeSharedChat: () => setSharedChatOpen(false),
-          applyAgentMixOps,
+          projectId: projectId(),
+          close: closeMidiEditor,
+          changeBounds: changeMidiCardBounds,
+          auditionNote,
+          startLiveNote,
+          stopLiveNote,
+          onLocalMidiSaved: handleLocalMidiSaved,
         }}
-        effectsPanel={{
-          isOpen: bottomFXOpen(),
-          selectedFXTarget: selection.selectedFXTarget(),
-          tracks: renderTracks(),
-          playheadSec: playheadSec(),
-          roomId: roomId(),
-          userId: userId(),
-          audioEngine,
+        sidebar={{
+          isPlaying: isPlaying(),
+          currentUserId: userId(),
+          subscribeTrackLevels: (listener) =>
+            audioEngine.subscribeTrackStereoLevels(listener),
+          onTrackClick: (id) => {
+            selection.selectTrackTarget(id, { clearClipSelection: true });
+          },
           canWriteTrackRouting: canWriteTrack,
-          grantClipWrite,
-          onSelectClip: jumpToClip,
-          onClose: () => setBottomFXOpen(false),
-          onOpen: () => setBottomFXOpen(true),
-          onEffectParamsCommitted: pushEffectParamsHistory,
-        }}
-        exportDialog={{
-          isOpen: exportOpen(),
-          tracks: renderTracks(),
-          bpm: bpm(),
-          loopEnabled: loopEnabled(),
-          loopStartSec: loopStartSec(),
-          loopEndSec: loopEndSec(),
-          roomId: roomId(),
-          userId: userId(),
-          ensureClipBuffer,
-          onClose: () => setExportOpen(false),
+          onTrackSendsChange: updateTrackSends,
+          onTrackOutputTargetChange: updateTrackOutputTargetId,
+          onVolumePreview: (trackId, volume, muted) => {
+            audioEngine.previewTrackVolume(trackId, volume, muted);
+          },
+          onVolumeChange: setTrackVolume,
+          onToggleMute: handleToggleTrackMute,
+          onToggleSolo: handleToggleTrackSolo,
+          onSidebarPointerDown,
+          onToggleRecordArm: handleToggleRecordArm,
         }}
       />
 
-      <div
-        class="flex-1 flex min-h-0"
-        ref={(el) => {
-          containerRef = el;
+      <DeleteTrackDialog
+        open={confirmOpen()}
+        clipCount={pendingDeleteTrackClipCount()}
+        pendingTrackId={pendingDeleteTrackId()}
+        onOpenChange={setConfirmOpen}
+        onCancel={() => {
+          setConfirmOpen(false);
+          setPendingDeleteTrackId(null);
         }}
-      >
-        <div
-          class="flex-1 relative overflow-auto timeline-scroll"
-          style={{
-            "padding-bottom": bottomFXOpen() ? `${FX_OFFSET_PX}px` : "0px",
-          }}
-          ref={(el) => {
-            scrollRef = el;
-            setScrollElement(el);
-          }}
-        >
-          <div
-            class="relative flex select-none"
-            style={{
-              width: `${duration() * PPS + sidebarWidth()}px`,
-              height: `${RULER_HEIGHT + (renderTracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}px`,
-            }}
-          >
-            <div
-              class="relative shrink-0"
-              style={{
-                width: `${duration() * PPS}px`,
-                height: `${RULER_HEIGHT + (renderTracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}px`,
-              }}
-              onPointerDown={handleLanePointerDown}
-            >
-              <TimelineRuler
-                durationSec={duration()}
-                bpm={bpm()}
-                denom={gridDenominator()}
-                gridEnabled={gridEnabled()}
-                onPointerDown={onRulerPointerDown}
-                loopEnabled={loopEnabled()}
-                loopStartSec={loopStartSec()}
-                loopEndSec={loopEndSec()}
-                onSetLoopRegion={(s, e) => setLoopRegion(s, e)}
-              />
-
-              <div
-                class="absolute left-0 right-0"
-                style={{
-                  top: `${RULER_HEIGHT}px`,
-                  height: `${(renderTracks().length + (dropAtNewTrack() ? 1 : 0)) * LANE_HEIGHT}px`,
-                }}
-              >
-                <For each={renderTracks()}>
-                  {(track, i) => (
-                    <TrackLane
-                      track={track}
-                      index={i()}
-                      isDropTarget={dropTargetLane() === i()}
-                      selectedClipIds={selection.selectedClipIds()}
-                      onClipPointerDown={onClipPointerDown}
-                      onClipPointerUp={onClipPointerUp}
-                      onClipResizeStart={onClipResizeStart}
-                      bpm={bpm()}
-                      onClipDblClick={(_, clipId) => {
-                        const match = trackLookup().clipEntryById.get(clipId);
-                        if (
-                          match &&
-                          match.trackId === track.id &&
-                          match.clip.midi
-                        ) {
-                          openMidiEditorFor(clipId);
-                        }
-                      }}
-                    />
-                  )}
-                </For>
-                <TimelineOverlays
-                  timeline={{
-                    tracks: renderTracks(),
-                    trackLookup: trackLookup(),
-                    durationSec: duration(),
-                    bpm: bpm(),
-                    gridDenominator: gridDenominator(),
-                    gridEnabled: gridEnabled(),
-                    loopEnabled: loopEnabled(),
-                    loopStartSec: loopStartSec(),
-                    loopEndSec: loopEndSec(),
-                    playheadSec: playheadSec(),
-                    dropAtNewTrack: dropAtNewTrack(),
-                    marqueeRect: marqueeRect(),
-                  }}
-                  recording={{
-                    isRecording: isRecording(),
-                    previewStartSec: previewStartSec(),
-                    previewPoints: previewPoints(),
-                    recordingTrackId: recordingTrackId(),
-                  }}
-                  midi={{
-                    clipId: midiEditorClipId(),
-                    card: midiCard(),
-                    userId: userId(),
-                    roomId: roomId(),
-                    close: closeMidiEditor,
-                    changeBounds: changeMidiCardBounds,
-                    auditionNote,
-                    startLiveNote,
-                    stopLiveNote,
-                  }}
-                />
-              </div>
-            </div>
-
-            <div
-              class="sticky right-0 z-40 flex shrink-0"
-              style={{ width: `${sidebarWidth()}px` }}
-            >
-              <TrackSidebar
-                sidebar={{
-                  tracks: renderTracks(),
-                  selectedTrackId: selection.selectedTrackId(),
-                  sidebarWidth: sidebarWidth(),
-                  isPlaying: isPlaying(),
-                  bottomOffsetPx: bottomFXOpen() ? FX_OFFSET_PX : 0,
-                  recordArmTrackId: recordArmTrackId(),
-                  currentUserId: userId(),
-                  subscribeTrackLevels: (listener) =>
-                    audioEngine.subscribeTrackStereoLevels(listener),
-                  onTrackClick: (id) => {
-                    selection.selectTrackTarget(id, {
-                      clearClipSelection: true,
-                    });
-                  },
-                  canWriteTrackRouting: canWriteTrack,
-                  onTrackSendsChange: (trackId, sends) => {
-                    localMix.persist(trackId, { sends });
-                    updateTrackSends(trackId, sends);
-                  },
-                  onTrackOutputTargetChange: (trackId, outputTargetId) => {
-                    localMix.persist(trackId, {
-                      outputTargetId: outputTargetId ?? null,
-                    });
-                    updateTrackOutputTargetId(trackId, outputTargetId);
-                  },
-                  onVolumePreview: (trackId, volume, muted) => {
-                    audioEngine.previewTrackVolume(trackId, volume, muted);
-                  },
-                  onVolumeChange: setTrackVolume,
-                  onToggleMute: handleToggleTrackMute,
-                  onToggleSolo: handleToggleTrackSolo,
-                  onSidebarPointerDown,
-                  onToggleRecordArm: handleToggleRecordArm,
-                }}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <Dialog open={confirmOpen()} onOpenChange={setConfirmOpen}>
-        <DialogContent class="bg-neutral-900 text-neutral-100 border border-neutral-800">
-          <DialogHeader>
-            <DialogTitle>Delete this track?</DialogTitle>
-            <DialogDescription>
-              {pendingDeleteTrackClipCount() > 0
-                ? `This track contains ${pendingDeleteTrackClipCount()} audio clip${pendingDeleteTrackClipCount() === 1 ? "" : "s"}. Deleting the track will remove them. This action cannot be undone.`
-                : "This track has no audio clips. Deleting it cannot be undone."}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setConfirmOpen(false);
-                setPendingDeleteTrackId(null);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                const id = pendingDeleteTrackId();
-                if (id) performDeleteTrack(id);
-                setPendingDeleteTrackId(null);
-                setConfirmOpen(false);
-              }}
-            >
-              Delete Track
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        onConfirm={(trackId) => {
+          performDeleteTrack(trackId);
+          setPendingDeleteTrackId(null);
+          setConfirmOpen(false);
+        }}
+      />
 
       {/* Cloud-only mode: no browser capability notice needed */}
     </div>

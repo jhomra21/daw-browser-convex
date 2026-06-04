@@ -1,4 +1,5 @@
-import { createEffect, createSignal, type Accessor } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, type Accessor } from "solid-js";
+import type { FunctionReturnType } from "convex/server";
 import {
   createDefaultEqParams,
   createDefaultReverbParams,
@@ -10,15 +11,19 @@ import {
   type SynthParamsInput,
 } from "~/lib/effects/params";
 import type { AudioEngine, SpectrumFrame } from "~/lib/audio-engine";
-import { convexApi, useConvexQuery } from "~/lib/convex";
+import { convexApi } from "~/lib/convex";
+import { listLocalEffects, type LocalEffectRow } from "~/lib/local-effects";
+import { isLocalId } from "~/lib/local-ids";
+import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import type { Track } from "~/types/timeline";
 
 type UseEffectsPanelAudioSyncOptions = {
   isOpen: Accessor<boolean>;
-  roomId: Accessor<string | undefined>;
+  projectId: Accessor<string | undefined>;
   currentTargetId: Accessor<string>;
   tracks: Accessor<Track[]>;
-  audioEngine: Accessor<AudioEngine | undefined>;
+  audioEngine: Accessor<AudioEngine>;
+  roomEffects: Accessor<RoomEffectRow[] | undefined>;
   playheadSec?: Accessor<number | undefined>;
   localDraftEffects?: {
     eq?: (targetId: string) => EqParams | undefined;
@@ -28,34 +33,51 @@ type UseEffectsPanelAudioSyncOptions = {
   };
 };
 
+type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
+type SyncedEffectRow = RoomEffectRow | LocalEffectRow;
+
 type UseEffectsPanelAudioSyncReturn = {
-  roomEffects: ReturnType<typeof useConvexQuery<typeof convexApi.effects.listByRoom>>;
   spectrum: Accessor<SpectrumFrame | null>;
 };
 
 export function useEffectsPanelAudioSync(
   options: UseEffectsPanelAudioSyncOptions,
 ): UseEffectsPanelAudioSyncReturn {
-  const roomEffects = useConvexQuery(
-    convexApi.effects.listByRoom,
-    () => {
-      const roomId = options.roomId();
-      return roomId ? { roomId } : null;
-    },
-    () => ["effects", "room", options.roomId()],
-  );
+  const [localEffects, setLocalEffects] = createSignal<LocalEffectRow[] | undefined>(undefined);
+
+  createEffect(on(options.projectId, (projectId) => {
+    if (!projectId || !isLocalId("project", projectId)) {
+      setLocalEffects(undefined);
+      return;
+    }
+    const isCurrentProject = () => options.projectId() === projectId;
+    const reloadLocalEffects = () => listLocalEffects(projectId).then((rows) => {
+      if (isCurrentProject()) {
+        setLocalEffects(rows);
+      }
+    }).catch(() => {
+      if (isCurrentProject()) {
+        setLocalEffects([]);
+      }
+    });
+    void reloadLocalEffects();
+    const unsubscribe = subscribeToLocalProjectChanges(projectId, () => {
+      void reloadLocalEffects();
+    })
+    onCleanup(unsubscribe)
+  }));
 
   const disabledEq = { ...createDefaultEqParams(), enabled: false };
   const disabledReverb = { ...createDefaultReverbParams(), enabled: false };
   let syncedTrackIds = new Set<Track["id"]>();
-  let syncedRoomId: string | null = null;
+  let syncedProjectId: string | null = null;
 
   const clearSyncedTrackState = (audioEngine: AudioEngine, trackIds: Iterable<Track["id"]>) => {
     for (const trackId of trackIds) {
       audioEngine.setTrackEq(trackId, disabledEq);
       audioEngine.setTrackReverb(trackId, disabledReverb);
-      audioEngine.clearTrackSynth?.(trackId);
-      audioEngine.clearTrackArpeggiator?.(trackId);
+      audioEngine.clearTrackSynth(trackId);
+      audioEngine.clearTrackArpeggiator(trackId);
     }
   };
 
@@ -66,35 +88,35 @@ export function useEffectsPanelAudioSync(
 
   createEffect(() => {
     const audioEngine = options.audioEngine();
-    const roomId = options.roomId();
-    if (!audioEngine) return;
-    if (roomId) return;
+    const projectId = options.projectId();
+    if (projectId) return;
     clearSyncedTrackState(audioEngine, syncedTrackIds);
     clearSyncedMasterState(audioEngine);
     syncedTrackIds = new Set();
-    syncedRoomId = null;
+    syncedProjectId = null;
   });
 
   createEffect(() => {
     const audioEngine = options.audioEngine();
-    const roomId = options.roomId();
-    const effects = roomEffects.data;
-    if (!audioEngine) return;
+    const projectId = options.projectId();
+    const effects: SyncedEffectRow[] | undefined = projectId && isLocalId("project", projectId)
+      ? localEffects()
+      : options.roomEffects();
 
     const activeTargetId = options.currentTargetId();
     const tracks = options.tracks();
     const currentTrackIds = new Set(tracks.map((track) => track.id));
     if (effects === undefined) {
-      if (roomId && syncedRoomId !== roomId) {
+      if (projectId && syncedProjectId !== projectId) {
         clearSyncedTrackState(audioEngine, new Set([...syncedTrackIds, ...currentTrackIds]));
         clearSyncedMasterState(audioEngine);
         syncedTrackIds = new Set(currentTrackIds);
-        syncedRoomId = roomId;
+        syncedProjectId = projectId;
       }
       return;
     }
 
-    if (!roomId) return;
+    if (!projectId) return;
 
     const eqByTrackId = new Map<string, EqParams>();
     const reverbByTrackId = new Map<string, ReverbParams>();
@@ -104,7 +126,40 @@ export function useEffectsPanelAudioSync(
     let hasMasterReverb = false;
 
     for (const row of effects) {
-      if (row?.targetType === "master") {
+      if ("effect" in row) {
+        if (row.effect === "master-eq") {
+          if (activeTargetId !== "master") {
+            hasMasterEq = true;
+            audioEngine.setMasterEq(row.params);
+          }
+          continue;
+        }
+        if (row.effect === "master-reverb") {
+          if (activeTargetId !== "master") {
+            hasMasterReverb = true;
+            audioEngine.setMasterReverb(row.params);
+          }
+          continue;
+        }
+        if (row.effect === "eq") {
+          if (row.targetId !== activeTargetId) eqByTrackId.set(row.targetId, row.params);
+          continue;
+        }
+        if (row.effect === "reverb") {
+          if (row.targetId !== activeTargetId) reverbByTrackId.set(row.targetId, row.params);
+          continue;
+        }
+        if (row.effect === "synth") {
+          if (row.targetId !== activeTargetId) synthByTrackId.set(row.targetId, normalizeSynthParams(row.params));
+          continue;
+        }
+        if (row.effect === "arp") {
+          if (row.targetId !== activeTargetId) arpByTrackId.set(row.targetId, row.params);
+          continue;
+        }
+        continue;
+      }
+      if (row.targetType === "master") {
         if (activeTargetId === "master") continue;
         if (row.type === "eq" && row.params) {
           hasMasterEq = true;
@@ -165,18 +220,18 @@ export function useEffectsPanelAudioSync(
       if (track.kind === "instrument") {
         const synth = options.localDraftEffects?.synth?.(track.id) ?? synthByTrackId.get(track.id);
         if (synth) audioEngine.setTrackSynth(track.id, synth);
-        else audioEngine.clearTrackSynth?.(track.id);
+        else audioEngine.clearTrackSynth(track.id);
         const arp = options.localDraftEffects?.arp?.(track.id) ?? arpByTrackId.get(track.id);
         if (arp) audioEngine.setTrackArpeggiator(track.id, arp);
-        else audioEngine.clearTrackArpeggiator?.(track.id);
+        else audioEngine.clearTrackArpeggiator(track.id);
         continue;
       }
-      audioEngine.clearTrackSynth?.(track.id);
-      audioEngine.clearTrackArpeggiator?.(track.id);
+      audioEngine.clearTrackSynth(track.id);
+      audioEngine.clearTrackArpeggiator(track.id);
     }
 
     syncedTrackIds = new Set(currentTrackIds);
-    syncedRoomId = roomId;
+    syncedProjectId = projectId;
   });
 
   const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null);
@@ -191,8 +246,8 @@ export function useEffectsPanelAudioSync(
       const audioEngine = options.audioEngine();
       const id = options.currentTargetId();
       const data = id === "master"
-        ? audioEngine?.getMasterSpectrum()
-        : audioEngine?.getTrackSpectrum(id);
+        ? audioEngine.getMasterSpectrum()
+        : audioEngine.getTrackSpectrum(id);
       setSpectrum(data ?? null);
     } catch {
       setSpectrum(null);
@@ -200,7 +255,6 @@ export function useEffectsPanelAudioSync(
   });
 
   return {
-    roomEffects,
     spectrum,
   };
 }

@@ -3,19 +3,21 @@ import { createSignal, onCleanup, onMount, type Accessor } from 'solid-js'
 import type { InsertSampleInput } from '~/hooks/useTimelineClipImport'
 import { copyText } from '~/lib/clipboard'
 import { useProjectSamples, type ProjectSampleListItem } from '~/hooks/useProjectSamples'
-import { convexApi, convexClient } from '~/lib/convex'
 import { hasAncestorDatasetValue } from '~/lib/dom-dataset'
+import { deleteLocalAsset } from '~/lib/local-assets'
+import { isLocalId } from '~/lib/local-ids'
+import { deleteProjectSample } from '~/lib/project-samples-api'
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData } from '~/lib/sample-drag-data'
 import type { Track } from '~/types/timeline'
 
 type UseSamplesMenuControllerOptions = {
-  currentRoomId: Accessor<string>
+  currentProjectId: Accessor<string>
   currentUserId: Accessor<string | undefined>
   onInsertSample: (input: InsertSampleInput) => void | Promise<void>
   onJumpToClip: (clipId: string, trackId: Track['id'], startSec: number) => void
 }
 
-type UseSamplesMenuControllerReturn = {
+export type SamplesMenuController = {
   open: Accessor<boolean>
   onOpenChange: (open: boolean) => void
   isDraggingSample: Accessor<boolean>
@@ -36,7 +38,7 @@ type UseSamplesMenuControllerReturn = {
 
 export function useSamplesMenuController(
   options: UseSamplesMenuControllerOptions,
-): UseSamplesMenuControllerReturn {
+): SamplesMenuController {
   const [open, setOpen] = createSignal(false)
   const [isDraggingSample, setIsDraggingSample] = createSignal(false)
   const [confirmingSampleKey, setConfirmingSampleKey] = createSignal<string | null>(null)
@@ -45,7 +47,8 @@ export function useSamplesMenuController(
   const captureOptions = { capture: true }
 
   const samples = useProjectSamples({
-    roomId: options.currentRoomId,
+    projectId: options.currentProjectId,
+    userId: () => options.currentUserId() ?? '',
     enabled: open,
   })
 
@@ -91,16 +94,20 @@ export function useSamplesMenuController(
   }
 
   const onDeleteSample = async (sample: ProjectSampleListItem) => {
-    const roomId = options.currentRoomId()
+    const projectId = options.currentProjectId()
     const userId = options.currentUserId()
-    if (!sample.url || !roomId || !userId) return
+    if (!sample.url || !projectId) return
     setDeletingSampleKey(sample.key)
     try {
-      await convexClient.mutation(convexApi.samples.removeFromRoom, {
-        roomId,
-        assetKey: sample.assetKey,
-        userId,
-      })
+      if (isLocalId('project', projectId) && isLocalId('asset', sample.assetKey)) {
+        if (sample.count > 0) return
+        await deleteLocalAsset(projectId, sample.assetKey)
+        samples.refreshSamples()
+        setConfirmingSampleKey(null)
+        return
+      }
+      if (!userId) return
+      await deleteProjectSample(projectId, sample.assetKey)
       setConfirmingSampleKey(null)
     } finally {
       setDeletingSampleKey(null)

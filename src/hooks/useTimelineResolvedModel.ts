@@ -1,12 +1,14 @@
 import { createEffect, createMemo, type Accessor } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
 
+import type { ClipMediaCache } from '~/lib/clip-buffer-cache'
 import { convexApi } from '~/lib/convex'
 import {
   resolveTimelineTracks,
   type ClipTimelinePatch,
   type PendingTrackEntry,
 } from '~/lib/resolve-timeline-tracks'
+import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
 import { createTimelineTrackIndex, type TimelineTrackIndex } from '~/lib/timeline-track-index'
 import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
 import type { LocalMixMap } from '~/lib/timeline-storage'
@@ -22,7 +24,9 @@ type ServerTrackState = {
 } | null
 
 type UseTimelineResolvedModelOptions = {
+  projectId: Accessor<string | undefined>
   fullViewData: Accessor<FullTimelineView | undefined>
+  localSnapshot: Accessor<TimelineSnapshot | null>
   syncMix: Accessor<boolean>
   writableTrackIds: Accessor<Set<Track['id']>>
   serverTrackState: Accessor<ServerTrackState>
@@ -47,7 +51,7 @@ type UseTimelineResolvedModelOptions = {
     rememberTrackProjection: (track: Pick<Track, 'id' | 'historyRef' | 'name'> | null | undefined) => void
     rememberClipHistoryRef: (clip: Pick<Track['clips'][number], 'id' | 'historyRef'> | null | undefined) => void
   }
-  audioBufferCache: Map<string, AudioBuffer>
+  buffers: ClipMediaCache
   bufferVersion: Accessor<number>
 }
 
@@ -70,8 +74,10 @@ export function useTimelineResolvedModel(
   }): Track[] {
     options.bufferVersion()
     return resolveTimelineTracks({
+      projectId: options.projectId(),
       server: {
         data: options.fullViewData(),
+        localSnapshot: options.localSnapshot(),
         trackState: options.serverTrackState(),
       },
       client: {
@@ -99,9 +105,7 @@ export function useTimelineResolvedModel(
           historyRefsById: options.identity.clipHistoryRefsById(),
         },
       },
-      buffers: {
-        audioBufferCache: options.audioBufferCache,
-      },
+      buffers: options.buffers,
     })
   }
 

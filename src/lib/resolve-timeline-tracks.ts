@@ -1,12 +1,17 @@
 import type { FunctionReturnType } from 'convex/server'
 
+import type { ClipMediaCache } from '~/lib/clip-buffer-cache'
 import { convexApi } from '~/lib/convex'
-import { sanitizeAudioSourceKind } from '~/lib/audio-source-rules'
+import { isLocalProjectAssetKey, sanitizeAudioSourceKind } from '~/lib/audio-source-rules'
+import { isLocalId } from '~/lib/local-ids'
 import { resolveTrackMixView } from '~/lib/timeline-mix-authority'
 import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
+import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
+import { cloneTimelineClip, cloneTimelineTrack } from '~/lib/timeline-clone'
 import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
 import type { LocalMixMap } from '~/lib/timeline-storage'
 import { normalizeTrackRouting } from '~/lib/track-routing'
+import { normalizeTrackChannelRole } from '~/lib/track-routing-core'
 import type { Track, Clip, TrackRouting, TrackSend } from '~/types/timeline'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
@@ -44,8 +49,10 @@ type TimelineRoutingState = {
 }
 
 type ResolveTimelineTracksOptions = {
+  projectId?: string
   server: {
     data?: FullTimelineView
+    localSnapshot?: TimelineSnapshot | null
     trackState?: TimelineRoutingState | null
   }
   client: {
@@ -73,9 +80,7 @@ type ResolveTimelineTracksOptions = {
       historyRefsById: Map<string, string>
     }
   }
-  buffers: {
-    audioBufferCache: Map<string, AudioBuffer>
-  }
+  buffers: ClipMediaCache
 }
 
 type ServerTimelineIndex<TTrackId extends string = Track['id']> = {
@@ -94,11 +99,6 @@ const nearlyEqual = (left: number | undefined, right: number | undefined) => {
 
 const normalizeTrackKind = (value: string | undefined): Track['kind'] => {
   if (value === 'audio' || value === 'instrument') return value
-  return undefined
-}
-
-const normalizeChannelRole = (value: string | undefined): Track['channelRole'] => {
-  if (value === 'track' || value === 'group' || value === 'return') return value
   return undefined
 }
 
@@ -121,29 +121,26 @@ const normalizeMidi = (value: FullTimelineView['clips'][number]['midi']): Clip['
   }
 }
 
-const cloneClip = (clip: Clip): Clip => ({
-  ...clip,
-  midi: clip.midi
-    ? {
-        ...clip.midi,
-        notes: clip.midi.notes.map((note) => ({ ...note })),
-      }
-    : undefined,
-})
-
-const cloneTrack = (track: Track): Track => ({
-  ...track,
-  clips: track.clips.map((clip) => cloneClip(clip)),
-  sends: track.sends?.map((send) => ({ ...send })),
-})
+const getWaveformAssetKey = (projectId: string | undefined, sourceAssetKey: string | undefined) => {
+  if (!projectId || !sourceAssetKey) return sourceAssetKey
+  return isLocalId('project', projectId) && isLocalProjectAssetKey(sourceAssetKey)
+    ? `${projectId}:${sourceAssetKey}`
+    : sourceAssetKey
+}
 
 const sortTrackClips = (track: Track) => {
   track.clips.sort((left, right) => left.startSec - right.startSec)
 }
 
-const attachClipBuffer = (clip: Clip, audioBufferCache: Map<string, AudioBuffer>): Clip => ({
+const attachClipBuffer = (
+  clip: Clip,
+  projectId: string | undefined,
+  buffers: ClipMediaCache,
+): Clip => ({
   ...clip,
-  buffer: audioBufferCache.get(clip.id) ?? clip.buffer ?? null,
+  buffer: buffers.getBuffer(clip.id) ?? clip.buffer ?? null,
+  mediaStatus: buffers.getMediaStatus(clip.id),
+  waveformAssetKey: getWaveformAssetKey(projectId, clip.sourceAssetKey),
 })
 
 const resolveTrackName = (input: {
@@ -280,15 +277,28 @@ export function isClipPatchReflected<TTrackId extends string>(
 export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Track[] {
   const projectedTracks: Track[] = []
   const projectedTrackIds = new Set<Track['id']>()
-  const serverTracks = options.server.data?.tracks ?? []
-  const serverClips = options.server.data?.clips ?? []
+  const localSnapshot = options.server.localSnapshot
+  const serverTracks = localSnapshot
+    ? localSnapshot.tracks.map((track) => ({
+        ...track,
+        _id: track.id,
+        lockedBy: null,
+      }))
+    : options.server.data?.tracks ?? []
+  const serverClips = localSnapshot
+    ? localSnapshot.clips.map((clip) => ({
+        ...clip,
+        _id: clip.id,
+      }))
+    : options.server.data?.clips ?? []
 
   for (let index = 0; index < serverTracks.length; index++) {
     const trackRow = serverTracks[index]
     const trackId = trackRow._id
     if (options.client.tracks.removedIds.has(trackId)) continue
 
-    const historyRef = options.client.tracks.historyRefsById.get(trackId) ?? trackId
+    const localTrackRow = localSnapshot ? localSnapshot.tracks[index] : undefined
+    const historyRef = options.client.tracks.historyRefsById.get(trackId) ?? localTrackRow?.historyRef ?? trackId
     const serverVolume = options.server.trackState?.serverVolumes.get(trackId)
 
     projectedTracks.push({
@@ -296,18 +306,19 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
       historyRef,
       name: resolveTrackName({
         historyRef,
+        explicitName: localTrackRow?.name,
         fallbackIndex: index + 1,
         namesByHistoryRef: options.client.tracks.namesByHistoryRef,
       }),
-      volume: serverVolume ?? 0.8,
+      volume: serverVolume ?? localTrackRow?.volume ?? 0.8,
       clips: [],
       muted: typeof trackRow.muted === 'boolean' ? trackRow.muted : false,
       soloed: typeof trackRow.soloed === 'boolean' ? trackRow.soloed : false,
       lockedBy: typeof trackRow.lockedBy === 'string' ? trackRow.lockedBy : null,
       kind: normalizeTrackKind(trackRow.kind) ?? 'audio',
-      channelRole: normalizeChannelRole(trackRow.channelRole) ?? 'track',
-      sends: [],
-      outputTargetId: undefined,
+      channelRole: normalizeTrackChannelRole(trackRow.channelRole),
+      sends: localTrackRow?.sends ?? [],
+      outputTargetId: localTrackRow?.outputTargetId,
     })
     projectedTrackIds.add(trackId)
   }
@@ -319,7 +330,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
   for (const entry of pendingTrackEntries) {
     if (projectedTrackIds.has(entry.track.id)) continue
     const insertIndex = Math.max(0, Math.min(projectedTracks.length, entry.index))
-    const clonedTrack = cloneTrack(entry.track)
+    const clonedTrack = cloneTimelineTrack(entry.track)
     const historyRef = clonedTrack.historyRef ?? clonedTrack.id
     clonedTrack.historyRef = historyRef
     clonedTrack.name = resolveTrackName({
@@ -346,10 +357,12 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
       id: clipId,
       historyRef: options.client.clips.historyRefsById.get(clipId) ?? clipId,
       name: clipRow.name ?? 'Clip',
-      buffer: options.buffers.audioBufferCache.get(clipId) ?? null,
+      buffer: options.buffers.getBuffer(clipId) ?? null,
+      mediaStatus: options.buffers.getMediaStatus(clipId),
       startSec: clipRow.startSec,
       duration: clipRow.duration,
       sourceAssetKey: clipRow.sourceAssetKey,
+      waveformAssetKey: getWaveformAssetKey(options.projectId, clipRow.sourceAssetKey),
       sourceKind: normalizeSourceKind(clipRow.sourceKind),
       sourceDurationSec: clipRow.sourceDurationSec,
       sourceSampleRate: clipRow.sourceSampleRate,
@@ -367,11 +380,20 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
   }
 
   for (const [clipId, pending] of options.client.clips.pendingCreatesById) {
-    if (options.client.clips.removedIds.has(clipId) || clipById.has(clipId)) continue
+    if (options.client.clips.removedIds.has(clipId)) continue
     const track = trackById.get(pending.trackId)
     if (!track) continue
-    const clip = attachClipBuffer(cloneClip(pending.clip), options.buffers.audioBufferCache)
-    pushClipToTrack(track, clip)
+    const clip = attachClipBuffer(cloneTimelineClip(pending.clip), options.projectId, options.buffers)
+    const currentTrackId = clipTrackIdById.get(clipId)
+    const currentTrack = currentTrackId ? trackById.get(currentTrackId) : undefined
+    if (currentTrack && currentTrack !== track) {
+      removeClipFromTrack(currentTrack, clipId)
+    }
+    if (currentTrack === track) {
+      track.clips = track.clips.map((entry) => entry.id === clipId ? clip : entry)
+    } else {
+      pushClipToTrack(track, clip)
+    }
     clipById.set(clipId, clip)
     clipTrackIdById.set(clipId, pending.trackId)
   }
@@ -387,7 +409,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
       const nextTrack = nextTrackId ? trackById.get(nextTrackId) : undefined
       if (!nextTrack || !currentTrackId || !currentTrack) continue
       const resolvedNextTrackId = nextTrack.id
-      const nextClip = attachClipBuffer(applyClipPatch(currentClip, patch), options.buffers.audioBufferCache)
+      const nextClip = attachClipBuffer(applyClipPatch(currentClip, patch), options.projectId, options.buffers)
       if (resolvedNextTrackId !== currentTrackId) {
         removeClipFromTrack(currentTrack, clipId)
         pushClipToTrack(nextTrack, nextClip)
@@ -411,7 +433,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
     const track = trackById.get(trackId)
     if (!track) continue
     for (const clip of clips) {
-      pushClipToTrack(track, attachClipBuffer(cloneClip(clip), options.buffers.audioBufferCache))
+      pushClipToTrack(track, attachClipBuffer(cloneTimelineClip(clip), options.projectId, options.buffers))
     }
   }
 
@@ -422,7 +444,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
     applyTrackMix(track, options, projectedTracks)
     track.clips = track.clips
       .filter((clip) => !options.client.clips.removedIds.has(clip.id))
-      .map((clip) => attachClipBuffer(clip, options.buffers.audioBufferCache))
+      .map((clip) => attachClipBuffer(clip, options.projectId, options.buffers))
     sortTrackClips(track)
   }
 

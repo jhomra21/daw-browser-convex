@@ -5,6 +5,37 @@
     "src/components/ui/**/*.tsx"
   ],
   "ignoreIssues": {
+    "src/lib/local-cloud-id-map.ts": [
+      "files",
+      "exports",
+      "types"
+    ],
+    "src/lib/effects/dsp.ts": [
+      "exports"
+    ],
+    "src/lib/local-assets.ts": [
+      "exports"
+    ],
+    "src/lib/local-ids.ts": [
+      "exports",
+      "types"
+    ],
+    "src/lib/local-project-db.ts": [
+      "exports",
+      "types"
+    ],
+    "src/lib/session.ts": [
+      "exports"
+    ],
+    "src/lib/timeline-storage.ts": [
+      "exports"
+    ],
+    "src/lib/audio-engine.ts": [
+      "types"
+    ],
+    "src/lib/timeline-repository/types.ts": [
+      "types"
+    ],
     "src/components/ui/**/*.tsx": [
       "exports",
       "types"

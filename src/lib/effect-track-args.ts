@@ -1,18 +1,25 @@
-import type { FunctionArgs } from 'convex/server'
-
+import { toCloudTrackId } from '~/lib/cloud-id-args'
 import { convexApi } from '~/lib/convex'
 import type { TrackId } from '~/types/timeline'
 
-type TrackEffectMutationInput =
-  | FunctionArgs<typeof convexApi.effects.setEqParams>
-  | FunctionArgs<typeof convexApi.effects.setReverbParams>
-  | FunctionArgs<typeof convexApi.effects.setSynthParams>
-  | FunctionArgs<typeof convexApi.effects.setArpeggiatorParams>
-
-export function buildTrackEffectQueryArgs(trackId: TrackId) {
-  return { trackId }
+export function buildTrackEffectQueryArgs(input: {
+  projectId: string
+  trackId: TrackId
+}) {
+  return {
+    projectId: input.projectId,
+    trackId: toCloudTrackId(input.trackId),
+  }
 }
 
-export function buildTrackEffectMutationInput<TInput extends TrackEffectMutationInput>(input: TInput): TInput {
-  return input
+export function buildTrackEffectMutationInput<TParams>(input: {
+  projectId: string
+  trackId: TrackId
+  params: TParams
+}) {
+  return {
+    projectId: input.projectId,
+    trackId: toCloudTrackId(input.trackId),
+    params: input.params,
+  }
 }

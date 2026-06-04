@@ -1,5 +1,5 @@
 export type OptimisticGrantScope = {
-  roomId: string
+  projectId: string
   userId: string
 }
 
@@ -9,18 +9,18 @@ export type OptimisticGrantWrite = (
 ) => void
 
 export function readOptimisticGrantScope(input: {
-  roomId: string | null | undefined
+  projectId: string | null | undefined
   userId: string | null | undefined
 }) {
-  if (!input.roomId || !input.userId) return null
+  if (!input.projectId || !input.userId) return null
   return {
-    roomId: input.roomId,
+    projectId: input.projectId,
     userId: input.userId,
   }
 }
 
 export function buildOptimisticGrantScopeKey(scope: OptimisticGrantScope) {
-  return `${scope.roomId}:${scope.userId}`
+  return `${scope.projectId}:${scope.userId}`
 }
 
 export function isOptimisticGrantScopeCurrent(

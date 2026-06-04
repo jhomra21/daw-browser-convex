@@ -9,6 +9,28 @@ import type {
 } from "convex/server";
 
 const convex = new ConvexClient(import.meta.env.VITE_CONVEX_URL as string);
+let convexAuthConfigured = false;
+
+const fetchConvexAccessToken = async () => {
+  const response = await fetch('/api/convex-auth/token', { credentials: 'include' });
+  if (response.status === 401) return null;
+  if (!response.ok) throw new Error('Failed to fetch Convex auth token');
+  const body: unknown = await response.json();
+  if (!body || typeof body !== 'object' || !('token' in body) || typeof body.token !== 'string') {
+    return null;
+  }
+  return body.token;
+};
+
+const configureConvexAuth = () => {
+  if (convexAuthConfigured) return;
+  convexAuthConfigured = true;
+  convex.setAuth(fetchConvexAccessToken);
+};
+
+if (typeof window !== 'undefined') {
+  configureConvexAuth();
+}
 
 // Type-safe Convex query hook using TanStack Query with real-time subscriptions
 export function useConvexQuery<

@@ -1,10 +1,6 @@
 import type { AudioEngine } from '~/lib/audio-engine'
-import { buildTrackLockMutationInput, buildTrackUnlockMutationInput } from '~/lib/track-mutation-args'
+import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { Track } from '~/types/timeline'
-
-type ConvexClientType = typeof import('~/lib/convex').convexClient
-
-type ConvexApiType = typeof import('~/lib/convex').convexApi
 
 const RECORDING_MIME_TYPES = [
   'audio/webm;codecs=opus',
@@ -16,8 +12,16 @@ const RECORDING_MIME_TYPES = [
 
 const RECORDING_LOCK_KEEPALIVE_MS = 30_000
 
+const isLockResult = (value: unknown): value is { ok?: boolean; reason?: string } => (
+  typeof value === 'object' && value !== null
+)
+
 export type RecordingContext = {
+  projectId: string
+  userId: string | undefined
+  isLocalProject: boolean
   trackId: Track['id']
+  tracks: Track[]
   createdTrack: Track | null
   startSec: number
   stream: MediaStream
@@ -93,21 +97,20 @@ export function ensureRecordingAudioContext(audioEngine: AudioEngine): void {
 }
 
 export async function acquireTrackRecordingLock(options: {
+  projectId: string
   trackId: Track['id']
   locker: string
-  convexClient: ConvexClientType
-  convexApi: ConvexApiType
   setTrackLock: (trackId: Track['id'], lockedBy: string | null) => void
   clearTrackLock: (trackId: Track['id']) => void
 }): Promise<{ ok: boolean; reason?: string }> {
   try {
-    const res = await options.convexClient.mutation(
-      options.convexApi.tracks.lock,
-      buildTrackLockMutationInput({ trackId: options.trackId, userId: options.locker }),
-    )
-    if (!res?.ok) {
+    const res = await publishSharedTimelineOperation(options.projectId, {
+      kind: 'tracks.lock',
+      payload: { trackId: options.trackId },
+    })
+    if (!isLockResult(res) || !res.ok) {
       options.clearTrackLock(options.trackId)
-      return { ok: false, reason: res?.reason }
+      return { ok: false, reason: isLockResult(res) ? res.reason : undefined }
     }
     options.setTrackLock(options.trackId, options.locker)
     return { ok: true }
@@ -119,10 +122,9 @@ export async function acquireTrackRecordingLock(options: {
 }
 
 export async function releaseTrackRecordingLock(options: {
+  projectId: string
   trackId: Track['id']
   locker: string | undefined
-  convexClient: ConvexClientType
-  convexApi: ConvexApiType
   setTrackLock: (trackId: Track['id'], lockedBy: string | null) => void
   clearTrackLock: (trackId: Track['id']) => void
 }): Promise<void> {
@@ -131,11 +133,11 @@ export async function releaseTrackRecordingLock(options: {
     return
   }
   try {
-    const result = await options.convexClient.mutation(
-      options.convexApi.tracks.unlock,
-      buildTrackUnlockMutationInput({ trackId: options.trackId, userId: options.locker }),
-    )
-    if (!result?.ok) {
+    const result = await publishSharedTimelineOperation(options.projectId, {
+      kind: 'tracks.unlock',
+      payload: { trackId: options.trackId },
+    })
+    if (!isLockResult(result) || !result.ok) {
       options.clearTrackLock(options.trackId)
       return
     }
@@ -153,17 +155,16 @@ export function clearRecordingLockHeartbeat(lockHeartbeatTimer: number | null): 
 }
 
 export function startRecordingLockHeartbeat(options: {
+  projectId: string
   trackId: Track['id']
   locker: string
-  convexClient: ConvexClientType
-  convexApi: ConvexApiType
   onError?: (error: unknown) => void
 }): number {
   return window.setInterval(() => {
-    void options.convexClient.mutation(
-      options.convexApi.tracks.lock,
-      buildTrackLockMutationInput({ trackId: options.trackId, userId: options.locker }),
-    ).catch((error) => {
+    void publishSharedTimelineOperation(options.projectId, {
+      kind: 'tracks.lock',
+      payload: { trackId: options.trackId },
+    }).catch((error) => {
       options.onError?.(error)
     })
   }, RECORDING_LOCK_KEEPALIVE_MS)
@@ -172,9 +173,8 @@ export function startRecordingLockHeartbeat(options: {
 export async function cleanupRecordingSession(options: {
   activeCtx: RecordingContext | null
   clearLockHeartbeat: () => void
-  releaseTrackLock: (trackId: Track['id'], locker: string | undefined) => Promise<void>
+  releaseTrackLock: (trackId: Track['id'], locker: string | undefined, isLocalProject: boolean) => Promise<void>
   setIsRecording: (value: boolean) => void
-  setIsRecordingInternal: (value: boolean) => void
   livePreviewPoints: { offset: number; amplitude: number }[]
   setPreviewPoints: (points: { offset: number; amplitude: number }[]) => void
   setPreviewStartSec: (value: number | null) => void
@@ -199,9 +199,8 @@ export async function cleanupRecordingSession(options: {
   } catch {}
   try { await ctx.analysisCtx?.close() } catch {}
 
-  await options.releaseTrackLock(ctx.trackId, ctx.lockedByUserId)
+  await options.releaseTrackLock(ctx.trackId, ctx.lockedByUserId, ctx.isLocalProject)
   options.setIsRecording(false)
-  options.setIsRecordingInternal(false)
   options.livePreviewPoints.length = 0
   options.setPreviewPoints(options.livePreviewPoints)
   options.setPreviewStartSec(null)
@@ -210,7 +209,6 @@ export async function cleanupRecordingSession(options: {
 
 export function haltRecordingPreview(options: {
   activeCtx: RecordingContext | null
-  setIsRecording: (value: boolean) => void
   livePreviewPoints: { offset: number; amplitude: number }[]
   setPreviewPoints: (points: { offset: number; amplitude: number }[]) => void
   setPreviewStartSec: (value: number | null) => void
@@ -226,7 +224,6 @@ export function haltRecordingPreview(options: {
     ctx.scriptProcessor = null
     ctx.analysisCtx = null
   } catch {}
-  options.setIsRecording(false)
   options.livePreviewPoints.length = 0
   options.setPreviewPoints(options.livePreviewPoints)
   options.setPreviewStartSec(null)

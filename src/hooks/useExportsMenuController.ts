@@ -4,10 +4,11 @@ import { useProjectExports } from '~/hooks/useProjectExports'
 import { copyText } from '~/lib/clipboard'
 
 type UseExportsMenuControllerOptions = {
-  currentRoomId: Accessor<string>
+  currentProjectId: Accessor<string>
+  currentUserId: Accessor<string | undefined>
 }
 
-type UseExportsMenuControllerReturn = {
+export type ExportsMenuController = {
   open: Accessor<boolean>
   onOpenChange: (open: boolean) => void
   exports: ReturnType<typeof useProjectExports>['exports']
@@ -16,10 +17,11 @@ type UseExportsMenuControllerReturn = {
 
 export function useExportsMenuController(
   options: UseExportsMenuControllerOptions,
-): UseExportsMenuControllerReturn {
+): ExportsMenuController {
   const [open, setOpen] = createSignal(false)
   const exportsQ = useProjectExports({
-    roomId: options.currentRoomId,
+    projectId: options.currentProjectId,
+    userId: () => options.currentUserId() ?? '',
     enabled: open,
   })
 

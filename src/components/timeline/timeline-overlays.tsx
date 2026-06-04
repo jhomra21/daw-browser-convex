@@ -35,12 +35,13 @@ type TimelineOverlaysProps = {
     clipId: string | null
     card: TimelineMidiBounds
     userId?: string
-    roomId?: string
+    projectId?: string
     close: () => void
     changeBounds: (next: TimelineMidiBounds) => void
     auditionNote: (pitch: number, velocity?: number, durSec?: number) => void
     startLiveNote: (pitch: number, velocity?: number) => void
     stopLiveNote: (pitch: number) => void
+    onLocalMidiSaved: (clipId: string, midi: Clip['midi']) => void
   }
 }
 
@@ -93,7 +94,6 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
       <Suspense fallback={null}>
         <GridOverlay
           durationSec={props.timeline.durationSec}
-          heightPx={(props.timeline.tracks.length + (props.timeline.dropAtNewTrack ? 1 : 0)) * LANE_HEIGHT}
           bpm={props.timeline.bpm}
           denom={props.timeline.gridDenominator}
           enabled={props.timeline.gridEnabled}
@@ -149,10 +149,11 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
                   onChangeBounds={props.midi.changeBounds}
                   midi={clip().midi}
                   userId={props.midi.userId}
-                  roomId={props.midi.roomId}
+                  projectId={props.midi.projectId}
                   onAuditionNote={props.midi.auditionNote}
                   onStartLiveNote={props.midi.startLiveNote}
                   onStopLiveNote={props.midi.stopLiveNote}
+                  onLocalMidiSaved={props.midi.onLocalMidiSaved}
                 />
               )
             }}

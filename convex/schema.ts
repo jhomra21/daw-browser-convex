@@ -1,20 +1,21 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { projectManifestValidator } from "./projectManifestValidator";
 
 // Minimal shared model for collaboration
 // - We intentionally DO NOT store track names or any audio URLs here
-// - All scoping is via a simple roomId string (avoids needing a timelines table)
+// - All scoping is via a simple projectId string (avoids needing a timelines table)
 export default defineSchema({
   tracks: defineTable({
-    roomId: v.string(),
+    projectId: v.string(),
     index: v.number(),
     kind: v.optional(v.string()), // 'audio' | 'instrument'
   })
-    .index("by_room", ["roomId"])
-    .index("by_room_index", ["roomId", "index"]),
+    .index("by_room", ["projectId"])
+    .index("by_room_index", ["projectId", "index"]),
 
   mixerChannels: defineTable({
-    roomId: v.string(),
+    projectId: v.string(),
     trackId: v.id("tracks"),
     volume: v.number(),
     muted: v.optional(v.boolean()),
@@ -28,11 +29,11 @@ export default defineSchema({
       amount: v.number(),
     })),
   })
-    .index("by_room", ["roomId"])
+    .index("by_room", ["projectId"])
     .index("by_track", ["trackId"]),
 
   clips: defineTable({
-    roomId: v.string(),
+    projectId: v.string(),
     trackId: v.id("tracks"),
     startSec: v.number(),
     duration: v.number(),
@@ -57,11 +58,11 @@ export default defineSchema({
     })),
     midiOffsetBeats: v.optional(v.number()),
   })
-    .index("by_room", ["roomId"])
+    .index("by_room", ["projectId"])
     .index("by_track", ["trackId"]),
 
   samples: defineTable({
-    roomId: v.string(),
+    projectId: v.string(),
     assetKey: v.string(),
     sourceKind: v.string(),
     url: v.string(),
@@ -72,33 +73,86 @@ export default defineSchema({
     ownerUserId: v.string(),
     createdAt: v.number(),
   })
-    .index("by_room", ["roomId"])
-    .index("by_room_assetKey", ["roomId", "assetKey"]),
+    .index("by_room", ["projectId"])
+    .index("by_room_assetKey", ["projectId", "assetKey"]),
 
   projects: defineTable({
-    roomId: v.string(),
+    projectId: v.string(),
     ownerUserId: v.string(),
     name: v.string(),
     createdAt: v.number(),
+    deletionPendingAt: v.optional(v.number()),
   })
     .index("by_owner", ["ownerUserId"])
-    .index("by_room", ["roomId"])
-    .index("by_room_owner", ["roomId", "ownerUserId"]),
+    .index("by_room", ["projectId"])
+    .index("by_room_createdAt", ["projectId", "createdAt"])
+    .index("by_room_owner", ["projectId", "ownerUserId"]),
 
   ownerships: defineTable({
-    roomId: v.string(),
+    projectId: v.string(),
     ownerUserId: v.string(),
+    role: v.optional(v.union(v.literal("owner"), v.literal("editor"), v.literal("viewer"))),
     clipId: v.optional(v.id("clips")),
     trackId: v.optional(v.id("tracks")),
   })
     .index("by_clip", ["clipId"])
     .index("by_track", ["trackId"])
-    .index("by_room", ["roomId"])
+    .index("by_room", ["projectId"])
     .index("by_owner", ["ownerUserId"])
-    .index("by_room_owner", ["roomId", "ownerUserId"]),
+    .index("by_owner_project_marker", ["ownerUserId", "trackId", "clipId"])
+    .index("by_room_owner", ["projectId", "ownerUserId"]),
+
+  shareInvites: defineTable({
+    projectId: v.string(),
+    role: v.union(v.literal("editor"), v.literal("viewer")),
+    token: v.string(),
+    createdBy: v.string(),
+    revokedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_token", ["token"])
+    .index("by_room", ["projectId"]),
+
+  cloudBackups: defineTable({
+    projectId: v.string(),
+    ownerUserId: v.string(),
+    manifest: projectManifestValidator,
+    manifestVersion: v.string(),
+    updatedAt: v.number(),
+    manifestUpdatedAt: v.number(),
+    entityCount: v.number(),
+    assetCount: v.number(),
+  })
+    .index("by_room", ["projectId"])
+    .index("by_room_updatedAt", ["projectId", "updatedAt"])
+    .index("by_room_owner", ["projectId", "ownerUserId"]),
+
+  r2DeleteQueue: defineTable({
+    projectId: v.string(),
+    r2Key: v.string(),
+    kind: v.union(v.literal("backup-asset"), v.literal("sample"), v.literal("export"), v.literal("project-prefix")),
+    attempts: v.number(),
+    nextAttemptAt: v.number(),
+    lastError: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_key", ["r2Key"])
+    .index("by_due", ["nextAttemptAt"])
+    .index("by_room", ["projectId"])
+    .index("by_room_due", ["projectId", "nextAttemptAt"]),
+
+  sharedOperationResults: defineTable({
+    projectId: v.string(),
+    userId: v.string(),
+    operationId: v.string(),
+    result: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_room_user_operation", ["projectId", "userId", "operationId"]),
 
   effects: defineTable({
-    roomId: v.string(),
+    projectId: v.string(),
     targetType: v.string(),
     trackId: v.optional(v.id("tracks")),
     index: v.number(),
@@ -107,11 +161,11 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_track", ["trackId"])
-    .index("by_room", ["roomId"])
+    .index("by_room", ["projectId"])
     .index("by_track_order", ["trackId", "index"]),
 
   chatHistories: defineTable({
-    roomId: v.string(),
+    projectId: v.string(),
     ownerUserId: v.string(),
     messages: v.array(
       v.object({
@@ -121,21 +175,21 @@ export default defineSchema({
     ),
     updatedAt: v.number(),
   })
-    .index("by_room_owner", ["roomId", "ownerUserId"]),
+    .index("by_room_owner", ["projectId", "ownerUserId"]),
 
-  roomMessages: defineTable({
-    roomId: v.string(),
+  projectMessages: defineTable({
+    projectId: v.string(),
     senderUserId: v.string(),
     content: v.string(),
     createdAt: v.number(),
     senderName: v.optional(v.string()),
     kind: v.optional(v.string()),
   })
-    .index("by_room", ["roomId"])
-    .index("by_room_createdAt", ["roomId", "createdAt"]),
+    .index("by_room", ["projectId"])
+    .index("by_room_createdAt", ["projectId", "createdAt"]),
 
   exports: defineTable({
-    roomId: v.string(),
+    projectId: v.string(),
     name: v.string(),
     url: v.string(),
     r2Key: v.string(),
@@ -146,6 +200,6 @@ export default defineSchema({
     createdAt: v.number(),
     createdBy: v.string(),
   })
-    .index("by_room_createdAt", ["roomId", "createdAt"])
-    .index("by_room", ["roomId"])
+    .index("by_room_createdAt", ["projectId", "createdAt"])
+    .index("by_room", ["projectId"])
 });

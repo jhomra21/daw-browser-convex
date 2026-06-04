@@ -7,6 +7,7 @@ import {
 
 import { drawWaveformPeaks } from "~/lib/audio-peaks/render-waveform";
 import { getWaveformSlice } from "~/lib/audio-peaks/select-waveform-window";
+import { resolveClipSampleUrl } from "~/lib/audio-source-rules";
 import { LANE_HEIGHT, PPS } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Clip, Track } from "~/types/timeline";
@@ -28,6 +29,9 @@ type ClipComponentProps = {
     e: PointerEvent,
   ) => void;
   onDblClick?: (trackId: Track["id"], clipId: string, e: PointerEvent) => void;
+  onRetryMedia?: (clipId: string) => void;
+  onReplaceMedia?: (trackId: Track["id"], clipId: string) => void;
+  onRemoveMissingMedia?: (trackId: Track["id"], clipId: string) => void;
   bpm: number;
 };
 
@@ -77,6 +81,11 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     null,
   );
   const isGhost = () => props.clip.id.startsWith("__dup_preview:");
+  const mediaStatusLabel = () => {
+    if (props.clip.mediaStatus === "permission-denied") return "Permission needed";
+    if (props.clip.mediaStatus === "missing") return "Missing media";
+    return null;
+  };
 
   function drawWaveform() {
     const canvas = canvasRef;
@@ -215,8 +224,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
   createEffect(() => {
     const midi: any = (props.clip as any).midi;
     const buffer = props.clip.buffer ?? null;
-    const assetKey = props.clip.sourceAssetKey;
-    const sampleUrl = props.clip.sampleUrl;
+    const assetKey = props.clip.waveformAssetKey ?? props.clip.sourceAssetKey;
+    const sampleUrl = resolveClipSampleUrl(props.clip);
     const cssW = Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS));
     const { sourceDurationSec, drawCols, sourceStartSec, sourceEndSec } =
       getAudioWaveformLayout(props.clip, cssW);
@@ -258,6 +267,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void props.clip.duration;
     void props.clip.buffer;
     void props.clip.sampleUrl;
+    void props.clip.sourceAssetKey;
     void props.clip.leftPadSec;
     void props.clip.bufferOffsetSec;
     void props.clip.sourceDurationSec;
@@ -344,9 +354,45 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         ref={(el) => (canvasRef = el || undefined)}
         class="absolute inset-0 pointer-events-none z-0"
       />
+      {mediaStatusLabel() && (
+        <div
+          class="absolute inset-0 z-30 flex items-center justify-center gap-1 bg-red-950/75 px-2 text-[10px] font-semibold uppercase tracking-wide text-red-100"
+          onPointerDown={(event) => event.stopPropagation()}
+          onPointerUp={(event) => event.stopPropagation()}
+        >
+          <span>{mediaStatusLabel()}</span>
+          <button
+            class="rounded border border-red-300/40 px-1 py-0.5 text-[9px] text-red-50 hover:bg-red-300/20"
+            onClick={(event) => {
+              event.stopPropagation();
+              props.onRetryMedia?.(props.clip.id);
+            }}
+          >
+            Retry
+          </button>
+          <button
+            class="rounded border border-red-300/40 px-1 py-0.5 text-[9px] text-red-50 hover:bg-red-300/20"
+            onClick={(event) => {
+              event.stopPropagation();
+              props.onReplaceMedia?.(props.trackId, props.clip.id);
+            }}
+          >
+            Replace
+          </button>
+          <button
+            class="rounded border border-red-300/40 px-1 py-0.5 text-[9px] text-red-50 hover:bg-red-300/20"
+            onClick={(event) => {
+              event.stopPropagation();
+              props.onRemoveMissingMedia?.(props.trackId, props.clip.id);
+            }}
+          >
+            Remove
+          </button>
+        </div>
+      )}
       <div
         class={cn(
-          "absolute left-0 right-0 top-0 z-10 pointer-events-none",
+          "absolute left-0 right-0 top-0 z-20 pointer-events-none",
           isGhost() ? "bg-black/20" : "bg-black/35",
         )}
       >

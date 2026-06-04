@@ -9,6 +9,8 @@ app.config.timestamp_*.js
 
 # Environment
 .env*
+.convex-auth-private.jwk
+.convex-auth-jwks.json
 
 # dependencies
 /node_modules

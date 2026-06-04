@@ -1,7 +1,7 @@
 import type { UploadToR2 } from '~/hooks/useClipBuffers'
 
 type UploadClipSampleUrlOptions = {
-  roomId: string
+  projectId: string
   assetKey: string
   file: File
   duration?: number
@@ -9,7 +9,7 @@ type UploadClipSampleUrlOptions = {
 }
 
 export async function uploadClipSampleUrl(options: UploadClipSampleUrlOptions) {
-  const sampleUrl = await options.uploadToR2(options.roomId, options.assetKey, options.file, options.duration)
+  const sampleUrl = await options.uploadToR2(options.projectId, options.assetKey, options.file, options.duration)
   if (!sampleUrl) {
     throw new Error('sample-upload-failed')
   }

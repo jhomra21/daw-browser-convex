@@ -1,6 +1,8 @@
 import { onCleanup, type Accessor } from 'solid-js'
 
 import { persistClipTiming } from '~/lib/clip-mutations'
+import { isLocalId } from '~/lib/local-ids'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { buildClipTimingHistoryEntry } from '~/lib/undo/builders'
 import { PPS, quantizeSecToGrid } from '~/lib/timeline-utils'
 import type { Track } from '~/types/timeline'
@@ -29,7 +31,7 @@ type ClipResizeOptions = {
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
   rescheduleChangedClips: (clipIds: string[]) => void
-  roomId: Accessor<string | undefined>
+  projectId: Accessor<string | undefined>
   historyPush: (entry: import('~/lib/undo/types').HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
 }
 
@@ -235,15 +237,15 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
       return
     }
 
-    const track = tracks().find(t => t.id === resizing!.trackId)
-    const clip = track?.clips.find(c => c.id === resizing!.clipId)
+    const active = resizing
+    const track = tracks().find(t => t.id === active.trackId)
+    const clip = track?.clips.find(c => c.id === active.clipId)
 
     clipResizing = false
-    const active = resizing
     resizing = null
     removeResizeListeners()
 
-    if (track && clip && active) {
+    if (clip) {
       setDraftClipTiming(clip.id, null)
       commitClipTiming(clip.id, {
         startSec: clip.startSec,
@@ -252,45 +254,95 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         bufferOffsetSec: clip.bufferOffsetSec,
         midiOffsetBeats: clip.midiOffsetBeats,
       })
-      const uid = userId()
-      if (uid) {
-        void persistClipTiming(convexClient, convexApi, uid, {
+      const rid = options.projectId()
+      const from = {
+        startSec: resizeOrigStart,
+        duration: resizeOrigDuration,
+        leftPadSec: resizeOrigPad,
+        bufferOffsetSec: resizeOrigBufferOffset,
+        midiOffsetBeats: resizeOrigMidiOffsetBeats,
+      }
+      const to = {
+        startSec: clip.startSec,
+        duration: clip.duration,
+        leftPadSec: clip.leftPadSec,
+        bufferOffsetSec: clip.bufferOffsetSec,
+        midiOffsetBeats: clip.midiOffsetBeats,
+      }
+      const timingEpsilon = 1e-6
+      const timingMatches = (target: typeof to, current: typeof to) => (
+        Math.abs((target.startSec ?? 0) - (current.startSec ?? 0)) < timingEpsilon &&
+        Math.abs((target.duration ?? 0) - (current.duration ?? 0)) < timingEpsilon &&
+        Math.abs((target.leftPadSec ?? 0) - (current.leftPadSec ?? 0)) < timingEpsilon &&
+        Math.abs((target.bufferOffsetSec ?? 0) - (current.bufferOffsetSec ?? 0)) < timingEpsilon &&
+        Math.abs((target.midiOffsetBeats ?? 0) - (current.midiOffsetBeats ?? 0)) < timingEpsilon
+      )
+      const sameTiming = timingMatches(from, to)
+      const pushHistory = () => {
+        if (rid) {
+          options.historyPush(buildClipTimingHistoryEntry({ projectId: rid, clip, from, to }))
+        }
+      }
+      const rollbackTiming = () => {
+        const currentClip = tracks()
+          .flatMap((track) => track.clips)
+          .find((current) => current.id === clip.id)
+        if (
+          options.projectId() !== rid ||
+          !currentClip ||
+          !timingMatches(to, {
+            startSec: currentClip.startSec,
+            duration: currentClip.duration,
+            leftPadSec: currentClip.leftPadSec,
+            bufferOffsetSec: currentClip.bufferOffsetSec,
+            midiOffsetBeats: currentClip.midiOffsetBeats,
+          })
+        ) {
+          return
+        }
+        commitClipTiming(clip.id, {
+          startSec: from.startSec,
+          duration: from.duration,
+          leftPadSec: from.leftPadSec,
+          bufferOffsetSec: from.bufferOffsetSec,
+          midiOffsetBeats: from.midiOffsetBeats,
+        })
+        queueMicrotask(() => options.rescheduleChangedClips([clip.id]))
+      }
+      if (sameTiming) {
+        queueMicrotask(() => options.rescheduleChangedClips([clip.id]))
+        return
+      }
+      if (rid && isLocalId('project', rid)) {
+        void createLocalTimelineRepository(rid).updateClip({
           clipId: clip.id,
           startSec: clip.startSec,
           duration: clip.duration,
           leftPadSec: clip.leftPadSec ?? 0,
           bufferOffsetSec: clip.bufferOffsetSec ?? 0,
           midiOffsetBeats: clip.midiOffsetBeats ?? 0,
-        })
-      }
-      try {
-        const rid = options.roomId()
-        if (rid) {
-          const from = {
-            startSec: resizeOrigStart,
-            duration: resizeOrigDuration,
-            leftPadSec: resizeOrigPad,
-            bufferOffsetSec: resizeOrigBufferOffset,
-            midiOffsetBeats: resizeOrigMidiOffsetBeats,
-          }
-          const to = {
+        }).then(pushHistory).catch(rollbackTiming)
+      } else {
+        const uid = userId()
+        if (uid) {
+          void persistClipTiming(convexClient, convexApi, {
+            clipId: clip.id,
             startSec: clip.startSec,
             duration: clip.duration,
-            leftPadSec: clip.leftPadSec,
-            bufferOffsetSec: clip.bufferOffsetSec,
-            midiOffsetBeats: clip.midiOffsetBeats,
-          }
-          const sameTiming =
-            Math.abs((from.startSec ?? 0) - (to.startSec ?? 0)) < 1e-6 &&
-            Math.abs((from.duration ?? 0) - (to.duration ?? 0)) < 1e-6 &&
-            Math.abs((from.leftPadSec ?? 0) - (to.leftPadSec ?? 0)) < 1e-6 &&
-            Math.abs((from.bufferOffsetSec ?? 0) - (to.bufferOffsetSec ?? 0)) < 1e-6 &&
-            Math.abs((from.midiOffsetBeats ?? 0) - (to.midiOffsetBeats ?? 0)) < 1e-6
-          if (!sameTiming) {
-            options.historyPush(buildClipTimingHistoryEntry({ roomId: rid, clip, from, to }))
-          }
+            leftPadSec: clip.leftPadSec ?? 0,
+            bufferOffsetSec: clip.bufferOffsetSec ?? 0,
+            midiOffsetBeats: clip.midiOffsetBeats ?? 0,
+          }).then((applied) => {
+            if (applied) {
+              pushHistory()
+              return
+            }
+            rollbackTiming()
+          }).catch(rollbackTiming)
+        } else {
+          rollbackTiming()
         }
-      } catch {}
+      }
       queueMicrotask(() => options.rescheduleChangedClips([clip.id]))
     }
   }

@@ -1,8 +1,10 @@
 import type { Doc, Id } from "./_generated/dataModel";
+import { canWriteProject, getProjectRole } from "./projectAccess";
 
 type TrackWriteAccess = {
   owner: Doc<"ownerships">;
   track: Doc<"tracks">;
+  projectWriter: boolean;
 };
 
 async function readTrackWriteAccess(ctx: any, trackId: Id<"tracks">) {
@@ -31,11 +33,14 @@ export async function getTrackWriteAccess(
   userId: string,
 ): Promise<TrackWriteAccess | null> {
   const access = await readTrackWriteAccess(ctx, trackId);
-  if (!access.track || !access.owner || access.owner.ownerUserId !== userId) return null;
+  if (!access.track || !access.owner) return null;
+  const projectWriter = canWriteProject(await getProjectRole(ctx, access.track.projectId, userId));
+  if (access.owner.ownerUserId !== userId && !projectWriter) return null;
 
   return {
     owner: access.owner,
     track: access.track,
+    projectWriter,
   };
 }
 
@@ -48,12 +53,17 @@ export async function requireTrackOwnerForWrite(
   if (!access.track) {
     throw new Error("Track not found.");
   }
-  if (!access.owner || access.owner.ownerUserId !== userId) {
+  if (!access.owner) {
+    throw new Error("Only the track owner can update this track.");
+  }
+  const projectWriter = canWriteProject(await getProjectRole(ctx, access.track.projectId, userId));
+  if (access.owner.ownerUserId !== userId && !projectWriter) {
     throw new Error("Only the track owner can update this track.");
   }
 
   return {
     owner: access.owner,
     track: access.track,
+    projectWriter,
   };
 }

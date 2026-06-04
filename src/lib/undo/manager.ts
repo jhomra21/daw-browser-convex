@@ -2,6 +2,47 @@ import type { HistoryEntry, MergeKey, PersistedHistory } from './types'
 
 export type UndoManager = ReturnType<typeof createUndoManager>
 
+function mergeEntry(prev: HistoryEntry, entry: HistoryEntry): HistoryEntry {
+  if (prev.type === 'clip-timing' && entry.type === 'clip-timing') {
+    return { ...entry, data: { ...entry.data, from: prev.data.from } }
+  }
+  if (prev.type === 'track-volume' && entry.type === 'track-volume') {
+    return { ...entry, data: { ...entry.data, from: prev.data.from } }
+  }
+  if (prev.type === 'track-mute' && entry.type === 'track-mute') {
+    return { ...entry, data: { ...entry.data, from: prev.data.from } }
+  }
+  if (prev.type === 'track-solo' && entry.type === 'track-solo') {
+    return { ...entry, data: { ...entry.data, from: prev.data.from } }
+  }
+  if (prev.type === 'track-routing' && entry.type === 'track-routing') {
+    return { ...entry, data: { ...entry.data, from: prev.data.from } }
+  }
+  if (prev.type === 'effect-params' && entry.type === 'effect-params') {
+    switch (entry.data.effect) {
+      case 'eq':
+        if (prev.data.effect !== 'eq') return entry
+        return { ...entry, data: { ...entry.data, from: prev.data.from } }
+      case 'reverb':
+        if (prev.data.effect !== 'reverb') return entry
+        return { ...entry, data: { ...entry.data, from: prev.data.from } }
+      case 'synth':
+        if (prev.data.effect !== 'synth') return entry
+        return { ...entry, data: { ...entry.data, from: prev.data.from } }
+      case 'arp':
+        if (prev.data.effect !== 'arp') return entry
+        return { ...entry, data: { ...entry.data, from: prev.data.from } }
+      case 'master-eq':
+        if (prev.data.effect !== 'master-eq') return entry
+        return { ...entry, data: { ...entry.data, from: prev.data.from } }
+      case 'master-reverb':
+        if (prev.data.effect !== 'master-reverb') return entry
+        return { ...entry, data: { ...entry.data, from: prev.data.from } }
+    }
+  }
+  return entry
+}
+
 export function createUndoManager(options: { max?: number; onChange?: (state: PersistedHistory) => void }) {
   const max = options.max ?? 50
   let undo: HistoryEntry[] = []
@@ -14,7 +55,7 @@ export function createUndoManager(options: { max?: number; onChange?: (state: Pe
       const now = Date.now()
       const prev = undo[undo.length - 1]
       if (lastMerged && lastMerged.key === mergeKey && (now - lastMerged.ts) <= mergeWindowMs && prev.type === entry.type) {
-        undo[undo.length - 1] = entry
+        undo[undo.length - 1] = mergeEntry(prev, entry)
         lastMerged.ts = now
       } else {
         undo.push(entry)

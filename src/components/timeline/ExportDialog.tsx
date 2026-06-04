@@ -4,6 +4,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '~/components/ui/button'
 import { renderMixdown, encodeAudioBuffer, type ExportRange } from '~/lib/export-mixdown'
 import { convexClient, convexApi } from '~/lib/convex'
+import { isLocalId } from '~/lib/local-ids'
+import { saveBlobLocally } from '~/lib/local-export'
+import { saveLocalExportMetadata } from '~/lib/local-export-metadata'
+import { listLocalEffects, type LocalEffectRow } from '~/lib/local-effects'
 
 type Props = {
   isOpen: boolean
@@ -13,7 +17,7 @@ type Props = {
   loopEnabled: boolean
   loopStartSec: number
   loopEndSec: number
-  roomId?: string
+  projectId?: string
   userId?: string
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
 }
@@ -25,6 +29,25 @@ const ExportDialog: Component<Props> = (props) => {
   const [busy, setBusy] = createSignal(false)
   const [error, setError] = createSignal<string | null>(null)
   const [resultUrl, setResultUrl] = createSignal<string | null>(null)
+  const [localSavedName, setLocalSavedName] = createSignal<string | null>(null)
+
+  const applyLocalEffectRowsToFx = (fx: any, rows: LocalEffectRow[]) => {
+    for (const row of rows) {
+      if (row.effect === 'master-eq') {
+        fx.masterEq = row.params
+        continue
+      }
+      if (row.effect === 'master-reverb') {
+        fx.masterReverb = row.params
+        continue
+      }
+      const previous = fx.trackFx[row.targetId] ?? {}
+      if (row.effect === 'eq') fx.trackFx[row.targetId] = { ...previous, eq: row.params }
+      if (row.effect === 'reverb') fx.trackFx[row.targetId] = { ...previous, reverb: row.params }
+      if (row.effect === 'arp') fx.trackFx[row.targetId] = { ...previous, arp: row.params }
+      if (row.effect === 'synth') fx.trackFx[row.targetId] = { ...previous, synth: row.params }
+    }
+  }
 
   const computeRange = (): ExportRange => {
     const m = mode()
@@ -66,43 +89,67 @@ const ExportDialog: Component<Props> = (props) => {
   async function handleExport() {
     setError(null)
     setResultUrl(null)
+    setLocalSavedName(null)
     setBusy(true)
     try {
       const range = computeRange()
       await ensureBuffersForRange(range)
-      // Fetch effects (master + per-track) from Convex
+      const localOnly = props.projectId ? isLocalId('project', props.projectId) : false
       const fx: any = { trackFx: {} as Record<string, { eq?: any; reverb?: any }> }
-      try {
-        if (props.roomId) {
-          const [mEq, mRv] = await Promise.all([
-            convexClient.query((convexApi as any).effects.getEqForMaster, { roomId: props.roomId } as any).catch(() => null),
-            convexClient.query((convexApi as any).effects.getReverbForMaster, { roomId: props.roomId } as any).catch(() => null),
-          ])
-          if (mEq?.params) fx.masterEq = mEq.params
-          if (mRv?.params) fx.masterReverb = mRv.params
+      if (localOnly && props.projectId) try {
+        applyLocalEffectRowsToFx(fx, await listLocalEffects(props.projectId))
+      } catch {}
+      if (!localOnly && props.projectId && props.userId) try {
+        const rows = await convexClient.query((convexApi as any).effects.listByRoom, {
+          projectId: props.projectId,
+        } as any).catch(() => [])
+        for (const row of rows) {
+          if (row?.targetType === 'master') {
+            if (row.type === 'eq' && row.params) fx.masterEq = row.params
+            if (row.type === 'reverb' && row.params) fx.masterReverb = row.params
+            continue
+          }
+          const trackId = row?.trackId
+          if (!trackId || !row.params) continue
+          const previous = fx.trackFx[trackId] ?? {}
+          if (row.type === 'eq') fx.trackFx[trackId] = { ...previous, eq: row.params }
+          if (row.type === 'reverb') fx.trackFx[trackId] = { ...previous, reverb: row.params }
+          if (row.type === 'arpeggiator') fx.trackFx[trackId] = { ...previous, arp: row.params }
+          if (row.type === 'synth') fx.trackFx[trackId] = { ...previous, synth: row.params }
         }
-        const perTrack = await Promise.all(props.tracks.map(async (t) => {
-          const [eqRow, rvRow, arpRow, synthRow] = await Promise.all([
-            convexClient.query((convexApi as any).effects.getEqForTrack, { trackId: t.id as any } as any).catch(() => null),
-            convexClient.query((convexApi as any).effects.getReverbForTrack, { trackId: t.id as any } as any).catch(() => null),
-            convexClient.query((convexApi as any).effects.getArpeggiatorForTrack, { trackId: t.id as any } as any).catch(() => null),
-            convexClient.query((convexApi as any).effects.getSynthForTrack, { trackId: t.id as any } as any).catch(() => null),
-          ])
-          return [t.id, { eq: eqRow?.params, reverb: rvRow?.params, arp: arpRow?.params, synth: synthRow?.params }] as const
-        }))
-        for (const [id, vals] of perTrack) fx.trackFx[id] = vals
       } catch {}
 
       const rendered = await renderMixdown({ tracks: props.tracks, bpm: props.bpm, range, fx })
       const enc = await encodeAudioBuffer(rendered)
+      const fname = `mixdown_${new Date().toISOString().replace(/[-:TZ.]/g, '')}${enc.fileExtension}`
+      if (localOnly) {
+        await saveBlobLocally({
+          blob: enc.blob,
+          suggestedName: fname,
+          types: [{
+            description: 'WAV audio',
+            accept: { [enc.mimeType]: [enc.fileExtension] },
+          }],
+        })
+        if (props.projectId) {
+          await saveLocalExportMetadata(props.projectId, {
+            name: fname,
+            format: 'wav',
+            durationSec: enc.durationSec,
+            sampleRate: enc.sampleRate,
+            sizeBytes: enc.blob.size,
+          })
+        }
+        setLocalSavedName(fname)
+        return
+      }
       // Upload to R2 via worker
-      const rid = props.roomId
+      const rid = props.projectId
       if (!rid) throw new Error('Missing room')
       const fd = new FormData()
-      fd.append('roomId', rid)
+      fd.append('projectId', rid)
       fd.append('duration', String(enc.durationSec))
       fd.append('sampleRate', String(enc.sampleRate))
-      const fname = `mixdown_${new Date().toISOString().replace(/[-:TZ.]/g, '')}${enc.fileExtension}`
       fd.append('name', fname)
       fd.append('file', enc.blob, fname)
       const res = await fetch('/api/exports', { method: 'POST', body: fd })
@@ -117,7 +164,7 @@ const ExportDialog: Component<Props> = (props) => {
       if (props.userId) {
         try {
           await convexClient.mutation((convexApi as any).exports.create, {
-            roomId: rid,
+            projectId: rid,
             name: fname,
             url,
             r2Key: key,
@@ -125,7 +172,6 @@ const ExportDialog: Component<Props> = (props) => {
             duration: enc.durationSec,
             sampleRate: enc.sampleRate,
             sizeBytes,
-            userId: props.userId,
           })
         } catch {}
       }
@@ -169,6 +215,9 @@ const ExportDialog: Component<Props> = (props) => {
             <div class="text-sm">
               Saved export: <a class="text-green-400 underline" href={resultUrl()!} target="_blank">Open</a>
             </div>
+          </Show>
+          <Show when={localSavedName()}>
+            <div class="text-sm text-green-400">Saved export locally: {localSavedName()}</div>
           </Show>
         </div>
         <DialogFooter>

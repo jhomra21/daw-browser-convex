@@ -8,6 +8,8 @@ import {
   untrack,
   onCleanup,
 } from "solid-js";
+import type { LocalEffectRow } from "~/lib/local-effects";
+import { isLocalId } from "~/lib/local-ids";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Eq from "~/components/effects/Eq";
 import Reverb from "~/components/effects/Reverb";
@@ -15,12 +17,12 @@ import Synth from "~/components/effects/Synth";
 import SynthCard from "~/components/effects/SynthCard";
 import { Button } from "~/components/ui/button";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
+import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
 import {
   createEffectsPanelState,
   EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
   EFFECT_PANEL_SAVE_DEBOUNCE_MS,
 } from "~/components/timeline/create-effects-panel-state";
-import { buildTrackEffectMutationInput, buildTrackEffectQueryArgs } from "~/lib/effect-track-args";
 import {
   type ArpeggiatorParams,
   createDefaultEqParams,
@@ -33,13 +35,15 @@ import {
 } from "~/lib/effects/params";
 import type { FunctionReturnType } from "convex/server";
 import type { AudioEngine, SpectrumFrame } from "~/lib/audio-engine";
-import { convexApi, convexClient, useConvexQuery } from "~/lib/convex";
+import { convexApi, useConvexQuery } from "~/lib/convex";
 import { useEffectsPanelAudioSync } from "~/hooks/useEffectsPanelAudioSync";
 import { useEffectsPanelTarget } from "~/hooks/useEffectsPanelTarget";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
+import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
+import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import { FX_PANEL_HEIGHT_PX } from "~/lib/timeline-utils";
-import type { Track } from "~/types/timeline";
+import type { Clip, Track } from "~/types/timeline";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -47,21 +51,24 @@ type EffectsPanelProps = {
   tracks: Track[];
   onClose: () => void;
   onOpen: () => void;
-  audioEngine?: AudioEngine;
-  roomId?: string;
+  audioEngine: AudioEngine;
+  projectId?: string;
   userId?: string;
   canWriteTrackRouting?: (trackId: Track["id"]) => boolean;
   grantClipWrite?: OptimisticGrantWrite;
   // Timeline context
   playheadSec?: number;
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
-  onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>) => void;
+  insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
+  onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
+  onLocalSaveFailed?: (message: string) => void;
 };
 
 type EffectKind = "eq" | "reverb";
 type InstrumentPanelState = ReturnType<typeof createEffectsPanelState>;
-type TrackEqRow = FunctionReturnType<typeof convexApi.effects.getEqForTrack>;
-type TrackReverbRow = FunctionReturnType<typeof convexApi.effects.getReverbForTrack>;
+type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
+type LocalEqRow = LocalEffectRow<EqParams>;
+type LocalReverbRow = LocalEffectRow<ReverbParams>;
 
 type EffectsPanelRailProps = {
   rail: {
@@ -366,13 +373,14 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     currentTargetId,
     targetName,
     currentTrack,
-    currentTrackId,
     isInstrumentTrack,
     canWriteCurrentTrackRouting,
     resolveTrackByTargetId,
   } = target;
 
-  // ===== Effect ordering (per target) =====
+  const effectScopeKey = (targetId: string) => `${props.projectId ?? "no-project"}:${targetId}`;
+
+  // ===== Effect ordering (per project target) =====
   const [effectOrderByTarget, setEffectOrderByTarget] = createSignal<
     Record<string, EffectKind[]>
   >({});
@@ -381,10 +389,11 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   >({});
 
   function appendEffectOrder(targetId: string, kind: EffectKind) {
+    const key = effectScopeKey(targetId);
     setEffectOrderByTarget((prev) => {
-      const arr = prev[targetId] ?? [];
+      const arr = prev[key] ?? [];
       if (arr.includes(kind)) return prev;
-      return { ...prev, [targetId]: [...arr, kind] };
+      return { ...prev, [key]: [...arr, kind] };
     });
   }
 
@@ -393,15 +402,16 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     kind: EffectKind,
     index?: number,
   ) {
+    const key = effectScopeKey(targetId);
     if (typeof index === "number") {
       setEffectIndexByTarget((prev) => {
-        if (prev[targetId]?.[kind] === index) return prev;
+        if (prev[key]?.[kind] === index) return prev;
         return {
           ...prev,
-          [targetId]: { ...(prev[targetId] ?? {}), [kind]: index },
+          [key]: { ...(prev[key] ?? {}), [kind]: index },
         };
       });
-      const idxCurrent = untrack(() => effectIndexByTarget()[targetId] ?? {});
+      const idxCurrent = untrack(() => effectIndexByTarget()[key] ?? {});
       const idx = { ...idxCurrent, [kind]: index };
       const entries: { kind: EffectKind; idx: number }[] = [];
       if (typeof idx.eq === "number") entries.push({ kind: "eq", idx: idx.eq });
@@ -410,7 +420,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         entries.sort((a, b) => a.idx - b.idx);
         const nextOrder = entries.map((entry) => entry.kind);
         setEffectOrderByTarget((prev) => {
-          const currentOrder = prev[targetId] ?? [];
+          const currentOrder = prev[key] ?? [];
           if (
             currentOrder.length === nextOrder.length &&
             currentOrder.every((entry, entryIndex) => entry === nextOrder[entryIndex])
@@ -419,7 +429,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
           }
           return {
             ...prev,
-            [targetId]: nextOrder,
+            [key]: nextOrder,
           };
         });
         return;
@@ -428,67 +438,106 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     appendEffectOrder(targetId, kind);
   }
 
-  const instrumentState = createEffectsPanelState(props, currentTargetId, currentTrack, resolveTrackByTargetId);
+  const roomEffectsQuery = useConvexQuery(
+    convexApi.effects.listByRoom,
+    () => {
+      const projectId = props.projectId;
+      if (projectId && isLocalId("project", projectId)) return null;
+      return projectId && props.userId ? { projectId } : null;
+    },
+    () => ["effects", "room", props.projectId, props.userId],
+  );
+  const remoteEffectForTarget = (targetId: string, effectType: "eq" | "reverb") => {
+    const targetType = targetId === "master" ? "master" : "track";
+    return roomEffectsQuery.data?.find((row: RoomEffectRow) => {
+      if (row.type !== effectType || row.targetType !== targetType) return false;
+      return targetType === "master" ? true : row.trackId === targetId;
+    });
+  };
+
+  const instrumentState = createEffectsPanelState(
+    {
+      audioEngine: () => props.audioEngine,
+      projectId: () => props.projectId,
+      userId: () => props.userId,
+      playheadSec: () => props.playheadSec,
+      roomEffects: () => roomEffectsQuery.data,
+      grantClipWrite: props.grantClipWrite,
+      onSelectClip: props.onSelectClip,
+      insertLocalClip: props.insertLocalClip,
+      onEffectParamsCommitted: props.onEffectParamsCommitted,
+      onLocalSaveFailed: props.onLocalSaveFailed,
+    },
+    currentTargetId,
+    currentTrack,
+    resolveTrackByTargetId,
+  );
   const canWriteCurrentTargetEffects = createMemo(() => currentTargetId() === "master" || canWriteCurrentTrackRouting());
   const isCurrentTargetReadOnly = createMemo(() => currentTargetId() !== "master" && !canWriteCurrentTrackRouting());
-
-  const eqMasterQuery = useConvexQuery(
-    convexApi.effects.getEqForMaster,
-    () => (props.roomId ? { roomId: props.roomId } : null),
-    () => ["effects", "eq", "master", props.roomId],
-  );
-
-  const eqTrackQuery = useConvexQuery(
-    convexApi.effects.getEqForTrack,
-    () => {
-      const trackId = currentTrackId();
-      return trackId ? buildTrackEffectQueryArgs(trackId) : null;
-    },
-    () => ["effects", "eq", "track", currentTargetId()],
-  );
-
-  const eqState = createPersistedEffectState<TrackEqRow, EqParams>({
+  const localEq = createLocalEffectRows<EqParams>({
+    projectId: () => props.projectId,
     targetId: currentTargetId,
-    row: () => currentTargetId() === "master" ? eqMasterQuery.data : eqTrackQuery.data,
+    effect: (targetId) => targetId === "master" ? "master-eq" : "eq",
+  });
+  const localReverb = createLocalEffectRows<ReverbParams>({
+    projectId: () => props.projectId,
+    targetId: currentTargetId,
+    effect: (targetId) => targetId === "master" ? "master-reverb" : "reverb",
+  });
+  const isLocalProject = localEq.isLocalProject;
+
+  const publishEffectOperation = (
+    projectId: string,
+    userId: string,
+    operation: SharedTimelineOperation,
+  ) => publishDurableSharedTimelineOperation({ projectId, userId, operation });
+
+  const eqState = createPersistedEffectState<RoomEffectRow | undefined, EqParams>({
+    targetId: currentTargetId,
+    scopeId: () => props.projectId,
+    row: () => isLocalProject() ? localEq.row(currentTargetId()) : remoteEffectForTarget(currentTargetId(), "eq"),
     readQueryParams: (row) => row?.params,
     createInitialParams: () => createDefaultEqParams(),
     serializeParams: serializeEqParams,
     applyToEngine: (targetId, params) => {
       if (targetId === "master") {
-        props.audioEngine?.setMasterEq(params);
+      props.audioEngine.setMasterEq(params);
       } else {
-        props.audioEngine?.setTrackEq(targetId, params);
+      props.audioEngine.setTrackEq(targetId, params);
       }
     },
-    persistParams: (targetId, params) => {
-      if (!props.roomId || !props.userId) return Promise.resolve();
+    createPersistContext: () => ({ projectId: props.projectId, userId: props.userId }),
+    persistParams: (targetId, params, context) => {
+      if (!context.projectId) return Promise.resolve();
+      if (isLocalId("project", context.projectId)) {
+        return localEq.persist(context.projectId, targetId, params);
+      }
+      if (!context.userId) return Promise.resolve();
       if (targetId === "master") {
-        return convexClient.mutation(convexApi.effects.setMasterEqParams, {
-          roomId: props.roomId,
-          userId: props.userId,
-          params,
+        return publishEffectOperation(context.projectId, context.userId, {
+          kind: "effects.setMasterEqParams",
+          payload: { params },
         });
       }
       const track = resolveTrackByTargetId(targetId);
       if (!track) return Promise.resolve();
-      return convexClient.mutation(
-        convexApi.effects.setEqParams,
-        buildTrackEffectMutationInput({
-          roomId: props.roomId,
-          trackId: track.id,
-          userId: props.userId,
-          params,
-        }),
-      );
+      return publishEffectOperation(context.projectId, context.userId, {
+        kind: "effects.setEqParams",
+        payload: { trackId: track.id, params },
+      });
     },
     debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
     remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
+    onPersistError: (error) => {
+      if (!isLocalProject()) return;
+      props.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
+    },
     onQueryRow: (targetId, row) => {
       if (row?.params) {
         setEffectOrderForTarget(targetId, "eq", typeof row.index === "number" ? row.index : undefined);
       }
     },
-    onParamsCommitted: (targetId, previous, next) => {
+    onParamsCommitted: (targetId, previous, next, context) => {
       if (previous === undefined) return;
       if (targetId === "master") {
         props.onEffectParamsCommitted?.({
@@ -496,7 +545,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
           effect: "master-eq",
           from: previous,
           to: next,
-        });
+        }, context.projectId);
         return;
       }
       const track = resolveTrackByTargetId(targetId);
@@ -506,7 +555,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         effect: "eq",
         from: previous,
         to: next,
-      });
+      }, context.projectId);
     },
   });
 
@@ -541,63 +590,52 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     eqState.update(() => createDefaultEqParams());
   };
 
-  const reverbMasterQuery = useConvexQuery(
-    convexApi.effects.getReverbForMaster,
-    () => (props.roomId ? { roomId: props.roomId } : null),
-    () => ["effects", "reverb", "master", props.roomId],
-  );
-
-  const reverbTrackQuery = useConvexQuery(
-    convexApi.effects.getReverbForTrack,
-    () => {
-      const trackId = currentTrackId();
-      return trackId ? buildTrackEffectQueryArgs(trackId) : null;
-    },
-    () => ["effects", "reverb", "track", currentTargetId()],
-  );
-
-  const reverbState = createPersistedEffectState<TrackReverbRow, ReverbParams>({
+  const reverbState = createPersistedEffectState<RoomEffectRow | undefined, ReverbParams>({
     targetId: currentTargetId,
-    row: () => currentTargetId() === "master" ? reverbMasterQuery.data : reverbTrackQuery.data,
+    scopeId: () => props.projectId,
+    row: () => isLocalProject() ? localReverb.row(currentTargetId()) : remoteEffectForTarget(currentTargetId(), "reverb"),
     readQueryParams: (row) => row?.params,
     createInitialParams: () => createDefaultReverbParams(),
     serializeParams: serializeReverbParams,
     applyToEngine: (targetId, params) => {
       if (targetId === "master") {
-        props.audioEngine?.setMasterReverb(params);
+      props.audioEngine.setMasterReverb(params);
       } else {
-        props.audioEngine?.setTrackReverb(targetId, params);
+      props.audioEngine.setTrackReverb(targetId, params);
       }
     },
-    persistParams: (targetId, params) => {
-      if (!props.roomId || !props.userId) return Promise.resolve();
+    createPersistContext: () => ({ projectId: props.projectId, userId: props.userId }),
+    persistParams: (targetId, params, context) => {
+      if (!context.projectId) return Promise.resolve();
+      if (isLocalId("project", context.projectId)) {
+        return localReverb.persist(context.projectId, targetId, params);
+      }
+      if (!context.userId) return Promise.resolve();
       if (targetId === "master") {
-        return convexClient.mutation(convexApi.effects.setMasterReverbParams, {
-          roomId: props.roomId,
-          userId: props.userId,
-          params,
+        return publishEffectOperation(context.projectId, context.userId, {
+          kind: "effects.setMasterReverbParams",
+          payload: { params },
         });
       }
       const track = resolveTrackByTargetId(targetId);
       if (!track) return Promise.resolve();
-      return convexClient.mutation(
-        convexApi.effects.setReverbParams,
-        buildTrackEffectMutationInput({
-          roomId: props.roomId,
-          trackId: track.id,
-          userId: props.userId,
-          params,
-        }),
-      );
+      return publishEffectOperation(context.projectId, context.userId, {
+        kind: "effects.setReverbParams",
+        payload: { trackId: track.id, params },
+      });
     },
     debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
     remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
+    onPersistError: (error) => {
+      if (!isLocalProject()) return;
+      props.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
+    },
     onQueryRow: (targetId, row) => {
       if (row?.params) {
         setEffectOrderForTarget(targetId, "reverb", typeof row.index === "number" ? row.index : undefined);
       }
     },
-    onParamsCommitted: (targetId, previous, next) => {
+    onParamsCommitted: (targetId, previous, next, context) => {
       if (previous === undefined) return;
       if (targetId === "master") {
         props.onEffectParamsCommitted?.({
@@ -605,7 +643,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
           effect: "master-reverb",
           from: previous,
           to: next,
-        });
+        }, context.projectId);
         return;
       }
       const track = resolveTrackByTargetId(targetId);
@@ -615,7 +653,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         effect: "reverb",
         from: previous,
         to: next,
-      });
+      }, context.projectId);
     },
   });
 
@@ -633,12 +671,13 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     reverbState.update(() => createDefaultReverbParams());
   };
 
-  const { roomEffects, spectrum } = useEffectsPanelAudioSync({
+  const { spectrum } = useEffectsPanelAudioSync({
     isOpen: () => props.isOpen,
-    roomId: () => props.roomId,
+    projectId: () => props.projectId,
     currentTargetId,
     tracks: () => props.tracks,
     audioEngine: () => props.audioEngine,
+    roomEffects: () => roomEffectsQuery.data,
     playheadSec: () => props.playheadSec,
     localDraftEffects: {
       eq: eqState.readDraftForTarget,
@@ -649,7 +688,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   });
 
   createEffect(() => {
-    const effects = roomEffects.data;
+    const effects = roomEffectsQuery.data;
     if (effects === undefined) return;
     const activeTarget = currentTargetId();
     const synthByTrackId = new Map<string, ReturnType<typeof normalizeSynthParams>>();
@@ -675,7 +714,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const orderedEffects = createMemo<EffectKind[]>(() => {
     const id = currentTargetId();
     const map = effectOrderByTarget();
-    const arr = map[id];
+    const arr = map[effectScopeKey(id)];
     if (arr && arr.length > 0) return arr;
     const present: EffectKind[] = [];
     if (eqForTarget()) present.push("eq");
@@ -684,10 +723,12 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     return present;
   });
 
-  const flushPending = () => {
-    eqState.flushPending();
-    reverbState.flushPending();
-    instrumentState.flushPending();
+  const flushPending = async () => {
+    await Promise.all([
+      eqState.flushPending(),
+      reverbState.flushPending(),
+      instrumentState.flushPending(),
+    ]);
   };
 
   createEffect(() => {
@@ -696,12 +737,12 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   });
 
   const handleClose = () => {
-    flushPending();
+    void flushPending();
     props.onClose();
   };
 
   onCleanup(() => {
-    flushPending();
+    void flushPending();
   });
 
   return (

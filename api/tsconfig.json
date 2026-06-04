@@ -8,6 +8,7 @@
   "include": [
     "**/*.ts",
     "../src/lib/**/*.ts",
+    "../shared/**/*.ts",
     "../src/types/**/*.ts"
   ]
 }

@@ -29,7 +29,7 @@ export type TimelineSelectionController = {
 }
 
 type UseTimelineSelectionStateOptions = {
-  roomId: Accessor<string>
+  projectId: Accessor<string>
   tracks: Accessor<Track[]>
   effectsPanel?: {
     isOpen: Accessor<boolean>
@@ -47,7 +47,7 @@ export function useTimelineSelectionState(
 
   const setters = { setSelectedTrackId, setSelectedClip, setSelectedClipIds, setSelectedFXTarget }
 
-  createEffect(on(options.roomId, () => {
+  createEffect(on(options.projectId, () => {
     selectMasterTarget(setters)
   }))
 

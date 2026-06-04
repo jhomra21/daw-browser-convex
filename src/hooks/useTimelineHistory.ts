@@ -1,7 +1,10 @@
-import { createEffect } from 'solid-js'
+import { createEffect, onCleanup } from 'solid-js'
 import type { Accessor } from 'solid-js'
 
 import type { AudioEngine } from '~/lib/audio-engine'
+import { loadLocalHistory, saveLocalHistory } from '~/lib/local-history'
+import { isLocalId } from '~/lib/local-ids'
+import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
 import {
   buildOptimisticGrantScopeKey,
   readOptimisticGrantScope,
@@ -9,14 +12,26 @@ import {
 } from '~/lib/optimistic-grant-scope'
 import { loadHistory, saveHistory, type LocalMixPatch } from '~/lib/timeline-storage'
 import { createUndoManager, type UndoManager } from '~/lib/undo/manager'
-import type { HistoryEntry } from '~/lib/undo/types'
+import type { HistoryEntry, PersistedHistory } from '~/lib/undo/types'
 import { execRedo, execUndo } from '~/lib/undo/exec'
-import type { Track, TrackRouting } from '~/types/timeline'
+import {
+  applyTrackMixStateInHistoryModel,
+  applyTrackRoutingInHistoryModel,
+  applyTrackVolumeInHistoryModel,
+  cloneHistoryTracks,
+  commitClipMovesInHistoryModel,
+  commitClipTimingInHistoryModel,
+  insertClipIntoHistoryModel,
+  insertTrackIntoHistoryModel,
+  removeClipsFromHistoryModel,
+  removeTrackFromHistoryModel,
+} from '~/lib/undo/history-model'
+import type { Track } from '~/types/timeline'
 
 type TimelineHistoryActions = Parameters<typeof execUndo>[1]['actions']
 
 type UseTimelineHistoryOptions = {
-  roomId: Accessor<string>
+  projectId: Accessor<string>
   userId: Accessor<string>
   getTracks: () => Track[]
   convexClient: typeof import('~/lib/convex').convexClient
@@ -25,7 +40,7 @@ type UseTimelineHistoryOptions = {
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
   grantTrackWrite: (trackId: Track['id'] | null | undefined, scope?: OptimisticGrantScope | null) => void
   grantClipWrite: (clipId: string | null | undefined, scope?: OptimisticGrantScope | null) => void
-  persistLocalMix: (roomId: string, trackId: Track['id'], patch: LocalMixPatch) => void
+  persistLocalMix: (projectId: string, trackId: Track['id'], patch: LocalMixPatch) => void
   getActions: () => TimelineHistoryActions
 }
 
@@ -39,137 +54,27 @@ type HistoryScopeContext = {
   manager: UndoManager
   tracks: Track[]
   pendingRun: Promise<void>
+  pendingLocalHistorySave: Promise<void>
+  unregisterLocalHistoryFlusher?: () => void
+  hydratedFromLocalDb?: boolean
+  pendingLocalHistoryState?: PersistedHistory
 }
 
-const cloneClip = (clip: Track['clips'][number]): Track['clips'][number] => ({
-  ...clip,
-  midi: clip.midi
-    ? {
-        ...clip.midi,
-        notes: clip.midi.notes.map((note) => ({ ...note })),
-      }
-    : undefined,
-})
-
-const cloneTrack = (track: Track): Track => ({
-  ...track,
-  clips: track.clips.map(cloneClip),
-  sends: track.sends?.map((send) => ({ ...send })),
-})
-
-const cloneTracks = (tracks: Track[]) => tracks.map(cloneTrack)
-
-const insertTrackIntoModel = (tracks: Track[], track: Track, index: number) => {
-  const existingIndex = tracks.findIndex((entry) => entry.id === track.id)
-  if (existingIndex >= 0) {
-    tracks.splice(existingIndex, 1)
+const mergeLocalHistoryState = (
+  persisted: PersistedHistory,
+  pending: PersistedHistory,
+): PersistedHistory => {
+  const seen = new Set(persisted.undo.map((entry) => JSON.stringify(entry)))
+  const pendingUndo = pending.undo.filter((entry) => {
+    const key = JSON.stringify(entry)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  return {
+    undo: [...persisted.undo, ...pendingUndo].slice(-50),
+    redo: pending.redo,
   }
-  const insertIndex = Math.max(0, Math.min(index, tracks.length))
-  tracks.splice(insertIndex, 0, cloneTrack(track))
-}
-
-const removeTrackFromModel = (tracks: Track[], trackId: Track['id']) => {
-  const index = tracks.findIndex((track) => track.id === trackId)
-  if (index >= 0) {
-    tracks.splice(index, 1)
-  }
-}
-
-const insertClipIntoModel = (tracks: Track[], trackId: string, clip: Track['clips'][number]) => {
-  const track = tracks.find((entry) => entry.id === trackId)
-  if (!track) return
-  const nextClip = cloneClip(clip)
-  const existingIndex = track.clips.findIndex((entry) => entry.id === nextClip.id)
-  if (existingIndex >= 0) {
-    track.clips.splice(existingIndex, 1, nextClip)
-    return
-  }
-  track.clips.push(nextClip)
-}
-
-const removeClipsFromModel = (tracks: Track[], clipIds: Iterable<string>) => {
-  const removedIds = new Set(clipIds)
-  if (removedIds.size === 0) return
-  for (const track of tracks) {
-    track.clips = track.clips.filter((clip) => !removedIds.has(clip.id))
-  }
-}
-
-const commitClipMovesInModel = (
-  tracks: Track[],
-  moves: Array<{ clipId: string; trackId: string; startSec: number }>,
-) => {
-  const moveByClipId = new Map(moves.map((move) => [move.clipId, move]))
-  const movedClips = new Map<string, Track['clips'][number]>()
-
-  for (const track of tracks) {
-    const remaining: Track['clips'] = []
-    for (const clip of track.clips) {
-      const move = moveByClipId.get(clip.id)
-      if (!move) {
-        remaining.push(clip)
-        continue
-      }
-      movedClips.set(clip.id, {
-        ...cloneClip(clip),
-        startSec: move.startSec,
-      })
-    }
-    track.clips = remaining
-  }
-
-  for (const move of moves) {
-    const track = tracks.find((entry) => entry.id === move.trackId)
-    const clip = movedClips.get(move.clipId)
-    if (!track || !clip) continue
-    track.clips.push(clip)
-  }
-}
-
-const commitClipTimingInModel = (
-  tracks: Track[],
-  clipId: string,
-  patch: { startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number },
-) => {
-  for (const track of tracks) {
-    const clip = track.clips.find((entry) => entry.id === clipId)
-    if (!clip) continue
-    clip.startSec = patch.startSec
-    clip.duration = patch.duration
-    clip.leftPadSec = patch.leftPadSec
-    clip.bufferOffsetSec = patch.bufferOffsetSec
-    clip.midiOffsetBeats = patch.midiOffsetBeats
-    return
-  }
-}
-
-const applyTrackVolumeInModel = (tracks: Track[], trackId: string, volume: number) => {
-  const track = tracks.find((entry) => entry.id === trackId)
-  if (track) {
-    track.volume = volume
-  }
-}
-
-const applyTrackMixStateInModel = (
-  tracks: Track[],
-  trackId: string,
-  patch: { muted?: boolean; soloed?: boolean },
-) => {
-  const track = tracks.find((entry) => entry.id === trackId)
-  if (!track) return
-  if (typeof patch.muted === 'boolean') {
-    track.muted = patch.muted
-  }
-  if (typeof patch.soloed === 'boolean') {
-    track.soloed = patch.soloed
-  }
-}
-
-const applyTrackRoutingInModel = (tracks: Track[], trackId: string, routing: TrackRouting) => {
-  const track = tracks.find((entry) => entry.id === trackId)
-  if (!track) return
-  track.sends = routing.sends?.map((send) => ({ ...send })) ?? []
-  track.outputTargetId = routing.outputTargetId
 }
 
 export function useTimelineHistory(
@@ -178,8 +83,8 @@ export function useTimelineHistory(
   const scopeContexts = new Map<string, HistoryScopeContext>()
 
   const readCurrentScope = () => readOptimisticGrantScope({
-    roomId: options.roomId(),
-    userId: options.userId(),
+    projectId: options.projectId(),
+    userId: isLocalId('project', options.projectId()) ? 'local' : options.userId(),
   })
 
   const readCurrentScopeKey = () => {
@@ -187,24 +92,86 @@ export function useTimelineHistory(
     return scope ? buildOptimisticGrantScopeKey(scope) : null
   }
 
+  const saveLocalHistoryInOrder = (context: HistoryScopeContext, projectId: string, state: PersistedHistory) => {
+    context.pendingLocalHistorySave = context.pendingLocalHistorySave
+      .catch(() => undefined)
+      .then(() => saveLocalHistory(projectId, state))
+    void context.pendingLocalHistorySave.catch(() => undefined)
+  }
+
   const getScopeContext = (scope: OptimisticGrantScope) => {
     const scopeKey = buildOptimisticGrantScopeKey(scope)
     const existing = scopeContexts.get(scopeKey)
     if (existing) return existing
 
+    const localProject = isLocalId('project', scope.projectId)
+    let hydrating = false
     const manager = createUndoManager({
-      onChange: (state) => saveHistory(scope, state),
+      onChange: (state) => {
+        if (hydrating) return
+        if (localProject) {
+          const context = scopeContexts.get(scopeKey)
+          if (context && !context.hydratedFromLocalDb) {
+            context.pendingLocalHistoryState = state
+            return
+          }
+          if (!context) {
+            void saveLocalHistory(scope.projectId, state)
+            return
+          }
+          saveLocalHistoryInOrder(context, scope.projectId, state)
+          return
+        }
+        saveHistory(scope, state)
+      },
     })
-    try {
-      manager.hydrate(loadHistory(scope))
-    } catch {}
+    if (!localProject) {
+      try {
+        hydrating = true
+        manager.hydrate(loadHistory(scope))
+      } catch {}
+    }
+    hydrating = false
 
     const context: HistoryScopeContext = {
       manager,
       tracks: [],
       pendingRun: Promise.resolve(),
+      pendingLocalHistorySave: Promise.resolve(),
     }
     scopeContexts.set(scopeKey, context)
+    if (localProject) {
+      context.unregisterLocalHistoryFlusher = registerPendingLocalProjectWriteFlusher(
+        'history',
+        scope.projectId,
+        () => context.pendingLocalHistorySave,
+      )
+      void loadLocalHistory(scope.projectId)
+        .then((state) => {
+          if (context.hydratedFromLocalDb) return
+          const pendingState = context.pendingLocalHistoryState
+          hydrating = true
+          if (state && pendingState) {
+            const merged = mergeLocalHistoryState(state, pendingState)
+            manager.hydrate(merged)
+            saveLocalHistoryInOrder(context, scope.projectId, merged)
+          } else if (state) {
+            manager.hydrate(state)
+          } else if (pendingState) {
+            manager.hydrate(pendingState)
+            saveLocalHistoryInOrder(context, scope.projectId, pendingState)
+          }
+          context.pendingLocalHistoryState = undefined
+          hydrating = false
+          context.hydratedFromLocalDb = true
+        })
+        .catch(() => {
+          const pendingState = context.pendingLocalHistoryState
+          if (pendingState) saveLocalHistoryInOrder(context, scope.projectId, pendingState)
+          context.pendingLocalHistoryState = undefined
+          context.hydratedFromLocalDb = true
+        })
+    }
     return context
   }
 
@@ -218,7 +185,7 @@ export function useTimelineHistory(
 
   const pushHistory = (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => {
     const scope = readCurrentScope()
-    if (!scope || scope.roomId !== entry.roomId) return
+    if (!scope || scope.projectId !== entry.projectId) return
     getScopeContext(scope).manager.push(entry, mergeKey, mergeWindowMs)
   }
 
@@ -241,30 +208,30 @@ export function useTimelineHistory(
       if (!entry) return
 
       const sourceActions = options.getActions()
-      let workingTracks = cloneTracks(context.tracks)
+      let workingTracks = cloneHistoryTracks(context.tracks)
       const actions: TimelineHistoryActions = {
         insertLocalTrack: (track, index) => {
-          insertTrackIntoModel(workingTracks, track, index)
+          insertTrackIntoHistoryModel(workingTracks, track, index)
           runVisibleAction(scopeKey, () => sourceActions.insertLocalTrack(track, index))
         },
         removeLocalTrack: (trackId) => {
-          removeTrackFromModel(workingTracks, trackId)
+          removeTrackFromHistoryModel(workingTracks, trackId)
           runVisibleAction(scopeKey, () => sourceActions.removeLocalTrack(trackId))
         },
         insertLocalClip: (trackId, clip) => {
-          insertClipIntoModel(workingTracks, trackId, clip)
+          insertClipIntoHistoryModel(workingTracks, trackId, clip)
           runVisibleAction(scopeKey, () => sourceActions.insertLocalClip(trackId, clip))
         },
         removeLocalClips: (clipIds) => {
-          removeClipsFromModel(workingTracks, clipIds)
+          removeClipsFromHistoryModel(workingTracks, clipIds)
           runVisibleAction(scopeKey, () => sourceActions.removeLocalClips(clipIds))
         },
         commitClipMoves: (moves) => {
-          commitClipMovesInModel(workingTracks, moves)
+          commitClipMovesInHistoryModel(workingTracks, moves)
           runVisibleAction(scopeKey, () => sourceActions.commitClipMoves(moves))
         },
         commitClipTiming: (clipId, patch) => {
-          commitClipTimingInModel(workingTracks, clipId, patch)
+          commitClipTimingInHistoryModel(workingTracks, clipId, patch)
           runVisibleAction(scopeKey, () => sourceActions.commitClipTiming(clipId, patch))
         },
         rescheduleChangedClips: (clipIds) => {
@@ -280,15 +247,15 @@ export function useTimelineHistory(
           runVisibleAction(scopeKey, () => sourceActions.cancelTrackMixWrite(trackId))
         },
         applyTrackVolume: (trackId, volume, scopeValue) => {
-          applyTrackVolumeInModel(workingTracks, trackId, volume)
+          applyTrackVolumeInHistoryModel(workingTracks, trackId, volume)
           runVisibleAction(scopeKey, () => sourceActions.applyTrackVolume(trackId, volume, scopeValue))
         },
         applyTrackMixState: (trackId, patch, scopeValue) => {
-          applyTrackMixStateInModel(workingTracks, trackId, patch)
+          applyTrackMixStateInHistoryModel(workingTracks, trackId, patch)
           runVisibleAction(scopeKey, () => sourceActions.applyTrackMixState(trackId, patch, scopeValue))
         },
         applyTrackRouting: (trackId, routing) => {
-          applyTrackRoutingInModel(workingTracks, trackId, routing)
+          applyTrackRoutingInHistoryModel(workingTracks, trackId, routing)
           runVisibleAction(scopeKey, () => sourceActions.applyTrackRouting(trackId, routing))
         },
       }
@@ -302,7 +269,7 @@ export function useTimelineHistory(
             const currentSnapshot = manager.snapshot()
             return [...currentSnapshot.undo, ...currentSnapshot.redo, entry]
           },
-          roomId: scope.roomId,
+          projectId: scope.projectId,
           userId: scope.userId,
           persistLocalMix: options.persistLocalMix,
           audioEngine: options.audioEngine,
@@ -342,7 +309,11 @@ export function useTimelineHistory(
     const scope = readCurrentScope()
     const tracks = options.getTracks()
     if (!scope) return
-    getScopeContext(scope).tracks = cloneTracks(tracks)
+    getScopeContext(scope).tracks = cloneHistoryTracks(tracks)
+  })
+
+  onCleanup(() => {
+    for (const context of scopeContexts.values()) context.unregisterLocalHistoryFlusher?.()
   })
 
   return {

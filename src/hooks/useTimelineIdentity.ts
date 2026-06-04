@@ -7,7 +7,7 @@ import type { Track } from '~/types/timeline'
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 
 type UseTimelineIdentityOptions = {
-  roomId: Accessor<string>
+  projectId: Accessor<string>
   serverData: Accessor<FullTimelineView | undefined>
 }
 
@@ -67,7 +67,7 @@ export function useTimelineIdentity(
     })
   }
 
-  createEffect(on(options.roomId, () => {
+  createEffect(on(options.projectId, () => {
     setTrackHistoryRefsById(new Map())
     setTrackNamesByHistoryRef(new Map<string, string>())
     setClipHistoryRefsById(new Map<string, string>())

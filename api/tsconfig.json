@@ -7,8 +7,8 @@
   },
   "include": [
     "**/*.ts",
-    "../src/lib/**/*.ts",
-    "../shared/**/*.ts",
+    "../packages/shared/src/**/*.ts",
+    "../packages/timeline-core/src/**/*.ts",
     "../src/types/**/*.ts"
   ]
 }

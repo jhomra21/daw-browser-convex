@@ -1,10 +1,10 @@
 import { pushTrackCreateHistory } from '~/lib/tracks'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
-import { canTrackReceiveAudioClip } from '~/lib/track-routing'
+import { canTrackReceiveAudioClip } from '@daw-browser/timeline-core/track-routing'
 import type { HistoryEntry } from '~/lib/undo/types'
-import type { Track } from '~/types/timeline'
+import type { Track } from '@daw-browser/timeline-core/types'
 
 type ConvexClientType = typeof import('~/lib/convex').convexClient
 

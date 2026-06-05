@@ -1,4 +1,4 @@
-import type { ProjectRole } from '../shared/project-role'
+import type { ProjectRole } from '@daw-browser/shared'
 import type { ApiContext } from './app-types'
 import { requireProjectRoleForApi } from './project-access'
 import { createR2ObjectResponse } from './r2-object-response'

@@ -1,7 +1,7 @@
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import type { UpdateTrackInput } from '~/lib/timeline-repository/types'
-import type { TrackRouting } from '~/types/timeline'
+import type { TrackRouting } from '@daw-browser/timeline-core/types'
 
 type TrackWriteContext = {
   projectId: string

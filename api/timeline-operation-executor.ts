@@ -1,5 +1,5 @@
 import { api as convexApi } from '../convex/_generated/api'
-import { readSharedTimelineOperationTargets, type SharedTimelineOperation } from '../src/lib/shared-timeline-operations'
+import { readSharedTimelineOperationTargets, type SharedTimelineOperation } from '@daw-browser/shared'
 import type { createAuthenticatedConvexClient } from './convex-auth'
 
 type AuthenticatedConvexClient = Awaited<ReturnType<typeof createAuthenticatedConvexClient>>

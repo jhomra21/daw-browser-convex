@@ -1,8 +1,8 @@
 import { type Accessor, onCleanup } from 'solid-js'
 
 import { clientXToSec } from '~/lib/timeline-utils'
-import type { AudioEngine } from '~/lib/audio-engine'
-import type { Track } from '~/types/timeline'
+import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
+import type { Track } from '@daw-browser/timeline-core/types'
 import { useTimelinePlayback } from './useTimelinePlayback'
 
 type Options = {

@@ -1,12 +1,12 @@
-import { isClipCompatibleWithTrack } from '~/lib/track-routing'
-import { createTimelineTrackIndex, type TimelineTrackIndex } from '~/lib/timeline-track-index'
+import { isClipCompatibleWithTrack } from '@daw-browser/timeline-core/track-routing'
+import { createTimelineTrackIndex, type TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import {
   calcNonOverlapStart,
   calcNonOverlapStartGridAligned,
   quantizeSecToGrid,
   willOverlap,
 } from '~/lib/timeline-utils'
-import type { Clip, Track } from '~/types/timeline'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 export type MultiDragSnapshot = {
   anchorClipId: string

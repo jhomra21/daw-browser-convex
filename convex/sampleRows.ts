@@ -3,9 +3,9 @@ import {
   sanitizeAudioSourceKind as sanitizeSourceKind,
   sanitizePositiveInt,
   sanitizePositiveNumber,
-} from '../src/lib/audio-source-rules'
+} from '@daw-browser/shared'
 
-export type { AudioSourceKind } from '../src/lib/audio-source-rules'
+export type { AudioSourceKind } from '@daw-browser/shared'
 
 export type UpsertSampleRowInput = {
   projectId: string

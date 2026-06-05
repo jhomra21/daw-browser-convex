@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/solid-router'
 import { createSignal, onCleanup, onMount, Suspense, lazy } from 'solid-js'
 import LocalProjectPicker from '~/components/LocalProjectPicker'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import { readLocationSearchParam } from '~/lib/location-search-param'
 import { markLocalProjectOpened } from '~/lib/local-project-db'
 import { useSessionQuery } from '~/lib/session'

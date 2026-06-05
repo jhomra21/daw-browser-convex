@@ -1,4 +1,4 @@
-import { sanitizeAudioSourceKind, type AudioSourceKind } from '~/lib/audio-source-rules'
+import { sanitizeAudioSourceKind, type AudioSourceKind } from '@daw-browser/shared'
 
 export const SAMPLE_DRAG_DATA_TYPE = 'application/x-mediabunny-sample'
 

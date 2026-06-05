@@ -2,10 +2,10 @@ import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import type { Accessor } from 'solid-js'
 
 import type { TimelineMidiBounds } from '~/components/timeline/timeline-overlays'
-import type { AudioEngine } from '~/lib/audio-engine'
+import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { canUseLocalStorage } from '~/lib/timeline-storage'
-import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
-import type { Track } from '~/types/timeline'
+import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
+import type { Track } from '@daw-browser/timeline-core/types'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 

@@ -4,10 +4,10 @@ import TrackLane from "~/components/timeline/TrackLane";
 import TrackSidebar from "~/components/timeline/TrackSidebar";
 import TimelineOverlays from "~/components/timeline/timeline-overlays";
 import { FX_PANEL_HEIGHT_PX, LANE_HEIGHT, PPS, RULER_HEIGHT } from "~/lib/timeline-utils";
-import type { AudioEngine } from "~/lib/audio-engine";
+import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionState";
-import type { Clip, Track, TrackId, TrackSend } from "~/types/timeline";
-import type { TimelineTrackIndex } from "~/lib/timeline-track-index";
+import type { Clip, Track, TrackId, TrackSend } from "@daw-browser/timeline-core/types";
+import type { TimelineTrackIndex } from "@daw-browser/timeline-core/track-index";
 import type { TimelineMidiBounds } from "~/components/timeline/timeline-overlays";
 
 type Props = {

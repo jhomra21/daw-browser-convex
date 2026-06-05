@@ -8,7 +8,7 @@ import {
   type LocalProjectAssetRow,
 } from '~/lib/local-project-db'
 import { assetCloudIdMappingKey } from '~/lib/local-cloud-id-map'
-import { createLocalAssetId } from '~/lib/local-ids'
+import { createLocalAssetId } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 
 type LocalAssetMetadata = {

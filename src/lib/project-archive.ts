@@ -1,11 +1,11 @@
-import { createLocalProjectId } from '~/lib/local-ids'
+import { createLocalProjectId } from '@daw-browser/shared'
 import { listLocalAssets, readLocalAssetBytes, writeLocalAssetFile } from '~/lib/local-assets'
 import { deleteLocalProject, importLocalProject } from '~/lib/local-project-db'
 import {
   buildProjectManifest,
   createRestoredProjectEntry,
 } from '~/lib/project-manifest'
-import { normalizeProjectManifest } from '~/lib/project-manifest-contract'
+import { normalizeProjectManifest } from '@daw-browser/shared'
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()

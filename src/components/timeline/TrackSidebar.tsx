@@ -8,15 +8,15 @@ import {
   onCleanup,
 } from "solid-js";
 import { createStore, produce } from "solid-js/store";
-import type { TrackStereoLevels } from "~/lib/audio-engine";
+import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
 import {
   canTrackReceiveAudioClip,
   getTrackChannelRole,
-} from "~/lib/track-routing";
+} from "@daw-browser/timeline-core/track-routing";
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
 import { LANE_HEIGHT, RULER_HEIGHT } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
-import type { Track, TrackSend } from "~/types/timeline";
+import type { Track, TrackSend } from "@daw-browser/timeline-core/types";
 
 type TrackSidebarProps = {
   sidebar: {

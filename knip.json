@@ -10,7 +10,7 @@
       "exports",
       "types"
     ],
-    "src/lib/effects/dsp.ts": [
+    "packages/audio-engine/src/effects/dsp.ts": [
       "exports"
     ],
     "src/lib/local-assets.ts": [
@@ -30,7 +30,7 @@
     "src/lib/timeline-storage.ts": [
       "exports"
     ],
-    "src/lib/audio-engine.ts": [
+    "packages/audio-engine/src/audio-engine.ts": [
       "types"
     ],
     "src/lib/timeline-repository/types.ts": [

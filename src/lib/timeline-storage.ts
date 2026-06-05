@@ -1,6 +1,6 @@
 import { normalizePersistedHistory, serializePersistedHistory } from '~/lib/undo/persisted-history'
 import type { PersistedHistory } from '~/lib/undo/types'
-import type { TrackId, TrackSend } from '~/types/timeline'
+import type { TrackId, TrackSend } from '@daw-browser/timeline-core/types'
 
 const MIX_KEY_PREFIX = 'mb:mix:'
 const MIX_SYNC_KEY_PREFIX = 'mb:mix-sync:'

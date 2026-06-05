@@ -1,6 +1,6 @@
 import { mutation, type MutationCtx, query } from "./_generated/server";
 import { v } from "convex/values";
-import { isValidR2DeleteKey, type R2DeleteKind } from "../src/lib/r2-delete-keys";
+import { isValidR2DeleteKey, type R2DeleteKind } from "@daw-browser/shared";
 
 const retryDelayMs = (attempts: number) => Math.min(60 * 60 * 1000, 2 ** Math.min(attempts, 8) * 1000);
 const clampQueueLimit = (limit: number) => Math.max(1, Math.min(limit, 100));

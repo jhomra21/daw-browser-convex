@@ -1,4 +1,4 @@
-import type { Clip } from '~/types/timeline'
+import type { Clip } from '@daw-browser/timeline-core/types'
 
 type ClipMediaStatus = NonNullable<Clip['mediaStatus']>
 export type EnsureClipBuffer = (clipId: string, sampleUrl?: string) => Promise<void>

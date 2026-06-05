@@ -1,6 +1,6 @@
 import { api as convexApi } from '../convex/_generated/api'
 import type { Id } from '../convex/_generated/dataModel'
-import type { R2DeleteKind } from '../src/lib/r2-delete-keys'
+import type { R2DeleteKind } from '@daw-browser/shared'
 import type { ApiContext } from './app-types'
 import type { Session } from './auth'
 import { createMaintenanceWorkerConvexClient, createWorkerConvexClient } from './convex-auth'

@@ -2,7 +2,11 @@
   "name": "daw-browser-convex",
   "version": "0.0.0",
   "description": "",
+  "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "start": "vite",
     "dev": "vite",
@@ -30,6 +34,10 @@
     "wrangler": "^4.69.0"
   },
   "dependencies": {
+    "@daw-browser/audio-engine": "workspace:*",
+    "@daw-browser/shared": "workspace:*",
+    "@daw-browser/timeline-core": "workspace:*",
+    "@daw-browser/waveforms": "workspace:*",
     "@kobalte/core": "^0.13.11",
     "@openrouter/ai-sdk-provider": "^1.5.4",
     "@tanstack/solid-query": "^5.90.23",
@@ -44,7 +52,6 @@
     "jose": "^6.2.3",
     "kysely": "0.28.11",
     "kysely-d1": "^0.4.0",
-    "mediabunny": "^1.35.1",
     "solid-js": "^1.9.11",
     "tailwind-merge": "^3.5.0",
     "tailwindcss-animate": "^1.0.7",

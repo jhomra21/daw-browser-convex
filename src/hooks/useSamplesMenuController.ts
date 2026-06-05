@@ -5,10 +5,10 @@ import { copyText } from '~/lib/clipboard'
 import { useProjectSamples, type ProjectSampleListItem } from '~/hooks/useProjectSamples'
 import { hasAncestorDatasetValue } from '~/lib/dom-dataset'
 import { deleteLocalAsset } from '~/lib/local-assets'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import { deleteProjectSample } from '~/lib/project-samples-api'
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData } from '~/lib/sample-drag-data'
-import type { Track } from '~/types/timeline'
+import type { Track } from '@daw-browser/timeline-core/types'
 
 type UseSamplesMenuControllerOptions = {
   currentProjectId: Accessor<string>

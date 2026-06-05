@@ -12,7 +12,7 @@ import {
   saveMixSyncFlag,
 } from '~/lib/timeline-storage'
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from '~/lib/timeline-layout'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import { loadLocalProjectState, saveLocalProjectState } from '~/lib/local-project-state'
 
 import { useProjectPersistedState } from './useProjectPersistedState'

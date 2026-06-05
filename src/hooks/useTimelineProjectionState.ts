@@ -8,7 +8,7 @@ import {
   type ClipTimelinePatch,
   type PendingTrackEntry,
 } from '~/lib/resolve-timeline-tracks'
-import type { Track } from '~/types/timeline'
+import type { Track } from '@daw-browser/timeline-core/types'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 

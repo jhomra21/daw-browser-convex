@@ -4,7 +4,7 @@ import {
   clampSynthCardBounds,
   type SynthCardBounds,
 } from '~/components/effects/synth-card-bounds'
-import type { SynthParams } from '~/lib/effects/params'
+import type { SynthParams } from '@daw-browser/shared'
 
 type SynthCardProps = {
   params: SynthParams

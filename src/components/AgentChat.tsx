@@ -1,5 +1,5 @@
 import { type Component, For, Show, createSignal, createEffect, onCleanup } from 'solid-js'
-import { CommandsEnvelopeSchema, type CommandsEnvelope } from '~/lib/agent-commands'
+import { CommandsEnvelopeSchema, type CommandsEnvelope } from '@daw-browser/shared'
 import { convexClient, convexApi } from '~/lib/convex'
 import { cn } from '~/lib/utils'
 

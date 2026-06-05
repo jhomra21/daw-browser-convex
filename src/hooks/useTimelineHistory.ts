@@ -1,9 +1,9 @@
 import { createEffect, onCleanup } from 'solid-js'
 import type { Accessor } from 'solid-js'
 
-import type { AudioEngine } from '~/lib/audio-engine'
+import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { loadLocalHistory, saveLocalHistory } from '~/lib/local-history'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
 import {
   buildOptimisticGrantScopeKey,
@@ -26,7 +26,7 @@ import {
   removeClipsFromHistoryModel,
   removeTrackFromHistoryModel,
 } from '~/lib/undo/history-model'
-import type { Track } from '~/types/timeline'
+import type { Track } from '@daw-browser/timeline-core/types'
 
 type TimelineHistoryActions = Parameters<typeof execUndo>[1]['actions']
 

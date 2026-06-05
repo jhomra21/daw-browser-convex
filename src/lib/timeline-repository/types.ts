@@ -1,9 +1,9 @@
 import type { AudioSourceKind } from '~/lib/audio-source'
-import type { TrackChannelRole } from '~/types/timeline'
+import type { TrackChannelRole, TrackId } from '@daw-browser/timeline-core/types'
 
 export type TimelineEntityKind = 'track' | 'clip' | 'effect' | 'mixerChannel'
 
-export type TimelineTrackId = string
+export type TimelineTrackId = TrackId
 export type TimelineClipId = string
 export type TimelineAssetId = string
 

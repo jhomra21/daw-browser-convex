@@ -1,6 +1,6 @@
 import type { FunctionArgs } from 'convex/server'
 
-import { normalizeClipStartSec } from '~/lib/clip-timing'
+import { normalizeClipStartSec } from '@daw-browser/shared'
 import { toCloudClipId, toCloudTrackIdOptional } from '~/lib/cloud-id-args'
 import { convexApi } from '~/lib/convex'
 

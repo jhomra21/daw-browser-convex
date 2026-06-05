@@ -9,7 +9,7 @@ import {
   onCleanup,
 } from "solid-js";
 import type { LocalEffectRow } from "~/lib/local-effects";
-import { isLocalId } from "~/lib/local-ids";
+import { isLocalId } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Eq from "~/components/effects/Eq";
 import Reverb from "~/components/effects/Reverb";
@@ -32,9 +32,9 @@ import {
   serializeReverbParams,
   type EqParams,
   type ReverbParams,
-} from "~/lib/effects/params";
+} from "@daw-browser/shared";
 import type { FunctionReturnType } from "convex/server";
-import type { AudioEngine, SpectrumFrame } from "~/lib/audio-engine";
+import type { AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import { convexApi, useConvexQuery } from "~/lib/convex";
 import { useEffectsPanelAudioSync } from "~/hooks/useEffectsPanelAudioSync";
 import { useEffectsPanelTarget } from "~/hooks/useEffectsPanelTarget";
@@ -43,7 +43,7 @@ import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import { FX_PANEL_HEIGHT_PX } from "~/lib/timeline-utils";
-import type { Clip, Track } from "~/types/timeline";
+import type { Clip, Track } from "@daw-browser/timeline-core/types";
 
 type EffectsPanelProps = {
   isOpen: boolean;

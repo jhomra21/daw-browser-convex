@@ -1,6 +1,6 @@
 import { openLocalProjectDb, type LocalProjectSyncStateRow } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { isSharedTimelineOperationKind, readSharedTimelineClipCreatePayload, sharedTimelineOperationSchema, type SharedTimelineClipCreatePayload } from '~/lib/shared-timeline-operations'
+import { isDurableSharedTimelineOperationKind, readSharedTimelineClipCreatePayload, sharedTimelineOperationSchema, type SharedTimelineClipCreatePayload } from '@daw-browser/shared'
 import {
   publishSharedTimelineOperation,
   SharedTimelineOperationHttpError,
@@ -73,7 +73,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
 )
 
 const isOutboxKind = (value: unknown): value is SharedOutboxKind => (
-  isSharedTimelineOperationKind(value) || value === 'clips.createUploadedAudio'
+  isDurableSharedTimelineOperationKind(value) || value === 'clips.createUploadedAudio'
 )
 
 const readEntry = (value: unknown): SharedOutboxEntry | null => {

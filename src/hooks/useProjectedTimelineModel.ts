@@ -3,7 +3,7 @@ import type { Accessor } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
 
 import { convexApi, useConvexQuery } from '~/lib/convex'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import {
   buildOptimisticGrantScopeKey,
   isOptimisticGrantScopeCurrent,
@@ -11,7 +11,7 @@ import {
 } from '~/lib/optimistic-grant-scope'
 import type { PendingTrackEntry } from '~/lib/resolve-timeline-tracks'
 import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
-import type { Track, TrackRouting, TrackSend } from '~/types/timeline'
+import type { Track, TrackRouting, TrackSend } from '@daw-browser/timeline-core/types'
 
 type ProjectedTimelineRouting = TrackRouting & { sends: TrackSend[] }
 type OptimisticGrantState = 'pending' | 'seen'

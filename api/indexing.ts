@@ -1,4 +1,4 @@
-import { toZeroBasedCommandIndex } from '../src/lib/agent-command-targets'
+import { toZeroBasedCommandIndex } from '@daw-browser/shared'
 
 const toZeroBased = (n: any): number | undefined => toZeroBasedCommandIndex(typeof n === 'number' ? n : Number(n))
 

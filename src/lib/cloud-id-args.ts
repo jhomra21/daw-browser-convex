@@ -1,5 +1,5 @@
 import type { Id } from '../../convex/_generated/dataModel'
-import type { TrackId } from '~/types/timeline'
+import type { TrackId } from '@daw-browser/timeline-core/types'
 
 export const toCloudClipId = (clipId: string): Id<'clips'> => clipId as Id<'clips'>
 export const toCloudTrackId = (trackId: TrackId): Id<'tracks'> => trackId as Id<'tracks'>

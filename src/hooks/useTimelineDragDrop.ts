@@ -3,7 +3,7 @@ import type { Accessor } from 'solid-js'
 
 import { SAMPLE_DRAG_DATA_TYPE } from '~/lib/sample-drag-data'
 import { yToLaneIndex } from '~/lib/timeline-utils'
-import type { Track } from '~/types/timeline'
+import type { Track } from '@daw-browser/timeline-core/types'
 
 type UseTimelineDragDropOptions = {
   tracks: Accessor<Track[]>

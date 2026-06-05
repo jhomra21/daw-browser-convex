@@ -9,10 +9,10 @@ import {
   type PendingTrackEntry,
 } from '~/lib/resolve-timeline-tracks'
 import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
-import { createTimelineTrackIndex, type TimelineTrackIndex } from '~/lib/timeline-track-index'
+import { createTimelineTrackIndex, type TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
 import type { LocalMixMap } from '~/lib/timeline-storage'
-import type { Clip, Track, TrackRouting, TrackSend } from '~/types/timeline'
+import type { Clip, Track, TrackRouting, TrackSend } from '@daw-browser/timeline-core/types'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 type PendingClipCreate = { trackId: Track['id']; clip: Clip }

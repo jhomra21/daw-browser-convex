@@ -5,12 +5,12 @@ import {
   onCleanup,
 } from "solid-js";
 
-import { drawWaveformPeaks } from "~/lib/audio-peaks/render-waveform";
-import { getWaveformSlice } from "~/lib/audio-peaks/select-waveform-window";
-import { resolveClipSampleUrl } from "~/lib/audio-source-rules";
+import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
+import { getWaveformSlice } from "@daw-browser/waveforms/select-waveform-window";
+import { resolveClipSampleUrl } from "@daw-browser/shared";
 import { LANE_HEIGHT, PPS } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
-import type { Clip, Track } from "~/types/timeline";
+import type { Clip, Track } from "@daw-browser/timeline-core/types";
 
 type ClipComponentProps = {
   clip: Clip;

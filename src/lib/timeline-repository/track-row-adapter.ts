@@ -1,5 +1,5 @@
 import type { TimelineClipRow, TimelineTrackRow } from '~/lib/timeline-repository/types'
-import type { Clip, Track } from '~/types/timeline'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 export const toLocalTimelineClip = (row: TimelineClipRow): Clip => ({
   id: row.id,
@@ -22,7 +22,7 @@ export const toLocalTimelineClip = (row: TimelineClipRow): Clip => ({
 })
 
 export const toLocalTimelineTrack = (row: TimelineTrackRow): Track => ({
-  id: row.id as Track['id'],
+  id: row.id,
   historyRef: row.historyRef,
   name: row.name,
   volume: row.volume,
@@ -31,9 +31,9 @@ export const toLocalTimelineTrack = (row: TimelineTrackRow): Track => ({
   soloed: row.soloed,
   kind: row.kind,
   channelRole: row.channelRole,
-  outputTargetId: row.outputTargetId as Track['outputTargetId'],
+  outputTargetId: row.outputTargetId,
   sends: row.sends.map((send) => ({
-    targetId: send.targetId as Track['id'],
+    targetId: send.targetId,
     amount: send.amount,
   })),
 })

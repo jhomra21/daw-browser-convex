@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, type Accessor } from "solid-js";
 import { getLocalEffect, setLocalEffect, type LocalEffectKind, type LocalEffectRow } from "~/lib/local-effects";
-import { isLocalId } from "~/lib/local-ids";
+import { isLocalId } from "@daw-browser/shared";
 
 type LocalEffectSelector = LocalEffectKind | ((targetId: string) => LocalEffectKind);
 

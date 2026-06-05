@@ -1,10 +1,10 @@
 import { Show, For, createSignal, onMount, onCleanup, createEffect } from 'solid-js'
-import type { SpectrumFrame } from '~/lib/audio-engine'
+import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import Knob from '~/components/ui/knob'
 import {
   supportsGain,
   type EqBandParams,
-} from '~/lib/effects/params'
+} from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
 
 

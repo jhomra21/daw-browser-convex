@@ -1,0 +1,15 @@
+{
+  "name": "@daw-browser/timeline-core",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./clip-placement": "./src/clip-placement.ts",
+    "./track-index": "./src/track-index.ts",
+    "./track-routing": "./src/track-routing.ts",
+    "./types": "./src/types.ts"
+  },
+  "dependencies": {
+    "@daw-browser/shared": "workspace:*"
+  }
+}

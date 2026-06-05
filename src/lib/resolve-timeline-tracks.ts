@@ -2,17 +2,17 @@ import type { FunctionReturnType } from 'convex/server'
 
 import type { ClipMediaCache } from '~/lib/clip-buffer-cache'
 import { convexApi } from '~/lib/convex'
-import { isLocalProjectAssetKey, sanitizeAudioSourceKind } from '~/lib/audio-source-rules'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalProjectAssetKey, sanitizeAudioSourceKind } from '@daw-browser/shared'
+import { isLocalId } from '@daw-browser/shared'
 import { resolveTrackMixView } from '~/lib/timeline-mix-authority'
 import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
 import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
 import { cloneTimelineClip, cloneTimelineTrack } from '~/lib/timeline-clone'
-import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
+import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { LocalMixMap } from '~/lib/timeline-storage'
-import { normalizeTrackRouting } from '~/lib/track-routing'
-import { normalizeTrackChannelRole } from '~/lib/track-routing-core'
-import type { Track, Clip, TrackRouting, TrackSend } from '~/types/timeline'
+import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
+import { normalizeTrackChannelRole } from '@daw-browser/shared'
+import type { Track, Clip, TrackRouting, TrackSend } from '@daw-browser/timeline-core/types'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 

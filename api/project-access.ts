@@ -1,5 +1,5 @@
 import { api as convexApi } from '../convex/_generated/api'
-import type { ProjectRole } from '../shared/project-role'
+import type { ProjectRole } from '@daw-browser/shared'
 import type { ApiContext } from './app-types'
 import { createAuthenticatedConvexClient } from './convex-auth'
 

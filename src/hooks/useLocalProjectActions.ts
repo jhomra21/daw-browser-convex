@@ -7,7 +7,7 @@ import {
 } from "~/lib/cloud-backup";
 import { downloadCloudAssetsForOffline } from "~/lib/cloud-asset-cache";
 import { setLocalProjectAssetDirectory } from "~/lib/local-assets";
-import { isLocalId } from "~/lib/local-ids";
+import { isLocalId } from "@daw-browser/shared";
 import { exportDawProjectArchive, importDawProjectArchive } from "~/lib/project-archive";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import { flushSharedOutbox, readSharedOutboxSummary } from "~/lib/shared-outbox";

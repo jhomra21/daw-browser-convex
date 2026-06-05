@@ -2,7 +2,7 @@ import {
   isClipKindCompatibleWithTrack as isClipKindCompatibleWithTrackCore,
   normalizeTrackChannelRole,
   normalizeTrackRouting as normalizeTrackRoutingCore,
-} from "../src/lib/track-routing-core";
+} from "@daw-browser/shared";
 
 type TrackLike = {
   _id: string

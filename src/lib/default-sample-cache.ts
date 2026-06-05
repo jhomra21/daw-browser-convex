@@ -1,5 +1,5 @@
 import type { AudioSourceMetadata } from '~/lib/audio-source'
-import { loadPeakAssetRecord } from '~/lib/audio-peaks/peak-db'
+import { loadPeakAssetRecord } from '@daw-browser/waveforms/peak-db'
 import { primeClipSourceAsset } from '~/lib/clip-source-client'
 
 type DefaultSampleCacheInput = {

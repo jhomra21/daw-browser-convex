@@ -1,6 +1,6 @@
 import { createEffect, on, type Accessor } from 'solid-js'
 
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import { loadLocalProjectState, saveLocalProjectState } from '~/lib/local-project-state'
 import {
   loadLocalMixMap,
@@ -9,7 +9,7 @@ import {
   type LocalMixMap,
   type LocalMixPatch,
 } from '~/lib/timeline-storage'
-import type { Track } from '~/types/timeline'
+import type { Track } from '@daw-browser/timeline-core/types'
 
 import { useProjectPersistedState } from './useProjectPersistedState'
 

@@ -2,7 +2,7 @@ import { api as convexApi } from '../../convex/_generated/api'
 import type { App } from '../app-types'
 import { parseJsonBody } from '../json-body'
 import { requireProjectRoleContextForApi } from '../project-access'
-import { sharedTimelineOperationSchema } from '../../src/lib/shared-timeline-operations'
+import { sharedTimelineOperationSchema } from '@daw-browser/shared'
 import { executeTimelineOperation, TimelineOperationTargetError } from '../timeline-operation-executor'
 
 export function registerTimelineOperationRoutes(app: App) {

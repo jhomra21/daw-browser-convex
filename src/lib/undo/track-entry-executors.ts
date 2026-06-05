@@ -1,7 +1,7 @@
 import { buildLocalClip } from '~/lib/clip-create'
-import { normalizeTrackRouting } from '~/lib/track-routing'
+import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
-import type { Track, TrackRouting } from '~/types/timeline'
+import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 
 import { buildHistoryRefIndex, resolveStoredTrackId, resolveTrackId, resolveTrackRoutingSnapshot } from './refs'
 import type { Deps } from './exec'

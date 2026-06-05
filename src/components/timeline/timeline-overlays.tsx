@@ -1,7 +1,7 @@
 import { type Component, Show, Suspense, createMemo, lazy } from 'solid-js'
-import type { TimelineTrackIndex } from '~/lib/timeline-track-index'
+import type { TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { LANE_HEIGHT, PPS } from '~/lib/timeline-utils'
-import type { Clip, Track } from '~/types/timeline'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 const RecordingPreview = lazy(() => import('~/components/timeline/RecordingPreview'))
 const GridOverlay = lazy(() => import('~/components/timeline/GridOverlay'))

@@ -1,10 +1,10 @@
 import type { Accessor } from 'solid-js'
 
 import type { ClipCreateSnapshot } from '~/lib/clip-create'
-import type { AudioEngine } from '~/lib/audio-engine'
+import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { ClipBuffers } from '~/lib/clip-buffer-cache'
-import { isLocalId } from '~/lib/local-ids'
-import { canTrackReceiveAudioClip, getTrackChannelRole } from '~/lib/track-routing'
+import { isLocalId } from '@daw-browser/shared'
+import { canTrackReceiveAudioClip, getTrackChannelRole } from '@daw-browser/timeline-core/track-routing'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE, type SampleDragData } from '~/lib/sample-drag-data'
 import { clientXToSec, yToLaneIndex, willOverlap, calcNonOverlapStart, quantizeSecToGrid, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
@@ -12,7 +12,7 @@ import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-t
 import { createAudioImportTransaction } from '~/lib/timeline-audio-import'
 import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
 import type { HistoryEntry } from '~/lib/undo/types'
-import type { Clip, Track } from '~/types/timeline'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 import type { UploadToR2 } from './useClipBuffers'

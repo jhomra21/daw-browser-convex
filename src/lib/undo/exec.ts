@@ -2,11 +2,11 @@ import { buildLocalClip, createManyClips } from '~/lib/clip-create'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
-import type { AudioEngine } from '~/lib/audio-engine'
-import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
-import { normalizeTrackRouting } from '~/lib/track-routing'
+import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
+import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
+import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
-import type { Track, TrackRouting } from '~/types/timeline'
+import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 import { applyTrackClipCreateEntry, applyTrackDeleteEntry } from './track-entry-executors'
 
 import { buildHistoryRefIndex, resolveClipId, resolveStoredTrackId, resolveTrackId, resolveTrackRoutingSnapshot } from './refs'
@@ -98,9 +98,10 @@ async function applyTrackBooleanEntry(
 async function applyTrackRoutingEntry(entry: Extract<HistoryEntry, { type: 'track-routing' }>, deps: Deps, direction: HistoryDirection) {
   const index = buildRefIndex(deps)
   const trackId = requireResolved(resolveTrackId(index, entry.data.trackRef), 'Track not found for track-routing history entry')
-  const track = deps.getTracks().find((entryValue) => entryValue.id === trackId)
+  const tracks = deps.getTracks()
+  const track = requireResolved(tracks.find((entryValue) => entryValue.id === trackId), 'Track not found for track-routing history entry')
   const routing = resolveTrackRoutingSnapshot(index, pickDirectionalValue(direction, entry.data.from, entry.data.to))
-  const normalizedRouting = track ? normalizeTrackRouting(track, routing, deps.getTracks()) : routing
+  const normalizedRouting = normalizeTrackRouting(track, routing, tracks)
   deps.actions.cancelTrackRoutingWrite(trackId)
   await persistHistoryTrackRouting(deps, trackId, normalizedRouting)
   deps.actions.applyTrackRouting(trackId, normalizedRouting)

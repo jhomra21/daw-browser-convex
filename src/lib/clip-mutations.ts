@@ -1,4 +1,4 @@
-import { normalizeClipTimingPatch } from '~/lib/clip-timing'
+import { normalizeClipTimingPatch } from '@daw-browser/shared'
 import { toCloudClipId } from '~/lib/cloud-id-args'
 
 type ConvexClientType = typeof import('~/lib/convex').convexClient

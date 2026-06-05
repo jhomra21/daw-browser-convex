@@ -1,9 +1,9 @@
 import { buildClipCreatePayload, buildLocalClip, createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory, type ClipCreateSnapshot } from '~/lib/clip-create'
 import { createAudioAssetKey, getAudioSourceMetadata, type AudioSourceKind } from '~/lib/audio-source'
-import { isLocalProjectAssetKey } from '~/lib/audio-source-rules'
+import { isLocalProjectAssetKey } from '@daw-browser/shared'
 import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError } from '~/lib/local-assets'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { isSharedOutboxQueuedError, publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import {
@@ -14,7 +14,7 @@ import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-t
 import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
-import type { Clip, Track, TrackId } from '~/types/timeline'
+import type { Clip, Track, TrackId } from '@daw-browser/timeline-core/types'
 
 type UploadToR2 = (
   projectId: string,

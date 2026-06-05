@@ -1,11 +1,11 @@
 import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
-import type { AudioEngine } from "~/lib/audio-engine";
+import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import { getAudioSourceMetadata } from "~/lib/audio-source";
 import type { ClipBufferWriter } from "~/lib/clip-buffer-cache";
 import { createLocalAsset, deleteLocalAsset } from "~/lib/local-assets";
-import { isLocalId } from "~/lib/local-ids";
+import { isLocalId } from "@daw-browser/shared";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
-import type { Clip, Track } from "~/types/timeline";
+import type { Clip, Track } from "@daw-browser/timeline-core/types";
 
 type ProjectionActions = {
   insertLocalClip: (trackId: Track["id"], clip: Clip) => void;

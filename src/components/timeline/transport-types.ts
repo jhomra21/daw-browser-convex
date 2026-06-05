@@ -1,7 +1,7 @@
 import type { InsertSampleInput } from "~/hooks/useTimelineClipImport";
 import type { TimelineProject } from "~/hooks/useTimelineData";
 import type { CloudBackupStatus } from "~/hooks/useLocalProjectActions";
-import type { Track } from "~/types/timeline";
+import type { Track } from "@daw-browser/timeline-core/types";
 
 export type TimelineProjectMenuModel = {
   currentProjectId: string;

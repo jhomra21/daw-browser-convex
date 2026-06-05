@@ -1,5 +1,5 @@
 import { createMemo, type Accessor } from "solid-js";
-import type { Track } from "~/types/timeline";
+import type { Track } from "@daw-browser/timeline-core/types";
 
 type UseEffectsPanelTargetOptions = {
   selectedFXTarget: Accessor<Track["id"] | "master">;

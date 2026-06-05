@@ -1,11 +1,11 @@
 import { buildCreatedClipSelection, createProjectedClips, createProjectedLocalClips, pushClipCreateHistory, type BatchClipCreateItem } from "~/lib/clip-create";
 import type { ClipBufferWriter } from "~/lib/clip-buffer-cache";
-import { isLocalId } from "~/lib/local-ids";
+import { isLocalId } from "@daw-browser/shared";
 import type { OptimisticGrantScope } from "~/lib/optimistic-grant-scope";
 import { buildClipsMoveHistoryEntry } from "~/lib/undo/builders";
 import { getTrackHistoryRef } from "~/lib/undo/refs";
 import type { HistoryEntry } from "~/lib/undo/types";
-import type { Clip, Track } from "~/types/timeline";
+import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { pushTrackCreateHistory } from "./tracks";
 
 type ClipMove = { clipId: string; trackId: Track["id"]; startSec: number };

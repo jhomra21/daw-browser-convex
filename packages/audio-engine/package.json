@@ -1,0 +1,15 @@
+{
+  "name": "@daw-browser/audio-engine",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./audio-engine": "./src/audio-engine.ts",
+    "./export-mixdown": "./src/export-mixdown.ts"
+  },
+  "dependencies": {
+    "@daw-browser/shared": "workspace:*",
+    "@daw-browser/timeline-core": "workspace:*",
+    "mediabunny": "^1.35.1"
+  }
+}

@@ -1,9 +1,9 @@
 import { createEffect, onCleanup, type Accessor } from 'solid-js'
 
-import type { AudioEngine } from '~/lib/audio-engine'
+import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { resetAudioEngine } from '~/lib/audio-engine-singleton'
 import { flushLocalTimelineWrites } from '~/lib/timeline-repository/local-timeline-repository'
-import type { Track } from '~/types/timeline'
+import type { Track } from '@daw-browser/timeline-core/types'
 
 export function useTimelineAudioLifecycle(input: {
   audioEngine: AudioEngine

@@ -1,7 +1,7 @@
 import { createSignal, onCleanup, type Accessor } from 'solid-js'
 
 import { PPS, RULER_HEIGHT, LANE_HEIGHT } from '~/lib/timeline-utils'
-import type { Track } from '~/types/timeline'
+import type { Track } from '@daw-browser/timeline-core/types'
 
 import { useDrag } from './useDrag'
 import type { TimelineSelectionController } from './useTimelineSelectionState'

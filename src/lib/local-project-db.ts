@@ -1,6 +1,7 @@
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from 'idb'
-import { createLocalProjectId, createLocalTrackId } from '~/lib/local-ids'
+import { createLocalProjectId, createLocalTrackId } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
+import { buildTimelineTrackRow } from '~/lib/timeline-repository/track-row-builder'
 
 export const LOCAL_PROJECT_SCHEMA_VERSION = 1
 
@@ -35,6 +36,13 @@ export type LocalProjectEntityRow = {
   value: unknown
   updatedAt: number
 }
+
+export const createLocalProjectEntityRow = (
+  kind: string,
+  id: string,
+  value: unknown,
+  updatedAt = Date.now(),
+): LocalProjectEntityRow => ({ kind, id, value, updatedAt })
 
 export type LocalProjectAssetRow = {
   id: string
@@ -208,25 +216,12 @@ export const createLocalProject = async (name: string): Promise<LocalProjectEntr
   }
   await db.put('projects', project)
   const projectDb = await openLocalProjectDb(project.id)
-  await projectDb.put('entities', {
-    kind: 'track',
-    id: trackId,
-    value: {
-      id: trackId,
-      historyRef: trackId,
-      name: 'Track 1',
-      index: 0,
-      volume: 0.8,
-      muted: false,
-      soloed: false,
-      kind: 'audio',
-      channelRole: 'track',
-      sends: [],
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    },
-    updatedAt: timestamp,
-  })
+  await projectDb.put('entities', createLocalProjectEntityRow(
+    'track',
+    trackId,
+    buildTimelineTrackRow({ id: trackId, index: 0, timestamp }),
+    timestamp,
+  ))
   return project
 }
 

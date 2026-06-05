@@ -10,10 +10,8 @@ import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-t
 import { getClipHistoryRef } from '~/lib/undo/refs'
 import type { HistoryClipSnapshot, HistoryEntry } from '~/lib/undo/types'
 import type { Clip, TrackId } from '@daw-browser/timeline-core/types'
-import { buildClipCreatePayload, buildQueuedAudioClipCreatePayload } from '@daw-browser/shared'
-import type { ClipCreateSnapshot } from '@daw-browser/shared'
-export { buildClipCreatePayload } from '@daw-browser/shared'
-export type { ClipCreateSnapshot } from '@daw-browser/shared'
+import type { RuntimeClip } from '~/lib/timeline-runtime-types'
+import { buildClipCreatePayload, buildQueuedAudioClipCreatePayload, type ClipCreateSnapshot } from '@daw-browser/shared'
 
 type BuildLocalClipInput = {
   id: string
@@ -34,7 +32,7 @@ type UploadedAudioClipInput = {
   sourceAssetKey: string
   sourceKind: AudioSourceKind
   createServerClip: (payload: SharedTimelineClipCreatePayload) => Promise<string | null>
-  insertLocalClip: (trackId: TrackId, clip: Clip) => void
+  insertLocalClip: (trackId: TrackId, clip: RuntimeClip) => void
   removeLocalClips?: (clipIds: Iterable<string>) => void
   selectClip?: (trackId: TrackId, clipId: string) => void
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
@@ -62,7 +60,7 @@ type LocalAudioClipInput = {
   source: AudioSourceMetadata
   sourceAssetKey: string
   sourceKind: AudioSourceKind
-  insertLocalClip: (trackId: TrackId, clip: Clip) => void
+  insertLocalClip: (trackId: TrackId, clip: RuntimeClip) => void
   selectClip?: (trackId: TrackId, clipId: string) => void
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   skipHistory?: boolean
@@ -110,7 +108,7 @@ function buildClipSnapshotFields(clip: Clip) {
   }
 }
 
-export function buildLocalClip(input: BuildLocalClipInput): Clip {
+export function buildLocalClip(input: BuildLocalClipInput): RuntimeClip {
   const { id, clip, buffer = null, color } = input
   return {
     id,
@@ -349,7 +347,7 @@ export async function createProjectedClips(input: {
   projectId: string
   items: readonly BatchClipCreateItem[]
   createMany: (items: ReturnType<typeof buildClipCreatePayload>[], operationId: string) => Promise<Array<string | null>>
-  insertLocalClip: (trackId: TrackId, clip: Clip) => void
+  insertLocalClip: (trackId: TrackId, clip: RuntimeClip) => void
   audioBufferCache: ClipBufferWriter
   grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void
   grantScope?: OptimisticGrantScope
@@ -370,7 +368,7 @@ export async function createProjectedClips(input: {
 export async function createProjectedLocalClips(input: {
   projectId: string
   items: readonly BatchClipCreateItem[]
-  insertLocalClip: (trackId: TrackId, clip: Clip) => void
+  insertLocalClip: (trackId: TrackId, clip: RuntimeClip) => void
   removeLocalClips: (clipIds: Iterable<string>) => void
   audioBufferCache: ClipBufferWriter
   canProject?: () => boolean

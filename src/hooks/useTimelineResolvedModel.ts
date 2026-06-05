@@ -13,9 +13,10 @@ import { createTimelineTrackIndex, type TimelineTrackIndex } from '@daw-browser/
 import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
 import type { LocalMixMap } from '~/lib/timeline-storage'
 import type { Clip, Track, TrackRouting, TrackSend } from '@daw-browser/timeline-core/types'
+import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
-type PendingClipCreate = { trackId: Track['id']; clip: Clip }
+type PendingClipCreate = { trackId: Track['id']; clip: RuntimeClip }
 type ServerTrackState = {
   serverVolumes: Map<Track['id'], number>
   serverMuted: Map<Track['id'], boolean>
@@ -42,7 +43,7 @@ type UseTimelineResolvedModelOptions = {
     removedClipIds: Accessor<Set<string>>
     committedClipEditsById: Accessor<Map<string, ClipTimelinePatch>>
     draftClipEditsById: Accessor<Map<string, ClipTimelinePatch>>
-    previewClipsByTrackId: Accessor<Map<Track['id'], Track['clips']>>
+    previewClipsByTrackId: Accessor<Map<Track['id'], RuntimeClip[]>>
   }
   identity: {
     trackHistoryRefsById: Accessor<Map<Track['id'], string>>
@@ -56,22 +57,22 @@ type UseTimelineResolvedModelOptions = {
 }
 
 type UseTimelineResolvedModelReturn = {
-  resolvedTracks: Accessor<Track[]>
-  placementTracks: Accessor<Track[]>
-  renderTracks: Accessor<Track[]>
-  trackLookup: Accessor<TimelineTrackIndex>
+  resolvedTracks: Accessor<RuntimeTrack[]>
+  placementTracks: Accessor<RuntimeTrack[]>
+  renderTracks: Accessor<RuntimeTrack[]>
+  trackLookup: Accessor<TimelineTrackIndex<AudioBuffer>>
 }
 
 export function useTimelineResolvedModel(
   options: UseTimelineResolvedModelOptions,
 ): UseTimelineResolvedModelReturn {
   const emptyDraftClipEditsById = new Map<string, ClipTimelinePatch>()
-  const emptyPreviewClipsByTrackId = new Map<Track['id'], Track['clips']>()
+  const emptyPreviewClipsByTrackId = new Map<Track['id'], RuntimeClip[]>()
 
   function resolveTracks(input: {
     draftClipEditsById: Map<string, ClipTimelinePatch>
-    previewClipsByTrackId: Map<Track['id'], Track['clips']>
-  }): Track[] {
+    previewClipsByTrackId: Map<Track['id'], RuntimeClip[]>
+  }): RuntimeTrack[] {
     options.bufferVersion()
     return resolveTimelineTracks({
       projectId: options.projectId(),

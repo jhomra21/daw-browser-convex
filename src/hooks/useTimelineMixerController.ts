@@ -1,5 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
-import type { Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from 'solid-js'
 
 import { isLocalId } from '@daw-browser/shared'
 import { resolveTrackMixView } from '~/lib/timeline-mix-authority'

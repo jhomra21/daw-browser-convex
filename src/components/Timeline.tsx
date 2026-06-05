@@ -628,10 +628,6 @@ const Timeline: Component = () => {
     handleStop();
   };
 
-  const handleRecordToggle = async () => {
-    await toggleRecording();
-  };
-
   const addAudioTrack = async () => {
     await createTimelineTrack();
   };
@@ -784,7 +780,7 @@ const Timeline: Component = () => {
     loopEnabled: loopEnabled(),
     onToggleLoop: () => setLoopEnabled((prev) => !prev),
     isRecording: isRecording(),
-    onToggleRecord: handleRecordToggle,
+    onToggleRecord: toggleRecording,
     onUndo: handleUndo,
     onRedo: handleRedo,
     onJumpToClip: (clipId: string, trackId: string, startSec: number) => jumpToClip(trackId, clipId, startSec),

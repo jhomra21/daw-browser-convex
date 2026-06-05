@@ -1,5 +1,4 @@
-import { createEffect, onCleanup } from 'solid-js'
-import type { Accessor } from 'solid-js'
+import { createEffect, onCleanup, type Accessor } from 'solid-js'
 
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { loadLocalHistory, saveLocalHistory } from '~/lib/local-history'

@@ -13,6 +13,7 @@ import type { LocalMixMap } from '~/lib/timeline-storage'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { normalizeTrackChannelRole } from '@daw-browser/shared'
 import type { Track, Clip, TrackRouting, TrackSend } from '@daw-browser/timeline-core/types'
+import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 
@@ -72,11 +73,11 @@ type ResolveTimelineTracksOptions = {
       namesByHistoryRef: Map<string, string>
     }
     clips: {
-      pendingCreatesById: Map<string, { trackId: Track['id']; clip: Clip }>
+      pendingCreatesById: Map<string, { trackId: Track['id']; clip: RuntimeClip }>
       removedIds: Set<string>
       committedEditsById: Map<string, ClipTimelinePatch>
       draftEditsById: Map<string, ClipTimelinePatch>
-      previewByTrackId: Map<Track['id'], Clip[]>
+      previewByTrackId: Map<Track['id'], RuntimeClip[]>
       historyRefsById: Map<string, string>
     }
   }
@@ -128,15 +129,15 @@ const getWaveformAssetKey = (projectId: string | undefined, sourceAssetKey: stri
     : sourceAssetKey
 }
 
-const sortTrackClips = (track: Track) => {
+const sortTrackClips = (track: RuntimeTrack) => {
   track.clips.sort((left, right) => left.startSec - right.startSec)
 }
 
 const attachClipBuffer = (
-  clip: Clip,
+  clip: RuntimeClip,
   projectId: string | undefined,
   buffers: ClipMediaCache,
-): Clip => ({
+): RuntimeClip => ({
   ...clip,
   buffer: buffers.getBuffer(clip.id) ?? clip.buffer ?? null,
   mediaStatus: buffers.getMediaStatus(clip.id),
@@ -155,7 +156,7 @@ const resolveTrackName = (input: {
   return `Track ${input.fallbackIndex}`
 }
 
-const applyClipPatch = (clip: Clip, patch: ClipTimelinePatch | undefined): Clip => {
+const applyClipPatch = (clip: RuntimeClip, patch: ClipTimelinePatch | undefined): RuntimeClip => {
   if (!patch) return clip
   return {
     ...clip,
@@ -167,20 +168,20 @@ const applyClipPatch = (clip: Clip, patch: ClipTimelinePatch | undefined): Clip 
   }
 }
 
-const removeClipFromTrack = (track: Track | undefined, clipId: string) => {
+const removeClipFromTrack = (track: RuntimeTrack | undefined, clipId: string) => {
   if (!track) return
   track.clips = track.clips.filter((clip) => clip.id !== clipId)
 }
 
-const pushClipToTrack = (track: Track | undefined, clip: Clip) => {
+const pushClipToTrack = (track: RuntimeTrack | undefined, clip: RuntimeClip) => {
   if (!track) return
   track.clips.push(clip)
 }
 
 const applyTrackMix = (
-  track: Track,
+  track: RuntimeTrack,
   options: ResolveTimelineTracksOptions,
-  tracks: Track[],
+  tracks: RuntimeTrack[],
 ) => {
   const localMixState = options.client.mix.localByTrackId[track.id]
   const canWriteSharedMix = options.client.mix.writableTrackIds.has(track.id)
@@ -274,8 +275,8 @@ export function isClipPatchReflected<TTrackId extends string>(
   return true
 }
 
-export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Track[] {
-  const projectedTracks: Track[] = []
+export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): RuntimeTrack[] {
+  const projectedTracks: RuntimeTrack[] = []
   const projectedTrackIds = new Set<Track['id']>()
   const localSnapshot = options.server.localSnapshot
   const serverTracks = localSnapshot
@@ -353,7 +354,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
     const track = trackById.get(trackId)
     const clipId = String(clipRow._id)
     if (!track || options.client.clips.removedIds.has(clipId)) continue
-    const clip: Clip = {
+    const clip: RuntimeClip = {
       id: clipId,
       historyRef: options.client.clips.historyRefsById.get(clipId) ?? clipId,
       name: clipRow.name ?? 'Clip',
@@ -399,7 +400,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
   }
 
   const applyClipEdits = (edits: Map<string, ClipTimelinePatch>) => {
-    const replacementsByTrack = new Map<Track, Map<string, Clip>>()
+    const replacementsByTrack = new Map<RuntimeTrack, Map<string, RuntimeClip>>()
     for (const [clipId, patch] of edits) {
       const currentTrackId = clipTrackIdById.get(clipId)
       const currentTrack = currentTrackId ? trackById.get(currentTrackId) : undefined
@@ -415,7 +416,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Tr
         pushClipToTrack(nextTrack, nextClip)
         clipTrackIdById.set(clipId, resolvedNextTrackId)
       } else {
-        const replacements = replacementsByTrack.get(currentTrack) ?? new Map<string, Clip>()
+        const replacements = replacementsByTrack.get(currentTrack) ?? new Map<string, RuntimeClip>()
         replacements.set(clipId, nextClip)
         replacementsByTrack.set(currentTrack, replacements)
       }

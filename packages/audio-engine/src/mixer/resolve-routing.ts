@@ -1,5 +1,4 @@
-import type { MixerChannel } from './channels'
-import { getMixerChannelRole } from './channels'
+import { getMixerChannelRole, type MixerChannel } from './channels'
 import { normalizeTrackRouting } from '@daw-browser/shared'
 import type { ResolveMixerGraphOptions, ResolvedMixerGraph, ResolvedMixerSend } from './types'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -21,7 +20,7 @@ function resolveChannelRouting(
 ): ResolvedChannelRouting {
   const normalized = normalizeTrackRouting({
     track: { id: channel.id, channelRole: channel.role },
-    sends: Array.isArray(channel.sends) ? channel.sends : [],
+    sends: channel.sends,
     outputTargetId: channel.outputTargetId,
     tracks: routingTracks,
   })

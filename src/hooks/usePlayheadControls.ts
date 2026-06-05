@@ -2,12 +2,12 @@ import { type Accessor, onCleanup } from 'solid-js'
 
 import { clientXToSec } from '~/lib/timeline-utils'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import type { Track } from '@daw-browser/timeline-core/types'
+import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { useTimelinePlayback } from './useTimelinePlayback'
 
 type Options = {
   audioEngine: AudioEngine
-  tracks: Accessor<Track[]>
+  tracks: Accessor<RuntimeTrack[]>
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
   loopEnabled?: Accessor<boolean>
   loopStartSec?: Accessor<number>

@@ -1,4 +1,5 @@
-import { buildClipHistorySnapshot, type ClipCreateSnapshot } from '~/lib/clip-create'
+import { buildClipHistorySnapshot } from '~/lib/clip-create'
+import type { ClipCreateSnapshot } from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 

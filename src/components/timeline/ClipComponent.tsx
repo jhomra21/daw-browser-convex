@@ -11,9 +11,10 @@ import { resolveClipSampleUrl } from "@daw-browser/shared";
 import { LANE_HEIGHT, PPS } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
+import type { RuntimeClip } from "~/lib/timeline-runtime-types";
 
 type ClipComponentProps = {
-  clip: Clip;
+  clip: RuntimeClip;
   trackId: Track["id"];
   isSelected: boolean;
   onPointerDown: (
@@ -49,7 +50,7 @@ type AudioWaveformLayout = {
   sourceEndSec: number;
 };
 
-function getAudioWaveformLayout(clip: Clip, cssW: number): AudioWaveformLayout {
+function getAudioWaveformLayout(clip: RuntimeClip, cssW: number): AudioWaveformLayout {
   const sourceDurationSec = Math.max(clip.sourceDurationSec ?? 0, 0);
   const padPx = Math.max(0, Math.floor((clip.leftPadSec ?? 0) * PPS));
   const offsetPx = Math.max(0, Math.floor((clip.bufferOffsetSec ?? 0) * PPS));

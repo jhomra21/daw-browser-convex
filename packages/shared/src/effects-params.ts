@@ -1,10 +1,12 @@
+export type EqBandType = 'lowpass' | 'highpass' | 'bandpass' | 'lowshelf' | 'highshelf' | 'peaking' | 'notch' | 'allpass'
+
 export type EqBandParams = {
   id: string
   frequency: number
   gainDb: number
   q: number
   enabled: boolean
-  type: BiquadFilterType
+  type: EqBandType
 }
 
 export type EqParams = {
@@ -20,24 +22,22 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
-function getDefaultEqBandType(index: number): BiquadFilterType {
+function getDefaultEqBandType(index: number): EqBandType {
   if (index === 0) return 'lowshelf'
   if (index === DEFAULT_EQ_FREQUENCIES.length - 1) return 'highshelf'
   return 'peaking'
 }
 
 export function createDefaultEqParams(): EqParams {
-  const bands: EqBandParams[] = DEFAULT_EQ_FREQUENCIES.map((frequency, index) => ({
-    id: `b${index + 1}`,
-    frequency,
-    gainDb: 0,
-    q: 1,
-    enabled: true,
-    type: getDefaultEqBandType(index),
-  }))
-
   return {
-    bands,
+    bands: DEFAULT_EQ_FREQUENCIES.map((frequency, index) => ({
+      id: `b${index + 1}`,
+      frequency,
+      gainDb: 0,
+      q: 1,
+      enabled: true,
+      type: getDefaultEqBandType(index),
+    })),
     enabled: true,
   }
 }
@@ -136,7 +136,7 @@ export function createDefaultArpeggiatorParams(): ArpeggiatorParams {
   }
 }
 
-export function supportsGain(type: BiquadFilterType): boolean {
+export function supportsGain(type: EqBandType): boolean {
   return type === 'peaking' || type === 'lowshelf' || type === 'highshelf'
 }
 

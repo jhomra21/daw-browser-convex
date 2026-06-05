@@ -1,5 +1,4 @@
-import { createEffect, createMemo, createSignal } from 'solid-js'
-import type { Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, type Accessor } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
 
 import { convexApi, useConvexQuery } from '~/lib/convex'

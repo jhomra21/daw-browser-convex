@@ -1,4 +1,5 @@
-import { buildClipCreatePayload, buildLocalClip, type ClipCreateSnapshot } from "~/lib/clip-create";
+import { buildLocalClip } from "~/lib/clip-create";
+import { buildClipCreatePayload, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipTiming } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";

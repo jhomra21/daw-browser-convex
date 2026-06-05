@@ -15,7 +15,7 @@ export type ExportRange =
   | { mode: 'custom'; startSec: number; endSec: number }
 
 type ExportRequest = {
-  tracks: Track[]
+  tracks: Track<AudioBuffer>[]
   bpm: number
   range: ExportRange
   sampleRate?: number
@@ -36,7 +36,7 @@ type ExportResult = {
   sampleRate: number
 }
 
-function lastClipEndSec(tracks: Track[]): number {
+function lastClipEndSec(tracks: Track<AudioBuffer>[]): number {
   let maxEnd = 0
   for (const track of tracks) {
     for (const clip of track.clips) {
@@ -46,7 +46,7 @@ function lastClipEndSec(tracks: Track[]): number {
   return Math.max(0.001, maxEnd)
 }
 
-function computeRangeSec(tracks: Track[], range: ExportRange): { start: number; end: number } {
+function computeRangeSec(tracks: Track<AudioBuffer>[], range: ExportRange): { start: number; end: number } {
   if (range.mode === 'whole') {
     return { start: 0, end: lastClipEndSec(tracks) }
   }

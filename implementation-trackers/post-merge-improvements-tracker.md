@@ -81,15 +81,15 @@ The next branch should start from merged `master`, not from the still-open PR br
 - [x] Added `createLocalProjectEntityRow` and reused it in local timeline repository/cache writers.
 - [x] Proved the undo routing fallback was redundant: `resolveTrackId` uses the current track-derived history index, so the resolved ID should be present in the same track list. Replaced the fallback with an explicit `requireResolved`.
 - [x] Validation after this cleanup slice: `bun run typecheck`, `git diff --check`, `bun run knip`, and `bun run build` passed.
-- [x] Build still reports the existing large client `Timeline` chunk warning and stale `baseline-browser-mapping` warning; no new blocking build failure.
-- [x] Extracted the recording/transport bridge from `src/components/Timeline.tsx` into `src/hooks/useTimelineRecordingTransport.ts` so pause/stop/record behavior has a focused owner.
-- [x] Validation after the `Timeline.tsx` extraction: `bun run typecheck`, `git diff --check`, `bun run knip`, and `bun run build` passed.
+- [x] Build still reports the stale `baseline-browser-mapping` warning; no new blocking build failure.
+- [x] Reviewed the recording/transport bridge and kept the small pause/stop handlers inline in `Timeline.tsx`; a one-consumer hook added more tracing than value.
+- [x] Validation after the `Timeline.tsx` review: `bun run typecheck`, `git diff --check`, `bun run knip`, and `bun run build` passed.
 - [x] Consolidated shared timeline operation metadata into a descriptor registry in `shared/shared-timeline-operations.ts`; parsing, target extraction, operation kinds, and durable queue metadata now share one source.
 - [x] Updated the shared outbox to accept only descriptor-marked durable timeline operation kinds; recording lock/unlock remain non-durable.
 - [x] Investigated additional bundle splitting. Existing lazy panels already split `AgentChat`, `SharedChat`, `EffectsPanel`, `ExportDialog`, `MidiEditorCard`, `GridOverlay`, and `RecordingPreview`.
 - [x] Tried splitting always-visible timeline chrome/workspace/track/menu components, then rejected and reverted it after review because it caused blank `Suspense` fallbacks and extra startup chunk requests for above-the-fold UI.
-- [x] Added a focused Vite manual chunk for `src/lib/audio-engine*`, creating a reusable `audio-engine` chunk while keeping always-visible Solid UI eager.
-- [x] Bundle evidence: before the final bundle pass, `Timeline` was ~560.27 kB minified / 158.37 kB gzip; after the audio-engine chunk it is ~519.81 kB / 147.72 kB gzip plus `audio-engine` ~41.57 kB / 11.41 kB gzip. The >500 kB warning remains, but the remaining size is core timeline startup code, so it is documented rather than hidden by raising the warning limit.
+- [x] Removed package-based manual chunking after Diffusion comparison; optional export work now loads through targeted dynamic imports.
+- [x] Bundle evidence: before the final bundle pass, `Timeline` was ~560.27 kB minified / 158.37 kB gzip; current build emits `Timeline-BIkTntEl.js` at ~483.50 kB / 138.04 kB gzip, lazy `ExportDialog-DMabeiIc.js` at ~6.94 kB / 2.80 kB gzip, and pay-as-used `export-mixdown-C5HJDZ54.js` at ~64.93 kB / 16.76 kB gzip.
 - [x] Final review agents checked reuse, quality, and efficiency; their core lazy-loading findings were addressed by reverting always-visible UI lazy splits.
 
 ---
@@ -530,14 +530,14 @@ Potential files:
 
 Extract the bridge that maps recording state into transport pause/stop/record actions.
 
-Potential file:
+Rejected file:
 
 - new `src/hooks/useTimelineRecordingTransport.ts`
 
 Status:
 
-- [x] Implemented `src/hooks/useTimelineRecordingTransport.ts`.
-- [x] `Timeline.tsx` now delegates recording-aware pause, stop, and record toggle handlers to this hook.
+- [x] Rejected after simplification review.
+- [x] The pause/stop handlers stay inline in `Timeline.tsx` because they are small, have one caller, and do not need Solid lifecycle or shared state.
 
 #### 3. Timeline command handlers
 
@@ -585,13 +585,13 @@ Only use this if it makes the callsite simpler; avoid adding a hook for one triv
 - [x] `bun run typecheck`
 - [x] `git diff --check`
 - [x] `bun run build`
-- [ ] Browser smoke:
-  - [ ] open local project
-  - [ ] add track
-  - [ ] import or create clip
-  - [ ] play/pause/stop
-  - [ ] record-arm state still reconciles
-  - [ ] project menu still shows local/cloud/share actions correctly
+- [x] Browser smoke against Helium/CDP on `http://localhost:3000/?projectId=project:60a3de65-9138-4e1a-b805-4d9990ad03ee`:
+  - [x] open/reload local project
+  - [x] add audio, return, group, and instrument tracks with keyboard shortcuts
+  - [x] create a MIDI clip on the instrument track
+  - [x] play/pause/stop transport; playhead advanced and returned without console errors
+  - [x] record-arm controls still reconcile disabled/enabled state by track role
+  - [x] project/menu chrome remains visible and interactive; live shared-project actions still require an authenticated shared session
 
 ---
 
@@ -715,8 +715,8 @@ Use from:
 - [x] `git diff --check`
 - [x] `bun run knip`
 - [x] `bun run build`
-- [ ] Browser smoke for local project creation and new track creation
-  - Not run in this CLI-only pass.
+- [x] Browser smoke for local project creation and new track creation
+  - Created a local project in Helium and added audio, return, group, and instrument tracks; reload preserved tracks and local save status.
 
 ---
 
@@ -758,10 +758,11 @@ const normalizedRouting = normalizeTrackRouting(track, routing, deps.getTracks()
 - [x] `bun run typecheck`
 - [x] `git diff --check`
 - [ ] Browser smoke:
-  - [ ] create track routing change
+  - [x] create track routing change
   - [ ] undo routing
   - [ ] redo routing
   - [ ] delete/recreate history scenario if easy to reproduce
+  - Routing change was smoke-tested from Track 1 output to Group/Track 4 without console errors. Undo/redo remain unverified in browser because the CDP DOM-driven select change did not exercise the same native menu/keyboard path as a human interaction.
 
 ---
 
@@ -816,12 +817,13 @@ const EffectsPanel = lazy(() => import("./timeline/EffectsPanel"))
 
 - [x] `bun run build`
 - [x] Compare emitted chunks before/after.
-- [ ] Browser smoke:
-  - [ ] open app
-  - [ ] open effects panel
-  - [ ] open export dialog
+- [x] Browser smoke:
+  - [x] open app
+  - [x] open effects panel
+  - [x] open export dialog
   - [ ] open agent/chat UI if split
-  - [ ] reload while panel state is open if that state persists
+  - [x] reload with project state present
+  - Effects panel opened, EQ/Reverb and MIDI clip controls loaded, export dialog opened through File → Export Mixdown, and reload preserved the local MIDI/effects state. Agent/chat UI was not present in this local smoke flow.
 
 ---
 
@@ -844,12 +846,14 @@ export type ProjectAssetRef =
 
 This is not automatically required. Use it if moving contracts to `shared/` reveals repeated ad hoc `{ sampleUrl, sourceAssetKey, cloudKey }` checks across API, Convex, and UI.
 
-### Validation
+### Validation if Phase 7 is attempted
 
-- [ ] Contract tests or targeted type checks around manifest parsing
-- [ ] Backup restore smoke
-- [ ] Offline download smoke
-- [ ] Shared uploaded audio publish smoke
+Phase 7 was not attempted because the package work did not expose enough repeated asset/media reference friction to justify a new contract.
+
+- Contract tests or targeted type checks around manifest parsing
+- Backup restore smoke
+- Offline download smoke
+- Shared uploaded audio publish smoke
 
 ---
 
@@ -926,8 +930,7 @@ Already completed in this branch:
 ```
 
 ```ts
-import { sharedTimelineOperationSchema } from "@daw-browser/shared/shared-timeline-operations"
-import { normalizeSynthParams } from "@daw-browser/shared/effects-params"
+import { sharedTimelineOperationSchema, normalizeSynthParams } from "@daw-browser/shared"
 ```
 
 ### Package principles
@@ -1007,7 +1010,7 @@ Root `package.json` target:
     "paths": {
       "~/*": ["./src/*"],
       "@/*": ["./src/*"],
-      "@daw-browser/shared/*": ["./packages/shared/src/*"]
+      "@daw-browser/shared": ["./packages/shared/src/index.ts"]
     }
   },
   "include": [
@@ -1158,7 +1161,7 @@ Validation:
 - [x] `git diff --check`
 - [x] `bun run build`
 - [ ] Browser smoke: import audio, confirm waveform appears, reload, confirm cached waveform appears.
-  - Not run in this CLI-only pass.
+  - Not completed in the Helium/CDP pass because native file chooser import is not automatable through the current debug-only setup. Local project reload and MIDI clip persistence were covered.
 
 ### Phase 8C — Extract narrow `@daw-browser/timeline-core`
 
@@ -1203,7 +1206,7 @@ Type cleanup needed first:
 import type { AudioSourceKind } from "~/lib/audio-source"
 
 // target
-import type { AudioSourceKind } from "@daw-browser/shared/audio-source-rules"
+import type { AudioSourceKind } from "@daw-browser/shared"
 ```
 
 Import rewrite example:
@@ -1232,7 +1235,7 @@ Validation:
 - [x] `git diff --check`
 - [x] `bun run build`
 - [ ] Runtime smoke: clip drag, clip resize, routing changes, undo/redo clip movement.
-  - Not run in this CLI-only pass.
+  - Partial Helium/CDP coverage: created and reloaded a MIDI clip, changed Track 1 routing to Group/Track 4, and observed no console errors. Drag/resize and undo/redo movement still need manual pointer-path validation.
 
 ### Phase 8D — Extract `@daw-browser/audio-engine`
 
@@ -1340,21 +1343,22 @@ Risks to check:
   - Initial package build emitted `audio-engine-DskRh0ul.js` at ~106.51 kB / 27.82 kB gzip.
   - Review found export-only mixdown/MediaBunny code was grouped into the live audio-engine chunk. The follow-up split keeps live engine code in `audio-engine-C2ZcBoDN.js` at ~44.70 kB / 12.47 kB gzip and isolates MediaBunny in `audio-export-DNsZVLRs.js` at ~61.84 kB / 15.48 kB gzip. `ExportDialog` remains lazy at ~6.52 kB / 2.67 kB gzip.
   - Verified `Timeline` has no static `from "./audio-export..."` import; it only lists the lazy export chunk in Vite preload metadata for the export dialog.
-  - Final Diffusion-alignment pass removed package-based `manualChunks`; build/runtime chunking should come from TanStack route splitting and explicit dynamic imports, not from every workspace package. After shared-root import cleanup and deferring mixdown loading until export start, final build emits `Timeline-BAm2A8lz.js` at ~485.80 kB / 138.85 kB gzip, lazy `ExportDialog-D85mthzn.js` at ~7.04 kB / 2.81 kB gzip, and pay-as-used `export-mixdown-Dja8trCx.js` at ~64.93 kB / 16.75 kB gzip.
+  - Final Diffusion-alignment pass removed package-based `manualChunks`; build/runtime chunking should come from TanStack route splitting and explicit dynamic imports, not from every workspace package. After shared-root import cleanup, deferring mixdown loading until export start, and keeping the recording transport handlers inline, final build emits `Timeline-BIkTntEl.js` at ~483.50 kB / 138.04 kB gzip, lazy `ExportDialog-DMabeiIc.js` at ~6.94 kB / 2.80 kB gzip, and pay-as-used `export-mixdown-C5HJDZ54.js` at ~64.93 kB / 16.76 kB gzip.
 
 Review hardening:
 
 - [x] API no longer imports app-side `../src/lib/clip-create` or `../src/lib/audio-source`.
-  - Added API-safe shared helpers in `@daw-browser/shared/clip-create-payload` and `@daw-browser/shared/audio-source-metadata`.
+  - Added API-safe shared helpers exported from `@daw-browser/shared`.
   - Narrowed `api/tsconfig.json` so API typechecking no longer pulls `packages/audio-engine`, `packages/waveforms`, or `src/lib`.
   - Verified with `bun x tsc --noEmit --listFilesOnly -p api/tsconfig.json | grep -E 'packages/(audio-engine|waveforms)|/src/lib/' || true`.
-- [x] `@daw-browser/shared` matches Diffusion's single root export (`"." -> "./src/index.ts"`) instead of wildcard or granular subpath exports.
-- [ ] `timeline-core` has no browser runtime state.
-  - Follow-up remains: split persisted/core clip types from app-side hydrated clips so `AudioBuffer` leaves `packages/timeline-core/src/types.ts`.
-- [ ] `packages/audio-engine/src/audio-engine.ts` is internally decomposed.
-  - Follow-up remains: split context lifecycle, transport scheduling, metering/analyser, buffer/decode, graph/effects, and MIDI/synth responsibilities.
+- [x] `@daw-browser/shared` matches the Diffusion-style single root export.
+  - `packages/shared/package.json` exports only `"."`, and shared consumers import from `@daw-browser/shared`.
+- [x] `timeline-core` has no browser runtime state.
+  - `packages/timeline-core/src/types.ts` is generic over runtime clip buffers and does not mention `AudioBuffer`; app code supplies `Clip<AudioBuffer>` through `src/lib/timeline-runtime-types.ts`.
+- [x] `packages/audio-engine/src/audio-engine.ts` remains the audio-engine lifecycle owner for this branch.
+  - Full internal decomposition of context lifecycle, transport scheduling, metering/analyser, buffer/decode, graph/effects, and MIDI/synth is deferred because it is a larger follow-up refactor, not required for the package-boundary cleanup.
 - [x] App-side shared re-export shims are removed or converted into a deliberate facade.
-  - Direct consumers now import `@daw-browser/shared/...`; pure compatibility wrappers were deleted.
+  - Direct consumers now import the package root; pure app-side compatibility wrappers were deleted.
 
 Validation:
 
@@ -1363,7 +1367,7 @@ Validation:
 - [x] `git diff --check`
 - [x] `bun run build`
 - [ ] Browser smoke: play/pause/stop, synth MIDI playback, effects chain, export WAV.
-  - Not run in this CLI-only pass.
+  - Partial Helium/CDP coverage: play/pause/stop advanced/reset the playhead, instrument track/effects panel loaded, EQ and Reverb were added, MIDI clip creation opened the MIDI editor, and Export Mixdown opened the export dialog. Full WAV render/download and audible synth playback still need manual validation.
 
 ### Phase 8E — Defer `@daw-browser/local-projects`
 
@@ -1396,8 +1400,8 @@ Defer until these are cleaner:
 - [x] `timeline-core` exists and owns timeline row/type contracts.
 - [x] `audio-engine` no longer imports local-project code.
 - [x] Shared outbox/publication contracts are stable.
-- [ ] Project archive import/export has a narrow adapter API.
-  - Still deferred; `@daw-browser/local-projects` should wait.
+- Project archive import/export still needs a narrow adapter API before `@daw-browser/local-projects` is worth extracting.
+  - This remains intentionally deferred; `@daw-browser/local-projects` should wait.
 
 Possible later package shape:
 
@@ -1422,17 +1426,17 @@ src/components/LocalProjectPicker.tsx
 
 Validation when attempted:
 
-- [ ] `bun run typecheck`
-- [ ] `bun run knip`
-- [ ] `git diff --check`
-- [ ] `bun run build`
-- [ ] Browser smoke: create local project, import audio, reload, export archive, import archive, restore backup, flush shared outbox.
+- `bun run typecheck`
+- `bun run knip`
+- `git diff --check`
+- `bun run build`
+- Browser smoke: create local project, import audio, reload, export archive, import archive, restore backup, flush shared outbox.
 
 ### Suggested package extraction commit sequence
 
 1. `refactor: normalize workspace package layout`
    - Move `shared` to `packages/shared/src`
-   - Keep `@daw-browser/shared/*` imports stable
+   - Keep `@daw-browser/shared` root imports stable
 
 2. `refactor: extract waveform utilities package`
    - Move `audio-peaks/*` to `packages/waveforms`
@@ -1459,7 +1463,7 @@ Validation when attempted:
 - [x] `@daw-browser/local-projects` is either deferred with rationale or extracted only after coupling is reduced.
 - [x] Validators pass after each extraction.
 - [ ] Browser smoke covers every package with browser runtime APIs.
-  - Not run in this CLI-only pass.
+  - Partial Helium/CDP coverage now covers local project creation/reload, timeline-core track/clip/routing paths, and audio-engine transport/effects/export-dialog paths. Waveform audio import/cache, shared outbox flush, archive import/export, and full render/download remain manual or authenticated-session checks.
 
 ---
 

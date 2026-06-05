@@ -18,6 +18,7 @@ import { buildClipDeleteHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry, TrackEffectSnapshot } from '~/lib/undo/types'
 import type { Clip, SelectedClip, Track } from '@daw-browser/timeline-core/types'
+import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 
@@ -27,8 +28,8 @@ type ConvexApiType = typeof import('~/lib/convex').convexApi
 type TrackDeleteResult = FunctionReturnType<ConvexApiType['tracks']['remove']>
 
 type TimelineClipActionsOptions = {
-  tracks: Accessor<Track[]>
-  insertLocalClip: (trackId: Track['id'], clip: Clip) => void
+  tracks: Accessor<RuntimeTrack[]>
+  insertLocalClip: (trackId: Track['id'], clip: RuntimeClip) => void
   removeLocalClips: (clipIds: Iterable<string>) => void
   removeLocalTrack: (trackId: Track['id']) => void
   canWriteClip: (clipId: string) => boolean
@@ -203,7 +204,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     if (writableSelectedIds.size === 0) return
 
     const tsSnapshot = tracks()
-    const byTrack = new Map<Track['id'], { track: Track; clips: Clip[] }>()
+    const byTrack = new Map<Track['id'], { track: RuntimeTrack; clips: RuntimeClip[] }>()
     for (const track of tsSnapshot) {
       const selected = track.clips.filter(clip => writableSelectedIds.has(clip.id))
       if (selected.length > 0) byTrack.set(track.id, { track, clips: selected })

@@ -5,6 +5,7 @@ import type { DuplicatedClipPlacement, MultiDragSnapshot } from "~/lib/clip-drag
 import { createTimelineTrackIndex, type TimelineTrackIndex } from "@daw-browser/timeline-core/track-index";
 import { PPS, quantizeSecToGrid, yToLaneIndex } from "~/lib/timeline-utils";
 import type { Clip, Track, TrackId } from "@daw-browser/timeline-core/types";
+import type { RuntimeClip, RuntimeTrack } from "~/lib/timeline-runtime-types";
 
 type DraggingIds = { trackId: Track["id"]; clipId: string };
 type ClipMove = { clipId: string; trackId: Track["id"]; startSec: number };
@@ -19,9 +20,9 @@ type ClipDragStart = {
 export const buildClipDragStart = (input: {
   trackId: Track["id"];
   clipId: string;
-  clip: Clip;
-  tracks: Track[];
-  lookup: TimelineTrackIndex;
+  clip: RuntimeClip;
+  tracks: RuntimeTrack[];
+  lookup: TimelineTrackIndex<AudioBuffer>;
   selectedClipIds: Set<string>;
   canWriteClip: (clipId: string) => boolean;
 }): ClipDragStart => {

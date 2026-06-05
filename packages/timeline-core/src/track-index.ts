@@ -1,28 +1,28 @@
-import type { Clip, Track } from './types'
+import type { Clip, Track, TrackId } from './types'
 
-export type TimelineClipEntry = {
-  trackId: Track['id']
+export type TimelineClipEntry<TBuffer = never> = {
+  trackId: TrackId
   trackIndex: number
-  track: Track
-  clip: Clip
+  track: Track<TBuffer>
+  clip: Clip<TBuffer>
 }
 
-export type TimelineTrackIndex = {
-  trackById: Map<Track['id'], Track>
-  trackIndexById: Map<Track['id'], number>
-  clipById: Map<string, Clip>
-  clipTrackIdById: Map<string, Track['id']>
-  clipEntryById: Map<string, TimelineClipEntry>
-  clipIdsByTrackId: Map<Track['id'], string[]>
+export type TimelineTrackIndex<TBuffer = never> = {
+  trackById: Map<TrackId, Track<TBuffer>>
+  trackIndexById: Map<TrackId, number>
+  clipById: Map<string, Clip<TBuffer>>
+  clipTrackIdById: Map<string, TrackId>
+  clipEntryById: Map<string, TimelineClipEntry<TBuffer>>
+  clipIdsByTrackId: Map<TrackId, string[]>
 }
 
-export function createTimelineTrackIndex(tracks: Track[]): TimelineTrackIndex {
-  const trackById = new Map<Track['id'], Track>()
-  const trackIndexById = new Map<Track['id'], number>()
-  const clipById = new Map<string, Clip>()
-  const clipTrackIdById = new Map<string, Track['id']>()
-  const clipEntryById = new Map<string, TimelineClipEntry>()
-  const clipIdsByTrackId = new Map<Track['id'], string[]>()
+export function createTimelineTrackIndex<TBuffer = never>(tracks: Track<TBuffer>[]): TimelineTrackIndex<TBuffer> {
+  const trackById = new Map<TrackId, Track<TBuffer>>()
+  const trackIndexById = new Map<TrackId, number>()
+  const clipById = new Map<string, Clip<TBuffer>>()
+  const clipTrackIdById = new Map<string, TrackId>()
+  const clipEntryById = new Map<string, TimelineClipEntry<TBuffer>>()
+  const clipIdsByTrackId = new Map<TrackId, string[]>()
 
   for (let trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
     const track = tracks[trackIndex]

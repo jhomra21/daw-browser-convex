@@ -1,5 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
-import type { Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
 import type { UseQueryResult } from '@tanstack/solid-query'
 

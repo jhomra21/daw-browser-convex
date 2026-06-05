@@ -10,6 +10,7 @@ import { createOptimisticTrack, pushTrackCreateHistory } from '~/lib/tracks'
 import type { TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Track } from '@daw-browser/timeline-core/types'
+import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 
@@ -24,7 +25,7 @@ type TimelineTrackCreateBehavior = {
 }
 
 type UseTimelineActionsOptions = {
-  tracks: Accessor<Track[]>
+  tracks: Accessor<RuntimeTrack[]>
   room: {
     projectId: Accessor<string>
     setProjectId: (projectId: string) => void
@@ -38,9 +39,9 @@ type UseTimelineActionsOptions = {
     pushHistory: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   }
   navigation: {
-    trackLookup: Accessor<TimelineTrackIndex>
+    trackLookup: Accessor<TimelineTrackIndex<AudioBuffer>>
     selection: TimelineSelectionController
-    setPlayhead: (nextSec: number, tracks: Track[]) => void
+    setPlayhead: (nextSec: number, tracks: RuntimeTrack[]) => void
     openMidiEditorFor: (clipId: string) => void
     ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
     getScrollElement: () => HTMLDivElement | undefined

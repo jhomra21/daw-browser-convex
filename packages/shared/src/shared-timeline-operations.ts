@@ -5,7 +5,6 @@ import type {
   ReverbParams,
   SynthWave,
 } from './effects-params'
-import { z } from 'zod'
 
 export type MoveClipInput = {
   clipId: string
@@ -441,12 +440,7 @@ export const readSharedTimelineOperationTargets = (operation: SharedTimelineOper
   findSharedTimelineOperationDescriptor(operation.kind)?.targets(operation.payload) ?? emptyTargets()
 )
 
-const parseSharedTimelineOperation = (value: unknown): SharedTimelineOperation | null => {
+export const parseSharedTimelineOperation = (value: unknown): SharedTimelineOperation | null => {
   if (!isRecord(value) || !isRecord(value.payload)) return null
   return findSharedTimelineOperationDescriptor(value.kind)?.parse(value.payload) ?? null
 }
-
-export const sharedTimelineOperationSchema = z.preprocess(
-  parseSharedTimelineOperation,
-  z.custom<SharedTimelineOperation>((value) => value !== null),
-)

@@ -1,7 +1,7 @@
 import type { z } from 'zod'
-import type { ConvexHttpClient } from 'convex/browser'
 import { api as generatedConvexApi } from '../convex/_generated/api'
 import type { Id } from '../convex/_generated/dataModel'
+import type { ApiConvexClient } from './convex-auth'
 import {
   AddMidiClipCommandSchema,
   AddSampleClipsCommandSchema,
@@ -69,8 +69,8 @@ type SampleDoc = {
 }
 
 type ConvexClientLike = {
-  query: ConvexHttpClient['query']
-  mutation: ConvexHttpClient['mutation']
+  query: ApiConvexClient['query']
+  mutation: ApiConvexClient['mutation']
 }
 
 type ConvexApi = typeof generatedConvexApi
@@ -257,7 +257,7 @@ export function createAgentActions(context: AgentActionContext) {
       return { error: `No track at index ${input.outputTrackIndex}` } as const
     }
 
-    const sends = Array.isArray(input.sends)
+    const sends = input.sends
       ? (() => {
           const resolved = []
           for (const send of input.sends) {

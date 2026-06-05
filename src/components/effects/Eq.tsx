@@ -4,6 +4,7 @@ import Knob from '~/components/ui/knob'
 import {
   supportsGain,
   type EqBandParams,
+  type EqBandType,
 } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
 
@@ -27,7 +28,7 @@ const GAIN_MAX = 24
 const Q_MIN = 0.2
 const Q_MAX = 18
 
-const FILTER_TYPES: { value: BiquadFilterType; label: string; short: string }[] = [
+const FILTER_TYPES: { value: EqBandType; label: string; short: string }[] = [
   { value: 'lowpass', label: 'Low Pass', short: 'LP' },
   { value: 'highpass', label: 'High Pass', short: 'HP' },
   { value: 'bandpass', label: 'Band Pass', short: 'BP' },

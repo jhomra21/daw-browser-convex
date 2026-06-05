@@ -1,6 +1,6 @@
 import type { Accessor } from 'solid-js'
 
-import type { ClipCreateSnapshot } from '~/lib/clip-create'
+import type { ClipCreateSnapshot } from '@daw-browser/shared'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import { isLocalId } from '@daw-browser/shared'

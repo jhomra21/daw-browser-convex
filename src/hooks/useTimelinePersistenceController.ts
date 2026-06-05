@@ -1,5 +1,4 @@
-import type { Accessor } from "solid-js";
-import { createEffect, onCleanup } from "solid-js";
+import { createEffect, onCleanup, type Accessor } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { ClipBufferWriter } from "~/lib/clip-buffer-cache";
 import { isLocalId } from "@daw-browser/shared";

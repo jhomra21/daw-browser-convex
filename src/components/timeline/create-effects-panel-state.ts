@@ -12,7 +12,7 @@ import {
 } from "~/components/effects/synth-card-bounds";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
-import { buildClipCreatePayload, type ClipCreateSnapshot } from "~/lib/clip-create";
+import { buildClipCreatePayload, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { convexApi } from "~/lib/convex";
 import type { LocalEffectRow } from "~/lib/local-effects";
 import { isLocalId } from "@daw-browser/shared";

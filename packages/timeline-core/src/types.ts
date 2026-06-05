@@ -13,11 +13,14 @@ export type TrackRouting = {
   sends?: TrackSend[]
 }
 
-export type Clip = {
+type ClipRuntimeFields<TBuffer> = [TBuffer] extends [never]
+  ? unknown
+  : { buffer?: TBuffer | null }
+
+export type Clip<TBuffer = never> = {
   id: string
   historyRef?: string
   name: string
-  buffer?: AudioBuffer | null
   mediaStatus?: 'missing' | 'permission-denied'
   startSec: number
   duration: number
@@ -37,14 +40,14 @@ export type Clip = {
     notes: { beat: number; length: number; pitch: number; velocity?: number }[]
   }
   midiOffsetBeats?: number
-}
+} & ClipRuntimeFields<TBuffer>
 
-export type Track = {
+export type Track<TBuffer = never> = {
   id: TrackId
   historyRef?: string
   name: string
   volume: number
-  clips: Clip[]
+  clips: Clip<TBuffer>[]
   muted?: boolean
   soloed?: boolean
   lockedBy?: string | null

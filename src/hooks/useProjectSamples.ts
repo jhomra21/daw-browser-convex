@@ -1,6 +1,5 @@
 import type { FunctionReturnType } from 'convex/server'
-import { createEffect, createMemo, createSignal, on } from 'solid-js'
-import type { Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, on, type Accessor } from 'solid-js'
 import { useConvexQuery, convexApi } from '~/lib/convex'
 import { useQuery } from '@tanstack/solid-query'
 import { getPersistedAudioSource, type AudioSourceKind, type AudioSourceMetadata } from '~/lib/audio-source'

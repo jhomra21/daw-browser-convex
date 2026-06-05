@@ -1,5 +1,5 @@
 import { type Component, createSignal, Show } from 'solid-js'
-import type { Track } from '@daw-browser/timeline-core/types'
+import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '~/components/ui/dialog'
 import { Button } from '~/components/ui/button'
 import type { ExportRange } from '@daw-browser/audio-engine/export-mixdown'
@@ -27,7 +27,7 @@ type ExportUploadResponse = {
 type Props = {
   isOpen: boolean
   onClose: () => void
-  tracks: Track[]
+  tracks: RuntimeTrack[]
   bpm: number
   loopEnabled: boolean
   loopStartSec: number
@@ -110,7 +110,7 @@ const ExportDialog: Component<Props> = (props) => {
     } else {
       rs = range.startSec; re = range.endSec
     }
-    const intersects = (c: Track['clips'][number]) => {
+    const intersects = (c: RuntimeClip) => {
       const clipStart = c.startSec
       const clipEnd = c.startSec + c.duration
       return clipEnd > rs && clipStart < re
@@ -133,6 +133,7 @@ const ExportDialog: Component<Props> = (props) => {
     setBusy(true)
     try {
       const range = computeRange()
+      const mixdownModule = import('@daw-browser/audio-engine/export-mixdown')
       await ensureBuffersForRange(range)
       const localOnly = props.projectId ? isLocalId('project', props.projectId) : false
       const fx: ExportFx = { trackFx: {} }
@@ -146,7 +147,7 @@ const ExportDialog: Component<Props> = (props) => {
         applyRoomEffectRowsToFx(fx, rows)
       } catch {}
 
-      const { renderMixdown, encodeAudioBuffer } = await import('@daw-browser/audio-engine/export-mixdown')
+      const { renderMixdown, encodeAudioBuffer } = await mixdownModule
       const rendered = await renderMixdown({ tracks: props.tracks, bpm: props.bpm, range, fx })
       const enc = await encodeAudioBuffer(rendered)
       const fname = `mixdown_${new Date().toISOString().replace(/[-:TZ.]/g, '')}${enc.fileExtension}`

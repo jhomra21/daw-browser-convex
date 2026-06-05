@@ -2,13 +2,13 @@ import { For, type JSX } from "solid-js";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
 import TrackSidebar from "~/components/timeline/TrackSidebar";
-import TimelineOverlays from "~/components/timeline/timeline-overlays";
+import TimelineOverlays, { type TimelineMidiBounds } from "~/components/timeline/timeline-overlays";
 import { FX_PANEL_HEIGHT_PX, LANE_HEIGHT, PPS, RULER_HEIGHT } from "~/lib/timeline-utils";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionState";
 import type { Clip, Track, TrackId, TrackSend } from "@daw-browser/timeline-core/types";
 import type { TimelineTrackIndex } from "@daw-browser/timeline-core/track-index";
-import type { TimelineMidiBounds } from "~/components/timeline/timeline-overlays";
+import type { RuntimeTrack } from "~/lib/timeline-runtime-types";
 
 type Props = {
   containerRef: (el: HTMLDivElement) => void;
@@ -16,7 +16,7 @@ type Props = {
   bottomFXOpen: boolean;
   durationSec: number;
   sidebarWidth: number;
-  tracks: Track[];
+  tracks: RuntimeTrack[];
   dropAtNewTrack: boolean;
   dropTargetLane: number | null;
   bpm: number;
@@ -36,7 +36,7 @@ type Props = {
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>;
   replaceMissingMediaClip: (trackId: Track["id"], clipId: string) => Promise<void>;
   removeMissingMediaClip: (trackId: Track["id"], clipId: string) => Promise<void>;
-  trackLookup: TimelineTrackIndex;
+  trackLookup: TimelineTrackIndex<AudioBuffer>;
   openMidiEditorFor: (clipId: string) => void;
   marqueeRect: { x: number; y: number; width: number; height: number } | null;
   recording: {

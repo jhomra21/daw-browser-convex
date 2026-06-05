@@ -1,4 +1,5 @@
-import { buildClipCreatePayload, buildLocalClip, createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory, type ClipCreateSnapshot } from '~/lib/clip-create'
+import { buildLocalClip, createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory } from '~/lib/clip-create'
+import { buildClipCreatePayload, type ClipCreateSnapshot } from '@daw-browser/shared'
 import { createAudioAssetKey, getAudioSourceMetadata, type AudioSourceKind } from '~/lib/audio-source'
 import { isLocalProjectAssetKey } from '@daw-browser/shared'
 import type { ClipBuffers } from '~/lib/clip-buffer-cache'

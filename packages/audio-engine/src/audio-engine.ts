@@ -7,7 +7,10 @@ import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
 import type { ResolvedMixerGraph } from './mixer/types'
 import { createSynthVoiceOscillators, getSynthVoiceConfig, getSynthVoiceVelocity, scheduleSynthVoiceEnvelope } from './synth-voice'
-import type { Track, Clip } from '@daw-browser/timeline-core/types'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
+
+type RuntimeClip = Clip<AudioBuffer>
+type RuntimeTrack = Track<AudioBuffer>
 
 const MASTER_FADE_DOWN_SEC = 0.002
 const MASTER_FADE_HOLD_SEC = 0.001
@@ -22,8 +25,8 @@ type ScheduleOptions = {
 }
 
 type ScheduledClipEntry = {
-  track: Track
-  clip: Clip
+  track: RuntimeTrack
+  clip: RuntimeClip
   startSec: number
   endSec: number
 }
@@ -78,7 +81,7 @@ export class AudioEngine {
   private audioCtx: AudioContext | null = null
   private masterGain: GainNode | null = null
   private destination: AudioDestinationNode | null = null
-  private tracksSnapshot: Track[] = []
+  private tracksSnapshot: RuntimeTrack[] = []
   private mixerRuntime = {
     gains: new Map<string, GainNode>(),
     outputs: new Map<string, GainNode>(),
@@ -142,7 +145,7 @@ export class AudioEngine {
   private pendingMeterLevels = new Map<string, TrackStereoLevels>()
   private meterListeners = new Set<TrackStereoLevelsListener>()
   private meterFlushHandle: number | null = null
-  private scheduleIndexCache = new WeakMap<Track[], ScheduleIndex>()
+  private scheduleIndexCache = new WeakMap<RuntimeTrack[], ScheduleIndex>()
   private zeroTrackStereoLevels: TrackStereoLevels = { left: 0, right: 0 }
 
   private ensureMeterWorkletModule() {
@@ -292,7 +295,7 @@ export class AudioEngine {
     this.mixerRuntime.sendGains.delete(trackId)
   }
 
-  private buildResolvedMixerGraph(tracks: Track[]): ResolvedMixerGraph {
+  private buildResolvedMixerGraph(tracks: RuntimeTrack[]): ResolvedMixerGraph {
     return resolveMixerGraph({ channels: createMixerChannels(tracks) })
   }
 
@@ -862,7 +865,7 @@ export class AudioEngine {
     this.rebuildTrackRouting(trackId, trackNodes)
   }
 
-  updateTrackGains(tracks: Track[]) {
+  updateTrackGains(tracks: RuntimeTrack[]) {
     this.tracksSnapshot = tracks
     if (!this.audioCtx || !this.masterGain) return
 
@@ -1014,7 +1017,7 @@ export class AudioEngine {
     this.resetMetronomeState()
   }
 
-  private scheduleMidiClip(track: Track, clip: Clip, playheadSec: number, nowCtx: number, endLimitSec?: number): boolean {
+  private scheduleMidiClip(track: RuntimeTrack, clip: RuntimeClip, playheadSec: number, nowCtx: number, endLimitSec?: number): boolean {
     if (!this.audioCtx) return false
     const midi: any = clip.midi
     if (!midi || !Array.isArray(midi.notes)) return false
@@ -1109,7 +1112,7 @@ export class AudioEngine {
 
     return true
   }
-  private scheduleAudioClip(clip: Clip, input: GainNode, playheadSec: number, nowCtx: number, endLimitSec?: number) {
+  private scheduleAudioClip(clip: RuntimeClip, input: GainNode, playheadSec: number, nowCtx: number, endLimitSec?: number) {
     if (!this.audioCtx || !clip.buffer) return
 
     const window = getPlayableAudioWindow({
@@ -1139,7 +1142,7 @@ export class AudioEngine {
     clipSet.add(source)
   }
 
-  private getScheduleIndex(tracks: Track[]): ScheduleIndex {
+  private getScheduleIndex(tracks: RuntimeTrack[]): ScheduleIndex {
     const cached = this.scheduleIndexCache.get(tracks)
     if (cached) return cached
     const entries: ScheduledClipEntry[] = []
@@ -1173,7 +1176,7 @@ export class AudioEngine {
     return low
   }
 
-  scheduleAllClipsFromPlayhead(tracks: Track[], playheadSec: number, opts?: ScheduleOptions) {
+  scheduleAllClipsFromPlayhead(tracks: RuntimeTrack[], playheadSec: number, opts?: ScheduleOptions) {
     if (!this.audioCtx) return
 
     if (!opts?.preserveExisting) this.stopClipSources()
@@ -1210,7 +1213,7 @@ export class AudioEngine {
     this.stopActiveNotesForClip(clipId)
   }
 
-  rescheduleClipsAtPlayhead(tracks: Track[], playheadSec: number, clipIds: string[], opts?: ScheduleOptions) {
+  rescheduleClipsAtPlayhead(tracks: RuntimeTrack[], playheadSec: number, clipIds: string[], opts?: ScheduleOptions) {
     if (!this.audioCtx) return
     if (!clipIds || clipIds.length === 0) return
     const idsSet = new Set<string>(clipIds)

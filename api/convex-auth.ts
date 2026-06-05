@@ -81,6 +81,8 @@ const createConvexClientWithAuth = async (
   return convex
 }
 
+export type ApiConvexClient = Awaited<ReturnType<typeof createConvexClientWithAuth>>
+
 export const createAuthenticatedConvexClient = async (c: ApiContext, user: Session['user']) => (
   createConvexClientWithAuth(c, user)
 )

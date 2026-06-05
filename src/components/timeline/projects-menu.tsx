@@ -1,5 +1,4 @@
-import { type Component, For, Show } from "solid-js";
-import { createEffect, createSignal } from "solid-js";
+import { type Component, createEffect, createSignal, For, Show } from "solid-js";
 import { Button } from "~/components/ui/button";
 import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator } from "~/components/ui/menubar";
 import { copyText } from "~/lib/clipboard";

@@ -1,10 +1,10 @@
 import type { FunctionReturnType } from 'convex/server'
 
 import { convexApi } from '~/lib/convex'
-import { sanitizeAudioSourceKind } from '~/lib/audio-source-rules'
-import { openLocalProjectDb, type LocalProjectAssetRow, type LocalProjectEntityRow } from '~/lib/local-project-db'
+import { sanitizeAudioSourceKind } from '@daw-browser/shared'
+import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectAssetRow } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { normalizeTrackChannelRole } from '~/lib/track-routing-core'
+import { normalizeTrackChannelRole } from '@daw-browser/shared'
 import type { TimelineClipRow, TimelineTrackRow } from '~/lib/timeline-repository/types'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
@@ -37,13 +37,6 @@ const normalizeMidi = (value: FullTimelineView['clips'][number]['midi']): Timeli
     })),
   }
 }
-
-const toEntityRow = (kind: string, id: string, value: unknown, updatedAt: number): LocalProjectEntityRow => ({
-  kind,
-  id,
-  value,
-  updatedAt,
-})
 
 const toTrackRow = (track: FullTimelineView['tracks'][number], index: number, updatedAt: number): TimelineTrackRow => {
   const trackId = String(track._id)
@@ -131,8 +124,8 @@ export const cacheRemoteTimelineSnapshot = async (
   await Promise.all([
     ...cachedTracks.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
     ...cachedClips.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
-    ...tracks.map((track) => tx.objectStore('entities').put(toEntityRow(TRACK_KIND, track.id, track, timestamp))),
-    ...clipsWithExistingTracks.map((clip) => tx.objectStore('entities').put(toEntityRow(CLIP_KIND, clip.id, clip, timestamp))),
+    ...tracks.map((track) => tx.objectStore('entities').put(createLocalProjectEntityRow(TRACK_KIND, track.id, track, timestamp))),
+    ...clipsWithExistingTracks.map((clip) => tx.objectStore('entities').put(createLocalProjectEntityRow(CLIP_KIND, clip.id, clip, timestamp))),
     ...assets.map((asset) => tx.objectStore('assets').put(asset)),
     ...clipsWithExistingTracks.flatMap((clip) => clip.sourceAssetKey && clip.sampleUrl
       ? [tx.objectStore('syncState').put({

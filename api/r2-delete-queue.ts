@@ -1,10 +1,9 @@
 import { api as convexApi } from '../convex/_generated/api'
 import type { Id } from '../convex/_generated/dataModel'
-import type { R2DeleteKind } from '../src/lib/r2-delete-keys'
+import type { R2DeleteKind } from '@daw-browser/shared'
 import type { ApiContext } from './app-types'
 import type { Session } from './auth'
-import { createMaintenanceWorkerConvexClient, createWorkerConvexClient } from './convex-auth'
-import type { ConvexHttpClient } from 'convex/browser'
+import { createMaintenanceWorkerConvexClient, createWorkerConvexClient, type ApiConvexClient } from './convex-auth'
 
 type R2DeleteQueueRow = {
   _id: Id<'r2DeleteQueue'>
@@ -42,7 +41,7 @@ export const deleteR2Keys = async (bucket: R2Bucket, keys: string[]) => {
   await bucket.delete(keys)
 }
 
-const markFailed = async (convex: ConvexHttpClient, row: R2DeleteQueueRow, error: unknown) => {
+const markFailed = async (convex: ApiConvexClient, row: R2DeleteQueueRow, error: unknown) => {
   await convex.mutation(convexApi.r2Deletes.markFailed, {
     projectId: row.projectId,
     id: row._id,
@@ -51,7 +50,7 @@ const markFailed = async (convex: ConvexHttpClient, row: R2DeleteQueueRow, error
 }
 
 const drainR2DeleteRows = async (input: {
-  convex: ConvexHttpClient
+  convex: ApiConvexClient
   bucket: R2Bucket
   rows: R2DeleteQueueRow[]
 }) => {

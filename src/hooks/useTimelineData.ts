@@ -1,10 +1,9 @@
-import { createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
-import type { Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
 import type { UseQueryResult } from '@tanstack/solid-query'
 
 import { useConvexQuery, convexClient, convexApi } from '~/lib/convex'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import {
   createLocalProject,
   deleteLocalProject,
@@ -18,7 +17,7 @@ import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writ
 import { subscribeToLocalProjectChanges } from '~/lib/local-project-changes'
 import { useSessionQuery } from '~/lib/session'
 import { cacheRemoteTimelineSnapshot } from '~/lib/remote-timeline-cache'
-import { isProjectRole, type ProjectRole } from '../../shared/project-role'
+import { isProjectRole, type ProjectRole } from '@daw-browser/shared'
 import { clearShareTokenFromUrl, useTimelineProjectRoute } from './useTimelineProjectRoute'
 
 export type TimelineProject = {

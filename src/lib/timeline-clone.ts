@@ -1,4 +1,4 @@
-import type { Clip, Track } from '~/types/timeline'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 export const cloneTimelineClip = (clip: Clip): Clip => ({
   ...clip,

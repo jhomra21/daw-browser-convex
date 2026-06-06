@@ -1,14 +1,15 @@
 {
-  "extends": "../tsconfig.json",
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["vite/client", "./worker-configuration.d.ts"],
+    "lib": ["ESNext"],
+    "types": ["./worker-configuration.d.ts"],
     "skipLibCheck": true,
     "noEmit": true
   },
   "include": [
     "**/*.ts",
-    "../src/lib/**/*.ts",
-    "../shared/**/*.ts",
+    "../packages/shared/src/**/*.ts",
+    "../packages/timeline-core/src/**/*.ts",
     "../src/types/**/*.ts"
   ]
 }

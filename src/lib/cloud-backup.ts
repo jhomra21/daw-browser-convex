@@ -1,9 +1,8 @@
 import { readLocalAssetBytes } from '~/lib/local-assets'
 import { assetCloudIdMappingRows, isCloudIdMappingValue } from '~/lib/local-cloud-id-map'
-import { createProjectId, importLocalProject, openLocalProjectDb, replaceLocalProject, setLocalProjectMode } from '~/lib/local-project-db'
+import { createProjectId, importLocalProject, openLocalProjectDb, replaceLocalProject, setLocalProjectMode, type LocalProjectSyncStateRow } from '~/lib/local-project-db'
 import { buildProjectManifest, CLOUD_BACKUP_LAST_MANIFEST_VERSION_KEY, CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY, createRestoredProjectEntry, isProjectManifestSyncStateKey } from '~/lib/project-manifest'
-import { normalizeProjectManifest, type ProjectManifest } from '~/lib/project-manifest-contract'
-import type { LocalProjectSyncStateRow } from '~/lib/local-project-db'
+import { normalizeProjectManifest, type ProjectManifest } from '@daw-browser/shared'
 
 type BackupResult = {
   ok: boolean

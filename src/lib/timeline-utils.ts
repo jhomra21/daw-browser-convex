@@ -1,5 +1,5 @@
-import { calcNonOverlappingStart, willClipsOverlap } from '~/lib/clip-placement'
-import type { Clip, Track } from '~/types/timeline'
+import { calcNonOverlappingStart, willClipsOverlap } from '@daw-browser/timeline-core/clip-placement'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 // Timeline constants
 export const PPS = 100 // pixels per second

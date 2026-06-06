@@ -1,6 +1,6 @@
-import type { AudioEngine } from '~/lib/audio-engine'
+import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
-import type { Track } from '~/types/timeline'
+import type { Track } from '@daw-browser/timeline-core/types'
 
 const RECORDING_MIME_TYPES = [
   'audio/webm;codecs=opus',

@@ -1,4 +1,4 @@
-import type { Clip, Track, TrackRouting } from '~/types/timeline'
+import type { Clip, Track, TrackRouting } from '@daw-browser/timeline-core/types'
 
 import type { ClipRef, HistoryEntry, TrackRef, TrackRoutingHistorySnapshot } from './types'
 

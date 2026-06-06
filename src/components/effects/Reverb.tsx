@@ -2,7 +2,7 @@ import { Show } from 'solid-js'
 import Knob from '~/components/ui/knob'
 import {
   type ReverbParams,
-} from '~/lib/effects/params'
+} from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
 
 

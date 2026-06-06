@@ -8,7 +8,7 @@ import {
   isCloudIdMappingMetadataKey,
 } from '~/lib/local-cloud-id-map'
 import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writes'
-import { PROJECT_MANIFEST_SCHEMA_VERSION, type ProjectManifest } from '~/lib/project-manifest-contract'
+import { PROJECT_MANIFEST_SCHEMA_VERSION, type ProjectManifest } from '@daw-browser/shared'
 
 export const CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY = 'cloudBackup:lastProjectUpdatedAt'
 export const CLOUD_BACKUP_LAST_MANIFEST_VERSION_KEY = 'cloudBackup:lastManifestVersion'

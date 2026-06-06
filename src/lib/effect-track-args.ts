@@ -1,6 +1,6 @@
 import { toCloudTrackId } from '~/lib/cloud-id-args'
 import { convexApi } from '~/lib/convex'
-import type { TrackId } from '~/types/timeline'
+import type { TrackId } from '@daw-browser/timeline-core/types'
 
 export function buildTrackEffectQueryArgs(input: {
   projectId: string

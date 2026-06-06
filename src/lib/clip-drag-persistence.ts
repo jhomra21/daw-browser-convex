@@ -1,11 +1,11 @@
-import { isLocalId } from "~/lib/local-ids";
+import { isLocalId } from "@daw-browser/shared";
 import type { OptimisticGrantScope } from "~/lib/optimistic-grant-scope";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { toLocalTimelineTrack } from "~/lib/timeline-repository/track-row-adapter";
 import { buildClipMoveMutationInput } from "~/lib/clip-mutation-args";
 import { buildTrackDeleteMutationInput } from "~/lib/track-mutation-args";
 import { createOptimisticTrack } from "~/lib/tracks";
-import type { Track } from "~/types/timeline";
+import type { Track } from "@daw-browser/timeline-core/types";
 
 type ClipMove = { clipId: string; trackId: Track["id"]; startSec: number };
 type ConvexClient = typeof import("~/lib/convex").convexClient;

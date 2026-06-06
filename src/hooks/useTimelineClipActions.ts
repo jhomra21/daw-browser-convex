@@ -6,10 +6,10 @@ import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import { getTrackDeleteConflictMessage } from '~/lib/delete-conflict-messages'
 import { buildTrackEffectQueryArgs } from '~/lib/effect-track-args'
 import { getLocalEffect } from '~/lib/local-effects'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
-import { isClipCompatibleWithTrack } from '~/lib/track-routing'
+import { isClipCompatibleWithTrack } from '@daw-browser/timeline-core/track-routing'
 import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { createTimelineClipWriteAdapter } from '~/lib/timeline-clip-write-adapter'
@@ -17,7 +17,8 @@ import { calcNonOverlapStart, calcNonOverlapStartGridAligned } from '~/lib/timel
 import { buildClipDeleteHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry, TrackEffectSnapshot } from '~/lib/undo/types'
-import type { Clip, SelectedClip, Track } from '~/types/timeline'
+import type { Clip, SelectedClip, Track } from '@daw-browser/timeline-core/types'
+import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 
@@ -27,8 +28,8 @@ type ConvexApiType = typeof import('~/lib/convex').convexApi
 type TrackDeleteResult = FunctionReturnType<ConvexApiType['tracks']['remove']>
 
 type TimelineClipActionsOptions = {
-  tracks: Accessor<Track[]>
-  insertLocalClip: (trackId: Track['id'], clip: Clip) => void
+  tracks: Accessor<RuntimeTrack[]>
+  insertLocalClip: (trackId: Track['id'], clip: RuntimeClip) => void
   removeLocalClips: (clipIds: Iterable<string>) => void
   removeLocalTrack: (trackId: Track['id']) => void
   canWriteClip: (clipId: string) => boolean
@@ -203,7 +204,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     if (writableSelectedIds.size === 0) return
 
     const tsSnapshot = tracks()
-    const byTrack = new Map<Track['id'], { track: Track; clips: Clip[] }>()
+    const byTrack = new Map<Track['id'], { track: RuntimeTrack; clips: RuntimeClip[] }>()
     for (const track of tsSnapshot) {
       const selected = track.clips.filter(clip => writableSelectedIds.has(clip.id))
       if (selected.length > 0) byTrack.set(track.id, { track, clips: selected })

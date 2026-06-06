@@ -1,4 +1,4 @@
-import { ensurePeakAsset } from '~/lib/audio-peaks/asset-store'
+import { ensurePeakAsset } from '@daw-browser/waveforms/asset-store'
 import { getAudioSourceMetadata } from '~/lib/audio-source'
 
 export async function primeClipSourceAsset(input: {

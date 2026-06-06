@@ -1,8 +1,8 @@
-import { ConvexHttpClient } from 'convex/browser'
 import { api as convexApi } from '../../convex/_generated/api'
-import { parseProjectManifest, type ProjectManifest, withProjectManifestAssetKeys } from '../../src/lib/project-manifest-contract'
-import { isValidR2DeleteKey } from '../../src/lib/r2-delete-keys'
+import { parseProjectManifest, type ProjectManifest, withProjectManifestAssetKeys } from '@daw-browser/shared'
+import { isValidR2DeleteKey } from '@daw-browser/shared'
 import type { App } from '../app-types'
+import type { ApiConvexClient } from '../convex-auth'
 import { hashFile } from '../hash-file'
 import { parseJsonBody } from '../json-body'
 import { requireAuthenticatedConvexForApi, requireProjectDeleteOwnerContextForApi } from '../project-access'
@@ -49,7 +49,7 @@ const cloudProjectCreateBodySchema = z.object({
   projectId: z.string(),
 })
 
-const readPendingDeletedCloudKeys = (value: FormDataEntryValue | null, projectId: string) => {
+const readPendingDeletedCloudKeys = (value: unknown, projectId: string) => {
   if (value === null) return []
   if (typeof value !== 'string') return null
   let parsed: unknown
@@ -64,7 +64,7 @@ const readPendingDeletedCloudKeys = (value: FormDataEntryValue | null, projectId
 }
 
 const ensureCloudProjectWritable = async (input: {
-  convex: ConvexHttpClient
+  convex: ApiConvexClient
   projectId: string
 }) => {
   const canWrite = async () => {
@@ -285,7 +285,7 @@ export function registerCloudBackupRoutes(app: App) {
 })
 
   app.delete('/api/cloud-projects/:projectId', async (c) => {
-  let preparedDelete: { convex: ConvexHttpClient; projectId: string } | undefined
+  let preparedDelete: { convex: ApiConvexClient; projectId: string } | undefined
   try {
     const projectId = c.req.param('projectId')
     const access = await requireProjectDeleteOwnerContextForApi(c, projectId)

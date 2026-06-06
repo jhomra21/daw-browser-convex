@@ -1,7 +1,8 @@
 import { type Component, Show, Suspense, createMemo, lazy } from 'solid-js'
-import type { TimelineTrackIndex } from '~/lib/timeline-track-index'
+import type { TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { LANE_HEIGHT, PPS } from '~/lib/timeline-utils'
-import type { Clip, Track } from '~/types/timeline'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 
 const RecordingPreview = lazy(() => import('~/components/timeline/RecordingPreview'))
 const GridOverlay = lazy(() => import('~/components/timeline/GridOverlay'))
@@ -12,8 +13,8 @@ type MarqueeRect = { x: number; y: number; width: number; height: number } | nul
 
 type TimelineOverlaysProps = {
   timeline: {
-    tracks: Track[]
-    trackLookup: TimelineTrackIndex
+    tracks: RuntimeTrack[]
+    trackLookup: TimelineTrackIndex<AudioBuffer>
     durationSec: number
     bpm: number
     gridDenominator: number
@@ -46,7 +47,7 @@ type TimelineOverlaysProps = {
 }
 
 const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
-  const midiClip = createMemo<Clip | undefined>(() => {
+  const midiClip = createMemo<RuntimeClip | undefined>(() => {
     const id = props.midi.clipId
     if (!id) return undefined
     return props.timeline.trackLookup.clipById.get(id)

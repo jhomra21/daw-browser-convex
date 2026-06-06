@@ -1,11 +1,12 @@
 import { batch, createSignal, onCleanup, type Accessor } from 'solid-js'
 
-import { createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory, type ClipCreateSnapshot } from '~/lib/clip-create'
+import { createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory } from '~/lib/clip-create'
+import type { ClipCreateSnapshot } from '@daw-browser/shared'
 import type { ClipBufferWriter } from '~/lib/clip-buffer-cache'
 import { createAudioAssetKey, getAudioSourceMetadata } from '~/lib/audio-source'
-import type { AudioEngine } from '~/lib/audio-engine'
+import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError } from '~/lib/local-assets'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { isSharedOutboxQueuedError } from '~/lib/shared-outbox'
 import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
@@ -26,13 +27,13 @@ import {
   ensureTrackForRecording,
   finalizeAutoCreatedTrackFailure,
 } from '~/lib/track-recording-target'
-import { canTrackReceiveAudioClip } from '~/lib/track-routing'
+import { canTrackReceiveAudioClip } from '@daw-browser/timeline-core/track-routing'
 import { calcNonOverlapStart, willOverlap } from '~/lib/timeline-utils'
 import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { UploadToR2 } from '~/hooks/useClipBuffers'
-import type { Track } from '~/types/timeline'
+import type { Track } from '@daw-browser/timeline-core/types'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 

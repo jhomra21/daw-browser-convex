@@ -1,34 +1,15 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    // General
-    "jsx": "preserve",
-    "jsxImportSource": "solid-js",
-    "target": "ESNext",
-
-    // Modules
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
-    "isolatedModules": true,
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "noEmit": true,
-
-    // Type Checking & Safety
-    "strict": true,
-    "skipLibCheck": true,
     "types": ["vite/client"],
-
-    // Path Aliases
-    // "baseUrl": ".",
     "paths": {
       "~/*": ["./src/*"],
-      "@/*": ["./src/*"],
+      "@/*": ["./src/*"]
     },
   },
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
-    "shared/**/*.ts",
     "convex/**/*.ts",
     "vite.config.ts",
   ],

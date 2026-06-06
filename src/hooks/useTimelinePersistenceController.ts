@@ -1,12 +1,11 @@
-import type { Accessor } from "solid-js";
-import { createEffect, onCleanup } from "solid-js";
-import type { AudioEngine } from "~/lib/audio-engine";
+import { createEffect, onCleanup, type Accessor } from "solid-js";
+import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { ClipBufferWriter } from "~/lib/clip-buffer-cache";
-import { isLocalId } from "~/lib/local-ids";
+import { isLocalId } from "@daw-browser/shared";
 import type { LocalProjectMode } from "~/lib/local-project-db";
 import { flushSharedOutbox } from "~/lib/shared-outbox";
 import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
-import type { Clip, Track } from "~/types/timeline";
+import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { useCloudSyncTick } from "./useCloudSyncTick";
 import { useLocalProjectActions } from "./useLocalProjectActions";
 import { useMissingMediaRecovery } from "./useLocalTimelineMediaRecovery";

@@ -3,7 +3,7 @@ import Knob from '~/components/ui/knob'
 import {
   type SynthParams,
   type SynthWave,
-} from '~/lib/effects/params'
+} from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
 
 

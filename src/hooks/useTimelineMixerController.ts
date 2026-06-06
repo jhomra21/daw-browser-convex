@@ -1,19 +1,18 @@
-import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
-import type { Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from 'solid-js'
 
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import { resolveTrackMixView } from '~/lib/timeline-mix-authority'
 import { createTimelineMixerLocalWrites } from '~/lib/timeline-mixer-local-writes'
 import { createTimelineMixerWriteQueue, type ScheduledTrackWrite } from '~/lib/timeline-mixer-write-queue'
 import { createTimelineTrackWriteAdapter } from '~/lib/timeline-track-write-adapter'
-import { createTimelineTrackIndex } from '~/lib/timeline-track-index'
+import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import { type PendingTrackMixState, isPendingTrackMixStateEqual, pruneMapToKeys, reuseMapIfEqual } from '~/lib/timeline-mixer-pending'
 import { buildTrackBooleanHistoryEntry, buildTrackRoutingHistoryEntry, buildTrackVolumeHistoryEntry } from '~/lib/undo/builders'
 import type { HistoryEntry } from '~/lib/undo/types'
-import { normalizeTrackRouting } from '~/lib/track-routing'
+import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { isTrackRoutingEqual } from '~/lib/track-routing-state'
-import type { Track, TrackRouting, TrackSend } from '~/types/timeline'
+import type { Track, TrackRouting, TrackSend } from '@daw-browser/timeline-core/types'
 
 type LocalTrackRouting = TrackRouting & { sends: TrackSend[] }
 type PendingTrackMixField = keyof PendingTrackMixState

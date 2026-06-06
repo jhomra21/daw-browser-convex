@@ -1,6 +1,6 @@
 import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
-import type { ArpeggiatorParams, EqParams, ReverbParams, SynthParams } from '~/lib/effects/params'
-import type { Track, TrackChannelRole, TrackSend } from '~/types/timeline'
+import type { ArpeggiatorParams, EqParams, ReverbParams, SynthParams } from '@daw-browser/shared'
+import type { Track, TrackChannelRole, TrackSend } from '@daw-browser/timeline-core/types'
 
 export type TrackRef = string
 export type ClipRef = string

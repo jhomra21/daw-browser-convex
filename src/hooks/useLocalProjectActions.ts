@@ -7,8 +7,7 @@ import {
 } from "~/lib/cloud-backup";
 import { downloadCloudAssetsForOffline } from "~/lib/cloud-asset-cache";
 import { setLocalProjectAssetDirectory } from "~/lib/local-assets";
-import { isLocalId } from "~/lib/local-ids";
-import { exportDawProjectArchive, importDawProjectArchive } from "~/lib/project-archive";
+import { isLocalId } from "@daw-browser/shared";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import { flushSharedOutbox, readSharedOutboxSummary } from "~/lib/shared-outbox";
 import type { CloudBackupDialogState } from "~/components/timeline/cloud-backup-dialog";
@@ -81,6 +80,7 @@ export const useLocalProjectActions = (input: Input) => {
     const file = inputElement.files?.[0];
     if (file) {
       try {
+        const { importDawProjectArchive } = await import("~/lib/project-archive");
         const nextProjectId = await importDawProjectArchive(file);
         input.navigateToRoom(nextProjectId);
       } catch (error) {
@@ -203,6 +203,7 @@ export const useLocalProjectActions = (input: Input) => {
     const rid = input.projectId();
     if (!isLocalId("project", rid)) return;
     try {
+      const { exportDawProjectArchive } = await import("~/lib/project-archive");
       const blob = await exportDawProjectArchive(rid);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");

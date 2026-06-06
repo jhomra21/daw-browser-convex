@@ -1,15 +1,14 @@
 import type { FunctionReturnType } from 'convex/server'
-import { createEffect, createMemo, createSignal, on } from 'solid-js'
-import type { Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, on, type Accessor } from 'solid-js'
 import { useConvexQuery, convexApi } from '~/lib/convex'
 import { useQuery } from '@tanstack/solid-query'
 import { getPersistedAudioSource, type AudioSourceKind, type AudioSourceMetadata } from '~/lib/audio-source'
-import { sanitizeAudioSourceKind } from '~/lib/audio-source-rules'
+import { sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { ensureDefaultSampleMetadata, loadCachedDefaultSampleMetadata } from '~/lib/default-sample-cache'
 import { listLocalAssets } from '~/lib/local-assets'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
-import type { Track } from '~/types/timeline'
+import type { Track } from '@daw-browser/timeline-core/types'
 
 type SampleRow = FunctionReturnType<typeof convexApi.samples.listByRoom>[number]
 type ClipRow = FunctionReturnType<typeof convexApi.clips.listByRoom>[number]

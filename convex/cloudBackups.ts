@@ -8,7 +8,7 @@ import {
   assertProjectManifestPublishIntegrity,
   readProjectManifestCloudKeys,
   type ProjectManifest,
-} from "../src/lib/project-manifest-contract";
+} from "@daw-browser/shared";
 import { enqueueR2DeleteRows } from "./r2Deletes";
 
 const latestBackup = async (ctx: Pick<QueryCtx, "db">, projectId: string) => (

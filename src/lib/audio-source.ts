@@ -1,15 +1,12 @@
+import type { AudioSourceKind } from '@daw-browser/shared'
+import { createLocalAssetId } from '@daw-browser/shared'
 import {
-  normalizeAudioSourceMetadataPatch,
-  type AudioSourceKind,
-} from '~/lib/audio-source-rules'
+  getPersistableAudioSourceMetadata as getPersistableAudioSourceMetadataFromFields,
+  type AudioSourceMetadata,
+} from '@daw-browser/shared'
 
-export type { AudioSourceKind } from '~/lib/audio-source-rules'
-
-export type AudioSourceMetadata = {
-  durationSec: number
-  sampleRate: number
-  channelCount: number
-}
+export type { AudioSourceKind } from '@daw-browser/shared'
+export type { AudioSourceMetadata } from '@daw-browser/shared'
 
 type PersistedAudioSource = {
   assetKey: string
@@ -26,9 +23,7 @@ type AudioSourceMetadataLike = {
   sourceChannelCount?: number
 }
 
-export function createAudioAssetKey() {
-  return `asset:${crypto.randomUUID()}`
-}
+export const createAudioAssetKey = createLocalAssetId
 
 export function getAudioSourceMetadata(buffer: AudioBuffer): AudioSourceMetadata {
   return {
@@ -43,25 +38,11 @@ export function getPersistableAudioSourceMetadata(source: AudioSourceMetadataLik
     return getAudioSourceMetadata(source.buffer)
   }
 
-  const normalized = normalizeAudioSourceMetadataPatch({
-    durationSec: source.sourceDurationSec,
-    sampleRate: source.sourceSampleRate,
-    channelCount: source.sourceChannelCount,
+  return getPersistableAudioSourceMetadataFromFields({
+    sourceDurationSec: source.sourceDurationSec,
+    sourceSampleRate: source.sourceSampleRate,
+    sourceChannelCount: source.sourceChannelCount,
   })
-
-  if (
-    normalized.durationSec === undefined ||
-    normalized.sampleRate === undefined ||
-    normalized.channelCount === undefined
-  ) {
-    return undefined
-  }
-
-  return {
-    durationSec: normalized.durationSec,
-    sampleRate: normalized.sampleRate,
-    channelCount: normalized.channelCount,
-  }
 }
 
 export function getPersistedAudioSource(source: AudioSourceMetadataLike): PersistedAudioSource | undefined {

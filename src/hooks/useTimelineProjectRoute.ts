@@ -1,5 +1,5 @@
 import { batch, createSignal, onCleanup, onMount } from 'solid-js'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import { readLocationSearchParam } from '~/lib/location-search-param'
 
 type UseTimelineProjectRouteOptions = {

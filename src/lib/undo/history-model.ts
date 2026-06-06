@@ -1,5 +1,5 @@
 import { cloneTimelineClip, cloneTimelineTrack } from '~/lib/timeline-clone'
-import type { Track, TrackRouting } from '~/types/timeline'
+import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 
 export const cloneHistoryTracks = (tracks: Track[]) => tracks.map(cloneTimelineTrack)
 

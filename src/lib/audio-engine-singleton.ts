@@ -1,4 +1,4 @@
-import { AudioEngine } from "~/lib/audio-engine"
+import { AudioEngine } from "@daw-browser/audio-engine/audio-engine"
 
 let audioEngineSingleton: AudioEngine | null = null
 

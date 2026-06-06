@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/components/ui/dialog";
-import type { Track } from "~/types/timeline";
+import type { Track } from "@daw-browser/timeline-core/types";
 
 type DeleteTrackDialogProps = {
   open: boolean;

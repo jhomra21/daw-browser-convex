@@ -1,7 +1,7 @@
 import { streamText } from 'ai'
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 import { api as convexApi } from '../../convex/_generated/api'
-import { CommandsEnvelopeSchema } from '../../src/lib/agent-commands'
+import { CommandsEnvelopeSchema } from '@daw-browser/shared'
 import { createAgentActions, executeAgentCommands } from '../agent-actions'
 import type { App } from '../app-types'
 import { parseJsonBody } from '../json-body'

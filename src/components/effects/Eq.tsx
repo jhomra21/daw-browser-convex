@@ -1,10 +1,11 @@
 import { Show, For, createSignal, onMount, onCleanup, createEffect } from 'solid-js'
-import type { SpectrumFrame } from '~/lib/audio-engine'
+import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import Knob from '~/components/ui/knob'
 import {
   supportsGain,
   type EqBandParams,
-} from '~/lib/effects/params'
+  type EqBandType,
+} from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
 
 
@@ -27,7 +28,7 @@ const GAIN_MAX = 24
 const Q_MIN = 0.2
 const Q_MAX = 18
 
-const FILTER_TYPES: { value: BiquadFilterType; label: string; short: string }[] = [
+const FILTER_TYPES: { value: EqBandType; label: string; short: string }[] = [
   { value: 'lowpass', label: 'Low Pass', short: 'LP' },
   { value: 'highpass', label: 'High Pass', short: 'HP' },
   { value: 'bandpass', label: 'Band Pass', short: 'BP' },

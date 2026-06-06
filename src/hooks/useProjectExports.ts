@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, type Accessor } from 'solid-js'
 import { useConvexQuery, convexApi } from '~/lib/convex'
 import { listLocalExportMetadata } from '~/lib/local-export-metadata'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 
 type ProjectExportItem = {
   _id: string

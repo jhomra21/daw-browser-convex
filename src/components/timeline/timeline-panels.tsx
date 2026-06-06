@@ -1,10 +1,10 @@
 import { type Component, Show, Suspense, createEffect, lazy } from 'solid-js'
 import { Button } from '~/components/ui/button'
-import type { AudioEngine } from '~/lib/audio-engine'
-import { isLocalId } from '~/lib/local-ids'
+import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
+import { isLocalId } from '@daw-browser/shared'
 import type { OptimisticGrantWrite } from '~/lib/optimistic-grant-scope'
 import type { EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
-import type { Clip, Track } from '~/types/timeline'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 const AgentChat = lazy(() => import('~/components/AgentChat'))
 const SharedChat = lazy(() => import('~/components/SharedChat'))

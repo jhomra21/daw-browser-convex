@@ -2,7 +2,7 @@ import type { FunctionReturnType } from 'convex/server'
 import { createEffect, createSignal, on, type Accessor } from 'solid-js'
 
 import { convexApi } from '~/lib/convex'
-import type { Track } from '~/types/timeline'
+import type { Track } from '@daw-browser/timeline-core/types'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 

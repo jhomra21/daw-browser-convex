@@ -1,16 +1,17 @@
-import { buildClipCreatePayload, buildLocalClip, type ClipCreateSnapshot } from "~/lib/clip-create";
+import { buildLocalClip } from "~/lib/clip-create";
+import { buildClipCreatePayload, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipTiming } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
 import { setLocalEffect } from "~/lib/local-effects";
-import { isLocalId } from "~/lib/local-ids";
+import { isLocalId } from "@daw-browser/shared";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { buildTrackCreateMutationInput, buildTrackDeleteMutationInput, buildTrackMixMutationInput, buildTrackVolumeMutationInput } from "~/lib/track-mutation-args";
 import { buildTrackRoutingMutationInput } from "~/lib/track-routing-state";
 import type { LocalMixPatch } from "~/lib/timeline-storage";
-import type { Track, TrackRouting } from "~/types/timeline";
+import type { Track, TrackRouting } from "@daw-browser/timeline-core/types";
 import type { Deps } from "./exec";
 import type { HistoryEntry } from "./types";
 

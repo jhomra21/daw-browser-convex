@@ -1,11 +1,11 @@
 import type {
   SharedTimelineOperation,
-} from '~/lib/shared-timeline-operations'
+} from '@daw-browser/shared'
 
 export type {
   SharedTimelineOperation,
   SharedTimelineOperationKind,
-} from '~/lib/shared-timeline-operations'
+} from '@daw-browser/shared'
 
 export class SharedTimelineOperationHttpError extends Error {
   constructor(public readonly status: number, detail?: string) {

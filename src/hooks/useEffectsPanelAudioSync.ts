@@ -9,13 +9,13 @@ import {
   type ReverbParams,
   type SynthParams,
   type SynthParamsInput,
-} from "~/lib/effects/params";
-import type { AudioEngine, SpectrumFrame } from "~/lib/audio-engine";
+} from "@daw-browser/shared";
+import type { AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import { convexApi } from "~/lib/convex";
 import { listLocalEffects, type LocalEffectRow } from "~/lib/local-effects";
-import { isLocalId } from "~/lib/local-ids";
+import { isLocalId } from "@daw-browser/shared";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
-import type { Track } from "~/types/timeline";
+import type { Track } from "@daw-browser/timeline-core/types";
 
 type UseEffectsPanelAudioSyncOptions = {
   isOpen: Accessor<boolean>;

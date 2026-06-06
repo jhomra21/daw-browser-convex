@@ -1,7 +1,7 @@
 import type { Doc } from "./_generated/dataModel";
 import { query, type DatabaseReader } from "./_generated/server";
 import { v } from "convex/values";
-import { isProjectRole, type ProjectRole } from "../shared/project-role";
+import { isProjectRole, type ProjectRole } from "@daw-browser/shared";
 
 type RoomSummary = {
   projectId: string;

@@ -1,53 +1,17 @@
-import type { FunctionArgs } from 'convex/server'
 import { getPersistableAudioSourceMetadata, type AudioSourceKind, type AudioSourceMetadata } from '~/lib/audio-source'
-import { resolveClipSampleUrl } from '~/lib/audio-source-rules'
+import { resolveClipSampleUrl } from '@daw-browser/shared'
 import type { ClipBufferWriter } from '~/lib/clip-buffer-cache'
 import { uploadClipSampleUrl } from '~/lib/clip-sample-url'
 import { primeClipSourceAsset } from '~/lib/clip-source-client'
-import { toCloudTrackId } from '~/lib/cloud-id-args'
-import { convexApi } from '~/lib/convex'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { enqueueSharedAudioClipCreateOnFailure, enqueueSharedTimelineOperationOnFailure, SharedOutboxQueuedError } from '~/lib/shared-outbox'
-import type { SharedTimelineClipCreatePayload } from '~/lib/shared-timeline-operations'
+import type { SharedTimelineClipCreatePayload } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { getClipHistoryRef } from '~/lib/undo/refs'
 import type { HistoryClipSnapshot, HistoryEntry } from '~/lib/undo/types'
-import type { Clip, TrackId } from '~/types/timeline'
-
-export type ClipTimingSnapshot = {
-  leftPadSec?: number
-  bufferOffsetSec?: number
-  midiOffsetBeats?: number
-}
-
-export type ClipCreateSnapshot = {
-  historyRef?: string
-  startSec: number
-  duration: number
-  name?: string
-  sampleUrl?: string
-  source?: AudioSourceMetadata
-  sourceAssetKey?: string
-  sourceKind?: AudioSourceKind
-  midi?: Clip['midi']
-  timing?: ClipTimingSnapshot
-}
-
-type BuildClipCreatePayloadInput = {
-  projectId: string
-  trackId: TrackId
-  clip: ClipCreateSnapshot
-}
-
-type CompleteAudioClipCreateSnapshot = ClipCreateSnapshot & {
-  source: AudioSourceMetadata & {
-    durationSec: number
-    sampleRate: number
-    channelCount: number
-  }
-  sourceAssetKey: string
-  sourceKind: AudioSourceKind
-}
+import type { Clip, TrackId } from '@daw-browser/timeline-core/types'
+import type { RuntimeClip } from '~/lib/timeline-runtime-types'
+import { buildClipCreatePayload, buildQueuedAudioClipCreatePayload, type ClipCreateSnapshot } from '@daw-browser/shared'
 
 type BuildLocalClipInput = {
   id: string
@@ -68,7 +32,7 @@ type UploadedAudioClipInput = {
   sourceAssetKey: string
   sourceKind: AudioSourceKind
   createServerClip: (payload: SharedTimelineClipCreatePayload) => Promise<string | null>
-  insertLocalClip: (trackId: TrackId, clip: Clip) => void
+  insertLocalClip: (trackId: TrackId, clip: RuntimeClip) => void
   removeLocalClips?: (clipIds: Iterable<string>) => void
   selectClip?: (trackId: TrackId, clipId: string) => void
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
@@ -96,7 +60,7 @@ type LocalAudioClipInput = {
   source: AudioSourceMetadata
   sourceAssetKey: string
   sourceKind: AudioSourceKind
-  insertLocalClip: (trackId: TrackId, clip: Clip) => void
+  insertLocalClip: (trackId: TrackId, clip: RuntimeClip) => void
   selectClip?: (trackId: TrackId, clipId: string) => void
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   skipHistory?: boolean
@@ -144,78 +108,7 @@ function buildClipSnapshotFields(clip: Clip) {
   }
 }
 
-const hasCompleteAudioClipMetadata = (clip: ClipCreateSnapshot): clip is CompleteAudioClipCreateSnapshot => (
-  Boolean(
-    clip.sourceAssetKey
-    && clip.sourceKind
-    && clip.source
-    && clip.source.durationSec !== undefined
-    && clip.source.sampleRate !== undefined
-    && clip.source.channelCount !== undefined,
-  )
-)
-
-const buildAudioClipMetadataPayloadFields = (
-  input: BuildClipCreatePayloadInput,
-): SharedTimelineClipCreatePayload => {
-  const { trackId, clip } = input
-  if (!hasCompleteAudioClipMetadata(clip)) {
-    throw new Error('Audio clips require complete source metadata')
-  }
-  return {
-    trackId: toCloudTrackId(trackId),
-    startSec: clip.startSec,
-    duration: clip.duration,
-    name: clip.name,
-    sampleUrl: resolveClipSampleUrl(clip),
-    assetKey: clip.sourceAssetKey,
-    sourceKind: clip.sourceKind,
-    durationSec: clip.source.durationSec,
-    sampleRate: clip.source.sampleRate,
-    channelCount: clip.source.channelCount,
-    clipKind: 'audio',
-    leftPadSec: clip.timing?.leftPadSec,
-    bufferOffsetSec: clip.timing?.bufferOffsetSec,
-    midiOffsetBeats: clip.timing?.midiOffsetBeats,
-  }
-}
-
-const buildAudioClipCreatePayloadFields = (
-  input: BuildClipCreatePayloadInput,
-): SharedTimelineClipCreatePayload => {
-  const payload = buildAudioClipMetadataPayloadFields(input)
-  if (!payload.sampleUrl) {
-    throw new Error('Audio clips require complete source metadata')
-  }
-  return payload
-}
-
-export function buildClipCreatePayload(
-  input: BuildClipCreatePayloadInput,
-): FunctionArgs<typeof convexApi.clips.create> {
-  const { projectId, trackId, clip } = input
-  if (!clip.midi) {
-    return {
-      projectId,
-      ...buildAudioClipCreatePayloadFields(input),
-      trackId: toCloudTrackId(trackId),
-    }
-  }
-  return {
-    projectId,
-    trackId: toCloudTrackId(trackId),
-    startSec: clip.startSec,
-    duration: clip.duration,
-    name: clip.name,
-    clipKind: 'midi',
-    midi: clip.midi,
-    leftPadSec: clip.timing?.leftPadSec,
-    bufferOffsetSec: clip.timing?.bufferOffsetSec,
-    midiOffsetBeats: clip.timing?.midiOffsetBeats,
-  }
-}
-
-export function buildLocalClip(input: BuildLocalClipInput): Clip {
+export function buildLocalClip(input: BuildLocalClipInput): RuntimeClip {
   const { id, clip, buffer = null, color } = input
   return {
     id,
@@ -270,14 +163,12 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
   }
 
   const operationId = crypto.randomUUID()
-  const queuedClipPayload = {
-    ...buildAudioClipMetadataPayloadFields({
-      projectId: input.projectId,
-      trackId: input.trackId,
-      clip,
-    }),
+  const queuedClipPayload = buildQueuedAudioClipCreatePayload({
+    projectId: input.projectId,
+    trackId: input.trackId,
+    clip,
     operationId,
-  }
+  })
 
   const sampleUrl = await uploadClipSampleUrl({
     projectId: input.projectId,
@@ -456,7 +347,7 @@ export async function createProjectedClips(input: {
   projectId: string
   items: readonly BatchClipCreateItem[]
   createMany: (items: ReturnType<typeof buildClipCreatePayload>[], operationId: string) => Promise<Array<string | null>>
-  insertLocalClip: (trackId: TrackId, clip: Clip) => void
+  insertLocalClip: (trackId: TrackId, clip: RuntimeClip) => void
   audioBufferCache: ClipBufferWriter
   grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void
   grantScope?: OptimisticGrantScope
@@ -477,7 +368,7 @@ export async function createProjectedClips(input: {
 export async function createProjectedLocalClips(input: {
   projectId: string
   items: readonly BatchClipCreateItem[]
-  insertLocalClip: (trackId: TrackId, clip: Clip) => void
+  insertLocalClip: (trackId: TrackId, clip: RuntimeClip) => void
   removeLocalClips: (clipIds: Iterable<string>) => void
   audioBufferCache: ClipBufferWriter
   canProject?: () => boolean

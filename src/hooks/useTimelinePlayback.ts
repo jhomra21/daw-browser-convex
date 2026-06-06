@@ -1,7 +1,7 @@
 import { createSignal, onCleanup, type Accessor } from 'solid-js'
 
-import type { AudioEngine } from '~/lib/audio-engine'
-import type { Track } from '~/types/timeline'
+import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
+import type { Track } from '@daw-browser/timeline-core/types'
 
 type LoopOptions = {
   loopEnabled?: Accessor<boolean>

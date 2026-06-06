@@ -1,6 +1,6 @@
 import { batch, type Setter } from 'solid-js'
 
-import type { SelectedClip, Track } from '~/types/timeline'
+import type { SelectedClip, Track } from '@daw-browser/timeline-core/types'
 
 type TimelineSelectionSetters = {
   setSelectedTrackId: Setter<Track['id'] | ''>

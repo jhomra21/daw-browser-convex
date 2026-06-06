@@ -5,7 +5,7 @@ import {
 } from '~/lib/shared-timeline-operations-api'
 import { buildTrackCreateHistoryEntry } from '~/lib/undo/builders'
 import type { HistoryEntry } from '~/lib/undo/types'
-import type { Clip, Track } from '~/types/timeline'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 type CreateLocalTrackOptions = {
   id: Track['id']

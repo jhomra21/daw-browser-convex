@@ -2,7 +2,7 @@ import { Show, For } from 'solid-js'
 import Knob from '~/components/ui/knob'
 import {
   type ArpeggiatorParams,
-} from '~/lib/effects/params'
+} from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
 
 

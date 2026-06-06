@@ -1,4 +1,4 @@
-import { openLocalProjectDb, type LocalProjectEntityRow } from '~/lib/local-project-db'
+import { createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 
 export type LocalEffectKind = 'eq' | 'reverb' | 'synth' | 'arp' | 'master-eq' | 'master-reverb'
@@ -28,13 +28,6 @@ const isLocalEffectRow = (value: unknown): value is LocalEffectRow => (
   && 'params' in value
 )
 
-const toEntityRow = (row: LocalEffectRow): LocalProjectEntityRow => ({
-  kind: EFFECT_KIND,
-  id: row.id,
-  value: row,
-  updatedAt: row.updatedAt,
-})
-
 export const getLocalEffect = async <TParams>(
   projectId: string,
   targetId: string,
@@ -42,7 +35,7 @@ export const getLocalEffect = async <TParams>(
 ): Promise<LocalEffectRow<TParams> | undefined> => {
   const db = await openLocalProjectDb(projectId)
   const row = await db.get('entities', [EFFECT_KIND, effectId(targetId, effect)])
-  return isLocalEffectRow(row?.value) ? row.value as LocalEffectRow<TParams> : undefined
+  return isLocalEffectRow(row?.value) ? row.value : undefined
 }
 
 export const listLocalEffects = async (projectId: string): Promise<LocalEffectRow[]> => {
@@ -68,7 +61,7 @@ export const setLocalEffect = async <TParams>(
     index,
     updatedAt: timestamp,
   }
-  await db.put('entities', toEntityRow(row))
+  await db.put('entities', createLocalProjectEntityRow(EFFECT_KIND, row.id, row, row.updatedAt))
   notifyLocalProjectChanged(projectId)
   return row
 }

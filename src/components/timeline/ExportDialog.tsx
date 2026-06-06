@@ -1,18 +1,33 @@
 import { type Component, createSignal, Show } from 'solid-js'
-import type { Track } from '~/types/timeline'
+import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '~/components/ui/dialog'
 import { Button } from '~/components/ui/button'
-import { renderMixdown, encodeAudioBuffer, type ExportRange } from '~/lib/export-mixdown'
+import type { ExportRange } from '@daw-browser/audio-engine/export-mixdown'
+import type { ArpParams, EqParamsLite, ReverbParamsLite, SynthParamsInput } from '@daw-browser/shared'
 import { convexClient, convexApi } from '~/lib/convex'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import { saveBlobLocally } from '~/lib/local-export'
 import { saveLocalExportMetadata } from '~/lib/local-export-metadata'
 import { listLocalEffects, type LocalEffectRow } from '~/lib/local-effects'
+import type { FunctionReturnType } from 'convex/server'
+
+type ExportMode = ExportRange['mode']
+type ExportFx = {
+  masterEq?: EqParamsLite
+  masterReverb?: ReverbParamsLite
+  trackFx: Record<string, { eq?: EqParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput }>
+}
+type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number]
+type ExportUploadResponse = {
+  url?: unknown
+  key?: unknown
+  sizeBytes?: unknown
+}
 
 type Props = {
   isOpen: boolean
   onClose: () => void
-  tracks: Track[]
+  tracks: RuntimeTrack[]
   bpm: number
   loopEnabled: boolean
   loopStartSec: number
@@ -23,7 +38,7 @@ type Props = {
 }
 
 const ExportDialog: Component<Props> = (props) => {
-  const [mode, setMode] = createSignal<'loop'|'whole'|'custom'>(props.loopEnabled ? 'loop' : 'whole')
+  const [mode, setMode] = createSignal<ExportMode>(props.loopEnabled ? 'loop' : 'whole')
   const [startSec, setStartSec] = createSignal(0)
   const [endSec, setEndSec] = createSignal(10)
   const [busy, setBusy] = createSignal(false)
@@ -31,7 +46,7 @@ const ExportDialog: Component<Props> = (props) => {
   const [resultUrl, setResultUrl] = createSignal<string | null>(null)
   const [localSavedName, setLocalSavedName] = createSignal<string | null>(null)
 
-  const applyLocalEffectRowsToFx = (fx: any, rows: LocalEffectRow[]) => {
+  const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
     for (const row of rows) {
       if (row.effect === 'master-eq') {
         fx.masterEq = row.params
@@ -48,6 +63,31 @@ const ExportDialog: Component<Props> = (props) => {
       if (row.effect === 'synth') fx.trackFx[row.targetId] = { ...previous, synth: row.params }
     }
   }
+
+  const applyRoomEffectRowsToFx = (fx: ExportFx, rows: RoomEffectRow[]) => {
+    for (const row of rows) {
+      if (row.targetType === 'master') {
+        if (row.type === 'eq' && row.params) fx.masterEq = row.params
+        if (row.type === 'reverb' && row.params) fx.masterReverb = row.params
+        continue
+      }
+      const trackId = row.trackId
+      if (!trackId || !row.params) continue
+      const previous = fx.trackFx[trackId] ?? {}
+      if (row.type === 'eq') fx.trackFx[trackId] = { ...previous, eq: row.params }
+      if (row.type === 'reverb') fx.trackFx[trackId] = { ...previous, reverb: row.params }
+      if (row.type === 'arpeggiator') fx.trackFx[trackId] = { ...previous, arp: row.params }
+      if (row.type === 'synth') fx.trackFx[trackId] = { ...previous, synth: row.params }
+    }
+  }
+
+  const readExportUploadResponse = (value: unknown): ExportUploadResponse => (
+    value !== null && typeof value === 'object' ? value : {}
+  )
+
+  const readExportMode = (value: string): ExportMode => (
+    value === 'loop' || value === 'custom' ? value : 'whole'
+  )
 
   const computeRange = (): ExportRange => {
     const m = mode()
@@ -70,7 +110,7 @@ const ExportDialog: Component<Props> = (props) => {
     } else {
       rs = range.startSec; re = range.endSec
     }
-    const intersects = (c: Track['clips'][number]) => {
+    const intersects = (c: RuntimeClip) => {
       const clipStart = c.startSec
       const clipEnd = c.startSec + c.duration
       return clipEnd > rs && clipStart < re
@@ -78,12 +118,12 @@ const ExportDialog: Component<Props> = (props) => {
     const jobs: Promise<void>[] = []
     for (const t of tracks) {
       for (const c of t.clips) {
-        if ((c as any).midi) continue
+        if (c.midi) continue
         if (!intersects(c)) continue
         if (!c.buffer) jobs.push(props.ensureClipBuffer(c.id, c.sampleUrl))
       }
     }
-    if (jobs.length) await Promise.allSettled(jobs)
+    await Promise.all(jobs)
   }
 
   async function handleExport() {
@@ -93,32 +133,21 @@ const ExportDialog: Component<Props> = (props) => {
     setBusy(true)
     try {
       const range = computeRange()
+      const mixdownModule = import('@daw-browser/audio-engine/export-mixdown')
       await ensureBuffersForRange(range)
       const localOnly = props.projectId ? isLocalId('project', props.projectId) : false
-      const fx: any = { trackFx: {} as Record<string, { eq?: any; reverb?: any }> }
+      const fx: ExportFx = { trackFx: {} }
       if (localOnly && props.projectId) try {
         applyLocalEffectRowsToFx(fx, await listLocalEffects(props.projectId))
       } catch {}
       if (!localOnly && props.projectId && props.userId) try {
-        const rows = await convexClient.query((convexApi as any).effects.listByRoom, {
+        const rows = await convexClient.query(convexApi.effects.listByRoom, {
           projectId: props.projectId,
-        } as any).catch(() => [])
-        for (const row of rows) {
-          if (row?.targetType === 'master') {
-            if (row.type === 'eq' && row.params) fx.masterEq = row.params
-            if (row.type === 'reverb' && row.params) fx.masterReverb = row.params
-            continue
-          }
-          const trackId = row?.trackId
-          if (!trackId || !row.params) continue
-          const previous = fx.trackFx[trackId] ?? {}
-          if (row.type === 'eq') fx.trackFx[trackId] = { ...previous, eq: row.params }
-          if (row.type === 'reverb') fx.trackFx[trackId] = { ...previous, reverb: row.params }
-          if (row.type === 'arpeggiator') fx.trackFx[trackId] = { ...previous, arp: row.params }
-          if (row.type === 'synth') fx.trackFx[trackId] = { ...previous, synth: row.params }
-        }
+        })
+        applyRoomEffectRowsToFx(fx, rows)
       } catch {}
 
+      const { renderMixdown, encodeAudioBuffer } = await mixdownModule
       const rendered = await renderMixdown({ tracks: props.tracks, bpm: props.bpm, range, fx })
       const enc = await encodeAudioBuffer(rendered)
       const fname = `mixdown_${new Date().toISOString().replace(/[-:TZ.]/g, '')}${enc.fileExtension}`
@@ -143,7 +172,6 @@ const ExportDialog: Component<Props> = (props) => {
         setLocalSavedName(fname)
         return
       }
-      // Upload to R2 via worker
       const rid = props.projectId
       if (!rid) throw new Error('Missing room')
       const fd = new FormData()
@@ -154,16 +182,15 @@ const ExportDialog: Component<Props> = (props) => {
       fd.append('file', enc.blob, fname)
       const res = await fetch('/api/exports', { method: 'POST', body: fd })
       if (!res.ok) throw new Error('Upload failed')
-      const data: any = await res.json().catch(() => null)
+      const data = readExportUploadResponse(await res.json().catch(() => null))
       const url = typeof data?.url === 'string' ? data.url : ''
       const key = typeof data?.key === 'string' ? data.key : ''
       const sizeBytes = typeof data?.sizeBytes === 'number' ? data.sizeBytes : undefined
       if (!url || !key) throw new Error('Invalid upload response')
 
-      // Record in Convex
       if (props.userId) {
         try {
-          await convexClient.mutation((convexApi as any).exports.create, {
+          await convexClient.mutation(convexApi.exports.create, {
             projectId: rid,
             name: fname,
             url,
@@ -194,7 +221,7 @@ const ExportDialog: Component<Props> = (props) => {
         <div class="flex flex-col gap-3 py-2">
           <div class="flex items-center gap-3">
             <label class="text-sm w-24 text-neutral-300">Range</label>
-            <select class="bg-neutral-900 text-neutral-100 border border-neutral-700 rounded px-2 py-1 text-sm" value={mode()} onChange={(e) => setMode((e.currentTarget as HTMLSelectElement).value as any)}>
+            <select class="bg-neutral-900 text-neutral-100 border border-neutral-700 rounded px-2 py-1 text-sm" value={mode()} onChange={(e) => setMode(readExportMode(e.currentTarget.value))}>
               <option value="whole">Whole timeline</option>
               <option value="loop" disabled={!props.loopEnabled}>Loop region</option>
               <option value="custom">Custom</option>

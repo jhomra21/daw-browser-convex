@@ -1,9 +1,9 @@
 import { type Component, createMemo, createSignal, onCleanup, createEffect, For, onMount } from 'solid-js'
 import { convexClient, convexApi } from '~/lib/convex'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { cn } from '~/lib/utils'
-import type { Clip } from '~/types/timeline'
+import type { Clip } from '@daw-browser/timeline-core/types'
 
 export type MidiEditorCardProps = {
   clipId: string

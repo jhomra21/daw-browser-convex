@@ -2,7 +2,7 @@ import {
   getTrackAcceptedClipKind,
   normalizeTrackChannelRole,
   type RoutingClipKind,
-} from '../src/lib/track-routing-core'
+} from '@daw-browser/shared'
 
 type TrackLike = {
   kind?: string

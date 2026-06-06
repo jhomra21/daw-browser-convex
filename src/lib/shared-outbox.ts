@@ -1,6 +1,6 @@
 import { openLocalProjectDb, type LocalProjectSyncStateRow } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { isSharedTimelineOperationKind, readSharedTimelineClipCreatePayload, sharedTimelineOperationSchema, type SharedTimelineClipCreatePayload } from '~/lib/shared-timeline-operations'
+import { isDurableSharedTimelineOperationKind, parseSharedTimelineOperation, readSharedTimelineClipCreatePayload, type SharedTimelineClipCreatePayload } from '@daw-browser/shared'
 import {
   publishSharedTimelineOperation,
   SharedTimelineOperationHttpError,
@@ -73,7 +73,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
 )
 
 const isOutboxKind = (value: unknown): value is SharedOutboxKind => (
-  isSharedTimelineOperationKind(value) || value === 'clips.createUploadedAudio'
+  isDurableSharedTimelineOperationKind(value) || value === 'clips.createUploadedAudio'
 )
 
 const readEntry = (value: unknown): SharedOutboxEntry | null => {
@@ -210,20 +210,25 @@ const publishEntry = async (entry: SharedOutboxEntry) => {
     await publishSharedTimelineOperation(entry.projectId, { kind: 'clips.create', payload: { ...payload.clipPayload, sampleUrl } })
     return
   }
-  const operation = sharedTimelineOperationSchema.safeParse({ kind: entry.kind, payload: entry.payload })
-  if (!operation.success) throw new Error('Invalid queued shared timeline operation.')
-  await publishSharedTimelineOperation(entry.projectId, operation.data)
+  const operation = parseSharedTimelineOperation({ kind: entry.kind, payload: entry.payload })
+  if (!operation) throw new Error('Invalid queued shared timeline operation.')
+  await publishSharedTimelineOperation(entry.projectId, operation)
 }
 
 export const enqueueSharedTimelineOperationOnFailure = async (
   input: { projectId: string; userId: string; operation: SharedTimelineOperation; error?: unknown },
-) => enqueueSharedOutboxOperation({
-  projectId: input.projectId,
-  userId: input.userId,
-  kind: input.operation.kind,
-  payload: input.operation.payload,
-  error: input.error,
-})
+) => {
+  if (!isDurableSharedTimelineOperationKind(input.operation.kind)) {
+    throw new Error(`Shared timeline operation ${input.operation.kind} is not durable.`)
+  }
+  await enqueueSharedOutboxOperation({
+    projectId: input.projectId,
+    userId: input.userId,
+    kind: input.operation.kind,
+    payload: input.operation.payload,
+    error: input.error,
+  })
+}
 
 export const publishDurableSharedTimelineOperation = async <T = undefined>(
   input: {
@@ -233,15 +238,20 @@ export const publishDurableSharedTimelineOperation = async <T = undefined>(
     queuedResult?: T
     throwQueued?: boolean
   },
-): Promise<unknown | T | undefined> => await publishSharedTimelineOperation(
-  input.projectId,
-  input.operation,
-).catch(async (error) => {
-  if (!shouldQueueSharedOperationError(error)) throw error
-  await enqueueSharedTimelineOperationOnFailure(input)
-  if (input.throwQueued) throw new SharedOutboxQueuedError(input.operation.kind)
-  return input.queuedResult
-})
+): Promise<unknown | T | undefined> => {
+  if (!isDurableSharedTimelineOperationKind(input.operation.kind)) {
+    throw new Error(`Shared timeline operation ${input.operation.kind} is not durable.`)
+  }
+  return await publishSharedTimelineOperation(
+    input.projectId,
+    input.operation,
+  ).catch(async (error) => {
+    if (!shouldQueueSharedOperationError(error)) throw error
+    await enqueueSharedTimelineOperationOnFailure(input)
+    if (input.throwQueued) throw new SharedOutboxQueuedError(input.operation.kind)
+    return input.queuedResult
+  })
+}
 
 export const enqueueSharedAudioClipCreateOnFailure = async (
   input: { projectId: string; userId: string; assetKey: string; file: File; duration?: number; clipPayload: UploadedAudioClipPayload['clipPayload']; error?: unknown },

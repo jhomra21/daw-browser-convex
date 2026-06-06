@@ -1,7 +1,7 @@
 import type { z } from 'zod'
-import type { ConvexHttpClient } from 'convex/browser'
 import { api as generatedConvexApi } from '../convex/_generated/api'
 import type { Id } from '../convex/_generated/dataModel'
+import type { ApiConvexClient } from './convex-auth'
 import {
   AddMidiClipCommandSchema,
   AddSampleClipsCommandSchema,
@@ -22,15 +22,15 @@ import {
   SetTimingCommandSchema,
   SetTrackRoutingCommandSchema,
   SetTrackVolumeCommandSchema,
-} from '../src/lib/agent-commands'
-import { buildClipCreatePayload } from '../src/lib/clip-create'
-import { getPersistableAudioSourceMetadata } from '../src/lib/audio-source'
-import { sanitizeAudioSourceKind } from '../src/lib/audio-source-rules'
-import { normalizeSynthParams } from '../src/lib/effects/params'
-import type { Clip, Track } from '../src/types/timeline'
+} from '@daw-browser/shared'
+import { buildClipCreatePayload } from '@daw-browser/shared'
+import { getPersistableAudioSourceMetadata } from '@daw-browser/shared'
+import { sanitizeAudioSourceKind } from '@daw-browser/shared'
+import { normalizeSynthParams } from '@daw-browser/shared'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import { getClipKindFromClip, getClipTargetError } from './clip-targets'
 import { listSortedClipsForTrack, resolveTrackClip, selectTrackClips, trackAtIndex as trackAtIndexImpl } from './indexing'
-import { resolveAgentMixTargetIndices } from '../src/lib/agent-command-targets'
+import { resolveAgentMixTargetIndices } from '@daw-browser/shared'
 
 type CreateTrackInput = z.infer<typeof CreateTrackCommandSchema>
 type SetTrackRoutingInput = z.infer<typeof SetTrackRoutingCommandSchema>
@@ -69,8 +69,8 @@ type SampleDoc = {
 }
 
 type ConvexClientLike = {
-  query: ConvexHttpClient['query']
-  mutation: ConvexHttpClient['mutation']
+  query: ApiConvexClient['query']
+  mutation: ApiConvexClient['mutation']
 }
 
 type ConvexApi = typeof generatedConvexApi
@@ -143,7 +143,7 @@ function normalizeClipMidi(midi: {
 
 function buildAgentSampleClipPayload(input: {
   projectId: string
-  trackId: Track['id']
+  trackId: Id<'tracks'>
   startSec: number
   duration: number
   sample: SampleDoc
@@ -257,7 +257,7 @@ export function createAgentActions(context: AgentActionContext) {
       return { error: `No track at index ${input.outputTrackIndex}` } as const
     }
 
-    const sends = Array.isArray(input.sends)
+    const sends = input.sends
       ? (() => {
           const resolved = []
           for (const send of input.sends) {

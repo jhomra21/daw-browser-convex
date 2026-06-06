@@ -1,6 +1,6 @@
 import { type Component, For } from 'solid-js'
 import { cn } from '~/lib/utils'
-import type { Track } from '~/types/timeline'
+import type { Track } from '@daw-browser/timeline-core/types'
 import { LANE_HEIGHT } from '~/lib/timeline-utils'
 import ClipComponent from './ClipComponent'
 

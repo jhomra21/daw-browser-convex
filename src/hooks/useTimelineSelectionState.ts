@@ -10,7 +10,7 @@ import {
   selectTrackTarget,
   type TimelineSelectionState,
 } from '~/lib/timeline-selection'
-import type { SelectedClip, Track } from '~/types/timeline'
+import type { SelectedClip, Track } from '@daw-browser/timeline-core/types'
 
 export type TimelineSelectionController = {
   selectedTrackId: Accessor<Track['id'] | ''>

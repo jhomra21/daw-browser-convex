@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server"
 import { v } from "convex/values"
 import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess"
-import { isValidR2DeleteKey } from "../src/lib/r2-delete-keys"
+import { isValidR2DeleteKey } from "@daw-browser/shared"
 import { enqueueR2DeleteRows } from "./r2Deletes"
 
 export const listByRoom = query({

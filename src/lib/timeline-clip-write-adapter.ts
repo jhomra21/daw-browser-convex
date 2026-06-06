@@ -1,4 +1,4 @@
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { MoveClipInput } from '~/lib/timeline-repository/types'

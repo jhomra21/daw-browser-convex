@@ -1,4 +1,4 @@
-import { defaultSampleUrl, toDefaultSampleAssetKey } from '../shared/default-sample-rules'
+import { defaultSampleUrl, toDefaultSampleAssetKey } from '@daw-browser/shared'
 
 const DEFAULT_SAMPLE_LIST_TIMEOUT_MS = 4_000
 const DEFAULT_SAMPLE_PREFIX = 'default/'

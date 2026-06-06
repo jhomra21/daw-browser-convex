@@ -12,10 +12,10 @@ import {
 } from "~/components/effects/synth-card-bounds";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
-import { buildClipCreatePayload, type ClipCreateSnapshot } from "~/lib/clip-create";
+import { buildClipCreatePayload, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { convexApi } from "~/lib/convex";
 import type { LocalEffectRow } from "~/lib/local-effects";
-import { isLocalId } from "~/lib/local-ids";
+import { isLocalId } from "@daw-browser/shared";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import { buildSharedClipCreateOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
@@ -27,7 +27,7 @@ import {
   serializeSynthParams,
   type ArpeggiatorParams,
   type SynthParams,
-} from "~/lib/effects/params";
+} from "@daw-browser/shared";
 import {
   didOptimisticGrantScopeChange,
   readOptimisticGrantScope,
@@ -35,8 +35,8 @@ import {
 } from "~/lib/optimistic-grant-scope";
 import type { EffectParamsByEffect, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
-import type { AudioEngine } from "~/lib/audio-engine";
-import type { Clip, Track } from "~/types/timeline";
+import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
+import type { Clip, Track } from "@daw-browser/timeline-core/types";
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
 type LocalArpRow = LocalEffectRow<ArpeggiatorParams>;
 type LocalSynthRow = LocalEffectRow<SynthParams>;

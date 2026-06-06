@@ -8,8 +8,8 @@ import { canWriteProject, getProjectRole, requireAuthenticatedUserId, requirePro
 import { upsertSampleRow } from './sampleRows'
 import { isClipKindCompatibleWithTrack } from './trackRouting'
 import { getTrackWriteAccess } from './trackWrites'
-import { normalizeClipStartSec, normalizeClipTimingPatch } from '../src/lib/clip-timing'
-import { buildClipAudioSourceFields, normalizeAudioSourceMetadataPatch, sanitizePositiveNumber, type AudioSourceKind } from '../src/lib/audio-source-rules'
+import { normalizeClipStartSec, normalizeClipTimingPatch } from '@daw-browser/shared'
+import { buildClipAudioSourceFields, normalizeAudioSourceMetadataPatch, sanitizePositiveNumber, type AudioSourceKind } from '@daw-browser/shared'
 import { runSharedOperationOnce } from './sharedOperationResults'
 
 type ClipKind = 'audio' | 'midi'

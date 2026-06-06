@@ -1,9 +1,9 @@
-import { openLocalProjectDb, type LocalProjectEntityRow } from '~/lib/local-project-db'
-import { createLocalClipId, createLocalTrackId } from '~/lib/local-ids'
+import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectEntityRow } from '~/lib/local-project-db'
+import { createLocalClipId, createLocalTrackId } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { flushRegisteredLocalProjectWrites } from '~/lib/local-project-write-flushers'
 import { LocalEntityWriteQueue } from '~/lib/local-write-queue'
-import { normalizeTrackRouting } from '~/lib/track-routing-core'
+import { normalizeTrackRouting } from '@daw-browser/shared'
 import type {
   CreateClipInput,
   CreateTrackInput,
@@ -17,6 +17,7 @@ import type {
   TimelineTrackId,
   TimelineTrackRow,
 } from '~/lib/timeline-repository/types'
+import { buildTimelineTrackRow } from './track-row-builder'
 
 const TRACK_KIND = 'track'
 const CLIP_KIND = 'clip'
@@ -63,12 +64,7 @@ const isClipRow = (value: unknown): value is TimelineClipRow => {
     && isNumber(value.updatedAt)
 }
 
-const toEntityRow = (kind: string, id: string, value: unknown, updatedAt = now()): LocalProjectEntityRow => ({
-  kind,
-  id,
-  value,
-  updatedAt,
-})
+const toEntityRow = createLocalProjectEntityRow
 
 const trackValues = (rows: LocalProjectEntityRow[]) => rows.flatMap((row) => isTrackRow(row.value) ? [row.value] : [])
 const clipValues = (rows: LocalProjectEntityRow[]) => rows.flatMap((row) => isClipRow(row.value) ? [row.value] : [])
@@ -235,21 +231,20 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     const timestamp = now()
     const index = input.index ?? tracks.length
     const id = input.id ?? createLocalTrackId()
-    const track: TimelineTrackRow = {
+    const track = buildTimelineTrackRow({
       id,
-      historyRef: input.historyRef ?? id,
-      name: input.name?.trim() || `Track ${index + 1}`,
+      historyRef: input.historyRef,
+      name: input.name,
       index,
-      volume: input.volume ?? 0.8,
-      muted: input.muted ?? false,
-      soloed: input.soloed ?? false,
-      kind: input.kind ?? 'audio',
-      channelRole: input.channelRole ?? 'track',
+      volume: input.volume,
+      muted: input.muted,
+      soloed: input.soloed,
+      kind: input.kind,
+      channelRole: input.channelRole,
       outputTargetId: input.outputTargetId,
-      sends: input.sends ?? [],
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    }
+      sends: input.sends,
+      timestamp,
+    })
     const tx = db.transaction('entities', 'readwrite')
     await Promise.all([
       ...tracks

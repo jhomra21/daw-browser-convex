@@ -1,11 +1,12 @@
 import { onCleanup, type Accessor } from 'solid-js'
 
 import { persistClipTiming } from '~/lib/clip-mutations'
-import { isLocalId } from '~/lib/local-ids'
+import { isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { buildClipTimingHistoryEntry } from '~/lib/undo/builders'
 import { PPS, quantizeSecToGrid } from '~/lib/timeline-utils'
-import type { Track } from '~/types/timeline'
+import type { Track } from '@daw-browser/timeline-core/types'
+import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 
@@ -18,7 +19,7 @@ type ResizeState = {
 }
 
 type ClipResizeOptions = {
-  tracks: Accessor<Track[]>
+  tracks: Accessor<RuntimeTrack[]>
   setDraftClipTiming: (clipId: string, patch: { startSec?: number; duration?: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number } | null) => void
   commitClipTiming: (clipId: string, patch: { startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number }) => void
   canWriteClip: (clipId: string) => boolean

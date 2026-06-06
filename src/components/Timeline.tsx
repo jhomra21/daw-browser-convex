@@ -6,7 +6,7 @@ import {
   createMemo,
   createSignal,
 } from "solid-js";
-import type { Clip, Track } from "~/types/timeline";
+import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { getAudioEngine } from "~/lib/audio-engine-singleton";
 import {
   timelineDurationSec,
@@ -22,7 +22,7 @@ import { useClipDrag } from "~/hooks/useClipDrag";
 import { useClipResize } from "~/hooks/useClipResize";
 import { useTimelineSelection } from "~/hooks/useTimelineSelection";
 import { useClipBuffers } from "~/hooks/useClipBuffers";
-import { normalizeCommandTrackIndices } from "~/lib/agent-command-targets";
+import { normalizeCommandTrackIndices } from "@daw-browser/shared";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
 import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
@@ -628,10 +628,6 @@ const Timeline: Component = () => {
     handleStop();
   };
 
-  const handleRecordToggle = async () => {
-    await toggleRecording();
-  };
-
   const addAudioTrack = async () => {
     await createTimelineTrack();
   };
@@ -784,7 +780,7 @@ const Timeline: Component = () => {
     loopEnabled: loopEnabled(),
     onToggleLoop: () => setLoopEnabled((prev) => !prev),
     isRecording: isRecording(),
-    onToggleRecord: handleRecordToggle,
+    onToggleRecord: toggleRecording,
     onUndo: handleUndo,
     onRedo: handleRedo,
     onJumpToClip: (clipId: string, trackId: string, startSec: number) => jumpToClip(trackId, clipId, startSec),

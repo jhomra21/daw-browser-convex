@@ -1,9 +1,10 @@
 import { loadLocalProjectState, saveLocalProjectState } from '~/lib/local-project-state'
+import { isExportAudioFormat, type ExportAudioFormat } from '@daw-browser/shared'
 
 type LocalExportMetadata = {
   id: string
   name: string
-  format: 'wav'
+  format: ExportAudioFormat
   durationSec: number
   sampleRate: number
   sizeBytes: number
@@ -25,7 +26,8 @@ const isExportMetadata = (value: unknown): value is LocalExportMetadata => {
     && 'createdAt' in value
     && typeof value.id === 'string'
     && typeof value.name === 'string'
-    && value.format === 'wav'
+    && typeof value.format === 'string'
+    && isExportAudioFormat(value.format)
     && typeof value.durationSec === 'number'
     && typeof value.sampleRate === 'number'
     && typeof value.sizeBytes === 'number'

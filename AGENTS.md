@@ -1,17 +1,18 @@
+This is a browser/chrome based DAW (Digital Audio Workstation), like Ableton but all in browser. Local first with a cloud/shared project model using convex to power sharing and realtime collaboration. Mediabunny for exporting, reading/writing/decoding/encoding files. Web Audio API for audio engine and dsp processing.
+Web Audio API Docs:
+https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API#web_audio_api_target_audience
+
 ## Philosophy
 This codebase will outlive you. Every shortcut becomes someone else's burden. Every hack compounds into technical debt that slows the whole team down. 
-
 You are not just writing code, you are shaping the future of this project. The patterns you establish will be copied. The corners you cut will be cut again.
 
 Fight entropy. Leave the codebase better than you found it.
-
 Do not write plausible code, write accurate code backed by the reality of this codebase
 
 ## Code Thinking
 Review your implementation before stopping. Check whether there is a better or simpler approach whether any redundant code remains, whether duplicate logic was introduced, and whether any dead or unused code was left behind. If you find issues, fix them now; if not, briefly confirm the implementation is clean.
                 
 Think carefully and only action the specific task I have given you with the most concise and elegant solution that takes into consideration existing code across codebase.
-
 Prefer the most concise and elegant solutions that changes or adds as little code as possible.
 
 ## Engineering Rules (Non-Negotiable)

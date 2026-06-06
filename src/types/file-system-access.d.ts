@@ -25,6 +25,7 @@ type FileSystemGetFileOptions = {
 type FileSystemWritableFileStream = WritableStream & {
   write(data: BufferSource | Blob | string): Promise<void>
   close(): Promise<void>
+  abort(reason?: unknown): Promise<void>
 }
 
 type IdleRequestCallback = (deadline: IdleDeadline) => void

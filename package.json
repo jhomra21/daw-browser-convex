@@ -21,7 +21,7 @@
   },
   "license": "MIT",
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.25.6",
+    "@cloudflare/vite-plugin": "1.40.0",
     "@tailwindcss/vite": "^4.2.1",
     "@tanstack/router-plugin": "^1.164.0",
     "@tanstack/solid-router-devtools": "^1.163.3",
@@ -32,7 +32,7 @@
     "typescript": "^6.0.2",
     "vite": "^7.3.1",
     "vite-plugin-solid": "^2.11.10",
-    "wrangler": "^4.69.0"
+    "wrangler": "4.98.0"
   },
   "dependencies": {
     "@daw-browser/audio-engine": "workspace:*",

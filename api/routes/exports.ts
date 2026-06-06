@@ -4,6 +4,12 @@ import { requireAuthenticatedConvexForApi, requireProjectRoleContextForApi } fro
 import { streamProjectR2Object } from '../project-r2-stream'
 import { drainR2DeleteQueue } from '../r2-delete-queue'
 import { sanitizeFileNameSegment } from '../sanitize-file-name-segment'
+import { getExportAudioFormatMetadata, isExportAudioFormat, type ExportAudioFormat } from '@daw-browser/shared'
+
+const isExportMimeTypeAllowed = (format: ExportAudioFormat, mimeType: string) => {
+  if (!mimeType) return true
+  return mimeType === getExportAudioFormatMetadata(format).mimeType
+}
 
 export function registerExportRoutes(app: App) {
 // Upload an export to R2 (protected route)
@@ -11,7 +17,7 @@ export function registerExportRoutes(app: App) {
   try {
     const form = await c.req.formData()
     const projectId = form.get('projectId')?.toString()
-    const format = 'wav'
+    const requestedFormat = form.get('format')?.toString() ?? 'wav'
     const durationStr = form.get('duration')?.toString()
     const sampleRateStr = form.get('sampleRate')?.toString()
     const file = form.get('file')
@@ -20,38 +26,31 @@ export function registerExportRoutes(app: App) {
     if (!projectId || !(file instanceof File)) {
       return c.json({ error: 'Missing projectId or file' }, 400)
     }
+    if (!isExportAudioFormat(requestedFormat)) {
+      return c.json({ error: 'Unsupported export format' }, 400)
+    }
+    const format = requestedFormat
+    const metadata = getExportAudioFormatMetadata(format)
+    if (!isExportMimeTypeAllowed(format, file.type)) {
+      return c.json({ error: 'Export file type does not match format' }, 400)
+    }
     const access = await requireProjectRoleContextForApi(c, projectId, ['owner', 'editor'])
     if (!access) return c.json({ error: 'Forbidden' }, 403)
 
     // Sanitize filename or generate one
     if (!name) {
       const ts = new Date().toISOString().replace(/[-:TZ.]/g, '')
-      name = `export_${ts}.wav`
+      name = `export_${ts}${metadata.fileExtension}`
     }
-    const sanitized = sanitizeFileNameSegment(name, 'export.wav')
-
-    const exportsPrefix = `projects/${projectId}/exports/`
+    const sanitized = sanitizeFileNameSegment(name, `export${metadata.fileExtension}`)
     const splitIdx = sanitized.lastIndexOf('.')
     const base = splitIdx > 0 ? sanitized.slice(0, splitIdx) : sanitized
-    const ext = splitIdx > 0 ? sanitized.slice(splitIdx) : ''
-    let chosenName = sanitized
-    let attempts = 0
-    while (attempts < 5) {
-      const probeKey = exportsPrefix + chosenName
-      const existing = await c.env.daw_audio_samples.head(probeKey)
-      if (!existing) break
-      attempts++
-      chosenName = `${base} (${attempts})${ext}`
-    }
-    if (attempts >= 5) {
-      const ts = new Date().toISOString().replace(/[-:TZ.]/g, '')
-      chosenName = `${base}_${ts}${ext}`
-    }
-    const key = exportsPrefix + chosenName
+    const chosenName = `${base}${metadata.fileExtension}`
+    const key = `projects/${projectId}/exports/${crypto.randomUUID()}-${chosenName}`
 
     const putRes = await c.env.daw_audio_samples.put(key, file.stream(), {
       httpMetadata: {
-        contentType: file.type || 'audio/wav',
+        contentType: metadata.mimeType,
         contentDisposition: `inline; filename="${chosenName}"`,
       },
       customMetadata: {

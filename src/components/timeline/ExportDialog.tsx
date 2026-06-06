@@ -1,12 +1,12 @@
-import { type Component, createSignal, Show } from 'solid-js'
+import { type Component, createEffect, createSignal, For, onCleanup, Show } from 'solid-js'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '~/components/ui/dialog'
 import { Button } from '~/components/ui/button'
 import type { ExportRange } from '@daw-browser/audio-engine/export-mixdown'
 import type { ArpParams, EqParamsLite, ReverbParamsLite, SynthParamsInput } from '@daw-browser/shared'
 import { convexClient, convexApi } from '~/lib/convex'
-import { isLocalId } from '@daw-browser/shared'
-import { saveBlobLocally } from '~/lib/local-export'
+import { exportAudioFormats, getExportAudioFormatMetadata, isExportAudioFormat, isLocalId, type ExportAudioFormat } from '@daw-browser/shared'
+import { chooseLocalExportFile, createLocalExportWritable, saveBlobLocally } from '~/lib/local-export'
 import { saveLocalExportMetadata } from '~/lib/local-export-metadata'
 import { listLocalEffects, type LocalEffectRow } from '~/lib/local-effects'
 import type { FunctionReturnType } from 'convex/server'
@@ -42,9 +42,45 @@ const ExportDialog: Component<Props> = (props) => {
   const [startSec, setStartSec] = createSignal(0)
   const [endSec, setEndSec] = createSignal(10)
   const [busy, setBusy] = createSignal(false)
+  const [format, setFormat] = createSignal<ExportAudioFormat>('wav')
+  const [supportedFormats, setSupportedFormats] = createSignal<ExportAudioFormat[] | null>(null)
   const [error, setError] = createSignal<string | null>(null)
   const [resultUrl, setResultUrl] = createSignal<string | null>(null)
   const [localSavedName, setLocalSavedName] = createSignal<string | null>(null)
+
+  createEffect(() => {
+    if (!props.isOpen) return
+    let canceled = false
+    const applySupportedFormats = (formats: ExportAudioFormat[]) => {
+      if (canceled) return
+      setSupportedFormats(formats)
+      if (!formats.includes(format())) setFormat('wav')
+    }
+    const probeSupportedFormats = () => import('@daw-browser/audio-engine/export-mixdown').then((exportMixdown) => (
+      exportMixdown.getSupportedExportAudioFormats()
+    )).then((formats) => {
+      applySupportedFormats(formats)
+      return formats
+    }).catch(() => {
+      if (!canceled) {
+        setSupportedFormats(['wav'])
+      }
+      return ['wav'] satisfies ExportAudioFormat[]
+    })
+    setSupportedFormats(null)
+    let supportProbeTimer: number | undefined
+    void probeSupportedFormats().then((formats) => {
+      if (formats.length > 1) return
+      // WebCodecs support checks can settle after the dialog chunk mounts; retry once and clean it up.
+      supportProbeTimer = window.setTimeout(() => {
+        void probeSupportedFormats()
+      }, 250)
+    })
+    onCleanup(() => {
+      canceled = true
+      if (supportProbeTimer !== undefined) window.clearTimeout(supportProbeTimer)
+    })
+  })
 
   const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
     for (const row of rows) {
@@ -87,6 +123,10 @@ const ExportDialog: Component<Props> = (props) => {
 
   const readExportMode = (value: string): ExportMode => (
     value === 'loop' || value === 'custom' ? value : 'whole'
+  )
+
+  const readExportFormat = (value: string): ExportAudioFormat => (
+    isExportAudioFormat(value) ? value : 'wav'
   )
 
   const computeRange = (): ExportRange => {
@@ -133,40 +173,61 @@ const ExportDialog: Component<Props> = (props) => {
     setBusy(true)
     try {
       const range = computeRange()
-      const mixdownModule = import('@daw-browser/audio-engine/export-mixdown')
-      await ensureBuffersForRange(range)
+      const selectedFormat = format()
+      const metadata = getExportAudioFormatMetadata(selectedFormat)
+      const fname = `mixdown_${new Date().toISOString().replace(/[-:TZ.]/g, '')}${metadata.fileExtension}`
       const localOnly = props.projectId ? isLocalId('project', props.projectId) : false
-      const fx: ExportFx = { trackFx: {} }
-      if (localOnly && props.projectId) try {
-        applyLocalEffectRowsToFx(fx, await listLocalEffects(props.projectId))
-      } catch {}
-      if (!localOnly && props.projectId && props.userId) try {
-        const rows = await convexClient.query(convexApi.effects.listByRoom, {
-          projectId: props.projectId,
-        })
-        applyRoomEffectRowsToFx(fx, rows)
-      } catch {}
-
-      const { renderMixdown, encodeAudioBuffer } = await mixdownModule
+      const saveTypes = [{
+        description: `${metadata.label} audio`,
+        accept: { [metadata.mimeType]: [metadata.fileExtension] },
+      }]
+      const localFileHandle = localOnly
+        ? await chooseLocalExportFile({ suggestedName: fname, types: saveTypes })
+        : undefined
+      const effectsPromise = async (): Promise<ExportFx> => {
+        const fx: ExportFx = { trackFx: {} }
+        if (localOnly && props.projectId) try {
+          applyLocalEffectRowsToFx(fx, await listLocalEffects(props.projectId))
+        } catch {}
+        if (!localOnly && props.projectId && props.userId) try {
+          const rows = await convexClient.query(convexApi.effects.listByRoom, {
+            projectId: props.projectId,
+          })
+          applyRoomEffectRowsToFx(fx, rows)
+        } catch {}
+        return fx
+      }
+      const [, fx] = await Promise.all([ensureBuffersForRange(range), effectsPromise()])
+      const { encodeAudioBuffer, renderMixdown } = await import('@daw-browser/audio-engine/export-mixdown')
       const rendered = await renderMixdown({ tracks: props.tracks, bpm: props.bpm, range, fx })
-      const enc = await encodeAudioBuffer(rendered)
-      const fname = `mixdown_${new Date().toISOString().replace(/[-:TZ.]/g, '')}${enc.fileExtension}`
+      const localWritable = localFileHandle ? await createLocalExportWritable(localFileHandle) : undefined
+      const enc = await encodeAudioBuffer(rendered, {
+        format: selectedFormat,
+        target: localWritable
+          ? {
+            mode: 'stream',
+            writable: localWritable.writable,
+            close: () => localWritable.writable.close(),
+            abort: (reason) => localWritable.writable.abort(reason),
+          }
+          : { mode: 'buffer' },
+      })
       if (localOnly) {
-        await saveBlobLocally({
-          blob: enc.blob,
-          suggestedName: fname,
-          types: [{
-            description: 'WAV audio',
-            accept: { [enc.mimeType]: [enc.fileExtension] },
-          }],
-        })
+        if (!localWritable) {
+          if (!enc.blob) throw new Error('Export did not produce a downloadable file.')
+          await saveBlobLocally({
+            blob: enc.blob,
+            suggestedName: fname,
+            types: saveTypes,
+          })
+        }
         if (props.projectId) {
           await saveLocalExportMetadata(props.projectId, {
             name: fname,
-            format: 'wav',
+            format: enc.format,
             durationSec: enc.durationSec,
             sampleRate: enc.sampleRate,
-            sizeBytes: enc.blob.size,
+            sizeBytes: enc.sizeBytes,
           })
         }
         setLocalSavedName(fname)
@@ -178,14 +239,16 @@ const ExportDialog: Component<Props> = (props) => {
       fd.append('projectId', rid)
       fd.append('duration', String(enc.durationSec))
       fd.append('sampleRate', String(enc.sampleRate))
+      fd.append('format', enc.format)
       fd.append('name', fname)
+      if (!enc.blob) throw new Error('Export did not produce an uploadable file.')
       fd.append('file', enc.blob, fname)
       const res = await fetch('/api/exports', { method: 'POST', body: fd })
       if (!res.ok) throw new Error('Upload failed')
       const data = readExportUploadResponse(await res.json().catch(() => null))
-      const url = typeof data?.url === 'string' ? data.url : ''
-      const key = typeof data?.key === 'string' ? data.key : ''
-      const sizeBytes = typeof data?.sizeBytes === 'number' ? data.sizeBytes : undefined
+      const url = typeof data.url === 'string' ? data.url : ''
+      const key = typeof data.key === 'string' ? data.key : ''
+      const sizeBytes = typeof data.sizeBytes === 'number' ? data.sizeBytes : undefined
       if (!url || !key) throw new Error('Invalid upload response')
 
       if (props.userId) {
@@ -195,7 +258,7 @@ const ExportDialog: Component<Props> = (props) => {
             name: fname,
             url,
             r2Key: key,
-            format: 'wav',
+            format: enc.format,
             duration: enc.durationSec,
             sampleRate: enc.sampleRate,
             sizeBytes,
@@ -205,6 +268,7 @@ const ExportDialog: Component<Props> = (props) => {
 
       setResultUrl(url)
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return
       setError(err instanceof Error ? err.message : 'Export failed')
     } finally {
       setBusy(false)
@@ -225,6 +289,24 @@ const ExportDialog: Component<Props> = (props) => {
               <option value="whole">Whole timeline</option>
               <option value="loop" disabled={!props.loopEnabled}>Loop region</option>
               <option value="custom">Custom</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-3">
+            <label class="text-sm w-24 text-neutral-300">Format</label>
+            <select class="bg-neutral-900 text-neutral-100 border border-neutral-700 rounded px-2 py-1 text-sm" value={format()} onChange={(e) => setFormat(readExportFormat(e.currentTarget.value))}>
+              <Show when={supportedFormats() !== null} fallback={<option value="wav">WAV</option>}>
+                <For each={exportAudioFormats}>
+                  {(item) => {
+                    const itemMetadata = getExportAudioFormatMetadata(item)
+                    const supported = supportedFormats()?.includes(item) ?? false
+                    return (
+                      <option value={item} disabled={supported ? undefined : true}>
+                        {supported ? itemMetadata.label : `${itemMetadata.label} unavailable`}
+                      </option>
+                    )
+                  }}
+                </For>
+              </Show>
             </select>
           </div>
           <Show when={mode() === 'custom'}>

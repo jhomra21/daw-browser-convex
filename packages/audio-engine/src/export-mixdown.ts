@@ -2,21 +2,13 @@ import {
   Output,
   BufferTarget,
   StreamTarget,
-  WavOutputFormat,
-  Mp3OutputFormat,
-  OggOutputFormat,
-  FlacOutputFormat,
   AudioBufferSource,
-  canEncodeAudio,
-  type AudioCodec,
-  type OutputFormat,
   type StreamTargetChunk,
   type Target,
 } from 'mediabunny'
 
 import { getPlayableAudioWindow, getScheduledMidiEvents } from './audio-scheduling'
 import {
-  exportAudioFormats,
   getExportAudioFormatMetadata,
   type ArpParams,
   type EqParamsLite,
@@ -24,6 +16,11 @@ import {
   type ReverbParamsLite,
   type SynthParamsInput,
 } from '@daw-browser/shared'
+import {
+  createExportAudioOutputFormat,
+  getExportAudioCodec,
+  getExportAudioDefaultBitrate,
+} from './export-audio-support'
 import { createSynthVoiceOscillators, getSynthVoiceConfig, getSynthVoiceVelocity, scheduleSynthVoiceEnvelope } from './synth-voice'
 import { createOfflineMixerNodes } from './mixer/apply-offline-routing'
 import { createMixerChannels } from './mixer/channels'
@@ -50,17 +47,14 @@ type ExportRequest = {
 }
 
 type ExportResult = {
-  audioBuffer: AudioBuffer
   blob?: Blob
   format: ExportAudioFormat
-  mimeType: string
-  fileExtension: string
   durationSec: number
   sampleRate: number
   sizeBytes: number
 }
 
-type EncodeTarget =
+export type EncodeAudioBufferTarget =
   | { mode: 'buffer' }
   | {
     mode: 'stream'
@@ -69,18 +63,11 @@ type EncodeTarget =
     abort?: (reason?: unknown) => Promise<void>
   }
 
-export type ExportWritableStream = WritableStream<StreamTargetChunk>
-
 type EncodeAudioBufferOptions = {
   format?: ExportAudioFormat
   bitrate?: number
-  target?: EncodeTarget
+  target?: EncodeAudioBufferTarget
   onWrite?: (sizeBytes: number) => void
-}
-
-type ExportAudioSupportRequest = {
-  sampleRate?: number
-  numberOfChannels?: number
 }
 
 function lastClipEndSec(tracks: Track<AudioBuffer>[]): number {
@@ -100,34 +87,6 @@ function computeRangeSec(tracks: Track<AudioBuffer>[], range: ExportRange): { st
   const start = Math.max(0, range.startSec)
   const end = Math.max(start, range.endSec)
   return { start, end }
-}
-
-type ExportAudioEncodingDescriptor = {
-  codec: AudioCodec
-  createOutputFormat: () => OutputFormat
-  defaultBitrate?: number
-}
-
-const exportAudioEncodingDescriptors: Record<ExportAudioFormat, ExportAudioEncodingDescriptor> = {
-  wav: {
-    codec: 'pcm-s16',
-    createOutputFormat: () => new WavOutputFormat(),
-  },
-  mp3: {
-    codec: 'mp3',
-    createOutputFormat: () => new Mp3OutputFormat(),
-    defaultBitrate: 192000,
-  },
-  'ogg-opus': {
-    codec: 'opus',
-    createOutputFormat: () => new OggOutputFormat(),
-    defaultBitrate: 128000,
-  },
-  flac: {
-    codec: 'flac',
-    createOutputFormat: () => new FlacOutputFormat(),
-    defaultBitrate: 128000,
-  },
 }
 
 export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
@@ -214,18 +173,6 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
   return await ctx.startRendering()
 }
 
-const getAudioCodec = (format: ExportAudioFormat): AudioCodec => {
-  return exportAudioEncodingDescriptors[format].codec
-}
-
-const getDefaultBitrate = (format: ExportAudioFormat): number | undefined => {
-  return exportAudioEncodingDescriptors[format].defaultBitrate
-}
-
-const createOutputFormat = (format: ExportAudioFormat): OutputFormat => {
-  return exportAudioEncodingDescriptors[format].createOutputFormat()
-}
-
 type EncodeTargetState = {
   target: Target
   close: () => Promise<void>
@@ -233,7 +180,7 @@ type EncodeTargetState = {
 }
 
 const createManagedWritable = (
-  target: Extract<EncodeTarget, { mode: 'stream' }>,
+  target: Extract<EncodeAudioBufferTarget, { mode: 'stream' }>,
   abortTarget: (reason?: unknown) => Promise<void>,
 ): WritableStream<StreamTargetChunk> => {
   if (!target.close && !target.abort) return target.writable
@@ -256,7 +203,7 @@ const createManagedWritable = (
   })
 }
 
-const createEncodeTarget = (target: EncodeTarget | undefined): EncodeTargetState => {
+const createEncodeTarget = (target: EncodeAudioBufferTarget | undefined): EncodeTargetState => {
   if (target?.mode !== 'stream') {
     return {
       target: new BufferTarget(),
@@ -283,37 +230,20 @@ const getBufferTargetBlob = (target: Target, mimeType: string): Blob | undefined
   return new Blob([target.buffer], { type: mimeType })
 }
 
-export async function getSupportedExportAudioFormats(req: ExportAudioSupportRequest = {}): Promise<ExportAudioFormat[]> {
-  const sampleRate = req.sampleRate ?? 44100
-  const numberOfChannels = req.numberOfChannels ?? 2
-  const supportChecks = exportAudioFormats.map(async (format): Promise<ExportAudioFormat | undefined> => {
-    const codec = getAudioCodec(format)
-    if (format === 'wav') return format
-    const canEncode = await canEncodeAudio(codec, {
-      sampleRate,
-      numberOfChannels,
-      bitrate: getDefaultBitrate(format),
-    })
-    return canEncode ? format : undefined
-  })
-  const checkedFormats = await Promise.all(supportChecks)
-  return checkedFormats.filter((format) => format !== undefined)
-}
-
 export async function encodeAudioBuffer(buffer: AudioBuffer, options: EncodeAudioBufferOptions = {}): Promise<ExportResult> {
   const format = options.format ?? 'wav'
   const metadata = getExportAudioFormatMetadata(format)
   const sampleRate = buffer.sampleRate
   const encodeTarget = createEncodeTarget(options.target)
-  const output = new Output({ format: createOutputFormat(format), target: encodeTarget.target })
+  const output = new Output({ format: createExportAudioOutputFormat(format), target: encodeTarget.target })
   let sizeBytes = 0
   encodeTarget.target.onwrite = (_start, end) => {
     sizeBytes = Math.max(sizeBytes, end)
     options.onWrite?.(sizeBytes)
   }
   const src = new AudioBufferSource({
-    codec: getAudioCodec(format),
-    bitrate: options.bitrate ?? getDefaultBitrate(format),
+    codec: getExportAudioCodec(format),
+    bitrate: options.bitrate ?? getExportAudioDefaultBitrate(format),
   })
   try {
     output.addAudioTrack(src)
@@ -335,11 +265,8 @@ export async function encodeAudioBuffer(buffer: AudioBuffer, options: EncodeAudi
   }
   const blob = getBufferTargetBlob(encodeTarget.target, metadata.mimeType)
   return {
-    audioBuffer: buffer,
     blob,
     format,
-    mimeType: metadata.mimeType,
-    fileExtension: metadata.fileExtension,
     durationSec: buffer.duration,
     sampleRate,
     sizeBytes: blob?.size ?? sizeBytes,

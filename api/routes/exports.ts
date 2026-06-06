@@ -4,7 +4,7 @@ import { requireAuthenticatedConvexForApi, requireProjectRoleContextForApi } fro
 import { streamProjectR2Object } from '../project-r2-stream'
 import { drainR2DeleteQueue } from '../r2-delete-queue'
 import { sanitizeFileNameSegment } from '../sanitize-file-name-segment'
-import { getExportAudioFormatMetadata, isExportAudioFormat, type ExportAudioFormat } from '@daw-browser/shared'
+import { formatExportFileTimestamp, getExportAudioFormatMetadata, isExportAudioFormat, type ExportAudioFormat } from '@daw-browser/shared'
 
 const isExportMimeTypeAllowed = (format: ExportAudioFormat, mimeType: string) => {
   if (!mimeType) return true
@@ -39,7 +39,7 @@ export function registerExportRoutes(app: App) {
 
     // Sanitize filename or generate one
     if (!name) {
-      const ts = new Date().toISOString().replace(/[-:TZ.]/g, '')
+      const ts = formatExportFileTimestamp(new Date())
       name = `export_${ts}${metadata.fileExtension}`
     }
     const sanitized = sanitizeFileNameSegment(name, `export${metadata.fileExtension}`)

@@ -40,6 +40,10 @@ export const getExportAudioFormatMetadata = (format: ExportAudioFormat): ExportA
   return exportAudioFormatMetadata[format]
 }
 
+export const formatExportFileTimestamp = (date: Date): string => (
+  date.toISOString().replace(/[-:TZ.]/g, '')
+)
+
 export const isExportAudioFormat = (value: string): value is ExportAudioFormat => (
   exportAudioFormats.some((format) => format === value)
 )

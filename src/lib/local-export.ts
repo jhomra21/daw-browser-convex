@@ -1,6 +1,11 @@
-type SaveBlobInput = {
+import type { EncodeAudioBufferTarget } from '@daw-browser/audio-engine/export-mixdown'
+
+type BlobDownloadInput = {
   blob: Blob
   suggestedName: string
+}
+
+type SaveBlobInput = BlobDownloadInput & {
   types?: FilePickerAcceptType[]
 }
 
@@ -12,6 +17,8 @@ type LocalExportWritableInput = {
 type LocalExportWritable = {
   writable: FileSystemWritableFileStream
 }
+
+type LocalExportTarget = Extract<EncodeAudioBufferTarget, { mode: 'stream' }>
 
 export const chooseLocalExportFile = async (input: LocalExportWritableInput): Promise<FileSystemFileHandle | undefined> => {
   if (typeof window === 'undefined' || !window.showSaveFilePicker) return
@@ -25,6 +32,26 @@ export const createLocalExportWritable = async (handle: FileSystemFileHandle): P
   const writable = await handle.createWritable?.()
   if (!writable) throw new Error('Writable file streams are not supported.')
   return { writable }
+}
+
+export const createLocalExportTarget = (localExport: LocalExportWritable): LocalExportTarget => ({
+  mode: 'stream',
+  writable: localExport.writable,
+  close: () => localExport.writable.close(),
+  abort: (reason) => localExport.writable.abort(reason),
+})
+
+export const downloadBlob = (input: BlobDownloadInput): void => {
+  const url = URL.createObjectURL(input.blob)
+  try {
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = input.suggestedName
+    anchor.rel = 'noopener'
+    anchor.click()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
 }
 
 export const saveBlobLocally = async (input: SaveBlobInput): Promise<void> => {
@@ -44,14 +71,5 @@ export const saveBlobLocally = async (input: SaveBlobInput): Promise<void> => {
     return
   }
 
-  const url = URL.createObjectURL(input.blob)
-  try {
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = input.suggestedName
-    anchor.rel = 'noopener'
-    anchor.click()
-  } finally {
-    URL.revokeObjectURL(url)
-  }
+  downloadBlob(input)
 }

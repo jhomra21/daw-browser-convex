@@ -11,6 +11,7 @@ import { clientXToSec, yToLaneIndex, willOverlap, calcNonOverlapStart, quantizeS
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { createAudioImportTransaction } from '~/lib/timeline-audio-import'
 import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
+import { isAbortError } from '~/lib/dom-errors'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
@@ -129,12 +130,12 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     return created ? { track: created, autoCreated: true } : null
   }
 
-  const resolveClipStartSec = (track: Track | undefined, desiredStart: number, duration: number) => {
+  const resolveClipStartSec = (track: Track, desiredStart: number, duration: number) => {
     const startSec = gridEnabled()
       ? quantizeSecToGrid(Math.max(0, desiredStart), bpm(), gridDenominator(), 'round')
       : Math.max(0, desiredStart)
     return gridEnabled()
-      ? calcNonOverlapStartGridAligned(track?.clips ?? [], null, startSec, duration, bpm(), gridDenominator())
+      ? calcNonOverlapStartGridAligned(track.clips, null, startSec, duration, bpm(), gridDenominator())
       : ensureNonOverlappingStart(track, startSec, duration)
   }
 
@@ -169,8 +170,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     selection.selectPrimaryClip({ trackId, clipId })
   }
 
-  const ensureNonOverlappingStart = (track: Track | undefined, desiredStart: number, duration: number) => {
-    if (!track) return desiredStart
+  const ensureNonOverlappingStart = (track: Track, desiredStart: number, duration: number) => {
     if (!willOverlap(track.clips, null, desiredStart, duration)) return desiredStart
     return calcNonOverlapStart(track.clips, null, desiredStart, duration)
   }
@@ -274,11 +274,6 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     const file = Array.from(files).find(f => f.type.startsWith('audio'))
     if (!file) return
     await handleFilesInternal(file)
-  }
-
-  const isAbortError = (error: unknown) => {
-    if (error instanceof DOMException) return error.name === 'AbortError'
-    return false
   }
 
   const handleAddAudio = async () => {

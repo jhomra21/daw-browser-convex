@@ -5,10 +5,11 @@ import { Button } from '~/components/ui/button'
 import type { ExportRange } from '@daw-browser/audio-engine/export-mixdown'
 import type { ArpParams, EqParamsLite, ReverbParamsLite, SynthParamsInput } from '@daw-browser/shared'
 import { convexClient, convexApi } from '~/lib/convex'
-import { exportAudioFormats, getExportAudioFormatMetadata, isExportAudioFormat, isLocalId, type ExportAudioFormat } from '@daw-browser/shared'
-import { chooseLocalExportFile, createLocalExportWritable, saveBlobLocally } from '~/lib/local-export'
+import { exportAudioFormats, formatExportFileTimestamp, getExportAudioFormatMetadata, isExportAudioFormat, isLocalId, type ExportAudioFormat } from '@daw-browser/shared'
+import { chooseLocalExportFile, createLocalExportTarget, createLocalExportWritable, saveBlobLocally } from '~/lib/local-export'
 import { saveLocalExportMetadata } from '~/lib/local-export-metadata'
 import { listLocalEffects, type LocalEffectRow } from '~/lib/local-effects'
+import { isAbortError } from '~/lib/dom-errors'
 import type { FunctionReturnType } from 'convex/server'
 
 type ExportMode = ExportRange['mode']
@@ -22,6 +23,32 @@ type ExportUploadResponse = {
   url?: unknown
   key?: unknown
   sizeBytes?: unknown
+}
+
+let cachedSupportedExportAudioFormats: ExportAudioFormat[] | undefined
+let supportedExportAudioFormatsPromise: Promise<ExportAudioFormat[]> | undefined
+
+const probeSupportedExportAudioFormats = (): Promise<ExportAudioFormat[]> => {
+  if (cachedSupportedExportAudioFormats) return Promise.resolve(cachedSupportedExportAudioFormats)
+  if (supportedExportAudioFormatsPromise) return supportedExportAudioFormatsPromise
+  const supportPromise = import('@daw-browser/audio-engine/export-audio-support').then((exportAudioSupport) => (
+    exportAudioSupport.getSupportedExportAudioFormats()
+  )).then((formats) => {
+    cachedSupportedExportAudioFormats = formats
+    return formats
+  }).catch(() => {
+    const fallbackFormats = ['wav'] satisfies ExportAudioFormat[]
+    supportedExportAudioFormatsPromise = undefined
+    return fallbackFormats
+  })
+  supportedExportAudioFormatsPromise = supportPromise
+  return supportPromise
+}
+
+const retrySupportedExportAudioFormats = (): Promise<ExportAudioFormat[]> => {
+  supportedExportAudioFormatsPromise = undefined
+  cachedSupportedExportAudioFormats = undefined
+  return probeSupportedExportAudioFormats()
 }
 
 type Props = {
@@ -56,24 +83,26 @@ const ExportDialog: Component<Props> = (props) => {
       setSupportedFormats(formats)
       if (!formats.includes(format())) setFormat('wav')
     }
-    const probeSupportedFormats = () => import('@daw-browser/audio-engine/export-mixdown').then((exportMixdown) => (
-      exportMixdown.getSupportedExportAudioFormats()
-    )).then((formats) => {
+    const probeSupportedFormats = (retry = false) => (
+      retry ? retrySupportedExportAudioFormats() : probeSupportedExportAudioFormats()
+    ).then((formats) => {
       applySupportedFormats(formats)
       return formats
-    }).catch(() => {
-      if (!canceled) {
-        setSupportedFormats(['wav'])
-      }
-      return ['wav'] satisfies ExportAudioFormat[]
     })
-    setSupportedFormats(null)
+    const hadCachedSupportedFormats = cachedSupportedExportAudioFormats !== undefined
+    if (cachedSupportedExportAudioFormats) {
+      applySupportedFormats(cachedSupportedExportAudioFormats)
+    } else {
+      setSupportedFormats(null)
+    }
     let supportProbeTimer: number | undefined
     void probeSupportedFormats().then((formats) => {
-      if (formats.length > 1) return
+      if (canceled) return
+      if (hadCachedSupportedFormats || formats.length > 1) return
       // WebCodecs support checks can settle after the dialog chunk mounts; retry once and clean it up.
       supportProbeTimer = window.setTimeout(() => {
-        void probeSupportedFormats()
+        if (canceled) return
+        void probeSupportedFormats(true)
       }, 250)
     })
     onCleanup(() => {
@@ -175,7 +204,7 @@ const ExportDialog: Component<Props> = (props) => {
       const range = computeRange()
       const selectedFormat = format()
       const metadata = getExportAudioFormatMetadata(selectedFormat)
-      const fname = `mixdown_${new Date().toISOString().replace(/[-:TZ.]/g, '')}${metadata.fileExtension}`
+      const fname = `mixdown_${formatExportFileTimestamp(new Date())}${metadata.fileExtension}`
       const localOnly = props.projectId ? isLocalId('project', props.projectId) : false
       const saveTypes = [{
         description: `${metadata.label} audio`,
@@ -184,6 +213,8 @@ const ExportDialog: Component<Props> = (props) => {
       const localFileHandle = localOnly
         ? await chooseLocalExportFile({ suggestedName: fname, types: saveTypes })
         : undefined
+      const savedName = localFileHandle?.name ?? fname
+      const mixdownModule = import('@daw-browser/audio-engine/export-mixdown')
       const effectsPromise = async (): Promise<ExportFx> => {
         const fx: ExportFx = { trackFx: {} }
         if (localOnly && props.projectId) try {
@@ -197,20 +228,13 @@ const ExportDialog: Component<Props> = (props) => {
         } catch {}
         return fx
       }
-      const [, fx] = await Promise.all([ensureBuffersForRange(range), effectsPromise()])
-      const { encodeAudioBuffer, renderMixdown } = await import('@daw-browser/audio-engine/export-mixdown')
+      const [exportMixdown, , fx] = await Promise.all([mixdownModule, ensureBuffersForRange(range), effectsPromise()])
+      const { encodeAudioBuffer, renderMixdown } = exportMixdown
       const rendered = await renderMixdown({ tracks: props.tracks, bpm: props.bpm, range, fx })
       const localWritable = localFileHandle ? await createLocalExportWritable(localFileHandle) : undefined
       const enc = await encodeAudioBuffer(rendered, {
         format: selectedFormat,
-        target: localWritable
-          ? {
-            mode: 'stream',
-            writable: localWritable.writable,
-            close: () => localWritable.writable.close(),
-            abort: (reason) => localWritable.writable.abort(reason),
-          }
-          : { mode: 'buffer' },
+        target: localWritable ? createLocalExportTarget(localWritable) : { mode: 'buffer' },
       })
       if (localOnly) {
         if (!localWritable) {
@@ -223,14 +247,14 @@ const ExportDialog: Component<Props> = (props) => {
         }
         if (props.projectId) {
           await saveLocalExportMetadata(props.projectId, {
-            name: fname,
+            name: savedName,
             format: enc.format,
             durationSec: enc.durationSec,
             sampleRate: enc.sampleRate,
             sizeBytes: enc.sizeBytes,
           })
         }
-        setLocalSavedName(fname)
+        setLocalSavedName(savedName)
         return
       }
       const rid = props.projectId
@@ -268,7 +292,7 @@ const ExportDialog: Component<Props> = (props) => {
 
       setResultUrl(url)
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') return
+      if (isAbortError(err)) return
       setError(err instanceof Error ? err.message : 'Export failed')
     } finally {
       setBusy(false)
@@ -312,9 +336,9 @@ const ExportDialog: Component<Props> = (props) => {
           <Show when={mode() === 'custom'}>
             <div class="flex items-center gap-3">
               <label class="text-sm w-24 text-neutral-300">Start (s)</label>
-              <input type="number" step="0.01" class="w-28 bg-neutral-900 text-neutral-100 border border-neutral-700 rounded px-2 py-1 text-sm" value={startSec()} onInput={(e) => setStartSec(parseFloat((e.currentTarget as HTMLInputElement).value) || 0)} />
+              <input type="number" step="0.01" class="w-28 bg-neutral-900 text-neutral-100 border border-neutral-700 rounded px-2 py-1 text-sm" value={startSec()} onInput={(e) => setStartSec(parseFloat(e.currentTarget.value) || 0)} />
               <label class="text-sm text-neutral-300">End (s)</label>
-              <input type="number" step="0.01" class="w-28 bg-neutral-900 text-neutral-100 border border-neutral-700 rounded px-2 py-1 text-sm" value={endSec()} onInput={(e) => setEndSec(parseFloat((e.currentTarget as HTMLInputElement).value) || 0)} />
+              <input type="number" step="0.01" class="w-28 bg-neutral-900 text-neutral-100 border border-neutral-700 rounded px-2 py-1 text-sm" value={endSec()} onInput={(e) => setEndSec(parseFloat(e.currentTarget.value) || 0)} />
             </div>
           </Show>
           <Show when={error()}>

@@ -1,41 +1,15 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    // General
-    "jsx": "preserve",
-    "jsxImportSource": "solid-js",
-    "target": "ESNext",
-
-    // Modules
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
-    "isolatedModules": true,
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "noEmit": true,
-
-    // Type Checking & Safety
-    "strict": true,
-    "skipLibCheck": true,
     "types": ["vite/client"],
-
-    // Path Aliases
-    // "baseUrl": ".",
     "paths": {
       "~/*": ["./src/*"],
-      "@/*": ["./src/*"],
-      "@daw-browser/audio-engine/*": ["./packages/audio-engine/src/*"],
-      "@daw-browser/shared": ["./packages/shared/src/index.ts"],
-      "@daw-browser/timeline-core/*": ["./packages/timeline-core/src/*"],
-      "@daw-browser/waveforms/*": ["./packages/waveforms/src/*"],
+      "@/*": ["./src/*"]
     },
   },
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
-    "packages/audio-engine/src/**/*.ts",
-    "packages/shared/src/**/*.ts",
-    "packages/timeline-core/src/**/*.ts",
-    "packages/waveforms/src/**/*.ts",
     "convex/**/*.ts",
     "vite.config.ts",
   ],

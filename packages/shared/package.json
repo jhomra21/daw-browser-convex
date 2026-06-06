@@ -6,6 +6,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "check": "bun --bun tsc --noEmit"
+  },
   "dependencies": {
     "zod": "^4.3.6"
   }

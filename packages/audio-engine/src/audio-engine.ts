@@ -1,12 +1,14 @@
-import { getPlayableAudioWindow, getScheduledMidiEvents } from './audio-scheduling'
-import { normalizeSynthParams, serializeEqParams, serializeReverbParams, type ArpParams, type EqParamsLite, type ReverbParamsLite, type SynthParamsInput } from '@daw-browser/shared'
-import { connectParallelFxChain, createReverbNodeChain, disconnectAudioNodes, applyReverbNodeChainParams, type ReverbNodeChain } from './effects/chain'
-import { applyEqNodeParams, createEqNodes, createImpulseResponseBuffer, getEqTopologySignature, getImpulseResponseBufferInfo } from './effects/dsp'
-import { applyLiveMixerGraph } from './mixer/apply-live-routing'
-import { createMixerChannels } from './mixer/channels'
-import { resolveMixerGraph } from './mixer/resolve-routing'
-import type { ResolvedMixerGraph } from './mixer/types'
-import { createSynthVoiceOscillators, getSynthVoiceConfig, getSynthVoiceVelocity, scheduleSynthVoiceEnvelope } from './synth-voice'
+import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime } from './audio-runtime'
+import { createClipScheduler, type ScheduleOptions } from './clip-scheduler'
+import type { ArpParams, EqParamsLite, ReverbParamsLite, SynthParamsInput } from '@daw-browser/shared'
+import { createImpulseResponseBuffer, getImpulseResponseBufferInfo } from './effects/dsp'
+import { createLiveMixerRuntime } from './live-mixer-runtime'
+import { createMasterFxRuntime } from './master-fx-runtime'
+import { createMeteringRuntime, type SpectrumFrame, type TrackStereoLevels, type TrackStereoLevelsBatch, type TrackStereoLevelsListener } from './metering-runtime'
+import { createMetronomeRuntime } from './metronome-runtime'
+import { createSourceRegistry, stopAndDisconnectSource } from './source-registry'
+import { createSynthRuntime } from './synth-runtime'
+import { createTransportClock } from './transport-clock'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 type RuntimeClip = Clip<AudioBuffer>
@@ -16,317 +18,61 @@ const MASTER_FADE_DOWN_SEC = 0.002
 const MASTER_FADE_HOLD_SEC = 0.001
 const MASTER_FADE_UP_SEC = 0.006
 const MASTER_STOP_DELAY_SEC = 0.004
-const TRACK_METER_PROCESSOR_NAME = 'track-meter-processor'
 
-type ScheduleOptions = {
-  atCtxTime?: number
-  preserveExisting?: boolean
-  endLimitSec?: number
-}
-
-type ScheduledClipEntry = {
-  track: RuntimeTrack
-  clip: RuntimeClip
-  startSec: number
-  endSec: number
-}
-
-type ScheduleIndex = {
-  byEnd: ScheduledClipEntry[]
-}
-
-type ActiveNote = {
-  trackId: string
-  clipId: string
-  oscs: OscillatorNode[]
-  remainingOscillators: number
-  gain: GainNode
-  amp: number
-  startCtx: number
-  endCtx: number
-  releaseStartCtx: number
-  attackSec: number
-  releaseSec: number
-}
-
-export type SpectrumFrame = {
-  data: Float32Array
-  sampleRate: number
-}
-
-type TrackSynthConfig = {
-  wave1: OscillatorType
-  wave2: OscillatorType
-  gain: number
-  attackMs: number
-  releaseMs: number
-}
-
-export type TrackStereoLevels = {
-  left: number
-  right: number
-}
-
-export type TrackStereoLevelsBatch = ReadonlyMap<string, TrackStereoLevels>
-
-type TrackStereoLevelsListener = (levels: TrackStereoLevelsBatch) => void
-
-type TrackNodeGroup = {
-  input: GainNode
-  gain: GainNode
-  output: GainNode
-}
+export type { SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch }
 
 export class AudioEngine {
+  private runtime: AudioRuntime | null = null
   private audioCtx: AudioContext | null = null
   private masterGain: GainNode | null = null
   private destination: AudioDestinationNode | null = null
   private tracksSnapshot: RuntimeTrack[] = []
-  private mixerRuntime = {
-    gains: new Map<string, GainNode>(),
-    outputs: new Map<string, GainNode>(),
-    sendGains: new Map<string, Map<string, GainNode>>(),
-    routingSignatures: new Map<string, string>(),
-  }
-  private activeSources: AudioScheduledSourceNode[] = []
-  private activeSourcesByClip = new Map<string, Set<AudioScheduledSourceNode>>()
-  private metronomeSources: AudioBufferSourceNode[] = []
-  private effectsRuntime = {
-    inputs: new Map<string, GainNode>(),
-    eqChains: new Map<string, BiquadFilterNode[]>(),
-    pendingEqParams: new Map<string, EqParamsLite>(),
-    eqSignatures: new Map<string, string>(),
-    eqTopologySignatures: new Map<string, string>(),
-    reverbs: new Map<string, ReverbNodeChain>(),
-    pendingReverbParams: new Map<string, ReverbParamsLite>(),
-    reverbSignatures: new Map<string, string>(),
-  }
-  private masterEqChain: BiquadFilterNode[] = []
-  private masterEqSignature: string | null = null
-  private masterEqTopologySignature: string | null = null
-  private masterAnalyser: AnalyserNode | null = null
-  private masterSpectrumTmp: Uint8Array | null = null
-  private masterSpectrumLast: SpectrumFrame | null = null
-  private masterAnalyserConnected = false
-  private masterReverb: ReverbNodeChain | null = null
-  private masterReverbSignature: string | null = null
-  private pendingMasterEqParams: EqParamsLite | null = null
-  private pendingMasterReverbParams: ReverbParamsLite | null = null
+  private sources = createSourceRegistry()
+  private synthRuntime = createSynthRuntime({
+    ensureAudio: () => this.ensureAudio(),
+    getAudioContext: () => this.audioCtx,
+    getBpm: () => this.clock.getBpm(),
+    timelineToCtxTime: (timelineSec) => this.timelineToCtxTime(timelineSec),
+    ensureTrackInput: (trackId) => this.mixerRuntime.ensureTrackInput(trackId),
+    sources: this.sources,
+  })
+  private mixerRuntime = createLiveMixerRuntime({
+    ensureAudio: () => this.ensureAudio(),
+    getAudioContext: () => this.audioCtx,
+    getMasterInput: () => this.masterGain,
+    getDestination: () => this.destination,
+    createImpulseResponse: (decaySec) => this.createImpulseResponse(decaySec),
+    reconnectTrackMeters: (trackId, output, isCurrentOutput) => {
+      if (!this.audioCtx) return
+      this.metering.reconnectTrackMeters(this.audioCtx, trackId, output, isCurrentOutput)
+    },
+    disposeTrackMeters: (trackId) => this.metering.disposeTrack(trackId),
+    disposeSynthTrack: (trackId) => this.disposeSynthTrack(trackId),
+  })
+  private scheduler = createClipScheduler({
+    getAudioContext: () => this.audioCtx,
+    timelineToCtxTime: (timelineSec) => this.timelineToCtxTime(timelineSec),
+    updateTrackGains: (tracks) => this.updateTrackGains(tracks),
+    ensureTrackInput: (trackId) => this.mixerRuntime.ensureTrackInput(trackId),
+    stopClipSources: () => this.stopClipSources(),
+    stopSourcesForClip: (clipId) => this.stopSourcesForClip(clipId),
+    scheduleMidiClip: (track, clip, playheadSec, nowCtx, endLimitSec) => this.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec),
+    sources: this.sources,
+  })
+  private masterFx = createMasterFxRuntime()
   private readonly impulseBucketSize = 0.1
   private impulseCache = new Map<string, AudioBuffer>()
-  private bpm = 120
-  private metronomeEnabled = false
-  private metronomeGain: GainNode | null = null
-  private metronomeBuffer: AudioBuffer | null = null
-  private metronomeSchedulerId: number | null = null
-  private nextMetronomeBeatTimelineSec: number | null = null
-  private transportEpochCtxTime = 0
-  private transportEpochTimelineSec = 0
-  private transportRunning = false
-  private readonly metronomeLookaheadSec = 0.25
-  private readonly metronomeIntervalMs = 50
-  private synthRuntime = {
-    configs: new Map<string, TrackSynthConfig>(),
-    activeOscillatorsByTrack: new Map<string, Set<OscillatorNode>>(),
-    gainNodes: new Map<string, GainNode>(),
-    activeNotesByTrack: new Map<string, Set<ActiveNote>>(),
-    arpeggiators: new Map<string, ArpParams>(),
-  }
-  private meterRuntime = {
-    analysers: new Map<string, AnalyserNode>(),
-    meterArrays: new Map<string, Float32Array>(),
-    spectrumTmp: new Map<string, Uint8Array>(),
-    spectrumOut: new Map<string, Float32Array>(),
-    spectrumLast: new Map<string, SpectrumFrame>(),
-  }
-  private meterWorkletReady: Promise<boolean> | null = null
-  private meterWorkletNodes = new Map<string, AudioWorkletNode>()
-  private meterWorkletLevels = new Map<string, TrackStereoLevels>()
-  private pendingMeterLevels = new Map<string, TrackStereoLevels>()
-  private meterListeners = new Set<TrackStereoLevelsListener>()
-  private meterFlushHandle: number | null = null
-  private scheduleIndexCache = new WeakMap<RuntimeTrack[], ScheduleIndex>()
-  private zeroTrackStereoLevels: TrackStereoLevels = { left: 0, right: 0 }
-
-  private ensureMeterWorkletModule() {
-    if (!this.audioCtx) return Promise.resolve(false)
-    if (this.meterWorkletReady) return this.meterWorkletReady
-    const source = `
-      class TrackMeterProcessor extends AudioWorkletProcessor {
-        constructor() {
-          super()
-          this.active = false
-          this.frames = 0
-          this.sumL = 0
-          this.sumR = 0
-          this.reportEveryFrames = 4096
-          this.port.onmessage = (event) => {
-            this.active = event.data?.active === true
-            if (!this.active) {
-              this.frames = 0
-              this.sumL = 0
-              this.sumR = 0
-            }
-          }
-        }
-        process(inputs) {
-          if (!this.active) return true
-          const input = inputs[0]
-          const left = input && input[0]
-          if (!left) return true
-          const right = input[1] || left
-          for (let i = 0; i < left.length; i++) {
-            const l = left[i] || 0
-            const r = right[i] || 0
-            this.sumL += l * l
-            this.sumR += r * r
-          }
-          this.frames += left.length
-          if (this.frames >= this.reportEveryFrames) {
-            this.port.postMessage({
-              left: Math.min(1, Math.max(0, Math.sqrt(Math.sqrt(this.sumL / this.frames)))),
-              right: Math.min(1, Math.max(0, Math.sqrt(Math.sqrt(this.sumR / this.frames)))),
-            })
-            this.frames = 0
-            this.sumL = 0
-            this.sumR = 0
-          }
-          return true
-        }
-      }
-      registerProcessor('${TRACK_METER_PROCESSOR_NAME}', TrackMeterProcessor)
-    `
-    const url = URL.createObjectURL(new Blob([source], { type: 'application/javascript' }))
-    this.meterWorkletReady = this.audioCtx.audioWorklet.addModule(url)
-      .then(() => true)
-      .catch(() => false)
-      .finally(() => URL.revokeObjectURL(url))
-    return this.meterWorkletReady
-  }
-
-  private emitTrackStereoLevels(levels: TrackStereoLevelsBatch) {
-    for (const listener of this.meterListeners) {
-      listener(levels)
-    }
-  }
-
-  private queueTrackStereoLevels(trackId: string, levels: TrackStereoLevels) {
-    this.pendingMeterLevels.set(trackId, levels)
-    if (this.meterFlushHandle !== null) return
-    this.meterFlushHandle = requestAnimationFrame(() => {
-      this.meterFlushHandle = null
-      if (this.pendingMeterLevels.size === 0) return
-      const batch = new Map(this.pendingMeterLevels)
-      this.pendingMeterLevels.clear()
-      this.emitTrackStereoLevels(batch)
-    })
-  }
-
-  private updateMeterWorkletSubscriptionState() {
-    const active = this.meterListeners.size > 0
-    for (const node of this.meterWorkletNodes.values()) {
-      node.port.postMessage({ active })
-    }
-  }
-
-  private ensureTrackMeterWorklet(trackId: string, gain: GainNode) {
-    if (!this.audioCtx) return
-    const existing = this.meterWorkletNodes.get(trackId)
-    if (existing) {
-      try { gain.connect(existing) } catch {}
-      return
-    }
-    void this.ensureMeterWorkletModule().then((ready) => {
-      if (!ready || !this.audioCtx || this.meterWorkletNodes.has(trackId)) return
-      if (this.mixerRuntime.outputs.get(trackId) !== gain) return
-      const node = new AudioWorkletNode(this.audioCtx, TRACK_METER_PROCESSOR_NAME, {
-        numberOfInputs: 1,
-        numberOfOutputs: 0,
-        channelCount: 2,
-        channelCountMode: 'explicit',
-        channelInterpretation: 'speakers',
-      })
-      node.port.postMessage({ active: this.meterListeners.size > 0 })
-      node.port.onmessage = (event) => {
-        const data = event.data
-        const next = {
-          left: typeof data?.left === 'number' ? data.left : 0,
-          right: typeof data?.right === 'number' ? data.right : 0,
-        }
-        this.meterWorkletLevels.set(trackId, next)
-        this.queueTrackStereoLevels(trackId, next)
-      }
-      try { gain.connect(node) } catch {}
-      this.meterWorkletNodes.set(trackId, node)
-    })
-  }
+  private clock = createTransportClock()
+  private metronome = createMetronomeRuntime(this.clock)
+  private metering = createMeteringRuntime()
 
   subscribeTrackStereoLevels(listener: TrackStereoLevelsListener) {
-    this.meterListeners.add(listener)
-    this.updateMeterWorkletSubscriptionState()
-    return () => {
-      this.meterListeners.delete(listener)
-      this.updateMeterWorkletSubscriptionState()
-    }
-  }
-
-  private ensureTrackAnalyser(trackId: string, gain: GainNode) {
-    if (!this.audioCtx) return
-    let a = this.meterRuntime.analysers.get(trackId)
-    if (!a) {
-      a = this.audioCtx.createAnalyser()
-      a.fftSize = 512
-      a.smoothingTimeConstant = 0.7
-      this.meterRuntime.analysers.set(trackId, a)
-    }
-    try { gain.connect(a) } catch {}
-  }
-
-  private reconnectTrackMeters(trackId: string, output: GainNode) {
-    this.ensureTrackMeterWorklet(trackId, output)
-  }
-
-  private cleanupTrackSendGains(trackId: string) {
-    const sendMap = this.mixerRuntime.sendGains.get(trackId)
-    if (!sendMap) return
-    for (const sendGain of sendMap.values()) {
-      try { sendGain.disconnect() } catch {}
-    }
-    this.mixerRuntime.sendGains.delete(trackId)
-  }
-
-  private buildResolvedMixerGraph(tracks: RuntimeTrack[]): ResolvedMixerGraph {
-    return resolveMixerGraph({ channels: createMixerChannels(tracks) })
+    return this.metering.subscribeTrackStereoLevels(listener)
   }
 
   // Returns a normalized 0..1 RMS level for a track's post-gain signal
   getTrackLevel(trackId: string): number {
-    const a = this.meterRuntime.analysers.get(trackId)
-    if (!a || !this.audioCtx) return 0
-    let arr = this.meterRuntime.meterArrays.get(trackId)
-    if (!arr || arr.length !== a.fftSize) {
-      arr = new Float32Array(a.fftSize)
-      this.meterRuntime.meterArrays.set(trackId, arr)
-    }
-    try {
-      a.getFloatTimeDomainData(arr as any)
-    } catch {
-      return 0
-    }
-    return this.getCompandedLevel(this.getRms(arr))
-  }
-
-  private getRms(arr: Float32Array) {
-    let sum = 0
-    for (let i = 0; i < arr.length; i++) {
-      const v = arr[i]
-      sum += v * v
-    }
-    return Math.sqrt(sum / arr.length)
-  }
-
-  private getCompandedLevel(value: number) {
-    return Math.min(1, Math.max(0, Math.sqrt(value)))
+    return this.metering.getTrackLevel(trackId)
   }
 
   getAudioContext() {
@@ -335,389 +81,89 @@ export class AudioEngine {
 
   getTrackSynthGainNode(trackId: string) {
     this.ensureAudio()
-    return this.ensureTrackSynthGainNode(trackId)
+    return this.synthRuntime.getTrackSynthGainNode(trackId)
   }
 
   getTrackSynthPreviewState(trackId: string) {
-    const synth = this.synthRuntime.configs.get(trackId)
-    if (!synth) return null
-    return {
-      wave1: synth.wave1,
-      wave2: synth.wave2,
-    }
+    return this.synthRuntime.getTrackSynthPreviewState(trackId)
   }
 
   ensureAudio(opts?: { applyCachedTrackGains?: boolean }) {
     if (!this.audioCtx) {
-      this.audioCtx = new AudioContext()
-      this.masterGain = this.audioCtx.createGain()
-      this.masterAnalyserConnected = false
-      this.destination = this.audioCtx.destination
-      this.masterGain.gain.value = 1.0
-      // Apply any pending master effects, then build routing
-      if (this.pendingMasterEqParams) {
-        const p = this.pendingMasterEqParams
-        this.pendingMasterEqParams = null
-        this.setMasterEq(p)
-      }
-      if (this.pendingMasterReverbParams) {
-        const p = this.pendingMasterReverbParams
-        this.pendingMasterReverbParams = null
-        this.setMasterReverb(p)
-      }
-      // If nothing pending, ensure we at least connect master to destination
-      this.rebuildMasterRouting()
+      this.runtime = createAudioRuntime()
+      this.audioCtx = this.runtime.ctx
+      this.masterGain = this.runtime.masterGain
+      this.destination = this.runtime.destination
+      this.masterFx.applyPending(this.audioCtx, this.masterGain, this.destination, (decaySec) => this.createImpulseResponse(decaySec))
       if (opts?.applyCachedTrackGains !== false) {
         this.updateTrackGains(this.tracksSnapshot)
       }
     }
   }
 
-  private ensureMasterAnalyser() {
-    if (!this.audioCtx || !this.masterGain) return
-    if (!this.masterAnalyser) {
-      const a = this.audioCtx.createAnalyser()
-      a.fftSize = 2048
-      a.smoothingTimeConstant = 0.8
-      this.masterAnalyser = a
-    }
-    if (this.masterAnalyser && !this.masterAnalyserConnected) {
-      try {
-        this.masterGain.connect(this.masterAnalyser)
-        this.masterAnalyserConnected = true
-      } catch {}
-    }
-  }
-
-  private ensureMetronomeNodes() {
-    if (!this.audioCtx || !this.masterGain) return
-    if (!this.metronomeGain) {
-      const gain = this.audioCtx.createGain()
-      gain.gain.value = 0.35
-      gain.connect(this.masterGain)
-      this.metronomeGain = gain
-    }
-    if (!this.metronomeBuffer) {
-      this.metronomeBuffer = this.createMetronomeBuffer(this.audioCtx)
-    }
-  }
-
-  private createMetronomeBuffer(ctx: AudioContext) {
-    const durationSec = 0.06
-    const sampleRate = ctx.sampleRate
-    const totalSamples = Math.max(1, Math.floor(durationSec * sampleRate))
-    const buffer = ctx.createBuffer(1, totalSamples, sampleRate)
-    const data = buffer.getChannelData(0)
-    const attackSamples = Math.floor(sampleRate * 0.002)
-    const decaySamples = totalSamples - attackSamples
-    for (let i = 0; i < totalSamples; i++) {
-      if (i < attackSamples) {
-        data[i] = i / Math.max(1, attackSamples)
-      } else {
-        const t = (i - attackSamples) / Math.max(1, decaySamples)
-        data[i] = Math.pow(1 - t, 3)
-      }
-    }
-    return buffer
-  }
-
-  private setMetronomeInterval() {
-    if (this.metronomeSchedulerId !== null) return
-    this.metronomeSchedulerId = setInterval(() => {
-      try {
-        this.scheduleMetronomeTicks()
-      } catch (err) {
-        console.error('[AudioEngine] metronome scheduling error', err)
-      }
-    }, this.metronomeIntervalMs) as unknown as number
-  }
-
-  private clearMetronomeInterval() {
-    if (this.metronomeSchedulerId !== null) {
-      clearInterval(this.metronomeSchedulerId)
-      this.metronomeSchedulerId = null
-    }
-  }
-
-  private secondsPerBeat() {
-    return 60 / Math.max(1, this.bpm)
-  }
-
   private timelineToCtxTime(timelineSec: number) {
     if (!this.audioCtx) return 0
-    const delta = timelineSec - this.transportEpochTimelineSec
-    return this.transportEpochCtxTime + Math.max(0, delta)
-  }
-
-  private ctxTimeToTimeline(ctxTime: number) {
-    const delta = ctxTime - this.transportEpochCtxTime
-    return this.transportEpochTimelineSec + Math.max(0, delta)
-  }
-
-  private computeNextBeatTimelineSec(fromTimelineSec: number) {
-    const epsilon = 1e-6
-    const spb = this.secondsPerBeat()
-    if (!isFinite(spb) || spb <= 0) return fromTimelineSec
-    const beats = Math.ceil((fromTimelineSec - epsilon) / spb)
-    return Math.max(0, beats) * spb
+    return this.clock.timelineToCtxTime(timelineSec)
   }
 
   setTrackSynth(trackId: string, params: SynthParamsInput) {
-    const synth = normalizeSynthParams(params)
-    const { wave1, wave2, gain, attackMs, releaseMs } = synth
-    this.synthRuntime.configs.set(trackId, { wave1, wave2, gain, attackMs, releaseMs })
-    const g = this.synthRuntime.gainNodes.get(trackId)
-    if (g) {
-      try { g.gain.value = gain } catch {}
-    }
-    const activeNotes = this.synthRuntime.activeNotesByTrack.get(trackId)
-    if (activeNotes) {
-      for (const note of activeNotes) {
-        const [osc1, osc2] = note.oscs
-        if (osc1) {
-          try { osc1.type = wave1 } catch {}
-        }
-        if (osc2) {
-          try { osc2.type = wave2 } catch {}
-        }
-      }
-    }
-    this.retargetActiveNotesForTrack(trackId)
+    this.synthRuntime.setTrackSynth(trackId, params)
   }
 
   setTrackArpeggiator(trackId: string, params: ArpParams) {
-    this.synthRuntime.arpeggiators.set(trackId, params)
+    this.synthRuntime.setTrackArpeggiator(trackId, params)
   }
 
   clearTrackArpeggiator(trackId: string) {
-    this.synthRuntime.arpeggiators.delete(trackId)
+    this.synthRuntime.clearTrackArpeggiator(trackId)
   }
 
   clearTrackSynth(trackId: string) {
-    this.synthRuntime.configs.delete(trackId)
-    const gain = this.synthRuntime.gainNodes.get(trackId)
-    if (gain) {
-      try { gain.gain.value = normalizeSynthParams({}).gain } catch {}
-    }
-  }
-
-  private computeCurrentAmp(note: ActiveNote, nowCtx: number) {
-    const { startCtx, endCtx, releaseStartCtx, attackSec, amp } = note
-    if (nowCtx <= startCtx) return 0
-    const attackEnd = startCtx + Math.max(0.001, attackSec)
-    if (nowCtx <= attackEnd) {
-      const t = (nowCtx - startCtx) / Math.max(0.001, attackSec)
-      return amp * Math.max(0, Math.min(1, t))
-    }
-    if (nowCtx <= releaseStartCtx) return amp
-    if (nowCtx >= endCtx) return 0
-    const relDur = Math.max(0.001, endCtx - releaseStartCtx)
-    const t = (nowCtx - releaseStartCtx) / relDur
-    return amp * Math.max(0, Math.min(1, 1 - t))
-  }
-
-  private stopActiveNote(note: ActiveNote) {
-    for (const o of note.oscs) {
-      try { o.stop() } catch {}
-      try { o.disconnect() } catch {}
-      const idx = this.activeSources.indexOf(o)
-      if (idx >= 0) this.activeSources.splice(idx, 1)
-      const clipSources = this.activeSourcesByClip.get(note.clipId)
-      if (clipSources) {
-        clipSources.delete(o)
-        if (clipSources.size === 0) this.activeSourcesByClip.delete(note.clipId)
-      }
-    }
-    try { note.gain.disconnect() } catch {}
-
-    const trackOscs = this.synthRuntime.activeOscillatorsByTrack.get(note.trackId)
-    if (trackOscs) {
-      for (const o of note.oscs) trackOscs.delete(o)
-      if (trackOscs.size === 0) this.synthRuntime.activeOscillatorsByTrack.delete(note.trackId)
-    }
-
-    const notes = this.synthRuntime.activeNotesByTrack.get(note.trackId)
-    if (notes) {
-      notes.delete(note)
-      if (notes.size === 0) this.synthRuntime.activeNotesByTrack.delete(note.trackId)
-    }
+    this.synthRuntime.clearTrackSynth(trackId)
   }
 
   private stopActiveNotesForClip(clipId: string) {
-    for (const notes of Array.from(this.synthRuntime.activeNotesByTrack.values())) {
-      for (const note of Array.from(notes)) {
-        if (note.clipId === clipId) this.stopActiveNote(note)
-      }
-    }
+    this.synthRuntime.stopClip(clipId)
   }
 
   private stopAllActiveNotes() {
-    for (const notes of Array.from(this.synthRuntime.activeNotesByTrack.values())) {
-      for (const note of Array.from(notes)) this.stopActiveNote(note)
-    }
-  }
-
-  private retargetActiveNotesForTrack(trackId: string) {
-    if (!this.audioCtx) return
-    const synth = this.synthRuntime.configs.get(trackId)
-    if (!synth) return
-    const notes = this.synthRuntime.activeNotesByTrack.get(trackId)
-    if (!notes || notes.size === 0) return
-    const now = this.audioCtx.currentTime
-    const attackSec = Math.max(0.001, (synth.attackMs ?? 5) / 1000)
-    const releaseSec = Math.max(0.001, (synth.releaseMs ?? 30) / 1000)
-    const EPS = 1e-4
-    for (const note of Array.from(notes)) {
-      const p = note.gain.gain
-      try { p.cancelScheduledValues(now) } catch {}
-      // Anchor to current amplitude (use epsilon floor for exponential ramp)
-      const currentAmp = Math.max(EPS, this.computeCurrentAmp(note, now))
-      try { p.setValueAtTime(currentAmp, now) } catch {}
-
-      // Recompute new envelope times while preserving hard end at note.endCtx
-      const attackEndNew = note.startCtx + attackSec
-      const releaseStartNew = Math.max(attackEndNew, note.endCtx - releaseSec)
-
-      if (now < attackEndNew) {
-        try { p.exponentialRampToValueAtTime(Math.max(EPS, note.amp), attackEndNew) } catch {}
-      }
-      if (releaseStartNew > Math.max(now, attackEndNew)) {
-        try { p.setValueAtTime(Math.max(EPS, note.amp), releaseStartNew) } catch {}
-      }
-      try { p.exponentialRampToValueAtTime(EPS, note.endCtx) } catch {}
-      try { p.setValueAtTime(0, note.endCtx + 1e-4) } catch {}
-
-      // Update stored params and schedule cleanup according to new end (unchanged) but reset timer
-      note.attackSec = attackSec
-      note.releaseSec = releaseSec
-      note.releaseStartCtx = releaseStartNew
-    }
-  }
-
-  private ensureTrackSynthGainNode(trackId: string): GainNode {
-    if (!this.audioCtx) this.ensureAudio()
-    const trackNodes = this.ensureTrackNodes(trackId)
-    if (!this.audioCtx) return trackNodes.input
-    let node = this.synthRuntime.gainNodes.get(trackId)
-    if (!node) {
-      node = this.audioCtx.createGain()
-      const synth = this.synthRuntime.configs.get(trackId)
-      node.gain.value = synth?.gain ?? 0.8
-      // Route synth output into the track input (so EQ/reverb still apply downstream)
-      node.connect(trackNodes.input)
-      this.synthRuntime.gainNodes.set(trackId, node)
-    }
-    return node
-  }
-
-  private scheduleMetronomeTicks() {
-    if (!this.audioCtx || !this.metronomeEnabled || !this.transportRunning) return
-    if (!this.metronomeGain || !this.metronomeBuffer) return
-    const nowCtx = this.audioCtx.currentTime
-    const scheduleUntil = nowCtx + this.metronomeLookaheadSec
-    const spb = this.secondsPerBeat()
-    if (!isFinite(spb) || spb <= 0) return
-
-    let nextTimelineBeat = this.nextMetronomeBeatTimelineSec
-    if (nextTimelineBeat === null) {
-      const nowTimeline = this.ctxTimeToTimeline(nowCtx)
-      nextTimelineBeat = this.computeNextBeatTimelineSec(nowTimeline)
-    }
-
-    let iterations = 0
-    while (iterations < 128 && nextTimelineBeat !== null) {
-      iterations += 1
-      const eventCtxTime = this.timelineToCtxTime(nextTimelineBeat)
-      if (eventCtxTime > scheduleUntil + 1e-3) break
-      if (eventCtxTime >= nowCtx - 0.02) {
-        const source = this.audioCtx.createBufferSource()
-        source.buffer = this.metronomeBuffer
-        source.connect(this.metronomeGain)
-        source.start(eventCtxTime)
-        source.onended = () => {
-          const idx = this.metronomeSources.indexOf(source)
-          if (idx >= 0) this.metronomeSources.splice(idx, 1)
-        }
-        this.metronomeSources.push(source)
-      }
-      nextTimelineBeat += spb
-      if (nextTimelineBeat < 0) break
-    }
-
-    this.nextMetronomeBeatTimelineSec = nextTimelineBeat
-  }
-
-  private resetMetronomeState() {
-    this.nextMetronomeBeatTimelineSec = null
-    for (const s of this.metronomeSources) {
-      try { s.stop() } catch {}
-      try { s.disconnect() } catch {}
-    }
-    this.metronomeSources = []
+    this.synthRuntime.stopAll()
   }
 
   setBpm(nextBpm: number) {
-    const sanitized = Math.min(300, Math.max(30, Math.round(nextBpm)))
-    if (sanitized === this.bpm) return
-    this.bpm = sanitized
-    if (this.metronomeEnabled && this.transportRunning) {
-      this.resetMetronomeState()
-      this.nextMetronomeBeatTimelineSec = null
-      this.scheduleMetronomeTicks()
-    }
+    if (!this.clock.setBpm(nextBpm)) return
+    this.metronome.onBpmChange(this.audioCtx)
   }
 
   setMetronomeEnabled(enabled: boolean) {
-    this.metronomeEnabled = enabled
     if (!enabled) {
-      this.clearMetronomeInterval()
-      this.resetMetronomeState()
-    } else {
-      this.ensureAudio()
-      this.ensureMetronomeNodes()
-      this.nextMetronomeBeatTimelineSec = null
-      if (this.transportRunning) {
-        this.scheduleMetronomeTicks()
-        this.setMetronomeInterval()
-      }
+      if (this.audioCtx && this.masterGain) this.metronome.setEnabled(false, this.audioCtx, this.masterGain)
+      return
     }
+    this.ensureAudio()
+    if (this.audioCtx && this.masterGain) this.metronome.setEnabled(true, this.audioCtx, this.masterGain)
   }
 
   onTransportStart(playheadSec: number) {
-    if (!this.audioCtx) return
-    this.ensureMetronomeNodes()
-    this.transportEpochCtxTime = this.audioCtx.currentTime
-    this.transportEpochTimelineSec = Math.max(0, playheadSec)
-    this.transportRunning = true
-    this.resetMetronomeState()
-    if (this.metronomeEnabled) {
-      this.scheduleMetronomeTicks()
-      this.setMetronomeInterval()
-    }
+    if (!this.audioCtx || !this.masterGain) return
+    this.clock.start(this.audioCtx.currentTime, playheadSec)
+    this.metronome.onTransportStart(this.audioCtx, this.masterGain)
   }
 
   onTransportPause() {
-    this.transportRunning = false
-    this.resetMetronomeState()
-    this.clearMetronomeInterval()
+    this.clock.pause()
+    this.metronome.onTransportPause()
   }
 
   onTransportStop() {
-    this.onTransportPause()
-    this.transportEpochTimelineSec = 0
-    this.transportEpochCtxTime = this.audioCtx?.currentTime ?? 0
+    this.clock.stop(this.audioCtx?.currentTime ?? 0)
+    this.metronome.onTransportPause()
   }
 
   onTransportSeek(playheadSec: number, offsetSec = 0, opts?: { resetMetronome?: boolean }) {
     if (!this.audioCtx) return
-    const now = this.audioCtx.currentTime
-    this.transportEpochCtxTime = now + Math.max(0, offsetSec)
-    this.transportEpochTimelineSec = Math.max(0, playheadSec)
-    const shouldReset = opts?.resetMetronome !== false
-    if (shouldReset && this.metronomeEnabled && this.transportRunning) {
-      this.resetMetronomeState()
-      this.scheduleMetronomeTicks()
-    }
+    this.clock.seek(this.audioCtx.currentTime, playheadSec, offsetSec)
+    this.metronome.onTransportSeek(this.audioCtx, opts?.resetMetronome !== false)
   }
 
   // --- Reverb helpers ---
@@ -738,243 +184,43 @@ export class AudioEngine {
   }
 
   setTrackReverb(trackId: string, params: ReverbParamsLite) {
-    if (!this.audioCtx) {
-      this.effectsRuntime.pendingReverbParams.set(trackId, params)
-      return
-    }
-    const signature = serializeReverbParams(params)
-    if (this.effectsRuntime.reverbSignatures.get(trackId) === signature) return
-    const trackNodes = this.ensureTrackNodes(trackId)
-    const createImpulseResponse = (decaySec: number) => this.createImpulseResponse(decaySec)
-    let rv = this.effectsRuntime.reverbs.get(trackId)
-    if (!rv) {
-      rv = createReverbNodeChain(this.audioCtx, params, createImpulseResponse)
-      this.effectsRuntime.reverbs.set(trackId, rv)
-    } else {
-      applyReverbNodeChainParams(rv, params, createImpulseResponse)
-    }
-    this.effectsRuntime.reverbSignatures.set(trackId, signature)
-    this.rebuildTrackRouting(trackId, trackNodes)
+    this.mixerRuntime.setTrackReverb(trackId, params)
   }
 
   setMasterReverb(params: ReverbParamsLite) {
-    if (!this.audioCtx || !this.masterGain) {
-      this.pendingMasterReverbParams = params
-      return
-    }
-    const signature = serializeReverbParams(params)
-    if (this.masterReverbSignature === signature) return
-    const createImpulseResponse = (decaySec: number) => this.createImpulseResponse(decaySec)
-    if (!this.masterReverb) {
-      this.masterReverb = createReverbNodeChain(this.audioCtx, params, createImpulseResponse)
-    } else {
-      applyReverbNodeChainParams(this.masterReverb, params, createImpulseResponse)
-    }
-    this.masterReverbSignature = signature
-    this.rebuildMasterRouting()
-  }
-
-  private ensureTrackNodes(trackId: string): TrackNodeGroup {
-    if (!this.audioCtx) this.ensureAudio()
-    // At this point audioCtx/masterGain should exist
-    if (!this.audioCtx || !this.masterGain) {
-      // Fallback: create a dummy gain node disconnected (shouldn't happen)
-      const ctx = new AudioContext()
-      return {
-        input: new GainNode(ctx),
-        gain: new GainNode(ctx),
-        output: new GainNode(ctx),
-      }
-    }
-    let input = this.effectsRuntime.inputs.get(trackId)
-    const createdInput = !input
-    if (!input) {
-      input = this.audioCtx.createGain()
-      this.effectsRuntime.inputs.set(trackId, input)
-    }
-    let g = this.mixerRuntime.gains.get(trackId)
-    if (!g) {
-      g = this.audioCtx.createGain()
-      g.gain.value = 1
-      this.mixerRuntime.gains.set(trackId, g)
-    }
-    let output = this.mixerRuntime.outputs.get(trackId)
-    if (!output) {
-      output = this.audioCtx.createGain()
-      output.gain.value = 1
-      this.mixerRuntime.outputs.set(trackId, output)
-    }
-    if (createdInput) {
-      // Connect by default input -> gain (no EQ)
-      try { input.disconnect() } catch {}
-      input.connect(g)
-
-      // If there were pending EQ params, apply now
-      const pending = this.effectsRuntime.pendingEqParams.get(trackId)
-      if (pending) {
-        this.effectsRuntime.pendingEqParams.delete(trackId)
-        this.setTrackEq(trackId, pending)
-      }
-      // Apply pending reverb params if any
-      const pendingRv = this.effectsRuntime.pendingReverbParams.get(trackId)
-      if (pendingRv) {
-        this.effectsRuntime.pendingReverbParams.delete(trackId)
-        this.setTrackReverb(trackId, pendingRv)
-      }
-    }
-    return { input, gain: g, output }
-  }
-
-  private rebuildTrackRouting(trackId: string, nodes: Pick<TrackNodeGroup, 'input' | 'gain'>) {
-    const { input, gain } = nodes
-    try { input.disconnect() } catch {}
-    const chain = this.effectsRuntime.eqChains.get(trackId) || []
-    connectParallelFxChain(input, gain, chain, this.effectsRuntime.reverbs.get(trackId))
+    this.masterFx.setReverb(
+      this.audioCtx,
+      this.masterGain,
+      this.destination,
+      params,
+      (decaySec) => this.createImpulseResponse(decaySec),
+    )
   }
 
   previewTrackVolume(trackId: string, volume: number, muted: boolean) {
-    const gain = this.mixerRuntime.gains.get(trackId)
-    if (!gain) return
-    const next = !muted && Number.isFinite(volume) ? Math.max(0, volume) : 0
-    try { gain.gain.value = next } catch {}
+    this.mixerRuntime.previewTrackVolume(trackId, volume, muted)
   }
 
   setTrackEq(trackId: string, params: EqParamsLite) {
-    if (!this.audioCtx) {
-      // Defer until audio context exists
-      this.effectsRuntime.pendingEqParams.set(trackId, params)
-      return
-    }
-    const signature = serializeEqParams(params)
-    if (this.effectsRuntime.eqSignatures.get(trackId) === signature) return
-    const trackNodes = this.ensureTrackNodes(trackId)
-    const topologySignature = getEqTopologySignature(params)
-    const old = this.effectsRuntime.eqChains.get(trackId)
-    if (old && this.effectsRuntime.eqTopologySignatures.get(trackId) === topologySignature) {
-      applyEqNodeParams(old, params)
-      this.effectsRuntime.eqSignatures.set(trackId, signature)
-      return
-    }
-    if (old) for (const n of old) try { n.disconnect() } catch {}
-    const targetChannels = this.destination?.maxChannelCount ?? this.audioCtx.destination.maxChannelCount ?? 2
-    const eqNodes = createEqNodes(this.audioCtx, params, targetChannels)
-    this.effectsRuntime.eqChains.set(trackId, eqNodes)
-    this.effectsRuntime.eqSignatures.set(trackId, signature)
-    this.effectsRuntime.eqTopologySignatures.set(trackId, topologySignature)
-    // Rewire
-    this.rebuildTrackRouting(trackId, trackNodes)
+    this.mixerRuntime.setTrackEq(trackId, params)
   }
 
   updateTrackGains(tracks: RuntimeTrack[]) {
     this.tracksSnapshot = tracks
-    if (!this.audioCtx || !this.masterGain) return
-
-    const graph = this.buildResolvedMixerGraph(tracks)
-    const trackNodes = new Map<string, { input: GainNode; gain: GainNode; output: GainNode }>()
-    for (const resolvedTrack of graph.channels) {
-      const channelId = resolvedTrack.channel.id
-      trackNodes.set(channelId, this.ensureTrackNodes(channelId))
-    }
-
-    const activeMeterTrackIds = new Set<string>(
-      graph.channels
-        .filter((entry) => entry.outputGain > 0 || entry.sends.length > 0)
-        .map((entry) => entry.channel.id),
-    )
-    applyLiveMixerGraph({
-      graph,
-      masterInput: this.masterGain,
-      trackNodes,
-      trackSendGains: this.mixerRuntime.sendGains,
-      trackRoutingSignatures: this.mixerRuntime.routingSignatures,
-      createGain: () => this.audioCtx!.createGain(),
-      reconnectTrackMeters: (trackId, gain) => {
-        if (!activeMeterTrackIds.has(trackId)) {
-          this.disposeTrackMeterRuntime(trackId)
-          return
-        }
-        this.reconnectTrackMeters(trackId, gain)
-      },
-    })
-
-    const activeTrackIds = new Set<string>(graph.channels.map((entry) => entry.channel.id))
-    for (const id of Array.from(this.mixerRuntime.gains.keys())) {
-      if (activeTrackIds.has(id)) continue
-      this.disposeTrackRuntime(id)
-    }
+    this.mixerRuntime.updateTrackGains(tracks)
   }
 
-  private disposeTrackMeterRuntime(id: string) {
-    const an = this.meterRuntime.analysers.get(id)
-    if (an) try { an.disconnect() } catch {}
-    this.meterRuntime.analysers.delete(id)
-    this.meterRuntime.meterArrays.delete(id)
-
-    const meterNode = this.meterWorkletNodes.get(id)
-    if (meterNode) {
-      try { meterNode.disconnect() } catch {}
-      meterNode.port.onmessage = null
-    }
-    this.meterWorkletNodes.delete(id)
-    if (this.meterWorkletLevels.has(id) || this.pendingMeterLevels.has(id)) {
-      this.queueTrackStereoLevels(id, this.zeroTrackStereoLevels)
-    }
-    this.meterWorkletLevels.delete(id)
-    this.meterRuntime.spectrumTmp.delete(id)
-    this.meterRuntime.spectrumOut.delete(id)
-    this.meterRuntime.spectrumLast.delete(id)
-  }
-
-  private disposeTrackRuntime(id: string) {
-    const gain = this.mixerRuntime.gains.get(id)
-    if (gain) try { gain.disconnect() } catch {}
-    this.mixerRuntime.gains.delete(id)
-    this.mixerRuntime.routingSignatures.delete(id)
-    this.cleanupTrackSendGains(id)
-
-    const input = this.effectsRuntime.inputs.get(id)
-    if (input) try { input.disconnect() } catch {}
-    this.effectsRuntime.inputs.delete(id)
-
-    const output = this.mixerRuntime.outputs.get(id)
-    if (output) try { output.disconnect() } catch {}
-    this.mixerRuntime.outputs.delete(id)
-
-    const nodes = this.effectsRuntime.eqChains.get(id)
-    if (nodes) for (const n of nodes) try { n.disconnect() } catch {}
-    this.effectsRuntime.eqChains.delete(id)
-    this.effectsRuntime.eqSignatures.delete(id)
-    this.effectsRuntime.eqTopologySignatures.delete(id)
-
-    const rv = this.effectsRuntime.reverbs.get(id)
-    if (rv) disconnectAudioNodes([rv.dryGain, rv.wetGain, rv.preDelay, rv.convolver])
-    this.effectsRuntime.reverbs.delete(id)
-    this.effectsRuntime.reverbSignatures.delete(id)
-    this.effectsRuntime.pendingEqParams.delete(id)
-    this.effectsRuntime.pendingReverbParams.delete(id)
-
-    const synthGain = this.synthRuntime.gainNodes.get(id)
-    if (synthGain) try { synthGain.disconnect() } catch {}
-    this.synthRuntime.gainNodes.delete(id)
-    this.synthRuntime.configs.delete(id)
-    this.synthRuntime.arpeggiators.delete(id)
-
-    const notes = this.synthRuntime.activeNotesByTrack.get(id)
-    if (notes) for (const note of Array.from(notes)) this.stopActiveNote(note)
-    this.synthRuntime.activeNotesByTrack.delete(id)
-    this.synthRuntime.activeOscillatorsByTrack.delete(id)
-
-    this.disposeTrackMeterRuntime(id)
+  private disposeSynthTrack(id: string) {
+    this.synthRuntime.disposeTrack(id)
   }
 
   private stopClipSources() {
     this.stopAllActiveNotes()
     // Snapshot currently active sources to avoid stopping newly scheduled ones
-    const toStop = Array.from(this.activeSources)
+    const toStop = this.sources.snapshot()
     // Reset tracking immediately so subsequent schedules are isolated
-    this.activeSources = []
-    this.activeSourcesByClip.clear()
-    this.synthRuntime.activeOscillatorsByTrack.clear()
+    this.sources.clear()
+    this.synthRuntime.clearActiveOscillators()
 
     // Quick master fade to avoid clicks
     const ctx = this.audioCtx
@@ -994,244 +240,30 @@ export class AudioEngine {
       } catch {}
     }
 
-    const doStop = () => {
-      for (const s of toStop) {
-        try {
-          if (stopAt !== null) {
-            s.stop(stopAt)
-          } else {
-            s.stop()
-          }
-        } catch {
-          try { s.stop() } catch {}
-        }
-        try { s.disconnect() } catch {}
-      }
-    }
-
-    doStop()
+    for (const source of toStop) stopAndDisconnectSource(source, stopAt ?? undefined)
   }
 
   stopAllSources() {
     this.stopClipSources()
-    this.resetMetronomeState()
+    this.metronome.reset()
   }
 
   private scheduleMidiClip(track: RuntimeTrack, clip: RuntimeClip, playheadSec: number, nowCtx: number, endLimitSec?: number): boolean {
     if (!this.audioCtx) return false
-    const midi: any = clip.midi
-    if (!midi || !Array.isArray(midi.notes)) return false
-
-    const scheduledNotes = getScheduledMidiEvents({
-      clip,
-      bpm: this.bpm,
-      notes: midi.notes,
-      rangeStartSec: playheadSec,
-      rangeEndSec: endLimitSec,
-      arp: this.synthRuntime.arpeggiators.get(track.id),
-    })
-    const voice = getSynthVoiceConfig({ synth: this.synthRuntime.configs.get(track.id), midi })
-
-    for (const note of scheduledNotes) {
-      const durationSec = note.endSec - note.startSec
-      if (durationSec <= 0) continue
-
-      const startCtx = Math.max(nowCtx, this.timelineToCtxTime(note.startSec))
-      const oscs = createSynthVoiceOscillators(this.audioCtx, {
-        startTime: startCtx,
-        pitch: note.pitch,
-        wave1: voice.wave1,
-        wave2: voice.wave2,
-      })
-      let trackOscs = this.synthRuntime.activeOscillatorsByTrack.get(track.id)
-      if (!trackOscs) { trackOscs = new Set<OscillatorNode>(); this.synthRuntime.activeOscillatorsByTrack.set(track.id, trackOscs) }
-      for (const osc of oscs) trackOscs.add(osc)
-      const gain = this.audioCtx.createGain()
-      const peakGain = (getSynthVoiceVelocity(note.velocity) * voice.clipGain) / oscs.length
-      const envelope = scheduleSynthVoiceEnvelope(gain.gain, {
-        startTime: startCtx,
-        durationSec,
-        attackSec: voice.attackSec,
-        releaseSec: voice.releaseSec,
-        peakGain,
-      })
-      for (const osc of oscs) osc.connect(gain)
-      gain.connect(this.ensureTrackSynthGainNode(track.id))
-
-      for (const osc of oscs) {
-        try { osc.start(startCtx) } catch {}
-        try { osc.stop(envelope.endTime) } catch {}
-      }
-      const noteEntry: ActiveNote = {
-        trackId: track.id,
-        clipId: clip.id,
-        oscs,
-        remainingOscillators: oscs.length,
-        gain,
-        amp: peakGain,
-        startCtx,
-        endCtx: envelope.endTime,
-        releaseStartCtx: envelope.releaseStartTime,
-        attackSec: voice.attackSec,
-        releaseSec: voice.releaseSec,
-      }
-      let notes = this.synthRuntime.activeNotesByTrack.get(track.id)
-      if (!notes) { notes = new Set<ActiveNote>(); this.synthRuntime.activeNotesByTrack.set(track.id, notes) }
-      notes.add(noteEntry)
-      const onOscEnded = (osc: OscillatorNode) => {
-        const set = this.synthRuntime.activeOscillatorsByTrack.get(track.id)
-        if (set) {
-          set.delete(osc)
-          if (set.size === 0) this.synthRuntime.activeOscillatorsByTrack.delete(track.id)
-        }
-        const idx = this.activeSources.indexOf(osc)
-        if (idx >= 0) this.activeSources.splice(idx, 1)
-        const setByClip = this.activeSourcesByClip.get(clip.id)
-        if (setByClip) {
-          setByClip.delete(osc)
-          if (setByClip.size === 0) this.activeSourcesByClip.delete(clip.id)
-        }
-        const activeNotes = this.synthRuntime.activeNotesByTrack.get(track.id)
-        if (activeNotes && !activeNotes.has(noteEntry)) return
-        noteEntry.remainingOscillators = Math.max(0, noteEntry.remainingOscillators - 1)
-        if (noteEntry.remainingOscillators > 0) return
-        try { noteEntry.gain.disconnect() } catch {}
-        if (activeNotes) {
-          activeNotes.delete(noteEntry)
-          if (activeNotes.size === 0) this.synthRuntime.activeNotesByTrack.delete(track.id)
-        }
-      }
-      for (const osc of oscs) {
-        osc.onended = () => onOscEnded(osc)
-        this.activeSources.push(osc)
-      }
-      let clipSet = this.activeSourcesByClip.get(clip.id)
-      if (!clipSet) { clipSet = new Set(); this.activeSourcesByClip.set(clip.id, clipSet) }
-      for (const osc of oscs) clipSet.add(osc)
-    }
-
-    return true
+    return this.synthRuntime.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec)
   }
-  private scheduleAudioClip(clip: RuntimeClip, input: GainNode, playheadSec: number, nowCtx: number, endLimitSec?: number) {
-    if (!this.audioCtx || !clip.buffer) return
-
-    const window = getPlayableAudioWindow({
-      clip,
-      bufferDurationSec: clip.buffer.duration,
-      rangeStartSec: playheadSec,
-      rangeEndSec: endLimitSec,
-    })
-    if (!window) return
-
-    const source = this.audioCtx.createBufferSource()
-    source.buffer = clip.buffer
-    source.connect(input)
-    source.start(nowCtx + Math.max(0, window.startSec - playheadSec), window.offsetSec, window.durationSec)
-    source.onended = () => {
-      const idx = this.activeSources.indexOf(source)
-      if (idx >= 0) this.activeSources.splice(idx, 1)
-      const setByClip = this.activeSourcesByClip.get(clip.id)
-      if (setByClip) {
-        setByClip.delete(source)
-        if (setByClip.size === 0) this.activeSourcesByClip.delete(clip.id)
-      }
-    }
-    this.activeSources.push(source)
-    let clipSet = this.activeSourcesByClip.get(clip.id)
-    if (!clipSet) { clipSet = new Set(); this.activeSourcesByClip.set(clip.id, clipSet) }
-    clipSet.add(source)
-  }
-
-  private getScheduleIndex(tracks: RuntimeTrack[]): ScheduleIndex {
-    const cached = this.scheduleIndexCache.get(tracks)
-    if (cached) return cached
-    const entries: ScheduledClipEntry[] = []
-    for (const track of tracks) {
-      for (const clip of track.clips) {
-        entries.push({
-          track,
-          clip,
-          startSec: clip.startSec,
-          endSec: clip.startSec + clip.duration,
-        })
-      }
-    }
-    entries.sort((left, right) => left.endSec - right.endSec)
-    const index = { byEnd: entries }
-    this.scheduleIndexCache.set(tracks, index)
-    return index
-  }
-
-  private findFirstScheduleEntryEndingAfter(entries: ScheduledClipEntry[], playheadSec: number) {
-    let low = 0
-    let high = entries.length
-    while (low < high) {
-      const mid = Math.floor((low + high) / 2)
-      if (entries[mid].endSec <= playheadSec) {
-        low = mid + 1
-      } else {
-        high = mid
-      }
-    }
-    return low
-  }
-
   scheduleAllClipsFromPlayhead(tracks: RuntimeTrack[], playheadSec: number, opts?: ScheduleOptions) {
-    if (!this.audioCtx) return
-
-    if (!opts?.preserveExisting) this.stopClipSources()
-    const hasOverride = typeof opts?.atCtxTime === 'number'
-    const now = hasOverride ? (opts!.atCtxTime as number) : this.timelineToCtxTime(playheadSec)
-    this.updateTrackGains(tracks)
-
-    const endLimitSec = opts?.endLimitSec
-    const entries = this.getScheduleIndex(tracks).byEnd
-    for (let index = this.findFirstScheduleEntryEndingAfter(entries, playheadSec); index < entries.length; index++) {
-      const entry = entries[index]
-      if (endLimitSec !== undefined && entry.startSec >= endLimitSec) continue
-      if (this.scheduleMidiClip(entry.track, entry.clip, playheadSec, now, endLimitSec)) {
-        continue
-      }
-
-      const { input } = this.ensureTrackNodes(entry.track.id)
-      this.scheduleAudioClip(entry.clip, input, playheadSec, now, endLimitSec)
-    }
+    this.scheduler.scheduleAllClipsFromPlayhead(tracks, playheadSec, opts)
   }
 
   private stopSourcesForClip(clipId: string) {
     // Stop audio buffer sources for this clip
-    const set = this.activeSourcesByClip.get(clipId)
-    if (set) {
-      for (const src of Array.from(set)) {
-        try { src.stop() } catch {}
-        try { src.disconnect() } catch {}
-        const idx = this.activeSources.indexOf(src)
-        if (idx >= 0) this.activeSources.splice(idx, 1)
-      }
-      this.activeSourcesByClip.delete(clipId)
-    }
+    this.sources.stopClip(clipId)
     this.stopActiveNotesForClip(clipId)
   }
 
   rescheduleClipsAtPlayhead(tracks: RuntimeTrack[], playheadSec: number, clipIds: string[], opts?: ScheduleOptions) {
-    if (!this.audioCtx) return
-    if (!clipIds || clipIds.length === 0) return
-    const idsSet = new Set<string>(clipIds)
-    const now = this.timelineToCtxTime(playheadSec)
-    this.updateTrackGains(tracks)
-    for (const id of idsSet) this.stopSourcesForClip(id)
-
-    for (const t of tracks) {
-      const { input } = this.ensureTrackNodes(t.id)
-      for (const c of t.clips) {
-        if (!idsSet.has(c.id)) continue
-        if (this.scheduleMidiClip(t, c, playheadSec, now, opts?.endLimitSec)) {
-          continue
-        }
-
-        this.scheduleAudioClip(c, input, playheadSec, now, opts?.endLimitSec)
-      }
-    }
+    this.scheduler.rescheduleClipsAtPlayhead(tracks, playheadSec, clipIds, opts)
   }
 
   async resume() {
@@ -1246,179 +278,39 @@ export class AudioEngine {
 
   // Sum of output and base latency (seconds) if available; used for A/V visual alignment
   get outputLatencySec() {
-    const ctx = this.audioCtx
-    if (!ctx) return 0
-    const base = (ctx as any).baseLatency ?? 0
-    const out = (ctx as any).outputLatency ?? 0
-    const total = (typeof base === 'number' ? base : 0) + (typeof out === 'number' ? out : 0)
-    return Number.isFinite(total) ? total : 0
+    return getOutputLatencySec(this.runtime)
   }
 
   async decodeAudioData(arrayBuffer: ArrayBuffer) {
-    // Avoid creating a real AudioContext during decode to prevent
-    // autoplay policy warnings before a user gesture occurs.
-    if (this.audioCtx) {
-      return this.audioCtx.decodeAudioData(arrayBuffer)
-    }
-    const offline = new OfflineAudioContext(2, 1, 44100)
-    return offline.decodeAudioData(arrayBuffer)
+    return decodeAudioData(this.runtime, arrayBuffer)
   }
 
   close() {
     this.stopAllSources()
-    this.clearMetronomeInterval()
+    this.metronome.close()
     this.impulseCache.clear()
-    this.effectsRuntime.eqSignatures.clear()
-    this.effectsRuntime.reverbSignatures.clear()
-    this.masterEqSignature = null
-    this.masterEqTopologySignature = null
-    this.masterReverbSignature = null
-    for (const id of Array.from(this.mixerRuntime.gains.keys())) {
-      this.disposeTrackRuntime(id)
-    }
-    for (const id of Array.from(this.effectsRuntime.inputs.keys())) {
-      this.disposeTrackRuntime(id)
-    }
-    this.meterWorkletNodes.clear()
-    this.meterWorkletLevels.clear()
-    this.pendingMeterLevels.clear()
-    if (this.meterFlushHandle !== null) {
-      cancelAnimationFrame(this.meterFlushHandle)
-      this.meterFlushHandle = null
-    }
-    this.meterWorkletReady = null
-    this.mixerRuntime.sendGains.clear()
-    this.mixerRuntime.outputs.clear()
-    this.mixerRuntime.gains.clear()
-    this.mixerRuntime.routingSignatures.clear()
-    this.effectsRuntime.inputs.clear()
-    this.effectsRuntime.eqChains.clear()
-    this.effectsRuntime.eqTopologySignatures.clear()
-    this.effectsRuntime.pendingEqParams.clear()
-    this.effectsRuntime.pendingReverbParams.clear()
-    this.effectsRuntime.reverbs.clear()
-    this.pendingMasterEqParams = null
-    this.pendingMasterReverbParams = null
-    this.synthRuntime.configs.clear()
-    this.synthRuntime.arpeggiators.clear()
-    this.synthRuntime.gainNodes.clear()
-    this.synthRuntime.activeNotesByTrack.clear()
-    this.synthRuntime.activeOscillatorsByTrack.clear()
-    this.meterRuntime.analysers.clear()
-    this.meterRuntime.meterArrays.clear()
-    this.meterRuntime.spectrumTmp.clear()
-    this.meterRuntime.spectrumOut.clear()
-    this.meterRuntime.spectrumLast.clear()
-    for (const node of this.masterEqChain) try { node.disconnect() } catch {}
-    this.masterEqChain = []
-    if (this.masterReverb) {
-      disconnectAudioNodes([
-        this.masterReverb.dryGain,
-        this.masterReverb.wetGain,
-        this.masterReverb.preDelay,
-        this.masterReverb.convolver,
-      ])
-      this.masterReverb = null
-    }
-    if (this.metronomeGain) try { this.metronomeGain.disconnect() } catch {}
-    this.metronomeGain = null
-    this.metronomeBuffer = null
-    if (this.masterAnalyser) try { this.masterAnalyser.disconnect() } catch {}
-    if (this.masterGain) try { this.masterGain.disconnect() } catch {}
-    this.masterSpectrumTmp = null
-    this.masterSpectrumLast = null
-    this.masterAnalyserConnected = false
-    if (this.audioCtx) {
-      try { this.audioCtx.close() } catch {}
-    }
-    this.masterAnalyser = null
+    this.mixerRuntime.clear()
+    this.metering.close()
+    this.synthRuntime.clear()
+    this.masterFx.close()
+    closeAudioRuntime(this.runtime)
     this.masterGain = null
     this.destination = null
     this.audioCtx = null
-  }
-
-  // --- Master EQ ---
-  private rebuildMasterRouting() {
-    if (!this.audioCtx || !this.masterGain) return
-    try { this.masterGain.disconnect() } catch {}
-    if (this.masterAnalyserConnected) this.masterAnalyserConnected = false
-    const eq = this.masterEqChain
-    const finalDest = this.destination ?? this.audioCtx.destination
-    connectParallelFxChain(this.masterGain, finalDest, eq, this.masterReverb)
-    if (this.masterAnalyser) {
-      try {
-        this.masterGain.connect(this.masterAnalyser)
-        this.masterAnalyserConnected = true
-      } catch {}
-    }
+    this.runtime = null
   }
 
   setMasterEq(params: EqParamsLite) {
-    if (!this.audioCtx) {
-      // Defer until AudioContext exists (created via user gesture)
-      this.pendingMasterEqParams = params
-      return
-    }
-    const signature = serializeEqParams(params)
-    if (this.masterEqSignature === signature) return
-    const topologySignature = getEqTopologySignature(params)
-    if (this.masterEqTopologySignature === topologySignature) {
-      applyEqNodeParams(this.masterEqChain, params)
-      this.masterEqSignature = signature
-      return
-    }
-    for (const n of this.masterEqChain) { try { n.disconnect() } catch {} }
-    this.masterEqChain = createEqNodes(this.audioCtx, params, this.audioCtx.destination.maxChannelCount || 2)
-    this.masterEqSignature = signature
-    this.masterEqTopologySignature = topologySignature
-    this.rebuildMasterRouting()
+    this.masterFx.setEq(this.audioCtx, this.masterGain, this.destination, params)
   }
 
   // --- Live spectrum sampling (Ableton-like) ---
   getTrackSpectrum(trackId: string): SpectrumFrame | null {
-    const output = this.mixerRuntime.outputs.get(trackId)
-    if (output) this.ensureTrackAnalyser(trackId, output)
-    const a = this.meterRuntime.analysers.get(trackId)
-    if (!a) return this.meterRuntime.spectrumLast.get(trackId) ?? null
-    let tmp = this.meterRuntime.spectrumTmp.get(trackId)
-    if (!tmp || tmp.length !== a.frequencyBinCount) {
-      tmp = new Uint8Array(a.frequencyBinCount)
-      this.meterRuntime.spectrumTmp.set(trackId, tmp)
-    }
-    try { a.getByteFrequencyData(tmp as any) } catch { return this.meterRuntime.spectrumLast.get(trackId) ?? null }
-    let sum = 0
-    for (let i = 0; i < tmp.length; i++) sum += tmp[i]
-    if (sum === 0) return this.meterRuntime.spectrumLast.get(trackId) ?? null
-    let out = this.meterRuntime.spectrumOut.get(trackId)
-    if (!out || out.length !== tmp.length) {
-      out = new Float32Array(tmp.length)
-      this.meterRuntime.spectrumOut.set(trackId, out)
-    }
-    for (let i = 0; i < tmp.length; i++) out[i] = tmp[i] / 255
-    const frame: SpectrumFrame = { data: out, sampleRate: this.audioCtx?.sampleRate ?? 44100 }
-    this.meterRuntime.spectrumLast.set(trackId, frame)
-    return frame
+    const output = this.mixerRuntime.getTrackOutput(trackId)
+    return this.metering.getTrackSpectrum(this.audioCtx, trackId, output)
   }
 
   getMasterSpectrum(): SpectrumFrame | null {
-    // Do not auto-create AudioContext here to avoid autoplay policy warnings.
-    // Only sample if an AudioContext already exists (created after a user gesture).
-    this.ensureMasterAnalyser()
-    const a = this.masterAnalyser
-    if (!a) return this.masterSpectrumLast
-    if (!this.masterSpectrumTmp || this.masterSpectrumTmp.length !== a.frequencyBinCount) {
-      this.masterSpectrumTmp = new Uint8Array(a.frequencyBinCount)
-    }
-    try { a.getByteFrequencyData(this.masterSpectrumTmp as any) } catch { return this.masterSpectrumLast }
-    let sum = 0
-    for (let i = 0; i < this.masterSpectrumTmp.length; i++) sum += this.masterSpectrumTmp[i]
-    if (sum === 0) return this.masterSpectrumLast
-    let out = this.masterSpectrumLast?.data
-    if (!out || out.length !== this.masterSpectrumTmp.length) {
-      out = new Float32Array(this.masterSpectrumTmp.length)
-    }
-    for (let i = 0; i < out.length; i++) out[i] = this.masterSpectrumTmp[i] / 255
-    this.masterSpectrumLast = { data: out, sampleRate: this.audioCtx?.sampleRate ?? 44100 }
-    return this.masterSpectrumLast
+    return this.masterFx.getSpectrum(this.audioCtx, this.masterGain)
   }
 }

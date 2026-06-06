@@ -11,5 +11,8 @@
     "./resample-peak-pairs": "./src/resample-peak-pairs.ts",
     "./select-waveform-window": "./src/select-waveform-window.ts",
     "./types": "./src/types.ts"
+  },
+  "scripts": {
+    "check": "bun --bun tsc --noEmit"
   }
 }

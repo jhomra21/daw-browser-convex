@@ -7,6 +7,9 @@
     "./audio-engine": "./src/audio-engine.ts",
     "./export-mixdown": "./src/export-mixdown.ts"
   },
+  "scripts": {
+    "check": "bun --bun tsc --noEmit"
+  },
   "dependencies": {
     "@daw-browser/shared": "workspace:*",
     "@daw-browser/timeline-core": "workspace:*",

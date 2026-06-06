@@ -9,6 +9,9 @@
     "./track-routing": "./src/track-routing.ts",
     "./types": "./src/types.ts"
   },
+  "scripts": {
+    "check": "bun --bun tsc --noEmit"
+  },
   "dependencies": {
     "@daw-browser/shared": "workspace:*"
   }

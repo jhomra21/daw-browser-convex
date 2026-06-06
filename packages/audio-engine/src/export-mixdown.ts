@@ -102,18 +102,32 @@ function computeRangeSec(tracks: Track<AudioBuffer>[], range: ExportRange): { st
   return { start, end }
 }
 
-const audioCodecs: Record<ExportAudioFormat, AudioCodec> = {
-  wav: 'pcm-s16',
-  mp3: 'mp3',
-  'ogg-opus': 'opus',
-  flac: 'flac',
+type ExportAudioEncodingDescriptor = {
+  codec: AudioCodec
+  createOutputFormat: () => OutputFormat
+  defaultBitrate?: number
 }
 
-const outputFormatFactories: Record<ExportAudioFormat, () => OutputFormat> = {
-  wav: () => new WavOutputFormat(),
-  mp3: () => new Mp3OutputFormat(),
-  'ogg-opus': () => new OggOutputFormat(),
-  flac: () => new FlacOutputFormat(),
+const exportAudioEncodingDescriptors: Record<ExportAudioFormat, ExportAudioEncodingDescriptor> = {
+  wav: {
+    codec: 'pcm-s16',
+    createOutputFormat: () => new WavOutputFormat(),
+  },
+  mp3: {
+    codec: 'mp3',
+    createOutputFormat: () => new Mp3OutputFormat(),
+    defaultBitrate: 192000,
+  },
+  'ogg-opus': {
+    codec: 'opus',
+    createOutputFormat: () => new OggOutputFormat(),
+    defaultBitrate: 128000,
+  },
+  flac: {
+    codec: 'flac',
+    createOutputFormat: () => new FlacOutputFormat(),
+    defaultBitrate: 128000,
+  },
 }
 
 export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
@@ -201,16 +215,15 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
 }
 
 const getAudioCodec = (format: ExportAudioFormat): AudioCodec => {
-  return audioCodecs[format]
+  return exportAudioEncodingDescriptors[format].codec
 }
 
 const getDefaultBitrate = (format: ExportAudioFormat): number | undefined => {
-  if (format === 'mp3') return 192000
-  if (format === 'ogg-opus') return 128000
+  return exportAudioEncodingDescriptors[format].defaultBitrate
 }
 
 const createOutputFormat = (format: ExportAudioFormat): OutputFormat => {
-  return outputFormatFactories[format]()
+  return exportAudioEncodingDescriptors[format].createOutputFormat()
 }
 
 type EncodeTargetState = {

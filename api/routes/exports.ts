@@ -34,6 +34,7 @@ export function registerExportRoutes(app: App) {
     if (!isExportMimeTypeAllowed(format, file.type)) {
       return c.json({ error: 'Export file type does not match format' }, 400)
     }
+    const contentType = file.type || metadata.mimeType
     const access = await requireProjectRoleContextForApi(c, projectId, ['owner', 'editor'])
     if (!access) return c.json({ error: 'Forbidden' }, 403)
 
@@ -50,7 +51,7 @@ export function registerExportRoutes(app: App) {
 
     const putRes = await c.env.daw_audio_samples.put(key, file.stream(), {
       httpMetadata: {
-        contentType: metadata.mimeType,
+        contentType,
         contentDisposition: `inline; filename="${chosenName}"`,
       },
       customMetadata: {
@@ -91,7 +92,7 @@ export function registerExportRoutes(app: App) {
       url,
       name: chosenName,
       format,
-      mimeType: metadata.mimeType,
+      mimeType: contentType,
       sizeBytes,
     })
   } catch (err) {

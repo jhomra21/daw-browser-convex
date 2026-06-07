@@ -38,7 +38,6 @@ const exportAudioEncodingDescriptors: Record<ExportAudioFormat, ExportAudioEncod
   flac: {
     codec: 'flac',
     createOutputFormat: () => new FlacOutputFormat(),
-    defaultBitrate: 128000,
   },
 }
 

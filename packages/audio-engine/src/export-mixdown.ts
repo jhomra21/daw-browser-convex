@@ -49,14 +49,14 @@ export type ExportRequest = {
   fx?: ExportFx
 }
 
-export type StemDefinition = {
+type StemDefinition = {
   id: string
   name: string
   sourceTrackIds: string[]
   includeMasterFx: boolean
 }
 
-export type RenderedStem = {
+type RenderedStem = {
   id: string
   name: string
   buffer: AudioBuffer

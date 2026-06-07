@@ -143,7 +143,7 @@ Web Audio runtime package:
 - live mixer/effects routing
 - metering, spectra, master FX, metronome, and synth/MIDI runtimes
 
-Only `./audio-engine` and `./export-mixdown` are public package exports; internal runtime modules use relative imports inside the package.
+Only `./audio-engine`, `./export-mixdown`, and `./export-audio-support` are public package exports; internal runtime modules use relative imports inside the package.
 
 ## Project Structure
 

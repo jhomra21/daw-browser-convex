@@ -26,9 +26,11 @@ const ExportProgressOverlay: Component = () => {
       {(job) => (
         <div class="fixed bottom-4 right-4 z-50 flex max-w-sm items-center gap-3 rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-3 text-sm text-neutral-100 shadow-xl">
           <div class="min-w-0 flex-1 truncate">{label()}</div>
-          <Button variant="outline" size="sm" onClick={() => exports.cancelExport(job().id)}>
-            Cancel
-          </Button>
+          <Show when={job().progress?.phase !== 'rendering'}>
+            <Button variant="outline" size="sm" onClick={() => exports.cancelExport(job().id)}>
+              Cancel
+            </Button>
+          </Show>
         </div>
       )}
     </Show>

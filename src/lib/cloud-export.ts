@@ -1,5 +1,4 @@
 import type { ExportAudioFormat } from '@daw-browser/shared'
-import { isExportAudioFormat } from '@daw-browser/shared'
 
 type SaveCloudExportInput = {
   projectId: string
@@ -13,12 +12,6 @@ type SaveCloudExportInput = {
 
 type CloudExportUpload = {
   url: string
-  key: string
-  name: string
-  format: ExportAudioFormat
-  mimeType: string
-  sizeBytes?: number
-  exportId?: string
 }
 
 const readCloudExportUpload = (value: unknown): CloudExportUpload => {
@@ -26,14 +19,8 @@ const readCloudExportUpload = (value: unknown): CloudExportUpload => {
     throw new Error('Invalid upload response')
   }
   const url = 'url' in value && typeof value.url === 'string' ? value.url : ''
-  const key = 'key' in value && typeof value.key === 'string' ? value.key : ''
-  const name = 'name' in value && typeof value.name === 'string' ? value.name : ''
-  const format = 'format' in value && typeof value.format === 'string' && isExportAudioFormat(value.format) ? value.format : undefined
-  const mimeType = 'mimeType' in value && typeof value.mimeType === 'string' ? value.mimeType : ''
-  const sizeBytes = 'sizeBytes' in value && typeof value.sizeBytes === 'number' ? value.sizeBytes : undefined
-  const exportId = 'exportId' in value && typeof value.exportId === 'string' ? value.exportId : undefined
-  if (!url || !key || !name || !format || !mimeType) throw new Error('Invalid upload response')
-  return { url, key, name, format, mimeType, sizeBytes, exportId }
+  if (!url) throw new Error('Invalid upload response')
+  return { url }
 }
 
 export const saveCloudExport = async (input: SaveCloudExportInput): Promise<CloudExportUpload> => {

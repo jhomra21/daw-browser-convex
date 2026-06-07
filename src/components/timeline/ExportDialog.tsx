@@ -6,7 +6,6 @@ import type { ExportRange } from '@daw-browser/audio-engine/export-mixdown'
 import { exportAudioFormats, getExportAudioFormatMetadata, isExportAudioFormat, type ExportAudioFormat } from '@daw-browser/shared'
 import { getCachedSupportedExportAudioFormats, probeSupportedExportAudioFormats, retrySupportedExportAudioFormats } from '~/lib/export-format-support'
 import { useExportContext } from '~/context/export'
-import { exportPresets } from '~/lib/export/export-presets'
 
 type ExportMode = ExportRange['mode']
 type ExportSource = 'mixdown' | 'all-stems' | 'selected-stems'
@@ -88,6 +87,11 @@ const ExportDialog: Component<Props> = (props) => {
     value === 'all-stems' || value === 'selected-stems' ? value : 'mixdown'
   )
 
+  const selectedStemAvailable = () => {
+    const selectedTrack = props.tracks.find((track) => track.id === props.selectedTrackId)
+    return selectedTrack !== undefined && (selectedTrack.channelRole ?? 'track') === 'track' && selectedTrack.clips.length > 0
+  }
+
   const computeRange = (): ExportRange => {
     const m = mode()
     if (m === 'loop') {
@@ -148,7 +152,7 @@ const ExportDialog: Component<Props> = (props) => {
             <select class="bg-neutral-900 text-neutral-100 border border-neutral-700 rounded px-2 py-1 text-sm" value={source()} onChange={(e) => setSource(readExportSource(e.currentTarget.value))}>
               <option value="mixdown">Mixdown</option>
               <option value="all-stems">All track stems</option>
-              <option value="selected-stems" disabled={!props.selectedTrackId}>Selected track stem</option>
+              <option value="selected-stems" disabled={!selectedStemAvailable()}>Selected track stem</option>
             </select>
           </div>
           <div class="flex items-center gap-3">
@@ -175,27 +179,6 @@ const ExportDialog: Component<Props> = (props) => {
                   }}
                 </For>
               </Show>
-            </select>
-          </div>
-          <div class="flex items-center gap-3">
-            <label class="text-sm w-24 text-neutral-300">Preset</label>
-            <select
-              class="bg-neutral-900 text-neutral-100 border border-neutral-700 rounded px-2 py-1 text-sm"
-              value=""
-              onChange={(event) => {
-                const preset = exportPresets.find((item) => item.id === event.currentTarget.value)
-                if (preset) setFormat(preset.format)
-                event.currentTarget.value = ''
-              }}
-            >
-              <option value="">Choose preset…</option>
-              <For each={exportPresets}>
-                {(preset) => (
-                  <option value={preset.id} disabled={supportedFormats()?.includes(preset.format) ? undefined : true}>
-                    {supportedFormats()?.includes(preset.format) ? preset.name : `${preset.name} unavailable`}
-                  </option>
-                )}
-              </For>
             </select>
           </div>
           <Show when={mode() === 'custom'}>

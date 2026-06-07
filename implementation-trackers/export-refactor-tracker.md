@@ -514,13 +514,13 @@ Only after phases 1-5 are stable:
 - [x] Track encode byte accounting through `target.onwrite`; progress UI was deferred in this focused pass.
 - [x] Defer estimated output size for compressed formats until compressed formats are supported in the tested browser path.
 - [x] Defer separate rendering/encoding/saving/uploading statuses; current success/error UX remained stable.
-- [x] Defer cancellation because the current offline render step has no real cancel path; adding a fake cancel button would be misleading.
+- [x] Add provider-level cancellation only for abort-aware phases; the overlay does not show the cancel action while `OfflineAudioContext.startRendering()` is active because that render step cannot be interrupted.
 
 Do not add polling loops.
 
 ---
 
-# Future Plan — Global Export Provider, Queue, Presets, And Ableton-Style Stems
+# Future Plan — Global Export Provider, Queue, And Ableton-Style Stems
 
 ## Motivation
 
@@ -535,7 +535,6 @@ That constraint has changed for the next export direction. A broader export syst
 - project/media menu export actions
 - keyboard shortcut export actions
 - background export queue
-- reusable audio export presets/templates
 - shared progress UI outside the dialog
 
 The goal is to borrow Diffusion's useful export controller pattern without copying video-only complexity.
@@ -555,7 +554,6 @@ Useful patterns:
 - A provider owns export execution, progress, cancellation, and shared progress UI.
 - Callers invoke a small export API instead of owning render/encode/save details.
 - UI-facing export config excludes execution-only values such as targets, callbacks, and cancellation handles.
-- Export presets/templates are descriptor data consumed by UI.
 - Progress UI is presentational and receives the active export state plus a cancel callback.
 
 DAW-specific differences:
@@ -572,7 +570,6 @@ Add app-level export orchestration:
 src/context/export.tsx
 src/components/export/ExportProgressOverlay.tsx
 src/lib/export/export-jobs.ts
-src/lib/export/export-presets.ts
 src/lib/export/export-sources.ts
 src/lib/export/run-export-job.ts
 ```
@@ -601,12 +598,10 @@ Target shape:
 
 ```ts
 type ExportContextValue = {
-  jobs: Accessor<ExportJob[]>
   activeJob: Accessor<ExportJob | undefined>
-  exporting: Accessor<boolean>
-  enqueueExport: (request: ExportJobRequest) => string
+  enqueueTimelineExport: (request: TimelineExportRequest) => Promise<ExportOutcome>
+  enqueueStemExport: (request: StemExportRequest) => Promise<ExportOutcome>
   cancelExport: (jobId: string) => void
-  openTimelineExportDialog: () => void
 }
 ```
 
@@ -636,50 +631,6 @@ type StemExportMode =
 
 Project/media menu export actions should trigger one of these sources or open the export dialog. Completed export rows remain handled by `useProjectExports(...)` and `ProjectMediaMenu`.
 
-## Export Presets
-
-Target shape:
-
-```ts
-type ExportPreset = {
-  id: string
-  name: string
-  format: ExportAudioFormat
-  destination: 'auto' | 'local' | 'cloud'
-  stemOptions?: StemExportOptions
-}
-
-type StemExportOptions = {
-  includeReturns: boolean
-  includeGroups: boolean
-  includeMasterFx: boolean
-  renderMode: 'ableton-style' | 'raw-tracks'
-}
-```
-
-Initial preset examples:
-
-```ts
-export const exportPresets = [
-  { id: 'wav-mixdown', name: 'WAV Mixdown', format: 'wav', destination: 'auto' },
-  { id: 'mp3-mixdown', name: 'MP3 Mixdown', format: 'mp3', destination: 'auto' },
-  {
-    id: 'wav-ableton-stems',
-    name: 'WAV Stems',
-    format: 'wav',
-    destination: 'auto',
-    stemOptions: {
-      includeReturns: true,
-      includeGroups: true,
-      includeMasterFx: false,
-      renderMode: 'ableton-style',
-    },
-  },
-]
-```
-
-Default stem behavior should keep `includeMasterFx: false` because recombining processed stems with master processing can double-process or fail to null against the final mix. The user should be able to opt in.
-
 ## Export Jobs And Progress
 
 Target shape:
@@ -698,7 +649,6 @@ type ExportJobStatus =
 type ExportJob = {
   id: string
   source: ExportSource
-  preset: ExportPreset
   status: ExportJobStatus
   createdAt: number
   progressLabel?: string
@@ -841,15 +791,14 @@ Add entry points only after provider and queue are stable:
 - multi-selection actions: export selected tracks as stems
 - project/media menu: export mixdown and export stems actions
 - keyboard shortcut: `Cmd/Ctrl + Shift + E` opens export UI
-- optional default export action can queue a default preset later, but initial shortcut should not silently start a long export
+- optional default export action can queue a default mixdown later, but initial shortcut should not silently start a long export
 
 ## Implementation Sequence
 
 1. Extract global export provider and shared progress overlay.
 2. Move timeline mixdown execution out of `ExportDialog` without changing behavior.
 3. Add serialized queue and provider-level cancellation.
-4. Add audio export presets/templates.
-5. Add Ableton-style stem render API in audio-engine.
+4. Add Ableton-style stem render API in audio-engine.
 6. Add stem export job runner and parent/child progress.
 7. Add clip export through the source-isolated graph seam.
 8. Wire project/media menu and keyboard entry points.
@@ -905,7 +854,7 @@ Record browser and OS for each run.
 - [x] Existing lazy export chunking remains intact.
 - [x] No package boundary regression from `@daw-browser/audio-engine/export-mixdown`.
 - [x] No accidental changes to live playback or `AudioEngine`.
-- [ ] No unrelated README/AGENTS changes included in export implementation commit unless requested. Pending because no export implementation commit exists yet and `README.md`/`AGENTS.md` remain modified in the working tree.
+- [x] README/AGENTS changes are intentionally included per user request.
 
 ---
 
@@ -1037,7 +986,7 @@ Notes:
 - Added a timeline-scoped export provider with serialized job execution, active-job progress, and provider-level cancellation.
 - Moved timeline mixdown execution out of `ExportDialog` into `src/lib/export/run-export-job.ts`; the dialog now collects range/format inputs and enqueues a provider job.
 - Added a shared export progress overlay rendered outside the dialog.
-- Added initial export preset descriptors and exposed mixdown presets in the export dialog.
+- Removed the initial preset dropdown before merge because it duplicated the format selector without a second real preset behavior.
 - Added an Ableton-style stem render API in `packages/audio-engine/src/export-mixdown.ts` that renders selected source tracks through the full resolved mixer graph instead of filtering the track list.
 - Wired the Media menu and `Cmd/Ctrl + Shift + E` to open the export dialog.
 - Narrowed stem/clip UI execution to backend seams only in this pass because no selected-track or selected-clip export UI contract exists yet; the implemented stem render API is the root seam needed before those entry points can safely enqueue real jobs.

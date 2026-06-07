@@ -148,10 +148,6 @@ async function ensureBuffersForRange(input: Pick<TimelineExportRequest, 'tracks'
   throwIfExportAborted(input.signal)
 }
 
-const readTracksAfterPreload = (input: Pick<TimelineExportRequest, 'getTracks'>): RuntimeTrack[] => {
-  return input.getTracks()
-}
-
 async function loadExportFx(projectId: string | undefined, userId: string | undefined): Promise<ExportFx> {
   const fx: ExportFx = { trackFx: {} }
   const localOnly = projectId ? isLocalId('project', projectId) : false
@@ -169,10 +165,14 @@ async function loadExportFx(projectId: string | undefined, userId: string | unde
   return fx
 }
 
+const isRenderableStemTrack = (track: RuntimeTrack): boolean => (
+  (track.channelRole ?? 'track') === 'track' && track.clips.length > 0
+)
+
 const collectStemTracks = (input: Pick<StemExportRequest, 'tracks' | 'stemMode' | 'selectedTrackIds'>): RuntimeTrack[] => {
-  if (input.stemMode === 'all-tracks') return input.tracks
+  if (input.stemMode === 'all-tracks') return input.tracks.filter(isRenderableStemTrack)
   const selectedIds = new Set(input.selectedTrackIds ?? [])
-  return input.tracks.filter((track) => selectedIds.has(track.id))
+  return input.tracks.filter((track) => selectedIds.has(track.id) && isRenderableStemTrack(track))
 }
 
 const createUniqueStemFileName = (
@@ -205,7 +205,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       ensureBuffersForRange(input),
       loadExportFx(input.projectId, input.userId),
     ])
-    const tracks = readTracksAfterPreload(input)
+    const tracks = input.getTracks()
     throwIfExportAborted(input.signal)
     input.onProgress?.({ phase: 'rendering' })
     const rendered = await exportMixdown.renderMixdown({
@@ -280,7 +280,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
       ensureBuffersForRange({ ...input, tracks: stemTracks }),
       loadExportFx(input.projectId, input.userId),
     ])
-    const tracks = readTracksAfterPreload(input)
+    const tracks = input.getTracks()
     const renderStemTracks = collectStemTracks({ ...input, tracks })
     if (renderStemTracks.length === 0) throw new Error('Select at least one track to export stems.')
     throwIfExportAborted(input.signal)

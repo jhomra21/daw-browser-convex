@@ -1,21 +1,10 @@
 import { createContext, createSignal, onCleanup, type Accessor, type JSX, useContext } from 'solid-js'
-import type { ExportAudioFormat } from '@daw-browser/shared'
 
 import { runStemExport, runTimelineExport, type ExportOutcome, type ExportProgress, type StemExportRequest, type TimelineExportRequest } from '~/lib/export/run-export-job'
-
-type ExportJobStatus =
-  | 'queued'
-  | 'preparing'
-  | 'rendering'
-  | 'encoding'
-  | 'saving'
 
 type ExportJob = {
   id: string
   name: string
-  status: ExportJobStatus
-  format: ExportAudioFormat
-  createdAt: number
   progress?: ExportProgress
 }
 
@@ -28,9 +17,7 @@ type EnqueueStemExportRequest = Omit<StemExportRequest, 'signal' | 'onProgress'>
 }
 
 type ExportContextValue = {
-  jobs: Accessor<ExportJob[]>
   activeJob: Accessor<ExportJob | undefined>
-  exporting: Accessor<boolean>
   enqueueTimelineExport: (request: EnqueueTimelineExportRequest) => Promise<ExportOutcome>
   enqueueStemExport: (request: EnqueueStemExportRequest) => Promise<ExportOutcome>
   cancelExport: (jobId: string) => void
@@ -40,63 +27,48 @@ const ExportContext = createContext<ExportContextValue>()
 
 const createExportJobId = () => `export-${crypto.randomUUID()}`
 
-const statusForProgress = (progress: ExportProgress): ExportJobStatus => progress.phase
-
 type ExportProviderProps = {
   children: JSX.Element
 }
 
 export function ExportProvider(props: ExportProviderProps) {
-  const [jobs, setJobs] = createSignal<ExportJob[]>([])
-  const [activeJobId, setActiveJobId] = createSignal<string | undefined>()
+  const [activeJob, setActiveJob] = createSignal<ExportJob | undefined>()
   const [activeController, setActiveController] = createSignal<AbortController | undefined>()
   let queue: Promise<void> = Promise.resolve()
   let disposed = false
 
-  const updateJob = (jobId: string, update: (job: ExportJob) => ExportJob) => {
+  const updateActiveJob = (update: (job: ExportJob) => ExportJob) => {
     if (disposed) return
-    setJobs((current) => current.map((job) => job.id === jobId ? update(job) : job))
+    setActiveJob((job) => job ? update(job) : job)
   }
 
-  const activeJob = () => jobs().find((job) => job.id === activeJobId())
-  const exporting = () => activeJob() !== undefined
-
   const runQueuedExport = async (
-    jobId: string,
+    job: ExportJob,
     runExport: (signal: AbortSignal, onProgress: (progress: ExportProgress) => void) => Promise<ExportOutcome>,
   ): Promise<ExportOutcome> => {
     if (disposed) return { type: 'canceled' }
     const controller = new AbortController()
     setActiveController(controller)
-    setActiveJobId(jobId)
-    updateJob(jobId, (job) => ({ ...job, status: 'preparing' }))
+    setActiveJob(job)
     const outcome = await runExport(controller.signal, (progress) => {
-      updateJob(jobId, (job) => ({ ...job, status: statusForProgress(progress), progress }))
+      updateActiveJob((job) => ({ ...job, progress }))
     })
     setActiveController(undefined)
-    setActiveJobId(undefined)
-    if (!disposed) setJobs((current) => current.filter((job) => job.id !== jobId))
+    if (!disposed) setActiveJob(undefined)
     return outcome
   }
 
   const enqueueExport = (
-    request: Pick<EnqueueTimelineExportRequest, 'name' | 'format'>,
+    request: Pick<EnqueueTimelineExportRequest, 'name'>,
     defaultName: string,
     runExport: (signal: AbortSignal, onProgress: (progress: ExportProgress) => void) => Promise<ExportOutcome>,
   ): Promise<ExportOutcome> => {
     if (disposed) return Promise.resolve({ type: 'canceled' })
-    const jobId = createExportJobId()
-    setJobs((current) => [
-      ...current,
-      {
-        id: jobId,
-        name: request.name ?? defaultName,
-        status: 'queued',
-        format: request.format,
-        createdAt: Date.now(),
-      },
-    ])
-    const result = queue.then(() => runQueuedExport(jobId, runExport))
+    const job = {
+      id: createExportJobId(),
+      name: request.name ?? defaultName,
+    }
+    const result = queue.then(() => runQueuedExport(job, runExport))
     queue = result.then(() => {}, () => {})
     return result
   }
@@ -110,7 +82,7 @@ export function ExportProvider(props: ExportProviderProps) {
   )
 
   const cancelExport = (jobId: string) => {
-    if (activeJobId() !== jobId) return
+    if (activeJob()?.id !== jobId) return
     activeController()?.abort()
   }
 
@@ -120,7 +92,7 @@ export function ExportProvider(props: ExportProviderProps) {
   })
 
   return (
-    <ExportContext.Provider value={{ jobs, activeJob, exporting, enqueueTimelineExport, enqueueStemExport, cancelExport }}>
+    <ExportContext.Provider value={{ activeJob, enqueueTimelineExport, enqueueStemExport, cancelExport }}>
       {props.children}
     </ExportContext.Provider>
   )

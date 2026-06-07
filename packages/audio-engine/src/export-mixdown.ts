@@ -1,7 +1,26 @@
-import { Output, BufferTarget, WavOutputFormat, AudioBufferSource } from 'mediabunny'
+import {
+  Output,
+  BufferTarget,
+  StreamTarget,
+  AudioBufferSource,
+  type StreamTargetChunk,
+  type Target,
+} from 'mediabunny'
 
 import { getPlayableAudioWindow, getScheduledMidiEvents } from './audio-scheduling'
-import { type ArpParams, type EqParamsLite, type ReverbParamsLite, type SynthParamsInput } from '@daw-browser/shared'
+import {
+  getExportAudioFormatMetadata,
+  type ArpParams,
+  type EqParamsLite,
+  type ExportAudioFormat,
+  type ReverbParamsLite,
+  type SynthParamsInput,
+} from '@daw-browser/shared'
+import {
+  createExportAudioOutputFormat,
+  getExportAudioCodec,
+  getExportAudioDefaultBitrate,
+} from './export-audio-support'
 import { createSynthVoiceOscillators, getSynthVoiceConfig, getSynthVoiceVelocity, scheduleSynthVoiceEnvelope } from './synth-voice'
 import { createOfflineMixerNodes } from './mixer/apply-offline-routing'
 import { createMixerChannels } from './mixer/channels'
@@ -14,26 +33,62 @@ export type ExportRange =
   | { mode: 'loop'; startSec: number; endSec: number }
   | { mode: 'custom'; startSec: number; endSec: number }
 
-type ExportRequest = {
+export type ExportFx = {
+  masterEq?: EqParamsLite
+  masterReverb?: ReverbParamsLite
+  trackFx?: Record<string, { eq?: EqParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput }>
+}
+
+export type ExportRequest = {
   tracks: Track<AudioBuffer>[]
   bpm: number
   range: ExportRange
   sampleRate?: number
   numberOfChannels?: number
-  fx?: {
-    masterEq?: EqParamsLite
-    masterReverb?: ReverbParamsLite
-    trackFx?: Record<string, { eq?: EqParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput }>
-  }
+  signal?: AbortSignal
+  fx?: ExportFx
+}
+
+type StemDefinition = {
+  id: string
+  name: string
+  sourceTrackIds: string[]
+  includeMasterFx: boolean
+}
+
+type RenderedStem = {
+  id: string
+  name: string
+  buffer: AudioBuffer
 }
 
 type ExportResult = {
-  audioBuffer: AudioBuffer
-  blob: Blob
-  mimeType: string
-  fileExtension: string
+  blob?: Blob
+  format: ExportAudioFormat
   durationSec: number
   sampleRate: number
+  sizeBytes: number
+}
+
+export type EncodeAudioBufferTarget =
+  | { mode: 'buffer' }
+  | {
+    mode: 'stream'
+    writable: WritableStream<StreamTargetChunk>
+    close?: () => Promise<void>
+    abort?: (reason?: unknown) => Promise<void>
+  }
+
+type EncodeAudioBufferOptions = {
+  format?: ExportAudioFormat
+  bitrate?: number
+  target?: EncodeAudioBufferTarget
+  signal?: AbortSignal
+  onWrite?: (sizeBytes: number) => void
+}
+
+const throwIfAborted = (signal: AbortSignal | undefined): void => {
+  signal?.throwIfAborted()
 }
 
 function lastClipEndSec(tracks: Track<AudioBuffer>[]): number {
@@ -55,7 +110,8 @@ function computeRangeSec(tracks: Track<AudioBuffer>[], range: ExportRange): { st
   return { start, end }
 }
 
-export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
+async function renderSourceIsolatedMixdown(req: ExportRequest, sourceTrackIds?: Set<string>, includeMasterFx = true): Promise<AudioBuffer> {
+  throwIfAborted(req.signal)
   const { tracks, bpm, range, sampleRate = 44100, numberOfChannels = 2, fx } = req
   const { start, end } = computeRangeSec(tracks, range)
   const duration = Math.max(0.001, end - start)
@@ -68,11 +124,13 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
     masterReverb: fx?.masterReverb,
     trackFx: fx?.trackFx,
   })
-  const { trackNodes } = createOfflineMixerNodes(ctx, mixerGraph)
+  const graph = includeMasterFx ? mixerGraph : { ...mixerGraph, master: {} }
+  const { trackNodes } = createOfflineMixerNodes(ctx, graph)
 
-  for (const resolvedTrack of mixerGraph.channels) {
+  for (const resolvedTrack of graph.channels) {
     const track = trackIndex.trackById.get(resolvedTrack.channel.id)
     if (!track) continue
+    if (sourceTrackIds && !sourceTrackIds.has(track.id)) continue
     const trackInput = trackNodes.get(track.id)?.input
     if (!trackInput) continue
     const fxCfg = resolvedTrack.fx
@@ -136,26 +194,126 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
     }
   }
 
-  return await ctx.startRendering()
+  throwIfAborted(req.signal)
+  const rendered = await ctx.startRendering()
+  throwIfAborted(req.signal)
+  return rendered
 }
 
-export async function encodeAudioBuffer(buffer: AudioBuffer): Promise<ExportResult> {
-  const sampleRate = buffer.sampleRate
-  const output = new Output({ format: new WavOutputFormat(), target: new BufferTarget() })
-  const src = new AudioBufferSource({ codec: 'pcm-s16' })
-  output.addAudioTrack(src)
-  await output.start()
-  await src.add(buffer)
-  src.close()
-  await output.finalize()
-  const outBuffer = (output.target as BufferTarget).buffer!
-  const blob = new Blob([outBuffer], { type: 'audio/wav' })
+export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
+  return renderSourceIsolatedMixdown(req)
+}
+
+export async function renderStemMixdown(req: ExportRequest & { stem: StemDefinition }): Promise<RenderedStem> {
+  const buffer = await renderSourceIsolatedMixdown(
+    req,
+    new Set(req.stem.sourceTrackIds),
+    req.stem.includeMasterFx,
+  )
+  return { id: req.stem.id, name: req.stem.name, buffer }
+}
+
+type EncodeTargetState = {
+  target: Target
+  close: () => Promise<void>
+  abort: (reason?: unknown) => Promise<void>
+}
+
+const createManagedWritable = (
+  target: Extract<EncodeAudioBufferTarget, { mode: 'stream' }>,
+  abortTarget: (reason?: unknown) => Promise<void>,
+): WritableStream<StreamTargetChunk> => {
+  if (!target.close && !target.abort) return target.writable
+  let writer: WritableStreamDefaultWriter<StreamTargetChunk> | undefined
+  return new WritableStream<StreamTargetChunk>({
+    start() {
+      writer = target.writable.getWriter()
+    },
+    write(chunk) {
+      if (!writer) throw new Error('Export stream writer was not initialized.')
+      return writer.write(chunk)
+    },
+    close() {
+      writer?.releaseLock()
+    },
+    abort(reason) {
+      writer?.releaseLock()
+      return abortTarget(reason)
+    },
+  })
+}
+
+const createEncodeTarget = (target: EncodeAudioBufferTarget | undefined): EncodeTargetState => {
+  if (target?.mode !== 'stream') {
+    return {
+      target: new BufferTarget(),
+      close: async () => {},
+      abort: async () => {},
+    }
+  }
+  let aborted = false
+  const abortTarget = async (reason?: unknown) => {
+    if (aborted) return
+    aborted = true
+    await target.abort?.(reason)
+  }
   return {
-    audioBuffer: buffer,
+    target: new StreamTarget(createManagedWritable(target, abortTarget), { chunked: true }),
+    close: target.close ?? (async () => {}),
+    abort: abortTarget,
+  }
+}
+
+const getBufferTargetBlob = (target: Target, mimeType: string): Blob | undefined => {
+  if (!(target instanceof BufferTarget)) return
+  if (!target.buffer) return
+  return new Blob([target.buffer], { type: mimeType })
+}
+
+export async function encodeAudioBuffer(buffer: AudioBuffer, options: EncodeAudioBufferOptions = {}): Promise<ExportResult> {
+  const format = options.format ?? 'wav'
+  const metadata = getExportAudioFormatMetadata(format)
+  const sampleRate = buffer.sampleRate
+  const encodeTarget = createEncodeTarget(options.target)
+  const output = new Output({ format: createExportAudioOutputFormat(format), target: encodeTarget.target })
+  let sizeBytes = 0
+  encodeTarget.target.onwrite = (_start, end) => {
+    throwIfAborted(options.signal)
+    sizeBytes = Math.max(sizeBytes, end)
+    options.onWrite?.(sizeBytes)
+  }
+  const src = new AudioBufferSource({
+    codec: getExportAudioCodec(format),
+    bitrate: options.bitrate ?? getExportAudioDefaultBitrate(format),
+  })
+  try {
+    throwIfAborted(options.signal)
+    output.addAudioTrack(src)
+    await output.start()
+    throwIfAborted(options.signal)
+    await src.add(buffer)
+    throwIfAborted(options.signal)
+    src.close()
+    await output.finalize()
+    throwIfAborted(options.signal)
+    await encodeTarget.close()
+  } catch (error) {
+    if (output.state !== 'canceled' && output.state !== 'finalized') {
+      try {
+        await output.cancel()
+      } catch {}
+    }
+    try {
+      await encodeTarget.abort(error)
+    } catch {}
+    throw error
+  }
+  const blob = getBufferTargetBlob(encodeTarget.target, metadata.mimeType)
+  return {
     blob,
-    mimeType: 'audio/wav',
-    fileExtension: '.wav',
+    format,
     durationSec: buffer.duration,
     sampleRate,
+    sizeBytes: blob?.size ?? sizeBytes,
   }
 }

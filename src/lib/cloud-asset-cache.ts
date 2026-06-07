@@ -1,6 +1,7 @@
 import { getLocalAsset, readLocalAssetBytes, writeLocalAssetFile } from '~/lib/local-assets'
 import { assetCloudIdMappingKey, isCloudIdMappingValue } from '~/lib/local-cloud-id-map'
 import { openLocalProjectDb } from '~/lib/local-project-db'
+import { runWithConcurrency } from '~/lib/run-with-concurrency'
 
 type CloudAssetReadResult =
   | { status: 'ready'; file: File; source: 'local' | 'cloud' }
@@ -82,21 +83,6 @@ const cacheCloudAssetForOffline = async (
   const result = await readCloudAssetFile(projectId, assetId, row)
   if (result.status !== 'ready') throw new Error('Cloud asset could not be downloaded.')
   await writeLocalAssetFile(projectId, row.storagePath, result.file)
-}
-
-const runWithConcurrency = async <T>(
-  items: T[],
-  limit: number,
-  worker: (item: T) => Promise<void>,
-): Promise<void> => {
-  let index = 0
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (index < items.length) {
-      const item = items[index]
-      index += 1
-      await worker(item)
-    }
-  }))
 }
 
 export const downloadCloudAssetsForOffline = async (

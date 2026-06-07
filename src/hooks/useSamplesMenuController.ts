@@ -9,6 +9,7 @@ import { isLocalId } from '@daw-browser/shared'
 import { deleteProjectSample } from '~/lib/project-samples-api'
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData } from '~/lib/sample-drag-data'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { formatBytes } from '~/lib/format-bytes'
 
 type UseSamplesMenuControllerOptions = {
   currentProjectId: Accessor<string>
@@ -51,19 +52,6 @@ export function useSamplesMenuController(
     userId: () => options.currentUserId() ?? '',
     enabled: open,
   })
-
-  const formatBytes = (bytes?: number) => {
-    if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return ''
-    const units = ['B', 'KB', 'MB', 'GB']
-    let value = bytes
-    let unitIndex = 0
-    while (value >= 1024 && unitIndex < units.length - 1) {
-      value /= 1024
-      unitIndex += 1
-    }
-    const formatted = value >= 10 ? value.toFixed(0) : value.toFixed(1)
-    return `${formatted} ${units[unitIndex]}`
-  }
 
   const onStartSampleDrag = (event: DragEvent, sample: InsertSampleInput) => {
     try {

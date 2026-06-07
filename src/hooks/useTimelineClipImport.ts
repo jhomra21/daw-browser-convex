@@ -7,10 +7,11 @@ import { isLocalId } from '@daw-browser/shared'
 import { canTrackReceiveAudioClip, getTrackChannelRole } from '@daw-browser/timeline-core/track-routing'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE, type SampleDragData } from '~/lib/sample-drag-data'
-import { clientXToSec, yToLaneIndex, willOverlap, calcNonOverlapStart, quantizeSecToGrid, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
+import { clientXToSec, yToLaneIndex, calcNonOverlapStart, quantizeSecToGrid, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { createAudioImportTransaction } from '~/lib/timeline-audio-import'
 import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
+import { isAbortError } from '~/lib/dom-errors'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
@@ -129,13 +130,13 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     return created ? { track: created, autoCreated: true } : null
   }
 
-  const resolveClipStartSec = (track: Track | undefined, desiredStart: number, duration: number) => {
+  const resolveClipStartSec = (track: Track, desiredStart: number, duration: number) => {
     const startSec = gridEnabled()
       ? quantizeSecToGrid(Math.max(0, desiredStart), bpm(), gridDenominator(), 'round')
       : Math.max(0, desiredStart)
     return gridEnabled()
-      ? calcNonOverlapStartGridAligned(track?.clips ?? [], null, startSec, duration, bpm(), gridDenominator())
-      : ensureNonOverlappingStart(track, startSec, duration)
+      ? calcNonOverlapStartGridAligned(track.clips, null, startSec, duration, bpm(), gridDenominator())
+      : calcNonOverlapStart(track.clips, null, startSec, duration)
   }
 
   const resolveDropTargetTrack = async (clientY: number): Promise<TargetAudioTrack | null> => {
@@ -167,12 +168,6 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
 
   const applySelectionAfterCreate = (trackId: Track['id'], clipId: string) => {
     selection.selectPrimaryClip({ trackId, clipId })
-  }
-
-  const ensureNonOverlappingStart = (track: Track | undefined, desiredStart: number, duration: number) => {
-    if (!track) return desiredStart
-    if (!willOverlap(track.clips, null, desiredStart, duration)) return desiredStart
-    return calcNonOverlapStart(track.clips, null, desiredStart, duration)
   }
 
   const audioImportTransaction = createAudioImportTransaction({
@@ -274,11 +269,6 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     const file = Array.from(files).find(f => f.type.startsWith('audio'))
     if (!file) return
     await handleFilesInternal(file)
-  }
-
-  const isAbortError = (error: unknown) => {
-    if (error instanceof DOMException) return error.name === 'AbortError'
-    return false
   }
 
   const handleAddAudio = async () => {

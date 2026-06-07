@@ -8,6 +8,7 @@ import {
 import { downloadCloudAssetsForOffline } from "~/lib/cloud-asset-cache";
 import { setLocalProjectAssetDirectory } from "~/lib/local-assets";
 import { isLocalId } from "@daw-browser/shared";
+import { downloadBlob } from "~/lib/local-export";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import { flushSharedOutbox, readSharedOutboxSummary } from "~/lib/shared-outbox";
 import type { CloudBackupDialogState } from "~/components/timeline/cloud-backup-dialog";
@@ -205,12 +206,7 @@ export const useLocalProjectActions = (input: Input) => {
     try {
       const { exportDawProjectArchive } = await import("~/lib/project-archive");
       const blob = await exportDawProjectArchive(rid);
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `${rid}.dawproject`;
-      anchor.click();
-      URL.revokeObjectURL(url);
+      downloadBlob({ blob, suggestedName: `${rid}.dawproject` });
     } catch (error) {
       setLocalSaveFailure(error instanceof Error ? error.message : "Archive export failed.");
     }

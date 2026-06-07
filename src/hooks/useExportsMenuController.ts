@@ -6,6 +6,7 @@ import { copyText } from '~/lib/clipboard'
 type UseExportsMenuControllerOptions = {
   currentProjectId: Accessor<string>
   currentUserId: Accessor<string | undefined>
+  onOpenExport: () => void
 }
 
 export type ExportsMenuController = {
@@ -13,6 +14,7 @@ export type ExportsMenuController = {
   onOpenChange: (open: boolean) => void
   exports: ReturnType<typeof useProjectExports>['exports']
   copyText: (value?: string) => Promise<void>
+  onOpenExport: () => void
 }
 
 export function useExportsMenuController(
@@ -30,5 +32,6 @@ export function useExportsMenuController(
     onOpenChange: setOpen,
     exports: exportsQ.exports,
     copyText,
+    onOpenExport: options.onOpenExport,
   }
 }

@@ -2,6 +2,8 @@ import { type Component, Show, Suspense, createEffect, lazy } from 'solid-js'
 import { Button } from '~/components/ui/button'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { isLocalId } from '@daw-browser/shared'
+import { ExportProvider } from '~/context/export'
+import ExportProgressOverlay from '~/components/export/ExportProgressOverlay'
 import type { OptimisticGrantWrite } from '~/lib/optimistic-grant-scope'
 import type { EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
@@ -45,6 +47,8 @@ export type TimelinePanelsProps = {
   exportDialog: {
     isOpen: boolean
     tracks: Track[]
+    getTracks: () => Track[]
+    selectedTrackId?: string
     bpm: number
     loopEnabled: boolean
     loopStartSec: number
@@ -71,7 +75,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
   })
 
   return (
-    <>
+    <ExportProvider>
       <Show when={canUseAgentChat()}>
         <Button
           variant="outline"
@@ -150,6 +154,8 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
             isOpen={props.exportDialog.isOpen}
             onClose={props.exportDialog.onClose}
             tracks={props.exportDialog.tracks}
+            getTracks={props.exportDialog.getTracks}
+            selectedTrackId={props.exportDialog.selectedTrackId}
             bpm={props.exportDialog.bpm}
             loopEnabled={props.exportDialog.loopEnabled}
             loopStartSec={props.exportDialog.loopStartSec}
@@ -160,7 +166,8 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
           />
         </Suspense>
       </Show>
-    </>
+      <ExportProgressOverlay />
+    </ExportProvider>
   )
 }
 

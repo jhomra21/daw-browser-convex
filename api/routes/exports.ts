@@ -64,7 +64,36 @@ export function registerExportRoutes(app: App) {
     })
 
     const url = `/api/export/${encodeURIComponent(projectId)}?key=${encodeURIComponent(key)}`
-    return c.json({ key, url, sizeBytes: putRes.size })
+    const duration = durationStr ? Number(durationStr) : undefined
+    const sampleRate = sampleRateStr ? Number(sampleRateStr) : undefined
+    const sizeBytes = putRes.size
+    let exportId: string
+    try {
+      exportId = await access.convex.mutation(convexApi.exports.create, {
+        projectId,
+        name: chosenName,
+        url,
+        r2Key: key,
+        format,
+        duration: Number.isFinite(duration) ? duration : undefined,
+        sampleRate: Number.isFinite(sampleRate) ? sampleRate : undefined,
+        sizeBytes,
+      })
+    } catch (metadataError) {
+      await c.env.daw_audio_samples.delete(key).catch((cleanupError) => {
+        console.warn('Failed to delete export after metadata creation failed', cleanupError)
+      })
+      throw metadataError
+    }
+    return c.json({
+      exportId,
+      key,
+      url,
+      name: chosenName,
+      format,
+      mimeType: metadata.mimeType,
+      sizeBytes,
+    })
   } catch (err) {
     console.error('Export upload error', err)
     return c.json({ error: 'Failed to upload export' }, 500)

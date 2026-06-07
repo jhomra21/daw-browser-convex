@@ -671,6 +671,7 @@ const Timeline: Component = () => {
     onAddInstrumentTrack: () => {
       void addInstrumentTrack().catch(() => {});
     },
+    onOpenExport: () => setExportOpen(true),
   });
 
   const { onSidebarPointerDown } = useTimelineSidebarResize({
@@ -823,6 +824,8 @@ const Timeline: Component = () => {
     exportDialog: {
       isOpen: exportOpen(),
       tracks: renderTracks(),
+      getTracks: () => renderTracks(),
+      selectedTrackId: selection.selectedTrackId() || undefined,
       bpm: bpm(),
       loopEnabled: loopEnabled(),
       loopStartSec: loopStartSec(),

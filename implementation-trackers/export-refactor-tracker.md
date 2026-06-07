@@ -453,7 +453,7 @@ Validation notes to record:
 - [x] Select MediaBunny output format and `AudioBufferSource` codec from the descriptor.
 - [x] Pass bitrate only where required.
 - [x] Await source `.add(...)` and close/finalize in the existing lifecycle order.
-- [x] Return selected `format`, `mimeType`, `fileExtension`, duration, sample rate, and size/Blob metadata.
+- [x] Return selected `format`, duration, sample rate, and size/Blob metadata; callers derive MIME type and extension from shared format metadata.
 - [x] Skip simple metadata tags for now because no project/title metadata is available at the audio-engine boundary.
 
 Rules:
@@ -517,6 +517,353 @@ Only after phases 1-5 are stable:
 - [x] Defer cancellation because the current offline render step has no real cancel path; adding a fake cancel button would be misleading.
 
 Do not add polling loops.
+
+---
+
+# Future Plan — Global Export Provider, Queue, Presets, And Ableton-Style Stems
+
+## Motivation
+
+The first export refactor pass intentionally kept export orchestration local to `ExportDialog` because there was only one real export entry point.
+
+That constraint has changed for the next export direction. A broader export system is justified if it supports multiple real callers:
+
+- timeline mixdown export
+- selected-track stem export
+- all-stems export
+- clip export
+- project/media menu export actions
+- keyboard shortcut export actions
+- background export queue
+- reusable audio export presets/templates
+- shared progress UI outside the dialog
+
+The goal is to borrow Diffusion's useful export controller pattern without copying video-only complexity.
+
+## Diffusion API Patterns To Reuse
+
+References:
+
+- `/Users/juan/Documents/monorepo-new/apps/web/src/context/export.tsx`
+- `/Users/juan/Documents/monorepo-new/apps/web/src/components/sidebar-right/export-progress.tsx`
+- `/Users/juan/Documents/monorepo-new/apps/web/src/components/sidebar-right/export-templates.ts`
+- `/Users/juan/Documents/monorepo-new/apps/web/src/components/engine/encode/interfaces.ts`
+- `/Users/juan/Documents/monorepo-new/apps/web/src/components/engine/encode/encoder.ts`
+
+Useful patterns:
+
+- A provider owns export execution, progress, cancellation, and shared progress UI.
+- Callers invoke a small export API instead of owning render/encode/save details.
+- UI-facing export config excludes execution-only values such as targets, callbacks, and cancellation handles.
+- Export presets/templates are descriptor data consumed by UI.
+- Progress UI is presentational and receives the active export state plus a cancel callback.
+
+DAW-specific differences:
+
+- Keep all video/resolution/FPS/social-media template logic out of this app.
+- Keep MediaBunny browser file handles, `AbortSignal`, write callbacks, project IDs, and save targets as execution-only values.
+- Keep render/encode logic in `packages/audio-engine`; keep job/progress UI state in the app.
+
+## Target Modules
+
+Add app-level export orchestration:
+
+```txt
+src/context/export.tsx
+src/components/export/ExportProgressOverlay.tsx
+src/lib/export/export-jobs.ts
+src/lib/export/export-presets.ts
+src/lib/export/export-sources.ts
+src/lib/export/run-export-job.ts
+```
+
+Add deeper audio-engine stem rendering only after provider/queue seams are validated:
+
+```txt
+packages/audio-engine/src/export-stems.ts
+packages/audio-engine/src/mixer/render-stem-graph.ts
+```
+
+Reuse existing lower-level modules:
+
+```txt
+packages/audio-engine/src/export-mixdown.ts
+packages/audio-engine/src/mixer/resolve-routing.ts
+packages/audio-engine/src/mixer/apply-offline-routing.ts
+src/lib/cloud-export.ts
+src/lib/local-export.ts
+src/lib/export-format-support.ts
+```
+
+## Provider Interface
+
+Target shape:
+
+```ts
+type ExportContextValue = {
+  jobs: Accessor<ExportJob[]>
+  activeJob: Accessor<ExportJob | undefined>
+  exporting: Accessor<boolean>
+  enqueueExport: (request: ExportJobRequest) => string
+  cancelExport: (jobId: string) => void
+  openTimelineExportDialog: () => void
+}
+```
+
+Rules:
+
+- Run one export job at a time first.
+- Keep the queue serialized until browser resource usage is proven safe for parallel rendering.
+- Use an `AbortController` per running job.
+- Render shared progress UI from the provider, not from `ExportDialog`.
+
+## Export Sources
+
+Target shape:
+
+```ts
+type ExportSource =
+  | { type: 'timeline'; range: ExportRange }
+  | { type: 'clip'; trackId: string; clipId: string }
+  | { type: 'stems'; stemMode: StemExportMode; range: ExportRange }
+
+type StemExportMode =
+  | { type: 'selected-tracks'; trackIds: string[] }
+  | { type: 'all-tracks' }
+  | { type: 'groups' }
+  | { type: 'returns' }
+```
+
+Project/media menu export actions should trigger one of these sources or open the export dialog. Completed export rows remain handled by `useProjectExports(...)` and `ProjectMediaMenu`.
+
+## Export Presets
+
+Target shape:
+
+```ts
+type ExportPreset = {
+  id: string
+  name: string
+  format: ExportAudioFormat
+  destination: 'auto' | 'local' | 'cloud'
+  stemOptions?: StemExportOptions
+}
+
+type StemExportOptions = {
+  includeReturns: boolean
+  includeGroups: boolean
+  includeMasterFx: boolean
+  renderMode: 'ableton-style' | 'raw-tracks'
+}
+```
+
+Initial preset examples:
+
+```ts
+export const exportPresets = [
+  { id: 'wav-mixdown', name: 'WAV Mixdown', format: 'wav', destination: 'auto' },
+  { id: 'mp3-mixdown', name: 'MP3 Mixdown', format: 'mp3', destination: 'auto' },
+  {
+    id: 'wav-ableton-stems',
+    name: 'WAV Stems',
+    format: 'wav',
+    destination: 'auto',
+    stemOptions: {
+      includeReturns: true,
+      includeGroups: true,
+      includeMasterFx: false,
+      renderMode: 'ableton-style',
+    },
+  },
+]
+```
+
+Default stem behavior should keep `includeMasterFx: false` because recombining processed stems with master processing can double-process or fail to null against the final mix. The user should be able to opt in.
+
+## Export Jobs And Progress
+
+Target shape:
+
+```ts
+type ExportJobStatus =
+  | 'queued'
+  | 'preparing'
+  | 'rendering'
+  | 'encoding'
+  | 'saving'
+  | 'completed'
+  | 'canceled'
+  | 'failed'
+
+type ExportJob = {
+  id: string
+  source: ExportSource
+  preset: ExportPreset
+  status: ExportJobStatus
+  createdAt: number
+  progressLabel?: string
+  sizeBytes?: number
+  resultUrl?: string
+  localSavedName?: string
+  error?: string
+}
+```
+
+For stem exports, prefer one parent job with child stem progress over one unrelated job per stem.
+
+Progress overlay should show:
+
+- active job name and source
+- phase
+- selected format
+- bytes written during encoding
+- current stem name, when exporting stems
+- completed stem count
+- cancel button
+- completed cloud URL or local saved name
+
+## Ableton-Style Stem Export Requirement
+
+Stem export should preserve routing behavior similar to Ableton:
+
+- source track volume/mute/solo behavior
+- source track effects
+- output routing into groups
+- group effects
+- sends to returns
+- return effects
+- solo/mute-aware routing
+- optional master effects
+
+Do not implement Ableton-style stems by calling `renderMixdown({ tracks: [track] })`. That loses shared routing context.
+
+## Existing Routing Evidence
+
+The current DAW code already has routing primitives that should be reused:
+
+- `packages/timeline-core/src/types.ts`
+  - `TrackChannelRole = 'track' | 'group' | 'return'`
+  - `TrackSend`
+  - `outputTargetId`
+- `packages/shared/src/track-routing-core.ts`
+  - normalizes sends to return tracks
+  - normalizes output targets to group tracks
+- `packages/audio-engine/src/mixer/resolve-routing.ts`
+  - resolves active sends and output routing
+  - handles solo-aware routing state
+- `packages/audio-engine/src/mixer/apply-offline-routing.ts`
+  - builds an offline graph with track, group, return, and master nodes
+  - connects sends through return inputs
+  - connects outputs through groups or master
+- `src/components/timeline/TrackSidebar.tsx`
+  - exposes group output target and return send UI
+
+## Ableton-Style Stem Renderer Shape
+
+Add an audio-engine API:
+
+```ts
+type StemRenderRequest = {
+  tracks: Track<AudioBuffer>[]
+  bpm: number
+  range: ExportRange
+  stems: StemDefinition[]
+  fx?: ExportFx
+  sampleRate?: number
+  numberOfChannels?: number
+  signal?: AbortSignal
+  onProgress?: (progress: StemRenderProgress) => void
+}
+
+type StemDefinition = {
+  id: string
+  name: string
+  sourceTrackIds: string[]
+  includeGroups: boolean
+  includeReturns: boolean
+  includeMasterFx: boolean
+}
+
+type RenderedStem = {
+  id: string
+  name: string
+  buffer: AudioBuffer
+}
+```
+
+```ts
+export async function renderStemMixdowns(
+  request: StemRenderRequest,
+): Promise<RenderedStem[]>
+```
+
+## Ableton-Style Stem Rendering Algorithm
+
+For each stem:
+
+1. Build the full normal mixer graph with all tracks, groups, returns, sends, and FX.
+2. Create offline mixer nodes from the full graph.
+3. Schedule audio and MIDI only for the stem's source tracks.
+4. Keep group and return channels alive so source signal can flow through them.
+5. Apply or omit master FX according to `includeMasterFx`.
+6. Render the resulting buffer.
+7. Encode and save the stem through the existing export target/save modules.
+
+The key principle is source isolation through the full graph:
+
+```txt
+selected source track -> source FX -> group output -> group FX -> master
+selected source track -> send amount -> return FX -> master
+```
+
+This preserves group and return contribution caused by the selected source without pretending a track rendered alone is equivalent.
+
+## Clip Export
+
+Clip export should reuse the same source-isolated graph idea:
+
+- derive range from the selected clip
+- schedule only that clip
+- preserve its track, group, return, and optional master processing
+
+Target source:
+
+```ts
+{ type: 'clip', trackId, clipId }
+```
+
+## Entry Points
+
+Add entry points only after provider and queue are stable:
+
+- timeline dialog: queues `source: { type: 'timeline', range }`
+- track menu/sidebar: export selected track stem
+- multi-selection actions: export selected tracks as stems
+- project/media menu: export mixdown and export stems actions
+- keyboard shortcut: `Cmd/Ctrl + Shift + E` opens export UI
+- optional default export action can queue a default preset later, but initial shortcut should not silently start a long export
+
+## Implementation Sequence
+
+1. Extract global export provider and shared progress overlay.
+2. Move timeline mixdown execution out of `ExportDialog` without changing behavior.
+3. Add serialized queue and provider-level cancellation.
+4. Add audio export presets/templates.
+5. Add Ableton-style stem render API in audio-engine.
+6. Add stem export job runner and parent/child progress.
+7. Add clip export through the source-isolated graph seam.
+8. Wire project/media menu and keyboard entry points.
+9. Run validators and browser smoke tests for timeline export, local/cloud save, cancel, stems, and clip export.
+
+## Risks To Avoid
+
+- Do not put provider/job UI state in `packages/audio-engine`.
+- Do not duplicate local/cloud save logic.
+- Do not push stem-specific UI branching into `ExportDialog`.
+- Do not make `ProjectMediaMenu` own export execution.
+- Do not parallelize stem renders initially.
+- Do not default to master FX on stems.
+- Do not call filtered-track stem export Ableton-style unless the full mixer graph is preserved.
 
 ---
 
@@ -684,3 +1031,13 @@ Notes:
 - Upgraded `wrangler` alone to `4.98.0`, but `bun dev` still failed because `@cloudflare/vite-plugin@1.25.6` carried a nested `wrangler@4.69.0`. Upgraded `@cloudflare/vite-plugin` to `1.40.0`, which depends on `wrangler@4.98.0`; `bun dev` then started successfully and established the remote connection.
 - Re-ran cloud export runtime validation against temporary project `4e3add48-bd65-4c76-9bfa-1b7bc11c16b0`: `/api/exports` returned `200` with project-scoped R2 key and URL, fetching the URL returned `200`, `content-type: audio/wav`, `size=44`, and the Convex export row readback contained the expected name, format, duration, sample rate, size, URL, and R2 key. The temporary cloud project was deleted afterward.
 - After simplify cleanup, re-ran a normalized cloud upload smoke against temporary project `d37c1250-bea3-4fab-b729-08f0bdf44863`: submitted `name="normalized-test.ogg"` with `format="wav"`, `/api/exports` returned `200`, the R2 key ended in `-normalized-test.wav`, fetching the URL returned `200`, `content-type: audio/wav`, `size=44`, and the temporary cloud project was deleted afterward.
+
+## Future Plan Execution Notes
+
+- Added a timeline-scoped export provider with serialized job execution, active-job progress, and provider-level cancellation.
+- Moved timeline mixdown execution out of `ExportDialog` into `src/lib/export/run-export-job.ts`; the dialog now collects range/format inputs and enqueues a provider job.
+- Added a shared export progress overlay rendered outside the dialog.
+- Added initial export preset descriptors and exposed mixdown presets in the export dialog.
+- Added an Ableton-style stem render API in `packages/audio-engine/src/export-mixdown.ts` that renders selected source tracks through the full resolved mixer graph instead of filtering the track list.
+- Wired the Media menu and `Cmd/Ctrl + Shift + E` to open the export dialog.
+- Narrowed stem/clip UI execution to backend seams only in this pass because no selected-track or selected-clip export UI contract exists yet; the implemented stem render API is the root seam needed before those entry points can safely enqueue real jobs.

@@ -121,6 +121,14 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
           </div>
           <MenubarSeparator />
           <div class="max-h-80 overflow-x-hidden overflow-y-auto">
+            <MenubarItem
+              class="flex w-full cursor-pointer items-center gap-2 hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100"
+              onSelect={exportsMenu().onOpenExport}
+            >
+              <Icon name="file-audio" class="h-4 w-4 text-neutral-400" />
+              <span class="text-xs text-neutral-200">Export mixdown…</span>
+            </MenubarItem>
+            <MenubarSeparator class="my-2" />
             <Show
               when={hasMedia()}
               fallback={

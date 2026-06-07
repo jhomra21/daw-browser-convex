@@ -33,17 +33,33 @@ export type ExportRange =
   | { mode: 'loop'; startSec: number; endSec: number }
   | { mode: 'custom'; startSec: number; endSec: number }
 
-type ExportRequest = {
+export type ExportFx = {
+  masterEq?: EqParamsLite
+  masterReverb?: ReverbParamsLite
+  trackFx?: Record<string, { eq?: EqParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput }>
+}
+
+export type ExportRequest = {
   tracks: Track<AudioBuffer>[]
   bpm: number
   range: ExportRange
   sampleRate?: number
   numberOfChannels?: number
-  fx?: {
-    masterEq?: EqParamsLite
-    masterReverb?: ReverbParamsLite
-    trackFx?: Record<string, { eq?: EqParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput }>
-  }
+  signal?: AbortSignal
+  fx?: ExportFx
+}
+
+export type StemDefinition = {
+  id: string
+  name: string
+  sourceTrackIds: string[]
+  includeMasterFx: boolean
+}
+
+export type RenderedStem = {
+  id: string
+  name: string
+  buffer: AudioBuffer
 }
 
 type ExportResult = {
@@ -67,7 +83,12 @@ type EncodeAudioBufferOptions = {
   format?: ExportAudioFormat
   bitrate?: number
   target?: EncodeAudioBufferTarget
+  signal?: AbortSignal
   onWrite?: (sizeBytes: number) => void
+}
+
+const throwIfAborted = (signal: AbortSignal | undefined): void => {
+  signal?.throwIfAborted()
 }
 
 function lastClipEndSec(tracks: Track<AudioBuffer>[]): number {
@@ -89,7 +110,8 @@ function computeRangeSec(tracks: Track<AudioBuffer>[], range: ExportRange): { st
   return { start, end }
 }
 
-export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
+async function renderSourceIsolatedMixdown(req: ExportRequest, sourceTrackIds?: Set<string>, includeMasterFx = true): Promise<AudioBuffer> {
+  throwIfAborted(req.signal)
   const { tracks, bpm, range, sampleRate = 44100, numberOfChannels = 2, fx } = req
   const { start, end } = computeRangeSec(tracks, range)
   const duration = Math.max(0.001, end - start)
@@ -102,11 +124,13 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
     masterReverb: fx?.masterReverb,
     trackFx: fx?.trackFx,
   })
-  const { trackNodes } = createOfflineMixerNodes(ctx, mixerGraph)
+  const graph = includeMasterFx ? mixerGraph : { ...mixerGraph, master: {} }
+  const { trackNodes } = createOfflineMixerNodes(ctx, graph)
 
-  for (const resolvedTrack of mixerGraph.channels) {
+  for (const resolvedTrack of graph.channels) {
     const track = trackIndex.trackById.get(resolvedTrack.channel.id)
     if (!track) continue
+    if (sourceTrackIds && !sourceTrackIds.has(track.id)) continue
     const trackInput = trackNodes.get(track.id)?.input
     if (!trackInput) continue
     const fxCfg = resolvedTrack.fx
@@ -170,7 +194,23 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
     }
   }
 
-  return await ctx.startRendering()
+  throwIfAborted(req.signal)
+  const rendered = await ctx.startRendering()
+  throwIfAborted(req.signal)
+  return rendered
+}
+
+export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
+  return renderSourceIsolatedMixdown(req)
+}
+
+export async function renderStemMixdown(req: ExportRequest & { stem: StemDefinition }): Promise<RenderedStem> {
+  const buffer = await renderSourceIsolatedMixdown(
+    req,
+    new Set(req.stem.sourceTrackIds),
+    req.stem.includeMasterFx,
+  )
+  return { id: req.stem.id, name: req.stem.name, buffer }
 }
 
 type EncodeTargetState = {
@@ -238,6 +278,7 @@ export async function encodeAudioBuffer(buffer: AudioBuffer, options: EncodeAudi
   const output = new Output({ format: createExportAudioOutputFormat(format), target: encodeTarget.target })
   let sizeBytes = 0
   encodeTarget.target.onwrite = (_start, end) => {
+    throwIfAborted(options.signal)
     sizeBytes = Math.max(sizeBytes, end)
     options.onWrite?.(sizeBytes)
   }
@@ -246,11 +287,15 @@ export async function encodeAudioBuffer(buffer: AudioBuffer, options: EncodeAudi
     bitrate: options.bitrate ?? getExportAudioDefaultBitrate(format),
   })
   try {
+    throwIfAborted(options.signal)
     output.addAudioTrack(src)
     await output.start()
+    throwIfAborted(options.signal)
     await src.add(buffer)
+    throwIfAborted(options.signal)
     src.close()
     await output.finalize()
+    throwIfAborted(options.signal)
     await encodeTarget.close()
   } catch (error) {
     if (output.state !== 'canceled' && output.state !== 'finalized') {

@@ -14,7 +14,7 @@ type LocalExportWritableInput = {
   types?: FilePickerAcceptType[]
 }
 
-type LocalExportWritable = {
+export type LocalExportWritable = {
   writable: FileSystemWritableFileStream
 }
 

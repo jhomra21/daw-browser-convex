@@ -8,6 +8,7 @@ type KeyboardHandlers = {
   onAddReturnTrack?: () => void;
   onAddGroupTrack?: () => void;
   onAddInstrumentTrack?: () => void;
+  onOpenExport?: () => void;
   onUndo?: () => void;
   onRedo?: () => void;
 };
@@ -93,7 +94,7 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
       handlers.onUndo?.();
       return;
     }
-    // Redo: Shift + Ctrl/Cmd + Z
+    // Redo: Ctrl/Cmd + Y
     if (
       (e.ctrlKey || e.metaKey) &&
       !e.shiftKey &&
@@ -102,6 +103,18 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
       e.preventDefault();
       e.stopPropagation();
       handlers.onRedo?.();
+      return;
+    }
+
+    // Export: Ctrl/Cmd + Shift + E
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      e.shiftKey &&
+      (e.key === "e" || e.key === "E")
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      handlers.onOpenExport?.();
       return;
     }
 

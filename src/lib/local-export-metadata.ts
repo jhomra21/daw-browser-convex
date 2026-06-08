@@ -42,15 +42,19 @@ const readExports = async (projectId: string): Promise<LocalExportMetadata[]> =>
 
 export const listLocalExportMetadata = readExports
 
-export const saveLocalExportMetadata = async (
+export type LocalExportMetadataInput = Omit<LocalExportMetadata, 'id' | 'createdAt'>
+
+export const saveLocalExportMetadataBatch = async (
   projectId: string,
-  input: Omit<LocalExportMetadata, 'id' | 'createdAt'>,
+  inputs: readonly LocalExportMetadataInput[],
 ): Promise<void> => {
+  if (inputs.length === 0) return
   const createdAt = Date.now()
-  const next = [{
+  const rows = inputs.map((input) => ({
     ...input,
     id: `export:${crypto.randomUUID()}`,
     createdAt,
-  }, ...(await readExports(projectId))].slice(0, MAX_LOCAL_EXPORTS)
+  }))
+  const next = [...rows, ...(await readExports(projectId))].slice(0, MAX_LOCAL_EXPORTS)
   await saveLocalProjectState(projectId, EXPORTS_KEY, next)
 }

@@ -46,7 +46,7 @@ export function ExportProvider(props: ExportProviderProps) {
     job: ExportJob,
     runExport: (signal: AbortSignal, onProgress: (progress: ExportProgress) => void) => Promise<ExportOutcome>,
   ): Promise<ExportOutcome> => {
-    if (disposed) return { type: 'canceled' }
+    if (disposed) return { type: 'canceled', outputs: [] }
     const controller = new AbortController()
     setActiveController(controller)
     setActiveJob(job)
@@ -63,7 +63,7 @@ export function ExportProvider(props: ExportProviderProps) {
     defaultName: string,
     runExport: (signal: AbortSignal, onProgress: (progress: ExportProgress) => void) => Promise<ExportOutcome>,
   ): Promise<ExportOutcome> => {
-    if (disposed) return Promise.resolve({ type: 'canceled' })
+    if (disposed) return Promise.resolve({ type: 'canceled', outputs: [] })
     const job = {
       id: createExportJobId(),
       name: request.name ?? defaultName,

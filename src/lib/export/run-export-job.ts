@@ -6,10 +6,10 @@ import type { FunctionReturnType } from 'convex/server'
 import { convexApi, convexClient } from '~/lib/convex'
 import { saveCloudExport } from '~/lib/cloud-export'
 import { isAbortError } from '~/lib/dom-errors'
-import { chooseLocalExportFile, createLocalExportTarget, createLocalExportWritable, saveBlobLocally } from '~/lib/local-export'
+import { chooseLocalExportDirectory, chooseLocalExportFile, createLocalExportDirectoryWritable, createLocalExportTarget, createLocalExportWritable, saveBlobLocally } from '~/lib/local-export'
 import { chooseStemExportDirectory, createStemExportWritable, sanitizeStemFileName } from '~/lib/local-stem-export'
 import { listLocalEffects, type LocalEffectRow } from '~/lib/local-effects'
-import { saveLocalExportMetadata } from '~/lib/local-export-metadata'
+import { saveLocalExportMetadataBatch, type LocalExportMetadataInput } from '~/lib/local-export-metadata'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 
@@ -23,14 +23,16 @@ export type ExportProgress = {
   currentStemName?: string
   completedStems?: number
   totalStems?: number
+  currentFormat?: ExportAudioFormat
+  completedFormats?: number
+  totalFormats?: number
 }
 
 export type TimelineExportRequest = {
-  tracks: RuntimeTrack[]
   getTracks: () => RuntimeTrack[]
   bpm: number
   range: ExportRange
-  format: ExportAudioFormat
+  formats: readonly ExportAudioFormat[]
   projectId?: string
   userId?: string
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
@@ -45,10 +47,14 @@ export type StemExportRequest = TimelineExportRequest & {
   selectedTrackIds?: readonly string[]
 }
 
+export type ExportOutput =
+  | { destination: 'local'; name: string }
+  | { destination: 'cloud'; name: string; url: string }
+
 export type ExportOutcome =
-  | { type: 'success'; url?: string; localSavedName?: string }
-  | { type: 'canceled' }
-  | { type: 'error'; message: string }
+  | { type: 'success'; outputs: readonly ExportOutput[] }
+  | { type: 'canceled'; outputs: readonly ExportOutput[] }
+  | { type: 'error'; message: string; outputs: readonly ExportOutput[] }
 
 type TrackFxMap = NonNullable<ExportFx['trackFx']>
 type TrackFxPatch = TrackFxMap[string]
@@ -116,7 +122,12 @@ const createEncodingProgressReporter = (
   }
 }
 
-async function ensureBuffersForRange(input: Pick<TimelineExportRequest, 'tracks' | 'ensureClipBuffer' | 'signal'> & { range: ExportRange }) {
+type ExportTrackSnapshotInput = Pick<TimelineExportRequest, 'ensureClipBuffer' | 'signal'> & {
+  tracks: RuntimeTrack[]
+  range: ExportRange
+}
+
+async function ensureBuffersForRange(input: ExportTrackSnapshotInput) {
   let rangeStart = 0
   let rangeEnd = 0
   if (input.range.mode === 'whole') {
@@ -169,7 +180,7 @@ const isRenderableStemTrack = (track: RuntimeTrack): boolean => (
   (track.channelRole ?? 'track') === 'track' && track.clips.length > 0
 )
 
-const collectStemTracks = (input: Pick<StemExportRequest, 'tracks' | 'stemMode' | 'selectedTrackIds'>): RuntimeTrack[] => {
+const collectStemTracks = (input: Pick<StemExportRequest, 'stemMode' | 'selectedTrackIds'> & { tracks: RuntimeTrack[] }): RuntimeTrack[] => {
   if (input.stemMode === 'all-tracks') return input.tracks.filter(isRenderableStemTrack)
   const selectedIds = new Set(input.selectedTrackIds ?? [])
   return input.tracks.filter((track) => selectedIds.has(track.id) && isRenderableStemTrack(track))
@@ -178,35 +189,102 @@ const collectStemTracks = (input: Pick<StemExportRequest, 'tracks' | 'stemMode' 
 const createUniqueStemFileName = (
   stemName: string,
   extension: string,
-  usedNames: Map<string, number>,
+  usedNames: Set<string>,
 ): string => {
   const baseName = sanitizeStemFileName(stemName)
-  const previousCount = usedNames.get(baseName) ?? 0
-  usedNames.set(baseName, previousCount + 1)
-  return previousCount === 0
-    ? `${baseName}${extension}`
-    : `${baseName} ${previousCount + 1}${extension}`
+  let index = 1
+  while (true) {
+    const fileName = index === 1
+      ? `${baseName}${extension}`
+      : `${baseName} ${index}${extension}`
+    if (!usedNames.has(fileName)) {
+      usedNames.add(fileName)
+      return fileName
+    }
+    index += 1
+  }
+}
+
+const requireExportFormats = (formats: readonly ExportAudioFormat[]): readonly ExportAudioFormat[] => {
+  const uniqueFormats = [...new Set(formats)]
+  if (uniqueFormats.length === 0) throw new Error('Select at least one export format.')
+  return uniqueFormats
+}
+
+const createMixdownFileName = (date: Date, format: ExportAudioFormat): string => {
+  const metadata = getExportAudioFormatMetadata(format)
+  return `mixdown_${formatExportFileTimestamp(date)}${metadata.fileExtension}`
+}
+
+const createSaveTypes = (format: ExportAudioFormat): FilePickerAcceptType[] => {
+  const metadata = getExportAudioFormatMetadata(format)
+  return [{ description: `${metadata.label} audio`, accept: { [metadata.mimeType]: [metadata.fileExtension] } }]
+}
+
+const reportFormatProgress = (
+  input: Pick<TimelineExportRequest, 'onProgress'>,
+  phase: Extract<ExportPhase, 'encoding' | 'saving'>,
+  format: ExportAudioFormat,
+  completedFormats: number,
+  totalFormats: number,
+  sizeBytes?: number,
+) => {
+  input.onProgress?.({ phase, currentFormat: format, completedFormats, totalFormats, sizeBytes })
+}
+
+const reportStemFormatProgress = (
+  input: Pick<TimelineExportRequest, 'onProgress'>,
+  phase: Extract<ExportPhase, 'encoding' | 'saving'>,
+  format: ExportAudioFormat,
+  track: RuntimeTrack,
+  completedStems: number,
+  totalStems: number,
+  completedFormats: number,
+  totalFormats: number,
+  sizeBytes?: number,
+) => {
+  input.onProgress?.({
+    phase,
+    sizeBytes,
+    currentFormat: format,
+    currentStemName: track.name,
+    completedStems,
+    totalStems,
+    completedFormats,
+    totalFormats,
+  })
 }
 
 export async function runTimelineExport(input: TimelineExportRequest): Promise<ExportOutcome> {
+  const outputs: ExportOutput[] = []
+  const localMetadataRows: LocalExportMetadataInput[] = []
+  let localProjectId: string | undefined
+  const saveCompletedLocalMetadata = async () => {
+    if (!localProjectId) return
+    await saveLocalExportMetadataBatch(localProjectId, localMetadataRows)
+    localMetadataRows.length = 0
+  }
   try {
     input.onProgress?.({ phase: 'preparing' })
-    const metadata = getExportAudioFormatMetadata(input.format)
-    const fileName = `mixdown_${formatExportFileTimestamp(new Date())}${metadata.fileExtension}`
+    const formats = requireExportFormats(input.formats)
+    const multiFormat = formats.length > 1
+    const exportDate = new Date()
+    const firstFormat = formats[0]
+    const firstFileName = createMixdownFileName(exportDate, firstFormat)
     const projectId = input.projectId
-    const localProjectId = projectId && isLocalId('project', projectId) ? projectId : undefined
-    const saveTypes = [{ description: `${metadata.label} audio`, accept: { [metadata.mimeType]: [metadata.fileExtension] } }]
-    const localFileHandle = localProjectId ? await chooseLocalExportFile({ suggestedName: fileName, types: saveTypes }) : undefined
+    localProjectId = projectId && isLocalId('project', projectId) ? projectId : undefined
+    const localFileHandle = localProjectId && !multiFormat ? await chooseLocalExportFile({ suggestedName: firstFileName, types: createSaveTypes(firstFormat) }) : undefined
+    const localDirectory = localProjectId && multiFormat ? await chooseLocalExportDirectory() : undefined
     throwIfExportAborted(input.signal)
-    const savedName = localFileHandle?.name ?? fileName
+    const preloadTracks = input.getTracks()
     const mixdownModule = import('@daw-browser/audio-engine/export-mixdown')
     const [exportMixdown, , fx] = await Promise.all([
       mixdownModule,
-      ensureBuffersForRange(input),
+      ensureBuffersForRange({ ...input, tracks: preloadTracks }),
       loadExportFx(input.projectId, input.userId),
     ])
-    const tracks = input.getTracks()
     throwIfExportAborted(input.signal)
+    const tracks = input.getTracks()
     input.onProgress?.({ phase: 'rendering' })
     const rendered = await exportMixdown.renderMixdown({
       tracks,
@@ -216,76 +294,94 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       signal: input.signal,
     })
     throwIfExportAborted(input.signal)
-    const localWritable = localFileHandle ? await createLocalExportWritable(localFileHandle) : undefined
-    input.onProgress?.({ phase: 'encoding' })
-    const reportEncodingProgress = createEncodingProgressReporter((sizeBytes) => {
-      input.onProgress?.({ phase: 'encoding', sizeBytes })
-    })
-    const enc = await exportMixdown.encodeAudioBuffer(rendered, {
-      format: input.format,
-      target: localWritable ? createLocalExportTarget(localWritable) : { mode: 'buffer' },
-      signal: input.signal,
-      onWrite: reportEncodingProgress,
-    })
-    throwIfExportAborted(input.signal)
-    if (localProjectId) {
-      if (!localWritable) {
-        if (!enc.blob) throw new Error('Export did not produce a downloadable file.')
-        input.onProgress?.({ phase: 'saving' })
-        await saveBlobLocally({ blob: enc.blob, suggestedName: fileName, types: saveTypes })
-        throwIfExportAborted(input.signal)
-      }
-      input.onProgress?.({ phase: 'saving' })
-      await saveLocalExportMetadata(localProjectId, {
-        name: savedName,
-        format: enc.format,
-        durationSec: enc.durationSec,
-        sampleRate: enc.sampleRate,
-        sizeBytes: enc.sizeBytes,
+    let completedFormats = 0
+    for (const format of formats) {
+      const fileName = createMixdownFileName(exportDate, format)
+      const localWritable = localFileHandle
+        ? await createLocalExportWritable(localFileHandle)
+        : localDirectory
+          ? await createLocalExportDirectoryWritable(localDirectory, fileName)
+          : undefined
+      reportFormatProgress(input, 'encoding', format, completedFormats, formats.length)
+      const reportEncodingProgress = createEncodingProgressReporter((sizeBytes) => {
+        reportFormatProgress(input, 'encoding', format, completedFormats, formats.length, sizeBytes)
+      })
+      const enc = await exportMixdown.encodeAudioBuffer(rendered, {
+        format,
+        target: localWritable ? createLocalExportTarget(localWritable) : { mode: 'buffer' },
+        signal: input.signal,
+        onWrite: reportEncodingProgress,
       })
       throwIfExportAborted(input.signal)
-      return { type: 'success', localSavedName: savedName }
+      const savedName = localFileHandle?.name ?? fileName
+      if (localProjectId) {
+        if (!localWritable) {
+          if (!enc.blob) throw new Error('Export did not produce a downloadable file.')
+          reportFormatProgress(input, 'saving', format, completedFormats, formats.length)
+          await saveBlobLocally({ blob: enc.blob, suggestedName: fileName, types: createSaveTypes(format) })
+          throwIfExportAborted(input.signal)
+        }
+        reportFormatProgress(input, 'saving', format, completedFormats, formats.length)
+        localMetadataRows.push({
+          name: savedName,
+          format: enc.format,
+          durationSec: enc.durationSec,
+          sampleRate: enc.sampleRate,
+          sizeBytes: enc.sizeBytes,
+        })
+        throwIfExportAborted(input.signal)
+        outputs.push({ destination: 'local', name: savedName })
+      } else {
+        if (!projectId) throw new Error('Missing room')
+        if (!enc.blob) throw new Error('Export did not produce an uploadable file.')
+        reportFormatProgress(input, 'saving', format, completedFormats, formats.length)
+        const upload = await saveCloudExport({
+          projectId,
+          blob: enc.blob,
+          name: fileName,
+          format: enc.format,
+          durationSec: enc.durationSec,
+          sampleRate: enc.sampleRate,
+          signal: input.signal,
+        })
+        throwIfExportAborted(input.signal)
+        outputs.push({ destination: 'cloud', name: fileName, url: upload.url })
+      }
+      completedFormats += 1
     }
-    if (!projectId) throw new Error('Missing room')
-    if (!enc.blob) throw new Error('Export did not produce an uploadable file.')
-    input.onProgress?.({ phase: 'saving' })
-    const upload = await saveCloudExport({
-      projectId,
-      blob: enc.blob,
-      name: fileName,
-      format: enc.format,
-      durationSec: enc.durationSec,
-      sampleRate: enc.sampleRate,
-      signal: input.signal,
-    })
-    throwIfExportAborted(input.signal)
-    return { type: 'success', url: upload.url }
+    await saveCompletedLocalMetadata()
+    return { type: 'success', outputs }
   } catch (err) {
-    if (isAbortError(err)) return { type: 'canceled' }
-    return { type: 'error', message: err instanceof Error ? err.message : 'Export failed' }
+    try {
+      await saveCompletedLocalMetadata()
+    } catch {}
+    if (isAbortError(err)) return { type: 'canceled', outputs }
+    return { type: 'error', message: err instanceof Error ? err.message : 'Export failed', outputs }
   }
 }
 
 export async function runStemExport(input: StemExportRequest): Promise<ExportOutcome> {
+  const outputs: ExportOutput[] = []
   try {
     input.onProgress?.({ phase: 'preparing' })
-    const metadata = getExportAudioFormatMetadata(input.format)
-    const stemTracks = collectStemTracks(input)
-    if (stemTracks.length === 0) throw new Error('Select at least one track to export stems.')
+    const formats = requireExportFormats(input.formats)
+    const preloadTracks = input.getTracks()
+    const preloadStemTracks = collectStemTracks({ ...input, tracks: preloadTracks })
+    if (preloadStemTracks.length === 0) throw new Error('Select at least one track to export stems.')
     const exportDirectory = await chooseStemExportDirectory()
     throwIfExportAborted(input.signal)
     const mixdownModule = import('@daw-browser/audio-engine/export-mixdown')
     const [exportMixdown, , fx] = await Promise.all([
       mixdownModule,
-      ensureBuffersForRange({ ...input, tracks: stemTracks }),
+      ensureBuffersForRange({ ...input, tracks: preloadStemTracks }),
       loadExportFx(input.projectId, input.userId),
     ])
-    const tracks = input.getTracks()
-    const renderStemTracks = collectStemTracks({ ...input, tracks })
-    if (renderStemTracks.length === 0) throw new Error('Select at least one track to export stems.')
     throwIfExportAborted(input.signal)
+    const tracks = input.getTracks()
+    const stemTracks = collectStemTracks({ ...input, tracks })
+    if (stemTracks.length === 0) throw new Error('Select at least one track to export stems.')
     let completedStems = 0
-    const usedStemFileNames = new Map<string, number>()
+    const usedStemFileNames = new Set<string>()
     const stemRenderSession = exportMixdown.createStemRenderSession({
       tracks,
       bpm: input.bpm,
@@ -293,45 +389,41 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
       fx,
       signal: input.signal,
     })
-    for (const track of renderStemTracks) {
+    for (const track of stemTracks) {
       input.onProgress?.({
         phase: 'rendering',
         currentStemName: track.name,
         completedStems,
-        totalStems: renderStemTracks.length,
+        totalStems: stemTracks.length,
       })
       const stemBuffer = await stemRenderSession.renderTrackStem(track)
       throwIfExportAborted(input.signal)
-      const fileName = createUniqueStemFileName(track.name, metadata.fileExtension, usedStemFileNames)
-      const localWritable = await createStemExportWritable(exportDirectory, fileName)
-      input.onProgress?.({
-        phase: 'encoding',
-        currentStemName: track.name,
-        completedStems,
-        totalStems: renderStemTracks.length,
-      })
-      const reportEncodingProgress = createEncodingProgressReporter((sizeBytes) => {
-        input.onProgress?.({
-          phase: 'encoding',
-          sizeBytes,
-          currentStemName: track.name,
-          completedStems,
-          totalStems: renderStemTracks.length,
+      let completedFormats = 0
+      for (const format of formats) {
+        const metadata = getExportAudioFormatMetadata(format)
+        const fileName = createUniqueStemFileName(track.name, metadata.fileExtension, usedStemFileNames)
+        const localWritable = await createStemExportWritable(exportDirectory, fileName)
+        reportStemFormatProgress(input, 'encoding', format, track, completedStems, stemTracks.length, completedFormats, formats.length)
+        const reportEncodingProgress = createEncodingProgressReporter((sizeBytes) => {
+          reportStemFormatProgress(input, 'encoding', format, track, completedStems, stemTracks.length, completedFormats, formats.length, sizeBytes)
         })
-      })
-      await exportMixdown.encodeAudioBuffer(stemBuffer, {
-        format: input.format,
-        target: createLocalExportTarget(localWritable),
-        signal: input.signal,
-        onWrite: reportEncodingProgress,
-      })
+        await exportMixdown.encodeAudioBuffer(stemBuffer, {
+          format,
+          target: createLocalExportTarget(localWritable),
+          signal: input.signal,
+          onWrite: reportEncodingProgress,
+        })
+        outputs.push({ destination: 'local', name: `stems/${fileName}` })
+        completedFormats += 1
+        throwIfExportAborted(input.signal)
+      }
       completedStems += 1
       throwIfExportAborted(input.signal)
     }
-    input.onProgress?.({ phase: 'saving', completedStems, totalStems: renderStemTracks.length })
-    return { type: 'success', localSavedName: `stems/${renderStemTracks.length} files` }
+    input.onProgress?.({ phase: 'saving', completedStems, totalStems: stemTracks.length })
+    return { type: 'success', outputs }
   } catch (err) {
-    if (isAbortError(err)) return { type: 'canceled' }
-    return { type: 'error', message: err instanceof Error ? err.message : 'Stem export failed' }
+    if (isAbortError(err)) return { type: 'canceled', outputs }
+    return { type: 'error', message: err instanceof Error ? err.message : 'Stem export failed', outputs }
   }
 }

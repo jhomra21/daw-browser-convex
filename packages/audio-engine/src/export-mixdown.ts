@@ -25,8 +25,8 @@ import { createSynthVoiceOscillators, getSynthVoiceConfig, getSynthVoiceVelocity
 import { createOfflineMixerNodes } from './mixer/apply-offline-routing'
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
-import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { Track } from '@daw-browser/timeline-core/types'
+import type { ResolvedMixerGraph } from './mixer/types'
 
 export type ExportRange =
   | { mode: 'whole' }
@@ -60,6 +60,27 @@ type RenderedStem = {
   id: string
   name: string
   buffer: AudioBuffer
+}
+
+type PreparedExportRange = {
+  startSec: number
+  endSec: number
+  durationSec: number
+}
+
+type PreparedExportRender = {
+  bpm: number
+  range: PreparedExportRange
+  sampleRate: number
+  numberOfChannels: number
+  trackById: Map<string, Track<AudioBuffer>>
+  mixerGraph: ResolvedMixerGraph
+  signal?: AbortSignal
+}
+
+type SourceIsolatedRenderOptions = {
+  sourceTrackIds?: Set<string>
+  includeMasterFx?: boolean
 }
 
 type ExportResult = {
@@ -110,25 +131,46 @@ function computeRangeSec(tracks: Track<AudioBuffer>[], range: ExportRange): { st
   return { start, end }
 }
 
-async function renderSourceIsolatedMixdown(req: ExportRequest, sourceTrackIds?: Set<string>, includeMasterFx = true): Promise<AudioBuffer> {
-  throwIfAborted(req.signal)
-  const { tracks, bpm, range, sampleRate = 44100, numberOfChannels = 2, fx } = req
+function createTrackById(tracks: Track<AudioBuffer>[]): Map<string, Track<AudioBuffer>> {
+  const trackById = new Map<string, Track<AudioBuffer>>()
+  for (const track of tracks) trackById.set(track.id, track)
+  return trackById
+}
+
+function prepareExportRender(req: ExportRequest): PreparedExportRender {
+  const { tracks, bpm, range, sampleRate = 44100, numberOfChannels = 2, fx, signal } = req
+  throwIfAborted(signal)
   const { start, end } = computeRangeSec(tracks, range)
-  const duration = Math.max(0.001, end - start)
-  const length = Math.ceil(duration * sampleRate)
-  const ctx = new OfflineAudioContext(numberOfChannels, length, sampleRate)
-  const trackIndex = createTimelineTrackIndex(tracks)
-  const mixerGraph = resolveMixerGraph({
-    channels: createMixerChannels(tracks),
-    masterEq: fx?.masterEq,
-    masterReverb: fx?.masterReverb,
-    trackFx: fx?.trackFx,
-  })
-  const graph = includeMasterFx ? mixerGraph : { ...mixerGraph, master: {} }
+  const durationSec = Math.max(0.001, end - start)
+  return {
+    bpm,
+    range: { startSec: start, endSec: end, durationSec },
+    sampleRate,
+    numberOfChannels,
+    trackById: createTrackById(tracks),
+    mixerGraph: resolveMixerGraph({
+      channels: createMixerChannels(tracks),
+      masterEq: fx?.masterEq,
+      masterReverb: fx?.masterReverb,
+      trackFx: fx?.trackFx,
+    }),
+    signal,
+  }
+}
+
+async function renderSourceIsolatedMixdownFromPrepared(
+  prepared: PreparedExportRender,
+  options: SourceIsolatedRenderOptions = {},
+): Promise<AudioBuffer> {
+  const { sourceTrackIds, includeMasterFx = true } = options
+  throwIfAborted(prepared.signal)
+  const length = Math.ceil(prepared.range.durationSec * prepared.sampleRate)
+  const ctx = new OfflineAudioContext(prepared.numberOfChannels, length, prepared.sampleRate)
+  const graph = includeMasterFx ? prepared.mixerGraph : { ...prepared.mixerGraph, master: {} }
   const { trackNodes } = createOfflineMixerNodes(ctx, graph)
 
   for (const resolvedTrack of graph.channels) {
-    const track = trackIndex.trackById.get(resolvedTrack.channel.id)
+    const track = prepared.trackById.get(resolvedTrack.channel.id)
     if (!track) continue
     if (sourceTrackIds && !sourceTrackIds.has(track.id)) continue
     const trackInput = trackNodes.get(track.id)?.input
@@ -141,15 +183,15 @@ async function renderSourceIsolatedMixdown(req: ExportRequest, sourceTrackIds?: 
         const voice = getSynthVoiceConfig({ synth: fxCfg?.synth, midi })
         const events = getScheduledMidiEvents({
           clip,
-          bpm,
+          bpm: prepared.bpm,
           notes: midi.notes,
-          rangeStartSec: start,
-          rangeEndSec: end,
+          rangeStartSec: prepared.range.startSec,
+          rangeEndSec: prepared.range.endSec,
           arp: fxCfg?.arp,
         })
 
         for (const event of events) {
-          const when = Math.max(0, event.startSec - start)
+          const when = Math.max(0, event.startSec - prepared.range.startSec)
           const noteDur = event.endSec - event.startSec
           if (noteDur <= 0) continue
 
@@ -182,34 +224,47 @@ async function renderSourceIsolatedMixdown(req: ExportRequest, sourceTrackIds?: 
       const window = getPlayableAudioWindow({
         clip,
         bufferDurationSec: clip.buffer.duration,
-        rangeStartSec: start,
-        rangeEndSec: end,
+        rangeStartSec: prepared.range.startSec,
+        rangeEndSec: prepared.range.endSec,
       })
       if (!window) continue
 
       const src = ctx.createBufferSource()
       src.buffer = clip.buffer
       src.connect(trackInput)
-      try { src.start(Math.max(0, window.startSec - start), window.offsetSec, window.durationSec) } catch {}
+      try { src.start(Math.max(0, window.startSec - prepared.range.startSec), window.offsetSec, window.durationSec) } catch {}
     }
   }
 
-  throwIfAborted(req.signal)
+  throwIfAborted(prepared.signal)
   const rendered = await ctx.startRendering()
-  throwIfAborted(req.signal)
+  throwIfAborted(prepared.signal)
   return rendered
 }
 
 export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
-  return renderSourceIsolatedMixdown(req)
+  return renderSourceIsolatedMixdownFromPrepared(prepareExportRender(req))
+}
+
+export function createStemRenderSession(req: ExportRequest): {
+  renderTrackStem: (track: Pick<Track<AudioBuffer>, 'id' | 'name'>) => Promise<AudioBuffer>
+} {
+  const prepared = prepareExportRender(req)
+  return {
+    renderTrackStem(track) {
+      return renderSourceIsolatedMixdownFromPrepared(prepared, {
+        sourceTrackIds: new Set([track.id]),
+        includeMasterFx: false,
+      })
+    },
+  }
 }
 
 export async function renderStemMixdown(req: ExportRequest & { stem: StemDefinition }): Promise<RenderedStem> {
-  const buffer = await renderSourceIsolatedMixdown(
-    req,
-    new Set(req.stem.sourceTrackIds),
-    req.stem.includeMasterFx,
-  )
+  const buffer = await renderSourceIsolatedMixdownFromPrepared(prepareExportRender(req), {
+    sourceTrackIds: new Set(req.stem.sourceTrackIds),
+    includeMasterFx: req.stem.includeMasterFx,
+  })
   return { id: req.stem.id, name: req.stem.name, buffer }
 }
 

@@ -286,6 +286,13 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
     throwIfExportAborted(input.signal)
     let completedStems = 0
     const usedStemFileNames = new Map<string, number>()
+    const stemRenderSession = exportMixdown.createStemRenderSession({
+      tracks,
+      bpm: input.bpm,
+      range: input.range,
+      fx,
+      signal: input.signal,
+    })
     for (const track of renderStemTracks) {
       input.onProgress?.({
         phase: 'rendering',
@@ -293,25 +300,13 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
         completedStems,
         totalStems: renderStemTracks.length,
       })
-      const stem = await exportMixdown.renderStemMixdown({
-        tracks,
-        bpm: input.bpm,
-        range: input.range,
-        fx,
-        signal: input.signal,
-        stem: {
-          id: track.id,
-          name: track.name,
-          sourceTrackIds: [track.id],
-          includeMasterFx: false,
-        },
-      })
+      const stemBuffer = await stemRenderSession.renderTrackStem(track)
       throwIfExportAborted(input.signal)
-      const fileName = createUniqueStemFileName(stem.name, metadata.fileExtension, usedStemFileNames)
+      const fileName = createUniqueStemFileName(track.name, metadata.fileExtension, usedStemFileNames)
       const localWritable = await createStemExportWritable(exportDirectory, fileName)
       input.onProgress?.({
         phase: 'encoding',
-        currentStemName: stem.name,
+        currentStemName: track.name,
         completedStems,
         totalStems: renderStemTracks.length,
       })
@@ -319,12 +314,12 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
         input.onProgress?.({
           phase: 'encoding',
           sizeBytes,
-          currentStemName: stem.name,
+          currentStemName: track.name,
           completedStems,
           totalStems: renderStemTracks.length,
         })
       })
-      await exportMixdown.encodeAudioBuffer(stem.buffer, {
+      await exportMixdown.encodeAudioBuffer(stemBuffer, {
         format: input.format,
         target: createLocalExportTarget(localWritable),
         signal: input.signal,

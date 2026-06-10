@@ -1,6 +1,7 @@
+import { COLOR_MODE_STORAGE_KEY, type ConfigColorMode } from "@kobalte/core";
 import { canUseLocalStorage } from "~/lib/timeline-storage";
 
-export type AppTheme = "system" | "light" | "dark";
+export type AppTheme = ConfigColorMode;
 export type AppSettings = { theme: AppTheme };
 
 const APP_SETTINGS_KEY = "daw:app-settings";
@@ -18,6 +19,9 @@ const normalizeAppSettings = (value: unknown): AppSettings => {
 export const loadAppSettings = (): AppSettings => {
   if (!canUseLocalStorage()) return defaultAppSettings;
   try {
+    const colorMode = localStorage.getItem(COLOR_MODE_STORAGE_KEY);
+    if (colorMode) return { theme: parseAppTheme(colorMode) };
+
     const raw = localStorage.getItem(APP_SETTINGS_KEY);
     return raw ? normalizeAppSettings(JSON.parse(raw)) : defaultAppSettings;
   } catch {
@@ -28,6 +32,6 @@ export const loadAppSettings = (): AppSettings => {
 export const saveAppSettings = (settings: AppSettings) => {
   if (!canUseLocalStorage()) return;
   try {
-    localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(settings));
+    localStorage.setItem(COLOR_MODE_STORAGE_KEY, settings.theme);
   } catch {}
 };

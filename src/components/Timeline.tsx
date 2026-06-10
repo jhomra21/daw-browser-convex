@@ -655,6 +655,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   };
 
   useTimelineKeyboard({
+    enabled: () => props.dashboardView() === null,
     onSpace: () => {
       if (isRecording()) {
         handleTransportPause();

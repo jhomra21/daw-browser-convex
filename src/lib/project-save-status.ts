@@ -19,7 +19,7 @@ const badgeClassByStatus = {
   none: "border-neutral-800 bg-neutral-900/70 text-neutral-400",
   local: "border-emerald-900/70 bg-emerald-950/40 text-emerald-300",
   cloud: "border-sky-900/70 bg-sky-950/40 text-sky-300",
-  signedOut: "******************* bg-amber-950/40 text-amber-300",
+  signedOut: "border-amber-900/70 bg-amber-950/40 text-amber-300",
 };
 
 export const getProjectSaveStatus = (input: ProjectSaveStatusInput) => {

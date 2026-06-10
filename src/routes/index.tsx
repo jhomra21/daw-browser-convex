@@ -81,7 +81,7 @@ function Index() {
           <Timeline
             bootstrapIfEmpty={hasProjectContext()}
             dashboardEnabled={hasProjectContext()}
-            dashboardView={dashboardView}
+            dashboardView={rootDashboardView}
             setDashboardParam={setDashboardParam}
           />
         )}

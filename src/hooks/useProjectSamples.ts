@@ -79,6 +79,7 @@ type UseProjectSamplesArgs = {
   projectId: Accessor<string>
   userId?: Accessor<string>
   enabled?: Accessor<boolean>
+  includeFilePath?: Accessor<boolean>
 }
 
 type UseProjectSamplesResult = {
@@ -227,7 +228,7 @@ function mergeDefaultSampleMetadata(
 }
 
 export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSamplesResult {
-  const { projectId, enabled, userId } = options
+  const { projectId, enabled, includeFilePath, userId } = options
   const [refreshKey, setRefreshKey] = createSignal(0)
   const [localSamples, setLocalSamples] = createSignal<ProjectSampleListItem[]>([])
   const [localSamplesProjectId, setLocalSamplesProjectId] = createSignal('')
@@ -278,8 +279,8 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
   }))
 
   createEffect(on(
-    () => [projectId(), enabled ? enabled() : true, refreshKey()] as const,
-    ([rid, isEnabled]) => {
+    () => [projectId(), enabled ? enabled() : true, includeFilePath ? includeFilePath() : false, refreshKey()] as const,
+    ([rid, isEnabled, shouldIncludeFilePath]) => {
       if (!rid || !isLocalId('project', rid)) {
         setLocalSamples([])
         setLocalSamplesProjectId('')
@@ -294,7 +295,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
         const [assets, snapshot, directoryHandle] = await Promise.all([
           listLocalAssets(rid),
           createLocalTimelineRepository(rid).loadSnapshot(),
-          getProjectDirectoryHandle(rid),
+          shouldIncludeFilePath ? getProjectDirectoryHandle(rid) : Promise.resolve(null),
         ])
         const rootPath = directoryHandle?.name ?? rid
         const usagesByAsset = new Map<string, ProjectSampleUsage[]>()

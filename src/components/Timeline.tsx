@@ -731,6 +731,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     userId,
     enabled: () => props.dashboardView() === "samples",
+    includeFilePath: () => true,
   });
 
   useTimelineAudioLifecycle({
@@ -889,8 +890,6 @@ const Timeline: Component<TimelineProps> = (props) => {
           setView={props.setDashboardParam}
           model={{
             projectMenu: transportProps().projectMenu,
-            trackCount: () => renderTracks().length,
-            clipCount: () => renderTracks().reduce((total, track) => total + track.clips.length, 0),
             samples: dashboardSamples.samples,
             bpm,
             setBpm: (value) => setBpm(clampBpm(value)),

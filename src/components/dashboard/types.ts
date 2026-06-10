@@ -13,8 +13,6 @@ export const parseDashboardView = (value: string | null): DashboardView | null =
 
 export type DashboardTimelineModel = {
   projectMenu: TimelineProjectMenuModel;
-  trackCount: Accessor<number>;
-  clipCount: Accessor<number>;
   samples: Accessor<ProjectSampleListItem[]>;
   bpm: Accessor<number>;
   setBpm: (value: number) => void;

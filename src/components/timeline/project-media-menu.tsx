@@ -16,6 +16,9 @@ const stopMenuButtonEvent = (event: Event) => {
   event.preventDefault();
 };
 
+const mediaMenuItemClass =
+  "flex w-full cursor-pointer items-center gap-2 hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100";
+
 const CopyUrlButton: Component<{
   label: string;
   url?: string;
@@ -54,7 +57,6 @@ const CopyUrlButton: Component<{
 
 const InsertSampleButton: Component<{
   label: string;
-  disabled: boolean;
   inserting: boolean;
   onInsert: () => Promise<void>;
 }> = (props) => (
@@ -64,7 +66,7 @@ const InsertSampleButton: Component<{
       props.inserting && "cursor-not-allowed opacity-60",
     )}
     aria-label={props.label}
-    disabled={props.disabled || props.inserting}
+    disabled={props.inserting}
     onPointerDown={stopMenuButtonEvent}
     onPointerUp={stopMenuButtonEvent}
     onClick={async (event) => {
@@ -122,13 +124,27 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
           <MenubarSeparator />
           <div class="max-h-80 overflow-x-hidden overflow-y-auto">
             <MenubarItem
-              class="flex w-full cursor-pointer items-center gap-2 hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100"
+              class={mediaMenuItemClass}
+              onSelect={() => samples().onOpenDashboard("samples")}
+            >
+              <Icon name="file-audio" class="h-4 w-4 text-neutral-400" />
+              <span class="text-xs text-neutral-200">Open samples dashboard</span>
+            </MenubarItem>
+            <MenubarItem
+              class={mediaMenuItemClass}
+              onSelect={() => exportsMenu().onOpenDashboard("export")}
+            >
+              <Icon name="file-audio" class="h-4 w-4 text-neutral-400" />
+              <span class="text-xs text-neutral-200">Open export dashboard</span>
+            </MenubarItem>
+            <MenubarSeparator class="my-2" />
+            <MenubarItem
+              class={mediaMenuItemClass}
               onSelect={exportsMenu().onOpenExport}
             >
               <Icon name="file-audio" class="h-4 w-4 text-neutral-400" />
               <span class="text-xs text-neutral-200">Export mixdown…</span>
             </MenubarItem>
-            <MenubarSeparator class="my-2" />
             <Show
               when={hasMedia()}
               fallback={
@@ -167,7 +183,7 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
                       >
                         <div
                           class="flex min-w-0 flex-1 items-center gap-2"
-                          draggable={!!sample.url}
+                          draggable
                           onDragStart={(event) =>
                             samples().onStartSampleDrag(event, sample)
                           }
@@ -191,7 +207,6 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
                           <CopyUrlButton label="Copy sample URL" url={sample.url} onCopy={samples().copyText} />
                           <InsertSampleButton
                             label="Insert sample"
-                            disabled={!sample.url}
                             inserting={isInserting()}
                             onInsert={() => samples().onInsertSample(sample)}
                           />
@@ -327,7 +342,7 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
                       >
                         <div
                           class="flex min-w-0 flex-1 items-center gap-2"
-                          draggable={!!sample.url}
+                          draggable
                           onDragStart={(event) =>
                             samples().onStartSampleDrag(event, sample)
                           }
@@ -353,7 +368,6 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
                           <CopyUrlButton label="Copy sample URL" url={sample.url} onCopy={samples().copyText} />
                           <InsertSampleButton
                             label="Insert default sample"
-                            disabled={!sample.url}
                             inserting={isInserting()}
                             onInsert={() => samples().onInsertSample(sample)}
                           />

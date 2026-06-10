@@ -7,6 +7,7 @@ import { cn } from "~/lib/utils";
 import type { ProjectsMenuController } from "~/hooks/useProjectsMenuController";
 import { NativeMenuTrigger } from "./toolbar-context";
 import type { TimelineProjectMenuModel } from "./transport-types";
+import { getProjectSaveStatus } from "~/lib/project-save-status";
 
 type ProjectsMenuProps = {
   projectMenu: TimelineProjectMenuModel;
@@ -28,23 +29,16 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
   const shareDisabledTitle = () => (
     isCurrentProjectLocal() ? "Open a cloud/shared project to copy an invite link" : "Only project owners can copy invite links"
   );
-  const hasSharedOutboxWork = () => Boolean((projectMenu().sharedOutboxStatus?.pending ?? 0) + (projectMenu().sharedOutboxStatus?.failed ?? 0));
-  const backupSaveLabel = () => {
-    if (!isBackupProject()) return null;
-    if (projectMenu().cloudBackupStatus === "backing-up") return "Backing up to cloud";
-    if (projectMenu().cloudBackupStatus === "backed-up") return "Backed up to cloud";
-    if (projectMenu().cloudBackupStatus === "failed") return "Cloud backup failed";
-    return "Cloud backup enabled";
-  };
-  const currentSaveLabel = () =>
-    hasSharedOutboxWork()
-      ? `${projectMenu().sharedOutboxStatus?.pending ?? 0} shared change${(projectMenu().sharedOutboxStatus?.pending ?? 0) === 1 ? "" : "s"} pending, ${projectMenu().sharedOutboxStatus?.failed ?? 0} failed`
-      : backupSaveLabel()
-        ?? (isCurrentProjectLocal()
-      ? "Saved locally on this device"
-      : projectMenu().currentUserId
-        ? "Saved to cloud project"
-        : "Sign in to sync this project");
+  const currentSaveStatus = () => getProjectSaveStatus({
+    projectId: projectMenu().currentProjectId,
+    userId: projectMenu().currentUserId,
+    mode: currentProjectMode(),
+    sharedOutboxStatus: projectMenu().sharedOutboxStatus,
+    cloudBackupStatus: projectMenu().cloudBackupStatus,
+  });
+  const hasSharedOutboxWork = () => Boolean(
+    (projectMenu().sharedOutboxStatus?.pending ?? 0) + (projectMenu().sharedOutboxStatus?.failed ?? 0),
+  );
   const onShare = async () => {
     setShareCopied(false);
     const shareUrl = await projectMenu().onShare?.();
@@ -73,20 +67,16 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                   Save status
                 </div>
                 <div class="mt-1 text-sm font-medium text-neutral-100">
-                  {currentSaveLabel()}
+                  {currentSaveStatus().label}
                 </div>
               </div>
               <span
                 class={cn(
                   "shrink-0 rounded-full border px-2 py-1 text-[11px] font-medium",
-                  isCurrentProjectLocal()
-                    ? "border-emerald-900/70 bg-emerald-950/40 text-emerald-300"
-                    : projectMenu().currentUserId
-                      ? "border-sky-900/70 bg-sky-950/40 text-sky-300"
-                      : "border-amber-900/70 bg-amber-950/40 text-amber-300",
+                  currentSaveStatus().class,
                 )}
               >
-                {isCurrentProjectLocal() ? "Local" : "Cloud"}
+                {currentSaveStatus().compactLabel}
               </span>
             </div>
             <div class="mt-3 grid grid-cols-2 gap-2">
@@ -241,6 +231,12 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
               New
             </Button>
           </div>
+          <MenubarItem
+            class="mb-2 cursor-pointer text-neutral-200 hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100"
+            onSelect={() => projectMenu().onOpenDashboard("projects")}
+          >
+            Open projects dashboard
+          </MenubarItem>
           <MenubarSeparator />
           <div class="max-h-72 overflow-y-auto">
             <For each={projectMenu().projects}>

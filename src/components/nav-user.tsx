@@ -8,11 +8,13 @@ import Icon from "~/components/ui/Icon"
 import { useSessionQuery } from "~/lib/session"
 import { authClient } from "~/lib/auth-client"
 import { queryClient } from "~/lib/query-client"
+import { useDashboardRouteParam } from "~/hooks/useDashboardRouteParam"
 
 export const NavUser: Component = () => {
   const navigate = useNavigate()
   const session = useSessionQuery()
   const user = createMemo(() => session.data?.user as any)
+  const { setDashboardParam } = useDashboardRouteParam()
 
   const getInitials = (name: string) => {
     if (!name || name === "Guest") return name.charAt(0).toUpperCase() || "G";
@@ -72,9 +74,13 @@ export const NavUser: Component = () => {
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem as={Link} to="/Login" class="cursor-pointer text-neutral-200">
+          <DropdownMenuItem class="cursor-pointer text-neutral-200" onSelect={() => setDashboardParam("account")}>
             <Icon name="user" class="mr-2 h-4 w-4" />
             Account
+          </DropdownMenuItem>
+          <DropdownMenuItem class="cursor-pointer text-neutral-200" onSelect={() => setDashboardParam("general")}>
+            <Icon name="grid" class="mr-2 h-4 w-4" />
+            Settings
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem class="cursor-pointer text-neutral-200" as={Link} to="/about">

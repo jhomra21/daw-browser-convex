@@ -48,6 +48,7 @@ type EnsureOwnedRoomOptions = {
 
 type UseTimelineDataInput = {
   notify: (title: string, message: string) => void
+  bootstrapIfEmpty: boolean
 }
 
 type UseTimelineDataReturn = {
@@ -92,6 +93,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
 
   const route = useTimelineProjectRoute({
     onLocalProjectOpened: (rid) => void markLocalProjectOpened(rid).then(loadLocalProjects),
+    bootstrapIfEmpty: input.bootstrapIfEmpty,
   })
   const projectId = route.projectId
   const bootstrapProjectId = route.bootstrapProjectId

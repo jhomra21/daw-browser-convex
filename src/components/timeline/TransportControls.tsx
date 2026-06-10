@@ -42,6 +42,9 @@ import { ProjectsMenu } from "./projects-menu";
 import { ProjectMediaMenu } from "./project-media-menu";
 import { NativeMenuTrigger, nativeMenuTriggerClass } from "./toolbar-context";
 import type { TransportControlsProps } from "./transport-types";
+import { timelineKeyboardShortcuts } from "~/components/dashboard/shortcut-registry";
+import { getProjectSaveStatus } from "~/lib/project-save-status";
+import { gridDenominators } from "./grid-options";
 
 type TransportBarController = {
   isRecording: boolean;
@@ -71,8 +74,6 @@ type TransportBarController = {
 
 const nativeMenuItemClass =
   "cursor-pointer text-neutral-200 hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100";
-
-const gridDenominators = [2, 4, 8, 12, 16];
 
 type ShareMenuController = {
   onOpenChange: (open: boolean) => void;
@@ -510,7 +511,7 @@ const ShareMenu: Component<{ share: ShareMenuController }> = (props) => {
   );
 };
 
-const ShortcutsSubMenu: Component = () => (
+const ShortcutsSubMenu: Component<{ onOpenDashboard: () => void }> = (props) => (
   <MenubarSub>
     <MenubarSubTrigger class={nativeMenuItemClass}>Shortcuts</MenubarSubTrigger>
     <MenubarPortal>
@@ -519,33 +520,17 @@ const ShortcutsSubMenu: Component = () => (
         style={{ width: "min(92vw, 22rem)" }}
       >
         <MenubarLabel class="text-neutral-400">Timeline</MenubarLabel>
-        <MenubarItem disabled>
-          Play / Pause
-          <MenubarShortcut>Space</MenubarShortcut>
-        </MenubarItem>
-        <MenubarItem disabled>
-          Delete selection or track
-          <MenubarShortcut>Del / Backspace</MenubarShortcut>
-        </MenubarItem>
-        <MenubarItem disabled>
-          Duplicate clips
-          <MenubarShortcut>Ctrl/Cmd + D</MenubarShortcut>
-        </MenubarItem>
-        <MenubarItem disabled>
-          Add Audio Track
-          <MenubarShortcut>Shift + T</MenubarShortcut>
-        </MenubarItem>
-        <MenubarItem disabled>
-          Add Return Track
-          <MenubarShortcut>Shift + R</MenubarShortcut>
-        </MenubarItem>
-        <MenubarItem disabled>
-          Add Group Track
-          <MenubarShortcut>Shift + G</MenubarShortcut>
-        </MenubarItem>
-        <MenubarItem disabled>
-          Add Instrument Track
-          <MenubarShortcut>Ctrl/Cmd + Shift + T</MenubarShortcut>
+        <For each={timelineKeyboardShortcuts}>
+          {(shortcut) => (
+            <MenubarItem disabled>
+              {shortcut.label}
+              <MenubarShortcut>{shortcut.keys}</MenubarShortcut>
+            </MenubarItem>
+          )}
+        </For>
+        <MenubarSeparator />
+        <MenubarItem class={nativeMenuItemClass} onSelect={props.onOpenDashboard}>
+          Open shortcuts dashboard
         </MenubarItem>
         <MenubarSeparator />
         <MenubarLabel class="text-neutral-400">
@@ -591,6 +576,14 @@ const SettingsMenu: Component<{ toolbar: TransportControlsProps }> = (props) => 
     <MenubarMenu value="settings">
       <NativeMenuTrigger label="Settings" />
       <MenubarContent class="w-56 border-neutral-800 bg-neutral-900">
+        <MenubarItem class={nativeMenuItemClass} onSelect={() => toolbar().projectMenu.onOpenDashboard("general")}>
+          Dashboard settings
+        </MenubarItem>
+        <MenubarItem class={nativeMenuItemClass} onSelect={() => toolbar().projectMenu.onOpenDashboard("timeline")}>
+          Timeline / DAW dashboard
+        </MenubarItem>
+        <ShortcutsSubMenu onOpenDashboard={() => toolbar().projectMenu.onOpenDashboard("keyboard")} />
+        <MenubarSeparator />
         <MenubarItem
           class={nativeMenuItemClass}
           onSelect={toolbar().onMasterFX}
@@ -633,9 +626,6 @@ const SettingsMenu: Component<{ toolbar: TransportControlsProps }> = (props) => 
             </MenubarItem>
           )}
         </For>
-        <MenubarSeparator />
-        <ShortcutsSubMenu />
-        <MenubarSeparator />
         <Show
           when={user()?.email}
           fallback={
@@ -660,12 +650,7 @@ const SettingsMenu: Component<{ toolbar: TransportControlsProps }> = (props) => 
 };
 
 const SaveStatus: Component<{ projectId: string; userId?: string }> = (props) => {
-  const status = () =>
-    isLocalId("project", props.projectId)
-      ? { label: "Saved locally", class: "border-emerald-900/70 bg-emerald-950/40 text-emerald-300" }
-      : props.userId
-        ? { label: "Cloud saved", class: "border-sky-900/70 bg-sky-950/40 text-sky-300" }
-        : { label: "Sign in to sync", class: "border-amber-900/70 bg-amber-950/40 text-amber-300" };
+  const status = () => getProjectSaveStatus({ projectId: props.projectId, userId: props.userId });
 
   return (
     <span
@@ -674,7 +659,7 @@ const SaveStatus: Component<{ projectId: string; userId?: string }> = (props) =>
         status().class,
       )}
     >
-      {status().label}
+      {status().shortLabel}
     </span>
   );
 };
@@ -691,11 +676,13 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
     currentUserId,
     onInsertSample: props.onInsertSample,
     onJumpToClip: props.onJumpToClip,
+    onOpenDashboard: props.projectMenu.onOpenDashboard,
   });
   const exportsMenu = useExportsMenuController({
     currentProjectId,
     currentUserId,
     onOpenExport: props.projectMenu.onOpenExport,
+    onOpenDashboard: props.projectMenu.onOpenDashboard,
   });
   const shareMenu = useShareMenuController({
     onShare: props.projectMenu.onShare,

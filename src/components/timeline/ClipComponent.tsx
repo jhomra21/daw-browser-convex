@@ -43,6 +43,11 @@ const AUDIO_WAVEFORM_TOP_PX = 8;
 const ClipComponent: Component<ClipComponentProps> = (props) => {
   let canvasRef: HTMLCanvasElement | undefined;
 
+  const clipWidthPx = () =>
+    Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS));
+  const handleWidthPx = () =>
+    clipWidthPx() < 18 ? 2 : clipWidthPx() < 28 ? 3 : 6;
+
   const waveform = useClipWaveformViewModel({
     clip: () => props.clip,
     cssWidthPx: () => clipWidthPx(),
@@ -214,11 +219,6 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void waveform.peaks();
     drawWaveform();
   });
-
-  const clipWidthPx = () =>
-    Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS));
-  const handleWidthPx = () =>
-    clipWidthPx() < 18 ? 2 : clipWidthPx() < 28 ? 3 : 6;
 
   return (
     <div

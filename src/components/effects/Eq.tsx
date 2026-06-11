@@ -379,7 +379,7 @@ export default function Eq(props: EqProps) {
   }
 
   return (
-    <div class={cn('flex flex-col rounded-md border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
+    <div class={cn('flex flex-col border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
       {/* Header */}
       <div class="flex items-center justify-between border-b border-neutral-800 px-2 py-1">
         <div class="flex items-center gap-2">
@@ -387,7 +387,7 @@ export default function Eq(props: EqProps) {
           <Show when={props.onToggleEnabled}>
             <button
               class={cn(
-                'ml-2 rounded px-2 py-0.5 text-xs',
+                'ml-2 px-2 py-0.5 text-xs',
                 props.enabled ? 'bg-green-500/20 text-green-400 ring-1 ring-green-500/30' : 'bg-neutral-800 text-neutral-400',
               )}
               onClick={() => props.onToggleEnabled?.(!props.enabled)}
@@ -400,7 +400,7 @@ export default function Eq(props: EqProps) {
         <div class="flex items-center gap-2">
           <Show when={props.onReset}>
             <button
-              class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+              class="border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
               onClick={() => props.onReset?.()}
             >Reset</button>
           </Show>
@@ -414,7 +414,7 @@ export default function Eq(props: EqProps) {
             {(b, i) => (
               <button
                 class={cn(
-                  'flex h-4 w-4 items-center justify-center rounded text-3xs font-bold transition-colors',
+                  'flex h-4 w-4 items-center justify-center text-3xs font-bold transition-colors',
                   selectedId() === b.id
                     ? 'bg-blue-500 text-white'
                     : b.enabled
@@ -429,7 +429,7 @@ export default function Eq(props: EqProps) {
           <Show when={props.onBandToggle && selBand()}>
             <button
               class={cn(
-                'ml-1 rounded px-1 py-0.5 text-3xs',
+                'ml-1 px-1 py-0.5 text-3xs',
                 selBand()?.enabled ? 'bg-neutral-300 text-black' : 'bg-neutral-800 text-neutral-300',
               )}
               onClick={() => selBand() && props.onBandToggle?.(selBand()!.id)}
@@ -510,7 +510,7 @@ export default function Eq(props: EqProps) {
               ref={(el) => (canvasRef = el || undefined)}
               width={canvasSize().width}
               height={canvasSize().height}
-              class={cn('w-full rounded-md', props.enabled ? 'cursor-crosshair' : 'cursor-not-allowed opacity-60')}
+              class={cn('w-full', props.enabled ? 'cursor-crosshair' : 'cursor-not-allowed opacity-60')}
               onPointerDown={onCanvasPointerDown}
               onPointerMove={onCanvasPointerMove}
               onPointerUp={onCanvasPointerUp}
@@ -527,7 +527,7 @@ export default function Eq(props: EqProps) {
             {(ft) => (
               <button
                 class={cn(
-                  'rounded border border-neutral-700 px-1 py-0.5 text-3xs',
+                  'border border-neutral-700 px-1 py-0.5 text-3xs',
                   selBand()?.type === ft.value
                     ? 'border-blue-400/30 bg-blue-500/20 text-blue-300'
                     : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',

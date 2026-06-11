@@ -16,6 +16,7 @@ Think carefully and only action the specific task I have given you with the most
 Prefer the most concise and elegant solutions that changes or adds as little code as possible.
 
 ## Engineering Rules (Non-Negotiable)
+- Never run dev server unless you are asked to do so.
 - Functional style first: prefer pure functions, immutable updates, explicit inputs/outputs.
 - Single responsibility: each function/module should have one reason to change.
 - Complexity budget:

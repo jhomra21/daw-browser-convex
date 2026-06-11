@@ -33,7 +33,7 @@ const RATES: { value: ArpeggiatorParams['rate']; label: string }[] = [
 
 export default function Arpeggiator(props: ArpeggiatorProps) {
   return (
-    <div class={cn('flex flex-col rounded-md border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
+    <div class={cn('flex flex-col border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
       {/* Header */}
       <div class="flex items-center justify-between border-b border-neutral-800 px-2 py-1">
         <div class="flex items-center gap-2">
@@ -41,7 +41,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
           <Show when={props.onToggleEnabled}>
             <button
               class={cn(
-                'rounded border border-neutral-700 px-1.5 py-0.5 text-2xs transition-colors',
+                'border border-neutral-700 px-1.5 py-0.5 text-2xs transition-colors',
                 props.params.enabled
                   ? 'border-green-400/30 bg-green-500/20 text-green-300'
                   : 'bg-neutral-800 text-neutral-400',
@@ -54,7 +54,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
           </Show>
           <button
             class={cn(
-              'rounded border border-neutral-700 px-1.5 py-0.5 text-2xs transition-colors',
+              'border border-neutral-700 px-1.5 py-0.5 text-2xs transition-colors',
               props.params.hold
                 ? 'border-blue-400/30 bg-blue-500/20 text-blue-300'
                 : 'bg-neutral-800 text-neutral-400',
@@ -69,7 +69,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
         <div class="flex items-center gap-2">
           <Show when={props.onReset}>
             <button
-              class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+              class="border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
               disabled={props.disabled}
               onClick={() => props.onReset?.()}
             >Reset</button>
@@ -85,7 +85,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
             {(pat) => (
               <button
                 class={cn(
-                  'rounded border border-neutral-700 px-2 py-1 text-xs transition-colors',
+                  'border border-neutral-700 px-2 py-1 text-xs transition-colors',
                   props.params.pattern === pat.value
                     ? 'border-blue-400/30 bg-blue-500/20 text-blue-300'
                     : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
@@ -108,7 +108,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
             {(r) => (
               <button
                 class={cn(
-                  'rounded border border-neutral-700 px-2 py-1 font-mono text-xs transition-colors',
+                  'border border-neutral-700 px-2 py-1 font-mono text-xs transition-colors',
                   props.params.rate === r.value
                     ? 'border-blue-400/30 bg-blue-500/20 text-blue-300'
                     : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',

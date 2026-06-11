@@ -314,7 +314,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   <div class="min-w-0 overflow-hidden">
                     <button
                       class={cn(
-                        "flex h-7 w-full items-center justify-center rounded-sm border px-2 text-center text-sm font-semibold",
+                        "flex h-7 w-full items-center justify-center border px-2 text-center text-sm font-semibold",
                         muteDisabled
                           ? "cursor-not-allowed border-neutral-700 text-neutral-500"
                           : muted()
@@ -341,7 +341,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       <span class="flex min-w-0 flex-col items-center gap-1">
                         <span class="truncate">{displayTrackName(track)}</span>
                         <Show when={isGroupTrack}>
-                          <span class="rounded bg-neutral-700 px-1.5 py-0.5 text-xs uppercase tracking-wide text-neutral-300">
+                          <span class="bg-neutral-700 px-1.5 py-0.5 text-xs uppercase tracking-wide text-neutral-300">
                             Group
                           </span>
                         </Show>
@@ -354,7 +354,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       <div class="relative">
                         <div
                           class={cn(
-                            "flex h-7 w-full items-center justify-between rounded border border-neutral-700 bg-neutral-950 px-2 text-xs text-neutral-200",
+                            "flex h-7 w-full items-center justify-between border border-neutral-700 bg-neutral-950 px-2 text-xs text-neutral-200",
                             !canWriteTrackRouting(track) &&
                               "text-neutral-500",
                           )}
@@ -372,8 +372,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                               d="M2.5 4.5 6 8l3.5-3.5"
                               stroke="currentColor"
                               stroke-width="1.5"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
                             />
                           </svg>
                         </div>
@@ -406,7 +404,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       <div class="relative">
                         <div
                           class={cn(
-                            "flex h-7 w-full items-center justify-between rounded border border-neutral-700 bg-neutral-950 px-2 text-xs text-neutral-200",
+                            "flex h-7 w-full items-center justify-between border border-neutral-700 bg-neutral-950 px-2 text-xs text-neutral-200",
                             (!canWriteTrackRouting(track) ||
                               returnTracks().length === 0) &&
                               "text-neutral-500",
@@ -425,8 +423,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                               d="M2.5 4.5 6 8l3.5-3.5"
                               stroke="currentColor"
                               stroke-width="1.5"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
                             />
                           </svg>
                         </div>
@@ -464,7 +460,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       <div class="grid grid-cols-2 gap-1">
                         <button
                           class={cn(
-                            "flex h-7 items-center justify-center rounded border text-xs font-bold transition-colors",
+                            "flex h-7 items-center justify-center border text-xs font-bold transition-colors",
                             recordDisabled
                               ? "cursor-not-allowed border-red-900 bg-neutral-800 text-red-900"
                               : isRecordArmed()
@@ -496,7 +492,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
                         <button
                           class={cn(
-                            "h-7 rounded border px-2 text-xs font-semibold",
+                            "h-7 border px-2 text-xs font-semibold",
                             soloDisabled
                               ? "cursor-not-allowed border-neutral-700 bg-neutral-700/40 text-neutral-500"
                               : soloed()
@@ -636,19 +632,19 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             right >= 0.98 ? "bg-red-500" : "bg-green-500";
                           return (
                             <>
-                              <div class="relative h-full w-1 overflow-hidden rounded-full bg-neutral-950/70">
+                              <div class="relative h-full w-1 overflow-hidden bg-neutral-950/70">
                                 <div
                                   class={cn(
-                                    "absolute bottom-0 w-full rounded-full transition-all duration-75",
+                                    "absolute bottom-0 w-full transition-all duration-75",
                                     leftColor,
                                   )}
                                   style={{ height: `${left * 100}%` }}
                                 />
                               </div>
-                              <div class="relative h-full w-1 overflow-hidden rounded-full bg-neutral-950/70">
+                              <div class="relative h-full w-1 overflow-hidden bg-neutral-950/70">
                                 <div
                                   class={cn(
-                                    "absolute bottom-0 w-full rounded-full transition-all duration-75",
+                                    "absolute bottom-0 w-full transition-all duration-75",
                                     rightColor,
                                   )}
                                   style={{ height: `${right * 100}%` }}

@@ -181,7 +181,7 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
 ) => {
   const transport = () => props.transport;
   const centerIconButtonClass =
-    "h-7 w-7 rounded text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100";
+    "h-7 w-7 text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100";
 
   return (
     <div class="justify-self-center flex items-center gap-1">
@@ -240,7 +240,7 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
             type="text"
             value={transport().tempoDraft()}
             size={Math.max(transport().tempoDraft().length + 1, 2)}
-            class="w-auto appearance-none rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 focus:border-neutral-500 focus:outline-none"
+            class="w-auto appearance-none border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 focus:border-neutral-500 focus:outline-none"
             inputmode="numeric"
             pattern="[0-9]*"
             onFocus={() => transport().setTempoEditing(true)}
@@ -371,7 +371,7 @@ const ShareMenu: Component<{ share: ShareMenuController }> = (props) => {
               </span>
             </div>
             <MenubarItem
-              class="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+              class="p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
               aria-label="Close"
               onSelect={share().onClose}
             >
@@ -383,8 +383,6 @@ const ShareMenu: Component<{ share: ShareMenuController }> = (props) => {
                 <path
                   fill="none"
                   stroke="currentColor"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
                   stroke-width="2"
                   d="m7 7l10 10M17 7L7 17"
                 />
@@ -393,7 +391,7 @@ const ShareMenu: Component<{ share: ShareMenuController }> = (props) => {
             </MenubarItem>
           </div>
           <div class="flex w-full items-center gap-2">
-            <div class="min-w-0 w-full max-w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-neutral-200 shadow-inner">
+            <div class="min-w-0 w-full max-w-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-neutral-200 shadow-inner">
               <div
                 class="font-mono"
                 style={{
@@ -427,10 +425,8 @@ const ShareMenu: Component<{ share: ShareMenuController }> = (props) => {
                       fill="none"
                       stroke="currentColor"
                       stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
                     >
-                      <rect width="8" height="8" x="8" y="8" rx="2" />
+                      <rect width="8" height="8" x="8" y="8" />
                       <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
                     </g>
                     <title>Copy</title>
@@ -446,8 +442,6 @@ const ShareMenu: Component<{ share: ShareMenuController }> = (props) => {
                     fill="none"
                     stroke="currentColor"
                     stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
                     d="m5 12l5 5L20 7"
                   />
                   <title>Copied</title>
@@ -475,7 +469,7 @@ const ShareMenu: Component<{ share: ShareMenuController }> = (props) => {
                 <div class="space-y-2">
                   <For each={share().members}>
                     {(member) => (
-                      <div class="flex items-center justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2">
+                      <div class="flex items-center justify-between gap-3 border border-neutral-800 bg-neutral-950/60 px-3 py-2">
                         <div class="min-w-0">
                           <div class="truncate text-xs text-neutral-200">{member.userId}</div>
                           <div class="text-[11px] capitalize text-neutral-500">{member.role}</div>
@@ -655,7 +649,7 @@ const SaveStatus: Component<{ projectId: string; userId?: string }> = (props) =>
   return (
     <span
       class={cn(
-        "rounded-full border px-2 py-1 text-[11px] font-medium",
+        "border px-2 py-1 text-[11px] font-medium",
         status().class,
       )}
     >

@@ -45,7 +45,6 @@ module.exports = {
     "justify-center",
     "gap-2",
     "whitespace-nowrap",
-    "rounded-md",
     "text-sm",
     "font-medium",
     "transition-colors",
@@ -90,12 +89,6 @@ module.exports = {
         ring: "hsl(var(--ring) / <alpha-value>)",
         "clip-audio": "hsl(var(--clip-audio) / <alpha-value>)",
         "clip-recording": "hsl(var(--clip-recording) / <alpha-value>)",
-      },
-      borderRadius: {
-        xl: "calc(var(--radius) + 4px)",
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)"
       },
       keyframes: {
         "accordion-down": {

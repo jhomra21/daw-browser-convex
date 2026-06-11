@@ -115,7 +115,7 @@ const SynthCard: Component<SynthCardProps> = (props) => {
 
   return (
     <div
-      class="fixed z-[9999] rounded-md border border-neutral-700 bg-neutral-900 shadow-xl overflow-hidden"
+      class="fixed z-[9999] border border-neutral-700 bg-neutral-900 shadow-xl overflow-hidden"
       style={{ left: `${props.x}px`, top: `${props.y}px`, width: `${props.w}px`, height: `${props.h}px` }}
       onPointerDown={(e) => { e.stopPropagation() }}
       onClick={(e) => e.stopPropagation()}
@@ -129,7 +129,7 @@ const SynthCard: Component<SynthCardProps> = (props) => {
       >
         <div class="text-sm font-semibold text-neutral-200">Synth</div>
         <button
-          class="text-neutral-300 hover:text-white rounded px-2 py-0.5 text-sm"
+          class="text-neutral-300 hover:text-white px-2 py-0.5 text-sm"
           onPointerDown={(e) => { e.stopPropagation() }}
           onClick={props.onClose}
           aria-label="Close Synth editor"
@@ -141,7 +141,7 @@ const SynthCard: Component<SynthCardProps> = (props) => {
         <Synth params={props.params} onChange={props.onChange} onReset={props.onReset} variant="expanded" class="min-w-160" />
       </div>
       <div
-        class="absolute right-1 bottom-1 w-4 h-4 cursor-se-resize rounded-sm bg-neutral-700/60 hover:bg-neutral-600/70"
+        class="absolute right-1 bottom-1 w-4 h-4 cursor-se-resize bg-neutral-700/60 hover:bg-neutral-600/70"
         style={{ 'touch-action': 'none' }}
         onPointerDown={onResizerPointerDown as any}
         title="Resize"

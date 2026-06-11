@@ -46,11 +46,11 @@ export const NavUser: Component = () => {
       <DropdownMenu>
         <DropdownMenuTrigger>
           <Button variant="ghost" size="icon" aria-label="User menu" class="hover:bg-neutral-800">
-            <Avatar class="h-8 w-8 rounded-lg shrink-0 border border-neutral-800">
+            <Avatar class="h-8 w-8 shrink-0 border border-neutral-800">
               <Show when={user()?.image}>
                 <AvatarImage src={(user()?.image as string) || ''} alt={(user()?.name as string) || ''} crossorigin="anonymous" referrerpolicy="no-referrer" />
               </Show>
-              <AvatarFallback class="rounded-lg bg-transparent text-xs">
+              <AvatarFallback class="bg-transparent text-xs">
                 {getInitials((user()?.name as string) || (user()?.email as string) || "")}
               </AvatarFallback>
             </Avatar>
@@ -59,11 +59,11 @@ export const NavUser: Component = () => {
         <DropdownMenuContent class="w-56 bg-neutral-900">
           <DropdownMenuLabel class="p-0">
             <div class="flex items-center gap-2 px-2 py-2 text-left text-sm">
-              <Avatar class="h-8 w-8 rounded-lg">
+              <Avatar class="h-8 w-8">
                 <Show when={user()?.image}>
                   <AvatarImage src={(user()?.image as string) || ''} alt={(user()?.name as string) || ''} crossorigin="anonymous" referrerpolicy="no-referrer" />
                 </Show>
-                <AvatarFallback class="rounded-lg text-xs">{getInitials((user()?.name as string) || (user()?.email as string) || "")}</AvatarFallback>
+                <AvatarFallback class="text-xs">{getInitials((user()?.name as string) || (user()?.email as string) || "")}</AvatarFallback>
               </Avatar>
               <div class="grid flex-1 text-left text-sm leading-tight min-w-0">
                 <span class="truncate font-semibold text-neutral-300">{user()?.name || user()?.email}</span>

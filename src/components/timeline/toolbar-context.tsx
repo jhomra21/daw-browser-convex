@@ -7,7 +7,7 @@ type NativeMenuTriggerProps = {
 };
 
 export const nativeMenuTriggerClass =
-  "h-7 rounded px-2 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100";
+  "h-7 px-2 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100";
 
 export const NativeMenuTrigger: Component<NativeMenuTriggerProps> = (props) => (
   <MenubarTrigger

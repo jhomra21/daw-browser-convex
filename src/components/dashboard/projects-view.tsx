@@ -101,7 +101,7 @@ function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
 
       <Show when={operationError()}>
         {(message) => (
-          <div class="rounded-lg border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+          <div class="border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm text-red-200">
             {message()}
           </div>
         )}
@@ -111,7 +111,7 @@ function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
         <Show
           when={props.projects()}
           fallback={
-            <div class="rounded-xl border border-neutral-800 bg-neutral-900/80 p-4 text-sm text-neutral-400">
+            <div class="border border-neutral-800 bg-neutral-900/80 p-4 text-sm text-neutral-400">
               Loading local projects...
             </div>
           }
@@ -120,14 +120,14 @@ function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
             <Show
               when={projectList().length > 0}
               fallback={
-                <div class="rounded-xl border border-dashed border-neutral-800 p-8 text-center text-sm text-neutral-400">
+                <div class="border border-dashed border-neutral-800 p-8 text-center text-sm text-neutral-400">
                   No local projects yet.
                 </div>
               }
             >
               <For each={projectList()}>
                 {(project) => (
-                  <article class="flex items-center justify-between gap-4 rounded-xl border border-neutral-800 bg-neutral-900/80 p-4">
+                  <article class="flex items-center justify-between gap-4 border border-neutral-800 bg-neutral-900/80 p-4">
                     <button
                       class="min-w-0 flex-1 text-left"
                       type="button"

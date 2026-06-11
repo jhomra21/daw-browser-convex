@@ -139,8 +139,6 @@ const FileAudioIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElemen
       fill="none"
       stroke="currentColor"
       stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
     >
       {local.title ? <title>{local.title}</title> : null}
       <path d="M17.5 22h.5a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v3" />
@@ -168,8 +166,6 @@ const PlayIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> =
       fill="none"
       stroke="currentColor"
       stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
     >
       {local.title ? <title>{local.title}</title> : null}
       <path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" />
@@ -195,12 +191,10 @@ const PauseIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> 
       fill="none"
       stroke="currentColor"
       stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
     >
       {local.title ? <title>{local.title}</title> : null}
-      <rect x="14" y="3" width="5" height="18" rx="1" />
-      <rect x="5" y="3" width="5" height="18" rx="1" />
+      <rect x="14" y="3" width="5" height="18" />
+      <rect x="5" y="3" width="5" height="18" />
     </svg>
   );
 };
@@ -223,11 +217,9 @@ const StopIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> =
       fill="none"
       stroke="currentColor"
       stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
     >
       {local.title ? <title>{local.title}</title> : null}
-      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <rect width="18" height="18" x="3" y="3" />
     </svg>
   );
 };
@@ -250,8 +242,6 @@ const MetronomeIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElemen
       fill="none"
       stroke="currentColor"
       stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
     >
       {local.title ? <title>{local.title}</title> : null}
       <path d="M6 19h12l-5-15h-2l-5 15Z" />
@@ -280,8 +270,6 @@ const RepeatIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>>
       fill="none"
       stroke="currentColor"
       stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
     >
       {local.title ? <title>{local.title}</title> : null}
       <path d="m17 2 4 4-4 4" />
@@ -310,11 +298,9 @@ const GridIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> =
       fill="none"
       stroke="currentColor"
       stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
     >
       {local.title ? <title>{local.title}</title> : null}
-      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <rect width="18" height="18" x="3" y="3" />
       <path d="M3 9h18" />
       <path d="M3 15h18" />
       <path d="M9 3v18" />
@@ -340,8 +326,6 @@ const UserIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> =
       fill="none"
       stroke="currentColor"
       stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
     >
       {local.title ? <title>{local.title}</title> : null}
       <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
@@ -367,8 +351,6 @@ const LogOutIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>>
       fill="none"
       stroke="currentColor"
       stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
     >
       {local.title ? <title>{local.title}</title> : null}
       <path d="m16 17 5-5-5-5" />
@@ -395,8 +377,6 @@ const LogInIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> 
       fill="none"
       stroke="currentColor"
       stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
     >
       {local.title ? <title>{local.title}</title> : null}
       <path d="m10 17 5-5-5-5" />
@@ -423,8 +403,6 @@ const HouseIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> 
       fill="none"
       stroke="currentColor"
       stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
     >
       {local.title ? <title>{local.title}</title> : null}
       <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />

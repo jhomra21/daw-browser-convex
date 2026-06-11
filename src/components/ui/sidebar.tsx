@@ -213,7 +213,7 @@ const Sidebar: Component<SidebarProps> = (rawProps) => {
           <SheetContent
             data-sidebar="sidebar"
             data-mobile="true"
-            class="h-dvh w-(--sidebar-width) bg-sidebar/98 rounded-r-xl p-0 text-sidebar-foreground"
+            class="h-dvh w-(--sidebar-width) bg-sidebar/98 p-0 text-sidebar-foreground"
             style={{
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE
             }}
@@ -266,7 +266,7 @@ const Sidebar: Component<SidebarProps> = (rawProps) => {
               class={cn(
                 "flex size-full flex-col bg-sidebar",
                 "transition-all duration-[var(--sidebar-animation-duration)] ease-in-out",
-                "group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow"
+                " group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow"
               )}
             >
               {local.children}
@@ -303,11 +303,9 @@ const SidebarTrigger = <T extends ValidComponent = "button">(props: SidebarTrigg
         fill="none"
         stroke="currentColor"
         stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
         class="size-4"
       >
-        <rect width="18" height="18" x="3" y="3" rx="2" />
+        <rect width="18" height="18" x="3" y="3" />
         <path d="M9 3v18" />
       </svg>
       <span class="sr-only">Toggle Sidebar</span>
@@ -346,7 +344,7 @@ const SidebarInset: Component<ComponentProps<"main">> = (props) => {
     <main
       class={cn(
         "relative flex flex-1 flex-col bg-background/80 md:h-svh",
-        "md:peer-data-[variant=inset]:h-[calc(100svh-theme(spacing.4))] md:peer-data-[variant=inset]:m-2 md:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow",
+        "md:peer-data-[variant=inset]:h-[calc(100svh-theme(spacing.4))] md:peer-data-[variant=inset]:m-2 md:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:ml-0  md:peer-data-[variant=inset]:shadow",
         local.class
       )}
       {...others}
@@ -438,7 +436,7 @@ const SidebarGroupLabel = <T extends ValidComponent = "div">(
       as="div"
       data-sidebar="group-label"
       class={cn(
-        "flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium text-sidebar-foreground/70 outline-none ring-sidebar-ring transition-[margin-top,opacity] duration-[var(--sidebar-animation-duration)] ease-in-out focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+        "flex h-8 shrink-0 items-center px-2 text-xs font-medium text-sidebar-foreground/70 outline-none ring-sidebar-ring transition-[margin-top,opacity] duration-[var(--sidebar-animation-duration)] ease-in-out focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
         "group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0",
         local.class
       )}
@@ -458,7 +456,7 @@ const SidebarGroupAction = <T extends ValidComponent = "button">(
       as="button"
       data-sidebar="group-action"
       class={cn(
-        "absolute right-3 top-3.5 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground outline-none ring-sidebar-ring transition-transform duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+        "absolute right-3 top-3.5 flex aspect-square w-5 items-center justify-center p-0 text-sidebar-foreground outline-none ring-sidebar-ring transition-transform duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
         // Increases the hit area of the button on mobile.
         "after:absolute after:-inset-2 after:md:hidden",
         "group-data-[collapsible=icon]:hidden",
@@ -493,7 +491,7 @@ const SidebarMenuItem: Component<ComponentProps<"li">> = (props) => {
 }
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-sidebar-ring transition-all duration-[var(--sidebar-animation-duration)] ease-in-out hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:!size-8 group-data-[collapsible=icon]:!p-2 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 group-data-[collapsible=icon]:justify-center",
+  "peer/menu-button flex w-full items-center gap-2 overflow-hidden p-2 text-left text-sm outline-none ring-sidebar-ring transition-all duration-[var(--sidebar-animation-duration)] ease-in-out hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:!size-8 group-data-[collapsible=icon]:!p-2 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 group-data-[collapsible=icon]:justify-center",
   {
     variants: {
       variant: {
@@ -574,7 +572,7 @@ const SidebarMenuAction = <T extends ValidComponent = "button">(
       as="button"
       data-sidebar="menu-action"
       class={cn(
-        "absolute right-1 top-1.5 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground outline-none ring-sidebar-ring transition-opacity duration-150 ease-out hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 peer-hover/menu-button:text-sidebar-accent-foreground [&>svg]:size-4 [&>svg]:shrink-0",
+        "absolute right-1 top-1.5 flex aspect-square w-5 items-center justify-center p-0 text-sidebar-foreground outline-none ring-sidebar-ring transition-opacity duration-150 ease-out hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 peer-hover/menu-button:text-sidebar-accent-foreground [&>svg]:size-4 [&>svg]:shrink-0",
         // Increases the hit area of the button on mobile.
         "after:absolute after:-inset-2 after:md:hidden",
         "peer-data-[size=sm]/menu-button:top-1",
@@ -596,7 +594,7 @@ const SidebarMenuBadge: Component<ComponentProps<"div">> = (props) => {
     <div
       data-sidebar="menu-badge"
       class={cn(
-        "pointer-events-none absolute right-1 flex h-5 min-w-5 select-none items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums text-sidebar-foreground",
+        "pointer-events-none absolute right-1 flex h-5 min-w-5 select-none items-center justify-center px-1 text-xs font-medium tabular-nums text-sidebar-foreground",
         "peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[active=true]/menu-button:text-sidebar-accent-foreground",
         "peer-data-[size=sm]/menu-button:top-1",
         "peer-data-[size=default]/menu-button:top-1.5",
@@ -623,10 +621,10 @@ const SidebarMenuSkeleton: Component<SidebarMenuSkeletonProps> = (rawProps) => {
   return (
     <div
       data-sidebar="menu-skeleton"
-      class={cn("flex h-8 items-center gap-2 rounded-md px-2", local.class)}
+      class={cn("flex h-8 items-center gap-2 px-2", local.class)}
       {...others}
     >
-      {local.showIcon && <Skeleton class="size-4 rounded-md" data-sidebar="menu-skeleton-icon" />}
+      {local.showIcon && <Skeleton class="size-4 " data-sidebar="menu-skeleton-icon" />}
       <Skeleton
         class="max-w-(--skeleton-width) h-4 flex-1"
         data-sidebar="menu-skeleton-text"
@@ -677,7 +675,7 @@ const SidebarMenuSubButton = <T extends ValidComponent = "a">(
       data-size={local.size}
       data-active={local.isActive}
       class={cn(
-        "flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-0 text-sidebar-foreground outline-none ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
+        "flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden px-0 text-sidebar-foreground outline-none ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
         "data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground",
         local.size === "sm" && "text-xs",
         local.size === "md" && "text-sm",

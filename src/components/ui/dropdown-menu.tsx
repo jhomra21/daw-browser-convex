@@ -29,7 +29,7 @@ const DropdownMenuContent = <T extends ValidComponent = "div">(
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
         class={cn(
-          "z-50 min-w-32 max-h-(--kb-menu-content-available-height) overflow-y-auto overflow-x-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md",
+          "z-50 min-w-32 max-h-(--kb-menu-content-available-height) overflow-y-auto overflow-x-hidden border bg-popover p-1 text-popover-foreground shadow-md",
           "origin-[var(--kb-menu-content-transform-origin)] data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0 data-[closed]:zoom-out-95 data-[expanded]:zoom-in-95",
           "data-[placement=bottom]:slide-in-from-top-2 data-[placement=left]:slide-in-from-right-2 data-[placement=right]:slide-in-from-left-2 data-[placement=top]:slide-in-from-bottom-2",
           props.class
@@ -53,7 +53,7 @@ const DropdownMenuItem = <T extends ValidComponent = "div">(
   return (
     <DropdownMenuPrimitive.Item
       class={cn(
-        "relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0",
+        "relative flex cursor-default select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0",
         local.inset && "pl-8",
         local.class
       )}
@@ -113,7 +113,7 @@ const DropdownMenuSubTrigger = <T extends ValidComponent = "div">(
   return (
     <DropdownMenuPrimitive.SubTrigger
       class={cn(
-        "flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[state=open]:bg-accent [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+        "flex cursor-default select-none items-center gap-2 px-2 py-1.5 text-sm outline-none focus:bg-accent data-[state=open]:bg-accent [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
         local.inset && "pl-8",
         local.class
       )}
@@ -126,8 +126,6 @@ const DropdownMenuSubTrigger = <T extends ValidComponent = "div">(
         fill="none"
         stroke="currentColor"
         stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
         class="ml-auto size-4"
       >
         <path d="M9 6l6 6l-6 6" />
@@ -148,7 +146,7 @@ const DropdownMenuSubContent = <T extends ValidComponent = "div">(
   return (
     <DropdownMenuPrimitive.SubContent
       class={cn(
-        "z-50 min-w-32 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md",
+        "z-50 min-w-32 overflow-hidden border bg-popover p-1 text-popover-foreground shadow-md",
         "origin-[var(--kb-menu-content-transform-origin)] data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0 data-[closed]:zoom-out-95 data-[expanded]:zoom-in-95",
         "data-[placement=bottom]:slide-in-from-top-2 data-[placement=left]:slide-in-from-right-2 data-[placement=right]:slide-in-from-left-2 data-[placement=top]:slide-in-from-bottom-2",
         props.class
@@ -171,7 +169,7 @@ const DropdownMenuCheckboxItem = <T extends ValidComponent = "div">(
   return (
     <DropdownMenuPrimitive.CheckboxItem
       class={cn(
-        "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "relative flex cursor-default select-none items-center py-1.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         props.class
       )}
       {...rest}
@@ -184,8 +182,6 @@ const DropdownMenuCheckboxItem = <T extends ValidComponent = "div">(
             fill="none"
             stroke="currentColor"
             stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
             class="size-4"
           >
             <path d="M5 12l5 5l10 -10" />
@@ -228,7 +224,7 @@ const DropdownMenuRadioItem = <T extends ValidComponent = "div">(
   return (
     <DropdownMenuPrimitive.RadioItem
       class={cn(
-        "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "relative flex cursor-default select-none items-center py-1.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         props.class
       )}
       {...rest}
@@ -241,8 +237,6 @@ const DropdownMenuRadioItem = <T extends ValidComponent = "div">(
             fill="none"
             stroke="currentColor"
             stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
             class="size-2 fill-current"
           >
             <path d="M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" />

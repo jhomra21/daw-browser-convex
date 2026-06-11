@@ -180,7 +180,6 @@ export default function Knob(props: KnobProps) {
             fill="none"
             stroke="#1f2937"
             stroke-width="4"
-            stroke-linecap="round"
           />
           
           {/* Value Arc */}
@@ -189,7 +188,6 @@ export default function Knob(props: KnobProps) {
             fill="none"
             stroke={isDragging() ? '#60a5fa' : '#38bdf8'}
             stroke-width="4"
-            stroke-linecap="round"
             pathLength="100"
             stroke-dasharray={arcDashArray()}
             stroke-dashoffset={0}
@@ -200,7 +198,7 @@ export default function Knob(props: KnobProps) {
         {/* Center Indicator */}
         <div
           class={cn(
-            'absolute w-0.5 -translate-x-1/2 transform rounded-full origin-bottom transition-colors duration-150',
+            'absolute w-0.5 -translate-x-1/2 transform origin-bottom transition-colors duration-150',
             isDragging() ? 'bg-sky-100' : 'bg-gray-200',
           )}
           style={{ 

@@ -44,10 +44,8 @@ const CopyUrlButton: Component<{
         fill="none"
         stroke="currentColor"
         stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
       >
-        <rect width="8" height="8" x="8" y="8" rx="2" />
+        <rect width="8" height="8" x="8" y="8" />
         <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
       </g>
       <title>Copy URL</title>
@@ -83,8 +81,6 @@ const InsertSampleButton: Component<{
         fill="none"
         stroke="currentColor"
         stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
         d="M4 11h16M12 4v16"
       />
       <title>Insert</title>
@@ -244,8 +240,6 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
                                     fill="none"
                                     stroke="currentColor"
                                     stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
                                     d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m-1 0v14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V6m3 4v8m4-8v8"
                                   />
                                   <title>Delete</title>
@@ -281,8 +275,6 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
                                     fill="none"
                                     stroke="currentColor"
                                     stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
                                     d="m5 12l5 5L20 7"
                                   />
                                   <title>Confirm</title>
@@ -306,8 +298,6 @@ export const ProjectMediaMenu: Component<ProjectMediaMenuProps> = (props) => {
                                   <path
                                     fill="none"
                                     stroke="currentColor"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
                                     stroke-width="2"
                                     d="m7 7l10 10M17 7L7 17"
                                   />

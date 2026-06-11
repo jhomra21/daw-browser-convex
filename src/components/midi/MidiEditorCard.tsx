@@ -446,7 +446,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
 
   return (
     <div
-      class="absolute z-50 rounded-md border border-neutral-700 bg-neutral-900 shadow-xl overflow-hidden"
+      class="absolute z-50 border border-neutral-700 bg-neutral-900 shadow-xl overflow-hidden"
       style={{ left: `${props.x}px`, top: `${props.y}px`, width: `${props.w}px`, height: `${props.h}px` }}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
@@ -462,7 +462,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
           <div class="flex items-center gap-2">
             <button
               class={cn(
-                'rounded border px-2 py-0.5 text-xs',
+                'border px-2 py-0.5 text-xs',
                 kbEnabled() ? 'border-green-500 bg-green-600/20 text-green-300' : 'border-neutral-600 bg-neutral-700/30 text-neutral-300',
               )}
               onPointerDown={(e) => { e.stopPropagation() }}
@@ -479,7 +479,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
           <span class="text-neutral-500 text-xs">BPM: {props.bpm}</span>
         </div>
         <button
-          class="text-neutral-300 hover:text-white rounded px-2 py-0.5 text-sm"
+          class="text-neutral-300 hover:text-white px-2 py-0.5 text-sm"
           onPointerDown={(e) => { e.stopPropagation() }}
           onClick={props.onClose}
           aria-label="Close MIDI editor"
@@ -533,7 +533,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
               <For each={notes()}>
                 {(n, idx) => (
                 <div
-                  class="absolute rounded-sm bg-green-500/70 border border-green-400/80 pointer-events-auto"
+                  class="absolute bg-green-500/70 border border-green-400/80 pointer-events-auto"
                   style={{
                     left: `${(n.beat / clipBeats()) * 100}%`,
                     top: `${(topPitch() - n.pitch) * rowPx}px`,
@@ -559,7 +559,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
         </div>
         {/* Bottom-right resizer */}
         <div
-          class="absolute right-1 bottom-1 w-4 h-4 cursor-se-resize rounded-sm bg-neutral-700/60 hover:bg-neutral-600/70"
+          class="absolute right-1 bottom-1 w-4 h-4 cursor-se-resize bg-neutral-700/60 hover:bg-neutral-600/70"
           onPointerDown={onResizerPointerDown as any}
           title="Resize"
         />

@@ -19,7 +19,7 @@ export function DashboardTimelineView(props: { model?: DashboardTimelineModel })
               value={`${model.bpm()}`}
               action={
                 <input
-                  class="w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100"
+                  class="w-20 border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100"
                   type="number"
                   min="30"
                   max="300"
@@ -43,7 +43,7 @@ export function DashboardTimelineView(props: { model?: DashboardTimelineModel })
               value={`1/${model.gridDenominator()}`}
               action={
                 <select
-                  class="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100"
+                  class="border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100"
                   value={model.gridDenominator()}
                   onChange={(event) => model.setGridDenominator(Number(event.currentTarget.value))}
                 >

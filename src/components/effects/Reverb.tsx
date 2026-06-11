@@ -18,7 +18,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 export default function Reverb(props: ReverbProps) {
   return (
-    <div class={cn('flex flex-col rounded-md border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
+    <div class={cn('flex flex-col border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
       {/* Header */}
       <div class="flex items-center justify-between border-b border-neutral-800 px-2 py-1">
         <div class="flex items-center gap-2">
@@ -26,7 +26,7 @@ export default function Reverb(props: ReverbProps) {
           <Show when={props.onToggleEnabled}>
             <button
               class={cn(
-                'ml-2 rounded px-2 py-0.5 text-xs',
+                'ml-2 px-2 py-0.5 text-xs',
                 props.params.enabled ? 'bg-green-500/20 text-green-400 ring-1 ring-green-500/30' : 'bg-neutral-800 text-neutral-400',
               )}
               onClick={() => props.onToggleEnabled?.(!props.params.enabled)}
@@ -39,7 +39,7 @@ export default function Reverb(props: ReverbProps) {
         <div class="flex items-center gap-2">
           <Show when={props.onReset}>
             <button
-              class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+              class="border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
               onClick={() => props.onReset?.()}
             >Reset</button>
           </Show>

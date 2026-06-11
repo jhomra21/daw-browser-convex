@@ -35,7 +35,7 @@ export function DashboardRow(props: { label: JSX.Element; value?: JSX.Element; a
 
 export function EmptyDashboardState(props: { title: string; message: string }) {
   return (
-    <div class="rounded-xl border border-dashed border-neutral-800 p-6 text-center">
+    <div class="border border-dashed border-neutral-800 p-6 text-center">
       <p class="text-sm font-medium text-neutral-200">{props.title}</p>
       <p class="mt-1 text-xs text-neutral-500">{props.message}</p>
     </div>

@@ -110,7 +110,7 @@ const MenubarTrigger = <T extends ValidComponent = "button">(
   return (
     <MenubarPrimitive.Trigger
       class={cn(
-        "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium !cursor-pointer focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+        "inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium !cursor-pointer focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
         "h-9 px-3 text-xs hover:bg-accent hover:text-accent-foreground data-[expanded]:bg-accent data-[expanded]:text-accent-foreground",
         local.class,
       )}
@@ -137,7 +137,7 @@ const MenubarContent = <T extends ValidComponent = "div">(
     <MenubarPrimitive.Portal>
       <MenubarPrimitive.Content
         class={cn(
-          "z-50 min-w-32 max-h-(--kb-menu-content-available-height) overflow-y-auto overflow-x-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md outline-none",
+          "z-50 min-w-32 max-h-(--kb-menu-content-available-height) overflow-y-auto overflow-x-hidden border bg-popover p-1 text-popover-foreground shadow-md outline-none",
           shouldAnimate()
             ? "origin-[var(--kb-menu-content-transform-origin)] data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0 data-[closed]:zoom-out-95 data-[expanded]:zoom-in-95 data-[placement=bottom]:slide-in-from-top-2 data-[placement=left]:slide-in-from-right-2 data-[placement=right]:slide-in-from-left-2 data-[placement=top]:slide-in-from-bottom-2"
             : "data-[closed]:hidden",
@@ -165,7 +165,7 @@ const MenubarItem = <T extends ValidComponent = "div">(
   return (
     <MenubarPrimitive.Item
       class={cn(
-        "relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0",
+        "relative flex cursor-default select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0",
         local.inset && "pl-8",
         local.class,
       )}
@@ -238,7 +238,7 @@ const MenubarSubTrigger = <T extends ValidComponent = "div">(
   return (
     <MenubarPrimitive.SubTrigger
       class={cn(
-        "flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[expanded]:bg-accent data-[expanded]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+        "flex cursor-default select-none items-center gap-2 px-2 py-1.5 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[expanded]:bg-accent data-[expanded]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
         local.inset && "pl-8",
         local.class,
       )}
@@ -251,8 +251,6 @@ const MenubarSubTrigger = <T extends ValidComponent = "div">(
         fill="none"
         stroke="currentColor"
         stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
         class="ml-auto size-4"
       >
         <path d="M9 6l6 6l-6 6" />
@@ -273,7 +271,7 @@ const MenubarSubContent = <T extends ValidComponent = "div">(
   return (
     <MenubarPrimitive.SubContent
       class={cn(
-        "z-50 min-w-32 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-lg outline-none",
+        "z-50 min-w-32 overflow-hidden border bg-popover p-1 text-popover-foreground shadow-lg outline-none",
         "origin-[var(--kb-menu-content-transform-origin)] data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0 data-[closed]:zoom-out-95 data-[expanded]:zoom-in-95",
         "data-[placement=bottom]:slide-in-from-top-2 data-[placement=left]:slide-in-from-right-2 data-[placement=right]:slide-in-from-left-2 data-[placement=top]:slide-in-from-bottom-2",
         local.class,

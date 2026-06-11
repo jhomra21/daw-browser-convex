@@ -237,10 +237,10 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
         props.instrument.state.synth.isExpandedForCurrentTarget()
       }
     >
-      <div class="flex min-w-48 items-center justify-between rounded border border-neutral-800 bg-neutral-900 px-2 py-2 text-neutral-300">
+      <div class="flex min-w-48 items-center justify-between border border-neutral-800 bg-neutral-900 px-2 py-2 text-neutral-300">
         <span class="text-xs">Synth is expanded</span>
         <button
-          class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+          class="border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
           onClick={props.instrument.state.synth.close}
         >
           Restore
@@ -304,7 +304,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
 );
 
 const EffectsPanelReadOnlyNotice: Component = () => (
-  <div class="flex min-w-60 items-center rounded border border-neutral-800 bg-neutral-950/80 px-3 py-2 text-xs text-neutral-500">
+  <div class="flex min-w-60 items-center border border-neutral-800 bg-neutral-950/80 px-3 py-2 text-xs text-neutral-500">
     Effects are read-only for collaborator-owned tracks.
   </div>
 );
@@ -331,7 +331,7 @@ type EffectsPanelClosedButtonProps = {
 
 const EffectsPanelClosedButton: Component<EffectsPanelClosedButtonProps> = (props) => (
   <button
-    class="fixed bottom-4 right-4 rounded-md border border-neutral-700 bg-neutral-800 px-3 py-2 text-white hover:bg-neutral-700"
+    class="fixed bottom-4 right-4 border border-neutral-700 bg-neutral-800 px-3 py-2 text-white hover:bg-neutral-700"
     onClick={props.onOpen}
   >
     Open Effects

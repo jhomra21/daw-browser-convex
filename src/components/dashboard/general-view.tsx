@@ -15,7 +15,7 @@ export function DashboardGeneralView() {
           value="Applied to the document root and saved locally."
           action={
             <select
-              class="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100"
+              class="border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100"
               value={appSettings.settings().theme}
               onChange={(event) => appSettings.setTheme(parseAppTheme(event.currentTarget.value))}
             >

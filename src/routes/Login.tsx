@@ -42,13 +42,13 @@ const Login: Component = () => {
 
   return (
     <div class="min-h-svh flex items-center justify-center bg-neutral-950 text-white p-6">
-      <div class="w-full max-w-md rounded-xl border border-neutral-800 bg-neutral-900 p-6 shadow-lg">
+      <div class="w-full max-w-md border border-neutral-800 bg-neutral-900 p-6 shadow-lg">
         <Show when={!session.data} fallback={<div class="text-xl font-semibold italic">Welcome</div>}>
           <h1 class="text-2xl font-semibold mb-2">Sign in</h1>
           <p class="text-neutral-400 mb-6">Use your Google account to continue.</p>
           <Show when={signInError()}>
             {(message) => (
-              <div class="mb-4 rounded-md border border-red-900/70 bg-red-950/40 p-3 text-sm text-red-200">
+              <div class="mb-4 border border-red-900/70 bg-red-950/40 p-3 text-sm text-red-200">
                 {message()}
               </div>
             )}
@@ -68,20 +68,20 @@ const Login: Component = () => {
           }
         >
           <div class="space-y-4">
-            <div class="rounded-md border border-neutral-800 bg-neutral-950 p-3">
+            <div class="border border-neutral-800 bg-neutral-950 p-3">
               <div class="text-sm text-neutral-400">Signed in as</div>
               <div class="font-medium">{session.data?.user?.email}</div>
             </div>
             <div class="flex gap-2">
               <Button
-                class="inline-flex items-center justify-center rounded-md bg-neutral-800 px-4 py-2 hover:bg-neutral-700"
+                class="inline-flex items-center justify-center bg-neutral-800 px-4 py-2 hover:bg-neutral-700"
                 onClick={() => {
                   window.location.assign(redirectTarget())
                 }}
               >
                 Go to app
               </Button>
-              <Button onClick={signOut} class="inline-flex items-center justify-center rounded-md border border-neutral-700 px-4 py-2 hover:bg-neutral-800">
+              <Button onClick={signOut} class="inline-flex items-center justify-center border border-neutral-700 px-4 py-2 hover:bg-neutral-800">
                 Sign out
               </Button>
             </div>

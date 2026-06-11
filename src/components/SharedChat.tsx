@@ -142,7 +142,7 @@ const SharedChat: Component<SharedChatProps> = (props) => {
           <div class="min-h-full flex flex-col justify-end space-y-2">
             <For each={messages()}>{(m) => (
               <div class="text-left">
-                <div class="inline-block max-w-[90%] rounded-md bg-neutral-800 px-2 py-1 text-sm text-neutral-100">
+                <div class="inline-block max-w-[90%] bg-neutral-800 px-2 py-1 text-sm text-neutral-100">
                   <div class="text-2xs text-neutral-400 mb-0.5">{m.senderName || m.senderUserId}</div>
                   <div>{m.content}</div>
                 </div>
@@ -153,7 +153,7 @@ const SharedChat: Component<SharedChatProps> = (props) => {
         </div>
         <div class="border-t border-neutral-800 p-2">
           <textarea
-            class="h-[4.5rem] w-full resize-none rounded bg-neutral-800 p-2 text-sm text-neutral-100 outline-none"
+            class="h-[4.5rem] w-full resize-none bg-neutral-800 p-2 text-sm text-neutral-100 outline-none"
             placeholder={props.userId ? 'Type a message…' : 'Sign in to chat'}
             disabled={!props.userId}
             value={input()}
@@ -165,7 +165,7 @@ const SharedChat: Component<SharedChatProps> = (props) => {
             <button
               disabled={!props.userId}
               class={cn(
-                'rounded border border-neutral-600 bg-neutral-700 px-3 py-1 text-sm text-white hover:bg-neutral-600',
+                'border border-neutral-600 bg-neutral-700 px-3 py-1 text-sm text-white hover:bg-neutral-600',
                 !props.userId && 'opacity-50',
               )}
               onClick={() => void send()}

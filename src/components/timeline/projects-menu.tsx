@@ -60,7 +60,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
         style={{ width: "min(92vw, 24rem)" }}
       >
         <div class="w-full p-2">
-          <div class="mb-2 rounded-lg border border-neutral-800 bg-neutral-950/80 p-3">
+          <div class="mb-2 border border-neutral-800 bg-neutral-950/80 p-3">
             <div class="flex items-center justify-between gap-3">
               <div>
                 <div class="text-xs uppercase tracking-wide text-neutral-500">
@@ -72,7 +72,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
               </div>
               <span
                 class={cn(
-                  "shrink-0 rounded-full border px-2 py-1 text-[11px] font-medium",
+                  "shrink-0 border px-2 py-1 text-[11px] font-medium",
                   currentSaveStatus().class,
                 )}
               >
@@ -222,8 +222,6 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                   fill="none"
                   stroke="currentColor"
                   stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
                   d="M12 5v14m-7-7h14"
                 />
                 <title>New</title>
@@ -271,8 +269,6 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                               fill="none"
                               stroke="currentColor"
                               stroke-width="2"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
                               d="M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
                             />
                             <title>Project</title>
@@ -329,7 +325,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                                 onKeyUp={menu().stopPropagation}
                                 onPointerUp={menu().stopPropagation}
                                 onPointerMove={menu().stopPropagation}
-                                class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 pr-12 text-xs text-neutral-100 outline-none focus:border-neutral-500"
+                                class="w-full border border-neutral-700 bg-neutral-800 px-2 py-1 pr-12 text-xs text-neutral-100 outline-none focus:border-neutral-500"
                                 ref={(element) => {
                                   const stopCapture = (event: Event) => {
                                     event.stopPropagation();
@@ -375,7 +371,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                           >
                             <button
                               class={cn(
-                                "rounded p-1",
+                                "p-1",
                                 menu().deletingProjectId() === projectId
                                   ? "cursor-not-allowed text-neutral-400 opacity-60"
                                   : "cursor-pointer text-green-500 hover:text-green-400",
@@ -402,8 +398,6 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                                   fill="none"
                                   stroke="currentColor"
                                   stroke-width="2"
-                                  stroke-linecap="round"
-                                  stroke-linejoin="round"
                                   d="m5 12l5 5L20 7"
                                 />
                                 <title>Confirm</title>
@@ -411,7 +405,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                             </button>
                             <button
                               class={cn(
-                                "rounded p-1",
+                                "p-1",
                                 menu().deletingProjectId() === projectId
                                   ? "cursor-not-allowed text-neutral-400 opacity-60"
                                   : "cursor-pointer text-neutral-400 hover:text-neutral-300",
@@ -433,8 +427,6 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                                 <path
                                   fill="none"
                                   stroke="currentColor"
-                                  stroke-linecap="round"
-                                  stroke-linejoin="round"
                                   stroke-width="2"
                                   d="m7 7l10 10M17 7L7 17"
                                 />
@@ -446,7 +438,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                             <div class="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-1">
                               <button
                                 class={cn(
-                                  "rounded p-1",
+                                  "p-1",
                                   isRenaming()
                                     ? "cursor-not-allowed text-neutral-400 opacity-60"
                                     : "cursor-pointer text-green-500 hover:text-green-400",
@@ -471,8 +463,6 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                                     fill="none"
                                     stroke="currentColor"
                                     stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
                                     d="m5 12l5 5L20 7"
                                   />
                                   <title>Confirm</title>
@@ -480,7 +470,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                               </button>
                               <button
                                 class={cn(
-                                  "rounded p-1",
+                                  "p-1",
                                   isRenaming()
                                     ? "cursor-not-allowed text-neutral-400 opacity-60"
                                     : "cursor-pointer text-neutral-400 hover:text-neutral-300",
@@ -502,8 +492,6 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                                   <path
                                     fill="none"
                                     stroke="currentColor"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
                                     stroke-width="2"
                                     d="m7 7l10 10M17 7L7 17"
                                   />
@@ -537,8 +525,6 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                             fill="none"
                             stroke="currentColor"
                             stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
                             d="M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
                           />
                           <title>Project</title>
@@ -579,16 +565,12 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                                 fill="none"
                                 stroke="currentColor"
                                 stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
                                 d="M12 20h9"
                               />
                               <path
                                 fill="none"
                                 stroke="currentColor"
                                 stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
                                 d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"
                               />
                               <title>Edit</title>
@@ -613,8 +595,6 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
                                 fill="none"
                                 stroke="currentColor"
                                 stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
                                 d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m-1 0v14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V6m3 4v8m4-8v8"
                               />
                               <title>Delete</title>

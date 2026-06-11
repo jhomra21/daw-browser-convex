@@ -165,7 +165,7 @@ const ExportDialog: Component<Props> = (props) => {
         <div class="flex flex-col gap-3 py-2">
           <div class="flex items-center gap-3">
             <label class="text-sm w-24 text-neutral-300">Source</label>
-            <select class="bg-neutral-900 text-neutral-100 border border-neutral-700 rounded px-2 py-1 text-sm" value={source()} onChange={(e) => setSource(readExportSource(e.currentTarget.value))}>
+            <select class="bg-neutral-900 text-neutral-100 border border-neutral-700 px-2 py-1 text-sm" value={source()} onChange={(e) => setSource(readExportSource(e.currentTarget.value))}>
               <option value="mixdown">Mixdown</option>
               <option value="all-stems">All track stems</option>
               <option value="selected-stems" disabled={!selectedStemAvailable()}>Selected track stem</option>
@@ -173,7 +173,7 @@ const ExportDialog: Component<Props> = (props) => {
           </div>
           <div class="flex items-center gap-3">
             <label class="text-sm w-24 text-neutral-300">Range</label>
-            <select class="bg-neutral-900 text-neutral-100 border border-neutral-700 rounded px-2 py-1 text-sm" value={mode()} onChange={(e) => setMode(readExportMode(e.currentTarget.value))}>
+            <select class="bg-neutral-900 text-neutral-100 border border-neutral-700 px-2 py-1 text-sm" value={mode()} onChange={(e) => setMode(readExportMode(e.currentTarget.value))}>
               <option value="whole">Whole timeline</option>
               <option value="loop" disabled={!props.loopEnabled}>Loop region</option>
               <option value="custom">Custom</option>
@@ -189,7 +189,7 @@ const ExportDialog: Component<Props> = (props) => {
                     const supported = formatSupported(item)
                     const selected = () => selectedFormats().includes(item)
                     return (
-                      <label class="flex items-center gap-1 rounded border border-neutral-700 px-2 py-1 text-sm text-neutral-200">
+                      <label class="flex items-center gap-1 border border-neutral-700 px-2 py-1 text-sm text-neutral-200">
                         <input
                           type="checkbox"
                           checked={selected()}
@@ -207,9 +207,9 @@ const ExportDialog: Component<Props> = (props) => {
           <Show when={mode() === 'custom'}>
             <div class="flex items-center gap-3">
               <label class="text-sm w-24 text-neutral-300">Start (s)</label>
-              <input type="number" step="0.01" class="w-28 bg-neutral-900 text-neutral-100 border border-neutral-700 rounded px-2 py-1 text-sm" value={startSec()} onInput={(e) => setStartSec(parseFloat(e.currentTarget.value) || 0)} />
+              <input type="number" step="0.01" class="w-28 bg-neutral-900 text-neutral-100 border border-neutral-700 px-2 py-1 text-sm" value={startSec()} onInput={(e) => setStartSec(parseFloat(e.currentTarget.value) || 0)} />
               <label class="text-sm text-neutral-300">End (s)</label>
-              <input type="number" step="0.01" class="w-28 bg-neutral-900 text-neutral-100 border border-neutral-700 rounded px-2 py-1 text-sm" value={endSec()} onInput={(e) => setEndSec(parseFloat(e.currentTarget.value) || 0)} />
+              <input type="number" step="0.01" class="w-28 bg-neutral-900 text-neutral-100 border border-neutral-700 px-2 py-1 text-sm" value={endSec()} onInput={(e) => setEndSec(parseFloat(e.currentTarget.value) || 0)} />
             </div>
           </Show>
           <Show when={error()}>

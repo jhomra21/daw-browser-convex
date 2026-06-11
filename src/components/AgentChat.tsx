@@ -742,7 +742,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
           <div class="flex items-center gap-2">
             <button
               class={cn(
-                'rounded border px-2 py-1 text-xs hover:bg-neutral-800',
+                'border px-2 py-1 text-xs hover:bg-neutral-800',
                 autoApply() ? 'border-green-500 text-green-400' : 'border-neutral-600 text-neutral-300',
               )}
               aria-pressed={autoApply()}
@@ -758,7 +758,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
               <div class={m.role === 'user' ? 'text-right' : 'text-left'}>
                 <div
                   class={cn(
-                    'inline-block max-w-[90%] rounded-md px-2 py-1 text-sm',
+                    'inline-block max-w-[90%] px-2 py-1 text-sm',
                     m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-neutral-800 text-neutral-100',
                   )}
                 >
@@ -768,17 +768,17 @@ const AgentChat: Component<AgentChatProps> = (props) => {
             )}</For>
             <div ref={el => (bottomAnchorRef = el)} />
             <Show when={!autoApply() && parsedCommands()}>
-              <div class="mt-2 p-2 bg-neutral-800 border border-neutral-700 rounded">
+              <div class="mt-2 p-2 bg-neutral-800 border border-neutral-700 ">
                 <div class="text-xs text-neutral-300 mb-1">Proposed changes (JSON):</div>
                 <pre class="text-2xs leading-snug text-neutral-200 overflow-x-auto max-h-32"><code>{JSON.stringify(parsedCommands(), null, 2)}</code></pre>
                 <div class="flex gap-2 mt-2 justify-end">
                   <button
-                    class="px-2 py-1 text-xs rounded border border-neutral-600 text-neutral-200 hover:bg-neutral-700 disabled:opacity-50"
+                    class="px-2 py-1 text-xs border border-neutral-600 text-neutral-200 hover:bg-neutral-700 disabled:opacity-50"
                     disabled={executing()}
                     onClick={() => void applyCommands()}
                   >{executing() ? 'Applying…' : 'Apply changes'}</button>
                   <button
-                    class="px-2 py-1 text-xs rounded border border-neutral-700 text-neutral-400 hover:text-neutral-200"
+                    class="px-2 py-1 text-xs border border-neutral-700 text-neutral-400 hover:text-neutral-200"
                     onClick={() => setParsedCommands(null)}
                   >Dismiss</button>
                 </div>
@@ -791,7 +791,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
         </div>
         <div class="border-t border-neutral-800 p-2">
           <textarea
-            class="h-[4.5rem] w-full resize-none rounded bg-neutral-800 p-2 text-sm text-neutral-100 outline-none"
+            class="h-[4.5rem] w-full resize-none bg-neutral-800 p-2 text-sm text-neutral-100 outline-none"
             placeholder="Ask to add tracks, effects, synths, or clips..."
             value={input()}
             onInput={(e) => setInput(e.currentTarget.value)}
@@ -801,7 +801,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
           <div class="flex justify-end pt-2">
             <button
               disabled={streaming()}
-              class="bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 text-white text-sm px-3 py-1 rounded border border-neutral-600"
+              class="bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 text-white text-sm px-3 py-1 border border-neutral-600"
               onClick={() => void sendMessage()}
             >
               {streaming() ? 'Sending…' : 'Send'}

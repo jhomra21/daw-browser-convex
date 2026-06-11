@@ -363,7 +363,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         >
           <span>{mediaStatusLabel()}</span>
           <button
-            class="rounded border border-red-300/40 px-1 py-0.5 text-[9px] text-red-50 hover:bg-red-300/20"
+            class="border border-red-300/40 px-1 py-0.5 text-[9px] text-red-50 hover:bg-red-300/20"
             onClick={(event) => {
               event.stopPropagation();
               props.onRetryMedia?.(props.clip.id);
@@ -372,7 +372,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
             Retry
           </button>
           <button
-            class="rounded border border-red-300/40 px-1 py-0.5 text-[9px] text-red-50 hover:bg-red-300/20"
+            class="border border-red-300/40 px-1 py-0.5 text-[9px] text-red-50 hover:bg-red-300/20"
             onClick={(event) => {
               event.stopPropagation();
               props.onReplaceMedia?.(props.trackId, props.clip.id);
@@ -381,7 +381,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
             Replace
           </button>
           <button
-            class="rounded border border-red-300/40 px-1 py-0.5 text-[9px] text-red-50 hover:bg-red-300/20"
+            class="border border-red-300/40 px-1 py-0.5 text-[9px] text-red-50 hover:bg-red-300/20"
             onClick={(event) => {
               event.stopPropagation();
               props.onRemoveMissingMedia?.(props.trackId, props.clip.id);

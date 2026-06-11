@@ -46,7 +46,7 @@ function FeatureCard(props: {
   visual: JSX.Element
 }) {
   return (
-    <div class="about-feature-card h-full min-h-85 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900/60">
+    <div class="about-feature-card h-full min-h-85 overflow-hidden border border-neutral-800 bg-neutral-900/60">
       <div class="h-full md:flex">
         <div class="p-6 md:flex-1">
           <h3 class="text-lg font-semibold">{props.title}</h3>
@@ -54,7 +54,7 @@ function FeatureCard(props: {
           <ul class="mt-4 list-disc space-y-1 pl-5 text-sm text-neutral-300">
             {props.children}
           </ul>
-          <div class="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
+          <div class="mt-4 border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
             Example: {props.example}
           </div>
         </div>
@@ -72,7 +72,7 @@ function About() {
     <main class="about-page min-h-screen bg-gradient-to-b from-neutral-950 to-neutral-900 text-neutral-100">
       <section class="relative container mx-auto px-4 pt-20 pb-10 text-center">
         <div class="pointer-events-none absolute inset-0 -z-10">
-          <div class="mx-auto -mt-16 h-64 w-144 rounded-full bg-[radial-gradient(closest-side,rgba(120,120,255,0.25),transparent)] blur-3xl" />
+          <div class="mx-auto -mt-16 h-64 w-144 bg-[radial-gradient(closest-side,rgba(120,120,255,0.25),transparent)] blur-3xl" />
         </div>
 
         <div class="about-hero-copy">
@@ -87,7 +87,7 @@ function About() {
             {session.data ? (
               <a
                 href={redirectTarget()}
-                class="inline-flex items-center justify-center rounded-md border border-neutral-700/20 bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                class="inline-flex items-center justify-center border border-neutral-700/20 bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
               >
                 Go to app
               </a>
@@ -95,28 +95,28 @@ function About() {
               <Link
                 to="/Login"
                 search={{ redirect: search().redirect }}
-                class="inline-flex items-center justify-center rounded-md border border-neutral-700/20 bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                class="inline-flex items-center justify-center border border-neutral-700/20 bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
               >
                 Get started - Sign in
               </Link>
             ) : (
               <Link
                 to="/Login"
-                class="inline-flex items-center justify-center rounded-md border border-neutral-700/20 bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                class="inline-flex items-center justify-center border border-neutral-700/20 bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
               >
                 Get started - Sign in
               </Link>
             )}
             <a
               href="#features"
-              class="inline-flex items-center justify-center rounded-md border border-neutral-800 px-6 py-3 text-sm font-medium text-neutral-200 hover:bg-neutral-900/60"
+              class="inline-flex items-center justify-center border border-neutral-800 px-6 py-3 text-sm font-medium text-neutral-200 hover:bg-neutral-900/60"
             >
               See features
             </a>
           </div>
         </div>
 
-        <div class="about-hero-media mx-auto mt-12 aspect-video w-full max-w-5xl overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900/60 shadow-2xl">
+        <div class="about-hero-media mx-auto mt-12 aspect-video w-full max-w-5xl overflow-hidden border border-neutral-800 bg-neutral-900/60 shadow-2xl">
           <img src="/landing-page-thumbnail.png" alt="MediaBunny DAW screenshot" class="w-full h-full object-contain p-4" loading='eager' />
         </div>
       </section>
@@ -204,7 +204,7 @@ function About() {
       </section>
 
       <section id="stack" class="container mx-auto px-4 pb-16">
-        <div class="about-feature-card rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 md:p-8">
+        <div class="about-feature-card border border-neutral-800 bg-neutral-900/50 p-6 md:p-8">
           <div class="grid grid-cols-3 sm:grid-cols-6 gap-6 place-items-center">
 
             <a href="https://www.convex.dev/" target="_blank" rel="noreferrer" class="group flex flex-col items-center gap-3 text-neutral-300 hover:text-white">

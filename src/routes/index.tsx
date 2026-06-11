@@ -64,13 +64,13 @@ function Index() {
     <main class="h-screen w-screen overflow-hidden">
       {requiresCloudLogin() ? (
         <section class="flex h-full w-full items-center justify-center bg-neutral-950 px-6 text-neutral-100">
-          <div class="w-full max-w-md rounded-2xl border border-neutral-800 bg-neutral-900 p-6 shadow-2xl shadow-black/40">
+          <div class="w-full max-w-md border border-neutral-800 bg-neutral-900 p-6 shadow-2xl shadow-black/40">
             <h1 class="text-2xl font-semibold tracking-tight">Sign in to open cloud project</h1>
             <p class="mt-2 text-sm text-neutral-400">
               Local projects open without an account. Cloud and shared projects require sign-in.
             </p>
             <a
-              class="mt-6 inline-flex h-10 items-center rounded-md bg-neutral-100 px-4 text-sm font-medium text-neutral-950 hover:bg-neutral-200"
+              class="mt-6 inline-flex h-10 items-center bg-neutral-100 px-4 text-sm font-medium text-neutral-950 hover:bg-neutral-200"
               href={loginUrl()}
             >
               Sign in

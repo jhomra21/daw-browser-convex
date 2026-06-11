@@ -68,7 +68,7 @@ export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: Loop
     audioEngine.stopAllSources()
     audioEngine.onTransportSeek(wrapped, SCHED_AHEAD_SEC)
     audioEngine.scheduleAllClipsFromPlayhead(tracks, wrapped)
-    setStartedCtxTime(audioEngine.currentTime)
+    setStartedCtxTime(audioEngine.currentTime + SCHED_AHEAD_SEC)
     setStartedPlayheadSec(wrapped)
     return { sec: wrapped, looped: true }
   }
@@ -114,6 +114,7 @@ export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: Loop
     audioEngine.onTransportSeek(playheadSec(), SCHED_AHEAD_SEC)
     const { isActive, end } = getLoopParams()
     audioEngine.scheduleAllClipsFromPlayhead(tracks, playheadSec(), isActive ? { endLimitSec: end } : undefined)
+    setStartedCtxTime(audioEngine.currentTime + SCHED_AHEAD_SEC)
     setRafId(requestAnimationFrame(tick))
   }
 
@@ -147,6 +148,7 @@ export function useTimelinePlayback(audioEngine: AudioEngine, loopOptions?: Loop
       audioEngine.onTransportSeek(sec, SCHED_AHEAD_SEC)
       const { isActive, end } = getLoopParams()
       audioEngine.scheduleAllClipsFromPlayhead(tracks, sec, isActive ? { endLimitSec: end } : undefined)
+      setStartedCtxTime(audioEngine.currentTime + SCHED_AHEAD_SEC)
     }
   }
 

@@ -10,6 +10,7 @@
     "./render-waveform": "./src/render-waveform.ts",
     "./resample-peak-pairs": "./src/resample-peak-pairs.ts",
     "./select-waveform-window": "./src/select-waveform-window.ts",
+    "./source-identity": "./src/source-identity.ts",
     "./types": "./src/types.ts"
   },
   "scripts": {

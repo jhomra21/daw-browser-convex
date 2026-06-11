@@ -16,11 +16,20 @@ export type PeakAssetRecord = {
   durationSec: number
   sampleRate: number
   channelCount: number
+  sourceIdentity?: WaveformSourceIdentity
   levels: PeakLevelRecord[]
+}
+
+export type WaveformSourceIdentity = {
+  assetKey: string
+  durationSec?: number
+  sampleRate?: number
+  channelCount?: number
 }
 
 export type EnsureWaveformAssetOptions = {
   assetKey: string
+  sourceIdentity?: WaveformSourceIdentity
   sampleUrl?: string
   buffer?: AudioBuffer | null
 }

@@ -2,6 +2,9 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "ignoreFiles": [
     "src/components/nav-user.tsx",
+    "src/lib/audio-waveform-layout.test.js",
+    "packages/waveforms/src/asset-store.test.ts",
+    "packages/waveforms/src/source-identity.test.ts",
     "src/components/ui/**/*.tsx"
   ],
   "ignoreIssues": {

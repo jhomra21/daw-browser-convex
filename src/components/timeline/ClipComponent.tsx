@@ -1,13 +1,10 @@
 import {
   type Component,
   createEffect,
-  createSignal,
-  onCleanup,
 } from "solid-js";
 
 import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
-import { getWaveformSlice } from "@daw-browser/waveforms/select-waveform-window";
-import { resolveClipSampleUrl } from "@daw-browser/shared";
+import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { LANE_HEIGHT, PPS } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
@@ -33,6 +30,7 @@ type ClipComponentProps = {
   onRetryMedia?: (clipId: string) => void;
   onReplaceMedia?: (trackId: Track["id"], clipId: string) => void;
   onRemoveMissingMedia?: (trackId: Track["id"], clipId: string) => void;
+  ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>;
   bpm: number;
 };
 
@@ -42,45 +40,14 @@ const WAVEFORM_PAD_Y = 6;
 const AUDIO_WAVEFORM_BOX_H = 34;
 const AUDIO_WAVEFORM_TOP_PX = 8;
 
-type AudioWaveformLayout = {
-  sourceDurationSec: number;
-  padPx: number;
-  drawCols: number;
-  sourceStartSec: number;
-  sourceEndSec: number;
-};
-
-function getAudioWaveformLayout(clip: RuntimeClip, cssW: number): AudioWaveformLayout {
-  const sourceDurationSec = Math.max(clip.sourceDurationSec ?? 0, 0);
-  const padPx = Math.max(0, Math.floor((clip.leftPadSec ?? 0) * PPS));
-  const offsetPx = Math.max(0, Math.floor((clip.bufferOffsetSec ?? 0) * PPS));
-  const sourcePxW = Math.max(1, Math.floor(sourceDurationSec * PPS));
-  const drawCols = Math.max(
-    0,
-    Math.min(cssW - padPx, Math.max(0, sourcePxW - offsetPx)),
-  );
-  const sourceStartSec = Math.max(0, clip.bufferOffsetSec ?? 0);
-  const sourceEndSec = Math.min(
-    sourceDurationSec,
-    sourceStartSec + drawCols / PPS,
-  );
-
-  return {
-    sourceDurationSec,
-    padPx,
-    drawCols,
-    sourceStartSec,
-    sourceEndSec,
-  };
-}
-
 const ClipComponent: Component<ClipComponentProps> = (props) => {
   let canvasRef: HTMLCanvasElement | undefined;
-  let waveformRequestId = 0;
 
-  const [waveformPeaks, setWaveformPeaks] = createSignal<Uint8Array | null>(
-    null,
-  );
+  const waveform = useClipWaveformViewModel({
+    clip: () => props.clip,
+    cssWidthPx: () => clipWidthPx(),
+    ensureClipBuffer: props.ensureClipBuffer,
+  });
   const isGhost = () => props.clip.id.startsWith("__dup_preview:");
   const mediaStatusLabel = () => {
     if (props.clip.mediaStatus === "permission-denied") return "Permission needed";
@@ -187,8 +154,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       return;
     }
 
-    const { padPx, drawCols } = getAudioWaveformLayout(props.clip, cssW);
-    const peaks = waveformPeaks();
+    const { padPx, drawCols } = waveform.layout();
+    const peaks = waveform.peaks();
 
     if (!peaks || drawCols <= 0) {
       ctx.strokeStyle = "rgba(255,255,255,0.10)";
@@ -223,48 +190,6 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
   }
 
   createEffect(() => {
-    const midi: any = (props.clip as any).midi;
-    const buffer = props.clip.buffer ?? null;
-    const assetKey = props.clip.waveformAssetKey ?? props.clip.sourceAssetKey;
-    const sampleUrl = resolveClipSampleUrl(props.clip);
-    const cssW = Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS));
-    const { sourceDurationSec, drawCols, sourceStartSec, sourceEndSec } =
-      getAudioWaveformLayout(props.clip, cssW);
-
-    if (midi) {
-      setWaveformPeaks(null);
-      return;
-    }
-    if (
-      drawCols <= 0 ||
-      sourceDurationSec <= 0 ||
-      !assetKey ||
-      (!buffer && !sampleUrl)
-    ) {
-      setWaveformPeaks(null);
-      return;
-    }
-
-    const requestId = ++waveformRequestId;
-    void getWaveformSlice({
-      assetKey,
-      sampleUrl,
-      buffer,
-      sourceStartSec,
-      sourceEndSec,
-      bins: drawCols,
-    })
-      .then((next) => {
-        if (requestId !== waveformRequestId) return;
-        setWaveformPeaks(next);
-      })
-      .catch(() => {
-        if (requestId !== waveformRequestId) return;
-        setWaveformPeaks(null);
-      });
-  });
-
-  createEffect(() => {
     void props.clip.duration;
     void props.clip.buffer;
     void props.clip.sampleUrl;
@@ -286,12 +211,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       : "";
     void midiSignature;
     void props.bpm;
-    void waveformPeaks();
+    void waveform.peaks();
     drawWaveform();
-  });
-
-  onCleanup(() => {
-    waveformRequestId += 1;
   });
 
   const clipWidthPx = () =>

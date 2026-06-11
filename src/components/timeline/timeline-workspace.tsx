@@ -139,6 +139,7 @@ export default function TimelineWorkspace(props: Props) {
                     onRemoveMissingMedia={(trackId, clipId) => {
                       void props.removeMissingMediaClip(trackId, clipId);
                     }}
+                    ensureClipBuffer={props.ensureClipBuffer}
                     bpm={props.bpm}
                     onClipDblClick={(_, clipId) => {
                       const match = props.trackLookup.clipEntryById.get(clipId);

@@ -1,10 +1,11 @@
 import { extractPeakAsset } from './extract-peaks'
 import { loadPeakAssetRecord, loadPeakChunk, storePeakAssetRecord, storePeakChunk } from './peak-db'
-import type { EnsureWaveformAssetOptions, PeakAssetRecord } from './types'
+import { createWaveformSourceIdentity, peakAssetMatchesSourceIdentity } from './source-identity'
+import type { EnsureWaveformAssetOptions, PeakAssetRecord, WaveformSourceIdentity } from './types'
 
 const assetRecordCache = new Map<string, PeakAssetRecord>()
 const assetChunkCache = new Map<string, Uint8Array>()
-const pendingAssetLoads = new Map<string, Promise<PeakAssetRecord | null>>()
+const pendingAssetLoads = new Map<string, Promise<void>>()
 const pendingChunkLoads = new Map<string, Promise<Uint8Array | null>>()
 
 function isPeakAssetRecord(value: unknown): value is PeakAssetRecord {
@@ -59,34 +60,67 @@ async function persistPeakAsset(record: PeakAssetRecord, chunks: Array<{ meta: {
   await Promise.all(chunks.map((chunk) => storePeakChunk(chunk.meta.chunkKey, chunk.data)))
 }
 
+async function runSerializedAssetLoad(
+  assetKey: string,
+  load: () => Promise<PeakAssetRecord | null>,
+) {
+  const previous = pendingAssetLoads.get(assetKey)
+  let release: () => void = () => {}
+  const current = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  pendingAssetLoads.set(assetKey, current)
+
+  try {
+    if (previous) {
+      try {
+        await previous
+      } catch {}
+    }
+    return await load()
+  } finally {
+    release()
+    if (pendingAssetLoads.get(assetKey) === current) pendingAssetLoads.delete(assetKey)
+  }
+}
+
+function createBufferSourceIdentity(assetKey: string, buffer: AudioBuffer): WaveformSourceIdentity {
+  return createWaveformSourceIdentity({
+    assetKey,
+    durationSec: buffer.duration,
+    sampleRate: buffer.sampleRate,
+    channelCount: buffer.numberOfChannels,
+  })
+}
+
+function createSourceIdentity(options: EnsureWaveformAssetOptions): WaveformSourceIdentity | undefined {
+  if (options.sourceIdentity) return createWaveformSourceIdentity(options.sourceIdentity)
+  if (options.buffer) return createBufferSourceIdentity(options.assetKey, options.buffer)
+  return undefined
+}
+
 export async function ensurePeakAsset(options: EnsureWaveformAssetOptions): Promise<PeakAssetRecord | null> {
   const assetKey = options.assetKey
+  const sourceIdentity = createSourceIdentity(options)
   const cached = assetRecordCache.get(assetKey)
-  if (cached) return cached
+  if (cached && peakAssetMatchesSourceIdentity(cached, sourceIdentity)) return cached
 
-  const pending = pendingAssetLoads.get(assetKey)
-  if (pending) return await pending
+  return await runSerializedAssetLoad(assetKey, async () => {
+    const cached = assetRecordCache.get(assetKey)
+    if (cached && peakAssetMatchesSourceIdentity(cached, sourceIdentity)) return cached
 
-  const task = (async () => {
     const stored = await loadPeakAssetRecord(assetKey)
-    if (isPeakAssetRecord(stored)) {
+    if (isPeakAssetRecord(stored) && peakAssetMatchesSourceIdentity(stored, sourceIdentity)) {
       assetRecordCache.set(assetKey, stored)
       return stored
     }
 
     const buffer = options.buffer ?? (options.sampleUrl ? await decodeBufferFromSampleUrl(options.sampleUrl) : null)
     if (!buffer) return null
-    const extracted = extractPeakAsset(buffer, assetKey)
+    const extracted = extractPeakAsset(buffer, assetKey, sourceIdentity)
     await persistPeakAsset(extracted.record, extracted.chunks)
     return extracted.record
-  })()
-
-  pendingAssetLoads.set(assetKey, task)
-  try {
-    return await task
-  } finally {
-    if (pendingAssetLoads.get(assetKey) === task) pendingAssetLoads.delete(assetKey)
-  }
+  })
 }
 
 export async function loadPeakChunkData(chunkKey: string): Promise<Uint8Array | null> {

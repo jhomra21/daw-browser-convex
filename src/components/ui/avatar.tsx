@@ -16,7 +16,7 @@ const Avatar = <T extends ValidComponent = "span">(
   const [local, others] = splitProps(props as AvatarRootProps, ["class"])
   return (
     <ImagePrimitive.Root
-      class={cn("relative flex size-10 shrink-0 overflow-hidden", local.class)}
+      class={cn("relative flex size-10 shrink-0 overflow-hidden rounded-full", local.class)}
       {...others}
     />
   )

@@ -2,6 +2,7 @@ import type { InsertSampleInput } from "~/hooks/useTimelineClipImport";
 import type { TimelineProject } from "~/hooks/useTimelineData";
 import type { CloudBackupStatus } from "~/hooks/useLocalProjectActions";
 import type { Track } from "@daw-browser/timeline-core/types";
+import type { DashboardView } from "~/components/dashboard/types";
 
 export type TimelineProjectMenuModel = {
   currentProjectId: string;
@@ -13,6 +14,7 @@ export type TimelineProjectMenuModel = {
   onDeleteProject: (projectId: string) => void | Promise<void>;
   onRenameProject: (projectId: string, name: string) => void | Promise<void>;
   onOpenExport: () => void;
+  onOpenDashboard: (view: DashboardView) => void;
   onShare?: () => string | void | Promise<string | void>;
   onChooseProjectFolder?: () => void | Promise<void>;
   onBackUpNow?: () => void | Promise<void>;

@@ -42,12 +42,15 @@ import { useTimelineSelectionState } from "~/hooks/useTimelineSelectionState";
 import { useTimelinePersistenceController } from "~/hooks/useTimelinePersistenceController";
 import { useTimelineAudioLifecycle } from "~/hooks/useTimelineAudioLifecycle";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
+import { useProjectSamples } from "~/hooks/useProjectSamples";
 import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
 import TimelineChrome from "./timeline/timeline-chrome";
 import AppMessageDialog, { type AppMessageDialogState } from "./timeline/app-message-dialog";
 import CloudBackupDialog from "./timeline/cloud-backup-dialog";
 import DeleteTrackDialog from "./timeline/delete-track-dialog";
 import TimelineWorkspace from "./timeline/timeline-workspace";
+import { Dashboard } from "~/components/dashboard/dashboard";
+import type { DashboardView } from "~/components/dashboard/types";
 
 type AgentMixOp = {
   type: "setMute" | "setSolo";
@@ -57,7 +60,14 @@ type AgentMixOp = {
   issuedAt: number;
 };
 
-const Timeline: Component = () => {
+type TimelineProps = {
+  bootstrapIfEmpty: boolean;
+  dashboardEnabled: boolean;
+  dashboardView: Accessor<DashboardView | null>;
+  setDashboardParam: (view: DashboardView | null) => void;
+};
+
+const Timeline: Component<TimelineProps> = (props) => {
   const [bottomFXOpen, setBottomFXOpen] = createSignal(true);
   const [agentPanelOpen, setAgentPanelOpen] = createSignal(false);
   const [sharedChatOpen, setSharedChatOpen] = createSignal(false);
@@ -88,7 +98,10 @@ const Timeline: Component = () => {
     createProject,
     renameProject,
     deleteProject,
-  } = useTimelineData({ notify });
+  } = useTimelineData({
+    notify,
+    bootstrapIfEmpty: props.bootstrapIfEmpty,
+  });
   const localProject = useLocalProjectActions({
     projectId,
     userId,
@@ -642,6 +655,7 @@ const Timeline: Component = () => {
   };
 
   useTimelineKeyboard({
+    enabled: () => props.dashboardView() === null,
     onSpace: () => {
       if (isRecording()) {
         handleTransportPause();
@@ -713,6 +727,12 @@ const Timeline: Component = () => {
   };
 
   const duration = () => timelineDurationSec(renderTracks());
+  const dashboardSamples = useProjectSamples({
+    projectId,
+    userId,
+    enabled: () => props.dashboardView() === "samples",
+    includeFilePath: () => true,
+  });
 
   useTimelineAudioLifecycle({
     audioEngine,
@@ -753,6 +773,7 @@ const Timeline: Component = () => {
       onDeleteProject: deleteProject,
       onRenameProject: renameProject,
       onOpenExport: () => setExportOpen(true),
+      onOpenDashboard: props.setDashboardParam,
       onShare: handleShare,
       onChooseProjectFolder: localProject.chooseProjectStorageFolder,
       onBackUpNow: localProject.backUpNow,
@@ -862,6 +883,27 @@ const Timeline: Component = () => {
         onDismissLocalSaveFailure={() => localProject.setLocalSaveFailure(null)}
         panels={panelsProps()}
       />
+
+      {props.dashboardEnabled ? (
+        <Dashboard
+          view={props.dashboardView()}
+          setView={props.setDashboardParam}
+          model={{
+            projectMenu: transportProps().projectMenu,
+            samples: dashboardSamples.samples,
+            bpm,
+            setBpm: (value) => setBpm(clampBpm(value)),
+            metronomeEnabled,
+            toggleMetronome: () => setMetronomeEnabled((prev) => !prev),
+            gridEnabled,
+            toggleGrid: () => setGridEnabled((prev) => !prev),
+            gridDenominator,
+            setGridDenominator,
+            loopEnabled,
+            toggleLoop: () => setLoopEnabled((prev) => !prev),
+          }}
+        />
+      ) : null}
 
       <CloudBackupDialog
         state={localProject.cloudBackupDialog()}

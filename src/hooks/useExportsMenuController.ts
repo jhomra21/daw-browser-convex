@@ -2,11 +2,13 @@ import { createSignal, type Accessor } from 'solid-js'
 
 import { useProjectExports } from '~/hooks/useProjectExports'
 import { copyText } from '~/lib/clipboard'
+import type { DashboardView } from '~/components/dashboard/types'
 
 type UseExportsMenuControllerOptions = {
   currentProjectId: Accessor<string>
   currentUserId: Accessor<string | undefined>
   onOpenExport: () => void
+  onOpenDashboard: (view: DashboardView) => void
 }
 
 export type ExportsMenuController = {
@@ -15,6 +17,7 @@ export type ExportsMenuController = {
   exports: ReturnType<typeof useProjectExports>['exports']
   copyText: (value?: string) => Promise<void>
   onOpenExport: () => void
+  onOpenDashboard: (view: DashboardView) => void
 }
 
 export function useExportsMenuController(
@@ -33,5 +36,6 @@ export function useExportsMenuController(
     exports: exportsQ.exports,
     copyText,
     onOpenExport: options.onOpenExport,
+    onOpenDashboard: options.onOpenDashboard,
   }
 }

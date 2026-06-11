@@ -4,6 +4,7 @@ import { readLocationSearchParam } from '~/lib/location-search-param'
 
 type UseTimelineProjectRouteOptions = {
   onLocalProjectOpened: (projectId: string) => void
+  bootstrapIfEmpty: boolean
 }
 
 const updateRoomUrl = (projectId: string, mode: 'push' | 'replace') => {
@@ -63,7 +64,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
   }
 
   onMount(() => {
-    const syncLocationState = (options?: { bootstrapIfEmpty?: boolean }) => {
+    const syncLocationState = () => {
       const nextProjectId = readLocationSearchParam('projectId')
       const nextShareToken = readLocationSearchParam('shareToken')
       setAcceptingShareToken(nextShareToken)
@@ -75,7 +76,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
         setBootstrapProjectId(null)
         setProjectIdState('')
       })
-      if (nextShareToken || !options?.bootstrapIfEmpty) return
+      if (nextShareToken || !options.bootstrapIfEmpty) return
       const generatedProjectId = crypto.randomUUID()
       resolveRoom(generatedProjectId, {
         history: 'replace',
@@ -83,7 +84,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
       })
     }
 
-    syncLocationState({ bootstrapIfEmpty: true })
+    syncLocationState()
     const syncRoomFromHistory = () => syncLocationState()
     window.addEventListener('popstate', syncRoomFromHistory)
     onCleanup(() => {

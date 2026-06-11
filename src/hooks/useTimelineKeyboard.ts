@@ -1,25 +1,28 @@
-import { onMount, onCleanup } from "solid-js";
+import { onMount, onCleanup, type Accessor } from "solid-js";
 
 type KeyboardHandlers = {
+  enabled: Accessor<boolean>;
   onSpace: () => void;
   onDelete: () => void;
-  onDuplicate?: () => void;
-  onAddAudioTrack?: () => void;
-  onAddReturnTrack?: () => void;
-  onAddGroupTrack?: () => void;
-  onAddInstrumentTrack?: () => void;
-  onOpenExport?: () => void;
-  onUndo?: () => void;
-  onRedo?: () => void;
+  onDuplicate: () => void;
+  onAddAudioTrack: () => void;
+  onAddReturnTrack: () => void;
+  onAddGroupTrack: () => void;
+  onAddInstrumentTrack: () => void;
+  onOpenExport: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
 };
 
 export function useTimelineKeyboard(handlers: KeyboardHandlers) {
   const captureOptions = { capture: true } as const;
 
   function onKeyDown(e: KeyboardEvent) {
-    const target = e.target as HTMLElement | null;
+    if (!handlers.enabled()) return;
+
+    const target = e.target;
     if (
-      target &&
+      target instanceof HTMLElement &&
       (target.tagName === "INPUT" ||
         target.tagName === "TEXTAREA" ||
         target.isContentEditable)
@@ -35,7 +38,7 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
     ) {
       e.preventDefault();
       e.stopPropagation();
-      handlers.onAddInstrumentTrack?.();
+      handlers.onAddInstrumentTrack();
       return;
     }
     // Audio: Shift + T (no Ctrl/Cmd)
@@ -47,7 +50,7 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
     ) {
       e.preventDefault();
       e.stopPropagation();
-      handlers.onAddAudioTrack?.();
+      handlers.onAddAudioTrack();
       return;
     }
     // Return: Shift + R (no Ctrl/Cmd)
@@ -59,7 +62,7 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
     ) {
       e.preventDefault();
       e.stopPropagation();
-      handlers.onAddReturnTrack?.();
+      handlers.onAddReturnTrack();
       return;
     }
     // Group: Shift + G (no Ctrl/Cmd)
@@ -71,7 +74,7 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
     ) {
       e.preventDefault();
       e.stopPropagation();
-      handlers.onAddGroupTrack?.();
+      handlers.onAddGroupTrack();
       return;
     }
 
@@ -79,7 +82,7 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
     if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) {
       e.preventDefault();
       e.stopPropagation();
-      handlers.onDuplicate?.();
+      handlers.onDuplicate();
       return;
     }
 
@@ -91,7 +94,7 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
     ) {
       e.preventDefault();
       e.stopPropagation();
-      handlers.onUndo?.();
+      handlers.onUndo();
       return;
     }
     // Redo: Ctrl/Cmd + Y
@@ -102,7 +105,7 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
     ) {
       e.preventDefault();
       e.stopPropagation();
-      handlers.onRedo?.();
+      handlers.onRedo();
       return;
     }
 
@@ -114,7 +117,7 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
     ) {
       e.preventDefault();
       e.stopPropagation();
-      handlers.onOpenExport?.();
+      handlers.onOpenExport();
       return;
     }
 

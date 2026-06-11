@@ -6,6 +6,7 @@ import { getPersistedAudioSource, type AudioSourceKind, type AudioSourceMetadata
 import { sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { ensureDefaultSampleMetadata, loadCachedDefaultSampleMetadata } from '~/lib/default-sample-cache'
 import { listLocalAssets } from '~/lib/local-assets'
+import { getProjectDirectoryHandle } from '~/lib/local-project-db'
 import { isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -38,6 +39,7 @@ export type ProjectSampleListItem = {
   assetKey: string
   sourceKind: AudioSourceKind
   url: string
+  filePath: string
   name: string
   duration: number
   source: AudioSourceMetadata
@@ -77,6 +79,7 @@ type UseProjectSamplesArgs = {
   projectId: Accessor<string>
   userId?: Accessor<string>
   enabled?: Accessor<boolean>
+  includeFilePath?: Accessor<boolean>
 }
 
 type UseProjectSamplesResult = {
@@ -225,9 +228,10 @@ function mergeDefaultSampleMetadata(
 }
 
 export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSamplesResult {
-  const { projectId, enabled, userId } = options
+  const { projectId, enabled, includeFilePath, userId } = options
   const [refreshKey, setRefreshKey] = createSignal(0)
   const [localSamples, setLocalSamples] = createSignal<ProjectSampleListItem[]>([])
+  const [localSamplesProjectId, setLocalSamplesProjectId] = createSignal('')
   const isLocalProject = createMemo(() => {
     const id = projectId()
     return Boolean(id && isLocalId('project', id))
@@ -260,6 +264,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
 
   const defaultSamplesQuery = useQuery(() => ({
     queryKey: ['default-samples'],
+    enabled: enabled ? enabled() : true,
     queryFn: async (): Promise<DefaultSampleCatalogItem[]> => {
       const res = await fetch('/api/default-samples').catch(() => null)
       if (!res || !res.ok) return []
@@ -274,19 +279,25 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
   }))
 
   createEffect(on(
-    () => [projectId(), enabled ? enabled() : true, refreshKey()] as const,
-    ([rid, isEnabled]) => {
-      if (!rid || !isEnabled || !isLocalId('project', rid)) {
+    () => [projectId(), enabled ? enabled() : true, includeFilePath ? includeFilePath() : false, refreshKey()] as const,
+    ([rid, isEnabled, shouldIncludeFilePath]) => {
+      if (!rid || !isLocalId('project', rid)) {
         setLocalSamples([])
+        setLocalSamplesProjectId('')
+        return
+      }
+      if (!isEnabled) {
         return
       }
 
-      const isCurrentProject = () => projectId() === rid && (!enabled || enabled()) && isLocalId('project', rid)
+      const isCurrentProject = () => projectId() === rid && (!enabled || enabled())
       void (async () => {
-        const [assets, snapshot] = await Promise.all([
+        const [assets, snapshot, directoryHandle] = await Promise.all([
           listLocalAssets(rid),
           createLocalTimelineRepository(rid).loadSnapshot(),
+          shouldIncludeFilePath ? getProjectDirectoryHandle(rid) : Promise.resolve(null),
         ])
+        const rootPath = directoryHandle?.name ?? rid
         const usagesByAsset = new Map<string, ProjectSampleUsage[]>()
         for (const clip of snapshot.clips) {
           if (!clip.sourceAssetKey || !clip.sourceKind || !clip.sourceDurationSec || !clip.sourceSampleRate || !clip.sourceChannelCount) continue
@@ -327,6 +338,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
             assetKey: asset.id,
             sourceKind: earliest?.sourceKind ?? 'upload',
             url: `local-asset:${asset.id}`,
+            filePath: `${rootPath}/assets/${asset.storagePath}`,
             name: asset.name || earliest?.name || 'Sample',
             duration: source.durationSec,
             source,
@@ -338,6 +350,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
         }
         if (!isCurrentProject()) return
         setLocalSamples(items)
+        setLocalSamplesProjectId(rid)
       })().catch(() => {
         if (isCurrentProject()) setLocalSamples([])
       })
@@ -395,7 +408,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
   })
 
   const samples = createMemo<ProjectSampleListItem[]>(() => {
-    if (isLocalProject()) return localSamples()
+    if (isLocalProject()) return localSamplesProjectId() === projectId() ? localSamples() : []
     const inventoryData = inventory.data
     const clipsData = clips.data
     if (!Array.isArray(inventoryData)) return []
@@ -447,6 +460,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
         assetKey: inv?.assetKey ?? fallback?.assetKey ?? key,
         sourceKind,
         url,
+        filePath: url,
         name,
         duration: source.durationSec,
         source,

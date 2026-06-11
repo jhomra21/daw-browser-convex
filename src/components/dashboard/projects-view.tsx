@@ -1,0 +1,236 @@
+import { createResource, createSignal, For, Show, type Accessor } from "solid-js";
+import { isLocalId } from "@daw-browser/shared";
+import { Button } from "~/components/ui/button";
+import ProjectDeleteDialog from "~/components/project-delete-dialog";
+import ProjectRenameDialog from "~/components/project-rename-dialog";
+import {
+  createLocalProject,
+  deleteLocalProject,
+  listLocalProjects,
+  renameLocalProject,
+  type LocalProjectEntry,
+} from "~/lib/local-project-db";
+import { flushLocalProjectPendingWrites } from "~/lib/local-project-pending-writes";
+import type { DashboardTimelineModel } from "./types";
+import { DashboardRow, DashboardScrollView, DashboardSection, EmptyDashboardState } from "./dashboard-shared";
+
+const formatUpdatedAt = (value: number) => {
+  if (!value) return "Never opened";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+};
+
+const getNextUntitledProjectName = (projects: LocalProjectEntry[]) => {
+  const names = new Set(projects.map((project) => project.name));
+  if (!names.has("Untitled")) return "Untitled";
+
+  let index = 2;
+  while (names.has(`Untitled ${index}`)) index += 1;
+  return `Untitled ${index}`;
+};
+
+type LocalProjectsDashboardViewProps = {
+  projects: Accessor<LocalProjectEntry[] | undefined>;
+  reloadProjects: () => void;
+  onOpenProject: (projectId: string) => void;
+};
+
+function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
+  const [busy, setBusy] = createSignal(false);
+  const [operationError, setOperationError] = createSignal<string | null>(null);
+  const [renamingProject, setRenamingProject] = createSignal<LocalProjectEntry | null>(null);
+  const [deletingProject, setDeletingProject] = createSignal<LocalProjectEntry | null>(null);
+
+  const createProject = async () => {
+    setOperationError(null);
+    setBusy(true);
+    try {
+      const project = await createLocalProject(getNextUntitledProjectName(props.projects() ?? []));
+      props.onOpenProject(project.id);
+    } catch {
+      setOperationError("This local project could not be created.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const renameProject = async (project: LocalProjectEntry, name: string) => {
+    setOperationError(null);
+    setBusy(true);
+    try {
+      await renameLocalProject(project.id, name);
+      setRenamingProject(null);
+      props.reloadProjects();
+    } catch {
+      setOperationError("This local project could not be renamed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeProject = async (project: LocalProjectEntry) => {
+    setOperationError(null);
+    setBusy(true);
+    try {
+      await flushLocalProjectPendingWrites(project.id);
+      await deleteLocalProject(project.id);
+      setDeletingProject(null);
+      props.reloadProjects();
+    } catch {
+      setOperationError("This local project could not be deleted.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div class="flex items-start justify-between gap-4 px-1">
+        <div>
+          <h2 class="text-2xl font-semibold tracking-tight text-neutral-100">Open a local project</h2>
+          <p class="mt-2 text-sm text-neutral-400">
+            Create or reopen a browser-local project. Sign-in is not required for local work.
+          </p>
+        </div>
+        <Button onClick={createProject} disabled={busy()}>
+          New project
+        </Button>
+      </div>
+
+      <Show when={operationError()}>
+        {(message) => (
+          <div class="rounded-lg border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+            {message()}
+          </div>
+        )}
+      </Show>
+
+      <div class="space-y-3">
+        <Show
+          when={props.projects()}
+          fallback={
+            <div class="rounded-xl border border-neutral-800 bg-neutral-900/80 p-4 text-sm text-neutral-400">
+              Loading local projects...
+            </div>
+          }
+        >
+          {(projectList) => (
+            <Show
+              when={projectList().length > 0}
+              fallback={
+                <div class="rounded-xl border border-dashed border-neutral-800 p-8 text-center text-sm text-neutral-400">
+                  No local projects yet.
+                </div>
+              }
+            >
+              <For each={projectList()}>
+                {(project) => (
+                  <article class="flex items-center justify-between gap-4 rounded-xl border border-neutral-800 bg-neutral-900/80 p-4">
+                    <button
+                      class="min-w-0 flex-1 text-left"
+                      type="button"
+                      onClick={() => props.onOpenProject(project.id)}
+                      disabled={busy()}
+                    >
+                      <div class="truncate font-medium text-neutral-100">{project.name}</div>
+                      <div class="mt-1 text-xs text-neutral-500">
+                        Last opened {formatUpdatedAt(project.lastOpenedAt)}
+                      </div>
+                    </button>
+                    <div class="flex shrink-0 gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setRenamingProject(project)} disabled={busy()}>
+                        Rename
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setDeletingProject(project)} disabled={busy()}>
+                        Delete
+                      </Button>
+                    </div>
+                  </article>
+                )}
+              </For>
+            </Show>
+          )}
+        </Show>
+      </div>
+
+      <ProjectRenameDialog
+        open={Boolean(renamingProject())}
+        project={renamingProject()}
+        busy={busy()}
+        onOpenChange={(open) => { if (!open) setRenamingProject(null); }}
+        onConfirm={(project, name) => { void renameProject(project, name); }}
+      />
+      <ProjectDeleteDialog
+        open={Boolean(deletingProject())}
+        project={deletingProject()}
+        busy={busy()}
+        onOpenChange={(open) => { if (!open) setDeletingProject(null); }}
+        onConfirm={(project) => { void removeProject(project); }}
+      />
+    </>
+  );
+}
+
+type DashboardProjectsViewProps = {
+  model?: DashboardTimelineModel;
+  onOpenProject?: (projectId: string) => void;
+};
+
+export function DashboardProjectsView(props: DashboardProjectsViewProps) {
+  const [localProjectsReloadToken, setLocalProjectsReloadToken] = createSignal(0);
+  const menu = () => props.model?.projectMenu;
+  const [localProjects] = createResource(
+    () => props.onOpenProject && !menu() ? localProjectsReloadToken() : null,
+    listLocalProjects,
+  );
+  const current = () => menu()?.projects.find((project) => project.projectId === menu()?.currentProjectId);
+  const localProjectsView = () => props.onOpenProject
+    ? (
+      <LocalProjectsDashboardView
+        projects={() => localProjects.latest ?? localProjects()}
+        reloadProjects={() => setLocalProjectsReloadToken((currentToken) => currentToken + 1)}
+        onOpenProject={props.onOpenProject}
+      />
+    )
+    : <EmptyDashboardState title="No project context" message="Open a project to manage project state from the dashboard." />;
+
+  return (
+    <DashboardScrollView>
+      <Show when={props.model} fallback={localProjectsView()} keyed>
+        {(model) => (
+          <>
+            <DashboardSection title="Current project">
+              <DashboardRow
+                label={current()?.name ?? model.projectMenu.currentProjectId}
+                value={isLocalId("project", model.projectMenu.currentProjectId) ? "Local project" : "Cloud project"}
+                action={<Button size="sm" variant="secondary" onClick={model.projectMenu.onOpenExport}>Export</Button>}
+              />
+            </DashboardSection>
+            <DashboardSection title="Projects">
+              <DashboardRow
+                label="New project"
+                value="Create a browser-local project."
+                action={<Button size="sm" variant="secondary" onClick={() => void model.projectMenu.onCreateProject()}>Create</Button>}
+              />
+              <For each={model.projectMenu.projects}>
+                {(project) => (
+                  <DashboardRow
+                    label={project.name ?? project.projectId}
+                    value={project.mode ?? (isLocalId("project", project.projectId) ? "Local" : "Cloud")}
+                    action={
+                      <Button size="sm" variant="ghost" onClick={() => model.projectMenu.onOpenProject(project.projectId)}>
+                        Open
+                      </Button>
+                    }
+                  />
+                )}
+              </For>
+            </DashboardSection>
+          </>
+        )}
+      </Show>
+    </DashboardScrollView>
+  );
+}

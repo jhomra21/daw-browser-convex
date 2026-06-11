@@ -10,12 +10,14 @@ import { deleteProjectSample } from '~/lib/project-samples-api'
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData } from '~/lib/sample-drag-data'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { formatBytes } from '~/lib/format-bytes'
+import type { DashboardView } from '~/components/dashboard/types'
 
 type UseSamplesMenuControllerOptions = {
   currentProjectId: Accessor<string>
   currentUserId: Accessor<string | undefined>
   onInsertSample: (input: InsertSampleInput) => void | Promise<void>
   onJumpToClip: (clipId: string, trackId: Track['id'], startSec: number) => void
+  onOpenDashboard: (view: DashboardView) => void
 }
 
 export type SamplesMenuController = {
@@ -35,6 +37,7 @@ export type SamplesMenuController = {
   onDeleteSample: (sample: ProjectSampleListItem) => Promise<void>
   formatBytes: (bytes?: number) => string
   copyText: (value?: string) => Promise<void>
+  onOpenDashboard: (view: DashboardView) => void
 }
 
 export function useSamplesMenuController(
@@ -64,7 +67,6 @@ export function useSamplesMenuController(
   }
 
   const onInsertSample = async (sample: InsertSampleInput & { key?: string }) => {
-    if (!sample.url) return
     const sampleKey = sample.key ?? sample.url
     setInsertingSampleKey(sampleKey)
     try {
@@ -84,7 +86,7 @@ export function useSamplesMenuController(
   const onDeleteSample = async (sample: ProjectSampleListItem) => {
     const projectId = options.currentProjectId()
     const userId = options.currentUserId()
-    if (!sample.url || !projectId) return
+    if (!projectId) return
     setDeletingSampleKey(sample.key)
     try {
       if (isLocalId('project', projectId) && isLocalId('asset', sample.assetKey)) {
@@ -142,5 +144,6 @@ export function useSamplesMenuController(
     onDeleteSample,
     formatBytes,
     copyText,
+    onOpenDashboard: options.onOpenDashboard,
   }
 }

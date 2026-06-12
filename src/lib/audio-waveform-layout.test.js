@@ -19,6 +19,8 @@ describe('getAudioWaveformLayout', () => {
       sourceDurationSec: 4,
       padPx: 0,
       drawCols: 4 * PPS,
+      audioStartPx: 0,
+      audioEndPx: 4 * PPS,
       sourceStartSec: 0,
       sourceEndSec: 4,
     })
@@ -39,6 +41,8 @@ describe('getAudioWaveformLayout', () => {
       sourceDurationSec: 5,
       padPx: 0.5 * PPS,
       drawCols: 2 * PPS,
+      audioStartPx: 0.5 * PPS,
+      audioEndPx: 2.5 * PPS,
       sourceStartSec: 1.25,
       sourceEndSec: 3.25,
     })
@@ -59,6 +63,8 @@ describe('getAudioWaveformLayout', () => {
       sourceDurationSec: 5,
       padPx: 0.5 * PPS,
       drawCols: 130,
+      audioStartPx: 0.5 * PPS,
+      audioEndPx: 180,
       sourceStartSec: 1,
       sourceEndSec: 2.3,
     })
@@ -80,6 +86,8 @@ describe('getAudioWaveformLayout', () => {
       sourceDurationSec: 2,
       padPx: 0.5 * PPS,
       drawCols: 75,
+      audioStartPx: 0.5 * PPS,
+      audioEndPx: 125,
       sourceStartSec: 1.25,
       sourceEndSec: 2,
     })
@@ -98,6 +106,8 @@ describe('getAudioWaveformLayout', () => {
     expect(layout.sourceStartSec).toBe(2)
     expect(layout.sourceEndSec).toBe(3)
     expect(layout.drawCols).toBe(PPS)
+    expect(layout.audioStartPx).toBe(0.25 * PPS)
+    expect(layout.audioEndPx).toBe(1.25 * PPS)
   })
 
   test('returns an empty draw window when playback has no audio', () => {
@@ -110,7 +120,50 @@ describe('getAudioWaveformLayout', () => {
     )
 
     expect(layout.drawCols).toBe(0)
+    expect(layout.audioStartPx).toBe(0)
+    expect(layout.audioEndPx).toBe(0)
     expect(layout.sourceStartSec).toBe(0)
     expect(layout.sourceEndSec).toBe(0)
+  })
+
+  test('marks trailing silence when clip extends beyond source duration', () => {
+    expect(
+      getAudioWaveformLayout(
+        createClip({
+          duration: 6,
+          sourceDurationSec: 4,
+        }),
+        600,
+      ),
+    ).toEqual({
+      sourceDurationSec: 4,
+      padPx: 0,
+      drawCols: 4 * PPS,
+      audioStartPx: 0,
+      audioEndPx: 4 * PPS,
+      sourceStartSec: 0,
+      sourceEndSec: 4,
+    })
+  })
+
+  test('marks leading and trailing silence from left padding', () => {
+    expect(
+      getAudioWaveformLayout(
+        createClip({
+          leftPadSec: 1,
+          duration: 6,
+          sourceDurationSec: 3,
+        }),
+        600,
+      ),
+    ).toEqual({
+      sourceDurationSec: 3,
+      padPx: PPS,
+      drawCols: 3 * PPS,
+      audioStartPx: PPS,
+      audioEndPx: 4 * PPS,
+      sourceStartSec: 0,
+      sourceEndSec: 3,
+    })
   })
 })

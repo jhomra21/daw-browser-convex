@@ -159,15 +159,38 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       return;
     }
 
-    const { padPx, drawCols } = waveform.layout();
+    const layout = waveform.layout();
+    const { padPx, drawCols, audioStartPx, audioEndPx } = layout;
     const peaks = waveform.peaks();
+    if (drawCols <= 0) {
+      ctx.fillStyle = "rgba(15,23,42,0.45)";
+      ctx.fillRect(0, 0, cssW, cssH);
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.beginPath();
+      ctx.moveTo(0, Math.floor(cssH / 2) + 0.5);
+      ctx.lineTo(cssW, Math.floor(cssH / 2) + 0.5);
+      ctx.stroke();
+      return;
+    }
 
-    if (!peaks || drawCols <= 0) {
+    const silentFill = props.isSelected
+      ? "rgba(15,23,42,0.42)"
+      : "rgba(15,23,42,0.34)";
+    if (audioStartPx > 0) {
+      ctx.fillStyle = silentFill;
+      ctx.fillRect(0, 0, Math.min(cssW, audioStartPx), cssH);
+    }
+    if (audioEndPx < cssW) {
+      ctx.fillStyle = silentFill;
+      ctx.fillRect(Math.max(0, audioEndPx), 0, cssW - Math.max(0, audioEndPx), cssH);
+    }
+
+    if (!peaks) {
       ctx.strokeStyle = "rgba(255,255,255,0.10)";
-      for (let x = 0; x < cssW; x += 6) {
+      for (let x = audioStartPx; x < audioEndPx; x += 6) {
         ctx.beginPath();
         ctx.moveTo(x, cssH);
-        ctx.lineTo(x + 6, 0);
+        ctx.lineTo(Math.min(audioEndPx, x + 6), 0);
         ctx.stroke();
       }
       return;

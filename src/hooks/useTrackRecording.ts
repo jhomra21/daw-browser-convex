@@ -83,6 +83,8 @@ type UseTrackRecordingReturn = {
   toggleRecording: () => Promise<StartRecordingResult>
 }
 
+const RECORDING_PREVIEW_UPDATE_MS = 1000 / 30
+
 export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRecordingReturn {
   const {
     audioEngine,
@@ -488,29 +490,36 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     const startSec = Math.max(0, playheadSec())
 
     let analyser: AnalyserNode | null = null
-    let scriptProcessor: ScriptProcessorNode | null = null
+    let analysisSource: MediaStreamAudioSourceNode | null = null
     let analysisCtx: AudioContext | null = null
+    let previewFrameId: number | null = null
     let startCtxTime = 0
+    let lastPreviewSampleMs = 0
     try {
       analysisCtx = new AudioContext({ latencyHint: 'interactive' })
-      const source = analysisCtx.createMediaStreamSource(stream)
+      await analysisCtx.resume()
+      analysisSource = analysisCtx.createMediaStreamSource(stream)
       analyser = analysisCtx.createAnalyser()
       analyser.fftSize = 2048
-      scriptProcessor = analysisCtx.createScriptProcessor(2048, 1, 1)
       startCtxTime = analysisCtx.currentTime
-      const gain = analysisCtx.createGain()
-      gain.gain.value = 0
-      scriptProcessor.connect(gain)
-      gain.connect(analysisCtx.destination)
       const ctxRef = analysisCtx
-      scriptProcessor.onaudioprocess = (event) => {
-        const input = event.inputBuffer.getChannelData(0)
+      const analyserRef = analyser
+      const previewBuffer = new Float32Array(analyserRef.fftSize)
+      const sampleRecordingPreview = () => {
+        const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
+        if (nowMs - lastPreviewSampleMs < RECORDING_PREVIEW_UPDATE_MS) {
+          previewFrameId = requestAnimationFrame(sampleRecordingPreview)
+          if (activeCtx) activeCtx.previewFrameId = previewFrameId
+          return
+        }
+        lastPreviewSampleMs = nowMs
+        analyserRef.getFloatTimeDomainData(previewBuffer)
         let sum = 0
-        for (let i = 0; i < input.length; i++) {
-          const value = input[i]
+        for (let i = 0; i < previewBuffer.length; i++) {
+          const value = previewBuffer[i]
           sum += value * value
         }
-        const rms = Math.sqrt(sum / input.length)
+        const rms = Math.sqrt(sum / previewBuffer.length)
         const ctxTime = ctxRef.currentTime
         const offset = Math.max(0, ctxTime - startCtxTime)
         const cutoff = Math.max(0, offset - 5)
@@ -523,14 +532,21 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
           livePreviewStartIndex = 0
         }
         setPreviewPoints(livePreviewStartIndex === 0 ? livePreviewPoints : livePreviewPoints.slice(livePreviewStartIndex))
+        previewFrameId = requestAnimationFrame(sampleRecordingPreview)
+        if (activeCtx) activeCtx.previewFrameId = previewFrameId
       }
-      source.connect(analyser)
-      analyser.connect(scriptProcessor)
+      analysisSource.connect(analyser)
+      // Recording preview is visualization only, so sample the AnalyserNode on paint instead of using deprecated ScriptProcessorNode audio callbacks.
+      previewFrameId = requestAnimationFrame(sampleRecordingPreview)
     } catch (err) {
       console.warn('[useTrackRecording] analyser setup failed', err)
+      try { analysisSource?.disconnect() } catch {}
+      try { analyser?.disconnect() } catch {}
+      try { await analysisCtx?.close() } catch {}
       analysisCtx = null
       analyser = null
-      scriptProcessor = null
+      analysisSource = null
+      previewFrameId = null
     }
 
     activeCtx = {
@@ -547,8 +563,9 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       mimeType: mimeType || recorder.mimeType,
       lockedByUserId: uid ?? '',
       analyser,
-      scriptProcessor,
+      analysisSource,
       analysisCtx,
+      previewFrameId,
       onDataAvailable,
       onStop,
       stopPromise: stopCompletion.promise,

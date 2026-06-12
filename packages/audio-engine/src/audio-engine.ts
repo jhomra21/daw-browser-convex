@@ -276,6 +276,11 @@ export class AudioEngine {
     return this.audioCtx?.currentTime ?? 0
   }
 
+  get currentTimelineSec() {
+    if (!this.audioCtx || !this.clock.isRunning()) return 0
+    return this.clock.ctxTimeToTimeline(this.audioCtx.currentTime)
+  }
+
   // Sum of output and base latency (seconds) if available; used for A/V visual alignment
   get outputLatencySec() {
     return getOutputLatencySec(this.runtime)

@@ -110,13 +110,13 @@ export function getPlayableAudioWindow(input: {
 }): PlayableAudioWindow | null {
   const leftPad = Math.max(0, input.clip.leftPadSec ?? 0)
   const bufferOffsetRaw = Math.max(0, input.clip.bufferOffsetSec ?? 0)
-  const windowStart = input.clip.startSec
-  const windowEndRaw = input.clip.startSec + input.clip.duration
-  const windowEnd = typeof input.rangeEndSec === 'number' ? Math.min(windowEndRaw, input.rangeEndSec) : windowEndRaw
-  const audioStart = windowStart + leftPad
+  const clipStart = input.clip.startSec
+  const clipEndRaw = input.clip.startSec + input.clip.duration
+  const clipEnd = typeof input.rangeEndSec === 'number' ? Math.min(clipEndRaw, input.rangeEndSec) : clipEndRaw
+  const audioStart = clipStart + leftPad
   const bufferOffset = Math.min(input.bufferDurationSec, bufferOffsetRaw)
   const bufferDurRemain = Math.max(0, input.bufferDurationSec - bufferOffset)
-  const audioEnd = Math.min(windowEnd, audioStart + bufferDurRemain)
+  const audioEnd = Math.min(clipEnd, audioStart + bufferDurRemain)
 
   if (input.rangeStartSec >= audioEnd) return null
 

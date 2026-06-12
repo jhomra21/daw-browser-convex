@@ -62,11 +62,23 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
   let resizeFixedRight = 0
   let resizeOrigBufferOffset = 0
   let resizeOrigMidiOffsetBeats = 0
+  let activeResizePointerId: number | null = null
+  let activeResizeCaptureTarget: HTMLElement | null = null
 
   const removeResizeListeners = () => {
     window.removeEventListener('pointermove', onResizePointerMove)
-    window.removeEventListener('pointerup', onResizePointerUp)
-    window.removeEventListener('pointercancel', onResizePointerUp)
+    window.removeEventListener('pointerup', onResizePointerUp, { capture: true })
+    window.removeEventListener('pointercancel', onResizePointerUp, { capture: true })
+    window.removeEventListener('blur', onResizePointerUp)
+    if (activeResizeCaptureTarget && activeResizePointerId !== null) {
+      try {
+        if (activeResizeCaptureTarget.hasPointerCapture(activeResizePointerId)) {
+          activeResizeCaptureTarget.releasePointerCapture(activeResizePointerId)
+        }
+      } catch {}
+    }
+    activeResizePointerId = null
+    activeResizeCaptureTarget = null
   }
 
   const onClipResizeStart = (trackId: Track['id'], clipId: string, edge: 'left' | 'right', event: PointerEvent) => {
@@ -90,11 +102,16 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     selection.selectPrimaryClip({ trackId, clipId })
 
     if (event.currentTarget instanceof HTMLElement) {
-      event.currentTarget.setPointerCapture(event.pointerId)
+      activeResizePointerId = event.pointerId
+      activeResizeCaptureTarget = event.currentTarget
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId)
+      } catch {}
     }
     window.addEventListener('pointermove', onResizePointerMove)
-    window.addEventListener('pointerup', onResizePointerUp)
-    window.addEventListener('pointercancel', onResizePointerUp)
+    window.addEventListener('pointerup', onResizePointerUp, { capture: true })
+    window.addEventListener('pointercancel', onResizePointerUp, { capture: true })
+    window.addEventListener('blur', onResizePointerUp)
   }
 
   const onResizePointerMove = (event: PointerEvent) => {
@@ -230,7 +247,8 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     }
   }
 
-  const onResizePointerUp = () => {
+  const onResizePointerUp = (event?: PointerEvent | FocusEvent) => {
+    if (event instanceof PointerEvent && activeResizePointerId !== null && event.pointerId !== activeResizePointerId) return
     if (!clipResizing || !resizing) {
       clipResizing = false
       resizing = null
@@ -311,7 +329,6 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         queueMicrotask(() => options.rescheduleChangedClips([clip.id]))
       }
       if (sameTiming) {
-        queueMicrotask(() => options.rescheduleChangedClips([clip.id]))
         return
       }
       if (rid && isLocalId('project', rid)) {

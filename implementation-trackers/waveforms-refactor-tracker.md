@@ -152,6 +152,13 @@ Status:
 
 ## Implementation
 
+- Validated the silent-tail plan against the current waveform/playback path. The plan is valid because playback and export already use `getPlayableAudioWindow(...)`, waveform layout already imports that package-level helper, and no app-level duplicate timing helper is needed.
+- Kept `getPlayableAudioWindow(...)` in `@daw-browser/audio-engine` as the shared scheduling contract for live playback, export, and waveform layout.
+- Updated `getAudioWaveformLayout(...)` to project the canonical audio window into pixels, including `audioStartPx` and `audioEndPx`, while preserving `padPx`, `drawCols`, and source range fields for existing waveform consumers.
+- Updated `ClipComponent.tsx` so leading and trailing silent audio-clip regions are shaded explicitly. Loading hatching is limited to the playable audio region, and clips with no playable audio render as silent/muted instead of showing a full-width waveform placeholder.
+- Kept right-resize behavior unchanged. Extending an audio clip can still create silent tail, and the UI now makes that tail visible.
+- Kept BPM out of raw audio playback. No warp or time-stretch behavior was added; future warp mode should be an explicit separate timing model if introduced.
+- Added waveform layout coverage for trailing silence when a clip exceeds source duration and for combined leading/trailing silence from left padding, and updated existing expectations for the enriched layout shape.
 - Added `ensureClipBuffer` plumbing from `timeline-workspace.tsx` through `TrackLane.tsx` into `ClipComponent.tsx`.
 - When an audio clip has waveform metadata but no `buffer` or `sampleUrl`, `ClipComponent` now asks the existing buffer loader to hydrate the clip.
 - Reused `getPlayableAudioWindow` for waveform layout so drawing and playback share the same clip `leftPadSec` / `bufferOffsetSec` / duration semantics.
@@ -159,6 +166,7 @@ Status:
 - Extracted the waveform layout calculation into a focused helper with regression coverage that compares layout output directly against playback scheduling windows.
 - Exposed `@daw-browser/audio-engine/audio-scheduling` as a package subpath for the shared scheduling helper.
 - Shifted playback visual timer starts by the schedule-ahead window during play, seek while playing, and loop wrap.
+- Promoted the audio engine transport clock to the visual playhead source of truth during playback, removing the duplicated UI epoch and latency subtraction that could make the playhead lag scheduled audio.
 - Added waveform source identity metadata validation so stale peak records are rejected when available source duration, sample rate, channel count, or waveform key changes.
 - Extracted waveform loading and media preload decisions into `useClipWaveformViewModel`.
 - Kept waveform extraction/storage in `@daw-browser/waveforms`; no Diffusion code or new abstraction was introduced.

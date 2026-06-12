@@ -30,8 +30,9 @@ export type RecordingContext = {
   mimeType: string
   lockedByUserId: string
   analyser: AnalyserNode | null
-  scriptProcessor: ScriptProcessorNode | null
+  analysisSource: MediaStreamAudioSourceNode | null
   analysisCtx: AudioContext | null
+  previewFrameId: number | null
   onDataAvailable: (event: BlobEvent) => void
   onStop: () => void
   stopPromise: Promise<void>
@@ -170,6 +171,20 @@ export function startRecordingLockHeartbeat(options: {
   }, RECORDING_LOCK_KEEPALIVE_MS)
 }
 
+async function disposeRecordingAnalysis(ctx: RecordingContext): Promise<void> {
+  const analysisCtx = ctx.analysisCtx
+  try {
+    if (ctx.previewFrameId !== null) cancelAnimationFrame(ctx.previewFrameId)
+  } catch {}
+  try { ctx.analysisSource?.disconnect() } catch {}
+  try { ctx.analyser?.disconnect() } catch {}
+  ctx.analyser = null
+  ctx.analysisSource = null
+  ctx.analysisCtx = null
+  ctx.previewFrameId = null
+  try { await analysisCtx?.close() } catch {}
+}
+
 export async function cleanupRecordingSession(options: {
   activeCtx: RecordingContext | null
   clearLockHeartbeat: () => void
@@ -193,11 +208,7 @@ export async function cleanupRecordingSession(options: {
     if (ctx.recorder.state !== 'inactive') ctx.recorder.stop()
   } catch {}
   try { ctx.stream.getTracks().forEach((track) => track.stop()) } catch {}
-  try {
-    ctx.scriptProcessor?.disconnect()
-    ctx.analyser?.disconnect()
-  } catch {}
-  try { await ctx.analysisCtx?.close() } catch {}
+  await disposeRecordingAnalysis(ctx)
 
   await options.releaseTrackLock(ctx.trackId, ctx.lockedByUserId, ctx.isLocalProject)
   options.setIsRecording(false)
@@ -217,12 +228,7 @@ export function haltRecordingPreview(options: {
   const ctx = options.activeCtx
   try {
     try { ctx.stream.getTracks().forEach((track) => track.stop()) } catch {}
-    try { ctx.scriptProcessor?.disconnect() } catch {}
-    try { ctx.analyser?.disconnect() } catch {}
-    try { ctx.analysisCtx?.close() } catch {}
-    ctx.analyser = null
-    ctx.scriptProcessor = null
-    ctx.analysisCtx = null
+    void disposeRecordingAnalysis(ctx)
   } catch {}
   options.livePreviewPoints.length = 0
   options.setPreviewPoints(options.livePreviewPoints)

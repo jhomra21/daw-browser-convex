@@ -6,6 +6,8 @@ type AudioWaveformLayout = {
   sourceDurationSec: number
   padPx: number
   drawCols: number
+  audioStartPx: number
+  audioEndPx: number
   sourceStartSec: number
   sourceEndSec: number
 }
@@ -30,6 +32,8 @@ export function getAudioWaveformLayout(
       sourceDurationSec,
       padPx: 0,
       drawCols: 0,
+      audioStartPx: 0,
+      audioEndPx: 0,
       sourceStartSec: 0,
       sourceEndSec: 0,
     }
@@ -42,11 +46,15 @@ export function getAudioWaveformLayout(
   )
   const sourceStartSec = window.offsetSec
   const sourceEndSec = Math.min(sourceDurationSec, sourceStartSec + drawCols / PPS)
+  const audioStartPx = padPx
+  const audioEndPx = Math.min(cssW, audioStartPx + drawCols)
 
   return {
     sourceDurationSec,
     padPx,
     drawCols,
+    audioStartPx,
+    audioEndPx,
     sourceStartSec,
     sourceEndSec,
   }

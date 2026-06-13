@@ -9,6 +9,7 @@ import type { RuntimeClip } from '~/lib/timeline-runtime-types'
 type ClipWaveformViewModelOptions = {
   clip: Accessor<RuntimeClip>
   cssWidthPx: Accessor<number>
+  projectBpm: Accessor<number>
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
 }
 
@@ -22,7 +23,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     const buffer = clip.buffer ?? null
     const assetKey = clip.waveformAssetKey ?? clip.sourceAssetKey
     const sampleUrl = resolveClipSampleUrl(clip)
-    const layout = getAudioWaveformLayout(clip, options.cssWidthPx(), buffer?.duration)
+    const layout = getAudioWaveformLayout(clip, options.cssWidthPx(), buffer?.duration, options.projectBpm())
     const metadata = getPersistableAudioSourceMetadata({
       buffer,
       sourceDurationSec: clip.sourceDurationSec,

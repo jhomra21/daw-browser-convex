@@ -1,6 +1,6 @@
 import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
 import type { ArpeggiatorParams, EqParams, ReverbParams, SynthParams } from '@daw-browser/shared'
-import type { Track, TrackChannelRole, TrackSend } from '@daw-browser/timeline-core/types'
+import type { AudioWarp, Track, TrackChannelRole, TrackSend } from '@daw-browser/timeline-core/types'
 
 export type TrackRef = string
 export type ClipRef = string
@@ -11,6 +11,7 @@ export type ClipTiming = {
   duration: number
   leftPadSec?: number
   bufferOffsetSec?: number
+  audioWarp?: AudioWarp
   midiOffsetBeats?: number
 }
 

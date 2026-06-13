@@ -1,9 +1,6 @@
+import { describe, expect, test } from 'bun:test'
 import { peakAssetMatchesSourceIdentity } from './source-identity'
 import type { PeakAssetRecord } from './types'
-
-declare const describe: (name: string, run: () => void) => void
-declare const test: (name: string, run: () => void) => void
-declare const expect: (value: unknown) => { toBe: (expected: unknown) => void }
 
 const record: PeakAssetRecord = {
   assetKey: 'project:asset',

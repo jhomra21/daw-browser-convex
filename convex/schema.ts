@@ -44,6 +44,11 @@ export default defineSchema({
     sourceChannelCount: v.optional(v.number()),
     leftPadSec: v.optional(v.number()),
     bufferOffsetSec: v.optional(v.number()),
+    audioWarp: v.optional(v.object({
+      enabled: v.boolean(),
+      sourceBpm: v.optional(v.number()),
+      mode: v.union(v.literal("repitch"), v.literal("stretch")),
+    })),
     name: v.optional(v.string()),
     sampleUrl: v.optional(v.string()),
     midi: v.optional(v.object({

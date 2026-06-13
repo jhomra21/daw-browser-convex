@@ -51,6 +51,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
   const waveform = useClipWaveformViewModel({
     clip: () => props.clip,
     cssWidthPx: () => clipWidthPx(),
+    projectBpm: () => props.bpm,
     ensureClipBuffer: props.ensureClipBuffer,
   });
   const isGhost = () => props.clip.id.startsWith("__dup_preview:");
@@ -227,6 +228,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void props.clip.sourceDurationSec;
     void props.clip.sourceSampleRate;
     void props.clip.sourceChannelCount;
+    void props.clip.audioWarp;
     void props.isSelected;
     const midi: any = (props.clip as any).midi;
     const midiSignature = Array.isArray(midi?.notes)

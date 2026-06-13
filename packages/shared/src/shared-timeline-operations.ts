@@ -5,6 +5,7 @@ import type {
   ReverbParams,
   SynthWave,
 } from './effects-params'
+import { normalizeAudioWarp, type AudioWarpPayload } from './audio-warp'
 
 export type MoveClipInput = {
   clipId: string
@@ -30,6 +31,7 @@ export type SharedTimelineClipCreatePayload = {
   channelCount?: number
   leftPadSec?: number
   bufferOffsetSec?: number
+  audioWarp?: AudioWarpPayload
   midiOffsetBeats?: number
   midi?: {
     wave: string
@@ -61,6 +63,7 @@ export type SharedTimelineOperation =
   | { kind: 'clips.createMany'; payload: { items: SharedTimelineClipCreatePayload[]; operationId?: string } }
   | { kind: 'clips.removeMany'; payload: { clipIds: string[] } }
   | { kind: 'clips.moveMany'; payload: { moves: MoveClipInput[] } }
+  | { kind: 'clips.setAudioWarp'; payload: { clipId: string; audioWarp: AudioWarpPayload } }
   | { kind: 'tracks.setRouting'; payload: { trackId: string; routing: TrackRouting } }
   | { kind: 'tracks.setVolume'; payload: { trackId: string; volume: number } }
   | { kind: 'tracks.setMix'; payload: { trackId: string; muted?: boolean; soloed?: boolean } }
@@ -95,6 +98,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
 
 const readOptionalNumber = (value: unknown) => typeof value === 'number' ? value : undefined
 const readOptionalString = (value: unknown) => typeof value === 'string' ? value : undefined
+
+const readAudioWarp = (value: unknown) => normalizeAudioWarp(value)
 
 const readStringArray = (value: unknown) => Array.isArray(value)
   ? value.flatMap((entry) => typeof entry === 'string' ? [entry] : [])
@@ -167,6 +172,7 @@ export const readSharedTimelineClipCreatePayload = (
     channelCount: readOptionalNumber(value.channelCount),
     leftPadSec: readOptionalNumber(value.leftPadSec),
     bufferOffsetSec: readOptionalNumber(value.bufferOffsetSec),
+    audioWarp: readAudioWarp(value.audioWarp),
     midiOffsetBeats: readOptionalNumber(value.midiOffsetBeats),
     midi,
     clipKind: readOptionalString(value.clipKind),
@@ -308,6 +314,13 @@ const parseClipMoveMany = (payload: Record<string, unknown>): SharedTimelineOper
   return moves.length > 0 ? { kind: 'clips.moveMany', payload: { moves } } : null
 }
 
+const parseClipAudioWarp = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  const audioWarp = readAudioWarp(payload.audioWarp)
+  return typeof payload.clipId === 'string' && audioWarp
+    ? { kind: 'clips.setAudioWarp', payload: { clipId: payload.clipId, audioWarp } }
+    : null
+}
+
 const parseTrackRouting = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   if (typeof payload.trackId !== 'string' || !isRecord(payload.routing)) return null
   return {
@@ -407,6 +420,12 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
       }
       return targets
     },
+    durableQueue: true,
+  },
+  {
+    kind: 'clips.setAudioWarp',
+    parse: parseClipAudioWarp,
+    targets: (payload) => isRecord(payload) && typeof payload.clipId === 'string' ? clipTargets([payload.clipId]) : emptyTargets(),
     durableQueue: true,
   },
   { kind: 'tracks.setRouting', parse: parseTrackRouting, targets: readRoutingTargets, durableQueue: true },

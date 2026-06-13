@@ -1,5 +1,6 @@
 import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime } from './audio-runtime'
 import { createClipScheduler, type ScheduleOptions } from './clip-scheduler'
+import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
 import type { ArpParams, EqParamsLite, ReverbParamsLite, SynthParamsInput } from '@daw-browser/shared'
 import { createImpulseResponseBuffer, getImpulseResponseBufferInfo } from './effects/dsp'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
@@ -19,7 +20,8 @@ const MASTER_FADE_HOLD_SEC = 0.001
 const MASTER_FADE_UP_SEC = 0.006
 const MASTER_STOP_DELAY_SEC = 0.004
 
-export type { SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch }
+export { isStretchQualityWarning }
+export type { AudioStretchRenderState, SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch }
 
 export class AudioEngine {
   private runtime: AudioRuntime | null = null
@@ -51,12 +53,15 @@ export class AudioEngine {
   })
   private scheduler = createClipScheduler({
     getAudioContext: () => this.audioCtx,
+    getBpm: () => this.clock.getBpm(),
     timelineToCtxTime: (timelineSec) => this.timelineToCtxTime(timelineSec),
     updateTrackGains: (tracks) => this.updateTrackGains(tracks),
     ensureTrackInput: (trackId) => this.mixerRuntime.ensureTrackInput(trackId),
     stopClipSources: () => this.stopClipSources(),
     stopSourcesForClip: (clipId) => this.stopSourcesForClip(clipId),
     scheduleMidiClip: (track, clip, playheadSec, nowCtx, endLimitSec) => this.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec),
+    ensureStretchedClip: (clip) => this.stretchCache.ensure(clip, this.clock.getBpm()),
+    getStretchedClip: (clip) => this.stretchCache.getReady(clip, this.clock.getBpm()),
     sources: this.sources,
   })
   private masterFx = createMasterFxRuntime()
@@ -65,6 +70,22 @@ export class AudioEngine {
   private clock = createTransportClock()
   private metronome = createMetronomeRuntime(this.clock)
   private metering = createMeteringRuntime()
+  private stretchCache = createAudioStretchCache({
+    createBuffer: (channels, frames, sampleRate) => new AudioBuffer({ numberOfChannels: channels, length: frames, sampleRate }),
+    persist: true,
+  })
+
+  ensureStretchRender(clip: RuntimeClip) {
+    this.stretchCache.ensure(clip, this.clock.getBpm())
+  }
+
+  getStretchRenderState(clip: RuntimeClip): AudioStretchRenderState {
+    return this.stretchCache.getState(clip, this.clock.getBpm())
+  }
+
+  subscribeStretchRenderState(listener: () => void) {
+    return this.stretchCache.subscribe(listener)
+  }
 
   subscribeTrackStereoLevels(listener: TrackStereoLevelsListener) {
     return this.metering.subscribeTrackStereoLevels(listener)

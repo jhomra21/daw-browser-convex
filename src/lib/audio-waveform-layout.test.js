@@ -166,4 +166,27 @@ describe('getAudioWaveformLayout', () => {
       sourceEndSec: 3,
     })
   })
+
+  test('changes waveform density for warped clips', () => {
+    expect(
+      getAudioWaveformLayout(
+        createClip({
+          duration: 4,
+          sourceDurationSec: 8,
+          audioWarp: { enabled: true, mode: 'repitch', sourceBpm: 120 },
+        }),
+        400,
+        undefined,
+        60,
+      ),
+    ).toEqual({
+      sourceDurationSec: 8,
+      padPx: 0,
+      drawCols: 4 * PPS,
+      audioStartPx: 0,
+      audioEndPx: 4 * PPS,
+      sourceStartSec: 0,
+      sourceEndSec: 2,
+    })
+  })
 })

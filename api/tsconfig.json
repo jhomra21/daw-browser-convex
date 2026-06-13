@@ -11,5 +11,8 @@
     "../packages/shared/src/**/*.ts",
     "../packages/timeline-core/src/**/*.ts",
     "../src/types/**/*.ts"
+  ],
+  "exclude": [
+    "../packages/**/*.test.ts"
   ]
 }

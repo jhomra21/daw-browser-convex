@@ -2,7 +2,13 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "ignoreFiles": [
     "src/components/nav-user.tsx",
+    "packages/shared/src/audio-warp.test.ts",
     "src/lib/audio-waveform-layout.test.js",
+    "packages/audio-engine/src/bpm-detection.test.ts",
+    "packages/audio-engine/src/audio-scheduling.test.ts",
+    "packages/audio-engine/src/clip-scheduler.test.ts",
+    "packages/audio-engine/src/audio-stretch-cache.test.ts",
+    "packages/audio-engine/src/audio-stretching.test.ts",
     "packages/waveforms/src/asset-store.test.ts",
     "packages/waveforms/src/source-identity.test.ts",
     "src/components/ui/**/*.tsx"
@@ -35,6 +41,12 @@
     ],
     "packages/audio-engine/src/audio-engine.ts": [
       "types"
+    ],
+    "packages/audio-engine/src/audio-stretch-cache.ts": [
+      "exports"
+    ],
+    "packages/audio-engine/src/clip-scheduler.ts": [
+      "exports"
     ],
     "src/lib/timeline-repository/types.ts": [
       "types"

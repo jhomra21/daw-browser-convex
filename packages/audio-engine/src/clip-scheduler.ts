@@ -1,4 +1,5 @@
-import { getPlayableAudioWindow } from './audio-scheduling'
+import { getAudioBufferPlaybackParams, getAudioClipTimeMap } from './audio-scheduling'
+import type { StretchedAudioRender } from './audio-stretch-cache'
 import type { SourceRegistry } from './source-registry'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
@@ -24,14 +25,20 @@ type ScheduleIndex = {
 
 type ClipSchedulerOptions = {
   getAudioContext: () => AudioContext | null
+  getBpm: () => number
   timelineToCtxTime: (timelineSec: number) => number
   updateTrackGains: (tracks: RuntimeTrack[]) => void
   ensureTrackInput: (trackId: string) => GainNode
   stopClipSources: () => void
   stopSourcesForClip: (clipId: string) => void
   scheduleMidiClip: (track: RuntimeTrack, clip: RuntimeClip, playheadSec: number, nowCtx: number, endLimitSec?: number) => boolean
+  ensureStretchedClip: (clip: RuntimeClip) => void
+  getStretchedClip: (clip: RuntimeClip) => StretchedAudioRender | null
+  stretchRenderAheadSec?: number
   sources: SourceRegistry
 }
+
+const DEFAULT_STRETCH_RENDER_AHEAD_SEC = Number.POSITIVE_INFINITY
 
 const findFirstScheduleEntryEndingAfter = (entries: ScheduledClipEntry[], playheadSec: number) => {
   let low = 0
@@ -46,6 +53,7 @@ const findFirstScheduleEntryEndingAfter = (entries: ScheduledClipEntry[], playhe
 
 export function createClipScheduler(options: ClipSchedulerOptions) {
   const scheduleIndexCache = new WeakMap<RuntimeTrack[], ScheduleIndex>()
+  const stretchRenderAheadSec = Math.max(0, options.stretchRenderAheadSec ?? DEFAULT_STRETCH_RENDER_AHEAD_SEC)
 
   const getScheduleIndex = (tracks: RuntimeTrack[]) => {
     const cached = scheduleIndexCache.get(tracks)
@@ -70,18 +78,38 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
   const scheduleAudioClip = (clip: RuntimeClip, input: GainNode, playheadSec: number, nowCtx: number, endLimitSec?: number) => {
     const ctx = options.getAudioContext()
     if (!ctx || !clip.buffer) return
-    const window = getPlayableAudioWindow({
+    const map = getAudioClipTimeMap({
       clip,
       bufferDurationSec: clip.buffer.duration,
+      projectBpm: options.getBpm(),
       rangeStartSec: playheadSec,
       rangeEndSec: endLimitSec,
     })
-    if (!window) return
+    if (!map) return
+    if (map.mode === 'stretch' && shouldEnsureStretchRender({
+      playheadSec,
+      renderAheadSec: stretchRenderAheadSec,
+      endLimitSec,
+      timelineStartSec: map.timelineStartSec,
+      timelineDurationSec: map.timelineDurationSec,
+    })) options.ensureStretchedClip(clip)
 
     const source = ctx.createBufferSource()
-    source.buffer = clip.buffer
+    const stretched = map.mode === 'stretch' ? options.getStretchedClip(clip) : null
+    const playback = getAudioBufferPlaybackParams({
+      sourceBuffer: clip.buffer,
+      map,
+      stretched: stretched ? { ...stretched, bufferDurationSec: stretched.buffer.duration } : null,
+    })
+    if (playback.durationSec <= 0) return
+    source.buffer = playback.buffer
+    source.playbackRate.value = playback.playbackRate
     source.connect(input)
-    source.start(nowCtx + Math.max(0, window.startSec - playheadSec), window.offsetSec, window.durationSec)
+    source.start(
+      nowCtx + Math.max(0, map.timelineStartSec - playheadSec),
+      playback.offsetSec,
+      playback.durationSec,
+    )
     source.onended = () => options.sources.remove(clip.id, source)
     options.sources.add(clip.id, source)
   }
@@ -120,4 +148,24 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
       }
     },
   }
+}
+
+const shouldEnsureStretchRender = (input: {
+  playheadSec: number
+  renderAheadSec: number
+  endLimitSec?: number
+  timelineStartSec: number
+  timelineDurationSec: number
+}) => {
+  const renderEndSec = input.timelineStartSec + input.timelineDurationSec
+  const horizonEndSec = Math.min(
+    input.endLimitSec ?? Number.POSITIVE_INFINITY,
+    input.playheadSec + Math.max(0, input.renderAheadSec),
+  )
+  return input.timelineStartSec < horizonEndSec && renderEndSec > input.playheadSec
+}
+
+export const clipSchedulerTestInternals = {
+  defaultStretchRenderAheadSec: DEFAULT_STRETCH_RENDER_AHEAD_SEC,
+  shouldEnsureStretchRender,
 }

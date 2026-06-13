@@ -6,6 +6,7 @@ import { ExportProvider } from '~/context/export'
 import ExportProgressOverlay from '~/components/export/ExportProgressOverlay'
 import type { OptimisticGrantWrite } from '~/lib/optimistic-grant-scope'
 import type { EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
+import type { BpmDetectionService } from '~/lib/bpm-detection-service'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 const AgentChat = lazy(() => import('~/components/AgentChat'))
@@ -43,6 +44,14 @@ export type TimelinePanelsProps = {
     onOpen: () => void
     onEffectParamsCommitted: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void
     onLocalSaveFailed?: (message: string) => void
+    sampleWarp?: {
+      selectedClip?: Clip
+      projectBpm: number
+      bpmDetection?: BpmDetectionService
+      ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
+      canWriteClip?: (clipId: string) => boolean
+      onChange: (clip: Clip, audioWarp: NonNullable<Clip['audioWarp']>) => Promise<boolean> | boolean | void
+    }
   }
   exportDialog: {
     isOpen: boolean
@@ -145,6 +154,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
           insertLocalClip={props.effectsPanel.insertLocalClip}
           onEffectParamsCommitted={props.effectsPanel.onEffectParamsCommitted}
           onLocalSaveFailed={props.effectsPanel.onLocalSaveFailed}
+          sampleWarp={props.effectsPanel.sampleWarp}
         />
       </Suspense>
 

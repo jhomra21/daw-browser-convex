@@ -1,3 +1,4 @@
+import { normalizeAudioWarp } from '@daw-browser/shared'
 import type { HistoryEntry, PersistedHistory } from '~/lib/undo/types'
 
 const PERSISTED_HISTORY_VERSION = 2 as const
@@ -22,12 +23,14 @@ const isString = (value: unknown): value is string => typeof value === 'string'
 const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean'
 const isScope = (value: unknown) => value === 'shared' || value === 'local'
+const isAudioWarp = (value: unknown) => normalizeAudioWarp(value) !== undefined
 
 const isClipTiming = (value: unknown) => isRecord(value)
   && isNumber(value.startSec)
   && isNumber(value.duration)
   && (value.leftPadSec === undefined || isNumber(value.leftPadSec))
   && (value.bufferOffsetSec === undefined || isNumber(value.bufferOffsetSec))
+  && (value.audioWarp === undefined || isAudioWarp(value.audioWarp))
   && (value.midiOffsetBeats === undefined || isNumber(value.midiOffsetBeats))
 
 const isRoutingSnapshot = (value: unknown) => isRecord(value)

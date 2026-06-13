@@ -16,10 +16,27 @@ type ScheduledMidiEvent = {
   velocity?: number
 }
 
-type PlayableAudioWindow = {
-  startSec: number
-  offsetSec: number
-  durationSec: number
+type AudioClipTimeMapInput = {
+  clip: Pick<Clip, 'startSec' | 'duration' | 'leftPadSec' | 'bufferOffsetSec' | 'sourceDurationSec' | 'audioWarp'>
+  bufferDurationSec: number
+  projectBpm: number
+  rangeStartSec: number
+  rangeEndSec?: number
+}
+
+export type AudioClipTimeMap = {
+  timelineStartSec: number
+  timelineEndSec: number
+  sourceStartSec: number
+  sourceEndSec: number
+  timelineDurationSec: number
+  sourceDurationSec: number
+  sourceSecondsPerTimelineSecond: number
+  timelineSecondsPerSourceSecond: number
+  playbackRate: number
+  mode: 'raw' | 'repitch' | 'stretch'
+  timelineToSourceSec: (timelineSec: number) => number
+  sourceToTimelineSec: (sourceSec: number) => number
 }
 
 const arpeggiatedNotesCache = new WeakMap<MidiNote[], Map<string, MidiNote[]>>()
@@ -102,37 +119,92 @@ export function getScheduledMidiEvents(input: {
   return events
 }
 
-export function getPlayableAudioWindow(input: {
-  clip: Pick<Clip, 'startSec' | 'duration' | 'leftPadSec' | 'bufferOffsetSec'>
-  bufferDurationSec: number
-  rangeStartSec: number
-  rangeEndSec?: number
-}): PlayableAudioWindow | null {
+const resolveWarpBpm = (value: number | undefined, fallback: number) => (
+  Number.isFinite(value) && value !== undefined && value > 0 ? value : fallback
+)
+
+export function getAudioClipTimeMap(input: AudioClipTimeMapInput): AudioClipTimeMap | null {
   const leftPad = Math.max(0, input.clip.leftPadSec ?? 0)
   const bufferOffsetRaw = Math.max(0, input.clip.bufferOffsetSec ?? 0)
   const clipStart = input.clip.startSec
   const clipEndRaw = input.clip.startSec + input.clip.duration
   const clipEnd = typeof input.rangeEndSec === 'number' ? Math.min(clipEndRaw, input.rangeEndSec) : clipEndRaw
   const audioStart = clipStart + leftPad
-  const bufferOffset = Math.min(input.bufferDurationSec, bufferOffsetRaw)
-  const bufferDurRemain = Math.max(0, input.bufferDurationSec - bufferOffset)
-  const audioEnd = Math.min(clipEnd, audioStart + bufferDurRemain)
+  const bufferDuration = Math.max(0, input.bufferDurationSec)
+  const bufferOffset = Math.min(bufferDuration, bufferOffsetRaw)
+  const bufferDurRemain = Math.max(0, bufferDuration - bufferOffset)
+  const projectBpm = resolveWarpBpm(input.projectBpm, 120)
+  const sourceBpm = resolveWarpBpm(input.clip.audioWarp?.sourceBpm, projectBpm)
+  const warpEnabled = input.clip.audioWarp?.enabled === true
+  const playbackRate = warpEnabled ? projectBpm / sourceBpm : 1
+  const sourceSecondsPerTimelineSecond = playbackRate
+  const timelineSecondsPerSourceSecond = 1 / playbackRate
+  const audioTimelineDuration = bufferDurRemain * timelineSecondsPerSourceSecond
+  const audioEnd = Math.min(clipEnd, audioStart + audioTimelineDuration)
 
   if (input.rangeStartSec >= audioEnd) return null
 
-  const startSec = Math.max(input.rangeStartSec, audioStart)
-  const offsetNoBase = Math.max(0, startSec - audioStart)
-  if (offsetNoBase >= bufferDurRemain) return null
+  const timelineStartSec = Math.max(input.rangeStartSec, audioStart)
+  const timelineOffsetNoBase = Math.max(0, timelineStartSec - audioStart)
+  const sourceOffsetNoBase = timelineOffsetNoBase * sourceSecondsPerTimelineSecond
+  if (sourceOffsetNoBase >= bufferDurRemain) return null
 
-  const durationSec = Math.min(
-    Math.max(0, bufferDurRemain - offsetNoBase),
-    Math.max(0, audioEnd - startSec),
+  const timelineDurationSec = Math.min(
+    Math.max(0, (bufferDurRemain - sourceOffsetNoBase) * timelineSecondsPerSourceSecond),
+    Math.max(0, audioEnd - timelineStartSec),
   )
-  if (durationSec <= 0) return null
+  if (timelineDurationSec <= 0) return null
+
+  const sourceStartSec = bufferOffset + sourceOffsetNoBase
+  const sourceDurationSec = timelineDurationSec * sourceSecondsPerTimelineSecond
+  const sourceEndSec = Math.min(bufferDuration, sourceStartSec + sourceDurationSec)
 
   return {
-    startSec,
-    offsetSec: bufferOffset + offsetNoBase,
+    timelineStartSec,
+    timelineEndSec: timelineStartSec + timelineDurationSec,
+    sourceStartSec,
+    sourceEndSec,
+    timelineDurationSec,
+    sourceDurationSec: Math.max(0, sourceEndSec - sourceStartSec),
+    sourceSecondsPerTimelineSecond,
+    timelineSecondsPerSourceSecond,
+    playbackRate,
+    mode: warpEnabled ? input.clip.audioWarp?.mode ?? 'repitch' : 'raw',
+    timelineToSourceSec: (timelineSec) => bufferOffset + Math.max(0, timelineSec - audioStart) * sourceSecondsPerTimelineSecond,
+    sourceToTimelineSec: (sourceSec) => audioStart + Math.max(0, sourceSec - bufferOffset) * timelineSecondsPerSourceSecond,
+  }
+}
+
+export function getAudioBufferPlaybackDurationSec(input: {
+  map: Pick<AudioClipTimeMap, 'sourceDurationSec'>
+  stretchedDurationSec?: number | null
+}) {
+  return input.stretchedDurationSec ?? input.map.sourceDurationSec
+}
+
+export function getAudioBufferPlaybackParams<TBuffer>(input: {
+  sourceBuffer: TBuffer
+  map: Pick<AudioClipTimeMap, 'mode' | 'playbackRate' | 'sourceStartSec' | 'sourceDurationSec' | 'timelineStartSec' | 'timelineDurationSec'>
+  stretched?: {
+    buffer: TBuffer
+    timelineStartSec: number
+    sourceStartSec: number
+    bufferDurationSec: number
+  } | null
+}) {
+  const stretched = input.stretched ?? null
+  const stretchedOffsetSec = stretched ? Math.max(0, input.map.timelineStartSec - stretched.timelineStartSec) : 0
+  const stretchedDurationSec = stretched
+    ? Math.min(input.map.timelineDurationSec, Math.max(0, stretched.bufferDurationSec - stretchedOffsetSec))
+    : null
+  const durationSec = getAudioBufferPlaybackDurationSec({
+    map: input.map,
+    stretchedDurationSec,
+  })
+  return {
+    buffer: stretched?.buffer ?? input.sourceBuffer,
+    offsetSec: stretched ? stretched.sourceStartSec + stretchedOffsetSec : input.map.sourceStartSec,
     durationSec,
+    playbackRate: input.map.mode !== 'raw' && !stretched ? input.map.playbackRate : 1,
   }
 }

@@ -6,7 +6,7 @@ import {
   createMemo,
   createSignal,
 } from "solid-js";
-import type { Clip, Track } from "@daw-browser/timeline-core/types";
+import type { AudioWarp, Clip, Track } from "@daw-browser/timeline-core/types";
 import { getAudioEngine } from "~/lib/audio-engine-singleton";
 import {
   timelineDurationSec,
@@ -41,6 +41,7 @@ import { useTimelineProjectionState } from "~/hooks/useTimelineProjectionState";
 import { useTimelineSelectionState } from "~/hooks/useTimelineSelectionState";
 import { useTimelinePersistenceController } from "~/hooks/useTimelinePersistenceController";
 import { useTimelineAudioLifecycle } from "~/hooks/useTimelineAudioLifecycle";
+import { useTimelineAudioWarp } from "~/hooks/useTimelineAudioWarp";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
 import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
@@ -316,6 +317,18 @@ const Timeline: Component<TimelineProps> = (props) => {
     } catch {}
   }
 
+  const audioWarpController = useTimelineAudioWarp({
+    projectId,
+    userId,
+    bpm,
+    tracks: () => renderTracks(),
+    selectedClip: selection.selectedClip,
+    canWriteClip,
+    projection,
+    pushHistory,
+    rescheduleChangedClips,
+  });
+
   const applyAgentMixOps = (ops: AgentMixOp[]) => {
     try {
       if (!projectId() || !Array.isArray(ops) || ops.length === 0) return;
@@ -492,6 +505,13 @@ const Timeline: Component<TimelineProps> = (props) => {
     grantClipWrite,
     onLocalSaveFailed: localProject.setLocalSaveFailure,
     notify,
+    onDecodedClipCreated: (clip) => {
+      void audioWarpController.bpmDetection.analyzeClip({
+        clip,
+        canWrite: canWriteClip(clip.id),
+        autoApply: (audioWarp) => audioWarpController.changeAudioWarp(clip, audioWarp),
+      });
+    },
   });
 
   const {
@@ -841,6 +861,16 @@ const Timeline: Component<TimelineProps> = (props) => {
       onOpen: () => setBottomFXOpen(true),
       onEffectParamsCommitted: pushEffectParamsHistory,
       onLocalSaveFailed: localProject.setLocalSaveFailure,
+      sampleWarp: {
+        selectedClip: audioWarpController.selectedAudioClip(),
+        projectBpm: bpm(),
+        bpmDetection: audioWarpController.bpmDetection,
+        ensureClipBuffer: clipBuffers.preload,
+        canWriteClip,
+        onChange: (clip: Clip, audioWarp: AudioWarp) => {
+          return audioWarpController.changeAudioWarp(clip, audioWarp);
+        },
+      },
     },
     exportDialog: {
       isOpen: exportOpen(),

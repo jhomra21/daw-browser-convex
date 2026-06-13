@@ -1,7 +1,7 @@
 import { buildLocalClip } from "~/lib/clip-create";
-import { buildClipCreatePayload, type ClipCreateSnapshot } from "@daw-browser/shared";
+import { buildClipCreatePayload, normalizeAudioWarp, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
-import { persistClipTiming } from "~/lib/clip-mutations";
+import { persistClipAudioWarp, persistClipTiming } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
 import { setLocalEffect } from "~/lib/local-effects";
 import { isLocalId } from "@daw-browser/shared";
@@ -22,6 +22,7 @@ type ClipTimingPatch = {
   duration: number;
   leftPadSec?: number;
   bufferOffsetSec?: number;
+  audioWarp?: Track["clips"][number]["audioWarp"];
   midiOffsetBeats?: number;
 };
 
@@ -44,6 +45,7 @@ const toHistoryCreateClipInput = (trackId: Track["id"], clip: Track["clips"][num
   sourceChannelCount: clip.sourceChannelCount,
   leftPadSec: clip.leftPadSec,
   bufferOffsetSec: clip.bufferOffsetSec,
+  audioWarp: normalizeAudioWarp(clip.audioWarp),
   sampleUrl: clip.sampleUrl,
   midi: clip.midi,
   midiOffsetBeats: clip.midiOffsetBeats,
@@ -265,6 +267,7 @@ export const persistHistoryClipTimingOrThrow = async (
       duration: timing.duration,
       leftPadSec: timing.leftPadSec,
       bufferOffsetSec: timing.bufferOffsetSec,
+      audioWarp: normalizeAudioWarp(timing.audioWarp),
       midiOffsetBeats: timing.midiOffsetBeats,
     });
     if (!applied) throw new Error(message);
@@ -279,6 +282,14 @@ export const persistHistoryClipTimingOrThrow = async (
     midiOffsetBeats: timing.midiOffsetBeats ?? 0,
   });
   if (!applied) throw new Error(message);
+  const audioWarp = normalizeAudioWarp(timing.audioWarp);
+  if (audioWarp) {
+    const warpApplied = await persistClipAudioWarp(deps.convexClient, deps.convexApi, {
+      clipId,
+      audioWarp,
+    });
+    if (!warpApplied) throw new Error(message);
+  }
 };
 
 export const persistHistoryClipMovesOrThrow = async (

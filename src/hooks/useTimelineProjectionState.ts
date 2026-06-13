@@ -14,7 +14,7 @@ type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 
 type FullTimelineViewLike<TTrackId extends string = Track['id']> = {
   tracks: Array<{ _id: TTrackId; lockedBy?: string | null }>
-  clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number }>
+  clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; audioWarp?: Track['clips'][number]['audioWarp']; midiOffsetBeats?: number }>
 }
 
 type PendingClipCreate<TTrackId extends string = Track['id']> = { trackId: TTrackId; clip: Track['clips'][number] }
@@ -50,7 +50,7 @@ type UseTimelineProjectionStateReturn = {
   removeLocalClips: (clipIds: Iterable<string>) => void
   removeLocalTrack: (trackId: Track['id']) => void
   setDraftClipTiming: (clipId: string, patch: ClipTimelinePatch | null) => void
-  commitClipTiming: (clipId: string, patch: { startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number }) => void
+  commitClipTiming: (clipId: string, patch: ClipTimelinePatch) => void
   replaceDraftClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
   clearDraftClipMoves: (clipIds: Iterable<string>) => void
   commitClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
@@ -226,6 +226,7 @@ export function useTimelineProjectionState(
         const hasRemainingFields = remaining.duration !== undefined
           || remaining.leftPadSec !== undefined
           || remaining.bufferOffsetSec !== undefined
+          || remaining.audioWarp !== undefined
           || remaining.midiOffsetBeats !== undefined
         if (!next) next = new Map(current)
         if (hasRemainingFields) {
@@ -367,7 +368,7 @@ export function useTimelineProjectionState(
         let next: Map<string, ClipTimelinePatch> | null = null
         for (const [clipId, patch] of current) {
           if (!moveIds.has(clipId)) continue
-          if (patch.duration !== undefined || patch.leftPadSec !== undefined || patch.bufferOffsetSec !== undefined || patch.midiOffsetBeats !== undefined) continue
+          if (patch.duration !== undefined || patch.leftPadSec !== undefined || patch.bufferOffsetSec !== undefined || patch.audioWarp !== undefined || patch.midiOffsetBeats !== undefined) continue
           if (!next) next = new Map(current)
           next.delete(clipId)
         }

@@ -1,9 +1,5 @@
+import { beforeEach, describe, expect, test } from 'bun:test'
 import { clearWaveformAssetCache, ensurePeakAsset } from './asset-store'
-
-declare const beforeEach: (run: () => void) => void
-declare const describe: (name: string, run: () => void) => void
-declare const test: (name: string, run: () => Promise<void>) => void
-declare const expect: (value: unknown) => { toBe: (expected: unknown) => void }
 
 function createTestBuffer(duration: number): AudioBuffer {
   const sampleRate = 10

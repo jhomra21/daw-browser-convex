@@ -1,5 +1,5 @@
 import { cloneTimelineClip, cloneTimelineTrack } from '~/lib/timeline-clone'
-import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
+import type { Clip, Track, TrackRouting } from '@daw-browser/timeline-core/types'
 
 export const cloneHistoryTracks = (tracks: Track[]) => tracks.map(cloneTimelineTrack)
 
@@ -74,7 +74,7 @@ export const commitClipMovesInHistoryModel = (
 export const commitClipTimingInHistoryModel = (
   tracks: Track[],
   clipId: string,
-  patch: { startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number },
+  patch: Pick<Clip, 'startSec' | 'duration' | 'leftPadSec' | 'bufferOffsetSec' | 'audioWarp' | 'midiOffsetBeats'>,
 ) => {
   for (const track of tracks) {
     const clip = track.clips.find((entry) => entry.id === clipId)
@@ -83,6 +83,7 @@ export const commitClipTimingInHistoryModel = (
     clip.duration = patch.duration
     clip.leftPadSec = patch.leftPadSec
     clip.bufferOffsetSec = patch.bufferOffsetSec
+    clip.audioWarp = patch.audioWarp
     clip.midiOffsetBeats = patch.midiOffsetBeats
     return
   }

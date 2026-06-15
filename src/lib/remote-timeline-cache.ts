@@ -78,6 +78,7 @@ const toClipRow = (clip: FullTimelineView['clips'][number], updatedAt: number): 
     leftPadSec: clip.leftPadSec ?? 0,
     bufferOffsetSec: clip.bufferOffsetSec ?? 0,
     audioWarp: normalizeAudioWarp(clip.audioWarp),
+    gain: clip.gain,
     sampleUrl: clip.sampleUrl,
     midi: normalizeMidi(clip.midi),
     midiOffsetBeats: clip.midiOffsetBeats ?? 0,

@@ -188,4 +188,57 @@ describe('useTimelinePlayback deferred stretch retries', () => {
       })
     })
   })
+
+  test('deferred queue upgrades matching windows to replace existing fallback sources', async () => {
+    await withFakeRaf(async () => {
+      let currentTimelineSec = 0
+      let stretchListener = () => {}
+      const scheduleCalls: ScheduleCall[] = []
+      const engine = {
+        get currentTimelineSec() {
+          return currentTimelineSec
+        },
+        ensureAudio: () => {},
+        onTransportPause: () => {},
+        onTransportSeek: () => {},
+        onTransportStart: () => {},
+        onTransportStop: () => {},
+        resume: async () => {},
+        rescheduleClipsAtPlayhead: (_tracks, playheadSec, clipIds, opts) => {
+          scheduleCalls.push({ playheadSec, opts: { ...opts, clipIds } })
+          return scheduleCalls.length === 2
+            ? { deferredStretchWindows: [{ clipId: 'clip-1', startSec: 12, endSec: 16, replaceExistingSource: true }] }
+            : { deferredStretchWindows: [] }
+        },
+        scheduleAllClipsFromPlayhead: (_tracks, playheadSec, opts) => {
+          scheduleCalls.push({ playheadSec, opts })
+          return { deferredStretchWindows: [{ clipId: 'clip-1', startSec: 12, endSec: 16 }] }
+        },
+        stopAllSources: () => {},
+        subscribeStretchRenderState: (listener) => {
+          stretchListener = listener
+          return () => true
+        },
+      } satisfies Parameters<typeof useTimelinePlayback>[0]
+
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(engine)
+        await playback.handlePlay([track])
+
+        currentTimelineSec = 11
+        playback.rescheduleChangedClips([track], 11, ['clip-1'], { endLimitSec: 16 })
+        stretchListener()
+
+        expect(scheduleCalls.at(-1)).toEqual({
+          playheadSec: 11,
+          opts: {
+            startLimitSec: 12,
+            endLimitSec: 16,
+            clipIds: ['clip-1'],
+          },
+        })
+        dispose()
+      })
+    })
+  })
 })

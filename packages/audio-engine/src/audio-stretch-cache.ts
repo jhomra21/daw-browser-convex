@@ -1,5 +1,5 @@
-import { getAudioClipTimeMap, type AudioClipTimeMap } from './audio-scheduling'
-import { stretchAudioWsola } from './audio-stretching'
+import { copyBufferWindow, renderStretchedAudio, writeBuffer } from './audio-stretch-rendering'
+import { evictStoredRenders, getStoredRenderByteSize, readStoredRender, selectStoredRenderEvictionKeys, touchStoredRender, writeStoredRender } from './audio-stretch-store'
 import type { Clip } from '@daw-browser/timeline-core/types'
 
 export type AudioStretchRenderStatus = 'idle' | 'rendering' | 'ready' | 'failed'
@@ -18,17 +18,6 @@ export type AudioStretchRenderState = {
 
 type AudioStretchRenderStateListener = () => void
 
-type StoredStretchedAudioRender = {
-  key: string
-  sampleRate: number
-  channels: Float32Array[]
-  timelineStartSec: number
-  sourceStartSec: number
-  timelineDurationSec: number
-  updatedAt: number
-  byteSize: number
-}
-
 type RuntimeClip = Pick<Clip<AudioBuffer>, 'id' | 'duration' | 'startSec' | 'leftPadSec' | 'bufferOffsetSec' | 'sourceAssetKey' | 'sourceDurationSec' | 'sourceSampleRate' | 'sourceChannelCount' | 'audioWarp' | 'buffer'>
 type CacheKeyClip = Omit<RuntimeClip, 'buffer'>
 
@@ -46,13 +35,9 @@ type AudioStretchCacheOptions = {
 
 type AudioBufferIdentity = Pick<AudioBuffer, 'duration' | 'sampleRate' | 'numberOfChannels' | 'length' | 'getChannelData'>
 
-const ANALYSIS_MARGIN_SEC = 0.08
 const QUALITY_WARNING_MIN = 0.75
 const QUALITY_WARNING_MAX = 1.33
 const DEFAULT_PERSIST_MAX_BYTES = 256 * 1024 * 1024
-const DB_NAME = 'daw-browser-audio-stretch-cache'
-const DB_VERSION = 1
-const STORE_NAME = 'renders'
 
 const toError = (error: unknown) => error instanceof Error ? error : new Error(String(error))
 
@@ -107,241 +92,6 @@ const createCacheKey = (clip: CacheKeyClip, buffer: AudioBufferIdentity, bpm: nu
   JSON.stringify(clip.audioWarp?.enabled === true ? clip.audioWarp.markers ?? [] : []),
   clip.audioWarp?.mode ?? 'repitch',
 ].join('|')
-
-const openStretchCacheDb = () => {
-  if (typeof indexedDB === 'undefined') return Promise.resolve<IDBDatabase | null>(null)
-  return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION)
-    request.onupgradeneeded = () => {
-      const db = request.result
-      if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, { keyPath: 'key' })
-    }
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error ?? new Error('Failed to open stretch cache database.'))
-  })
-}
-
-const getStoredRenderByteSize = (row: Pick<StoredStretchedAudioRender, 'channels'>) => (
-  row.channels.reduce((total, channel) => total + channel.byteLength, 0)
-)
-
-const normalizeStoredRender = (value: unknown): StoredStretchedAudioRender | null => {
-  if (!value || typeof value !== 'object' || !('key' in value)) return null
-  const row = value
-  if (!('channels' in row) || !Array.isArray(row.channels)) return null
-  const channels: Float32Array[] = []
-  for (const channel of row.channels) {
-    if (!(channel instanceof Float32Array)) return null
-    channels.push(channel)
-  }
-  if (
-    typeof row.key !== 'string'
-    || !('sampleRate' in row)
-    || typeof row.sampleRate !== 'number'
-    || !('timelineStartSec' in row)
-    || typeof row.timelineStartSec !== 'number'
-    || !('sourceStartSec' in row)
-    || typeof row.sourceStartSec !== 'number'
-    || !('timelineDurationSec' in row)
-    || typeof row.timelineDurationSec !== 'number'
-  ) return null
-  const updatedAt = 'updatedAt' in row && typeof row.updatedAt === 'number' ? row.updatedAt : 0
-  const fallback = getStoredRenderByteSize({ channels })
-  const byteSize = 'byteSize' in row && typeof row.byteSize === 'number' ? row.byteSize : fallback
-  return {
-    key: row.key,
-    sampleRate: row.sampleRate,
-    channels,
-    timelineStartSec: row.timelineStartSec,
-    sourceStartSec: row.sourceStartSec,
-    timelineDurationSec: row.timelineDurationSec,
-    updatedAt,
-    byteSize,
-  }
-}
-
-const selectStoredRenderEvictionKeys = (
-  rows: Pick<StoredStretchedAudioRender, 'key' | 'updatedAt' | 'byteSize'>[],
-  maxBytes: number,
-) => {
-  let totalBytes = rows.reduce((total, row) => total + Math.max(0, row.byteSize), 0)
-  if (totalBytes <= maxBytes) return []
-  const keys: string[] = []
-  const oldestFirst = [...rows].sort((left, right) => left.updatedAt - right.updatedAt)
-  for (const row of oldestFirst) {
-    if (totalBytes <= maxBytes) break
-    keys.push(row.key)
-    totalBytes -= Math.max(0, row.byteSize)
-  }
-  return keys
-}
-
-const readStoredRender = async (key: string): Promise<StoredStretchedAudioRender | null> => {
-  const db = await openStretchCacheDb()
-  if (!db) return null
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readonly')
-    const request = tx.objectStore(STORE_NAME).get(key)
-    request.onsuccess = () => {
-      resolve(normalizeStoredRender(request.result))
-    }
-    request.onerror = () => reject(request.error ?? new Error('Failed to read stored Stretch render.'))
-    tx.oncomplete = () => db.close()
-    tx.onabort = () => db.close()
-  })
-}
-
-const touchStoredRender = async (row: StoredStretchedAudioRender) => {
-  await writeStoredRender({ ...row, updatedAt: Date.now() })
-}
-
-const writeStoredRender = async (row: StoredStretchedAudioRender) => {
-  const db = await openStretchCacheDb()
-  if (!db) return
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
-    tx.objectStore(STORE_NAME).put(row)
-    tx.oncomplete = () => {
-      db.close()
-      resolve()
-    }
-    tx.onerror = () => {
-      db.close()
-      reject(tx.error ?? new Error('Failed to persist Stretch render.'))
-    }
-    tx.onabort = () => {
-      db.close()
-      reject(tx.error ?? new Error('Failed to persist Stretch render.'))
-    }
-  })
-}
-
-const readStoredRenderRows = async () => {
-  const db = await openStretchCacheDb()
-  if (!db) return []
-  return new Promise<StoredStretchedAudioRender[]>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readonly')
-    const request = tx.objectStore(STORE_NAME).getAll()
-    request.onsuccess = () => {
-      const result: unknown = request.result
-      if (!Array.isArray(result)) {
-        resolve([])
-        return
-      }
-      const rows: StoredStretchedAudioRender[] = []
-      for (const value of result) {
-        const row = normalizeStoredRender(value)
-        if (row) rows.push(row)
-      }
-      resolve(rows)
-    }
-    request.onerror = () => reject(request.error ?? new Error('Failed to list stored Stretch renders.'))
-    tx.oncomplete = () => db.close()
-    tx.onabort = () => db.close()
-  })
-}
-
-const deleteStoredRenders = async (keys: string[]) => {
-  if (keys.length === 0) return
-  const db = await openStretchCacheDb()
-  if (!db) return
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
-    const store = tx.objectStore(STORE_NAME)
-    for (const key of keys) store.delete(key)
-    tx.oncomplete = () => {
-      db.close()
-      resolve()
-    }
-    tx.onerror = () => {
-      db.close()
-      reject(tx.error ?? new Error('Failed to evict stored Stretch renders.'))
-    }
-    tx.onabort = () => {
-      db.close()
-      reject(tx.error ?? new Error('Failed to evict stored Stretch renders.'))
-    }
-  })
-}
-
-const evictStoredRenders = async (maxBytes: number) => {
-  const rows = await readStoredRenderRows()
-  await deleteStoredRenders(selectStoredRenderEvictionKeys(rows, maxBytes))
-}
-
-const copyBufferWindow = (buffer: AudioBuffer, startFrame: number, frameCount: number) => {
-  const channels: Float32Array[] = []
-  for (let channelIndex = 0; channelIndex < buffer.numberOfChannels; channelIndex++) {
-    const channel = new Float32Array(frameCount)
-    buffer.copyFromChannel(channel, channelIndex, startFrame)
-    channels.push(channel)
-  }
-  return channels
-}
-
-const writeBuffer = (
-  createBuffer: AudioStretchCacheOptions['createBuffer'],
-  channels: Float32Array[],
-  sampleRate: number,
-) => {
-  const frameCount = channels[0]?.length ?? 0
-  const buffer = createBuffer(channels.length, frameCount, sampleRate)
-  for (let channelIndex = 0; channelIndex < channels.length; channelIndex++) {
-    const target = buffer.getChannelData(channelIndex)
-    const source = channels[channelIndex]
-    for (let frame = 0; frame < source.length; frame++) target[frame] = source[frame]
-  }
-  return buffer
-}
-
-const renderMappedStretch = (
-  sourceBuffer: AudioBuffer,
-  map: AudioClipTimeMap,
-  clip: RuntimeClip,
-  projectBpm: number,
-  createBuffer: AudioStretchCacheOptions['createBuffer'],
-) => {
-  const projectSecondsPerBeat = 60 / Math.max(1, projectBpm)
-  const audioStartSec = clip.startSec + Math.max(0, clip.leftPadSec ?? 0)
-  const markerBoundaries = (clip.audioWarp?.markers ?? [])
-    .map((marker) => audioStartSec + marker.timelineBeat * projectSecondsPerBeat)
-    .filter((timelineSec) => timelineSec > map.timelineStartSec + 1e-6 && timelineSec < map.timelineEndSec - 1e-6)
-  const boundaries = [map.timelineStartSec, ...markerBoundaries, map.timelineEndSec]
-  const stretchedSegments = boundaries.slice(0, -1).flatMap((timelineStartSec, index) => {
-    const timelineEndSec = boundaries[index + 1]
-    const sourceStartSec = Math.max(0, Math.min(sourceBuffer.duration, map.timelineToSourceSec(timelineStartSec)))
-    const sourceEndSec = Math.max(0, Math.min(sourceBuffer.duration, map.timelineToSourceSec(timelineEndSec)))
-    const sourceDurationSec = sourceEndSec - sourceStartSec
-    const targetFrameCount = Math.max(1, Math.round((timelineEndSec - timelineStartSec) * sourceBuffer.sampleRate))
-    if (sourceDurationSec <= 1 / sourceBuffer.sampleRate) return []
-    const startFrame = Math.max(0, Math.min(sourceBuffer.length - 1, Math.floor(sourceStartSec * sourceBuffer.sampleRate)))
-    const endFrame = Math.max(startFrame + 1, Math.min(sourceBuffer.length, Math.ceil(sourceEndSec * sourceBuffer.sampleRate)))
-    return [stretchAudioWsola({
-      channels: copyBufferWindow(sourceBuffer, startFrame, endFrame - startFrame),
-      sampleRate: sourceBuffer.sampleRate,
-    }, {
-      outputFrameCount: targetFrameCount,
-    }).channels]
-  })
-  const frameCount = stretchedSegments.reduce((total, segment) => total + (segment[0]?.length ?? 0), 0)
-  const channels = Array.from({ length: sourceBuffer.numberOfChannels }, (_, channelIndex) => {
-    const output = new Float32Array(frameCount)
-    let offset = 0
-    for (const segment of stretchedSegments) {
-      const source = segment[channelIndex]
-      if (!source) continue
-      output.set(source, offset)
-      offset += source.length
-    }
-    return output
-  })
-  return {
-    buffer: writeBuffer(createBuffer, channels, sourceBuffer.sampleRate),
-    timelineStartSec: map.timelineStartSec,
-    sourceStartSec: 0,
-    timelineDurationSec: frameCount / sourceBuffer.sampleRate,
-  }
-}
 
 export function isStretchQualityWarning(playbackRate: number) {
   return playbackRate < QUALITY_WARNING_MIN || playbackRate > QUALITY_WARNING_MAX
@@ -417,43 +167,7 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
   }
 
   const render = async (clip: RuntimeClip, projectBpm: number): Promise<StretchedAudioRender> => {
-    const sourceBuffer = clip.buffer
-    if (!sourceBuffer) throw new Error('Cannot render Stretch warp without an audio buffer.')
-    const map = getAudioClipTimeMap({
-      clip,
-      bufferDurationSec: sourceBuffer.duration,
-      projectBpm,
-      rangeStartSec: clip.startSec,
-      rangeEndSec: clip.startSec + clip.duration,
-    })
-    if (!map || map.mode !== 'stretch') throw new Error('Cannot render Stretch warp for a non-stretched clip.')
-    if ((clip.audioWarp?.markers?.length ?? 0) >= 2) return renderMappedStretch(sourceBuffer, map, clip, projectBpm, options.createBuffer)
-
-    const marginSec = Math.min(ANALYSIS_MARGIN_SEC, map.sourceStartSec)
-    const renderSourceStartSec = Math.max(0, map.sourceStartSec - marginSec)
-    const renderSourceEndSec = Math.min(sourceBuffer.duration, map.sourceEndSec + ANALYSIS_MARGIN_SEC)
-    const startFrame = Math.floor(renderSourceStartSec * sourceBuffer.sampleRate)
-    const sourceFrameCount = Math.max(1, Math.ceil((renderSourceEndSec - renderSourceStartSec) * sourceBuffer.sampleRate))
-    const outputFrameCount = Math.max(1, Math.round((sourceFrameCount / map.playbackRate)))
-    const stretched = stretchAudioWsola({
-      channels: copyBufferWindow(sourceBuffer, startFrame, sourceFrameCount),
-      sampleRate: sourceBuffer.sampleRate,
-    }, {
-      outputFrameCount,
-    })
-    const marginOutputFrames = Math.round((map.sourceStartSec - renderSourceStartSec) / map.playbackRate * sourceBuffer.sampleRate)
-    const timelineFrames = Math.max(1, Math.round(map.timelineDurationSec * sourceBuffer.sampleRate))
-    const trimmedChannels = stretched.channels.map((channel) => {
-      const trimmed = new Float32Array(timelineFrames)
-      trimmed.set(channel.subarray(marginOutputFrames, Math.min(channel.length, marginOutputFrames + timelineFrames)))
-      return trimmed
-    })
-    return {
-      buffer: writeBuffer(options.createBuffer, trimmedChannels, sourceBuffer.sampleRate),
-      timelineStartSec: map.timelineStartSec,
-      sourceStartSec: 0,
-      timelineDurationSec: timelineFrames / sourceBuffer.sampleRate,
-    }
+    return renderStretchedAudio(clip, projectBpm, options.createBuffer)
   }
 
   const startRender = (key: string, clip: RuntimeClip, projectBpm: number, waitForPersist = false) => {

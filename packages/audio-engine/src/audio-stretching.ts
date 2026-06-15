@@ -67,6 +67,20 @@ const copyExact = (input: AudioStretchInput, outputFrameCount: number): AudioStr
   }),
 })
 
+const stretchWithinSupportedRatio = (input: AudioStretchInput, outputFrameCount: number, config: WsolaStretchConfig): AudioStretchResult => {
+  const inputFrameCount = getInputFrameCount(input.channels)
+  const stretchRatio = outputFrameCount / inputFrameCount
+  if (stretchRatio >= MIN_STRETCH_RATIO && stretchRatio <= MAX_STRETCH_RATIO) {
+    return stretchAudioWsola(input, { ...config, outputFrameCount })
+  }
+  const intermediateFrameCount = stretchRatio < MIN_STRETCH_RATIO
+    ? Math.max(outputFrameCount + 1, Math.ceil(inputFrameCount * MIN_STRETCH_RATIO))
+    : Math.min(outputFrameCount, Math.ceil(inputFrameCount * MAX_STRETCH_RATIO))
+  if (intermediateFrameCount === inputFrameCount || intermediateFrameCount === outputFrameCount) return copyExact(input, outputFrameCount)
+  const intermediate = stretchAudioWsola(input, { ...config, outputFrameCount: intermediateFrameCount })
+  return stretchWithinSupportedRatio(intermediate, outputFrameCount, config)
+}
+
 const scoreOverlap = (mono: Float32Array, outputMono: Float32Array, inputStart: number, outputStart: number, overlapFrameCount: number) => {
   let correlation = 0
   let inputEnergy = 0
@@ -138,7 +152,7 @@ export function stretchAudioWsola(input: AudioStretchInput, config: WsolaStretch
 
   const stretchRatio = outputFrameCount / inputFrameCount
   if (stretchRatio < MIN_STRETCH_RATIO || stretchRatio > MAX_STRETCH_RATIO) {
-    throw new Error('WSOLA stretch ratio must be between 0.5x and 2x')
+    return stretchWithinSupportedRatio(input, outputFrameCount, config)
   }
   if (Math.abs(stretchRatio - 1) <= 1 / Math.max(1, inputFrameCount)) return copyExact(input, outputFrameCount)
 

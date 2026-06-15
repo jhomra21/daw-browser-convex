@@ -73,17 +73,24 @@ export function useTimelinePlayback(audioEngine: TimelinePlaybackAudioEngine, lo
   }
 
   const deferredStretchQueue = {
-    has: (window: DeferredStretchWindow) => deferredStretchWindows.some((deferred) => (
-      deferred.clipId === window.clipId
-      && deferred.startSec === window.startSec
-      && deferred.endSec === window.endSec
-    )),
     clear: () => {
       deferredStretchWindows = []
     },
     add: (windows: DeferredStretchWindow[]) => {
       for (const window of windows) {
-        if (!deferredStretchQueue.has(window)) deferredStretchWindows = [...deferredStretchWindows, window]
+        const existingIndex = deferredStretchWindows.findIndex((deferred) => (
+          deferred.clipId === window.clipId
+          && deferred.startSec === window.startSec
+          && deferred.endSec === window.endSec
+        ))
+        if (existingIndex === -1) {
+          deferredStretchWindows = [...deferredStretchWindows, window]
+          continue
+        }
+        if (!window.replaceExistingSource || deferredStretchWindows[existingIndex].replaceExistingSource) continue
+        deferredStretchWindows = deferredStretchWindows.map((deferred, index) => (
+          index === existingIndex ? { ...deferred, replaceExistingSource: true } : deferred
+        ))
       }
     },
     replace: (windows: DeferredStretchWindow[]) => {

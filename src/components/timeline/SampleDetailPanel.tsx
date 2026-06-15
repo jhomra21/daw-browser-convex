@@ -19,6 +19,7 @@ type SampleDetailPanelProps = {
   onWarpChange: (clip: Clip, audioWarp: AudioWarp) => Promise<boolean> | boolean | void;
   onGainChange: (clip: Clip, gain: number) => Promise<boolean> | boolean | void;
   onMarkerDragStateChange?: (dragging: boolean) => void;
+  onHeightChange?: (heightPx: number) => void;
   onClose: () => void;
 };
 
@@ -31,8 +32,14 @@ const SampleDetailPanel: Component<SampleDetailPanelProps> = (props) => {
   const canWrite = createMemo(() => props.canWriteClip(props.clip.id));
 
   const commitHeight = (value: number) => {
-    setHeight(saveSampleDetailPanelHeight(preferenceScopeId(), value, window.innerHeight));
+    const savedHeight = saveSampleDetailPanelHeight(preferenceScopeId(), value, window.innerHeight);
+    setHeight(savedHeight);
+    props.onHeightChange?.(savedHeight);
   };
+
+  createEffect(() => {
+    props.onHeightChange?.(height());
+  });
 
   createEffect(() => {
     const start = dragStart();

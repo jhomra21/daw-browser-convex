@@ -106,4 +106,25 @@ describe('stretchAudioWsola', () => {
     expect(getMaxAdjacentDelta(output.channels[0])).toBeLessThan(Math.max(0.25, getMaxAdjacentDelta(input) * 3))
   })
 
+  test('supports user-selectable warp ratios outside the single-pass WSOLA range', () => {
+    const input = createLoopFixture(sampleRate)
+    const output = stretchAudioWsola({ channels: [input], sampleRate }, {
+      outputFrameCount: Math.round(input.length * 0.25),
+    })
+
+    expect(output.channels[0].length).toBe(Math.round(input.length * 0.25))
+    expect(output.channels[0].every(Number.isFinite)).toBe(true)
+    expect(getPeak(output.channels[0])).toBeLessThanOrEqual(getPeak(input) + 0.0003)
+  })
+
+  test('compresses tiny buffers with progress-guaranteed staging', () => {
+    const input = new Float32Array([0.25, -0.5, 0.75])
+    const output = stretchAudioWsola({ channels: [input], sampleRate }, {
+      outputFrameCount: 1,
+    })
+
+    expect(output.channels[0].length).toBe(1)
+    expect(output.channels[0].every(Number.isFinite)).toBe(true)
+  })
+
 })

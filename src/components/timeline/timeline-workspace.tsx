@@ -3,7 +3,7 @@ import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
 import TrackSidebar from "~/components/timeline/TrackSidebar";
 import TimelineOverlays, { type TimelineMidiBounds } from "~/components/timeline/timeline-overlays";
-import { FX_PANEL_HEIGHT_PX, LANE_HEIGHT, PPS, RULER_HEIGHT } from "~/lib/timeline-utils";
+import { LANE_HEIGHT, PPS, RULER_HEIGHT } from "~/lib/timeline-utils";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionState";
 import type { Clip, Track, TrackId, TrackSend } from "@daw-browser/timeline-core/types";
@@ -14,6 +14,7 @@ type Props = {
   containerRef: (el: HTMLDivElement) => void;
   scrollRef: (el: HTMLDivElement) => void;
   bottomFXOpen: boolean;
+  bottomPanelHeightPx: number;
   durationSec: number;
   sidebarWidth: number;
   tracks: RuntimeTrack[];
@@ -79,7 +80,8 @@ type Props = {
 export default function TimelineWorkspace(props: Props) {
   const trackAreaHeight = () => (props.tracks.length + (props.dropAtNewTrack ? 1 : 0)) * LANE_HEIGHT;
   const fullHeight = () => RULER_HEIGHT + trackAreaHeight();
-  const scrollContentHeight = () => fullHeight() + (props.bottomFXOpen ? FX_PANEL_HEIGHT_PX : 0);
+  const bottomPanelHeight = () => props.bottomFXOpen ? props.bottomPanelHeightPx : 0;
+  const scrollContentHeight = () => fullHeight() + bottomPanelHeight();
   return (
     <div class="flex-1 flex min-h-0" ref={props.containerRef}>
       <div
@@ -118,7 +120,7 @@ export default function TimelineWorkspace(props: Props) {
               class="absolute left-0 right-0 bg-neutral-950"
               style={{
                 top: `${RULER_HEIGHT}px`,
-                bottom: props.bottomFXOpen ? `${FX_PANEL_HEIGHT_PX}px` : "0",
+                bottom: props.bottomFXOpen ? `${bottomPanelHeight()}px` : "0",
               }}
             >
               <For each={props.tracks}>

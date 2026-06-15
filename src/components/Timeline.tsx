@@ -10,7 +10,6 @@ import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { getAudioEngine } from "~/lib/audio-engine-singleton";
 import {
   timelineDurationSec,
-  FX_OFFSET_PX,
 } from "~/lib/timeline-utils";
 import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
 import { useTimelineClipImport } from "~/hooks/useTimelineClipImport";
@@ -42,6 +41,7 @@ import { useTimelineSelectionState } from "~/hooks/useTimelineSelectionState";
 import { useTimelinePersistenceController } from "~/hooks/useTimelinePersistenceController";
 import { useTimelineAudioLifecycle } from "~/hooks/useTimelineAudioLifecycle";
 import { useTimelineAudioWarp } from "~/hooks/useTimelineAudioWarp";
+import { useTimelineBottomPanelState } from "~/hooks/useTimelineBottomPanelState";
 import { isTimelineSampleDetailClip, useTimelineSampleDetailController } from "~/hooks/useTimelineSampleDetailController";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
@@ -69,13 +69,7 @@ type TimelineProps = {
   setDashboardParam: (view: DashboardView | null) => void;
 };
 
-type BottomPanelMode = "effects" | "sample-detail";
-
 const Timeline: Component<TimelineProps> = (props) => {
-  const [bottomFXOpen, setBottomFXOpen] = createSignal(true);
-  const [bottomPanelMode, setBottomPanelMode] = createSignal<BottomPanelMode>("effects");
-  const [agentPanelOpen, setAgentPanelOpen] = createSignal(false);
-  const [sharedChatOpen, setSharedChatOpen] = createSignal(false);
   const [confirmOpen, setConfirmOpen] = createSignal(false);
   const [appMessage, setAppMessage] = createSignal<AppMessageDialogState | null>(null);
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<
@@ -112,6 +106,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     userId,
     navigateToRoom,
   });
+  const bottomPanel = useTimelineBottomPanelState({ projectId });
 
   const {
     sidebarWidth,
@@ -149,8 +144,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     tracks: () => renderTracks(),
     effectsPanel: {
-      isOpen: bottomFXOpen,
-      setOpen: setBottomFXOpen,
+      isOpen: bottomPanel.open,
+      setOpen: bottomPanel.setOpen,
     },
   });
   const clipBuffers = useClipBuffers({
@@ -322,9 +317,9 @@ const Timeline: Component<TimelineProps> = (props) => {
   const sampleDetail = useTimelineSampleDetailController({
     projectId,
     userId,
-    mode: bottomPanelMode,
-    setMode: setBottomPanelMode,
-    setOpen: setBottomFXOpen,
+    mode: bottomPanel.mode,
+    setMode: bottomPanel.setMode,
+    setOpen: bottomPanel.setOpen,
     trackLookup,
     selection,
     canWriteClip,
@@ -749,7 +744,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       event.stopPropagation();
       return;
     }
-    setBottomPanelMode("effects");
+    bottomPanel.setMode("effects");
     onLanePointerDown(event, scrollRef);
   };
 
@@ -831,8 +826,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
     onMasterFX: () => {
       selection.setSelectedFXTarget("master");
-      setBottomPanelMode("effects");
-      setBottomFXOpen(true);
+      bottomPanel.setMode("effects");
+      bottomPanel.setOpen(true);
     },
     bpm: bpm(),
     onChangeBpm: (next: number) => setBpm(clampBpm(next)),
@@ -871,21 +866,21 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   const panelsProps = () => ({
     chat: {
-      bottomOffsetPx: bottomFXOpen() ? FX_OFFSET_PX : 0,
-      agentPanelOpen: agentPanelOpen(),
-      sharedChatOpen: sharedChatOpen(),
+      bottomOffsetPx: bottomPanel.chatBottomOffsetPx(),
+      agentPanelOpen: bottomPanel.agentPanelOpen(),
+      sharedChatOpen: bottomPanel.sharedChatOpen(),
       projectId: projectId(),
       userId: userId(),
       bpm: bpm(),
-      toggleAgentPanel: () => setAgentPanelOpen((value) => !value),
-      toggleSharedChat: () => setSharedChatOpen((value) => !value),
-      closeAgentPanel: () => setAgentPanelOpen(false),
-      closeSharedChat: () => setSharedChatOpen(false),
+      toggleAgentPanel: bottomPanel.toggleAgentPanel,
+      toggleSharedChat: bottomPanel.toggleSharedChat,
+      closeAgentPanel: bottomPanel.closeAgentPanel,
+      closeSharedChat: bottomPanel.closeSharedChat,
       applyAgentMixOps,
     },
     effectsPanel: {
-      isOpen: bottomFXOpen() && bottomPanelMode() === "effects",
-      showOpenButton: bottomPanelMode() === "effects",
+      isOpen: bottomPanel.open() && bottomPanel.mode() === "effects",
+      showOpenButton: bottomPanel.mode() === "effects",
       selectedFXTarget: selection.selectedFXTarget(),
       tracks: renderTracks(),
       playheadSec: playheadSec(),
@@ -896,16 +891,16 @@ const Timeline: Component<TimelineProps> = (props) => {
       grantClipWrite,
       onSelectClip: jumpToClip,
       insertLocalClip: projection.insertLocalClip,
-      onClose: () => setBottomFXOpen(false),
+      onClose: () => bottomPanel.setOpen(false),
       onOpen: () => {
-        setBottomPanelMode("effects");
-        setBottomFXOpen(true);
+        bottomPanel.setMode("effects");
+        bottomPanel.setOpen(true);
       },
       onEffectParamsCommitted: pushEffectParamsHistory,
       onLocalSaveFailed: localProject.setLocalSaveFailure,
     },
     sampleDetailPanel: {
-      isOpen: bottomFXOpen() && bottomPanelMode() === "sample-detail",
+      isOpen: bottomPanel.open() && bottomPanel.mode() === "sample-detail",
       selectedClip: sampleDetail.selectedClip(),
       preferenceScopeId: projectId(),
       projectBpm: bpm(),
@@ -916,6 +911,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       onChange: sampleDetail.changeWarp,
       onGainChange: sampleDetail.changeGain,
       onMarkerDragStateChange: sampleDetail.setMarkerDragging,
+      onHeightChange: bottomPanel.setSampleDetailHeightPx,
       onClose: sampleDetail.close,
     },
     exportDialog: {
@@ -988,7 +984,8 @@ const Timeline: Component<TimelineProps> = (props) => {
           scrollRef = el;
           setScrollElement(el);
         }}
-        bottomFXOpen={bottomFXOpen()}
+        bottomFXOpen={bottomPanel.open()}
+        bottomPanelHeightPx={bottomPanel.heightPx()}
         durationSec={duration()}
         sidebarWidth={sidebarWidth()}
         tracks={renderTracks()}
@@ -1017,8 +1014,8 @@ const Timeline: Component<TimelineProps> = (props) => {
           const match = trackLookup().clipEntryById.get(clipId);
           if (!match || !isTimelineSampleDetailClip(match.clip)) return;
           selection.selectPrimaryClip({ trackId: match.trackId, clipId });
-          setBottomPanelMode("sample-detail");
-          setBottomFXOpen(true);
+          bottomPanel.setMode("sample-detail");
+          bottomPanel.setOpen(true);
         }}
         marqueeRect={marqueeRect()}
         recording={{
@@ -1046,7 +1043,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           subscribeTrackLevels: (listener) =>
             audioEngine.subscribeTrackStereoLevels(listener),
           onTrackClick: (id) => {
-            setBottomPanelMode("effects");
+            bottomPanel.setMode("effects");
             selection.selectTrackTarget(id, { clearClipSelection: true });
           },
           canWriteTrackRouting: canWriteTrack,

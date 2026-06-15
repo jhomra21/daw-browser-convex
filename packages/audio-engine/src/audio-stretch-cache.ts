@@ -29,7 +29,8 @@ type StoredStretchedAudioRender = {
   byteSize: number
 }
 
-type RuntimeClip = Pick<Clip<AudioBuffer>, 'id' | 'duration' | 'startSec' | 'leftPadSec' | 'bufferOffsetSec' | 'sourceDurationSec' | 'audioWarp' | 'buffer'>
+type RuntimeClip = Pick<Clip<AudioBuffer>, 'id' | 'duration' | 'startSec' | 'leftPadSec' | 'bufferOffsetSec' | 'sourceAssetKey' | 'sourceDurationSec' | 'sourceSampleRate' | 'sourceChannelCount' | 'audioWarp' | 'buffer'>
+type CacheKeyClip = Omit<RuntimeClip, 'buffer'>
 
 type StretchCacheEntry =
   | { status: 'rendering'; promise: Promise<StretchedAudioRender> }
@@ -42,6 +43,8 @@ type AudioStretchCacheOptions = {
   persist?: boolean
   persistMaxBytes?: number
 }
+
+type AudioBufferIdentity = Pick<AudioBuffer, 'duration' | 'sampleRate' | 'numberOfChannels' | 'length' | 'getChannelData'>
 
 const ANALYSIS_MARGIN_SEC = 0.08
 const QUALITY_WARNING_MIN = 0.75
@@ -58,7 +61,7 @@ const hashNumber = (hash: number, value: number) => {
   return Math.imul(hash ^ scaled, 16_777_619) >>> 0
 }
 
-const createBufferFingerprint = (buffer: AudioBuffer) => {
+const createBufferFingerprint = (buffer: AudioBufferIdentity) => {
   let hash = hashNumber(2_166_136_261, buffer.duration)
   hash = hashNumber(hash, buffer.sampleRate)
   hash = hashNumber(hash, buffer.numberOfChannels)
@@ -72,12 +75,27 @@ const createBufferFingerprint = (buffer: AudioBuffer) => {
   return hash.toString(36)
 }
 
-const createCacheKey = (clip: RuntimeClip, buffer: AudioBuffer, bpm: number) => [
-  clip.id,
-  createBufferFingerprint(buffer),
-  buffer.sampleRate,
-  buffer.numberOfChannels,
-  buffer.length,
+const createSourceCacheIdentity = (clip: CacheKeyClip, buffer: AudioBufferIdentity) => {
+  if (clip.sourceAssetKey) {
+    return [
+      'asset',
+      clip.sourceAssetKey,
+      clip.sourceDurationSec ?? buffer.duration,
+      clip.sourceSampleRate ?? buffer.sampleRate,
+      clip.sourceChannelCount ?? buffer.numberOfChannels,
+    ].join(':')
+  }
+  return [
+    'buffer',
+    createBufferFingerprint(buffer),
+    buffer.sampleRate,
+    buffer.numberOfChannels,
+    buffer.length,
+  ].join(':')
+}
+
+const createCacheKey = (clip: CacheKeyClip, buffer: AudioBufferIdentity, bpm: number) => [
+  createSourceCacheIdentity(clip, buffer),
   bpm,
   clip.startSec,
   clip.duration,
@@ -85,6 +103,7 @@ const createCacheKey = (clip: RuntimeClip, buffer: AudioBuffer, bpm: number) => 
   clip.bufferOffsetSec ?? 0,
   clip.audioWarp?.enabled === true ? 1 : 0,
   clip.audioWarp?.sourceBpm ?? bpm,
+  clip.audioWarp?.enabled === true ? clip.audioWarp.sourceBeatOffset ?? 0 : 0,
   clip.audioWarp?.mode ?? 'repitch',
 ].join('|')
 
@@ -279,6 +298,9 @@ export function isStretchQualityWarning(playbackRate: number) {
 }
 
 export const audioStretchCacheTestInternals = {
+  createBufferFingerprint,
+  createCacheKey,
+  createSourceCacheIdentity,
   getStoredRenderByteSize,
   selectStoredRenderEvictionKeys,
 }

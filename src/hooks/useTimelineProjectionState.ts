@@ -51,6 +51,7 @@ type UseTimelineProjectionStateReturn = {
   removeLocalTrack: (trackId: Track['id']) => void
   setDraftClipTiming: (clipId: string, patch: ClipTimelinePatch | null) => void
   commitClipTiming: (clipId: string, patch: ClipTimelinePatch) => void
+  commitClipAudioWarp: (clipId: string, audioWarp: Track['clips'][number]['audioWarp']) => void
   replaceDraftClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
   clearDraftClipMoves: (clipIds: Iterable<string>) => void
   commitClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
@@ -171,6 +172,16 @@ function collectTrackClipIds(options: {
   return clipIds
 }
 
+const hasClipTimelinePatchFields = (patch: ClipTimelinePatch) => (
+  patch.trackId !== undefined
+  || patch.startSec !== undefined
+  || patch.duration !== undefined
+  || patch.leftPadSec !== undefined
+  || patch.bufferOffsetSec !== undefined
+  || patch.audioWarp !== undefined
+  || patch.midiOffsetBeats !== undefined
+)
+
 export function useTimelineProjectionState(
   options: UseTimelineProjectionStateOptions,
 ): UseTimelineProjectionStateReturn {
@@ -223,19 +234,30 @@ export function useTimelineProjectionState(
         const remaining: ClipTimelinePatch = { ...patch }
         delete remaining.trackId
         delete remaining.startSec
-        const hasRemainingFields = remaining.duration !== undefined
-          || remaining.leftPadSec !== undefined
-          || remaining.bufferOffsetSec !== undefined
-          || remaining.audioWarp !== undefined
-          || remaining.midiOffsetBeats !== undefined
         if (!next) next = new Map(current)
-        if (hasRemainingFields) {
+        if (hasClipTimelinePatchFields(remaining)) {
           next.set(clipId, remaining)
         } else {
           next.delete(clipId)
         }
       }
       return next ?? current
+    })
+  }
+
+  const clearDraftClipAudioWarp = (clipId: string) => {
+    setDraftClipEditsById((current) => {
+      const patch = current.get(clipId)
+      if (!patch?.audioWarp) return current
+      const remaining: ClipTimelinePatch = { ...patch }
+      delete remaining.audioWarp
+      const next = new Map(current)
+      if (hasClipTimelinePatchFields(remaining)) {
+        next.set(clipId, remaining)
+      } else {
+        next.delete(clipId)
+      }
+      return next
     })
   }
 
@@ -358,7 +380,21 @@ export function useTimelineProjectionState(
       })
       setCommittedClipEditsById((current) => {
         const next = new Map(current)
-        next.set(clipId, patch)
+        next.set(clipId, {
+          ...current.get(clipId),
+          ...patch,
+        })
+        return next
+      })
+    },
+    commitClipAudioWarp: (clipId, audioWarp) => {
+      clearDraftClipAudioWarp(clipId)
+      setCommittedClipEditsById((current) => {
+        const next = new Map(current)
+        next.set(clipId, {
+          ...current.get(clipId),
+          audioWarp,
+        })
         return next
       })
     },

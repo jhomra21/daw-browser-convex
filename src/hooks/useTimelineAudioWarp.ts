@@ -7,7 +7,7 @@ import { getClipHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
 
 type TimelineProjectionAudioWarp = {
-  commitClipTiming: (clipId: string, patch: { audioWarp: AudioWarp }) => void
+  commitClipAudioWarp: (clipId: string, audioWarp: AudioWarp) => void
 }
 
 type UseTimelineAudioWarpOptions = {
@@ -32,13 +32,8 @@ export function useTimelineAudioWarp(options: UseTimelineAudioWarpOptions) {
     return clip && !clip.midi ? clip : undefined
   })
 
-  const buildClipTimingSnapshot = (clip: Clip) => ({
-    startSec: clip.startSec,
-    duration: clip.duration,
-    leftPadSec: clip.leftPadSec,
-    bufferOffsetSec: clip.bufferOffsetSec,
+  const buildClipAudioWarpSnapshot = (clip: Clip) => ({
     audioWarp: normalizeAudioWarp(clip.audioWarp) ?? createDefaultAudioWarp(options.bpm()),
-    midiOffsetBeats: clip.midiOffsetBeats,
   })
 
   const changeAudioWarp = async (clip: Clip, audioWarp: AudioWarp) => {
@@ -48,21 +43,21 @@ export function useTimelineAudioWarp(options: UseTimelineAudioWarpOptions) {
 
     const nextAudioWarp = normalizeAudioWarp(audioWarp)
     if (!nextAudioWarp) return false
-    const previous = buildClipTimingSnapshot(clip)
+    const previous = buildClipAudioWarpSnapshot(clip)
     if (audioWarpEqual(previous.audioWarp, nextAudioWarp)) return true
 
     const applied = await createTimelineClipWriteAdapter({ projectId, userId }).setAudioWarp(clip.id, nextAudioWarp)
     if (!applied) return false
 
-    options.projection.commitClipTiming(clip.id, { audioWarp: nextAudioWarp })
+    options.projection.commitClipAudioWarp(clip.id, nextAudioWarp)
     options.rescheduleChangedClips([clip.id])
     options.pushHistory({
-      type: 'clip-timing',
+      type: 'clip-audio-warp',
       projectId,
       data: {
         clipRef: getClipHistoryRef(clip),
         from: previous,
-        to: { ...previous, audioWarp: nextAudioWarp },
+        to: { audioWarp: nextAudioWarp },
       },
     })
     return true

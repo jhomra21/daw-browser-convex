@@ -18,6 +18,7 @@ import {
   applyTrackRoutingInHistoryModel,
   applyTrackVolumeInHistoryModel,
   cloneHistoryTracks,
+  commitClipAudioWarpInHistoryModel,
   commitClipMovesInHistoryModel,
   commitClipTimingInHistoryModel,
   insertClipIntoHistoryModel,
@@ -232,6 +233,10 @@ export function useTimelineHistory(
         commitClipTiming: (clipId, patch) => {
           commitClipTimingInHistoryModel(workingTracks, clipId, patch)
           runVisibleAction(scopeKey, () => sourceActions.commitClipTiming(clipId, patch))
+        },
+        commitClipAudioWarp: (clipId, audioWarp) => {
+          commitClipAudioWarpInHistoryModel(workingTracks, clipId, audioWarp)
+          runVisibleAction(scopeKey, () => sourceActions.commitClipAudioWarp(clipId, audioWarp))
         },
         rescheduleChangedClips: (clipIds) => {
           runVisibleAction(scopeKey, () => sourceActions.rescheduleChangedClips(clipIds))

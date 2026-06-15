@@ -4,6 +4,7 @@
     "src/components/nav-user.tsx",
     "packages/shared/src/audio-warp.test.ts",
     "src/lib/audio-waveform-layout.test.js",
+    "src/hooks/useTimelinePlayback.test.ts",
     "packages/audio-engine/src/bpm-detection.test.ts",
     "packages/audio-engine/src/audio-scheduling.test.ts",
     "packages/audio-engine/src/clip-scheduler.test.ts",

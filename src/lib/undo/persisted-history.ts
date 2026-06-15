@@ -86,6 +86,12 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>) {
           && isNumber(move.to.startSec))
     case 'clip-timing':
       return isString(data.clipRef) && isClipTiming(data.from) && isClipTiming(data.to)
+    case 'clip-audio-warp':
+      return isString(data.clipRef)
+        && isRecord(data.from)
+        && isAudioWarp(data.from.audioWarp)
+        && isRecord(data.to)
+        && isAudioWarp(data.to.audioWarp)
     case 'track-create':
       return isTrackCreateData(data)
     case 'track-clip-create':

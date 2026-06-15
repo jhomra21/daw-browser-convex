@@ -44,11 +44,10 @@ import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-a
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import { FX_PANEL_HEIGHT_PX } from "~/lib/timeline-utils";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
-import SampleClipPanel from "~/components/timeline/SampleClipPanel";
-import type { BpmDetectionService } from "~/lib/bpm-detection-service";
 
 type EffectsPanelProps = {
   isOpen: boolean;
+  showOpenButton?: boolean;
   selectedFXTarget: Track["id"] | "master";
   tracks: Track[];
   onClose: () => void;
@@ -64,14 +63,6 @@ type EffectsPanelProps = {
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
   onLocalSaveFailed?: (message: string) => void;
-  sampleWarp?: {
-    selectedClip?: Clip;
-    projectBpm: number;
-    bpmDetection?: BpmDetectionService;
-    ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>;
-    canWriteClip?: (clipId: string) => boolean;
-    onChange: (clip: Clip, audioWarp: NonNullable<Clip["audioWarp"]>) => Promise<boolean> | boolean | void;
-  };
 };
 
 type EffectKind = "eq" | "reverb";
@@ -806,21 +797,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       onResetReverb: handleReverbReset,
                     }}
                   />
-                  <Show when={props.sampleWarp?.selectedClip}>
-                    {(clip) => (
-                      <SampleClipPanel
-                        audioEngine={props.audioEngine}
-                        sample={{
-                          clip: clip(),
-                          projectBpm: props.sampleWarp?.projectBpm ?? 120,
-                          bpmDetection: props.sampleWarp?.bpmDetection,
-                          ensureClipBuffer: props.sampleWarp?.ensureClipBuffer,
-                          canWrite: props.sampleWarp?.canWriteClip ? props.sampleWarp.canWriteClip(clip().id) : true,
-                          onWarpChange: (audioWarp) => props.sampleWarp?.onChange(clip(), audioWarp),
-                        }}
-                      />
-                    )}
-                  </Show>
                   <Show when={isCurrentTargetReadOnly()}>
                     <EffectsPanelReadOnlyNotice />
                   </Show>
@@ -843,7 +819,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         </div>
       </Show>
 
-      <Show when={!props.isOpen}>
+      <Show when={!props.isOpen && (props.showOpenButton ?? true)}>
         <EffectsPanelClosedButton onOpen={props.onOpen} />
       </Show>
 

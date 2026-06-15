@@ -54,6 +54,7 @@ type ClipCreateInput = {
   audioWarp?: {
     enabled: boolean
     sourceBpm?: number
+    sourceBeatOffset?: number
     mode: 'repitch' | 'stretch'
   }
   midiOffsetBeats?: number
@@ -95,6 +96,7 @@ type ClipCreatePatch = {
 const audioWarpValidator = v.object({
   enabled: v.boolean(),
   sourceBpm: v.optional(v.number()),
+  sourceBeatOffset: v.optional(v.number()),
   mode: v.union(v.literal('repitch'), v.literal('stretch')),
 })
 

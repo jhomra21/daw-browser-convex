@@ -11,8 +11,13 @@ export type ClipTiming = {
   duration: number
   leftPadSec?: number
   bufferOffsetSec?: number
+  /** Legacy persisted undo entries may include audioWarp here. New warp history uses clip-audio-warp. */
   audioWarp?: AudioWarp
   midiOffsetBeats?: number
+}
+
+export type ClipAudioWarpSnapshot = {
+  audioWarp: AudioWarp
 }
 
 export type ClipOffsets = Omit<ClipTiming, 'startSec' | 'duration'>
@@ -156,6 +161,15 @@ export type HistoryEntry =
         clipRef: ClipRef
         from: ClipTiming
         to: ClipTiming
+      }
+    }
+  | {
+      type: 'clip-audio-warp'
+      projectId: string
+      data: {
+        clipRef: ClipRef
+        from: ClipAudioWarpSnapshot
+        to: ClipAudioWarpSnapshot
       }
     }
   | {

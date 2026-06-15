@@ -1,8 +1,8 @@
 import { For, type Component, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import { isStretchQualityWarning, type AudioEngine, type AudioStretchRenderState } from '@daw-browser/audio-engine/audio-engine'
-import { createDefaultAudioWarp, normalizeAudioWarp } from '@daw-browser/shared'
 import type { AudioWarp, Clip } from '@daw-browser/timeline-core/types'
 import type { BpmDetectionService, BpmSuggestionState } from '~/lib/bpm-detection-service'
+import { buildNextAudioWarp } from '~/lib/audio-warp-patch'
 
 type SampleClipPanelProps = {
   audioEngine: AudioEngine
@@ -20,6 +20,7 @@ const resolveSourceBpm = (clip: Clip, projectBpm: number) => clip.audioWarp?.sou
 
 const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
   const sourceBpm = createMemo(() => resolveSourceBpm(props.sample.clip, props.sample.projectBpm))
+  const sourceBeatOffset = createMemo(() => props.sample.clip.audioWarp?.sourceBeatOffset ?? 0)
   const ratio = createMemo(() => props.sample.projectBpm / sourceBpm())
   const [renderState, setRenderState] = createSignal<AudioStretchRenderState>({ status: 'idle' })
   const [bpmState, setBpmState] = createSignal<BpmSuggestionState>({ status: 'idle' })
@@ -74,13 +75,9 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
   })
 
   const commit = (patch: Partial<AudioWarp>) => {
-    const audioWarp = normalizeAudioWarp({
-      ...createDefaultAudioWarp(props.sample.projectBpm),
-      ...props.sample.clip.audioWarp,
-      sourceBpm: sourceBpm(),
-      ...patch,
-    })
-    if (audioWarp) props.sample.onWarpChange(audioWarp)
+    const audioWarp = buildNextAudioWarp(props.sample.projectBpm, props.sample.clip.audioWarp, { sourceBpm: sourceBpm(), ...patch })
+    if (audioWarp) return props.sample.onWarpChange(audioWarp)
+    return false
   }
 
   return (
@@ -151,6 +148,36 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
           {stretchStatusText()}
         </div>
       )}
+      {props.sample.clip.audioWarp?.enabled === true && (
+        <div class="flex items-end gap-2 border-t border-neutral-800 pt-2 text-xs">
+          <label class="flex flex-col gap-1 text-neutral-400">
+            Beat Offset
+            <input
+              class="h-7 w-24 border border-neutral-700 bg-neutral-900 px-2 text-neutral-100 disabled:opacity-50"
+              type="number"
+              min="-16"
+              max="16"
+              step="0.001"
+              value={sourceBeatOffset()}
+              disabled={!props.sample.canWrite}
+              onChange={(event) => {
+                const value = event.currentTarget.valueAsNumber
+                if (Number.isFinite(value)) commit({ sourceBeatOffset: value })
+              }}
+            />
+          </label>
+          {sourceBeatOffset() !== 0 && (
+            <button
+              class="h-7 border border-neutral-700 px-2 text-neutral-200 disabled:opacity-50"
+              type="button"
+              disabled={!props.sample.canWrite}
+              onClick={() => commit({ sourceBeatOffset: 0 })}
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      )}
       <div class="flex flex-col gap-1 border-t border-neutral-800 pt-2 text-xs text-neutral-400">
         <div class="flex items-center justify-between gap-2">
           <span>Auto BPM</span>
@@ -191,7 +218,7 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
                 onClick={() => {
                   const state = bpmState()
                   if (state.status !== 'suggested') return
-                  void Promise.resolve(props.sample.onWarpChange({ enabled: true, sourceBpm: state.result.bpm, mode: 'stretch' })).then((value) => {
+                  void Promise.resolve(commit({ enabled: true, sourceBpm: state.result.bpm, mode: 'stretch' })).then((value) => {
                     if (value !== false) props.sample.bpmDetection?.markApplied(props.sample.clip.id)
                   })
                 }}

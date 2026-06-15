@@ -32,8 +32,38 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
 
   let marqueeActive = false
   let marqueeAdditive = false
+  let marqueeBaseClipIds = new Set<string>()
   let startX = 0
   let startY = 0
+
+  const findPrimarySelectedClip = (selectedClipIds: Set<string>) => {
+    for (const track of tracks()) {
+      for (const clip of track.clips) {
+        if (selectedClipIds.has(clip.id)) {
+          return { trackId: track.id, clipId: clip.id }
+        }
+      }
+    }
+    return null
+  }
+
+  const selectMarqueeClips = (selected: Set<string>) => {
+    const clipIds = marqueeAdditive
+      ? new Set([...marqueeBaseClipIds, ...selected])
+      : selected
+    const primaryClip = findPrimarySelectedClip(clipIds)
+    if (primaryClip) {
+      selection.selectClipGroup({
+        trackId: primaryClip.trackId,
+        clipIds: [...clipIds],
+        primaryClipId: primaryClip.clipId,
+      })
+      return
+    }
+    if (!marqueeAdditive) {
+      selection.selectMasterTarget()
+    }
+  }
 
   const startLaneDrag = (event: PointerEvent, scrollEl: HTMLDivElement | undefined) => {
     const ts = tracks()
@@ -41,22 +71,12 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
 
     currentScrollEl = scrollEl
 
-    const trackIdx = Math.max(
-      0,
-      Math.min(
-        ts.length - 1,
-        Math.floor((event.clientY - scrollEl.getBoundingClientRect().top + (scrollEl.scrollTop || 0) - RULER_HEIGHT) / LANE_HEIGHT),
-      ),
-    )
-    const id = ts[trackIdx]?.id
-    if (id) {
-      selection.selectTrackTarget(
-        id,
-        event.shiftKey ? { clearPrimaryClip: true } : { clearClipSelection: true },
-      )
+    if (!event.shiftKey) {
+      selection.selectMasterTarget()
     }
 
     marqueeAdditive = !!event.shiftKey
+    marqueeBaseClipIds = marqueeAdditive ? new Set(selection.selectedClipIds()) : new Set<string>()
     const rect = scrollEl.getBoundingClientRect()
     startX = event.clientX - rect.left + (scrollEl.scrollLeft || 0)
     startY = event.clientY - rect.top + (scrollEl.scrollTop || 0)
@@ -118,15 +138,7 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
       }
     }
 
-    if (marqueeAdditive) {
-      selection.setSelectedClipIds((previous) => {
-        const next = new Set<string>(previous)
-        for (const id of selected) next.add(id)
-        return next
-      })
-    } else {
-      selection.setSelectedClipIds(selected)
-    }
+    selectMarqueeClips(selected)
   }
 
   const laneDrag = useDrag({
@@ -142,6 +154,7 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
     stopScrub()
     setMarqueeRect(null)
     marqueeActive = false
+    marqueeBaseClipIds = new Set<string>()
   }
 
   onCleanup(() => {

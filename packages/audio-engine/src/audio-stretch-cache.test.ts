@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import { audioStretchCacheTestInternals } from './audio-stretch-cache'
 
+const createTestBuffer = (values: number[]) => ({
+  duration: values.length / 10,
+  sampleRate: 10,
+  numberOfChannels: 1,
+  length: values.length,
+  getChannelData: () => new Float32Array(values),
+})
+
 describe('audio stretch cache eviction helpers', () => {
   test('accounts stored render bytes from channel buffers', () => {
     expect(audioStretchCacheTestInternals.getStoredRenderByteSize({
@@ -28,5 +36,49 @@ describe('audio stretch cache eviction helpers', () => {
     ], 50)
 
     expect(keys.join(',')).toBe('older,oversized')
+  })
+})
+
+describe('audio stretch cache key identity', () => {
+  test('uses stable source asset metadata instead of clip id for persisted keys', () => {
+    const buffer = createTestBuffer([0, 0.5, 1])
+    const left = audioStretchCacheTestInternals.createCacheKey({
+      id: 'clip-a',
+      sourceAssetKey: 'asset-key',
+      sourceDurationSec: 12,
+      sourceSampleRate: 48_000,
+      sourceChannelCount: 2,
+      startSec: 0,
+      duration: 4,
+      audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+    }, buffer, 120)
+    const right = audioStretchCacheTestInternals.createCacheKey({
+      id: 'clip-b',
+      sourceAssetKey: 'asset-key',
+      sourceDurationSec: 12,
+      sourceSampleRate: 48_000,
+      sourceChannelCount: 2,
+      startSec: 0,
+      duration: 4,
+      audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+    }, buffer, 120)
+
+    expect(left).toBe(right)
+    expect(left.startsWith('asset:asset-key')).toBe(true)
+  })
+
+  test('falls back to buffer fingerprint for transient source buffers', () => {
+    const leftBuffer = createTestBuffer([0, 0.5, 1])
+    const rightBuffer = createTestBuffer([0, 0.25, 1])
+
+    expect(audioStretchCacheTestInternals.createSourceCacheIdentity({
+      id: 'clip',
+      startSec: 0,
+      duration: 1,
+    }, leftBuffer)).not.toBe(audioStretchCacheTestInternals.createSourceCacheIdentity({
+      id: 'clip',
+      startSec: 0,
+      duration: 1,
+    }, rightBuffer))
   })
 })

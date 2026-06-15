@@ -22,7 +22,6 @@ type ClipTimingPatch = {
   duration: number;
   leftPadSec?: number;
   bufferOffsetSec?: number;
-  audioWarp?: Track["clips"][number]["audioWarp"];
   midiOffsetBeats?: number;
 };
 
@@ -267,7 +266,6 @@ export const persistHistoryClipTimingOrThrow = async (
       duration: timing.duration,
       leftPadSec: timing.leftPadSec,
       bufferOffsetSec: timing.bufferOffsetSec,
-      audioWarp: normalizeAudioWarp(timing.audioWarp),
       midiOffsetBeats: timing.midiOffsetBeats,
     });
     if (!applied) throw new Error(message);
@@ -282,13 +280,40 @@ export const persistHistoryClipTimingOrThrow = async (
     midiOffsetBeats: timing.midiOffsetBeats ?? 0,
   });
   if (!applied) throw new Error(message);
+};
+
+export const persistHistoryClipAudioWarpOrThrow = async (
+  deps: Deps,
+  clipId: string,
+  audioWarp: Track["clips"][number]["audioWarp"],
+  message: string,
+) => {
+  const normalizedAudioWarp = normalizeAudioWarp(audioWarp);
+  if (!normalizedAudioWarp) throw new Error(message);
+  if (isLocalHistoryProject(deps)) {
+    const applied = await createLocalTimelineRepository(deps.projectId).updateClip({
+      clipId,
+      audioWarp: normalizedAudioWarp,
+    });
+    if (!applied) throw new Error(message);
+    return;
+  }
+  const applied = await persistClipAudioWarp(deps.convexClient, deps.convexApi, {
+    clipId,
+    audioWarp: normalizedAudioWarp,
+  });
+  if (!applied) throw new Error(message);
+};
+
+export const persistLegacyHistoryClipTimingAudioWarpOrThrow = async (
+  deps: Deps,
+  clipId: string,
+  timing: { audioWarp?: Track["clips"][number]["audioWarp"] },
+  message: string,
+) => {
   const audioWarp = normalizeAudioWarp(timing.audioWarp);
   if (audioWarp) {
-    const warpApplied = await persistClipAudioWarp(deps.convexClient, deps.convexApi, {
-      clipId,
-      audioWarp,
-    });
-    if (!warpApplied) throw new Error(message);
+    await persistHistoryClipAudioWarpOrThrow(deps, clipId, audioWarp, message);
   }
 };
 

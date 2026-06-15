@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 
-import { getAudioWaveformLayout } from '~/lib/audio-waveform-layout'
+import {
+  getAudioWaveformLayout,
+  getSourceBeatOffsetAnchorX,
+  getSourceBeatOffsetFromAnchorX,
+} from '~/lib/audio-waveform-layout'
 import { PPS } from '~/lib/timeline-utils'
 
 const createClip = (input) => ({
@@ -11,6 +15,71 @@ const createClip = (input) => ({
   sourceDurationSec: 4,
   color: '#fff',
   ...input,
+})
+
+describe('source beat offset marker helpers', () => {
+  test('maps beat offsets to the sample detail beat grid pixels', () => {
+    expect(getSourceBeatOffsetAnchorX({
+      sourceBeatOffset: 1,
+      clipDurationSec: 4,
+      cssWidthPx: 960,
+      projectBpm: 120,
+    })).toBe(120)
+  })
+
+  test('inverts sample detail beat grid pixels back to beat offsets', () => {
+    expect(getSourceBeatOffsetFromAnchorX({
+      anchorX: 120,
+      clipDurationSec: 4,
+      cssWidthPx: 960,
+      projectBpm: 120,
+      snap: true,
+    })).toBe(1)
+  })
+
+  test('accounts for left padding when mapping marker position', () => {
+    const x = getSourceBeatOffsetAnchorX({
+      sourceBeatOffset: 1,
+      clipDurationSec: 4,
+      cssWidthPx: 960,
+      projectBpm: 120,
+      leftPadSec: 0.5,
+    })
+
+    expect(x).toBe(240)
+    expect(getSourceBeatOffsetFromAnchorX({
+      anchorX: x,
+      clipDurationSec: 4,
+      cssWidthPx: 960,
+      projectBpm: 120,
+      leftPadSec: 0.5,
+      snap: true,
+    })).toBe(1)
+  })
+
+  test('snaps before clamping and rounds drag offsets', () => {
+    const readOffset = (beatOffset, snap) => getSourceBeatOffsetFromAnchorX({
+      anchorX: beatOffset * 120,
+      clipDurationSec: 4,
+      cssWidthPx: 960,
+      projectBpm: 120,
+      snap,
+    })
+
+    expect(readOffset(1.13, true)).toBe(1.25)
+    expect(readOffset(1.2345, false)).toBe(1.235)
+    expect(readOffset(18.2, true)).toBe(16)
+    expect(readOffset(-18.2, true)).toBe(-16)
+  })
+
+  test('uses project BPM for source beat offsets to match playback timing', () => {
+    expect(getSourceBeatOffsetAnchorX({
+      sourceBeatOffset: 1,
+      clipDurationSec: 4,
+      cssWidthPx: 960,
+      projectBpm: 120,
+    })).toBe(120)
+  })
 })
 
 describe('getAudioWaveformLayout', () => {
@@ -48,6 +117,28 @@ describe('getAudioWaveformLayout', () => {
     })
   })
 
+  test('scales draw bounds from css width instead of global timeline pixels', () => {
+    expect(
+      getAudioWaveformLayout(
+        createClip({
+          leftPadSec: 0.5,
+          bufferOffsetSec: 1.25,
+          duration: 2.5,
+          sourceDurationSec: 5,
+        }),
+        1000,
+      ),
+    ).toEqual({
+      sourceDurationSec: 5,
+      padPx: 200,
+      drawCols: 800,
+      audioStartPx: 200,
+      audioEndPx: 1000,
+      sourceStartSec: 1.25,
+      sourceEndSec: 3.25,
+    })
+  })
+
   test('clamps draw columns to available css width after left padding', () => {
     expect(
       getAudioWaveformLayout(
@@ -61,12 +152,12 @@ describe('getAudioWaveformLayout', () => {
       ),
     ).toEqual({
       sourceDurationSec: 5,
-      padPx: 0.5 * PPS,
-      drawCols: 130,
-      audioStartPx: 0.5 * PPS,
-      audioEndPx: 180,
+      padPx: 22,
+      drawCols: 157,
+      audioStartPx: 22,
+      audioEndPx: 179,
       sourceStartSec: 1,
-      sourceEndSec: 2.3,
+      sourceEndSec: 4.488888889,
     })
   })
 
@@ -187,6 +278,29 @@ describe('getAudioWaveformLayout', () => {
       audioEndPx: 4 * PPS,
       sourceStartSec: 0,
       sourceEndSec: 2,
+    })
+  })
+
+  test('aligns waveform to positive beat offset leading silence', () => {
+    expect(
+      getAudioWaveformLayout(
+        createClip({
+          duration: 4,
+          sourceDurationSec: 8,
+          audioWarp: { enabled: true, mode: 'repitch', sourceBpm: 120, sourceBeatOffset: 1 },
+        }),
+        400,
+        undefined,
+        120,
+      ),
+    ).toEqual({
+      sourceDurationSec: 8,
+      padPx: 0.5 * PPS,
+      drawCols: 3.5 * PPS,
+      audioStartPx: 0.5 * PPS,
+      audioEndPx: 4 * PPS,
+      sourceStartSec: 0,
+      sourceEndSec: 3.5,
     })
   })
 })

@@ -123,6 +123,12 @@ const resolveWarpBpm = (value: number | undefined, fallback: number) => (
   Number.isFinite(value) && value !== undefined && value > 0 ? value : fallback
 )
 
+const resolveSourceBeatOffsetSec = (input: {
+  warpEnabled: boolean
+  sourceBeatOffset?: number
+  sourceBpm: number
+}) => input.warpEnabled ? (input.sourceBeatOffset ?? 0) * (60 / input.sourceBpm) : 0
+
 export function getAudioClipTimeMap(input: AudioClipTimeMapInput): AudioClipTimeMap | null {
   const leftPad = Math.max(0, input.clip.leftPadSec ?? 0)
   const bufferOffsetRaw = Math.max(0, input.clip.bufferOffsetSec ?? 0)
@@ -139,23 +145,31 @@ export function getAudioClipTimeMap(input: AudioClipTimeMapInput): AudioClipTime
   const playbackRate = warpEnabled ? projectBpm / sourceBpm : 1
   const sourceSecondsPerTimelineSecond = playbackRate
   const timelineSecondsPerSourceSecond = 1 / playbackRate
-  const audioTimelineDuration = bufferDurRemain * timelineSecondsPerSourceSecond
-  const audioEnd = Math.min(clipEnd, audioStart + audioTimelineDuration)
+  const sourceBeatOffsetSec = resolveSourceBeatOffsetSec({
+    warpEnabled,
+    sourceBeatOffset: input.clip.audioWarp?.sourceBeatOffset,
+    sourceBpm,
+  })
+  const sourceBaseSec = bufferOffset - sourceBeatOffsetSec
+  const leadingTimelineSilenceSec = Math.max(0, bufferOffset - sourceBaseSec) * timelineSecondsPerSourceSecond
+  const effectiveSourceStartSec = Math.max(bufferOffset, sourceBaseSec)
+  const audioTimelineDuration = Math.max(0, bufferDuration - effectiveSourceStartSec) * timelineSecondsPerSourceSecond
+  const audioStartSec = audioStart + leadingTimelineSilenceSec
+  const audioEnd = Math.min(clipEnd, audioStartSec + audioTimelineDuration)
 
   if (input.rangeStartSec >= audioEnd) return null
 
-  const timelineStartSec = Math.max(input.rangeStartSec, audioStart)
-  const timelineOffsetNoBase = Math.max(0, timelineStartSec - audioStart)
-  const sourceOffsetNoBase = timelineOffsetNoBase * sourceSecondsPerTimelineSecond
-  if (sourceOffsetNoBase >= bufferDurRemain) return null
+  const timelineStartSec = Math.max(input.rangeStartSec, audioStartSec)
+  const sourceStartAtTimeline = sourceBaseSec + Math.max(0, timelineStartSec - audioStart) * sourceSecondsPerTimelineSecond
+  const sourceStartSec = Math.max(bufferOffset, sourceStartAtTimeline)
+  if (sourceStartSec >= bufferDuration) return null
 
   const timelineDurationSec = Math.min(
-    Math.max(0, (bufferDurRemain - sourceOffsetNoBase) * timelineSecondsPerSourceSecond),
+    Math.max(0, (bufferDuration - sourceStartSec) * timelineSecondsPerSourceSecond),
     Math.max(0, audioEnd - timelineStartSec),
   )
   if (timelineDurationSec <= 0) return null
 
-  const sourceStartSec = bufferOffset + sourceOffsetNoBase
   const sourceDurationSec = timelineDurationSec * sourceSecondsPerTimelineSecond
   const sourceEndSec = Math.min(bufferDuration, sourceStartSec + sourceDurationSec)
 
@@ -170,8 +184,8 @@ export function getAudioClipTimeMap(input: AudioClipTimeMapInput): AudioClipTime
     timelineSecondsPerSourceSecond,
     playbackRate,
     mode: warpEnabled ? input.clip.audioWarp?.mode ?? 'repitch' : 'raw',
-    timelineToSourceSec: (timelineSec) => bufferOffset + Math.max(0, timelineSec - audioStart) * sourceSecondsPerTimelineSecond,
-    sourceToTimelineSec: (sourceSec) => audioStart + Math.max(0, sourceSec - bufferOffset) * timelineSecondsPerSourceSecond,
+    timelineToSourceSec: (timelineSec) => sourceBaseSec + Math.max(0, timelineSec - audioStart) * sourceSecondsPerTimelineSecond,
+    sourceToTimelineSec: (sourceSec) => audioStart + (sourceSec - sourceBaseSec) * timelineSecondsPerSourceSecond,
   }
 }
 

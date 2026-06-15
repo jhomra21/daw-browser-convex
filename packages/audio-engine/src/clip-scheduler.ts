@@ -9,7 +9,20 @@ type RuntimeTrack = Track<AudioBuffer>
 export type ScheduleOptions = {
   atCtxTime?: number
   preserveExisting?: boolean
+  startLimitSec?: number
   endLimitSec?: number
+  clipIds?: string[]
+}
+
+export type DeferredStretchWindow = {
+  clipId: string
+  startSec: number
+  endSec: number
+  replaceExistingSource?: boolean
+}
+
+export type ScheduleResult = {
+  deferredStretchWindows: DeferredStretchWindow[]
 }
 
 type ScheduledClipEntry = {
@@ -31,7 +44,7 @@ type ClipSchedulerOptions = {
   ensureTrackInput: (trackId: string) => GainNode
   stopClipSources: () => void
   stopSourcesForClip: (clipId: string) => void
-  scheduleMidiClip: (track: RuntimeTrack, clip: RuntimeClip, playheadSec: number, nowCtx: number, endLimitSec?: number) => boolean
+  scheduleMidiClip: (track: RuntimeTrack, clip: RuntimeClip, playheadSec: number, nowCtx: number, startLimitSec?: number, endLimitSec?: number) => boolean
   ensureStretchedClip: (clip: RuntimeClip) => void
   getStretchedClip: (clip: RuntimeClip) => StretchedAudioRender | null
   stretchRenderAheadSec?: number
@@ -50,6 +63,15 @@ const findFirstScheduleEntryEndingAfter = (entries: ScheduledClipEntry[], playhe
   }
   return low
 }
+
+const shouldScheduleEntryInRange = (
+  entry: Pick<ScheduledClipEntry, 'startSec' | 'endSec'>,
+  startLimitSec: number,
+  endLimitSec?: number,
+) => (
+  entry.endSec > startLimitSec
+  && (endLimitSec === undefined || entry.startSec < endLimitSec)
+)
 
 export function createClipScheduler(options: ClipSchedulerOptions) {
   const scheduleIndexCache = new WeakMap<RuntimeTrack[], ScheduleIndex>()
@@ -75,33 +97,48 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
     return index
   }
 
-  const scheduleAudioClip = (clip: RuntimeClip, input: GainNode, playheadSec: number, nowCtx: number, endLimitSec?: number) => {
+  const createScheduleResult = (): ScheduleResult => ({ deferredStretchWindows: [] })
+
+  const scheduleAudioClip = (clip: RuntimeClip, input: GainNode, playheadSec: number, nowCtx: number, startLimitSec?: number, endLimitSec?: number): DeferredStretchWindow | null => {
     const ctx = options.getAudioContext()
-    if (!ctx || !clip.buffer) return
+    if (!ctx || !clip.buffer) return null
     const map = getAudioClipTimeMap({
       clip,
       bufferDurationSec: clip.buffer.duration,
       projectBpm: options.getBpm(),
-      rangeStartSec: playheadSec,
+      rangeStartSec: startLimitSec ?? playheadSec,
       rangeEndSec: endLimitSec,
     })
-    if (!map) return
-    if (map.mode === 'stretch' && shouldEnsureStretchRender({
+    if (!map) return null
+    const stretchInHorizon = map.mode === 'stretch' && shouldScheduleStretchSource({
       playheadSec,
       renderAheadSec: stretchRenderAheadSec,
       endLimitSec,
       timelineStartSec: map.timelineStartSec,
       timelineDurationSec: map.timelineDurationSec,
-    })) options.ensureStretchedClip(clip)
+    })
+    if (map.mode === 'stretch' && !stretchInHorizon) return null
+    if (stretchInHorizon) options.ensureStretchedClip(clip)
+
+    const stretched = map.mode === 'stretch' ? options.getStretchedClip(clip) : null
+    let deferredFallbackWindow: DeferredStretchWindow | null = null
+    if (map.mode === 'stretch' && !stretched) {
+      const deferredWindow = { clipId: clip.id, startSec: map.timelineStartSec, endSec: map.timelineEndSec }
+      if (!canFallbackToRepitchStretch({
+        playheadSec,
+        timelineStartSec: map.timelineStartSec,
+        timelineEndSec: map.timelineEndSec,
+      })) return deferredWindow
+      deferredFallbackWindow = { ...deferredWindow, replaceExistingSource: true }
+    }
 
     const source = ctx.createBufferSource()
-    const stretched = map.mode === 'stretch' ? options.getStretchedClip(clip) : null
     const playback = getAudioBufferPlaybackParams({
       sourceBuffer: clip.buffer,
       map,
       stretched: stretched ? { ...stretched, bufferDurationSec: stretched.buffer.duration } : null,
     })
-    if (playback.durationSec <= 0) return
+    if (playback.durationSec <= 0) return null
     source.buffer = playback.buffer
     source.playbackRate.value = playback.playbackRate
     source.connect(input)
@@ -112,27 +149,36 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
     )
     source.onended = () => options.sources.remove(clip.id, source)
     options.sources.add(clip.id, source)
+    return deferredFallbackWindow
   }
 
   return {
     scheduleAllClipsFromPlayhead: (tracks: RuntimeTrack[], playheadSec: number, opts?: ScheduleOptions) => {
-      if (!options.getAudioContext()) return
+      const result = createScheduleResult()
+      if (!options.getAudioContext()) return result
       if (!opts?.preserveExisting) options.stopClipSources()
       const now = typeof opts?.atCtxTime === 'number' ? opts.atCtxTime : options.timelineToCtxTime(playheadSec)
       options.updateTrackGains(tracks)
 
+      const startLimitSec = opts?.startLimitSec
       const endLimitSec = opts?.endLimitSec
+      const clipIds = opts?.clipIds ? new Set(opts.clipIds) : null
       const entries = getScheduleIndex(tracks).byEnd
-      for (let index = findFirstScheduleEntryEndingAfter(entries, playheadSec); index < entries.length; index++) {
+      const scheduleStartSec = startLimitSec ?? playheadSec
+      for (let index = findFirstScheduleEntryEndingAfter(entries, scheduleStartSec); index < entries.length; index++) {
         const entry = entries[index]
-        if (endLimitSec !== undefined && entry.startSec >= endLimitSec) continue
-        if (options.scheduleMidiClip(entry.track, entry.clip, playheadSec, now, endLimitSec)) continue
-        scheduleAudioClip(entry.clip, options.ensureTrackInput(entry.track.id), playheadSec, now, endLimitSec)
+        if (clipIds && !clipIds.has(entry.clip.id)) continue
+        if (!shouldScheduleEntryInRange(entry, scheduleStartSec, endLimitSec)) continue
+        if (options.scheduleMidiClip(entry.track, entry.clip, playheadSec, now, startLimitSec, endLimitSec)) continue
+        const deferred = scheduleAudioClip(entry.clip, options.ensureTrackInput(entry.track.id), playheadSec, now, startLimitSec, endLimitSec)
+        if (deferred) result.deferredStretchWindows.push(deferred)
       }
+      return result
     },
     rescheduleClipsAtPlayhead: (tracks: RuntimeTrack[], playheadSec: number, clipIds: string[], opts?: ScheduleOptions) => {
-      if (!options.getAudioContext()) return
-      if (!clipIds || clipIds.length === 0) return
+      const result = createScheduleResult()
+      if (!options.getAudioContext()) return result
+      if (!clipIds || clipIds.length === 0) return result
       const idsSet = new Set<string>(clipIds)
       const now = options.timelineToCtxTime(playheadSec)
       options.updateTrackGains(tracks)
@@ -142,15 +188,17 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
         const input = options.ensureTrackInput(track.id)
         for (const clip of track.clips) {
           if (!idsSet.has(clip.id)) continue
-          if (options.scheduleMidiClip(track, clip, playheadSec, now, opts?.endLimitSec)) continue
-          scheduleAudioClip(clip, input, playheadSec, now, opts?.endLimitSec)
+          if (options.scheduleMidiClip(track, clip, playheadSec, now, opts?.startLimitSec, opts?.endLimitSec)) continue
+          const deferred = scheduleAudioClip(clip, input, playheadSec, now, opts?.startLimitSec, opts?.endLimitSec)
+          if (deferred) result.deferredStretchWindows.push(deferred)
         }
       }
+      return result
     },
   }
 }
 
-const shouldEnsureStretchRender = (input: {
+const shouldScheduleStretchSource = (input: {
   playheadSec: number
   renderAheadSec: number
   endLimitSec?: number
@@ -165,7 +213,21 @@ const shouldEnsureStretchRender = (input: {
   return input.timelineStartSec < horizonEndSec && renderEndSec > input.playheadSec
 }
 
+export const STRETCH_REPITCH_FALLBACK_IMMINENT_SEC = 1
+
+export const canFallbackToRepitchStretch = (input: {
+  playheadSec: number
+  timelineStartSec: number
+  timelineEndSec: number
+}) => (
+  input.timelineEndSec > input.playheadSec
+  && input.timelineStartSec <= input.playheadSec + STRETCH_REPITCH_FALLBACK_IMMINENT_SEC
+)
+
 export const clipSchedulerTestInternals = {
   defaultStretchRenderAheadSec: DEFAULT_STRETCH_RENDER_AHEAD_SEC,
-  shouldEnsureStretchRender,
+  shouldEnsureStretchRender: shouldScheduleStretchSource,
+  shouldScheduleStretchSource,
+  shouldScheduleEntryInRange,
+  canFallbackToRepitchStretch,
 }

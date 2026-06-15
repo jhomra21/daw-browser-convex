@@ -14,8 +14,10 @@ import type { HistoryEntry } from './types'
 import {
   isLocalHistoryProject,
   persistHistoryEffectParams,
+  persistHistoryClipAudioWarpOrThrow,
   persistHistoryClipMovesOrThrow,
   persistHistoryClipTimingOrThrow,
+  persistLegacyHistoryClipTimingAudioWarpOrThrow,
   createHistoryClip,
   createHistoryTrack,
   persistHistoryTrackMix,
@@ -44,7 +46,8 @@ export type Deps = {
     insertLocalClip: (trackId: Track['id'], clip: Track['clips'][number]) => void
     removeLocalClips: (clipIds: Iterable<string>) => void
     commitClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
-    commitClipTiming: (clipId: string, patch: Extract<HistoryEntry, { type: 'clip-timing' }>['data']['to']) => void
+    commitClipTiming: (clipId: string, patch: Omit<Extract<HistoryEntry, { type: 'clip-timing' }>['data']['to'], 'audioWarp'>) => void
+    commitClipAudioWarp: (clipId: string, audioWarp: Track['clips'][number]['audioWarp']) => void
     rescheduleChangedClips: (clipIds: string[]) => void
     cancelTrackVolumeWrite: (trackId: Track['id']) => void
     cancelTrackRoutingWrite: (trackId: Track['id']) => void
@@ -164,7 +167,18 @@ async function applyClipTimingEntry(entry: Extract<HistoryEntry, { type: 'clip-t
   const clipId = requireResolved(resolveClipId(index, entry.data.clipRef), 'Clip not found for clip-timing history entry')
   const timing = pickDirectionalValue(direction, entry.data.from, entry.data.to)
   await persistHistoryClipTimingOrThrow(deps, clipId, timing, 'Failed to apply clip timing during history replay')
+  await persistLegacyHistoryClipTimingAudioWarpOrThrow(deps, clipId, timing, 'Failed to apply clip warp during history replay')
   deps.actions.commitClipTiming(clipId, timing)
+  if (timing.audioWarp) deps.actions.commitClipAudioWarp(clipId, timing.audioWarp)
+  deps.actions.rescheduleChangedClips([clipId])
+}
+
+async function applyClipAudioWarpEntry(entry: Extract<HistoryEntry, { type: 'clip-audio-warp' }>, deps: Deps, direction: HistoryDirection) {
+  const index = buildRefIndex(deps)
+  const clipId = requireResolved(resolveClipId(index, entry.data.clipRef), 'Clip not found for clip-audio-warp history entry')
+  const snapshot = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+  await persistHistoryClipAudioWarpOrThrow(deps, clipId, snapshot.audioWarp, 'Failed to apply clip warp during history replay')
+  deps.actions.commitClipAudioWarp(clipId, snapshot.audioWarp)
   deps.actions.rescheduleChangedClips([clipId])
 }
 
@@ -297,6 +311,10 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
 
     case 'clip-timing':
       await applyClipTimingEntry(entry, deps, direction)
+      return
+
+    case 'clip-audio-warp':
+      await applyClipAudioWarpEntry(entry, deps, direction)
       return
 
     case 'track-create': {

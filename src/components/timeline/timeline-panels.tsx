@@ -12,6 +12,7 @@ import type { Clip, Track } from '@daw-browser/timeline-core/types'
 const AgentChat = lazy(() => import('~/components/AgentChat'))
 const SharedChat = lazy(() => import('~/components/SharedChat'))
 const EffectsPanel = lazy(() => import('~/components/timeline/EffectsPanel'))
+const SampleDetailPanel = lazy(() => import('~/components/timeline/SampleDetailPanel'))
 const ExportDialog = lazy(() => import('~/components/timeline/ExportDialog'))
 
 export type TimelinePanelsProps = {
@@ -30,6 +31,7 @@ export type TimelinePanelsProps = {
   }
   effectsPanel: {
     isOpen: boolean
+    showOpenButton?: boolean
     selectedFXTarget: Track['id'] | 'master'
     tracks: Track[]
     playheadSec: number
@@ -44,14 +46,17 @@ export type TimelinePanelsProps = {
     onOpen: () => void
     onEffectParamsCommitted: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void
     onLocalSaveFailed?: (message: string) => void
-    sampleWarp?: {
-      selectedClip?: Clip
-      projectBpm: number
-      bpmDetection?: BpmDetectionService
-      ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
-      canWriteClip?: (clipId: string) => boolean
-      onChange: (clip: Clip, audioWarp: NonNullable<Clip['audioWarp']>) => Promise<boolean> | boolean | void
-    }
+  }
+  sampleDetailPanel: {
+    isOpen: boolean
+    selectedClip?: Clip<AudioBuffer>
+    projectBpm: number
+    audioEngine: AudioEngine
+    bpmDetection?: BpmDetectionService
+    ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
+    canWriteClip?: (clipId: string) => boolean
+    onChange: (clip: Clip, audioWarp: NonNullable<Clip['audioWarp']>) => Promise<boolean> | boolean | void
+    onClose: () => void
   }
   exportDialog: {
     isOpen: boolean
@@ -140,6 +145,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
       <Suspense fallback={null}>
         <EffectsPanel
           isOpen={props.effectsPanel.isOpen}
+          showOpenButton={props.effectsPanel.showOpenButton}
           selectedFXTarget={props.effectsPanel.selectedFXTarget}
           tracks={props.effectsPanel.tracks}
           onClose={props.effectsPanel.onClose}
@@ -154,9 +160,25 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
           insertLocalClip={props.effectsPanel.insertLocalClip}
           onEffectParamsCommitted={props.effectsPanel.onEffectParamsCommitted}
           onLocalSaveFailed={props.effectsPanel.onLocalSaveFailed}
-          sampleWarp={props.effectsPanel.sampleWarp}
         />
       </Suspense>
+
+      <Show when={props.sampleDetailPanel.isOpen && props.sampleDetailPanel.selectedClip}>
+        {(clip) => (
+          <Suspense fallback={null}>
+            <SampleDetailPanel
+              clip={clip()}
+              projectBpm={props.sampleDetailPanel.projectBpm}
+              audioEngine={props.sampleDetailPanel.audioEngine}
+              bpmDetection={props.sampleDetailPanel.bpmDetection}
+              ensureClipBuffer={props.sampleDetailPanel.ensureClipBuffer}
+              canWriteClip={props.sampleDetailPanel.canWriteClip}
+              onWarpChange={props.sampleDetailPanel.onChange}
+              onClose={props.sampleDetailPanel.onClose}
+            />
+          </Suspense>
+        )}
+      </Show>
 
       <Show when={props.exportDialog.isOpen}>
         <Suspense fallback={null}>

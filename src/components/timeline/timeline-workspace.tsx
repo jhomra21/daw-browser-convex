@@ -38,6 +38,7 @@ type Props = {
   removeMissingMediaClip: (trackId: Track["id"], clipId: string) => Promise<void>;
   trackLookup: TimelineTrackIndex<AudioBuffer>;
   openMidiEditorFor: (clipId: string) => void;
+  openSampleDetailFor: (clipId: string) => void;
   marqueeRect: { x: number; y: number; width: number; height: number } | null;
   recording: {
     isRecording: boolean;
@@ -145,7 +146,9 @@ export default function TimelineWorkspace(props: Props) {
                       const match = props.trackLookup.clipEntryById.get(clipId);
                       if (match && match.trackId === track.id && match.clip.midi) {
                         props.openMidiEditorFor(clipId);
+                        return;
                       }
+                      props.openSampleDetailFor(clipId);
                     }}
                   />
                 )}

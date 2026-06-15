@@ -5,6 +5,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  onCleanup,
 } from "solid-js";
 import type { AudioWarp, Clip, Track } from "@daw-browser/timeline-core/types";
 import { getAudioEngine } from "~/lib/audio-engine-singleton";
@@ -68,8 +69,21 @@ type TimelineProps = {
   setDashboardParam: (view: DashboardView | null) => void;
 };
 
+type BottomPanelMode = "effects" | "sample-detail";
+
+const isValidAudioClip = (clip: Clip<AudioBuffer> | undefined) => {
+  if (!clip || clip.midi) return false;
+  return Boolean(
+    clip.sampleUrl ||
+      clip.sourceAssetKey ||
+      clip.sourceKind ||
+      clip.buffer,
+  );
+};
+
 const Timeline: Component<TimelineProps> = (props) => {
   const [bottomFXOpen, setBottomFXOpen] = createSignal(true);
+  const [bottomPanelMode, setBottomPanelMode] = createSignal<BottomPanelMode>("effects");
   const [agentPanelOpen, setAgentPanelOpen] = createSignal(false);
   const [sharedChatOpen, setSharedChatOpen] = createSignal(false);
   const [confirmOpen, setConfirmOpen] = createSignal(false);
@@ -214,6 +228,8 @@ const Timeline: Component<TimelineProps> = (props) => {
       commitClipMoves: (moves) => projection.commitClipMoves(moves),
       commitClipTiming: (clipId, patch) =>
         projection.commitClipTiming(clipId, patch),
+      commitClipAudioWarp: (clipId, audioWarp) =>
+        projection.commitClipAudioWarp(clipId, audioWarp),
       rescheduleChangedClips,
       cancelTrackVolumeWrite: (trackId) => cancelTrackVolumeWrite(trackId),
       cancelTrackRoutingWrite: (trackId) => cancelTrackRoutingWrite(trackId),
@@ -302,21 +318,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     return trackLookup().trackById.get(trackId)?.clips.length ?? 0;
   });
 
-  function rescheduleChangedClips(clipIds: string[]) {
-    if (clipIds.length === 0 || !isPlaying()) return;
-    try {
-      const enabled = loopEnabled();
-      const end = loopEndSec();
-      const lenOk = enabled && end > loopStartSec() + 1e-3;
-      audioEngine.rescheduleClipsAtPlayhead(
-        renderTracks(),
-        playheadSec(),
-        clipIds,
-        lenOk ? { endLimitSec: end } : undefined,
-      );
-    } catch {}
-  }
-
   const audioWarpController = useTimelineAudioWarp({
     projectId,
     userId,
@@ -327,6 +328,32 @@ const Timeline: Component<TimelineProps> = (props) => {
     projection,
     pushHistory,
     rescheduleChangedClips,
+  });
+  const selectedSampleDetailClip = createMemo(() => {
+    const selected = selection.selectedClip();
+    if (!selected) return undefined;
+    const match = trackLookup().clipEntryById.get(selected.clipId);
+    if (!match || match.trackId !== selected.trackId) return undefined;
+    return isValidAudioClip(match.clip) ? match.clip : undefined;
+  });
+
+  createEffect(() => {
+    if (bottomPanelMode() !== "sample-detail") return;
+    if (selectedSampleDetailClip()) return;
+    setBottomPanelMode("effects");
+    setBottomFXOpen(true);
+  });
+
+  createEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || bottomPanelMode() !== "sample-detail") return;
+      if (document.body.hasAttribute("data-warp-marker-dragging")) return;
+      event.preventDefault();
+      setBottomPanelMode("effects");
+      setBottomFXOpen(true);
+    };
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
+    onCleanup(() => window.removeEventListener("keydown", handleKeyDown, { capture: true }));
   });
 
   const applyAgentMixOps = (ops: AgentMixOp[]) => {
@@ -410,6 +437,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     moveScrub,
     stopScrub,
     setScrollElement,
+    rescheduleChangedClips: playbackRescheduleChangedClips,
   } = usePlayheadControls({
     audioEngine,
     tracks: () => renderTracks(),
@@ -418,6 +446,21 @@ const Timeline: Component<TimelineProps> = (props) => {
     loopStartSec,
     loopEndSec,
   });
+
+  function rescheduleChangedClips(clipIds: string[]) {
+    if (clipIds.length === 0 || !isPlaying()) return;
+    try {
+      const enabled = loopEnabled();
+      const end = loopEndSec();
+      const lenOk = enabled && end > loopStartSec() + 1e-3;
+      playbackRescheduleChangedClips(
+        renderTracks(),
+        playheadSec(),
+        clipIds,
+        lenOk ? { endLimitSec: end } : undefined,
+      );
+    } catch {}
+  }
 
   // DOM refs
   let scrollRef: HTMLDivElement | undefined;
@@ -728,6 +771,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       event.stopPropagation();
       return;
     }
+    setBottomPanelMode("effects");
     onLanePointerDown(event, scrollRef);
   };
 
@@ -809,6 +853,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
     onMasterFX: () => {
       selection.setSelectedFXTarget("master");
+      setBottomPanelMode("effects");
       setBottomFXOpen(true);
     },
     bpm: bpm(),
@@ -846,7 +891,8 @@ const Timeline: Component<TimelineProps> = (props) => {
       applyAgentMixOps,
     },
     effectsPanel: {
-      isOpen: bottomFXOpen(),
+      isOpen: bottomFXOpen() && bottomPanelMode() === "effects",
+      showOpenButton: bottomPanelMode() === "effects",
       selectedFXTarget: selection.selectedFXTarget(),
       tracks: renderTracks(),
       playheadSec: playheadSec(),
@@ -858,18 +904,27 @@ const Timeline: Component<TimelineProps> = (props) => {
       onSelectClip: jumpToClip,
       insertLocalClip: projection.insertLocalClip,
       onClose: () => setBottomFXOpen(false),
-      onOpen: () => setBottomFXOpen(true),
+      onOpen: () => {
+        setBottomPanelMode("effects");
+        setBottomFXOpen(true);
+      },
       onEffectParamsCommitted: pushEffectParamsHistory,
       onLocalSaveFailed: localProject.setLocalSaveFailure,
-      sampleWarp: {
-        selectedClip: audioWarpController.selectedAudioClip(),
-        projectBpm: bpm(),
-        bpmDetection: audioWarpController.bpmDetection,
-        ensureClipBuffer: clipBuffers.preload,
-        canWriteClip,
-        onChange: (clip: Clip, audioWarp: AudioWarp) => {
-          return audioWarpController.changeAudioWarp(clip, audioWarp);
-        },
+    },
+    sampleDetailPanel: {
+      isOpen: bottomFXOpen() && bottomPanelMode() === "sample-detail",
+      selectedClip: selectedSampleDetailClip(),
+      projectBpm: bpm(),
+      audioEngine,
+      bpmDetection: audioWarpController.bpmDetection,
+      ensureClipBuffer: clipBuffers.preload,
+      canWriteClip,
+      onChange: (clip: Clip, audioWarp: AudioWarp) => {
+        return audioWarpController.changeAudioWarp(clip, audioWarp);
+      },
+      onClose: () => {
+        setBottomPanelMode("effects");
+        setBottomFXOpen(true);
       },
     },
     exportDialog: {
@@ -980,6 +1035,13 @@ const Timeline: Component<TimelineProps> = (props) => {
         removeMissingMediaClip={mediaRecovery.removeMissingMediaClip}
         trackLookup={trackLookup()}
         openMidiEditorFor={openMidiEditorFor}
+        openSampleDetailFor={(clipId) => {
+          const match = trackLookup().clipEntryById.get(clipId);
+          if (!match || !isValidAudioClip(match.clip)) return;
+          selection.selectPrimaryClip({ trackId: match.trackId, clipId });
+          setBottomPanelMode("sample-detail");
+          setBottomFXOpen(true);
+        }}
         marqueeRect={marqueeRect()}
         recording={{
           isRecording: isRecording(),
@@ -1006,6 +1068,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           subscribeTrackLevels: (listener) =>
             audioEngine.subscribeTrackStereoLevels(listener),
           onTrackClick: (id) => {
+            setBottomPanelMode("effects");
             selection.selectTrackTarget(id, { clearClipSelection: true });
           },
           canWriteTrackRouting: canWriteTrack,

@@ -58,6 +58,7 @@ export type TimelinePanelsProps = {
     canWriteClip?: (clipId: string) => boolean
     onChange: (clip: Clip, audioWarp: NonNullable<Clip['audioWarp']>) => Promise<boolean> | boolean | void
     onGainChange?: (clip: Clip, gain: number) => Promise<boolean> | boolean | void
+    onMarkerDragStateChange?: (dragging: boolean) => void
     onClose: () => void
   }
   exportDialog: {
@@ -178,6 +179,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
               canWriteClip={props.sampleDetailPanel.canWriteClip}
               onWarpChange={props.sampleDetailPanel.onChange}
               onGainChange={props.sampleDetailPanel.onGainChange}
+              onMarkerDragStateChange={props.sampleDetailPanel.onMarkerDragStateChange}
               onClose={props.sampleDetailPanel.onClose}
             />
           </Suspense>

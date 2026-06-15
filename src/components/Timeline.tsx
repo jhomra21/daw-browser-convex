@@ -5,9 +5,8 @@ import {
   createEffect,
   createMemo,
   createSignal,
-  onCleanup,
 } from "solid-js";
-import type { AudioWarp, Clip, Track } from "@daw-browser/timeline-core/types";
+import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { getAudioEngine } from "~/lib/audio-engine-singleton";
 import {
   timelineDurationSec,
@@ -43,18 +42,17 @@ import { useTimelineSelectionState } from "~/hooks/useTimelineSelectionState";
 import { useTimelinePersistenceController } from "~/hooks/useTimelinePersistenceController";
 import { useTimelineAudioLifecycle } from "~/hooks/useTimelineAudioLifecycle";
 import { useTimelineAudioWarp } from "~/hooks/useTimelineAudioWarp";
+import { isTimelineSampleDetailClip, useTimelineSampleDetailController } from "~/hooks/useTimelineSampleDetailController";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
 import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
-import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
-import { getClipHistoryRef } from "~/lib/undo/refs";
 import TimelineChrome from "./timeline/timeline-chrome";
 import AppMessageDialog, { type AppMessageDialogState } from "./timeline/app-message-dialog";
 import CloudBackupDialog from "./timeline/cloud-backup-dialog";
 import DeleteTrackDialog from "./timeline/delete-track-dialog";
 import TimelineWorkspace from "./timeline/timeline-workspace";
 import { Dashboard } from "~/components/dashboard/dashboard";
-import type { DashboardView } from "~/components/dashboard/types";
+import type { DashboardTimelineModel, DashboardView } from "~/components/dashboard/types";
 
 type AgentMixOp = {
   type: "setMute" | "setSolo";
@@ -72,16 +70,6 @@ type TimelineProps = {
 };
 
 type BottomPanelMode = "effects" | "sample-detail";
-
-const isValidAudioClip = (clip: Clip<AudioBuffer> | undefined) => {
-  if (!clip || clip.midi) return false;
-  return Boolean(
-    clip.sampleUrl ||
-      clip.sourceAssetKey ||
-      clip.sourceKind ||
-      clip.buffer,
-  );
-};
 
 const Timeline: Component<TimelineProps> = (props) => {
   const [bottomFXOpen, setBottomFXOpen] = createSignal(true);
@@ -331,31 +319,19 @@ const Timeline: Component<TimelineProps> = (props) => {
     pushHistory,
     rescheduleChangedClips,
   });
-  const selectedSampleDetailClip = createMemo(() => {
-    const selected = selection.selectedClip();
-    if (!selected) return undefined;
-    const match = trackLookup().clipEntryById.get(selected.clipId);
-    if (!match || match.trackId !== selected.trackId) return undefined;
-    return isValidAudioClip(match.clip) ? match.clip : undefined;
-  });
-
-  createEffect(() => {
-    if (bottomPanelMode() !== "sample-detail") return;
-    if (selectedSampleDetailClip()) return;
-    setBottomPanelMode("effects");
-    setBottomFXOpen(true);
-  });
-
-  createEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || bottomPanelMode() !== "sample-detail") return;
-      if (document.body.hasAttribute("data-warp-marker-dragging")) return;
-      event.preventDefault();
-      setBottomPanelMode("effects");
-      setBottomFXOpen(true);
-    };
-    window.addEventListener("keydown", handleKeyDown, { capture: true });
-    onCleanup(() => window.removeEventListener("keydown", handleKeyDown, { capture: true }));
+  const sampleDetail = useTimelineSampleDetailController({
+    projectId,
+    userId,
+    mode: bottomPanelMode,
+    setMode: setBottomPanelMode,
+    setOpen: setBottomFXOpen,
+    trackLookup,
+    selection,
+    canWriteClip,
+    projection,
+    audioWarpController,
+    rescheduleChangedClips,
+    pushHistory,
   });
 
   const applyAgentMixOps = (ops: AgentMixOp[]) => {
@@ -878,6 +854,21 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
   });
 
+  const dashboardTimelineModel = createMemo<DashboardTimelineModel>(() => ({
+    projectMenu: transportProps().projectMenu,
+    samples: dashboardSamples.samples,
+    bpm,
+    setBpm: (value) => setBpm(clampBpm(value)),
+    metronomeEnabled,
+    toggleMetronome: () => setMetronomeEnabled((prev) => !prev),
+    gridEnabled,
+    toggleGrid: () => setGridEnabled((prev) => !prev),
+    gridDenominator,
+    setGridDenominator,
+    loopEnabled,
+    toggleLoop: () => setLoopEnabled((prev) => !prev),
+  }));
+
   const panelsProps = () => ({
     chat: {
       bottomOffsetPx: bottomFXOpen() ? FX_OFFSET_PX : 0,
@@ -915,40 +906,17 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
     sampleDetailPanel: {
       isOpen: bottomFXOpen() && bottomPanelMode() === "sample-detail",
-      selectedClip: selectedSampleDetailClip(),
+      selectedClip: sampleDetail.selectedClip(),
       preferenceScopeId: projectId(),
       projectBpm: bpm(),
       audioEngine,
       bpmDetection: audioWarpController.bpmDetection,
       ensureClipBuffer: clipBuffers.preload,
       canWriteClip,
-      onChange: (clip: Clip, audioWarp: AudioWarp) => {
-        return audioWarpController.changeAudioWarp(clip, audioWarp);
-      },
-      onGainChange: async (clip: Clip, gain: number) => {
-        const project = projectId();
-        if (!project || !canWriteClip(clip.id)) return false;
-        const normalizedGain = Math.min(2, Math.max(0, gain));
-        if (normalizedGain === (clip.gain ?? 1)) return true;
-        const applied = await createTimelineClipWriteAdapter({ projectId: project, userId: userId() }).setGain(clip.id, normalizedGain);
-        if (!applied) return false;
-        projection.commitClipGain(clip.id, normalizedGain);
-        rescheduleChangedClips([clip.id]);
-        pushHistory({
-          type: "clip-timing",
-          projectId: project,
-          data: {
-            clipRef: getClipHistoryRef(clip),
-            from: { startSec: clip.startSec, duration: clip.duration, leftPadSec: clip.leftPadSec, bufferOffsetSec: clip.bufferOffsetSec, midiOffsetBeats: clip.midiOffsetBeats, gain: clip.gain ?? 1 },
-            to: { startSec: clip.startSec, duration: clip.duration, leftPadSec: clip.leftPadSec, bufferOffsetSec: clip.bufferOffsetSec, midiOffsetBeats: clip.midiOffsetBeats, gain: normalizedGain },
-          },
-        });
-        return true;
-      },
-      onClose: () => {
-        setBottomPanelMode("effects");
-        setBottomFXOpen(true);
-      },
+      onChange: sampleDetail.changeWarp,
+      onGainChange: sampleDetail.changeGain,
+      onMarkerDragStateChange: sampleDetail.setMarkerDragging,
+      onClose: sampleDetail.close,
     },
     exportDialog: {
       isOpen: exportOpen(),
@@ -996,20 +964,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         <Dashboard
           view={props.dashboardView()}
           setView={props.setDashboardParam}
-          model={{
-            projectMenu: transportProps().projectMenu,
-            samples: dashboardSamples.samples,
-            bpm,
-            setBpm: (value) => setBpm(clampBpm(value)),
-            metronomeEnabled,
-            toggleMetronome: () => setMetronomeEnabled((prev) => !prev),
-            gridEnabled,
-            toggleGrid: () => setGridEnabled((prev) => !prev),
-            gridDenominator,
-            setGridDenominator,
-            loopEnabled,
-            toggleLoop: () => setLoopEnabled((prev) => !prev),
-          }}
+          model={dashboardTimelineModel()}
         />
       ) : null}
 
@@ -1060,7 +1015,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         openMidiEditorFor={openMidiEditorFor}
         openSampleDetailFor={(clipId) => {
           const match = trackLookup().clipEntryById.get(clipId);
-          if (!match || !isValidAudioClip(match.clip)) return;
+          if (!match || !isTimelineSampleDetailClip(match.clip)) return;
           selection.selectPrimaryClip({ trackId: match.trackId, clipId });
           setBottomPanelMode("sample-detail");
           setBottomFXOpen(true);

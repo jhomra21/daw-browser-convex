@@ -456,6 +456,32 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
     }
   }
 
+  const startRender = (key: string, clip: RuntimeClip, projectBpm: number, waitForPersist = false) => {
+    const promise = hydrate(key).then((stored) => stored ?? render(clip, projectBpm))
+    entries.set(key, { status: 'rendering', promise })
+    notify()
+    prune()
+    const ready = promise.then(
+      async (result) => {
+        entries.set(key, { status: 'ready', render: result })
+        const persisted = persistRender(key, result).catch(() => {})
+        if (waitForPersist) await persisted
+        else void persisted
+        prune()
+        notify()
+        return result
+      },
+      (error) => {
+        const renderedError = toError(error)
+        entries.set(key, { status: 'failed', error: renderedError })
+        prune()
+        notify()
+        throw renderedError
+      },
+    )
+    return waitForPersist ? ready : promise
+  }
+
   const ensure = (clip: RuntimeClip, projectBpm: number) => {
     const sourceBuffer = clip.buffer
     if (!sourceBuffer || clip.audioWarp?.enabled !== true || clip.audioWarp.mode !== 'stretch') return
@@ -465,23 +491,7 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
       touch(key, cached)
       return
     }
-    const promise = hydrate(key).then((stored) => stored ?? render(clip, projectBpm))
-    entries.set(key, { status: 'rendering', promise })
-    notify()
-    prune()
-    promise.then(
-      (result) => {
-        entries.set(key, { status: 'ready', render: result })
-        void persistRender(key, result).catch(() => {})
-        prune()
-        notify()
-      },
-      (error) => {
-        entries.set(key, { status: 'failed', error: toError(error) })
-        prune()
-        notify()
-      },
-    )
+    void startRender(key, clip, projectBpm)
   }
 
   const getReady = (clip: RuntimeClip, projectBpm: number) => {
@@ -506,23 +516,10 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
       touch(key, cached)
       return cached.promise
     }
-    const promise = hydrate(key).then((stored) => stored ?? render(clip, projectBpm))
-    entries.set(key, { status: 'rendering', promise })
-    notify()
-    prune()
     try {
-      const result = await promise
-      entries.set(key, { status: 'ready', render: result })
-      await persistRender(key, result).catch(() => {})
-      prune()
-      notify()
-      return result
+      return await startRender(key, clip, projectBpm, true)
     } catch (error) {
-      const renderedError = toError(error)
-      entries.set(key, { status: 'failed', error: renderedError })
-      prune()
-      notify()
-      throw renderedError
+      throw toError(error)
     }
   }
 

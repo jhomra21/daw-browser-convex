@@ -53,11 +53,11 @@ export type TimelinePanelsProps = {
     preferenceScopeId?: string
     projectBpm: number
     audioEngine: AudioEngine
-    bpmDetection?: BpmDetectionService
-    ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
-    canWriteClip?: (clipId: string) => boolean
+    bpmDetection: BpmDetectionService
+    ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
+    canWriteClip: (clipId: string) => boolean
     onChange: (clip: Clip, audioWarp: NonNullable<Clip['audioWarp']>) => Promise<boolean> | boolean | void
-    onGainChange?: (clip: Clip, gain: number) => Promise<boolean> | boolean | void
+    onGainChange: (clip: Clip, gain: number) => Promise<boolean> | boolean | void
     onMarkerDragStateChange?: (dragging: boolean) => void
     onClose: () => void
   }

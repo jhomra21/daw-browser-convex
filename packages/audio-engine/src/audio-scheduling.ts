@@ -139,7 +139,6 @@ export function getAudioClipTimeMap(input: AudioClipTimeMapInput): AudioClipTime
   const audioStart = clipStart + leftPad
   const bufferDuration = Math.max(0, input.bufferDurationSec)
   const bufferOffset = Math.min(bufferDuration, bufferOffsetRaw)
-  const bufferDurRemain = Math.max(0, bufferDuration - bufferOffset)
   const projectBpm = resolveWarpBpm(input.projectBpm, 120)
   const sourceBpm = resolveWarpBpm(input.clip.audioWarp?.sourceBpm, projectBpm)
   const warpEnabled = input.clip.audioWarp?.enabled === true

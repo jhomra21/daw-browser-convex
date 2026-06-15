@@ -13,11 +13,11 @@ type SampleDetailPanelProps = {
   preferenceScopeId?: string;
   projectBpm: number;
   audioEngine: AudioEngine;
-  bpmDetection?: BpmDetectionService;
-  ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>;
-  canWriteClip?: (clipId: string) => boolean;
+  bpmDetection: BpmDetectionService;
+  ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>;
+  canWriteClip: (clipId: string) => boolean;
   onWarpChange: (clip: Clip, audioWarp: AudioWarp) => Promise<boolean> | boolean | void;
-  onGainChange?: (clip: Clip, gain: number) => Promise<boolean> | boolean | void;
+  onGainChange: (clip: Clip, gain: number) => Promise<boolean> | boolean | void;
   onMarkerDragStateChange?: (dragging: boolean) => void;
   onClose: () => void;
 };
@@ -28,6 +28,7 @@ const SampleDetailPanel: Component<SampleDetailPanelProps> = (props) => {
   const [dragStart, setDragStart] = createSignal<{ y: number; height: number }>();
   const gainDb = createMemo(() => linearGainToDb(props.clip.gain ?? 1));
   const gainLabel = createMemo(() => Number.isFinite(gainDb()) ? `${gainDb().toFixed(1)} dB` : "-inf dB");
+  const canWrite = createMemo(() => props.canWriteClip(props.clip.id));
 
   const commitHeight = (value: number) => {
     setHeight(saveSampleDetailPanelHeight(preferenceScopeId(), value, window.innerHeight));
@@ -93,7 +94,7 @@ const SampleDetailPanel: Component<SampleDetailPanelProps> = (props) => {
           projectBpm: props.projectBpm,
           bpmDetection: props.bpmDetection,
           ensureClipBuffer: props.ensureClipBuffer,
-          canWrite: props.canWriteClip ? props.canWriteClip(props.clip.id) : true,
+          canWrite: canWrite(),
           onWarpChange: (audioWarp) => props.onWarpChange(props.clip, audioWarp),
         }}
       />
@@ -105,10 +106,10 @@ const SampleDetailPanel: Component<SampleDetailPanelProps> = (props) => {
           max="6.02"
           step="0.1"
           value={Number.isFinite(gainDb()) ? gainDb() : -60}
-          disabled={!props.onGainChange || (props.canWriteClip ? !props.canWriteClip(props.clip.id) : false)}
+          disabled={!canWrite()}
           onChange={(event) => {
             const db = Number(event.currentTarget.value);
-            props.onGainChange?.(props.clip, db <= -60 ? 0 : dbToLinearGain(db));
+            props.onGainChange(props.clip, db <= -60 ? 0 : dbToLinearGain(db));
           }}
         />
         <div>{gainLabel()}</div>
@@ -117,7 +118,7 @@ const SampleDetailPanel: Component<SampleDetailPanelProps> = (props) => {
         clip={props.clip}
         projectBpm={props.projectBpm}
         ensureClipBuffer={props.ensureClipBuffer}
-        canWrite={props.canWriteClip ? props.canWriteClip(props.clip.id) : true}
+        canWrite={canWrite()}
         onMarkerDragStateChange={props.onMarkerDragStateChange}
         onWarpChange={(audioWarp) => props.onWarpChange(props.clip, audioWarp)}
       />

@@ -9,8 +9,8 @@ type SampleClipPanelProps = {
   sample: {
     clip: Clip
     projectBpm: number
-    bpmDetection?: BpmDetectionService
-    ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
+    bpmDetection: BpmDetectionService
+    ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
     canWrite: boolean
     onWarpChange: (audioWarp: AudioWarp) => Promise<boolean> | boolean | void
   }
@@ -47,6 +47,7 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
     if (state.status === 'failed') return `Stretch render failed. Re-Pitch fallback is playing.${state.error ? ` ${state.error.message}` : ''}`
     return 'Stretch render will start on playback or export.'
   })
+  const syncBpmState = () => setBpmState(props.sample.bpmDetection.getState(props.sample.clip.id))
 
   createEffect(() => {
     if (!stretchEnabled()) {
@@ -65,14 +66,12 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
   })
 
   createEffect(() => {
-    setBpmState(props.sample.bpmDetection?.getState(props.sample.clip.id) ?? { status: 'idle' })
+    syncBpmState()
   })
 
   createEffect(() => {
-    const unsubscribe = props.sample.bpmDetection?.subscribe(() => {
-      setBpmState(props.sample.bpmDetection?.getState(props.sample.clip.id) ?? { status: 'idle' })
-    })
-    if (unsubscribe) onCleanup(unsubscribe)
+    const unsubscribe = props.sample.bpmDetection.subscribe(syncBpmState)
+    onCleanup(unsubscribe)
   })
 
   const commit = (patch: Partial<AudioWarp>) => {
@@ -186,9 +185,9 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
           <button
             class="border border-neutral-700 px-2 py-1 text-neutral-200 disabled:opacity-50"
             type="button"
-            disabled={!props.sample.bpmDetection || bpmState().status === 'analyzing'}
+            disabled={bpmState().status === 'analyzing'}
             onClick={() => {
-              void Promise.resolve(props.sample.ensureClipBuffer?.(props.sample.clip.id, props.sample.clip.sampleUrl)).then(() => props.sample.bpmDetection?.analyzeClip({
+              void props.sample.ensureClipBuffer(props.sample.clip.id, props.sample.clip.sampleUrl).then(() => props.sample.bpmDetection.analyzeClip({
                 clip: props.sample.clip,
                 canWrite: props.sample.canWrite,
                 autoApply: (audioWarp) => Promise.resolve(props.sample.onWarpChange(audioWarp)).then((value) => value !== false),
@@ -221,7 +220,7 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
                   const state = bpmState()
                   if (state.status !== 'suggested') return
                   void Promise.resolve(commit({ enabled: true, sourceBpm: state.result.bpm, mode: 'stretch' })).then((value) => {
-                    if (value !== false) props.sample.bpmDetection?.markApplied(props.sample.clip.id)
+                    if (value !== false) props.sample.bpmDetection.markApplied(props.sample.clip.id)
                   })
                 }}
               >

@@ -129,7 +129,7 @@ const overlapAddFrame = (
 export function stretchAudioWsola(input: AudioStretchInput, config: WsolaStretchConfig): AudioStretchResult {
   const inputFrameCount = getInputFrameCount(input.channels)
   const outputFrameCount = Math.max(0, Math.floor(config.outputFrameCount))
-  if (input.channels.length === 0 || inputFrameCount === 0 || outputFrameCount === 0) {
+  if (inputFrameCount === 0 || outputFrameCount === 0) {
     return { sampleRate: input.sampleRate, channels: input.channels.map(() => new Float32Array(outputFrameCount)) }
   }
   for (const channel of input.channels) {

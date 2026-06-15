@@ -32,6 +32,7 @@ export type SharedTimelineClipCreatePayload = {
   leftPadSec?: number
   bufferOffsetSec?: number
   audioWarp?: AudioWarpPayload
+  gain?: number
   midiOffsetBeats?: number
   midi?: {
     wave: string
@@ -64,6 +65,7 @@ export type SharedTimelineOperation =
   | { kind: 'clips.removeMany'; payload: { clipIds: string[] } }
   | { kind: 'clips.moveMany'; payload: { moves: MoveClipInput[] } }
   | { kind: 'clips.setAudioWarp'; payload: { clipId: string; audioWarp: AudioWarpPayload } }
+  | { kind: 'clips.setGain'; payload: { clipId: string; gain: number } }
   | { kind: 'tracks.setRouting'; payload: { trackId: string; routing: TrackRouting } }
   | { kind: 'tracks.setVolume'; payload: { trackId: string; volume: number } }
   | { kind: 'tracks.setMix'; payload: { trackId: string; muted?: boolean; soloed?: boolean } }
@@ -173,6 +175,7 @@ export const readSharedTimelineClipCreatePayload = (
     leftPadSec: readOptionalNumber(value.leftPadSec),
     bufferOffsetSec: readOptionalNumber(value.bufferOffsetSec),
     audioWarp: readAudioWarp(value.audioWarp),
+    gain: readOptionalNumber(value.gain),
     midiOffsetBeats: readOptionalNumber(value.midiOffsetBeats),
     midi,
     clipKind: readOptionalString(value.clipKind),
@@ -321,6 +324,12 @@ const parseClipAudioWarp = (payload: Record<string, unknown>): SharedTimelineOpe
     : null
 }
 
+const parseClipGain = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
+  typeof payload.clipId === 'string' && typeof payload.gain === 'number'
+    ? { kind: 'clips.setGain', payload: { clipId: payload.clipId, gain: Math.min(2, Math.max(0, payload.gain)) } }
+    : null
+)
+
 const parseTrackRouting = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   if (typeof payload.trackId !== 'string' || !isRecord(payload.routing)) return null
   return {
@@ -425,6 +434,12 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   {
     kind: 'clips.setAudioWarp',
     parse: parseClipAudioWarp,
+    targets: (payload) => isRecord(payload) && typeof payload.clipId === 'string' ? clipTargets([payload.clipId]) : emptyTargets(),
+    durableQueue: true,
+  },
+  {
+    kind: 'clips.setGain',
+    parse: parseClipGain,
     targets: (payload) => isRecord(payload) && typeof payload.clipId === 'string' ? clipTargets([payload.clipId]) : emptyTargets(),
     durableQueue: true,
   },

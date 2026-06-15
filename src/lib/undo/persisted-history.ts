@@ -31,6 +31,7 @@ const isClipTiming = (value: unknown) => isRecord(value)
   && (value.leftPadSec === undefined || isNumber(value.leftPadSec))
   && (value.bufferOffsetSec === undefined || isNumber(value.bufferOffsetSec))
   && (value.audioWarp === undefined || isAudioWarp(value.audioWarp))
+  && (value.gain === undefined || isNumber(value.gain))
   && (value.midiOffsetBeats === undefined || isNumber(value.midiOffsetBeats))
 
 const isRoutingSnapshot = (value: unknown) => isRecord(value)

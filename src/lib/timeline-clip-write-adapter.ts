@@ -67,4 +67,20 @@ export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
     })
     return isRecord(result) && result.status === 'applied'
   },
+  setGain: async (clipId: string, gain: number) => {
+    const normalizedGain = Math.min(2, Math.max(0, gain))
+    if (isLocalId('project', context.projectId)) {
+      const row = await createLocalTimelineRepository(context.projectId).updateClip({ clipId, gain: normalizedGain })
+      return Boolean(row)
+    }
+    if (!context.userId) return false
+    const userId = context.userId
+    const result = await publishDurableSharedTimelineOperation({
+      projectId: context.projectId,
+      userId,
+      operation: { kind: 'clips.setGain', payload: { clipId, gain: normalizedGain } },
+      queuedResult: { status: 'applied' },
+    })
+    return isRecord(result) && result.status === 'applied'
+  },
 })

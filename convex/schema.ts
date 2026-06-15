@@ -48,8 +48,14 @@ export default defineSchema({
       enabled: v.boolean(),
       sourceBpm: v.optional(v.number()),
       sourceBeatOffset: v.optional(v.number()),
+      markers: v.optional(v.array(v.object({
+        id: v.string(),
+        sourceBeat: v.number(),
+        timelineBeat: v.number(),
+      }))),
       mode: v.union(v.literal("repitch"), v.literal("stretch")),
     })),
+    gain: v.optional(v.number()),
     name: v.optional(v.string()),
     sampleUrl: v.optional(v.string()),
     midi: v.optional(v.object({

@@ -36,6 +36,7 @@ export type Clip<TBuffer = never> = {
   leftPadSec?: number
   bufferOffsetSec?: number
   audioWarp?: AudioWarp
+  gain?: number
   color: string
   sampleUrl?: string
   midi?: {

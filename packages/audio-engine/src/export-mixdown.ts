@@ -7,7 +7,7 @@ import {
   type Target,
 } from 'mediabunny'
 
-import { getAudioBufferPlaybackParams, getAudioClipTimeMap, getScheduledMidiEvents } from './audio-scheduling'
+import { connectSourceWithClipGain, getAudioBufferPlaybackParams, getAudioClipTimeMap, getScheduledMidiEvents } from './audio-scheduling'
 import { createAudioStretchCache } from './audio-stretch-cache'
 import {
   getExportAudioFormatMetadata,
@@ -248,7 +248,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
       if (playback.durationSec <= 0) continue
       src.buffer = playback.buffer
       src.playbackRate.value = playback.playbackRate
-      src.connect(trackInput)
+      connectSourceWithClipGain(ctx, src, trackInput, clip.gain)
       try {
         src.start(
           Math.max(0, map.timelineStartSec - prepared.range.startSec),

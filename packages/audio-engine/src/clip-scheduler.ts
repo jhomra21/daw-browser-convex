@@ -1,4 +1,4 @@
-import { getAudioBufferPlaybackParams, getAudioClipTimeMap } from './audio-scheduling'
+import { connectSourceWithClipGain, getAudioBufferPlaybackParams, getAudioClipTimeMap } from './audio-scheduling'
 import type { StretchedAudioRender } from './audio-stretch-cache'
 import type { SourceRegistry } from './source-registry'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
@@ -141,7 +141,7 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
     if (playback.durationSec <= 0) return null
     source.buffer = playback.buffer
     source.playbackRate.value = playback.playbackRate
-    source.connect(input)
+    connectSourceWithClipGain(ctx, source, input, clip.gain)
     source.start(
       nowCtx + Math.max(0, map.timelineStartSec - playheadSec),
       playback.offsetSec,

@@ -46,6 +46,8 @@ import { useTimelineAudioWarp } from "~/hooks/useTimelineAudioWarp";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
 import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
+import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
+import { getClipHistoryRef } from "~/lib/undo/refs";
 import TimelineChrome from "./timeline/timeline-chrome";
 import AppMessageDialog, { type AppMessageDialogState } from "./timeline/app-message-dialog";
 import CloudBackupDialog from "./timeline/cloud-backup-dialog";
@@ -914,6 +916,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     sampleDetailPanel: {
       isOpen: bottomFXOpen() && bottomPanelMode() === "sample-detail",
       selectedClip: selectedSampleDetailClip(),
+      preferenceScopeId: projectId(),
       projectBpm: bpm(),
       audioEngine,
       bpmDetection: audioWarpController.bpmDetection,
@@ -921,6 +924,26 @@ const Timeline: Component<TimelineProps> = (props) => {
       canWriteClip,
       onChange: (clip: Clip, audioWarp: AudioWarp) => {
         return audioWarpController.changeAudioWarp(clip, audioWarp);
+      },
+      onGainChange: async (clip: Clip, gain: number) => {
+        const project = projectId();
+        if (!project || !canWriteClip(clip.id)) return false;
+        const normalizedGain = Math.min(2, Math.max(0, gain));
+        if (normalizedGain === (clip.gain ?? 1)) return true;
+        const applied = await createTimelineClipWriteAdapter({ projectId: project, userId: userId() }).setGain(clip.id, normalizedGain);
+        if (!applied) return false;
+        projection.commitClipGain(clip.id, normalizedGain);
+        rescheduleChangedClips([clip.id]);
+        pushHistory({
+          type: "clip-timing",
+          projectId: project,
+          data: {
+            clipRef: getClipHistoryRef(clip),
+            from: { startSec: clip.startSec, duration: clip.duration, leftPadSec: clip.leftPadSec, bufferOffsetSec: clip.bufferOffsetSec, midiOffsetBeats: clip.midiOffsetBeats, gain: clip.gain ?? 1 },
+            to: { startSec: clip.startSec, duration: clip.duration, leftPadSec: clip.leftPadSec, bufferOffsetSec: clip.bufferOffsetSec, midiOffsetBeats: clip.midiOffsetBeats, gain: normalizedGain },
+          },
+        });
+        return true;
       },
       onClose: () => {
         setBottomPanelMode("effects");

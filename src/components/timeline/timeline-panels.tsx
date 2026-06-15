@@ -50,12 +50,14 @@ export type TimelinePanelsProps = {
   sampleDetailPanel: {
     isOpen: boolean
     selectedClip?: Clip<AudioBuffer>
+    preferenceScopeId?: string
     projectBpm: number
     audioEngine: AudioEngine
     bpmDetection?: BpmDetectionService
     ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
     canWriteClip?: (clipId: string) => boolean
     onChange: (clip: Clip, audioWarp: NonNullable<Clip['audioWarp']>) => Promise<boolean> | boolean | void
+    onGainChange?: (clip: Clip, gain: number) => Promise<boolean> | boolean | void
     onClose: () => void
   }
   exportDialog: {
@@ -168,12 +170,14 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
           <Suspense fallback={null}>
             <SampleDetailPanel
               clip={clip()}
+              preferenceScopeId={props.sampleDetailPanel.preferenceScopeId}
               projectBpm={props.sampleDetailPanel.projectBpm}
               audioEngine={props.sampleDetailPanel.audioEngine}
               bpmDetection={props.sampleDetailPanel.bpmDetection}
               ensureClipBuffer={props.sampleDetailPanel.ensureClipBuffer}
               canWriteClip={props.sampleDetailPanel.canWriteClip}
               onWarpChange={props.sampleDetailPanel.onChange}
+              onGainChange={props.sampleDetailPanel.onGainChange}
               onClose={props.sampleDetailPanel.onClose}
             />
           </Suspense>

@@ -93,6 +93,7 @@ function buildClipSnapshotFields(clip: Clip) {
     startSec: clip.startSec,
     duration: clip.duration,
     name: clip.name,
+    gain: clip.gain,
     sampleUrl: resolveClipSampleUrl(clip),
     source: getPersistableAudioSourceMetadata({
       sourceDurationSec: clip.sourceDurationSec,
@@ -131,6 +132,7 @@ export function buildLocalClip(input: BuildLocalClipInput): RuntimeClip {
     leftPadSec: clip.timing?.leftPadSec,
     bufferOffsetSec: clip.timing?.bufferOffsetSec,
     audioWarp: normalizeAudioWarp(clip.audioWarp),
+    gain: clip.gain,
     midiOffsetBeats: clip.timing?.midiOffsetBeats,
   }
 }
@@ -408,6 +410,7 @@ export async function createProjectedLocalClips(input: {
         leftPadSec: item.clip.timing?.leftPadSec,
         bufferOffsetSec: item.clip.timing?.bufferOffsetSec,
         audioWarp: normalizeAudioWarp(item.clip.audioWarp),
+        gain: item.clip.gain,
         sampleUrl: item.clip.sampleUrl,
         midi: item.clip.midi,
         midiOffsetBeats: item.clip.timing?.midiOffsetBeats,

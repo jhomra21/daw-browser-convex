@@ -40,6 +40,7 @@ export type TimelineClipRow = {
   leftPadSec?: number
   bufferOffsetSec?: number
   audioWarp?: AudioWarp
+  gain?: number
   sampleUrl?: string
   midi?: {
     wave: 'sine' | 'square' | 'sawtooth' | 'triangle'
@@ -88,6 +89,7 @@ export type CreateClipInput = {
   leftPadSec?: number
   bufferOffsetSec?: number
   audioWarp?: AudioWarp
+  gain?: number
   sampleUrl?: string
   midi?: TimelineClipRow['midi']
   midiOffsetBeats?: number
@@ -102,6 +104,7 @@ export type UpdateClipInput = {
   leftPadSec?: number
   bufferOffsetSec?: number
   audioWarp?: AudioWarp
+  gain?: number
   sourceAssetId?: TimelineAssetId
   sourceAssetKey?: string
   sourceKind?: AudioSourceKind

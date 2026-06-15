@@ -1,27 +1,43 @@
-import { createEffect, createMemo, createSignal, onCleanup, type Component } from "solid-js";
+import { For, createEffect, createMemo, createSignal, onCleanup, type Component } from "solid-js";
 import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { AudioWarp, Clip } from "@daw-browser/timeline-core/types";
+import { dbToLinearGain, linearGainToDb, mapTimelineBeatToSourceBeat } from "@daw-browser/shared";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { buildNextAudioWarp } from "~/lib/audio-warp-patch";
 import { getAudioWaveformLayout, getSourceBeatOffsetAnchorX, getSourceBeatOffsetFromAnchorX } from "~/lib/audio-waveform-layout";
 import { FX_PANEL_HEIGHT_PX } from "~/lib/timeline-utils";
+import { SAMPLE_DETAIL_PANEL_DEFAULT_HEIGHT_PX, clampSampleDetailPanelHeight, loadSampleDetailPanelHeight, saveSampleDetailPanelHeight } from "~/lib/sample-detail-panel-preferences";
 import type { BpmDetectionService } from "~/lib/bpm-detection-service";
 import SampleClipPanel from "~/components/timeline/SampleClipPanel";
 
 type SampleDetailPanelProps = {
   clip: Clip<AudioBuffer>;
+  preferenceScopeId?: string;
   projectBpm: number;
   audioEngine: AudioEngine;
   bpmDetection?: BpmDetectionService;
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>;
   canWriteClip?: (clipId: string) => boolean;
   onWarpChange: (clip: Clip, audioWarp: AudioWarp) => Promise<boolean> | boolean | void;
+  onGainChange?: (clip: Clip, gain: number) => Promise<boolean> | boolean | void;
   onClose: () => void;
 };
 
 const WAVEFORM_WIDTH_PX = 960;
 const WAVEFORM_HEIGHT_PX = 108;
+const MIN_MARKER_GAP_BEATS = 0.001;
+
+const getClipBeatWidth = (clipDurationSec: number, projectBpm: number) => (
+  clipDurationSec / (60 / Math.max(1, projectBpm))
+);
+
+const beatFromPointer = (event: Pick<PointerEvent, "clientX" | "altKey">, canvas: HTMLCanvasElement, clipDurationSec: number, projectBpm: number) => {
+  const bounds = canvas.getBoundingClientRect();
+  const x = Math.min(bounds.width, Math.max(0, event.clientX - bounds.left));
+  const rawBeat = (x / Math.max(1, bounds.width)) * getClipBeatWidth(clipDurationSec, projectBpm);
+  return event.altKey ? rawBeat : Math.round(rawBeat);
+};
 
 const SampleDetailWaveform: Component<{
   clip: Clip<AudioBuffer>;
@@ -41,6 +57,10 @@ const SampleDetailWaveform: Component<{
   const [dragPreviewOffset, setDragPreviewOffset] = createSignal<number | undefined>();
   const [isDraggingMarker, setIsDraggingMarker] = createSignal(false);
   const sourceBeatOffset = createMemo(() => props.clip.audioWarp?.sourceBeatOffset ?? 0);
+  const warpMarkers = createMemo(() => props.clip.audioWarp?.markers ?? []);
+  const markerWarpActive = createMemo(() => warpMarkers().length >= 2);
+  const [selectedMarkerId, setSelectedMarkerId] = createSignal<string>();
+  const [dragMarker, setDragMarker] = createSignal<{ id: string; timelineBeat: number; sourceBeat: number }>();
   const visibleSourceBeatOffset = createMemo(() => dragPreviewOffset() ?? sourceBeatOffset());
   const markerX = createMemo(() => getSourceBeatOffsetAnchorX({
     sourceBeatOffset: visibleSourceBeatOffset(),
@@ -70,6 +90,33 @@ const SampleDetailWaveform: Component<{
       sourceBeatOffset: value,
     });
     if (audioWarp) props.onWarpChange(audioWarp);
+  };
+
+  const commitMarkers = (markers: AudioWarp["markers"]) => {
+    const audioWarp = buildNextAudioWarp(props.projectBpm, props.clip.audioWarp, {
+      enabled: props.clip.audioWarp?.enabled === true,
+      markers,
+      mode: "stretch",
+    });
+    if (audioWarp) props.onWarpChange(audioWarp);
+  };
+
+  const addMarker = (event: MouseEvent) => {
+    if (!props.canWrite || event.detail !== 2 || !canvasRef || props.clip.audioWarp?.enabled !== true) return;
+    const timelineBeat = beatFromPointer(event, canvasRef, props.clip.duration, props.projectBpm);
+    const sourceBeat = warpMarkers().length >= 2
+      ? mapTimelineBeatToSourceBeat(warpMarkers(), timelineBeat)
+      : timelineBeat + sourceBeatOffset();
+    const marker = { id: `warp-marker-${Date.now().toString(36)}`, timelineBeat, sourceBeat };
+    commitMarkers([...warpMarkers(), marker]);
+    setSelectedMarkerId(marker.id);
+  };
+
+  const deleteSelectedMarker = () => {
+    const selected = selectedMarkerId();
+    if (!selected || !props.canWrite || props.clip.audioWarp?.enabled !== true) return;
+    commitMarkers(warpMarkers().filter((marker) => marker.id !== selected));
+    setSelectedMarkerId(undefined);
   };
 
   const draw = () => {
@@ -179,8 +226,63 @@ const SampleDetailWaveform: Component<{
             canvasRef = el || undefined;
           }}
           class="h-[108px] w-[960px] border border-neutral-800"
+          onDblClick={addMarker}
+          onKeyDown={(event) => {
+            if (event.key !== "Delete" && event.key !== "Backspace") return;
+            event.preventDefault();
+            deleteSelectedMarker();
+          }}
+          tabIndex={0}
         />
-        {props.clip.audioWarp?.enabled === true && (
+        <For each={warpMarkers()}>
+          {(marker, index) => {
+            const preview = createMemo(() => dragMarker()?.id === marker.id ? dragMarker() ?? marker : marker);
+            const markerLeft = createMemo(() => (preview().timelineBeat / Math.max(1e-6, getClipBeatWidth(props.clip.duration, props.projectBpm))) * WAVEFORM_WIDTH_PX);
+            return (
+              <button
+                type="button"
+                aria-label="Warp marker"
+                disabled={!props.canWrite || props.clip.audioWarp?.enabled !== true}
+                class="absolute top-0 h-[108px] w-3 -translate-x-1/2 border-x border-amber-300/80 bg-amber-400/10 disabled:opacity-50"
+                classList={{ "bg-amber-300/30": selectedMarkerId() === marker.id }}
+                style={{ left: `${markerLeft()}px` }}
+                onClick={() => setSelectedMarkerId(marker.id)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Delete" && event.key !== "Backspace") return;
+                  event.preventDefault();
+                  deleteSelectedMarker();
+                }}
+                onPointerDown={(event) => {
+                  if (!props.canWrite || props.clip.audioWarp?.enabled !== true || !canvasRef) return;
+                  event.preventDefault();
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  setSelectedMarkerId(marker.id);
+                  setDragMarker(marker);
+                }}
+                onPointerMove={(event) => {
+                  if (dragMarker()?.id !== marker.id || !canvasRef) return;
+                  const beat = beatFromPointer(event, canvasRef, props.clip.duration, props.projectBpm);
+                  const markers = warpMarkers();
+                  const previous = markers[index() - 1];
+                  const next = markers[index() + 1];
+                  const lower = previous ? previous.timelineBeat + MIN_MARKER_GAP_BEATS : 0;
+                  const upper = next ? next.timelineBeat - MIN_MARKER_GAP_BEATS : getClipBeatWidth(props.clip.duration, props.projectBpm);
+                  const timelineBeat = Math.min(upper, Math.max(lower, beat));
+                  setDragMarker({ id: marker.id, timelineBeat, sourceBeat: marker.sourceBeat });
+                }}
+                onPointerUp={(event) => {
+                  const dragged = dragMarker();
+                  if (!dragged || dragged.id !== marker.id) return;
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                  setDragMarker(undefined);
+                  commitMarkers(warpMarkers().map((entry) => entry.id === marker.id ? dragged : entry));
+                }}
+                onPointerCancel={() => setDragMarker(undefined)}
+              />
+            );
+          }}
+        </For>
+        {props.clip.audioWarp?.enabled === true && !markerWarpActive() && (
           <div
             class="pointer-events-none absolute top-0 h-[108px]"
             style={{ left: `${markerX()}px` }}
@@ -239,9 +341,53 @@ const SampleDetailWaveform: Component<{
   );
 };
 
-const SampleDetailPanel: Component<SampleDetailPanelProps> = (props) => (
+const SampleDetailPanel: Component<SampleDetailPanelProps> = (props) => {
+  const preferenceScopeId = () => props.preferenceScopeId ?? "default";
+  const [height, setHeight] = createSignal(typeof window === "undefined" ? FX_PANEL_HEIGHT_PX : loadSampleDetailPanelHeight(preferenceScopeId(), window.innerHeight));
+  const [dragStart, setDragStart] = createSignal<{ y: number; height: number }>();
+  const gainDb = createMemo(() => linearGainToDb(props.clip.gain ?? 1));
+  const gainLabel = createMemo(() => Number.isFinite(gainDb()) ? `${gainDb().toFixed(1)} dB` : "-inf dB");
+
+  const commitHeight = (value: number) => {
+    setHeight(saveSampleDetailPanelHeight(preferenceScopeId(), value, window.innerHeight));
+  };
+
+  createEffect(() => {
+    const start = dragStart();
+    if (!start) return;
+    const onMove = (event: PointerEvent) => setHeight(clampSampleDetailPanelHeight(start.height + start.y - event.clientY, window.innerHeight));
+    const onUp = () => {
+      commitHeight(height());
+      setDragStart(undefined);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setHeight(start.height);
+      setDragStart(undefined);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+    window.addEventListener("keydown", onKey);
+    onCleanup(() => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("keydown", onKey);
+    });
+  });
+
+  return (
   <div class="fixed left-0 right-0 bottom-0 z-50 border-t border-neutral-800 bg-neutral-900">
-    <div class="flex gap-3 overflow-x-auto px-3 py-2" style={{ height: `${FX_PANEL_HEIGHT_PX}px` }}>
+    <button
+      type="button"
+      aria-label="Resize sample detail panel"
+      class="absolute left-0 right-0 top-0 h-2 cursor-ns-resize bg-neutral-800/60 hover:bg-sky-500/50"
+      onDblClick={() => commitHeight(SAMPLE_DETAIL_PANEL_DEFAULT_HEIGHT_PX)}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        setDragStart({ y: event.clientY, height: height() });
+      }}
+    />
+    <div class="flex gap-3 overflow-x-auto px-3 py-3" style={{ height: `${height()}px` }}>
       <div class="flex w-20 shrink-0 flex-col items-center gap-2 border-r border-neutral-800 pr-2">
         <button
           class="w-full border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-700"
@@ -270,6 +416,22 @@ const SampleDetailPanel: Component<SampleDetailPanelProps> = (props) => (
           onWarpChange: (audioWarp) => props.onWarpChange(props.clip, audioWarp),
         }}
       />
+      <div class="flex w-32 shrink-0 flex-col gap-2 border border-neutral-800 bg-neutral-950 p-3 text-xs text-neutral-300">
+        <div class="font-semibold uppercase tracking-wide text-neutral-400">Clip Gain</div>
+        <input
+          type="range"
+          min="-60"
+          max="6.02"
+          step="0.1"
+          value={Number.isFinite(gainDb()) ? gainDb() : -60}
+          disabled={!props.onGainChange || (props.canWriteClip ? !props.canWriteClip(props.clip.id) : false)}
+          onChange={(event) => {
+            const db = Number(event.currentTarget.value);
+            props.onGainChange?.(props.clip, db <= -60 ? 0 : dbToLinearGain(db));
+          }}
+        />
+        <div>{gainLabel()}</div>
+      </div>
       <SampleDetailWaveform
         clip={props.clip}
         projectBpm={props.projectBpm}
@@ -279,6 +441,7 @@ const SampleDetailPanel: Component<SampleDetailPanelProps> = (props) => (
       />
     </div>
   </div>
-);
+  );
+};
 
 export default SampleDetailPanel;

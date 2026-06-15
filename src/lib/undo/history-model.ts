@@ -74,7 +74,7 @@ export const commitClipMovesInHistoryModel = (
 export const commitClipTimingInHistoryModel = (
   tracks: Track[],
   clipId: string,
-  patch: Pick<Clip, 'startSec' | 'duration' | 'leftPadSec' | 'bufferOffsetSec' | 'midiOffsetBeats'>,
+  patch: Pick<Clip, 'startSec' | 'duration' | 'leftPadSec' | 'bufferOffsetSec' | 'midiOffsetBeats' | 'gain'>,
 ) => {
   for (const track of tracks) {
     const clip = track.clips.find((entry) => entry.id === clipId)
@@ -84,6 +84,7 @@ export const commitClipTimingInHistoryModel = (
     clip.leftPadSec = patch.leftPadSec
     clip.bufferOffsetSec = patch.bufferOffsetSec
     clip.midiOffsetBeats = patch.midiOffsetBeats
+    clip.gain = patch.gain
     return
   }
 }

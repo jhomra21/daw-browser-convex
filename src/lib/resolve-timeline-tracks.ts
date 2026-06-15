@@ -25,7 +25,7 @@ type TimelineTrackLike<TTrackId extends string = Track['id']> = Omit<Track, 'id'
 
 type TimelineViewLike<TTrackId extends string = Track['id']> = {
   tracks: Array<{ _id: TTrackId; lockedBy?: string | null }>
-  clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number; audioWarp?: Clip['audioWarp'] }>
+  clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number; audioWarp?: Clip['audioWarp']; gain?: number }>
 }
 
 export type ClipTimelinePatch<TTrackId extends string = Track['id']> = {
@@ -35,6 +35,7 @@ export type ClipTimelinePatch<TTrackId extends string = Track['id']> = {
   leftPadSec?: number
   bufferOffsetSec?: number
   audioWarp?: Clip['audioWarp']
+  gain?: number
   midiOffsetBeats?: number
 }
 
@@ -88,7 +89,7 @@ type ResolveTimelineTracksOptions = {
 type ServerTimelineIndex<TTrackId extends string = Track['id']> = {
   trackIds: Set<TTrackId>
   clipIds: Set<string>
-  clipRowsById: Map<string, { trackId: TTrackId; startSec: number; duration: number; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; midiOffsetBeats: number }>
+  clipRowsById: Map<string, { trackId: TTrackId; startSec: number; duration: number; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; gain?: number; midiOffsetBeats: number }>
   trackLocksById: Map<TTrackId, string | null>
 }
 
@@ -166,6 +167,7 @@ const applyClipPatch = (clip: RuntimeClip, patch: ClipTimelinePatch | undefined)
     leftPadSec: patch.leftPadSec ?? clip.leftPadSec,
     bufferOffsetSec: patch.bufferOffsetSec ?? clip.bufferOffsetSec,
     audioWarp: patch.audioWarp === undefined ? clip.audioWarp : normalizeAudioWarp(patch.audioWarp),
+    gain: patch.gain ?? clip.gain,
     midiOffsetBeats: patch.midiOffsetBeats ?? clip.midiOffsetBeats,
   }
 }
@@ -234,7 +236,7 @@ const applyTrackMix = (
 export function buildServerTimelineIndex<TTrackId extends string>(data: TimelineViewLike<TTrackId>): ServerTimelineIndex<TTrackId> {
   const trackIds = new Set<TTrackId>()
   const clipIds = new Set<string>()
-  const clipRowsById = new Map<string, { trackId: TTrackId; startSec: number; duration: number; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; midiOffsetBeats: number }>()
+  const clipRowsById = new Map<string, { trackId: TTrackId; startSec: number; duration: number; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; gain?: number; midiOffsetBeats: number }>()
   const trackLocksById = new Map<TTrackId, string | null>()
 
   for (const track of data.tracks) {
@@ -253,6 +255,7 @@ export function buildServerTimelineIndex<TTrackId extends string>(data: Timeline
       leftPadSec: clip.leftPadSec ?? 0,
       bufferOffsetSec: clip.bufferOffsetSec ?? 0,
       audioWarp: normalizeAudioWarp(clip.audioWarp),
+      gain: clip.gain,
       midiOffsetBeats: clip.midiOffsetBeats ?? 0,
     })
   }
@@ -275,6 +278,7 @@ export function isClipPatchReflected<TTrackId extends string>(
   if (patch.leftPadSec !== undefined && !nearlyEqual(patch.leftPadSec, serverClip.leftPadSec)) return false
   if (patch.bufferOffsetSec !== undefined && !nearlyEqual(patch.bufferOffsetSec, serverClip.bufferOffsetSec)) return false
   if (patch.audioWarp !== undefined && !audioWarpEqual(normalizeAudioWarp(patch.audioWarp), serverClip.audioWarp)) return false
+  if (patch.gain !== undefined && !nearlyEqual(patch.gain, serverClip.gain)) return false
   if (patch.midiOffsetBeats !== undefined && !nearlyEqual(patch.midiOffsetBeats, serverClip.midiOffsetBeats)) return false
   return true
 }
@@ -375,6 +379,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
       leftPadSec: clipRow.leftPadSec ?? 0,
       bufferOffsetSec: clipRow.bufferOffsetSec ?? 0,
       audioWarp: normalizeAudioWarp(clipRow.audioWarp),
+      gain: clipRow.gain,
       color: '#22c55e',
       sampleUrl: clipRow.sampleUrl,
       midi: normalizeMidi(clipRow.midi),

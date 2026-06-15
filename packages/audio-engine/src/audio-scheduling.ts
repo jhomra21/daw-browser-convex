@@ -1,4 +1,5 @@
 import { applyArpeggiatorToNotes } from './effects/dsp'
+import { mapSourceBeatToTimelineBeat, mapTimelineBeatToSourceBeat } from '@daw-browser/shared'
 import type { ArpParams } from '@daw-browser/shared'
 import type { Clip } from '@daw-browser/timeline-core/types'
 
@@ -142,6 +143,10 @@ export function getAudioClipTimeMap(input: AudioClipTimeMapInput): AudioClipTime
   const projectBpm = resolveWarpBpm(input.projectBpm, 120)
   const sourceBpm = resolveWarpBpm(input.clip.audioWarp?.sourceBpm, projectBpm)
   const warpEnabled = input.clip.audioWarp?.enabled === true
+  const warpMarkers = warpEnabled && input.clip.audioWarp?.mode === 'stretch'
+    ? input.clip.audioWarp.markers ?? []
+    : []
+  const markerWarpEnabled = warpMarkers.length >= 2
   const playbackRate = warpEnabled ? projectBpm / sourceBpm : 1
   const sourceSecondsPerTimelineSecond = playbackRate
   const timelineSecondsPerSourceSecond = 1 / playbackRate
@@ -151,6 +156,38 @@ export function getAudioClipTimeMap(input: AudioClipTimeMapInput): AudioClipTime
     sourceBpm,
   })
   const sourceBaseSec = bufferOffset - sourceBeatOffsetSec
+  if (markerWarpEnabled) {
+    const projectSecondsPerBeat = 60 / projectBpm
+    const sourceSecondsPerBeat = 60 / sourceBpm
+    const clipTimelineBeat = (timelineSec: number) => Math.max(0, (timelineSec - audioStart) / projectSecondsPerBeat)
+    const clipSourceBeatToSec = (sourceBeat: number) => bufferOffset + sourceBeat * sourceSecondsPerBeat
+    const timelineBeatToSec = (timelineBeat: number) => audioStart + timelineBeat * projectSecondsPerBeat
+    const timelineToSourceSec = (timelineSec: number) => clipSourceBeatToSec(mapTimelineBeatToSourceBeat(warpMarkers, clipTimelineBeat(timelineSec)))
+    const sourceToTimelineSec = (sourceSec: number) => timelineBeatToSec(mapSourceBeatToTimelineBeat(warpMarkers, (sourceSec - bufferOffset) / sourceSecondsPerBeat))
+    const audioStartSec = Math.max(audioStart, sourceToTimelineSec(bufferOffset))
+    const audioEnd = Math.min(clipEnd, sourceToTimelineSec(bufferDuration))
+    if (input.rangeStartSec >= audioEnd) return null
+    const timelineStartSec = Math.max(input.rangeStartSec, audioStartSec)
+    const sourceStartSec = Math.max(bufferOffset, timelineToSourceSec(timelineStartSec))
+    if (sourceStartSec >= bufferDuration) return null
+    const timelineDurationSec = Math.max(0, audioEnd - timelineStartSec)
+    if (timelineDurationSec <= 0) return null
+    const sourceEndSec = Math.min(bufferDuration, timelineToSourceSec(timelineStartSec + timelineDurationSec))
+    return {
+      timelineStartSec,
+      timelineEndSec: timelineStartSec + timelineDurationSec,
+      sourceStartSec,
+      sourceEndSec,
+      timelineDurationSec,
+      sourceDurationSec: Math.max(0, sourceEndSec - sourceStartSec),
+      sourceSecondsPerTimelineSecond: playbackRate,
+      timelineSecondsPerSourceSecond: 1 / playbackRate,
+      playbackRate,
+      mode: 'stretch',
+      timelineToSourceSec,
+      sourceToTimelineSec,
+    }
+  }
   const leadingTimelineSilenceSec = Math.max(0, bufferOffset - sourceBaseSec) * timelineSecondsPerSourceSecond
   const effectiveSourceStartSec = Math.max(bufferOffset, sourceBaseSec)
   const audioTimelineDuration = Math.max(0, bufferDuration - effectiveSourceStartSec) * timelineSecondsPerSourceSecond
@@ -194,6 +231,22 @@ export function getAudioBufferPlaybackDurationSec(input: {
   stretchedDurationSec?: number | null
 }) {
   return input.stretchedDurationSec ?? input.map.sourceDurationSec
+}
+
+export function connectSourceWithClipGain(
+  context: BaseAudioContext,
+  source: AudioNode,
+  destination: AudioNode,
+  gain: number | undefined,
+) {
+  if (gain === undefined || gain === 1) {
+    source.connect(destination)
+    return
+  }
+  const clipGain = context.createGain()
+  clipGain.gain.value = Math.min(2, Math.max(0, gain))
+  source.connect(clipGain)
+  clipGain.connect(destination)
 }
 
 export function getAudioBufferPlaybackParams<TBuffer>(input: {

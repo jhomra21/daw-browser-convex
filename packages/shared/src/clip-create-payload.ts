@@ -16,6 +16,7 @@ export type ClipCreateSnapshot = {
   startSec: number
   duration: number
   name?: string
+  gain?: number
   sampleUrl?: string
   source?: AudioSourceMetadata
   sourceAssetKey?: string
@@ -84,6 +85,7 @@ const buildAudioClipMetadataPayloadFields = <TTrackId extends string>(
     leftPadSec: clip.timing?.leftPadSec,
     bufferOffsetSec: clip.timing?.bufferOffsetSec,
     audioWarp: normalizeAudioWarp(clip.audioWarp),
+    gain: clip.gain,
     midiOffsetBeats: clip.timing?.midiOffsetBeats,
   }
 }
@@ -128,6 +130,7 @@ export function buildClipCreatePayload<TTrackId extends string>(
     name: clip.name,
     clipKind: 'midi',
     midi: clip.midi,
+    gain: clip.gain,
     leftPadSec: clip.timing?.leftPadSec,
     bufferOffsetSec: clip.timing?.bufferOffsetSec,
     audioWarp: normalizeAudioWarp(clip.audioWarp),

@@ -14,7 +14,7 @@ type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 
 type FullTimelineViewLike<TTrackId extends string = Track['id']> = {
   tracks: Array<{ _id: TTrackId; lockedBy?: string | null }>
-  clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; audioWarp?: Track['clips'][number]['audioWarp']; midiOffsetBeats?: number }>
+  clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; audioWarp?: Track['clips'][number]['audioWarp']; gain?: number; midiOffsetBeats?: number }>
 }
 
 type PendingClipCreate<TTrackId extends string = Track['id']> = { trackId: TTrackId; clip: Track['clips'][number] }
@@ -52,6 +52,7 @@ type UseTimelineProjectionStateReturn = {
   setDraftClipTiming: (clipId: string, patch: ClipTimelinePatch | null) => void
   commitClipTiming: (clipId: string, patch: ClipTimelinePatch) => void
   commitClipAudioWarp: (clipId: string, audioWarp: Track['clips'][number]['audioWarp']) => void
+  commitClipGain: (clipId: string, gain: number) => void
   replaceDraftClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
   clearDraftClipMoves: (clipIds: Iterable<string>) => void
   commitClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
@@ -179,6 +180,7 @@ const hasClipTimelinePatchFields = (patch: ClipTimelinePatch) => (
   || patch.leftPadSec !== undefined
   || patch.bufferOffsetSec !== undefined
   || patch.audioWarp !== undefined
+  || patch.gain !== undefined
   || patch.midiOffsetBeats !== undefined
 )
 
@@ -259,6 +261,10 @@ export function useTimelineProjectionState(
       }
       return next
     })
+  }
+
+  const commitClipGain = (clipId: string, gain: number) => {
+    setCommittedClipEditsById((current) => new Map(current).set(clipId, { ...(current.get(clipId) ?? {}), gain }))
   }
 
   const removeLocalClips = (clipIds: Iterable<string>) => {
@@ -398,6 +404,7 @@ export function useTimelineProjectionState(
         return next
       })
     },
+    commitClipGain,
     replaceDraftClipMoves: (moves) => {
       const moveIds = new Set(moves.map((move) => move.clipId))
       setDraftClipEditsById((current) => {

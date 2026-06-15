@@ -13,6 +13,7 @@ export type ClipTiming = {
   bufferOffsetSec?: number
   /** Legacy persisted undo entries may include audioWarp here. New warp history uses clip-audio-warp. */
   audioWarp?: AudioWarp
+  gain?: number
   midiOffsetBeats?: number
 }
 

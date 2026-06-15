@@ -23,7 +23,12 @@ type ClipTimingPatch = {
   leftPadSec?: number;
   bufferOffsetSec?: number;
   midiOffsetBeats?: number;
+  gain?: number;
 };
+
+const isAppliedResult = (value: unknown) => (
+  typeof value === "object" && value !== null && "status" in value && value.status === "applied"
+);
 
 export const isLocalHistoryProject = (deps: Pick<Deps, "projectId">) => (
   isLocalId("project", deps.projectId)
@@ -45,6 +50,7 @@ const toHistoryCreateClipInput = (trackId: Track["id"], clip: Track["clips"][num
   leftPadSec: clip.leftPadSec,
   bufferOffsetSec: clip.bufferOffsetSec,
   audioWarp: normalizeAudioWarp(clip.audioWarp),
+  gain: clip.gain,
   sampleUrl: clip.sampleUrl,
   midi: clip.midi,
   midiOffsetBeats: clip.midiOffsetBeats,
@@ -267,6 +273,7 @@ export const persistHistoryClipTimingOrThrow = async (
       leftPadSec: timing.leftPadSec,
       bufferOffsetSec: timing.bufferOffsetSec,
       midiOffsetBeats: timing.midiOffsetBeats,
+      gain: timing.gain,
     });
     if (!applied) throw new Error(message);
     return;
@@ -280,6 +287,15 @@ export const persistHistoryClipTimingOrThrow = async (
     midiOffsetBeats: timing.midiOffsetBeats ?? 0,
   });
   if (!applied) throw new Error(message);
+  if (timing.gain !== undefined) {
+    const result = await publishDurableSharedTimelineOperation({
+      projectId: deps.projectId,
+      userId: deps.userId,
+      operation: { kind: "clips.setGain", payload: { clipId, gain: timing.gain } },
+      queuedResult: { status: "applied" },
+    });
+    if (!isAppliedResult(result)) throw new Error(message);
+  }
 };
 
 export const persistHistoryClipAudioWarpOrThrow = async (

@@ -1,4 +1,4 @@
-import { getAudioClipTimeMap } from './audio-scheduling'
+import { getAudioClipTimeMap, type AudioClipTimeMap } from './audio-scheduling'
 import { stretchAudioWsola } from './audio-stretching'
 import type { Clip } from '@daw-browser/timeline-core/types'
 
@@ -104,6 +104,7 @@ const createCacheKey = (clip: CacheKeyClip, buffer: AudioBufferIdentity, bpm: nu
   clip.audioWarp?.enabled === true ? 1 : 0,
   clip.audioWarp?.sourceBpm ?? bpm,
   clip.audioWarp?.enabled === true ? clip.audioWarp.sourceBeatOffset ?? 0 : 0,
+  JSON.stringify(clip.audioWarp?.enabled === true ? clip.audioWarp.markers ?? [] : []),
   clip.audioWarp?.mode ?? 'repitch',
 ].join('|')
 
@@ -293,6 +294,55 @@ const writeBuffer = (
   return buffer
 }
 
+const renderMappedStretch = (
+  sourceBuffer: AudioBuffer,
+  map: AudioClipTimeMap,
+  clip: RuntimeClip,
+  projectBpm: number,
+  createBuffer: AudioStretchCacheOptions['createBuffer'],
+) => {
+  const projectSecondsPerBeat = 60 / Math.max(1, projectBpm)
+  const audioStartSec = clip.startSec + Math.max(0, clip.leftPadSec ?? 0)
+  const markerBoundaries = (clip.audioWarp?.markers ?? [])
+    .map((marker) => audioStartSec + marker.timelineBeat * projectSecondsPerBeat)
+    .filter((timelineSec) => timelineSec > map.timelineStartSec + 1e-6 && timelineSec < map.timelineEndSec - 1e-6)
+  const boundaries = [map.timelineStartSec, ...markerBoundaries, map.timelineEndSec]
+  const stretchedSegments = boundaries.slice(0, -1).flatMap((timelineStartSec, index) => {
+    const timelineEndSec = boundaries[index + 1]
+    const sourceStartSec = Math.max(0, Math.min(sourceBuffer.duration, map.timelineToSourceSec(timelineStartSec)))
+    const sourceEndSec = Math.max(0, Math.min(sourceBuffer.duration, map.timelineToSourceSec(timelineEndSec)))
+    const sourceDurationSec = sourceEndSec - sourceStartSec
+    const targetFrameCount = Math.max(1, Math.round((timelineEndSec - timelineStartSec) * sourceBuffer.sampleRate))
+    if (sourceDurationSec <= 1 / sourceBuffer.sampleRate) return []
+    const startFrame = Math.max(0, Math.min(sourceBuffer.length - 1, Math.floor(sourceStartSec * sourceBuffer.sampleRate)))
+    const endFrame = Math.max(startFrame + 1, Math.min(sourceBuffer.length, Math.ceil(sourceEndSec * sourceBuffer.sampleRate)))
+    return [stretchAudioWsola({
+      channels: copyBufferWindow(sourceBuffer, startFrame, endFrame - startFrame),
+      sampleRate: sourceBuffer.sampleRate,
+    }, {
+      outputFrameCount: targetFrameCount,
+    }).channels]
+  })
+  const frameCount = stretchedSegments.reduce((total, segment) => total + (segment[0]?.length ?? 0), 0)
+  const channels = Array.from({ length: sourceBuffer.numberOfChannels }, (_, channelIndex) => {
+    const output = new Float32Array(frameCount)
+    let offset = 0
+    for (const segment of stretchedSegments) {
+      const source = segment[channelIndex]
+      if (!source) continue
+      output.set(source, offset)
+      offset += source.length
+    }
+    return output
+  })
+  return {
+    buffer: writeBuffer(createBuffer, channels, sourceBuffer.sampleRate),
+    timelineStartSec: map.timelineStartSec,
+    sourceStartSec: 0,
+    timelineDurationSec: frameCount / sourceBuffer.sampleRate,
+  }
+}
+
 export function isStretchQualityWarning(playbackRate: number) {
   return playbackRate < QUALITY_WARNING_MIN || playbackRate > QUALITY_WARNING_MAX
 }
@@ -377,6 +427,7 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
       rangeEndSec: clip.startSec + clip.duration,
     })
     if (!map || map.mode !== 'stretch') throw new Error('Cannot render Stretch warp for a non-stretched clip.')
+    if ((clip.audioWarp?.markers?.length ?? 0) >= 2) return renderMappedStretch(sourceBuffer, map, clip, projectBpm, options.createBuffer)
 
     const marginSec = Math.min(ANALYSIS_MARGIN_SEC, map.sourceStartSec)
     const renderSourceStartSec = Math.max(0, map.sourceStartSec - marginSec)

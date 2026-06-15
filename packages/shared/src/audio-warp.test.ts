@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { audioWarpEqual, createDefaultAudioWarp, normalizeAudioWarp } from './audio-warp'
+import { audioWarpEqual, createDefaultAudioWarp, mapSourceBeatToTimelineBeat, mapTimelineBeatToSourceBeat, normalizeAudioWarp } from './audio-warp'
 import { parseSharedTimelineOperation } from './shared-timeline-operations'
 
 describe('audio warp normalization', () => {
@@ -59,6 +59,40 @@ describe('audio warp normalization', () => {
       { enabled: true, sourceBpm: 120, mode: 'stretch' },
       { enabled: true, sourceBpm: 121, mode: 'stretch' },
     )).toBe(false)
+  })
+
+  test('normalizes markers into a monotonic mapping', () => {
+    const audioWarp = normalizeAudioWarp({
+      enabled: true,
+      sourceBpm: 120,
+      mode: 'stretch',
+      markers: [
+        { id: 'b', sourceBeat: 4, timelineBeat: 4 },
+        { id: 'duplicate', sourceBeat: 3, timelineBeat: 3 },
+        { id: 'a', sourceBeat: 0, timelineBeat: 0 },
+        { id: 'crossing', sourceBeat: 2, timelineBeat: 5 },
+        { id: 'duplicate', sourceBeat: 6, timelineBeat: 6 },
+      ],
+    })
+
+    expect(audioWarp?.markers).toEqual([
+      { id: 'a', sourceBeat: 0, timelineBeat: 0 },
+      { id: 'duplicate', sourceBeat: 3, timelineBeat: 3 },
+      { id: 'b', sourceBeat: 4, timelineBeat: 4 },
+    ])
+  })
+
+  test('maps between timeline and source beats across marker segments', () => {
+    const markers = [
+      { id: 'a', sourceBeat: 0, timelineBeat: 0 },
+      { id: 'b', sourceBeat: 2, timelineBeat: 4 },
+      { id: 'c', sourceBeat: 6, timelineBeat: 8 },
+    ]
+
+    expect(mapTimelineBeatToSourceBeat(markers, 2)).toBe(1)
+    expect(mapTimelineBeatToSourceBeat(markers, 6)).toBe(4)
+    expect(mapSourceBeatToTimelineBeat(markers, 1)).toBe(2)
+    expect(mapSourceBeatToTimelineBeat(markers, 4)).toBe(6)
   })
 
   test('normalizes shared operation warp payloads', () => {

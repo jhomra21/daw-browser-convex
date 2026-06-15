@@ -100,6 +100,7 @@ const clipPersistenceFieldsEqual = (left: TimelineClipRow, right: TimelineClipRo
   && left.leftPadSec === right.leftPadSec
   && left.bufferOffsetSec === right.bufferOffsetSec
   && audioWarpEqual(left.audioWarp, right.audioWarp)
+  && left.gain === right.gain
   && left.midi === right.midi
   && left.midiOffsetBeats === right.midiOffsetBeats
 )
@@ -288,6 +289,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       leftPadSec: input.leftPadSec,
       bufferOffsetSec: input.bufferOffsetSec,
       audioWarp: normalizeAudioWarp(input.audioWarp),
+      gain: input.gain,
       sampleUrl: input.sampleUrl,
       midi: input.midi,
       midiOffsetBeats: input.midiOffsetBeats,
@@ -446,6 +448,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       leftPadSec: input.leftPadSec ?? row.value.leftPadSec,
       bufferOffsetSec: input.bufferOffsetSec ?? row.value.bufferOffsetSec,
       audioWarp: input.audioWarp === undefined ? row.value.audioWarp : normalizeAudioWarp(input.audioWarp),
+      gain: input.gain ?? row.value.gain,
       midi: input.midi ?? row.value.midi,
       midiOffsetBeats: input.midiOffsetBeats ?? row.value.midiOffsetBeats,
       updatedAt: timestamp,

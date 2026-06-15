@@ -21,6 +21,7 @@ const resolveSourceBpm = (clip: Clip, projectBpm: number) => clip.audioWarp?.sou
 const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
   const sourceBpm = createMemo(() => resolveSourceBpm(props.sample.clip, props.sample.projectBpm))
   const sourceBeatOffset = createMemo(() => props.sample.clip.audioWarp?.sourceBeatOffset ?? 0)
+  const markerWarpActive = createMemo(() => (props.sample.clip.audioWarp?.markers?.length ?? 0) >= 2)
   const ratio = createMemo(() => props.sample.projectBpm / sourceBpm())
   const [renderState, setRenderState] = createSignal<AudioStretchRenderState>({ status: 'idle' })
   const [bpmState, setBpmState] = createSignal<BpmSuggestionState>({ status: 'idle' })
@@ -159,18 +160,19 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
               max="16"
               step="0.001"
               value={sourceBeatOffset()}
-              disabled={!props.sample.canWrite}
+              disabled={!props.sample.canWrite || markerWarpActive()}
               onChange={(event) => {
                 const value = event.currentTarget.valueAsNumber
                 if (Number.isFinite(value)) commit({ sourceBeatOffset: value })
               }}
             />
+            {markerWarpActive() && <span class="text-[10px] text-neutral-500">Using warp markers</span>}
           </label>
           {sourceBeatOffset() !== 0 && (
             <button
               class="h-7 border border-neutral-700 px-2 text-neutral-200 disabled:opacity-50"
               type="button"
-              disabled={!props.sample.canWrite}
+              disabled={!props.sample.canWrite || markerWarpActive()}
               onClick={() => commit({ sourceBeatOffset: 0 })}
             >
               Reset

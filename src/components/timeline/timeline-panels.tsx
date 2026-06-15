@@ -8,6 +8,7 @@ import type { OptimisticGrantWrite } from '~/lib/optimistic-grant-scope'
 import type { EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
 import type { BpmDetectionService } from '~/lib/bpm-detection-service'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import type { TimelineBottomPanelShellControls } from '~/components/timeline/TimelineBottomPanelShell'
 
 const AgentChat = lazy(() => import('~/components/AgentChat'))
 const SharedChat = lazy(() => import('~/components/SharedChat'))
@@ -31,7 +32,8 @@ export type TimelinePanelsProps = {
   }
   effectsPanel: {
     isOpen: boolean
-    showOpenButton?: boolean
+    showOpenButton: boolean
+    shell: TimelineBottomPanelShellControls
     selectedFXTarget: Track['id'] | 'master'
     tracks: Track[]
     playheadSec: number
@@ -59,7 +61,7 @@ export type TimelinePanelsProps = {
     onChange: (clip: Clip, audioWarp: NonNullable<Clip['audioWarp']>) => Promise<boolean> | boolean | void
     onGainChange: (clip: Clip, gain: number) => Promise<boolean> | boolean | void
     onMarkerDragStateChange?: (dragging: boolean) => void
-    onHeightChange?: (heightPx: number) => void
+    shell: TimelineBottomPanelShellControls
     onClose: () => void
   }
   exportDialog: {
@@ -150,6 +152,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         <EffectsPanel
           isOpen={props.effectsPanel.isOpen}
           showOpenButton={props.effectsPanel.showOpenButton}
+          shell={props.effectsPanel.shell}
           selectedFXTarget={props.effectsPanel.selectedFXTarget}
           tracks={props.effectsPanel.tracks}
           onClose={props.effectsPanel.onClose}
@@ -181,7 +184,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
               onWarpChange={props.sampleDetailPanel.onChange}
               onGainChange={props.sampleDetailPanel.onGainChange}
               onMarkerDragStateChange={props.sampleDetailPanel.onMarkerDragStateChange}
-              onHeightChange={props.sampleDetailPanel.onHeightChange}
+              shell={props.sampleDetailPanel.shell}
               onClose={props.sampleDetailPanel.onClose}
             />
           </Suspense>

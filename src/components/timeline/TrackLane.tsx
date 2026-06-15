@@ -12,7 +12,7 @@ type TrackLaneProps = {
   onClipPointerUp: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
   onClipResizeStart: (trackId: Track['id'], clipId: string, edge: 'left' | 'right', e: PointerEvent) => void
   isDropTarget?: boolean
-  onClipDblClick?: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
+  onClipDblClick?: (trackId: Track['id'], clipId: string) => void
   onRetryMedia?: (clipId: string) => void
   onReplaceMedia?: (trackId: Track['id'], clipId: string) => void
   onRemoveMissingMedia?: (trackId: Track['id'], clipId: string) => void

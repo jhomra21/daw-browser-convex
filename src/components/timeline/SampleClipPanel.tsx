@@ -1,6 +1,7 @@
 import { For, type Component, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import { isStretchQualityWarning, type AudioEngine, type AudioStretchRenderState } from '@daw-browser/audio-engine/audio-engine'
 import type { AudioWarp, Clip } from '@daw-browser/timeline-core/types'
+import { dbToLinearGain, linearGainToDb } from '@daw-browser/shared'
 import type { BpmDetectionService, BpmSuggestionState } from '~/lib/bpm-detection-service'
 import { buildNextAudioWarp } from '~/lib/audio-warp-patch'
 
@@ -13,6 +14,7 @@ type SampleClipPanelProps = {
     ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
     canWrite: boolean
     onWarpChange: (audioWarp: AudioWarp) => Promise<boolean> | boolean | void
+    onGainChange: (gain: number) => Promise<boolean> | boolean | void
   }
 }
 
@@ -39,6 +41,8 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
     && isStretchQualityWarning(ratio())
   ))
   const stretchEnabled = createMemo(() => props.sample.clip.audioWarp?.enabled === true && props.sample.clip.audioWarp.mode === 'stretch')
+  const gainDb = createMemo(() => linearGainToDb(props.sample.clip.gain ?? 1))
+  const gainLabel = createMemo(() => Number.isFinite(gainDb()) ? `${gainDb().toFixed(1)} dB` : '-inf dB')
   const stretchStatusText = createMemo(() => {
     if (!stretchEnabled()) return ''
     const state = renderState()
@@ -81,7 +85,7 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
   }
 
   return (
-    <section class="flex min-w-72 flex-col gap-2 border border-neutral-800 bg-neutral-950 px-3 py-2 text-neutral-200">
+    <section class="flex h-full min-w-72 flex-col gap-1.5 bg-neutral-950 px-3 py-2 text-neutral-200">
       <div class="flex items-center justify-between gap-3">
         <div>
           <div class="text-xs font-semibold uppercase tracking-wide text-neutral-400">Sample</div>
@@ -97,11 +101,11 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
           Warp
         </label>
       </div>
-      <div class="grid grid-cols-4 items-end gap-2 text-xs">
+      <div class="grid grid-cols-4 items-end gap-1.5 text-xs">
         <label class="flex flex-col gap-1 text-neutral-400">
           Source BPM
           <input
-            class="h-7 w-20 border border-neutral-700 bg-neutral-900 px-2 text-neutral-100 disabled:opacity-50"
+            class="h-6 w-20 border border-neutral-700 bg-neutral-900 px-2 text-neutral-100 disabled:opacity-50"
             type="number"
             min="1"
             step="0.01"
@@ -115,20 +119,20 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
         </label>
         <div class="flex flex-col gap-1 text-neutral-400">
           Project BPM
-          <div class="flex h-7 w-20 items-center border border-neutral-800 bg-neutral-900 px-2 text-neutral-200">
+          <div class="flex h-6 w-20 items-center border border-neutral-800 bg-neutral-900 px-2 text-neutral-200">
             {props.sample.projectBpm.toFixed(2)}
           </div>
         </div>
         <div class="flex flex-col gap-1 text-neutral-400">
           Ratio
-          <div class="flex h-7 w-20 items-center border border-neutral-800 bg-neutral-900 px-2 text-neutral-200">
+          <div class="flex h-6 w-20 items-center border border-neutral-800 bg-neutral-900 px-2 text-neutral-200">
             {ratio().toFixed(3)}x
           </div>
         </div>
         <div class="flex flex-col gap-1 text-neutral-400">
           Mode
           <select
-            class="h-7 w-24 border border-neutral-700 bg-neutral-900 px-2 text-neutral-100 disabled:opacity-50"
+            class="h-6 w-24 border border-neutral-700 bg-neutral-900 px-2 text-neutral-100 disabled:opacity-50"
             value={props.sample.clip.audioWarp?.mode ?? 'repitch'}
             disabled={!props.sample.canWrite}
             onChange={(event) => commit({ mode: event.currentTarget.value === 'stretch' ? 'stretch' : 'repitch' })}
@@ -149,11 +153,11 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
         </div>
       )}
       {props.sample.clip.audioWarp?.enabled === true && (
-        <div class="flex items-end gap-2 border-t border-neutral-800 pt-2 text-xs">
+        <div class="flex items-end gap-2 border-t border-neutral-800 pt-1.5 text-xs">
           <label class="flex flex-col gap-1 text-neutral-400">
             Beat Offset
             <input
-              class="h-7 w-24 border border-neutral-700 bg-neutral-900 px-2 text-neutral-100 disabled:opacity-50"
+              class="h-6 w-24 border border-neutral-700 bg-neutral-900 px-2 text-neutral-100 disabled:opacity-50"
               type="number"
               min="-16"
               max="16"
@@ -169,7 +173,7 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
           </label>
           {sourceBeatOffset() !== 0 && (
             <button
-              class="h-7 border border-neutral-700 px-2 text-neutral-200 disabled:opacity-50"
+              class="h-6 border border-neutral-700 px-2 text-neutral-200 disabled:opacity-50"
               type="button"
               disabled={!props.sample.canWrite || markerWarpActive()}
               onClick={() => commit({ sourceBeatOffset: 0 })}
@@ -179,11 +183,11 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
           )}
         </div>
       )}
-      <div class="flex flex-col gap-1 border-t border-neutral-800 pt-2 text-xs text-neutral-400">
+      <div class="flex flex-col gap-1 border-t border-neutral-800 pt-1.5 text-xs text-neutral-400">
         <div class="flex items-center justify-between gap-2">
           <span>Auto BPM</span>
           <button
-            class="border border-neutral-700 px-2 py-1 text-neutral-200 disabled:opacity-50"
+            class="h-6 border border-neutral-700 px-2 text-neutral-200 disabled:opacity-50"
             type="button"
             disabled={bpmState().status === 'analyzing'}
             onClick={() => {
@@ -197,7 +201,6 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
             Analyze
           </button>
         </div>
-        {bpmState().status === 'idle' && <div>No BPM suggestion yet.</div>}
         {bpmState().status === 'analyzing' && <div>Analyzing loop tempo…</div>}
         {bpmState().status === 'failed' && <div class="text-red-300">{bpmFailureMessage()}</div>}
         {bpmSuggestion() && (
@@ -213,7 +216,7 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
             </div>
             {bpmState().status === 'suggested' && (
               <button
-                class="w-fit border border-neutral-700 px-2 py-1 text-neutral-200 disabled:opacity-50"
+                class="h-6 w-fit border border-neutral-700 px-2 text-neutral-200 disabled:opacity-50"
                 type="button"
                 disabled={!props.sample.canWrite}
                 onClick={() => {
@@ -229,6 +232,24 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
             )}
           </div>
         )}
+      </div>
+      <div class="flex flex-col gap-1 border-t border-neutral-800 pt-1.5 text-xs text-neutral-300">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-semibold uppercase tracking-wide text-neutral-400">Clip Gain</span>
+          <span>{gainLabel()}</span>
+        </div>
+        <input
+          type="range"
+          min="-60"
+          max="6.02"
+          step="0.1"
+          value={Number.isFinite(gainDb()) ? gainDb() : -60}
+          disabled={!props.sample.canWrite}
+          onChange={(event) => {
+            const db = Number(event.currentTarget.value)
+            props.sample.onGainChange(db <= -60 ? 0 : dbToLinearGain(db))
+          }}
+        />
       </div>
     </section>
   )

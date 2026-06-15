@@ -26,7 +26,7 @@ type ClipComponentProps = {
     edge: "left" | "right",
     e: PointerEvent,
   ) => void;
-  onDblClick?: (trackId: Track["id"], clipId: string, e: PointerEvent) => void;
+  onDblClick?: (trackId: Track["id"], clipId: string) => void;
   onRetryMedia?: (clipId: string) => void;
   onReplaceMedia?: (trackId: Track["id"], clipId: string) => void;
   onRemoveMissingMedia?: (trackId: Track["id"], clipId: string) => void;
@@ -39,9 +39,24 @@ const MIN_CLIP_PX = 6;
 const WAVEFORM_PAD_Y = 6;
 const AUDIO_WAVEFORM_BOX_H = 34;
 const AUDIO_WAVEFORM_TOP_PX = 8;
+const DOUBLE_TAP_MS = 700;
+const DOUBLE_TAP_DISTANCE_PX = 8;
+const SELECTED_TAP_MS = 700;
+type ClipTapState = { key: string; at: number; x: number; y: number; pointerType: string };
+type ClipOpenState = { key: string; at: number };
+// Native dblclick can be lost when selection remounts the clip; keep the tap window outside the component.
+let lastClipTap:
+  | ClipTapState
+  | undefined;
+let lastClipDoubleOpen:
+  | ClipOpenState
+  | undefined;
 
 const ClipComponent: Component<ClipComponentProps> = (props) => {
   let canvasRef: HTMLCanvasElement | undefined;
+  let selectedTapStart:
+    | { x: number; y: number; at: number }
+    | undefined;
 
   const clipWidthPx = () =>
     Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS));
@@ -59,6 +74,40 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     if (props.clip.mediaStatus === "permission-denied") return "Permission needed";
     if (props.clip.mediaStatus === "missing") return "Missing media";
     return null;
+  };
+
+  const openFromDoubleTap = () => {
+    const now = performance.now();
+    const key = `${props.trackId}:${props.clip.id}`;
+    if (
+      lastClipDoubleOpen?.key === key &&
+      now - lastClipDoubleOpen.at < DOUBLE_TAP_MS
+    ) return;
+    lastClipDoubleOpen = { key, at: now };
+    props.onDblClick?.(props.trackId, props.clip.id);
+  };
+
+  const isDoubleTap = (event: PointerEvent) => {
+    const now = performance.now();
+    const previous = lastClipTap;
+    const key = `${props.trackId}:${props.clip.id}`;
+    lastClipTap = {
+      key,
+      at: now,
+      x: event.clientX,
+      y: event.clientY,
+      pointerType: event.pointerType,
+    };
+    if (
+      !previous ||
+      previous.key !== key ||
+      previous.pointerType !== event.pointerType
+    ) return false;
+    if (now - previous.at > DOUBLE_TAP_MS) return false;
+    return (
+      Math.abs(event.clientX - previous.x) <= DOUBLE_TAP_DISTANCE_PX &&
+      Math.abs(event.clientY - previous.y) <= DOUBLE_TAP_DISTANCE_PX
+    );
   };
 
   function drawWaveform() {
@@ -262,14 +311,35 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         height: `${LANE_HEIGHT - 1}px`,
       }}
       onPointerDown={(e) => {
-        if (e.detail >= 2) {
+        if (e.detail >= 2 || isDoubleTap(e)) {
           e.stopPropagation();
-          props.onDblClick?.(props.trackId, props.clip.id, e);
+          e.preventDefault();
+          selectedTapStart = undefined;
+          openFromDoubleTap();
           return;
         }
+        selectedTapStart = props.isSelected
+          ? { x: e.clientX, y: e.clientY, at: performance.now() }
+          : undefined;
         props.onPointerDown(props.trackId, props.clip.id, e);
       }}
-      onPointerUp={(e) => props.onPointerUp(props.trackId, props.clip.id, e)}
+      onDblClick={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        openFromDoubleTap();
+      }}
+      onPointerUp={(e) => {
+        props.onPointerUp(props.trackId, props.clip.id, e);
+        const start = selectedTapStart;
+        selectedTapStart = undefined;
+        if (!start) return;
+        if (performance.now() - start.at > SELECTED_TAP_MS) return;
+        if (
+          Math.abs(e.clientX - start.x) > DOUBLE_TAP_DISTANCE_PX ||
+          Math.abs(e.clientY - start.y) > DOUBLE_TAP_DISTANCE_PX
+        ) return;
+        openFromDoubleTap();
+      }}
       title={`${props.clip.name}`}
     >
       <div

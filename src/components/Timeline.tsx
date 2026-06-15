@@ -881,6 +881,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     effectsPanel: {
       isOpen: bottomPanel.open() && bottomPanel.mode() === "effects",
       showOpenButton: bottomPanel.mode() === "effects",
+      shell: {
+        heightPx: bottomPanel.heightPx(),
+        onHeightPreview: bottomPanel.previewHeightPx,
+        onHeightCommit: bottomPanel.commitHeightPx,
+      },
       selectedFXTarget: selection.selectedFXTarget(),
       tracks: renderTracks(),
       playheadSec: playheadSec(),
@@ -911,7 +916,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       onChange: sampleDetail.changeWarp,
       onGainChange: sampleDetail.changeGain,
       onMarkerDragStateChange: sampleDetail.setMarkerDragging,
-      onHeightChange: bottomPanel.setSampleDetailHeightPx,
+      shell: {
+        heightPx: bottomPanel.heightPx(),
+        onHeightPreview: bottomPanel.previewHeightPx,
+        onHeightCommit: bottomPanel.commitHeightPx,
+      },
       onClose: sampleDetail.close,
     },
     exportDialog: {
@@ -1013,6 +1022,13 @@ const Timeline: Component<TimelineProps> = (props) => {
         openSampleDetailFor={(clipId) => {
           const match = trackLookup().clipEntryById.get(clipId);
           if (!match || !isTimelineSampleDetailClip(match.clip)) return;
+          const selectedClip = selection.selectedClip();
+          if (
+            selectedClip?.clipId === clipId &&
+            selectedClip.trackId === match.trackId &&
+            bottomPanel.open() &&
+            bottomPanel.mode() === "sample-detail"
+          ) return;
           selection.selectPrimaryClip({ trackId: match.trackId, clipId });
           bottomPanel.setMode("sample-detail");
           bottomPanel.setOpen(true);

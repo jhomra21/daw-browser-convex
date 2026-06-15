@@ -1,10 +1,10 @@
-import { For, createEffect, createMemo, createSignal, type Component } from "solid-js";
+import { For, createEffect, createMemo, createSignal, onCleanup, onMount, type Component } from "solid-js";
 import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
 import type { AudioWarp, Clip } from "@daw-browser/timeline-core/types";
 import { mapTimelineBeatToSourceBeat } from "@daw-browser/shared";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { buildNextAudioWarp } from "~/lib/audio-warp-patch";
-import { getAudioWaveformLayout, getSourceBeatOffsetAnchorX, getSourceBeatOffsetFromAnchorX } from "~/lib/audio-waveform-layout";
+import { getSourceBeatOffsetAnchorX, getSourceBeatOffsetFromAnchorX } from "~/lib/audio-waveform-layout";
 
 type SampleDetailWaveformProps = {
   clip: Clip<AudioBuffer>;
@@ -16,7 +16,8 @@ type SampleDetailWaveformProps = {
 };
 
 const WAVEFORM_WIDTH_PX = 960;
-const WAVEFORM_HEIGHT_PX = 108;
+const WAVEFORM_PANEL_MIN_WIDTH_PX = WAVEFORM_WIDTH_PX + 20;
+const WAVEFORM_MIN_HEIGHT_PX = 108;
 const MIN_MARKER_GAP_BEATS = 0.001;
 
 const getClipBeatWidth = (clipDurationSec: number, projectBpm: number) => (
@@ -32,7 +33,9 @@ const beatFromPointer = (event: Pick<PointerEvent, "clientX" | "altKey">, canvas
 
 const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
   let canvasRef: HTMLCanvasElement | undefined;
+  let canvasWrapRef: HTMLDivElement | undefined;
   let markerHandleRef: HTMLButtonElement | undefined;
+  const [waveformHeightPx, setWaveformHeightPx] = createSignal(220);
   const waveform = useClipWaveformViewModel({
     clip: () => props.clip,
     cssWidthPx: () => WAVEFORM_WIDTH_PX,
@@ -54,6 +57,24 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     projectBpm: props.projectBpm,
     leftPadSec: props.clip.leftPadSec,
   }));
+
+  onMount(() => {
+    const commitHeight = (heightPx: number) => {
+      const nextHeightPx = Math.max(WAVEFORM_MIN_HEIGHT_PX, Math.floor(heightPx));
+      setWaveformHeightPx((currentHeightPx) => currentHeightPx === nextHeightPx ? currentHeightPx : nextHeightPx);
+    };
+    const measureHeight = () => {
+      const bounds = canvasWrapRef?.getBoundingClientRect();
+      if (bounds) commitHeight(bounds.height);
+    };
+    measureHeight();
+    const resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) commitHeight(entry.contentRect.height);
+    });
+    if (canvasWrapRef) resizeObserver.observe(canvasWrapRef);
+    onCleanup(() => resizeObserver.disconnect());
+  });
 
   const previewOffsetFromPointer = (event: PointerEvent) => {
     const canvas = canvasRef;
@@ -108,8 +129,9 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     const canvas = canvasRef;
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
+    const waveformHeight = waveformHeightPx();
     const pxW = Math.floor(WAVEFORM_WIDTH_PX * dpr);
-    const pxH = Math.floor(WAVEFORM_HEIGHT_PX * dpr);
+    const pxH = Math.floor(waveformHeight * dpr);
     if (canvas.width !== pxW || canvas.height !== pxH) {
       canvas.width = pxW;
       canvas.height = pxH;
@@ -117,20 +139,12 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, WAVEFORM_WIDTH_PX, WAVEFORM_HEIGHT_PX);
+    ctx.clearRect(0, 0, WAVEFORM_WIDTH_PX, waveformHeight);
     ctx.fillStyle = "rgb(10, 10, 10)";
-    ctx.fillRect(0, 0, WAVEFORM_WIDTH_PX, WAVEFORM_HEIGHT_PX);
+    ctx.fillRect(0, 0, WAVEFORM_WIDTH_PX, waveformHeight);
 
     const layout = waveform.layout();
     const peaks = waveform.peaks();
-    const sourceDurationSec = props.clip.buffer?.duration ?? props.clip.sourceDurationSec ?? 0;
-    const fullLayout = getAudioWaveformLayout(
-      props.clip,
-      WAVEFORM_WIDTH_PX,
-      sourceDurationSec,
-      props.projectBpm,
-    );
-
     ctx.strokeStyle = "rgba(255,255,255,0.08)";
     ctx.lineWidth = 1;
     const secondsPerBeat = 60 / Math.max(1, props.projectBpm);
@@ -143,15 +157,15 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
       const x = Math.round(((timelineSec - props.clip.startSec) / Math.max(1e-6, props.clip.duration)) * WAVEFORM_WIDTH_PX) + 0.5;
       ctx.beginPath();
       ctx.moveTo(x, 0);
-      ctx.lineTo(x, WAVEFORM_HEIGHT_PX);
+      ctx.lineTo(x, waveformHeight);
       ctx.stroke();
     }
 
     if (!peaks || layout.drawCols <= 0) {
       ctx.strokeStyle = "rgba(255,255,255,0.14)";
       ctx.beginPath();
-      ctx.moveTo(0, Math.floor(WAVEFORM_HEIGHT_PX / 2) + 0.5);
-      ctx.lineTo(WAVEFORM_WIDTH_PX, Math.floor(WAVEFORM_HEIGHT_PX / 2) + 0.5);
+      ctx.moveTo(0, Math.floor(waveformHeight / 2) + 0.5);
+      ctx.lineTo(WAVEFORM_WIDTH_PX, Math.floor(waveformHeight / 2) + 0.5);
       ctx.stroke();
       return;
     }
@@ -162,14 +176,10 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
       drawCols: layout.drawCols,
       padPx: layout.padPx,
       topY: 16,
-      contentH: WAVEFORM_HEIGHT_PX - 32,
+      contentH: waveformHeight - 32,
       cssW: WAVEFORM_WIDTH_PX,
-      cssH: WAVEFORM_HEIGHT_PX,
+      cssH: waveformHeight,
     });
-
-    ctx.strokeStyle = props.clip.audioWarp?.enabled === true ? "rgba(96,165,250,0.75)" : "rgba(34,197,94,0.65)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(fullLayout.audioStartPx + 0.5, 8.5, Math.max(0, fullLayout.audioEndPx - fullLayout.audioStartPx), WAVEFORM_HEIGHT_PX - 17);
   };
 
   createEffect(() => {
@@ -182,13 +192,17 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     void props.clip.sourceDurationSec;
     void props.clip.audioWarp;
     void visibleSourceBeatOffset();
+    void waveformHeightPx();
     void props.projectBpm;
     void waveform.peaks();
     draw();
   });
 
   return (
-    <div class="flex min-w-[980px] flex-1 flex-col gap-2 overflow-hidden border border-neutral-800 bg-neutral-950 px-3 py-2">
+    <div
+      class="flex h-full flex-1 flex-col gap-2 overflow-hidden bg-neutral-950 px-3 py-2"
+      style={{ "min-width": `${WAVEFORM_PANEL_MIN_WIDTH_PX}px` }}
+    >
       <div class="flex items-center justify-between gap-3">
         <div>
           <div class="text-xs font-semibold uppercase tracking-wide text-neutral-400">Beat Grid</div>
@@ -200,12 +214,17 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
           {props.clip.mediaStatus === "permission-denied" ? "Permission needed" : props.clip.mediaStatus === "missing" ? "Missing media" : ""}
         </div>
       </div>
-      <div class="relative h-[108px] w-[960px]">
+      <div
+        ref={(el) => { canvasWrapRef = el || undefined; }}
+        class="relative min-h-0 flex-1"
+        style={{ width: `${WAVEFORM_WIDTH_PX}px` }}
+      >
         <canvas
           ref={(el) => {
             canvasRef = el || undefined;
           }}
-          class="h-[108px] w-[960px] border border-neutral-800"
+          class="h-full"
+          style={{ width: `${WAVEFORM_WIDTH_PX}px` }}
           onDblClick={addMarker}
           onKeyDown={(event) => {
             if (event.key !== "Delete" && event.key !== "Backspace") return;
@@ -223,7 +242,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
                 type="button"
                 aria-label="Warp marker"
                 disabled={!props.canWrite || props.clip.audioWarp?.enabled !== true}
-                class="absolute top-0 h-[108px] w-3 -translate-x-1/2 border-x border-amber-300/80 bg-amber-400/10 disabled:opacity-50"
+                class="absolute top-0 h-full w-3 -translate-x-1/2 border-x border-amber-300/80 bg-amber-400/10 disabled:opacity-50"
                 classList={{ "bg-amber-300/30": selectedMarkerId() === marker.id }}
                 style={{ left: `${markerLeft()}px` }}
                 onClick={() => setSelectedMarkerId(marker.id)}
@@ -272,7 +291,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
         </For>
         {props.clip.audioWarp?.enabled === true && !markerWarpActive() && (
           <div
-            class="pointer-events-none absolute top-0 h-[108px]"
+            class="pointer-events-none absolute top-0 h-full"
             style={{ left: `${markerX()}px` }}
             data-warp-marker-dragging={isDraggingMarker() ? "true" : undefined}
           >

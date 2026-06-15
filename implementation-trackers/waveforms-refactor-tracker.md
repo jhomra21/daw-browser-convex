@@ -8,6 +8,9 @@ Fix local-project waveform rendering and playback alignment for audio clips.
 
 Updated 2026-06-15:
 
+- Current working-tree follow-up completed the Sample Detail / Effects bottom-panel convergence: one shared resizable shell/API now backs Effects, Master Effects, and Sample Detail.
+- Sample clip double-tap/tap-open was browser-verified in Helium, and empty-lane clicks now restore focus to the clicked track's effects panel instead of master/first-track fallback.
+- Effects devices are constrained to one horizontal device chain with horizontal overflow, matching the Ableton-style panel direction and preventing vertical device stacking.
 - The branch grew from waveform/playback alignment into the completed Sample Detail / Warp Editing milestone tracked in `audio-warping-tracker.md`.
 - Completed follow-on work includes full warp marker editing, marker-aware Stretch playback/export, persisted clip gain, resizable Sample Detail bottom panel, Stretch cache/scheduler hardening, and long continuous browser validation across a future marker-warped Stretch clip.
 - Final review passes found no remaining high-confidence merge blockers after the WSOLA staged-compression recursion fix and stretch-cache/bottom-panel responsibility split.

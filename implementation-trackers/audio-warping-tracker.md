@@ -60,6 +60,10 @@ Updated 2026-06-12:
 
 Updated 2026-06-15:
 
+- Follow-up bottom-panel UX is complete in the working tree: clip double-tap now opens Sample Detail through native double-click, pointer double-tap, and selected-clip tap paths verified in Helium.
+- Effects, Master Effects, and Sample Detail now share one resizable bottom-panel shell/state API, including shared height persistence, workspace/chat offset reservation, and top-edge resize/reset behavior.
+- Empty-lane clicks now focus the clicked lane's track effects instead of falling back to master/first track, so leaving Sample Detail from a Track 3 clip lands on Track 3 FX.
+- Effects devices now stay in a single horizontal Ableton-style device chain with horizontal overflow only; EQ/Reverb vertical stacking is disallowed.
 - Completed the integrated milestone that followed the grill decisions: bottom panel resize, clip gain, full marker model/editing, marker-aware Stretch playback/export, and long continuous playback validation.
 - Persisted `audioWarp.markers` as paired beat anchors on the clip warp payload. Markers are preserved when Warp is disabled, inactive while disabled, and authoritative for Stretch when at least two valid markers exist.
 - Added marker normalization/mapping helpers so marker maps stay strictly ordered by timeline beat and source beat. Invalid persisted crossing markers are dropped instead of guessed.

@@ -1,6 +1,6 @@
 import { createSignal, onCleanup, type Accessor } from 'solid-js'
 
-import { PPS, RULER_HEIGHT, LANE_HEIGHT } from '~/lib/timeline-utils'
+import { PPS, RULER_HEIGHT, LANE_HEIGHT, yToLaneIndex } from '~/lib/timeline-utils'
 import type { Track } from '@daw-browser/timeline-core/types'
 
 import { useDrag } from './useDrag'
@@ -71,15 +71,34 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
 
     currentScrollEl = scrollEl
 
-    if (!event.shiftKey) {
-      selection.selectMasterTarget()
-    }
-
     marqueeAdditive = !!event.shiftKey
     marqueeBaseClipIds = marqueeAdditive ? new Set(selection.selectedClipIds()) : new Set<string>()
     const rect = scrollEl.getBoundingClientRect()
     startX = event.clientX - rect.left + (scrollEl.scrollLeft || 0)
     startY = event.clientY - rect.top + (scrollEl.scrollTop || 0)
+    if (!event.shiftKey) {
+      const laneIndex = yToLaneIndex(event.clientY, scrollEl)
+      const track = ts[laneIndex]
+      if (track) {
+        if (
+          selection.selectedTrackId() !== track.id ||
+          selection.selectedFXTarget() !== track.id ||
+          selection.selectedClip() ||
+          selection.selectedClipIds().size > 0
+        ) {
+          selection.selectTrackTarget(track.id, { clearClipSelection: true })
+        }
+      } else {
+        if (
+          selection.selectedTrackId() ||
+          selection.selectedFXTarget() !== 'master' ||
+          selection.selectedClip() ||
+          selection.selectedClipIds().size > 0
+        ) {
+          selection.selectMasterTarget()
+        }
+      }
+    }
     marqueeActive = false
     startScrub(event.clientX, { listen: false })
     return true

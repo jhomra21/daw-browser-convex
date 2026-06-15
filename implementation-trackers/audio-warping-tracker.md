@@ -51,10 +51,28 @@ Updated 2026-06-12:
 - The sample clip panel now lets users choose Re-Pitch or Stretch and shows the Stretch quality/fallback warning for ratios outside the preferred range.
 - Completed manual listening fixture support for Stretch quality checks. `packages/audio-engine/src/audio-stretching.test.ts` now has an opt-in fixture path that writes deterministic WAV files when `AUDIO_STRETCH_FIXTURE_DIR` is provided.
 - Completed Stretch v1 hardening: the live stretch cache now persists rendered buffers to IndexedDB where available, uses deterministic keys that include clip timing, warp mode/BPM, project BPM, sample rate, channel count, buffer length, and a content fingerprint, and exposes render status for minimal selected-clip UI.
-- Deferred warp markers. The current timing model is constant-rate only, and the tracker's Pitch-Preserving Stretch Decisions explicitly defer variable-rate segments. Adding markers now would require a persisted segment mapping contract and UI semantics that are not specified.
+- Completed Warp Markers v2 after the marker contract was grilled and specified. `audioWarp.markers` now stores paired `{ id, sourceBeat, timelineBeat }` anchors, normalizes to a monotonic map, drives marker-aware Stretch rendering/export, and participates in cache identity/history/persistence.
 - Completed Auto BPM detection v1 for decoded/imported audio loops. The first pass uses an in-house deterministic onset/autocorrelation detector in `packages/audio-engine`, keeps low-confidence suggestions ephemeral, and auto-applies high-confidence import/manual detections through the existing clip warp write/history path with Warp enabled and Stretch mode selected.
 - Deferred advanced stretch-resize gestures. The current resize path only models left trim/pad and right duration resize, with no gesture distinction for "trim resize" versus "stretch resize"; adding it now would require product-level interaction semantics and a pure resize contract extension.
-- Remaining: warp markers, auto BPM detection, and advanced stretch-resize gestures remain future work.
+- Completed Sample Detail / Warp Editing milestone: marker add/delete/drag, marker-aware Stretch, clip gain, resizable bottom panel, long continuous browser validation, review/simplify/thermos hardening, and final commit/push. Remaining future work is advanced stretch-resize gestures and out-of-scope Ableton-class features like transient detection, groove/quantize, variable tempo maps, curved segments, quality modes, MIDI warp markers, remote marker presence, and destructive render-to-sample.
+
+## Sample Detail / Warp Editing Milestone
+
+Updated 2026-06-15:
+
+- Completed the integrated milestone that followed the grill decisions: bottom panel resize, clip gain, full marker model/editing, marker-aware Stretch playback/export, and long continuous playback validation.
+- Persisted `audioWarp.markers` as paired beat anchors on the clip warp payload. Markers are preserved when Warp is disabled, inactive while disabled, and authoritative for Stretch when at least two valid markers exist.
+- Added marker normalization/mapping helpers so marker maps stay strictly ordered by timeline beat and source beat. Invalid persisted crossing markers are dropped instead of guessed.
+- Sample Detail now supports multiple marker editing interactions: drag, double-click add, Delete/Backspace removal, default grid snap, Alt/Option free movement, and pointer-up commit behavior.
+- Marker-aware Stretch renders each marker-defined segment with the existing WSOLA path and concatenates the rendered segments. Live playback and export share the same rendered-buffer path.
+- Stretch cache identity includes normalized markers, and scheduler/deferred-render handling was hardened so ready Stretch renders can replace Re-Pitch fallback playback without layering duplicate sources.
+- Clip gain is persisted as linear `clip.gain` in the `0..2` range, displayed as dB in Sample Detail, applied before track FX in live playback and export, and included in local/shared persistence, history, projection, delete/create snapshots, and remote cache rows.
+- Bottom Sample Detail panel height is a local per-project preference with top-edge drag resize, double-click reset, Escape cancel, viewport clamping, and workspace/chat offset reservation.
+- Stretch hardening now supports user-selectable warp ratios outside the single-pass WSOLA range through staged rendering, with a tiny-buffer regression covering progress-guaranteed compression.
+- Refactored Stretch internals after review: `audio-stretch-cache.ts` remains the public coordinator while pure rendering lives in `audio-stretch-rendering.ts` and IndexedDB persistence/eviction lives in `audio-stretch-store.ts`.
+- Long continuous browser validation passed for playback crossing into a future marker-warped Stretch clip beyond the initial scheduling horizon without stop/start, overlay, scheduler failure, or render failure.
+- Final validators passed before commit/push: focused tests, `bun run typecheck`, `git diff --check`, `bun test`, `bun run knip`, and `bun run build`.
+- Final commit pushed: `2cb6808cc40b7528da4d1f6d6562e630eba8f505` on `waveforms-refactor`.
 
 ## Pitch-Preserving Stretch Decisions
 
@@ -79,7 +97,7 @@ Grill-me decisions from 2026-06-12:
 - If BPM/source BPM changes during playback, keep playing Re-Pitch until the new stretched render is ready, then reschedule the affected clip if still playing.
 - Use multi-channel linked WSOLA from the start: compute the best overlap offset from mono-summed analysis and apply the same offset to all channels.
 - Implement the DSP core on plain `Float32Array[]` channel data plus sample rate, with thin adapters to/from `AudioBuffer`.
-- Support constant-rate stretching only for now. Defer warp markers and variable-rate segments.
+- Initial Stretch supported constant-rate rendering only. Warp Markers v2 now adds scoped piecewise-linear marker segments by rendering each marker-defined segment and concatenating the result, while keeping transient detection, curved segments, and quality-mode selection out of scope.
 
 ## Pitch-Preserving Stretch Production Sequence
 

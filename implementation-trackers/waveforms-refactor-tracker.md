@@ -4,6 +4,16 @@
 
 Fix local-project waveform rendering and playback alignment for audio clips.
 
+## Latest Branch Status
+
+Updated 2026-06-15:
+
+- The branch grew from waveform/playback alignment into the completed Sample Detail / Warp Editing milestone tracked in `audio-warping-tracker.md`.
+- Completed follow-on work includes full warp marker editing, marker-aware Stretch playback/export, persisted clip gain, resizable Sample Detail bottom panel, Stretch cache/scheduler hardening, and long continuous browser validation across a future marker-warped Stretch clip.
+- Final review passes found no remaining high-confidence merge blockers after the WSOLA staged-compression recursion fix and stretch-cache/bottom-panel responsibility split.
+- Final validators passed before push: `bun run typecheck`, `git diff --check`, `bun test`, `bun run knip`, and `bun run build`.
+- Pushed commit: `2cb6808cc40b7528da4d1f6d6562e630eba8f505` on `waveforms-refactor`.
+
 ## Findings
 
 - Diffusion did not directly provide a waveform-specific pattern for this branch.

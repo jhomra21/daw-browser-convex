@@ -1,3 +1,4 @@
+import { normalizeAudioWarp } from '@daw-browser/shared'
 import type { HistoryEntry, PersistedHistory } from '~/lib/undo/types'
 
 const PERSISTED_HISTORY_VERSION = 2 as const
@@ -22,12 +23,15 @@ const isString = (value: unknown): value is string => typeof value === 'string'
 const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean'
 const isScope = (value: unknown) => value === 'shared' || value === 'local'
+const isAudioWarp = (value: unknown) => normalizeAudioWarp(value) !== undefined
 
 const isClipTiming = (value: unknown) => isRecord(value)
   && isNumber(value.startSec)
   && isNumber(value.duration)
   && (value.leftPadSec === undefined || isNumber(value.leftPadSec))
   && (value.bufferOffsetSec === undefined || isNumber(value.bufferOffsetSec))
+  && (value.audioWarp === undefined || isAudioWarp(value.audioWarp))
+  && (value.gain === undefined || isNumber(value.gain))
   && (value.midiOffsetBeats === undefined || isNumber(value.midiOffsetBeats))
 
 const isRoutingSnapshot = (value: unknown) => isRecord(value)
@@ -83,6 +87,12 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>) {
           && isNumber(move.to.startSec))
     case 'clip-timing':
       return isString(data.clipRef) && isClipTiming(data.from) && isClipTiming(data.to)
+    case 'clip-audio-warp':
+      return isString(data.clipRef)
+        && isRecord(data.from)
+        && isAudioWarp(data.from.audioWarp)
+        && isRecord(data.to)
+        && isAudioWarp(data.to.audioWarp)
     case 'track-create':
       return isTrackCreateData(data)
     case 'track-clip-create':

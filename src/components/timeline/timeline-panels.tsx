@@ -6,11 +6,14 @@ import { ExportProvider } from '~/context/export'
 import ExportProgressOverlay from '~/components/export/ExportProgressOverlay'
 import type { OptimisticGrantWrite } from '~/lib/optimistic-grant-scope'
 import type { EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
+import type { BpmDetectionService } from '~/lib/bpm-detection-service'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import type { TimelineBottomPanelShellControls } from '~/components/timeline/TimelineBottomPanelShell'
 
 const AgentChat = lazy(() => import('~/components/AgentChat'))
 const SharedChat = lazy(() => import('~/components/SharedChat'))
 const EffectsPanel = lazy(() => import('~/components/timeline/EffectsPanel'))
+const SampleDetailPanel = lazy(() => import('~/components/timeline/SampleDetailPanel'))
 const ExportDialog = lazy(() => import('~/components/timeline/ExportDialog'))
 
 export type TimelinePanelsProps = {
@@ -29,6 +32,8 @@ export type TimelinePanelsProps = {
   }
   effectsPanel: {
     isOpen: boolean
+    showOpenButton: boolean
+    shell: TimelineBottomPanelShellControls
     selectedFXTarget: Track['id'] | 'master'
     tracks: Track[]
     playheadSec: number
@@ -43,6 +48,20 @@ export type TimelinePanelsProps = {
     onOpen: () => void
     onEffectParamsCommitted: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void
     onLocalSaveFailed?: (message: string) => void
+  }
+  sampleDetailPanel: {
+    isOpen: boolean
+    selectedClip?: Clip<AudioBuffer>
+    projectBpm: number
+    audioEngine: AudioEngine
+    bpmDetection: BpmDetectionService
+    ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
+    canWriteClip: (clipId: string) => boolean
+    onChange: (clip: Clip, audioWarp: NonNullable<Clip['audioWarp']>) => Promise<boolean> | boolean | void
+    onGainChange: (clip: Clip, gain: number) => Promise<boolean> | boolean | void
+    onMarkerDragStateChange?: (dragging: boolean) => void
+    shell: TimelineBottomPanelShellControls
+    onClose: () => void
   }
   exportDialog: {
     isOpen: boolean
@@ -131,6 +150,8 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
       <Suspense fallback={null}>
         <EffectsPanel
           isOpen={props.effectsPanel.isOpen}
+          showOpenButton={props.effectsPanel.showOpenButton}
+          shell={props.effectsPanel.shell}
           selectedFXTarget={props.effectsPanel.selectedFXTarget}
           tracks={props.effectsPanel.tracks}
           onClose={props.effectsPanel.onClose}
@@ -147,6 +168,26 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
           onLocalSaveFailed={props.effectsPanel.onLocalSaveFailed}
         />
       </Suspense>
+
+      <Show when={props.sampleDetailPanel.isOpen && props.sampleDetailPanel.selectedClip}>
+        {(clip) => (
+          <Suspense fallback={null}>
+            <SampleDetailPanel
+              clip={clip()}
+              projectBpm={props.sampleDetailPanel.projectBpm}
+              audioEngine={props.sampleDetailPanel.audioEngine}
+              bpmDetection={props.sampleDetailPanel.bpmDetection}
+              ensureClipBuffer={props.sampleDetailPanel.ensureClipBuffer}
+              canWriteClip={props.sampleDetailPanel.canWriteClip}
+              onWarpChange={props.sampleDetailPanel.onChange}
+              onGainChange={props.sampleDetailPanel.onGainChange}
+              onMarkerDragStateChange={props.sampleDetailPanel.onMarkerDragStateChange}
+              shell={props.sampleDetailPanel.shell}
+              onClose={props.sampleDetailPanel.onClose}
+            />
+          </Suspense>
+        )}
+      </Show>
 
       <Show when={props.exportDialog.isOpen}>
         <Suspense fallback={null}>

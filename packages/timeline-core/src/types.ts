@@ -1,4 +1,5 @@
-import type { AudioSourceKind } from '@daw-browser/shared'
+import type { AudioSourceKind, AudioWarpPayload } from '@daw-browser/shared'
+export type { AudioWarpMode } from '@daw-browser/shared'
 export type TrackId = string
 
 export type TrackSend = {
@@ -12,6 +13,8 @@ export type TrackRouting = {
   outputTargetId?: TrackId
   sends?: TrackSend[]
 }
+
+export type AudioWarp = AudioWarpPayload
 
 type ClipRuntimeFields<TBuffer> = [TBuffer] extends [never]
   ? unknown
@@ -32,6 +35,8 @@ export type Clip<TBuffer = never> = {
   sourceChannelCount?: number
   leftPadSec?: number
   bufferOffsetSec?: number
+  audioWarp?: AudioWarp
+  gain?: number
   color: string
   sampleUrl?: string
   midi?: {

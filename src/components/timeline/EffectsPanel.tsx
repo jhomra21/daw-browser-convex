@@ -42,11 +42,13 @@ import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
-import { FX_PANEL_HEIGHT_PX } from "~/lib/timeline-utils";
+import TimelineBottomPanelShell, { type TimelineBottomPanelShellControls } from "~/components/timeline/TimelineBottomPanelShell";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 
 type EffectsPanelProps = {
   isOpen: boolean;
+  showOpenButton: boolean;
+  shell: TimelineBottomPanelShellControls;
   selectedFXTarget: Track["id"] | "master";
   tracks: Track[];
   onClose: () => void;
@@ -174,7 +176,10 @@ type EffectsPanelInstrumentSectionProps = {
 };
 
 const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProps> = (props) => (
-  <div classList={{ "pointer-events-none opacity-60": !props.instrument.canWrite }}>
+  <div
+    class="flex h-full shrink-0 items-stretch gap-3"
+    classList={{ "pointer-events-none opacity-60": !props.instrument.canWrite }}
+  >
     <Show
       when={
         props.instrument.currentTrack &&
@@ -268,7 +273,10 @@ type EffectsPanelEffectCardsProps = {
 };
 
 const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props) => (
-  <div classList={{ "pointer-events-none opacity-60": !props.effects.canWrite }}>
+  <div
+    class="flex h-full shrink-0 items-stretch gap-3"
+    classList={{ "pointer-events-none opacity-60": !props.effects.canWrite }}
+  >
     <For each={props.effects.orderedEffects}>
       {(effect) => (
         <Show
@@ -748,8 +756,11 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   return (
     <>
       <Show when={props.isOpen}>
-        <div class="fixed left-0 right-0 bottom-0 z-50 border-t border-neutral-800 bg-neutral-900">
-          <div class="flex" style={{ height: `${FX_PANEL_HEIGHT_PX}px` }}>
+        <TimelineBottomPanelShell
+          controls={props.shell}
+          resizeLabel="Resize effects panel"
+        >
+          <div class="flex h-full">
             <EffectsPanelRail
               rail={{
                 isInstrumentTrack: isInstrumentTrack(),
@@ -815,10 +826,10 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
               </div>
             </div>
           </div>
-        </div>
+        </TimelineBottomPanelShell>
       </Show>
 
-      <Show when={!props.isOpen}>
+      <Show when={!props.isOpen && props.showOpenButton}>
         <EffectsPanelClosedButton onOpen={props.onOpen} />
       </Show>
 

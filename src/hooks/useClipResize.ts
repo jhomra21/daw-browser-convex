@@ -1,7 +1,8 @@
 import { onCleanup, type Accessor } from 'solid-js'
 
-import { persistClipTiming } from '~/lib/clip-mutations'
-import { isLocalId } from '@daw-browser/shared'
+import { persistClipTiming, persistClipTimingAndAudioWarp } from '~/lib/clip-mutations'
+import { calculateAudioLeftResizeTiming } from '~/lib/audio-left-resize-timing'
+import { audioWarpEqual, isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { buildClipTimingHistoryEntry } from '~/lib/undo/builders'
 import { PPS, quantizeSecToGrid } from '~/lib/timeline-utils'
@@ -20,8 +21,8 @@ type ResizeState = {
 
 type ClipResizeOptions = {
   tracks: Accessor<RuntimeTrack[]>
-  setDraftClipTiming: (clipId: string, patch: { startSec?: number; duration?: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number } | null) => void
-  commitClipTiming: (clipId: string, patch: { startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number }) => void
+  setDraftClipTiming: (clipId: string, patch: { startSec?: number; duration?: number; leftPadSec?: number; bufferOffsetSec?: number; audioWarp?: RuntimeTrack['clips'][number]['audioWarp']; midiOffsetBeats?: number } | null) => void
+  commitClipTiming: (clipId: string, patch: { startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; audioWarp?: RuntimeTrack['clips'][number]['audioWarp']; midiOffsetBeats?: number }) => void
   canWriteClip: (clipId: string) => boolean
   selection: TimelineSelectionController
   convexClient: typeof import('~/lib/convex').convexClient
@@ -61,12 +62,26 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
   let resizeFixedLeft = 0
   let resizeFixedRight = 0
   let resizeOrigBufferOffset = 0
+  let resizeOrigAudioWarp: RuntimeTrack['clips'][number]['audioWarp']
   let resizeOrigMidiOffsetBeats = 0
+  let resizeBaselineAudioClip: RuntimeTrack['clips'][number] | null = null
+  let activeResizePointerId: number | null = null
+  let activeResizeCaptureTarget: HTMLElement | null = null
 
   const removeResizeListeners = () => {
     window.removeEventListener('pointermove', onResizePointerMove)
-    window.removeEventListener('pointerup', onResizePointerUp)
-    window.removeEventListener('pointercancel', onResizePointerUp)
+    window.removeEventListener('pointerup', onResizePointerUp, { capture: true })
+    window.removeEventListener('pointercancel', onResizePointerUp, { capture: true })
+    window.removeEventListener('blur', onResizePointerUp)
+    if (activeResizeCaptureTarget && activeResizePointerId !== null) {
+      try {
+        if (activeResizeCaptureTarget.hasPointerCapture(activeResizePointerId)) {
+          activeResizeCaptureTarget.releasePointerCapture(activeResizePointerId)
+        }
+      } catch {}
+    }
+    activeResizePointerId = null
+    activeResizeCaptureTarget = null
   }
 
   const onClipResizeStart = (trackId: Track['id'], clipId: string, edge: 'left' | 'right', event: PointerEvent) => {
@@ -85,16 +100,23 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     resizeFixedLeft = clip.startSec
     resizeFixedRight = clip.startSec + clip.duration
     resizeOrigBufferOffset = clip.bufferOffsetSec ?? 0
+    resizeOrigAudioWarp = clip.audioWarp
     resizeOrigMidiOffsetBeats = clip.midiOffsetBeats ?? 0
+    resizeBaselineAudioClip = { ...clip }
 
     selection.selectPrimaryClip({ trackId, clipId })
 
     if (event.currentTarget instanceof HTMLElement) {
-      event.currentTarget.setPointerCapture(event.pointerId)
+      activeResizePointerId = event.pointerId
+      activeResizeCaptureTarget = event.currentTarget
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId)
+      } catch {}
     }
     window.addEventListener('pointermove', onResizePointerMove)
-    window.addEventListener('pointerup', onResizePointerUp)
-    window.addEventListener('pointercancel', onResizePointerUp)
+    window.addEventListener('pointerup', onResizePointerUp, { capture: true })
+    window.addEventListener('pointercancel', onResizePointerUp, { capture: true })
+    window.addEventListener('blur', onResizePointerUp)
   }
 
   const onResizePointerMove = (event: PointerEvent) => {
@@ -167,26 +189,19 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         const windowDuration = resizeFixedRight - resizeFixedLeft
         const fallbackBufferDur = Math.max(0, windowDuration - resizeOrigPad)
         const bufferDur = clip.buffer?.duration ?? fallbackBufferDur
-        const delta = newStart - resizeOrigStart
-        let nextLeftPad = resizeOrigPad
-        let nextBufOffset = Math.max(0, resizeOrigBufferOffset)
-        if (delta >= 0) {
-          const consumePad = Math.min(nextLeftPad, delta)
-          nextLeftPad = Math.max(0, nextLeftPad - consumePad)
-          const remaining = delta - consumePad
-          nextBufOffset = Math.max(0, Math.min(bufferDur, nextBufOffset + Math.max(0, remaining)))
-        } else {
-          const supply = -delta
-          const reduceBuf = Math.min(nextBufOffset, supply)
-          nextBufOffset = Math.max(0, nextBufOffset - reduceBuf)
-          const leftover = supply - reduceBuf
-          nextLeftPad = Math.max(0, nextLeftPad + Math.max(0, leftover))
-        }
+        const timing = calculateAudioLeftResizeTiming({
+          baselineClip: resizeBaselineAudioClip ?? clip,
+          fixedRightSec: resizeFixedRight,
+          newStartSec: newStart,
+          bufferDurationSec: bufferDur,
+          projectBpm: options.bpm(),
+        })
         setDraftClipTiming(clip.id, {
-          startSec: newStart,
+          startSec: timing.startSec,
           duration: newDuration,
-          leftPadSec: nextLeftPad,
-          bufferOffsetSec: nextBufOffset,
+          leftPadSec: timing.leftPadSec,
+          bufferOffsetSec: timing.bufferOffsetSec,
+          audioWarp: timing.audioWarp,
         })
       }
     } else {
@@ -230,7 +245,8 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     }
   }
 
-  const onResizePointerUp = () => {
+  const onResizePointerUp = (event?: PointerEvent | FocusEvent) => {
+    if (event instanceof PointerEvent && activeResizePointerId !== null && event.pointerId !== activeResizePointerId) return
     if (!clipResizing || !resizing) {
       clipResizing = false
       resizing = null
@@ -244,6 +260,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
 
     clipResizing = false
     resizing = null
+    resizeBaselineAudioClip = null
     removeResizeListeners()
 
     if (clip) {
@@ -253,6 +270,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         duration: clip.duration,
         leftPadSec: clip.leftPadSec,
         bufferOffsetSec: clip.bufferOffsetSec,
+        audioWarp: clip.audioWarp,
         midiOffsetBeats: clip.midiOffsetBeats,
       })
       const rid = options.projectId()
@@ -261,6 +279,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         duration: resizeOrigDuration,
         leftPadSec: resizeOrigPad,
         bufferOffsetSec: resizeOrigBufferOffset,
+        audioWarp: resizeOrigAudioWarp,
         midiOffsetBeats: resizeOrigMidiOffsetBeats,
       }
       const to = {
@@ -268,6 +287,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         duration: clip.duration,
         leftPadSec: clip.leftPadSec,
         bufferOffsetSec: clip.bufferOffsetSec,
+        audioWarp: clip.audioWarp,
         midiOffsetBeats: clip.midiOffsetBeats,
       }
       const timingEpsilon = 1e-6
@@ -276,6 +296,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         Math.abs((target.duration ?? 0) - (current.duration ?? 0)) < timingEpsilon &&
         Math.abs((target.leftPadSec ?? 0) - (current.leftPadSec ?? 0)) < timingEpsilon &&
         Math.abs((target.bufferOffsetSec ?? 0) - (current.bufferOffsetSec ?? 0)) < timingEpsilon &&
+        audioWarpEqual(target.audioWarp, current.audioWarp) &&
         Math.abs((target.midiOffsetBeats ?? 0) - (current.midiOffsetBeats ?? 0)) < timingEpsilon
       )
       const sameTiming = timingMatches(from, to)
@@ -296,6 +317,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
             duration: currentClip.duration,
             leftPadSec: currentClip.leftPadSec,
             bufferOffsetSec: currentClip.bufferOffsetSec,
+            audioWarp: currentClip.audioWarp,
             midiOffsetBeats: currentClip.midiOffsetBeats,
           })
         ) {
@@ -306,12 +328,12 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           duration: from.duration,
           leftPadSec: from.leftPadSec,
           bufferOffsetSec: from.bufferOffsetSec,
+          audioWarp: from.audioWarp,
           midiOffsetBeats: from.midiOffsetBeats,
         })
         queueMicrotask(() => options.rescheduleChangedClips([clip.id]))
       }
       if (sameTiming) {
-        queueMicrotask(() => options.rescheduleChangedClips([clip.id]))
         return
       }
       if (rid && isLocalId('project', rid)) {
@@ -321,18 +343,20 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           duration: clip.duration,
           leftPadSec: clip.leftPadSec ?? 0,
           bufferOffsetSec: clip.bufferOffsetSec ?? 0,
+          audioWarp: clip.audioWarp,
           midiOffsetBeats: clip.midiOffsetBeats ?? 0,
         }).then(pushHistory).catch(rollbackTiming)
       } else {
         const uid = userId()
         if (uid) {
-          void persistClipTiming(convexClient, convexApi, {
+          void persistClipTimingAndAudioWarp(convexClient, convexApi, {
             clipId: clip.id,
             startSec: clip.startSec,
             duration: clip.duration,
             leftPadSec: clip.leftPadSec ?? 0,
             bufferOffsetSec: clip.bufferOffsetSec ?? 0,
             midiOffsetBeats: clip.midiOffsetBeats ?? 0,
+            audioWarp: clip.audioWarp,
           }).then((applied) => {
             if (applied) {
               pushHistory()
@@ -351,6 +375,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
   onCleanup(() => {
     clipResizing = false
     resizing = null
+    resizeBaselineAudioClip = null
     removeResizeListeners()
   })
 

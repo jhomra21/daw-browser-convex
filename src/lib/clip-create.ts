@@ -1,5 +1,5 @@
 import { getPersistableAudioSourceMetadata, type AudioSourceKind, type AudioSourceMetadata } from '~/lib/audio-source'
-import { resolveClipSampleUrl } from '@daw-browser/shared'
+import { normalizeAudioWarp, resolveClipSampleUrl } from '@daw-browser/shared'
 import type { ClipBufferWriter } from '~/lib/clip-buffer-cache'
 import { uploadClipSampleUrl } from '~/lib/clip-sample-url'
 import { primeClipSourceAsset } from '~/lib/clip-source-client'
@@ -43,6 +43,7 @@ type UploadedAudioClipInput = {
   color?: string
   pushHistory?: boolean
   canProject?: () => boolean
+  onClipCreated?: (clip: RuntimeClip) => void
 }
 
 type UploadedAudioClipResult = {
@@ -67,6 +68,7 @@ type LocalAudioClipInput = {
   audioBufferCache: ClipBufferWriter
   color?: string
   canProject?: () => boolean
+  onClipCreated?: (clip: RuntimeClip) => void
 }
 
 export type BatchClipCreateItem = {
@@ -91,6 +93,7 @@ function buildClipSnapshotFields(clip: Clip) {
     startSec: clip.startSec,
     duration: clip.duration,
     name: clip.name,
+    gain: clip.gain,
     sampleUrl: resolveClipSampleUrl(clip),
     source: getPersistableAudioSourceMetadata({
       sourceDurationSec: clip.sourceDurationSec,
@@ -100,6 +103,7 @@ function buildClipSnapshotFields(clip: Clip) {
     sourceAssetKey: clip.sourceAssetKey,
     sourceKind: clip.sourceKind,
     midi: clip.midi,
+    audioWarp: normalizeAudioWarp(clip.audioWarp),
     timing: {
       leftPadSec: clip.leftPadSec,
       bufferOffsetSec: clip.bufferOffsetSec,
@@ -127,6 +131,8 @@ export function buildLocalClip(input: BuildLocalClipInput): RuntimeClip {
     midi: clip.midi,
     leftPadSec: clip.timing?.leftPadSec,
     bufferOffsetSec: clip.timing?.bufferOffsetSec,
+    audioWarp: normalizeAudioWarp(clip.audioWarp),
+    gain: clip.gain,
     midiOffsetBeats: clip.timing?.midiOffsetBeats,
   }
 }
@@ -222,13 +228,15 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
     return { clipId, clip }
   }
 
-  input.insertLocalClip(input.trackId, buildLocalClip({
+  const localClip = buildLocalClip({
     id: clipId,
     clip,
     buffer: input.decoded,
     color: input.color,
-  }))
+  })
+  input.insertLocalClip(input.trackId, localClip)
   input.audioBufferCache.storeBuffer(clipId, input.decoded)
+  input.onClipCreated?.(localClip)
   void primeClipSourceAsset({
     sourceAssetKey: input.sourceAssetKey,
     sampleUrl,
@@ -284,6 +292,7 @@ export async function createLocalAudioClip(input: LocalAudioClipInput): Promise<
   }
   input.insertLocalClip(input.trackId, localClip)
   input.audioBufferCache.storeBuffer(row.id, input.decoded)
+  input.onClipCreated?.(localClip)
   input.selectClip?.(input.trackId, row.id)
   if (!input.skipHistory) {
     pushClipCreateHistory({
@@ -400,6 +409,8 @@ export async function createProjectedLocalClips(input: {
         sourceChannelCount: item.clip.source?.channelCount,
         leftPadSec: item.clip.timing?.leftPadSec,
         bufferOffsetSec: item.clip.timing?.bufferOffsetSec,
+        audioWarp: normalizeAudioWarp(item.clip.audioWarp),
+        gain: item.clip.gain,
         sampleUrl: item.clip.sampleUrl,
         midi: item.clip.midi,
         midiOffsetBeats: item.clip.timing?.midiOffsetBeats,

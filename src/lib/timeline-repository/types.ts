@@ -1,5 +1,5 @@
 import type { AudioSourceKind } from '~/lib/audio-source'
-import type { TrackChannelRole, TrackId } from '@daw-browser/timeline-core/types'
+import type { AudioWarp, TrackChannelRole, TrackId } from '@daw-browser/timeline-core/types'
 
 export type TimelineEntityKind = 'track' | 'clip' | 'effect' | 'mixerChannel'
 
@@ -39,6 +39,8 @@ export type TimelineClipRow = {
   sourceChannelCount?: number
   leftPadSec?: number
   bufferOffsetSec?: number
+  audioWarp?: AudioWarp
+  gain?: number
   sampleUrl?: string
   midi?: {
     wave: 'sine' | 'square' | 'sawtooth' | 'triangle'
@@ -86,6 +88,8 @@ export type CreateClipInput = {
   sourceChannelCount?: number
   leftPadSec?: number
   bufferOffsetSec?: number
+  audioWarp?: AudioWarp
+  gain?: number
   sampleUrl?: string
   midi?: TimelineClipRow['midi']
   midiOffsetBeats?: number
@@ -99,6 +103,8 @@ export type UpdateClipInput = {
   name?: string
   leftPadSec?: number
   bufferOffsetSec?: number
+  audioWarp?: AudioWarp
+  gain?: number
   sourceAssetId?: TimelineAssetId
   sourceAssetKey?: string
   sourceKind?: AudioSourceKind

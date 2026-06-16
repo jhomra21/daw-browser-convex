@@ -1,6 +1,7 @@
 import type { AudioSourceKind } from './audio-source-rules'
 import { resolveClipSampleUrl } from './audio-source-rules'
 import type { AudioSourceMetadata } from './audio-source-metadata'
+import { normalizeAudioWarp, type AudioWarpPayload } from './audio-warp'
 import type { SharedTimelineClipCreatePayload } from './shared-timeline-operations'
 import type { SynthWave } from './effects-params'
 
@@ -15,6 +16,7 @@ export type ClipCreateSnapshot = {
   startSec: number
   duration: number
   name?: string
+  gain?: number
   sampleUrl?: string
   source?: AudioSourceMetadata
   sourceAssetKey?: string
@@ -25,6 +27,7 @@ export type ClipCreateSnapshot = {
     notes: Array<{ beat: number; length: number; pitch: number; velocity?: number }>
   }
   timing?: ClipTimingSnapshot
+  audioWarp?: AudioWarpPayload
 }
 
 type BuildClipCreatePayloadInput<TTrackId extends string = string> = {
@@ -81,6 +84,8 @@ const buildAudioClipMetadataPayloadFields = <TTrackId extends string>(
     clipKind: 'audio',
     leftPadSec: clip.timing?.leftPadSec,
     bufferOffsetSec: clip.timing?.bufferOffsetSec,
+    audioWarp: normalizeAudioWarp(clip.audioWarp),
+    gain: clip.gain,
     midiOffsetBeats: clip.timing?.midiOffsetBeats,
   }
 }
@@ -125,8 +130,10 @@ export function buildClipCreatePayload<TTrackId extends string>(
     name: clip.name,
     clipKind: 'midi',
     midi: clip.midi,
+    gain: clip.gain,
     leftPadSec: clip.timing?.leftPadSec,
     bufferOffsetSec: clip.timing?.bufferOffsetSec,
+    audioWarp: normalizeAudioWarp(clip.audioWarp),
     midiOffsetBeats: clip.timing?.midiOffsetBeats,
   }
 }

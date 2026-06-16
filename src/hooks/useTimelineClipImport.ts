@@ -47,6 +47,7 @@ type TimelineClipImportOptions = {
   grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
   onLocalSaveFailed?: (message: string) => void
   notify: (title: string, message: string) => void
+  onDecodedClipCreated?: (clip: Clip<AudioBuffer>) => void
 }
 
 type TimelineClipImportHandlers = {
@@ -185,6 +186,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
       historyPush: options.historyPush,
       pushTrackClipCreateHistory: pushLocalTrackClipCreateHistory,
       grantClipWrite,
+      onClipCreated: options.onDecodedClipCreated,
     },
     cloud: {
       uploadToR2: clipBuffers.uploadToR2,

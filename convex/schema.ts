@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { audioWarpValidator } from "./audioWarpValidator";
 import { projectManifestValidator } from "./projectManifestValidator";
 
 // Minimal shared model for collaboration
@@ -44,6 +45,8 @@ export default defineSchema({
     sourceChannelCount: v.optional(v.number()),
     leftPadSec: v.optional(v.number()),
     bufferOffsetSec: v.optional(v.number()),
+    audioWarp: v.optional(audioWarpValidator),
+    gain: v.optional(v.number()),
     name: v.optional(v.string()),
     sampleUrl: v.optional(v.string()),
     midi: v.optional(v.object({

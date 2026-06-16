@@ -91,6 +91,16 @@ export const executeTimelineOperation = async (
           toTrackId: move.trackId,
         })),
       })
+    case 'clips.setAudioWarp':
+      return await context.convex.mutation(convexApi.clips.serverSetAudioWarp, {
+        clipId: operation.payload.clipId,
+        audioWarp: operation.payload.audioWarp,
+      })
+    case 'clips.setGain':
+      return await context.convex.mutation(convexApi.clips.serverSetGain, {
+        clipId: operation.payload.clipId,
+        gain: operation.payload.gain,
+      })
     case 'tracks.setRouting':
       await context.convex.mutation(convexApi.tracks.serverSetRouting, {
         trackId: operation.payload.trackId,

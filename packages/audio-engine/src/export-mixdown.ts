@@ -7,7 +7,9 @@ import {
   type Target,
 } from 'mediabunny'
 
-import { getPlayableAudioWindow, getScheduledMidiEvents } from './audio-scheduling'
+import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
+import { connectSourceWithClipGain, getAudioBufferPlaybackParams, getScheduledMidiEvents } from './audio-scheduling'
+import { createAudioStretchCache } from './audio-stretch-cache'
 import {
   getExportAudioFormatMetadata,
   type ArpParams,
@@ -166,6 +168,9 @@ async function renderSourceIsolatedMixdownFromPrepared(
   throwIfAborted(prepared.signal)
   const length = Math.ceil(prepared.range.durationSec * prepared.sampleRate)
   const ctx = new OfflineAudioContext(prepared.numberOfChannels, length, prepared.sampleRate)
+  const stretchCache = createAudioStretchCache({
+    createBuffer: (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
+  })
   const graph = includeMasterFx ? prepared.mixerGraph : { ...prepared.mixerGraph, master: {} }
   const { trackNodes } = createOfflineMixerNodes(ctx, graph)
 
@@ -221,18 +226,37 @@ async function renderSourceIsolatedMixdownFromPrepared(
       }
 
       if (!clip.buffer) continue
-      const window = getPlayableAudioWindow({
+      const map = getAudioClipTimeMap({
         clip,
         bufferDurationSec: clip.buffer.duration,
+        projectBpm: prepared.bpm,
         rangeStartSec: prepared.range.startSec,
         rangeEndSec: prepared.range.endSec,
       })
-      if (!window) continue
+      if (!map) continue
 
       const src = ctx.createBufferSource()
-      src.buffer = clip.buffer
-      src.connect(trackInput)
-      try { src.start(Math.max(0, window.startSec - prepared.range.startSec), window.offsetSec, window.durationSec) } catch {}
+      const stretched = map.mode === 'stretch'
+        ? await stretchCache.renderNow(clip, prepared.bpm).catch((error) => {
+          throw new Error(`Failed to render Stretch warp for clip "${clip.name}": ${error instanceof Error ? error.message : String(error)}`)
+        })
+        : null
+      const playback = getAudioBufferPlaybackParams({
+        sourceBuffer: clip.buffer,
+        map,
+        stretched: stretched ? { ...stretched, bufferDurationSec: stretched.buffer.duration } : null,
+      })
+      if (playback.durationSec <= 0) continue
+      src.buffer = playback.buffer
+      src.playbackRate.value = playback.playbackRate
+      connectSourceWithClipGain(ctx, src, trackInput, clip.gain)
+      try {
+        src.start(
+          Math.max(0, map.timelineStartSec - prepared.range.startSec),
+          playback.offsetSec,
+          playback.durationSec,
+        )
+      } catch {}
     }
   }
 

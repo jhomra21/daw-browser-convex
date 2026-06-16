@@ -1,5 +1,5 @@
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectEntityRow } from '~/lib/local-project-db'
-import { createLocalClipId, createLocalTrackId } from '@daw-browser/shared'
+import { audioWarpEqual, createLocalClipId, createLocalTrackId, normalizeAudioWarp } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { flushRegisteredLocalProjectWrites } from '~/lib/local-project-write-flushers'
 import { LocalEntityWriteQueue } from '~/lib/local-write-queue'
@@ -99,6 +99,8 @@ const clipPersistenceFieldsEqual = (left: TimelineClipRow, right: TimelineClipRo
   && left.sampleUrl === right.sampleUrl
   && left.leftPadSec === right.leftPadSec
   && left.bufferOffsetSec === right.bufferOffsetSec
+  && audioWarpEqual(left.audioWarp, right.audioWarp)
+  && left.gain === right.gain
   && left.midi === right.midi
   && left.midiOffsetBeats === right.midiOffsetBeats
 )
@@ -286,6 +288,8 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       sourceChannelCount: input.sourceChannelCount,
       leftPadSec: input.leftPadSec,
       bufferOffsetSec: input.bufferOffsetSec,
+      audioWarp: normalizeAudioWarp(input.audioWarp),
+      gain: input.gain,
       sampleUrl: input.sampleUrl,
       midi: input.midi,
       midiOffsetBeats: input.midiOffsetBeats,
@@ -443,6 +447,8 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       sampleUrl: patchOptionalString(row.value.sampleUrl, input.sampleUrl),
       leftPadSec: input.leftPadSec ?? row.value.leftPadSec,
       bufferOffsetSec: input.bufferOffsetSec ?? row.value.bufferOffsetSec,
+      audioWarp: input.audioWarp === undefined ? row.value.audioWarp : normalizeAudioWarp(input.audioWarp),
+      gain: input.gain ?? row.value.gain,
       midi: input.midi ?? row.value.midi,
       midiOffsetBeats: input.midiOffsetBeats ?? row.value.midiOffsetBeats,
       updatedAt: timestamp,

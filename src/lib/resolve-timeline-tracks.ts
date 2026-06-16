@@ -2,7 +2,7 @@ import type { FunctionReturnType } from 'convex/server'
 
 import type { ClipMediaCache } from '~/lib/clip-buffer-cache'
 import { convexApi } from '~/lib/convex'
-import { isLocalProjectAssetKey, sanitizeAudioSourceKind } from '@daw-browser/shared'
+import { audioWarpEqual, isLocalProjectAssetKey, normalizeAudioWarp, sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { isLocalId } from '@daw-browser/shared'
 import { resolveTrackMixView } from '~/lib/timeline-mix-authority'
 import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
@@ -25,7 +25,7 @@ type TimelineTrackLike<TTrackId extends string = Track['id']> = Omit<Track, 'id'
 
 type TimelineViewLike<TTrackId extends string = Track['id']> = {
   tracks: Array<{ _id: TTrackId; lockedBy?: string | null }>
-  clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number }>
+  clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number; audioWarp?: Clip['audioWarp']; gain?: number }>
 }
 
 export type ClipTimelinePatch<TTrackId extends string = Track['id']> = {
@@ -34,6 +34,8 @@ export type ClipTimelinePatch<TTrackId extends string = Track['id']> = {
   duration?: number
   leftPadSec?: number
   bufferOffsetSec?: number
+  audioWarp?: Clip['audioWarp']
+  gain?: number
   midiOffsetBeats?: number
 }
 
@@ -87,7 +89,7 @@ type ResolveTimelineTracksOptions = {
 type ServerTimelineIndex<TTrackId extends string = Track['id']> = {
   trackIds: Set<TTrackId>
   clipIds: Set<string>
-  clipRowsById: Map<string, { trackId: TTrackId; startSec: number; duration: number; leftPadSec: number; bufferOffsetSec: number; midiOffsetBeats: number }>
+  clipRowsById: Map<string, { trackId: TTrackId; startSec: number; duration: number; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; gain?: number; midiOffsetBeats: number }>
   trackLocksById: Map<TTrackId, string | null>
 }
 
@@ -164,6 +166,8 @@ const applyClipPatch = (clip: RuntimeClip, patch: ClipTimelinePatch | undefined)
     duration: patch.duration ?? clip.duration,
     leftPadSec: patch.leftPadSec ?? clip.leftPadSec,
     bufferOffsetSec: patch.bufferOffsetSec ?? clip.bufferOffsetSec,
+    audioWarp: patch.audioWarp === undefined ? clip.audioWarp : normalizeAudioWarp(patch.audioWarp),
+    gain: patch.gain ?? clip.gain,
     midiOffsetBeats: patch.midiOffsetBeats ?? clip.midiOffsetBeats,
   }
 }
@@ -232,7 +236,7 @@ const applyTrackMix = (
 export function buildServerTimelineIndex<TTrackId extends string>(data: TimelineViewLike<TTrackId>): ServerTimelineIndex<TTrackId> {
   const trackIds = new Set<TTrackId>()
   const clipIds = new Set<string>()
-  const clipRowsById = new Map<string, { trackId: TTrackId; startSec: number; duration: number; leftPadSec: number; bufferOffsetSec: number; midiOffsetBeats: number }>()
+  const clipRowsById = new Map<string, { trackId: TTrackId; startSec: number; duration: number; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; gain?: number; midiOffsetBeats: number }>()
   const trackLocksById = new Map<TTrackId, string | null>()
 
   for (const track of data.tracks) {
@@ -250,6 +254,8 @@ export function buildServerTimelineIndex<TTrackId extends string>(data: Timeline
       duration: clip.duration,
       leftPadSec: clip.leftPadSec ?? 0,
       bufferOffsetSec: clip.bufferOffsetSec ?? 0,
+      audioWarp: normalizeAudioWarp(clip.audioWarp),
+      gain: clip.gain,
       midiOffsetBeats: clip.midiOffsetBeats ?? 0,
     })
   }
@@ -271,6 +277,8 @@ export function isClipPatchReflected<TTrackId extends string>(
   if (patch.duration !== undefined && !nearlyEqual(patch.duration, serverClip.duration)) return false
   if (patch.leftPadSec !== undefined && !nearlyEqual(patch.leftPadSec, serverClip.leftPadSec)) return false
   if (patch.bufferOffsetSec !== undefined && !nearlyEqual(patch.bufferOffsetSec, serverClip.bufferOffsetSec)) return false
+  if (patch.audioWarp !== undefined && !audioWarpEqual(normalizeAudioWarp(patch.audioWarp), serverClip.audioWarp)) return false
+  if (patch.gain !== undefined && !nearlyEqual(patch.gain, serverClip.gain)) return false
   if (patch.midiOffsetBeats !== undefined && !nearlyEqual(patch.midiOffsetBeats, serverClip.midiOffsetBeats)) return false
   return true
 }
@@ -370,6 +378,8 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
       sourceChannelCount: clipRow.sourceChannelCount,
       leftPadSec: clipRow.leftPadSec ?? 0,
       bufferOffsetSec: clipRow.bufferOffsetSec ?? 0,
+      audioWarp: normalizeAudioWarp(clipRow.audioWarp),
+      gain: clipRow.gain,
       color: '#22c55e',
       sampleUrl: clipRow.sampleUrl,
       midi: normalizeMidi(clipRow.midi),

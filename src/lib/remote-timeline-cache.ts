@@ -1,7 +1,7 @@
 import type { FunctionReturnType } from 'convex/server'
 
 import { convexApi } from '~/lib/convex'
-import { sanitizeAudioSourceKind } from '@daw-browser/shared'
+import { normalizeAudioWarp, sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectAssetRow } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { normalizeTrackChannelRole } from '@daw-browser/shared'
@@ -77,6 +77,8 @@ const toClipRow = (clip: FullTimelineView['clips'][number], updatedAt: number): 
     sourceChannelCount: clip.sourceChannelCount,
     leftPadSec: clip.leftPadSec ?? 0,
     bufferOffsetSec: clip.bufferOffsetSec ?? 0,
+    audioWarp: normalizeAudioWarp(clip.audioWarp),
+    gain: clip.gain,
     sampleUrl: clip.sampleUrl,
     midi: normalizeMidi(clip.midi),
     midiOffsetBeats: clip.midiOffsetBeats ?? 0,

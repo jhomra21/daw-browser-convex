@@ -1,19 +1,52 @@
-import { For, type JSX } from "solid-js";
+import { createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
 import TrackSidebar from "~/components/timeline/TrackSidebar";
 import TimelineOverlays, { type TimelineMidiBounds } from "~/components/timeline/timeline-overlays";
-import { FX_PANEL_HEIGHT_PX, LANE_HEIGHT, PPS, RULER_HEIGHT } from "~/lib/timeline-utils";
+import { LANE_HEIGHT, PPS, RULER_HEIGHT } from "~/lib/timeline-utils";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionState";
 import type { Clip, Track, TrackId, TrackSend } from "@daw-browser/timeline-core/types";
 import type { TimelineTrackIndex } from "@daw-browser/timeline-core/track-index";
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types";
 
+const createViewportRedrawVersion = () => {
+  const [version, setVersion] = createSignal(0);
+  const requestRedraw = () => setVersion((value) => value + 1);
+
+  onMount(() => {
+    requestRedraw();
+    window.addEventListener("resize", requestRedraw);
+    window.visualViewport?.addEventListener("resize", requestRedraw);
+
+    let dprQuery: MediaQueryList | undefined;
+    let dprListener: (() => void) | undefined;
+    const bindDprListener = () => {
+      if (dprQuery && dprListener) dprQuery.removeEventListener("change", dprListener);
+      dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      dprListener = () => {
+        requestRedraw();
+        bindDprListener();
+      };
+      dprQuery.addEventListener("change", dprListener);
+    };
+    bindDprListener();
+
+    onCleanup(() => {
+      window.removeEventListener("resize", requestRedraw);
+      window.visualViewport?.removeEventListener("resize", requestRedraw);
+      if (dprQuery && dprListener) dprQuery.removeEventListener("change", dprListener);
+    });
+  });
+
+  return version;
+};
+
 type Props = {
   containerRef: (el: HTMLDivElement) => void;
   scrollRef: (el: HTMLDivElement) => void;
   bottomFXOpen: boolean;
+  bottomPanelHeightPx: number;
   durationSec: number;
   sidebarWidth: number;
   tracks: RuntimeTrack[];
@@ -38,6 +71,7 @@ type Props = {
   removeMissingMediaClip: (trackId: Track["id"], clipId: string) => Promise<void>;
   trackLookup: TimelineTrackIndex<AudioBuffer>;
   openMidiEditorFor: (clipId: string) => void;
+  openSampleDetailFor: (clipId: string) => void;
   marqueeRect: { x: number; y: number; width: number; height: number } | null;
   recording: {
     isRecording: boolean;
@@ -76,9 +110,11 @@ type Props = {
 };
 
 export default function TimelineWorkspace(props: Props) {
+  const viewportRedrawVersion = createViewportRedrawVersion();
   const trackAreaHeight = () => (props.tracks.length + (props.dropAtNewTrack ? 1 : 0)) * LANE_HEIGHT;
   const fullHeight = () => RULER_HEIGHT + trackAreaHeight();
-  const scrollContentHeight = () => fullHeight() + (props.bottomFXOpen ? FX_PANEL_HEIGHT_PX : 0);
+  const bottomPanelHeight = () => props.bottomFXOpen ? props.bottomPanelHeightPx : 0;
+  const scrollContentHeight = () => fullHeight() + bottomPanelHeight();
   return (
     <div class="flex-1 flex min-h-0" ref={props.containerRef}>
       <div
@@ -117,7 +153,7 @@ export default function TimelineWorkspace(props: Props) {
               class="absolute left-0 right-0 bg-neutral-950"
               style={{
                 top: `${RULER_HEIGHT}px`,
-                bottom: props.bottomFXOpen ? `${FX_PANEL_HEIGHT_PX}px` : "0",
+                bottom: props.bottomFXOpen ? `${bottomPanelHeight()}px` : "0",
               }}
             >
               <For each={props.tracks}>
@@ -139,12 +175,16 @@ export default function TimelineWorkspace(props: Props) {
                     onRemoveMissingMedia={(trackId, clipId) => {
                       void props.removeMissingMediaClip(trackId, clipId);
                     }}
+                    ensureClipBuffer={props.ensureClipBuffer}
                     bpm={props.bpm}
+                    viewportRedrawVersion={viewportRedrawVersion()}
                     onClipDblClick={(_, clipId) => {
                       const match = props.trackLookup.clipEntryById.get(clipId);
                       if (match && match.trackId === track.id && match.clip.midi) {
                         props.openMidiEditorFor(clipId);
+                        return;
                       }
+                      props.openSampleDetailFor(clipId);
                     }}
                   />
                 )}

@@ -1,4 +1,4 @@
-import type { PeakAssetRecord, PeakChunkRecord, PeakLevelRecord } from './types'
+import type { PeakAssetRecord, PeakChunkRecord, PeakLevelRecord, WaveformSourceIdentity } from './types'
 import { resamplePeakPairs } from './resample-peak-pairs'
 
 const PEAK_LEVELS_PER_SECOND = [400, 100, 25] as const
@@ -102,7 +102,7 @@ function resampleChunkPeaks(
   }
 }
 
-export function extractPeakAsset(buffer: AudioBuffer, assetKey: string) {
+export function extractPeakAsset(buffer: AudioBuffer, assetKey: string, sourceIdentity?: WaveformSourceIdentity) {
   const durationSec = Math.max(0, buffer.duration)
   const levelChunks = new Map<number, Array<{ meta: PeakChunkRecord; data: Uint8Array }>>()
   const highResChunks: Array<{ meta: PeakChunkRecord; data: Uint8Array }> = []
@@ -138,6 +138,7 @@ export function extractPeakAsset(buffer: AudioBuffer, assetKey: string) {
     durationSec,
     sampleRate: buffer.sampleRate,
     channelCount: buffer.numberOfChannels,
+    sourceIdentity,
     levels,
   }
 

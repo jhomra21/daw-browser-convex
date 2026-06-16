@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
+    "./audio-clip-time-map": "./src/audio-clip-time-map.ts",
     "./clip-placement": "./src/clip-placement.ts",
     "./track-index": "./src/track-index.ts",
     "./track-routing": "./src/track-routing.ts",

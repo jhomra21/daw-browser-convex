@@ -1,7 +1,8 @@
-import { isLocalId } from '@daw-browser/shared'
+import { isLocalId, normalizeAudioWarp, normalizeClipGain } from '@daw-browser/shared'
 import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { MoveClipInput } from '~/lib/timeline-repository/types'
+import type { AudioWarp } from '@daw-browser/timeline-core/types'
 
 type ClipWriteContext = {
   projectId: string
@@ -45,6 +46,39 @@ export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
       projectId: context.projectId,
       userId,
       operation: { kind: 'clips.moveMany', payload: { moves } },
+      queuedResult: { status: 'applied' },
+    })
+    return isRecord(result) && result.status === 'applied'
+  },
+  setAudioWarp: async (clipId: string, audioWarp: AudioWarp) => {
+    const normalizedAudioWarp = normalizeAudioWarp(audioWarp)
+    if (!normalizedAudioWarp) return false
+    if (isLocalId('project', context.projectId)) {
+      const row = await createLocalTimelineRepository(context.projectId).updateClip({ clipId, audioWarp: normalizedAudioWarp })
+      return Boolean(row)
+    }
+    if (!context.userId) return false
+    const userId = context.userId
+    const result = await publishDurableSharedTimelineOperation({
+      projectId: context.projectId,
+      userId,
+      operation: { kind: 'clips.setAudioWarp', payload: { clipId, audioWarp: normalizedAudioWarp } },
+      queuedResult: { status: 'applied' },
+    })
+    return isRecord(result) && result.status === 'applied'
+  },
+  setGain: async (clipId: string, gain: number) => {
+    const normalizedGain = normalizeClipGain(gain)
+    if (isLocalId('project', context.projectId)) {
+      const row = await createLocalTimelineRepository(context.projectId).updateClip({ clipId, gain: normalizedGain })
+      return Boolean(row)
+    }
+    if (!context.userId) return false
+    const userId = context.userId
+    const result = await publishDurableSharedTimelineOperation({
+      projectId: context.projectId,
+      userId,
+      operation: { kind: 'clips.setGain', payload: { clipId, gain: normalizedGain } },
       queuedResult: { status: 'applied' },
     })
     return isRecord(result) && result.status === 'applied'

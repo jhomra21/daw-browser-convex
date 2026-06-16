@@ -5,6 +5,8 @@
   "type": "module",
   "exports": {
     "./audio-engine": "./src/audio-engine.ts",
+    "./bpm-detection": "./src/bpm-detection.ts",
+    "./audio-scheduling": "./src/audio-scheduling.ts",
     "./export-audio-support": "./src/export-audio-support.ts",
     "./export-mixdown": "./src/export-mixdown.ts"
   },

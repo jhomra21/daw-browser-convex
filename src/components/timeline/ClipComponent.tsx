@@ -1,13 +1,10 @@
 import {
   type Component,
   createEffect,
-  createSignal,
-  onCleanup,
 } from "solid-js";
 
 import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
-import { getWaveformSlice } from "@daw-browser/waveforms/select-waveform-window";
-import { resolveClipSampleUrl } from "@daw-browser/shared";
+import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { LANE_HEIGHT, PPS } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
@@ -29,11 +26,13 @@ type ClipComponentProps = {
     edge: "left" | "right",
     e: PointerEvent,
   ) => void;
-  onDblClick?: (trackId: Track["id"], clipId: string, e: PointerEvent) => void;
+  onDblClick?: (trackId: Track["id"], clipId: string) => void;
   onRetryMedia?: (clipId: string) => void;
   onReplaceMedia?: (trackId: Track["id"], clipId: string) => void;
   onRemoveMissingMedia?: (trackId: Track["id"], clipId: string) => void;
+  ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>;
   bpm: number;
+  viewportRedrawVersion: number;
 };
 
 // these values center waveform in clips container
@@ -41,46 +40,36 @@ const MIN_CLIP_PX = 6;
 const WAVEFORM_PAD_Y = 6;
 const AUDIO_WAVEFORM_BOX_H = 34;
 const AUDIO_WAVEFORM_TOP_PX = 8;
-
-type AudioWaveformLayout = {
-  sourceDurationSec: number;
-  padPx: number;
-  drawCols: number;
-  sourceStartSec: number;
-  sourceEndSec: number;
-};
-
-function getAudioWaveformLayout(clip: RuntimeClip, cssW: number): AudioWaveformLayout {
-  const sourceDurationSec = Math.max(clip.sourceDurationSec ?? 0, 0);
-  const padPx = Math.max(0, Math.floor((clip.leftPadSec ?? 0) * PPS));
-  const offsetPx = Math.max(0, Math.floor((clip.bufferOffsetSec ?? 0) * PPS));
-  const sourcePxW = Math.max(1, Math.floor(sourceDurationSec * PPS));
-  const drawCols = Math.max(
-    0,
-    Math.min(cssW - padPx, Math.max(0, sourcePxW - offsetPx)),
-  );
-  const sourceStartSec = Math.max(0, clip.bufferOffsetSec ?? 0);
-  const sourceEndSec = Math.min(
-    sourceDurationSec,
-    sourceStartSec + drawCols / PPS,
-  );
-
-  return {
-    sourceDurationSec,
-    padPx,
-    drawCols,
-    sourceStartSec,
-    sourceEndSec,
-  };
-}
+const DOUBLE_TAP_MS = 700;
+const DOUBLE_TAP_DISTANCE_PX = 8;
+const SELECTED_TAP_MS = 700;
+type ClipTapState = { key: string; at: number; x: number; y: number; pointerType: string };
+type ClipOpenState = { key: string; at: number };
+// Native dblclick can be lost when selection remounts the clip; keep the tap window outside the component.
+let lastClipTap:
+  | ClipTapState
+  | undefined;
+let lastClipDoubleOpen:
+  | ClipOpenState
+  | undefined;
 
 const ClipComponent: Component<ClipComponentProps> = (props) => {
   let canvasRef: HTMLCanvasElement | undefined;
-  let waveformRequestId = 0;
+  let selectedTapStart:
+    | { x: number; y: number; at: number }
+    | undefined;
 
-  const [waveformPeaks, setWaveformPeaks] = createSignal<Uint8Array | null>(
-    null,
-  );
+  const clipWidthPx = () =>
+    Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS));
+  const handleWidthPx = () =>
+    clipWidthPx() < 18 ? 2 : clipWidthPx() < 28 ? 3 : 6;
+
+  const waveform = useClipWaveformViewModel({
+    clip: () => props.clip,
+    cssWidthPx: () => clipWidthPx(),
+    projectBpm: () => props.bpm,
+    ensureClipBuffer: props.ensureClipBuffer,
+  });
   const isGhost = () => props.clip.id.startsWith("__dup_preview:");
   const mediaStatusLabel = () => {
     if (props.clip.mediaStatus === "permission-denied") return "Permission needed";
@@ -88,13 +77,46 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     return null;
   };
 
+  const openFromDoubleTap = () => {
+    const now = performance.now();
+    const key = `${props.trackId}:${props.clip.id}`;
+    if (
+      lastClipDoubleOpen?.key === key &&
+      now - lastClipDoubleOpen.at < DOUBLE_TAP_MS
+    ) return;
+    lastClipDoubleOpen = { key, at: now };
+    props.onDblClick?.(props.trackId, props.clip.id);
+  };
+
+  const isDoubleTap = (event: PointerEvent) => {
+    const now = performance.now();
+    const previous = lastClipTap;
+    const key = `${props.trackId}:${props.clip.id}`;
+    lastClipTap = {
+      key,
+      at: now,
+      x: event.clientX,
+      y: event.clientY,
+      pointerType: event.pointerType,
+    };
+    if (
+      !previous ||
+      previous.key !== key ||
+      previous.pointerType !== event.pointerType
+    ) return false;
+    if (now - previous.at > DOUBLE_TAP_MS) return false;
+    return (
+      Math.abs(event.clientX - previous.x) <= DOUBLE_TAP_DISTANCE_PX &&
+      Math.abs(event.clientY - previous.y) <= DOUBLE_TAP_DISTANCE_PX
+    );
+  };
+
   function drawWaveform() {
     const canvas = canvasRef;
     if (!canvas) return;
 
-    const cssW = Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS));
+    const cssW = clipWidthPx();
     const cssH = Math.max(1, Math.floor(LANE_HEIGHT - 1));
-    if (cssW === 0 || cssH === 0) return;
 
     const dpr = window.devicePixelRatio || 1;
     const pxW = Math.floor(cssW * dpr);
@@ -187,15 +209,38 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       return;
     }
 
-    const { padPx, drawCols } = getAudioWaveformLayout(props.clip, cssW);
-    const peaks = waveformPeaks();
+    const layout = waveform.layout();
+    const { padPx, drawCols, audioStartPx, audioEndPx } = layout;
+    const peaks = waveform.peaks();
+    if (drawCols <= 0) {
+      ctx.fillStyle = "rgba(15,23,42,0.45)";
+      ctx.fillRect(0, 0, cssW, cssH);
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.beginPath();
+      ctx.moveTo(0, Math.floor(cssH / 2) + 0.5);
+      ctx.lineTo(cssW, Math.floor(cssH / 2) + 0.5);
+      ctx.stroke();
+      return;
+    }
 
-    if (!peaks || drawCols <= 0) {
+    const silentFill = props.isSelected
+      ? "rgba(15,23,42,0.42)"
+      : "rgba(15,23,42,0.34)";
+    if (audioStartPx > 0) {
+      ctx.fillStyle = silentFill;
+      ctx.fillRect(0, 0, Math.min(cssW, audioStartPx), cssH);
+    }
+    if (audioEndPx < cssW) {
+      ctx.fillStyle = silentFill;
+      ctx.fillRect(Math.max(0, audioEndPx), 0, cssW - Math.max(0, audioEndPx), cssH);
+    }
+
+    if (!peaks) {
       ctx.strokeStyle = "rgba(255,255,255,0.10)";
-      for (let x = 0; x < cssW; x += 6) {
+      for (let x = audioStartPx; x < audioEndPx; x += 6) {
         ctx.beginPath();
         ctx.moveTo(x, cssH);
-        ctx.lineTo(x + 6, 0);
+        ctx.lineTo(Math.min(audioEndPx, x + 6), 0);
         ctx.stroke();
       }
       return;
@@ -223,48 +268,6 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
   }
 
   createEffect(() => {
-    const midi: any = (props.clip as any).midi;
-    const buffer = props.clip.buffer ?? null;
-    const assetKey = props.clip.waveformAssetKey ?? props.clip.sourceAssetKey;
-    const sampleUrl = resolveClipSampleUrl(props.clip);
-    const cssW = Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS));
-    const { sourceDurationSec, drawCols, sourceStartSec, sourceEndSec } =
-      getAudioWaveformLayout(props.clip, cssW);
-
-    if (midi) {
-      setWaveformPeaks(null);
-      return;
-    }
-    if (
-      drawCols <= 0 ||
-      sourceDurationSec <= 0 ||
-      !assetKey ||
-      (!buffer && !sampleUrl)
-    ) {
-      setWaveformPeaks(null);
-      return;
-    }
-
-    const requestId = ++waveformRequestId;
-    void getWaveformSlice({
-      assetKey,
-      sampleUrl,
-      buffer,
-      sourceStartSec,
-      sourceEndSec,
-      bins: drawCols,
-    })
-      .then((next) => {
-        if (requestId !== waveformRequestId) return;
-        setWaveformPeaks(next);
-      })
-      .catch(() => {
-        if (requestId !== waveformRequestId) return;
-        setWaveformPeaks(null);
-      });
-  });
-
-  createEffect(() => {
     void props.clip.duration;
     void props.clip.buffer;
     void props.clip.sampleUrl;
@@ -274,6 +277,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void props.clip.sourceDurationSec;
     void props.clip.sourceSampleRate;
     void props.clip.sourceChannelCount;
+    void props.clip.audioWarp;
     void props.isSelected;
     const midi: any = (props.clip as any).midi;
     const midiSignature = Array.isArray(midi?.notes)
@@ -286,18 +290,10 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       : "";
     void midiSignature;
     void props.bpm;
-    void waveformPeaks();
+    void waveform.peaks();
+    void props.viewportRedrawVersion;
     drawWaveform();
   });
-
-  onCleanup(() => {
-    waveformRequestId += 1;
-  });
-
-  const clipWidthPx = () =>
-    Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS));
-  const handleWidthPx = () =>
-    clipWidthPx() < 18 ? 2 : clipWidthPx() < 28 ? 3 : 6;
 
   return (
     <div
@@ -316,14 +312,35 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         height: `${LANE_HEIGHT - 1}px`,
       }}
       onPointerDown={(e) => {
-        if (e.detail >= 2) {
+        if (e.detail >= 2 || isDoubleTap(e)) {
           e.stopPropagation();
-          props.onDblClick?.(props.trackId, props.clip.id, e);
+          e.preventDefault();
+          selectedTapStart = undefined;
+          openFromDoubleTap();
           return;
         }
+        selectedTapStart = props.isSelected
+          ? { x: e.clientX, y: e.clientY, at: performance.now() }
+          : undefined;
         props.onPointerDown(props.trackId, props.clip.id, e);
       }}
-      onPointerUp={(e) => props.onPointerUp(props.trackId, props.clip.id, e)}
+      onDblClick={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        openFromDoubleTap();
+      }}
+      onPointerUp={(e) => {
+        props.onPointerUp(props.trackId, props.clip.id, e);
+        const start = selectedTapStart;
+        selectedTapStart = undefined;
+        if (!start) return;
+        if (performance.now() - start.at > SELECTED_TAP_MS) return;
+        if (
+          Math.abs(e.clientX - start.x) > DOUBLE_TAP_DISTANCE_PX ||
+          Math.abs(e.clientY - start.y) > DOUBLE_TAP_DISTANCE_PX
+        ) return;
+        openFromDoubleTap();
+      }}
       title={`${props.clip.name}`}
     >
       <div

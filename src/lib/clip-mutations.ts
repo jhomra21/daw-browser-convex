@@ -1,5 +1,6 @@
 import { normalizeClipTimingPatch } from '@daw-browser/shared'
 import { toCloudClipId } from '~/lib/cloud-id-args'
+import type { AudioWarp } from '@daw-browser/timeline-core/types'
 
 type ConvexClientType = typeof import('~/lib/convex').convexClient
 
@@ -12,6 +13,10 @@ type PersistClipTimingInput = {
   leftPadSec?: number
   bufferOffsetSec?: number
   midiOffsetBeats?: number
+}
+
+type PersistClipTimingAndAudioWarpInput = PersistClipTimingInput & {
+  audioWarp?: AudioWarp
 }
 
 export async function persistClipTiming(
@@ -27,6 +32,36 @@ export async function persistClipTiming(
     leftPadSec: timing.leftPadSec,
     bufferOffsetSec: timing.bufferOffsetSec,
     midiOffsetBeats: timing.midiOffsetBeats,
+  })
+  return result?.status === 'applied'
+}
+
+export async function persistClipAudioWarp(
+  convexClient: ConvexClientType,
+  convexApi: ConvexApiType,
+  input: { clipId: string; audioWarp: AudioWarp },
+) {
+  const result = await convexClient.mutation(convexApi.clips.setAudioWarp, {
+    clipId: toCloudClipId(input.clipId),
+    audioWarp: input.audioWarp,
+  })
+  return result?.status === 'applied'
+}
+
+export async function persistClipTimingAndAudioWarp(
+  convexClient: ConvexClientType,
+  convexApi: ConvexApiType,
+  input: PersistClipTimingAndAudioWarpInput,
+) {
+  const timing = normalizeClipTimingPatch(input)
+  const result = await convexClient.mutation(convexApi.clips.setTimingAndAudioWarp, {
+    clipId: toCloudClipId(input.clipId),
+    startSec: timing.startSec,
+    duration: timing.duration,
+    leftPadSec: timing.leftPadSec,
+    bufferOffsetSec: timing.bufferOffsetSec,
+    midiOffsetBeats: timing.midiOffsetBeats,
+    audioWarp: input.audioWarp,
   })
   return result?.status === 'applied'
 }

@@ -43,6 +43,7 @@ type ImportClipContext = {
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   pushTrackClipCreateHistory: (track: Track, clipId: string, clip: ClipCreateSnapshot) => void
   grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
+  onClipCreated?: (clip: Clip<AudioBuffer>) => void
 }
 
 type ImportCloudContext = {
@@ -240,6 +241,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
           skipHistory: Boolean(input.autoCreatedTrack),
           audioBufferCache: context.clips.buffers.writer,
           canProject: () => context.project.isActiveProjectTrack(projectId, input.track.id),
+          onClipCreated: context.clips.onClipCreated,
         })
         if (input.autoCreatedTrack && context.project.isActiveProjectTrack(projectId, input.track.id)) {
           context.clips.pushTrackClipCreateHistory(input.autoCreatedTrack, created.clipId, created.clip)
@@ -285,6 +287,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         grantScope: { projectId, userId },
         pushHistory: !input.autoCreatedTrack,
         canProject: () => context.project.isActiveProjectTrack(projectId, input.track.id),
+        onClipCreated: context.clips.onClipCreated,
       })
       if (input.autoCreatedTrack && context.project.isActiveProjectTrack(projectId, input.track.id)) {
         context.clips.pushTrackClipCreateHistory(input.autoCreatedTrack, created.clipId, created.clip)

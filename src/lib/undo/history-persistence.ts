@@ -1,7 +1,7 @@
 import { buildLocalClip } from "~/lib/clip-create";
-import { buildClipCreatePayload, type ClipCreateSnapshot } from "@daw-browser/shared";
+import { buildClipCreatePayload, normalizeAudioWarp, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
-import { persistClipTiming } from "~/lib/clip-mutations";
+import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
 import { setLocalEffect } from "~/lib/local-effects";
 import { isLocalId } from "@daw-browser/shared";
@@ -23,7 +23,13 @@ type ClipTimingPatch = {
   leftPadSec?: number;
   bufferOffsetSec?: number;
   midiOffsetBeats?: number;
+  audioWarp?: Track["clips"][number]["audioWarp"];
+  gain?: number;
 };
+
+const isAppliedResult = (value: unknown) => (
+  typeof value === "object" && value !== null && "status" in value && value.status === "applied"
+);
 
 export const isLocalHistoryProject = (deps: Pick<Deps, "projectId">) => (
   isLocalId("project", deps.projectId)
@@ -44,6 +50,8 @@ const toHistoryCreateClipInput = (trackId: Track["id"], clip: Track["clips"][num
   sourceChannelCount: clip.sourceChannelCount,
   leftPadSec: clip.leftPadSec,
   bufferOffsetSec: clip.bufferOffsetSec,
+  audioWarp: normalizeAudioWarp(clip.audioWarp),
+  gain: clip.gain,
   sampleUrl: clip.sampleUrl,
   midi: clip.midi,
   midiOffsetBeats: clip.midiOffsetBeats,
@@ -266,17 +274,62 @@ export const persistHistoryClipTimingOrThrow = async (
       leftPadSec: timing.leftPadSec,
       bufferOffsetSec: timing.bufferOffsetSec,
       midiOffsetBeats: timing.midiOffsetBeats,
+      audioWarp: timing.audioWarp,
+      gain: timing.gain,
     });
     if (!applied) throw new Error(message);
     return;
   }
-  const applied = await persistClipTiming(deps.convexClient, deps.convexApi, {
+  const audioWarp = normalizeAudioWarp(timing.audioWarp);
+  const applied = audioWarp
+    ? await persistClipTimingAndAudioWarp(deps.convexClient, deps.convexApi, {
+      clipId,
+      startSec: timing.startSec,
+      duration: timing.duration,
+      leftPadSec: timing.leftPadSec ?? 0,
+      bufferOffsetSec: timing.bufferOffsetSec ?? 0,
+      midiOffsetBeats: timing.midiOffsetBeats ?? 0,
+      audioWarp,
+    })
+    : await persistClipTiming(deps.convexClient, deps.convexApi, {
+      clipId,
+      startSec: timing.startSec,
+      duration: timing.duration,
+      leftPadSec: timing.leftPadSec ?? 0,
+      bufferOffsetSec: timing.bufferOffsetSec ?? 0,
+      midiOffsetBeats: timing.midiOffsetBeats ?? 0,
+    });
+  if (!applied) throw new Error(message);
+  if (timing.gain !== undefined) {
+    const result = await publishDurableSharedTimelineOperation({
+      projectId: deps.projectId,
+      userId: deps.userId,
+      operation: { kind: "clips.setGain", payload: { clipId, gain: timing.gain } },
+      queuedResult: { status: "applied" },
+    });
+    if (!isAppliedResult(result)) throw new Error(message);
+  }
+};
+
+export const persistHistoryClipAudioWarpOrThrow = async (
+  deps: Deps,
+  clipId: string,
+  audioWarp: Track["clips"][number]["audioWarp"],
+  message: string,
+) => {
+  const normalizedAudioWarp = normalizeAudioWarp(audioWarp);
+  if (!normalizedAudioWarp) throw new Error(message);
+  if (isLocalHistoryProject(deps)) {
+    const applied = await createLocalTimelineRepository(deps.projectId).updateClip({
+      clipId,
+      audioWarp: normalizedAudioWarp,
+    });
+    if (!applied) throw new Error(message);
+    return;
+  }
+  const applied = await persistClipAudioWarp(deps.convexClient, deps.convexApi, {
     clipId,
-    startSec: timing.startSec,
-    duration: timing.duration,
-    leftPadSec: timing.leftPadSec ?? 0,
-    bufferOffsetSec: timing.bufferOffsetSec ?? 0,
-    midiOffsetBeats: timing.midiOffsetBeats ?? 0,
+    audioWarp: normalizedAudioWarp,
   });
   if (!applied) throw new Error(message);
 };

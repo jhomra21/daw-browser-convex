@@ -1,5 +1,6 @@
 import { applyArpeggiatorToNotes } from './effects/dsp'
-import type { ArpParams } from '@daw-browser/shared'
+import { normalizeClipGain, type ArpParams } from '@daw-browser/shared'
+import type { AudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 import type { Clip } from '@daw-browser/timeline-core/types'
 
 type MidiNote = {
@@ -14,12 +15,6 @@ type ScheduledMidiEvent = {
   endSec: number
   pitch: number
   velocity?: number
-}
-
-type PlayableAudioWindow = {
-  startSec: number
-  offsetSec: number
-  durationSec: number
 }
 
 const arpeggiatedNotesCache = new WeakMap<MidiNote[], Map<string, MidiNote[]>>()
@@ -102,37 +97,52 @@ export function getScheduledMidiEvents(input: {
   return events
 }
 
-export function getPlayableAudioWindow(input: {
-  clip: Pick<Clip, 'startSec' | 'duration' | 'leftPadSec' | 'bufferOffsetSec'>
-  bufferDurationSec: number
-  rangeStartSec: number
-  rangeEndSec?: number
-}): PlayableAudioWindow | null {
-  const leftPad = Math.max(0, input.clip.leftPadSec ?? 0)
-  const bufferOffsetRaw = Math.max(0, input.clip.bufferOffsetSec ?? 0)
-  const windowStart = input.clip.startSec
-  const windowEndRaw = input.clip.startSec + input.clip.duration
-  const windowEnd = typeof input.rangeEndSec === 'number' ? Math.min(windowEndRaw, input.rangeEndSec) : windowEndRaw
-  const audioStart = windowStart + leftPad
-  const bufferOffset = Math.min(input.bufferDurationSec, bufferOffsetRaw)
-  const bufferDurRemain = Math.max(0, input.bufferDurationSec - bufferOffset)
-  const audioEnd = Math.min(windowEnd, audioStart + bufferDurRemain)
+export function getAudioBufferPlaybackDurationSec(input: {
+  map: Pick<AudioClipTimeMap, 'sourceDurationSec'>
+  stretchedDurationSec?: number | null
+}) {
+  return input.stretchedDurationSec ?? input.map.sourceDurationSec
+}
 
-  if (input.rangeStartSec >= audioEnd) return null
+export function connectSourceWithClipGain(
+  context: BaseAudioContext,
+  source: AudioNode,
+  destination: AudioNode,
+  gain: number | undefined,
+) {
+  if (gain === undefined || gain === 1) {
+    source.connect(destination)
+    return
+  }
+  const clipGain = context.createGain()
+  clipGain.gain.value = normalizeClipGain(gain)
+  source.connect(clipGain)
+  clipGain.connect(destination)
+}
 
-  const startSec = Math.max(input.rangeStartSec, audioStart)
-  const offsetNoBase = Math.max(0, startSec - audioStart)
-  if (offsetNoBase >= bufferDurRemain) return null
-
-  const durationSec = Math.min(
-    Math.max(0, bufferDurRemain - offsetNoBase),
-    Math.max(0, audioEnd - startSec),
-  )
-  if (durationSec <= 0) return null
-
+export function getAudioBufferPlaybackParams<TBuffer>(input: {
+  sourceBuffer: TBuffer
+  map: Pick<AudioClipTimeMap, 'mode' | 'playbackRate' | 'sourceStartSec' | 'sourceDurationSec' | 'timelineStartSec' | 'timelineDurationSec'>
+  stretched?: {
+    buffer: TBuffer
+    timelineStartSec: number
+    sourceStartSec: number
+    bufferDurationSec: number
+  } | null
+}) {
+  const stretched = input.stretched ?? null
+  const stretchedOffsetSec = stretched ? Math.max(0, input.map.timelineStartSec - stretched.timelineStartSec) : 0
+  const stretchedDurationSec = stretched
+    ? Math.min(input.map.timelineDurationSec, Math.max(0, stretched.bufferDurationSec - stretchedOffsetSec))
+    : null
+  const durationSec = getAudioBufferPlaybackDurationSec({
+    map: input.map,
+    stretchedDurationSec,
+  })
   return {
-    startSec,
-    offsetSec: bufferOffset + offsetNoBase,
+    buffer: stretched?.buffer ?? input.sourceBuffer,
+    offsetSec: stretched ? stretched.sourceStartSec + stretchedOffsetSec : input.map.sourceStartSec,
     durationSec,
+    playbackRate: input.map.mode !== 'raw' && !stretched ? input.map.playbackRate : 1,
   }
 }

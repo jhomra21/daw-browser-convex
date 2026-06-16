@@ -1,5 +1,6 @@
 import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime } from './audio-runtime'
-import { createClipScheduler, type ScheduleOptions } from './clip-scheduler'
+import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
+import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
 import type { ArpParams, EqParamsLite, ReverbParamsLite, SynthParamsInput } from '@daw-browser/shared'
 import { createImpulseResponseBuffer, getImpulseResponseBufferInfo } from './effects/dsp'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
@@ -18,8 +19,10 @@ const MASTER_FADE_DOWN_SEC = 0.002
 const MASTER_FADE_HOLD_SEC = 0.001
 const MASTER_FADE_UP_SEC = 0.006
 const MASTER_STOP_DELAY_SEC = 0.004
+export const LIVE_SCHEDULE_HORIZON_SEC = 30
 
-export type { SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch }
+export { canFallbackToRepitchStretch, isStretchQualityWarning }
+export type { AudioStretchRenderState, DeferredStretchWindow, SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch }
 
 export class AudioEngine {
   private runtime: AudioRuntime | null = null
@@ -51,12 +54,16 @@ export class AudioEngine {
   })
   private scheduler = createClipScheduler({
     getAudioContext: () => this.audioCtx,
+    getBpm: () => this.clock.getBpm(),
     timelineToCtxTime: (timelineSec) => this.timelineToCtxTime(timelineSec),
     updateTrackGains: (tracks) => this.updateTrackGains(tracks),
     ensureTrackInput: (trackId) => this.mixerRuntime.ensureTrackInput(trackId),
     stopClipSources: () => this.stopClipSources(),
     stopSourcesForClip: (clipId) => this.stopSourcesForClip(clipId),
-    scheduleMidiClip: (track, clip, playheadSec, nowCtx, endLimitSec) => this.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec),
+    scheduleMidiClip: (track, clip, playheadSec, nowCtx, startLimitSec, endLimitSec) => this.scheduleMidiClip(track, clip, playheadSec, nowCtx, startLimitSec, endLimitSec),
+    ensureStretchedClip: (clip) => this.stretchCache.ensure(clip, this.clock.getBpm()),
+    getStretchedClip: (clip) => this.stretchCache.getReady(clip, this.clock.getBpm()),
+    stretchRenderAheadSec: LIVE_SCHEDULE_HORIZON_SEC,
     sources: this.sources,
   })
   private masterFx = createMasterFxRuntime()
@@ -65,6 +72,22 @@ export class AudioEngine {
   private clock = createTransportClock()
   private metronome = createMetronomeRuntime(this.clock)
   private metering = createMeteringRuntime()
+  private stretchCache = createAudioStretchCache({
+    createBuffer: (channels, frames, sampleRate) => new AudioBuffer({ numberOfChannels: channels, length: frames, sampleRate }),
+    persist: true,
+  })
+
+  ensureStretchRender(clip: RuntimeClip) {
+    this.stretchCache.ensure(clip, this.clock.getBpm())
+  }
+
+  getStretchRenderState(clip: RuntimeClip): AudioStretchRenderState {
+    return this.stretchCache.getState(clip, this.clock.getBpm())
+  }
+
+  subscribeStretchRenderState(listener: () => void) {
+    return this.stretchCache.subscribe(listener)
+  }
 
   subscribeTrackStereoLevels(listener: TrackStereoLevelsListener) {
     return this.metering.subscribeTrackStereoLevels(listener)
@@ -248,12 +271,12 @@ export class AudioEngine {
     this.metronome.reset()
   }
 
-  private scheduleMidiClip(track: RuntimeTrack, clip: RuntimeClip, playheadSec: number, nowCtx: number, endLimitSec?: number): boolean {
+  private scheduleMidiClip(track: RuntimeTrack, clip: RuntimeClip, playheadSec: number, nowCtx: number, startLimitSec?: number, endLimitSec?: number): boolean {
     if (!this.audioCtx) return false
-    return this.synthRuntime.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec)
+    return this.synthRuntime.scheduleMidiClip(track, clip, startLimitSec ?? playheadSec, nowCtx, endLimitSec)
   }
-  scheduleAllClipsFromPlayhead(tracks: RuntimeTrack[], playheadSec: number, opts?: ScheduleOptions) {
-    this.scheduler.scheduleAllClipsFromPlayhead(tracks, playheadSec, opts)
+  scheduleAllClipsFromPlayhead(tracks: RuntimeTrack[], playheadSec: number, opts?: ScheduleOptions): ScheduleResult {
+    return this.scheduler.scheduleAllClipsFromPlayhead(tracks, playheadSec, opts)
   }
 
   private stopSourcesForClip(clipId: string) {
@@ -263,7 +286,7 @@ export class AudioEngine {
   }
 
   rescheduleClipsAtPlayhead(tracks: RuntimeTrack[], playheadSec: number, clipIds: string[], opts?: ScheduleOptions) {
-    this.scheduler.rescheduleClipsAtPlayhead(tracks, playheadSec, clipIds, opts)
+    return this.scheduler.rescheduleClipsAtPlayhead(tracks, playheadSec, clipIds, opts)
   }
 
   async resume() {
@@ -274,6 +297,11 @@ export class AudioEngine {
 
   get currentTime() {
     return this.audioCtx?.currentTime ?? 0
+  }
+
+  get currentTimelineSec() {
+    if (!this.audioCtx || !this.clock.isRunning()) return 0
+    return this.clock.ctxTimeToTimeline(this.audioCtx.currentTime)
   }
 
   // Sum of output and base latency (seconds) if available; used for A/V visual alignment

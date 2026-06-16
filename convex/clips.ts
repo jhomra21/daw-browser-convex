@@ -8,9 +8,10 @@ import { canWriteProject, getProjectRole, requireAuthenticatedUserId, requirePro
 import { upsertSampleRow } from './sampleRows'
 import { isClipKindCompatibleWithTrack } from './trackRouting'
 import { getTrackWriteAccess } from './trackWrites'
-import { normalizeClipStartSec, normalizeClipTimingPatch } from '@daw-browser/shared'
+import { normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch } from '@daw-browser/shared'
 import { buildClipAudioSourceFields, normalizeAudioSourceMetadataPatch, sanitizePositiveNumber, type AudioSourceKind } from '@daw-browser/shared'
 import { runSharedOperationOnce } from './sharedOperationResults'
+import { audioWarpValidator } from './audioWarpValidator'
 
 type ClipKind = 'audio' | 'midi'
 
@@ -51,6 +52,14 @@ type ClipCreateInput = {
   channelCount?: number
   leftPadSec?: number
   bufferOffsetSec?: number
+  audioWarp?: {
+    enabled: boolean
+    sourceBpm?: number
+    sourceBeatOffset?: number
+    markers?: Array<{ id: string; sourceBeat: number; timelineBeat: number }>
+    mode: 'repitch' | 'stretch'
+  }
+  gain?: number
   midiOffsetBeats?: number
   midi?: {
     wave: string
@@ -83,6 +92,8 @@ type ClipCreatePatch = {
   leftPadSec?: number
   midi?: ClipCreateInput['midi']
   bufferOffsetSec?: number
+  audioWarp?: ClipCreateInput['audioWarp']
+  gain?: number
   midiOffsetBeats?: number
 }
 
@@ -144,10 +155,30 @@ const buildClipCreatePatch = (
     leftPadSec: item.leftPadSec,
     midi: item.midi,
     bufferOffsetSec: item.bufferOffsetSec,
+    audioWarp: item.audioWarp,
+    gain: item.gain,
     midiOffsetBeats: item.midiOffsetBeats,
   }
   Object.assign(patch, buildClipAudioSourceFields(metadata))
 
+  return patch
+}
+
+const buildClipTimingPatch = (input: {
+  startSec: number
+  duration: number
+  leftPadSec?: number
+  bufferOffsetSec?: number
+  midiOffsetBeats?: number
+}) => {
+  const normalizedTiming = normalizeClipTimingPatch(input)
+  const patch: Record<string, unknown> = {
+    startSec: normalizedTiming.startSec,
+    duration: normalizedTiming.duration,
+  }
+  if (normalizedTiming.leftPadSec !== undefined) patch.leftPadSec = normalizedTiming.leftPadSec
+  if (normalizedTiming.bufferOffsetSec !== undefined) patch.bufferOffsetSec = normalizedTiming.bufferOffsetSec
+  if (normalizedTiming.midiOffsetBeats !== undefined) patch.midiOffsetBeats = normalizedTiming.midiOffsetBeats
   return patch
 }
 
@@ -255,6 +286,8 @@ export const create = mutation({
     channelCount: v.optional(v.number()),
     leftPadSec: v.optional(v.number()),
     bufferOffsetSec: v.optional(v.number()),
+    audioWarp: v.optional(audioWarpValidator),
+    gain: v.optional(v.number()),
     midiOffsetBeats: v.optional(v.number()),
     midi: v.optional(v.object({
       wave: v.string(),
@@ -296,6 +329,8 @@ export const serverCreate = mutation({
     channelCount: v.optional(v.number()),
     leftPadSec: v.optional(v.number()),
     bufferOffsetSec: v.optional(v.number()),
+    audioWarp: v.optional(audioWarpValidator),
+    gain: v.optional(v.number()),
     midiOffsetBeats: v.optional(v.number()),
     midi: v.optional(v.object({
       wave: v.string(),
@@ -477,21 +512,91 @@ export const setTiming = mutation({
     if (!access) return { status: 'rejected' as const }
     if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
 
-    const normalizedTiming = normalizeClipTimingPatch({
+    await ctx.db.patch(clipId, buildClipTimingPatch({
+      startSec,
+      duration,
+      leftPadSec,
+      bufferOffsetSec,
+      midiOffsetBeats,
+    }))
+    return { status: 'applied' as const }
+  },
+})
+
+export const setAudioWarp = mutation({
+  args: {
+    clipId: v.id('clips'),
+    audioWarp: audioWarpValidator,
+  },
+  handler: async (ctx, { clipId, audioWarp }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const access = await getClipWriteAccess(ctx, clipId, userId)
+    if (!access) return { status: 'rejected' as const }
+    if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
+    await ctx.db.patch(clipId, { audioWarp })
+    return { status: 'applied' as const }
+  },
+})
+
+export const setTimingAndAudioWarp = mutation({
+  args: {
+    clipId: v.id('clips'),
+    startSec: v.number(),
+    duration: v.number(),
+    leftPadSec: v.optional(v.number()),
+    bufferOffsetSec: v.optional(v.number()),
+    midiOffsetBeats: v.optional(v.number()),
+    audioWarp: v.optional(audioWarpValidator),
+  },
+  handler: async (ctx, { clipId, startSec, duration, leftPadSec, bufferOffsetSec, midiOffsetBeats, audioWarp }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const access = await getClipWriteAccess(ctx, clipId, userId)
+    if (!access) return { status: 'rejected' as const }
+    if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
+
+    const patch = buildClipTimingPatch({
       startSec,
       duration,
       leftPadSec,
       bufferOffsetSec,
       midiOffsetBeats,
     })
-    const patch: Record<string, unknown> = {
-      startSec: normalizedTiming.startSec,
-      duration: normalizedTiming.duration,
-    }
-    if (normalizedTiming.leftPadSec !== undefined) patch.leftPadSec = normalizedTiming.leftPadSec
-    if (normalizedTiming.bufferOffsetSec !== undefined) patch.bufferOffsetSec = normalizedTiming.bufferOffsetSec
-    if (normalizedTiming.midiOffsetBeats !== undefined) patch.midiOffsetBeats = normalizedTiming.midiOffsetBeats
+    if (audioWarp !== undefined) patch.audioWarp = audioWarp
     await ctx.db.patch(clipId, patch)
+    return { status: 'applied' as const }
+  },
+})
+
+export const serverSetAudioWarp = mutation({
+  args: {
+    clipId: v.string(),
+    audioWarp: audioWarpValidator,
+  },
+  handler: async (ctx, { clipId, audioWarp }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const normalizedClipId = ctx.db.normalizeId('clips', clipId)
+    if (!normalizedClipId) return { status: 'rejected' as const }
+    const access = await getClipWriteAccess(ctx, normalizedClipId, userId)
+    if (!access) return { status: 'rejected' as const }
+    if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
+    await ctx.db.patch(normalizedClipId, { audioWarp })
+    return { status: 'applied' as const }
+  },
+})
+
+export const serverSetGain = mutation({
+  args: {
+    clipId: v.string(),
+    gain: v.number(),
+  },
+  handler: async (ctx, { clipId, gain }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const normalizedClipId = ctx.db.normalizeId('clips', clipId)
+    if (!normalizedClipId) return { status: 'rejected' as const }
+    const access = await getClipWriteAccess(ctx, normalizedClipId, userId)
+    if (!access) return { status: 'rejected' as const }
+    if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
+    await ctx.db.patch(normalizedClipId, { gain: normalizeClipGain(gain) })
     return { status: 'applied' as const }
   },
 })
@@ -548,6 +653,8 @@ export const createMany = mutation({
         })),
       })),
       bufferOffsetSec: v.optional(v.number()),
+      audioWarp: v.optional(audioWarpValidator),
+      gain: v.optional(v.number()),
       midiOffsetBeats: v.optional(v.number()),
       clipKind: v.optional(v.string()),
     })),
@@ -599,6 +706,8 @@ export const serverCreateMany = mutation({
         })),
       })),
       bufferOffsetSec: v.optional(v.number()),
+      audioWarp: v.optional(audioWarpValidator),
+      gain: v.optional(v.number()),
       midiOffsetBeats: v.optional(v.number()),
       clipKind: v.optional(v.string()),
     })),

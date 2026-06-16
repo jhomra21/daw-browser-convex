@@ -1,4 +1,4 @@
-import { getAudioClipTimeMap, type AudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
+import { getAudioClipTimeMap, getMarkerWarpTimelineSegments, type AudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 import { stretchAudioWsola } from './audio-stretching'
 import type { Clip } from '@daw-browser/timeline-core/types'
 import type { StretchedAudioRender } from './audio-stretch-cache'
@@ -40,18 +40,17 @@ const renderMappedStretch = (
   projectBpm: number,
   createBuffer: CreateBuffer,
 ) => {
-  const projectSecondsPerBeat = 60 / Math.max(1, projectBpm)
-  const audioStartSec = clip.startSec + Math.max(0, clip.leftPadSec ?? 0)
-  const markerBoundaries = (clip.audioWarp?.markers ?? [])
-    .map((marker) => audioStartSec + marker.timelineBeat * projectSecondsPerBeat)
-    .filter((timelineSec) => timelineSec > map.timelineStartSec + 1e-6 && timelineSec < map.timelineEndSec - 1e-6)
-  const boundaries = [map.timelineStartSec, ...markerBoundaries, map.timelineEndSec]
-  const stretchedSegments = boundaries.slice(0, -1).flatMap((timelineStartSec, index) => {
-    const timelineEndSec = boundaries[index + 1]
-    const sourceStartSec = Math.max(0, Math.min(sourceBuffer.duration, map.timelineToSourceSec(timelineStartSec)))
-    const sourceEndSec = Math.max(0, Math.min(sourceBuffer.duration, map.timelineToSourceSec(timelineEndSec)))
+  const markerSegments = getMarkerWarpTimelineSegments({
+    clip,
+    map,
+    projectBpm,
+    timelineEndSec: map.timelineEndSec,
+  })
+  const stretchedSegments = markerSegments.flatMap((segment) => {
+    const sourceStartSec = Math.max(0, Math.min(sourceBuffer.duration, segment.sourceStartSec))
+    const sourceEndSec = Math.max(0, Math.min(sourceBuffer.duration, segment.sourceEndSec))
     const sourceDurationSec = sourceEndSec - sourceStartSec
-    const targetFrameCount = Math.max(1, Math.round((timelineEndSec - timelineStartSec) * sourceBuffer.sampleRate))
+    const targetFrameCount = Math.max(1, Math.round((segment.timelineEndSec - segment.timelineStartSec) * sourceBuffer.sampleRate))
     if (sourceDurationSec <= 1 / sourceBuffer.sampleRate) return []
     const startFrame = Math.max(0, Math.min(sourceBuffer.length - 1, Math.floor(sourceStartSec * sourceBuffer.sampleRate)))
     const endFrame = Math.max(startFrame + 1, Math.min(sourceBuffer.length, Math.ceil(sourceEndSec * sourceBuffer.sampleRate)))

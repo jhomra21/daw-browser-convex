@@ -10,6 +10,7 @@
     "packages/audio-engine/src/audio-scheduling.test.ts",
     "packages/audio-engine/src/clip-scheduler.test.ts",
     "packages/audio-engine/src/audio-stretch-cache.test.ts",
+    "packages/audio-engine/src/audio-stretch-rendering.test.ts",
     "packages/audio-engine/src/audio-stretching.test.ts",
     "packages/waveforms/src/asset-store.test.ts",
     "packages/waveforms/src/source-identity.test.ts",

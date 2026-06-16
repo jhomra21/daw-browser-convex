@@ -24,6 +24,13 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
 
 const roundBpm = (value: number) => Math.round(value * 100) / 100
 
+export const getBpmAnalysisFrameCount = (sourceLength: number, sampleRate: number) => (
+  Math.min(
+    sourceLength,
+    Math.floor(MAX_ANALYSIS_SEC * ANALYSIS_SAMPLE_RATE) * Math.max(1, Math.floor(sampleRate / ANALYSIS_SAMPLE_RATE)),
+  )
+)
+
 const normalizeBpm = (bpm: number) => {
   let normalized = bpm
   while (normalized < MIN_BPM) normalized *= 2
@@ -34,7 +41,7 @@ const normalizeBpm = (bpm: number) => {
 const createEnergyEnvelope = (input: BpmDetectionInput) => {
   const sourceLength = input.channels[0]?.length ?? 0
   const frameSize = Math.max(1, Math.floor(input.sampleRate / ANALYSIS_SAMPLE_RATE))
-  const maxFrames = Math.min(Math.floor(sourceLength / frameSize), Math.floor(MAX_ANALYSIS_SEC * ANALYSIS_SAMPLE_RATE))
+  const maxFrames = Math.floor(getBpmAnalysisFrameCount(sourceLength, input.sampleRate) / frameSize)
   const envelope = new Float32Array(maxFrames)
   for (let frameIndex = 0; frameIndex < maxFrames; frameIndex++) {
     const start = frameIndex * frameSize

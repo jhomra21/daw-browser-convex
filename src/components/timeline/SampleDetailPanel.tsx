@@ -8,7 +8,6 @@ import TimelineBottomPanelShell, { type TimelineBottomPanelShellControls } from 
 
 type SampleDetailPanelProps = {
   clip: Clip<AudioBuffer>;
-  preferenceScopeId?: string;
   projectBpm: number;
   audioEngine: AudioEngine;
   bpmDetection: BpmDetectionService;

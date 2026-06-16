@@ -1,12 +1,12 @@
 import { createEffect, createMemo, createSignal, onCleanup, type Accessor, type Setter } from "solid-js";
 import type { AudioWarp, Clip } from "@daw-browser/timeline-core/types";
+import { normalizeClipGain } from "@daw-browser/shared";
 import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
 import { buildClipTimingHistoryEntry } from "~/lib/undo/builders";
 import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionState";
+import type { TimelineBottomPanelMode } from "~/hooks/useTimelineBottomPanelState";
 import type { TimelineTrackIndex } from "@daw-browser/timeline-core/track-index";
 import type { HistoryEntry } from "~/lib/undo/types";
-
-type BottomPanelMode = "effects" | "sample-detail";
 
 type AudioWarpController = {
   changeAudioWarp: (clip: Clip, audioWarp: AudioWarp) => Promise<boolean> | boolean | void;
@@ -15,8 +15,8 @@ type AudioWarpController = {
 type Options = {
   projectId: Accessor<string>;
   userId: Accessor<string>;
-  mode: Accessor<BottomPanelMode>;
-  setMode: Setter<BottomPanelMode>;
+  mode: Accessor<TimelineBottomPanelMode>;
+  setMode: Setter<TimelineBottomPanelMode>;
   setOpen: Setter<boolean>;
   trackLookup: Accessor<TimelineTrackIndex<AudioBuffer>>;
   selection: TimelineSelectionController;
@@ -74,7 +74,7 @@ export function useTimelineSampleDetailController(options: Options) {
   const changeGain = async (clip: Clip, gain: number) => {
     const project = options.projectId();
     if (!project || !options.canWriteClip(clip.id)) return false;
-    const normalizedGain = Math.min(2, Math.max(0, gain));
+    const normalizedGain = normalizeClipGain(gain);
     if (normalizedGain === (clip.gain ?? 1)) return true;
     const applied = await createTimelineClipWriteAdapter({
       projectId: project,

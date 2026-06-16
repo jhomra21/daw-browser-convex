@@ -1,8 +1,8 @@
 import { onCleanup, type Accessor } from 'solid-js'
 
-import { persistClipTiming } from '~/lib/clip-mutations'
+import { persistClipTiming, persistClipTimingAndAudioWarp } from '~/lib/clip-mutations'
 import { calculateAudioLeftResizeTiming } from '~/lib/audio-left-resize-timing'
-import { isLocalId } from '@daw-browser/shared'
+import { audioWarpEqual, isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { buildClipTimingHistoryEntry } from '~/lib/undo/builders'
 import { PPS, quantizeSecToGrid } from '~/lib/timeline-utils'
@@ -21,8 +21,8 @@ type ResizeState = {
 
 type ClipResizeOptions = {
   tracks: Accessor<RuntimeTrack[]>
-  setDraftClipTiming: (clipId: string, patch: { startSec?: number; duration?: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number } | null) => void
-  commitClipTiming: (clipId: string, patch: { startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number }) => void
+  setDraftClipTiming: (clipId: string, patch: { startSec?: number; duration?: number; leftPadSec?: number; bufferOffsetSec?: number; audioWarp?: RuntimeTrack['clips'][number]['audioWarp']; midiOffsetBeats?: number } | null) => void
+  commitClipTiming: (clipId: string, patch: { startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; audioWarp?: RuntimeTrack['clips'][number]['audioWarp']; midiOffsetBeats?: number }) => void
   canWriteClip: (clipId: string) => boolean
   selection: TimelineSelectionController
   convexClient: typeof import('~/lib/convex').convexClient
@@ -62,6 +62,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
   let resizeFixedLeft = 0
   let resizeFixedRight = 0
   let resizeOrigBufferOffset = 0
+  let resizeOrigAudioWarp: RuntimeTrack['clips'][number]['audioWarp']
   let resizeOrigMidiOffsetBeats = 0
   let resizeBaselineAudioClip: RuntimeTrack['clips'][number] | null = null
   let activeResizePointerId: number | null = null
@@ -99,6 +100,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     resizeFixedLeft = clip.startSec
     resizeFixedRight = clip.startSec + clip.duration
     resizeOrigBufferOffset = clip.bufferOffsetSec ?? 0
+    resizeOrigAudioWarp = clip.audioWarp
     resizeOrigMidiOffsetBeats = clip.midiOffsetBeats ?? 0
     resizeBaselineAudioClip = { ...clip }
 
@@ -199,6 +201,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           duration: newDuration,
           leftPadSec: timing.leftPadSec,
           bufferOffsetSec: timing.bufferOffsetSec,
+          audioWarp: timing.audioWarp,
         })
       }
     } else {
@@ -267,6 +270,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         duration: clip.duration,
         leftPadSec: clip.leftPadSec,
         bufferOffsetSec: clip.bufferOffsetSec,
+        audioWarp: clip.audioWarp,
         midiOffsetBeats: clip.midiOffsetBeats,
       })
       const rid = options.projectId()
@@ -275,6 +279,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         duration: resizeOrigDuration,
         leftPadSec: resizeOrigPad,
         bufferOffsetSec: resizeOrigBufferOffset,
+        audioWarp: resizeOrigAudioWarp,
         midiOffsetBeats: resizeOrigMidiOffsetBeats,
       }
       const to = {
@@ -282,6 +287,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         duration: clip.duration,
         leftPadSec: clip.leftPadSec,
         bufferOffsetSec: clip.bufferOffsetSec,
+        audioWarp: clip.audioWarp,
         midiOffsetBeats: clip.midiOffsetBeats,
       }
       const timingEpsilon = 1e-6
@@ -290,6 +296,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         Math.abs((target.duration ?? 0) - (current.duration ?? 0)) < timingEpsilon &&
         Math.abs((target.leftPadSec ?? 0) - (current.leftPadSec ?? 0)) < timingEpsilon &&
         Math.abs((target.bufferOffsetSec ?? 0) - (current.bufferOffsetSec ?? 0)) < timingEpsilon &&
+        audioWarpEqual(target.audioWarp, current.audioWarp) &&
         Math.abs((target.midiOffsetBeats ?? 0) - (current.midiOffsetBeats ?? 0)) < timingEpsilon
       )
       const sameTiming = timingMatches(from, to)
@@ -310,6 +317,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
             duration: currentClip.duration,
             leftPadSec: currentClip.leftPadSec,
             bufferOffsetSec: currentClip.bufferOffsetSec,
+            audioWarp: currentClip.audioWarp,
             midiOffsetBeats: currentClip.midiOffsetBeats,
           })
         ) {
@@ -320,6 +328,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           duration: from.duration,
           leftPadSec: from.leftPadSec,
           bufferOffsetSec: from.bufferOffsetSec,
+          audioWarp: from.audioWarp,
           midiOffsetBeats: from.midiOffsetBeats,
         })
         queueMicrotask(() => options.rescheduleChangedClips([clip.id]))
@@ -334,18 +343,20 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           duration: clip.duration,
           leftPadSec: clip.leftPadSec ?? 0,
           bufferOffsetSec: clip.bufferOffsetSec ?? 0,
+          audioWarp: clip.audioWarp,
           midiOffsetBeats: clip.midiOffsetBeats ?? 0,
         }).then(pushHistory).catch(rollbackTiming)
       } else {
         const uid = userId()
         if (uid) {
-          void persistClipTiming(convexClient, convexApi, {
+          void persistClipTimingAndAudioWarp(convexClient, convexApi, {
             clipId: clip.id,
             startSec: clip.startSec,
             duration: clip.duration,
             leftPadSec: clip.leftPadSec ?? 0,
             bufferOffsetSec: clip.bufferOffsetSec ?? 0,
             midiOffsetBeats: clip.midiOffsetBeats ?? 0,
+            audioWarp: clip.audioWarp,
           }).then((applied) => {
             if (applied) {
               pushHistory()

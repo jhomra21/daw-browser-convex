@@ -1,4 +1,4 @@
-import { detectLoopBpm, type BpmDetectionResult } from '@daw-browser/audio-engine/bpm-detection'
+import { detectLoopBpm, getBpmAnalysisFrameCount, type BpmDetectionResult } from '@daw-browser/audio-engine/bpm-detection'
 import { normalizeAudioWarp } from '@daw-browser/shared'
 import type { AudioWarp, Clip } from '@daw-browser/timeline-core/types'
 
@@ -20,9 +20,10 @@ type BpmSuggestionListener = () => void
 const HIGH_CONFIDENCE = 0.62
 
 const readChannels = (buffer: AudioBuffer) => {
+  const analysisFrames = getBpmAnalysisFrameCount(buffer.length, buffer.sampleRate)
   const channels: Float32Array[] = []
   for (let channelIndex = 0; channelIndex < buffer.numberOfChannels; channelIndex++) {
-    channels.push(new Float32Array(buffer.getChannelData(channelIndex)))
+    channels.push(buffer.getChannelData(channelIndex).subarray(0, analysisFrames))
   }
   return channels
 }

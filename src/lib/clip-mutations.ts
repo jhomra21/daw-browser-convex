@@ -15,6 +15,10 @@ type PersistClipTimingInput = {
   midiOffsetBeats?: number
 }
 
+type PersistClipTimingAndAudioWarpInput = PersistClipTimingInput & {
+  audioWarp?: AudioWarp
+}
+
 export async function persistClipTiming(
   convexClient: ConvexClientType,
   convexApi: ConvexApiType,
@@ -39,6 +43,24 @@ export async function persistClipAudioWarp(
 ) {
   const result = await convexClient.mutation(convexApi.clips.setAudioWarp, {
     clipId: toCloudClipId(input.clipId),
+    audioWarp: input.audioWarp,
+  })
+  return result?.status === 'applied'
+}
+
+export async function persistClipTimingAndAudioWarp(
+  convexClient: ConvexClientType,
+  convexApi: ConvexApiType,
+  input: PersistClipTimingAndAudioWarpInput,
+) {
+  const timing = normalizeClipTimingPatch(input)
+  const result = await convexClient.mutation(convexApi.clips.setTimingAndAudioWarp, {
+    clipId: toCloudClipId(input.clipId),
+    startSec: timing.startSec,
+    duration: timing.duration,
+    leftPadSec: timing.leftPadSec,
+    bufferOffsetSec: timing.bufferOffsetSec,
+    midiOffsetBeats: timing.midiOffsetBeats,
     audioWarp: input.audioWarp,
   })
   return result?.status === 'applied'

@@ -1,5 +1,5 @@
 import { applyArpeggiatorToNotes } from './effects/dsp'
-import type { ArpParams } from '@daw-browser/shared'
+import { normalizeClipGain, type ArpParams } from '@daw-browser/shared'
 import type { AudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 import type { Clip } from '@daw-browser/timeline-core/types'
 
@@ -115,7 +115,7 @@ export function connectSourceWithClipGain(
     return
   }
   const clipGain = context.createGain()
-  clipGain.gain.value = Math.min(2, Math.max(0, gain))
+  clipGain.gain.value = normalizeClipGain(gain)
   source.connect(clipGain)
   clipGain.connect(destination)
 }

@@ -1,5 +1,6 @@
+import { normalizeSourceBeatOffsetValue } from '@daw-browser/shared'
 import { getAudioClipTimeMap, type AudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
-import type { Clip } from '@daw-browser/timeline-core/types'
+import type { AudioWarp, Clip } from '@daw-browser/timeline-core/types'
 
 const getResizeAudioClipTimeMap = (input: {
   clip: Pick<Clip, 'startSec' | 'duration' | 'leftPadSec' | 'bufferOffsetSec' | 'sourceDurationSec' | 'audioWarp'>
@@ -25,6 +26,33 @@ const getSourceOffsetAfterTimelineTrim = (input: {
   const oldTimelineSec = Math.max(map.timelineStartSec, audioStartSec)
   const newTimelineSec = Math.min(map.timelineEndSec, oldTimelineSec + input.timelineTrimSec)
   return Math.max(0, Math.min(input.bufferDurationSec, map.timelineToSourceSec(newTimelineSec)))
+}
+
+const consumeWarpLeadingSilence = (input: {
+  audioWarp: AudioWarp | undefined
+  projectBpm: number
+  timelineTrimSec: number
+}) => {
+  const audioWarp = input.audioWarp
+  const sourceBeatOffset = audioWarp?.enabled === true ? Math.max(0, audioWarp.sourceBeatOffset ?? 0) : 0
+  if (!audioWarp || sourceBeatOffset <= 0 || input.timelineTrimSec <= 0) {
+    return {
+      audioWarp,
+      consumedTimelineSec: 0,
+      changed: false,
+    }
+  }
+  const projectSecondsPerBeat = 60 / Math.max(1e-6, input.projectBpm || 120)
+  const consumedBeats = Math.min(sourceBeatOffset, input.timelineTrimSec / projectSecondsPerBeat)
+  const nextSourceBeatOffset = normalizeSourceBeatOffsetValue(sourceBeatOffset - consumedBeats)
+  return {
+    audioWarp: {
+      ...audioWarp,
+      sourceBeatOffset: nextSourceBeatOffset === 0 ? undefined : nextSourceBeatOffset,
+    },
+    consumedTimelineSec: consumedBeats * projectSecondsPerBeat,
+    changed: consumedBeats > 0,
+  }
 }
 
 const getSourceOffsetBeforeTimelineTrim = (input: {
@@ -63,10 +91,11 @@ export function calculateAudioLeftResizeTiming(input: {
   newStartSec: number
   bufferDurationSec: number
   projectBpm: number
-}): { startSec: number; duration: number; leftPadSec: number; bufferOffsetSec: number } {
+}): { startSec: number; duration: number; leftPadSec: number; bufferOffsetSec: number; audioWarp?: AudioWarp } {
   const delta = input.newStartSec - input.baselineClip.startSec
   let nextLeftPad = Math.max(0, input.baselineClip.leftPadSec ?? 0)
   let nextBufOffset = Math.max(0, input.baselineClip.bufferOffsetSec ?? 0)
+  let nextAudioWarp: AudioWarp | undefined
   const map = getResizeAudioClipTimeMap({
     clip: input.baselineClip,
     bufferDurationSec: input.bufferDurationSec,
@@ -77,11 +106,38 @@ export function calculateAudioLeftResizeTiming(input: {
     nextLeftPad = Math.max(0, nextLeftPad - consumePad)
     const remaining = delta - consumePad
     if (remaining > 0) {
-      nextBufOffset = getSourceOffsetAfterTimelineTrim({
-        clip: input.baselineClip,
-        bufferDurationSec: input.bufferDurationSec,
+      const warpTrim = consumeWarpLeadingSilence({
+        audioWarp: input.baselineClip.audioWarp,
+        projectBpm: input.projectBpm,
         timelineTrimSec: remaining,
-        map,
+      })
+      const sourceTrimSec = remaining - warpTrim.consumedTimelineSec
+      if (warpTrim.changed) nextAudioWarp = warpTrim.audioWarp
+      if (sourceTrimSec <= 0) {
+        return {
+          startSec: input.newStartSec,
+          duration: Math.max(0, input.fixedRightSec - input.newStartSec),
+          leftPadSec: nextLeftPad,
+          bufferOffsetSec: nextBufOffset,
+          audioWarp: nextAudioWarp,
+        }
+      }
+      const sourceTrimBaseline = {
+        ...input.baselineClip,
+        startSec: input.baselineClip.startSec + warpTrim.consumedTimelineSec,
+        leftPadSec: 0,
+        audioWarp: warpTrim.audioWarp,
+      }
+      const sourceTrimMap = getResizeAudioClipTimeMap({
+        clip: sourceTrimBaseline,
+        bufferDurationSec: input.bufferDurationSec,
+        projectBpm: input.projectBpm,
+      })
+      nextBufOffset = getSourceOffsetAfterTimelineTrim({
+        clip: sourceTrimBaseline,
+        bufferDurationSec: input.bufferDurationSec,
+        timelineTrimSec: sourceTrimSec,
+        map: sourceTrimMap,
       })
     }
   } else {
@@ -106,5 +162,6 @@ export function calculateAudioLeftResizeTiming(input: {
     duration: Math.max(0, input.fixedRightSec - input.newStartSec),
     leftPadSec: nextLeftPad,
     bufferOffsetSec: nextBufOffset,
+    audioWarp: nextAudioWarp,
   }
 }

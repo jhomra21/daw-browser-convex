@@ -52,7 +52,6 @@ export type TimelinePanelsProps = {
   sampleDetailPanel: {
     isOpen: boolean
     selectedClip?: Clip<AudioBuffer>
-    preferenceScopeId?: string
     projectBpm: number
     audioEngine: AudioEngine
     bpmDetection: BpmDetectionService
@@ -175,7 +174,6 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
           <Suspense fallback={null}>
             <SampleDetailPanel
               clip={clip()}
-              preferenceScopeId={props.sampleDetailPanel.preferenceScopeId}
               projectBpm={props.sampleDetailPanel.projectBpm}
               audioEngine={props.sampleDetailPanel.audioEngine}
               bpmDetection={props.sampleDetailPanel.bpmDetection}

@@ -1,6 +1,5 @@
-import { copyBufferWindow, renderStretchedAudio, writeBuffer } from './audio-stretch-rendering'
+import { copyBufferWindow, renderStretchedAudio, writeBuffer, type AudioStretchRuntimeClip } from './audio-stretch-rendering'
 import { evictStoredRenders, getStoredRenderByteSize, readStoredRender, selectStoredRenderEvictionKeys, touchStoredRender, writeStoredRender } from './audio-stretch-store'
-import type { Clip } from '@daw-browser/timeline-core/types'
 
 export type AudioStretchRenderStatus = 'idle' | 'rendering' | 'ready' | 'failed'
 
@@ -18,7 +17,7 @@ export type AudioStretchRenderState = {
 
 type AudioStretchRenderStateListener = () => void
 
-type RuntimeClip = Pick<Clip<AudioBuffer>, 'id' | 'duration' | 'startSec' | 'leftPadSec' | 'bufferOffsetSec' | 'sourceAssetKey' | 'sourceDurationSec' | 'sourceSampleRate' | 'sourceChannelCount' | 'audioWarp' | 'buffer'>
+type RuntimeClip = AudioStretchRuntimeClip
 type CacheKeyClip = Omit<RuntimeClip, 'buffer'>
 
 type StretchCacheEntry =
@@ -137,10 +136,13 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
     void touchStoredRender(stored).catch(() => {})
     const buffer = writeBuffer(options.createBuffer, stored.channels, stored.sampleRate)
     return {
-      buffer,
-      timelineStartSec: stored.timelineStartSec,
-      sourceStartSec: stored.sourceStartSec,
-      timelineDurationSec: stored.timelineDurationSec,
+      render: {
+        buffer,
+        timelineStartSec: stored.timelineStartSec,
+        sourceStartSec: stored.sourceStartSec,
+        timelineDurationSec: stored.timelineDurationSec,
+      },
+      persisted: true,
     }
   }
 
@@ -172,19 +174,19 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
   }
 
   const startRender = (key: string, clip: RuntimeClip, projectBpm: number, waitForPersist = false) => {
-    const promise = hydrate(key).then((stored) => stored ?? render(clip, projectBpm))
-    entries.set(key, { status: 'rendering', promise })
-    notify()
-    prune()
-    const ready = promise.then(
+    const operation = hydrate(key).then(async (stored) => {
+      if (stored) return stored
+      return { render: await render(clip, projectBpm), persisted: false }
+    })
+    const ready = operation.then(
       async (result) => {
-        entries.set(key, { status: 'ready', render: result })
-        const persisted = persistRender(key, result).catch(() => {})
+        entries.set(key, { status: 'ready', render: result.render })
+        const persisted = result.persisted ? Promise.resolve() : persistRender(key, result.render).catch(() => {})
         if (waitForPersist) await persisted
         else void persisted
         prune()
         notify()
-        return result
+        return result.render
       },
       (error) => {
         const renderedError = toError(error)
@@ -194,7 +196,10 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
         throw renderedError
       },
     )
-    return waitForPersist ? ready : promise
+    entries.set(key, { status: 'rendering', promise: ready })
+    notify()
+    prune()
+    return ready
   }
 
   const ensure = (clip: RuntimeClip, projectBpm: number) => {
@@ -206,6 +211,7 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
       touch(key, cached)
       return
     }
+    if (cached?.status === 'failed') return
     void startRender(key, clip, projectBpm)
   }
 

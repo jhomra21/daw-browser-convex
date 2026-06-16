@@ -1,5 +1,6 @@
 import { getAudioClipTimeMap, getMarkerWarpTimelineSegments } from '@daw-browser/timeline-core/audio-clip-time-map'
 import type { Clip } from '@daw-browser/timeline-core/types'
+import { normalizeSourceBeatOffsetValue } from '@daw-browser/shared'
 
 type AudioWaveformLayoutSegment = {
   drawCols: number
@@ -19,16 +20,11 @@ type AudioWaveformLayout = {
 }
 
 const roundSeconds = (value: number) => Math.round(value * 1_000_000_000) / 1_000_000_000
-const SOURCE_BEAT_OFFSET_MIN = -16
-const SOURCE_BEAT_OFFSET_MAX = 16
 const SOURCE_BEAT_OFFSET_SNAP = 0.25
-const SOURCE_BEAT_OFFSET_PRECISION = 1_000
 
 const normalizeSourceBeatOffsetForDrag = (value: number, snap: boolean) => {
   const snapped = snap ? Math.round(value / SOURCE_BEAT_OFFSET_SNAP) * SOURCE_BEAT_OFFSET_SNAP : value
-  return Math.round(
-    Math.min(SOURCE_BEAT_OFFSET_MAX, Math.max(SOURCE_BEAT_OFFSET_MIN, snapped)) * SOURCE_BEAT_OFFSET_PRECISION,
-  ) / SOURCE_BEAT_OFFSET_PRECISION
+  return normalizeSourceBeatOffsetValue(snapped)
 }
 
 export const getSourceBeatOffsetAnchorX = (input: {

@@ -18,6 +18,7 @@ type TrackLaneProps = {
   onRemoveMissingMedia?: (trackId: Track['id'], clipId: string) => void
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
   bpm: number
+  viewportRedrawVersion: number
 }
 
 const TrackLane: Component<TrackLaneProps> = (props) => {
@@ -42,6 +43,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
             onRemoveMissingMedia={props.onRemoveMissingMedia}
             ensureClipBuffer={props.ensureClipBuffer}
             bpm={props.bpm}
+            viewportRedrawVersion={props.viewportRedrawVersion}
           />
         )}
       </For>

@@ -30,11 +30,15 @@ const normalizeWarpBpm = (value: unknown) => (
     : undefined
 )
 
-const normalizeSourceBeatOffset = (value: unknown) => {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
-  const normalized = Math.round(
+export const normalizeSourceBeatOffsetValue = (value: number) => (
+  Math.round(
     Math.min(MAX_SOURCE_BEAT_OFFSET, Math.max(MIN_SOURCE_BEAT_OFFSET, value)) * SOURCE_BEAT_OFFSET_PRECISION,
   ) / SOURCE_BEAT_OFFSET_PRECISION
+)
+
+const normalizeSourceBeatOffset = (value: unknown) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  const normalized = normalizeSourceBeatOffsetValue(value)
   return Object.is(normalized, -0) || normalized === 0 ? undefined : normalized
 }
 
@@ -102,7 +106,11 @@ export const linearGainToDb = (gain: number) => (
 )
 
 export const dbToLinearGain = (db: number) => (
-  Number.isFinite(db) ? Math.min(2, Math.max(0, 10 ** (db / 20))) : 0
+  Number.isFinite(db) ? normalizeClipGain(10 ** (db / 20)) : 0
+)
+
+export const normalizeClipGain = (gain: number) => (
+  Math.min(2, Math.max(0, gain))
 )
 
 const isDisabledDefaultWarp = (value: AudioWarpPayload | undefined) => (

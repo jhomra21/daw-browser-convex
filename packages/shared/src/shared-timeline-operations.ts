@@ -5,7 +5,7 @@ import type {
   ReverbParams,
   SynthWave,
 } from './effects-params'
-import { normalizeAudioWarp, type AudioWarpPayload } from './audio-warp'
+import { normalizeAudioWarp, normalizeClipGain, type AudioWarpPayload } from './audio-warp'
 
 export type MoveClipInput = {
   clipId: string
@@ -326,7 +326,7 @@ const parseClipAudioWarp = (payload: Record<string, unknown>): SharedTimelineOpe
 
 const parseClipGain = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
   typeof payload.clipId === 'string' && typeof payload.gain === 'number'
-    ? { kind: 'clips.setGain', payload: { clipId: payload.clipId, gain: Math.min(2, Math.max(0, payload.gain)) } }
+    ? { kind: 'clips.setGain', payload: { clipId: payload.clipId, gain: normalizeClipGain(payload.gain) } }
     : null
 )
 

@@ -1,7 +1,7 @@
 import { buildLocalClip } from "~/lib/clip-create";
 import { buildClipCreatePayload, normalizeAudioWarp, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
-import { persistClipAudioWarp, persistClipTiming } from "~/lib/clip-mutations";
+import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
 import { setLocalEffect } from "~/lib/local-effects";
 import { isLocalId } from "@daw-browser/shared";
@@ -23,6 +23,7 @@ type ClipTimingPatch = {
   leftPadSec?: number;
   bufferOffsetSec?: number;
   midiOffsetBeats?: number;
+  audioWarp?: Track["clips"][number]["audioWarp"];
   gain?: number;
 };
 
@@ -273,19 +274,31 @@ export const persistHistoryClipTimingOrThrow = async (
       leftPadSec: timing.leftPadSec,
       bufferOffsetSec: timing.bufferOffsetSec,
       midiOffsetBeats: timing.midiOffsetBeats,
+      audioWarp: timing.audioWarp,
       gain: timing.gain,
     });
     if (!applied) throw new Error(message);
     return;
   }
-  const applied = await persistClipTiming(deps.convexClient, deps.convexApi, {
-    clipId,
-    startSec: timing.startSec,
-    duration: timing.duration,
-    leftPadSec: timing.leftPadSec ?? 0,
-    bufferOffsetSec: timing.bufferOffsetSec ?? 0,
-    midiOffsetBeats: timing.midiOffsetBeats ?? 0,
-  });
+  const audioWarp = normalizeAudioWarp(timing.audioWarp);
+  const applied = audioWarp
+    ? await persistClipTimingAndAudioWarp(deps.convexClient, deps.convexApi, {
+      clipId,
+      startSec: timing.startSec,
+      duration: timing.duration,
+      leftPadSec: timing.leftPadSec ?? 0,
+      bufferOffsetSec: timing.bufferOffsetSec ?? 0,
+      midiOffsetBeats: timing.midiOffsetBeats ?? 0,
+      audioWarp,
+    })
+    : await persistClipTiming(deps.convexClient, deps.convexApi, {
+      clipId,
+      startSec: timing.startSec,
+      duration: timing.duration,
+      leftPadSec: timing.leftPadSec ?? 0,
+      bufferOffsetSec: timing.bufferOffsetSec ?? 0,
+      midiOffsetBeats: timing.midiOffsetBeats ?? 0,
+    });
   if (!applied) throw new Error(message);
   if (timing.gain !== undefined) {
     const result = await publishDurableSharedTimelineOperation({
@@ -319,18 +332,6 @@ export const persistHistoryClipAudioWarpOrThrow = async (
     audioWarp: normalizedAudioWarp,
   });
   if (!applied) throw new Error(message);
-};
-
-export const persistLegacyHistoryClipTimingAudioWarpOrThrow = async (
-  deps: Deps,
-  clipId: string,
-  timing: { audioWarp?: Track["clips"][number]["audioWarp"] },
-  message: string,
-) => {
-  const audioWarp = normalizeAudioWarp(timing.audioWarp);
-  if (audioWarp) {
-    await persistHistoryClipAudioWarpOrThrow(deps, clipId, audioWarp, message);
-  }
 };
 
 export const persistHistoryClipMovesOrThrow = async (

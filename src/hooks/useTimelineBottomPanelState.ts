@@ -1,7 +1,7 @@
 import { createEffect, createSignal, type Accessor } from "solid-js";
 import { BOTTOM_PANEL_DEFAULT_HEIGHT_PX, clampBottomPanelHeight, loadBottomPanelHeight, saveBottomPanelHeight } from "~/lib/bottom-panel-preferences";
 
-type TimelineBottomPanelMode = "effects" | "sample-detail";
+export type TimelineBottomPanelMode = "effects" | "sample-detail";
 
 const BOTTOM_PANEL_GAP_PX = 8;
 

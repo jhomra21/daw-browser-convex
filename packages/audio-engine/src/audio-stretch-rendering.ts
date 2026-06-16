@@ -3,7 +3,7 @@ import { stretchAudioWsola } from './audio-stretching'
 import type { Clip } from '@daw-browser/timeline-core/types'
 import type { StretchedAudioRender } from './audio-stretch-cache'
 
-type RuntimeClip = Pick<Clip<AudioBuffer>, 'id' | 'duration' | 'startSec' | 'leftPadSec' | 'bufferOffsetSec' | 'sourceAssetKey' | 'sourceDurationSec' | 'sourceSampleRate' | 'sourceChannelCount' | 'audioWarp' | 'buffer'>
+export type AudioStretchRuntimeClip = Pick<Clip<AudioBuffer>, 'id' | 'duration' | 'startSec' | 'leftPadSec' | 'bufferOffsetSec' | 'sourceAssetKey' | 'sourceDurationSec' | 'sourceSampleRate' | 'sourceChannelCount' | 'audioWarp' | 'buffer'>
 type CreateBuffer = (channels: number, frames: number, sampleRate: number) => AudioBuffer
 
 const ANALYSIS_MARGIN_SEC = 0.08
@@ -36,7 +36,7 @@ export const writeBuffer = (
 const renderMappedStretch = (
   sourceBuffer: AudioBuffer,
   map: AudioClipTimeMap,
-  clip: RuntimeClip,
+  clip: AudioStretchRuntimeClip,
   projectBpm: number,
   createBuffer: CreateBuffer,
 ) => {
@@ -82,7 +82,7 @@ const renderMappedStretch = (
 }
 
 export const renderStretchedAudio = (
-  clip: RuntimeClip,
+  clip: AudioStretchRuntimeClip,
   projectBpm: number,
   createBuffer: CreateBuffer,
 ): StretchedAudioRender => {

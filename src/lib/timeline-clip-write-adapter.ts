@@ -1,4 +1,4 @@
-import { isLocalId, normalizeAudioWarp } from '@daw-browser/shared'
+import { isLocalId, normalizeAudioWarp, normalizeClipGain } from '@daw-browser/shared'
 import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { MoveClipInput } from '~/lib/timeline-repository/types'
@@ -68,7 +68,7 @@ export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
     return isRecord(result) && result.status === 'applied'
   },
   setGain: async (clipId: string, gain: number) => {
-    const normalizedGain = Math.min(2, Math.max(0, gain))
+    const normalizedGain = normalizeClipGain(gain)
     if (isLocalId('project', context.projectId)) {
       const row = await createLocalTimelineRepository(context.projectId).updateClip({ clipId, gain: normalizedGain })
       return Boolean(row)

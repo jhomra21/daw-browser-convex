@@ -17,7 +17,6 @@ import {
   persistHistoryClipAudioWarpOrThrow,
   persistHistoryClipMovesOrThrow,
   persistHistoryClipTimingOrThrow,
-  persistLegacyHistoryClipTimingAudioWarpOrThrow,
   createHistoryClip,
   createHistoryTrack,
   persistHistoryTrackMix,
@@ -167,7 +166,6 @@ async function applyClipTimingEntry(entry: Extract<HistoryEntry, { type: 'clip-t
   const clipId = requireResolved(resolveClipId(index, entry.data.clipRef), 'Clip not found for clip-timing history entry')
   const timing = pickDirectionalValue(direction, entry.data.from, entry.data.to)
   await persistHistoryClipTimingOrThrow(deps, clipId, timing, 'Failed to apply clip timing during history replay')
-  await persistLegacyHistoryClipTimingAudioWarpOrThrow(deps, clipId, timing, 'Failed to apply clip warp during history replay')
   deps.actions.commitClipTiming(clipId, timing)
   if (timing.audioWarp) deps.actions.commitClipAudioWarp(clipId, timing.audioWarp)
   deps.actions.rescheduleChangedClips([clipId])

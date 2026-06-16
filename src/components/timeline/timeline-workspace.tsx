@@ -1,4 +1,4 @@
-import { For, type JSX } from "solid-js";
+import { createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
 import TrackSidebar from "~/components/timeline/TrackSidebar";
@@ -9,6 +9,38 @@ import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionSt
 import type { Clip, Track, TrackId, TrackSend } from "@daw-browser/timeline-core/types";
 import type { TimelineTrackIndex } from "@daw-browser/timeline-core/track-index";
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types";
+
+const createViewportRedrawVersion = () => {
+  const [version, setVersion] = createSignal(0);
+  const requestRedraw = () => setVersion((value) => value + 1);
+
+  onMount(() => {
+    requestRedraw();
+    window.addEventListener("resize", requestRedraw);
+    window.visualViewport?.addEventListener("resize", requestRedraw);
+
+    let dprQuery: MediaQueryList | undefined;
+    let dprListener: (() => void) | undefined;
+    const bindDprListener = () => {
+      if (dprQuery && dprListener) dprQuery.removeEventListener("change", dprListener);
+      dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      dprListener = () => {
+        requestRedraw();
+        bindDprListener();
+      };
+      dprQuery.addEventListener("change", dprListener);
+    };
+    bindDprListener();
+
+    onCleanup(() => {
+      window.removeEventListener("resize", requestRedraw);
+      window.visualViewport?.removeEventListener("resize", requestRedraw);
+      if (dprQuery && dprListener) dprQuery.removeEventListener("change", dprListener);
+    });
+  });
+
+  return version;
+};
 
 type Props = {
   containerRef: (el: HTMLDivElement) => void;
@@ -78,6 +110,7 @@ type Props = {
 };
 
 export default function TimelineWorkspace(props: Props) {
+  const viewportRedrawVersion = createViewportRedrawVersion();
   const trackAreaHeight = () => (props.tracks.length + (props.dropAtNewTrack ? 1 : 0)) * LANE_HEIGHT;
   const fullHeight = () => RULER_HEIGHT + trackAreaHeight();
   const bottomPanelHeight = () => props.bottomFXOpen ? props.bottomPanelHeightPx : 0;
@@ -144,6 +177,7 @@ export default function TimelineWorkspace(props: Props) {
                     }}
                     ensureClipBuffer={props.ensureClipBuffer}
                     bpm={props.bpm}
+                    viewportRedrawVersion={viewportRedrawVersion()}
                     onClipDblClick={(_, clipId) => {
                       const match = props.trackLookup.clipEntryById.get(clipId);
                       if (match && match.trackId === track.id && match.clip.midi) {

@@ -303,4 +303,31 @@ describe('getAudioWaveformLayout', () => {
       sourceEndSec: 3.5,
     })
   })
+
+  test('segments marker warped waveforms by timeline marker density', () => {
+    const layout = getAudioWaveformLayout(
+      createClip({
+        duration: 4,
+        sourceDurationSec: 2,
+        audioWarp: {
+          enabled: true,
+          mode: 'stretch',
+          sourceBpm: 120,
+          markers: [
+            { id: 'a', sourceBeat: 0, timelineBeat: 0 },
+            { id: 'b', sourceBeat: 1, timelineBeat: 4 },
+            { id: 'c', sourceBeat: 4, timelineBeat: 8 },
+          ],
+        },
+      }),
+      400,
+      undefined,
+      120,
+    )
+
+    expect(layout.segments).toEqual([
+      { drawCols: 200, sourceStartSec: 0, sourceEndSec: 0.5 },
+      { drawCols: 200, sourceStartSec: 0.5, sourceEndSec: 2 },
+    ])
+  })
 })

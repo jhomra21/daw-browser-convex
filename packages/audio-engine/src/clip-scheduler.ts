@@ -1,4 +1,5 @@
-import { connectSourceWithClipGain, getAudioBufferPlaybackParams, getAudioClipTimeMap } from './audio-scheduling'
+import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
+import { connectSourceWithClipGain, getAudioBufferPlaybackParams } from './audio-scheduling'
 import type { StretchedAudioRender } from './audio-stretch-cache'
 import type { SourceRegistry } from './source-registry'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'

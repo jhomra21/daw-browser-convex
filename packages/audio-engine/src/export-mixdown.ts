@@ -7,7 +7,8 @@ import {
   type Target,
 } from 'mediabunny'
 
-import { connectSourceWithClipGain, getAudioBufferPlaybackParams, getAudioClipTimeMap, getScheduledMidiEvents } from './audio-scheduling'
+import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
+import { connectSourceWithClipGain, getAudioBufferPlaybackParams, getScheduledMidiEvents } from './audio-scheduling'
 import { createAudioStretchCache } from './audio-stretch-cache'
 import {
   getExportAudioFormatMetadata,

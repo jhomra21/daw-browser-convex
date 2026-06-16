@@ -26,7 +26,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
 
 const normalizeWarpBpm = (value: unknown) => (
   typeof value === 'number' && Number.isFinite(value)
-    ? Math.min(MAX_WARP_BPM, Math.max(MIN_WARP_BPM, Math.round(value)))
+    ? Math.round(Math.min(MAX_WARP_BPM, Math.max(MIN_WARP_BPM, value)) * 100) / 100
     : undefined
 )
 

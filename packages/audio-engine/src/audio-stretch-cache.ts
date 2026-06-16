@@ -65,6 +65,7 @@ const createSourceCacheIdentity = (clip: CacheKeyClip, buffer: AudioBufferIdenti
     return [
       'asset',
       clip.sourceAssetKey,
+      createBufferFingerprint(buffer),
       clip.sourceDurationSec ?? buffer.duration,
       clip.sourceSampleRate ?? buffer.sampleRate,
       clip.sourceChannelCount ?? buffer.numberOfChannels,

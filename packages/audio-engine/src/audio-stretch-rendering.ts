@@ -1,4 +1,4 @@
-import { getAudioClipTimeMap, type AudioClipTimeMap } from './audio-scheduling'
+import { getAudioClipTimeMap, type AudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 import { stretchAudioWsola } from './audio-stretching'
 import type { Clip } from '@daw-browser/timeline-core/types'
 import type { StretchedAudioRender } from './audio-stretch-cache'

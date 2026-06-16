@@ -1,5 +1,11 @@
-import { getAudioClipTimeMap } from '@daw-browser/audio-engine/audio-scheduling'
+import { getAudioClipTimeMap, getMarkerWarpTimelineSegments } from '@daw-browser/timeline-core/audio-clip-time-map'
 import type { Clip } from '@daw-browser/timeline-core/types'
+
+type AudioWaveformLayoutSegment = {
+  drawCols: number
+  sourceStartSec: number
+  sourceEndSec: number
+}
 
 type AudioWaveformLayout = {
   sourceDurationSec: number
@@ -9,6 +15,7 @@ type AudioWaveformLayout = {
   audioEndPx: number
   sourceStartSec: number
   sourceEndSec: number
+  segments?: AudioWaveformLayoutSegment[]
 }
 
 const roundSeconds = (value: number) => Math.round(value * 1_000_000_000) / 1_000_000_000
@@ -94,8 +101,26 @@ export function getAudioWaveformLayout(
   )
   const audioStartPx = padPx
   const audioEndPx = Math.min(cssW, audioStartPx + drawCols)
+  const segments = getMarkerWarpTimelineSegments({
+    clip,
+    map,
+    projectBpm,
+    timelineEndSec: map.timelineStartSec + drawCols / pixelsPerSecond,
+  }).flatMap((segment) => {
+    const timelineStartSec = segment.timelineStartSec
+    const timelineEndSec = segment.timelineEndSec
+    const segmentStartPx = Math.floor((timelineStartSec - clip.startSec) * pixelsPerSecond)
+    const segmentEndPx = Math.floor((timelineEndSec - clip.startSec) * pixelsPerSecond)
+    const segmentDrawCols = Math.max(0, segmentEndPx - segmentStartPx)
+    if (segmentDrawCols <= 0) return []
+    return [{
+      drawCols: segmentDrawCols,
+      sourceStartSec: Math.max(0, Math.min(sourceDurationSec, roundSeconds(map.timelineToSourceSec(timelineStartSec)))),
+      sourceEndSec: Math.max(0, Math.min(sourceDurationSec, roundSeconds(map.timelineToSourceSec(timelineEndSec)))),
+    }]
+  })
 
-  return {
+  const layout = {
     sourceDurationSec,
     padPx,
     drawCols,
@@ -104,4 +129,5 @@ export function getAudioWaveformLayout(
     sourceStartSec,
     sourceEndSec,
   }
+  return segments.length > 1 ? { ...layout, segments } : layout
 }

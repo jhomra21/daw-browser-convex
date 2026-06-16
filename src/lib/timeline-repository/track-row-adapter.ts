@@ -15,6 +15,7 @@ export const toLocalTimelineClip = (row: TimelineClipRow): RuntimeClip => ({
   sourceDurationSec: row.sourceDurationSec,
   sourceSampleRate: row.sourceSampleRate,
   sourceChannelCount: row.sourceChannelCount,
+  gain: row.gain,
   leftPadSec: row.leftPadSec,
   bufferOffsetSec: row.bufferOffsetSec,
   audioWarp: normalizeAudioWarp(row.audioWarp),

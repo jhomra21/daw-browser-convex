@@ -1,6 +1,7 @@
 import { onCleanup, type Accessor } from 'solid-js'
 
 import { persistClipTiming } from '~/lib/clip-mutations'
+import { calculateAudioLeftResizeTiming } from '~/lib/audio-left-resize-timing'
 import { isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { buildClipTimingHistoryEntry } from '~/lib/undo/builders'
@@ -62,6 +63,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
   let resizeFixedRight = 0
   let resizeOrigBufferOffset = 0
   let resizeOrigMidiOffsetBeats = 0
+  let resizeBaselineAudioClip: RuntimeTrack['clips'][number] | null = null
   let activeResizePointerId: number | null = null
   let activeResizeCaptureTarget: HTMLElement | null = null
 
@@ -98,6 +100,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     resizeFixedRight = clip.startSec + clip.duration
     resizeOrigBufferOffset = clip.bufferOffsetSec ?? 0
     resizeOrigMidiOffsetBeats = clip.midiOffsetBeats ?? 0
+    resizeBaselineAudioClip = { ...clip }
 
     selection.selectPrimaryClip({ trackId, clipId })
 
@@ -184,26 +187,18 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
         const windowDuration = resizeFixedRight - resizeFixedLeft
         const fallbackBufferDur = Math.max(0, windowDuration - resizeOrigPad)
         const bufferDur = clip.buffer?.duration ?? fallbackBufferDur
-        const delta = newStart - resizeOrigStart
-        let nextLeftPad = resizeOrigPad
-        let nextBufOffset = Math.max(0, resizeOrigBufferOffset)
-        if (delta >= 0) {
-          const consumePad = Math.min(nextLeftPad, delta)
-          nextLeftPad = Math.max(0, nextLeftPad - consumePad)
-          const remaining = delta - consumePad
-          nextBufOffset = Math.max(0, Math.min(bufferDur, nextBufOffset + Math.max(0, remaining)))
-        } else {
-          const supply = -delta
-          const reduceBuf = Math.min(nextBufOffset, supply)
-          nextBufOffset = Math.max(0, nextBufOffset - reduceBuf)
-          const leftover = supply - reduceBuf
-          nextLeftPad = Math.max(0, nextLeftPad + Math.max(0, leftover))
-        }
+        const timing = calculateAudioLeftResizeTiming({
+          baselineClip: resizeBaselineAudioClip ?? clip,
+          fixedRightSec: resizeFixedRight,
+          newStartSec: newStart,
+          bufferDurationSec: bufferDur,
+          projectBpm: options.bpm(),
+        })
         setDraftClipTiming(clip.id, {
-          startSec: newStart,
+          startSec: timing.startSec,
           duration: newDuration,
-          leftPadSec: nextLeftPad,
-          bufferOffsetSec: nextBufOffset,
+          leftPadSec: timing.leftPadSec,
+          bufferOffsetSec: timing.bufferOffsetSec,
         })
       }
     } else {
@@ -262,6 +257,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
 
     clipResizing = false
     resizing = null
+    resizeBaselineAudioClip = null
     removeResizeListeners()
 
     if (clip) {
@@ -368,6 +364,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
   onCleanup(() => {
     clipResizing = false
     resizing = null
+    resizeBaselineAudioClip = null
     removeResizeListeners()
   })
 

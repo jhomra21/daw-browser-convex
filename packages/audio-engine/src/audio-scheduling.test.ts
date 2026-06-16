@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { getAudioBufferPlaybackDurationSec, getAudioClipTimeMap } from './audio-scheduling'
+import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
+import { getAudioBufferPlaybackDurationSec } from './audio-scheduling'
 import { clipSchedulerTestInternals } from './clip-scheduler'
 
 describe('audio clip playback duration', () => {

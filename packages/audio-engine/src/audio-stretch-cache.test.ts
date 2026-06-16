@@ -40,7 +40,7 @@ describe('audio stretch cache eviction helpers', () => {
 })
 
 describe('audio stretch cache key identity', () => {
-  test('uses stable source asset metadata instead of clip id for persisted keys', () => {
+  test('uses stable source asset metadata and fingerprint instead of clip id for persisted keys', () => {
     const buffer = createTestBuffer([0, 0.5, 1])
     const left = audioStretchCacheTestInternals.createCacheKey({
       id: 'clip-a',
@@ -65,6 +65,29 @@ describe('audio stretch cache key identity', () => {
 
     expect(left).toBe(right)
     expect(left.startsWith('asset:asset-key')).toBe(true)
+  })
+
+  test('separates asset-backed buffers with changed content', () => {
+    const leftBuffer = createTestBuffer([0, 0.5, 1])
+    const rightBuffer = createTestBuffer([0, 0.25, 1])
+
+    expect(audioStretchCacheTestInternals.createSourceCacheIdentity({
+      id: 'clip',
+      sourceAssetKey: 'asset-key',
+      sourceDurationSec: 12,
+      sourceSampleRate: 48_000,
+      sourceChannelCount: 2,
+      startSec: 0,
+      duration: 1,
+    }, leftBuffer)).not.toBe(audioStretchCacheTestInternals.createSourceCacheIdentity({
+      id: 'clip',
+      sourceAssetKey: 'asset-key',
+      sourceDurationSec: 12,
+      sourceSampleRate: 48_000,
+      sourceChannelCount: 2,
+      startSec: 0,
+      duration: 1,
+    }, rightBuffer))
   })
 
   test('falls back to buffer fingerprint for transient source buffers', () => {

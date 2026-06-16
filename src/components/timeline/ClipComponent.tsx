@@ -1,6 +1,9 @@
 import {
   type Component,
   createEffect,
+  createSignal,
+  onCleanup,
+  onMount,
 } from "solid-js";
 
 import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
@@ -60,6 +63,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
 
   const clipWidthPx = () =>
     Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS));
+  const [redrawVersion, setRedrawVersion] = createSignal(0);
   const handleWidthPx = () =>
     clipWidthPx() < 18 ? 2 : clipWidthPx() < 28 ? 3 : 6;
 
@@ -110,13 +114,14 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     );
   };
 
+  const requestRedraw = () => setRedrawVersion((version) => version + 1);
+
   function drawWaveform() {
     const canvas = canvasRef;
     if (!canvas) return;
 
-    const cssW = Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS));
+    const cssW = clipWidthPx();
     const cssH = Math.max(1, Math.floor(LANE_HEIGHT - 1));
-    if (cssW === 0 || cssH === 0) return;
 
     const dpr = window.devicePixelRatio || 1;
     const pxW = Math.floor(cssW * dpr);
@@ -291,7 +296,33 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void midiSignature;
     void props.bpm;
     void waveform.peaks();
+    void redrawVersion();
     drawWaveform();
+  });
+
+  onMount(() => {
+    requestRedraw();
+    window.addEventListener("resize", requestRedraw);
+    window.visualViewport?.addEventListener("resize", requestRedraw);
+
+    let dprQuery: MediaQueryList | undefined;
+    let dprListener: (() => void) | undefined;
+    const bindDprListener = () => {
+      if (dprQuery && dprListener) dprQuery.removeEventListener("change", dprListener);
+      dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      dprListener = () => {
+        requestRedraw();
+        bindDprListener();
+      };
+      dprQuery.addEventListener("change", dprListener);
+    };
+    bindDprListener();
+
+    onCleanup(() => {
+      window.removeEventListener("resize", requestRedraw);
+      window.visualViewport?.removeEventListener("resize", requestRedraw);
+      if (dprQuery && dprListener) dprQuery.removeEventListener("change", dprListener);
+    });
   });
 
   return (

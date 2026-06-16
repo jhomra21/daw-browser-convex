@@ -13,6 +13,17 @@ type ClipWaveformViewModelOptions = {
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
 }
 
+const concatPeakSegments = (segments: Uint8Array[]) => {
+  const totalLength = segments.reduce((sum, segment) => sum + segment.length, 0)
+  const result = new Uint8Array(totalLength)
+  let offset = 0
+  for (const segment of segments) {
+    result.set(segment, offset)
+    offset += segment.length
+  }
+  return result
+}
+
 export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) {
   const [peaks, setPeaks] = createSignal<Uint8Array | null>(null)
   let requestId = 0
@@ -54,6 +65,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       setPeaks(null)
       return
     }
+    const assetKey = current.assetKey
     if (!current.buffer && !current.sampleUrl) {
       if (!current.clip.mediaStatus) {
         void options.ensureClipBuffer?.(current.clip.id)
@@ -62,18 +74,31 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       return
     }
 
-    void getWaveformSlice({
-      assetKey: current.assetKey,
+    const segments = current.layout.segments
+      ? current.layout.segments
+      : [{
+        drawCols: current.layout.drawCols,
+        sourceStartSec: current.layout.sourceStartSec,
+        sourceEndSec: current.layout.sourceEndSec,
+      }]
+
+    void Promise.all(segments.map((segment) => getWaveformSlice({
+      assetKey,
       sourceIdentity: current.sourceIdentity,
       sampleUrl: current.sampleUrl,
       buffer: current.buffer,
-      sourceStartSec: current.layout.sourceStartSec,
-      sourceEndSec: current.layout.sourceEndSec,
-      bins: current.layout.drawCols,
-    })
+      sourceStartSec: segment.sourceStartSec,
+      sourceEndSec: segment.sourceEndSec,
+      bins: segment.drawCols,
+    })))
       .then((next) => {
         if (currentRequestId !== requestId) return
-        setPeaks(next)
+        const complete = next.flatMap((segment) => segment ? [segment] : [])
+        if (complete.length !== next.length) {
+          setPeaks(null)
+          return
+        }
+        setPeaks(complete.length === 1 ? complete[0] : concatPeakSegments(complete))
       })
       .catch(() => {
         if (currentRequestId !== requestId) return

@@ -3,6 +3,7 @@
   "ignoreFiles": [
     "src/components/nav-user.tsx",
     "packages/shared/src/audio-warp.test.ts",
+    "src/lib/audio-left-resize-timing.test.ts",
     "src/lib/audio-waveform-layout.test.js",
     "src/hooks/useTimelinePlayback.test.ts",
     "packages/audio-engine/src/bpm-detection.test.ts",

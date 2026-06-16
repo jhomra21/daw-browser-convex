@@ -15,9 +15,9 @@ describe('audio warp normalization', () => {
     expect(audioWarp?.mode).toBe('repitch')
   })
 
-  test('clamps and rounds source bpm', () => {
+  test('clamps and rounds source bpm to two decimals', () => {
     expect(normalizeAudioWarp({ enabled: true, sourceBpm: 329.6, mode: 'stretch' })?.sourceBpm).toBe(300)
-    expect(normalizeAudioWarp({ enabled: true, sourceBpm: 127.6, mode: 'stretch' })?.sourceBpm).toBe(128)
+    expect(normalizeAudioWarp({ enabled: true, sourceBpm: 127.678, mode: 'stretch' })?.sourceBpm).toBe(127.68)
   })
 
   test('clamps and rounds source beat offset', () => {

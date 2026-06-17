@@ -44,6 +44,7 @@ import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-a
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import TimelineBottomPanelShell, { type TimelineBottomPanelShellControls } from "~/components/timeline/TimelineBottomPanelShell";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
+import { BOTTOM_PANEL_EDGE_PADDING_PX, EFFECTS_PANEL_FOOTER_HEIGHT_PX } from "~/lib/bottom-panel-layout";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -53,6 +54,10 @@ type EffectsPanelProps = {
   tracks: Track[];
   onClose: () => void;
   onOpen: () => void;
+  clipTab: {
+    canOpen: boolean;
+    onOpen: () => void;
+  };
   audioEngine: AudioEngine;
   projectId?: string;
   userId?: string;
@@ -82,21 +87,12 @@ type EffectsPanelToolbarProps = {
     onAddMidiClip: () => Promise<void>;
     onAddEq: () => void;
     onAddReverb: () => void;
-    onClose: () => void;
     canWrite: boolean;
   };
 };
 
 const EffectsPanelToolbar: Component<EffectsPanelToolbarProps> = (props) => (
   <div class="flex min-h-7 flex-wrap items-center gap-1.5 border-b border-neutral-800/50 px-2 py-0.5">
-    <Button
-      variant="outline"
-      size="sm"
-      class="h-6 px-2 py-0.5 text-xs"
-      onClick={props.toolbar.onClose}
-    >
-      Hide
-    </Button>
     <Show when={props.toolbar.showAddMidiClip}>
       <Button
         variant="default"
@@ -144,9 +140,73 @@ const EffectsPanelToolbar: Component<EffectsPanelToolbarProps> = (props) => (
   </div>
 );
 
+type EffectsPanelFooterProps = {
+  toggleLabel: "Hide" | "Show";
+  onEffectsTabClick: () => void;
+  onToggle: () => void;
+  clipTab: {
+    canOpen: boolean;
+    onOpen: () => void;
+  };
+};
+
+const EffectsPanelFooter: Component<EffectsPanelFooterProps> = (props) => (
+  <div
+    class="flex shrink-0 items-center justify-between border-t border-neutral-800 bg-neutral-950"
+    style={{ height: `${EFFECTS_PANEL_FOOTER_HEIGHT_PX}px` }}
+  >
+    <div class="flex h-full items-center gap-1">
+      <Button
+        variant="ghost"
+        size="sm"
+        type="button"
+        class="h-full border-x border-neutral-700 bg-neutral-800 px-3 text-[11px] font-semibold uppercase tracking-wide text-neutral-100"
+        onClick={props.onEffectsTabClick}
+      >
+        Effects
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        type="button"
+        class="h-full border-x border-neutral-800 px-3 text-[11px] font-semibold uppercase tracking-wide text-neutral-500"
+        disabled={!props.clipTab.canOpen}
+        onClick={props.clipTab.onOpen}
+      >
+        Clip
+      </Button>
+    </div>
+    <Button
+      variant="ghost"
+      size="sm"
+      type="button"
+      class="h-full border-x border-neutral-700 bg-neutral-900 px-3 text-[11px] font-semibold uppercase tracking-wide text-neutral-200 hover:bg-neutral-800"
+      onClick={props.onToggle}
+    >
+      {props.toggleLabel}
+    </Button>
+  </div>
+);
+
+const EffectsPanelClosedFooter: Component<{
+  onOpen: () => void;
+  clipTab: EffectsPanelFooterProps["clipTab"];
+}> = (props) => (
+  <div
+    class="fixed left-0 right-0 bottom-0 z-50 bg-neutral-900"
+    style={{ "padding-bottom": `${BOTTOM_PANEL_EDGE_PADDING_PX}px` }}
+  >
+    <EffectsPanelFooter
+      toggleLabel="Show"
+      onEffectsTabClick={props.onOpen}
+      onToggle={props.onOpen}
+      clipTab={props.clipTab}
+    />
+  </div>
+);
+
 type EffectsPanelInstrumentSectionProps = {
   instrument: {
-    currentTrack?: Track;
     state: InstrumentPanelState;
     canWrite: boolean;
   };
@@ -157,13 +217,7 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
     class="flex h-full shrink-0 items-stretch gap-3"
     classList={{ "pointer-events-none opacity-60": !props.instrument.canWrite }}
   >
-    <Show
-      when={
-        props.instrument.currentTrack &&
-        props.instrument.currentTrack.kind === "instrument" &&
-        !!props.instrument.state.arp.params()
-      }
-    >
+    <Show when={!!props.instrument.state.arp.params()}>
       <Arpeggiator
         params={props.instrument.state.arp.params()!}
         onChange={(updates) => {
@@ -185,8 +239,6 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
 
     <Show
       when={
-        props.instrument.currentTrack &&
-        props.instrument.currentTrack.kind === "instrument" &&
         !!props.instrument.state.synth.params() &&
         !props.instrument.state.synth.isExpandedForCurrentTarget()
       }
@@ -213,8 +265,6 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
 
     <Show
       when={
-        props.instrument.currentTrack &&
-        props.instrument.currentTrack.kind === "instrument" &&
         !!props.instrument.state.synth.params() &&
         props.instrument.state.synth.isExpandedForCurrentTarget()
       }
@@ -308,19 +358,6 @@ const EffectsPanelEmptyState: Component<EffectsPanelEmptyStateProps> = (props) =
       Use Add EQ or Add Reverb.
     </div>
   </Show>
-);
-
-type EffectsPanelClosedButtonProps = {
-  onOpen: () => void;
-};
-
-const EffectsPanelClosedButton: Component<EffectsPanelClosedButtonProps> = (props) => (
-  <button
-    class="fixed bottom-4 right-4 border border-neutral-700 bg-neutral-800 px-3 py-2 text-white hover:bg-neutral-700"
-    onClick={props.onOpen}
-  >
-    Open Effects
-  </button>
 );
 
 type EffectsPanelFloatingSynthProps = {
@@ -724,6 +761,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     void flushPending();
     props.onClose();
   };
+  const showToolbar = () => isInstrumentTrack() || !eqForTarget() || !reverbForTarget();
 
   onCleanup(() => {
     void flushPending();
@@ -735,32 +773,42 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         <TimelineBottomPanelShell
           controls={props.shell}
           resizeLabel="Resize effects panel"
+          footer={
+            <EffectsPanelFooter
+              toggleLabel="Hide"
+              onEffectsTabClick={props.onOpen}
+              onToggle={handleClose}
+              clipTab={props.clipTab}
+            />
+          }
         >
           <div class="flex h-full min-h-0 flex-col">
             <div class="flex flex-1 flex-col overflow-hidden min-h-0">
-              <EffectsPanelToolbar
-                toolbar={{
-                  showAddMidiClip: isInstrumentTrack(),
-                  showAddArp: isInstrumentTrack() && !instrumentState.arp.params(),
-                  onAddMidiClip: instrumentState.addMidiClip,
-                  showAddEq: !eqForTarget(),
-                  showAddReverb: !reverbForTarget(),
-                  onAddArp: instrumentState.arp.add,
-                  onAddEq: eqState.add,
-                  onAddReverb: reverbState.add,
-                  onClose: handleClose,
-                  canWrite: canWriteCurrentTargetEffects(),
-                }}
-              />
-              <div class="flex-1 overflow-x-auto overflow-y-hidden px-2 py-2 min-h-0">
+              <Show when={showToolbar()}>
+                <EffectsPanelToolbar
+                  toolbar={{
+                    showAddMidiClip: isInstrumentTrack(),
+                    showAddArp: isInstrumentTrack() && !instrumentState.arp.params(),
+                    onAddMidiClip: instrumentState.addMidiClip,
+                    showAddEq: !eqForTarget(),
+                    showAddReverb: !reverbForTarget(),
+                    onAddArp: instrumentState.arp.add,
+                    onAddEq: eqState.add,
+                    onAddReverb: reverbState.add,
+                    canWrite: canWriteCurrentTargetEffects(),
+                  }}
+                />
+              </Show>
+              <div class="flex-1 overflow-x-auto overflow-y-hidden px-1 py-[3px] min-h-0">
                 <div class="flex items-stretch gap-3 h-full min-w-min min-h-0">
-                  <EffectsPanelInstrumentSection
-                    instrument={{
-                      currentTrack: currentTrack(),
-                      state: instrumentState,
-                      canWrite: canWriteCurrentTargetEffects(),
-                    }}
-                  />
+                  <Show when={isInstrumentTrack()}>
+                    <EffectsPanelInstrumentSection
+                      instrument={{
+                        state: instrumentState,
+                        canWrite: canWriteCurrentTargetEffects(),
+                      }}
+                    />
+                  </Show>
                   <EffectsPanelEffectCards
                     effects={{
                       orderedEffects: orderedEffects(),
@@ -799,7 +847,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       </Show>
 
       <Show when={!props.isOpen && props.showOpenButton}>
-        <EffectsPanelClosedButton onOpen={props.onOpen} />
+        <EffectsPanelClosedFooter onOpen={props.onOpen} clipTab={props.clipTab} />
       </Show>
 
       <EffectsPanelFloatingSynth synth={instrumentState.synth} canWrite={canWriteCurrentTargetEffects()} />

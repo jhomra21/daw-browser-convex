@@ -1,5 +1,6 @@
 import { createEffect, createSignal, onCleanup, type Component, type JSX } from "solid-js";
 import { BOTTOM_PANEL_DEFAULT_HEIGHT_PX } from "~/lib/bottom-panel-preferences";
+import { BOTTOM_PANEL_EDGE_PADDING_PX, BOTTOM_PANEL_RESIZE_HANDLE_OVERHANG_PX } from "~/lib/bottom-panel-layout";
 
 export type TimelineBottomPanelShellControls = {
   heightPx: number;
@@ -10,6 +11,7 @@ export type TimelineBottomPanelShellControls = {
 type TimelineBottomPanelShellProps = {
   controls: TimelineBottomPanelShellControls;
   resizeLabel: string;
+  footer?: JSX.Element;
   children: JSX.Element;
 };
 
@@ -46,20 +48,27 @@ const TimelineBottomPanelShell: Component<TimelineBottomPanelShellProps> = (prop
   });
 
   return (
-    <div class="fixed left-0 right-0 bottom-0 z-50 border-t border-neutral-800 bg-neutral-900">
+    <div
+      class="fixed left-0 right-0 bottom-0 z-50 border-t border-neutral-800 bg-neutral-900"
+      style={{ "padding-bottom": `${BOTTOM_PANEL_EDGE_PADDING_PX}px` }}
+    >
       <button
         type="button"
         aria-label={props.resizeLabel}
-        class="absolute left-0 right-0 top-0 h-2 cursor-ns-resize bg-neutral-800/60 hover:bg-sky-500/50"
+        class="absolute left-0 right-0 top-0 z-40 -translate-y-1/2 cursor-ns-resize"
+        style={{ height: `${BOTTOM_PANEL_RESIZE_HANDLE_OVERHANG_PX * 2}px` }}
         onDblClick={() => props.controls.onHeightCommit(BOTTOM_PANEL_DEFAULT_HEIGHT_PX)}
         onPointerDown={(event) => {
           event.preventDefault();
           setDragStart({ y: event.clientY, height: props.controls.heightPx });
         }}
-      />
+      >
+        <div class="pointer-events-none absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2 bg-neutral-700" />
+      </button>
       <div style={{ height: `${props.controls.heightPx}px` }}>
         {props.children}
       </div>
+      {props.footer}
     </div>
   );
 };

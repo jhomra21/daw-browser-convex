@@ -5,6 +5,7 @@ import { normalizeAudioWarp, sanitizeAudioSourceKind } from '@daw-browser/shared
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectAssetRow } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { normalizeTrackChannelRole } from '@daw-browser/shared'
+import { normalizeProjectMixState } from '~/lib/project-mix-state'
 import type { TimelineClipRow, TimelineTrackRow } from '~/lib/timeline-repository/types'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
@@ -118,7 +119,7 @@ export const cacheRemoteTimelineSnapshot = async (
   const clipsWithExistingTracks = clips.filter((clip) => trackIds.has(clip.trackId))
   const assets = toAssetRows(clipsWithExistingTracks, timestamp)
   const db = await openLocalProjectDb(projectId)
-  const tx = db.transaction(['entities', 'assets', 'syncState'], 'readwrite')
+  const tx = db.transaction(['entities', 'assets', 'projectState', 'syncState'], 'readwrite')
   const [cachedTracks, cachedClips] = await Promise.all([
     tx.objectStore('entities').index('by-kind').getAll(TRACK_KIND),
     tx.objectStore('entities').index('by-kind').getAll(CLIP_KIND),
@@ -136,6 +137,11 @@ export const cacheRemoteTimelineSnapshot = async (
           updatedAt: timestamp,
         })]
       : []),
+    tx.objectStore('projectState').put({
+      key: 'projectMix',
+      value: normalizeProjectMixState(data.mixerSettings),
+      updatedAt: timestamp,
+    }),
     tx.objectStore('syncState').put({
       key: REMOTE_CACHE_KEY,
       value: {

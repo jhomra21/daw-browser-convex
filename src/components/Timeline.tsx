@@ -36,6 +36,8 @@ import { useTimelineDragDrop } from "~/hooks/useTimelineDragDrop";
 import { useTimelineHistory } from "~/hooks/useTimelineHistory";
 import { useTimelineIdentity } from "~/hooks/useTimelineIdentity";
 import { useTimelineLocalMix } from "~/hooks/useTimelineLocalMix";
+import { useTimelineMasterVolume } from "~/hooks/useTimelineMasterVolume";
+import { useTimelineProjectMix } from "~/hooks/useTimelineProjectMix";
 import { useTimelineProjectionState } from "~/hooks/useTimelineProjectionState";
 import { useTimelineSelectionState } from "~/hooks/useTimelineSelectionState";
 import { useTimelinePersistenceController } from "~/hooks/useTimelinePersistenceController";
@@ -190,6 +192,18 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     writableTrackIds,
     onLocalSaveFailed: localProject.setLocalSaveFailure,
+  });
+  const projectMix = useTimelineProjectMix({
+    projectId,
+    onLocalSaveFailed: localProject.setLocalSaveFailure,
+  });
+  const masterVolume = useTimelineMasterVolume({
+    projectId,
+    userId,
+    currentProjectRole,
+    fullViewData: () => fullView.data,
+    audioEngine,
+    projectMix,
   });
   const { pushHistory, handleUndo, handleRedo } = useTimelineHistory({
     projectId,
@@ -824,11 +838,6 @@ const Timeline: Component<TimelineProps> = (props) => {
       onExportArchive: localProject.exportArchive,
       onImportArchive: () => archiveInputRef?.click(),
     },
-    onMasterFX: () => {
-      selection.setSelectedFXTarget("master");
-      bottomPanel.setMode("effects");
-      bottomPanel.setOpen(true);
-    },
     bpm: bpm(),
     onChangeBpm: (next: number) => setBpm(clampBpm(next)),
     metronomeEnabled: metronomeEnabled(),
@@ -928,6 +937,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       getTracks: () => renderTracks(),
       selectedTrackId: selection.selectedTrackId() || undefined,
       bpm: bpm(),
+      masterVolume: masterVolume.volume(),
       loopEnabled: loopEnabled(),
       loopStartSec: loopStartSec(),
       loopEndSec: loopEndSec(),
@@ -1055,6 +1065,21 @@ const Timeline: Component<TimelineProps> = (props) => {
         sidebar={{
           isPlaying: isPlaying(),
           currentUserId: userId(),
+          master: {
+            selected: selection.selectedFXTarget() === "master",
+            ready: masterVolume.ready(),
+            canEditVolume: masterVolume.canEdit(),
+            volume: masterVolume.volume(),
+            onClick: () => {
+              bottomPanel.setMode("effects");
+              bottomPanel.setOpen(true);
+              selection.selectMasterTarget();
+            },
+            onVolumePreview: masterVolume.previewVolume,
+            onVolumeChange: (volume) => {
+              masterVolume.commitVolume(volume);
+            },
+          },
           subscribeTrackLevels: (listener) =>
             audioEngine.subscribeTrackStereoLevels(listener),
           onTrackClick: (id) => {

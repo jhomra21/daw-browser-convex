@@ -1,7 +1,7 @@
 import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime } from './audio-runtime'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
-import type { ArpParams, EqParamsLite, ReverbParamsLite, SynthParamsInput } from '@daw-browser/shared'
+import { normalizeMasterVolume, type ArpParams, type EqParamsLite, type ReverbParamsLite, type SynthParamsInput } from '@daw-browser/shared'
 import { createImpulseResponseBuffer, getImpulseResponseBufferInfo } from './effects/dsp'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
@@ -30,6 +30,7 @@ export class AudioEngine {
   private masterGain: GainNode | null = null
   private destination: AudioDestinationNode | null = null
   private tracksSnapshot: RuntimeTrack[] = []
+  private masterVolume = 1
   private sources = createSourceRegistry()
   private synthRuntime = createSynthRuntime({
     ensureAudio: () => this.ensureAudio(),
@@ -116,6 +117,7 @@ export class AudioEngine {
       this.runtime = createAudioRuntime()
       this.audioCtx = this.runtime.ctx
       this.masterGain = this.runtime.masterGain
+      this.masterGain.gain.value = this.masterVolume
       this.destination = this.runtime.destination
       this.masterFx.applyPending(this.audioCtx, this.masterGain, this.destination, (decaySec) => this.createImpulseResponse(decaySec))
       if (opts?.applyCachedTrackGains !== false) {
@@ -222,6 +224,14 @@ export class AudioEngine {
 
   previewTrackVolume(trackId: string, volume: number, muted: boolean) {
     this.mixerRuntime.previewTrackVolume(trackId, volume, muted)
+  }
+
+  setMasterVolume(volume: number) {
+    const nextVolume = normalizeMasterVolume(volume)
+    if (nextVolume === this.masterVolume) return
+    this.masterVolume = nextVolume
+    if (!this.masterGain) return
+    this.masterGain.gain.value = nextVolume
   }
 
   setTrackEq(trackId: string, params: EqParamsLite) {

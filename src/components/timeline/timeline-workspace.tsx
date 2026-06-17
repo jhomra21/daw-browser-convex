@@ -95,6 +95,15 @@ type Props = {
   sidebar: {
     isPlaying: boolean;
     currentUserId: string;
+    master: {
+      selected: boolean;
+      ready: boolean;
+      canEditVolume: boolean;
+      volume: number;
+      onClick: () => void;
+      onVolumePreview: (volume: number) => void;
+      onVolumeChange: (volume: number) => void;
+    };
     subscribeTrackLevels: AudioEngine["subscribeTrackStereoLevels"];
     canWriteTrackRouting: (trackId: Track["id"]) => boolean;
     onTrackClick: (trackId: Track["id"]) => void;
@@ -216,6 +225,10 @@ export default function TimelineWorkspace(props: Props) {
                 tracks: props.tracks,
                 selectedTrackId: props.selection.selectedTrackId(),
                 sidebarWidth: props.sidebarWidth,
+                master: {
+                  ...props.sidebar.master,
+                  bottomOffsetPx: bottomPanelHeight(),
+                },
                 isPlaying: props.sidebar.isPlaying,
                 recordArmTrackId: props.recording.recordArmTrackId,
                 currentUserId: props.sidebar.currentUserId,

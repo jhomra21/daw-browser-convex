@@ -31,6 +31,7 @@ export type ExportProgress = {
 export type TimelineExportRequest = {
   getTracks: () => RuntimeTrack[]
   bpm: number
+  masterVolume: number
   range: ExportRange
   formats: readonly ExportAudioFormat[]
   projectId?: string
@@ -283,6 +284,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       ensureBuffersForRange({ ...input, tracks: preloadTracks }),
       loadExportFx(input.projectId, input.userId),
     ])
+    fx.masterVolume = input.masterVolume
     throwIfExportAborted(input.signal)
     const tracks = input.getTracks()
     input.onProgress?.({ phase: 'rendering' })
@@ -376,6 +378,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
       ensureBuffersForRange({ ...input, tracks: preloadStemTracks }),
       loadExportFx(input.projectId, input.userId),
     ])
+    fx.masterVolume = input.masterVolume
     throwIfExportAborted(input.signal)
     const tracks = input.getTracks()
     const stemTracks = collectStemTracks({ ...input, tracks })

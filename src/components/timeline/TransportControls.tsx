@@ -580,13 +580,6 @@ const SettingsMenu: Component<{ toolbar: TransportControlsProps }> = (props) => 
         <MenubarSeparator />
         <MenubarItem
           class={nativeMenuItemClass}
-          onSelect={toolbar().onMasterFX}
-        >
-          Master FX
-        </MenubarItem>
-        <MenubarSeparator />
-        <MenubarItem
-          class={nativeMenuItemClass}
           onSelect={toolbar().onToggleMetronome}
         >
           {toolbar().metronomeEnabled ? "Disable" : "Enable"} Metronome

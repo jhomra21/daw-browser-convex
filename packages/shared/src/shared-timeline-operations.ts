@@ -6,6 +6,7 @@ import type {
   SynthWave,
 } from './effects-params'
 import { normalizeAudioWarp, normalizeClipGain, type AudioWarpPayload } from './audio-warp'
+import { normalizeMasterVolume } from './master-volume'
 
 export type MoveClipInput = {
   clipId: string
@@ -69,6 +70,7 @@ export type SharedTimelineOperation =
   | { kind: 'tracks.setRouting'; payload: { trackId: string; routing: TrackRouting } }
   | { kind: 'tracks.setVolume'; payload: { trackId: string; volume: number } }
   | { kind: 'tracks.setMix'; payload: { trackId: string; muted?: boolean; soloed?: boolean } }
+  | { kind: 'mixer.setMasterVolume'; payload: { volume: number } }
   | { kind: 'effects.setEqParams'; payload: { trackId: string; params: EqParams } }
   | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: ReverbParams } }
   | { kind: 'effects.setSynthParams'; payload: { trackId: string; params: SharedSynthParams } }
@@ -363,6 +365,12 @@ const parseTrackMix = (payload: Record<string, unknown>): SharedTimelineOperatio
     : null
 )
 
+const parseMasterVolume = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
+  typeof payload.volume === 'number'
+    ? { kind: 'mixer.setMasterVolume', payload: { volume: normalizeMasterVolume(payload.volume) } }
+    : null
+)
+
 const parseTrackEq = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readEqParams(payload.params)
   return typeof payload.trackId === 'string' && params ? { kind: 'effects.setEqParams', payload: { trackId: payload.trackId, params } } : null
@@ -446,6 +454,7 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   { kind: 'tracks.setRouting', parse: parseTrackRouting, targets: readRoutingTargets, durableQueue: true },
   { kind: 'tracks.setVolume', parse: parseTrackVolume, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'tracks.setMix', parse: parseTrackMix, targets: readTrackIdTargets, durableQueue: true },
+  { kind: 'mixer.setMasterVolume', parse: parseMasterVolume, targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setEqParams', parse: parseTrackEq, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setReverbParams', parse: parseTrackReverb, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setSynthParams', parse: parseTrackSynth, targets: readTrackIdTargets, durableQueue: true },

@@ -9,7 +9,6 @@ type UseEffectsPanelTargetOptions = {
 
 type UseEffectsPanelTargetReturn = {
   currentTargetId: Accessor<Track["id"] | "master">;
-  targetName: Accessor<string>;
   currentTrack: Accessor<Track | undefined>;
   currentTrackId: Accessor<Track["id"] | undefined>;
   isInstrumentTrack: Accessor<boolean>;
@@ -30,7 +29,6 @@ export function useEffectsPanelTarget(
 
   const currentTrack = createMemo(() => resolveTrackByTargetId(currentTargetId()));
   const currentTrackId = createMemo(() => currentTrack()?.id);
-  const targetName = createMemo(() => currentTargetId() === "master" ? "Master" : currentTrack()?.name ?? "Track");
   const isInstrumentTrack = createMemo(() => currentTrack()?.kind === "instrument");
   const canWriteCurrentTrackRouting = createMemo(() => {
     const track = currentTrack();
@@ -40,7 +38,6 @@ export function useEffectsPanelTarget(
 
   return {
     currentTargetId,
-    targetName,
     currentTrack,
     currentTrackId,
     isInstrumentTrack,

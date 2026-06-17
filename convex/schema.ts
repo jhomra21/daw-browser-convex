@@ -33,6 +33,13 @@ export default defineSchema({
     .index("by_room", ["projectId"])
     .index("by_track", ["trackId"]),
 
+  projectMixerSettings: defineTable({
+    projectId: v.string(),
+    masterVolume: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_room", ["projectId"]),
+
   clips: defineTable({
     projectId: v.string(),
     trackId: v.id("tracks"),

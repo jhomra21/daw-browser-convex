@@ -18,6 +18,7 @@ type Props = {
   getTracks: () => RuntimeTrack[]
   selectedTrackId?: string
   bpm: number
+  masterVolume: number
   loopEnabled: boolean
   loopStartSec: number
   loopEndSec: number
@@ -131,6 +132,7 @@ const ExportDialog: Component<Props> = (props) => {
       const baseRequest = {
         getTracks: props.getTracks,
         bpm: props.bpm,
+        masterVolume: props.masterVolume,
         range: computeRange(),
         formats: selectedFormats(),
         projectId: props.projectId,

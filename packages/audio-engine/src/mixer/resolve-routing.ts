@@ -1,5 +1,5 @@
 import { getMixerChannelRole, type MixerChannel } from './channels'
-import { normalizeTrackRouting } from '@daw-browser/shared'
+import { normalizeMasterVolume, normalizeTrackRouting } from '@daw-browser/shared'
 import type { ResolveMixerGraphOptions, ResolvedMixerGraph, ResolvedMixerSend } from './types'
 import type { Track } from '@daw-browser/timeline-core/types'
 
@@ -144,6 +144,7 @@ export function resolveMixerGraph(options: ResolveMixerGraphOptions): ResolvedMi
         }
       }),
     master: {
+      volume: normalizeMasterVolume(options.masterVolume ?? 1),
       eq: options.masterEq,
       reverb: options.masterReverb,
     },

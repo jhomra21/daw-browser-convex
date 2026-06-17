@@ -72,65 +72,42 @@ type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[num
 type LocalEqRow = LocalEffectRow<EqParams>;
 type LocalReverbRow = LocalEffectRow<ReverbParams>;
 
-type EffectsPanelRailProps = {
-  rail: {
-    isInstrumentTrack: boolean;
-    targetName: string;
-    onClose: () => void;
-    onAddMidiClip: () => Promise<void>;
-    canWrite: boolean;
-  };
-};
-
-const EffectsPanelRail: Component<EffectsPanelRailProps> = (props) => (
-  <div class="flex w-20 flex-col items-center gap-2 border-r border-neutral-800 px-2 py-2">
-    <Button
-      variant="outline"
-      size="sm"
-      class="w-full py-1 text-xs"
-      onClick={props.rail.onClose}
-    >
-      Hide
-    </Button>
-    <Show when={props.rail.isInstrumentTrack}>
-      <Button
-        variant="default"
-        size="sm"
-        class="w-full px-1 py-1 text-xs"
-        disabled={!props.rail.canWrite}
-        onClick={() => void props.rail.onAddMidiClip()}
-      >
-        + MIDI
-      </Button>
-    </Show>
-    <div class="flex flex-1 items-center justify-center">
-      <span
-        class="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-neutral-300"
-        style={{
-          transform: "rotate(-90deg)",
-          "white-space": "nowrap",
-        }}
-      >
-        {props.rail.targetName}
-      </span>
-    </div>
-  </div>
-);
-
 type EffectsPanelToolbarProps = {
   toolbar: {
     showAddArp: boolean;
+    showAddMidiClip: boolean;
     showAddEq: boolean;
     showAddReverb: boolean;
     onAddArp: () => void;
+    onAddMidiClip: () => Promise<void>;
     onAddEq: () => void;
     onAddReverb: () => void;
+    onClose: () => void;
     canWrite: boolean;
   };
 };
 
 const EffectsPanelToolbar: Component<EffectsPanelToolbarProps> = (props) => (
   <div class="flex min-h-7 flex-wrap items-center gap-1.5 border-b border-neutral-800/50 px-2 py-0.5">
+    <Button
+      variant="outline"
+      size="sm"
+      class="h-6 px-2 py-0.5 text-xs"
+      onClick={props.toolbar.onClose}
+    >
+      Hide
+    </Button>
+    <Show when={props.toolbar.showAddMidiClip}>
+      <Button
+        variant="default"
+        size="sm"
+        class="h-6 px-2 py-0.5 text-xs"
+        disabled={!props.toolbar.canWrite}
+        onClick={() => void props.toolbar.onAddMidiClip()}
+      >
+        + MIDI
+      </Button>
+    </Show>
     <Show when={props.toolbar.showAddArp}>
       <Button
         variant="default"
@@ -379,7 +356,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   });
   const {
     currentTargetId,
-    targetName,
     currentTrack,
     isInstrumentTrack,
     canWriteCurrentTrackRouting,
@@ -760,25 +736,19 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
           controls={props.shell}
           resizeLabel="Resize effects panel"
         >
-          <div class="flex h-full">
-            <EffectsPanelRail
-              rail={{
-                isInstrumentTrack: isInstrumentTrack(),
-                targetName: targetName(),
-                onClose: handleClose,
-                onAddMidiClip: instrumentState.addMidiClip,
-                canWrite: canWriteCurrentTargetEffects(),
-              }}
-            />
+          <div class="flex h-full min-h-0 flex-col">
             <div class="flex flex-1 flex-col overflow-hidden min-h-0">
               <EffectsPanelToolbar
                 toolbar={{
-                  showAddArp: !!currentTrack() && currentTrack()!.kind === "instrument" && !instrumentState.arp.params(),
+                  showAddMidiClip: isInstrumentTrack(),
+                  showAddArp: isInstrumentTrack() && !instrumentState.arp.params(),
+                  onAddMidiClip: instrumentState.addMidiClip,
                   showAddEq: !eqForTarget(),
                   showAddReverb: !reverbForTarget(),
                   onAddArp: instrumentState.arp.add,
                   onAddEq: eqState.add,
                   onAddReverb: reverbState.add,
+                  onClose: handleClose,
                   canWrite: canWriteCurrentTargetEffects(),
                 }}
               />
@@ -817,8 +787,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                         !reverbForTarget() &&
                         !instrumentState.arp.params() &&
                         (!instrumentState.synth.params() ||
-                          !currentTrack() ||
-                          currentTrack()!.kind !== "instrument"),
+                          !isInstrumentTrack()),
                       currentTargetId: currentTargetId(),
                     }}
                   />

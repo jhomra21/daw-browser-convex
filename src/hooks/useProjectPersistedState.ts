@@ -15,6 +15,7 @@ type UseRoomPersistedStateOptions<TValue> = {
 
 type UseRoomPersistedStateReturn<TValue> = {
   value: Accessor<TValue>
+  isHydrated: Accessor<boolean>
   setValue: RoomPersistedSetter<TValue>
   setValueSilently: RoomPersistedSetter<TValue>
 }
@@ -24,6 +25,7 @@ export function useProjectPersistedState<TValue>(
 ): UseRoomPersistedStateReturn<TValue> {
   const initialProjectId = options.projectId()
   const [currentValue, setCurrentValue] = createSignal(initialProjectId ? options.load(initialProjectId) : options.createInitial())
+  const [asyncHydrated, setAsyncHydrated] = createSignal(!options.loadAsync || !initialProjectId)
   let hydratedProjectId = initialProjectId
   let valueRevision = 0
   const pendingAsyncSavesByProject = new Map<string, Set<Promise<void>>>()
@@ -53,9 +55,11 @@ export function useProjectPersistedState<TValue>(
     valueRevision += 1
     if (!projectId) {
       setCurrentValue(() => options.createInitial())
+      setAsyncHydrated(true)
       return
     }
     setCurrentValue(() => options.load(projectId))
+    setAsyncHydrated(!options.loadAsync)
   }
 
   const value: Accessor<TValue> = () => {
@@ -67,15 +71,20 @@ export function useProjectPersistedState<TValue>(
     syncHydratedValue()
     if (!projectId || !options.loadAsync) return
     const loadRevision = valueRevision
+    setAsyncHydrated(false)
     void options.loadAsync(projectId).then((loaded) => {
-      if (loaded === undefined || options.projectId() !== projectId || valueRevision !== loadRevision) return
-      setCurrentValue(() => loaded)
-    }).catch(() => undefined)
+      if (options.projectId() !== projectId || valueRevision !== loadRevision) return
+      if (loaded !== undefined) setCurrentValue(() => loaded)
+      setAsyncHydrated(true)
+    }).catch(() => {
+      if (options.projectId() === projectId && valueRevision === loadRevision) setAsyncHydrated(true)
+    })
   }, { defer: false }))
 
   const applyValue: RoomPersistedSetter<TValue> = (next) => {
     syncHydratedValue()
     valueRevision += 1
+    setAsyncHydrated(true)
     return setCurrentValue(next)
   }
 
@@ -83,6 +92,7 @@ export function useProjectPersistedState<TValue>(
     syncHydratedValue()
     const previous = currentValue()
     const resolved = setCurrentValue(next)
+    setAsyncHydrated(true)
     const projectId = options.projectId()
     if (projectId && resolved !== previous) {
       valueRevision += 1
@@ -110,6 +120,7 @@ export function useProjectPersistedState<TValue>(
 
   return {
     value,
+    isHydrated: asyncHydrated,
     setValue: setPersistedValue,
     setValueSilently: applyValue,
   }

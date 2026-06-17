@@ -29,7 +29,7 @@ function buildOfflineFxChain(
 
 export function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: ResolvedMixerGraph): OfflineMixerNodes {
   const masterInput = ctx.createGain()
-  masterInput.gain.value = 1
+  masterInput.gain.value = graph.master.volume
   buildOfflineFxChain(ctx, masterInput, ctx.destination, graph.master.eq, graph.master.reverb)
 
   const trackNodes = new Map<string, OfflineTrackNodes>()

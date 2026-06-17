@@ -120,6 +120,11 @@ export const executeTimelineOperation = async (
         muted: operation.payload.muted,
         soloed: operation.payload.soloed,
       })
+    case 'mixer.setMasterVolume':
+      return await context.convex.mutation(convexApi.projectMixerSettings.setMasterVolume, {
+        projectId: context.projectId,
+        volume: operation.payload.volume,
+      })
     case 'effects.setEqParams':
       return await context.convex.mutation(convexApi.effects.serverSetEqParams, {
         projectId: context.projectId,

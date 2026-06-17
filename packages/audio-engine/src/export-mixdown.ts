@@ -36,6 +36,7 @@ export type ExportRange =
   | { mode: 'custom'; startSec: number; endSec: number }
 
 export type ExportFx = {
+  masterVolume?: number
   masterEq?: EqParamsLite
   masterReverb?: ReverbParamsLite
   trackFx?: Record<string, { eq?: EqParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput }>
@@ -154,6 +155,7 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
       channels: createMixerChannels(tracks),
       masterEq: fx?.masterEq,
       masterReverb: fx?.masterReverb,
+      masterVolume: fx?.masterVolume,
       trackFx: fx?.trackFx,
     }),
     signal,
@@ -171,7 +173,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
   const stretchCache = createAudioStretchCache({
     createBuffer: (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
   })
-  const graph = includeMasterFx ? prepared.mixerGraph : { ...prepared.mixerGraph, master: {} }
+  const graph = includeMasterFx ? prepared.mixerGraph : { ...prepared.mixerGraph, master: { volume: prepared.mixerGraph.master.volume } }
   const { trackNodes } = createOfflineMixerNodes(ctx, graph)
 
   for (const resolvedTrack of graph.channels) {

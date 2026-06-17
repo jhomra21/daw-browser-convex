@@ -60,7 +60,7 @@ export function useTimelineSelectionState(
       selectedFXTarget: selectedFXTarget(),
     }
     const reconciledSelection = reconcileTimelineSelection(nextTracks, currentSelection)
-    const nextSelection = !reconciledSelection.selectedTrackId && nextTracks.length > 0
+    const nextSelection = !reconciledSelection.selectedTrackId && reconciledSelection.selectedFXTarget !== 'master' && nextTracks.length > 0
       ? { ...reconciledSelection, selectedTrackId: nextTracks[0].id }
       : reconciledSelection
     if (isTimelineSelectionEqual(currentSelection, nextSelection)) return

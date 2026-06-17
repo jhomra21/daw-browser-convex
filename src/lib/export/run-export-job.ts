@@ -31,6 +31,7 @@ export type ExportProgress = {
 export type TimelineExportRequest = {
   getTracks: () => RuntimeTrack[]
   bpm: number
+  masterVolume: number
   range: ExportRange
   formats: readonly ExportAudioFormat[]
   projectId?: string
@@ -159,8 +160,8 @@ async function ensureBuffersForRange(input: ExportTrackSnapshotInput) {
   throwIfExportAborted(input.signal)
 }
 
-async function loadExportFx(projectId: string | undefined, userId: string | undefined): Promise<ExportFx> {
-  const fx: ExportFx = { trackFx: {} }
+async function loadExportFx(projectId: string | undefined, userId: string | undefined, masterVolume: number): Promise<ExportFx> {
+  const fx: ExportFx = { trackFx: {}, masterVolume }
   const localOnly = projectId ? isLocalId('project', projectId) : false
   if (localOnly && projectId) {
     try {
@@ -281,7 +282,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     const [exportMixdown, , fx] = await Promise.all([
       mixdownModule,
       ensureBuffersForRange({ ...input, tracks: preloadTracks }),
-      loadExportFx(input.projectId, input.userId),
+      loadExportFx(input.projectId, input.userId, input.masterVolume),
     ])
     throwIfExportAborted(input.signal)
     const tracks = input.getTracks()
@@ -374,7 +375,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
     const [exportMixdown, , fx] = await Promise.all([
       mixdownModule,
       ensureBuffersForRange({ ...input, tracks: preloadStemTracks }),
-      loadExportFx(input.projectId, input.userId),
+      loadExportFx(input.projectId, input.userId, input.masterVolume),
     ])
     throwIfExportAborted(input.signal)
     const tracks = input.getTracks()

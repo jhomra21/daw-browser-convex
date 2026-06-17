@@ -13,6 +13,7 @@ export type ResolvedMixerSend = TrackSend
 
 export type ResolveMixerGraphOptions = {
   channels: MixerChannel[]
+  masterVolume?: number
   masterEq?: EqParamsLite
   masterReverb?: ReverbParamsLite
   trackFx?: Record<string, MixerTrackFx>
@@ -30,6 +31,7 @@ export type ResolvedMixerChannel = {
 export type ResolvedMixerGraph = {
   channels: ResolvedMixerChannel[]
   master: {
+    volume: number
     eq?: EqParamsLite
     reverb?: ReverbParamsLite
   }

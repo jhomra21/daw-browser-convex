@@ -1,6 +1,7 @@
 import { createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
+import type { MasterSidebarModel } from "~/components/timeline/MasterSidebarRow";
 import TrackSidebar from "~/components/timeline/TrackSidebar";
 import TimelineOverlays, { type TimelineMidiBounds } from "~/components/timeline/timeline-overlays";
 import { LANE_HEIGHT, PPS, RULER_HEIGHT } from "~/lib/timeline-utils";
@@ -95,6 +96,7 @@ type Props = {
   sidebar: {
     isPlaying: boolean;
     currentUserId: string;
+    master: MasterSidebarModel;
     subscribeTrackLevels: AudioEngine["subscribeTrackStereoLevels"];
     canWriteTrackRouting: (trackId: Track["id"]) => boolean;
     onTrackClick: (trackId: Track["id"]) => void;
@@ -216,6 +218,8 @@ export default function TimelineWorkspace(props: Props) {
                 tracks: props.tracks,
                 selectedTrackId: props.selection.selectedTrackId(),
                 sidebarWidth: props.sidebarWidth,
+                bottomOffsetPx: bottomPanelHeight(),
+                master: props.sidebar.master,
                 isPlaying: props.sidebar.isPlaying,
                 recordArmTrackId: props.recording.recordArmTrackId,
                 currentUserId: props.sidebar.currentUserId,

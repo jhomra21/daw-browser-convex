@@ -17,16 +17,22 @@ import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
 import { LANE_HEIGHT, RULER_HEIGHT } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Track, TrackSend } from "@daw-browser/timeline-core/types";
+import MasterSidebarRow, {
+  MASTER_ROW_HEIGHT,
+  type MasterSidebarModel,
+} from "~/components/timeline/MasterSidebarRow";
 
 type TrackSidebarProps = {
   sidebar: {
     tracks: Track[];
     selectedTrackId: Track["id"] | "";
     sidebarWidth: number;
+    bottomOffsetPx: number;
+    master: MasterSidebarModel;
     onTrackClick: (trackId: Track["id"]) => void;
-    canWriteTrackRouting?: (trackId: Track["id"]) => boolean;
-    onTrackSendsChange?: (trackId: Track["id"], sends: TrackSend[]) => void;
-    onTrackOutputTargetChange?: (
+    canWriteTrackRouting: (trackId: Track["id"]) => boolean;
+    onTrackSendsChange: (trackId: Track["id"], sends: TrackSend[]) => void;
+    onTrackOutputTargetChange: (
       trackId: Track["id"],
       outputTargetId?: Track["id"],
     ) => void;
@@ -36,7 +42,7 @@ type TrackSidebarProps = {
     onToggleSolo: (trackId: Track["id"]) => void;
     recordArmTrackId: Track["id"] | null;
     onToggleRecordArm: (trackId: Track["id"]) => void;
-    currentUserId?: string;
+    currentUserId: string;
     isPlaying: boolean;
     subscribeTrackLevels: (
       listener: (levels: ReadonlyMap<string, TrackStereoLevels>) => void,
@@ -48,6 +54,11 @@ type TrackSidebarProps = {
     ) => void;
   };
 };
+
+const clampUnit = (value: number) => Math.max(0, Math.min(1, value));
+const clampVolume = (volume: number) => clampUnit(volume);
+const quantizeVolume = (volume: number) =>
+  Math.round(clampVolume(volume) * 100) / 100;
 
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const sidebar = () => props.sidebar;
@@ -163,7 +174,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   });
 
   const canWriteTrackRouting = (track: Track) =>
-    sidebar().canWriteTrackRouting?.(track.id) ?? true;
+    sidebar().canWriteTrackRouting(track.id);
 
   const handleOutputTargetChange = (track: Track, value: string) => {
     if (!canWriteTrackRouting(track)) return;
@@ -175,7 +186,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     const outputTargetId = value
       ? groupTracks().find((groupTrack) => groupTrack.id === value)?.id
       : undefined;
-    sidebar().onTrackOutputTargetChange?.(track.id, outputTargetId);
+    sidebar().onTrackOutputTargetChange(track.id, outputTargetId);
   };
 
   const handleSendTargetChange = (track: Track, targetId: string) => {
@@ -190,7 +201,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       (candidate) => candidate.id === targetId,
     );
     if (!returnTrack) {
-      sidebar().onTrackSendsChange?.(track.id, []);
+      sidebar().onTrackSendsChange(track.id, []);
       return;
     }
     const currentTargetId = actualSendTargetId(track);
@@ -201,7 +212,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       existingAmount !== undefined && existingAmount > 0.0001
         ? existingAmount
         : 1;
-    sidebar().onTrackSendsChange?.(track.id, [
+    sidebar().onTrackSendsChange(track.id, [
       ...existingSends.filter(
         (send) =>
           send.targetId !== currentTargetId && send.targetId !== returnTrack.id,
@@ -216,11 +227,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     startValue: number;
     value: number;
   } | null>(null);
-
-  const clampUnit = (value: number) => Math.max(0, Math.min(1, value));
-  const clampVolume = (volume: number) => clampUnit(volume);
-  const quantizeVolume = (volume: number) =>
-    Math.round(clampVolume(volume) * 100) / 100;
 
   const volumeFromPointer = (input: HTMLInputElement, clientX: number) => {
     const rect = input.getBoundingClientRect();
@@ -274,7 +280,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       </div>
 
       <div
-        class="track-sidebar-scroll h-full overflow-x-clip border-l border-neutral-800 bg-neutral-900 p-0"
+        class="track-sidebar-scroll flex h-full flex-col overflow-x-clip border-l border-neutral-800 bg-neutral-900 p-0"
         style={{
           width: `${sidebar().sidebarWidth}px`,
           "min-width": `${TIMELINE_SIDEBAR_MIN_WIDTH}px`,
@@ -661,6 +667,15 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             );
           }}
         </For>
+        <div
+          class="min-h-6 flex-1 shrink-0"
+          style={{ "padding-bottom": `${MASTER_ROW_HEIGHT}px` }}
+        />
+        <MasterSidebarRow
+          master={sidebar().master}
+          sidebarWidth={sidebar().sidebarWidth}
+          bottomOffsetPx={sidebar().bottomOffsetPx}
+        />
       </div>
     </>
   );

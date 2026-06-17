@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as audioWarpValidator from "../audioWarpValidator.js";
 import type * as authIdentity from "../authIdentity.js";
 import type * as chat from "../chat.js";
 import type * as clipWrites from "../clipWrites.js";
@@ -20,6 +21,7 @@ import type * as ownerships from "../ownerships.js";
 import type * as projectAccess from "../projectAccess.js";
 import type * as projectManifestValidator from "../projectManifestValidator.js";
 import type * as projectMembership from "../projectMembership.js";
+import type * as projectMixerSettings from "../projectMixerSettings.js";
 import type * as projects from "../projects.js";
 import type * as r2Deletes from "../r2Deletes.js";
 import type * as sampleRows from "../sampleRows.js";
@@ -39,6 +41,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  audioWarpValidator: typeof audioWarpValidator;
   authIdentity: typeof authIdentity;
   chat: typeof chat;
   clipWrites: typeof clipWrites;
@@ -51,6 +54,7 @@ declare const fullApi: ApiFromModules<{
   projectAccess: typeof projectAccess;
   projectManifestValidator: typeof projectManifestValidator;
   projectMembership: typeof projectMembership;
+  projectMixerSettings: typeof projectMixerSettings;
   projects: typeof projects;
   r2Deletes: typeof r2Deletes;
   sampleRows: typeof sampleRows;

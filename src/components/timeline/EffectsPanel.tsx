@@ -741,7 +741,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
               <EffectsPanelToolbar
                 toolbar={{
                   showAddMidiClip: isInstrumentTrack(),
-                  showAddArp: !!currentTrack() && currentTrack()!.kind === "instrument" && !instrumentState.arp.params(),
+                  showAddArp: isInstrumentTrack() && !instrumentState.arp.params(),
                   onAddMidiClip: instrumentState.addMidiClip,
                   showAddEq: !eqForTarget(),
                   showAddReverb: !reverbForTarget(),
@@ -787,8 +787,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                         !reverbForTarget() &&
                         !instrumentState.arp.params() &&
                         (!instrumentState.synth.params() ||
-                          !currentTrack() ||
-                          currentTrack()!.kind !== "instrument"),
+                          !isInstrumentTrack()),
                       currentTargetId: currentTargetId(),
                     }}
                   />

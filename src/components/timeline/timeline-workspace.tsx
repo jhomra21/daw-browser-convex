@@ -1,7 +1,8 @@
 import { createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
-import TrackSidebar, { type MasterSidebarModel } from "~/components/timeline/TrackSidebar";
+import type { MasterSidebarModel } from "~/components/timeline/MasterSidebarRow";
+import TrackSidebar from "~/components/timeline/TrackSidebar";
 import TimelineOverlays, { type TimelineMidiBounds } from "~/components/timeline/timeline-overlays";
 import { LANE_HEIGHT, PPS, RULER_HEIGHT } from "~/lib/timeline-utils";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
@@ -217,10 +218,8 @@ export default function TimelineWorkspace(props: Props) {
                 tracks: props.tracks,
                 selectedTrackId: props.selection.selectedTrackId(),
                 sidebarWidth: props.sidebarWidth,
-                master: {
-                  ...props.sidebar.master,
-                  bottomOffsetPx: bottomPanelHeight(),
-                },
+                bottomOffsetPx: bottomPanelHeight(),
+                master: props.sidebar.master,
                 isPlaying: props.sidebar.isPlaying,
                 recordArmTrackId: props.recording.recordArmTrackId,
                 currentUserId: props.sidebar.currentUserId,

@@ -895,6 +895,14 @@ const Timeline: Component<TimelineProps> = (props) => {
         onHeightPreview: bottomPanel.previewHeightPx,
         onHeightCommit: bottomPanel.commitHeightPx,
       },
+      clipTab: {
+        canOpen: Boolean(sampleDetail.selectedClip()),
+        onOpen: () => {
+          if (!sampleDetail.selectedClip()) return;
+          bottomPanel.setMode("sample-detail");
+          bottomPanel.setOpen(true);
+        },
+      },
       selectedFXTarget: selection.selectedFXTarget(),
       tracks: renderTracks(),
       playheadSec: playheadSec(),
@@ -1002,8 +1010,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           scrollRef = el;
           setScrollElement(el);
         }}
-        bottomFXOpen={bottomPanel.open()}
-        bottomPanelHeightPx={bottomPanel.heightPx()}
+        bottomPanelOffsetPx={bottomPanel.bottomPanelOffsetPx()}
         durationSec={duration()}
         sidebarWidth={sidebarWidth()}
         tracks={renderTracks()}
@@ -1084,6 +1091,7 @@ const Timeline: Component<TimelineProps> = (props) => {
             audioEngine.subscribeTrackStereoLevels(listener),
           onTrackClick: (id) => {
             bottomPanel.setMode("effects");
+            bottomPanel.setOpen(true);
             selection.selectTrackTarget(id, { clearClipSelection: true });
           },
           canWriteTrackRouting: canWriteTrack,

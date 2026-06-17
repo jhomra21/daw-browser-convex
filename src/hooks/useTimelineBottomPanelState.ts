@@ -1,4 +1,5 @@
 import { createEffect, createSignal, type Accessor } from "solid-js";
+import { BOTTOM_PANEL_EDGE_PADDING_PX, EFFECTS_PANEL_FOOTER_HEIGHT_PX } from "~/lib/bottom-panel-layout";
 import { BOTTOM_PANEL_DEFAULT_HEIGHT_PX, clampBottomPanelHeight, loadBottomPanelHeight, saveBottomPanelHeight } from "~/lib/bottom-panel-preferences";
 
 export type TimelineBottomPanelMode = "effects" | "sample-detail";
@@ -16,7 +17,13 @@ export const useTimelineBottomPanelState = (options: TimelineBottomPanelStateOpt
   const [agentPanelOpen, setAgentPanelOpen] = createSignal(false);
   const [sharedChatOpen, setSharedChatOpen] = createSignal(false);
 
-  const chatBottomOffsetPx = () => open() ? heightPx() + BOTTOM_PANEL_GAP_PX : 0;
+  const footerHeightPx = () => mode() === "effects" ? EFFECTS_PANEL_FOOTER_HEIGHT_PX : 0;
+  const bottomPanelOffsetPx = () => {
+    const footer = footerHeightPx();
+    if (open()) return heightPx() + footer + BOTTOM_PANEL_EDGE_PADDING_PX;
+    return footer > 0 ? footer + BOTTOM_PANEL_EDGE_PADDING_PX : 0;
+  };
+  const chatBottomOffsetPx = () => bottomPanelOffsetPx() > 0 ? bottomPanelOffsetPx() + BOTTOM_PANEL_GAP_PX : 0;
   const preferenceScopeId = () => options.projectId() ?? "default";
   const viewportHeightPx = () => typeof window === "undefined" ? heightPx() : window.innerHeight;
 
@@ -39,6 +46,7 @@ export const useTimelineBottomPanelState = (options: TimelineBottomPanelStateOpt
     mode,
     setMode,
     heightPx,
+    bottomPanelOffsetPx,
     previewHeightPx,
     commitHeightPx,
     chatBottomOffsetPx,

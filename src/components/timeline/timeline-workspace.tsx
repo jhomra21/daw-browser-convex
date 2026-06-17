@@ -46,8 +46,7 @@ const createViewportRedrawVersion = () => {
 type Props = {
   containerRef: (el: HTMLDivElement) => void;
   scrollRef: (el: HTMLDivElement) => void;
-  bottomFXOpen: boolean;
-  bottomPanelHeightPx: number;
+  bottomPanelOffsetPx: number;
   durationSec: number;
   sidebarWidth: number;
   tracks: RuntimeTrack[];
@@ -115,8 +114,7 @@ export default function TimelineWorkspace(props: Props) {
   const viewportRedrawVersion = createViewportRedrawVersion();
   const trackAreaHeight = () => (props.tracks.length + (props.dropAtNewTrack ? 1 : 0)) * LANE_HEIGHT;
   const fullHeight = () => RULER_HEIGHT + trackAreaHeight();
-  const bottomPanelHeight = () => props.bottomFXOpen ? props.bottomPanelHeightPx : 0;
-  const scrollContentHeight = () => fullHeight() + bottomPanelHeight();
+  const scrollContentHeight = () => fullHeight() + props.bottomPanelOffsetPx;
   return (
     <div class="flex-1 flex min-h-0" ref={props.containerRef}>
       <div
@@ -155,7 +153,7 @@ export default function TimelineWorkspace(props: Props) {
               class="absolute left-0 right-0 bg-neutral-950"
               style={{
                 top: `${RULER_HEIGHT}px`,
-                bottom: props.bottomFXOpen ? `${bottomPanelHeight()}px` : "0",
+                bottom: `${props.bottomPanelOffsetPx}px`,
               }}
             >
               <For each={props.tracks}>
@@ -218,7 +216,7 @@ export default function TimelineWorkspace(props: Props) {
                 tracks: props.tracks,
                 selectedTrackId: props.selection.selectedTrackId(),
                 sidebarWidth: props.sidebarWidth,
-                bottomOffsetPx: bottomPanelHeight(),
+                bottomOffsetPx: props.bottomPanelOffsetPx,
                 master: props.sidebar.master,
                 isPlaying: props.sidebar.isPlaying,
                 recordArmTrackId: props.recording.recordArmTrackId,

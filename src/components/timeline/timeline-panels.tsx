@@ -34,6 +34,10 @@ export type TimelinePanelsProps = {
     isOpen: boolean
     showOpenButton: boolean
     shell: TimelineBottomPanelShellControls
+    clipTab: {
+      canOpen: boolean
+      onOpen: () => void
+    }
     selectedFXTarget: Track['id'] | 'master'
     tracks: Track[]
     playheadSec: number
@@ -153,6 +157,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
           isOpen={props.effectsPanel.isOpen}
           showOpenButton={props.effectsPanel.showOpenButton}
           shell={props.effectsPanel.shell}
+          clipTab={props.effectsPanel.clipTab}
           selectedFXTarget={props.effectsPanel.selectedFXTarget}
           tracks={props.effectsPanel.tracks}
           onClose={props.effectsPanel.onClose}

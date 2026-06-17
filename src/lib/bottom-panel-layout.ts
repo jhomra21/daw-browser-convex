@@ -1,0 +1,2 @@
+export const BOTTOM_PANEL_EDGE_PADDING_PX = 4;
+export const EFFECTS_PANEL_FOOTER_HEIGHT_PX = 28;

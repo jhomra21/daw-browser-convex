@@ -6,6 +6,31 @@ import { cn } from '~/lib/utils'
 // Minimal message type for local chat UI
 type Msg = { role: 'user' | 'assistant'; content: string }
 
+const MAX_AGENT_CHAT_REQUEST_MESSAGES = 32
+const MAX_AGENT_CHAT_HISTORY_MESSAGES = MAX_AGENT_CHAT_REQUEST_MESSAGES - 1
+const MAX_AGENT_CHAT_CONTENT_LENGTH = 8_000
+const AGENT_SYSTEM_MESSAGE = {
+  role: 'system',
+  content: 'You are a helpful DAW assistant.',
+}
+
+function normalizeAgentChatMessage(message: Msg): Msg {
+  return {
+    role: message.role,
+    content: message.content.slice(0, MAX_AGENT_CHAT_CONTENT_LENGTH),
+  }
+}
+
+function trimAgentChatHistory(messages: Msg[]): Msg[] {
+  return messages
+    .slice(-MAX_AGENT_CHAT_HISTORY_MESSAGES)
+    .map(normalizeAgentChatMessage)
+}
+
+function removeStreamingPlaceholder(messages: Msg[]): Msg[] {
+  return messages.filter((m, i, arr) => !(i === arr.length - 1 && m.role === 'assistant' && m.content === ''))
+}
+
 const readTrackKind = (value: string | undefined): 'audio' | 'instrument' | undefined => {
   return value === 'audio' || value === 'instrument' ? value : undefined
 }
@@ -397,7 +422,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
         const history = await convexClient.query((convexApi as any).chat.getHistory, { projectId: rid } as any)
         if (cancelled || props.projectId !== rid || props.userId !== uid || !props.isOpen) return
         if (Array.isArray(history)) {
-          setMessages(history as any)
+          setMessages(trimAgentChatHistory(history))
           setForceScrollNext(true)
           // Ensure we land at the latest after DOM paints
           scrollToBottomSoon()
@@ -423,7 +448,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
     const uid = props.userId
     if (!rid || !uid) return
     clearSaveHistoryTimer()
-    const messagesSnapshot = nextMessages.slice()
+    const messagesSnapshot = trimAgentChatHistory(nextMessages)
     saveTimer = window.setTimeout(() => {
       saveTimer = null
       try {
@@ -659,7 +684,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
   }
 
   async function sendMessage() {
-    const content = input().trim()
+    const content = input().trim().slice(0, MAX_AGENT_CHAT_CONTENT_LENGTH)
     if (!content || streaming()) return
 
     const userMsg: Msg = { role: 'user', content }
@@ -677,11 +702,10 @@ const AgentChat: Component<AgentChatProps> = (props) => {
         body: JSON.stringify({
           projectId: props.projectId,
           bpm: typeof props.bpm === 'number' ? props.bpm : undefined,
-          // Use current messages but exclude the trailing placeholder assistant
-          messages: [{
-            role: 'system',
-            content: 'You are a helpful DAW assistant.'
-          }, ...messages().filter((m, i, arr) => !(i === arr.length - 1 && m.role === 'assistant' && m.content === ''))],
+          messages: [
+            AGENT_SYSTEM_MESSAGE,
+            ...trimAgentChatHistory(removeStreamingPlaceholder(messages())),
+          ],
         }),
       })
       if (!res.ok || !res.body) {

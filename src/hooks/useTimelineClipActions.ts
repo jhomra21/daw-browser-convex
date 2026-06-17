@@ -95,20 +95,12 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
   const selectedTrackId = selection.selectedTrackId
   const selectedClipIds = selection.selectedClipIds
 
-  const showTrackDeleteFailure = (result: TrackDeleteResult | null | undefined) => {
+  const showTrackDeleteFailure = (result: TrackDeleteResult | null) => {
     if (result?.status === 'conflict') {
       notify('Track delete blocked', getTrackDeleteConflictMessage(result.reason))
       return
     }
     notify('Track delete failed', 'This track could not be deleted.')
-  }
-
-  const queryTrackEffect = async <TRow>(read: () => Promise<TRow>): Promise<TRow | null> => {
-    try {
-      return await read()
-    } catch {
-      return null
-    }
   }
 
   const loadTrackDeleteEffects = async (trackId: Track['id']) => {
@@ -124,10 +116,10 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     }
     const args = buildTrackEffectQueryArgs({ projectId: rid, trackId })
     const [eqRow, rvRow, synthRow, arpRow] = await Promise.all([
-      queryTrackEffect(() => convexClient.query(convexApi.effects.getEqForTrack, args)),
-      queryTrackEffect(() => convexClient.query(convexApi.effects.getReverbForTrack, args)),
-      queryTrackEffect(() => convexClient.query(convexApi.effects.getSynthForTrack, args)),
-      queryTrackEffect(() => convexClient.query(convexApi.effects.getArpeggiatorForTrack, args)),
+      convexClient.query(convexApi.effects.getEqForTrack, args),
+      convexClient.query(convexApi.effects.getReverbForTrack, args),
+      convexClient.query(convexApi.effects.getSynthForTrack, args),
+      convexClient.query(convexApi.effects.getArpeggiatorForTrack, args),
     ])
 
     return {
@@ -325,7 +317,10 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
           tracks: snapshot,
           effects: await loadLocalTrackDeleteEffects(rid, trackId),
         })
-      } catch {}
+      } catch {
+        showTrackDeleteFailure(null)
+        return
+      }
       await createLocalTimelineRepository(rid).deleteTrack(trackId)
       completeDeletedTrack(historyEntry)
       return
@@ -344,13 +339,16 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
           effects: await loadTrackDeleteEffects(trackId),
         })
       }
-    } catch {}
+    } catch {
+      showTrackDeleteFailure(null)
+      return
+    }
 
     const result = await convexClient.mutation(
       convexApi.tracks.remove,
       buildTrackDeleteMutationInput({ trackId }),
     )
-    if (result?.status !== 'deleted') {
+    if (result.status !== 'deleted') {
       showTrackDeleteFailure(result)
       return
     }

@@ -83,6 +83,25 @@ const upsertMasterEffect = async (
   })
 }
 
+const getTrackEffect = async (
+  ctx: any,
+  input: {
+    projectId: string
+    trackId: any
+    userId: string
+    type: 'synth' | 'arpeggiator' | 'reverb' | 'eq'
+  },
+) => {
+  const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
+  if (!access || access.track.projectId !== input.projectId) return null
+  const rows = await ctx.db
+    .query("effects")
+    .withIndex("by_track", (q: any) => q.eq("trackId", input.trackId))
+    .collect();
+  rows.sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0));
+  return rows.find((row: any) => row.type === input.type && row.targetType === 'track') ?? null;
+}
+
 // Return the EQ effect row for a track if it exists (we use a single EQ per track for now)
 export const listByRoom = query({
   args: { projectId: v.string() },
@@ -106,15 +125,7 @@ export const getEqForTrack = query({
   args: { projectId: v.string(), trackId: v.id("tracks") },
   handler: async (ctx, { projectId, trackId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    await requireProjectAccess(ctx, projectId, userId);
-    const track = await ctx.db.get(trackId);
-    if (!track || track.projectId !== projectId) return null;
-    const rows = await ctx.db
-      .query("effects")
-      .withIndex("by_track", q => q.eq("trackId", trackId))
-      .collect();
-    rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-    return rows.find(r => r.type === "eq" && r.targetType === 'track') ?? null;
+    return await getTrackEffect(ctx, { projectId, trackId, userId, type: "eq" });
   },
 });
 
@@ -123,15 +134,7 @@ export const getSynthForTrack = query({
   args: { projectId: v.string(), trackId: v.id('tracks') },
   handler: async (ctx, { projectId, trackId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    await requireProjectAccess(ctx, projectId, userId);
-    const track = await ctx.db.get(trackId);
-    if (!track || track.projectId !== projectId) return null;
-    const rows = await ctx.db
-      .query('effects')
-      .withIndex('by_track', q => q.eq('trackId', trackId))
-      .collect();
-    rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-    return rows.find(r => r.type === 'synth' && r.targetType === 'track') ?? null;
+    return await getTrackEffect(ctx, { projectId, trackId, userId, type: 'synth' });
   },
 })
 
@@ -140,15 +143,7 @@ export const getArpeggiatorForTrack = query({
   args: { projectId: v.string(), trackId: v.id('tracks') },
   handler: async (ctx, { projectId, trackId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    await requireProjectAccess(ctx, projectId, userId);
-    const track = await ctx.db.get(trackId);
-    if (!track || track.projectId !== projectId) return null;
-    const rows = await ctx.db
-      .query('effects')
-      .withIndex('by_track', q => q.eq('trackId', trackId))
-      .collect();
-    rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-    return rows.find(r => r.type === 'arpeggiator' && r.targetType === 'track') ?? null;
+    return await getTrackEffect(ctx, { projectId, trackId, userId, type: 'arpeggiator' });
   },
 })
 
@@ -267,15 +262,7 @@ export const getReverbForTrack = query({
   args: { projectId: v.string(), trackId: v.id("tracks") },
   handler: async (ctx, { projectId, trackId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    await requireProjectAccess(ctx, projectId, userId);
-    const track = await ctx.db.get(trackId);
-    if (!track || track.projectId !== projectId) return null;
-    const rows = await ctx.db
-      .query("effects")
-      .withIndex("by_track", q => q.eq("trackId", trackId))
-      .collect();
-    rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-    return rows.find(r => r.type === "reverb" && r.targetType === 'track') ?? null;
+    return await getTrackEffect(ctx, { projectId, trackId, userId, type: "reverb" });
   },
 });
 

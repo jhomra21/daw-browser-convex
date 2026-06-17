@@ -237,6 +237,7 @@ wrangler dev
 - `bun serve`: preview the production build locally.
 - `bun run check:packages`: run TypeScript checks for all workspace packages.
 - `bun run typecheck`: run package checks, app check, and API check.
+- `bun run test`: run the Bun test suite.
 - `bun run knip`: run unused dependency/export analysis.
 
 ### TypeScript setup

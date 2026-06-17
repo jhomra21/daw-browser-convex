@@ -111,6 +111,7 @@ export default defineSchema({
     token: v.string(),
     createdBy: v.string(),
     revokedAt: v.optional(v.number()),
+    expiresAt: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_token", ["token"])

@@ -13,9 +13,66 @@ import { registerTimelineOperationRoutes } from './routes/timeline-operations'
 
 const app = new Hono<ApiBindings>()
 
+const LOCAL_AUTH_ORIGINS = new Set([
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:8787',
+])
+const DEFAULT_LOCAL_AUTH_ORIGIN = 'http://localhost:5173'
+
+type ConfiguredAuthOrigins = {
+  raw: string | undefined
+  origins: Set<string>
+  firstOrigin: string | undefined
+}
+
+let configuredAuthOriginsCache: ConfiguredAuthOrigins = {
+  raw: undefined,
+  origins: new Set(),
+  firstOrigin: undefined,
+}
+
+const splitAuthCorsOrigins = (value: string | undefined) => (
+  value
+    ? value.split(',').map((origin) => origin.trim()).filter(Boolean)
+    : []
+)
+
+const getConfiguredAuthOrigins = (raw: string | undefined) => {
+  if (configuredAuthOriginsCache.raw === raw) return configuredAuthOriginsCache
+
+  const origins = splitAuthCorsOrigins(raw)
+  configuredAuthOriginsCache = {
+    raw,
+    origins: new Set(origins),
+    firstOrigin: origins[0],
+  }
+  return configuredAuthOriginsCache
+}
+
+const getAllowedRequestAuthOrigin = (origin: string, env: ApiBindings['Bindings']) => {
+  if (LOCAL_AUTH_ORIGINS.has(origin)) return origin
+
+  const configuredOrigins = getConfiguredAuthOrigins(env.AUTH_CORS_ORIGINS)
+  if (configuredOrigins.origins.has(origin)) return origin
+  if (env.BETTER_AUTH_URL === origin) return origin
+
+  return undefined
+}
+
+const getDefaultAuthOrigin = (env: ApiBindings['Bindings']) => {
+  const configuredOrigins = getConfiguredAuthOrigins(env.AUTH_CORS_ORIGINS)
+  return env.BETTER_AUTH_URL || configuredOrigins.firstOrigin || DEFAULT_LOCAL_AUTH_ORIGIN
+}
+
+const getAuthCorsOrigin = (origin: string | undefined, env: ApiBindings['Bindings']) => {
+  if (!origin) return getDefaultAuthOrigin(env)
+  return getAllowedRequestAuthOrigin(origin, env) || getDefaultAuthOrigin(env)
+}
+
 // CORS middleware must be registered before routes
 app.use('/api/auth/*', cors({
-  origin: (origin) => origin || '*', // Allow all origins for now, restrict in production
+  origin: (origin, c) => getAuthCorsOrigin(origin, c.env),
   allowHeaders: ['Content-Type', 'Authorization'],
   allowMethods: ['POST', 'GET', 'OPTIONS'],
   exposeHeaders: ['Content-Length'],

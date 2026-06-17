@@ -13,6 +13,7 @@
     "build": "vite build",
     "check:packages": "bun --filter '@daw-browser/shared' --filter '@daw-browser/timeline-core' --filter '@daw-browser/audio-engine' --filter '@daw-browser/waveforms' check",
     "typecheck": "bun run check:packages && bun x tsc --noEmit -p tsconfig.json && bun x tsc --noEmit -p api/tsconfig.json",
+    "test": "bun test",
     "serve": "vite preview",
     "knip": "knip"
   },

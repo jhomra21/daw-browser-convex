@@ -7,6 +7,7 @@ export type Variables = {
 }
 
 type ApiEnv = Env & {
+  AUTH_CORS_ORIGINS?: string;
   R2_DELETE_QUEUE_DRAIN_TOKEN?: string;
 }
 

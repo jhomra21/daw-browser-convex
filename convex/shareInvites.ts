@@ -3,6 +3,8 @@ import { v } from "convex/values";
 import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
 import { removeProjectMemberAccessAndTransferEntities } from "./projectMembership";
 
+const SHARE_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 const roleRank = (role: "owner" | "editor" | "viewer" | undefined) => (
   role === "owner" ? 3 : role === "viewer" ? 1 : 2
 );
@@ -16,12 +18,14 @@ export const create = mutation({
     const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, projectId, userId, ["owner"]);
     const token = crypto.randomUUID();
+    const now = Date.now();
     await ctx.db.insert("shareInvites", {
       projectId,
       role,
       token,
       createdBy: userId,
-      createdAt: Date.now(),
+      createdAt: now,
+      expiresAt: now + SHARE_INVITE_TTL_MS,
     });
     return { token };
   },
@@ -31,12 +35,13 @@ export const accept = mutation({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    const rows = await ctx.db
+    const invite = await ctx.db
       .query("shareInvites")
       .withIndex("by_token", (q) => q.eq("token", token))
-      .collect();
-    const invite = rows[0];
-    if (!invite || invite.revokedAt) throw new Error("Invite is not available.");
+      .first();
+    if (!invite || invite.revokedAt || (invite.expiresAt !== undefined && invite.expiresAt <= Date.now())) {
+      throw new Error("Invite is not available.");
+    }
     const existing = await ctx.db
       .query("ownerships")
       .withIndex("by_room_owner", (q) => q.eq("projectId", invite.projectId).eq("ownerUserId", userId))
@@ -61,11 +66,10 @@ export const revoke = mutation({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    const rows = await ctx.db
+    const invite = await ctx.db
       .query("shareInvites")
       .withIndex("by_token", (q) => q.eq("token", token))
-      .collect();
-    const invite = rows[0];
+      .first();
     if (!invite) return null;
     await requireProjectRole(ctx, invite.projectId, userId, ["owner"]);
     await ctx.db.patch(invite._id, { revokedAt: Date.now() });

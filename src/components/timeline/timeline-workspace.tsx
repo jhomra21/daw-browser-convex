@@ -1,7 +1,7 @@
 import { createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
-import TrackSidebar from "~/components/timeline/TrackSidebar";
+import TrackSidebar, { type MasterSidebarModel } from "~/components/timeline/TrackSidebar";
 import TimelineOverlays, { type TimelineMidiBounds } from "~/components/timeline/timeline-overlays";
 import { LANE_HEIGHT, PPS, RULER_HEIGHT } from "~/lib/timeline-utils";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
@@ -95,15 +95,7 @@ type Props = {
   sidebar: {
     isPlaying: boolean;
     currentUserId: string;
-    master: {
-      selected: boolean;
-      ready: boolean;
-      canEditVolume: boolean;
-      volume: number;
-      onClick: () => void;
-      onVolumePreview: (volume: number) => void;
-      onVolumeChange: (volume: number) => void;
-    };
+    master: MasterSidebarModel;
     subscribeTrackLevels: AudioEngine["subscribeTrackStereoLevels"];
     canWriteTrackRouting: (trackId: Track["id"]) => boolean;
     onTrackClick: (trackId: Track["id"]) => void;

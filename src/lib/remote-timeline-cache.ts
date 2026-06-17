@@ -19,6 +19,14 @@ const now = () => Date.now()
 
 const sanitizeStoragePath = (assetKey: string) => assetKey.replace(/[/\\:]/g, '-')
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+
+const readSignature = (value: unknown, key: string) => (
+  isRecord(value) && typeof value[key] === 'string' ? value[key] : undefined
+)
+
 const normalizeTrackKind = (value: string | undefined): TimelineTrackRow['kind'] => (
   value === 'instrument' ? 'instrument' : 'audio'
 )
@@ -108,6 +116,12 @@ const toAssetRows = (clips: TimelineClipRow[], updatedAt: number): LocalProjectA
   return [...rowsById.values()]
 }
 
+const timelineCacheSignature = (input: {
+  tracks: TimelineTrackRow[]
+  clips: TimelineClipRow[]
+  assets: LocalProjectAssetRow[]
+}) => JSON.stringify(input)
+
 export const cacheRemoteTimelineSnapshot = async (
   projectId: string,
   data: FullTimelineView,
@@ -118,25 +132,51 @@ export const cacheRemoteTimelineSnapshot = async (
   const trackIds = new Set(tracks.map((track) => track.id))
   const clipsWithExistingTracks = clips.filter((clip) => trackIds.has(clip.trackId))
   const assets = toAssetRows(clipsWithExistingTracks, timestamp)
+  const signatureTimestamp = 0
+  const nextTracksSignature = timelineCacheSignature({
+    tracks: data.tracks.map((track, index) => toTrackRow(track, index, signatureTimestamp)),
+    clips: [],
+    assets: [],
+  })
+  const nextClipsSignature = timelineCacheSignature({
+    tracks: [],
+    clips: data.clips.map((clip) => toClipRow(clip, signatureTimestamp)).filter((clip) => trackIds.has(clip.trackId)),
+    assets: [],
+  })
+  const nextAssetsSignature = timelineCacheSignature({
+    tracks: [],
+    clips: [],
+    assets: toAssetRows(clipsWithExistingTracks.map((clip) => ({ ...clip, createdAt: signatureTimestamp, updatedAt: signatureTimestamp })), signatureTimestamp),
+  })
   const db = await openLocalProjectDb(projectId)
   const tx = db.transaction(['entities', 'assets', 'projectState', 'syncState'], 'readwrite')
-  const [cachedTracks, cachedClips] = await Promise.all([
-    tx.objectStore('entities').index('by-kind').getAll(TRACK_KIND),
-    tx.objectStore('entities').index('by-kind').getAll(CLIP_KIND),
-  ])
-  await Promise.all([
-    ...cachedTracks.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
-    ...cachedClips.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
-    ...tracks.map((track) => tx.objectStore('entities').put(createLocalProjectEntityRow(TRACK_KIND, track.id, track, timestamp))),
-    ...clipsWithExistingTracks.map((clip) => tx.objectStore('entities').put(createLocalProjectEntityRow(CLIP_KIND, clip.id, clip, timestamp))),
-    ...assets.map((asset) => tx.objectStore('assets').put(asset)),
-    ...clipsWithExistingTracks.flatMap((clip) => clip.sourceAssetKey && clip.sampleUrl
+  const cachedSummary = await tx.objectStore('syncState').get(REMOTE_CACHE_KEY)
+  const cacheValue = cachedSummary?.value
+  const shouldRewriteTimelineCache =
+    readSignature(cacheValue, 'tracksSignature') !== nextTracksSignature ||
+    readSignature(cacheValue, 'clipsSignature') !== nextClipsSignature ||
+    readSignature(cacheValue, 'assetsSignature') !== nextAssetsSignature
+  const timelineWrites = shouldRewriteTimelineCache
+    ? await Promise.all([
+        tx.objectStore('entities').index('by-kind').getAll(TRACK_KIND),
+        tx.objectStore('entities').index('by-kind').getAll(CLIP_KIND),
+      ]).then(([cachedTracks, cachedClips]) => [
+        ...cachedTracks.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
+        ...cachedClips.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
+        ...tracks.map((track) => tx.objectStore('entities').put(createLocalProjectEntityRow(TRACK_KIND, track.id, track, timestamp))),
+        ...clipsWithExistingTracks.map((clip) => tx.objectStore('entities').put(createLocalProjectEntityRow(CLIP_KIND, clip.id, clip, timestamp))),
+        ...assets.map((asset) => tx.objectStore('assets').put(asset)),
+        ...clipsWithExistingTracks.flatMap((clip) => clip.sourceAssetKey && clip.sampleUrl
       ? [tx.objectStore('syncState').put({
           key: `cloud-url:asset:${clip.sourceAssetKey}`,
           value: clip.sampleUrl,
           updatedAt: timestamp,
         })]
       : []),
+      ])
+    : []
+  await Promise.all([
+    ...timelineWrites,
     tx.objectStore('projectState').put({
       key: 'projectMix',
       value: normalizeProjectMixState(data.mixerSettings),
@@ -149,6 +189,9 @@ export const cacheRemoteTimelineSnapshot = async (
         trackCount: tracks.length,
         clipCount: clipsWithExistingTracks.length,
         assetCount: assets.length,
+        tracksSignature: nextTracksSignature,
+        clipsSignature: nextClipsSignature,
+        assetsSignature: nextAssetsSignature,
       },
       updatedAt: timestamp,
     }),

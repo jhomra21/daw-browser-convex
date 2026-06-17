@@ -19,21 +19,30 @@ import { LANE_HEIGHT, RULER_HEIGHT } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Track, TrackSend } from "@daw-browser/timeline-core/types";
 
+export type MasterSidebarModel = {
+  selected: boolean;
+  ready: boolean;
+  canEditVolume: boolean;
+  volume: number;
+  onClick: () => void;
+  onVolumePreview: (volume: number) => void;
+  onVolumeChange: (volume: number) => void;
+};
+
+type MasterSidebarPlacementModel = MasterSidebarModel & {
+  bottomOffsetPx: number;
+};
+
+type MasterSidebarRowModel = MasterSidebarPlacementModel & {
+  sidebarWidth: number;
+};
+
 type TrackSidebarProps = {
   sidebar: {
     tracks: Track[];
     selectedTrackId: Track["id"] | "";
     sidebarWidth: number;
-    master: {
-      selected: boolean;
-      bottomOffsetPx: number;
-      ready: boolean;
-      canEditVolume: boolean;
-      volume: number;
-      onClick: () => void;
-      onVolumePreview: (volume: number) => void;
-      onVolumeChange: (volume: number) => void;
-    };
+    master: MasterSidebarPlacementModel;
     onTrackClick: (trackId: Track["id"]) => void;
     canWriteTrackRouting: (trackId: Track["id"]) => boolean;
     onTrackSendsChange: (trackId: Track["id"], sends: TrackSend[]) => void;
@@ -67,17 +76,7 @@ const quantizeVolume = (volume: number) =>
   Math.round(clampVolume(volume) * 100) / 100;
 
 type MasterSidebarRowProps = {
-  master: {
-    selected: boolean;
-    bottomOffsetPx: number;
-    sidebarWidth: number;
-    ready: boolean;
-    canEditVolume: boolean;
-    volume: number;
-    onClick: () => void;
-    onVolumePreview: (volume: number) => void;
-    onVolumeChange: (volume: number) => void;
-  };
+  master: MasterSidebarRowModel;
 };
 
 const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {

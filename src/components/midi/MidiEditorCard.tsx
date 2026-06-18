@@ -94,7 +94,6 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
       }
       return
     }
-    if (!save.userId) return
     await convexClient.mutation((convexApi as any).clips.setMidi, { clipId: save.clipId as any, midi: save.midi })
   }
   const scheduleSave = () => {

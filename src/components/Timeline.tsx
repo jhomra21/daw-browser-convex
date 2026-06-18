@@ -46,11 +46,11 @@ import { useTimelineAudioWarp } from "~/hooks/useTimelineAudioWarp";
 import { useTimelineBottomPanelState } from "~/hooks/useTimelineBottomPanelState";
 import { useTimelineLeftBrowserResize } from "~/hooks/useTimelineLeftBrowserResize";
 import { useTimelineLeftBrowserState } from "~/hooks/useTimelineLeftBrowserState";
+import { useTimelineBrowserController } from "~/hooks/useTimelineBrowserController";
 import { isTimelineSampleDetailClip, useTimelineSampleDetailController } from "~/hooks/useTimelineSampleDetailController";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
-import type { BrowserItem, TimelineDeviceInsertActions } from "~/components/timeline/browser/browser-types";
-import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData, type SampleDragData } from "~/lib/sample-drag-data";
+import type { TimelineDeviceInsertActions } from "~/components/timeline/browser/browser-types";
 import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
 import TimelineChrome from "./timeline/timeline-chrome";
 import AppMessageDialog, { type AppMessageDialogState } from "./timeline/app-message-dialog";
@@ -73,16 +73,6 @@ type TimelineProps = {
   dashboardEnabled: boolean;
   dashboardView: Accessor<DashboardView | null>;
   setDashboardParam: (view: DashboardView | null) => void;
-};
-
-const BROWSER_ASSET_PAGE_SIZE = 200;
-const BROWSER_EFFECT_ITEM_IDS = {
-  eq: "builtin:audio-effect:eq",
-  reverb: "builtin:audio-effect:reverb",
-  arpeggiator: "builtin:midi-effect:arpeggiator",
-};
-const BROWSER_INSTRUMENT_ITEM_IDS = {
-  synth: "builtin:midi-instrument:synth",
 };
 
 const Timeline: Component<TimelineProps> = (props) => {
@@ -813,173 +803,20 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   const duration = () => timelineDurationSec(renderTracks());
   const dashboardSamplesEnabled = () => props.dashboardView() === "samples";
-  const browserSamplesEnabled = () => leftBrowser.open() && leftBrowser.activeTab() === "assets";
   const dashboardSamples = useProjectSamples({
     projectId,
     userId,
     enabled: dashboardSamplesEnabled,
     includeFilePath: () => true,
   });
-  const [browserAssetVisibleCount, setBrowserAssetVisibleCount] = createSignal(BROWSER_ASSET_PAGE_SIZE);
-  const browserSamples = useProjectSamples({
+  const timelineBrowser = useTimelineBrowserController({
     projectId,
     userId,
-    enabled: browserSamplesEnabled,
-    includeFilePath: () => false,
-    includeUsage: () => false,
-    sampleLimit: browserAssetVisibleCount,
-    defaultSampleLimit: browserAssetVisibleCount,
+    leftBrowser,
+    onResizePointerDown: leftBrowserResize.onPointerDown,
+    deviceInsertActions,
+    handleInsertSample,
   });
-  const browserAssetQuery = () => leftBrowser.searchQueryByTab().assets.trim().toLowerCase();
-  const browserAssetRows = createMemo(() => {
-    const rows: Array<{ item: BrowserItem; sample: SampleDragData }> = [];
-    for (const sample of browserSamples.samples()) {
-      const label = sample.name || "Sample";
-      const subtitle = sample.filePath || sample.url;
-      rows.push({
-        item: {
-          id: `project:${sample.key}`,
-          source: "project",
-          category: "sample",
-          label,
-          subtitle,
-          searchText: `${label} ${subtitle}`.toLowerCase(),
-        },
-        sample: {
-          url: sample.url,
-          name: label,
-          duration: sample.duration,
-          assetKey: sample.assetKey,
-          sourceKind: sample.sourceKind,
-          source: sample.source,
-        },
-      });
-    }
-    for (const sample of browserSamples.defaultSamples()) {
-      const label = sample.name || "Sample";
-      const subtitle = sample.url;
-      rows.push({
-        item: {
-          id: `default:${sample.key}`,
-          source: "default",
-          category: "sample",
-          label,
-          subtitle,
-          searchText: `${label} ${subtitle}`.toLowerCase(),
-        },
-        sample: {
-          url: sample.url,
-          name: label,
-          duration: sample.duration,
-          assetKey: sample.assetKey,
-          sourceKind: sample.sourceKind,
-          source: sample.source,
-        },
-      });
-    }
-    return rows;
-  });
-  const filteredBrowserAssetRows = createMemo(() => {
-    const query = browserAssetQuery();
-    if (!query) return browserAssetRows();
-    return browserAssetRows().filter((row) => row.item.searchText.includes(query));
-  });
-  const browserAssetItems = createMemo(() => filteredBrowserAssetRows().map((row) => row.item));
-  const browserAssetSampleById = createMemo(() => {
-    const map = new Map<string, SampleDragData>();
-    for (const row of filteredBrowserAssetRows()) map.set(row.item.id, row.sample);
-    return map;
-  });
-  const browserDeviceQuery = (tab: "effects" | "midi-instruments") => leftBrowser.searchQueryByTab()[tab].trim().toLowerCase();
-  const browserEffectItems = createMemo<BrowserItem[]>(() => {
-    const actions = deviceInsertActions();
-    const canWrite = actions?.canWrite === true;
-    const items: BrowserItem[] = [
-      {
-        id: BROWSER_EFFECT_ITEM_IDS.eq,
-        source: "builtin",
-        category: "audio-effect",
-        label: "EQ",
-        subtitle: "Audio effect",
-        searchText: "eq audio effect equalizer",
-        disabled: !canWrite || actions?.canAddEq !== true,
-      },
-      {
-        id: BROWSER_EFFECT_ITEM_IDS.reverb,
-        source: "builtin",
-        category: "audio-effect",
-        label: "Reverb",
-        subtitle: "Audio effect",
-        searchText: "reverb audio effect space",
-        disabled: !canWrite || actions?.canAddReverb !== true,
-      },
-      {
-        id: BROWSER_EFFECT_ITEM_IDS.arpeggiator,
-        source: "builtin",
-        category: "midi-effect",
-        label: "Arpeggiator",
-        subtitle: "MIDI effect",
-        searchText: "arpeggiator arp midi effect",
-        disabled: !canWrite || actions?.canAddArpeggiator !== true,
-      },
-    ];
-    const query = browserDeviceQuery("effects");
-    if (!query) return items;
-    return items.filter((item) => item.searchText.includes(query));
-  });
-  const browserInstrumentItems = createMemo<BrowserItem[]>(() => {
-    const actions = deviceInsertActions();
-    const items: BrowserItem[] = [
-      {
-        id: BROWSER_INSTRUMENT_ITEM_IDS.synth,
-        source: "builtin",
-        category: "midi-instrument",
-        label: "Synth",
-        subtitle: "Create a MIDI clip on the selected instrument track",
-        searchText: "synth midi instrument clip",
-        disabled: actions?.canWrite !== true || actions.canAddMidiClip !== true,
-      },
-    ];
-    const query = browserDeviceQuery("midi-instruments");
-    if (!query) return items;
-    return items.filter((item) => item.searchText.includes(query));
-  });
-
-  createEffect(() => {
-    browserAssetQuery();
-    setBrowserAssetVisibleCount(BROWSER_ASSET_PAGE_SIZE);
-  });
-
-  const insertBrowserSample = (itemId: string) => {
-    const sample = browserAssetSampleById().get(itemId);
-    if (!sample) return;
-    void handleInsertSample(sample);
-  };
-
-  const startBrowserSampleDrag = (event: DragEvent, itemId: string) => {
-    const sample = browserAssetSampleById().get(itemId);
-    if (!sample || !event.dataTransfer) {
-      event.preventDefault();
-      return;
-    }
-    event.dataTransfer.effectAllowed = "copy";
-    event.dataTransfer.setData(SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData(sample));
-  };
-
-  const addBrowserEffect = (itemId: string) => {
-    const actions = deviceInsertActions();
-    if (!actions?.canWrite) return;
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.eq && actions.canAddEq) actions.addEq();
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.reverb && actions.canAddReverb) actions.addReverb();
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.arpeggiator && actions.canAddArpeggiator) actions.addArpeggiator();
-  };
-
-  const addBrowserInstrument = (itemId: string) => {
-    const actions = deviceInsertActions();
-    if (!actions?.canWrite || itemId !== BROWSER_INSTRUMENT_ITEM_IDS.synth || !actions.canAddMidiClip) return;
-    void actions.addMidiClip();
-  };
-
   useTimelineAudioLifecycle({
     audioEngine,
     tracks: () => renderTracks(),
@@ -1212,32 +1049,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           setScrollElement(el);
         }}
         bottomPanelOffsetPx={bottomPanel.bottomPanelOffsetPx()}
-        leftBrowser={{
-          open: leftBrowser.open(),
-          widthPx: leftBrowser.widthPx(),
-          activeTab: leftBrowser.activeTab(),
-          searchQueryByTab: leftBrowser.searchQueryByTab(),
-          scrollTopByTab: leftBrowser.scrollTopByTab(),
-          assets: {
-            items: browserAssetItems,
-            visibleCount: browserAssetVisibleCount,
-            canLoadMore: () => browserAssetItems().length >= browserAssetVisibleCount(),
-            onLoadMore: () => setBrowserAssetVisibleCount((count) => count + BROWSER_ASSET_PAGE_SIZE),
-            onInsert: insertBrowserSample,
-            onDragStart: startBrowserSampleDrag,
-          },
-          devices: {
-            effects: browserEffectItems,
-            instruments: browserInstrumentItems,
-            onAddEffect: addBrowserEffect,
-            onAddInstrument: addBrowserInstrument,
-          },
-          onToggle: leftBrowser.toggleOpen,
-          onSelectTab: leftBrowser.setActiveTab,
-          onSearchQueryChange: leftBrowser.setSearchQuery,
-          onScrollTopChange: leftBrowser.setScrollTop,
-          onResizePointerDown: leftBrowserResize.onPointerDown,
-        }}
+        leftBrowser={timelineBrowser()}
         durationSec={duration()}
         sidebarWidth={sidebarWidth()}
         tracks={renderTracks()}

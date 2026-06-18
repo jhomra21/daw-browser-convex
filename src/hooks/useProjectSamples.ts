@@ -283,6 +283,12 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
     placeholderData: (prev: DefaultSampleCatalogItem[] | undefined) => prev ?? [],
   }))
 
+  const limitedDefaultSamples = createMemo(() => {
+    return Array.isArray(defaultSamplesQuery.data)
+      ? defaultSamplesQuery.data.slice(0, defaultSampleLimit ? defaultSampleLimit() : undefined)
+      : []
+  })
+
   createEffect(on(
     () => [projectId(), enabled ? enabled() : true, includeFilePath ? includeFilePath() : false, includeUsage ? includeUsage() : true, sampleLimit ? sampleLimit() : undefined, refreshKey()] as const,
     ([rid, isEnabled, shouldIncludeFilePath, shouldIncludeUsage, maxSamples]) => {
@@ -364,17 +370,16 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
   ))
 
   createEffect(on(
-    () => defaultSamplesQuery.data,
-    (data) => {
-      const list = Array.isArray(data) ? data.slice(0, defaultSampleLimit ? defaultSampleLimit() : undefined) : []
+    limitedDefaultSamples,
+    (list) => {
       if (list.length === 0) return
 
       void (async () => {
-        const next = new Map<string, AudioSourceMetadata>()
         const cachedSources = await Promise.all(list.map(async (sample) => ({
           sample,
           source: sample.source ?? await loadCachedDefaultSampleMetadata(sample.assetKey),
         })))
+        const next = new Map<string, AudioSourceMetadata>()
         for (const { sample, source } of cachedSources) {
           if (source) {
             next.set(sample.key, source)
@@ -395,16 +400,18 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
           }
         }
         setCachedDefaultSampleMetadataByKey((current) => {
-          return isAudioSourceMetadataMapEqual(current, next) ? current : next
+          const merged = new Map(current)
+          for (const [key, source] of next) {
+            merged.set(key, source)
+          }
+          return isAudioSourceMetadataMapEqual(current, merged) ? current : merged
         })
       })()
     },
   ))
 
   const defaultSamples = createMemo<DefaultSampleListItem[]>(() => {
-    const list = Array.isArray(defaultSamplesQuery.data)
-      ? defaultSamplesQuery.data.slice(0, defaultSampleLimit ? defaultSampleLimit() : undefined)
-      : []
+    const list = limitedDefaultSamples()
     const metadataByKey = cachedDefaultSampleMetadataByKey()
     const items: DefaultSampleListItem[] = []
     for (const sample of list) {

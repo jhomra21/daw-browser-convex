@@ -12,6 +12,7 @@ import type { EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
 import type { BpmDetectionService } from '~/lib/bpm-detection-service'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { TimelineBottomPanelShellControls } from '~/components/timeline/TimelineBottomPanelShell'
+import type { TimelineDeviceInsertActions } from '~/components/timeline/browser/browser-types'
 
 const AgentChat = lazy(() => import('~/components/AgentChat'))
 const SharedChat = lazy(() => import('~/components/SharedChat'))
@@ -52,6 +53,7 @@ export type TimelinePanelsProps = {
     onOpen: () => void
     onEffectParamsCommitted: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void
     onLocalSaveFailed?: (message: string) => void
+    onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void
   }
   sampleDetailPanel: {
     isOpen: boolean
@@ -171,6 +173,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         insertLocalClip={props.effectsPanel.insertLocalClip}
         onEffectParamsCommitted={props.effectsPanel.onEffectParamsCommitted}
         onLocalSaveFailed={props.effectsPanel.onLocalSaveFailed}
+        onDeviceInsertActionsChange={props.effectsPanel.onDeviceInsertActionsChange}
       />
 
       <Show when={props.sampleDetailPanel.isOpen && props.sampleDetailPanel.selectedClip}>

@@ -826,7 +826,7 @@ Record validation evidence in this tracker as each phase completes.
 - [x] Phase 1B: Menu taxonomy update
 - [x] Phase 2: Left browser shell and real menu/browser actions
 - [x] Phase 3: Assets tab
-- [ ] Phase 4: Effects and MIDI Instruments tabs
+- [x] Phase 4: Effects and MIDI Instruments tabs
 - [ ] Phase 5: Remove EffectsPanel toolbar
 - [ ] Phase 6: Dashboard cleanup
 
@@ -838,3 +838,4 @@ Record validation evidence in this tracker as each phase completes.
 - Phase 1B: Applied the target top-level taxonomy by removing the top-level Share menu, moving copy share link into Project, moving file/archive/account actions into File, moving keyboard shortcuts entry into Edit, and narrowing Media to detailed samples/export dashboard entries until the browser shell phase. Validation passed with `bun run typecheck` and `bun run build`.
 - Phase 2: Added a persistent left browser shell with open state, width, active tab, per-tab search, and per-tab scroll saved to local storage. Mounted it as a sibling of the timeline scroll area so the timeline continues using its existing bottom-panel scroll padding, while the browser visual height subtracts the fixed bottom panel footprint once. Added left-edge resize clamping against right sidebar width and the minimum timeline width, Media menu browser commands, and `Ctrl/Cmd + Alt + B` timeline-scoped browser toggle. Validation passed with `bun run typecheck` and `bun run build`.
 - Phase 3: Wired the Assets browser tab to the existing project/default sample data path from `useProjectSamples`. Sample loading review found project Convex/local reads still return full arrays, while default R2 loading uses cursor pages internally but returns the full catalog; the browser therefore uses a capped 200-row initial render with explicit "Load more" and search-backed filtering for this phase without moving dashboard delete/copy management. Asset rows use the `BrowserItem` source/category model, precomputed lowercase search text, and Map-based handler lookup. Insert reuses `handleInsertSample`, and drag reuses `SAMPLE_DRAG_DATA_TYPE` plus `serializeSampleDragData`, so timeline root/drop handling consumes the existing sample payload.
+- Phase 4: Added built-in browser rows for EQ, Reverb, Arpeggiator, and Synth using the existing `BrowserItem` source/category model. Extracted only the device insertion actions and availability booleans from `EffectsPanel` through the existing panel props path, preserving write permission checks and duplicate-prevention rules from `EffectsPanelToolbar`. Browser clicks now call the same add handlers for EQ, Reverb, Arpeggiator, and MIDI clip creation on the selected instrument track. Validation passed with `bun run typecheck` and `bun run build`.

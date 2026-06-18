@@ -5,13 +5,18 @@ import { cn } from "~/lib/utils";
 
 const tabPlaceholder: Record<TimelineBrowserTab, string> = {
   assets: "",
-  effects: "Effect rows arrive in Phase 4.",
-  "midi-instruments": "MIDI instrument rows arrive in Phase 4.",
+  effects: "No effects match this search.",
+  "midi-instruments": "No MIDI instruments match this search.",
 };
 
 export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel }> = (props) => {
   let scrollRef: HTMLDivElement | undefined;
   const visibleAssets = createMemo(() => props.browser.assets.items().slice(0, props.browser.assets.visibleCount()));
+  const visibleDevices = createMemo(() => {
+    if (props.browser.activeTab === "effects") return props.browser.devices.effects();
+    if (props.browser.activeTab === "midi-instruments") return props.browser.devices.instruments();
+    return [];
+  });
 
   const restoreScrollTop = () => {
     if (!scrollRef) return;
@@ -84,8 +89,40 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
         <Show
           when={props.browser.activeTab === "assets"}
           fallback={(
-            <div class="rounded border border-dashed border-neutral-800 bg-neutral-900/40 p-3 text-xs leading-5 text-neutral-500">
-              {tabPlaceholder[props.browser.activeTab]}
+            <div class="space-y-1">
+              <Show
+                when={visibleDevices().length > 0}
+                fallback={(
+                  <div class="rounded border border-dashed border-neutral-800 bg-neutral-900/40 p-3 text-xs leading-5 text-neutral-500">
+                    {tabPlaceholder[props.browser.activeTab]}
+                  </div>
+                )}
+              >
+                <For each={visibleDevices()}>
+                  {(item) => (
+                    <button
+                      type="button"
+                      disabled={item.disabled}
+                      class="group flex w-full items-center justify-between gap-2 rounded border border-transparent px-2 py-1.5 text-left text-xs hover:border-neutral-800 hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => {
+                        if (props.browser.activeTab === "effects") {
+                          props.browser.devices.onAddEffect(item.id);
+                          return;
+                        }
+                        props.browser.devices.onAddInstrument(item.id);
+                      }}
+                    >
+                      <span class="min-w-0">
+                        <span class="block truncate text-neutral-200 group-hover:text-neutral-50">{item.label}</span>
+                        <span class="block truncate text-[11px] text-neutral-500">{item.subtitle}</span>
+                      </span>
+                      <span class="shrink-0 rounded border border-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.12em] text-neutral-500">
+                        {item.source}
+                      </span>
+                    </button>
+                  )}
+                </For>
+              </Show>
             </div>
           )}
         >

@@ -45,6 +45,7 @@ import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import TimelineBottomPanelShell, { type TimelineBottomPanelShellControls } from "~/components/timeline/TimelineBottomPanelShell";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { BOTTOM_PANEL_EDGE_PADDING_PX, EFFECTS_PANEL_FOOTER_HEIGHT_PX } from "~/lib/bottom-panel-layout";
+import type { TimelineDeviceInsertActions } from "~/components/timeline/browser/browser-types";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -69,6 +70,7 @@ type EffectsPanelProps = {
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
   onLocalSaveFailed?: (message: string) => void;
+  onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
 };
 
 type EffectKind = "eq" | "reverb";
@@ -762,6 +764,20 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     props.onClose();
   };
   const showToolbar = () => isInstrumentTrack() || !eqForTarget() || !reverbForTarget();
+
+  createEffect(() => {
+    props.onDeviceInsertActionsChange?.({
+      addMidiClip: instrumentState.addMidiClip,
+      addArpeggiator: instrumentState.arp.add,
+      addEq: eqState.add,
+      addReverb: reverbState.add,
+      canWrite: canWriteCurrentTargetEffects(),
+      canAddMidiClip: isInstrumentTrack(),
+      canAddArpeggiator: isInstrumentTrack() && !instrumentState.arp.params(),
+      canAddEq: !eqForTarget(),
+      canAddReverb: !reverbForTarget(),
+    });
+  });
 
   onCleanup(() => {
     void flushPending();

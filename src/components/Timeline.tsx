@@ -49,7 +49,7 @@ import { useTimelineLeftBrowserState } from "~/hooks/useTimelineLeftBrowserState
 import { isTimelineSampleDetailClip, useTimelineSampleDetailController } from "~/hooks/useTimelineSampleDetailController";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
-import type { BrowserItem } from "~/components/timeline/browser/browser-types";
+import type { BrowserItem, TimelineDeviceInsertActions } from "~/components/timeline/browser/browser-types";
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData, type SampleDragData } from "~/lib/sample-drag-data";
 import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
 import TimelineChrome from "./timeline/timeline-chrome";
@@ -76,6 +76,14 @@ type TimelineProps = {
 };
 
 const BROWSER_ASSET_PAGE_SIZE = 200;
+const BROWSER_EFFECT_ITEM_IDS = {
+  eq: "builtin:audio-effect:eq",
+  reverb: "builtin:audio-effect:reverb",
+  arpeggiator: "builtin:midi-effect:arpeggiator",
+};
+const BROWSER_INSTRUMENT_ITEM_IDS = {
+  synth: "builtin:midi-instrument:synth",
+};
 
 const Timeline: Component<TimelineProps> = (props) => {
   const [confirmOpen, setConfirmOpen] = createSignal(false);
@@ -474,6 +482,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     getContainerElement: () => containerRef,
     rightSidebarWidthPx: sidebarWidth,
   });
+  const [deviceInsertActions, setDeviceInsertActions] = createSignal<TimelineDeviceInsertActions>();
 
   createEffect(() => {
     sidebarWidth();
@@ -881,6 +890,60 @@ const Timeline: Component<TimelineProps> = (props) => {
     for (const row of filteredBrowserAssetRows()) map.set(row.item.id, row.sample);
     return map;
   });
+  const browserDeviceQuery = (tab: "effects" | "midi-instruments") => leftBrowser.searchQueryByTab()[tab].trim().toLowerCase();
+  const browserEffectItems = createMemo<BrowserItem[]>(() => {
+    const actions = deviceInsertActions();
+    const canWrite = actions?.canWrite === true;
+    const items: BrowserItem[] = [
+      {
+        id: BROWSER_EFFECT_ITEM_IDS.eq,
+        source: "builtin",
+        category: "audio-effect",
+        label: "EQ",
+        subtitle: "Audio effect",
+        searchText: "eq audio effect equalizer",
+        disabled: !canWrite || actions?.canAddEq !== true,
+      },
+      {
+        id: BROWSER_EFFECT_ITEM_IDS.reverb,
+        source: "builtin",
+        category: "audio-effect",
+        label: "Reverb",
+        subtitle: "Audio effect",
+        searchText: "reverb audio effect space",
+        disabled: !canWrite || actions?.canAddReverb !== true,
+      },
+      {
+        id: BROWSER_EFFECT_ITEM_IDS.arpeggiator,
+        source: "builtin",
+        category: "midi-effect",
+        label: "Arpeggiator",
+        subtitle: "MIDI effect",
+        searchText: "arpeggiator arp midi effect",
+        disabled: !canWrite || actions?.canAddArpeggiator !== true,
+      },
+    ];
+    const query = browserDeviceQuery("effects");
+    if (!query) return items;
+    return items.filter((item) => item.searchText.includes(query));
+  });
+  const browserInstrumentItems = createMemo<BrowserItem[]>(() => {
+    const actions = deviceInsertActions();
+    const items: BrowserItem[] = [
+      {
+        id: BROWSER_INSTRUMENT_ITEM_IDS.synth,
+        source: "builtin",
+        category: "midi-instrument",
+        label: "Synth",
+        subtitle: "Create a MIDI clip on the selected instrument track",
+        searchText: "synth midi instrument clip",
+        disabled: actions?.canWrite !== true || actions.canAddMidiClip !== true,
+      },
+    ];
+    const query = browserDeviceQuery("midi-instruments");
+    if (!query) return items;
+    return items.filter((item) => item.searchText.includes(query));
+  });
 
   createEffect(() => {
     browserAssetQuery();
@@ -901,6 +964,20 @@ const Timeline: Component<TimelineProps> = (props) => {
     }
     event.dataTransfer.effectAllowed = "copy";
     event.dataTransfer.setData(SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData(sample));
+  };
+
+  const addBrowserEffect = (itemId: string) => {
+    const actions = deviceInsertActions();
+    if (!actions?.canWrite) return;
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.eq && actions.canAddEq) actions.addEq();
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.reverb && actions.canAddReverb) actions.addReverb();
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.arpeggiator && actions.canAddArpeggiator) actions.addArpeggiator();
+  };
+
+  const addBrowserInstrument = (itemId: string) => {
+    const actions = deviceInsertActions();
+    if (!actions?.canWrite || itemId !== BROWSER_INSTRUMENT_ITEM_IDS.synth || !actions.canAddMidiClip) return;
+    void actions.addMidiClip();
   };
 
   useTimelineAudioLifecycle({
@@ -1043,6 +1120,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       },
       onEffectParamsCommitted: pushEffectParamsHistory,
       onLocalSaveFailed: localProject.setLocalSaveFailure,
+      onDeviceInsertActionsChange: setDeviceInsertActions,
     },
     sampleDetailPanel: {
       isOpen: bottomPanel.open() && bottomPanel.mode() === "sample-detail",
@@ -1147,6 +1225,12 @@ const Timeline: Component<TimelineProps> = (props) => {
             onLoadMore: () => setBrowserAssetVisibleCount((count) => count + BROWSER_ASSET_PAGE_SIZE),
             onInsert: insertBrowserSample,
             onDragStart: startBrowserSampleDrag,
+          },
+          devices: {
+            effects: browserEffectItems,
+            instruments: browserInstrumentItems,
+            onAddEffect: addBrowserEffect,
+            onAddInstrument: addBrowserInstrument,
           },
           onToggle: leftBrowser.toggleOpen,
           onSelectTab: leftBrowser.setActiveTab,

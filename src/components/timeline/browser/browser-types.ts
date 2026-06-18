@@ -29,6 +29,25 @@ export type BrowserAssetsModel = {
   onDragStart: (event: DragEvent, itemId: string) => void;
 };
 
+export type BrowserDevicesModel = {
+  effects: Accessor<BrowserItem[]>;
+  instruments: Accessor<BrowserItem[]>;
+  onAddEffect: (itemId: string) => void;
+  onAddInstrument: (itemId: string) => void;
+};
+
+export type TimelineDeviceInsertActions = {
+  addMidiClip: () => Promise<void>;
+  addArpeggiator: () => void;
+  addEq: () => void;
+  addReverb: () => void;
+  canWrite: boolean;
+  canAddMidiClip: boolean;
+  canAddArpeggiator: boolean;
+  canAddEq: boolean;
+  canAddReverb: boolean;
+};
+
 export type TimelineLeftBrowserModel = {
   open: boolean;
   widthPx: number;
@@ -36,6 +55,7 @@ export type TimelineLeftBrowserModel = {
   searchQueryByTab: Record<TimelineBrowserTab, string>;
   scrollTopByTab: Record<TimelineBrowserTab, number>;
   assets: BrowserAssetsModel;
+  devices: BrowserDevicesModel;
   onToggle: () => void;
   onSelectTab: (tab: TimelineBrowserTab) => void;
   onSearchQueryChange: (tab: TimelineBrowserTab, query: string) => void;

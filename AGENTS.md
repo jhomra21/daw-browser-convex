@@ -15,6 +15,14 @@ Review your implementation before stopping. Check whether there is a better or s
 Think carefully and only action the specific task I have given you with the most concise and elegant solution that takes into consideration existing code across codebase.
 Prefer the most concise and elegant solutions that changes or adds as little code as possible.
 
+## Reference Codebases
+Reference these local codebases when designing apis, code, solutions or other programming things:
+/Documents/monorepo-new (Fullstack Video Editing Platform/app)[Programming Code]
+/Documents/dialkit (Real-time parameter tweaking for React, Solid, Svelte, and Vue) [UI Code]
+
+If you need to reference external libraries or APIs, use the most up-to-date and reliable sources available with web search or other tools.
+If you want to add a new local codebase, ask user and provide repo url.
+
 ## Engineering Rules (Non-Negotiable)
 - Never run dev server unless you are asked to do so.
 - Functional style first: prefer pure functions, immutable updates, explicit inputs/outputs.

@@ -79,69 +79,6 @@ type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[num
 type LocalEqRow = LocalEffectRow<EqParams>;
 type LocalReverbRow = LocalEffectRow<ReverbParams>;
 
-type EffectsPanelToolbarProps = {
-  toolbar: {
-    showAddArp: boolean;
-    showAddMidiClip: boolean;
-    showAddEq: boolean;
-    showAddReverb: boolean;
-    onAddArp: () => void;
-    onAddMidiClip: () => Promise<void>;
-    onAddEq: () => void;
-    onAddReverb: () => void;
-    canWrite: boolean;
-  };
-};
-
-const EffectsPanelToolbar: Component<EffectsPanelToolbarProps> = (props) => (
-  <div class="flex min-h-7 flex-wrap items-center gap-1.5 border-b border-neutral-800/50 px-2 py-0.5">
-    <Show when={props.toolbar.showAddMidiClip}>
-      <Button
-        variant="default"
-        size="sm"
-        class="h-6 px-2 py-0.5 text-xs"
-        disabled={!props.toolbar.canWrite}
-        onClick={() => void props.toolbar.onAddMidiClip()}
-      >
-        + MIDI
-      </Button>
-    </Show>
-    <Show when={props.toolbar.showAddArp}>
-      <Button
-        variant="default"
-        size="sm"
-        class="h-6 px-2 py-0.5 text-xs"
-        disabled={!props.toolbar.canWrite}
-        onClick={props.toolbar.onAddArp}
-      >
-        + Arp
-      </Button>
-    </Show>
-    <Show when={props.toolbar.showAddEq}>
-      <Button
-        variant="default"
-        size="sm"
-        class="h-6 px-2 py-0.5 text-xs"
-        disabled={!props.toolbar.canWrite}
-        onClick={props.toolbar.onAddEq}
-      >
-        + EQ
-      </Button>
-    </Show>
-    <Show when={props.toolbar.showAddReverb}>
-      <Button
-        variant="default"
-        size="sm"
-        class="h-6 px-2 py-0.5 text-xs"
-        disabled={!props.toolbar.canWrite}
-        onClick={props.toolbar.onAddReverb}
-      >
-        + Reverb
-      </Button>
-    </Show>
-  </div>
-);
-
 type EffectsPanelFooterProps = {
   toggleLabel: "Hide" | "Show";
   onEffectsTabClick: () => void;
@@ -356,8 +293,8 @@ type EffectsPanelEmptyStateProps = {
 const EffectsPanelEmptyState: Component<EffectsPanelEmptyStateProps> = (props) => (
   <Show when={props.empty.visible}>
     <div class="flex items-center px-4 text-sm text-neutral-400">
-      No effects on this {props.empty.currentTargetId === "master" ? "master bus" : "track"}.
-      Use Add EQ or Add Reverb.
+      No devices on this {props.empty.currentTargetId === "master" ? "master bus" : "track"}.
+      Add instruments or effects from the Browser.
     </div>
   </Show>
 );
@@ -763,7 +700,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     void flushPending();
     props.onClose();
   };
-  const showToolbar = () => isInstrumentTrack() || !eqForTarget() || !reverbForTarget();
 
   createEffect(() => {
     props.onDeviceInsertActionsChange?.({
@@ -800,21 +736,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         >
           <div class="flex h-full min-h-0 flex-col">
             <div class="flex flex-1 flex-col overflow-hidden min-h-0">
-              <Show when={showToolbar()}>
-                <EffectsPanelToolbar
-                  toolbar={{
-                    showAddMidiClip: isInstrumentTrack(),
-                    showAddArp: isInstrumentTrack() && !instrumentState.arp.params(),
-                    onAddMidiClip: instrumentState.addMidiClip,
-                    showAddEq: !eqForTarget(),
-                    showAddReverb: !reverbForTarget(),
-                    onAddArp: instrumentState.arp.add,
-                    onAddEq: eqState.add,
-                    onAddReverb: reverbState.add,
-                    canWrite: canWriteCurrentTargetEffects(),
-                  }}
-                />
-              </Show>
               <div class="flex-1 overflow-x-auto overflow-y-hidden px-1 py-[3px] min-h-0">
                 <div class="flex items-stretch gap-3 h-full min-w-min min-h-0">
                   <Show when={isInstrumentTrack()}>

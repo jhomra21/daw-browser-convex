@@ -8,6 +8,7 @@ import {
 } from '~/lib/timeline-midi-bounds'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { canUseLocalStorage } from '~/lib/timeline-storage'
+import { clampMidiVelocity, midiPitchFrequency } from '~/lib/midi-note-audio'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { Track } from '@daw-browser/timeline-core/types'
 
@@ -162,9 +163,9 @@ export function useTimelineMidiOverlay(
       const gain = ctx.createGain()
       const start = ctx.currentTime
       const end = start + Math.max(0.05, durSec)
-      const amp = Math.max(0, Math.min(1.5, velocity))
+      const amp = clampMidiVelocity(velocity)
       osc.type = 'sawtooth'
-      osc.frequency.setValueAtTime(440 * Math.pow(2, (pitch - 69) / 12), start)
+      osc.frequency.setValueAtTime(midiPitchFrequency(pitch), start)
       gain.gain.setValueAtTime(0, start)
       gain.gain.linearRampToValueAtTime(amp, start + 0.01)
       gain.gain.linearRampToValueAtTime(0, end)
@@ -191,10 +192,10 @@ export function useTimelineMidiOverlay(
       const synth = options.audioEngine.getTrackSynthPreviewState(trackId)
       const wave1 = synth?.wave1 ?? 'sawtooth'
       const wave2 = synth?.wave2 ?? wave1
-      const targetAmp = Math.max(0, Math.min(1.5, velocity)) / 2
+      const targetAmp = clampMidiVelocity(velocity) / 2
       try { osc1.type = wave1 } catch {}
       try { osc2.type = wave2 } catch {}
-      const freq = 440 * Math.pow(2, (pitch - 69) / 12)
+      const freq = midiPitchFrequency(pitch)
       const epsilon = 1e-4
       osc1.frequency.setValueAtTime(freq, start)
       osc2.frequency.setValueAtTime(freq, start)

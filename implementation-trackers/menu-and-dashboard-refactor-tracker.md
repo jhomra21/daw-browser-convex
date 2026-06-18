@@ -828,7 +828,18 @@ Record validation evidence in this tracker as each phase completes.
 - [x] Phase 3: Assets tab
 - [x] Phase 4: Effects and MIDI Instruments tabs
 - [x] Phase 5: Remove EffectsPanel toolbar
-- [ ] Phase 6: Dashboard cleanup
+- [x] Phase 6: Dashboard cleanup
+
+## Phase 6 Duplicate-Control Checklist
+
+- General: keep theme preference selector; no duplicate quick-action controls to remove.
+- Account: keep session details and sign-out management; no duplicate quick-action controls to remove.
+- Projects: remove current-project "Export" action and model-backed "New project" quick-action row because File/Project menus own those lifecycle actions; keep project list/open management. Keep local-project create/rename/delete controls for the root dashboard without timeline menus.
+- Local Files: keep storage mode and project-folder permission controls because this is the detailed file-permission surface.
+- Samples: keep sample metadata, file paths, usage counts, and diagnostics surface; no quick insert/drag controls are present.
+- Timeline / DAW: keep BPM, metronome, grid, resolution, and loop preferences as the detailed settings surface even though Settings menu owns quick toggles.
+- Keyboard Shortcuts: keep read-only shortcut reference; no duplicate quick-entry control to remove.
+- Export: remove the "Export mixdown" button because File menu owns the canonical export action; keep current-project export context.
 
 ---
 
@@ -840,3 +851,4 @@ Record validation evidence in this tracker as each phase completes.
 - Phase 3: Wired the Assets browser tab to the existing project/default sample data path from `useProjectSamples`. Sample loading review found project Convex/local reads still return full arrays, while default R2 loading uses cursor pages internally but returns the full catalog; the browser therefore uses a capped 200-row initial render with explicit "Load more" and search-backed filtering for this phase without moving dashboard delete/copy management. Asset rows use the `BrowserItem` source/category model, precomputed lowercase search text, and Map-based handler lookup. Insert reuses `handleInsertSample`, and drag reuses `SAMPLE_DRAG_DATA_TYPE` plus `serializeSampleDragData`, so timeline root/drop handling consumes the existing sample payload.
 - Phase 4: Added built-in browser rows for EQ, Reverb, Arpeggiator, and Synth using the existing `BrowserItem` source/category model. Extracted only the device insertion actions and availability booleans from `EffectsPanel` through the existing panel props path, preserving write permission checks and duplicate-prevention rules from `EffectsPanelToolbar`. Browser clicks now call the same add handlers for EQ, Reverb, Arpeggiator, and MIDI clip creation on the selected instrument track. Validation passed with `bun run typecheck` and `bun run build`.
 - Phase 5: Removed the effects panel toolbar component and its toolbar-only visibility helper, leaving insertion owned by the Browser. Updated the effects panel empty state to direct users to the Browser for instruments/effects. Verified the Browser still maps Synth to `addMidiClip`, Arpeggiator to `addArpeggiator`, EQ to `addEq`, and Reverb to `addReverb`, with the Phase 4 `canWrite` and per-device availability checks preserved. Validation passed with `bun run typecheck` and `bun run build`.
+- Phase 6: Added the per-view duplicate-control checklist before editing dashboard code. Removed the model-backed Projects dashboard current-project export action and new-project quick-action row because File/Project menus own those lifecycle actions. Kept local root-dashboard project creation, project list/open management, samples metadata, file permissions, timeline preferences, keyboard reference, account/session, and general settings surfaces. Removed the Export dashboard mixdown button and left the current-project export context with copy pointing to File > Export Mixdown. Verified `parseDashboardView` accepts all eight dashboard URL values (`general`, `account`, `projects`, `files`, `samples`, `timeline`, `keyboard`, `export`) and rejects invalid values. Validation passed with `bun run typecheck` and `bun run build`.

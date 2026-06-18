@@ -3,6 +3,7 @@ import type { TimelineProject } from "~/hooks/useTimelineData";
 import type { CloudBackupStatus } from "~/hooks/useLocalProjectActions";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { DashboardView } from "~/components/dashboard/types";
+import type { TimelineBrowserTab } from "~/components/timeline/browser/browser-types";
 
 export type TimelineProjectMenuModel = {
   currentProjectId: string;
@@ -65,4 +66,9 @@ export type TransportControlsProps = {
   ) => void;
   onInsertSample: (input: InsertSampleInput) => void | Promise<void>;
   projectMenu: TimelineProjectMenuModel;
+  browser: {
+    open: boolean;
+    onToggle: () => void;
+    onSelectTab: (tab: TimelineBrowserTab) => void;
+  };
 };

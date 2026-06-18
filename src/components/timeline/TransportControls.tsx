@@ -252,7 +252,10 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
             projectMenu={props.projectMenu}
             menu={projectsMenu}
           />
-          <MediaMenu onOpenDashboard={props.projectMenu.onOpenDashboard} />
+          <MediaMenu
+            onOpenDashboard={props.projectMenu.onOpenDashboard}
+            browser={props.browser}
+          />
           <SettingsMenu toolbar={props} />
           <TracksMenu tracksMenu={props.tracksMenu} />
         </Menubar>

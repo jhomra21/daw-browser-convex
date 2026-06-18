@@ -44,6 +44,8 @@ import { useTimelinePersistenceController } from "~/hooks/useTimelinePersistence
 import { useTimelineAudioLifecycle } from "~/hooks/useTimelineAudioLifecycle";
 import { useTimelineAudioWarp } from "~/hooks/useTimelineAudioWarp";
 import { useTimelineBottomPanelState } from "~/hooks/useTimelineBottomPanelState";
+import { useTimelineLeftBrowserResize } from "~/hooks/useTimelineLeftBrowserResize";
+import { useTimelineLeftBrowserState } from "~/hooks/useTimelineLeftBrowserState";
 import { isTimelineSampleDetailClip, useTimelineSampleDetailController } from "~/hooks/useTimelineSampleDetailController";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
@@ -456,6 +458,24 @@ const Timeline: Component<TimelineProps> = (props) => {
   let containerRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
 
+  const leftBrowser = useTimelineLeftBrowserState({
+    projectId,
+    rightSidebarWidthPx: sidebarWidth,
+    getContainerElement: () => containerRef,
+  });
+  const leftBrowserResize = useTimelineLeftBrowserResize({
+    widthPx: leftBrowser.widthPx,
+    previewWidthPx: leftBrowser.previewWidthPx,
+    commitWidthPx: leftBrowser.commitWidthPx,
+    getContainerElement: () => containerRef,
+    rightSidebarWidthPx: sidebarWidth,
+  });
+
+  createEffect(() => {
+    sidebarWidth();
+    leftBrowser.clampWidthToLayout();
+  });
+
   const {
     midiEditorClipId,
     midiCard,
@@ -736,6 +756,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       void addInstrumentTrack().catch(() => {});
     },
     onOpenExport: () => setExportOpen(true),
+    onToggleBrowser: leftBrowser.toggleOpen,
   });
 
   const { onSidebarPointerDown } = useTimelineSidebarResize({
@@ -837,6 +858,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       onRetrySharedChanges: localProject.retrySharedChanges,
       onExportArchive: localProject.exportArchive,
       onImportArchive: () => archiveInputRef?.click(),
+    },
+    browser: {
+      open: leftBrowser.open(),
+      onToggle: leftBrowser.toggleOpen,
+      onSelectTab: leftBrowser.setActiveTab,
     },
     bpm: bpm(),
     onChangeBpm: (next: number) => setBpm(clampBpm(next)),
@@ -1011,6 +1037,18 @@ const Timeline: Component<TimelineProps> = (props) => {
           setScrollElement(el);
         }}
         bottomPanelOffsetPx={bottomPanel.bottomPanelOffsetPx()}
+        leftBrowser={{
+          open: leftBrowser.open(),
+          widthPx: leftBrowser.widthPx(),
+          activeTab: leftBrowser.activeTab(),
+          searchQueryByTab: leftBrowser.searchQueryByTab(),
+          scrollTopByTab: leftBrowser.scrollTopByTab(),
+          onToggle: leftBrowser.toggleOpen,
+          onSelectTab: leftBrowser.setActiveTab,
+          onSearchQueryChange: leftBrowser.setSearchQuery,
+          onScrollTopChange: leftBrowser.setScrollTop,
+          onResizePointerDown: leftBrowserResize.onPointerDown,
+        }}
         durationSec={duration()}
         sidebarWidth={sidebarWidth()}
         tracks={renderTracks()}

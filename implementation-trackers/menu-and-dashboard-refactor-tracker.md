@@ -824,7 +824,7 @@ Record validation evidence in this tracker as each phase completes.
 - [x] Combined plan and review feedback captured in this tracker
 - [x] Phase 1A: Behavior-preserving menu extraction
 - [x] Phase 1B: Menu taxonomy update
-- [ ] Phase 2: Left browser shell and real menu/browser actions
+- [x] Phase 2: Left browser shell and real menu/browser actions
 - [ ] Phase 3: Assets tab
 - [ ] Phase 4: Effects and MIDI Instruments tabs
 - [ ] Phase 5: Remove EffectsPanel toolbar
@@ -836,3 +836,4 @@ Record validation evidence in this tracker as each phase completes.
 
 - Phase 1A: Extracted existing File, Edit, Project, Media, Settings, Tracks, and Share menu components into `src/components/timeline/menus/` without taxonomy or user-facing behavior changes. Moved `projects-menu.tsx` to `menus/project-menu.tsx` and `project-media-menu.tsx` to `menus/media-menu.tsx`; removed the old parallel files. Validation passed with `bun run typecheck` and `bun run build`.
 - Phase 1B: Applied the target top-level taxonomy by removing the top-level Share menu, moving copy share link into Project, moving file/archive/account actions into File, moving keyboard shortcuts entry into Edit, and narrowing Media to detailed samples/export dashboard entries until the browser shell phase. Validation passed with `bun run typecheck` and `bun run build`.
+- Phase 2: Added a persistent left browser shell with open state, width, active tab, per-tab search, and per-tab scroll saved to local storage. Mounted it as a sibling of the timeline scroll area so the timeline continues using its existing bottom-panel scroll padding, while the browser visual height subtracts the fixed bottom panel footprint once. Added left-edge resize clamping against right sidebar width and the minimum timeline width, Media menu browser commands, and `Ctrl/Cmd + Alt + B` timeline-scoped browser toggle. Validation passed with `bun run typecheck` and `bun run build`.

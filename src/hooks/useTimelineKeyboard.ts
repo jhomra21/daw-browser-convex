@@ -10,6 +10,7 @@ type KeyboardHandlers = {
   onAddGroupTrack: () => void;
   onAddInstrumentTrack: () => void;
   onOpenExport: () => void;
+  onToggleBrowser: () => void;
   onUndo: () => void;
   onRedo: () => void;
 };
@@ -25,10 +26,23 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
       target instanceof HTMLElement &&
       (target.tagName === "INPUT" ||
         target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" ||
         target.isContentEditable)
     )
       return;
 
+
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      e.altKey &&
+      !e.shiftKey &&
+      (e.key === "b" || e.key === "B")
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      handlers.onToggleBrowser();
+      return;
+    }
     // Add Track
     // Instrument: Ctrl/Cmd + Shift + T
     if (

@@ -128,30 +128,27 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
           onContextMenu={stopOverlayEvent}
         />
         <Show when={midiClip()}>
-          {(clip) => {
-            const card = props.midi.card
-            return (
-              <MidiEditorCard
-                clipId={clip().id}
-                bpm={props.timeline.bpm}
-                gridDenominator={props.timeline.gridDenominator}
-                clipDurationSec={clip().duration}
-                x={card.x}
-                y={card.y}
-                w={card.w}
-                h={card.h}
-                onClose={props.midi.close}
-                onChangeBounds={props.midi.changeBounds}
-                midi={clip().midi}
-                userId={props.midi.userId}
-                projectId={props.midi.projectId}
-                onAuditionNote={props.midi.auditionNote}
-                onStartLiveNote={props.midi.startLiveNote}
-                onStopLiveNote={props.midi.stopLiveNote}
-                onLocalMidiSaved={props.midi.onLocalMidiSaved}
-              />
-            )
-          }}
+          {(clip) => (
+            <MidiEditorCard
+              clipId={clip().id}
+              bpm={props.timeline.bpm}
+              gridDenominator={props.timeline.gridDenominator}
+              clipDurationSec={clip().duration}
+              x={props.midi.card.x}
+              y={props.midi.card.y}
+              w={props.midi.card.w}
+              h={props.midi.card.h}
+              onClose={props.midi.close}
+              onChangeBounds={props.midi.changeBounds}
+              midi={clip().midi}
+              userId={props.midi.userId}
+              projectId={props.midi.projectId}
+              onAuditionNote={props.midi.auditionNote}
+              onStartLiveNote={props.midi.startLiveNote}
+              onStopLiveNote={props.midi.stopLiveNote}
+              onLocalMidiSaved={props.midi.onLocalMidiSaved}
+            />
+          )}
         </Show>
       </Show>
     </>

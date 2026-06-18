@@ -1,5 +1,5 @@
 import { For, type Component } from "solid-js";
-import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator, MenubarShortcut } from "~/components/ui/menubar";
+import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator } from "~/components/ui/menubar";
 import { timelineBrowserTabLabels, timelineBrowserTabs } from "~/lib/timeline-left-browser-preferences";
 import { cn } from "~/lib/utils";
 import { gridDenominators } from "../grid-options";
@@ -16,20 +16,18 @@ const viewMenuItemClass = cn(nativeMenuItemClass, "flex w-full items-center gap-
 
 export const ViewMenu: Component<ViewMenuProps> = (props) => {
   const toolbar = () => props.toolbar;
+  const selectBrowserTab = (tab: (typeof timelineBrowserTabs)[number]) => {
+    toolbar().browser.onSelectTab(tab);
+    toolbar().browser.onOpen();
+  };
 
   return (
     <MenubarMenu value="view">
       <NativeMenuTrigger label="View" />
       <MenubarContent class="w-64 border-neutral-800 bg-neutral-900">
-        <MenubarItem class={viewMenuItemClass} onSelect={toolbar().browser.onToggle}>
-          <MenuCheckMark checked={toolbar().browser.open} />
-          <span>{toolbar().browser.open ? "Hide Browser" : "Show Browser"}</span>
-          <MenubarShortcut>Ctrl/Cmd + Alt + B</MenubarShortcut>
-        </MenubarItem>
-        <MenubarSeparator />
         <For each={timelineBrowserTabs}>
           {(tab) => (
-            <MenubarItem class={viewMenuItemClass} onSelect={() => toolbar().browser.onSelectTab(tab)}>
+            <MenubarItem class={viewMenuItemClass} onSelect={() => selectBrowserTab(tab)}>
               <span class="w-4" />
               <span>{timelineBrowserTabLabels[tab]} Browser</span>
             </MenubarItem>

@@ -246,6 +246,20 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
   return (
     <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-neutral-800 bg-neutral-950 p-2">
       <div class="justify-self-start flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-pressed={props.browser.open}
+          aria-label={props.browser.open ? "Hide browser sidebar" : "Show browser sidebar"}
+          class={cn(
+            nativeMenuTriggerClass,
+            "focus:bg-neutral-800 focus:text-neutral-100 focus:outline-none",
+            props.browser.open && "bg-neutral-800 text-neutral-100",
+          )}
+          onClick={props.browser.onToggle}
+        >
+          Browser
+        </Button>
         <Menubar class="flex items-center gap-1">
           <FileMenu toolbar={props} />
           <EditMenu toolbar={props} />

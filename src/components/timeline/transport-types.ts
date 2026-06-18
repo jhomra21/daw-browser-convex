@@ -70,6 +70,7 @@ export type TransportControlsProps = {
   projectMenu: TimelineProjectMenuModel;
   browser: {
     open: boolean;
+    onOpen: () => void;
     onToggle: () => void;
     onSelectTab: (tab: TimelineBrowserTab) => void;
   };

@@ -35,20 +35,6 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
         display: props.browser.open ? undefined : "none",
       }}
     >
-      <div class="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
-        <div>
-          <div class="text-xs font-semibold uppercase tracking-[0.16em] text-neutral-500">Browser</div>
-          <div class="text-sm font-medium text-neutral-100">{timelineBrowserTabLabels[props.browser.activeTab]}</div>
-        </div>
-        <button
-          type="button"
-          class="rounded border border-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:border-neutral-700 hover:bg-neutral-900 hover:text-neutral-100"
-          onClick={props.browser.onToggle}
-        >
-          Hide
-        </button>
-      </div>
-
       <div class="border-b border-neutral-800 p-2">
         <div class="grid grid-cols-1 gap-1">
           <For each={timelineBrowserTabs}>
@@ -69,12 +55,12 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
         </div>
       </div>
 
-      <div class="border-b border-neutral-800 p-2">
+      <div class="border-b border-neutral-800">
         <input
           type="search"
           value={props.browser.searchQueryByTab[props.browser.activeTab]}
           placeholder={`Search ${timelineBrowserTabLabels[props.browser.activeTab].toLowerCase()}`}
-          class="h-8 w-full rounded border border-neutral-800 bg-neutral-900 px-2 text-xs text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-neutral-600"
+          class="h-12 w-full bg-transparent px-4 text-sm text-neutral-100 outline-none placeholder:text-neutral-600 focus:bg-neutral-900/60"
           onInput={(event) => props.browser.onSearchQueryChange(props.browser.activeTab, event.currentTarget.value)}
         />
       </div>

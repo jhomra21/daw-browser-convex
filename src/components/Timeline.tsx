@@ -872,6 +872,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
     browser: {
       open: leftBrowser.open(),
+      onOpen: () => leftBrowser.setOpen(true),
       onToggle: leftBrowser.toggleOpen,
       onSelectTab: leftBrowser.setActiveTab,
     },

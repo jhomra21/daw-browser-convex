@@ -22,9 +22,6 @@ export type BrowserItem = {
 
 export type BrowserAssetsModel = {
   items: Accessor<BrowserItem[]>;
-  visibleCount: Accessor<number>;
-  canLoadMore: Accessor<boolean>;
-  onLoadMore: () => void;
   onInsert: (itemId: string) => void;
   onDragStart: (event: DragEvent, itemId: string) => void;
 };
@@ -34,18 +31,6 @@ export type BrowserDevicesModel = {
   instruments: Accessor<BrowserItem[]>;
   onAddEffect: (itemId: string) => void;
   onAddInstrument: (itemId: string) => void;
-};
-
-export type TimelineDeviceInsertActions = {
-  addMidiClip: () => Promise<void>;
-  addArpeggiator: () => void;
-  addEq: () => void;
-  addReverb: () => void;
-  canWrite: boolean;
-  canAddMidiClip: boolean;
-  canAddArpeggiator: boolean;
-  canAddEq: boolean;
-  canAddReverb: boolean;
 };
 
 export type TimelineLeftBrowserModel = {

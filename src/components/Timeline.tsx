@@ -47,10 +47,10 @@ import { useTimelineBottomPanelState } from "~/hooks/useTimelineBottomPanelState
 import { useTimelineLeftBrowserResize } from "~/hooks/useTimelineLeftBrowserResize";
 import { useTimelineLeftBrowserState } from "~/hooks/useTimelineLeftBrowserState";
 import { useTimelineBrowserController } from "~/hooks/useTimelineBrowserController";
+import type { TimelineDeviceInsertActions } from "./timeline/timeline-device-insert-actions";
 import { isTimelineSampleDetailClip, useTimelineSampleDetailController } from "~/hooks/useTimelineSampleDetailController";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
-import type { TimelineDeviceInsertActions } from "~/components/timeline/browser/browser-types";
 import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
 import TimelineChrome from "./timeline/timeline-chrome";
 import AppMessageDialog, { type AppMessageDialogState } from "./timeline/app-message-dialog";

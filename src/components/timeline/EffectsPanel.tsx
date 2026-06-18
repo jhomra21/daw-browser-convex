@@ -45,7 +45,7 @@ import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import TimelineBottomPanelShell, { type TimelineBottomPanelShellControls } from "~/components/timeline/TimelineBottomPanelShell";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { BOTTOM_PANEL_EDGE_PADDING_PX, EFFECTS_PANEL_FOOTER_HEIGHT_PX } from "~/lib/bottom-panel-layout";
-import type { TimelineDeviceInsertActions } from "~/components/timeline/browser/browser-types";
+import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 
 type EffectsPanelProps = {
   isOpen: boolean;

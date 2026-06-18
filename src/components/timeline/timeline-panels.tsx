@@ -12,7 +12,7 @@ import type { EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
 import type { BpmDetectionService } from '~/lib/bpm-detection-service'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { TimelineBottomPanelShellControls } from '~/components/timeline/TimelineBottomPanelShell'
-import type { TimelineDeviceInsertActions } from '~/components/timeline/browser/browser-types'
+import type { TimelineDeviceInsertActions } from '~/components/timeline/timeline-device-insert-actions'
 
 const AgentChat = lazy(() => import('~/components/AgentChat'))
 const SharedChat = lazy(() => import('~/components/SharedChat'))

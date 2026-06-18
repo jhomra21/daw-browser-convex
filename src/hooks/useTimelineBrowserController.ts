@@ -1,7 +1,8 @@
-import { createEffect, createMemo, createSignal, type Accessor } from "solid-js";
+import { createMemo, type Accessor } from "solid-js";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
 import type { TimelineLeftBrowserState } from "~/components/timeline/browser/browser-types";
-import type { BrowserItem, BrowserItemSource, TimelineDeviceInsertActions, TimelineLeftBrowserModel } from "~/components/timeline/browser/browser-types";
+import type { BrowserItem, BrowserItemSource, TimelineLeftBrowserModel } from "~/components/timeline/browser/browser-types";
+import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData, type SampleDragData } from "~/lib/sample-drag-data";
 
 type Options = {
@@ -13,7 +14,6 @@ type Options = {
   handleInsertSample: (sample: SampleDragData) => void | Promise<void>;
 };
 
-const BROWSER_ASSET_PAGE_SIZE = 200;
 const BROWSER_EFFECT_ITEM_IDS = {
   eq: "builtin:audio-effect:eq",
   reverb: "builtin:audio-effect:reverb",
@@ -62,7 +62,6 @@ const buildBrowserSampleRow = (
 
 export function useTimelineBrowserController(options: Options): Accessor<TimelineLeftBrowserModel> {
   const browserSamplesEnabled = () => options.leftBrowser.open() && options.leftBrowser.activeTab() === "assets";
-  const [browserAssetVisibleCount, setBrowserAssetVisibleCount] = createSignal(BROWSER_ASSET_PAGE_SIZE);
   const browserSamples = useProjectSamples({
     projectId: options.projectId,
     userId: options.userId,
@@ -155,11 +154,6 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     return items.filter((item) => item.searchText.includes(query));
   });
 
-  createEffect(() => {
-    browserAssetQuery();
-    setBrowserAssetVisibleCount(BROWSER_ASSET_PAGE_SIZE);
-  });
-
   const insertBrowserSample = (itemId: string) => {
     const sample = browserAssetSampleById().get(itemId);
     if (!sample) return;
@@ -198,9 +192,6 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     scrollTopByTab: options.leftBrowser.scrollTopByTab(),
     assets: {
       items: browserAssetItems,
-      visibleCount: browserAssetVisibleCount,
-      canLoadMore: () => browserAssetItems().length > browserAssetVisibleCount(),
-      onLoadMore: () => setBrowserAssetVisibleCount((count) => count + BROWSER_ASSET_PAGE_SIZE),
       onInsert: insertBrowserSample,
       onDragStart: startBrowserSampleDrag,
     },

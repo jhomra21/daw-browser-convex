@@ -11,7 +11,6 @@ const tabPlaceholder: Record<TimelineBrowserTab, string> = {
 
 export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel }> = (props) => {
   let scrollRef: HTMLDivElement | undefined;
-  const visibleAssets = createMemo(() => props.browser.assets.items().slice(0, props.browser.assets.visibleCount()));
   const visibleDevices = createMemo(() => {
     if (props.browser.activeTab === "effects") return props.browser.devices.effects();
     if (props.browser.activeTab === "midi-instruments") return props.browser.devices.instruments();
@@ -114,14 +113,14 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
         >
           <div class="space-y-1">
             <Show
-              when={visibleAssets().length > 0}
+              when={props.browser.assets.items().length > 0}
               fallback={(
                 <div class="rounded border border-dashed border-neutral-800 bg-neutral-900/40 p-3 text-xs leading-5 text-neutral-500">
                   No samples match this search.
                 </div>
               )}
             >
-              <For each={visibleAssets()}>
+              <For each={props.browser.assets.items()}>
                 {(item) => (
                   <button
                     type="button"
@@ -141,15 +140,6 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
                   </button>
                 )}
               </For>
-            </Show>
-            <Show when={props.browser.assets.canLoadMore()}>
-              <button
-                type="button"
-                class="mt-2 w-full rounded border border-neutral-800 px-2 py-1.5 text-xs text-neutral-300 hover:border-neutral-700 hover:bg-neutral-900 hover:text-neutral-100"
-                onClick={props.browser.assets.onLoadMore}
-              >
-                Load more samples
-              </button>
             </Show>
           </div>
         </Show>

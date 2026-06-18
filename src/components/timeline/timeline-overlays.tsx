@@ -3,11 +3,11 @@ import type { TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { LANE_HEIGHT, PPS } from '~/lib/timeline-utils'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
+import type { TimelineMidiBounds } from '~/lib/timeline-midi-bounds'
 import RecordingPreview from '~/components/timeline/RecordingPreview'
 import GridOverlay from '~/components/timeline/GridOverlay'
 import MidiEditorCard from '~/components/midi/MidiEditorCard'
 
-export type TimelineMidiBounds = { x: number; y: number; w: number; h: number }
 type MarqueeRect = { x: number; y: number; width: number; height: number } | null
 
 type TimelineOverlaysProps = {
@@ -134,10 +134,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
               bpm={props.timeline.bpm}
               gridDenominator={props.timeline.gridDenominator}
               clipDurationSec={clip().duration}
-              x={props.midi.card.x}
-              y={props.midi.card.y}
-              w={props.midi.card.w}
-              h={props.midi.card.h}
+              bounds={props.midi.card}
               onClose={props.midi.close}
               onChangeBounds={props.midi.changeBounds}
               midi={clip().midi}

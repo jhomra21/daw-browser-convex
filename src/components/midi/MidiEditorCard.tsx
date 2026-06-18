@@ -3,6 +3,11 @@ import { convexClient, convexApi } from '~/lib/convex'
 import { isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { cn } from '~/lib/utils'
+import { useDrag } from '~/hooks/useDrag'
+import {
+  clampTimelineMidiBounds,
+  type TimelineMidiBounds,
+} from '~/lib/timeline-midi-bounds'
 import type { Clip } from '@daw-browser/timeline-core/types'
 
 type MidiEditorCardProps = {
@@ -12,12 +17,9 @@ type MidiEditorCardProps = {
   gridDenominator: number
   // Clip window to size grid to
   clipDurationSec: number
-  x: number
-  y: number
-  w: number
-  h: number
+  bounds: TimelineMidiBounds
   onClose: () => void
-  onChangeBounds: (next: { x: number; y: number; w: number; h: number }) => void
+  onChangeBounds: (next: TimelineMidiBounds) => void
   midi?: Clip['midi']
   userId?: string
   // Optional: preview note when adding/dragging
@@ -30,11 +32,7 @@ type MidiEditorCardProps = {
   onLocalMidiSaved?: (clipId: string, midi: Clip['midi']) => void
 }
 
-const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v))
-
 const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
-  const [dragging, setDragging] = createSignal(false)
-  const [resizing, setResizing] = createSignal(false)
   const [notes, setNotes] = createSignal<Array<{ beat: number; length: number; pitch: number; velocity?: number }>>([])
   // Local-only toggle to capture keyboard for playing notes
   const storageKey = () => `mb:midi_kb:${props.projectId || 'default'}`
@@ -69,7 +67,6 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   let startTop = 0
   let resizeStartW = 0
   let resizeStartH = 0
-  let pointerId: number | null = null
   let saveTimer: number | null = null
   type PendingMidiSave = {
     clipId: string
@@ -119,57 +116,55 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     }, 200)
   }
 
-  const onHeaderPointerDown = (e: PointerEvent) => {
-    if (pointerId !== null) return
-    pointerId = e.pointerId
-    dragStartX = e.clientX
-    dragStartY = e.clientY
-    startLeft = props.x
-    startTop = props.y
-    setDragging(true)
-    try { (e as any).preventDefault?.() } catch {}
-    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch {}
-    window.addEventListener('pointermove', onPointerMove)
-    window.addEventListener('pointerup', onPointerUp, { once: true })
+  const cardDrag = useDrag({
+    dragCursorClass: 'cursor-grabbing',
+    onDragStart: (pos) => {
+      dragStartX = pos.x
+      dragStartY = pos.y
+      startLeft = props.bounds.x
+      startTop = props.bounds.y
+    },
+    onDragMove: (pos) => {
+      props.onChangeBounds(clampTimelineMidiBounds({
+        x: startLeft + pos.x - dragStartX,
+        y: startTop + pos.y - dragStartY,
+        w: props.bounds.w,
+        h: props.bounds.h,
+      }))
+    },
+  })
+
+  const resizeDrag = useDrag({
+    dragCursorClass: 'cursor-se-resize',
+    onDragStart: (pos) => {
+      dragStartX = pos.x
+      dragStartY = pos.y
+      resizeStartW = props.bounds.w
+      resizeStartH = props.bounds.h
+    },
+    onDragMove: (pos) => {
+      props.onChangeBounds(clampTimelineMidiBounds({
+        x: props.bounds.x,
+        y: props.bounds.y,
+        w: resizeStartW + pos.x - dragStartX,
+        h: resizeStartH + pos.y - dragStartY,
+      }))
+    },
+  })
+
+  const onHeaderPointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return
+    event.stopPropagation()
+    cardDrag.onPointerDown(event)
   }
 
-  const onResizerPointerDown = (e: PointerEvent) => {
-    if (pointerId !== null) return
-    pointerId = e.pointerId
-    dragStartX = e.clientX
-    dragStartY = e.clientY
-    resizeStartW = props.w
-    resizeStartH = props.h
-    setResizing(true)
-    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch {}
-    window.addEventListener('pointermove', onPointerMove)
-    window.addEventListener('pointerup', onPointerUp, { once: true })
-  }
-
-  const onPointerMove = (e: PointerEvent) => {
-    if (dragging()) {
-      const dx = e.clientX - dragStartX
-      const dy = e.clientY - dragStartY
-      const next = { x: clamp(startLeft + dx, 0, window.innerWidth - 80), y: clamp(startTop + dy, 0, window.innerHeight - 80), w: props.w, h: props.h }
-      props.onChangeBounds(next)
-    } else if (resizing()) {
-      const dx = e.clientX - dragStartX
-      const dy = e.clientY - dragStartY
-      const nextW = clamp(resizeStartW + dx, 320, window.innerWidth)
-      const nextH = clamp(resizeStartH + dy, 200, window.innerHeight)
-      props.onChangeBounds({ x: props.x, y: props.y, w: nextW, h: nextH })
-    }
-  }
-
-  const onPointerUp = (_e: PointerEvent) => {
-    dragging() && setDragging(false)
-    resizing() && setResizing(false)
-    pointerId = null
-    try { window.removeEventListener('pointermove', onPointerMove) } catch {}
+  const onResizerPointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return
+    event.stopPropagation()
+    resizeDrag.onPointerDown(event)
   }
 
   onCleanup(() => {
-    try { window.removeEventListener('pointermove', onPointerMove) } catch {}
     if (saveTimer) {
       clearTimeout(saveTimer)
       saveTimer = null
@@ -242,20 +237,20 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   type DragState = {
     idx: number;
     mode: 'move' | 'resize';
-    startBeat: number;
-    startPitch: number;
-    startLength: number;
     startCol: number;
-    grabOffsetSteps: number; // integer fallback
-    startStep: number;
-    // pixel-stable dragging helpers
     stepWidthPx: number;
     grabOffsetStepsF: number;
     startPointerStepF: number;
     startRow: number;
     started: boolean;
+    changed: boolean;
   }
   let dragNote: DragState | null = null
+  const cleanupNoteDragListeners = () => {
+    try { window.removeEventListener('pointermove', onNotePointerMove, { capture: true } as EventListenerOptions) } catch {}
+    try { window.removeEventListener('pointerup', onNotePointerUp, { capture: true } as EventListenerOptions) } catch {}
+    try { window.removeEventListener('pointercancel', onNotePointerUp, { capture: true } as EventListenerOptions) } catch {}
+  }
   const onNotePointerDown = (idx: number) => (e: PointerEvent) => {
     if (!canPersist()) { warnMissingUser(); return }
     if (e.button !== 0) return
@@ -269,75 +264,73 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const nearRight = (e.clientX - rect.left) > rect.width * 0.7
     const { col } = pointToCell(el, e)
-    const startStep = Math.round(n.beat * stepsPerBeat())
     const containerRect = el.getBoundingClientRect()
     const stepWidthPx = Math.max(1e-6, containerRect.width / cols())
     const pointerStepF = (e.clientX - containerRect.left) / stepWidthPx
-    const grabOffsetSteps = col - startStep
     const grabOffsetStepsF = pointerStepF - (n.beat * stepsPerBeat())
     dragNote = {
       idx,
       mode: nearRight ? 'resize' : 'move',
-      startBeat: n.beat,
-      startPitch: n.pitch,
-      startLength: n.length,
       startCol: col,
-      grabOffsetSteps,
-      startStep,
       stepWidthPx,
       grabOffsetStepsF,
       startPointerStepF: pointerStepF,
       startRow: Math.round((topPitch() - n.pitch)),
       started: false,
+      changed: false,
     }
-    window.addEventListener('pointermove', onNotePointerMove)
-    window.addEventListener('pointerup', onNotePointerUp, { once: true })
+    window.addEventListener('pointermove', onNotePointerMove, { capture: true })
+    window.addEventListener('pointerup', onNotePointerUp, { capture: true })
+    window.addEventListener('pointercancel', onNotePointerUp, { capture: true })
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch {}
     // Audition on drag start
     const dur = Math.min(0.6, Math.max(0.05, n.length * secondsPerBeat()))
     props.onAuditionNote?.(n.pitch, n.velocity ?? 0.9, dur)
   }
   const onNotePointerMove = (e: PointerEvent) => {
-    if (!dragNote) return
+    const drag = dragNote
+    if (!drag) return
     if (!canPersist()) { return }
     const el = gridRef; if (!el) return
     const { col, row } = pointToCell(el, e)
-    setNotes(prev => prev.map((nn, i) => {
-      if (i !== dragNote!.idx) return nn
-      if (dragNote!.mode === 'move') {
-        const pitch = Math.max(minPitch, Math.min(maxPitch, topPitch() - row))
-        // Pixel-stable step under pointer
-        const containerRect = el.getBoundingClientRect()
-        const stepW = dragNote!.stepWidthPx || Math.max(1e-6, containerRect.width / cols())
-        const pointerStepF = (e.clientX - containerRect.left) / stepW
-        const newStepF = pointerStepF - dragNote!.grabOffsetStepsF
-        // Deadzone: wait until movement exceeds small threshold to avoid initial jump
-        const stepDelta = Math.abs(pointerStepF - dragNote!.startPointerStepF)
-        const rowDelta = Math.abs(row - dragNote!.startRow)
-        if (!dragNote!.started && stepDelta < 0.25 && rowDelta < 0.5) {
-          return nn
-        }
-        dragNote!.started = true
-        const newStep = Math.max(0, Math.min(cols() - 1, Math.round(newStepF)))
-        const nextBeat = newStep / stepsPerBeat()
-        return { ...nn, beat: nextBeat, pitch }
-      } else {
-        const deltaSteps = Math.max(1, col - dragNote!.startCol + 1)
-        const nextLen = Math.max(1 / stepsPerBeat(), deltaSteps / stepsPerBeat())
-        return { ...nn, length: nextLen }
-      }
-    }))
-  }
-  const onNotePointerUp = (_e: PointerEvent) => {
-    if (!canPersist()) {
-      dragNote = null
-      try { window.removeEventListener('pointermove', onNotePointerMove) } catch {}
+    const note = notes()[drag.idx]
+    if (!note) return
+
+    if (drag.mode === 'move') {
+      const pitch = Math.max(minPitch, Math.min(maxPitch, topPitch() - row))
+      const containerRect = el.getBoundingClientRect()
+      const stepW = drag.stepWidthPx || Math.max(1e-6, containerRect.width / cols())
+      const pointerStepF = (e.clientX - containerRect.left) / stepW
+      const stepDelta = Math.abs(pointerStepF - drag.startPointerStepF)
+      const rowDelta = Math.abs(row - drag.startRow)
+      if (!drag.started && stepDelta < 0.25 && rowDelta < 0.5) return
+      drag.started = true
+
+      const newStep = Math.max(0, Math.min(cols() - 1, Math.round(pointerStepF - drag.grabOffsetStepsF)))
+      const nextBeat = newStep / stepsPerBeat()
+      if (note.pitch === pitch && note.beat === nextBeat) return
+      drag.changed = true
+      setNotes(prev => prev.map((nn, i) => i === drag.idx ? { ...nn, beat: nextBeat, pitch } : nn))
       return
     }
-    scheduleSave()
-    dragNote = null
-    try { window.removeEventListener('pointermove', onNotePointerMove) } catch {}
+
+    const deltaSteps = Math.max(1, col - drag.startCol + 1)
+    const nextLen = Math.max(1 / stepsPerBeat(), deltaSteps / stepsPerBeat())
+    if (note.length === nextLen) return
+    drag.changed = true
+    setNotes(prev => prev.map((nn, i) => i === drag.idx ? { ...nn, length: nextLen } : nn))
   }
+  const onNotePointerUp = (_e: PointerEvent) => {
+    const drag = dragNote
+    cleanupNoteDragListeners()
+    if (!canPersist()) {
+      dragNote = null
+      return
+    }
+    if (drag?.changed) scheduleSave()
+    dragNote = null
+  }
+  onCleanup(cleanupNoteDragListeners)
 
   // --- Computer keyboard play mode (A/S/D/F/G row mapping) ---
   // Mapping based on event.code for US QWERTY; anchor A as C4 (MIDI 60)
@@ -446,7 +439,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   return (
     <div
       class="absolute z-50 border border-neutral-700 bg-neutral-900 shadow-xl overflow-hidden"
-      style={{ left: `${props.x}px`, top: `${props.y}px`, width: `${props.w}px`, height: `${props.h}px` }}
+      style={{ left: `${props.bounds.x}px`, top: `${props.bounds.y}px`, width: `${props.bounds.w}px`, height: `${props.bounds.h}px` }}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
@@ -455,7 +448,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
       {/* Header: draggable */}
       <div
         class="flex items-center justify-between px-3 py-2 bg-neutral-800 border-b border-neutral-700 cursor-move select-none"
-        onPointerDown={onHeaderPointerDown as any}
+        onPointerDown={onHeaderPointerDown}
       >
         <div class="flex items-center gap-3 text-sm font-semibold text-neutral-200">
           <div class="flex items-center gap-2">
@@ -559,7 +552,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
         {/* Bottom-right resizer */}
         <div
           class="absolute right-1 bottom-1 w-4 h-4 cursor-se-resize bg-neutral-700/60 hover:bg-neutral-600/70"
-          onPointerDown={onResizerPointerDown as any}
+          onPointerDown={onResizerPointerDown}
           title="Resize"
         />
       </div>

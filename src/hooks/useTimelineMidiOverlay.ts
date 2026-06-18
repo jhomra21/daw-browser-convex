@@ -1,7 +1,11 @@
 import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import type { Accessor } from 'solid-js'
 
-import type { TimelineMidiBounds } from '~/components/timeline/timeline-overlays'
+import {
+  clampTimelineMidiBounds,
+  timelineMidiBoundsEqual,
+  type TimelineMidiBounds,
+} from '~/lib/timeline-midi-bounds'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { canUseLocalStorage } from '~/lib/timeline-storage'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
@@ -50,7 +54,9 @@ export function useTimelineMidiOverlay(
   options: UseTimelineMidiOverlayOptions,
 ): UseTimelineMidiOverlayReturn {
   const [midiEditorClipId, setMidiEditorClipId] = createSignal<string | null>(null)
-  const [midiCard, setMidiCard] = createSignal<TimelineMidiBounds>({ x: 80, y: 80, w: 720, h: 360 })
+  const [midiCard, setMidiCard] = createSignal<TimelineMidiBounds>(
+    clampTimelineMidiBounds({ x: 80, y: 80, w: 720, h: 360 }),
+  )
   const activeLiveNotes = new Map<number, LiveNote>()
   let midiCardPersistTimer: number | null = null
   const trackIndex = createMemo(() => createTimelineTrackIndex(options.tracks()))
@@ -138,7 +144,9 @@ export function useTimelineMidiOverlay(
   }
 
   const changeMidiCardBounds = (next: TimelineMidiBounds) => {
-    setMidiCard(next)
+    const clamped = clampTimelineMidiBounds(next)
+    if (timelineMidiBoundsEqual(midiCard(), clamped)) return
+    setMidiCard(clamped)
     schedulePersistMidiCard()
   }
 
@@ -209,7 +217,7 @@ export function useTimelineMidiOverlay(
       if (!raw) return
       const parsed = readMidiBounds(JSON.parse(raw))
       if (parsed) {
-        setMidiCard(parsed)
+        setMidiCard(clampTimelineMidiBounds(parsed))
       }
     } catch {}
   })

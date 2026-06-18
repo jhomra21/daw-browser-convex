@@ -4,7 +4,7 @@ import { PPS, LANE_HEIGHT } from '~/lib/timeline-utils'
 const INNER_PADDING_TOP = 6
 const INNER_PADDING_BOTTOM = 6
 
-export type RecordingPoint = {
+type RecordingPoint = {
   offset: number
   amplitude: number
 }

@@ -1,12 +1,11 @@
-import { type Component, Show, Suspense, createMemo, lazy } from 'solid-js'
+import { type Component, Show, createMemo } from 'solid-js'
 import type { TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { LANE_HEIGHT, PPS } from '~/lib/timeline-utils'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
-
-const RecordingPreview = lazy(() => import('~/components/timeline/RecordingPreview'))
-const GridOverlay = lazy(() => import('~/components/timeline/GridOverlay'))
-const MidiEditorCard = lazy(() => import('~/components/midi/MidiEditorCard'))
+import RecordingPreview from '~/components/timeline/RecordingPreview'
+import GridOverlay from '~/components/timeline/GridOverlay'
+import MidiEditorCard from '~/components/midi/MidiEditorCard'
 
 export type TimelineMidiBounds = { x: number; y: number; w: number; h: number }
 type MarqueeRect = { x: number; y: number; width: number; height: number } | null
@@ -80,9 +79,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
             class="absolute left-0 right-0 pointer-events-none"
             style={{ top: `${preview().topPx}px`, height: `${LANE_HEIGHT}px` }}
           >
-            <Suspense fallback={null}>
-              <RecordingPreview startSec={preview().start} points={preview().points} />
-            </Suspense>
+            <RecordingPreview startSec={preview().start} points={preview().points} />
           </div>
         )}
       </Show>
@@ -92,14 +89,12 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
           style={{ top: `${props.timeline.tracks.length * LANE_HEIGHT}px`, height: `${LANE_HEIGHT}px` }}
         />
       )}
-      <Suspense fallback={null}>
-        <GridOverlay
-          durationSec={props.timeline.durationSec}
-          bpm={props.timeline.bpm}
-          denom={props.timeline.gridDenominator}
-          enabled={props.timeline.gridEnabled}
-        />
-      </Suspense>
+      <GridOverlay
+        durationSec={props.timeline.durationSec}
+        bpm={props.timeline.bpm}
+        denom={props.timeline.gridDenominator}
+        enabled={props.timeline.gridEnabled}
+      />
       {props.timeline.loopEnabled && props.timeline.loopEndSec - props.timeline.loopStartSec > 0.05 && (
         <>
           <div
@@ -132,34 +127,32 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
           onWheel={stopOverlayEvent}
           onContextMenu={stopOverlayEvent}
         />
-        <Suspense fallback={null}>
-          <Show when={midiClip()}>
-            {(clip) => {
-              const card = props.midi.card
-              return (
-                <MidiEditorCard
-                  clipId={clip().id}
-                  bpm={props.timeline.bpm}
-                  gridDenominator={props.timeline.gridDenominator}
-                  clipDurationSec={clip().duration}
-                  x={card.x}
-                  y={card.y}
-                  w={card.w}
-                  h={card.h}
-                  onClose={props.midi.close}
-                  onChangeBounds={props.midi.changeBounds}
-                  midi={clip().midi}
-                  userId={props.midi.userId}
-                  projectId={props.midi.projectId}
-                  onAuditionNote={props.midi.auditionNote}
-                  onStartLiveNote={props.midi.startLiveNote}
-                  onStopLiveNote={props.midi.stopLiveNote}
-                  onLocalMidiSaved={props.midi.onLocalMidiSaved}
-                />
-              )
-            }}
-          </Show>
-        </Suspense>
+        <Show when={midiClip()}>
+          {(clip) => {
+            const card = props.midi.card
+            return (
+              <MidiEditorCard
+                clipId={clip().id}
+                bpm={props.timeline.bpm}
+                gridDenominator={props.timeline.gridDenominator}
+                clipDurationSec={clip().duration}
+                x={card.x}
+                y={card.y}
+                w={card.w}
+                h={card.h}
+                onClose={props.midi.close}
+                onChangeBounds={props.midi.changeBounds}
+                midi={clip().midi}
+                userId={props.midi.userId}
+                projectId={props.midi.projectId}
+                onAuditionNote={props.midi.auditionNote}
+                onStartLiveNote={props.midi.startLiveNote}
+                onStopLiveNote={props.midi.stopLiveNote}
+                onLocalMidiSaved={props.midi.onLocalMidiSaved}
+              />
+            )
+          }}
+        </Show>
       </Show>
     </>
   )

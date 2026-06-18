@@ -1,5 +1,5 @@
 import { type Component } from "solid-js";
-import { MenubarContent, MenubarItem, MenubarMenu } from "~/components/ui/menubar";
+import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator } from "~/components/ui/menubar";
 import { NativeMenuTrigger } from "../toolbar-context";
 import type { TransportControlsProps } from "../transport-types";
 import { nativeMenuItemClass } from "./menu-action-types";
@@ -16,6 +16,13 @@ export const EditMenu: Component<{ toolbar: TransportControlsProps }> = (props) 
         </MenubarItem>
         <MenubarItem class={nativeMenuItemClass} onSelect={toolbar().onRedo}>
           Redo
+        </MenubarItem>
+        <MenubarSeparator />
+        <MenubarItem
+          class={nativeMenuItemClass}
+          onSelect={() => toolbar().projectMenu.onOpenDashboard("keyboard")}
+        >
+          Keyboard Shortcuts
         </MenubarItem>
       </MenubarContent>
     </MenubarMenu>

@@ -85,14 +85,6 @@ export const ProjectMenu: Component<ProjectMenuProps> = (props) => {
                 variant="secondary"
                 size="sm"
                 class="justify-center"
-                onClick={projectMenu().onOpenExport}
-              >
-                Export audio
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                class="justify-center"
                 disabled={!isCurrentProjectLocal() || !projectMenu().currentUserId || !projectMenu().onBackUpNow}
                 onClick={() => void projectMenu().onBackUpNow?.()}
                 title={
@@ -123,24 +115,6 @@ export const ProjectMenu: Component<ProjectMenuProps> = (props) => {
                 <Show when={shareCopied()} fallback="Copy share link">
                   Copied
                 </Show>
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                class="justify-center"
-                disabled={!isCurrentProjectLocal() || !projectMenu().onExportArchive}
-                onClick={() => void projectMenu().onExportArchive?.()}
-                title={!isCurrentProjectLocal() ? "Export local projects as .dawproject archives" : undefined}
-              >
-                Export .dawproject
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                class="justify-center"
-                onClick={() => void projectMenu().onImportArchive?.()}
-              >
-                Import .dawproject
               </Button>
               <Show when={isCurrentProjectLocal() && projectMenu().onChooseProjectFolder}>
                 <Button
@@ -234,7 +208,7 @@ export const ProjectMenu: Component<ProjectMenuProps> = (props) => {
             class={cn(nativeMenuItemClass, "mb-2")}
             onSelect={() => projectMenu().onOpenDashboard("projects")}
           >
-            Open projects dashboard
+            Manage projects dashboard
           </MenubarItem>
           <MenubarSeparator />
           <div class="max-h-72 overflow-y-auto">

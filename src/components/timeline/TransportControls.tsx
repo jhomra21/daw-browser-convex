@@ -8,12 +8,8 @@ import {
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 import { Menubar } from "~/components/ui/menubar";
-import { useExportsMenuController } from "~/hooks/useExportsMenuController";
 import { useProjectsMenuController } from "~/hooks/useProjectsMenuController";
-import { useSamplesMenuController } from "~/hooks/useSamplesMenuController";
-import { useShareMenuController } from "~/hooks/useShareMenuController";
 import { useTransportTempoController } from "~/hooks/useTransportTempoController";
-import { isLocalId } from "@daw-browser/shared";
 import { cn } from "~/lib/utils";
 import { nativeMenuTriggerClass } from "./toolbar-context";
 import type { TransportControlsProps } from "./transport-types";
@@ -23,7 +19,6 @@ import { FileMenu } from "./menus/file-menu";
 import { MediaMenu } from "./menus/media-menu";
 import { ProjectMenu } from "./menus/project-menu";
 import { SettingsMenu } from "./menus/settings-menu";
-import { ShareMenu } from "./menus/share-menu";
 import { TracksMenu } from "./menus/tracks-menu";
 import { gridDenominators } from "./grid-options";
 
@@ -243,23 +238,6 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
     onDeleteProject: props.projectMenu.onDeleteProject,
     onRenameProject: props.projectMenu.onRenameProject,
   });
-  const samplesMenu = useSamplesMenuController({
-    currentProjectId,
-    currentUserId,
-    onInsertSample: props.onInsertSample,
-    onJumpToClip: props.onJumpToClip,
-    onOpenDashboard: props.projectMenu.onOpenDashboard,
-  });
-  const exportsMenu = useExportsMenuController({
-    currentProjectId,
-    currentUserId,
-    onOpenExport: props.projectMenu.onOpenExport,
-    onOpenDashboard: props.projectMenu.onOpenDashboard,
-  });
-  const shareMenu = useShareMenuController({
-    onShare: props.projectMenu.onShare,
-    projectId: currentProjectId,
-  });
   const tempo = useTransportTempoController({
     bpm: () => props.bpm,
     onChangeBpm: props.onChangeBpm,
@@ -274,27 +252,9 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
             projectMenu={props.projectMenu}
             menu={projectsMenu}
           />
-          <MediaMenu samples={samplesMenu} exportsMenu={exportsMenu} />
+          <MediaMenu onOpenDashboard={props.projectMenu.onOpenDashboard} />
           <SettingsMenu toolbar={props} />
           <TracksMenu tracksMenu={props.tracksMenu} />
-          <Show when={!isLocalId("project", props.projectMenu.currentProjectId) && props.projectMenu.canManageSharing}>
-            <ShareMenu
-              share={{
-                onOpenChange: shareMenu.onOpenChange,
-                onOpen: shareMenu.onOpen,
-                onClose: shareMenu.onClose,
-                copied: shareMenu.copied(),
-                shareUrl: shareMenu.shareUrl(),
-                shareError: shareMenu.shareError(),
-                members: shareMenu.members(),
-                membersLoading: shareMenu.membersLoading(),
-                membersError: shareMenu.membersError(),
-                revokingMemberId: shareMenu.revokingMemberId(),
-                onCopy: shareMenu.onCopy,
-                onRevokeMember: shareMenu.onRevokeMember,
-              }}
-            />
-          </Show>
         </Menubar>
       </div>
 

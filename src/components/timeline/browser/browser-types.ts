@@ -2,12 +2,40 @@ import type { Accessor } from "solid-js";
 
 export type TimelineBrowserTab = "assets" | "effects" | "midi-instruments";
 
+export type BrowserItemSource = "project" | "default" | "builtin";
+
+export type BrowserItemCategory =
+  | "sample"
+  | "audio-effect"
+  | "midi-effect"
+  | "midi-instrument";
+
+export type BrowserItem = {
+  id: string;
+  source: BrowserItemSource;
+  category: BrowserItemCategory;
+  label: string;
+  subtitle?: string;
+  searchText: string;
+  disabled?: boolean;
+};
+
+export type BrowserAssetsModel = {
+  items: Accessor<BrowserItem[]>;
+  visibleCount: Accessor<number>;
+  canLoadMore: Accessor<boolean>;
+  onLoadMore: () => void;
+  onInsert: (itemId: string) => void;
+  onDragStart: (event: DragEvent, itemId: string) => void;
+};
+
 export type TimelineLeftBrowserModel = {
   open: boolean;
   widthPx: number;
   activeTab: TimelineBrowserTab;
   searchQueryByTab: Record<TimelineBrowserTab, string>;
   scrollTopByTab: Record<TimelineBrowserTab, number>;
+  assets: BrowserAssetsModel;
   onToggle: () => void;
   onSelectTab: (tab: TimelineBrowserTab) => void;
   onSearchQueryChange: (tab: TimelineBrowserTab, query: string) => void;

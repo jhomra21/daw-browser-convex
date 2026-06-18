@@ -1,16 +1,17 @@
-import { createEffect, For, onMount, type Component } from "solid-js";
+import { createEffect, createMemo, For, onMount, Show, type Component } from "solid-js";
 import type { TimelineBrowserTab, TimelineLeftBrowserModel } from "./browser-types";
 import { timelineBrowserTabLabels, timelineBrowserTabs } from "~/lib/timeline-left-browser-preferences";
 import { cn } from "~/lib/utils";
 
 const tabPlaceholder: Record<TimelineBrowserTab, string> = {
-  assets: "Asset browsing arrives in Phase 3.",
+  assets: "",
   effects: "Effect rows arrive in Phase 4.",
   "midi-instruments": "MIDI instrument rows arrive in Phase 4.",
 };
 
 export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel }> = (props) => {
   let scrollRef: HTMLDivElement | undefined;
+  const visibleAssets = createMemo(() => props.browser.assets.items().slice(0, props.browser.assets.visibleCount()));
 
   const restoreScrollTop = () => {
     if (!scrollRef) return;
@@ -80,9 +81,55 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
         class="min-h-0 flex-1 overflow-y-auto p-3"
         onScroll={(event) => props.browser.onScrollTopChange(props.browser.activeTab, event.currentTarget.scrollTop)}
       >
-        <div class="rounded border border-dashed border-neutral-800 bg-neutral-900/40 p-3 text-xs leading-5 text-neutral-500">
-          {tabPlaceholder[props.browser.activeTab]}
-        </div>
+        <Show
+          when={props.browser.activeTab === "assets"}
+          fallback={(
+            <div class="rounded border border-dashed border-neutral-800 bg-neutral-900/40 p-3 text-xs leading-5 text-neutral-500">
+              {tabPlaceholder[props.browser.activeTab]}
+            </div>
+          )}
+        >
+          <div class="space-y-1">
+            <Show
+              when={visibleAssets().length > 0}
+              fallback={(
+                <div class="rounded border border-dashed border-neutral-800 bg-neutral-900/40 p-3 text-xs leading-5 text-neutral-500">
+                  No samples match this search.
+                </div>
+              )}
+            >
+              <For each={visibleAssets()}>
+                {(item) => (
+                  <button
+                    type="button"
+                    draggable={!item.disabled}
+                    disabled={item.disabled}
+                    class="group flex w-full items-center justify-between gap-2 rounded border border-transparent px-2 py-1.5 text-left text-xs hover:border-neutral-800 hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() => props.browser.assets.onInsert(item.id)}
+                    onDragStart={(event) => props.browser.assets.onDragStart(event, item.id)}
+                  >
+                    <span class="min-w-0">
+                      <span class="block truncate text-neutral-200 group-hover:text-neutral-50">{item.label}</span>
+                      <span class="block truncate text-[11px] text-neutral-500">{item.subtitle}</span>
+                    </span>
+                    <span class="shrink-0 rounded border border-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.12em] text-neutral-500">
+                      {item.source}
+                    </span>
+                  </button>
+                )}
+              </For>
+            </Show>
+            <Show when={props.browser.assets.canLoadMore()}>
+              <button
+                type="button"
+                class="mt-2 w-full rounded border border-neutral-800 px-2 py-1.5 text-xs text-neutral-300 hover:border-neutral-700 hover:bg-neutral-900 hover:text-neutral-100"
+                onClick={props.browser.assets.onLoadMore}
+              >
+                Load more samples
+              </button>
+            </Show>
+          </div>
+        </Show>
       </div>
 
       <button

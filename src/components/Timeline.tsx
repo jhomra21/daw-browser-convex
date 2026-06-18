@@ -49,6 +49,8 @@ import { useTimelineLeftBrowserState } from "~/hooks/useTimelineLeftBrowserState
 import { isTimelineSampleDetailClip, useTimelineSampleDetailController } from "~/hooks/useTimelineSampleDetailController";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
+import type { BrowserItem } from "~/components/timeline/browser/browser-types";
+import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData, type SampleDragData } from "~/lib/sample-drag-data";
 import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
 import TimelineChrome from "./timeline/timeline-chrome";
 import AppMessageDialog, { type AppMessageDialogState } from "./timeline/app-message-dialog";
@@ -72,6 +74,8 @@ type TimelineProps = {
   dashboardView: Accessor<DashboardView | null>;
   setDashboardParam: (view: DashboardView | null) => void;
 };
+
+const BROWSER_ASSET_PAGE_SIZE = 200;
 
 const Timeline: Component<TimelineProps> = (props) => {
   const [confirmOpen, setConfirmOpen] = createSignal(false);
@@ -799,12 +803,105 @@ const Timeline: Component<TimelineProps> = (props) => {
   };
 
   const duration = () => timelineDurationSec(renderTracks());
+  const dashboardSamplesEnabled = () => props.dashboardView() === "samples";
+  const browserSamplesEnabled = () => leftBrowser.open() && leftBrowser.activeTab() === "assets";
   const dashboardSamples = useProjectSamples({
     projectId,
     userId,
-    enabled: () => props.dashboardView() === "samples",
+    enabled: dashboardSamplesEnabled,
     includeFilePath: () => true,
   });
+  const [browserAssetVisibleCount, setBrowserAssetVisibleCount] = createSignal(BROWSER_ASSET_PAGE_SIZE);
+  const browserSamples = useProjectSamples({
+    projectId,
+    userId,
+    enabled: browserSamplesEnabled,
+    includeFilePath: () => false,
+    includeUsage: () => false,
+    sampleLimit: browserAssetVisibleCount,
+    defaultSampleLimit: browserAssetVisibleCount,
+  });
+  const browserAssetQuery = () => leftBrowser.searchQueryByTab().assets.trim().toLowerCase();
+  const browserAssetRows = createMemo(() => {
+    const rows: Array<{ item: BrowserItem; sample: SampleDragData }> = [];
+    for (const sample of browserSamples.samples()) {
+      const label = sample.name || "Sample";
+      const subtitle = sample.filePath || sample.url;
+      rows.push({
+        item: {
+          id: `project:${sample.key}`,
+          source: "project",
+          category: "sample",
+          label,
+          subtitle,
+          searchText: `${label} ${subtitle}`.toLowerCase(),
+        },
+        sample: {
+          url: sample.url,
+          name: label,
+          duration: sample.duration,
+          assetKey: sample.assetKey,
+          sourceKind: sample.sourceKind,
+          source: sample.source,
+        },
+      });
+    }
+    for (const sample of browserSamples.defaultSamples()) {
+      const label = sample.name || "Sample";
+      const subtitle = sample.url;
+      rows.push({
+        item: {
+          id: `default:${sample.key}`,
+          source: "default",
+          category: "sample",
+          label,
+          subtitle,
+          searchText: `${label} ${subtitle}`.toLowerCase(),
+        },
+        sample: {
+          url: sample.url,
+          name: label,
+          duration: sample.duration,
+          assetKey: sample.assetKey,
+          sourceKind: sample.sourceKind,
+          source: sample.source,
+        },
+      });
+    }
+    return rows;
+  });
+  const filteredBrowserAssetRows = createMemo(() => {
+    const query = browserAssetQuery();
+    if (!query) return browserAssetRows();
+    return browserAssetRows().filter((row) => row.item.searchText.includes(query));
+  });
+  const browserAssetItems = createMemo(() => filteredBrowserAssetRows().map((row) => row.item));
+  const browserAssetSampleById = createMemo(() => {
+    const map = new Map<string, SampleDragData>();
+    for (const row of filteredBrowserAssetRows()) map.set(row.item.id, row.sample);
+    return map;
+  });
+
+  createEffect(() => {
+    browserAssetQuery();
+    setBrowserAssetVisibleCount(BROWSER_ASSET_PAGE_SIZE);
+  });
+
+  const insertBrowserSample = (itemId: string) => {
+    const sample = browserAssetSampleById().get(itemId);
+    if (!sample) return;
+    void handleInsertSample(sample);
+  };
+
+  const startBrowserSampleDrag = (event: DragEvent, itemId: string) => {
+    const sample = browserAssetSampleById().get(itemId);
+    if (!sample || !event.dataTransfer) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData(SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData(sample));
+  };
 
   useTimelineAudioLifecycle({
     audioEngine,
@@ -1043,6 +1140,14 @@ const Timeline: Component<TimelineProps> = (props) => {
           activeTab: leftBrowser.activeTab(),
           searchQueryByTab: leftBrowser.searchQueryByTab(),
           scrollTopByTab: leftBrowser.scrollTopByTab(),
+          assets: {
+            items: browserAssetItems,
+            visibleCount: browserAssetVisibleCount,
+            canLoadMore: () => browserAssetItems().length >= browserAssetVisibleCount(),
+            onLoadMore: () => setBrowserAssetVisibleCount((count) => count + BROWSER_ASSET_PAGE_SIZE),
+            onInsert: insertBrowserSample,
+            onDragStart: startBrowserSampleDrag,
+          },
           onToggle: leftBrowser.toggleOpen,
           onSelectTab: leftBrowser.setActiveTab,
           onSearchQueryChange: leftBrowser.setSearchQuery,

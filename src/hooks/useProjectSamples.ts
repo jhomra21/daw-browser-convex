@@ -62,7 +62,7 @@ type DefaultSampleCatalogItem = {
   uploadedAt?: string
 }
 
-type DefaultSampleListItem = {
+export type DefaultSampleListItem = {
   key: string
   assetKey: string
   sourceKind: AudioSourceKind
@@ -80,6 +80,9 @@ type UseProjectSamplesArgs = {
   userId?: Accessor<string>
   enabled?: Accessor<boolean>
   includeFilePath?: Accessor<boolean>
+  includeUsage?: Accessor<boolean>
+  sampleLimit?: Accessor<number | undefined>
+  defaultSampleLimit?: Accessor<number | undefined>
 }
 
 type UseProjectSamplesResult = {
@@ -228,7 +231,7 @@ function mergeDefaultSampleMetadata(
 }
 
 export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSamplesResult {
-  const { projectId, enabled, includeFilePath, userId } = options
+  const { projectId, enabled, includeFilePath, includeUsage, sampleLimit, defaultSampleLimit, userId } = options
   const [refreshKey, setRefreshKey] = createSignal(0)
   const [localSamples, setLocalSamples] = createSignal<ProjectSampleListItem[]>([])
   const [localSamplesProjectId, setLocalSamplesProjectId] = createSignal('')
@@ -243,21 +246,23 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
       const rid = projectId()
       if (rid && isLocalId('project', rid)) return null
       const uid = userId ? userId() : ''
-      return rid && uid ? ({ projectId: rid }) : null
+      const limit = sampleLimit ? sampleLimit() : undefined
+      return rid && uid ? ({ projectId: rid, limit }) : null
     },
-    () => ['samples', 'by_room', projectId(), userId ? userId() : '']
+    () => ['samples', 'by_room', projectId(), userId ? userId() : '', sampleLimit ? sampleLimit() : 'all']
   )
 
   const clips = useConvexQuery(
     convexApi.clips.listByRoom,
     () => {
       if (enabled && !enabled()) return null
+      if (includeUsage && !includeUsage()) return null
       const rid = projectId()
       if (rid && isLocalId('project', rid)) return null
       const uid = userId ? userId() : ''
       return rid && uid ? ({ projectId: rid }) : null
     },
-    () => ['clips', 'by_room', projectId(), userId ? userId() : '']
+    () => ['clips', 'by_room', projectId(), userId ? userId() : '', includeUsage ? includeUsage() : true]
   )
 
   const [cachedDefaultSampleMetadataByKey, setCachedDefaultSampleMetadataByKey] = createSignal<Map<string, AudioSourceMetadata>>(new Map())
@@ -279,8 +284,8 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
   }))
 
   createEffect(on(
-    () => [projectId(), enabled ? enabled() : true, includeFilePath ? includeFilePath() : false, refreshKey()] as const,
-    ([rid, isEnabled, shouldIncludeFilePath]) => {
+    () => [projectId(), enabled ? enabled() : true, includeFilePath ? includeFilePath() : false, includeUsage ? includeUsage() : true, sampleLimit ? sampleLimit() : undefined, refreshKey()] as const,
+    ([rid, isEnabled, shouldIncludeFilePath, shouldIncludeUsage, maxSamples]) => {
       if (!rid || !isLocalId('project', rid)) {
         setLocalSamples([])
         setLocalSamplesProjectId('')
@@ -294,7 +299,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
       void (async () => {
         const [assets, snapshot, directoryHandle] = await Promise.all([
           listLocalAssets(rid),
-          createLocalTimelineRepository(rid).loadSnapshot(),
+          shouldIncludeUsage ? createLocalTimelineRepository(rid).loadSnapshot() : Promise.resolve({ clips: [] }),
           shouldIncludeFilePath ? getProjectDirectoryHandle(rid) : Promise.resolve(null),
         ])
         const rootPath = directoryHandle?.name ?? rid
@@ -320,6 +325,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
 
         const items: ProjectSampleListItem[] = []
         for (const asset of assets) {
+          if (maxSamples && maxSamples > 0 && items.length >= maxSamples) break
           const source = asset.durationSec && asset.sampleRate
             ? {
                 durationSec: asset.durationSec,
@@ -360,7 +366,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
   createEffect(on(
     () => defaultSamplesQuery.data,
     (data) => {
-      const list = Array.isArray(data) ? data : []
+      const list = Array.isArray(data) ? data.slice(0, defaultSampleLimit ? defaultSampleLimit() : undefined) : []
       if (list.length === 0) return
 
       void (async () => {
@@ -396,7 +402,9 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
   ))
 
   const defaultSamples = createMemo<DefaultSampleListItem[]>(() => {
-    const list = Array.isArray(defaultSamplesQuery.data) ? defaultSamplesQuery.data : []
+    const list = Array.isArray(defaultSamplesQuery.data)
+      ? defaultSamplesQuery.data.slice(0, defaultSampleLimit ? defaultSampleLimit() : undefined)
+      : []
     const metadataByKey = cachedDefaultSampleMetadataByKey()
     const items: DefaultSampleListItem[] = []
     for (const sample of list) {
@@ -410,7 +418,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
   const samples = createMemo<ProjectSampleListItem[]>(() => {
     if (isLocalProject()) return localSamplesProjectId() === projectId() ? localSamples() : []
     const inventoryData = inventory.data
-    const clipsData = clips.data
+    const clipsData = includeUsage && !includeUsage() ? [] : clips.data
     if (!Array.isArray(inventoryData)) return []
     if (!Array.isArray(clipsData)) return []
 

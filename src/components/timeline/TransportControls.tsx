@@ -20,6 +20,7 @@ import { MediaMenu } from "./menus/media-menu";
 import { ProjectMenu } from "./menus/project-menu";
 import { SettingsMenu } from "./menus/settings-menu";
 import { TracksMenu } from "./menus/tracks-menu";
+import { ViewMenu } from "./menus/view-menu";
 import { gridDenominators } from "./grid-options";
 
 type TransportBarController = {
@@ -252,9 +253,9 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
             projectMenu={props.projectMenu}
             menu={projectsMenu}
           />
+          <ViewMenu toolbar={props} />
           <MediaMenu
             onOpenDashboard={props.projectMenu.onOpenDashboard}
-            browser={props.browser}
           />
           <SettingsMenu toolbar={props} />
           <TracksMenu tracksMenu={props.tracksMenu} />

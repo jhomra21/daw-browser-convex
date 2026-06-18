@@ -59,6 +59,8 @@ export type TransportControlsProps = {
   onToggleRecord: () => void;
   onUndo: () => void;
   onRedo: () => void;
+  onDeleteSelection: () => void;
+  onDuplicateSelection: () => void;
   onJumpToClip: (
     clipId: string,
     trackId: Track["id"],

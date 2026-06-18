@@ -889,6 +889,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     onToggleRecord: toggleRecording,
     onUndo: handleUndo,
     onRedo: handleRedo,
+    onDeleteSelection: handleKeyboardAction,
+    onDuplicateSelection: () => {
+      void duplicateSelectedClips();
+    },
     onJumpToClip: (clipId: string, trackId: string, startSec: number) => jumpToClip(trackId, clipId, startSec),
     onInsertSample: (payload: Parameters<typeof handleInsertSample>[0]) => {
       void handleInsertSample(payload);

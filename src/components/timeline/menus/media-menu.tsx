@@ -1,20 +1,13 @@
 import { type Component } from "solid-js";
 import Icon from "~/components/ui/Icon";
-import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator, MenubarShortcut } from "~/components/ui/menubar";
+import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator } from "~/components/ui/menubar";
 import type { DashboardView } from "~/components/dashboard/types";
-import type { TimelineBrowserTab } from "~/components/timeline/browser/browser-types";
-import { timelineBrowserTabLabels } from "~/lib/timeline-left-browser-preferences";
 import { cn } from "~/lib/utils";
 import { NativeMenuTrigger } from "../toolbar-context";
 import { nativeMenuItemClass } from "./menu-action-types";
 
 type MediaMenuProps = {
   onOpenDashboard: (view: DashboardView) => void;
-  browser: {
-    open: boolean;
-    onToggle: () => void;
-    onSelectTab: (tab: TimelineBrowserTab) => void;
-  };
 };
 
 const mediaMenuItemClass = cn(nativeMenuItemClass, "flex w-full items-center gap-2");
@@ -35,50 +28,17 @@ export const MediaMenu: Component<MediaMenuProps> = (props) => {
           <div class="max-h-80 overflow-x-hidden overflow-y-auto">
             <MenubarItem
               class={mediaMenuItemClass}
-              onSelect={props.browser.onToggle}
-            >
-              <Icon name="file-audio" class="h-4 w-4 text-neutral-400" />
-              <span class="text-xs text-neutral-200">
-                {props.browser.open ? "Hide Browser" : "Show Browser"}
-              </span>
-              <MenubarShortcut>Ctrl/Cmd + Alt + B</MenubarShortcut>
-            </MenubarItem>
-            <MenubarSeparator />
-            <MenubarItem
-              class={mediaMenuItemClass}
-              onSelect={() => props.browser.onSelectTab("assets")}
-            >
-              <Icon name="file-audio" class="h-4 w-4 text-neutral-400" />
-              <span class="text-xs text-neutral-200">Browser tab: {timelineBrowserTabLabels.assets}</span>
-            </MenubarItem>
-            <MenubarItem
-              class={mediaMenuItemClass}
-              onSelect={() => props.browser.onSelectTab("effects")}
-            >
-              <Icon name="file-audio" class="h-4 w-4 text-neutral-400" />
-              <span class="text-xs text-neutral-200">Browser tab: {timelineBrowserTabLabels.effects}</span>
-            </MenubarItem>
-            <MenubarItem
-              class={mediaMenuItemClass}
-              onSelect={() => props.browser.onSelectTab("midi-instruments")}
-            >
-              <Icon name="file-audio" class="h-4 w-4 text-neutral-400" />
-              <span class="text-xs text-neutral-200">Browser tab: {timelineBrowserTabLabels["midi-instruments"]}</span>
-            </MenubarItem>
-            <MenubarSeparator />
-            <MenubarItem
-              class={mediaMenuItemClass}
               onSelect={() => props.onOpenDashboard("samples")}
             >
               <Icon name="file-audio" class="h-4 w-4 text-neutral-400" />
-              <span class="text-xs text-neutral-200">Open samples dashboard</span>
+              <span class="text-xs text-neutral-200">Samples Dashboard</span>
             </MenubarItem>
             <MenubarItem
               class={mediaMenuItemClass}
               onSelect={() => props.onOpenDashboard("export")}
             >
               <Icon name="file-audio" class="h-4 w-4 text-neutral-400" />
-              <span class="text-xs text-neutral-200">Open export dashboard</span>
+              <span class="text-xs text-neutral-200">Export Dashboard</span>
             </MenubarItem>
           </div>
         </div>

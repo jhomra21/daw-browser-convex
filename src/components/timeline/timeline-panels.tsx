@@ -4,6 +4,9 @@ import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { isLocalId } from '@daw-browser/shared'
 import { ExportProvider } from '~/context/export'
 import ExportProgressOverlay from '~/components/export/ExportProgressOverlay'
+import EffectsPanel from '~/components/timeline/EffectsPanel'
+import SampleDetailPanel from '~/components/timeline/SampleDetailPanel'
+import ExportDialog from '~/components/timeline/ExportDialog'
 import type { OptimisticGrantWrite } from '~/lib/optimistic-grant-scope'
 import type { EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
 import type { BpmDetectionService } from '~/lib/bpm-detection-service'
@@ -12,9 +15,6 @@ import type { TimelineBottomPanelShellControls } from '~/components/timeline/Tim
 
 const AgentChat = lazy(() => import('~/components/AgentChat'))
 const SharedChat = lazy(() => import('~/components/SharedChat'))
-const EffectsPanel = lazy(() => import('~/components/timeline/EffectsPanel'))
-const SampleDetailPanel = lazy(() => import('~/components/timeline/SampleDetailPanel'))
-const ExportDialog = lazy(() => import('~/components/timeline/ExportDialog'))
 
 export type TimelinePanelsProps = {
   chat: {
@@ -152,67 +152,61 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         </Suspense>
       </Show>
 
-      <Suspense fallback={null}>
-        <EffectsPanel
-          isOpen={props.effectsPanel.isOpen}
-          showOpenButton={props.effectsPanel.showOpenButton}
-          shell={props.effectsPanel.shell}
-          clipTab={props.effectsPanel.clipTab}
-          selectedFXTarget={props.effectsPanel.selectedFXTarget}
-          tracks={props.effectsPanel.tracks}
-          onClose={props.effectsPanel.onClose}
-          onOpen={props.effectsPanel.onOpen}
-          audioEngine={props.effectsPanel.audioEngine}
-          projectId={props.effectsPanel.projectId}
-          userId={props.effectsPanel.userId}
-          canWriteTrackRouting={props.effectsPanel.canWriteTrackRouting}
-          grantClipWrite={props.effectsPanel.grantClipWrite}
-          playheadSec={props.effectsPanel.playheadSec}
-          onSelectClip={props.effectsPanel.onSelectClip}
-          insertLocalClip={props.effectsPanel.insertLocalClip}
-          onEffectParamsCommitted={props.effectsPanel.onEffectParamsCommitted}
-          onLocalSaveFailed={props.effectsPanel.onLocalSaveFailed}
-        />
-      </Suspense>
+      <EffectsPanel
+        isOpen={props.effectsPanel.isOpen}
+        showOpenButton={props.effectsPanel.showOpenButton}
+        shell={props.effectsPanel.shell}
+        clipTab={props.effectsPanel.clipTab}
+        selectedFXTarget={props.effectsPanel.selectedFXTarget}
+        tracks={props.effectsPanel.tracks}
+        onClose={props.effectsPanel.onClose}
+        onOpen={props.effectsPanel.onOpen}
+        audioEngine={props.effectsPanel.audioEngine}
+        projectId={props.effectsPanel.projectId}
+        userId={props.effectsPanel.userId}
+        canWriteTrackRouting={props.effectsPanel.canWriteTrackRouting}
+        grantClipWrite={props.effectsPanel.grantClipWrite}
+        playheadSec={props.effectsPanel.playheadSec}
+        onSelectClip={props.effectsPanel.onSelectClip}
+        insertLocalClip={props.effectsPanel.insertLocalClip}
+        onEffectParamsCommitted={props.effectsPanel.onEffectParamsCommitted}
+        onLocalSaveFailed={props.effectsPanel.onLocalSaveFailed}
+      />
 
       <Show when={props.sampleDetailPanel.isOpen && props.sampleDetailPanel.selectedClip}>
         {(clip) => (
-          <Suspense fallback={null}>
-            <SampleDetailPanel
-              clip={clip()}
-              projectBpm={props.sampleDetailPanel.projectBpm}
-              audioEngine={props.sampleDetailPanel.audioEngine}
-              bpmDetection={props.sampleDetailPanel.bpmDetection}
-              ensureClipBuffer={props.sampleDetailPanel.ensureClipBuffer}
-              canWriteClip={props.sampleDetailPanel.canWriteClip}
-              onWarpChange={props.sampleDetailPanel.onChange}
-              onGainChange={props.sampleDetailPanel.onGainChange}
-              onMarkerDragStateChange={props.sampleDetailPanel.onMarkerDragStateChange}
-              shell={props.sampleDetailPanel.shell}
-              onClose={props.sampleDetailPanel.onClose}
-            />
-          </Suspense>
+          <SampleDetailPanel
+            clip={clip()}
+            projectBpm={props.sampleDetailPanel.projectBpm}
+            audioEngine={props.sampleDetailPanel.audioEngine}
+            bpmDetection={props.sampleDetailPanel.bpmDetection}
+            ensureClipBuffer={props.sampleDetailPanel.ensureClipBuffer}
+            canWriteClip={props.sampleDetailPanel.canWriteClip}
+            onWarpChange={props.sampleDetailPanel.onChange}
+            onGainChange={props.sampleDetailPanel.onGainChange}
+            onMarkerDragStateChange={props.sampleDetailPanel.onMarkerDragStateChange}
+            shell={props.sampleDetailPanel.shell}
+            onClose={props.sampleDetailPanel.onClose}
+          />
         )}
       </Show>
 
       <Show when={props.exportDialog.isOpen}>
-        <Suspense fallback={null}>
-          <ExportDialog
-            isOpen={props.exportDialog.isOpen}
-            onClose={props.exportDialog.onClose}
-            tracks={props.exportDialog.tracks}
-            getTracks={props.exportDialog.getTracks}
-            selectedTrackId={props.exportDialog.selectedTrackId}
-            bpm={props.exportDialog.bpm}
-            masterVolume={props.exportDialog.masterVolume}
-            loopEnabled={props.exportDialog.loopEnabled}
-            loopStartSec={props.exportDialog.loopStartSec}
-            loopEndSec={props.exportDialog.loopEndSec}
-            projectId={props.exportDialog.projectId}
-            userId={props.exportDialog.userId}
-            ensureClipBuffer={props.exportDialog.ensureClipBuffer}
-          />
-        </Suspense>
+        <ExportDialog
+          isOpen={props.exportDialog.isOpen}
+          onClose={props.exportDialog.onClose}
+          tracks={props.exportDialog.tracks}
+          getTracks={props.exportDialog.getTracks}
+          selectedTrackId={props.exportDialog.selectedTrackId}
+          bpm={props.exportDialog.bpm}
+          masterVolume={props.exportDialog.masterVolume}
+          loopEnabled={props.exportDialog.loopEnabled}
+          loopStartSec={props.exportDialog.loopStartSec}
+          loopEndSec={props.exportDialog.loopEndSec}
+          projectId={props.exportDialog.projectId}
+          userId={props.exportDialog.userId}
+          ensureClipBuffer={props.exportDialog.ensureClipBuffer}
+        />
       </Show>
       <ExportProgressOverlay />
     </ExportProvider>

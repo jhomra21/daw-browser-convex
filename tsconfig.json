@@ -1,7 +1,7 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "types": ["vite/client", "bun"],
+    "types": ["vite/client", "vite-plugin-pwa/client", "bun"],
     "paths": {
       "~/*": ["./src/*"],
       "@/*": ["./src/*"]

@@ -5,7 +5,7 @@ import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-t
 import { cn } from '~/lib/utils'
 import type { Clip } from '@daw-browser/timeline-core/types'
 
-export type MidiEditorCardProps = {
+type MidiEditorCardProps = {
   clipId: string
   bpm: number
   // Align grid to timeline
@@ -94,7 +94,6 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
       }
       return
     }
-    if (!save.userId) return
     await convexClient.mutation((convexApi as any).clips.setMidi, { clipId: save.clipId as any, midi: save.midi })
   }
   const scheduleSave = () => {

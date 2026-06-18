@@ -4,7 +4,7 @@ import { PPS, LANE_HEIGHT } from '~/lib/timeline-utils'
 const INNER_PADDING_TOP = 6
 const INNER_PADDING_BOTTOM = 6
 
-export type RecordingPoint = {
+type RecordingPoint = {
   offset: number
   amplitude: number
 }
@@ -17,9 +17,6 @@ type RecordingPreviewProps = {
 const RecordingPreview: Component<RecordingPreviewProps> = (props) => {
   const dimensions = createMemo(() => {
     const pts = props.points
-    if (!pts.length) {
-      return { widthPx: 6, heightPx: LANE_HEIGHT - 12, innerHeight: Math.max(1, LANE_HEIGHT - 12 - INNER_PADDING_TOP - INNER_PADDING_BOTTOM) }
-    }
     const last = pts[pts.length - 1]
     const widthPx = Math.max(6, Math.ceil(last.offset * PPS) + 4)
     const heightPx = Math.max(12, LANE_HEIGHT - 12)
@@ -29,7 +26,6 @@ const RecordingPreview: Component<RecordingPreviewProps> = (props) => {
 
   const polygonPoints = createMemo(() => {
     const pts = props.points
-    if (!pts.length) return ''
     const { widthPx, innerHeight } = dimensions()
     const midY = INNER_PADDING_TOP + innerHeight / 2
     const gain = innerHeight / 2

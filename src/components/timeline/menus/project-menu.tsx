@@ -5,16 +5,17 @@ import { copyText } from "~/lib/clipboard";
 import { isLocalId } from "@daw-browser/shared";
 import { cn } from "~/lib/utils";
 import type { ProjectsMenuController } from "~/hooks/useProjectsMenuController";
-import { NativeMenuTrigger } from "./toolbar-context";
-import type { TimelineProjectMenuModel } from "./transport-types";
+import { NativeMenuTrigger } from "../toolbar-context";
+import type { TimelineProjectMenuModel } from "../transport-types";
 import { getProjectSaveStatus } from "~/lib/project-save-status";
+import { nativeMenuItemClass } from "./menu-action-types";
 
-type ProjectsMenuProps = {
+type ProjectMenuProps = {
   projectMenu: TimelineProjectMenuModel;
   menu: ProjectsMenuController;
 };
 
-export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
+export const ProjectMenu: Component<ProjectMenuProps> = (props) => {
   const [shareCopied, setShareCopied] = createSignal(false);
   const menu = () => props.menu;
   const projectMenu = () => props.projectMenu;
@@ -230,7 +231,7 @@ export const ProjectsMenu: Component<ProjectsMenuProps> = (props) => {
             </Button>
           </div>
           <MenubarItem
-            class="mb-2 cursor-pointer text-neutral-200 hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100"
+            class={cn(nativeMenuItemClass, "mb-2")}
             onSelect={() => projectMenu().onOpenDashboard("projects")}
           >
             Open projects dashboard

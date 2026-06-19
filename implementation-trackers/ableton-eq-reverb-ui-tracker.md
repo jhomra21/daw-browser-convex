@@ -473,6 +473,19 @@ refactor: reshape reverb device into sectioned layout
 - keep reverb params and audio behavior unchanged
 ```
 
+### Phase 2 Implementation Notes
+
+- Implemented Reverb UI refactor in `src/components/effects/Reverb.tsx`.
+- Added local sectioned layout with visual decay display, Global pre-delay, Space decay, and Output wet controls.
+- Preserved `ReverbProps`, `ReverbParams`, and current `wet`, `decaySec`, and `preDelayMs` update behavior.
+- Ran simplify review for Reverb checkpoint:
+  - Reuse review: suggested sharing the knob wrapper with EQ, skipped because this tracker keeps device-shaped primitives local.
+  - Quality review: extracted per-parameter normalization helpers/constants and removed redundant display-column min-width.
+  - Efficiency review: batched canvas grid path drawing and hoisted the decay curve denominator.
+- Validation after simplify:
+  - `bun run typecheck` passed.
+  - `bun test` passed, 84 tests.
+
 ---
 
 ## Phase 3: Integration Review and Polish

@@ -8,16 +8,13 @@ import {
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 import { Menubar } from "~/components/ui/menubar";
-import { useProjectsMenuController } from "~/hooks/useProjectsMenuController";
 import { useTransportTempoController } from "~/hooks/useTransportTempoController";
 import { cn } from "~/lib/utils";
 import { nativeMenuTriggerClass } from "./toolbar-context";
 import type { TransportControlsProps } from "./transport-types";
-import { getProjectSaveStatus } from "~/lib/project-save-status";
+import { ProjectSaveStatusBadge } from "~/components/project-save-status-badge";
 import { EditMenu } from "./menus/edit-menu";
 import { FileMenu } from "./menus/file-menu";
-import { MediaMenu } from "./menus/media-menu";
-import { ProjectMenu } from "./menus/project-menu";
 import { SettingsMenu } from "./menus/settings-menu";
 import { TracksMenu } from "./menus/tracks-menu";
 import { ViewMenu } from "./menus/view-menu";
@@ -217,28 +214,23 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
   );
 };
 
-const SaveStatus: Component<{ projectId: string; userId?: string }> = (props) => {
-  const status = () => getProjectSaveStatus({ projectId: props.projectId, userId: props.userId });
+const SaveStatus: Component<{ projectMenu: TransportControlsProps["projectMenu"] }> = (props) => {
+  const currentProject = () =>
+    props.projectMenu.projects.find((project) => project.projectId === props.projectMenu.currentProjectId);
 
   return (
-    <span
-      class={cn(
-        "border px-2 py-1 text-[11px] font-medium",
-        status().class,
-      )}
-    >
-      {status().shortLabel}
-    </span>
+    <ProjectSaveStatusBadge
+      label="short"
+      projectId={props.projectMenu.currentProjectId}
+      userId={props.projectMenu.currentUserId}
+      mode={currentProject()?.mode}
+      sharedOutboxStatus={props.projectMenu.sharedOutboxStatus}
+      cloudBackupStatus={props.projectMenu.cloudBackupStatus}
+    />
   );
 };
 
 const TransportControls: Component<TransportControlsProps> = (props) => {
-  const currentProjectId = () => props.projectMenu.currentProjectId;
-  const currentUserId = () => props.projectMenu.currentUserId;
-  const projectsMenu = useProjectsMenuController({
-    onDeleteProject: props.projectMenu.onDeleteProject,
-    onRenameProject: props.projectMenu.onRenameProject,
-  });
   const tempo = useTransportTempoController({
     bpm: () => props.bpm,
     onChangeBpm: props.onChangeBpm,
@@ -263,14 +255,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
         <Menubar class="flex items-center gap-1">
           <FileMenu toolbar={props} />
           <EditMenu toolbar={props} />
-          <ProjectMenu
-            projectMenu={props.projectMenu}
-            menu={projectsMenu}
-          />
           <ViewMenu toolbar={props} />
-          <MediaMenu
-            onOpenDashboard={props.projectMenu.onOpenDashboard}
-          />
           <SettingsMenu toolbar={props} />
           <TracksMenu tracksMenu={props.tracksMenu} />
         </Menubar>
@@ -305,7 +290,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
       />
 
       <div class="justify-self-end flex items-center gap-3">
-        <SaveStatus projectId={currentProjectId()} userId={currentUserId()} />
+        <SaveStatus projectMenu={props.projectMenu} />
         <div class="flex items-center gap-2 text-xs">
           <span class="text-neutral-500">Playhead</span>
           <span class="tabular-nums text-neutral-200">

@@ -26,8 +26,8 @@ export type TimelineProjectMenuModel = {
   cloudBackupStatus?: CloudBackupStatus;
   sharedOutboxStatus?: { pending: number; failed: number };
   onRetrySharedChanges?: () => void | Promise<void>;
-  onExportArchive?: () => void | Promise<void>;
-  onImportArchive?: () => void | Promise<void>;
+  onExportArchive: () => void | Promise<void>;
+  onImportArchive: () => void | Promise<void>;
 }
 
 export type TransportControlsProps = {

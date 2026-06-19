@@ -10,14 +10,14 @@ import {
   DialogTitle,
 } from '~/components/ui/dialog'
 import { TextField, TextFieldInput, TextFieldLabel } from '~/components/ui/text-field'
-import type { LocalProjectEntry } from '~/lib/local-project-db'
+import type { ProjectDialogProject } from './project-rename-dialog'
 
 type ProjectDeleteDialogProps = {
   open: boolean
-  project: LocalProjectEntry | null
+  project: ProjectDialogProject | null
   busy: boolean
   onOpenChange: (open: boolean) => void
-  onConfirm: (project: LocalProjectEntry) => void
+  onConfirm: (project: ProjectDialogProject) => void
 }
 
 export default function ProjectDeleteDialog(props: ProjectDeleteDialogProps) {
@@ -44,12 +44,12 @@ export default function ProjectDeleteDialog(props: ProjectDeleteDialogProps) {
           }}
         >
           <DialogHeader>
-            <DialogTitle>Delete local project?</DialogTitle>
+            <DialogTitle>Delete project?</DialogTitle>
             <DialogDescription>
               <Show when={props.project}>
                 {(project) => (
                   <>
-                    Type <span class="font-medium text-neutral-100">{project().name}</span> to permanently delete this local project.
+                    Type <span class="font-medium text-neutral-100">{project().name}</span> to permanently delete this project.
                   </>
                 )}
               </Show>

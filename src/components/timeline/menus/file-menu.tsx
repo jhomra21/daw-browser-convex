@@ -41,6 +41,18 @@ export const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) 
         >
           Open Projects Dashboard
         </MenubarItem>
+        <MenubarItem
+          class={nativeMenuItemClass}
+          onSelect={() => toolbar().projectMenu.onOpenDashboard("samples")}
+        >
+          Open Samples Dashboard
+        </MenubarItem>
+        <MenubarItem
+          class={nativeMenuItemClass}
+          onSelect={() => toolbar().projectMenu.onOpenDashboard("export")}
+        >
+          Open Export Dashboard
+        </MenubarItem>
         <MenubarSeparator />
         <MenubarItem
           class={nativeMenuItemClass}
@@ -50,14 +62,14 @@ export const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) 
         </MenubarItem>
         <MenubarItem
           class={nativeMenuItemClass}
-          onSelect={() => void toolbar().projectMenu.onImportArchive?.()}
+          onSelect={() => void toolbar().projectMenu.onImportArchive()}
         >
           Import .dawproject...
         </MenubarItem>
         <MenubarItem
           class={nativeMenuItemClass}
           disabled={!canExportArchive()}
-          onSelect={() => void toolbar().projectMenu.onExportArchive?.()}
+          onSelect={() => void toolbar().projectMenu.onExportArchive()}
         >
           Export .dawproject...
         </MenubarItem>

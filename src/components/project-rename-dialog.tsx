@@ -10,14 +10,18 @@ import {
   DialogTitle,
 } from '~/components/ui/dialog'
 import { TextField, TextFieldInput, TextFieldLabel } from '~/components/ui/text-field'
-import type { LocalProjectEntry } from '~/lib/local-project-db'
+
+export type ProjectDialogProject = {
+  id: string
+  name: string
+}
 
 type ProjectRenameDialogProps = {
   open: boolean
-  project: LocalProjectEntry | null
+  project: ProjectDialogProject | null
   busy: boolean
   onOpenChange: (open: boolean) => void
-  onConfirm: (project: LocalProjectEntry, name: string) => void
+  onConfirm: (project: ProjectDialogProject, name: string) => void
 }
 
 export default function ProjectRenameDialog(props: ProjectRenameDialogProps) {

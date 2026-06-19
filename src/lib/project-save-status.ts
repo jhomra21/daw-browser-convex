@@ -7,7 +7,7 @@ type SharedOutboxSummary = {
   failed: number;
 };
 
-type ProjectSaveStatusInput = {
+export type ProjectSaveStatusInput = {
   projectId: string;
   userId?: string;
   mode?: LocalProjectMode;

@@ -125,10 +125,12 @@ export default function Reverb(props: ReverbProps) {
       <div class="flex items-center justify-between border-b border-neutral-800 px-2 py-1">
         <div class="flex items-center gap-2">
           <span class="text-xs font-semibold">Reverb</span>
+        </div>
+        <div class="flex items-center gap-2">
           <Show when={props.onToggleEnabled}>
             <button
               class={cn(
-                'ml-2 px-2 py-0.5 text-xs',
+                'px-2 py-0.5 text-xs',
                 props.params.enabled ? 'bg-green-500/20 text-green-400 ring-1 ring-green-500/30' : 'bg-neutral-800 text-neutral-400',
               )}
               onClick={() => props.onToggleEnabled?.(!props.params.enabled)}
@@ -137,8 +139,6 @@ export default function Reverb(props: ReverbProps) {
               {props.params.enabled ? 'On' : 'Off'}
             </button>
           </Show>
-        </div>
-        <div class="flex items-center gap-2">
           <Show when={props.onReset}>
             <button
               class="border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"

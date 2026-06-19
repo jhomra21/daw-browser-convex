@@ -532,6 +532,19 @@ fix: polish ableton-style effect device layouts
 
 ---
 
+### Phase 3 Completion Notes
+
+- Verified actual integration point: `src/components/timeline/EffectsPanel.tsx`.
+- Existing effect card widths remain aligned with the plan: Reverb uses `min-w-72`, EQ uses `min-w-80`.
+- Final validation passed:
+  - `bun run typecheck`
+  - `bun test`, 84 tests
+  - `bun run build`
+- Final bug-focused review returned no findings.
+- Final simplify pass returned no findings.
+
+---
+
 ## Commit and Push Instructions for Agent
 
 The implementation agent should not batch the whole branch into one large final commit if a phase is complete and validators pass.

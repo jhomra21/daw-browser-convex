@@ -36,6 +36,7 @@ export function useShareMenuController(options: UseShareMenuControllerOptions) {
     setShareUrl("");
     setShareError("");
     setMembers([]);
+    setMembersLoading(false);
     setMembersError("");
     setRevokingMemberId("");
   };

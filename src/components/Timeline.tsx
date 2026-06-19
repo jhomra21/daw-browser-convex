@@ -903,6 +903,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const dashboardTimelineModel = createMemo<DashboardTimelineModel>(() => ({
     projectMenu: transportProps().projectMenu,
     samples: dashboardSamples.samples,
+    refreshSamples: dashboardSamples.refreshSamples,
     bpm,
     setBpm: (value) => setBpm(clampBpm(value)),
     metronomeEnabled,

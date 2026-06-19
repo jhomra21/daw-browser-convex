@@ -14,7 +14,7 @@ export const getBottomPanelFooterHeightPx = (mode: BottomPanelMode) => mode === 
 
 export const getBottomPanelMountedFootprintPx = (input: BottomPanelFootprintInput) => {
   if (input.open) {
-    return input.heightPx + input.footerHeightPx + BOTTOM_PANEL_EDGE_PADDING_PX + BOTTOM_PANEL_RESIZE_HANDLE_OVERHANG_PX;
+    return input.heightPx + input.footerHeightPx + BOTTOM_PANEL_EDGE_PADDING_PX;
   }
   return input.footerHeightPx > 0 ? input.footerHeightPx + BOTTOM_PANEL_EDGE_PADDING_PX : 0;
 };

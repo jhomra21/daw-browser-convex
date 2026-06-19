@@ -18,16 +18,16 @@ export function DashboardExportView(props: { model?: DashboardTimelineModel }) {
           <DashboardSection title="Export" description="Use File > Export Mixdown for the export action.">
             <DashboardRow label="Current project" value={model.projectMenu.currentProjectId} />
             <div class="space-y-2">
-              <div class="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+              <div class="text-xs font-semibold uppercase tracking-wide text-neutral-500">
                 Export history
               </div>
               <Show
                 when={exports.exports().length > 0}
-                fallback={<div class="rounded border border-dashed border-neutral-800 bg-neutral-950/60 px-3 py-3 text-sm text-neutral-500">No exports yet.</div>}
+                fallback={<div class="border border-dashed border-neutral-800 bg-neutral-950/60 px-3 py-3 text-sm text-neutral-500">No exports yet.</div>}
               >
                 <For each={exports.exports()}>
                   {(item) => (
-                    <div class="flex items-center justify-between gap-3 rounded border border-neutral-800 bg-neutral-950/60 px-3 py-2">
+                    <div class="flex items-center justify-between gap-3 border border-neutral-800 bg-neutral-950/60 px-3 py-2">
                       <button
                         type="button"
                         disabled={!item.url}
@@ -42,7 +42,7 @@ export function DashboardExportView(props: { model?: DashboardTimelineModel }) {
                       <button
                         type="button"
                         disabled={!item.url}
-                        class="rounded border border-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:border-neutral-700 hover:bg-neutral-900 hover:text-neutral-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        class="border border-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:border-neutral-700 hover:bg-neutral-900 hover:text-neutral-100 disabled:cursor-not-allowed disabled:opacity-50"
                         onClick={() => void copyText(item.url)}
                       >
                         Copy URL

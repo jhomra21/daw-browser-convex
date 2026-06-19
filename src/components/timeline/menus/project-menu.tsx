@@ -1,10 +1,10 @@
 import { type Component, createEffect, createSignal, For, Show } from "solid-js";
 import { Button } from "~/components/ui/button";
 import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator } from "~/components/ui/menubar";
-import { copyText } from "~/lib/clipboard";
 import { isLocalId } from "@daw-browser/shared";
 import { cn } from "~/lib/utils";
 import type { ProjectsMenuController } from "~/hooks/useProjectsMenuController";
+import { useShareMenuController } from "~/hooks/useShareMenuController";
 import { NativeMenuTrigger } from "../toolbar-context";
 import type { TimelineProjectMenuModel } from "../transport-types";
 import { getProjectSaveStatus } from "~/lib/project-save-status";
@@ -19,6 +19,10 @@ export const ProjectMenu: Component<ProjectMenuProps> = (props) => {
   const [shareCopied, setShareCopied] = createSignal(false);
   const menu = () => props.menu;
   const projectMenu = () => props.projectMenu;
+  const shareMenu = useShareMenuController({
+    projectId: () => projectMenu().currentProjectId,
+    onShare: () => projectMenu().onShare?.(),
+  });
   const currentProject = () =>
     projectMenu().projects.find((project) => project.projectId === projectMenu().currentProjectId);
   const isCurrentProjectLocal = () =>
@@ -42,19 +46,23 @@ export const ProjectMenu: Component<ProjectMenuProps> = (props) => {
   );
   const onShare = async () => {
     setShareCopied(false);
-    const shareUrl = await projectMenu().onShare?.();
-    if (!shareUrl) return;
-    await copyText(shareUrl);
-    setShareCopied(true);
+    await shareMenu.load();
+    setShareCopied(await shareMenu.copy());
   };
 
   createEffect(() => {
     projectMenu().currentProjectId;
     setShareCopied(false);
+    shareMenu.reset();
   });
 
   return (
-    <MenubarMenu value="project">
+    <MenubarMenu
+      value="project"
+      onOpenChange={(open) => {
+        if (open && canShareCurrentProject()) void shareMenu.loadMembers();
+      }}
+    >
       <NativeMenuTrigger label="Project" />
       <MenubarContent
         class="w-full border-neutral-800 bg-neutral-900"
@@ -177,6 +185,58 @@ export const ProjectMenu: Component<ProjectMenuProps> = (props) => {
                 </Button>
               </Show>
             </div>
+            <Show when={canShareCurrentProject()}>
+              <div class="mt-4 border-t border-neutral-800 pt-3">
+                <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  Members
+                </div>
+                <Show
+                  when={!shareMenu.membersLoading()}
+                  fallback={<div class="text-xs text-neutral-500">Loading members...</div>}
+                >
+                  <Show
+                    when={shareMenu.members().length > 0}
+                    fallback={<div class="text-xs text-neutral-500">No accepted members yet.</div>}
+                  >
+                    <div class="space-y-2">
+                      <For each={shareMenu.members()}>
+                        {(member) => (
+                          <div class="flex items-center justify-between gap-3 border border-neutral-800 bg-neutral-950/60 px-3 py-2">
+                            <div class="min-w-0">
+                              <div class="truncate text-xs text-neutral-200">{member.userId}</div>
+                              <div class="text-xs capitalize text-neutral-500">{member.role}</div>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              class="shrink-0 text-red-300 hover:bg-red-950/40 hover:text-red-200"
+                              disabled={shareMenu.revokingMemberId() === member.userId}
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void shareMenu.revokeMember(member.userId);
+                              }}
+                            >
+                              {shareMenu.revokingMemberId() === member.userId ? "Removing..." : "Remove"}
+                            </Button>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                </Show>
+                <Show when={shareMenu.shareError()}>
+                  <div class="mt-2 text-xs text-red-300">
+                    {shareMenu.shareError()}
+                  </div>
+                </Show>
+                <Show when={shareMenu.membersError()}>
+                  <div class="mt-2 text-xs text-red-300">
+                    {shareMenu.membersError()}
+                  </div>
+                </Show>
+              </div>
+            </Show>
           </div>
           <div class="flex items-center justify-between px-1 pb-2">
             <span class="text-sm font-semibold text-neutral-100">

@@ -1,4 +1,5 @@
 import { Link, useNavigate } from "@tanstack/solid-router";
+import { isLocalId } from "@daw-browser/shared";
 import { type Component, Show, createMemo } from "solid-js";
 import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator } from "~/components/ui/menubar";
 import { authClient } from "~/lib/auth-client";
@@ -13,6 +14,7 @@ export const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) 
   const navigate = useNavigate();
   const session = useSessionQuery();
   const user = createMemo(() => session.data?.user);
+  const canExportArchive = () => isLocalId("project", toolbar().projectMenu.currentProjectId);
 
   const handleSignOut = async () => {
     try {
@@ -54,6 +56,7 @@ export const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) 
         </MenubarItem>
         <MenubarItem
           class={nativeMenuItemClass}
+          disabled={!canExportArchive()}
           onSelect={() => void toolbar().projectMenu.onExportArchive?.()}
         >
           Export .dawproject...

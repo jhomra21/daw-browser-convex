@@ -387,20 +387,7 @@ export default function Eq(props: EqProps) {
     setSelectedId(closest.id)
     setDraggedId(closest.id)
 
-    // Apply immediately
-    const nf = Math.max(FREQ_MIN, Math.min(FREQ_MAX, xToFreq(x)))
-    const band = props.bands.find(b => b.id === closest.id)
-    if (band && supportsGain(band.type)) {
-      const ng = Math.max(GAIN_MIN, Math.min(GAIN_MAX, yToGain(y)))
-      const gainDb = Math.round(ng * 10) / 10
-      const frequency = Math.round(nf)
-      if (band.gainDb !== gainDb || band.frequency !== frequency) {
-        props.onBandChange(closest.id, { gainDb, frequency })
-      }
-    } else {
-      const frequency = Math.round(nf)
-      if (band?.frequency !== frequency) props.onBandChange(closest.id, { frequency })
-    }
+    applyBandPointerValue(closest.id, x, y)
   }
 
   const onCanvasPointerMove = (ev: PointerEvent) => {
@@ -408,6 +395,10 @@ export default function Eq(props: EqProps) {
     const rect = canvasRef.getBoundingClientRect()
     const x = ev.clientX - rect.left
     const y = ev.clientY - rect.top
+    applyBandPointerValue(id, x, y)
+  }
+
+  const applyBandPointerValue = (id: string, x: number, y: number) => {
     const nf = Math.max(FREQ_MIN, Math.min(FREQ_MAX, xToFreq(x)))
     const band = props.bands.find(b => b.id === id)
     if (band && supportsGain(band.type)) {
@@ -440,7 +431,7 @@ export default function Eq(props: EqProps) {
   const selectedQLabel = () => formatQ(selectedBand()?.q ?? 0)
 
   return (
-    <div class={cn('flex min-w-96 flex-col border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
+    <div class={cn('flex flex-col border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
       <div class="flex items-center justify-between border-b border-neutral-800 px-2 py-1">
         <div class="flex items-center gap-2">
           <span class="text-xs font-semibold">EQ Eight</span>

@@ -447,9 +447,11 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
       const list = usageByKey.get(clip.assetKey)
       if (list) list.push(clip); else usageByKey.set(clip.assetKey, [clip])
     }
-    const defaultInventoryByKey = new Map<string, DefaultSampleListItem>()
-    for (const sample of defaultSamples()) {
-      defaultInventoryByKey.set(sample.assetKey, sample)
+    const defaultInventoryByKey = usageByKey.size > 0 ? new Map<string, DefaultSampleListItem>() : undefined
+    if (defaultInventoryByKey) {
+      for (const sample of defaultSamples()) {
+        defaultInventoryByKey.set(sample.assetKey, sample)
+      }
     }
 
     const allKeys = new Set<string>([...inventoryByKey.keys(), ...usageByKey.keys()])
@@ -457,7 +459,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
     const items: ProjectSampleListItem[] = []
     for (const key of allKeys) {
       const inv = inventoryByKey.get(key)
-      const fallback = defaultInventoryByKey.get(key)
+      const fallback = defaultInventoryByKey?.get(key)
       const usages = usageByKey.get(key) ?? []
       const earliest = usages.reduce<ProjectSampleUsage | undefined>((current, candidate) => {
         if (!current) return candidate

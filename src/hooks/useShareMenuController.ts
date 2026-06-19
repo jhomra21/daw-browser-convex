@@ -70,10 +70,6 @@ export function useShareMenuController(options: UseShareMenuControllerOptions) {
     }
   };
 
-  const load = async () => {
-    await Promise.all([createShareUrl(), loadMembers()]);
-  };
-
   const copy = async () => {
     const currentShareUrl = shareUrl();
     if (!currentShareUrl) return false;
@@ -115,7 +111,7 @@ export function useShareMenuController(options: UseShareMenuControllerOptions) {
     membersError,
     revokingMemberId,
     reset,
-    load,
+    createShareUrl,
     loadMembers,
     copy,
     revokeMember,

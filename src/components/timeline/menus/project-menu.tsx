@@ -46,7 +46,7 @@ export const ProjectMenu: Component<ProjectMenuProps> = (props) => {
   );
   const onShare = async () => {
     setShareCopied(false);
-    await shareMenu.load();
+    await shareMenu.createShareUrl();
     setShareCopied(await shareMenu.copy());
   };
 

@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onMount, Show, type Component, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onMount, Show, type Component, type JSX } from "solid-js";
 import type { BrowserItem, BrowserSection, TimelineBrowserTab, TimelineLeftBrowserModel } from "./browser-types";
 import { timelineBrowserTabLabels, timelineBrowserTabs } from "~/lib/timeline-left-browser-preferences";
 
@@ -104,7 +104,7 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
   };
 
   onMount(restoreScrollTop);
-  createEffect(restoreScrollTop);
+  createEffect(on(() => props.browser.activeTab, restoreScrollTop));
 
   return (
     <aside

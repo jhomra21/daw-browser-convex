@@ -1,7 +1,7 @@
 import { createMemo, type Accessor } from "solid-js";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
 import type { TimelineLeftBrowserState } from "~/components/timeline/browser/browser-types";
-import type { BrowserItem, BrowserItemSource, TimelineLeftBrowserModel } from "~/components/timeline/browser/browser-types";
+import type { BrowserItem, BrowserItemSource, BrowserSection, TimelineLeftBrowserModel } from "~/components/timeline/browser/browser-types";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData, type SampleDragData } from "~/lib/sample-drag-data";
 
@@ -23,6 +23,14 @@ const BROWSER_INSTRUMENT_ITEM_IDS = {
   synth: "builtin:midi-instrument:synth",
 };
 
+const visibleBrowserSections = (sections: BrowserSection[]): BrowserSection[] => {
+  const visibleSections: BrowserSection[] = [];
+  for (const section of sections) {
+    if (section.items.length > 0) visibleSections.push(section);
+  }
+  return visibleSections;
+};
+
 const buildBrowserSampleRow = (
   sample: {
     key: string;
@@ -39,7 +47,7 @@ const buildBrowserSampleRow = (
     subtitle: string;
   },
 ): { item: BrowserItem; sample: SampleDragData } => {
-  const label = sample.name || "Sample";
+  const label = sample.name;
   return {
     item: {
       id: `${options.idPrefix}:${sample.key}`,
@@ -76,7 +84,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       rows.push(buildBrowserSampleRow(sample, {
         idPrefix: "project",
         source: "project",
-        subtitle: sample.filePath || sample.url,
+        subtitle: sample.filePath,
       }));
     }
     for (const sample of browserSamples.defaultSamples()) {
@@ -94,6 +102,18 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     return browserAssetRows().filter((row) => row.item.searchText.includes(query));
   });
   const browserAssetItems = createMemo(() => filteredBrowserAssetRows().map((row) => row.item));
+  const browserAssetSections = createMemo(() => {
+    const projectItems: BrowserItem[] = [];
+    const defaultItems: BrowserItem[] = [];
+    for (const item of browserAssetItems()) {
+      if (item.source === "project") projectItems.push(item);
+      if (item.source === "default") defaultItems.push(item);
+    }
+    return visibleBrowserSections([
+      { id: "project-samples", label: "Project", items: projectItems },
+      { id: "default-samples", label: "Default", items: defaultItems },
+    ]);
+  });
   const browserAssetSampleById = createMemo(() => {
     const map = new Map<string, SampleDragData>();
     for (const row of filteredBrowserAssetRows()) map.set(row.item.id, row.sample);
@@ -136,6 +156,18 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     if (!query) return items;
     return items.filter((item) => item.searchText.includes(query));
   });
+  const browserEffectSections = createMemo(() => {
+    const audioEffectItems: BrowserItem[] = [];
+    const midiEffectItems: BrowserItem[] = [];
+    for (const item of browserEffectItems()) {
+      if (item.category === "audio-effect") audioEffectItems.push(item);
+      if (item.category === "midi-effect") midiEffectItems.push(item);
+    }
+    return visibleBrowserSections([
+      { id: "audio-effects", label: "Audio Effects", items: audioEffectItems },
+      { id: "midi-effects", label: "MIDI Effects", items: midiEffectItems },
+    ]);
+  });
   const browserInstrumentItems = createMemo<BrowserItem[]>(() => {
     const actions = options.deviceInsertActions();
     const items: BrowserItem[] = [
@@ -153,6 +185,9 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     if (!query) return items;
     return items.filter((item) => item.searchText.includes(query));
   });
+  const browserInstrumentSections = createMemo(() => visibleBrowserSections([
+    { id: "midi-instruments", label: "Instruments", items: browserInstrumentItems() },
+  ]));
 
   const insertBrowserSample = (itemId: string) => {
     const sample = browserAssetSampleById().get(itemId);
@@ -191,13 +226,13 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     searchQueryByTab: options.leftBrowser.searchQueryByTab(),
     scrollTopByTab: options.leftBrowser.scrollTopByTab(),
     assets: {
-      items: browserAssetItems,
+      sections: browserAssetSections,
       onInsert: insertBrowserSample,
       onDragStart: startBrowserSampleDrag,
     },
     devices: {
-      effects: browserEffectItems,
-      instruments: browserInstrumentItems,
+      effectSections: browserEffectSections,
+      instrumentSections: browserInstrumentSections,
       onAddEffect: addBrowserEffect,
       onAddInstrument: addBrowserInstrument,
     },

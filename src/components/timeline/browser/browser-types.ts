@@ -20,15 +20,21 @@ export type BrowserItem = {
   disabled?: boolean;
 };
 
+export type BrowserSection = {
+  id: string;
+  label: string;
+  items: BrowserItem[];
+};
+
 export type BrowserAssetsModel = {
-  items: Accessor<BrowserItem[]>;
+  sections: Accessor<BrowserSection[]>;
   onInsert: (itemId: string) => void;
   onDragStart: (event: DragEvent, itemId: string) => void;
 };
 
 export type BrowserDevicesModel = {
-  effects: Accessor<BrowserItem[]>;
-  instruments: Accessor<BrowserItem[]>;
+  effectSections: Accessor<BrowserSection[]>;
+  instrumentSections: Accessor<BrowserSection[]>;
   onAddEffect: (itemId: string) => void;
   onAddInstrument: (itemId: string) => void;
 };

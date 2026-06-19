@@ -1,7 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onMount, Show, type Component, type JSX } from "solid-js";
 import type { BrowserItem, BrowserSection, TimelineBrowserTab, TimelineLeftBrowserModel } from "./browser-types";
 import { timelineBrowserTabLabels, timelineBrowserTabs } from "~/lib/timeline-left-browser-preferences";
-import { cn } from "~/lib/utils";
 
 const tabPlaceholder: Record<TimelineBrowserTab, string> = {
   assets: "",
@@ -27,7 +26,7 @@ const BrowserTree: Component<{
     <Show
       when={props.sections.length > 0}
       fallback={(
-        <div class="rounded border border-dashed border-neutral-800 bg-neutral-900/40 px-2 py-2 text-xs leading-5 text-neutral-500">
+        <div class="border border-dashed border-neutral-800 bg-neutral-900/40 px-2 py-2 text-xs leading-5 text-neutral-500">
           {props.emptyText}
         </div>
       )}
@@ -40,13 +39,13 @@ const BrowserTree: Component<{
               <section>
                 <button
                   type="button"
-                  class="flex h-6 w-full items-center gap-1 rounded px-1.5 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300"
+                  class="flex h-6 w-full items-center gap-1 px-1.5 text-left text-xs font-semibold uppercase tracking-widest text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300"
                   aria-expanded={!collapsed()}
                   onClick={() => toggleSection(section.id)}
                 >
-                  <span class="w-3 text-center text-[10px] text-neutral-600">{collapsed() ? "▸" : "▾"}</span>
+                  <span class="w-3 text-center text-xs text-neutral-600">{collapsed() ? "▸" : "▾"}</span>
                   <span class="min-w-0 flex-1 truncate">{section.label}</span>
-                  <span class="text-[10px] font-normal tracking-normal text-neutral-600">{section.items.length}</span>
+                  <span class="text-xs font-normal tracking-normal text-neutral-600">{section.items.length}</span>
                 </button>
                 <Show when={!collapsed()}>
                   <ul class="py-0.5">
@@ -74,7 +73,7 @@ const BrowserItemRow: Component<{
     type="button"
     draggable={props.draggable}
     disabled={props.item.disabled}
-    class="group flex h-6 w-full items-center rounded px-5 text-left text-xs hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
+    class="group flex h-6 w-full items-center px-5 text-left text-xs hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
     onClick={props.onClick}
     onDragStart={props.onDragStart}
   >
@@ -122,10 +121,11 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
             {(tab) => (
               <button
                 type="button"
-                class={cn(
-                  "rounded px-2 py-1 text-left text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100",
-                  props.browser.activeTab === tab && "bg-neutral-900 text-neutral-100",
-                )}
+                class="px-2 py-1 text-left text-xs hover:bg-neutral-900 hover:text-neutral-100"
+                classList={{
+                  "bg-neutral-900 text-neutral-100": props.browser.activeTab === tab,
+                  "text-neutral-400": props.browser.activeTab !== tab,
+                }}
                 aria-pressed={props.browser.activeTab === tab}
                 onClick={() => props.browser.onSelectTab(tab)}
               >

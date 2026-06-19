@@ -84,6 +84,7 @@ export function useShareMenuController(options: UseShareMenuControllerOptions) {
   const revokeMember = async (targetUserId: string) => {
     const projectId = options.projectId();
     if (!projectId || !targetUserId) return;
+    const isCurrentProject = () => options.projectId() === projectId;
     setMembersError("");
     setRevokingMemberId(targetUserId);
     try {
@@ -92,10 +93,16 @@ export function useShareMenuController(options: UseShareMenuControllerOptions) {
         { method: "DELETE" },
       );
       if (!response.ok) throw new Error("Member could not be removed.");
-      setMembers((current) => current.filter((member) => member.userId !== targetUserId));
+      if (!isCurrentProject()) return;
+      setMembers((current) => {
+        if (!current.some((member) => member.userId === targetUserId)) return current;
+        return current.filter((member) => member.userId !== targetUserId);
+      });
     } catch {
+      if (!isCurrentProject()) return;
       setMembersError("Member could not be removed.");
     } finally {
+      if (!isCurrentProject() || revokingMemberId() !== targetUserId) return;
       setRevokingMemberId("");
     }
   };

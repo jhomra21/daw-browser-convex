@@ -296,6 +296,19 @@ refactor: reshape eq device around ableton layout
 - keep eq params and audio behavior unchanged
 ```
 
+### Phase 1 Implementation Notes
+
+- Implemented EQ UI refactor in `src/components/effects/Eq.tsx`.
+- Added local Ableton-inspired selected-band knob stack, right utility column, bottom band strip, filter-shape icons, and numbered canvas nodes.
+- Preserved `EqProps`, `EqBandParams`, spectrum analyzer input, and current audio behavior.
+- Ran simplify review for EQ checkpoint:
+  - Reuse review: no findings.
+  - Quality review: consolidated filter metadata and replaced repeated selected-band lookup with `createMemo`.
+  - Efficiency review: guarded no-op resize updates, hoisted invariant canvas loop values, hoisted canvas text state for node labels, and skipped no-op drag updates.
+- Validation after simplify:
+  - `bun run typecheck` passed.
+  - `bun test` passed, 84 tests.
+
 ---
 
 ## Phase 2: Reverb Ableton-Style Refactor

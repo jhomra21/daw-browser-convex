@@ -982,6 +982,10 @@ const Timeline: Component<TimelineProps> = (props) => {
         onHeightCommit: bottomPanel.commitHeightPx,
       },
       onClose: sampleDetail.close,
+      onHide: () => {
+        bottomPanel.setMode("effects");
+        bottomPanel.setOpen(false);
+      },
     },
     exportDialog: {
       isOpen: exportOpen(),

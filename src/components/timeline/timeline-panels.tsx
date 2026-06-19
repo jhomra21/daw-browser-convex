@@ -68,6 +68,7 @@ export type TimelinePanelsProps = {
     onMarkerDragStateChange?: (dragging: boolean) => void
     shell: TimelineBottomPanelShellControls
     onClose: () => void
+    onHide: () => void
   }
   exportDialog: {
     isOpen: boolean
@@ -190,6 +191,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
             onMarkerDragStateChange={props.sampleDetailPanel.onMarkerDragStateChange}
             shell={props.sampleDetailPanel.shell}
             onClose={props.sampleDetailPanel.onClose}
+            onHide={props.sampleDetailPanel.onHide}
           />
         )}
       </Show>

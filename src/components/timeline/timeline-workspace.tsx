@@ -128,7 +128,7 @@ export default function TimelineWorkspace(props: Props) {
         <TimelineLeftBrowser browser={props.leftBrowser} />
       </div>
       <div
-        class="flex-1 relative overflow-auto timeline-scroll"
+        class="flex-1 relative overflow-auto"
         ref={props.scrollRef}
       >
         <div

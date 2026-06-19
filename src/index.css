@@ -201,6 +201,15 @@
       "rlig" 1,
       "calt" 1;
   }
+
+  * {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  *::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @layer utilities {
@@ -290,36 +299,8 @@
   }
 }
 
-::-webkit-scrollbar {
-  width: 16px;
-}
-
-::-webkit-scrollbar-thumb {
-  border: 4px solid transparent;
-  background-clip: content-box;
-  @apply bg-accent;
-}
-
-::-webkit-scrollbar-corner {
-  display: none;
-}
-
 html {
   overscroll-behavior: none;
-}
-
-/* Hide scrollbars for timeline scroll containers */
-.timeline-scroll,
-.track-sidebar-scroll {
-  /* Firefox */
-  scrollbar-width: none;
-  /* IE/Edge */
-  -ms-overflow-style: none;
-}
-.timeline-scroll::-webkit-scrollbar,
-.track-sidebar-scroll::-webkit-scrollbar {
-  width: 0;
-  height: 0;
 }
 
 .track-volume-slider {

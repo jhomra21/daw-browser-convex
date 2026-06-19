@@ -280,7 +280,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       </div>
 
       <div
-        class="track-sidebar-scroll flex h-full flex-col overflow-x-clip border-l border-neutral-800 bg-neutral-900 p-0"
+        class="flex h-full flex-col overflow-x-clip border-l border-neutral-800 bg-neutral-900 p-0"
         style={{
           width: `${sidebar().sidebarWidth}px`,
           "min-width": `${TIMELINE_SIDEBAR_MIN_WIDTH}px`,

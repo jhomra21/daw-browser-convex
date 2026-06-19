@@ -3,7 +3,7 @@ import { cn } from "~/lib/utils";
 
 export function DashboardScrollView(props: { class?: string; children: JSX.Element }) {
   return (
-    <div class={cn("min-h-0 flex-1 overflow-y-auto px-6 py-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", props.class)}>
+    <div class={cn("min-h-0 flex-1 overflow-y-auto px-6 py-5", props.class)}>
       <div class="flex flex-col gap-5">{props.children}</div>
     </div>
   );

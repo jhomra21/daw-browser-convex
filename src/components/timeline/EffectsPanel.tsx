@@ -15,7 +15,6 @@ import Eq from "~/components/effects/Eq";
 import Reverb from "~/components/effects/Reverb";
 import Synth from "~/components/effects/Synth";
 import SynthCard from "~/components/effects/SynthCard";
-import { Button } from "~/components/ui/button";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
 import {
@@ -43,8 +42,9 @@ import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import TimelineBottomPanelShell, { type TimelineBottomPanelShellControls } from "~/components/timeline/TimelineBottomPanelShell";
+import TimelineBottomPanelFooter from "~/components/timeline/TimelineBottomPanelFooter";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
-import { BOTTOM_PANEL_EDGE_PADDING_PX, EFFECTS_PANEL_FOOTER_HEIGHT_PX } from "~/lib/bottom-panel-layout";
+import { BOTTOM_PANEL_EDGE_PADDING_PX } from "~/lib/bottom-panel-layout";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 
 type EffectsPanelProps = {
@@ -79,67 +79,20 @@ type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[num
 type LocalEqRow = LocalEffectRow<EqParams>;
 type LocalReverbRow = LocalEffectRow<ReverbParams>;
 
-type EffectsPanelFooterProps = {
-  toggleLabel: "Hide" | "Show";
-  onEffectsTabClick: () => void;
-  onToggle: () => void;
-  clipTab: {
-    canOpen: boolean;
-    onOpen: () => void;
-  };
-};
-
-const EffectsPanelFooter: Component<EffectsPanelFooterProps> = (props) => (
-  <div
-    class="flex shrink-0 items-center justify-between border-t border-neutral-800 bg-neutral-950"
-    style={{ height: `${EFFECTS_PANEL_FOOTER_HEIGHT_PX}px` }}
-  >
-    <div class="flex h-full items-center gap-1">
-      <Button
-        variant="ghost"
-        size="sm"
-        type="button"
-        class="h-full border-x border-neutral-700 bg-neutral-800 px-3 text-[11px] font-semibold uppercase tracking-wide text-neutral-100"
-        onClick={props.onEffectsTabClick}
-      >
-        Effects
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        type="button"
-        class="h-full border-x border-neutral-800 px-3 text-[11px] font-semibold uppercase tracking-wide text-neutral-500"
-        disabled={!props.clipTab.canOpen}
-        onClick={props.clipTab.onOpen}
-      >
-        Clip
-      </Button>
-    </div>
-    <Button
-      variant="ghost"
-      size="sm"
-      type="button"
-      class="h-full border-x border-neutral-700 bg-neutral-900 px-3 text-[11px] font-semibold uppercase tracking-wide text-neutral-200 hover:bg-neutral-800"
-      onClick={props.onToggle}
-    >
-      {props.toggleLabel}
-    </Button>
-  </div>
-);
-
 const EffectsPanelClosedFooter: Component<{
   onOpen: () => void;
-  clipTab: EffectsPanelFooterProps["clipTab"];
+  clipTab: EffectsPanelProps["clipTab"];
 }> = (props) => (
   <div
     class="fixed left-0 right-0 bottom-0 z-50 bg-neutral-900"
     style={{ "padding-bottom": `${BOTTOM_PANEL_EDGE_PADDING_PX}px` }}
   >
-    <EffectsPanelFooter
+    <TimelineBottomPanelFooter
+      activeTab="effects"
       toggleLabel="Show"
       onEffectsTabClick={props.onOpen}
+      onClipTabClick={props.clipTab.canOpen ? props.clipTab.onOpen : undefined}
       onToggle={props.onOpen}
-      clipTab={props.clipTab}
     />
   </div>
 );
@@ -726,11 +679,12 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
           controls={props.shell}
           resizeLabel="Resize effects panel"
           footer={
-            <EffectsPanelFooter
+            <TimelineBottomPanelFooter
+              activeTab="effects"
               toggleLabel="Hide"
               onEffectsTabClick={props.onOpen}
+              onClipTabClick={props.clipTab.canOpen ? props.clipTab.onOpen : undefined}
               onToggle={handleClose}
-              clipTab={props.clipTab}
             />
           }
         >

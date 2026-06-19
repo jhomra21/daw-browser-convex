@@ -15,4 +15,5 @@ export const timelineKeyboardShortcuts: readonly KeyboardShortcut[] = [
   { section: "Tracks", keys: "Shift + R", label: "Add return track" },
   { section: "Tracks", keys: "Shift + G", label: "Add group track" },
   { section: "Export", keys: "Ctrl/Cmd + Shift + E", label: "Open export mixdown" },
+  { section: "Browser", keys: "Ctrl/Cmd + Alt + B", label: "Show or hide browser" },
 ];

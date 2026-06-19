@@ -44,6 +44,10 @@ import { useTimelinePersistenceController } from "~/hooks/useTimelinePersistence
 import { useTimelineAudioLifecycle } from "~/hooks/useTimelineAudioLifecycle";
 import { useTimelineAudioWarp } from "~/hooks/useTimelineAudioWarp";
 import { useTimelineBottomPanelState } from "~/hooks/useTimelineBottomPanelState";
+import { useTimelineLeftBrowserResize } from "~/hooks/useTimelineLeftBrowserResize";
+import { useTimelineLeftBrowserState } from "~/hooks/useTimelineLeftBrowserState";
+import { useTimelineBrowserController } from "~/hooks/useTimelineBrowserController";
+import type { TimelineDeviceInsertActions } from "./timeline/timeline-device-insert-actions";
 import { isTimelineSampleDetailClip, useTimelineSampleDetailController } from "~/hooks/useTimelineSampleDetailController";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
@@ -456,6 +460,25 @@ const Timeline: Component<TimelineProps> = (props) => {
   let containerRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
 
+  const leftBrowser = useTimelineLeftBrowserState({
+    projectId,
+    rightSidebarWidthPx: sidebarWidth,
+    getContainerElement: () => containerRef,
+  });
+  const leftBrowserResize = useTimelineLeftBrowserResize({
+    widthPx: leftBrowser.widthPx,
+    previewWidthPx: leftBrowser.previewWidthPx,
+    commitWidthPx: leftBrowser.commitWidthPx,
+    getContainerElement: () => containerRef,
+    rightSidebarWidthPx: sidebarWidth,
+  });
+  const [deviceInsertActions, setDeviceInsertActions] = createSignal<TimelineDeviceInsertActions>();
+
+  createEffect(() => {
+    sidebarWidth();
+    leftBrowser.clampWidthToLayout();
+  });
+
   const {
     midiEditorClipId,
     midiCard,
@@ -736,6 +759,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       void addInstrumentTrack().catch(() => {});
     },
     onOpenExport: () => setExportOpen(true),
+    onToggleBrowser: leftBrowser.toggleOpen,
   });
 
   const { onSidebarPointerDown } = useTimelineSidebarResize({
@@ -778,13 +802,21 @@ const Timeline: Component<TimelineProps> = (props) => {
   };
 
   const duration = () => timelineDurationSec(renderTracks());
+  const dashboardSamplesEnabled = () => props.dashboardView() === "samples";
   const dashboardSamples = useProjectSamples({
     projectId,
     userId,
-    enabled: () => props.dashboardView() === "samples",
+    enabled: dashboardSamplesEnabled,
     includeFilePath: () => true,
   });
-
+  const timelineBrowser = useTimelineBrowserController({
+    projectId,
+    userId,
+    leftBrowser,
+    onResizePointerDown: leftBrowserResize.onPointerDown,
+    deviceInsertActions,
+    handleInsertSample,
+  });
   useTimelineAudioLifecycle({
     audioEngine,
     tracks: () => renderTracks(),
@@ -838,6 +870,12 @@ const Timeline: Component<TimelineProps> = (props) => {
       onExportArchive: localProject.exportArchive,
       onImportArchive: () => archiveInputRef?.click(),
     },
+    browser: {
+      open: leftBrowser.open(),
+      onOpen: () => leftBrowser.setOpen(true),
+      onToggle: leftBrowser.toggleOpen,
+      onSelectTab: leftBrowser.setActiveTab,
+    },
     bpm: bpm(),
     onChangeBpm: (next: number) => setBpm(clampBpm(next)),
     metronomeEnabled: metronomeEnabled(),
@@ -852,6 +890,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     onToggleRecord: toggleRecording,
     onUndo: handleUndo,
     onRedo: handleRedo,
+    onDeleteSelection: handleKeyboardAction,
+    onDuplicateSelection: () => {
+      void duplicateSelectedClips();
+    },
     onJumpToClip: (clipId: string, trackId: string, startSec: number) => jumpToClip(trackId, clipId, startSec),
     onInsertSample: (payload: Parameters<typeof handleInsertSample>[0]) => {
       void handleInsertSample(payload);
@@ -861,6 +903,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const dashboardTimelineModel = createMemo<DashboardTimelineModel>(() => ({
     projectMenu: transportProps().projectMenu,
     samples: dashboardSamples.samples,
+    refreshSamples: dashboardSamples.refreshSamples,
     bpm,
     setBpm: (value) => setBpm(clampBpm(value)),
     metronomeEnabled,
@@ -920,6 +963,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       },
       onEffectParamsCommitted: pushEffectParamsHistory,
       onLocalSaveFailed: localProject.setLocalSaveFailure,
+      onDeviceInsertActionsChange: setDeviceInsertActions,
     },
     sampleDetailPanel: {
       isOpen: bottomPanel.open() && bottomPanel.mode() === "sample-detail",
@@ -1011,6 +1055,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           setScrollElement(el);
         }}
         bottomPanelOffsetPx={bottomPanel.bottomPanelOffsetPx()}
+        leftBrowser={timelineBrowser()}
         durationSec={duration()}
         sidebarWidth={sidebarWidth()}
         tracks={renderTracks()}

@@ -3,6 +3,8 @@ import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
 import type { MasterSidebarModel } from "~/components/timeline/MasterSidebarRow";
 import TrackSidebar from "~/components/timeline/TrackSidebar";
+import { TimelineLeftBrowser } from "~/components/timeline/browser/timeline-left-browser";
+import type { TimelineLeftBrowserModel } from "~/components/timeline/browser/browser-types";
 import TimelineOverlays from "~/components/timeline/timeline-overlays";
 import type { TimelineMidiBounds } from "~/lib/timeline-midi-bounds";
 import { LANE_HEIGHT, PPS, RULER_HEIGHT } from "~/lib/timeline-utils";
@@ -48,6 +50,7 @@ type Props = {
   containerRef: (el: HTMLDivElement) => void;
   scrollRef: (el: HTMLDivElement) => void;
   bottomPanelOffsetPx: number;
+  leftBrowser: TimelineLeftBrowserModel;
   durationSec: number;
   sidebarWidth: number;
   tracks: RuntimeTrack[];
@@ -118,6 +121,12 @@ export default function TimelineWorkspace(props: Props) {
   const scrollContentHeight = () => fullHeight() + props.bottomPanelOffsetPx;
   return (
     <div class="flex-1 flex min-h-0" ref={props.containerRef}>
+      <div
+        class="min-h-0 shrink-0"
+        style={{ height: `calc(100% - ${props.bottomPanelOffsetPx}px)` }}
+      >
+        <TimelineLeftBrowser browser={props.leftBrowser} />
+      </div>
       <div
         class="flex-1 relative overflow-auto timeline-scroll"
         ref={props.scrollRef}

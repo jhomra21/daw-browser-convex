@@ -17,14 +17,17 @@ const readSampleObjectPathFromUrl = (url: string) => {
 }
 
 export const listByRoom = query({
-  args: { projectId: v.string() },
-  handler: async (ctx, { projectId }) => {
+  args: { projectId: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, { projectId, limit }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     await requireProjectAccess(ctx, projectId, userId)
-    return await ctx.db
+    const query = ctx.db
       .query('samples')
       .withIndex('by_room', q => q.eq('projectId', projectId))
-      .collect()
+    if (limit && limit > 0) {
+      return await query.take(Math.floor(limit))
+    }
+    return await query.collect()
   },
 })
 

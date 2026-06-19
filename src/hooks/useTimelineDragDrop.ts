@@ -59,12 +59,19 @@ export function useTimelineDragDrop(
     } catch {}
   }
 
-  const isSampleDragInsideRoot = (event: DragEvent) => {
+  const isSupportedDrag = (event: DragEvent) => {
     const transfer = event.dataTransfer
-    if (!transfer?.types.includes(SAMPLE_DRAG_DATA_TYPE)) return false
-    const root = options.rootElement()
-    if (!root) return false
-    const bounds = root.getBoundingClientRect()
+    return Boolean(
+      transfer?.types.includes(SAMPLE_DRAG_DATA_TYPE)
+      || transfer?.types.includes('Files'),
+    )
+  }
+
+  const isSupportedDragInsideTimeline = (event: DragEvent) => {
+    if (!isSupportedDrag(event)) return false
+    const scrollElement = options.scrollElement()
+    if (!scrollElement) return false
+    const bounds = scrollElement.getBoundingClientRect()
     return (
       event.clientX >= bounds.left
       && event.clientX <= bounds.right
@@ -74,6 +81,7 @@ export function useTimelineDragDrop(
   }
 
   const handleRootDragOver = (event: DragEvent) => {
+    if (!isSupportedDragInsideTimeline(event)) return
     event.preventDefault()
     setCopyDropEffect(event)
     updateDropTarget(event.clientY)
@@ -81,19 +89,20 @@ export function useTimelineDragDrop(
 
   const handleRootDrop = async (event: DragEvent) => {
     if (event.defaultPrevented) return
+    if (!isSupportedDragInsideTimeline(event)) return
     await options.onDrop(event)
     clearDropTarget()
   }
 
   const handleGlobalDragOver = (event: DragEvent) => {
-    if (!isSampleDragInsideRoot(event)) return
+    if (!isSupportedDragInsideTimeline(event)) return
     event.preventDefault()
     setCopyDropEffect(event)
     updateDropTarget(event.clientY)
   }
 
   const handleWindowDrop = (event: DragEvent) => {
-    if (!isSampleDragInsideRoot(event)) return
+    if (!isSupportedDragInsideTimeline(event)) return
     event.preventDefault()
     void options.onDrop(event)
     clearDropTarget()

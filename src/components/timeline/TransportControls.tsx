@@ -1,11 +1,4 @@
-import { Link, useNavigate } from "@tanstack/solid-router";
-import {
-  type Accessor,
-  type Component,
-  For,
-  Show,
-  createMemo,
-} from "solid-js";
+import { type Accessor, type Component, For, Show } from "solid-js";
 import Icon from "~/components/ui/Icon";
 import { Button } from "~/components/ui/button";
 import {
@@ -14,36 +7,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
-import {
-  Menubar,
-  MenubarContent,
-  MenubarItem,
-  MenubarLabel,
-  MenubarMenu,
-  MenubarPortal,
-  MenubarSeparator,
-  MenubarShortcut,
-  MenubarSub,
-  MenubarSubContent,
-  MenubarSubTrigger,
-} from "~/components/ui/menubar";
-import { useExportsMenuController } from "~/hooks/useExportsMenuController";
+import { Menubar } from "~/components/ui/menubar";
 import { useProjectsMenuController } from "~/hooks/useProjectsMenuController";
-import { useSamplesMenuController } from "~/hooks/useSamplesMenuController";
-import { useShareMenuController } from "~/hooks/useShareMenuController";
 import { useTransportTempoController } from "~/hooks/useTransportTempoController";
-import { authClient } from "~/lib/auth-client";
-import { isLocalId } from "@daw-browser/shared";
-import { queryClient } from "~/lib/query-client";
-import { useSessionQuery } from "~/lib/session";
 import { cn } from "~/lib/utils";
-import type { Track } from "@daw-browser/timeline-core/types";
-import { ProjectsMenu } from "./projects-menu";
-import { ProjectMediaMenu } from "./project-media-menu";
-import { NativeMenuTrigger, nativeMenuTriggerClass } from "./toolbar-context";
+import { nativeMenuTriggerClass } from "./toolbar-context";
 import type { TransportControlsProps } from "./transport-types";
-import { timelineKeyboardShortcuts } from "~/components/dashboard/shortcut-registry";
 import { getProjectSaveStatus } from "~/lib/project-save-status";
+import { EditMenu } from "./menus/edit-menu";
+import { FileMenu } from "./menus/file-menu";
+import { MediaMenu } from "./menus/media-menu";
+import { ProjectMenu } from "./menus/project-menu";
+import { SettingsMenu } from "./menus/settings-menu";
+import { TracksMenu } from "./menus/tracks-menu";
+import { ViewMenu } from "./menus/view-menu";
 import { gridDenominators } from "./grid-options";
 
 type TransportBarController = {
@@ -70,110 +47,6 @@ type TransportBarController = {
   gridDenominator: number;
   onChangeGridDenominator: (next: number) => void;
   bpm: number;
-};
-
-const nativeMenuItemClass =
-  "cursor-pointer text-neutral-200 hover:bg-neutral-800 hover:text-neutral-100 focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100";
-
-type ShareMenuController = {
-  onOpenChange: (open: boolean) => void;
-  onOpen: () => Promise<void>;
-  onClose: () => void;
-  copied: boolean;
-  shareUrl: string;
-  shareError: string;
-  members: Array<{ userId: string; role: "editor" | "viewer" }>;
-  membersLoading: boolean;
-  membersError: string;
-  revokingMemberId: string;
-  onCopy: () => Promise<void>;
-  onRevokeMember: (userId: string) => Promise<void>;
-};
-
-const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) => {
-  const toolbar = () => props.toolbar;
-
-  return (
-    <MenubarMenu value="file">
-      <NativeMenuTrigger label="File" />
-      <MenubarContent class="w-56 border-neutral-800 bg-neutral-900">
-        <MenubarItem
-          class={nativeMenuItemClass}
-          onSelect={toolbar().onAddAudio}
-        >
-          Add Audio...
-        </MenubarItem>
-        <MenubarItem
-          class={nativeMenuItemClass}
-          onSelect={toolbar().projectMenu.onOpenExport}
-        >
-          Export Mixdown...
-        </MenubarItem>
-      </MenubarContent>
-    </MenubarMenu>
-  );
-};
-
-const EditMenu: Component<{ toolbar: TransportControlsProps }> = (props) => {
-  const toolbar = () => props.toolbar;
-
-  return (
-    <MenubarMenu value="edit">
-      <NativeMenuTrigger label="Edit" />
-      <MenubarContent class="w-44 border-neutral-800 bg-neutral-900">
-        <MenubarItem class={nativeMenuItemClass} onSelect={toolbar().onUndo}>
-          Undo
-        </MenubarItem>
-        <MenubarItem class={nativeMenuItemClass} onSelect={toolbar().onRedo}>
-          Redo
-        </MenubarItem>
-      </MenubarContent>
-    </MenubarMenu>
-  );
-};
-
-const TracksMenu: Component<{ tracksMenu: TransportControlsProps["tracksMenu"] }> = (props) => {
-  const tracksMenu = () => props.tracksMenu;
-
-  return (
-    <MenubarMenu value="tracks">
-      <NativeMenuTrigger label="Tracks" />
-      <MenubarContent class="w-64 border-neutral-800 bg-neutral-900">
-        <MenubarItem
-          class={cn(nativeMenuItemClass, tracksMenu().syncMix && "text-blue-300")}
-          onSelect={tracksMenu().onToggleSyncMix}
-        >
-          Sync Mix
-        </MenubarItem>
-        <MenubarSeparator />
-        <MenubarItem class={nativeMenuItemClass} onSelect={tracksMenu().onAddTrack}>
-          <span>Add Track</span>
-          <MenubarShortcut>Shift + T</MenubarShortcut>
-        </MenubarItem>
-        <MenubarItem
-          class={nativeMenuItemClass}
-          onSelect={tracksMenu().onAddReturnTrack}
-        >
-          <span>Return</span>
-          <MenubarShortcut>Shift + R</MenubarShortcut>
-        </MenubarItem>
-        <MenubarItem
-          class={nativeMenuItemClass}
-          onSelect={tracksMenu().onAddGroupTrack}
-        >
-          <span>Group</span>
-          <MenubarShortcut>Shift + G</MenubarShortcut>
-        </MenubarItem>
-        <MenubarItem
-          class={nativeMenuItemClass}
-          onSelect={tracksMenu().onAddInstrumentTrack}
-        >
-          <span>Instrument</span>
-          <MenubarShortcut>Ctrl/Cmd + Shift + T</MenubarShortcut>
-        </MenubarItem>
-      </MenubarContent>
-    </MenubarMenu>
-  );
 };
 
 const TransportBar: Component<{ transport: TransportBarController }> = (
@@ -344,298 +217,6 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
   );
 };
 
-const ShareMenu: Component<{ share: ShareMenuController }> = (props) => {
-  const share = () => props.share;
-
-  return (
-    <MenubarMenu
-      value="share"
-      onOpenChange={(open) => {
-        if (open) {
-          void share().onOpen();
-        } else {
-          share().onOpenChange(false);
-        }
-      }}
-    >
-      <NativeMenuTrigger label="Share" />
-      <MenubarContent
-        class="w-full border-neutral-800 bg-neutral-900"
-        style={{ width: "min(92vw, 24rem)" }}
-      >
-        <div class="w-full p-3">
-          <div class="mb-3 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <span class="text-sm font-semibold text-neutral-200">
-                Share this room
-              </span>
-            </div>
-            <MenubarItem
-              class="p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-              aria-label="Close"
-              onSelect={share().onClose}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                class="h-4 w-4"
-              >
-                <path
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  d="m7 7l10 10M17 7L7 17"
-                />
-                <title>Close</title>
-              </svg>
-            </MenubarItem>
-          </div>
-          <div class="flex w-full items-center gap-2">
-            <div class="min-w-0 w-full max-w-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-neutral-200 shadow-inner">
-              <div
-                class="font-mono"
-                style={{
-                  overflow: "hidden",
-                  "text-overflow": "ellipsis",
-                  "white-space": "nowrap",
-                }}
-              >
-                {share().shareUrl}
-              </div>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={share().copied ? "Copied" : "Copy URL"}
-              class={cn(
-                "shrink-0",
-                share().copied ? "text-green-500" : "text-neutral-400",
-              )}
-              onClick={() => void share().onCopy()}
-            >
-              <Show
-                when={share().copied}
-                fallback={
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    class="h-4 w-4"
-                  >
-                    <g
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                    >
-                      <rect width="8" height="8" x="8" y="8" />
-                      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
-                    </g>
-                    <title>Copy</title>
-                  </svg>
-                }
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  class="h-4 w-4"
-                >
-                  <path
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    d="m5 12l5 5L20 7"
-                  />
-                  <title>Copied</title>
-                </svg>
-              </Show>
-            </Button>
-          </div>
-          <Show when={share().shareError}>
-            <div class="mt-2 text-xs text-red-300">
-              {share().shareError}
-            </div>
-          </Show>
-          <div class="mt-4 border-t border-neutral-800 pt-3">
-            <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-              Members
-            </div>
-            <Show
-              when={!share().membersLoading}
-              fallback={<div class="text-xs text-neutral-500">Loading members...</div>}
-            >
-              <Show
-                when={share().members.length > 0}
-                fallback={<div class="text-xs text-neutral-500">No accepted members yet.</div>}
-              >
-                <div class="space-y-2">
-                  <For each={share().members}>
-                    {(member) => (
-                      <div class="flex items-center justify-between gap-3 border border-neutral-800 bg-neutral-950/60 px-3 py-2">
-                        <div class="min-w-0">
-                          <div class="truncate text-xs text-neutral-200">{member.userId}</div>
-                          <div class="text-[11px] capitalize text-neutral-500">{member.role}</div>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          class="shrink-0 text-red-300 hover:bg-red-950/40 hover:text-red-200"
-                          disabled={share().revokingMemberId === member.userId}
-                          onPointerDown={(event) => event.stopPropagation()}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void share().onRevokeMember(member.userId);
-                          }}
-                        >
-                          {share().revokingMemberId === member.userId ? "Removing..." : "Remove"}
-                        </Button>
-                      </div>
-                    )}
-                  </For>
-                </div>
-              </Show>
-            </Show>
-            <Show when={share().membersError}>
-              <div class="mt-2 text-xs text-red-300">
-                {share().membersError}
-              </div>
-            </Show>
-          </div>
-        </div>
-      </MenubarContent>
-    </MenubarMenu>
-  );
-};
-
-const ShortcutsSubMenu: Component<{ onOpenDashboard: () => void }> = (props) => (
-  <MenubarSub>
-    <MenubarSubTrigger class={nativeMenuItemClass}>Shortcuts</MenubarSubTrigger>
-    <MenubarPortal>
-      <MenubarSubContent
-        class="border-neutral-800 bg-neutral-900 text-neutral-100"
-        style={{ width: "min(92vw, 22rem)" }}
-      >
-        <MenubarLabel class="text-neutral-400">Timeline</MenubarLabel>
-        <For each={timelineKeyboardShortcuts}>
-          {(shortcut) => (
-            <MenubarItem disabled>
-              {shortcut.label}
-              <MenubarShortcut>{shortcut.keys}</MenubarShortcut>
-            </MenubarItem>
-          )}
-        </For>
-        <MenubarSeparator />
-        <MenubarItem class={nativeMenuItemClass} onSelect={props.onOpenDashboard}>
-          Open shortcuts dashboard
-        </MenubarItem>
-        <MenubarSeparator />
-        <MenubarLabel class="text-neutral-400">
-          MIDI Editor (when keyboard enabled)
-        </MenubarLabel>
-        <MenubarItem disabled>
-          Note keys
-          <MenubarShortcut>A S D F G H J K L ;</MenubarShortcut>
-        </MenubarItem>
-        <MenubarItem disabled>
-          Sharp keys
-          <MenubarShortcut>W E T Y U O P</MenubarShortcut>
-        </MenubarItem>
-        <MenubarItem disabled>
-          Octave down
-          <MenubarShortcut>Z</MenubarShortcut>
-        </MenubarItem>
-        <MenubarItem disabled>
-          Octave up
-          <MenubarShortcut>X</MenubarShortcut>
-        </MenubarItem>
-      </MenubarSubContent>
-    </MenubarPortal>
-  </MenubarSub>
-);
-
-const SettingsMenu: Component<{ toolbar: TransportControlsProps }> = (props) => {
-  const toolbar = () => props.toolbar;
-  const navigate = useNavigate();
-  const session = useSessionQuery();
-  const user = createMemo(() => session.data?.user);
-
-  const handleSignOut = async () => {
-    try {
-      await authClient.signOut();
-    } finally {
-      queryClient.setQueryData(["session"], null);
-      navigate({ to: "/Login" });
-    }
-  };
-
-  return (
-    <MenubarMenu value="settings">
-      <NativeMenuTrigger label="Settings" />
-      <MenubarContent class="w-56 border-neutral-800 bg-neutral-900">
-        <MenubarItem class={nativeMenuItemClass} onSelect={() => toolbar().projectMenu.onOpenDashboard("general")}>
-          Dashboard settings
-        </MenubarItem>
-        <MenubarItem class={nativeMenuItemClass} onSelect={() => toolbar().projectMenu.onOpenDashboard("timeline")}>
-          Timeline / DAW dashboard
-        </MenubarItem>
-        <ShortcutsSubMenu onOpenDashboard={() => toolbar().projectMenu.onOpenDashboard("keyboard")} />
-        <MenubarSeparator />
-        <MenubarItem
-          class={nativeMenuItemClass}
-          onSelect={toolbar().onToggleMetronome}
-        >
-          {toolbar().metronomeEnabled ? "Disable" : "Enable"} Metronome
-        </MenubarItem>
-        <MenubarItem
-          class={nativeMenuItemClass}
-          onSelect={toolbar().onToggleLoop}
-        >
-          {toolbar().loopEnabled ? "Disable" : "Enable"} Loop
-        </MenubarItem>
-        <MenubarItem
-          class={nativeMenuItemClass}
-          onSelect={toolbar().onToggleGrid}
-        >
-          {toolbar().gridEnabled ? "Disable" : "Enable"} Grid
-        </MenubarItem>
-        <MenubarSeparator />
-        <div class="px-2 pb-1 pt-1 text-xs text-neutral-500">
-          Grid Resolution
-        </div>
-        <For each={gridDenominators}>
-          {(denominator) => (
-            <MenubarItem
-              class={cn(
-                nativeMenuItemClass,
-                toolbar().gridDenominator === denominator && "text-green-400",
-              )}
-              onSelect={() => toolbar().onChangeGridDenominator(denominator)}
-            >
-              1/{denominator}
-            </MenubarItem>
-          )}
-        </For>
-        <Show
-          when={user()?.email}
-          fallback={
-            <MenubarItem as={Link} to="/Login" class={nativeMenuItemClass}>
-              Sign in
-            </MenubarItem>
-          }
-        >
-          <MenubarItem as={Link} to="/Login" class={nativeMenuItemClass}>
-            Account
-          </MenubarItem>
-          <MenubarItem class={nativeMenuItemClass} onSelect={handleSignOut}>
-            Logout
-          </MenubarItem>
-        </Show>
-        <MenubarItem as={Link} to="/about" class={nativeMenuItemClass}>
-          About
-        </MenubarItem>
-      </MenubarContent>
-    </MenubarMenu>
-  );
-};
-
 const SaveStatus: Component<{ projectId: string; userId?: string }> = (props) => {
   const status = () => getProjectSaveStatus({ projectId: props.projectId, userId: props.userId });
 
@@ -658,23 +239,6 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
     onDeleteProject: props.projectMenu.onDeleteProject,
     onRenameProject: props.projectMenu.onRenameProject,
   });
-  const samplesMenu = useSamplesMenuController({
-    currentProjectId,
-    currentUserId,
-    onInsertSample: props.onInsertSample,
-    onJumpToClip: props.onJumpToClip,
-    onOpenDashboard: props.projectMenu.onOpenDashboard,
-  });
-  const exportsMenu = useExportsMenuController({
-    currentProjectId,
-    currentUserId,
-    onOpenExport: props.projectMenu.onOpenExport,
-    onOpenDashboard: props.projectMenu.onOpenDashboard,
-  });
-  const shareMenu = useShareMenuController({
-    onShare: props.projectMenu.onShare,
-    projectId: currentProjectId,
-  });
   const tempo = useTransportTempoController({
     bpm: () => props.bpm,
     onChangeBpm: props.onChangeBpm,
@@ -682,34 +246,33 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
   return (
     <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-neutral-800 bg-neutral-950 p-2">
       <div class="justify-self-start flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-pressed={props.browser.open}
+          aria-label={props.browser.open ? "Hide browser sidebar" : "Show browser sidebar"}
+          class={cn(
+            nativeMenuTriggerClass,
+            "focus:bg-neutral-800 focus:text-neutral-100 focus:outline-none",
+            props.browser.open && "bg-neutral-800 text-neutral-100",
+          )}
+          onClick={props.browser.onToggle}
+        >
+          Browser
+        </Button>
         <Menubar class="flex items-center gap-1">
           <FileMenu toolbar={props} />
           <EditMenu toolbar={props} />
-          <ProjectsMenu
+          <ProjectMenu
             projectMenu={props.projectMenu}
             menu={projectsMenu}
           />
-          <ProjectMediaMenu samples={samplesMenu} exportsMenu={exportsMenu} />
+          <ViewMenu toolbar={props} />
+          <MediaMenu
+            onOpenDashboard={props.projectMenu.onOpenDashboard}
+          />
           <SettingsMenu toolbar={props} />
           <TracksMenu tracksMenu={props.tracksMenu} />
-          <Show when={!isLocalId("project", props.projectMenu.currentProjectId) && props.projectMenu.canManageSharing}>
-            <ShareMenu
-              share={{
-                onOpenChange: shareMenu.onOpenChange,
-                onOpen: shareMenu.onOpen,
-                onClose: shareMenu.onClose,
-                copied: shareMenu.copied(),
-                shareUrl: shareMenu.shareUrl(),
-                shareError: shareMenu.shareError(),
-                members: shareMenu.members(),
-                membersLoading: shareMenu.membersLoading(),
-                membersError: shareMenu.membersError(),
-                revokingMemberId: shareMenu.revokingMemberId(),
-                onCopy: shareMenu.onCopy,
-                onRevokeMember: shareMenu.onRevokeMember,
-              }}
-            />
-          </Show>
         </Menubar>
       </div>
 

@@ -205,15 +205,9 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
               <DashboardRow
                 label={current()?.name ?? model.projectMenu.currentProjectId}
                 value={isLocalId("project", model.projectMenu.currentProjectId) ? "Local project" : "Cloud project"}
-                action={<Button size="sm" variant="secondary" onClick={model.projectMenu.onOpenExport}>Export</Button>}
               />
             </DashboardSection>
             <DashboardSection title="Projects">
-              <DashboardRow
-                label="New project"
-                value="Create a browser-local project."
-                action={<Button size="sm" variant="secondary" onClick={() => void model.projectMenu.onCreateProject()}>Create</Button>}
-              />
               <For each={model.projectMenu.projects}>
                 {(project) => (
                   <DashboardRow

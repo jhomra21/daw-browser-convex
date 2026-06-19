@@ -1,7 +1,7 @@
 # Ableton EQ/Reverb UI Tracker
 
 > Created: 2026-06-19
-> Branch: `ableton-eq-reverb-ui-plan`
+> Branch: `eq-reverb-refactor`
 > Base branch: `master`
 > Scope: refactor the EQ and Reverb device UIs to more closely resemble Ableton Live's EQ Eight and Reverb devices while preserving current audio behavior.
 >
@@ -522,7 +522,7 @@ Use this rhythm:
 
 Required checkpoint commits:
 
-1. Tracker setup commit on `ableton-eq-reverb-ui-plan`.
+1. Tracker setup commit on `eq-reverb-refactor`.
 2. EQ UI refactor checkpoint.
 3. Reverb UI refactor checkpoint.
 4. Final integration/polish checkpoint, if there are additional changes after Phase 2.

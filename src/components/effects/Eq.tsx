@@ -363,6 +363,13 @@ export default function Eq(props: EqProps) {
     draw()
   })
 
+  createEffect(() => {
+    const current = selectedId()
+    if (props.bands.some((band) => band.id === current)) return
+    const next = props.bands[0]?.id ?? ''
+    if (current !== next) setSelectedId(next)
+  })
+
   // Interaction: drag nodes to set freq/gain
   const onCanvasPointerDown = (ev: PointerEvent) => {
     if (!props.enabled || !canvasRef) return
@@ -468,7 +475,8 @@ export default function Eq(props: EqProps) {
               onValueChange={(v) => {
                 const band = selectedBand()
                 if (!band) return
-                props.onBandChange(band.id, { frequency: Math.round(v) })
+                const frequency = Math.round(v)
+                if (band.frequency !== frequency) props.onBandChange(band.id, { frequency })
               }}
             />
           </AbletonKnobControl>
@@ -488,7 +496,8 @@ export default function Eq(props: EqProps) {
               onValueChange={(v) => {
                 const band = selectedBand()
                 if (!band) return
-                props.onBandChange(band.id, { gainDb: Math.round(v * 10) / 10 })
+                const gainDb = Math.round(v * 10) / 10
+                if (band.gainDb !== gainDb) props.onBandChange(band.id, { gainDb })
               }}
             />
           </AbletonKnobControl>
@@ -506,7 +515,8 @@ export default function Eq(props: EqProps) {
               onValueChange={(v) => {
                 const band = selectedBand()
                 if (!band) return
-                props.onBandChange(band.id, { q: Math.round(v * 10) / 10 })
+                const q = Math.round(v * 10) / 10
+                if (band.q !== q) props.onBandChange(band.id, { q })
               }}
             />
           </AbletonKnobControl>

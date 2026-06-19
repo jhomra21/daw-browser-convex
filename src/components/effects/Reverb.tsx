@@ -119,8 +119,21 @@ function ReverbDecayDisplay(props: { decaySec: number; enabled: boolean }) {
 }
 
 export default function Reverb(props: ReverbProps) {
+  const updateWet = (value: number) => {
+    const wet = normalizeWet(value)
+    if (props.params.wet !== wet) props.onChange({ wet })
+  }
+  const updateDecay = (value: number) => {
+    const decaySec = normalizeDecay(value)
+    if (props.params.decaySec !== decaySec) props.onChange({ decaySec })
+  }
+  const updatePreDelay = (value: number) => {
+    const preDelayMs = normalizePreDelay(value)
+    if (props.params.preDelayMs !== preDelayMs) props.onChange({ preDelayMs })
+  }
+
   return (
-    <div class={cn('flex min-w-72 flex-col border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
+    <div class={cn('flex flex-col border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
       {/* Header */}
       <div class="flex items-center justify-between border-b border-neutral-800 px-2 py-1">
         <div class="flex items-center gap-2">
@@ -166,7 +179,7 @@ export default function Reverb(props: ReverbProps) {
               unit="ms"
               disabled={!props.params.enabled}
               showValue={false}
-              onValueChange={(v) => props.onChange({ preDelayMs: normalizePreDelay(v) })}
+              onValueChange={updatePreDelay}
             />
           </ReverbKnobControl>
         </ReverbSection>
@@ -183,7 +196,7 @@ export default function Reverb(props: ReverbProps) {
               unit="s"
               disabled={!props.params.enabled}
               showValue={false}
-              onValueChange={(v) => props.onChange({ decaySec: normalizeDecay(v) })}
+              onValueChange={updateDecay}
             />
           </ReverbKnobControl>
         </ReverbSection>
@@ -199,7 +212,7 @@ export default function Reverb(props: ReverbProps) {
               label=""
               disabled={!props.params.enabled}
               showValue={false}
-              onValueChange={(v) => props.onChange({ wet: normalizeWet(v) })}
+              onValueChange={updateWet}
             />
           </ReverbKnobControl>
         </ReverbSection>

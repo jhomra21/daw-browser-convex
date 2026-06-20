@@ -1,4 +1,4 @@
-import { normalizeReverbParams, supportsGain, type ArpParams, type EqBandParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
+import { normalizeReverbParams, REVERB_DECAY_SEC_MAX, REVERB_DECAY_SEC_MIN, supportsGain, type ArpParams, type EqBandParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
 
 type MidiNote = { beat: number; length: number; pitch: number; velocity?: number }
 
@@ -31,11 +31,11 @@ function createSeededRandom(seed: number) {
 }
 
 export function getImpulseBucket(decaySec: number, bucketSize = 0.1): ImpulseBucket {
-  const clampedDecay = Math.min(10, Math.max(0.05, decaySec))
+  const clampedDecay = Math.min(REVERB_DECAY_SEC_MAX, Math.max(REVERB_DECAY_SEC_MIN, decaySec))
   const bucketIndex = Math.max(1, Math.round(clampedDecay / bucketSize))
   return {
     bucketIndex,
-    bucketSec: Math.min(10, Math.max(bucketSize, bucketIndex * bucketSize)),
+    bucketSec: Math.min(REVERB_DECAY_SEC_MAX, Math.max(bucketSize, bucketIndex * bucketSize)),
   }
 }
 
@@ -55,13 +55,22 @@ export function createReverbImpulseRender(
   const params = options?.normalizedParams ?? (typeof paramsOrDecaySec === 'number'
     ? normalizeReverbParams({ decaySec: paramsOrDecaySec })
     : normalizeReverbParams(paramsOrDecaySec))
+  const info = createReverbImpulseRenderInfo(ctx.sampleRate, params, options)
+  return { params, info }
+}
+
+export function createReverbImpulseRenderInfo(
+  sampleRate: number,
+  params: ReverbParamsLite,
+  options?: { bucketSize?: number },
+): ReverbImpulseInfo {
   const sizeScale = 0.5 + params.size * 0.75
   const bucket = getImpulseBucket(params.decaySec * sizeScale, options?.bucketSize)
   const densityBucket = Math.round(params.density * 100)
   const diffusionBucket = Math.round(params.diffusion * 100)
   const highCutBucket = Math.round(params.highCutHz / 100)
-  const length = Math.max(1, Math.floor(ctx.sampleRate * bucket.bucketSec))
-  const info = {
+  const length = Math.max(1, Math.floor(sampleRate * bucket.bucketSec))
+  return {
     bucketIndex: bucket.bucketIndex,
     bucketSec: bucket.bucketSec,
     densityBucket,
@@ -70,7 +79,6 @@ export function createReverbImpulseRender(
     length,
     signature: `${bucket.bucketIndex}:${densityBucket}:${diffusionBucket}:${highCutBucket}:${length}`,
   }
-  return { params, info }
 }
 
 export function createImpulseResponseBuffer(
@@ -140,7 +148,7 @@ export function applyEqNodeParams(nodes: BiquadFilterNode[], params: EqParamsLit
   }
 }
 
-export function applyEqBandParams(filter: BiquadFilterNode, band: EqBandParams) {
+function applyEqBandParams(filter: BiquadFilterNode, band: EqBandParams) {
   filter.type = band.type
   filter.frequency.value = Math.max(20, Math.min(20000, band.frequency))
   filter.Q.value = Math.max(0.001, band.q)

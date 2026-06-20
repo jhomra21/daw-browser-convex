@@ -1,6 +1,5 @@
 import { Show, For, createSignal, createMemo, onMount, onCleanup, createEffect, type JSX } from 'solid-js'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
-import { applyEqBandParams } from '@daw-browser/audio-engine/effects/dsp'
 import Knob from '~/components/ui/knob'
 import {
   supportsGain,
@@ -101,6 +100,13 @@ const smoothSpectrumY = (values: Float32Array, index: number) => {
   }
 
   return weightTotal > 0 ? total / weightTotal : values[index]
+}
+
+function applyEqResponseBandParams(filter: BiquadFilterNode, band: EqBandParams) {
+  filter.type = band.type
+  filter.frequency.value = Math.max(FREQ_MIN, Math.min(FREQ_MAX, band.frequency))
+  filter.Q.value = Math.max(0.001, band.q)
+  filter.gain.value = supportsGain(band.type) ? band.gainDb : 0
 }
 
 function AbletonKnobControl(props: {
@@ -396,7 +402,7 @@ export default function Eq(props: EqProps) {
         }
         for (const band of props.bands) {
           if (!band.enabled) continue
-          applyEqBandParams(filter, band)
+          applyEqResponseBandParams(filter, band)
           filter.getFrequencyResponse(frequencies, magnitudes, phases)
           for (let index = 0; index < pointCount; index++) {
             dbValues[index] += 20 * Math.log10(Math.max(0.000001, magnitudes[index] ?? 1))

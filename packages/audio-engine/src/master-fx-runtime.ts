@@ -1,7 +1,7 @@
 import { serializeEqParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
 import { connectParallelFxChain, createReverbNodeChain, disconnectAudioNodes, disconnectReverbChain, applyReverbNodeChainParams, type CreateReverbImpulseResponse, type ReverbNodeChain } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
-import { getAppliedReverbSignature } from './effects/reverb-signature'
+import { getAppliedReverbSignature, getReverbTopologySignature } from './effects/reverb-signature'
 import type { SpectrumFrame } from './metering-runtime'
 
 export function createMasterFxRuntime() {
@@ -14,6 +14,7 @@ export function createMasterFxRuntime() {
   let analyserConnected = false
   let reverb: ReverbNodeChain | null = null
   let reverbSignature: string | null = null
+  let reverbTopologySignature: string | null = null
   let pendingEqParams: EqParamsLite | null = null
   let pendingReverbParams: ReverbParamsLite | null = null
 
@@ -61,6 +62,7 @@ export function createMasterFxRuntime() {
         pendingReverbParams = null
         reverb = createReverbNodeChain(ctx, params, createImpulseResponse)
         reverbSignature = getAppliedReverbSignature(params)
+        reverbTopologySignature = getReverbTopologySignature(params)
       }
       rebuildRouting(ctx, masterGain, destination)
     },
@@ -90,10 +92,15 @@ export function createMasterFxRuntime() {
       }
       const signature = getAppliedReverbSignature(params)
       if (reverbSignature === signature) return
+      const topologySignature = getReverbTopologySignature(params)
+      const previousTopologySignature = reverbTopologySignature
       if (!reverb) reverb = createReverbNodeChain(ctx, params, createImpulseResponse)
       else applyReverbNodeChainParams(reverb, params, createImpulseResponse)
       reverbSignature = signature
-      rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
+      reverbTopologySignature = topologySignature
+      if (previousTopologySignature !== topologySignature && (previousTopologySignature !== null || topologySignature === 'enabled')) {
+        rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
+      }
     },
     rebuildRouting,
     getSpectrum: (ctx: AudioContext | null, masterGain: GainNode | null) => {
@@ -116,6 +123,7 @@ export function createMasterFxRuntime() {
       eqSignature = null
       eqTopologySignature = null
       reverbSignature = null
+      reverbTopologySignature = null
       pendingEqParams = null
       pendingReverbParams = null
       disconnectAudioNodes(eqChain)

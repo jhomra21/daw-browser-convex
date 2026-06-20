@@ -542,6 +542,11 @@ fix: polish ableton-style effect device layouts
   - `bun run build`
 - Final bug-focused review returned no findings.
 - Final simplify pass returned no findings.
+- Final defensive cleanup removed redundant optional callback calls inside already-narrowed EQ/Reverb `<Show>` blocks and simplified the fixed-width Reverb decay display denominator.
+- Re-validation after defensive cleanup passed:
+  - `bun run typecheck`
+  - `bun test`, 84 tests
+  - `bun run build`
 
 ---
 

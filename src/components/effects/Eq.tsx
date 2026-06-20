@@ -444,17 +444,19 @@ export default function Eq(props: EqProps) {
           <span class="text-xs font-semibold">EQ Eight</span>
           <span class="text-[10px] text-neutral-500">Stereo</span>
         </div>
-        <Show when={props.onToggleEnabled}>
-          <button
-            class={cn(
-              'px-2 py-0.5 text-xs',
-              props.enabled ? 'bg-cyan-500/20 text-cyan-300 ring-1 ring-cyan-500/30' : 'bg-neutral-800 text-neutral-400',
-            )}
-            onClick={() => props.onToggleEnabled?.(!props.enabled)}
-            title={props.enabled ? 'Disable EQ' : 'Enable EQ'}
-          >
-            {props.enabled ? 'On' : 'Off'}
-          </button>
+        <Show when={props.onToggleEnabled} keyed>
+          {(onToggleEnabled) => (
+            <button
+              class={cn(
+                'px-2 py-0.5 text-xs',
+                props.enabled ? 'bg-cyan-500/20 text-cyan-300 ring-1 ring-cyan-500/30' : 'bg-neutral-800 text-neutral-400',
+              )}
+              onClick={() => onToggleEnabled(!props.enabled)}
+              title={props.enabled ? 'Disable EQ' : 'Enable EQ'}
+            >
+              {props.enabled ? 'On' : 'Off'}
+            </button>
+          )}
         </Show>
       </div>
 
@@ -540,13 +542,15 @@ export default function Eq(props: EqProps) {
           <div class="mb-3 border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-neutral-300">Stereo</div>
           <div class="mb-1 text-neutral-500">Edit</div>
           <div class="mb-3 border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-neutral-300">A</div>
-          <Show when={props.onReset}>
-            <button
-              class="mt-auto border border-neutral-700 bg-neutral-800 px-1 py-1 text-neutral-300 hover:bg-neutral-700"
-              onClick={() => props.onReset?.()}
-            >
-              Reset
-            </button>
+          <Show when={props.onReset} keyed>
+            {(onReset) => (
+              <button
+                class="mt-auto border border-neutral-700 bg-neutral-800 px-1 py-1 text-neutral-300 hover:bg-neutral-700"
+                onClick={() => onReset()}
+              >
+                Reset
+              </button>
+            )}
           </Show>
         </div>
       </div>

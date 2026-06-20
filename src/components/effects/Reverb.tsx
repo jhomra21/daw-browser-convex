@@ -97,7 +97,7 @@ function ReverbDecayDisplay(props: { decaySec: number; enabled: boolean }) {
     ctx.beginPath()
 
     const normalizedDecay = clamp(props.decaySec / 10, 0.05, 1)
-    const denominator = Math.max(1, width - 1)
+    const denominator = width - 1
     for (let x = 0; x < width; x++) {
       const t = x / denominator
       const amplitude = Math.exp(-t / normalizedDecay)
@@ -140,23 +140,27 @@ export default function Reverb(props: ReverbProps) {
           <span class="text-xs font-semibold">Reverb</span>
         </div>
         <div class="flex items-center gap-2">
-          <Show when={props.onToggleEnabled}>
-            <button
-              class={cn(
-                'px-2 py-0.5 text-xs',
-                props.params.enabled ? 'bg-green-500/20 text-green-400 ring-1 ring-green-500/30' : 'bg-neutral-800 text-neutral-400',
-              )}
-              onClick={() => props.onToggleEnabled?.(!props.params.enabled)}
-              title={props.params.enabled ? 'Disable Reverb' : 'Enable Reverb'}
-            >
-              {props.params.enabled ? 'On' : 'Off'}
-            </button>
+          <Show when={props.onToggleEnabled} keyed>
+            {(onToggleEnabled) => (
+              <button
+                class={cn(
+                  'px-2 py-0.5 text-xs',
+                  props.params.enabled ? 'bg-green-500/20 text-green-400 ring-1 ring-green-500/30' : 'bg-neutral-800 text-neutral-400',
+                )}
+                onClick={() => onToggleEnabled(!props.params.enabled)}
+                title={props.params.enabled ? 'Disable Reverb' : 'Enable Reverb'}
+              >
+                {props.params.enabled ? 'On' : 'Off'}
+              </button>
+            )}
           </Show>
-          <Show when={props.onReset}>
-            <button
-              class="border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
-              onClick={() => props.onReset?.()}
-            >Reset</button>
+          <Show when={props.onReset} keyed>
+            {(onReset) => (
+              <button
+                class="border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+                onClick={() => onReset()}
+              >Reset</button>
+            )}
           </Show>
         </div>
       </div>

@@ -41,22 +41,20 @@ export function getImpulseBucket(decaySec: number, bucketSize = 0.1): ImpulseBuc
 
 export function getImpulseResponseBufferInfo(
   ctx: BaseAudioContext,
-  paramsOrDecaySec: ReverbParamsLite | number,
-  options?: { bucketSize?: number; normalizedParams?: ReverbParamsLite },
+  params: ReverbParamsLite,
+  options?: { bucketSize?: number },
 ): ReverbImpulseInfo {
-  return createReverbImpulseRender(ctx, paramsOrDecaySec, options).info
+  return createReverbImpulseRender(ctx, params, options).info
 }
 
 export function createReverbImpulseRender(
   ctx: BaseAudioContext,
-  paramsOrDecaySec: ReverbParamsLite | number,
-  options?: { bucketSize?: number; normalizedParams?: ReverbParamsLite },
+  params: ReverbParamsLite,
+  options?: { bucketSize?: number },
 ): ReverbImpulseRender {
-  const params = options?.normalizedParams ?? (typeof paramsOrDecaySec === 'number'
-    ? normalizeReverbParams({ decaySec: paramsOrDecaySec })
-    : normalizeReverbParams(paramsOrDecaySec))
-  const info = createReverbImpulseRenderInfo(ctx.sampleRate, params, options)
-  return { params, info }
+  const normalized = normalizeReverbParams(params)
+  const info = createReverbImpulseRenderInfo(ctx.sampleRate, normalized, options)
+  return { params: normalized, info }
 }
 
 export function createReverbImpulseRenderInfo(
@@ -83,12 +81,11 @@ export function createReverbImpulseRenderInfo(
 
 export function createImpulseResponseBuffer(
   ctx: BaseAudioContext,
-  paramsOrDecaySec: ReverbParamsLite | number,
-  options?: { bucketSize?: number; channelCount?: number; render?: ReverbImpulseRender },
+  render: ReverbImpulseRender,
+  options?: { channelCount?: number },
 ) {
-  const normalized = options?.render ?? createReverbImpulseRender(ctx, paramsOrDecaySec, options)
-  const params = normalized.params
-  const info = normalized.info
+  const params = render.params
+  const info = render.info
   const channelCount = Math.max(1, Math.min(2, options?.channelCount ?? 2))
   const impulse = ctx.createBuffer(channelCount, info.length, ctx.sampleRate)
   for (let channel = 0; channel < impulse.numberOfChannels; channel++) {

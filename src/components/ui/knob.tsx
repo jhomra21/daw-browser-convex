@@ -1,4 +1,5 @@
-import { createSignal, onCleanup } from 'solid-js'
+import { createSignal } from 'solid-js'
+import { useDrag } from '~/hooks/useDrag'
 import { cn } from '~/lib/utils'
 
 type KnobProps = {
@@ -17,11 +18,10 @@ type KnobProps = {
 }
 
 export default function Knob(props: KnobProps) {
-  const [isDragging, setIsDragging] = createSignal(false)
-  const [startY, setStartY] = createSignal(0)
-  const [startValue, setStartValue] = createSignal(0)
   const [dragValue, setDragValue] = createSignal<number | null>(null)
-  let cleanupDragListeners: (() => void) | undefined
+  let startY = 0
+  let startValue = 0
+  let lastEmittedValue = props.value
   
   const size = () => props.size || 48
   const step = () => props.step || 0.1
@@ -75,31 +75,31 @@ export default function Knob(props: KnobProps) {
     return `${value.toFixed(1)}${unit}`
   }
 
-  const handlePointerDown = (event: PointerEvent) => {
-    if (props.disabled) return
-    
-    event.preventDefault()
-    event.stopPropagation()
-    if (event.currentTarget instanceof HTMLElement) {
-      event.currentTarget.setPointerCapture(event.pointerId)
-    }
-    
-    setIsDragging(true)
-    setStartY(event.clientY)
-    setStartValue(props.value)
-    setDragValue(props.value)
-    cleanupDragListeners?.()
-    
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      moveEvent.preventDefault()
-      const deltaY = startY() - moveEvent.clientY
+  const emitValue = (value: number) => {
+    if (value === lastEmittedValue) return
+    lastEmittedValue = value
+    props.onValueChange(value)
+  }
+
+  const drag = useDrag({
+    disabled: () => props.disabled ?? false,
+    onDragStart: (pos, event) => {
+      event.stopPropagation()
+      startY = pos.y
+      startValue = props.value
+      lastEmittedValue = props.value
+      setDragValue(props.value)
+    },
+    onDragMove: (pos, event) => {
+      event.preventDefault()
+      const deltaY = startY - pos.y
       const sensitivity = props.logarithmic ? 1.0 : 1.5
       
       let newValue: number
       
       if (props.logarithmic) {
         // Logarithmic scaling for frequency
-        const normalizedStart = (startValue() - props.min) / (props.max - props.min)
+        const normalizedStart = (startValue - props.min) / (props.max - props.min)
         const logMin = Math.log10(props.min)
         const logMax = Math.log10(props.max)
         const logStart = logMin + normalizedStart * (logMax - logMin)
@@ -109,7 +109,7 @@ export default function Knob(props: KnobProps) {
         // Linear scaling
         const range = props.max - props.min
         const deltaValue = (deltaY * sensitivity * range) / 150
-        newValue = startValue() + deltaValue
+        newValue = startValue + deltaValue
       }
       
       // Clamp and round
@@ -118,32 +118,12 @@ export default function Knob(props: KnobProps) {
       const finalValue = Math.max(props.min, Math.min(props.max, stepped))
       
       setDragValue(finalValue)
-      props.onValueChange(finalValue)
-    }
-    
-    const handlePointerUp = (upEvent: PointerEvent) => {
-      upEvent.preventDefault()
-      setIsDragging(false)
+      emitValue(finalValue)
+    },
+    onDragEnd: (_pos, event) => {
+      event.preventDefault()
       setDragValue(null)
-      cleanupDragListeners?.()
-    }
-
-    cleanupDragListeners = () => {
-      document.removeEventListener('pointermove', handlePointerMove)
-      document.removeEventListener('pointerup', handlePointerUp)
-      document.removeEventListener('pointercancel', handlePointerUp)
-      cleanupDragListeners = undefined
-    }
-    document.addEventListener('pointermove', handlePointerMove)
-    document.addEventListener('pointerup', handlePointerUp)
-    document.addEventListener('pointercancel', handlePointerUp)
-  }
-
-  // Cleanup on component unmount
-  onCleanup(() => {
-    setIsDragging(false)
-    setDragValue(null)
-    cleanupDragListeners?.()
+    },
   })
 
   const handleDoubleClick = () => {
@@ -151,8 +131,9 @@ export default function Knob(props: KnobProps) {
     
     // Reset to center for bipolar, to min for unipolar
     const resetValue = bipolar() ? (props.min + props.max) / 2 : props.min
+    lastEmittedValue = props.value
     setDragValue(resetValue)
-    props.onValueChange(resetValue)
+    emitValue(resetValue)
     queueMicrotask(() => setDragValue(null))
   }
 
@@ -179,7 +160,7 @@ export default function Knob(props: KnobProps) {
           '-webkit-user-select': 'none',
           'touch-action': 'none'
         }}
-        onPointerDown={handlePointerDown}
+        onPointerDown={drag.onPointerDown}
         onDblClick={handleDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
         onDragStart={(e) => e.preventDefault()}
@@ -202,7 +183,7 @@ export default function Knob(props: KnobProps) {
           <path
             d="M 15 75 A 35 35 0 1 1 85 75"
             fill="none"
-            stroke={isDragging() ? '#60a5fa' : '#38bdf8'}
+            stroke={drag.isDragging() ? '#60a5fa' : '#38bdf8'}
             stroke-width="4"
             pathLength="100"
             stroke-dasharray={arcDashArray()}
@@ -214,7 +195,7 @@ export default function Knob(props: KnobProps) {
         <div
           class={cn(
             'absolute w-0.5 -translate-x-1/2 transform origin-bottom',
-            isDragging() ? 'bg-sky-100' : 'bg-gray-200',
+            drag.isDragging() ? 'bg-sky-100' : 'bg-gray-200',
           )}
           style={{ 
             left: '50%',
@@ -231,7 +212,7 @@ export default function Knob(props: KnobProps) {
         <div
           class={cn(
             'min-w-12 text-center font-mono text-xs transition-colors duration-150',
-            isDragging() ? 'text-gray-200' : 'text-gray-400',
+            drag.isDragging() ? 'text-gray-200' : 'text-gray-400',
           )}
         >
           {formatValue()}

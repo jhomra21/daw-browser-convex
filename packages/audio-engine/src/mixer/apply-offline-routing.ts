@@ -35,7 +35,7 @@ export function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: Resolve
     const cacheKey = `${ctx.sampleRate}:${render.info.signature}`
     const cached = impulseCache.get(cacheKey)
     if (cached) return cached
-    const { buffer } = createImpulseResponseBuffer(ctx, params, { render })
+    const { buffer } = createImpulseResponseBuffer(ctx, render)
     impulseCache.set(cacheKey, buffer)
     return buffer
   }

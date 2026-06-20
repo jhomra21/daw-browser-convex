@@ -135,10 +135,23 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     }
     const signature = getAppliedReverbSignature(params)
     if (reverbSignatures.get(trackId) === signature) return
-    const trackNodes = ensureTrackNodes(trackId)
     const topologySignature = getReverbTopologySignature(params)
     const previousTopologySignature = reverbTopologySignatures.get(trackId)
     let reverb = reverbs.get(trackId)
+    if (topologySignature === 'disabled') {
+      if (reverb) {
+        disconnectReverbChain(reverb)
+        reverbs.delete(trackId)
+      }
+      reverbSignatures.set(trackId, signature)
+      reverbTopologySignatures.set(trackId, topologySignature)
+      if (previousTopologySignature !== undefined && previousTopologySignature !== topologySignature) {
+        const trackNodes = ensureTrackNodes(trackId)
+        rebuildTrackRouting(trackId, trackNodes)
+      }
+      return
+    }
+    const trackNodes = ensureTrackNodes(trackId)
     if (!reverb) {
       reverb = createReverbNodeChain(ctx, params, options.createImpulseResponse)
       reverbs.set(trackId, reverb)

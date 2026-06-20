@@ -60,9 +60,12 @@ export function createMasterFxRuntime() {
       if (pendingReverbParams) {
         const params = pendingReverbParams
         pendingReverbParams = null
-        reverb = createReverbNodeChain(ctx, params, createImpulseResponse)
+        const topologySignature = getReverbTopologySignature(params)
+        reverb = topologySignature === 'enabled'
+          ? createReverbNodeChain(ctx, params, createImpulseResponse)
+          : null
         reverbSignature = getAppliedReverbSignature(params)
-        reverbTopologySignature = getReverbTopologySignature(params)
+        reverbTopologySignature = topologySignature
       }
       rebuildRouting(ctx, masterGain, destination)
     },
@@ -94,6 +97,18 @@ export function createMasterFxRuntime() {
       if (reverbSignature === signature) return
       const topologySignature = getReverbTopologySignature(params)
       const previousTopologySignature = reverbTopologySignature
+      if (topologySignature === 'disabled') {
+        if (reverb) {
+          disconnectReverbChain(reverb)
+          reverb = null
+        }
+        reverbSignature = signature
+        reverbTopologySignature = topologySignature
+        if (previousTopologySignature !== null && previousTopologySignature !== topologySignature) {
+          rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
+        }
+        return
+      }
       if (!reverb) reverb = createReverbNodeChain(ctx, params, createImpulseResponse)
       else applyReverbNodeChainParams(reverb, params, createImpulseResponse)
       reverbSignature = signature

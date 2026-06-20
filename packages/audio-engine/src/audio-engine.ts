@@ -1,7 +1,7 @@
 import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime } from './audio-runtime'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
-import { normalizeMasterVolume, normalizeReverbParams, type ArpParams, type EqParamsLite, type ReverbParamsLite, type SynthParamsInput } from '@daw-browser/shared'
+import { normalizeMasterVolume, type ArpParams, type EqParamsLite, type ReverbParamsLite, type SynthParamsInput } from '@daw-browser/shared'
 import { createImpulseResponseBuffer, createReverbImpulseRender } from './effects/dsp'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
@@ -196,18 +196,13 @@ export class AudioEngine {
   private createImpulseResponse(params: ReverbParamsLite) {
     if (!this.audioCtx) return null
     const ctx = this.audioCtx
-    const normalizedParams = normalizeReverbParams(params)
-    const render = createReverbImpulseRender(ctx, normalizedParams, {
+    const render = createReverbImpulseRender(ctx, params, {
       bucketSize: this.impulseBucketSize,
-      normalizedParams,
     })
     const cacheKey = `${ctx.sampleRate}:${render.info.signature}`
     const cached = this.impulseCache.get(cacheKey)
     if (cached) return cached
-    const { buffer } = createImpulseResponseBuffer(ctx, normalizedParams, {
-      bucketSize: this.impulseBucketSize,
-      render,
-    })
+    const { buffer } = createImpulseResponseBuffer(ctx, render)
     this.impulseCache.set(cacheKey, buffer)
     while (this.impulseCache.size > this.impulseCacheLimit) {
       for (const oldestKey of this.impulseCache.keys()) {

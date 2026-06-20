@@ -151,6 +151,7 @@ export function createMeteringRuntime() {
   return {
     subscribeTrackStereoLevels: (listener: TrackStereoLevelsListener) => {
       listeners.add(listener)
+      if (workletLevels.size > 0) listener(new Map(workletLevels))
       updateWorkletSubscriptionState()
       return () => {
         listeners.delete(listener)

@@ -1,6 +1,6 @@
 import type { EqParamsLite, ReverbParamsLite } from '@daw-browser/shared'
-import { createEqNodes, createImpulseResponseBuffer } from '../effects/dsp'
-import { connectParallelFxChain, createReverbNodeChain } from '../effects/chain'
+import { createEqNodes, createImpulseResponseBuffer, createReverbImpulseRender } from '../effects/dsp'
+import { connectParallelFxChain, createReverbNodeChain, type CreateReverbImpulseResponse } from '../effects/chain'
 import type { ResolvedMixerGraph } from './types'
 
 type OfflineTrackNodes = {
@@ -19,18 +19,29 @@ function buildOfflineFxChain(
   destination: AudioNode,
   eqParams?: EqParamsLite,
   reverbParams?: ReverbParamsLite,
+  createImpulseResponse?: CreateReverbImpulseResponse,
 ) {
   const eq = createEqNodes(ctx, eqParams, ctx.destination.channelCount || 2)
   const reverb = reverbParams
-    ? createReverbNodeChain(ctx, reverbParams, (decaySec) => createImpulseResponseBuffer(ctx, decaySec).buffer)
+    ? createReverbNodeChain(ctx, reverbParams, createImpulseResponse ?? ((params) => createImpulseResponseBuffer(ctx, params).buffer))
     : null
   connectParallelFxChain(input, destination, eq, reverb)
 }
 
 export function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: ResolvedMixerGraph): OfflineMixerNodes {
+  const impulseCache = new Map<string, AudioBuffer>()
+  const createCachedImpulseResponse = (params: ReverbParamsLite) => {
+    const render = createReverbImpulseRender(ctx, params)
+    const cacheKey = `${ctx.sampleRate}:${render.info.signature}`
+    const cached = impulseCache.get(cacheKey)
+    if (cached) return cached
+    const { buffer } = createImpulseResponseBuffer(ctx, params, { render })
+    impulseCache.set(cacheKey, buffer)
+    return buffer
+  }
   const masterInput = ctx.createGain()
   masterInput.gain.value = graph.master.volume
-  buildOfflineFxChain(ctx, masterInput, ctx.destination, graph.master.eq, graph.master.reverb)
+  buildOfflineFxChain(ctx, masterInput, ctx.destination, graph.master.eq, graph.master.reverb, createCachedImpulseResponse)
 
   const trackNodes = new Map<string, OfflineTrackNodes>()
   for (const resolvedTrack of graph.channels) {
@@ -39,7 +50,7 @@ export function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: Resolve
     const output = ctx.createGain()
     gain.gain.value = resolvedTrack.gain
     output.gain.value = resolvedTrack.outputGain
-    buildOfflineFxChain(ctx, input, gain, resolvedTrack.fx?.eq, resolvedTrack.fx?.reverb)
+    buildOfflineFxChain(ctx, input, gain, resolvedTrack.fx?.eq, resolvedTrack.fx?.reverb, createCachedImpulseResponse)
     trackNodes.set(resolvedTrack.channel.id, { input, gain, output })
   }
 

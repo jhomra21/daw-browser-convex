@@ -1,5 +1,5 @@
 import { serializeEqParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
-import { connectParallelFxChain, createReverbNodeChain, disconnectAudioNodes, applyReverbNodeChainParams, type ReverbNodeChain } from './effects/chain'
+import { connectParallelFxChain, createReverbNodeChain, disconnectAudioNodes, disconnectReverbChain, applyReverbNodeChainParams, type CreateReverbImpulseResponse, type ReverbNodeChain } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { getAppliedReverbSignature } from './effects/reverb-signature'
 import type { SpectrumFrame } from './metering-runtime'
@@ -46,7 +46,7 @@ export function createMasterFxRuntime() {
   }
 
   return {
-    applyPending: (ctx: AudioContext, masterGain: GainNode, destination: AudioDestinationNode, createImpulseResponse: (decaySec: number) => AudioBuffer | null) => {
+    applyPending: (ctx: AudioContext, masterGain: GainNode, destination: AudioDestinationNode, createImpulseResponse: CreateReverbImpulseResponse) => {
       if (pendingEqParams) {
         const params = pendingEqParams
         pendingEqParams = null
@@ -83,7 +83,7 @@ export function createMasterFxRuntime() {
       eqTopologySignature = topologySignature
       rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
     },
-    setReverb: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: ReverbParamsLite, createImpulseResponse: (decaySec: number) => AudioBuffer | null) => {
+    setReverb: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: ReverbParamsLite, createImpulseResponse: CreateReverbImpulseResponse) => {
       if (!ctx || !masterGain) {
         pendingReverbParams = params
         return
@@ -121,7 +121,7 @@ export function createMasterFxRuntime() {
       disconnectAudioNodes(eqChain)
       eqChain = []
       if (reverb) {
-        disconnectAudioNodes([reverb.dryGain, reverb.wetGain, reverb.preDelay, reverb.convolver])
+        disconnectReverbChain(reverb)
         reverb = null
       }
       disconnectAudioNodes([analyser])

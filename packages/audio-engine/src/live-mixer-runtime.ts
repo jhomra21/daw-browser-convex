@@ -1,5 +1,5 @@
 import { serializeEqParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
-import { connectParallelFxChain, createReverbNodeChain, disconnectAudioNodes, applyReverbNodeChainParams, type ReverbNodeChain } from './effects/chain'
+import { connectParallelFxChain, createReverbNodeChain, disconnectAudioNodes, disconnectReverbChain, applyReverbNodeChainParams, type CreateReverbImpulseResponse, type ReverbNodeChain } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { getAppliedReverbSignature } from './effects/reverb-signature'
 import { applyLiveMixerGraph } from './mixer/apply-live-routing'
@@ -20,7 +20,7 @@ type LiveMixerRuntimeOptions = {
   getAudioContext: () => AudioContext | null
   getMasterInput: () => GainNode | null
   getDestination: () => AudioDestinationNode | null
-  createImpulseResponse: (decaySec: number) => AudioBuffer | null
+  createImpulseResponse: CreateReverbImpulseResponse
   reconnectTrackMeters: (trackId: string, output: GainNode, isCurrentOutput: () => boolean) => void
   disposeTrackMeters: (trackId: string) => void
   disposeSynthTrack: (trackId: string) => void
@@ -168,7 +168,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     eqTopologySignatures.delete(trackId)
 
     const reverb = reverbs.get(trackId)
-    if (reverb) disconnectAudioNodes([reverb.dryGain, reverb.wetGain, reverb.preDelay, reverb.convolver])
+    if (reverb) disconnectReverbChain(reverb)
     reverbs.delete(trackId)
     reverbSignatures.delete(trackId)
     pendingEqParams.delete(trackId)

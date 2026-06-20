@@ -1,10 +1,23 @@
-import { supportsGain, type ArpParams, type EqBandParams, type EqParamsLite } from '@daw-browser/shared'
+import { normalizeReverbParams, supportsGain, type ArpParams, type EqBandParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
 
 type MidiNote = { beat: number; length: number; pitch: number; velocity?: number }
 
 type ImpulseBucket = {
   bucketIndex: number
   bucketSec: number
+}
+
+type ReverbImpulseInfo = ImpulseBucket & {
+  densityBucket: number
+  diffusionBucket: number
+  highCutBucket: number
+  length: number
+  signature: string
+}
+
+type ReverbImpulseRender = {
+  params: ReverbParamsLite
+  info: ReverbImpulseInfo
 }
 
 function createSeededRandom(seed: number) {
@@ -28,35 +41,69 @@ export function getImpulseBucket(decaySec: number, bucketSize = 0.1): ImpulseBuc
 
 export function getImpulseResponseBufferInfo(
   ctx: BaseAudioContext,
-  decaySec: number,
-  options?: { bucketSize?: number },
-) {
-  const bucket = getImpulseBucket(decaySec, options?.bucketSize)
-  return {
+  paramsOrDecaySec: ReverbParamsLite | number,
+  options?: { bucketSize?: number; normalizedParams?: ReverbParamsLite },
+): ReverbImpulseInfo {
+  return createReverbImpulseRender(ctx, paramsOrDecaySec, options).info
+}
+
+export function createReverbImpulseRender(
+  ctx: BaseAudioContext,
+  paramsOrDecaySec: ReverbParamsLite | number,
+  options?: { bucketSize?: number; normalizedParams?: ReverbParamsLite },
+): ReverbImpulseRender {
+  const params = options?.normalizedParams ?? (typeof paramsOrDecaySec === 'number'
+    ? normalizeReverbParams({ decaySec: paramsOrDecaySec })
+    : normalizeReverbParams(paramsOrDecaySec))
+  const sizeScale = 0.5 + params.size * 0.75
+  const bucket = getImpulseBucket(params.decaySec * sizeScale, options?.bucketSize)
+  const densityBucket = Math.round(params.density * 100)
+  const diffusionBucket = Math.round(params.diffusion * 100)
+  const highCutBucket = Math.round(params.highCutHz / 100)
+  const length = Math.max(1, Math.floor(ctx.sampleRate * bucket.bucketSec))
+  const info = {
     bucketIndex: bucket.bucketIndex,
     bucketSec: bucket.bucketSec,
-    length: Math.max(1, Math.floor(ctx.sampleRate * bucket.bucketSec)),
+    densityBucket,
+    diffusionBucket,
+    highCutBucket,
+    length,
+    signature: `${bucket.bucketIndex}:${densityBucket}:${diffusionBucket}:${highCutBucket}:${length}`,
   }
+  return { params, info }
 }
 
 export function createImpulseResponseBuffer(
   ctx: BaseAudioContext,
-  decaySec: number,
-  options?: { bucketSize?: number; channelCount?: number },
+  paramsOrDecaySec: ReverbParamsLite | number,
+  options?: { bucketSize?: number; channelCount?: number; render?: ReverbImpulseRender },
 ) {
-  const info = getImpulseResponseBufferInfo(ctx, decaySec, options)
+  const normalized = options?.render ?? createReverbImpulseRender(ctx, paramsOrDecaySec, options)
+  const params = normalized.params
+  const info = normalized.info
   const channelCount = Math.max(1, Math.min(2, options?.channelCount ?? 2))
   const impulse = ctx.createBuffer(channelCount, info.length, ctx.sampleRate)
   for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
     const data = impulse.getChannelData(channel)
-    const noise = createSeededRandom(info.bucketIndex * 0x9E3779B1 + channel * 0x85EBCA77)
+    const noise = createSeededRandom(
+      info.bucketIndex * 0x9E3779B1
+      + info.densityBucket * 0x85EBCA77
+      + info.diffusionBucket * 0xC2B2AE3D
+      + channel * 0x27D4EB2F,
+    )
+    const density = Math.max(0.05, params.density)
+    const diffusion = params.diffusion
+    const damping = 1 - params.highCutHz / 20000
+    let smoothed = 0
     for (let frame = 0; frame < info.length; frame++) {
       const t = frame / info.length
-      const decay = Math.pow(1 - t, 3)
-      data[frame] = (noise() * 2 - 1) * decay
+      const decay = Math.pow(1 - t, 1.5 + diffusion * 2.5)
+      const sparse = noise() <= density ? noise() * 2 - 1 : 0
+      smoothed += (sparse - smoothed) * (1 - damping * 0.85)
+      data[frame] = (sparse * (1 - diffusion) + smoothed * diffusion) * decay
     }
   }
-  return { buffer: impulse, bucketIndex: info.bucketIndex, bucketSec: info.bucketSec, length: info.length }
+  return { buffer: impulse, bucketIndex: info.bucketIndex, bucketSec: info.bucketSec, length: info.length, signature: info.signature }
 }
 
 export function createEqNodes(ctx: BaseAudioContext, params?: EqParamsLite, channels = 2): BiquadFilterNode[] {

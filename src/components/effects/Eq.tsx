@@ -1,5 +1,6 @@
 import { Show, For, createSignal, createMemo, onMount, onCleanup, createEffect, type JSX } from 'solid-js'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
+import { applyEqBandParams } from '@daw-browser/audio-engine/effects/dsp'
 import Knob from '~/components/ui/knob'
 import {
   supportsGain,
@@ -141,6 +142,11 @@ export default function Eq(props: EqProps) {
   let displayedSpectrum: Float32Array | undefined
   let spectrumYBuf: Float32Array | undefined
   let smoothedYBuf: Float32Array | undefined
+  let responseFilter: BiquadFilterNode | undefined
+  let responseFrequencies: Float32Array<ArrayBuffer> | undefined
+  let responseMagnitudes: Float32Array<ArrayBuffer> | undefined
+  let responsePhases: Float32Array<ArrayBuffer> | undefined
+  let responseDb: Float32Array | undefined
   let displayedSpectrumSampleRate = 44100
   let lastFreshSpectrumAt = 0
   let lastSpectrumDecayAt = 0
@@ -159,11 +165,14 @@ export default function Eq(props: EqProps) {
     update()
     resizeObs = new ResizeObserver(() => update())
     containerRef && resizeObs.observe(containerRef)
+    const responseContext = new OfflineAudioContext(1, 1, 44100)
+    responseFilter = responseContext.createBiquadFilter()
   })
 
   onCleanup(() => {
     try { resizeObs?.disconnect() } catch {}
     if (spectrumDecayFrame !== null) cancelAnimationFrame(spectrumDecayFrame)
+    responseFilter = undefined
   })
 
   const runSpectrumDecay = (time: number) => {
@@ -243,68 +252,11 @@ export default function Eq(props: EqProps) {
     return GAIN_MAX - t * (GAIN_MAX - GAIN_MIN)
   }
 
-  // Simple response model per type. This is an approximation for visualization only.
-  const responseAt = (freq: number) => {
-    let total = 0
-    const A = 24 // attenuation depth for non-gain filters (dB)
-    for (const b of props.bands) {
-      if (!b.enabled) continue
-      const ratio = Math.max(1e-6, freq / b.frequency)
-      const l = Math.log(ratio)
-      const q = Math.max(0.1, b.q)
-
-      switch (b.type) {
-        case 'peaking': {
-          if (Math.abs(b.gainDb) < 0.05) break
-          const resp = b.gainDb * Math.exp(-Math.pow(l * q, 2))
-          total += resp
-          break
-        }
-        case 'lowshelf': {
-          if (Math.abs(b.gainDb) < 0.05) break
-          const k = Math.min(6, Math.max(0.2, q))
-          const sigmoid = 1 / (1 + Math.exp(+k * l)) // ~1 below cutoff, ~0 above
-          const resp = b.gainDb * sigmoid
-          total += resp
-          break
-        }
-        case 'highshelf': {
-          if (Math.abs(b.gainDb) < 0.05) break
-          const k = Math.min(6, Math.max(0.2, q))
-          const sigmoid = 1 / (1 + Math.exp(-k * l)) // ~0 below cutoff, ~1 above
-          const resp = b.gainDb * sigmoid
-          total += resp
-          break
-        }
-        case 'lowpass': {
-          const k = Math.min(6, Math.max(0.2, q))
-          const sigmoid = 1 / (1 + Math.exp(-k * l)) // rises above cutoff
-          const resp = -A * sigmoid // attenuate highs
-          total += resp
-          break
-        }
-        case 'highpass': {
-          const k = Math.min(6, Math.max(0.2, q))
-          const sigmoid = 1 / (1 + Math.exp(-k * l)) // rises above cutoff
-          const resp = -A * (1 - sigmoid) // attenuate lows
-          total += resp
-          break
-        }
-        case 'bandpass': {
-          const resp = -A * (1 - Math.exp(-Math.pow(l * q, 2))) // attenuate away from center
-          total += resp
-          break
-        }
-        case 'notch': {
-          const resp = -A * Math.exp(-Math.pow(l * q, 2)) // attenuate at center
-          total += resp
-          break
-        }
-        default:
-          break
-      }
-    }
-    return total
+  const ensureResponseBuffers = (length: number) => {
+    if (!responseFrequencies || responseFrequencies.length !== length) responseFrequencies = new Float32Array(length)
+    if (!responseMagnitudes || responseMagnitudes.length !== length) responseMagnitudes = new Float32Array(length)
+    if (!responsePhases || responsePhases.length !== length) responsePhases = new Float32Array(length)
+    if (!responseDb || responseDb.length !== length) responseDb = new Float32Array(length)
   }
 
   // Drawing
@@ -422,18 +374,44 @@ export default function Eq(props: EqProps) {
 
     // Response curve
     if (props.enabled) {
-      ctx.strokeStyle = '#22c55e'
-      ctx.lineWidth = 2.5
-      ctx.beginPath()
       const L = 6, R = 6
       const inner = Math.max(1, width - (L + R))
-      for (let x = L; x <= width - R; x += 2) {
-        const t = (x - L) / inner
-        const freq = FREQ_MIN * Math.pow(FREQ_MAX / FREQ_MIN, t)
-        const y = gainToY(responseAt(freq))
-        if (x === L) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+      let pointCount = 0
+      for (let x = L; x <= width - R; x += 2) pointCount++
+      ensureResponseBuffers(pointCount)
+      const frequencies = responseFrequencies
+      const magnitudes = responseMagnitudes
+      const phases = responsePhases
+      const dbValues = responseDb
+      const filter = responseFilter
+      if (frequencies && magnitudes && phases && dbValues && filter) {
+        let pointIndex = 0
+        for (let x = L; x <= width - R; x += 2) {
+          const t = (x - L) / inner
+          frequencies[pointIndex] = FREQ_MIN * Math.pow(FREQ_MAX / FREQ_MIN, t)
+          dbValues[pointIndex] = 0
+          pointIndex++
+        }
+        for (const band of props.bands) {
+          if (!band.enabled) continue
+          applyEqBandParams(filter, band)
+          filter.getFrequencyResponse(frequencies, magnitudes, phases)
+          for (let index = 0; index < pointCount; index++) {
+            dbValues[index] += 20 * Math.log10(Math.max(0.000001, magnitudes[index] ?? 1))
+          }
+        }
+
+        ctx.strokeStyle = '#22c55e'
+        ctx.lineWidth = 2.5
+        ctx.beginPath()
+        pointIndex = 0
+        for (let x = L; x <= width - R; x += 2) {
+          const y = gainToY(dbValues[pointIndex] ?? 0)
+          if (x === L) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+          pointIndex++
+        }
+        ctx.stroke()
       }
-      ctx.stroke()
     }
 
     // Nodes

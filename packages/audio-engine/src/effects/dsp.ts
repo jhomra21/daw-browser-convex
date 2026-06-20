@@ -140,7 +140,7 @@ export function applyEqNodeParams(nodes: BiquadFilterNode[], params: EqParamsLit
   }
 }
 
-function applyEqBandParams(filter: BiquadFilterNode, band: EqBandParams) {
+export function applyEqBandParams(filter: BiquadFilterNode, band: EqBandParams) {
   filter.type = band.type
   filter.frequency.value = Math.max(20, Math.min(20000, band.frequency))
   filter.Q.value = Math.max(0.001, band.q)

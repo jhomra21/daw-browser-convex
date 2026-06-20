@@ -20,14 +20,17 @@ export default function Knob(props: KnobProps) {
   const [isDragging, setIsDragging] = createSignal(false)
   const [startY, setStartY] = createSignal(0)
   const [startValue, setStartValue] = createSignal(0)
+  const [dragValue, setDragValue] = createSignal<number | null>(null)
   
   const size = () => props.size || 48
   const step = () => props.step || 0.1
   const bipolar = () => props.bipolar || false
+  const visualValue = () => dragValue() ?? props.value
   
   // Calculate angle based on value (180 degrees range, -90 to +90)
   const getAngle = () => {
-    const { min, max, value } = props
+    const { min, max } = props
+    const value = visualValue()
     const normalizedValue = (value - min) / (max - min)
     const angle = normalizedValue * 180 - 90
     return Math.max(-90, Math.min(90, angle))
@@ -42,7 +45,8 @@ export default function Knob(props: KnobProps) {
 
   // Directly from value range for a 0..1 fraction
   const arcFraction = () => {
-    const { min, max, value } = props
+    const { min, max } = props
+    const value = visualValue()
     if (max === min) return 0
     return Math.max(0, Math.min(1, (value - min) / (max - min)))
   }
@@ -58,7 +62,8 @@ export default function Knob(props: KnobProps) {
 
   // Format display value
   const formatValue = () => {
-    const { value, unit = '' } = props
+    const { unit = '' } = props
+    const value = visualValue()
     
     if (props.logarithmic && value >= 1000) {
       return `${(value / 1000).toFixed(1)}k${unit}`
@@ -83,6 +88,7 @@ export default function Knob(props: KnobProps) {
     setIsDragging(true)
     setStartY(event.clientY)
     setStartValue(props.value)
+    setDragValue(props.value)
     
     const handlePointerMove = (moveEvent: PointerEvent) => {
       moveEvent.preventDefault()
@@ -111,12 +117,14 @@ export default function Knob(props: KnobProps) {
       const stepped = Math.round(newValue / step()) * step()
       const finalValue = Math.max(props.min, Math.min(props.max, stepped))
       
+      setDragValue(finalValue)
       props.onValueChange(finalValue)
     }
     
     const handlePointerUp = (upEvent: PointerEvent) => {
       upEvent.preventDefault()
       setIsDragging(false)
+      setDragValue(null)
       document.removeEventListener('pointermove', handlePointerMove)
       document.removeEventListener('pointerup', handlePointerUp)
       document.removeEventListener('pointercancel', handlePointerUp)
@@ -130,6 +138,7 @@ export default function Knob(props: KnobProps) {
   // Cleanup on component unmount
   onCleanup(() => {
     setIsDragging(false)
+    setDragValue(null)
   })
 
   const handleDoubleClick = () => {
@@ -137,7 +146,9 @@ export default function Knob(props: KnobProps) {
     
     // Reset to center for bipolar, to min for unipolar
     const resetValue = bipolar() ? (props.min + props.max) / 2 : props.min
+    setDragValue(resetValue)
     props.onValueChange(resetValue)
+    queueMicrotask(() => setDragValue(null))
   }
 
   return (
@@ -191,14 +202,13 @@ export default function Knob(props: KnobProps) {
             pathLength="100"
             stroke-dasharray={arcDashArray()}
             stroke-dashoffset={0}
-            class="transition-all duration-75"
           />
         </svg>
         
         {/* Center Indicator */}
         <div
           class={cn(
-            'absolute w-0.5 -translate-x-1/2 transform origin-bottom transition-colors duration-150',
+            'absolute w-0.5 -translate-x-1/2 transform origin-bottom',
             isDragging() ? 'bg-sky-100' : 'bg-gray-200',
           )}
           style={{ 

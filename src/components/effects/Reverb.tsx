@@ -76,6 +76,38 @@ function ReverbKnobControl(props: {
   )
 }
 
+function ReverbParamControl(props: {
+  title: string
+  label: string
+  valueLabel: string
+  value: number
+  min: number
+  max: number
+  step: number
+  disabled: boolean
+  unit?: string
+  onValueChange: (value: number) => void
+}) {
+  return (
+    <ReverbSection title={props.title}>
+      <ReverbKnobControl label={props.label} valueLabel={props.valueLabel}>
+        <Knob
+          value={props.value}
+          min={props.min}
+          max={props.max}
+          step={props.step}
+          size={28}
+          label=""
+          unit={props.unit}
+          disabled={props.disabled}
+          showValue={false}
+          onValueChange={props.onValueChange}
+        />
+      </ReverbKnobControl>
+    </ReverbSection>
+  )
+}
+
 function ReverbDecayDisplay(props: { params: ReverbParams }) {
   let canvasRef: HTMLCanvasElement | undefined
 
@@ -164,41 +196,45 @@ function ReverbDecayDisplay(props: { params: ReverbParams }) {
 }
 
 export default function Reverb(props: ReverbProps) {
+  const updateParam = (updates: Partial<ReverbParams>) => {
+    const normalized = normalizeReverbParams({ ...props.params, ...updates })
+    if (updates.wet !== undefined && props.params.wet !== normalized.wet) props.onChange({ wet: normalized.wet })
+    if (updates.decaySec !== undefined && props.params.decaySec !== normalized.decaySec) props.onChange({ decaySec: normalized.decaySec })
+    if (updates.preDelayMs !== undefined && props.params.preDelayMs !== normalized.preDelayMs) props.onChange({ preDelayMs: normalized.preDelayMs })
+    if (updates.size !== undefined && props.params.size !== normalized.size) props.onChange({ size: normalized.size })
+    if (updates.diffusion !== undefined && props.params.diffusion !== normalized.diffusion) props.onChange({ diffusion: normalized.diffusion })
+    if (updates.density !== undefined && props.params.density !== normalized.density) props.onChange({ density: normalized.density })
+    if (updates.lowCutHz !== undefined && props.params.lowCutHz !== normalized.lowCutHz) props.onChange({ lowCutHz: normalized.lowCutHz })
+    if (updates.highCutHz !== undefined && props.params.highCutHz !== normalized.highCutHz) props.onChange({ highCutHz: normalized.highCutHz })
+    if (updates.stereoWidth !== undefined && props.params.stereoWidth !== normalized.stereoWidth) props.onChange({ stereoWidth: normalized.stereoWidth })
+  }
+
   const updateWet = (value: number) => {
-    const wet = normalizeReverbParams({ ...props.params, wet: normalizeWet(value) }).wet
-    if (props.params.wet !== wet) props.onChange({ wet })
+    updateParam({ wet: normalizeWet(value) })
   }
   const updateDecay = (value: number) => {
-    const decaySec = normalizeReverbParams({ ...props.params, decaySec: normalizeDecay(value) }).decaySec
-    if (props.params.decaySec !== decaySec) props.onChange({ decaySec })
+    updateParam({ decaySec: normalizeDecay(value) })
   }
   const updatePreDelay = (value: number) => {
-    const preDelayMs = normalizeReverbParams({ ...props.params, preDelayMs: normalizePreDelay(value) }).preDelayMs
-    if (props.params.preDelayMs !== preDelayMs) props.onChange({ preDelayMs })
+    updateParam({ preDelayMs: normalizePreDelay(value) })
   }
   const updateSize = (value: number) => {
-    const size = normalizeReverbParams({ ...props.params, size: normalizeUnitParam(value) }).size
-    if (props.params.size !== size) props.onChange({ size })
+    updateParam({ size: normalizeUnitParam(value) })
   }
   const updateDiffusion = (value: number) => {
-    const diffusion = normalizeReverbParams({ ...props.params, diffusion: normalizeUnitParam(value) }).diffusion
-    if (props.params.diffusion !== diffusion) props.onChange({ diffusion })
+    updateParam({ diffusion: normalizeUnitParam(value) })
   }
   const updateDensity = (value: number) => {
-    const density = normalizeReverbParams({ ...props.params, density: normalizeUnitParam(value) }).density
-    if (props.params.density !== density) props.onChange({ density })
+    updateParam({ density: normalizeUnitParam(value) })
   }
   const updateLowCut = (value: number) => {
-    const lowCutHz = normalizeReverbParams({ ...props.params, lowCutHz: normalizeLowCut(value) }).lowCutHz
-    if (props.params.lowCutHz !== lowCutHz) props.onChange({ lowCutHz })
+    updateParam({ lowCutHz: normalizeLowCut(value) })
   }
   const updateHighCut = (value: number) => {
-    const highCutHz = normalizeReverbParams({ ...props.params, highCutHz: normalizeHighCut(value) }).highCutHz
-    if (props.params.highCutHz !== highCutHz) props.onChange({ highCutHz })
+    updateParam({ highCutHz: normalizeHighCut(value) })
   }
   const updateStereoWidth = (value: number) => {
-    const stereoWidth = normalizeReverbParams({ ...props.params, stereoWidth: normalizeStereoWidth(value) }).stereoWidth
-    if (props.params.stereoWidth !== stereoWidth) props.onChange({ stereoWidth })
+    updateParam({ stereoWidth: normalizeStereoWidth(value) })
   }
 
   return (
@@ -240,153 +276,109 @@ export default function Reverb(props: ReverbProps) {
           <ReverbDecayDisplay params={props.params} />
         </ReverbSection>
 
-        <ReverbSection title="Input">
-          <ReverbKnobControl label="LoCut" valueLabel={formatFrequency(props.params.lowCutHz)}>
-            <Knob
-              value={props.params.lowCutHz}
-              min={REVERB_LOW_CUT_HZ_MIN}
-              max={REVERB_LOW_CUT_HZ_MAX}
-              step={10}
-              size={28}
-              label=""
-              unit="Hz"
-              disabled={!props.params.enabled}
-              showValue={false}
-              onValueChange={updateLowCut}
-            />
-          </ReverbKnobControl>
-        </ReverbSection>
-
-        <ReverbSection title="Filter">
-          <ReverbKnobControl label="HiCut" valueLabel={formatFrequency(props.params.highCutHz)}>
-            <Knob
-              value={props.params.highCutHz}
-              min={REVERB_HIGH_CUT_HZ_MIN}
-              max={REVERB_HIGH_CUT_HZ_MAX}
-              step={100}
-              size={28}
-              label=""
-              unit="Hz"
-              disabled={!props.params.enabled}
-              showValue={false}
-              onValueChange={updateHighCut}
-            />
-          </ReverbKnobControl>
-        </ReverbSection>
-
-        <ReverbSection title="Early">
-          <ReverbKnobControl label="Pre" valueLabel={formatMilliseconds(props.params.preDelayMs)}>
-            <Knob
-              value={props.params.preDelayMs}
-              min={REVERB_PRE_DELAY_MS_MIN}
-              max={REVERB_PRE_DELAY_MS_MAX}
-              step={1}
-              size={28}
-              label=""
-              unit="ms"
-              disabled={!props.params.enabled}
-              showValue={false}
-              onValueChange={updatePreDelay}
-            />
-          </ReverbKnobControl>
-        </ReverbSection>
-
-        <ReverbSection title="Space">
-          <ReverbKnobControl label="Size" valueLabel={formatUnitPercent(props.params.size)}>
-            <Knob
-              value={props.params.size}
-              min={REVERB_UNIT_PARAM_MIN}
-              max={REVERB_UNIT_PARAM_MAX}
-              step={0.01}
-              size={28}
-              label=""
-              disabled={!props.params.enabled}
-              showValue={false}
-              onValueChange={updateSize}
-            />
-          </ReverbKnobControl>
-        </ReverbSection>
-
-        <ReverbSection title="Time">
-          <ReverbKnobControl label="Decay" valueLabel={formatSeconds(props.params.decaySec)}>
-            <Knob
-              value={props.params.decaySec}
-              min={REVERB_DECAY_SEC_MIN}
-              max={REVERB_DECAY_SEC_MAX}
-              step={0.1}
-              size={28}
-              label=""
-              unit="s"
-              disabled={!props.params.enabled}
-              showValue={false}
-              onValueChange={updateDecay}
-            />
-          </ReverbKnobControl>
-        </ReverbSection>
-
-        <ReverbSection title="Diffuse">
-          <ReverbKnobControl label="Diff" valueLabel={formatUnitPercent(props.params.diffusion)}>
-            <Knob
-              value={props.params.diffusion}
-              min={REVERB_UNIT_PARAM_MIN}
-              max={REVERB_UNIT_PARAM_MAX}
-              step={0.01}
-              size={28}
-              label=""
-              disabled={!props.params.enabled}
-              showValue={false}
-              onValueChange={updateDiffusion}
-            />
-          </ReverbKnobControl>
-        </ReverbSection>
-
-        <ReverbSection title="Network">
-          <ReverbKnobControl label="Dens" valueLabel={formatUnitPercent(props.params.density)}>
-            <Knob
-              value={props.params.density}
-              min={REVERB_UNIT_PARAM_MIN}
-              max={REVERB_UNIT_PARAM_MAX}
-              step={0.01}
-              size={28}
-              label=""
-              disabled={!props.params.enabled}
-              showValue={false}
-              onValueChange={updateDensity}
-            />
-          </ReverbKnobControl>
-        </ReverbSection>
-
-        <ReverbSection title="Width">
-          <ReverbKnobControl label="Stereo" valueLabel={formatStereoWidth(props.params.stereoWidth)}>
-            <Knob
-              value={props.params.stereoWidth}
-              min={REVERB_STEREO_WIDTH_MIN}
-              max={REVERB_STEREO_WIDTH_MAX}
-              step={0.01}
-              size={28}
-              label=""
-              disabled={!props.params.enabled}
-              showValue={false}
-              onValueChange={updateStereoWidth}
-            />
-          </ReverbKnobControl>
-        </ReverbSection>
-
-        <ReverbSection title="Output">
-          <ReverbKnobControl label="Wet" valueLabel={formatPercent(props.params.wet)}>
-            <Knob
-              value={props.params.wet}
-              min={REVERB_WET_MIN}
-              max={REVERB_WET_MAX}
-              step={0.01}
-              size={28}
-              label=""
-              disabled={!props.params.enabled}
-              showValue={false}
-              onValueChange={updateWet}
-            />
-          </ReverbKnobControl>
-        </ReverbSection>
+        <ReverbParamControl
+          title="Input"
+          label="LoCut"
+          valueLabel={formatFrequency(props.params.lowCutHz)}
+          value={props.params.lowCutHz}
+          min={REVERB_LOW_CUT_HZ_MIN}
+          max={REVERB_LOW_CUT_HZ_MAX}
+          step={10}
+          unit="Hz"
+          disabled={!props.params.enabled}
+          onValueChange={updateLowCut}
+        />
+        <ReverbParamControl
+          title="Filter"
+          label="HiCut"
+          valueLabel={formatFrequency(props.params.highCutHz)}
+          value={props.params.highCutHz}
+          min={REVERB_HIGH_CUT_HZ_MIN}
+          max={REVERB_HIGH_CUT_HZ_MAX}
+          step={100}
+          unit="Hz"
+          disabled={!props.params.enabled}
+          onValueChange={updateHighCut}
+        />
+        <ReverbParamControl
+          title="Early"
+          label="Pre"
+          valueLabel={formatMilliseconds(props.params.preDelayMs)}
+          value={props.params.preDelayMs}
+          min={REVERB_PRE_DELAY_MS_MIN}
+          max={REVERB_PRE_DELAY_MS_MAX}
+          step={1}
+          unit="ms"
+          disabled={!props.params.enabled}
+          onValueChange={updatePreDelay}
+        />
+        <ReverbParamControl
+          title="Space"
+          label="Size"
+          valueLabel={formatUnitPercent(props.params.size)}
+          value={props.params.size}
+          min={REVERB_UNIT_PARAM_MIN}
+          max={REVERB_UNIT_PARAM_MAX}
+          step={0.01}
+          disabled={!props.params.enabled}
+          onValueChange={updateSize}
+        />
+        <ReverbParamControl
+          title="Time"
+          label="Decay"
+          valueLabel={formatSeconds(props.params.decaySec)}
+          value={props.params.decaySec}
+          min={REVERB_DECAY_SEC_MIN}
+          max={REVERB_DECAY_SEC_MAX}
+          step={0.1}
+          unit="s"
+          disabled={!props.params.enabled}
+          onValueChange={updateDecay}
+        />
+        <ReverbParamControl
+          title="Diffuse"
+          label="Diff"
+          valueLabel={formatUnitPercent(props.params.diffusion)}
+          value={props.params.diffusion}
+          min={REVERB_UNIT_PARAM_MIN}
+          max={REVERB_UNIT_PARAM_MAX}
+          step={0.01}
+          disabled={!props.params.enabled}
+          onValueChange={updateDiffusion}
+        />
+        <ReverbParamControl
+          title="Network"
+          label="Dens"
+          valueLabel={formatUnitPercent(props.params.density)}
+          value={props.params.density}
+          min={REVERB_UNIT_PARAM_MIN}
+          max={REVERB_UNIT_PARAM_MAX}
+          step={0.01}
+          disabled={!props.params.enabled}
+          onValueChange={updateDensity}
+        />
+        <ReverbParamControl
+          title="Width"
+          label="Stereo"
+          valueLabel={formatStereoWidth(props.params.stereoWidth)}
+          value={props.params.stereoWidth}
+          min={REVERB_STEREO_WIDTH_MIN}
+          max={REVERB_STEREO_WIDTH_MAX}
+          step={0.01}
+          disabled={!props.params.enabled}
+          onValueChange={updateStereoWidth}
+        />
+        <ReverbParamControl
+          title="Output"
+          label="Wet"
+          valueLabel={formatPercent(props.params.wet)}
+          value={props.params.wet}
+          min={REVERB_WET_MIN}
+          max={REVERB_WET_MAX}
+          step={0.01}
+          disabled={!props.params.enabled}
+          onValueChange={updateWet}
+        />
       </div>
     </div>
   )

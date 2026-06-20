@@ -21,6 +21,7 @@ export default function Knob(props: KnobProps) {
   const [startY, setStartY] = createSignal(0)
   const [startValue, setStartValue] = createSignal(0)
   const [dragValue, setDragValue] = createSignal<number | null>(null)
+  let cleanupDragListeners: (() => void) | undefined
   
   const size = () => props.size || 48
   const step = () => props.step || 0.1
@@ -29,9 +30,8 @@ export default function Knob(props: KnobProps) {
   
   // Calculate angle based on value (180 degrees range, -90 to +90)
   const getAngle = () => {
-    const { min, max } = props
     const value = visualValue()
-    const normalizedValue = (value - min) / (max - min)
+    const normalizedValue = (value - props.min) / (props.max - props.min)
     const angle = normalizedValue * 180 - 90
     return Math.max(-90, Math.min(90, angle))
   }
@@ -45,10 +45,9 @@ export default function Knob(props: KnobProps) {
 
   // Directly from value range for a 0..1 fraction
   const arcFraction = () => {
-    const { min, max } = props
     const value = visualValue()
-    if (max === min) return 0
-    return Math.max(0, Math.min(1, (value - min) / (max - min)))
+    if (props.max === props.min) return 0
+    return Math.max(0, Math.min(1, (value - props.min) / (props.max - props.min)))
   }
   
   // With pathLength="100", dasharray can use percentages
@@ -62,7 +61,7 @@ export default function Knob(props: KnobProps) {
 
   // Format display value
   const formatValue = () => {
-    const { unit = '' } = props
+    const unit = props.unit ?? ''
     const value = visualValue()
     
     if (props.logarithmic && value >= 1000) {
@@ -89,6 +88,7 @@ export default function Knob(props: KnobProps) {
     setStartY(event.clientY)
     setStartValue(props.value)
     setDragValue(props.value)
+    cleanupDragListeners?.()
     
     const handlePointerMove = (moveEvent: PointerEvent) => {
       moveEvent.preventDefault()
@@ -125,11 +125,15 @@ export default function Knob(props: KnobProps) {
       upEvent.preventDefault()
       setIsDragging(false)
       setDragValue(null)
+      cleanupDragListeners?.()
+    }
+
+    cleanupDragListeners = () => {
       document.removeEventListener('pointermove', handlePointerMove)
       document.removeEventListener('pointerup', handlePointerUp)
       document.removeEventListener('pointercancel', handlePointerUp)
+      cleanupDragListeners = undefined
     }
-    
     document.addEventListener('pointermove', handlePointerMove)
     document.addEventListener('pointerup', handlePointerUp)
     document.addEventListener('pointercancel', handlePointerUp)
@@ -139,6 +143,7 @@ export default function Knob(props: KnobProps) {
   onCleanup(() => {
     setIsDragging(false)
     setDragValue(null)
+    cleanupDragListeners?.()
   })
 
   const handleDoubleClick = () => {

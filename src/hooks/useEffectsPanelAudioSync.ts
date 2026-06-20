@@ -9,7 +9,6 @@ import {
   type EqParams,
   type ReverbParams,
   type SynthParams,
-  type SynthParamsInput,
 } from "@daw-browser/shared";
 import type { AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import { convexApi } from "~/lib/convex";
@@ -177,7 +176,7 @@ export function useEffectsPanelAudioSync(
       if (!trackId || trackId === activeTargetId) continue;
       if (row.type === "eq" && row.params) eqByTrackId.set(trackId, row.params);
       if (row.type === "reverb" && row.params) reverbByTrackId.set(trackId, normalizeReverbParams(row.params));
-      if (row.type === "synth" && row.params) synthByTrackId.set(trackId, normalizeSynthParams(row.params as SynthParamsInput));
+      if (row.type === "synth" && row.params) synthByTrackId.set(trackId, normalizeSynthParams(row.params));
       if (row.type === "arpeggiator" && row.params) arpByTrackId.set(trackId, row.params);
     }
 

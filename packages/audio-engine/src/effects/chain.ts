@@ -1,4 +1,5 @@
 import { normalizeReverbParams, type ReverbParamsLite } from '@daw-browser/shared'
+import { getReverbImpulseSignature } from './reverb-signature'
 
 export type CreateReverbImpulseResponse = (params: ReverbParamsLite) => AudioBuffer | null
 
@@ -6,6 +7,7 @@ export type ReverbNodeChain = {
   enabled: boolean
   internalsConnected: boolean
   outputTarget: AudioNode | null
+  impulseSignature: string | null
   dryGain: GainNode
   wetGain: GainNode
   preDelay: DelayNode
@@ -49,6 +51,7 @@ export function createReverbNodeChain(
     enabled: !!params.enabled,
     internalsConnected: false,
     outputTarget: null,
+    impulseSignature: null,
     dryGain: ctx.createGain(),
     wetGain: ctx.createGain(),
     preDelay: ctx.createDelay(2.0),
@@ -89,11 +92,15 @@ export function applyReverbNodeChainParams(
   chain.rightToRight.gain.value = (1 + width) / 2
   if (!chain.enabled) {
     chain.convolver.buffer = null
+    chain.impulseSignature = null
     return
   }
+  const impulseSignature = getReverbImpulseSignature(normalized)
+  if (chain.impulseSignature === impulseSignature) return
   const impulse = createImpulseResponse(normalized)
   if (impulse) {
     chain.convolver.buffer = impulse
+    chain.impulseSignature = impulseSignature
   }
 }
 
@@ -114,6 +121,7 @@ export function disconnectReverbChain(chain: ReverbNodeChain) {
   ])
   chain.internalsConnected = false
   chain.outputTarget = null
+  chain.impulseSignature = null
 }
 
 function connectReverbInternals(chain: ReverbNodeChain) {

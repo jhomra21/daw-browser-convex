@@ -110,50 +110,55 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
     class="flex h-full shrink-0 items-stretch gap-3"
     classList={{ "pointer-events-none opacity-60": !props.instrument.canWrite }}
   >
-    <Show when={!!props.instrument.state.arp.params()}>
-      <Arpeggiator
-        params={props.instrument.state.arp.params()!}
-        onChange={(updates) => {
-          if (!props.instrument.canWrite) return;
-          props.instrument.state.arp.change(updates);
-        }}
-        onToggleEnabled={(enabled) => {
-          if (!props.instrument.canWrite) return;
-          props.instrument.state.arp.toggle(enabled);
-        }}
-        onReset={() => {
-          if (!props.instrument.canWrite) return;
-          props.instrument.state.arp.reset();
-        }}
-        disabled={!props.instrument.canWrite}
-        class="min-w-72"
-      />
+    <Show when={props.instrument.state.arp.params()}>
+      {(params) => (
+        <Arpeggiator
+          params={params()}
+          onChange={(updates) => {
+            if (!props.instrument.canWrite) return;
+            props.instrument.state.arp.change(updates);
+          }}
+          onToggleEnabled={(enabled) => {
+            if (!props.instrument.canWrite) return;
+            props.instrument.state.arp.toggle(enabled);
+          }}
+          onReset={() => {
+            if (!props.instrument.canWrite) return;
+            props.instrument.state.arp.reset();
+          }}
+          disabled={!props.instrument.canWrite}
+          class="min-w-72"
+        />
+      )}
     </Show>
 
     <Show
       when={
-        !!props.instrument.state.synth.params() &&
-        !props.instrument.state.synth.isExpandedForCurrentTarget()
+        props.instrument.state.synth.isExpandedForCurrentTarget()
+          ? undefined
+          : props.instrument.state.synth.params()
       }
     >
-      <Synth
-        params={props.instrument.state.synth.params()!}
-        onChange={(updates) => {
-          if (!props.instrument.canWrite) return;
-          props.instrument.state.synth.change(updates);
-        }}
-        onReset={() => {
-          if (!props.instrument.canWrite) return;
-          props.instrument.state.synth.reset();
-        }}
-        onExpand={() => {
-          if (!props.instrument.canWrite) return;
-          props.instrument.state.synth.open();
-        }}
-        disabled={!props.instrument.canWrite}
-        variant="compact"
-        class="min-w-72"
-      />
+      {(params) => (
+        <Synth
+          params={params()}
+          onChange={(updates) => {
+            if (!props.instrument.canWrite) return;
+            props.instrument.state.synth.change(updates);
+          }}
+          onReset={() => {
+            if (!props.instrument.canWrite) return;
+            props.instrument.state.synth.reset();
+          }}
+          onExpand={() => {
+            if (!props.instrument.canWrite) return;
+            props.instrument.state.synth.open();
+          }}
+          disabled={!props.instrument.canWrite}
+          variant="compact"
+          class="min-w-72"
+        />
+      )}
     </Show>
 
     <Show
@@ -202,28 +207,32 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
         <Show
           when={effect === "eq"}
           fallback={
-            <Show when={!!props.effects.reverbParams}>
-              <Reverb
-                params={props.effects.reverbParams!}
-                onChange={props.effects.onReverbChange}
-                onToggleEnabled={props.effects.onReverbToggle}
-                onReset={props.effects.onResetReverb}
-                class="min-w-[772px]"
-              />
+            <Show when={props.effects.reverbParams}>
+              {(params) => (
+                <Reverb
+                  params={params()}
+                  onChange={props.effects.onReverbChange}
+                  onToggleEnabled={props.effects.onReverbToggle}
+                  onReset={props.effects.onResetReverb}
+                  class="min-w-[772px]"
+                />
+              )}
             </Show>
           }
         >
-          <Show when={!!props.effects.eqParams}>
-            <Eq
-              bands={props.effects.eqParams!.bands}
-              enabled={props.effects.eqParams!.enabled}
-              onBandChange={props.effects.onBandChange}
-              onBandToggle={props.effects.onBandToggle}
-              onToggleEnabled={props.effects.onToggleEqEnabled}
-              onReset={props.effects.onResetEq}
-              class="min-w-80"
-              spectrumData={props.effects.spectrum}
-            />
+          <Show when={props.effects.eqParams}>
+            {(params) => (
+              <Eq
+                bands={params().bands}
+                enabled={params().enabled}
+                onBandChange={props.effects.onBandChange}
+                onBandToggle={props.effects.onBandToggle}
+                onToggleEnabled={props.effects.onToggleEqEnabled}
+                onReset={props.effects.onResetEq}
+                class="min-w-80"
+                spectrumData={props.effects.spectrum}
+              />
+            )}
           </Show>
         </Show>
       )}
@@ -262,18 +271,20 @@ const EffectsPanelFloatingSynth: Component<EffectsPanelFloatingSynthProps> = (pr
   const card = () => props.synth.expandedCard();
 
   return (
-    <Show when={props.canWrite && !!card()}>
-      <SynthCard
-        params={card()!.params}
-        onChange={card()!.onChange}
-        onReset={card()!.onReset}
-        x={card()!.x}
-        y={card()!.y}
-        w={card()!.w}
-        h={card()!.h}
-        onChangeBounds={props.synth.updateCardBounds}
-        onClose={props.synth.close}
-      />
+    <Show when={props.canWrite ? card() : undefined}>
+      {(expandedCard) => (
+        <SynthCard
+          params={expandedCard().params}
+          onChange={expandedCard().onChange}
+          onReset={expandedCard().onReset}
+          x={expandedCard().x}
+          y={expandedCard().y}
+          w={expandedCard().w}
+          h={expandedCard().h}
+          onChangeBounds={props.synth.updateCardBounds}
+          onClose={props.synth.close}
+        />
+      )}
     </Show>
   );
 };

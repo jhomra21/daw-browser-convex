@@ -140,7 +140,7 @@ export function createMeteringRuntime() {
     let analyser = analysers.get(trackId)
     if (!analyser) {
       analyser = ctx.createAnalyser()
-      analyser.fftSize = 512
+      analyser.fftSize = 2048
       analyser.smoothingTimeConstant = 0.7
       analysers.set(trackId, analyser)
     }

@@ -27,6 +27,11 @@ const GAIN_MIN = -24
 const GAIN_MAX = 24
 const Q_MIN = 0.2
 const Q_MAX = 18
+const SPECTRUM_DECAY_GRACE_MS = 90
+const SPECTRUM_DECAY_PER_SECOND = 0.04
+const SPECTRUM_SILENCE_THRESHOLD = 0.003
+const SPECTRUM_MIN_SMOOTHING_PX = 3
+const SPECTRUM_MAX_SMOOTHING_PX = 18
 
 const FILTER_TYPE_DEFINITIONS: { value: EqBandType; label: string; path: string; cycles: boolean }[] = [
   { value: 'lowpass', label: 'Low Pass', path: 'M2 4 H17 C22 4 22 12 30 12', cycles: true },
@@ -55,6 +60,47 @@ const formatFrequency = (frequency: number) =>
 const formatDb = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(2)} dB`
 
 const formatQ = (value: number) => value.toFixed(2)
+
+const hasAudibleSpectrum = (data: Float32Array) => {
+  for (let i = 0; i < data.length; i++) {
+    if (data[i] > SPECTRUM_SILENCE_THRESHOLD) return true
+  }
+  return false
+}
+
+const sampleSpectrumMagnitude = (data: Float32Array, frequency: number, nyquist: number) => {
+  const binPosition = Math.min(data.length - 1, Math.max(0, (frequency / nyquist) * (data.length - 1)))
+  const center = Math.floor(binPosition)
+  let total = 0
+  let weightTotal = 0
+
+  for (let bin = center - 2; bin <= center + 2; bin++) {
+    if (bin < 0 || bin >= data.length) continue
+    const distance = Math.abs(bin - binPosition)
+    const weight = Math.max(0, 1 - distance / 3)
+    total += (data[bin] || 0) * weight
+    weightTotal += weight
+  }
+
+  return weightTotal > 0 ? total / weightTotal : 0
+}
+
+const smoothSpectrumY = (values: Float32Array, index: number) => {
+  const t = values.length <= 1 ? 1 : index / (values.length - 1)
+  const radius = Math.round(SPECTRUM_MIN_SMOOTHING_PX + (1 - t) * (SPECTRUM_MAX_SMOOTHING_PX - SPECTRUM_MIN_SMOOTHING_PX))
+  let total = 0
+  let weightTotal = 0
+
+  for (let offset = -radius; offset <= radius; offset++) {
+    const nextIndex = index + offset
+    if (nextIndex < 0 || nextIndex >= values.length) continue
+    const weight = radius === 0 ? 1 : 1 - Math.abs(offset) / (radius + 1)
+    total += values[nextIndex] * weight
+    weightTotal += weight
+  }
+
+  return weightTotal > 0 ? total / weightTotal : values[index]
+}
 
 function AbletonKnobControl(props: {
   label: string
@@ -86,11 +132,19 @@ export default function Eq(props: EqProps) {
   const [selectedId, setSelectedId] = createSignal<string>(props.bands[0]?.id ?? '')
   const [draggedId, setDraggedId] = createSignal<string | null>(null)
   const [canvasSize, setCanvasSize] = createSignal({ width: 640, height: 160 })
+  const [spectrumTick, setSpectrumTick] = createSignal(0)
 
   // canvas + container refs
   let canvasRef: HTMLCanvasElement | undefined
   let containerRef: HTMLDivElement | undefined
   let resizeObs: ResizeObserver | undefined
+  let displayedSpectrum: Float32Array | undefined
+  let spectrumYBuf: Float32Array | undefined
+  let smoothedYBuf: Float32Array | undefined
+  let displayedSpectrumSampleRate = 44100
+  let lastFreshSpectrumAt = 0
+  let lastSpectrumDecayAt = 0
+  let spectrumDecayFrame: number | null = null
 
   onMount(() => {
     // Initialize size based on container (very compact)
@@ -109,6 +163,49 @@ export default function Eq(props: EqProps) {
 
   onCleanup(() => {
     try { resizeObs?.disconnect() } catch {}
+    if (spectrumDecayFrame !== null) cancelAnimationFrame(spectrumDecayFrame)
+  })
+
+  const runSpectrumDecay = (time: number) => {
+    spectrumDecayFrame = null
+    const data = displayedSpectrum
+    if (!data) return
+
+    const elapsedSinceFresh = time - lastFreshSpectrumAt
+    const elapsed = Math.max(0, time - lastSpectrumDecayAt) / 1000
+    lastSpectrumDecayAt = time
+
+    if (elapsedSinceFresh > SPECTRUM_DECAY_GRACE_MS) {
+      const decay = Math.pow(SPECTRUM_DECAY_PER_SECOND, elapsed)
+      for (let index = 0; index < data.length; index++) data[index] *= decay
+      setSpectrumTick((tick) => tick + 1)
+    }
+
+    if (hasAudibleSpectrum(data)) spectrumDecayFrame = requestAnimationFrame(runSpectrumDecay)
+  }
+
+  const startSpectrumDecay = () => {
+    if (spectrumDecayFrame !== null) return
+    // The analyser stops producing fresh frames when transport pauses; this visual-only RAF lets the displayed spectrum decay to silence instead of freezing.
+    lastSpectrumDecayAt = performance.now()
+    spectrumDecayFrame = requestAnimationFrame(runSpectrumDecay)
+  }
+
+  createEffect(() => {
+    const frame = props.spectrumData
+    const data = frame?.data
+    if (!data || data.length === 0) {
+      startSpectrumDecay()
+      return
+    }
+
+    if (!displayedSpectrum || displayedSpectrum.length !== data.length) {
+      displayedSpectrum = new Float32Array(data.length)
+    }
+    displayedSpectrum.set(data)
+    displayedSpectrumSampleRate = frame.sampleRate
+    lastFreshSpectrumAt = performance.now()
+    startSpectrumDecay()
   })
 
   // Helpers: mapping
@@ -272,28 +369,44 @@ export default function Eq(props: EqProps) {
     ctx.stroke()
 
     // Live spectrum (if available)
-    const frame = props.spectrumData
-    const spec = frame?.data
+    const spec = displayedSpectrum
     if (spec && spec.length > 0) {
       const grad = ctx.createLinearGradient(6, 0, width - 6, 0)
       grad.addColorStop(0, '#22c55e')
       grad.addColorStop(1, '#ef4444')
-      ctx.beginPath()
-      ctx.moveTo(6, height)
       const L = 6, R = 6
       const inner = Math.max(1, width - (L + R))
-      const nyquist = Math.max(1, (frame?.sampleRate ?? 44100) / 2)
-      for (let x = L; x <= width - R; x += 2) {
+      const nyquist = Math.max(1, displayedSpectrumSampleRate / 2)
+      const sampleCount = Math.max(1, width - R - L + 1)
+      if (!spectrumYBuf || spectrumYBuf.length !== sampleCount) spectrumYBuf = new Float32Array(sampleCount)
+      if (!smoothedYBuf || smoothedYBuf.length !== sampleCount) smoothedYBuf = new Float32Array(sampleCount)
+      const spectrumY = spectrumYBuf
+      const smoothedSpectrumY = smoothedYBuf
+      for (let index = 0; index < sampleCount; index++) {
+        const x = L + index
         const t = (x - L) / inner
         const freq = FREQ_MIN * Math.pow(FREQ_MAX / FREQ_MIN, t)
-        const bin = Math.min(spec.length - 1, Math.max(0, Math.floor((freq / nyquist) * spec.length)))
-        let mag = spec[bin] || 0
-        if (bin > 0 && bin < spec.length - 1) {
-          mag = (spec[bin - 1] + spec[bin] + spec[bin + 1]) / 3
-        }
+        const mag = sampleSpectrumMagnitude(spec, freq, nyquist)
         const scaled = Math.pow(mag, 0.7)
-        const y = height - (scaled * height * 0.5)
-        ctx.lineTo(x, y)
+        spectrumY[index] = height - (scaled * height * 0.5)
+      }
+      for (let index = 0; index < sampleCount; index++) {
+        smoothedSpectrumY[index] = smoothSpectrumY(spectrumY, index)
+      }
+      let previousX = L
+      let previousY = height
+      for (let index = 0; index < sampleCount; index++) {
+        const x = L + index
+        const y = smoothedSpectrumY[index]
+        if (x === L) {
+          ctx.beginPath()
+          ctx.moveTo(L, height)
+          ctx.lineTo(x, y)
+        } else {
+          ctx.quadraticCurveTo(previousX, previousY, (previousX + x) / 2, (previousY + y) / 2)
+        }
+        previousX = x
+        previousY = y
       }
       ctx.lineTo(width - R, height)
       ctx.closePath()
@@ -360,6 +473,7 @@ export default function Eq(props: EqProps) {
     void selectedId()
     void canvasSize()
     void props.spectrumData
+    void spectrumTick()
     draw()
   })
 

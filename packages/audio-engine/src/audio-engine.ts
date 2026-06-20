@@ -210,9 +210,10 @@ export class AudioEngine {
     })
     this.impulseCache.set(cacheKey, buffer)
     while (this.impulseCache.size > this.impulseCacheLimit) {
-      const oldestKey = this.impulseCache.keys().next().value
-      if (oldestKey === undefined) break
-      this.impulseCache.delete(oldestKey)
+      for (const oldestKey of this.impulseCache.keys()) {
+        this.impulseCache.delete(oldestKey)
+        break
+      }
     }
     return buffer
   }

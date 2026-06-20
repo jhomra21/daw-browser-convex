@@ -257,6 +257,12 @@ export default function Eq(props: EqProps) {
     if (!responseMagnitudes || responseMagnitudes.length !== length) responseMagnitudes = new Float32Array(length)
     if (!responsePhases || responsePhases.length !== length) responsePhases = new Float32Array(length)
     if (!responseDb || responseDb.length !== length) responseDb = new Float32Array(length)
+    return {
+      frequencies: responseFrequencies,
+      magnitudes: responseMagnitudes,
+      phases: responsePhases,
+      dbValues: responseDb,
+    }
   }
 
   // Drawing
@@ -378,13 +384,9 @@ export default function Eq(props: EqProps) {
       const inner = Math.max(1, width - (L + R))
       let pointCount = 0
       for (let x = L; x <= width - R; x += 2) pointCount++
-      ensureResponseBuffers(pointCount)
-      const frequencies = responseFrequencies
-      const magnitudes = responseMagnitudes
-      const phases = responsePhases
-      const dbValues = responseDb
+      const { frequencies, magnitudes, phases, dbValues } = ensureResponseBuffers(pointCount)
       const filter = responseFilter
-      if (frequencies && magnitudes && phases && dbValues && filter) {
+      if (filter) {
         let pointIndex = 0
         for (let x = L; x <= width - R; x += 2) {
           const t = (x - L) / inner

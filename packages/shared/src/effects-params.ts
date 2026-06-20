@@ -121,8 +121,8 @@ export function normalizeReverbParams(input: ReverbParamsInput): ReverbParams {
     size: size === undefined ? defaults.size : clamp(size, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
     diffusion: diffusion === undefined ? defaults.diffusion : clamp(diffusion, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
     density: density === undefined ? defaults.density : clamp(density, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
-    lowCutHz: Math.min(lowCutHz, highCutHz),
-    highCutHz: Math.max(highCutHz, lowCutHz),
+    lowCutHz,
+    highCutHz,
     stereoWidth: stereoWidth === undefined ? defaults.stereoWidth : clamp(stereoWidth, REVERB_STEREO_WIDTH_MIN, REVERB_STEREO_WIDTH_MAX),
   }
 }

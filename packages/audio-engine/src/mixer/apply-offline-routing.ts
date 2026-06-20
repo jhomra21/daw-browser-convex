@@ -17,13 +17,13 @@ function buildOfflineFxChain(
   ctx: OfflineAudioContext,
   input: GainNode,
   destination: AudioNode,
+  createImpulseResponse: CreateReverbImpulseResponse,
   eqParams?: EqParamsLite,
   reverbParams?: ReverbParamsLite,
-  createImpulseResponse?: CreateReverbImpulseResponse,
 ) {
   const eq = createEqNodes(ctx, eqParams, ctx.destination.channelCount || 2)
   const reverb = reverbParams
-    ? createReverbNodeChain(ctx, reverbParams, createImpulseResponse ?? ((params) => createImpulseResponseBuffer(ctx, params).buffer))
+    ? createReverbNodeChain(ctx, reverbParams, createImpulseResponse)
     : null
   connectParallelFxChain(input, destination, eq, reverb)
 }
@@ -41,7 +41,7 @@ export function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: Resolve
   }
   const masterInput = ctx.createGain()
   masterInput.gain.value = graph.master.volume
-  buildOfflineFxChain(ctx, masterInput, ctx.destination, graph.master.eq, graph.master.reverb, createCachedImpulseResponse)
+  buildOfflineFxChain(ctx, masterInput, ctx.destination, createCachedImpulseResponse, graph.master.eq, graph.master.reverb)
 
   const trackNodes = new Map<string, OfflineTrackNodes>()
   for (const resolvedTrack of graph.channels) {
@@ -50,7 +50,7 @@ export function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: Resolve
     const output = ctx.createGain()
     gain.gain.value = resolvedTrack.gain
     output.gain.value = resolvedTrack.outputGain
-    buildOfflineFxChain(ctx, input, gain, resolvedTrack.fx?.eq, resolvedTrack.fx?.reverb, createCachedImpulseResponse)
+    buildOfflineFxChain(ctx, input, gain, createCachedImpulseResponse, resolvedTrack.fx?.eq, resolvedTrack.fx?.reverb)
     trackNodes.set(resolvedTrack.channel.id, { input, gain, output })
   }
 

@@ -1,6 +1,7 @@
-import { serializeEqParams, serializeReverbParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
+import { serializeEqParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
 import { connectParallelFxChain, createReverbNodeChain, disconnectAudioNodes, applyReverbNodeChainParams, type ReverbNodeChain } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
+import { getAppliedReverbSignature } from './effects/reverb-signature'
 import type { SpectrumFrame } from './metering-runtime'
 
 export function createMasterFxRuntime() {
@@ -59,7 +60,7 @@ export function createMasterFxRuntime() {
         const params = pendingReverbParams
         pendingReverbParams = null
         reverb = createReverbNodeChain(ctx, params, createImpulseResponse)
-        reverbSignature = serializeReverbParams(params)
+        reverbSignature = getAppliedReverbSignature(params)
       }
       rebuildRouting(ctx, masterGain, destination)
     },
@@ -87,7 +88,7 @@ export function createMasterFxRuntime() {
         pendingReverbParams = params
         return
       }
-      const signature = serializeReverbParams(params)
+      const signature = getAppliedReverbSignature(params)
       if (reverbSignature === signature) return
       if (!reverb) reverb = createReverbNodeChain(ctx, params, createImpulseResponse)
       else applyReverbNodeChainParams(reverb, params, createImpulseResponse)

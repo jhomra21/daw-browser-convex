@@ -3,6 +3,7 @@ import type { FunctionReturnType } from "convex/server";
 import {
   createDefaultEqParams,
   createDefaultReverbParams,
+  normalizeReverbParams,
   normalizeSynthParams,
   type ArpeggiatorParams,
   type EqParams,
@@ -137,7 +138,7 @@ export function useEffectsPanelAudioSync(
         if (row.effect === "master-reverb") {
           if (activeTargetId !== "master") {
             hasMasterReverb = true;
-            audioEngine.setMasterReverb(row.params);
+            audioEngine.setMasterReverb(normalizeReverbParams(row.params));
           }
           continue;
         }
@@ -146,7 +147,7 @@ export function useEffectsPanelAudioSync(
           continue;
         }
         if (row.effect === "reverb") {
-          if (row.targetId !== activeTargetId) reverbByTrackId.set(row.targetId, row.params);
+          if (row.targetId !== activeTargetId) reverbByTrackId.set(row.targetId, normalizeReverbParams(row.params));
           continue;
         }
         if (row.effect === "synth") {
@@ -167,7 +168,7 @@ export function useEffectsPanelAudioSync(
         }
         if (row.type === "reverb" && row.params) {
           hasMasterReverb = true;
-          audioEngine.setMasterReverb(row.params);
+          audioEngine.setMasterReverb(normalizeReverbParams(row.params));
         }
         continue;
       }
@@ -175,7 +176,7 @@ export function useEffectsPanelAudioSync(
       const trackId = row?.trackId;
       if (!trackId || trackId === activeTargetId) continue;
       if (row.type === "eq" && row.params) eqByTrackId.set(trackId, row.params);
-      if (row.type === "reverb" && row.params) reverbByTrackId.set(trackId, row.params);
+      if (row.type === "reverb" && row.params) reverbByTrackId.set(trackId, normalizeReverbParams(row.params));
       if (row.type === "synth" && row.params) synthByTrackId.set(trackId, normalizeSynthParams(row.params as SynthParamsInput));
       if (row.type === "arpeggiator" && row.params) arpByTrackId.set(trackId, row.params);
     }

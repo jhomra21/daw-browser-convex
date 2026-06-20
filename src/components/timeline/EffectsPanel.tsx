@@ -26,6 +26,7 @@ import {
   type ArpeggiatorParams,
   createDefaultEqParams,
   createDefaultReverbParams,
+  normalizeReverbParams,
   normalizeSynthParams,
   serializeEqParams,
   serializeReverbParams,
@@ -396,6 +397,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     projectId: () => props.projectId,
     targetId: currentTargetId,
     effect: (targetId) => targetId === "master" ? "master-reverb" : "reverb",
+    normalize: normalizeReverbParams,
   });
   const isLocalProject = localEq.isLocalProject;
 
@@ -507,7 +509,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     targetId: currentTargetId,
     scopeId: () => props.projectId,
     row: () => isLocalProject() ? localReverb.row(currentTargetId()) : remoteEffectForTarget(currentTargetId(), "reverb"),
-    readQueryParams: (row) => row?.params,
+    readQueryParams: (row) => row?.params ? normalizeReverbParams(row.params) : undefined,
     createInitialParams: () => createDefaultReverbParams(),
     serializeParams: serializeReverbParams,
     applyToEngine: (targetId, params) => {
@@ -524,17 +526,18 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         return localReverb.persist(context.projectId, targetId, params);
       }
       if (!context.userId) return Promise.resolve();
+      const normalizedParams = normalizeReverbParams(params);
       if (targetId === "master") {
         return publishEffectOperation(context.projectId, context.userId, {
           kind: "effects.setMasterReverbParams",
-          payload: { params },
+          payload: { params: normalizedParams },
         });
       }
       const track = resolveTrackByTargetId(targetId);
       if (!track) return Promise.resolve();
       return publishEffectOperation(context.projectId, context.userId, {
         kind: "effects.setReverbParams",
-        payload: { trackId: track.id, params },
+        payload: { trackId: track.id, params: normalizedParams },
       });
     },
     debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
@@ -573,7 +576,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const reverbForTarget = reverbState.params;
   const handleReverbChange = (updates: Partial<ReverbParams>) => {
     if (!canWriteCurrentTargetEffects()) return;
-    reverbState.update((prev) => ({ ...prev, ...updates }));
+    reverbState.update((prev) => normalizeReverbParams({ ...prev, ...updates }));
   };
   const handleReverbToggle = (enabled: boolean) => {
     if (!canWriteCurrentTargetEffects()) return;

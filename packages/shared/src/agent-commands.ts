@@ -60,6 +60,12 @@ export const SetReverbParamsCommandSchema = z.object({
   wet: z.number().min(0).max(1),
   decaySec: z.number().min(0.05).max(12),
   preDelayMs: z.number().min(0).max(250),
+  size: z.number().min(0).max(1).optional(),
+  diffusion: z.number().min(0).max(1).optional(),
+  density: z.number().min(0).max(1).optional(),
+  lowCutHz: z.number().min(20).max(1200).optional(),
+  highCutHz: z.number().min(1200).max(20000).optional(),
+  stereoWidth: z.number().min(0).max(2).optional(),
 })
 
 export const SetSynthParamsCommandSchema = z.object({

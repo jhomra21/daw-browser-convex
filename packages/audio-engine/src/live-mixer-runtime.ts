@@ -1,6 +1,7 @@
-import { serializeEqParams, serializeReverbParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
+import { serializeEqParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
 import { connectParallelFxChain, createReverbNodeChain, disconnectAudioNodes, applyReverbNodeChainParams, type ReverbNodeChain } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
+import { getAppliedReverbSignature } from './effects/reverb-signature'
 import { applyLiveMixerGraph } from './mixer/apply-live-routing'
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
@@ -131,7 +132,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       pendingReverbParams.set(trackId, params)
       return
     }
-    const signature = serializeReverbParams(params)
+    const signature = getAppliedReverbSignature(params)
     if (reverbSignatures.get(trackId) === signature) return
     const trackNodes = ensureTrackNodes(trackId)
     let reverb = reverbs.get(trackId)

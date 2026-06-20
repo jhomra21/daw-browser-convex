@@ -22,6 +22,10 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
+function readFiniteNumber(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
 function getDefaultEqBandType(index: number): EqBandType {
   if (index === 0) return 'lowshelf'
   if (index === DEFAULT_EQ_FREQUENCIES.length - 1) return 'highshelf'
@@ -55,9 +59,16 @@ export type ReverbParams = {
   wet: number
   decaySec: number
   preDelayMs: number
+  size: number
+  diffusion: number
+  density: number
+  lowCutHz: number
+  highCutHz: number
+  stereoWidth: number
 }
 
 export type ReverbParamsLite = ReverbParams
+export type ReverbParamsInput = Partial<ReverbParams>
 
 export function createDefaultReverbParams(): ReverbParams {
   return {
@@ -65,11 +76,44 @@ export function createDefaultReverbParams(): ReverbParams {
     wet: 0.25,
     decaySec: 2.2,
     preDelayMs: 20,
+    size: 0.65,
+    diffusion: 0.75,
+    density: 0.8,
+    lowCutHz: 20,
+    highCutHz: 20000,
+    stereoWidth: 1,
+  }
+}
+
+export function normalizeReverbParams(input: ReverbParamsInput): ReverbParams {
+  const defaults = createDefaultReverbParams()
+  const wet = readFiniteNumber(input.wet)
+  const decaySec = readFiniteNumber(input.decaySec)
+  const preDelayMs = readFiniteNumber(input.preDelayMs)
+  const size = readFiniteNumber(input.size)
+  const diffusion = readFiniteNumber(input.diffusion)
+  const density = readFiniteNumber(input.density)
+  const lowCutInput = readFiniteNumber(input.lowCutHz)
+  const highCutInput = readFiniteNumber(input.highCutHz)
+  const stereoWidth = readFiniteNumber(input.stereoWidth)
+  const lowCutHz = lowCutInput === undefined ? defaults.lowCutHz : clamp(lowCutInput, 20, 1200)
+  const highCutHz = highCutInput === undefined ? defaults.highCutHz : clamp(highCutInput, 1200, 20000)
+  return {
+    enabled: input.enabled ?? defaults.enabled,
+    wet: wet === undefined ? defaults.wet : clamp(wet, 0, 1),
+    decaySec: decaySec === undefined ? defaults.decaySec : clamp(decaySec, 0.05, 12),
+    preDelayMs: preDelayMs === undefined ? defaults.preDelayMs : clamp(preDelayMs, 0, 250),
+    size: size === undefined ? defaults.size : clamp(size, 0, 1),
+    diffusion: diffusion === undefined ? defaults.diffusion : clamp(diffusion, 0, 1),
+    density: density === undefined ? defaults.density : clamp(density, 0, 1),
+    lowCutHz: Math.min(lowCutHz, highCutHz),
+    highCutHz: Math.max(highCutHz, lowCutHz),
+    stereoWidth: stereoWidth === undefined ? defaults.stereoWidth : clamp(stereoWidth, 0, 2),
   }
 }
 
 export function serializeReverbParams(params: ReverbParams): string {
-  return `${params.enabled ? 1 : 0}|${params.wet}|${params.decaySec}|${params.preDelayMs}`
+  return `${params.enabled ? 1 : 0}|${params.wet}|${params.decaySec}|${params.preDelayMs}|${params.size}|${params.diffusion}|${params.density}|${params.lowCutHz}|${params.highCutHz}|${params.stereoWidth}`
 }
 
 export type SynthWave = 'sine' | 'square' | 'sawtooth' | 'triangle'

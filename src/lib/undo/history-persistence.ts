@@ -1,5 +1,5 @@
 import { buildLocalClip } from "~/lib/clip-create";
-import { buildClipCreatePayload, normalizeAudioWarp, type ClipCreateSnapshot } from "@daw-browser/shared";
+import { buildClipCreatePayload, normalizeAudioWarp, normalizeReverbParams, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
@@ -167,7 +167,7 @@ export const persistHistoryTrackEffects = async (
   if (isLocalHistoryProject(deps)) {
     await Promise.all([
       effects.eq ? setLocalEffect(deps.projectId, trackId, "eq", effects.eq) : null,
-      effects.reverb ? setLocalEffect(deps.projectId, trackId, "reverb", effects.reverb) : null,
+      effects.reverb ? setLocalEffect(deps.projectId, trackId, "reverb", normalizeReverbParams(effects.reverb)) : null,
       effects.synth ? setLocalEffect(deps.projectId, trackId, "synth", effects.synth) : null,
       effects.arp ? setLocalEffect(deps.projectId, trackId, "arp", effects.arp) : null,
     ]);
@@ -175,7 +175,7 @@ export const persistHistoryTrackEffects = async (
   }
   await Promise.all([
     effects.eq ? publishHistoryOperation(deps, { kind: "effects.setEqParams", payload: { trackId, params: effects.eq } }) : null,
-    effects.reverb ? publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId, params: effects.reverb } }) : null,
+    effects.reverb ? publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId, params: normalizeReverbParams(effects.reverb) } }) : null,
     effects.synth ? publishHistoryOperation(deps, { kind: "effects.setSynthParams", payload: { trackId, params: effects.synth } }) : null,
     effects.arp ? publishHistoryOperation(deps, { kind: "effects.setArpeggiatorParams", payload: { trackId, params: effects.arp } }) : null,
   ]);
@@ -188,8 +188,18 @@ export const persistHistoryEffectParams = async (
   direction: HistoryDirection,
 ) => {
   if (isLocalHistoryProject(deps)) {
+    if (entry.data.effect === "reverb" || entry.data.effect === "master-reverb") {
+      const params = normalizeReverbParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
+      await setLocalEffect(deps.projectId, targetId, entry.data.effect, params);
+      return;
+    }
     const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-    await setLocalEffect(deps.projectId, targetId, entry.data.effect, params);
+    await setLocalEffect(
+      deps.projectId,
+      targetId,
+      entry.data.effect,
+      params,
+    );
     return;
   }
   switch (entry.data.effect) {
@@ -199,7 +209,7 @@ export const persistHistoryEffectParams = async (
       return;
     }
     case "master-reverb": {
-      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+      const params = normalizeReverbParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
       await publishHistoryOperation(deps, { kind: "effects.setMasterReverbParams", payload: { params } });
       return;
     }
@@ -209,7 +219,7 @@ export const persistHistoryEffectParams = async (
       return;
     }
     case "reverb": {
-      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+      const params = normalizeReverbParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
       await publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId: targetId, params } });
       return;
     }

@@ -3,8 +3,10 @@ import type {
   EqBandParams,
   EqParams,
   ReverbParams,
+  ReverbParamsInput,
   SynthWave,
 } from './effects-params'
+import { normalizeReverbParams } from './effects-params'
 import { normalizeAudioWarp, normalizeClipGain, type AudioWarpPayload } from './audio-warp'
 import { normalizeMasterVolume } from './master-volume'
 
@@ -216,15 +218,23 @@ const readEqParams = (value: unknown): EqParams | null => {
   return bands.length === value.bands.length ? { enabled: value.enabled, bands } : null
 }
 
-const readReverbParams = (value: unknown): ReverbParams | null => (
-  isRecord(value)
-  && typeof value.enabled === 'boolean'
-  && typeof value.wet === 'number'
-  && typeof value.decaySec === 'number'
-  && typeof value.preDelayMs === 'number'
-    ? { enabled: value.enabled, wet: value.wet, decaySec: value.decaySec, preDelayMs: value.preDelayMs }
-    : null
-)
+const readReverbParams = (value: unknown): ReverbParams | null => {
+  if (!isRecord(value) || typeof value.enabled !== 'boolean') return null
+  const params: ReverbParamsInput = {
+    enabled: value.enabled,
+    wet: readOptionalNumber(value.wet),
+    decaySec: readOptionalNumber(value.decaySec),
+    preDelayMs: readOptionalNumber(value.preDelayMs),
+    size: readOptionalNumber(value.size),
+    diffusion: readOptionalNumber(value.diffusion),
+    density: readOptionalNumber(value.density),
+    lowCutHz: readOptionalNumber(value.lowCutHz),
+    highCutHz: readOptionalNumber(value.highCutHz),
+    stereoWidth: readOptionalNumber(value.stereoWidth),
+  }
+  if (params.wet === undefined || params.decaySec === undefined || params.preDelayMs === undefined) return null
+  return normalizeReverbParams(params)
+}
 
 const readSynthWave = (value: unknown): SynthWave | null => (
   value === 'sine' || value === 'square' || value === 'sawtooth' || value === 'triangle' ? value : null

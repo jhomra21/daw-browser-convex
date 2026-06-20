@@ -2,9 +2,22 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProjectAccess } from "./projectAccess";
 import { getTrackWriteAccess } from "./trackWrites";
-import { normalizeSynthParams } from "@daw-browser/shared";
+import { normalizeReverbParams, normalizeSynthParams } from "@daw-browser/shared";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
+const reverbParamsValidator = v.object({
+  enabled: v.boolean(),
+  wet: v.number(),
+  decaySec: v.number(),
+  preDelayMs: v.number(),
+  size: v.optional(v.number()),
+  diffusion: v.optional(v.number()),
+  density: v.optional(v.number()),
+  lowCutHz: v.optional(v.number()),
+  highCutHz: v.optional(v.number()),
+  stereoWidth: v.optional(v.number()),
+})
 
 const sanitizeArpParams = (params: {
   enabled: boolean
@@ -213,32 +226,22 @@ export const setReverbParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.id("tracks"),
-    params: v.object({
-      enabled: v.boolean(),
-      wet: v.number(), // 0..1
-      decaySec: v.number(), // 0.1..10
-      preDelayMs: v.number(), // 0..200
-    }),
+    params: reverbParamsValidator,
   },
   handler: async (ctx, { projectId, trackId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'reverb', params });
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'reverb', params: normalizeReverbParams(params) });
   },
 });
 
 export const setMasterReverbParams = mutation({
   args: {
     projectId: v.string(),
-    params: v.object({
-      enabled: v.boolean(),
-      wet: v.number(),
-      decaySec: v.number(),
-      preDelayMs: v.number(),
-    }),
+    params: reverbParamsValidator,
   },
   handler: async (ctx, { projectId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'reverb', params })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'reverb', params: normalizeReverbParams(params) })
   },
 });
 
@@ -373,18 +376,13 @@ export const serverSetReverbParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.string(),
-    params: v.object({
-      enabled: v.boolean(),
-      wet: v.number(),
-      decaySec: v.number(),
-      preDelayMs: v.number(),
-    }),
+    params: reverbParamsValidator,
   },
   handler: async (ctx, { projectId, trackId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
     if (!normalizedTrackId) return
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'reverb', params })
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'reverb', params: normalizeReverbParams(params) })
   },
 })
 
@@ -415,16 +413,11 @@ export const serverSetEqParams = mutation({
 export const serverSetMasterReverbParams = mutation({
   args: {
     projectId: v.string(),
-    params: v.object({
-      enabled: v.boolean(),
-      wet: v.number(),
-      decaySec: v.number(),
-      preDelayMs: v.number(),
-    }),
+    params: reverbParamsValidator,
   },
   handler: async (ctx, { projectId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'reverb', params })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'reverb', params: normalizeReverbParams(params) })
   },
 })
 

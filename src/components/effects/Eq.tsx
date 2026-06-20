@@ -408,7 +408,8 @@ export default function Eq(props: EqProps) {
   const applyBandPointerValue = (id: string, x: number, y: number) => {
     const nf = Math.max(FREQ_MIN, Math.min(FREQ_MAX, xToFreq(x)))
     const band = props.bands.find(b => b.id === id)
-    if (band && supportsGain(band.type)) {
+    if (!band) return
+    if (supportsGain(band.type)) {
       const ng = Math.max(GAIN_MIN, Math.min(GAIN_MAX, yToGain(y)))
       const gainDb = Math.round(ng * 10) / 10
       const frequency = Math.round(nf)
@@ -417,7 +418,7 @@ export default function Eq(props: EqProps) {
       }
     } else {
       const frequency = Math.round(nf)
-      if (band?.frequency !== frequency) props.onBandChange(id, { frequency })
+      if (band.frequency !== frequency) props.onBandChange(id, { frequency })
     }
   }
 

@@ -24,6 +24,7 @@ type UseEffectsPanelAudioSyncOptions = {
   tracks: Accessor<Track[]>;
   audioEngine: Accessor<AudioEngine>;
   roomEffects: Accessor<RoomEffectRow[] | undefined>;
+  isPlaying: Accessor<boolean>;
   playheadSec?: Accessor<number | undefined>;
   localDraftEffects?: {
     eq?: (targetId: string) => EqParams | undefined;
@@ -237,7 +238,7 @@ export function useEffectsPanelAudioSync(
   const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null);
 
   createEffect(() => {
-    if (!options.isOpen()) {
+    if (!options.isOpen() || !options.isPlaying()) {
       setSpectrum(null);
       return;
     }

@@ -70,6 +70,21 @@ export type ReverbParams = {
 export type ReverbParamsLite = ReverbParams
 export type ReverbParamsInput = Partial<ReverbParams>
 
+export const REVERB_WET_MIN = 0
+export const REVERB_WET_MAX = 1
+export const REVERB_DECAY_SEC_MIN = 0.05
+export const REVERB_DECAY_SEC_MAX = 12
+export const REVERB_PRE_DELAY_MS_MIN = 0
+export const REVERB_PRE_DELAY_MS_MAX = 250
+export const REVERB_UNIT_PARAM_MIN = 0
+export const REVERB_UNIT_PARAM_MAX = 1
+export const REVERB_LOW_CUT_HZ_MIN = 20
+export const REVERB_LOW_CUT_HZ_MAX = 1200
+export const REVERB_HIGH_CUT_HZ_MIN = 1200
+export const REVERB_HIGH_CUT_HZ_MAX = 20000
+export const REVERB_STEREO_WIDTH_MIN = 0
+export const REVERB_STEREO_WIDTH_MAX = 2
+
 export function createDefaultReverbParams(): ReverbParams {
   return {
     enabled: true,
@@ -96,19 +111,19 @@ export function normalizeReverbParams(input: ReverbParamsInput): ReverbParams {
   const lowCutInput = readFiniteNumber(input.lowCutHz)
   const highCutInput = readFiniteNumber(input.highCutHz)
   const stereoWidth = readFiniteNumber(input.stereoWidth)
-  const lowCutHz = lowCutInput === undefined ? defaults.lowCutHz : clamp(lowCutInput, 20, 1200)
-  const highCutHz = highCutInput === undefined ? defaults.highCutHz : clamp(highCutInput, 1200, 20000)
+  const lowCutHz = lowCutInput === undefined ? defaults.lowCutHz : clamp(lowCutInput, REVERB_LOW_CUT_HZ_MIN, REVERB_LOW_CUT_HZ_MAX)
+  const highCutHz = highCutInput === undefined ? defaults.highCutHz : clamp(highCutInput, REVERB_HIGH_CUT_HZ_MIN, REVERB_HIGH_CUT_HZ_MAX)
   return {
     enabled: input.enabled ?? defaults.enabled,
-    wet: wet === undefined ? defaults.wet : clamp(wet, 0, 1),
-    decaySec: decaySec === undefined ? defaults.decaySec : clamp(decaySec, 0.05, 12),
-    preDelayMs: preDelayMs === undefined ? defaults.preDelayMs : clamp(preDelayMs, 0, 250),
-    size: size === undefined ? defaults.size : clamp(size, 0, 1),
-    diffusion: diffusion === undefined ? defaults.diffusion : clamp(diffusion, 0, 1),
-    density: density === undefined ? defaults.density : clamp(density, 0, 1),
+    wet: wet === undefined ? defaults.wet : clamp(wet, REVERB_WET_MIN, REVERB_WET_MAX),
+    decaySec: decaySec === undefined ? defaults.decaySec : clamp(decaySec, REVERB_DECAY_SEC_MIN, REVERB_DECAY_SEC_MAX),
+    preDelayMs: preDelayMs === undefined ? defaults.preDelayMs : clamp(preDelayMs, REVERB_PRE_DELAY_MS_MIN, REVERB_PRE_DELAY_MS_MAX),
+    size: size === undefined ? defaults.size : clamp(size, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
+    diffusion: diffusion === undefined ? defaults.diffusion : clamp(diffusion, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
+    density: density === undefined ? defaults.density : clamp(density, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
     lowCutHz: Math.min(lowCutHz, highCutHz),
     highCutHz: Math.max(highCutHz, lowCutHz),
-    stereoWidth: stereoWidth === undefined ? defaults.stereoWidth : clamp(stereoWidth, 0, 2),
+    stereoWidth: stereoWidth === undefined ? defaults.stereoWidth : clamp(stereoWidth, REVERB_STEREO_WIDTH_MIN, REVERB_STEREO_WIDTH_MAX),
   }
 }
 

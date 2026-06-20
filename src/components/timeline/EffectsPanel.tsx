@@ -208,7 +208,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                 onChange={props.effects.onReverbChange}
                 onToggleEnabled={props.effects.onReverbToggle}
                 onReset={props.effects.onResetReverb}
-                class="min-w-72"
+                class="min-w-[772px]"
               />
             </Show>
           }

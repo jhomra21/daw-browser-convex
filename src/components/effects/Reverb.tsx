@@ -64,10 +64,11 @@ function DeviceSection(props: {
 function ReverbKnobControl(props: {
   label: string
   valueLabel: string
+  class?: string
   children: JSX.Element
 }) {
   return (
-    <div class="flex flex-col items-center gap-1 px-1 py-1">
+    <div class={cn('flex flex-col items-center gap-1 px-1 py-1', props.class)}>
       <div class="text-[10px] leading-none text-neutral-400">{props.label}</div>
       {props.children}
       <div class="max-w-full truncate font-mono text-[10px] leading-none text-cyan-300">
@@ -103,6 +104,15 @@ function ReverbValueBox(props: { value: string }) {
     <div class="grid grid-cols-[minmax(0,1fr)_8px] overflow-hidden border border-neutral-700 bg-neutral-300 font-mono text-[10px] leading-none text-neutral-950">
       <div class="overflow-hidden whitespace-nowrap bg-orange-400 px-1 py-1">{props.value}</div>
       <div />
+    </div>
+  )
+}
+
+function DiffusionNetworkReadout(props: { label: string, value: string }) {
+  return (
+    <div class="flex flex-col gap-1 text-[11px] leading-none">
+      <span class="text-neutral-400">{props.label}</span>
+      <span class="font-mono text-amber-300">{props.value}</span>
     </div>
   )
 }
@@ -280,6 +290,74 @@ function SpaceGraph(props: {
   )
 }
 
+function DiffusionNetworkPanel(props: {
+  params: ReverbParams
+  disabled: boolean
+  onSpaceChange: (updates: Pick<ReverbParams, 'size' | 'decaySec' | 'diffusion'>) => void
+  onDecayChange: (value: number) => void
+  onDiffusionChange: (value: number) => void
+  onDensityChange: (value: number) => void
+}) {
+  return (
+    <DeviceSection title="Diffusion Network">
+      <div class="grid grid-cols-[minmax(0,1fr)_4.25rem] gap-2 pt-1">
+        <div class="min-w-0">
+          <SpaceGraph
+            params={props.params}
+            disabled={props.disabled}
+            onSpaceChange={props.onSpaceChange}
+          />
+        </div>
+
+        <div class="flex flex-col justify-center gap-4">
+          <DiffusionNetworkReadout label="Diffusion" value={formatUnitPercent(props.params.diffusion)} />
+          <DiffusionNetworkReadout label="Scale" value={formatUnitPercent(props.params.size)} />
+        </div>
+      </div>
+
+      <div class="mt-auto grid shrink-0 grid-cols-3 items-center gap-1 pb-2 pt-3">
+        <ReverbKnobControl label="Decay" valueLabel={formatSeconds(props.params.decaySec)} class="px-0">
+          <Knob
+            value={props.params.decaySec}
+            min={REVERB_DECAY_SEC_MIN}
+            max={REVERB_DECAY_SEC_MAX}
+            step={0.1}
+            label=""
+            unit="s"
+            disabled={props.disabled}
+            showValue={false}
+            onValueChange={props.onDecayChange}
+          />
+        </ReverbKnobControl>
+        <ReverbKnobControl label="Diff" valueLabel={formatUnitPercent(props.params.diffusion)} class="px-0">
+          <Knob
+            value={props.params.diffusion}
+            min={REVERB_UNIT_PARAM_MIN}
+            max={REVERB_UNIT_PARAM_MAX}
+            step={0.01}
+            label=""
+            disabled={props.disabled}
+            showValue={false}
+            onValueChange={props.onDiffusionChange}
+          />
+        </ReverbKnobControl>
+        <ReverbKnobControl label="Dens" valueLabel={formatUnitPercent(props.params.density)} class="px-0">
+          <Knob
+            value={props.params.density}
+            min={REVERB_UNIT_PARAM_MIN}
+            max={REVERB_UNIT_PARAM_MAX}
+            step={0.01}
+            label=""
+            disabled={props.disabled}
+            showValue={false}
+            onValueChange={props.onDensityChange}
+          />
+        </ReverbKnobControl>
+      </div>
+    </DeviceSection>
+  )
+}
+
 export default function Reverb(props: ReverbProps) {
   const updateParam = (updates: Partial<ReverbParams>) => {
     const changed: Partial<ReverbParams> = {}
@@ -323,9 +401,9 @@ export default function Reverb(props: ReverbProps) {
       enabled={props.params.enabled}
       onToggleEnabled={props.onToggleEnabled}
       onReset={props.onReset}
-      class={cn('w-[655px] min-w-[655px]', props.class)}
+      class={cn('w-[700px] min-w-[700px]', props.class)}
     >
-      <div class={cn('grid min-h-0 flex-1 grid-cols-[115px_110px_250px_100px] items-stretch gap-4 px-4 py-3', !props.params.enabled && 'opacity-70')}>
+      <div class={cn('grid min-h-0 flex-1 grid-cols-[115px_110px_320px_72px] items-stretch gap-3 px-4 py-3', !props.params.enabled && 'opacity-70')}>
         <DeviceSection title="Input Processing">
           <div class="grid grid-cols-2 gap-1 pb-2">
             <ReverbParameterButton label="Lo Cut" active={lowCutActive()} disabled={!props.params.enabled} onClick={toggleLowCut} />
@@ -345,7 +423,7 @@ export default function Reverb(props: ReverbProps) {
               <ReverbValueBox value={formatFrequencyWithUnit(props.params.highCutHz)} />
             </div>
           </div>
-          <div class="mt-auto w-24 self-center pt-3">
+          <div class="mt-auto w-24 self-center pb-2 pt-3">
             <ReverbKnobControl label="Predelay" valueLabel={formatMilliseconds(props.params.preDelayMs)}>
               <Knob
                 value={props.params.preDelayMs}
@@ -379,57 +457,14 @@ export default function Reverb(props: ReverbProps) {
           </div>
         </DeviceSection>
 
-        <DeviceSection title="Space">
-          <div class="grid grid-cols-3 gap-1 pb-2">
-            <ReverbValueBox value={formatSeconds(props.params.decaySec)} />
-            <ReverbValueBox value={formatUnitPercent(props.params.diffusion)} />
-            <ReverbValueBox value={formatUnitPercent(props.params.density)} />
-          </div>
-          <SpaceGraph
-            params={props.params}
-            disabled={!props.params.enabled}
-            onSpaceChange={updateSpace}
-          />
-          <div class="mt-auto grid shrink-0 grid-cols-3 items-center pt-4">
-            <ReverbKnobControl label="Decay" valueLabel={formatSeconds(props.params.decaySec)}>
-              <Knob
-                value={props.params.decaySec}
-                min={REVERB_DECAY_SEC_MIN}
-                max={REVERB_DECAY_SEC_MAX}
-                step={0.1}
-                label=""
-                unit="s"
-                disabled={!props.params.enabled}
-                showValue={false}
-                onValueChange={updateDecay}
-              />
-            </ReverbKnobControl>
-            <ReverbKnobControl label="Diff" valueLabel={formatUnitPercent(props.params.diffusion)}>
-              <Knob
-                value={props.params.diffusion}
-                min={REVERB_UNIT_PARAM_MIN}
-                max={REVERB_UNIT_PARAM_MAX}
-                step={0.01}
-                label=""
-                disabled={!props.params.enabled}
-                showValue={false}
-                onValueChange={updateDiffusion}
-              />
-            </ReverbKnobControl>
-            <ReverbKnobControl label="Dens" valueLabel={formatUnitPercent(props.params.density)}>
-              <Knob
-                value={props.params.density}
-                min={REVERB_UNIT_PARAM_MIN}
-                max={REVERB_UNIT_PARAM_MAX}
-                step={0.01}
-                label=""
-                disabled={!props.params.enabled}
-                showValue={false}
-                onValueChange={updateDensity}
-              />
-            </ReverbKnobControl>
-          </div>
-        </DeviceSection>
+        <DiffusionNetworkPanel
+          params={props.params}
+          disabled={!props.params.enabled}
+          onSpaceChange={updateSpace}
+          onDecayChange={updateDecay}
+          onDiffusionChange={updateDiffusion}
+          onDensityChange={updateDensity}
+        />
 
         <DeviceSection title="Mix">
           <div class="flex min-h-0 flex-1 flex-col justify-end gap-5 pb-2">

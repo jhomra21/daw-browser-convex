@@ -128,7 +128,6 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
             props.instrument.state.arp.reset();
           }}
           disabled={!props.instrument.canWrite}
-          class="min-w-72"
         />
       )}
     </Show>
@@ -157,7 +156,6 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
           }}
           disabled={!props.instrument.canWrite}
           variant="compact"
-          class="min-w-72"
         />
       )}
     </Show>
@@ -215,7 +213,6 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                   onChange={props.effects.onReverbChange}
                   onToggleEnabled={props.effects.onReverbToggle}
                   onReset={props.effects.onResetReverb}
-                  class="min-w-[772px]"
                 />
               )}
             </Show>
@@ -230,7 +227,6 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                 onBandToggle={props.effects.onBandToggle}
                 onToggleEnabled={props.effects.onToggleEqEnabled}
                 onReset={props.effects.onResetEq}
-                class="min-w-80"
                 spectrumData={props.effects.spectrum}
               />
             )}

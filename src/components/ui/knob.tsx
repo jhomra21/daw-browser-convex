@@ -23,7 +23,7 @@ export default function Knob(props: KnobProps) {
   let startValue = 0
   let lastEmittedValue = props.value
   
-  const size = () => props.size || 48
+  const size = () => props.size ?? 36
   const step = () => props.step || 0.1
   const bipolar = () => props.bipolar || false
   const visualValue = () => dragValue() ?? props.value

@@ -1,4 +1,5 @@
-import { Show, For, createMemo } from 'solid-js'
+import { For, createMemo } from 'solid-js'
+import EffectShell from '~/components/effects/EffectShell'
 import Knob from '~/components/ui/knob'
 import {
   type SynthParams,
@@ -33,30 +34,24 @@ export default function Synth(props: SynthProps) {
   const envW = () => (variant() === 'expanded' ? 360 : 220)
   const envH = () => (variant() === 'expanded' ? 80 : 48)
   return (
-    <div class={cn('flex flex-col border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
-      {/* Header */}
-      <div class="flex items-center justify-between border-b border-neutral-800 px-2 py-1">
-        <div class="flex items-center gap-2">
-          <span class="text-xs font-semibold">Synth</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <Show when={props.onExpand}>
-            <button
-              class="border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
-              disabled={props.disabled}
-              onClick={() => props.onExpand?.()}
-            >Expand</button>
-          </Show>
-          <Show when={props.onReset}>
-            <button
-              class="border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
-              disabled={props.disabled}
-              onClick={() => props.onReset?.()}
-            >Reset</button>
-          </Show>
-        </div>
-      </div>
-
+    <EffectShell
+      title="Synth"
+      typeLabel="Instrument"
+      onReset={props.onReset}
+      disabled={props.disabled}
+      class={cn(variant() === 'expanded' ? 'min-w-160' : 'min-w-72', props.class)}
+      actionsBeforeReset={
+        props.onExpand ? (
+          <button
+            class="border border-neutral-700 bg-neutral-800 px-2 py-0.5 text-xs text-neutral-300 hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={props.disabled}
+            onClick={() => props.onExpand?.()}
+          >
+            Expand
+          </button>
+        ) : undefined
+      }
+    >
       {/* Oscillator controls */}
       <div class="px-2 py-2 border-b border-neutral-800/50">
         <div class="grid gap-3" style={{ 'grid-template-columns': '1fr 1fr' }}>
@@ -125,7 +120,6 @@ export default function Synth(props: SynthProps) {
             min={0}
             max={1.5}
             step={0.05}
-            size={28}
             label=""
             showValue={false}
             onValueChange={(v) => props.onChange({ gain: Math.round(clamp(v, 0, 1.5) * 100) / 100 })}
@@ -142,7 +136,6 @@ export default function Synth(props: SynthProps) {
             min={0}
             max={200}
             step={1}
-            size={28}
             label=""
             unit="ms"
             showValue={false}
@@ -160,7 +153,6 @@ export default function Synth(props: SynthProps) {
             min={0}
             max={200}
             step={1}
-            size={28}
             label=""
             unit="ms"
             showValue={false}
@@ -179,7 +171,7 @@ export default function Synth(props: SynthProps) {
           </div>
         </div>
       </div>
-    </div>
+    </EffectShell>
   )
 }
 

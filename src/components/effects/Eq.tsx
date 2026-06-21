@@ -1,5 +1,6 @@
-import { Show, For, createSignal, createMemo, onMount, onCleanup, createEffect, type JSX } from 'solid-js'
+import { For, createSignal, createMemo, onMount, onCleanup, createEffect, type JSX } from 'solid-js'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
+import EffectShell from '~/components/effects/EffectShell'
 import Knob from '~/components/ui/knob'
 import {
   supportsGain,
@@ -51,7 +52,7 @@ const CYCLE_FILTER_TYPES = FILTER_TYPE_DEFINITIONS.filter((definition) => defini
 
 const nextFilterType = (type: EqBandType): EqBandType => {
   const index = CYCLE_FILTER_TYPES.indexOf(type)
-  return CYCLE_FILTER_TYPES[(index + 1) % CYCLE_FILTER_TYPES.length] ?? 'peaking'
+  return CYCLE_FILTER_TYPES[(index + 1) % CYCLE_FILTER_TYPES.length]
 }
 
 const formatFrequency = (frequency: number) =>
@@ -165,7 +166,7 @@ export default function Eq(props: EqProps) {
       if (!el) return
       const rect = el.getBoundingClientRect()
       const width = Math.floor(rect.width)
-      const height = Math.max(120, Math.min(220, Math.floor(width * 0.35)))
+      const height = Math.max(120, Math.floor(rect.height))
       setCanvasSize((current) => current.width === width && current.height === height ? current : { width, height })
     }
     update()
@@ -244,14 +245,14 @@ export default function Eq(props: EqProps) {
   }
   const gainToY = (g: number) => {
     const { height } = canvasSize()
-    const top = 4, bottom = 8
+    const top = 18, bottom = 18
     const h = Math.max(1, height - (top + bottom))
     const t = (GAIN_MAX - Math.max(GAIN_MIN, Math.min(GAIN_MAX, g))) / (GAIN_MAX - GAIN_MIN)
     return top + t * h
   }
   const yToGain = (y: number) => {
     const { height } = canvasSize()
-    const top = 6, bottom = 12
+    const top = 18, bottom = 18
     const h = Math.max(1, height - (top + bottom))
     const clamped = Math.min(Math.max(y, top), height - bottom)
     const t = (clamped - top) / h
@@ -539,28 +540,14 @@ export default function Eq(props: EqProps) {
   const selectedQLabel = () => formatQ(selectedBand()?.q ?? 0)
 
   return (
-    <div class={cn('flex flex-col border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
-      <div class="flex items-center justify-between border-b border-neutral-800 px-2 py-1">
-        <div class="flex items-center gap-2">
-          <span class="text-xs font-semibold">EQ Eight</span>
-          <span class="text-[10px] text-neutral-500">Stereo</span>
-        </div>
-        <Show when={props.onToggleEnabled} keyed>
-          {(onToggleEnabled) => (
-            <button
-              class={cn(
-                'px-2 py-0.5 text-xs',
-                props.enabled ? 'bg-cyan-500/20 text-cyan-300 ring-1 ring-cyan-500/30' : 'bg-neutral-800 text-neutral-400',
-              )}
-              onClick={() => onToggleEnabled(!props.enabled)}
-              title={props.enabled ? 'Disable EQ' : 'Enable EQ'}
-            >
-              {props.enabled ? 'On' : 'Off'}
-            </button>
-          )}
-        </Show>
-      </div>
-
+    <EffectShell
+      title="EQ Eight"
+      typeLabel="Stereo"
+      enabled={props.enabled}
+      onToggleEnabled={props.onToggleEnabled}
+      onReset={props.onReset}
+      class={cn('w-[784px] min-w-[784px]', props.class)}
+    >
       <div class="grid min-h-0 flex-1" style={{ 'grid-template-columns': '72px minmax(220px, 1fr) 72px' }}>
         <div class="flex flex-col border-r border-neutral-800 bg-neutral-950/30">
           <AbletonKnobControl label="Freq" valueLabel={selectedFrequencyLabel()}>
@@ -569,7 +556,6 @@ export default function Eq(props: EqProps) {
               min={FREQ_MIN}
               max={FREQ_MAX}
               step={1}
-              size={28}
               label=""
               unit="Hz"
               disabled={!props.enabled || !selectedBand()?.enabled}
@@ -590,7 +576,6 @@ export default function Eq(props: EqProps) {
               min={GAIN_MIN}
               max={GAIN_MAX}
               step={0.1}
-              size={28}
               label=""
               unit="dB"
               disabled={!props.enabled || !selectedBand()?.enabled || !supportsGain(selectedBand()?.type ?? 'peaking')}
@@ -611,7 +596,6 @@ export default function Eq(props: EqProps) {
               min={Q_MIN}
               max={Q_MAX}
               step={0.1}
-              size={28}
               label=""
               disabled={!props.enabled || !selectedBand()?.enabled}
               showValue={false}
@@ -625,12 +609,12 @@ export default function Eq(props: EqProps) {
           </AbletonKnobControl>
         </div>
 
-        <div ref={containerRef} class="min-w-0 bg-neutral-950">
+        <div ref={containerRef} class="relative min-w-0 overflow-hidden bg-neutral-950">
           <canvas
             ref={(el) => (canvasRef = el || undefined)}
             width={canvasSize().width}
             height={canvasSize().height}
-            class={cn('block w-full', props.enabled ? 'cursor-crosshair' : 'cursor-not-allowed opacity-60')}
+            class={cn('absolute inset-0 block h-full w-full', props.enabled ? 'cursor-crosshair' : 'cursor-not-allowed opacity-60')}
             onPointerDown={onCanvasPointerDown}
             onPointerMove={onCanvasPointerMove}
             onPointerUp={onCanvasPointerUp}
@@ -643,26 +627,16 @@ export default function Eq(props: EqProps) {
           <div class="mb-3 border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-neutral-300">Stereo</div>
           <div class="mb-1 text-neutral-500">Edit</div>
           <div class="mb-3 border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-neutral-300">A</div>
-          <Show when={props.onReset} keyed>
-            {(onReset) => (
-              <button
-                class="mt-auto border border-neutral-700 bg-neutral-800 px-1 py-1 text-neutral-300 hover:bg-neutral-700"
-                onClick={() => onReset()}
-              >
-                Reset
-              </button>
-            )}
-          </Show>
         </div>
       </div>
 
       <div class="flex border-t border-neutral-800 bg-neutral-950/50">
         <For each={props.bands}>
           {(band, index) => (
-            <div class="flex min-w-12 flex-1 items-center gap-1 border-r border-neutral-800 px-1 py-1 last:border-r-0">
+            <div class="grid min-w-[72px] flex-1 grid-cols-[34px_12px_20px] items-center justify-center gap-1 border-r border-neutral-800 px-1 py-1 last:border-r-0">
               <button
                 class={cn(
-                  'flex h-7 min-w-0 flex-1 items-center justify-center border border-neutral-700 bg-neutral-800 text-neutral-300',
+                  'flex h-7 w-[34px] items-center justify-center border border-neutral-700 bg-neutral-800 text-neutral-300',
                   selectedId() === band.id && 'border-cyan-400 bg-cyan-500/15 text-cyan-200',
                 )}
                 disabled={!props.enabled}
@@ -699,6 +673,6 @@ export default function Eq(props: EqProps) {
           )}
         </For>
       </div>
-    </div>
+    </EffectShell>
   )
 }

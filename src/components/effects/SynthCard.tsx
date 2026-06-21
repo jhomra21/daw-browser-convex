@@ -35,10 +35,10 @@ const SynthCard: Component<SynthCardProps> = (props) => {
   function beginPointerInteraction(e: PointerEvent, mode: PointerMode): void {
     if (pointerId !== null) return
 
-    try { e.preventDefault(); e.stopPropagation() } catch {}
+    e.preventDefault()
+    e.stopPropagation()
 
-    const button = (e as { button?: number }).button
-    if (button != null && button !== 0) return
+    if (e.button !== 0) return
 
     pointerId = e.pointerId
     dragStartX = e.clientX
@@ -73,7 +73,8 @@ const SynthCard: Component<SynthCardProps> = (props) => {
   }
 
   function onPointerMove(e: PointerEvent): void {
-    try { e.preventDefault(); e.stopPropagation() } catch {}
+    e.preventDefault()
+    e.stopPropagation()
 
     const dx = e.clientX - dragStartX
     const dy = e.clientY - dragStartY
@@ -106,11 +107,11 @@ const SynthCard: Component<SynthCardProps> = (props) => {
     }
     captureEl = null
     pointerId = null
-    try { window.removeEventListener('pointermove', onPointerMove, { capture: true } as any) } catch {}
+    window.removeEventListener('pointermove', onPointerMove, { capture: true })
   }
 
   onCleanup(() => {
-    try { window.removeEventListener('pointermove', onPointerMove, { capture: true } as any) } catch {}
+    window.removeEventListener('pointermove', onPointerMove, { capture: true })
   })
 
   return (
@@ -125,7 +126,7 @@ const SynthCard: Component<SynthCardProps> = (props) => {
       <div
         class="flex items-center justify-between px-3 py-2 bg-neutral-800 border-b border-neutral-700 cursor-move select-none"
         style={{ 'touch-action': 'none' }}
-        onPointerDown={onHeaderPointerDown as any}
+        onPointerDown={(e) => onHeaderPointerDown(e)}
       >
         <div class="text-sm font-semibold text-neutral-200">Synth</div>
         <button
@@ -138,12 +139,12 @@ const SynthCard: Component<SynthCardProps> = (props) => {
         </button>
       </div>
       <div class="w-full overflow-hidden p-2" style={{ height: 'calc(100% - 36px)', 'touch-action': 'manipulation' }}>
-        <Synth params={props.params} onChange={props.onChange} onReset={props.onReset} variant="expanded" class="min-w-160" />
+        <Synth params={props.params} onChange={props.onChange} onReset={props.onReset} variant="expanded" />
       </div>
       <div
         class="absolute right-1 bottom-1 w-4 h-4 cursor-se-resize bg-neutral-700/60 hover:bg-neutral-600/70"
         style={{ 'touch-action': 'none' }}
-        onPointerDown={onResizerPointerDown as any}
+        onPointerDown={(e) => onResizerPointerDown(e)}
         title="Resize"
       />
     </div>

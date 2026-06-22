@@ -1,5 +1,6 @@
 import { createSignal, createUniqueId, For, type JSX } from 'solid-js'
 import EffectShell from '~/components/effects/EffectShell'
+import { DeviceToggleButton, DeviceValueStrip } from '~/components/ui/device-control'
 import Knob from '~/components/ui/knob'
 import {
   REVERB_DECAY_SEC_MAX,
@@ -129,53 +130,6 @@ function ReverbGraphSection(props: {
       </div>
       {props.bottomKnobs}
     </DeviceSection>
-  )
-}
-
-function ReverbKnobControl(props: {
-  label: string
-  valueLabel: string
-  class?: string
-  children: JSX.Element
-}) {
-  return (
-    <div class={cn('flex flex-col items-center gap-1 px-1 py-1', props.class)}>
-      <div class="text-[10px] leading-none text-neutral-400">{props.label}</div>
-      {props.children}
-      <div class="max-w-full truncate font-mono text-[10px] leading-none text-cyan-300">
-        {props.valueLabel}
-      </div>
-    </div>
-  )
-}
-
-function ReverbParameterButton(props: {
-  label: string
-  active?: boolean
-  disabled?: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      class={cn(
-        'whitespace-nowrap border border-neutral-700 px-1 py-1 text-center text-[10px] font-medium leading-none disabled:cursor-not-allowed disabled:opacity-50',
-        props.active ? 'bg-amber-400 text-neutral-950' : 'bg-neutral-700 text-neutral-200',
-      )}
-      disabled={props.disabled}
-      onClick={props.onClick}
-    >
-      {props.label}
-    </button>
-  )
-}
-
-function ReverbValueBox(props: { value: string }) {
-  return (
-    <div class="grid grid-cols-[minmax(0,1fr)_8px] overflow-hidden border border-neutral-700 bg-neutral-300 font-mono text-[10px] leading-none text-neutral-950">
-      <div class="overflow-hidden whitespace-nowrap bg-orange-400 px-1 py-1">{props.value}</div>
-      <div />
-    </div>
   )
 }
 
@@ -378,9 +332,9 @@ function DiffusionNetworkPanel(props: {
       title="Diffusion Network"
       topControls={
         <div class="grid grid-cols-[3rem_minmax(5.75rem,1fr)_2.9rem] gap-1">
-          <ReverbParameterButton label="High" active={props.highCutActive} disabled={props.disabled} onClick={props.onHighCutToggle} />
-          <ReverbValueBox value={formatFrequencyWithUnit(props.params.diffusionHighCutHz)} />
-          <ReverbValueBox value={props.params.density.toFixed(2)} />
+          <DeviceToggleButton label="High" active={props.highCutActive} disabled={props.disabled} onClick={props.onHighCutToggle} />
+          <DeviceValueStrip value={formatFrequencyWithUnit(props.params.diffusionHighCutHz)} />
+          <DeviceValueStrip value={props.params.density.toFixed(2)} />
         </div>
       }
       graph={
@@ -392,9 +346,9 @@ function DiffusionNetworkPanel(props: {
       }
       bottomControls={
         <div class="grid grid-cols-[3rem_minmax(7.5rem,1fr)_2.9rem] gap-1">
-          <ReverbParameterButton label="Low" active={props.lowCutActive} disabled={props.disabled} onClick={props.onLowCutToggle} />
-          <ReverbValueBox value={formatFrequencyWithUnit(props.params.diffusionLowCutHz)} />
-          <ReverbValueBox value={props.params.size.toFixed(2)} />
+          <DeviceToggleButton label="Low" active={props.lowCutActive} disabled={props.disabled} onClick={props.onLowCutToggle} />
+          <DeviceValueStrip value={formatFrequencyWithUnit(props.params.diffusionLowCutHz)} />
+          <DeviceValueStrip value={props.params.size.toFixed(2)} />
         </div>
       }
       side={
@@ -406,43 +360,40 @@ function DiffusionNetworkPanel(props: {
       bottomKnobs={
         <div class="mt-auto grid shrink-0 grid-cols-[minmax(0,1fr)_4.25rem] gap-2 pb-2 pt-3">
           <div class="-mx-2.5 flex items-center justify-between">
-            <ReverbKnobControl label="Decay" valueLabel={formatSeconds(props.params.decaySec)} class="w-12 px-0">
-              <Knob
-                value={props.params.decaySec}
-                min={REVERB_DECAY_SEC_MIN}
-                max={REVERB_DECAY_SEC_MAX}
-                step={0.1}
-                label=""
-                unit="s"
-                disabled={props.disabled}
-                showValue={false}
-                onValueChange={props.onDecayChange}
-              />
-            </ReverbKnobControl>
-            <ReverbKnobControl label="Diff" valueLabel={formatUnitPercent(props.params.diffusion)} class="w-12 px-0">
-              <Knob
-                value={props.params.diffusion}
-                min={REVERB_UNIT_PARAM_MIN}
-                max={REVERB_UNIT_PARAM_MAX}
-                step={0.01}
-                label=""
-                disabled={props.disabled}
-                showValue={false}
-                onValueChange={props.onDiffusionChange}
-              />
-            </ReverbKnobControl>
-            <ReverbKnobControl label="Dens" valueLabel={formatUnitPercent(props.params.density)} class="w-12 px-0">
-              <Knob
-                value={props.params.density}
-                min={REVERB_UNIT_PARAM_MIN}
-                max={REVERB_UNIT_PARAM_MAX}
-                step={0.01}
-                label=""
-                disabled={props.disabled}
-                showValue={false}
-                onValueChange={props.onDensityChange}
-              />
-            </ReverbKnobControl>
+            <Knob
+              class="w-12 px-0 py-1"
+              label="Decay"
+              valueLabel={formatSeconds(props.params.decaySec)}
+              value={props.params.decaySec}
+              min={REVERB_DECAY_SEC_MIN}
+              max={REVERB_DECAY_SEC_MAX}
+              step={0.1}
+              unit="s"
+              disabled={props.disabled}
+              onValueChange={props.onDecayChange}
+            />
+            <Knob
+              class="w-12 px-0 py-1"
+              label="Diff"
+              valueLabel={formatUnitPercent(props.params.diffusion)}
+              value={props.params.diffusion}
+              min={REVERB_UNIT_PARAM_MIN}
+              max={REVERB_UNIT_PARAM_MAX}
+              step={0.01}
+              disabled={props.disabled}
+              onValueChange={props.onDiffusionChange}
+            />
+            <Knob
+              class="w-12 px-0 py-1"
+              label="Dens"
+              valueLabel={formatUnitPercent(props.params.density)}
+              value={props.params.density}
+              min={REVERB_UNIT_PARAM_MIN}
+              max={REVERB_UNIT_PARAM_MAX}
+              step={0.01}
+              disabled={props.disabled}
+              onValueChange={props.onDensityChange}
+            />
           </div>
           <div />
         </div>
@@ -463,59 +414,55 @@ function EarlyReflectionsPanel(props: {
   return (
     <DeviceSection title="Early Reflections">
       <div class="flex pb-2">
-        <ReverbParameterButton label="Spin" active={props.params.reflectionSpin} disabled={props.disabled} onClick={props.onSpinToggle} />
+        <DeviceToggleButton label="Spin" active={props.params.reflectionSpin} disabled={props.disabled} onClick={props.onSpinToggle} />
       </div>
       <div class="grid grid-cols-2 gap-1">
-        <ReverbKnobControl label="Reflect" valueLabel={formatUnitPercent(props.params.reflections)}>
-          <Knob
-            value={props.params.reflections}
-            min={REVERB_UNIT_PARAM_MIN}
-            max={REVERB_UNIT_PARAM_MAX}
-            step={0.01}
-            label=""
-            disabled={props.disabled}
-            showValue={false}
-            onValueChange={props.onReflectChange}
-          />
-        </ReverbKnobControl>
-        <ReverbKnobControl label="Shape" valueLabel={formatUnitPercent(props.params.reflectionShape)}>
-          <Knob
-            value={props.params.reflectionShape}
-            min={REVERB_UNIT_PARAM_MIN}
-            max={REVERB_UNIT_PARAM_MAX}
-            step={0.01}
-            label=""
-            disabled={props.disabled}
-            showValue={false}
-            onValueChange={props.onShapeChange}
-          />
-        </ReverbKnobControl>
-        <ReverbKnobControl label="Amount" valueLabel={formatReflectionMilliseconds(props.params.reflectionModAmountMs)}>
-          <Knob
-            value={props.params.reflectionModAmountMs}
-            min={REVERB_REFLECTION_MOD_AMOUNT_MS_MIN}
-            max={REVERB_REFLECTION_MOD_AMOUNT_MS_MAX}
-            step={0.1}
-            label=""
-            unit="ms"
-            disabled={props.disabled}
-            showValue={false}
-            onValueChange={props.onModAmountChange}
-          />
-        </ReverbKnobControl>
-        <ReverbKnobControl label="Rate" valueLabel={formatHertz(props.params.reflectionModRateHz)}>
-          <Knob
-            value={props.params.reflectionModRateHz}
-            min={REVERB_REFLECTION_MOD_RATE_HZ_MIN}
-            max={REVERB_REFLECTION_MOD_RATE_HZ_MAX}
-            step={0.01}
-            label=""
-            unit="Hz"
-            disabled={props.disabled}
-            showValue={false}
-            onValueChange={props.onModRateChange}
-          />
-        </ReverbKnobControl>
+        <Knob
+          class="px-1 py-1"
+          label="Reflect"
+          valueLabel={formatUnitPercent(props.params.reflections)}
+          value={props.params.reflections}
+          min={REVERB_UNIT_PARAM_MIN}
+          max={REVERB_UNIT_PARAM_MAX}
+          step={0.01}
+          disabled={props.disabled}
+          onValueChange={props.onReflectChange}
+        />
+        <Knob
+          class="px-1 py-1"
+          label="Shape"
+          valueLabel={formatUnitPercent(props.params.reflectionShape)}
+          value={props.params.reflectionShape}
+          min={REVERB_UNIT_PARAM_MIN}
+          max={REVERB_UNIT_PARAM_MAX}
+          step={0.01}
+          disabled={props.disabled}
+          onValueChange={props.onShapeChange}
+        />
+        <Knob
+          class="px-1 py-1"
+          label="Amount"
+          valueLabel={formatReflectionMilliseconds(props.params.reflectionModAmountMs)}
+          value={props.params.reflectionModAmountMs}
+          min={REVERB_REFLECTION_MOD_AMOUNT_MS_MIN}
+          max={REVERB_REFLECTION_MOD_AMOUNT_MS_MAX}
+          step={0.1}
+          unit="ms"
+          disabled={props.disabled}
+          onValueChange={props.onModAmountChange}
+        />
+        <Knob
+          class="px-1 py-1"
+          label="Rate"
+          valueLabel={formatHertz(props.params.reflectionModRateHz)}
+          value={props.params.reflectionModRateHz}
+          min={REVERB_REFLECTION_MOD_RATE_HZ_MIN}
+          max={REVERB_REFLECTION_MOD_RATE_HZ_MAX}
+          step={0.01}
+          unit="Hz"
+          disabled={props.disabled}
+          onValueChange={props.onModRateChange}
+        />
       </div>
     </DeviceSection>
   )
@@ -574,8 +521,8 @@ export default function Reverb(props: ReverbProps) {
           title="Input Processing"
           topControls={
             <div class="grid grid-cols-2 gap-1">
-              <ReverbParameterButton label="Lo Cut" active={lowCutActive()} disabled={!props.params.enabled} onClick={toggleLowCut} />
-              <ReverbParameterButton label="Hi Cut" active={highCutActive()} disabled={!props.params.enabled} onClick={toggleHighCut} />
+              <DeviceToggleButton label="Lo Cut" active={lowCutActive()} disabled={!props.params.enabled} onClick={toggleLowCut} />
+              <DeviceToggleButton label="Hi Cut" active={highCutActive()} disabled={!props.params.enabled} onClick={toggleHighCut} />
             </div>
           }
           graph={
@@ -590,25 +537,24 @@ export default function Reverb(props: ReverbProps) {
           }
           bottomControls={
             <div class="grid grid-cols-2 gap-1">
-              <ReverbValueBox value={formatFrequencyWithUnit(props.params.lowCutHz)} />
-              <ReverbValueBox value={formatFrequencyWithUnit(props.params.highCutHz)} />
+              <DeviceValueStrip value={formatFrequencyWithUnit(props.params.lowCutHz)} />
+              <DeviceValueStrip value={formatFrequencyWithUnit(props.params.highCutHz)} />
             </div>
           }
           bottomKnobs={
             <div class="mt-auto w-24 self-center pb-2 pt-3">
-              <ReverbKnobControl label="Predelay" valueLabel={formatMilliseconds(props.params.preDelayMs)}>
-                <Knob
-                  value={props.params.preDelayMs}
-                  min={REVERB_PRE_DELAY_MS_MIN}
-                  max={REVERB_PRE_DELAY_MS_MAX}
-                  step={1}
-                  label=""
-                  unit="ms"
-                  disabled={!props.params.enabled}
-                  showValue={false}
-                  onValueChange={updatePreDelay}
-                />
-              </ReverbKnobControl>
+              <Knob
+                class="px-1 py-1"
+                label="Predelay"
+                valueLabel={formatMilliseconds(props.params.preDelayMs)}
+                value={props.params.preDelayMs}
+                min={REVERB_PRE_DELAY_MS_MIN}
+                max={REVERB_PRE_DELAY_MS_MAX}
+                step={1}
+                unit="ms"
+                disabled={!props.params.enabled}
+                onValueChange={updatePreDelay}
+              />
             </div>
           }
         />
@@ -638,42 +584,39 @@ export default function Reverb(props: ReverbProps) {
 
         <div class="flex min-h-0 min-w-0 flex-col bg-transparent">
           <div class="flex min-h-0 flex-1 flex-col justify-end gap-5 pb-2">
-            <ReverbKnobControl label="Diffuse" valueLabel={formatUnitPercent(props.params.diffuse)}>
-              <Knob
-                value={props.params.diffuse}
-                min={REVERB_UNIT_PARAM_MIN}
-                max={REVERB_UNIT_PARAM_MAX}
-                step={0.01}
-                label=""
-                disabled={!props.params.enabled}
-                showValue={false}
-                onValueChange={updateDiffuse}
-              />
-            </ReverbKnobControl>
-            <ReverbKnobControl label="Width" valueLabel={formatStereoWidth(props.params.stereoWidth)}>
-              <Knob
-                value={props.params.stereoWidth}
-                min={REVERB_STEREO_WIDTH_MIN}
-                max={REVERB_STEREO_WIDTH_MAX}
-                step={0.01}
-                label=""
-                disabled={!props.params.enabled}
-                showValue={false}
-                onValueChange={updateStereoWidth}
-              />
-            </ReverbKnobControl>
-            <ReverbKnobControl label="Dry/Wet" valueLabel={formatPercent(props.params.wet)}>
-              <Knob
-                value={props.params.wet}
-                min={REVERB_WET_MIN}
-                max={REVERB_WET_MAX}
-                step={0.01}
-                label=""
-                disabled={!props.params.enabled}
-                showValue={false}
-                onValueChange={updateWet}
-              />
-            </ReverbKnobControl>
+            <Knob
+              class="px-1 py-1"
+              label="Diffuse"
+              valueLabel={formatUnitPercent(props.params.diffuse)}
+              value={props.params.diffuse}
+              min={REVERB_UNIT_PARAM_MIN}
+              max={REVERB_UNIT_PARAM_MAX}
+              step={0.01}
+              disabled={!props.params.enabled}
+              onValueChange={updateDiffuse}
+            />
+            <Knob
+              class="px-1 py-1"
+              label="Width"
+              valueLabel={formatStereoWidth(props.params.stereoWidth)}
+              value={props.params.stereoWidth}
+              min={REVERB_STEREO_WIDTH_MIN}
+              max={REVERB_STEREO_WIDTH_MAX}
+              step={0.01}
+              disabled={!props.params.enabled}
+              onValueChange={updateStereoWidth}
+            />
+            <Knob
+              class="px-1 py-1"
+              label="Dry/Wet"
+              valueLabel={formatPercent(props.params.wet)}
+              value={props.params.wet}
+              min={REVERB_WET_MIN}
+              max={REVERB_WET_MAX}
+              step={0.01}
+              disabled={!props.params.enabled}
+              onValueChange={updateWet}
+            />
           </div>
         </div>
       </div>

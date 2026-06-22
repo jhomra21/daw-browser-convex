@@ -1,4 +1,4 @@
-import { For, createSignal, createMemo, onMount, onCleanup, createEffect, type JSX } from 'solid-js'
+import { For, createSignal, createMemo, onMount, onCleanup, createEffect } from 'solid-js'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import EffectShell from '~/components/effects/EffectShell'
 import Knob from '~/components/ui/knob'
@@ -107,22 +107,6 @@ function applyEqResponseBandParams(filter: BiquadFilterNode, band: EqBandParams)
   filter.frequency.value = Math.max(FREQ_MIN, Math.min(FREQ_MAX, band.frequency))
   filter.Q.value = Math.max(0.001, band.q)
   filter.gain.value = supportsGain(band.type) ? band.gainDb : 0
-}
-
-function AbletonKnobControl(props: {
-  label: string
-  valueLabel: string
-  children: JSX.Element
-}) {
-  return (
-    <div class="flex flex-col items-center gap-1 border-b border-neutral-800 px-1 py-2 last:border-b-0">
-      <div class="text-[10px] leading-none text-neutral-400">{props.label}</div>
-      {props.children}
-      <div class="max-w-full truncate font-mono text-[10px] leading-none text-cyan-300">
-        {props.valueLabel}
-      </div>
-    </div>
-  )
 }
 
 function EqFilterIcon(props: { type: EqBandType; active: boolean; class?: string }) {
@@ -606,63 +590,57 @@ export default function Eq(props: EqProps) {
         }}
       >
         <div class="row-span-2 flex flex-col border-r border-neutral-800 bg-neutral-950/30">
-          <AbletonKnobControl label="Freq" valueLabel={selectedFrequencyLabel()}>
-            <Knob
-              value={selectedBand()?.frequency ?? 1000}
-              min={FREQ_MIN}
-              max={FREQ_MAX}
-              step={1}
-              label=""
-              unit="Hz"
-              disabled={!props.enabled || !selectedBand()?.enabled}
-              logarithmic={true}
-              showValue={false}
-              onValueChange={(v) => {
-                const band = selectedBand()
-                if (!band) return
-                const frequency = Math.round(v)
-                if (band.frequency !== frequency) props.onBandChange(band.id, { frequency })
-              }}
-            />
-          </AbletonKnobControl>
+          <Knob
+            class="border-b border-neutral-800 px-1 py-2"
+            label="Freq"
+            valueLabel={selectedFrequencyLabel()}
+            value={selectedBand()?.frequency ?? 1000}
+            min={FREQ_MIN}
+            max={FREQ_MAX}
+            step={1}
+            unit="Hz"
+            disabled={!props.enabled || !selectedBand()?.enabled}
+            logarithmic={true}
+            onValueChange={(v) => {
+              const band = selectedBand()
+              if (!band) return
+              props.onBandChange(band.id, { frequency: v })
+            }}
+          />
 
-          <AbletonKnobControl label="Gain" valueLabel={selectedGainLabel()}>
-            <Knob
-              value={selectedBand()?.gainDb ?? 0}
-              min={GAIN_MIN}
-              max={GAIN_MAX}
-              step={0.1}
-              label=""
-              unit="dB"
-              disabled={!props.enabled || !selectedBand()?.enabled || !supportsGain(selectedBand()?.type ?? 'peaking')}
-              bipolar={true}
-              showValue={false}
-              onValueChange={(v) => {
-                const band = selectedBand()
-                if (!band) return
-                const gainDb = Math.round(v * 10) / 10
-                if (band.gainDb !== gainDb) props.onBandChange(band.id, { gainDb })
-              }}
-            />
-          </AbletonKnobControl>
+          <Knob
+            class="border-b border-neutral-800 px-1 py-2"
+            label="Gain"
+            valueLabel={selectedGainLabel()}
+            value={selectedBand()?.gainDb ?? 0}
+            min={GAIN_MIN}
+            max={GAIN_MAX}
+            step={0.1}
+            unit="dB"
+            disabled={!props.enabled || !selectedBand()?.enabled || !supportsGain(selectedBand()?.type ?? 'peaking')}
+            bipolar={true}
+            onValueChange={(v) => {
+              const band = selectedBand()
+              if (!band) return
+              props.onBandChange(band.id, { gainDb: v })
+            }}
+          />
 
-          <AbletonKnobControl label="Q" valueLabel={selectedQLabel()}>
-            <Knob
-              value={selectedBand()?.q ?? 1}
-              min={Q_MIN}
-              max={Q_MAX}
-              step={0.1}
-              label=""
-              disabled={!props.enabled || !selectedBand()?.enabled}
-              showValue={false}
-              onValueChange={(v) => {
-                const band = selectedBand()
-                if (!band) return
-                const q = Math.round(v * 10) / 10
-                if (band.q !== q) props.onBandChange(band.id, { q })
-              }}
-            />
-          </AbletonKnobControl>
+          <Knob
+            class="px-1 py-2"
+            label="Q"
+            valueLabel={selectedQLabel()}
+            value={selectedBand()?.q ?? 1}
+            min={Q_MIN}
+            max={Q_MAX}
+            step={0.1}
+            disabled={!props.enabled || !selectedBand()?.enabled}
+            onValueChange={(v) => {
+              const band = selectedBand()
+              if (!band) return
+              props.onBandChange(band.id, { q: v })
+            }}
+          />
         </div>
 
         <div ref={containerRef} class="relative min-w-0 overflow-hidden bg-neutral-950">

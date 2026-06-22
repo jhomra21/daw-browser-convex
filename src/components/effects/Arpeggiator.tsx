@@ -16,8 +16,6 @@ type ArpeggiatorProps = {
   class?: string
 }
 
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
-
 const PATTERNS: { value: ArpeggiatorParams['pattern']; label: string }[] = [
   { value: 'up', label: 'Up' },
   { value: 'down', label: 'Down' },
@@ -106,37 +104,26 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
 
       {/* Controls */}
       <div class="px-3 py-3 flex flex-1 items-center justify-evenly gap-4">
-        {/* Octaves */}
-        <div class="flex flex-col items-center gap-1">
-          <div class="text-xs leading-none text-neutral-400">Octaves</div>
-          <Knob
-            value={props.params.octaves}
-            min={1}
-            max={4}
-            step={1}
-            label=""
-            showValue={false}
-            onValueChange={(v) => props.onChange({ octaves: Math.round(clamp(v, 1, 4)) })}
-            disabled={props.disabled || !props.params.enabled}
-          />
-          <div class="text-xs leading-none text-neutral-300 font-mono">{props.params.octaves}</div>
-        </div>
-
-        {/* Gate */}
-        <div class="flex flex-col items-center gap-1">
-          <div class="text-xs leading-none text-neutral-400">Gate</div>
-          <Knob
-            value={props.params.gate}
-            min={0.1}
-            max={1.0}
-            step={0.05}
-            label=""
-            showValue={false}
-            onValueChange={(v) => props.onChange({ gate: Math.round(clamp(v, 0.1, 1.0) * 100) / 100 })}
-            disabled={props.disabled || !props.params.enabled}
-          />
-          <div class="text-xs leading-none text-neutral-300 font-mono">{(props.params.gate * 100).toFixed(0)}%</div>
-        </div>
+        <Knob
+          label="Octaves"
+          valueLabel={String(props.params.octaves)}
+          value={props.params.octaves}
+          min={1}
+          max={4}
+          step={1}
+          onValueChange={(octaves) => props.onChange({ octaves })}
+          disabled={props.disabled || !props.params.enabled}
+        />
+        <Knob
+          label="Gate"
+          valueLabel={`${(props.params.gate * 100).toFixed(0)}%`}
+          value={props.params.gate}
+          min={0.1}
+          max={1.0}
+          step={0.05}
+          onValueChange={(gate) => props.onChange({ gate })}
+          disabled={props.disabled || !props.params.enabled}
+        />
       </div>
     </EffectShell>
   )

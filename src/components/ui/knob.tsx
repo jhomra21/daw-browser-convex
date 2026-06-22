@@ -1,4 +1,4 @@
-import { createSignal } from 'solid-js'
+import { Show, createSignal } from 'solid-js'
 import { useDrag } from '~/hooks/useDrag'
 import { cn } from '~/lib/utils'
 
@@ -9,12 +9,14 @@ type KnobProps = {
   step?: number
   size?: number
   label?: string
+  valueLabel?: string
   unit?: string
   disabled?: boolean
   onValueChange: (value: number) => void
   logarithmic?: boolean
   bipolar?: boolean
   showValue?: boolean
+  class?: string
 }
 
 export default function Knob(props: KnobProps) {
@@ -24,11 +26,10 @@ export default function Knob(props: KnobProps) {
   let lastEmittedValue = props.value
   
   const size = () => props.size ?? 36
-  const step = () => props.step || 0.1
-  const bipolar = () => props.bipolar || false
+  const step = () => props.step ?? 0.1
+  const bipolar = () => props.bipolar ?? false
   const visualValue = () => dragValue() ?? props.value
   
-  // Calculate angle based on value (180 degrees range, -90 to +90)
   const getAngle = () => {
     const value = visualValue()
     const normalizedValue = (value - props.min) / (props.max - props.min)
@@ -37,29 +38,26 @@ export default function Knob(props: KnobProps) {
   }
 
   const arcRadiusPx = () => (size() / 100) * 35
-  
-  // Pointer geometry: keep the stick safely inside the arc
   const indicatorLength = () => Math.max(6, arcRadiusPx() - 10)
-  // Arc center in the viewBox is at y=75 → in pixels: 6px padding + 0.75 * size()
   const pointerTop = () => 6 + size() * 0.75 - indicatorLength()
 
-  // Directly from value range for a 0..1 fraction
   const arcFraction = () => {
     const value = visualValue()
     if (props.max === props.min) return 0
     return Math.max(0, Math.min(1, (value - props.min) / (props.max - props.min)))
   }
-  
-  // With pathLength="100", dasharray can use percentages
   const arcDashArray = () => {
     const fraction = arcFraction()
     const visible = Math.max(0, Math.min(100, fraction * 100))
     const hidden = 100 - visible
     return `${visible} ${hidden}`
   }
+  const normalizeValue = (value: number) => {
+    const clamped = Math.max(props.min, Math.min(props.max, value))
+    const stepped = Math.round(clamped / step()) * step()
+    return Math.max(props.min, Math.min(props.max, Number(stepped.toFixed(6))))
+  }
 
-
-  // Format display value
   const formatValue = () => {
     const unit = props.unit ?? ''
     const value = visualValue()
@@ -98,7 +96,6 @@ export default function Knob(props: KnobProps) {
       let newValue: number
       
       if (props.logarithmic) {
-        // Logarithmic scaling for frequency
         const normalizedStart = (startValue - props.min) / (props.max - props.min)
         const logMin = Math.log10(props.min)
         const logMax = Math.log10(props.max)
@@ -106,16 +103,12 @@ export default function Knob(props: KnobProps) {
         const logNew = logStart + (deltaY * sensitivity * 0.005)
         newValue = Math.pow(10, Math.max(logMin, Math.min(logMax, logNew)))
       } else {
-        // Linear scaling
         const range = props.max - props.min
         const deltaValue = (deltaY * sensitivity * range) / 150
         newValue = startValue + deltaValue
       }
       
-      // Clamp and round
-      newValue = Math.max(props.min, Math.min(props.max, newValue))
-      const stepped = Math.round(newValue / step()) * step()
-      const finalValue = Math.max(props.min, Math.min(props.max, stepped))
+      const finalValue = normalizeValue(newValue)
       
       setDragValue(finalValue)
       emitValue(finalValue)
@@ -129,7 +122,6 @@ export default function Knob(props: KnobProps) {
   const handleDoubleClick = () => {
     if (props.disabled) return
     
-    // Reset to center for bipolar, to min for unipolar
     const resetValue = bipolar() ? (props.min + props.max) / 2 : props.min
     lastEmittedValue = props.value
     setDragValue(resetValue)
@@ -137,53 +129,99 @@ export default function Knob(props: KnobProps) {
     queueMicrotask(() => setDragValue(null))
   }
 
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (props.disabled) return
+    const currentValue = visualValue()
+    const largeStep = step() * 10
+    let nextValue: number | undefined
+
+    switch (event.key) {
+      case 'ArrowUp':
+      case 'ArrowRight':
+        nextValue = currentValue + step()
+        break
+      case 'ArrowDown':
+      case 'ArrowLeft':
+        nextValue = currentValue - step()
+        break
+      case 'PageUp':
+        nextValue = currentValue + largeStep
+        break
+      case 'PageDown':
+        nextValue = currentValue - largeStep
+        break
+      case 'Home':
+        nextValue = props.min
+        break
+      case 'End':
+        nextValue = props.max
+        break
+      default:
+        return
+    }
+
+    event.preventDefault()
+    lastEmittedValue = props.value
+    const finalValue = normalizeValue(nextValue)
+    setDragValue(finalValue)
+    emitValue(finalValue)
+    queueMicrotask(() => setDragValue(null))
+  }
+
   return (
-    <div class="flex flex-col items-center gap-1">
-      {/* Label */}
-      {props.label && (
-        <div class="text-xs text-gray-400 font-medium">
-          {props.label}
-        </div>
-      )}
+    <div class={cn('flex flex-col items-center gap-1', props.class)}>
+      <Show when={props.label}>
+        <div class="text-xs font-medium leading-none text-neutral-400">{props.label}</div>
+      </Show>
       
-      {/* Knob Container - Larger click area */}
       <div
-        class={cn(
-          'relative select-none transition-transform duration-100',
-          props.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-        )}
+        role="slider"
+        tabIndex={props.disabled ? undefined : 0}
+        aria-label={props.label ?? 'Knob'}
+        aria-disabled={props.disabled}
+        aria-valuemin={props.min}
+        aria-valuemax={props.max}
+        aria-valuenow={visualValue()}
+        aria-valuetext={props.valueLabel ?? formatValue()}
+        class="relative select-none transition-transform duration-100"
+        classList={{
+          'cursor-not-allowed opacity-50': props.disabled,
+          'cursor-pointer': !props.disabled,
+        }}
         style={{ 
           width: `${size() + 12}px`, 
           height: `${size() + 12}px`,
           padding: '6px',
           'user-select': 'none',
           '-webkit-user-select': 'none',
-          'touch-action': 'none'
+          'touch-action': 'none',
         }}
         onPointerDown={drag.onPointerDown}
+        onKeyDown={handleKeyDown}
         onDblClick={handleDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
         onDragStart={(e) => e.preventDefault()}
       >
-        {/* Value Track (Background) */}
-        <svg 
-          class="absolute inset-1.5 w-full h-full"
+        <svg
+          class="absolute inset-1.5 h-full w-full"
           style={{ width: `${size()}px`, height: `${size()}px` }}
           viewBox="0 0 100 100"
+          aria-hidden="true"
         >
-          {/* Background Arc */}
           <path
+            class="stroke-neutral-800"
             d="M 15 75 A 35 35 0 1 1 85 75"
             fill="none"
-            stroke="#1f2937"
             stroke-width="4"
           />
           
-          {/* Value Arc */}
           <path
+            classList={{
+              'stroke-sky-300': drag.isDragging(),
+              'stroke-cyan-400': !drag.isDragging(),
+            }}
             d="M 15 75 A 35 35 0 1 1 85 75"
             fill="none"
-            stroke={drag.isDragging() ? '#60a5fa' : '#38bdf8'}
             stroke-width="4"
             pathLength="100"
             stroke-dasharray={arcDashArray()}
@@ -191,31 +229,31 @@ export default function Knob(props: KnobProps) {
           />
         </svg>
         
-        {/* Center Indicator */}
         <div
-          class={cn(
-            'absolute w-0.5 -translate-x-1/2 transform origin-bottom',
-            drag.isDragging() ? 'bg-sky-100' : 'bg-gray-200',
-          )}
+          class="absolute w-0.5 -translate-x-1/2 origin-bottom transform"
+          classList={{
+            'bg-sky-100': drag.isDragging(),
+            'bg-neutral-200': !drag.isDragging(),
+          }}
           style={{ 
             left: '50%',
             top: `${pointerTop()}px`,
             height: `${indicatorLength()}px`,
             transform: `translateX(-50%) rotate(${getAngle()}deg)`,
-            'transform-origin': `center ${indicatorLength()}px`
+            'transform-origin': `center ${indicatorLength()}px`,
           }}
         />
       </div>
       
-      {/* Value Display */}
       {props.showValue !== false && (
         <div
-          class={cn(
-            'min-w-12 text-center font-mono text-xs transition-colors duration-150',
-            drag.isDragging() ? 'text-gray-200' : 'text-gray-400',
-          )}
+          class="max-w-full min-w-12 truncate text-center font-mono text-xs leading-none transition-colors duration-150"
+          classList={{
+            'text-neutral-100': drag.isDragging(),
+            'text-cyan-300': !drag.isDragging(),
+          }}
         >
-          {formatValue()}
+          {props.valueLabel ?? formatValue()}
         </div>
       )}
     </div>

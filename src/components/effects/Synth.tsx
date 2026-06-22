@@ -18,8 +18,6 @@ type SynthProps = {
   class?: string
 }
 
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
-
 const WAVEFORMS: { value: SynthWave; label: string; icon: string }[] = [
   { value: 'sine', label: 'Sine', icon: '~' },
   { value: 'square', label: 'Square', icon: '[]' },
@@ -33,6 +31,7 @@ export default function Synth(props: SynthProps) {
   const wvH = () => (variant() === 'expanded' ? 64 : 28)
   const envW = () => (variant() === 'expanded' ? 360 : 220)
   const envH = () => (variant() === 'expanded' ? 80 : 48)
+
   return (
     <EffectShell
       title="Synth"
@@ -112,55 +111,38 @@ export default function Synth(props: SynthProps) {
 
       {/* Controls */}
       <div class="px-3 py-3 flex flex-1 items-center justify-evenly gap-4">
-        {/* Gain */}
-        <div class="flex flex-col items-center gap-1">
-          <div class="text-xs leading-none text-neutral-400">Gain</div>
-          <Knob
-            value={props.params.gain}
-            min={0}
-            max={1.5}
-            step={0.05}
-            label=""
-            showValue={false}
-            onValueChange={(v) => props.onChange({ gain: Math.round(clamp(v, 0, 1.5) * 100) / 100 })}
-            disabled={props.disabled}
-          />
-          <div class="text-xs leading-none text-neutral-300 font-mono">{props.params.gain.toFixed(2)}</div>
-        </div>
-
-        {/* Attack */}
-        <div class="flex flex-col items-center gap-1">
-          <div class="text-xs leading-none text-neutral-400">Attack</div>
-          <Knob
-            value={props.params.attackMs}
-            min={0}
-            max={200}
-            step={1}
-            label=""
-            unit="ms"
-            showValue={false}
-            onValueChange={(v) => props.onChange({ attackMs: Math.round(clamp(v, 0, 200)) })}
-            disabled={props.disabled}
-          />
-          <div class="text-xs leading-none text-neutral-300 font-mono">{props.params.attackMs}ms</div>
-        </div>
-
-        {/* Release */}
-        <div class="flex flex-col items-center gap-1">
-          <div class="text-xs leading-none text-neutral-400">Release</div>
-          <Knob
-            value={props.params.releaseMs}
-            min={0}
-            max={200}
-            step={1}
-            label=""
-            unit="ms"
-            showValue={false}
-            onValueChange={(v) => props.onChange({ releaseMs: Math.round(clamp(v, 0, 200)) })}
-            disabled={props.disabled}
-          />
-          <div class="text-xs leading-none text-neutral-300 font-mono">{props.params.releaseMs}ms</div>
-        </div>
+        <Knob
+          label="Gain"
+          valueLabel={props.params.gain.toFixed(2)}
+          value={props.params.gain}
+          min={0}
+          max={1.5}
+          step={0.05}
+          onValueChange={(gain) => props.onChange({ gain })}
+          disabled={props.disabled}
+        />
+        <Knob
+          label="Attack"
+          valueLabel={`${props.params.attackMs}ms`}
+          value={props.params.attackMs}
+          min={0}
+          max={200}
+          step={1}
+          unit="ms"
+          onValueChange={(attackMs) => props.onChange({ attackMs })}
+          disabled={props.disabled}
+        />
+        <Knob
+          label="Release"
+          valueLabel={`${props.params.releaseMs}ms`}
+          value={props.params.releaseMs}
+          min={0}
+          max={200}
+          step={1}
+          unit="ms"
+          onValueChange={(releaseMs) => props.onChange({ releaseMs })}
+          disabled={props.disabled}
+        />
       </div>
 
       {/* Envelope preview */}

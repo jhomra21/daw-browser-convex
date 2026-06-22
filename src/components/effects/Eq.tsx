@@ -3,6 +3,12 @@ import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import EffectShell from '~/components/effects/EffectShell'
 import Knob from '~/components/ui/knob'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '~/components/ui/dropdown-menu'
+import {
   supportsGain,
   type EqBandParams,
   type EqBandType,
@@ -34,26 +40,19 @@ const SPECTRUM_SILENCE_THRESHOLD = 0.003
 const SPECTRUM_MIN_SMOOTHING_PX = 3
 const SPECTRUM_MAX_SMOOTHING_PX = 18
 
-const FILTER_TYPE_DEFINITIONS: { value: EqBandType; label: string; path: string; cycles: boolean }[] = [
-  { value: 'lowpass', label: 'Low Pass', path: 'M2 4 H17 C22 4 22 12 30 12', cycles: true },
-  { value: 'highpass', label: 'High Pass', path: 'M2 12 C10 12 10 4 15 4 H30', cycles: true },
-  { value: 'bandpass', label: 'Band Pass', path: 'M2 12 C8 12 9 4 16 4 C23 4 24 12 30 12', cycles: true },
-  { value: 'notch', label: 'Notch', path: 'M2 4 H12 C14 4 14 12 16 12 C18 12 18 4 20 4 H30', cycles: true },
-  { value: 'lowshelf', label: 'Low Shelf', path: 'M2 10 H10 C15 10 15 5 20 5 H30', cycles: true },
-  { value: 'highshelf', label: 'High Shelf', path: 'M2 5 H12 C17 5 17 10 22 10 H30', cycles: true },
-  { value: 'peaking', label: 'Peaking', path: 'M2 10 C8 10 10 5 16 5 C22 5 24 10 30 10', cycles: true },
-  { value: 'allpass', label: 'All Pass', path: 'M2 8 H30', cycles: false },
+const FILTER_TYPE_DEFINITIONS: { value: EqBandType; label: string; path: string }[] = [
+  { value: 'lowpass', label: 'Low Pass', path: 'M2 4 H17 C22 4 22 12 30 12' },
+  { value: 'highpass', label: 'High Pass', path: 'M2 12 C10 12 10 4 15 4 H30' },
+  { value: 'bandpass', label: 'Band Pass', path: 'M2 12 C8 12 9 4 16 4 C23 4 24 12 30 12' },
+  { value: 'notch', label: 'Notch', path: 'M2 4 H12 C14 4 14 12 16 12 C18 12 18 4 20 4 H30' },
+  { value: 'lowshelf', label: 'Low Shelf', path: 'M2 10 H10 C15 10 15 5 20 5 H30' },
+  { value: 'highshelf', label: 'High Shelf', path: 'M2 5 H12 C17 5 17 10 22 10 H30' },
+  { value: 'peaking', label: 'Peaking', path: 'M2 10 C8 10 10 5 16 5 C22 5 24 10 30 10' },
+  { value: 'allpass', label: 'All Pass', path: 'M2 8 H30' },
 ]
 
 const filterDefinition = (type: EqBandType) =>
   FILTER_TYPE_DEFINITIONS.find((definition) => definition.value === type) ?? FILTER_TYPE_DEFINITIONS[6]
-
-const CYCLE_FILTER_TYPES = FILTER_TYPE_DEFINITIONS.filter((definition) => definition.cycles).map((definition) => definition.value)
-
-const nextFilterType = (type: EqBandType): EqBandType => {
-  const index = CYCLE_FILTER_TYPES.indexOf(type)
-  return CYCLE_FILTER_TYPES[(index + 1) % CYCLE_FILTER_TYPES.length]
-}
 
 const formatFrequency = (frequency: number) =>
   frequency >= 1000 ? `${(frequency / 1000).toFixed(2)} kHz` : `${Math.round(frequency)} Hz`
@@ -126,13 +125,64 @@ function AbletonKnobControl(props: {
   )
 }
 
-function EqFilterIcon(props: { type: EqBandType; active: boolean }) {
+function EqFilterIcon(props: { type: EqBandType; active: boolean; class?: string }) {
   const stroke = () => props.active ? '#67e8f9' : '#737373'
 
   return (
-    <svg viewBox="0 0 32 16" class="h-4 w-8" aria-hidden="true">
+    <svg viewBox="0 0 32 16" class={cn('h-4 w-8', props.class)} aria-hidden="true">
       <path d={filterDefinition(props.type).path} fill="none" stroke={stroke()} stroke-width="2" />
     </svg>
+  )
+}
+
+function EqBandFilterMenu(props: {
+  band: EqBandParams
+  enabled: boolean
+  selected: boolean
+  onSelectBand: () => void
+  onTypeChange: (type: EqBandType) => void
+}) {
+  const canEdit = () => props.enabled && props.band.enabled
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        class={cn(
+          'flex h-4 w-full items-center justify-between border border-neutral-700 bg-neutral-800 px-1 text-neutral-300',
+          props.selected && 'border-cyan-400 bg-cyan-500/15 text-cyan-200',
+          !props.enabled && 'cursor-not-allowed opacity-60',
+          props.enabled && !props.band.enabled && 'opacity-60',
+        )}
+        disabled={!props.enabled}
+        onClick={props.onSelectBand}
+        title={`${filterDefinition(props.band.type).label} filter`}
+      >
+        <EqFilterIcon type={props.band.type} active={props.band.enabled} class="h-2.5 w-6" />
+        <svg viewBox="0 0 8 8" class="h-1.5 w-1.5 shrink-0 text-neutral-400" aria-hidden="true">
+          <path d="M1 3 L4 6 L7 3 Z" fill="currentColor" />
+        </svg>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent class="w-max min-w-28 border-neutral-700 bg-neutral-900 p-1">
+        <For each={FILTER_TYPE_DEFINITIONS}>
+          {(definition) => (
+            <DropdownMenuItem
+              class={cn(
+                'h-7 cursor-pointer gap-2 px-2 py-1 text-xs text-neutral-200 focus:bg-neutral-800 focus:text-neutral-50',
+                definition.value === props.band.type && 'bg-cyan-500/20 text-cyan-100',
+              )}
+              disabled={!canEdit()}
+              onSelect={() => {
+                props.onSelectBand()
+                props.onTypeChange(definition.value)
+              }}
+            >
+              <EqFilterIcon type={definition.value} active={definition.value === props.band.type} />
+              <span class="min-w-0 flex-1 truncate">{definition.label}</span>
+            </DropdownMenuItem>
+          )}
+        </For>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -546,10 +596,16 @@ export default function Eq(props: EqProps) {
       enabled={props.enabled}
       onToggleEnabled={props.onToggleEnabled}
       onReset={props.onReset}
-      class={cn('w-[784px] min-w-[784px]', props.class)}
+      class={cn('w-[704px] min-w-[704px]', props.class)}
     >
-      <div class="grid min-h-0 flex-1" style={{ 'grid-template-columns': '72px minmax(220px, 1fr) 72px' }}>
-        <div class="flex flex-col border-r border-neutral-800 bg-neutral-950/30">
+      <div
+        class="grid min-h-0 flex-1 overflow-hidden"
+        style={{
+          'grid-template-columns': '72px minmax(220px, 1fr) 72px',
+          'grid-template-rows': 'minmax(0, 1fr) 52px',
+        }}
+      >
+        <div class="row-span-2 flex flex-col border-r border-neutral-800 bg-neutral-950/30">
           <AbletonKnobControl label="Freq" valueLabel={selectedFrequencyLabel()}>
             <Knob
               value={selectedBand()?.frequency ?? 1000}
@@ -622,56 +678,49 @@ export default function Eq(props: EqProps) {
           />
         </div>
 
-        <div class="flex flex-col border-l border-neutral-800 bg-neutral-950/40 px-1 py-2 text-[10px]">
+        <div class="row-span-2 flex flex-col border-l border-neutral-800 bg-neutral-950/40 px-1 py-2 text-[10px]">
           <div class="mb-1 text-neutral-500">Mode</div>
           <div class="mb-3 border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-neutral-300">Stereo</div>
           <div class="mb-1 text-neutral-500">Edit</div>
           <div class="mb-3 border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-neutral-300">A</div>
         </div>
-      </div>
 
-      <div class="flex border-t border-neutral-800 bg-neutral-950/50">
-        <For each={props.bands}>
-          {(band, index) => (
-            <div class="grid min-w-[72px] flex-1 grid-cols-[34px_12px_20px] items-center justify-center gap-1 border-r border-neutral-800 px-1 py-1 last:border-r-0">
-              <button
-                class={cn(
-                  'flex h-7 w-[34px] items-center justify-center border border-neutral-700 bg-neutral-800 text-neutral-300',
-                  selectedId() === band.id && 'border-cyan-400 bg-cyan-500/15 text-cyan-200',
-                )}
-                disabled={!props.enabled}
-                onClick={() => setSelectedId(band.id)}
-                title={`Select band ${index() + 1}`}
-              >
-                <EqFilterIcon type={band.type} active={band.enabled} />
-              </button>
+        <div class="relative z-10 flex min-w-0 border-t border-neutral-800 bg-neutral-950">
+          <For each={props.bands}>
+            {(band, index) => (
+              <div class="flex min-w-0 flex-1 flex-col items-center justify-center gap-1 border-r border-neutral-800 p-1 last:border-r-0">
+                <EqBandFilterMenu
+                  band={band}
+                  enabled={props.enabled}
+                  selected={selectedId() === band.id}
+                  onSelectBand={() => setSelectedId(band.id)}
+                  onTypeChange={(type) => props.onBandChange(band.id, { type })}
+                />
 
-              <button
-                class={cn(
-                  'h-3 w-3 border border-neutral-600',
-                  band.enabled ? 'bg-cyan-400' : 'bg-neutral-900',
-                )}
-                disabled={!props.enabled || !props.onBandToggle}
-                onClick={() => props.onBandToggle?.(band.id)}
-                title={band.enabled ? 'Disable band' : 'Enable band'}
-              />
-
-              <button
-                class={cn(
-                  'flex h-5 w-5 items-center justify-center border text-[10px] font-semibold',
-                  selectedId() === band.id
-                    ? 'border-amber-400 bg-amber-400 text-black'
-                    : 'border-neutral-600 bg-neutral-900 text-neutral-300',
-                )}
-                disabled={!props.enabled || !band.enabled}
-                onClick={() => props.onBandChange(band.id, { type: nextFilterType(band.type) })}
-                title={`${filterDefinition(band.type).label}: click to cycle filter type`}
-              >
-                {index() + 1}
-              </button>
-            </div>
-          )}
-        </For>
+                <div class="flex h-5 items-center justify-center gap-2">
+                  <button
+                    class={cn(
+                      'h-3.5 w-3.5 border border-neutral-600',
+                      band.enabled ? 'bg-cyan-400' : 'bg-neutral-900',
+                    )}
+                    disabled={!props.enabled || !props.onBandToggle}
+                    onClick={() => props.onBandToggle?.(band.id)}
+                    title={band.enabled ? 'Disable band' : 'Enable band'}
+                  />
+                  <span
+                    class={cn(
+                      'w-3 text-center text-[11px] font-semibold leading-none',
+                      selectedId() === band.id ? 'text-amber-300' : 'text-neutral-300',
+                      !band.enabled && 'text-neutral-500',
+                    )}
+                  >
+                    {index() + 1}
+                  </span>
+                </div>
+              </div>
+            )}
+          </For>
+        </div>
       </div>
     </EffectShell>
   )

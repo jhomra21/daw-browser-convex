@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test'
-import { addEarlyReflectionTaps, createReverbImpulseRenderInfo, getImpulseBucket } from './dsp'
-import { getAppliedReverbSignature, getReverbImpulseSignature, getReverbTopologySignature } from './reverb-signature'
+import { addEarlyReflectionTaps, createReverbImpulseRenderInfo } from './dsp'
+import { getAppliedReverbSignature, getReverbImpulseBucket, getReverbImpulseSignature, getReverbTopologySignature } from './reverb-signature'
 import { createDefaultReverbParams, normalizeReverbParams, REVERB_DECAY_SEC_MAX } from '@daw-browser/shared'
 
 describe('reverb impulse rendering', () => {
   test('uses shared maximum decay for impulse buckets', () => {
-    const bucket = getImpulseBucket(REVERB_DECAY_SEC_MAX + 10)
+    const bucket = getReverbImpulseBucket(REVERB_DECAY_SEC_MAX + 10)
 
     expect(bucket.bucketSec).toBe(REVERB_DECAY_SEC_MAX)
   })
 
   test('includes impulse-shaping params in the render signature', () => {
-    const base = normalizeReverbParams({ decaySec: 2, size: 0.5, density: 0.5, diffusion: 0.5, diffusionLowCutHz: 120, diffusionHighCutHz: 12000 })
+    const base = normalizeReverbParams({ decaySec: 2, size: 0.5, density: 0.5, diffusion: 0.5, diffusionLowCutHz: 120, diffusionHighCutHz: 12000, reflections: 0.5 })
     const denser = normalizeReverbParams({ ...base, density: 0.8 })
     const lowCut = normalizeReverbParams({ ...base, diffusionLowCutHz: 830 })
     const darker = normalizeReverbParams({ ...base, diffusionHighCutHz: 8000 })
@@ -33,6 +33,16 @@ describe('reverb impulse rendering', () => {
     expect(createReverbImpulseRenderInfo(48000, reflectionRate).signature).not.toBe(baseSignature)
     expect(createReverbImpulseRenderInfo(48000, reflectionShape).signature).not.toBe(baseSignature)
     expect(createReverbImpulseRenderInfo(48000, diffuse).signature).not.toBe(baseSignature)
+  })
+
+  test('excludes inactive reflection spin params from the impulse render signature', () => {
+    const disabledReflections = normalizeReverbParams({ reflections: 0 })
+    const disabledSpin = normalizeReverbParams({ reflections: 0.5, reflectionSpin: false })
+
+    expect(createReverbImpulseRenderInfo(48000, { ...disabledReflections, reflectionModAmountMs: 4 }).signature)
+      .toBe(createReverbImpulseRenderInfo(48000, disabledReflections).signature)
+    expect(createReverbImpulseRenderInfo(48000, { ...disabledSpin, reflectionModRateHz: 1.2 }).signature)
+      .toBe(createReverbImpulseRenderInfo(48000, disabledSpin).signature)
   })
 
   test('includes size in the impulse render signature within the same decay bucket', () => {

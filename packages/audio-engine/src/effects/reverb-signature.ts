@@ -43,6 +43,8 @@ export function getReverbImpulseSignatureParts(
   const normalized = normalizeReverbParams(params)
   const sizeScale = 0.5 + normalized.size * 0.75
   const bucket = getReverbImpulseBucket(normalized.decaySec * sizeScale, options?.bucketSize)
+  const reflectionsBucket = Math.round(normalized.reflections * 100)
+  const reflectionSpinBucket = reflectionsBucket > 0 && normalized.reflectionSpin ? 1 : 0
   return {
     bucketIndex: bucket.bucketIndex,
     bucketSec: bucket.bucketSec,
@@ -51,10 +53,10 @@ export function getReverbImpulseSignatureParts(
     diffusionBucket: Math.round(normalized.diffusion * 100),
     diffusionLowCutBucket: Math.round(normalized.diffusionLowCutHz / 10),
     diffusionHighCutBucket: Math.round(normalized.diffusionHighCutHz / 100),
-    reflectionsBucket: Math.round(normalized.reflections * 100),
-    reflectionSpinBucket: normalized.reflectionSpin ? 1 : 0,
-    reflectionModAmountBucket: Math.round(normalized.reflectionModAmountMs * 10),
-    reflectionModRateBucket: Math.round(normalized.reflectionModRateHz * 100),
+    reflectionsBucket,
+    reflectionSpinBucket,
+    reflectionModAmountBucket: reflectionSpinBucket ? Math.round(normalized.reflectionModAmountMs * 10) : 0,
+    reflectionModRateBucket: reflectionSpinBucket ? Math.round(normalized.reflectionModRateHz * 100) : 0,
     reflectionShapeBucket: Math.round(normalized.reflectionShape * 100),
     diffuseBucket: Math.round(normalized.diffuse * 100),
   }

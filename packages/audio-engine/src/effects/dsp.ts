@@ -1,5 +1,5 @@
 import { normalizeReverbParams, REVERB_DIFFUSION_HIGH_CUT_HZ_MAX, REVERB_DIFFUSION_LOW_CUT_HZ_MIN, supportsGain, type ArpParams, type EqBandParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
-import { formatReverbImpulseSignature, getReverbImpulseBucket, getReverbImpulseSignatureParts, type ReverbImpulseBucket, type ReverbImpulseSignatureParts } from './reverb-signature'
+import { formatReverbImpulseSignature, getReverbImpulseSignatureParts, type ReverbImpulseSignatureParts } from './reverb-signature'
 
 type MidiNote = { beat: number; length: number; pitch: number; velocity?: number }
 
@@ -21,10 +21,6 @@ function createSeededRandom(seed: number) {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
   }
-}
-
-export function getImpulseBucket(decaySec: number, bucketSize = 0.1): ReverbImpulseBucket {
-  return getReverbImpulseBucket(decaySec, bucketSize)
 }
 
 function getOnePoleLowpassAlpha(cutoffHz: number, sampleRate: number): number {

@@ -61,6 +61,35 @@ const LOW_CUT_TOGGLE_HZ = 830
 const HIGH_CUT_TOGGLE_HZ = 6000
 const DIFFUSION_LOW_CUT_TOGGLE_HZ = 830
 const DIFFUSION_HIGH_CUT_TOGGLE_HZ = 6000
+const REVERB_UPDATE_KEYS: ReadonlyArray<keyof ReverbParams> = [
+  'wet',
+  'decaySec',
+  'preDelayMs',
+  'reflections',
+  'reflectionSpin',
+  'reflectionModAmountMs',
+  'reflectionModRateHz',
+  'reflectionShape',
+  'diffuse',
+  'size',
+  'diffusion',
+  'density',
+  'lowCutHz',
+  'highCutHz',
+  'diffusionLowCutHz',
+  'diffusionHighCutHz',
+  'stereoWidth',
+]
+
+function addChangedReverbParam<Key extends keyof ReverbParams>(
+  changed: Partial<ReverbParams>,
+  current: ReverbParams,
+  updates: Partial<ReverbParams>,
+  key: Key,
+) {
+  const value = updates[key]
+  if (value !== undefined && current[key] !== value) changed[key] = value
+}
 
 function DeviceSection(props: {
   title: string
@@ -495,23 +524,7 @@ function EarlyReflectionsPanel(props: {
 export default function Reverb(props: ReverbProps) {
   const updateParam = (updates: Partial<ReverbParams>) => {
     const changed: Partial<ReverbParams> = {}
-    if (updates.wet !== undefined && props.params.wet !== updates.wet) changed.wet = updates.wet
-    if (updates.decaySec !== undefined && props.params.decaySec !== updates.decaySec) changed.decaySec = updates.decaySec
-    if (updates.preDelayMs !== undefined && props.params.preDelayMs !== updates.preDelayMs) changed.preDelayMs = updates.preDelayMs
-    if (updates.reflections !== undefined && props.params.reflections !== updates.reflections) changed.reflections = updates.reflections
-    if (updates.reflectionSpin !== undefined && props.params.reflectionSpin !== updates.reflectionSpin) changed.reflectionSpin = updates.reflectionSpin
-    if (updates.reflectionModAmountMs !== undefined && props.params.reflectionModAmountMs !== updates.reflectionModAmountMs) changed.reflectionModAmountMs = updates.reflectionModAmountMs
-    if (updates.reflectionModRateHz !== undefined && props.params.reflectionModRateHz !== updates.reflectionModRateHz) changed.reflectionModRateHz = updates.reflectionModRateHz
-    if (updates.reflectionShape !== undefined && props.params.reflectionShape !== updates.reflectionShape) changed.reflectionShape = updates.reflectionShape
-    if (updates.diffuse !== undefined && props.params.diffuse !== updates.diffuse) changed.diffuse = updates.diffuse
-    if (updates.size !== undefined && props.params.size !== updates.size) changed.size = updates.size
-    if (updates.diffusion !== undefined && props.params.diffusion !== updates.diffusion) changed.diffusion = updates.diffusion
-    if (updates.density !== undefined && props.params.density !== updates.density) changed.density = updates.density
-    if (updates.lowCutHz !== undefined && props.params.lowCutHz !== updates.lowCutHz) changed.lowCutHz = updates.lowCutHz
-    if (updates.highCutHz !== undefined && props.params.highCutHz !== updates.highCutHz) changed.highCutHz = updates.highCutHz
-    if (updates.diffusionLowCutHz !== undefined && props.params.diffusionLowCutHz !== updates.diffusionLowCutHz) changed.diffusionLowCutHz = updates.diffusionLowCutHz
-    if (updates.diffusionHighCutHz !== undefined && props.params.diffusionHighCutHz !== updates.diffusionHighCutHz) changed.diffusionHighCutHz = updates.diffusionHighCutHz
-    if (updates.stereoWidth !== undefined && props.params.stereoWidth !== updates.stereoWidth) changed.stereoWidth = updates.stereoWidth
+    for (const key of REVERB_UPDATE_KEYS) addChangedReverbParam(changed, props.params, updates, key)
     if (Object.keys(changed).length > 0) props.onChange(changed)
   }
 

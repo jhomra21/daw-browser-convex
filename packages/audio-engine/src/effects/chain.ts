@@ -1,7 +1,7 @@
 import { normalizeReverbParams, type ReverbParamsLite } from '@daw-browser/shared'
 import { getReverbImpulseSignature } from './reverb-signature'
 
-export type CreateReverbImpulseResponse = (params: ReverbParamsLite) => AudioBuffer | null
+export type CreateReverbImpulseResponse = (params: ReverbParamsLite) => AudioBuffer
 
 export type ReverbNodeChain = {
   enabled: boolean
@@ -98,10 +98,8 @@ export function applyReverbNodeChainParams(
   const impulseSignature = getReverbImpulseSignature(normalized)
   if (chain.impulseSignature === impulseSignature) return
   const impulse = createImpulseResponse(normalized)
-  if (impulse) {
-    chain.convolver.buffer = impulse
-    chain.impulseSignature = impulseSignature
-  }
+  chain.convolver.buffer = impulse
+  chain.impulseSignature = impulseSignature
 }
 
 export function disconnectReverbChain(chain: ReverbNodeChain) {

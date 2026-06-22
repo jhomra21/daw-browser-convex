@@ -10,6 +10,7 @@ type KnobProps = {
   size?: number
   label?: string
   valueLabel?: string
+  resetValue?: number
   unit?: string
   disabled?: boolean
   onValueChange: (value: number) => void
@@ -122,7 +123,7 @@ export default function Knob(props: KnobProps) {
   const handleDoubleClick = () => {
     if (props.disabled) return
     
-    const resetValue = bipolar() ? (props.min + props.max) / 2 : props.min
+    const resetValue = normalizeValue(props.resetValue ?? (bipolar() ? (props.min + props.max) / 2 : props.min))
     lastEmittedValue = props.value
     setDragValue(resetValue)
     emitValue(resetValue)

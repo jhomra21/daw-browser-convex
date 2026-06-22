@@ -1,12 +1,11 @@
 import type {
   ArpeggiatorParams,
-  EqBandParams,
   EqParams,
   ReverbParams,
   ReverbParamsInput,
   SynthWave,
 } from './effects-params'
-import { normalizeReverbParams } from './effects-params'
+import { isEqBandType, normalizeEqParams, normalizeReverbParams } from './effects-params'
 import { normalizeAudioWarp, normalizeClipGain, type AudioWarpPayload } from './audio-warp'
 import { normalizeMasterVolume } from './master-volume'
 
@@ -187,20 +186,6 @@ export const readSharedTimelineClipCreatePayload = (
   }
 }
 
-const readEqBandType = (value: unknown): EqBandParams['type'] | null => {
-  if (
-    value === 'allpass'
-    || value === 'bandpass'
-    || value === 'highpass'
-    || value === 'highshelf'
-    || value === 'lowpass'
-    || value === 'lowshelf'
-    || value === 'notch'
-    || value === 'peaking'
-  ) return value
-  return null
-}
-
 const readEqParams = (value: unknown): EqParams | null => {
   if (!isRecord(value) || typeof value.enabled !== 'boolean' || !Array.isArray(value.bands)) return null
   const bands = value.bands.flatMap((band) => {
@@ -212,10 +197,11 @@ const readEqParams = (value: unknown): EqParams | null => {
       || typeof band.q !== 'number'
       || typeof band.enabled !== 'boolean'
     ) return []
-    const type = readEqBandType(band.type)
-    return type ? [{ id: band.id, type, frequency: band.frequency, gainDb: band.gainDb, q: band.q, enabled: band.enabled }] : []
+    return isEqBandType(band.type)
+      ? [{ id: band.id, type: band.type, frequency: band.frequency, gainDb: band.gainDb, q: band.q, enabled: band.enabled }]
+      : []
   })
-  return bands.length === value.bands.length ? { enabled: value.enabled, bands } : null
+  return bands.length === value.bands.length ? normalizeEqParams({ enabled: value.enabled, bands }) : null
 }
 
 const readReverbParams = (value: unknown): ReverbParams | null => {

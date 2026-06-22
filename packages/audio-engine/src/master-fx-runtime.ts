@@ -1,4 +1,4 @@
-import { serializeEqParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
+import { normalizeEqParams, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
 import { connectParallelFxChain, createReverbNodeChain, disconnectAudioNodes, disconnectReverbChain, applyReverbNodeChainParams, type CreateReverbImpulseResponse, type ReverbNodeChain } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { getAppliedReverbSignature, getReverbTopologySignature } from './effects/reverb-signature'
@@ -51,7 +51,7 @@ export function createMasterFxRuntime() {
       if (pendingEqParams) {
         const params = pendingEqParams
         pendingEqParams = null
-        const signature = serializeEqParams(params)
+        const signature = serializeNormalizedEqParams(params)
         const topologySignature = getEqTopologySignature(params)
         eqChain = createEqNodes(ctx, params, ctx.destination.maxChannelCount || 2)
         eqSignature = signature
@@ -70,20 +70,21 @@ export function createMasterFxRuntime() {
       rebuildRouting(ctx, masterGain, destination)
     },
     setEq: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: EqParamsLite) => {
+      const normalized = normalizeEqParams(params)
       if (!ctx || !masterGain) {
-        pendingEqParams = params
+        pendingEqParams = normalized
         return
       }
-      const signature = serializeEqParams(params)
+      const signature = serializeNormalizedEqParams(normalized)
       if (eqSignature === signature) return
-      const topologySignature = getEqTopologySignature(params)
+      const topologySignature = getEqTopologySignature(normalized)
       if (eqTopologySignature === topologySignature) {
-        applyEqNodeParams(eqChain, params)
+        applyEqNodeParams(eqChain, normalized)
         eqSignature = signature
         return
       }
       disconnectAudioNodes(eqChain)
-      eqChain = createEqNodes(ctx, params, ctx.destination.maxChannelCount || 2)
+      eqChain = createEqNodes(ctx, normalized, ctx.destination.maxChannelCount || 2)
       eqSignature = signature
       eqTopologySignature = topologySignature
       rebuildRouting(ctx, masterGain, destination ?? ctx.destination)

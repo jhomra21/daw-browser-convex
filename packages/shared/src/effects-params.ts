@@ -15,14 +15,25 @@ export type EqParams = {
 }
 
 export type EqParamsLite = EqParams
+export type EqBandParamsInput = Partial<Omit<EqBandParams, 'type'>> & { type?: unknown }
+export type EqParamsInput = {
+  enabled?: boolean
+  bands?: EqBandParamsInput[]
+}
 
+export const EQ_FREQUENCY_MIN = 20
+export const EQ_FREQUENCY_MAX = 20000
+export const EQ_GAIN_DB_MIN = -24
+export const EQ_GAIN_DB_MAX = 24
+export const EQ_Q_MIN = 0.2
+export const EQ_Q_MAX = 18
 const DEFAULT_EQ_FREQUENCIES = [40, 100, 200, 500, 1000, 2500, 6000, 12000]
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
-function readFiniteNumber(value: number | undefined): number | undefined {
+function readFiniteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
@@ -32,26 +43,69 @@ function getDefaultEqBandType(index: number): EqBandType {
   return 'peaking'
 }
 
+export function createDefaultEqBand(index: number): EqBandParams {
+  return {
+    id: `b${index + 1}`,
+    frequency: DEFAULT_EQ_FREQUENCIES[index] ?? 1000,
+    gainDb: 0,
+    q: 1,
+    enabled: true,
+    type: getDefaultEqBandType(index),
+  }
+}
+
 export function createDefaultEqParams(): EqParams {
   return {
-    bands: DEFAULT_EQ_FREQUENCIES.map((frequency, index) => ({
-      id: `b${index + 1}`,
-      frequency,
-      gainDb: 0,
-      q: 1,
-      enabled: true,
-      type: getDefaultEqBandType(index),
-    })),
+    bands: DEFAULT_EQ_FREQUENCIES.map((_, index) => createDefaultEqBand(index)),
     enabled: true,
   }
 }
 
-export function serializeEqParams(params: EqParams): string {
+export function isEqBandType(value: unknown): value is EqBandType {
+  return (
+    value === 'allpass'
+    || value === 'bandpass'
+    || value === 'highpass'
+    || value === 'highshelf'
+    || value === 'lowpass'
+    || value === 'lowshelf'
+    || value === 'notch'
+    || value === 'peaking'
+  )
+}
+
+export function normalizeEqParams(input: EqParamsInput): EqParams {
+  const defaults = createDefaultEqParams()
+  const bandsInput = Array.isArray(input.bands) && input.bands.length > 0 ? input.bands : defaults.bands
+  return {
+    enabled: typeof input.enabled === 'boolean' ? input.enabled : defaults.enabled,
+    bands: bandsInput.map((band, index) => {
+      const defaultBand = defaults.bands[index] ?? createDefaultEqBand(index)
+      const frequency = readFiniteNumber(band.frequency)
+      const gainDb = readFiniteNumber(band.gainDb)
+      const q = readFiniteNumber(band.q)
+      return {
+        id: typeof band.id === 'string' && band.id.length > 0 ? band.id : defaultBand.id,
+        frequency: frequency === undefined ? defaultBand.frequency : clamp(frequency, EQ_FREQUENCY_MIN, EQ_FREQUENCY_MAX),
+        gainDb: gainDb === undefined ? defaultBand.gainDb : clamp(gainDb, EQ_GAIN_DB_MIN, EQ_GAIN_DB_MAX),
+        q: q === undefined ? defaultBand.q : clamp(q, EQ_Q_MIN, EQ_Q_MAX),
+        enabled: typeof band.enabled === 'boolean' ? band.enabled : defaultBand.enabled,
+        type: isEqBandType(band.type) ? band.type : defaultBand.type,
+      }
+    }),
+  }
+}
+
+export function serializeNormalizedEqParams(params: EqParams): string {
   let signature = params.enabled ? '1' : '0'
   for (const band of params.bands) {
     signature += `|${band.id}:${band.enabled ? 1 : 0}:${band.type}:${band.frequency}:${band.gainDb}:${band.q}`
   }
   return signature
+}
+
+export function serializeEqParams(params: EqParams): string {
+  return serializeNormalizedEqParams(normalizeEqParams(params))
 }
 
 export type ReverbParams = {

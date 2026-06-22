@@ -1,4 +1,4 @@
-import { serializeEqParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
+import { normalizeEqParams, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
 import { connectParallelFxChain, createReverbNodeChain, disconnectAudioNodes, disconnectReverbChain, applyReverbNodeChainParams, type CreateReverbImpulseResponse, type ReverbNodeChain } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { getAppliedReverbSignature, getReverbTopologySignature } from './effects/reverb-signature'
@@ -88,7 +88,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       const pendingEq = pendingEqParams.get(trackId)
       if (pendingEq) {
         pendingEqParams.delete(trackId)
-        setTrackEq(trackId, pendingEq)
+        applyTrackEq(ctx, trackId, pendingEq)
       }
 
       const pendingReverb = pendingReverbParams.get(trackId)
@@ -101,30 +101,35 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     return { input, gain, output }
   }
 
-  const setTrackEq = (trackId: string, params: EqParamsLite) => {
-    const ctx = options.getAudioContext()
-    if (!ctx) {
-      pendingEqParams.set(trackId, params)
-      return
-    }
-    const signature = serializeEqParams(params)
+  const applyTrackEq = (ctx: AudioContext, trackId: string, normalized: EqParamsLite) => {
+    const signature = serializeNormalizedEqParams(normalized)
     if (eqSignatures.get(trackId) === signature) return
     const trackNodes = ensureTrackNodes(trackId)
-    const topologySignature = getEqTopologySignature(params)
+    const topologySignature = getEqTopologySignature(normalized)
     const old = eqChains.get(trackId)
     if (old && eqTopologySignatures.get(trackId) === topologySignature) {
-      applyEqNodeParams(old, params)
+      applyEqNodeParams(old, normalized)
       eqSignatures.set(trackId, signature)
       return
     }
     if (old) disconnectAudioNodes(old)
     const destination = options.getDestination()
     const targetChannels = destination?.maxChannelCount ?? ctx.destination.maxChannelCount ?? 2
-    const eqNodes = createEqNodes(ctx, params, targetChannels)
+    const eqNodes = createEqNodes(ctx, normalized, targetChannels)
     eqChains.set(trackId, eqNodes)
     eqSignatures.set(trackId, signature)
     eqTopologySignatures.set(trackId, topologySignature)
     rebuildTrackRouting(trackId, trackNodes)
+  }
+
+  const setTrackEq = (trackId: string, params: EqParamsLite) => {
+    const normalized = normalizeEqParams(params)
+    const ctx = options.getAudioContext()
+    if (!ctx) {
+      pendingEqParams.set(trackId, normalized)
+      return
+    }
+    applyTrackEq(ctx, trackId, normalized)
   }
 
   const setTrackReverb = (trackId: string, params: ReverbParamsLite) => {

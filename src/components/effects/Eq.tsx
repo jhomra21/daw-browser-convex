@@ -4,6 +4,14 @@ import EffectShell from '~/components/effects/EffectShell'
 import EqFilterTypeSelect from '~/components/effects/eq-filter-type-select'
 import Knob from '~/components/ui/knob'
 import {
+  createDefaultEqParams,
+  createDefaultEqBand,
+  EQ_FREQUENCY_MAX,
+  EQ_FREQUENCY_MIN,
+  EQ_GAIN_DB_MAX,
+  EQ_GAIN_DB_MIN,
+  EQ_Q_MAX,
+  EQ_Q_MIN,
   supportsGain,
   type EqBandParams,
 } from '@daw-browser/shared'
@@ -22,12 +30,13 @@ type EqProps = {
   spectrumData?: SpectrumFrame | null
 }
 
-const FREQ_MIN = 20
-const FREQ_MAX = 20000
-const GAIN_MIN = -24
-const GAIN_MAX = 24
-const Q_MIN = 0.2
-const Q_MAX = 18
+const DEFAULT_EQ_PARAMS = createDefaultEqParams()
+const FREQ_MIN = EQ_FREQUENCY_MIN
+const FREQ_MAX = EQ_FREQUENCY_MAX
+const GAIN_MIN = EQ_GAIN_DB_MIN
+const GAIN_MAX = EQ_GAIN_DB_MAX
+const Q_MIN = EQ_Q_MIN
+const Q_MAX = EQ_Q_MAX
 const SPECTRUM_DECAY_GRACE_MS = 90
 const SPECTRUM_DECAY_PER_SECOND = 0.04
 const SPECTRUM_SILENCE_THRESHOLD = 0.003
@@ -427,6 +436,7 @@ export default function Eq(props: EqProps) {
   // Interaction: drag nodes to set freq/gain
   const onCanvasPointerDown = (ev: PointerEvent) => {
     if (!props.enabled || !canvasRef) return
+    ev.preventDefault()
     if (ev.currentTarget instanceof HTMLCanvasElement) {
       ev.currentTarget.setPointerCapture(ev.pointerId)
     }
@@ -453,6 +463,7 @@ export default function Eq(props: EqProps) {
 
   const onCanvasPointerMove = (ev: PointerEvent) => {
     const id = draggedId(); if (!id || !canvasRef) return
+    ev.preventDefault()
     const rect = canvasRef.getBoundingClientRect()
     const x = ev.clientX - rect.left
     const y = ev.clientY - rect.top
@@ -479,7 +490,18 @@ export default function Eq(props: EqProps) {
   const onCanvasPointerUp = () => setDraggedId(null)
 
   // UI helpers
-  const selectedBand = createMemo(() => props.bands.find(b => b.id === selectedId()))
+  const selectedBandState = createMemo(() => {
+    const index = props.bands.findIndex((band) => band.id === selectedId())
+    return {
+      band: index === -1 ? undefined : props.bands[index],
+      index,
+    }
+  })
+  const selectedBand = () => selectedBandState().band
+  const defaultSelectedBand = createMemo(() => {
+    const index = selectedBandState().index
+    return index === -1 ? DEFAULT_EQ_PARAMS.bands[0] : (DEFAULT_EQ_PARAMS.bands[index] ?? createDefaultEqBand(index))
+  })
 
   const selectedFrequencyLabel = () => formatFrequency(selectedBand()?.frequency ?? 0)
 
@@ -514,6 +536,7 @@ export default function Eq(props: EqProps) {
             label="Freq"
             valueLabel={selectedFrequencyLabel()}
             value={selectedBand()?.frequency ?? 1000}
+            resetValue={defaultSelectedBand()?.frequency}
             min={FREQ_MIN}
             max={FREQ_MAX}
             step={1}
@@ -532,6 +555,7 @@ export default function Eq(props: EqProps) {
             label="Gain"
             valueLabel={selectedGainLabel()}
             value={selectedBand()?.gainDb ?? 0}
+            resetValue={defaultSelectedBand()?.gainDb}
             min={GAIN_MIN}
             max={GAIN_MAX}
             step={0.1}
@@ -550,6 +574,7 @@ export default function Eq(props: EqProps) {
             label="Q"
             valueLabel={selectedQLabel()}
             value={selectedBand()?.q ?? 1}
+            resetValue={defaultSelectedBand()?.q}
             min={Q_MIN}
             max={Q_MAX}
             step={0.1}
@@ -567,7 +592,7 @@ export default function Eq(props: EqProps) {
             ref={(el) => (canvasRef = el || undefined)}
             width={canvasSize().width}
             height={canvasSize().height}
-            class={cn('absolute inset-0 block h-full w-full', props.enabled ? 'cursor-crosshair' : 'cursor-not-allowed opacity-60')}
+            class={cn('absolute inset-0 block h-full w-full touch-none', props.enabled ? 'cursor-crosshair' : 'cursor-not-allowed opacity-60')}
             onPointerDown={onCanvasPointerDown}
             onPointerMove={onCanvasPointerMove}
             onPointerUp={onCanvasPointerUp}
@@ -596,6 +621,9 @@ export default function Eq(props: EqProps) {
 
                 <div class="flex h-5 items-center justify-center gap-2">
                   <button
+                    type="button"
+                    aria-pressed={band.enabled}
+                    aria-label={band.enabled ? `Disable EQ band ${index() + 1}` : `Enable EQ band ${index() + 1}`}
                     class={cn(
                       'h-3.5 w-3.5 border border-neutral-600',
                       band.enabled ? 'bg-cyan-400' : 'bg-neutral-900',

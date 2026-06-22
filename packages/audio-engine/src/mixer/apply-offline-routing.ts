@@ -1,4 +1,4 @@
-import type { EqParamsLite, ReverbParamsLite } from '@daw-browser/shared'
+import { normalizeEqParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
 import { createEqNodes, createImpulseResponseBuffer, createReverbImpulseRender } from '../effects/dsp'
 import { connectParallelFxChain, createReverbNodeChain, type CreateReverbImpulseResponse } from '../effects/chain'
 import type { ResolvedMixerGraph } from './types'
@@ -21,7 +21,7 @@ function buildOfflineFxChain(
   eqParams?: EqParamsLite,
   reverbParams?: ReverbParamsLite,
 ) {
-  const eq = createEqNodes(ctx, eqParams, ctx.destination.channelCount || 2)
+  const eq = createEqNodes(ctx, eqParams ? normalizeEqParams(eqParams) : undefined, ctx.destination.channelCount || 2)
   const reverb = reverbParams
     ? createReverbNodeChain(ctx, reverbParams, createImpulseResponse)
     : null

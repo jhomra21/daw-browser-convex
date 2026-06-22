@@ -2,7 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProjectAccess } from "./projectAccess";
 import { getTrackWriteAccess } from "./trackWrites";
-import { normalizeReverbParams, normalizeSynthParams } from "@daw-browser/shared";
+import { normalizeEqParams, normalizeReverbParams, normalizeSynthParams } from "@daw-browser/shared";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
@@ -25,6 +25,29 @@ const reverbParamsValidator = v.object({
   diffusionLowCutHz: v.optional(v.number()),
   diffusionHighCutHz: v.optional(v.number()),
   stereoWidth: v.optional(v.number()),
+})
+
+const eqBandTypeValidator = v.union(
+  v.literal('allpass'),
+  v.literal('bandpass'),
+  v.literal('highpass'),
+  v.literal('highshelf'),
+  v.literal('lowpass'),
+  v.literal('lowshelf'),
+  v.literal('notch'),
+  v.literal('peaking'),
+)
+
+const eqParamsValidator = v.object({
+  enabled: v.boolean(),
+  bands: v.array(v.object({
+    id: v.string(),
+    type: eqBandTypeValidator,
+    frequency: v.number(),
+    gainDb: v.number(),
+    q: v.number(),
+    enabled: v.boolean(),
+  })),
 })
 
 const sanitizeArpParams = (params: {
@@ -297,21 +320,11 @@ export const setEqParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.id("tracks"),
-    params: v.object({
-      enabled: v.boolean(),
-      bands: v.array(v.object({
-        id: v.string(),
-        type: v.string(),
-        frequency: v.number(),
-        gainDb: v.number(),
-        q: v.number(),
-        enabled: v.boolean(),
-      })),
-    }),
+    params: eqParamsValidator,
   },
   handler: async (ctx, { projectId, trackId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'eq', params });
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'eq', params: normalizeEqParams(params) });
   },
 });
 
@@ -319,21 +332,11 @@ export const setEqParams = mutation({
 export const setMasterEqParams = mutation({
   args: {
     projectId: v.string(),
-    params: v.object({
-      enabled: v.boolean(),
-      bands: v.array(v.object({
-        id: v.string(),
-        type: v.string(),
-        frequency: v.number(),
-        gainDb: v.number(),
-        q: v.number(),
-        enabled: v.boolean(),
-      })),
-    }),
+    params: eqParamsValidator,
   },
   handler: async (ctx, { projectId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'eq', params })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'eq', params: normalizeEqParams(params) })
   }
 })
 
@@ -398,23 +401,13 @@ export const serverSetEqParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.string(),
-    params: v.object({
-      enabled: v.boolean(),
-      bands: v.array(v.object({
-        id: v.string(),
-        type: v.string(),
-        frequency: v.number(),
-        gainDb: v.number(),
-        q: v.number(),
-        enabled: v.boolean(),
-      })),
-    }),
+    params: eqParamsValidator,
   },
   handler: async (ctx, { projectId, trackId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
     if (!normalizedTrackId) return
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'eq', params })
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'eq', params: normalizeEqParams(params) })
   },
 })
 
@@ -432,20 +425,10 @@ export const serverSetMasterReverbParams = mutation({
 export const serverSetMasterEqParams = mutation({
   args: {
     projectId: v.string(),
-    params: v.object({
-      enabled: v.boolean(),
-      bands: v.array(v.object({
-        id: v.string(),
-        type: v.string(),
-        frequency: v.number(),
-        gainDb: v.number(),
-        q: v.number(),
-        enabled: v.boolean(),
-      })),
-    }),
+    params: eqParamsValidator,
   },
   handler: async (ctx, { projectId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'eq', params })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'eq', params: normalizeEqParams(params) })
   },
 })

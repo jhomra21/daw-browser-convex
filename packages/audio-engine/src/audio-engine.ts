@@ -194,7 +194,7 @@ export class AudioEngine {
 
   // --- Reverb helpers ---
   private createImpulseResponse(params: ReverbParamsLite) {
-    if (!this.audioCtx) return null
+    if (!this.audioCtx) throw new Error('Audio runtime was not initialized')
     const ctx = this.audioCtx
     const render = createReverbImpulseRender(ctx, params, {
       bucketSize: this.impulseBucketSize,

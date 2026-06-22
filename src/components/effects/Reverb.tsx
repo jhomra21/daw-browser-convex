@@ -3,6 +3,7 @@ import EffectShell from '~/components/effects/EffectShell'
 import { DeviceToggleButton, DeviceValueStrip } from '~/components/ui/device-control'
 import Knob from '~/components/ui/knob'
 import {
+  createDefaultReverbParams,
   REVERB_DECAY_SEC_MAX,
   REVERB_DECAY_SEC_MIN,
   REVERB_DIFFUSION_HIGH_CUT_HZ_MAX,
@@ -62,6 +63,7 @@ const LOW_CUT_TOGGLE_HZ = 830
 const HIGH_CUT_TOGGLE_HZ = 6000
 const DIFFUSION_LOW_CUT_TOGGLE_HZ = 830
 const DIFFUSION_HIGH_CUT_TOGGLE_HZ = 6000
+const DEFAULT_REVERB_PARAMS = createDefaultReverbParams()
 const REVERB_UPDATE_KEYS: ReadonlyArray<keyof ReverbParams> = [
   'wet',
   'decaySec',
@@ -143,9 +145,21 @@ function DiffusionNetworkReadout(props: { label: string, value: string }) {
 }
 
 type ReverbGraphHandle = {
+  label: string
   x: () => number
   y: () => number
   onDrag: (point: { x: number, y: number }) => void
+  onKeyDown?: (event: KeyboardEvent) => void
+}
+
+function handleGraphKeyDelta(
+  event: KeyboardEvent,
+  deltas: Record<string, () => void>,
+) {
+  const apply = deltas[event.key]
+  if (!apply) return
+  event.preventDefault()
+  apply()
 }
 
 function DraggableReverbGraph(props: {
@@ -166,6 +180,7 @@ function DraggableReverbGraph(props: {
     }
   }
   const dragActiveHandle = (event: PointerEvent) => {
+    if (activeHandle()) event.preventDefault()
     activeHandle()?.onDrag(graphPoint(event))
   }
   const endDrag = (event: PointerEvent) => {
@@ -202,6 +217,7 @@ function DraggableReverbGraph(props: {
         {(handle) => (
           <button
             type="button"
+            aria-label={handle.label}
             class={cn(
               'absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-cyan-300 bg-neutral-950',
               props.disabled ? 'cursor-not-allowed opacity-60' : 'cursor-grab active:cursor-grabbing',
@@ -213,10 +229,15 @@ function DraggableReverbGraph(props: {
             disabled={props.disabled}
             onPointerDown={(event) => {
               if (props.disabled) return
+              event.preventDefault()
               dragBounds = graphRef?.getBoundingClientRect()
               graphRef?.setPointerCapture(event.pointerId)
               setActiveHandle(handle)
               handle.onDrag(graphPoint(event))
+            }}
+            onKeyDown={(event) => {
+              if (props.disabled) return
+              handle.onKeyDown?.(event)
             }}
           />
         )}
@@ -238,6 +259,26 @@ function FilterGraph(props: {
   const highCutX = () => 74 + clamp((props.params.highCutHz - REVERB_HIGH_CUT_HZ_MIN) / (REVERB_HIGH_CUT_HZ_MAX - REVERB_HIGH_CUT_HZ_MIN), 0, 1) * 88
   const pointToLowCut = (x: number) => REVERB_LOW_CUT_HZ_MIN + (clamp((x - 8) / 46, 0, 1) * (REVERB_LOW_CUT_HZ_MAX - REVERB_LOW_CUT_HZ_MIN))
   const pointToHighCut = (x: number) => REVERB_HIGH_CUT_HZ_MIN + (clamp((x - 74) / 88, 0, 1) * (REVERB_HIGH_CUT_HZ_MAX - REVERB_HIGH_CUT_HZ_MIN))
+  const onLowCutKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
+    ArrowRight: () => props.onLowCutChange(props.params.lowCutHz + 10),
+    ArrowUp: () => props.onLowCutChange(props.params.lowCutHz + 10),
+    ArrowLeft: () => props.onLowCutChange(props.params.lowCutHz - 10),
+    ArrowDown: () => props.onLowCutChange(props.params.lowCutHz - 10),
+    PageUp: () => props.onLowCutChange(props.params.lowCutHz + 100),
+    PageDown: () => props.onLowCutChange(props.params.lowCutHz - 100),
+    Home: () => props.onLowCutChange(REVERB_LOW_CUT_HZ_MIN),
+    End: () => props.onLowCutChange(REVERB_LOW_CUT_HZ_MAX),
+  })
+  const onHighCutKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
+    ArrowRight: () => props.onHighCutChange(props.params.highCutHz + 100),
+    ArrowUp: () => props.onHighCutChange(props.params.highCutHz + 100),
+    ArrowLeft: () => props.onHighCutChange(props.params.highCutHz - 100),
+    ArrowDown: () => props.onHighCutChange(props.params.highCutHz - 100),
+    PageUp: () => props.onHighCutChange(props.params.highCutHz + 1000),
+    PageDown: () => props.onHighCutChange(props.params.highCutHz - 1000),
+    Home: () => props.onHighCutChange(REVERB_HIGH_CUT_HZ_MIN),
+    End: () => props.onHighCutChange(REVERB_HIGH_CUT_HZ_MAX),
+  })
   const filterPath = () => {
     const startY = props.lowCutActive ? 42 : 30
     const endY = props.highCutActive ? 48 : 30
@@ -250,8 +291,8 @@ function FilterGraph(props: {
     return `${lowCurve} ${highCurve}`
   }
   const handles = () => [
-    ...(props.lowCutActive ? [{ x: lowCutX, y: () => 31, onDrag: (point: { x: number, y: number }) => props.onLowCutChange(pointToLowCut(point.x)) }] : []),
-    ...(props.highCutActive ? [{ x: highCutX, y: () => 32, onDrag: (point: { x: number, y: number }) => props.onHighCutChange(pointToHighCut(point.x)) }] : []),
+    ...(props.lowCutActive ? [{ label: 'Low cut frequency', x: lowCutX, y: () => 31, onDrag: (point: { x: number, y: number }) => props.onLowCutChange(pointToLowCut(point.x)), onKeyDown: onLowCutKeyDown }] : []),
+    ...(props.highCutActive ? [{ label: 'High cut frequency', x: highCutX, y: () => 32, onDrag: (point: { x: number, y: number }) => props.onHighCutChange(pointToHighCut(point.x)), onKeyDown: onHighCutKeyDown }] : []),
   ]
 
   return (
@@ -281,6 +322,28 @@ function SpaceGraph(props: {
   const pointToDecay = (x: number) => REVERB_DECAY_SEC_MIN + (clamp((x - 112) / 42, 0, 1) * (REVERB_DECAY_SEC_MAX - REVERB_DECAY_SEC_MIN))
   const firstPointToDiffusion = (y: number) => clamp((36 - y) / 18, 0, 1)
   const secondPointToDiffusion = (y: number) => clamp((y - 28) / 18, 0, 1)
+  const updateSpace = (updates: Partial<Pick<ReverbParams, 'size' | 'decaySec' | 'diffusion'>>) => props.onSpaceChange({
+    size: props.params.size,
+    decaySec: props.params.decaySec,
+    diffusion: props.params.diffusion,
+    ...updates,
+  })
+  const onFirstHandleKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
+    ArrowRight: () => updateSpace({ size: props.params.size + 0.02 }),
+    ArrowLeft: () => updateSpace({ size: props.params.size - 0.02 }),
+    PageUp: () => updateSpace({ size: props.params.size + 0.1 }),
+    PageDown: () => updateSpace({ size: props.params.size - 0.1 }),
+    ArrowUp: () => updateSpace({ diffusion: props.params.diffusion + 0.02 }),
+    ArrowDown: () => updateSpace({ diffusion: props.params.diffusion - 0.02 }),
+  })
+  const onSecondHandleKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
+    ArrowRight: () => updateSpace({ decaySec: props.params.decaySec + 0.1 }),
+    ArrowLeft: () => updateSpace({ decaySec: props.params.decaySec - 0.1 }),
+    PageUp: () => updateSpace({ decaySec: props.params.decaySec + 1 }),
+    PageDown: () => updateSpace({ decaySec: props.params.decaySec - 1 }),
+    ArrowUp: () => updateSpace({ diffusion: props.params.diffusion + 0.02 }),
+    ArrowDown: () => updateSpace({ diffusion: props.params.diffusion - 0.02 }),
+  })
 
   return (
     <DraggableReverbGraph
@@ -289,8 +352,10 @@ function SpaceGraph(props: {
       path={() => `M 0 ${42 - size() * 12} C 38 ${28 - diffusion() * 8} 72 ${26 + size() * 10} 104 ${30 - decay() * 8} C 132 ${34 + diffusion() * 8} 152 ${40 - decay() * 8} 180 ${38 + size() * 8}`}
       handles={[
         {
+          label: 'Reverb size and diffusion',
           x: firstX,
           y: firstY,
+          onKeyDown: onFirstHandleKeyDown,
           onDrag: (point) => {
             props.onSpaceChange({
               size: pointToSize(point.x),
@@ -300,8 +365,10 @@ function SpaceGraph(props: {
           },
         },
         {
+          label: 'Reverb decay and diffusion',
           x: secondX,
           y: secondY,
+          onKeyDown: onSecondHandleKeyDown,
           onDrag: (point) => {
             props.onSpaceChange({
               size: props.params.size,
@@ -365,6 +432,7 @@ function DiffusionNetworkPanel(props: {
               label="Decay"
               valueLabel={formatSeconds(props.params.decaySec)}
               value={props.params.decaySec}
+              resetValue={DEFAULT_REVERB_PARAMS.decaySec}
               min={REVERB_DECAY_SEC_MIN}
               max={REVERB_DECAY_SEC_MAX}
               step={0.1}
@@ -377,6 +445,7 @@ function DiffusionNetworkPanel(props: {
               label="Diff"
               valueLabel={formatUnitPercent(props.params.diffusion)}
               value={props.params.diffusion}
+              resetValue={DEFAULT_REVERB_PARAMS.diffusion}
               min={REVERB_UNIT_PARAM_MIN}
               max={REVERB_UNIT_PARAM_MAX}
               step={0.01}
@@ -388,6 +457,7 @@ function DiffusionNetworkPanel(props: {
               label="Dens"
               valueLabel={formatUnitPercent(props.params.density)}
               value={props.params.density}
+              resetValue={DEFAULT_REVERB_PARAMS.density}
               min={REVERB_UNIT_PARAM_MIN}
               max={REVERB_UNIT_PARAM_MAX}
               step={0.01}
@@ -422,6 +492,7 @@ function EarlyReflectionsPanel(props: {
           label="Reflect"
           valueLabel={formatUnitPercent(props.params.reflections)}
           value={props.params.reflections}
+          resetValue={DEFAULT_REVERB_PARAMS.reflections}
           min={REVERB_UNIT_PARAM_MIN}
           max={REVERB_UNIT_PARAM_MAX}
           step={0.01}
@@ -433,6 +504,7 @@ function EarlyReflectionsPanel(props: {
           label="Shape"
           valueLabel={formatUnitPercent(props.params.reflectionShape)}
           value={props.params.reflectionShape}
+          resetValue={DEFAULT_REVERB_PARAMS.reflectionShape}
           min={REVERB_UNIT_PARAM_MIN}
           max={REVERB_UNIT_PARAM_MAX}
           step={0.01}
@@ -444,6 +516,7 @@ function EarlyReflectionsPanel(props: {
           label="Amount"
           valueLabel={formatReflectionMilliseconds(props.params.reflectionModAmountMs)}
           value={props.params.reflectionModAmountMs}
+          resetValue={DEFAULT_REVERB_PARAMS.reflectionModAmountMs}
           min={REVERB_REFLECTION_MOD_AMOUNT_MS_MIN}
           max={REVERB_REFLECTION_MOD_AMOUNT_MS_MAX}
           step={0.1}
@@ -456,6 +529,7 @@ function EarlyReflectionsPanel(props: {
           label="Rate"
           valueLabel={formatHertz(props.params.reflectionModRateHz)}
           value={props.params.reflectionModRateHz}
+          resetValue={DEFAULT_REVERB_PARAMS.reflectionModRateHz}
           min={REVERB_REFLECTION_MOD_RATE_HZ_MIN}
           max={REVERB_REFLECTION_MOD_RATE_HZ_MAX}
           step={0.01}
@@ -548,6 +622,7 @@ export default function Reverb(props: ReverbProps) {
                 label="Predelay"
                 valueLabel={formatMilliseconds(props.params.preDelayMs)}
                 value={props.params.preDelayMs}
+                resetValue={DEFAULT_REVERB_PARAMS.preDelayMs}
                 min={REVERB_PRE_DELAY_MS_MIN}
                 max={REVERB_PRE_DELAY_MS_MAX}
                 step={1}
@@ -589,6 +664,7 @@ export default function Reverb(props: ReverbProps) {
               label="Diffuse"
               valueLabel={formatUnitPercent(props.params.diffuse)}
               value={props.params.diffuse}
+              resetValue={DEFAULT_REVERB_PARAMS.diffuse}
               min={REVERB_UNIT_PARAM_MIN}
               max={REVERB_UNIT_PARAM_MAX}
               step={0.01}
@@ -600,6 +676,7 @@ export default function Reverb(props: ReverbProps) {
               label="Width"
               valueLabel={formatStereoWidth(props.params.stereoWidth)}
               value={props.params.stereoWidth}
+              resetValue={DEFAULT_REVERB_PARAMS.stereoWidth}
               min={REVERB_STEREO_WIDTH_MIN}
               max={REVERB_STEREO_WIDTH_MAX}
               step={0.01}
@@ -611,6 +688,7 @@ export default function Reverb(props: ReverbProps) {
               label="Dry/Wet"
               valueLabel={formatPercent(props.params.wet)}
               value={props.params.wet}
+              resetValue={DEFAULT_REVERB_PARAMS.wet}
               min={REVERB_WET_MIN}
               max={REVERB_WET_MAX}
               step={0.01}

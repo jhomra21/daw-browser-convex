@@ -157,8 +157,8 @@ export function createEqNodes(ctx: BaseAudioContext, params?: EqParamsLite, chan
     if (!band.enabled) continue
     const filter = ctx.createBiquadFilter()
     try {
-      ;(filter as any).channelCountMode = 'explicit'
-      ;(filter as any).channelInterpretation = 'speakers'
+      filter.channelCountMode = 'explicit'
+      filter.channelInterpretation = 'speakers'
       filter.channelCount = Math.max(1, Math.min(2, channels))
     } catch {
       // Some browsers may not allow changing channel configuration.
@@ -186,8 +186,8 @@ export function applyEqNodeParams(nodes: BiquadFilterNode[], params: EqParamsLit
 
 function applyEqBandParams(filter: BiquadFilterNode, band: EqBandParams) {
   filter.type = band.type
-  filter.frequency.value = Math.max(20, Math.min(20000, band.frequency))
-  filter.Q.value = Math.max(0.001, band.q)
+  filter.frequency.value = band.frequency
+  filter.Q.value = band.q
   filter.gain.value = supportsGain(band.type) ? band.gainDb : 0
 }
 

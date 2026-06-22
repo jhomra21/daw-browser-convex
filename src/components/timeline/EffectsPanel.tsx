@@ -26,6 +26,7 @@ import {
   type ArpeggiatorParams,
   createDefaultEqParams,
   createDefaultReverbParams,
+  normalizeEqParams,
   normalizeReverbParams,
   normalizeSynthParams,
   serializeEqParams,
@@ -400,6 +401,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     projectId: () => props.projectId,
     targetId: currentTargetId,
     effect: (targetId) => targetId === "master" ? "master-eq" : "eq",
+    normalize: normalizeEqParams,
   });
   const localReverb = createLocalEffectRows<ReverbParams>({
     projectId: () => props.projectId,
@@ -419,14 +421,14 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     targetId: currentTargetId,
     scopeId: () => props.projectId,
     row: () => isLocalProject() ? localEq.row(currentTargetId()) : remoteEffectForTarget(currentTargetId(), "eq"),
-    readQueryParams: (row) => row?.params,
+    readQueryParams: (row) => row?.params ? normalizeEqParams(row.params) : undefined,
     createInitialParams: () => createDefaultEqParams(),
     serializeParams: serializeEqParams,
     applyToEngine: (targetId, params) => {
       if (targetId === "master") {
-      props.audioEngine.setMasterEq(params);
+        props.audioEngine.setMasterEq(params);
       } else {
-      props.audioEngine.setTrackEq(targetId, params);
+        props.audioEngine.setTrackEq(targetId, params);
       }
     },
     createPersistContext: () => ({ projectId: props.projectId, userId: props.userId }),
@@ -439,14 +441,14 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       if (targetId === "master") {
         return publishEffectOperation(context.projectId, context.userId, {
           kind: "effects.setMasterEqParams",
-          payload: { params },
+          payload: { params: normalizeEqParams(params) },
         });
       }
       const track = resolveTrackByTargetId(targetId);
       if (!track) return Promise.resolve();
       return publishEffectOperation(context.projectId, context.userId, {
         kind: "effects.setEqParams",
-        payload: { trackId: track.id, params },
+        payload: { trackId: track.id, params: normalizeEqParams(params) },
       });
     },
     debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,

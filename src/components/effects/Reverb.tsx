@@ -658,7 +658,7 @@ export default function Reverb(props: ReverbProps) {
         />
 
         <div class="flex min-h-0 min-w-0 flex-col bg-transparent">
-          <div class="flex min-h-0 flex-1 flex-col justify-end gap-5 pb-2">
+          <div class="flex min-h-0 flex-1 flex-col justify-end gap-5">
             <Knob
               class="px-1 py-1"
               label="Diffuse"

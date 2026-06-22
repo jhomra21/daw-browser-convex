@@ -201,12 +201,12 @@ export function normalizeReverbParams(input: ReverbParamsInput): ReverbParams {
   const diffusionLowCutHz = diffusionLowCutInput === undefined ? defaults.diffusionLowCutHz : clamp(diffusionLowCutInput, REVERB_DIFFUSION_LOW_CUT_HZ_MIN, REVERB_DIFFUSION_LOW_CUT_HZ_MAX)
   const diffusionHighCutHz = diffusionHighCutInput === undefined ? defaults.diffusionHighCutHz : clamp(diffusionHighCutInput, REVERB_DIFFUSION_HIGH_CUT_HZ_MIN, REVERB_DIFFUSION_HIGH_CUT_HZ_MAX)
   return {
-    enabled: input.enabled ?? defaults.enabled,
+    enabled: typeof input.enabled === 'boolean' ? input.enabled : defaults.enabled,
     wet: wet === undefined ? defaults.wet : clamp(wet, REVERB_WET_MIN, REVERB_WET_MAX),
     decaySec: decaySec === undefined ? defaults.decaySec : clamp(decaySec, REVERB_DECAY_SEC_MIN, REVERB_DECAY_SEC_MAX),
     preDelayMs: preDelayMs === undefined ? defaults.preDelayMs : clamp(preDelayMs, REVERB_PRE_DELAY_MS_MIN, REVERB_PRE_DELAY_MS_MAX),
     reflections: reflections === undefined ? defaults.reflections : clamp(reflections, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
-    reflectionSpin: input.reflectionSpin ?? defaults.reflectionSpin,
+    reflectionSpin: typeof input.reflectionSpin === 'boolean' ? input.reflectionSpin : defaults.reflectionSpin,
     reflectionModAmountMs: reflectionModAmountMs === undefined ? defaults.reflectionModAmountMs : clamp(reflectionModAmountMs, REVERB_REFLECTION_MOD_AMOUNT_MS_MIN, REVERB_REFLECTION_MOD_AMOUNT_MS_MAX),
     reflectionModRateHz: reflectionModRateHz === undefined ? defaults.reflectionModRateHz : clamp(reflectionModRateHz, REVERB_REFLECTION_MOD_RATE_HZ_MIN, REVERB_REFLECTION_MOD_RATE_HZ_MAX),
     reflectionShape: reflectionShape === undefined ? defaults.reflectionShape : clamp(reflectionShape, REVERB_UNIT_PARAM_MIN, REVERB_UNIT_PARAM_MAX),
@@ -223,7 +223,8 @@ export function normalizeReverbParams(input: ReverbParamsInput): ReverbParams {
 }
 
 export function serializeReverbParams(params: ReverbParams): string {
-  return `${params.enabled ? 1 : 0}|${params.wet}|${params.decaySec}|${params.preDelayMs}|${params.reflections}|${params.reflectionSpin ? 1 : 0}|${params.reflectionModAmountMs}|${params.reflectionModRateHz}|${params.reflectionShape}|${params.diffuse}|${params.size}|${params.diffusion}|${params.density}|${params.lowCutHz}|${params.highCutHz}|${params.diffusionLowCutHz}|${params.diffusionHighCutHz}|${params.stereoWidth}`
+  const normalized = normalizeReverbParams(params)
+  return `${normalized.enabled ? 1 : 0}|${normalized.wet}|${normalized.decaySec}|${normalized.preDelayMs}|${normalized.reflections}|${normalized.reflectionSpin ? 1 : 0}|${normalized.reflectionModAmountMs}|${normalized.reflectionModRateHz}|${normalized.reflectionShape}|${normalized.diffuse}|${normalized.size}|${normalized.diffusion}|${normalized.density}|${normalized.lowCutHz}|${normalized.highCutHz}|${normalized.diffusionLowCutHz}|${normalized.diffusionHighCutHz}|${normalized.stereoWidth}`
 }
 
 export type SynthWave = 'sine' | 'square' | 'sawtooth' | 'triangle'

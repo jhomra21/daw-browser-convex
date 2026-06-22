@@ -64,35 +64,6 @@ const HIGH_CUT_TOGGLE_HZ = 6000
 const DIFFUSION_LOW_CUT_TOGGLE_HZ = 830
 const DIFFUSION_HIGH_CUT_TOGGLE_HZ = 6000
 const DEFAULT_REVERB_PARAMS = createDefaultReverbParams()
-const REVERB_UPDATE_KEYS: ReadonlyArray<keyof ReverbParams> = [
-  'wet',
-  'decaySec',
-  'preDelayMs',
-  'reflections',
-  'reflectionSpin',
-  'reflectionModAmountMs',
-  'reflectionModRateHz',
-  'reflectionShape',
-  'diffuse',
-  'size',
-  'diffusion',
-  'density',
-  'lowCutHz',
-  'highCutHz',
-  'diffusionLowCutHz',
-  'diffusionHighCutHz',
-  'stereoWidth',
-]
-
-function addChangedReverbParam<Key extends keyof ReverbParams>(
-  changed: Partial<ReverbParams>,
-  current: ReverbParams,
-  updates: Partial<ReverbParams>,
-  key: Key,
-) {
-  const value = updates[key]
-  if (value !== undefined && current[key] !== value) changed[key] = value
-}
 
 function DeviceSection(props: {
   title: string
@@ -544,9 +515,7 @@ function EarlyReflectionsPanel(props: {
 
 export default function Reverb(props: ReverbProps) {
   const updateParam = (updates: Partial<ReverbParams>) => {
-    const changed: Partial<ReverbParams> = {}
-    for (const key of REVERB_UPDATE_KEYS) addChangedReverbParam(changed, props.params, updates, key)
-    if (Object.keys(changed).length > 0) props.onChange(changed)
+    props.onChange(updates)
   }
 
   const updateWet = (value: number) => updateParam({ wet: normalizeWet(value) })

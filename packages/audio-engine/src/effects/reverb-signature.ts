@@ -20,7 +20,7 @@ export type ReverbImpulseSignatureParts = ReverbImpulseBucket & {
 }
 
 export function getAppliedReverbSignature(params: ReverbParamsLite): string {
-  return serializeReverbParams(normalizeReverbParams(params))
+  return serializeReverbParams(params)
 }
 
 export function getReverbTopologySignature(params: ReverbParamsLite): string {

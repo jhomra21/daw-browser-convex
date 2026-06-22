@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   createDefaultEqParams,
+  createDefaultReverbParams,
   createDefaultEqBand,
   EQ_FREQUENCY_MAX,
   EQ_FREQUENCY_MIN,
@@ -9,7 +10,11 @@ import {
   EQ_Q_MAX,
   EQ_Q_MIN,
   normalizeEqParams,
+  normalizeReverbParams,
   serializeEqParams,
+  serializeReverbParams,
+  REVERB_DECAY_SEC_MAX,
+  REVERB_WET_MAX,
 } from './effects-params'
 import { parseSharedTimelineOperation } from './shared-timeline-operations'
 
@@ -104,5 +109,31 @@ describe('EQ params', () => {
         },
       },
     })
+  })
+})
+
+describe('Reverb params', () => {
+  test('normalizes booleans safely and clamps numeric values', () => {
+    const defaults = createDefaultReverbParams()
+    const normalized = normalizeReverbParams({
+      ...JSON.parse('{"enabled":"no","reflectionSpin":"yes"}'),
+      wet: 999,
+      decaySec: 999,
+    })
+
+    expect(normalized).toEqual({
+      ...defaults,
+      wet: REVERB_WET_MAX,
+      decaySec: REVERB_DECAY_SEC_MAX,
+    })
+    expect(normalizeReverbParams({ enabled: false, reflectionSpin: false }).enabled).toBe(false)
+    expect(normalizeReverbParams({ enabled: false, reflectionSpin: false }).reflectionSpin).toBe(false)
+  })
+
+  test('serializes normalized params', () => {
+    const high = normalizeReverbParams({ wet: REVERB_WET_MAX, decaySec: REVERB_DECAY_SEC_MAX })
+    const outOfRange = { ...createDefaultReverbParams(), wet: 999, decaySec: 999 }
+
+    expect(serializeReverbParams(outOfRange)).toBe(serializeReverbParams(high))
   })
 })

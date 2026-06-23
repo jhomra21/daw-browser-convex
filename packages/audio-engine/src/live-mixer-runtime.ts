@@ -1,7 +1,7 @@
 import { normalizeEqParams, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
-import { connectParallelFxChain, createReverbNodeChain, disconnectAudioNodes, disconnectReverbChain, applyReverbNodeChainParams, type CreateReverbImpulseResponse, type ReverbNodeChain } from './effects/chain'
+import { connectParallelFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
-import { getAppliedReverbSignature, getReverbTopologySignature } from './effects/reverb-signature'
+import { createReverbChainState, type ReverbChainState } from './effects/reverb-chain-state'
 import { applyLiveMixerGraph } from './mixer/apply-live-routing'
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
@@ -36,10 +36,8 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const pendingEqParams = new Map<string, EqParamsLite>()
   const eqSignatures = new Map<string, string>()
   const eqTopologySignatures = new Map<string, string>()
-  const reverbs = new Map<string, ReverbNodeChain>()
+  const reverbChains = new Map<string, ReverbChainState>()
   const pendingReverbParams = new Map<string, ReverbParamsLite>()
-  const reverbSignatures = new Map<string, string>()
-  const reverbTopologySignatures = new Map<string, string>()
 
   const cleanupTrackSendGains = (trackId: string) => {
     const sendMap = sendGains.get(trackId)
@@ -50,7 +48,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
   const rebuildTrackRouting = (trackId: string, nodes: Pick<TrackNodeGroup, 'input' | 'gain'>) => {
     disconnectAudioNodes([nodes.input])
-    connectParallelFxChain(nodes.input, nodes.gain, eqChains.get(trackId) || [], reverbs.get(trackId))
+    connectParallelFxChain(nodes.input, nodes.gain, eqChains.get(trackId) || [], reverbChains.get(trackId)?.chain())
   }
 
   const ensureTrackNodes = (trackId: string): TrackNodeGroup => {
@@ -138,34 +136,15 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       pendingReverbParams.set(trackId, params)
       return
     }
-    const signature = getAppliedReverbSignature(params)
-    if (reverbSignatures.get(trackId) === signature) return
-    const topologySignature = getReverbTopologySignature(params)
-    const previousTopologySignature = reverbTopologySignatures.get(trackId)
-    let reverb = reverbs.get(trackId)
-    if (topologySignature === 'disabled') {
-      if (reverb) {
-        disconnectReverbChain(reverb)
-        reverbs.delete(trackId)
-      }
-      reverbSignatures.set(trackId, signature)
-      reverbTopologySignatures.set(trackId, topologySignature)
-      if (previousTopologySignature !== undefined && previousTopologySignature !== topologySignature) {
-        const trackNodes = ensureTrackNodes(trackId)
-        rebuildTrackRouting(trackId, trackNodes)
-      }
-      return
+    let reverbState = reverbChains.get(trackId)
+    if (!reverbState) {
+      reverbState = createReverbChainState()
+      reverbChains.set(trackId, reverbState)
     }
-    const trackNodes = ensureTrackNodes(trackId)
-    if (!reverb) {
-      reverb = createReverbNodeChain(ctx, params, options.createImpulseResponse)
-      reverbs.set(trackId, reverb)
-    } else {
-      applyReverbNodeChainParams(reverb, params, options.createImpulseResponse)
-    }
-    reverbSignatures.set(trackId, signature)
-    reverbTopologySignatures.set(trackId, topologySignature)
-    if (previousTopologySignature !== topologySignature && (previousTopologySignature !== undefined || topologySignature === 'enabled')) {
+    const result = reverbState.set(ctx, params, options.createImpulseResponse)
+    if (!result.changed) return
+    if (result.requiresRoutingRebuild) {
+      const trackNodes = ensureTrackNodes(trackId)
       rebuildTrackRouting(trackId, trackNodes)
     }
   }
@@ -191,11 +170,8 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     eqSignatures.delete(trackId)
     eqTopologySignatures.delete(trackId)
 
-    const reverb = reverbs.get(trackId)
-    if (reverb) disconnectReverbChain(reverb)
-    reverbs.delete(trackId)
-    reverbSignatures.delete(trackId)
-    reverbTopologySignatures.delete(trackId)
+    reverbChains.get(trackId)?.close()
+    reverbChains.delete(trackId)
     pendingEqParams.delete(trackId)
     pendingReverbParams.delete(trackId)
 
@@ -215,10 +191,9 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     pendingEqParams.clear()
     eqSignatures.clear()
     eqTopologySignatures.clear()
-    reverbs.clear()
+    for (const reverbState of reverbChains.values()) reverbState.close()
+    reverbChains.clear()
     pendingReverbParams.clear()
-    reverbSignatures.clear()
-    reverbTopologySignatures.clear()
   }
 
   return {

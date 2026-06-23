@@ -1,7 +1,7 @@
 import { normalizeEqParams, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
-import { connectParallelFxChain, createReverbNodeChain, disconnectAudioNodes, disconnectReverbChain, applyReverbNodeChainParams, type CreateReverbImpulseResponse, type ReverbNodeChain } from './effects/chain'
+import { connectParallelFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
-import { getAppliedReverbSignature, getReverbTopologySignature } from './effects/reverb-signature'
+import { createReverbChainState } from './effects/reverb-chain-state'
 import type { SpectrumFrame } from './metering-runtime'
 
 export function createMasterFxRuntime() {
@@ -12,16 +12,14 @@ export function createMasterFxRuntime() {
   let spectrumTmp: Uint8Array<ArrayBuffer> | null = null
   let spectrumLast: SpectrumFrame | null = null
   let analyserConnected = false
-  let reverb: ReverbNodeChain | null = null
-  let reverbSignature: string | null = null
-  let reverbTopologySignature: string | null = null
+  const reverbState = createReverbChainState()
   let pendingEqParams: EqParamsLite | null = null
   let pendingReverbParams: ReverbParamsLite | null = null
 
   const rebuildRouting = (ctx: AudioContext, masterGain: GainNode, destination: AudioDestinationNode) => {
     disconnectAudioNodes([masterGain])
     if (analyserConnected) analyserConnected = false
-    connectParallelFxChain(masterGain, destination, eqChain, reverb)
+    connectParallelFxChain(masterGain, destination, eqChain, reverbState.chain())
     if (analyser) {
       try {
         masterGain.connect(analyser)
@@ -60,12 +58,7 @@ export function createMasterFxRuntime() {
       if (pendingReverbParams) {
         const params = pendingReverbParams
         pendingReverbParams = null
-        const topologySignature = getReverbTopologySignature(params)
-        reverb = topologySignature === 'enabled'
-          ? createReverbNodeChain(ctx, params, createImpulseResponse)
-          : null
-        reverbSignature = getAppliedReverbSignature(params)
-        reverbTopologySignature = topologySignature
+        reverbState.set(ctx, params, createImpulseResponse)
       }
       rebuildRouting(ctx, masterGain, destination)
     },
@@ -94,27 +87,9 @@ export function createMasterFxRuntime() {
         pendingReverbParams = params
         return
       }
-      const signature = getAppliedReverbSignature(params)
-      if (reverbSignature === signature) return
-      const topologySignature = getReverbTopologySignature(params)
-      const previousTopologySignature = reverbTopologySignature
-      if (topologySignature === 'disabled') {
-        if (reverb) {
-          disconnectReverbChain(reverb)
-          reverb = null
-        }
-        reverbSignature = signature
-        reverbTopologySignature = topologySignature
-        if (previousTopologySignature !== null && previousTopologySignature !== topologySignature) {
-          rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
-        }
-        return
-      }
-      if (!reverb) reverb = createReverbNodeChain(ctx, params, createImpulseResponse)
-      else applyReverbNodeChainParams(reverb, params, createImpulseResponse)
-      reverbSignature = signature
-      reverbTopologySignature = topologySignature
-      if (previousTopologySignature !== topologySignature && (previousTopologySignature !== null || topologySignature === 'enabled')) {
+      const result = reverbState.set(ctx, params, createImpulseResponse)
+      if (!result.changed) return
+      if (result.requiresRoutingRebuild) {
         rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
       }
     },
@@ -138,16 +113,11 @@ export function createMasterFxRuntime() {
     close: () => {
       eqSignature = null
       eqTopologySignature = null
-      reverbSignature = null
-      reverbTopologySignature = null
       pendingEqParams = null
       pendingReverbParams = null
       disconnectAudioNodes(eqChain)
       eqChain = []
-      if (reverb) {
-        disconnectReverbChain(reverb)
-        reverb = null
-      }
+      reverbState.close()
       disconnectAudioNodes([analyser])
       analyser = null
       spectrumTmp = null

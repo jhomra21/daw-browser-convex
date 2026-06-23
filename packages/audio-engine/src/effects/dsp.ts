@@ -32,7 +32,7 @@ function getOnePoleHighpassAlpha(cutoffHz: number, sampleRate: number): number {
 }
 
 export function getImpulseResponseBufferInfo(
-  ctx: BaseAudioContext,
+  ctx: Pick<BaseAudioContext, 'sampleRate'>,
   params: ReverbParamsLite,
   options?: { bucketSize?: number },
 ): ReverbImpulseInfo {
@@ -40,7 +40,7 @@ export function getImpulseResponseBufferInfo(
 }
 
 export function createReverbImpulseRender(
-  ctx: BaseAudioContext,
+  ctx: Pick<BaseAudioContext, 'sampleRate'>,
   params: ReverbParamsLite,
   options?: { bucketSize?: number },
 ): ReverbImpulseRender {
@@ -100,7 +100,7 @@ export function addEarlyReflectionTaps(
 }
 
 export function createImpulseResponseBuffer(
-  ctx: BaseAudioContext,
+  ctx: Pick<BaseAudioContext, 'sampleRate' | 'createBuffer'>,
   render: ReverbImpulseRender,
   options?: { channelCount?: number },
 ) {

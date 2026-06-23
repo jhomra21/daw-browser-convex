@@ -2,7 +2,7 @@ import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatenc
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
 import { normalizeMasterVolume, type ArpParams, type EqParamsLite, type ReverbParamsLite, type SynthParamsInput } from '@daw-browser/shared'
-import { createImpulseResponseBuffer, createReverbImpulseRender } from './effects/dsp'
+import { createReverbImpulseCache } from './effects/reverb-impulse-cache'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
 import { createMeteringRuntime, type SpectrumFrame, type TrackStereoLevels, type TrackStereoLevelsBatch, type TrackStereoLevelsListener } from './metering-runtime'
@@ -68,9 +68,7 @@ export class AudioEngine {
     sources: this.sources,
   })
   private masterFx = createMasterFxRuntime()
-  private readonly impulseBucketSize = 0.1
-  private readonly impulseCacheLimit = 48
-  private impulseCache = new Map<string, AudioBuffer>()
+  private impulseCache = createReverbImpulseCache({ bucketSize: 0.1, limit: 48 })
   private clock = createTransportClock()
   private metronome = createMetronomeRuntime(this.clock)
   private metering = createMeteringRuntime()
@@ -195,22 +193,7 @@ export class AudioEngine {
   // --- Reverb helpers ---
   private createImpulseResponse(params: ReverbParamsLite) {
     if (!this.audioCtx) throw new Error('Audio runtime was not initialized')
-    const ctx = this.audioCtx
-    const render = createReverbImpulseRender(ctx, params, {
-      bucketSize: this.impulseBucketSize,
-    })
-    const cacheKey = `${ctx.sampleRate}:${render.info.signature}`
-    const cached = this.impulseCache.get(cacheKey)
-    if (cached) return cached
-    const { buffer } = createImpulseResponseBuffer(ctx, render)
-    this.impulseCache.set(cacheKey, buffer)
-    while (this.impulseCache.size > this.impulseCacheLimit) {
-      for (const oldestKey of this.impulseCache.keys()) {
-        this.impulseCache.delete(oldestKey)
-        break
-      }
-    }
-    return buffer
+    return this.impulseCache.get(this.audioCtx, params)
   }
 
   setTrackReverb(trackId: string, params: ReverbParamsLite) {

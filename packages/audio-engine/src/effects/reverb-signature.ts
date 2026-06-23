@@ -23,7 +23,7 @@ export function getAppliedReverbSignature(params: ReverbParamsLite): string {
   return serializeReverbParams(params)
 }
 
-export function getReverbTopologySignature(params: ReverbParamsLite): string {
+export function getReverbTopologySignature(params: ReverbParamsLite): 'enabled' | 'disabled' {
   return normalizeReverbParams(params).enabled ? 'enabled' : 'disabled'
 }
 

@@ -42,7 +42,7 @@ export default function Synth(props: SynthProps) {
       actionsBeforeReset={
         props.onExpand ? (
           <button
-            class="border border-neutral-700 bg-neutral-800 px-2 py-0.5 text-xs text-neutral-300 hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-50"
+            class="bg-transparent px-2 text-xs text-neutral-300 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={props.disabled}
             onClick={() => props.onExpand?.()}
           >

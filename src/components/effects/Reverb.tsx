@@ -85,6 +85,7 @@ function DeviceSection(props: {
 
 function ReverbGraphSection(props: {
   title: string
+  class?: string
   topControls: JSX.Element
   graph: JSX.Element
   bottomControls: JSX.Element
@@ -92,8 +93,8 @@ function ReverbGraphSection(props: {
   bottomKnobs?: JSX.Element
 }) {
   return (
-    <DeviceSection title={props.title}>
-      <div class={cn('grid gap-2', props.side ? 'grid-cols-[minmax(0,1fr)_4.25rem]' : 'grid-cols-1')}>
+    <DeviceSection title={props.title} class={props.class}>
+      <div class={cn('grid gap-3', props.side ? 'grid-cols-[minmax(0,1fr)_4.25rem]' : 'grid-cols-1')}>
         <div class="flex min-w-0 flex-col gap-2">
           {props.topControls}
           {props.graph}
@@ -356,6 +357,7 @@ function SpaceGraph(props: {
 function DiffusionNetworkPanel(props: {
   params: ReverbParams
   disabled: boolean
+  class?: string
   highCutActive: boolean
   lowCutActive: boolean
   onHighCutToggle: () => void
@@ -367,6 +369,7 @@ function DiffusionNetworkPanel(props: {
 }) {
   return (
     <ReverbGraphSection
+      class={props.class}
       title="Diffusion Network"
       topControls={
         <div class="grid grid-cols-[3rem_minmax(5.75rem,1fr)_2.9rem] gap-1">
@@ -396,7 +399,7 @@ function DiffusionNetworkPanel(props: {
         </div>
       }
       bottomKnobs={
-        <div class="mt-auto grid shrink-0 grid-cols-[minmax(0,1fr)_4.25rem] gap-2 pb-2 pt-3">
+        <div class="mt-auto grid shrink-0 grid-cols-[minmax(0,1fr)_4.25rem] gap-3 pb-2 pt-3">
           <div class="-mx-2.5 flex items-center justify-between">
             <Knob
               class="w-12 px-0 py-1"
@@ -446,6 +449,7 @@ function DiffusionNetworkPanel(props: {
 function EarlyReflectionsPanel(props: {
   params: ReverbParams
   disabled: boolean
+  class?: string
   onSpinToggle: () => void
   onReflectChange: (value: number) => void
   onShapeChange: (value: number) => void
@@ -453,7 +457,7 @@ function EarlyReflectionsPanel(props: {
   onModRateChange: (value: number) => void
 }) {
   return (
-    <DeviceSection title="Early Reflections">
+    <DeviceSection title="Early Reflections" class={props.class}>
       <div class="flex pb-2">
         <DeviceToggleButton label="Spin" active={props.params.reflectionSpin} disabled={props.disabled} onClick={props.onSpinToggle} />
       </div>
@@ -557,10 +561,11 @@ export default function Reverb(props: ReverbProps) {
       enabled={props.params.enabled}
       onToggleEnabled={props.onToggleEnabled}
       onReset={props.onReset}
-      class={cn('w-[692px] min-w-[692px]', props.class)}
+      class={cn('w-[637px] min-w-[637px]', props.class)}
     >
-      <div class={cn('grid min-h-0 flex-1 grid-cols-[115px_320px_129px_72px] items-stretch gap-3 px-4 py-3', !props.params.enabled && 'opacity-70')}>
+      <div class={cn('grid min-h-0 flex-1 grid-cols-[115px_12px_320px_2px_112px_2px_56px] items-stretch px-2 py-3', !props.params.enabled && 'opacity-70')}>
         <ReverbGraphSection
+          class="col-start-1"
           title="Input Processing"
           topControls={
             <div class="grid grid-cols-2 gap-1">
@@ -604,6 +609,7 @@ export default function Reverb(props: ReverbProps) {
         />
 
         <DiffusionNetworkPanel
+          class="col-start-3"
           params={props.params}
           disabled={!props.params.enabled}
           highCutActive={diffusionHighCutActive()}
@@ -617,6 +623,7 @@ export default function Reverb(props: ReverbProps) {
         />
 
         <EarlyReflectionsPanel
+          class="col-start-5"
           params={props.params}
           disabled={!props.params.enabled}
           onSpinToggle={toggleReflectionSpin}
@@ -626,10 +633,10 @@ export default function Reverb(props: ReverbProps) {
           onModRateChange={updateReflectionModRate}
         />
 
-        <div class="flex min-h-0 min-w-0 flex-col bg-transparent">
+        <div class="col-start-7 flex min-h-0 min-w-0 translate-x-[7px] flex-col bg-transparent">
           <div class="flex min-h-0 flex-1 flex-col justify-end gap-5">
             <Knob
-              class="px-1 py-1"
+              class="w-14 px-0 py-1"
               label="Diffuse"
               valueLabel={formatUnitPercent(props.params.diffuse)}
               value={props.params.diffuse}
@@ -641,7 +648,7 @@ export default function Reverb(props: ReverbProps) {
               onValueChange={updateDiffuse}
             />
             <Knob
-              class="px-1 py-1"
+              class="w-14 px-0 py-1"
               label="Width"
               valueLabel={formatStereoWidth(props.params.stereoWidth)}
               value={props.params.stereoWidth}
@@ -653,7 +660,7 @@ export default function Reverb(props: ReverbProps) {
               onValueChange={updateStereoWidth}
             />
             <Knob
-              class="px-1 py-1"
+              class="w-14 px-0 py-1"
               label="Dry/Wet"
               valueLabel={formatPercent(props.params.wet)}
               value={props.params.wet}

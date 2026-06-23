@@ -3,7 +3,6 @@ import type { FunctionReturnType } from "convex/server";
 import {
   createDefaultEqParams,
   createDefaultReverbParams,
-  normalizeEqParams,
   normalizeReverbParams,
   normalizeSynthParams,
   type ArpeggiatorParams,
@@ -132,7 +131,7 @@ export function useEffectsPanelAudioSync(
         if (row.effect === "master-eq") {
           if (activeTargetId !== "master") {
             hasMasterEq = true;
-            audioEngine.setMasterEq(normalizeEqParams(row.params));
+            audioEngine.setMasterEq(row.params);
           }
           continue;
         }
@@ -144,7 +143,7 @@ export function useEffectsPanelAudioSync(
           continue;
         }
         if (row.effect === "eq") {
-          if (row.targetId !== activeTargetId) eqByTrackId.set(row.targetId, normalizeEqParams(row.params));
+          if (row.targetId !== activeTargetId) eqByTrackId.set(row.targetId, row.params);
           continue;
         }
         if (row.effect === "reverb") {
@@ -165,7 +164,7 @@ export function useEffectsPanelAudioSync(
         if (activeTargetId === "master") continue;
         if (row.type === "eq" && row.params) {
           hasMasterEq = true;
-          audioEngine.setMasterEq(normalizeEqParams(row.params));
+          audioEngine.setMasterEq(row.params);
         }
         if (row.type === "reverb" && row.params) {
           hasMasterReverb = true;
@@ -176,7 +175,7 @@ export function useEffectsPanelAudioSync(
 
       const trackId = row?.trackId;
       if (!trackId || trackId === activeTargetId) continue;
-      if (row.type === "eq" && row.params) eqByTrackId.set(trackId, normalizeEqParams(row.params));
+      if (row.type === "eq" && row.params) eqByTrackId.set(trackId, row.params);
       if (row.type === "reverb" && row.params) reverbByTrackId.set(trackId, normalizeReverbParams(row.params));
       if (row.type === "synth" && row.params) synthByTrackId.set(trackId, normalizeSynthParams(row.params));
       if (row.type === "arpeggiator" && row.params) arpByTrackId.set(trackId, row.params);

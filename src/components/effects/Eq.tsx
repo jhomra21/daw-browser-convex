@@ -59,7 +59,7 @@ const SPECTRUM_MAX_SMOOTHING_PX = 18
 const formatFrequency = (frequency: number) =>
   frequency >= 1000 ? `${(frequency / 1000).toFixed(2)} kHz` : `${Math.round(frequency)} Hz`
 
-const formatDb = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(2)} dB`
+const formatDb = (value: number) => `${value.toFixed(2)} dB`
 
 const formatQ = (value: number) => value.toFixed(2)
 
@@ -545,9 +545,9 @@ export default function Eq(props: EqProps) {
           'grid-template-rows': 'minmax(0, 1fr) 52px',
         }}
       >
-        <div class="row-span-2 flex flex-col border-r border-neutral-800 bg-neutral-950/30">
+        <div class="row-span-2 flex flex-col border-r border-neutral-800 bg-neutral-950/30 px-1 py-1">
           <Knob
-            class="border-b border-neutral-800 px-1 py-2"
+            class="min-h-0 flex-1 justify-center px-1 py-1"
             label="Freq"
             valueLabel={selectedFrequencyLabel()}
             value={selectedBand()?.frequency ?? 1000}
@@ -566,7 +566,7 @@ export default function Eq(props: EqProps) {
           />
 
           <Knob
-            class="border-b border-neutral-800 px-1 py-2"
+            class="min-h-0 flex-1 justify-center px-1 py-1"
             label="Gain"
             valueLabel={selectedGainLabel()}
             value={selectedBand()?.gainDb ?? 0}
@@ -585,7 +585,7 @@ export default function Eq(props: EqProps) {
           />
 
           <Knob
-            class="px-1 py-2"
+            class="min-h-0 flex-1 justify-center px-1 py-1"
             label="Q"
             valueLabel={selectedQLabel()}
             value={selectedBand()?.q ?? 1}

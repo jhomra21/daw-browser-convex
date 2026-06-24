@@ -24,6 +24,7 @@ const KNOB_ARC_PATH = 'M 23 75 A 35 35 0 1 1 77 75'
 const KNOB_ARC_SWEEP_DEGREES = 260
 const KNOB_ARC_START_DEGREES = -130
 const KNOB_POINTER_END_Y = 18
+const KNOB_CENTER_VALUE = 0
 
 export default function Knob(props: KnobProps) {
   const [dragValue, setDragValue] = createSignal<number | null>(null)
@@ -35,20 +36,32 @@ export default function Knob(props: KnobProps) {
   const step = () => props.step ?? 0.1
   const bipolar = () => props.bipolar ?? false
   const visualValue = () => dragValue() ?? props.value
+  const displayValue = () => props.valueLabel ?? formatValue()
   
   const getAngle = () => {
-    return arcFraction() * KNOB_ARC_SWEEP_DEGREES + KNOB_ARC_START_DEGREES
+    return valueToArcFraction(visualValue()) * KNOB_ARC_SWEEP_DEGREES + KNOB_ARC_START_DEGREES
   }
 
-  const arcFraction = () => {
-    const value = visualValue()
+  const valueToArcFraction = (value: number) => {
     if (props.max === props.min) return 0
     return Math.max(0, Math.min(1, (value - props.min) / (props.max - props.min)))
   }
+  const centerArcFraction = () => bipolar() ? valueToArcFraction(KNOB_CENTER_VALUE) : 0
+  const fillArcFraction = () => valueToArcFraction(visualValue())
   const arcDashArray = () => {
-    const fraction = arcFraction()
-    const visible = Math.max(0, Math.min(100, fraction * 100))
+    if (bipolar()) {
+      const visible = Math.abs(fillArcFraction() - centerArcFraction()) * 100
+      return `${visible} ${100 - visible}`
+    }
+
+    const visible = Math.max(0, Math.min(100, fillArcFraction() * 100))
     return `${visible} ${100 - visible}`
+  }
+  const arcDashOffset = () => {
+    if (!bipolar()) return undefined
+    const center = centerArcFraction() * 100
+    const fill = fillArcFraction() * 100
+    return `${fill < center ? -fill : -center}`
   }
   const normalizeValue = (value: number) => {
     const clamped = Math.max(props.min, Math.min(props.max, value))
@@ -180,7 +193,7 @@ export default function Knob(props: KnobProps) {
         aria-valuemin={props.min}
         aria-valuemax={props.max}
         aria-valuenow={visualValue()}
-        aria-valuetext={props.valueLabel ?? formatValue()}
+        aria-valuetext={displayValue()}
         class="relative select-none transition-transform duration-100"
         classList={{
           'cursor-not-allowed opacity-50': props.disabled,
@@ -226,6 +239,7 @@ export default function Knob(props: KnobProps) {
             stroke-linecap="round"
             pathLength="100"
             stroke-dasharray={arcDashArray()}
+            stroke-dashoffset={arcDashOffset()}
           />
           <line
             x1="50"
@@ -245,13 +259,16 @@ export default function Knob(props: KnobProps) {
       
       {props.showValue !== false && (
         <div
-          class="max-w-full min-w-12 truncate text-center font-mono text-xs leading-none transition-colors duration-150"
+          class="max-w-full w-full whitespace-nowrap text-center font-mono leading-none transition-colors duration-150"
           classList={{
+            'text-[11px]': displayValue().length > 6,
+            'text-xs': displayValue().length <= 6,
             'text-neutral-50': drag.isDragging(),
             'text-neutral-200': !drag.isDragging(),
           }}
+          style={{ 'word-spacing': '-0.18em' }}
         >
-          {props.valueLabel ?? formatValue()}
+          {displayValue()}
         </div>
       )}
     </div>

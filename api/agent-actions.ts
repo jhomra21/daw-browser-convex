@@ -74,8 +74,10 @@ type ConvexClientLike = {
 }
 
 type ConvexApi = typeof generatedConvexApi
+type AgentEqParams = ReturnType<typeof normalizeEqParams>
 type AgentEffectParams =
-  | ReturnType<typeof normalizeEqParams>
+  | AgentEqParams
+  | Pick<AgentEqParams, 'enabled' | 'bands'>
   | ReturnType<typeof normalizeReverbParams>
 
 type AgentActionContext = {
@@ -442,7 +444,10 @@ export function createAgentActions(context: AgentActionContext) {
     },
 
     async setEqParams(input: Omit<SetEqParamsInput, 'type'>) {
-      const params = normalizeEqParams({ enabled: input.enabled, bands: input.bands })
+      const normalized = normalizeEqParams({ enabled: input.enabled, channelMode: input.channelMode, bands: input.bands })
+      const params = input.channelMode === undefined
+        ? { enabled: normalized.enabled, bands: normalized.bands }
+        : normalized
       return mutateEffectTarget({
         target: input.target,
         params,

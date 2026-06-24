@@ -31,6 +31,7 @@ import {
   normalizeSynthParams,
   serializeEqParams,
   serializeReverbParams,
+  type EqChannelMode,
   type EqParams,
   type ReverbParams,
 } from "@daw-browser/shared";
@@ -188,6 +189,7 @@ type EffectsPanelEffectCardsProps = {
     canWrite: boolean;
     spectrum: SpectrumFrame | null;
     onBandChange: (bandId: string, updates: Partial<EqParams["bands"][number]>) => void;
+    onChannelModeChange: (mode: EqChannelMode) => void;
     onBandToggle: (bandId: string) => void;
     onToggleEqEnabled: (enabled: boolean) => void;
     onResetEq: () => void;
@@ -224,7 +226,9 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
               <Eq
                 bands={params().bands}
                 enabled={params().enabled}
+                channelMode={params().channelMode}
                 onBandChange={props.effects.onBandChange}
+                onChannelModeChange={props.effects.onChannelModeChange}
                 onBandToggle={props.effects.onBandToggle}
                 onToggleEnabled={props.effects.onToggleEqEnabled}
                 onReset={props.effects.onResetEq}
@@ -506,6 +510,10 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       ),
     }));
   };
+  const handleChannelModeChange = (channelMode: EqChannelMode) => {
+    if (!canWriteCurrentTargetEffects()) return;
+    eqState.update((prev) => prev.channelMode === channelMode ? prev : normalizeEqParams({ ...prev, channelMode }));
+  };
   const handleToggleEnabled = (enabled: boolean) => {
     if (!canWriteCurrentTargetEffects()) return;
     eqState.update((prev) => ({ ...prev, enabled }));
@@ -722,6 +730,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       canWrite: canWriteCurrentTargetEffects(),
                       spectrum: spectrum(),
                       onBandChange: handleBandChange,
+                      onChannelModeChange: handleChannelModeChange,
                       onBandToggle: handleBandToggle,
                       onToggleEqEnabled: handleToggleEnabled,
                       onResetEq: handleReset,

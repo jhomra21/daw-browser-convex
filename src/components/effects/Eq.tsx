@@ -4,6 +4,12 @@ import EffectShell from '~/components/effects/EffectShell'
 import EqFilterTypeSelect from '~/components/effects/eq-filter-type-select'
 import Knob from '~/components/ui/knob'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '~/components/ui/dropdown-menu'
+import {
   createDefaultEqParams,
   createDefaultEqBand,
   EQ_FREQUENCY_MAX,
@@ -13,6 +19,7 @@ import {
   EQ_Q_MAX,
   EQ_Q_MIN,
   supportsGain,
+  type EqChannelMode,
   type EqBandParams,
 } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
@@ -22,7 +29,9 @@ import { cn } from '~/lib/utils'
 type EqProps = {
   bands: EqBandParams[]
   enabled: boolean
+  channelMode: EqChannelMode
   onBandChange: (bandId: string, updates: Partial<EqBandParams>) => void
+  onChannelModeChange: (mode: EqChannelMode) => void
   onBandToggle?: (bandId: string) => void
   onToggleEnabled?: (enabled: boolean) => void
   onReset?: () => void
@@ -37,6 +46,10 @@ const GAIN_MIN = EQ_GAIN_DB_MIN
 const GAIN_MAX = EQ_GAIN_DB_MAX
 const Q_MIN = EQ_Q_MIN
 const Q_MAX = EQ_Q_MAX
+const EQ_CHANNEL_MODE_OPTIONS: { value: EqChannelMode; label: string }[] = [
+  { value: 'mono', label: 'Mono' },
+  { value: 'stereo', label: 'Stereo' },
+]
 const SPECTRUM_DECAY_GRACE_MS = 90
 const SPECTRUM_DECAY_PER_SECOND = 0.04
 const SPECTRUM_SILENCE_THRESHOLD = 0.003
@@ -49,6 +62,8 @@ const formatFrequency = (frequency: number) =>
 const formatDb = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(2)} dB`
 
 const formatQ = (value: number) => value.toFixed(2)
+
+const formatChannelMode = (mode: EqChannelMode) => mode === 'mono' ? 'Mono' : 'Stereo'
 
 const hasAudibleSpectrum = (data: Float32Array) => {
   for (let i = 0; i < data.length; i++) {
@@ -517,7 +532,7 @@ export default function Eq(props: EqProps) {
   return (
     <EffectShell
       title="EQ Eight"
-      typeLabel="Stereo"
+      typeLabel={formatChannelMode(props.channelMode)}
       enabled={props.enabled}
       onToggleEnabled={props.onToggleEnabled}
       onReset={props.onReset}
@@ -602,7 +617,39 @@ export default function Eq(props: EqProps) {
 
         <div class="row-span-2 flex flex-col border-l border-neutral-800 bg-neutral-950/40 px-1 py-2 text-[10px]">
           <div class="mb-1 text-neutral-500">Mode</div>
-          <div class="mb-3 border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-neutral-300">Stereo</div>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              class={cn(
+                'mb-3 flex h-5 w-full items-center justify-between border border-neutral-700 bg-neutral-900 px-1 text-left text-neutral-300 hover:bg-neutral-800',
+                !props.enabled && 'cursor-not-allowed opacity-60',
+              )}
+              disabled={!props.enabled}
+              title="EQ channel mode"
+            >
+              <span class="min-w-0 truncate">{formatChannelMode(props.channelMode)}</span>
+              <svg viewBox="0 0 8 8" class="h-1.5 w-1.5 shrink-0 text-neutral-400" aria-hidden="true">
+                <path d="M1 3 L4 6 L7 3 Z" fill="currentColor" />
+              </svg>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent class="w-20 min-w-20 border-neutral-700 bg-neutral-900 p-1">
+              <For each={EQ_CHANNEL_MODE_OPTIONS}>
+                {(option) => (
+                  <DropdownMenuItem
+                    class={cn(
+                      'h-6 cursor-pointer px-2 py-1 text-xs text-neutral-200 focus:bg-neutral-800 focus:text-neutral-50',
+                      option.value === props.channelMode && 'bg-cyan-500/20 text-cyan-100',
+                    )}
+                    disabled={!props.enabled}
+                    onSelect={() => {
+                      if (option.value !== props.channelMode) props.onChannelModeChange(option.value)
+                    }}
+                  >
+                    {option.label}
+                  </DropdownMenuItem>
+                )}
+              </For>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <div class="mb-1 text-neutral-500">Edit</div>
           <div class="mb-3 border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-neutral-300">A</div>
         </div>

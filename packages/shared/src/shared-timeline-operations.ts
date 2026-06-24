@@ -201,7 +201,7 @@ const readEqParams = (value: unknown): EqParams | null => {
       ? [{ id: band.id, type: band.type, frequency: band.frequency, gainDb: band.gainDb, q: band.q, enabled: band.enabled }]
       : []
   })
-  return bands.length === value.bands.length ? normalizeEqParams({ enabled: value.enabled, bands }) : null
+  return bands.length === value.bands.length ? normalizeEqParams({ enabled: value.enabled, channelMode: value.channelMode, bands }) : null
 }
 
 const readReverbParams = (value: unknown): ReverbParams | null => {

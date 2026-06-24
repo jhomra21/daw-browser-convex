@@ -9,9 +9,12 @@ export type EqBandParams = {
   type: EqBandType
 }
 
+export type EqChannelMode = 'stereo' | 'mono'
+
 export type EqParams = {
   bands: EqBandParams[]
   enabled: boolean
+  channelMode: EqChannelMode
 }
 
 export type EqParamsLite = EqParams
@@ -19,6 +22,7 @@ export type EqBandParamsInput = Partial<Omit<EqBandParams, 'type'>> & { type?: u
 export type EqParamsInput = {
   enabled?: boolean
   bands?: EqBandParamsInput[]
+  channelMode?: unknown
 }
 
 export const EQ_FREQUENCY_MIN = 20
@@ -58,7 +62,12 @@ export function createDefaultEqParams(): EqParams {
   return {
     bands: DEFAULT_EQ_FREQUENCIES.map((_, index) => createDefaultEqBand(index)),
     enabled: true,
+    channelMode: 'stereo',
   }
+}
+
+export function normalizeEqChannelMode(value: unknown): EqChannelMode {
+  return value === 'mono' ? 'mono' : 'stereo'
 }
 
 export function isEqBandType(value: unknown): value is EqBandType {
@@ -79,6 +88,7 @@ export function normalizeEqParams(input: EqParamsInput): EqParams {
   const bandsInput = Array.isArray(input.bands) && input.bands.length > 0 ? input.bands : defaults.bands
   return {
     enabled: typeof input.enabled === 'boolean' ? input.enabled : defaults.enabled,
+    channelMode: normalizeEqChannelMode(input.channelMode),
     bands: bandsInput.map((band, index) => {
       const defaultBand = defaults.bands[index] ?? createDefaultEqBand(index)
       const frequency = readFiniteNumber(band.frequency)
@@ -96,8 +106,12 @@ export function normalizeEqParams(input: EqParamsInput): EqParams {
   }
 }
 
+export function normalizeEqParamsForUpdate(input: EqParamsInput, existing?: EqParamsInput): EqParams {
+  return normalizeEqParams({ ...(existing === undefined ? {} : normalizeEqParams(existing)), ...input })
+}
+
 export function serializeNormalizedEqParams(params: EqParams): string {
-  let signature = params.enabled ? '1' : '0'
+  let signature = `${params.enabled ? '1' : '0'}|${params.channelMode}`
   for (const band of params.bands) {
     signature += `|${band.id}:${band.enabled ? 1 : 0}:${band.type}:${band.frequency}:${band.gainDb}:${band.q}`
   }

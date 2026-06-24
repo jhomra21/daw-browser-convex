@@ -1,7 +1,45 @@
 import { describe, expect, test } from 'bun:test'
-import { addEarlyReflectionTaps, createReverbImpulseRenderInfo } from './dsp'
+import { addEarlyReflectionTaps, configureEqNodeChannels, createReverbImpulseRenderInfo, getEqTopologySignature, resolveEqChannelCount } from './dsp'
 import { getAppliedReverbSignature, getReverbImpulseBucket, getReverbImpulseSignature, getReverbTopologySignature } from './reverb-signature'
-import { createDefaultReverbParams, normalizeReverbParams, REVERB_DECAY_SEC_MAX } from '@daw-browser/shared'
+import { createDefaultReverbParams, normalizeEqParams, normalizeReverbParams, REVERB_DECAY_SEC_MAX } from '@daw-browser/shared'
+
+describe('EQ channel mode', () => {
+  test('uses one channel for mono EQ nodes', () => {
+    const node: Pick<AudioNode, 'channelCount' | 'channelCountMode' | 'channelInterpretation'> = {
+      channelCount: 2,
+      channelCountMode: 'max',
+      channelInterpretation: 'speakers',
+    }
+
+    configureEqNodeChannels(node, 'mono', 2)
+
+    expect(node.channelCountMode).toBe('explicit')
+    expect(node.channelInterpretation).toBe('speakers')
+    expect(node.channelCount).toBe(1)
+  })
+
+  test('clamps stereo EQ nodes to available channels', () => {
+    expect(resolveEqChannelCount('stereo', 0)).toBe(1)
+    expect(resolveEqChannelCount('stereo', 1)).toBe(1)
+    expect(resolveEqChannelCount('stereo', 4)).toBe(2)
+  })
+
+  test('includes channel mode in EQ topology signature', () => {
+    const stereo = normalizeEqParams({ channelMode: 'stereo' })
+    const mono = normalizeEqParams({ channelMode: 'mono' })
+
+    expect(getEqTopologySignature(mono)).not.toBe(getEqTopologySignature(stereo))
+  })
+
+  test('omits channel mode from empty EQ topology signatures', () => {
+    const mono = normalizeEqParams({
+      channelMode: 'mono',
+      bands: [{ id: 'b1', type: 'peaking', frequency: 1000, gainDb: 0, q: 1, enabled: false }],
+    })
+
+    expect(getEqTopologySignature(mono)).toBe('')
+  })
+})
 
 describe('reverb impulse rendering', () => {
   test('uses shared maximum decay for impulse buckets', () => {

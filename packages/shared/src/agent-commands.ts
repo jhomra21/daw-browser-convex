@@ -74,6 +74,7 @@ export const SetEqParamsCommandSchema = z.object({
   type: z.literal('setEqParams'),
   target: z.union([z.literal('master'), z.number().int().min(1)]),
   enabled: z.boolean(),
+  channelMode: z.union([z.literal('mono'), z.literal('stereo')]).optional(),
   bands: z.array(EqBandSchema),
 })
 

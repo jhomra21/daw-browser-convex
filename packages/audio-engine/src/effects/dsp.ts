@@ -1,4 +1,4 @@
-import { normalizeReverbParams, REVERB_DIFFUSION_HIGH_CUT_HZ_MAX, REVERB_DIFFUSION_LOW_CUT_HZ_MIN, supportsGain, type ArpParams, type EqBandParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
+import { normalizeReverbParams, REVERB_DIFFUSION_HIGH_CUT_HZ_MAX, REVERB_DIFFUSION_LOW_CUT_HZ_MIN, supportsGain, type ArpParams, type EqBandParams, type EqChannelMode, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
 import { formatReverbImpulseSignature, getReverbImpulseSignatureParts, type ReverbImpulseSignatureParts } from './reverb-signature'
 
 type MidiNote = { beat: number; length: number; pitch: number; velocity?: number }
@@ -156,25 +156,37 @@ export function createEqNodes(ctx: BaseAudioContext, params?: EqParamsLite, chan
   for (const band of params.bands) {
     if (!band.enabled) continue
     const filter = ctx.createBiquadFilter()
-    try {
-      filter.channelCountMode = 'explicit'
-      filter.channelInterpretation = 'speakers'
-      filter.channelCount = Math.max(1, Math.min(2, channels))
-    } catch {
-      // Some browsers may not allow changing channel configuration.
-    }
+    configureEqNodeChannels(filter, params.channelMode, channels)
     applyEqBandParams(filter, band)
     nodes.push(filter)
   }
   return nodes
 }
 
+export function resolveEqChannelCount(mode: EqChannelMode, availableChannels = 2): number {
+  if (mode === 'mono') return 1
+  return Math.max(1, Math.min(2, availableChannels))
+}
+
+type ConfigurableEqNodeChannels = Pick<AudioNode, 'channelCount' | 'channelCountMode' | 'channelInterpretation'>
+
+export function configureEqNodeChannels(node: ConfigurableEqNodeChannels, mode: EqChannelMode, availableChannels = 2) {
+  try {
+    node.channelCountMode = 'explicit'
+    node.channelInterpretation = 'speakers'
+    node.channelCount = resolveEqChannelCount(mode, availableChannels)
+  } catch {
+    // Some browsers may not allow changing channel configuration.
+  }
+}
+
 export function getEqTopologySignature(params?: EqParamsLite): string {
   if (!params?.enabled) return ''
-  return params.bands
+  const bandsSignature = params.bands
     .filter((band) => band.enabled)
     .map((band) => `${band.id}:${band.type}`)
     .join('|')
+  return bandsSignature ? `${params.channelMode}|${bandsSignature}` : ''
 }
 
 export function applyEqNodeParams(nodes: BiquadFilterNode[], params: EqParamsLite) {

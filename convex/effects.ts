@@ -2,7 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProjectAccess } from "./projectAccess";
 import { getTrackWriteAccess } from "./trackWrites";
-import { normalizeEqParams, normalizeReverbParams, normalizeSynthParams } from "@daw-browser/shared";
+import { normalizeEqParamsForUpdate, normalizeReverbParams, normalizeSynthParams } from "@daw-browser/shared";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
@@ -40,6 +40,7 @@ const eqBandTypeValidator = v.union(
 
 const eqParamsValidator = v.object({
   enabled: v.boolean(),
+  channelMode: v.optional(v.union(v.literal('mono'), v.literal('stereo'))),
   bands: v.array(v.object({
     id: v.string(),
     type: eqBandTypeValidator,
@@ -77,7 +78,7 @@ const upsertTrackEffect = async (
     userId: string
     trackId: any
     type: 'synth' | 'arpeggiator' | 'reverb' | 'eq'
-    params: unknown
+    params: any
   },
 ) => {
   const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
@@ -86,16 +87,18 @@ const upsertTrackEffect = async (
   const byIndex = existing.sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0))
   const row = byIndex.find((entry: any) => entry.type === input.type) ?? null
   if (row) {
-    await ctx.db.patch(row._id, { params: input.params, targetType: 'track' })
+    const params = input.type === 'eq' ? normalizeEqParamsForUpdate(input.params, row.params) : input.params
+    await ctx.db.patch(row._id, { params, targetType: 'track' })
     return row._id
   }
+  const params = input.type === 'eq' ? normalizeEqParamsForUpdate(input.params) : input.params
   return await ctx.db.insert('effects', {
     projectId: input.projectId,
     targetType: 'track',
     trackId: input.trackId,
     index: existing.length,
     type: input.type,
-    params: input.params,
+    params,
     createdAt: Date.now(),
   })
 }
@@ -106,7 +109,7 @@ const upsertMasterEffect = async (
     projectId: string
     userId: string
     type: 'reverb' | 'eq'
-    params: unknown
+    params: any
   },
 ) => {
   await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
@@ -114,15 +117,17 @@ const upsertMasterEffect = async (
   const byIndex = existing.sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0))
   const row = byIndex.find((entry: any) => entry.type === input.type && entry.targetType === 'master') ?? null
   if (row) {
-    await ctx.db.patch(row._id, { params: input.params, targetType: 'master' })
+    const params = input.type === 'eq' ? normalizeEqParamsForUpdate(input.params, row.params) : input.params
+    await ctx.db.patch(row._id, { params, targetType: 'master' })
     return row._id
   }
+  const params = input.type === 'eq' ? normalizeEqParamsForUpdate(input.params) : input.params
   return await ctx.db.insert('effects', {
     projectId: input.projectId,
     targetType: 'master',
     index: existing.filter((entry: any) => entry.targetType === 'master').length,
     type: input.type,
-    params: input.params,
+    params,
     createdAt: Date.now(),
   })
 }
@@ -324,7 +329,7 @@ export const setEqParams = mutation({
   },
   handler: async (ctx, { projectId, trackId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'eq', params: normalizeEqParams(params) });
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'eq', params });
   },
 });
 
@@ -336,7 +341,7 @@ export const setMasterEqParams = mutation({
   },
   handler: async (ctx, { projectId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'eq', params: normalizeEqParams(params) })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'eq', params })
   }
 })
 
@@ -407,7 +412,7 @@ export const serverSetEqParams = mutation({
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
     if (!normalizedTrackId) return
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'eq', params: normalizeEqParams(params) })
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'eq', params })
   },
 })
 
@@ -429,6 +434,6 @@ export const serverSetMasterEqParams = mutation({
   },
   handler: async (ctx, { projectId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'eq', params: normalizeEqParams(params) })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'eq', params })
   },
 })

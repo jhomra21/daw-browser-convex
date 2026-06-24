@@ -10,11 +10,13 @@ import {
   EQ_Q_MAX,
   EQ_Q_MIN,
   normalizeEqParams,
+  normalizeEqParamsForUpdate,
   normalizeReverbParams,
   serializeEqParams,
   serializeReverbParams,
   REVERB_DECAY_SEC_MAX,
   REVERB_WET_MAX,
+  serializeNormalizedEqParams,
 } from './effects-params'
 import { parseSharedTimelineOperation } from './shared-timeline-operations'
 
@@ -44,6 +46,7 @@ describe('EQ params', () => {
     })
 
     expect(normalized.enabled).toBe(false)
+    expect(normalized.channelMode).toBe('stereo')
     expect(normalized.bands[0]).toEqual({
       ...defaults.bands[0],
       gainDb: EQ_GAIN_DB_MIN,
@@ -67,6 +70,31 @@ describe('EQ params', () => {
     expect(serializeEqParams(outOfRange)).toBe(serializeEqParams(low))
   })
 
+  test('defaults missing or invalid channel mode to stereo', () => {
+    expect(createDefaultEqParams().channelMode).toBe('stereo')
+    expect(normalizeEqParams({}).channelMode).toBe('stereo')
+    expect(normalizeEqParams({ channelMode: 'side' }).channelMode).toBe('stereo')
+  })
+
+  test('preserves mono channel mode', () => {
+    expect(normalizeEqParams({ channelMode: 'mono' }).channelMode).toBe('mono')
+  })
+
+  test('includes channel mode in normalized serialization', () => {
+    const stereo = normalizeEqParams({ channelMode: 'stereo' })
+    const mono = normalizeEqParams({ channelMode: 'mono' })
+
+    expect(serializeNormalizedEqParams(mono)).not.toBe(serializeNormalizedEqParams(stereo))
+  })
+
+  test('preserves existing channel mode for partial updates', () => {
+    const existing = normalizeEqParams({ channelMode: 'mono' })
+
+    expect(normalizeEqParamsForUpdate({ enabled: false }, existing).channelMode).toBe('mono')
+    expect(normalizeEqParamsForUpdate({ enabled: false }).channelMode).toBe('stereo')
+    expect(normalizeEqParamsForUpdate({ channelMode: 'stereo' }, existing).channelMode).toBe('stereo')
+  })
+
   test('uses shared defaults for bands beyond the default set', () => {
     const normalized = normalizeEqParams({
       bands: Array.from({ length: 9 }, (_, index) => (
@@ -83,6 +111,7 @@ describe('EQ params', () => {
       payload: {
         params: {
           enabled: true,
+          channelMode: 'stereo',
           bands: [{
             id: 'b1',
             type: 'peaking',
@@ -98,6 +127,7 @@ describe('EQ params', () => {
       payload: {
         params: {
           enabled: true,
+          channelMode: 'stereo',
           bands: [{
             id: 'b1',
             type: 'peaking',

@@ -12,6 +12,7 @@ import {
   normalizeEqParams,
   normalizeEqParamsForUpdate,
   normalizeReverbParams,
+  normalizeReverbParamsForUpdate,
   serializeEqParams,
   serializeReverbParams,
   REVERB_DECAY_SEC_MAX,
@@ -165,5 +166,46 @@ describe('Reverb params', () => {
     const outOfRange = { ...createDefaultReverbParams(), wet: 999, decaySec: 999 }
 
     expect(serializeReverbParams(outOfRange)).toBe(serializeReverbParams(high))
+  })
+
+  test('preserves existing optional params during partial updates', () => {
+    const existing = normalizeReverbParams({
+      enabled: true,
+      wet: 0.3,
+      decaySec: 3,
+      preDelayMs: 30,
+      reflections: 0.7,
+      reflectionSpin: false,
+      stereoWidth: 1.5,
+    })
+
+    expect(normalizeReverbParamsForUpdate({ wet: 0.5 }, existing)).toEqual({
+      ...existing,
+      wet: 0.5,
+    })
+  })
+
+  test('parses shared Reverb operations without filling omitted optional params', () => {
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setMasterReverbParams',
+      payload: {
+        params: {
+          enabled: true,
+          wet: 0.4,
+          decaySec: 4,
+          preDelayMs: 40,
+        },
+      },
+    })).toEqual({
+      kind: 'effects.setMasterReverbParams',
+      payload: {
+        params: {
+          enabled: true,
+          wet: 0.4,
+          decaySec: 4,
+          preDelayMs: 40,
+        },
+      },
+    })
   })
 })

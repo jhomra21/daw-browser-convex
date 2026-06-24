@@ -26,7 +26,7 @@ import {
 import { buildClipCreatePayload } from '@daw-browser/shared'
 import { getPersistableAudioSourceMetadata } from '@daw-browser/shared'
 import { sanitizeAudioSourceKind } from '@daw-browser/shared'
-import { normalizeEqParams, normalizeReverbParams, normalizeSynthParams } from '@daw-browser/shared'
+import { normalizeEqParams, normalizeSynthParams } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import { getClipKindFromClip, getClipTargetError } from './clip-targets'
 import { listSortedClipsForTrack, resolveTrackClip, selectTrackClips, trackAtIndex as trackAtIndexImpl } from './indexing'
@@ -75,10 +75,11 @@ type ConvexClientLike = {
 
 type ConvexApi = typeof generatedConvexApi
 type AgentEqParams = ReturnType<typeof normalizeEqParams>
+type AgentReverbParams = Omit<SetReverbParamsInput, 'type' | 'target'>
 type AgentEffectParams =
   | AgentEqParams
   | Pick<AgentEqParams, 'enabled' | 'bands'>
-  | ReturnType<typeof normalizeReverbParams>
+  | AgentReverbParams
 
 type AgentActionContext = {
   convex: ConvexClientLike
@@ -455,9 +456,9 @@ export function createAgentActions(context: AgentActionContext) {
     },
 
     async setReverbParams(input: Omit<SetReverbParamsInput, 'type'>) {
-      const params = normalizeReverbParams(input)
+      const { target, ...params } = input
       return mutateEffectTarget({
-        target: input.target,
+        target,
         params,
       })
     },

@@ -1,11 +1,10 @@
 import type {
   ArpeggiatorParams,
   EqParams,
-  ReverbParams,
   ReverbParamsInput,
   SynthWave,
 } from './effects-params'
-import { isEqBandType, normalizeEqParams, normalizeReverbParams } from './effects-params'
+import { isEqBandType, normalizeEqParams } from './effects-params'
 import { normalizeAudioWarp, normalizeClipGain, type AudioWarpPayload } from './audio-warp'
 import { normalizeMasterVolume } from './master-volume'
 
@@ -58,6 +57,8 @@ type SharedSynthParams = {
   releaseMs?: number
 }
 
+type SharedReverbParams = Required<Pick<ReverbParamsInput, 'enabled' | 'wet' | 'decaySec' | 'preDelayMs'>> & Omit<ReverbParamsInput, 'enabled' | 'wet' | 'decaySec' | 'preDelayMs'>
+
 export type SharedTimelineOperation =
   | { kind: 'tracks.create'; payload: { index?: number; kind?: string; channelRole?: string; operationId?: string } }
   | { kind: 'tracks.lock'; payload: { trackId: string } }
@@ -73,11 +74,11 @@ export type SharedTimelineOperation =
   | { kind: 'tracks.setMix'; payload: { trackId: string; muted?: boolean; soloed?: boolean } }
   | { kind: 'mixer.setMasterVolume'; payload: { volume: number } }
   | { kind: 'effects.setEqParams'; payload: { trackId: string; params: EqParams } }
-  | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: ReverbParams } }
+  | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: SharedReverbParams } }
   | { kind: 'effects.setSynthParams'; payload: { trackId: string; params: SharedSynthParams } }
   | { kind: 'effects.setArpeggiatorParams'; payload: { trackId: string; params: ArpeggiatorParams } }
   | { kind: 'effects.setMasterEqParams'; payload: { params: EqParams } }
-  | { kind: 'effects.setMasterReverbParams'; payload: { params: ReverbParams } }
+  | { kind: 'effects.setMasterReverbParams'; payload: { params: SharedReverbParams } }
 
 export type SharedTimelineOperationKind = SharedTimelineOperation['kind']
 
@@ -204,7 +205,7 @@ const readEqParams = (value: unknown): EqParams | null => {
   return bands.length === value.bands.length ? normalizeEqParams({ enabled: value.enabled, channelMode: value.channelMode, bands }) : null
 }
 
-const readReverbParams = (value: unknown): ReverbParams | null => {
+const readReverbParams = (value: unknown): SharedReverbParams | null => {
   if (!isRecord(value) || typeof value.enabled !== 'boolean') return null
   const params: ReverbParamsInput = {
     enabled: value.enabled,
@@ -227,7 +228,13 @@ const readReverbParams = (value: unknown): ReverbParams | null => {
     stereoWidth: readOptionalNumber(value.stereoWidth),
   }
   if (params.wet === undefined || params.decaySec === undefined || params.preDelayMs === undefined) return null
-  return normalizeReverbParams(params)
+  return {
+    ...params,
+    enabled: value.enabled,
+    wet: params.wet,
+    decaySec: params.decaySec,
+    preDelayMs: params.preDelayMs,
+  }
 }
 
 const readSynthWave = (value: unknown): SynthWave | null => (

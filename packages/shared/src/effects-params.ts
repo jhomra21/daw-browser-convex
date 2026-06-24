@@ -236,6 +236,10 @@ export function normalizeReverbParams(input: ReverbParamsInput): ReverbParams {
   }
 }
 
+export function normalizeReverbParamsForUpdate(input: ReverbParamsInput, existing?: ReverbParamsInput): ReverbParams {
+  return normalizeReverbParams({ ...(existing === undefined ? {} : normalizeReverbParams(existing)), ...input })
+}
+
 export function serializeReverbParams(params: ReverbParams): string {
   const normalized = normalizeReverbParams(params)
   return `${normalized.enabled ? 1 : 0}|${normalized.wet}|${normalized.decaySec}|${normalized.preDelayMs}|${normalized.reflections}|${normalized.reflectionSpin ? 1 : 0}|${normalized.reflectionModAmountMs}|${normalized.reflectionModRateHz}|${normalized.reflectionShape}|${normalized.diffuse}|${normalized.size}|${normalized.diffusion}|${normalized.density}|${normalized.lowCutHz}|${normalized.highCutHz}|${normalized.diffusionLowCutHz}|${normalized.diffusionHighCutHz}|${normalized.stereoWidth}`

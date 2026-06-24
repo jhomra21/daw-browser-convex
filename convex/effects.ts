@@ -2,7 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProjectAccess } from "./projectAccess";
 import { getTrackWriteAccess } from "./trackWrites";
-import { normalizeEqParamsForUpdate, normalizeReverbParams, normalizeSynthParams } from "@daw-browser/shared";
+import { normalizeEqParamsForUpdate, normalizeReverbParamsForUpdate, normalizeSynthParams } from "@daw-browser/shared";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
@@ -71,6 +71,16 @@ const sanitizeArpParams = (params: {
   }
 }
 
+const normalizeEffectParamsForUpdate = (
+  type: 'synth' | 'arpeggiator' | 'reverb' | 'eq',
+  params: any,
+  existing?: any,
+) => {
+  if (type === 'eq') return normalizeEqParamsForUpdate(params, existing)
+  if (type === 'reverb') return normalizeReverbParamsForUpdate(params, existing)
+  return params
+}
+
 const upsertTrackEffect = async (
   ctx: any,
   input: {
@@ -87,11 +97,11 @@ const upsertTrackEffect = async (
   const byIndex = existing.sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0))
   const row = byIndex.find((entry: any) => entry.type === input.type) ?? null
   if (row) {
-    const params = input.type === 'eq' ? normalizeEqParamsForUpdate(input.params, row.params) : input.params
+    const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
     await ctx.db.patch(row._id, { params, targetType: 'track' })
     return row._id
   }
-  const params = input.type === 'eq' ? normalizeEqParamsForUpdate(input.params) : input.params
+  const params = normalizeEffectParamsForUpdate(input.type, input.params)
   return await ctx.db.insert('effects', {
     projectId: input.projectId,
     targetType: 'track',
@@ -117,11 +127,11 @@ const upsertMasterEffect = async (
   const byIndex = existing.sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0))
   const row = byIndex.find((entry: any) => entry.type === input.type && entry.targetType === 'master') ?? null
   if (row) {
-    const params = input.type === 'eq' ? normalizeEqParamsForUpdate(input.params, row.params) : input.params
+    const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
     await ctx.db.patch(row._id, { params, targetType: 'master' })
     return row._id
   }
-  const params = input.type === 'eq' ? normalizeEqParamsForUpdate(input.params) : input.params
+  const params = normalizeEffectParamsForUpdate(input.type, input.params)
   return await ctx.db.insert('effects', {
     projectId: input.projectId,
     targetType: 'master',
@@ -266,7 +276,7 @@ export const setReverbParams = mutation({
   },
   handler: async (ctx, { projectId, trackId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'reverb', params: normalizeReverbParams(params) });
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'reverb', params });
   },
 });
 
@@ -277,7 +287,7 @@ export const setMasterReverbParams = mutation({
   },
   handler: async (ctx, { projectId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'reverb', params: normalizeReverbParams(params) })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'reverb', params })
   },
 });
 
@@ -398,7 +408,7 @@ export const serverSetReverbParams = mutation({
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
     if (!normalizedTrackId) return
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'reverb', params: normalizeReverbParams(params) })
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'reverb', params })
   },
 })
 
@@ -423,7 +433,7 @@ export const serverSetMasterReverbParams = mutation({
   },
   handler: async (ctx, { projectId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'reverb', params: normalizeReverbParams(params) })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'reverb', params })
   },
 })
 

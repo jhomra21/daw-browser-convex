@@ -20,6 +20,11 @@ type KnobProps = {
   class?: string
 }
 
+const KNOB_ARC_PATH = 'M 23 75 A 35 35 0 1 1 77 75'
+const KNOB_ARC_SWEEP_DEGREES = 260
+const KNOB_ARC_START_DEGREES = -130
+const KNOB_POINTER_END_Y = 18
+
 export default function Knob(props: KnobProps) {
   const [dragValue, setDragValue] = createSignal<number | null>(null)
   let startY = 0
@@ -32,15 +37,8 @@ export default function Knob(props: KnobProps) {
   const visualValue = () => dragValue() ?? props.value
   
   const getAngle = () => {
-    const value = visualValue()
-    const normalizedValue = (value - props.min) / (props.max - props.min)
-    const angle = normalizedValue * 180 - 90
-    return Math.max(-90, Math.min(90, angle))
+    return arcFraction() * KNOB_ARC_SWEEP_DEGREES + KNOB_ARC_START_DEGREES
   }
-
-  const arcRadiusPx = () => (size() / 100) * 35
-  const indicatorLength = () => Math.max(6, arcRadiusPx() - 10)
-  const pointerTop = () => 6 + size() * 0.75 - indicatorLength()
 
   const arcFraction = () => {
     const value = visualValue()
@@ -50,8 +48,7 @@ export default function Knob(props: KnobProps) {
   const arcDashArray = () => {
     const fraction = arcFraction()
     const visible = Math.max(0, Math.min(100, fraction * 100))
-    const hidden = 100 - visible
-    return `${visible} ${hidden}`
+    return `${visible} ${100 - visible}`
   }
   const normalizeValue = (value: number) => {
     const clamped = Math.max(props.min, Math.min(props.max, value))
@@ -170,7 +167,7 @@ export default function Knob(props: KnobProps) {
   }
 
   return (
-    <div class={cn('flex flex-col items-center gap-1', props.class)}>
+    <div class={cn('flex flex-col items-center gap-0.5', props.class)}>
       <Show when={props.label}>
         <div class="text-xs font-medium leading-none text-neutral-400">{props.label}</div>
       </Show>
@@ -210,10 +207,12 @@ export default function Knob(props: KnobProps) {
           aria-hidden="true"
         >
           <path
-            class="stroke-neutral-800"
-            d="M 15 75 A 35 35 0 1 1 85 75"
+            class="stroke-neutral-700"
+            d={KNOB_ARC_PATH}
             fill="none"
             stroke-width="4"
+            stroke-linecap="round"
+            pathLength="100"
           />
           
           <path
@@ -221,37 +220,35 @@ export default function Knob(props: KnobProps) {
               'stroke-sky-300': drag.isDragging(),
               'stroke-cyan-400': !drag.isDragging(),
             }}
-            d="M 15 75 A 35 35 0 1 1 85 75"
+            d={KNOB_ARC_PATH}
             fill="none"
             stroke-width="4"
+            stroke-linecap="round"
             pathLength="100"
             stroke-dasharray={arcDashArray()}
-            stroke-dashoffset={0}
+          />
+          <line
+            x1="50"
+            y1="50"
+            x2="50"
+            y2={KNOB_POINTER_END_Y}
+            classList={{
+              'stroke-sky-100': drag.isDragging(),
+              'stroke-neutral-100': !drag.isDragging(),
+            }}
+            stroke-width="5"
+            stroke-linecap="round"
+            transform={`rotate(${getAngle()} 50 50)`}
           />
         </svg>
-        
-        <div
-          class="absolute w-0.5 -translate-x-1/2 origin-bottom transform"
-          classList={{
-            'bg-sky-100': drag.isDragging(),
-            'bg-neutral-200': !drag.isDragging(),
-          }}
-          style={{ 
-            left: '50%',
-            top: `${pointerTop()}px`,
-            height: `${indicatorLength()}px`,
-            transform: `translateX(-50%) rotate(${getAngle()}deg)`,
-            'transform-origin': `center ${indicatorLength()}px`,
-          }}
-        />
       </div>
       
       {props.showValue !== false && (
         <div
           class="max-w-full min-w-12 truncate text-center font-mono text-xs leading-none transition-colors duration-150"
           classList={{
-            'text-neutral-100': drag.isDragging(),
-            'text-cyan-300': !drag.isDragging(),
+            'text-neutral-50': drag.isDragging(),
+            'text-neutral-200': !drag.isDragging(),
           }}
         >
           {props.valueLabel ?? formatValue()}

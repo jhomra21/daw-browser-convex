@@ -229,7 +229,15 @@ export function createPersistedEffectState<TRow, TParams>(
   function syncRemote(targetId: string, nextParams: TParams | undefined) {
     const key = keyForTarget(targetId)
     setRemoteByTarget((prev) => {
-      if (prev[key] === nextParams) return prev
+      const current = prev[key]
+      if (
+        current === nextParams ||
+        (
+          current !== undefined &&
+          nextParams !== undefined &&
+          options.serializeParams(current) === options.serializeParams(nextParams)
+        )
+      ) return prev
       return { ...prev, [key]: nextParams }
     })
 

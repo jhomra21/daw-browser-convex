@@ -215,7 +215,9 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
           ensureClipBuffer={props.exportDialog.ensureClipBuffer}
         />
       </Show>
-      <ExportProgressOverlay />
+      <Show when={!props.exportDialog.isOpen}>
+        <ExportProgressOverlay />
+      </Show>
     </ExportProvider>
   )
 }

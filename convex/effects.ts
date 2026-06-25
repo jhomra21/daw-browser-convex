@@ -2,7 +2,13 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProjectAccess } from "./projectAccess";
 import { getTrackWriteAccess } from "./trackWrites";
-import { normalizeEqParamsForUpdate, normalizeReverbParamsForUpdate, normalizeSynthParams } from "@daw-browser/shared";
+import {
+  normalizeEqParamsForUpdate,
+  normalizeReverbParamsForUpdate,
+  normalizeSynthParams,
+  serializeEqParams,
+  serializeReverbParams,
+} from "@daw-browser/shared";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
@@ -28,19 +34,19 @@ const reverbParamsValidator = v.object({
 })
 
 const eqBandTypeValidator = v.union(
-  v.literal('allpass'),
-  v.literal('bandpass'),
-  v.literal('highpass'),
-  v.literal('highshelf'),
-  v.literal('lowpass'),
-  v.literal('lowshelf'),
-  v.literal('notch'),
-  v.literal('peaking'),
+  v.literal("allpass"),
+  v.literal("bandpass"),
+  v.literal("highpass"),
+  v.literal("highshelf"),
+  v.literal("lowpass"),
+  v.literal("lowshelf"),
+  v.literal("notch"),
+  v.literal("peaking"),
 )
 
 const eqParamsValidator = v.object({
   enabled: v.boolean(),
-  channelMode: v.optional(v.union(v.literal('mono'), v.literal('stereo'))),
+  channelMode: v.optional(v.union(v.literal("mono"), v.literal("stereo"))),
   bands: v.array(v.object({
     id: v.string(),
     type: eqBandTypeValidator,
@@ -81,6 +87,16 @@ const normalizeEffectParamsForUpdate = (
   return params
 }
 
+const areEffectParamsEqual = (
+  type: 'synth' | 'arpeggiator' | 'reverb' | 'eq',
+  current: any,
+  next: any,
+) => {
+  if (type === 'eq') return serializeEqParams(current) === serializeEqParams(next)
+  if (type === 'reverb') return serializeReverbParams(current) === serializeReverbParams(next)
+  return current === next
+}
+
 const upsertTrackEffect = async (
   ctx: any,
   input: {
@@ -98,6 +114,7 @@ const upsertTrackEffect = async (
   const row = byIndex.find((entry: any) => entry.type === input.type) ?? null
   if (row) {
     const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
+    if (row.targetType === 'track' && areEffectParamsEqual(input.type, row.params, params)) return row._id
     await ctx.db.patch(row._id, { params, targetType: 'track' })
     return row._id
   }
@@ -128,6 +145,7 @@ const upsertMasterEffect = async (
   const row = byIndex.find((entry: any) => entry.type === input.type && entry.targetType === 'master') ?? null
   if (row) {
     const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
+    if (areEffectParamsEqual(input.type, row.params, params)) return row._id
     await ctx.db.patch(row._id, { params, targetType: 'master' })
     return row._id
   }

@@ -65,7 +65,7 @@ type ExpandedSynthCard = ExpandedSynthBounds & {
   onReset: () => void;
 };
 
-type EffectsPanelState = {
+type EffectsPanelInstrumentDevice = {
   addMidiClip: () => Promise<void>;
   flushPending: () => Promise<void>;
   arp: {
@@ -94,12 +94,12 @@ type EffectsPanelState = {
 export const EFFECT_PANEL_SAVE_DEBOUNCE_MS = 200;
 export const EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS = 800;
 
-export function createEffectsPanelState(
+export function createEffectsPanelInstrumentDevice(
   context: EffectsPanelContext,
   currentTargetId: Accessor<string>,
   currentTrack: Accessor<Track | undefined>,
   resolveTrackById: (targetId: string) => Track | undefined,
-): EffectsPanelState {
+): EffectsPanelInstrumentDevice {
   function getTrackTargetId(): Track["id"] | undefined {
     if (currentTargetId() === "master") return undefined;
     return currentTrack()?.id;

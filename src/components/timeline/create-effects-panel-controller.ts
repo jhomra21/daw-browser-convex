@@ -2,8 +2,8 @@ import { createEffect, createMemo, onCleanup, type Accessor } from "solid-js";
 import { isLocalId, normalizeSynthParams, type ArpeggiatorParams } from "@daw-browser/shared";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
-import { createEffectsPanelAudioEffectsState } from "~/components/timeline/create-effects-panel-audio-effects-state";
-import { createEffectsPanelState } from "~/components/timeline/create-effects-panel-state";
+import { createEffectsPanelAudioDevice } from "~/components/timeline/create-effects-panel-audio-effects-state";
+import { createEffectsPanelInstrumentDevice } from "~/components/timeline/create-effects-panel-state";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 import { useEffectsPanelAudioSync } from "~/hooks/useEffectsPanelAudioSync";
 import { useEffectsPanelTarget } from "~/hooks/useEffectsPanelTarget";
@@ -69,7 +69,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     () => ["effects", "room", options.projectId(), options.userId()],
   );
 
-  const instrument = createEffectsPanelState(
+  const instrument = createEffectsPanelInstrumentDevice(
     {
       audioEngine: options.audioEngine,
       projectId: options.projectId,
@@ -88,7 +88,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
   );
   const canWriteCurrentTargetEffects = createMemo(() => currentTargetId() === "master" || canWriteCurrentTrackRouting());
   const isCurrentTargetReadOnly = createMemo(() => currentTargetId() !== "master" && !canWriteCurrentTrackRouting());
-  const audioEffects = createEffectsPanelAudioEffectsState(
+  const audioEffects = createEffectsPanelAudioDevice(
     {
       audioEngine: options.audioEngine,
       projectId: options.projectId,
@@ -184,11 +184,17 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
 
   return {
     target,
-    instrument,
-    audioEffects,
+    devices: {
+      instrument,
+      audioEffects,
+    },
     spectrum,
     canWriteCurrentTargetEffects,
     isCurrentTargetReadOnly,
     close,
   };
 }
+
+export type EffectsPanelController = ReturnType<typeof createEffectsPanelController>;
+export type EffectsPanelInstrumentDevice = EffectsPanelController["devices"]["instrument"];
+export type EffectsPanelAudioEffects = EffectsPanelController["devices"]["audioEffects"];

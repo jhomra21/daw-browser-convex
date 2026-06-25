@@ -8,14 +8,6 @@ import Eq from "~/components/effects/Eq";
 import Reverb from "~/components/effects/Reverb";
 import Synth from "~/components/effects/Synth";
 import SynthCard from "~/components/effects/SynthCard";
-import {
-  createEffectsPanelState,
-} from "~/components/timeline/create-effects-panel-state";
-import {
-  type EqChannelMode,
-  type EqParams,
-  type ReverbParams,
-} from "@daw-browser/shared";
 import type { AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
@@ -24,8 +16,11 @@ import TimelineBottomPanelFooter from "~/components/timeline/TimelineBottomPanel
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { BOTTOM_PANEL_EDGE_PADDING_PX } from "~/lib/bottom-panel-layout";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
-import type { EffectKind } from "~/components/timeline/create-effects-panel-audio-effects-state";
-import { createEffectsPanelController } from "~/components/timeline/create-effects-panel-controller";
+import {
+  createEffectsPanelController,
+  type EffectsPanelAudioEffects,
+  type EffectsPanelInstrumentDevice,
+} from "~/components/timeline/create-effects-panel-controller";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -54,8 +49,6 @@ type EffectsPanelProps = {
   onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
 };
 
-type InstrumentPanelState = ReturnType<typeof createEffectsPanelState>;
-
 const EffectsPanelClosedFooter: Component<{
   onOpen: () => void;
   clipTab: EffectsPanelProps["clipTab"];
@@ -76,7 +69,7 @@ const EffectsPanelClosedFooter: Component<{
 
 type EffectsPanelInstrumentSectionProps = {
   instrument: {
-    state: InstrumentPanelState;
+    state: EffectsPanelInstrumentDevice;
     canWrite: boolean;
   };
 };
@@ -155,57 +148,45 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
 );
 
 type EffectsPanelEffectCardsProps = {
-  effects: {
-    orderedEffects: EffectKind[];
-    eqParams?: EqParams;
-    reverbParams?: ReverbParams;
-    canWrite: boolean;
-    spectrum: SpectrumFrame | null;
-    onBandChange: (bandId: string, updates: Partial<EqParams["bands"][number]>) => void;
-    onChannelModeChange: (mode: EqChannelMode) => void;
-    onBandToggle: (bandId: string) => void;
-    onToggleEqEnabled: (enabled: boolean) => void;
-    onResetEq: () => void;
-    onReverbChange: (updates: Partial<ReverbParams>) => void;
-    onReverbToggle: (enabled: boolean) => void;
-    onResetReverb: () => void;
-  };
+  audioEffects: EffectsPanelAudioEffects;
+  canWrite: boolean;
+  spectrum: SpectrumFrame | null;
 };
 
 const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props) => (
   <div
     class="flex h-full shrink-0 items-stretch gap-3"
-    classList={{ "pointer-events-none opacity-60": !props.effects.canWrite }}
+    classList={{ "pointer-events-none opacity-60": !props.canWrite }}
   >
-    <For each={props.effects.orderedEffects}>
+    <For each={props.audioEffects.orderedEffects()}>
       {(effect) => (
         <Show
           when={effect === "eq"}
           fallback={
-            <Show when={props.effects.reverbParams}>
+            <Show when={props.audioEffects.reverb.params()}>
               {(params) => (
                 <Reverb
                   params={params()}
-                  onChange={props.effects.onReverbChange}
-                  onToggleEnabled={props.effects.onReverbToggle}
-                  onReset={props.effects.onResetReverb}
+                  onChange={props.audioEffects.reverb.change}
+                  onToggleEnabled={props.audioEffects.reverb.toggleEnabled}
+                  onReset={props.audioEffects.reverb.reset}
                 />
               )}
             </Show>
           }
         >
-          <Show when={props.effects.eqParams}>
+          <Show when={props.audioEffects.eq.params()}>
             {(params) => (
               <Eq
                 bands={params().bands}
                 enabled={params().enabled}
                 channelMode={params().channelMode}
-                onBandChange={props.effects.onBandChange}
-                onChannelModeChange={props.effects.onChannelModeChange}
-                onBandToggle={props.effects.onBandToggle}
-                onToggleEnabled={props.effects.onToggleEqEnabled}
-                onReset={props.effects.onResetEq}
-                spectrumData={props.effects.spectrum}
+                onBandChange={props.audioEffects.eq.changeBand}
+                onChannelModeChange={props.audioEffects.eq.changeChannelMode}
+                onBandToggle={props.audioEffects.eq.toggleBand}
+                onToggleEnabled={props.audioEffects.eq.toggleEnabled}
+                onReset={props.audioEffects.eq.reset}
+                spectrumData={props.spectrum}
               />
             )}
           </Show>
@@ -238,7 +219,7 @@ const EffectsPanelEmptyState: Component<EffectsPanelEmptyStateProps> = (props) =
 );
 
 type EffectsPanelFloatingSynthProps = {
-  synth: InstrumentPanelState["synth"];
+  synth: EffectsPanelInstrumentDevice["synth"];
   canWrite: boolean;
 };
 
@@ -283,7 +264,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     onLocalSaveFailed: props.onLocalSaveFailed,
     onDeviceInsertActionsChange: props.onDeviceInsertActionsChange,
   });
-  const { target, instrument, audioEffects, spectrum, canWriteCurrentTargetEffects, isCurrentTargetReadOnly } = controller;
+  const { target, devices, spectrum, canWriteCurrentTargetEffects, isCurrentTargetReadOnly } = controller;
+  const { instrument, audioEffects } = devices;
   const eqForTarget = audioEffects.eq.params;
   const reverbForTarget = audioEffects.reverb.params;
 
@@ -316,21 +298,9 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     />
                   </Show>
                   <EffectsPanelEffectCards
-                    effects={{
-                      orderedEffects: audioEffects.orderedEffects(),
-                      eqParams: eqForTarget(),
-                      reverbParams: reverbForTarget(),
-                      canWrite: canWriteCurrentTargetEffects(),
-                      spectrum: spectrum(),
-                      onBandChange: audioEffects.eq.changeBand,
-                      onChannelModeChange: audioEffects.eq.changeChannelMode,
-                      onBandToggle: audioEffects.eq.toggleBand,
-                      onToggleEqEnabled: audioEffects.eq.toggleEnabled,
-                      onResetEq: audioEffects.eq.reset,
-                      onReverbChange: audioEffects.reverb.change,
-                      onReverbToggle: audioEffects.reverb.toggleEnabled,
-                      onResetReverb: audioEffects.reverb.reset,
-                    }}
+                    audioEffects={audioEffects}
+                    canWrite={canWriteCurrentTargetEffects()}
+                    spectrum={spectrum()}
                   />
                   <Show when={isCurrentTargetReadOnly()}>
                     <EffectsPanelReadOnlyNotice />

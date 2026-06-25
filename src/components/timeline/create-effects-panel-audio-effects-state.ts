@@ -26,7 +26,7 @@ import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-a
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 
-export type EffectKind = "eq" | "reverb";
+type EffectKind = "eq" | "reverb";
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
 type EqRow = RoomEffectRow | LocalEffectRow<EqParams> | undefined;
@@ -42,7 +42,7 @@ type EffectsPanelAudioEffectsContext = {
   onLocalSaveFailed?: (message: string) => void;
 };
 
-type EffectsPanelAudioEffectsState = {
+type EffectsPanelAudioDevice = {
   eq: {
     add: () => void;
     changeBand: (bandId: string, updates: Partial<EqParams["bands"][number]>) => void;
@@ -65,11 +65,11 @@ type EffectsPanelAudioEffectsState = {
   };
 };
 
-export function createEffectsPanelAudioEffectsState(
+export function createEffectsPanelAudioDevice(
   context: EffectsPanelAudioEffectsContext,
   currentTargetId: Accessor<string>,
   resolveTrackByTargetId: (targetId: string) => Track | undefined,
-): EffectsPanelAudioEffectsState {
+): EffectsPanelAudioDevice {
   const effectScopeKey = (targetId: string) => `${context.projectId() ?? "no-project"}:${targetId}`;
   const [effectOrderByTarget, setEffectOrderByTarget] = createSignal<Record<string, EffectKind[]>>({});
   const [effectIndexByTarget, setEffectIndexByTarget] = createSignal<Record<string, Partial<Record<EffectKind, number>>>>({});

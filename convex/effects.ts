@@ -4,10 +4,14 @@ import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProject
 import { getTrackWriteAccess } from "./trackWrites";
 import {
   normalizeEqParamsForUpdate,
+  normalizeDelayParamsForUpdate,
   normalizeReverbParamsForUpdate,
+  normalizeSaturatorParamsForUpdate,
   normalizeSynthParams,
+  serializeDelayParams,
   serializeEqParams,
   serializeReverbParams,
+  serializeSaturatorParams,
 } from "@daw-browser/shared";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
@@ -57,6 +61,33 @@ const eqParamsValidator = v.object({
   })),
 })
 
+const saturatorParamsValidator = v.object({
+  enabled: v.boolean(),
+  driveDb: v.number(),
+  curve: v.union(v.literal("soft"), v.literal("medium"), v.literal("hard"), v.literal("clip")),
+  color: v.boolean(),
+  colorFrequencyHz: v.number(),
+  colorAmount: v.number(),
+  outputDb: v.number(),
+  dryWet: v.number(),
+})
+
+const delayParamsValidator = v.object({
+  enabled: v.boolean(),
+  mode: v.union(v.literal("sync"), v.literal("time")),
+  timeMs: v.number(),
+  syncDivision: v.union(v.literal("1/16"), v.literal("1/8"), v.literal("1/4"), v.literal("1/2"), v.literal("1/1")),
+  feedback: v.number(),
+  dryWet: v.number(),
+  pingPong: v.boolean(),
+  filterEnabled: v.boolean(),
+  lowCutHz: v.number(),
+  highCutHz: v.number(),
+})
+
+type TrackAudioEffectType = 'synth' | 'arpeggiator' | 'reverb' | 'eq' | 'saturator' | 'delay'
+type MasterAudioEffectType = 'reverb' | 'eq' | 'saturator' | 'delay'
+
 const sanitizeArpParams = (params: {
   enabled: boolean
   pattern: 'up' | 'down' | 'updown' | 'random'
@@ -78,21 +109,25 @@ const sanitizeArpParams = (params: {
 }
 
 const normalizeEffectParamsForUpdate = (
-  type: 'synth' | 'arpeggiator' | 'reverb' | 'eq',
+  type: TrackAudioEffectType | MasterAudioEffectType,
   params: any,
   existing?: any,
 ) => {
   if (type === 'eq') return normalizeEqParamsForUpdate(params, existing)
+  if (type === 'saturator') return normalizeSaturatorParamsForUpdate(params, existing)
+  if (type === 'delay') return normalizeDelayParamsForUpdate(params, existing)
   if (type === 'reverb') return normalizeReverbParamsForUpdate(params, existing)
   return params
 }
 
 const areEffectParamsEqual = (
-  type: 'synth' | 'arpeggiator' | 'reverb' | 'eq',
+  type: TrackAudioEffectType | MasterAudioEffectType,
   current: any,
   next: any,
 ) => {
   if (type === 'eq') return serializeEqParams(current) === serializeEqParams(next)
+  if (type === 'saturator') return serializeSaturatorParams(current) === serializeSaturatorParams(next)
+  if (type === 'delay') return serializeDelayParams(current) === serializeDelayParams(next)
   if (type === 'reverb') return serializeReverbParams(current) === serializeReverbParams(next)
   return current === next
 }
@@ -103,7 +138,7 @@ const upsertTrackEffect = async (
     projectId: string
     userId: string
     trackId: any
-    type: 'synth' | 'arpeggiator' | 'reverb' | 'eq'
+    type: TrackAudioEffectType
     params: any
   },
 ) => {
@@ -135,7 +170,7 @@ const upsertMasterEffect = async (
   input: {
     projectId: string
     userId: string
-    type: 'reverb' | 'eq'
+    type: MasterAudioEffectType
     params: any
   },
 ) => {
@@ -166,7 +201,7 @@ const getTrackEffect = async (
     projectId: string
     trackId: any
     userId: string
-    type: 'synth' | 'arpeggiator' | 'reverb' | 'eq'
+    type: TrackAudioEffectType
   },
 ) => {
   const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
@@ -373,6 +408,38 @@ export const setMasterEqParams = mutation({
   }
 })
 
+export const setSaturatorParams = mutation({
+  args: { projectId: v.string(), trackId: v.id("tracks"), params: saturatorParamsValidator },
+  handler: async (ctx, { projectId, trackId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'saturator', params })
+  },
+})
+
+export const setDelayParams = mutation({
+  args: { projectId: v.string(), trackId: v.id("tracks"), params: delayParamsValidator },
+  handler: async (ctx, { projectId, trackId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'delay', params })
+  },
+})
+
+export const setMasterSaturatorParams = mutation({
+  args: { projectId: v.string(), params: saturatorParamsValidator },
+  handler: async (ctx, { projectId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'saturator', params })
+  },
+})
+
+export const setMasterDelayParams = mutation({
+  args: { projectId: v.string(), params: delayParamsValidator },
+  handler: async (ctx, { projectId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'delay', params })
+  },
+})
+
 export const serverSetSynthParams = mutation({
   args: {
     projectId: v.string(),
@@ -463,5 +530,41 @@ export const serverSetMasterEqParams = mutation({
   handler: async (ctx, { projectId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     return await upsertMasterEffect(ctx, { projectId, userId, type: 'eq', params })
+  },
+})
+
+export const serverSetSaturatorParams = mutation({
+  args: { projectId: v.string(), trackId: v.string(), params: saturatorParamsValidator },
+  handler: async (ctx, { projectId, trackId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
+    if (!normalizedTrackId) return
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'saturator', params })
+  },
+})
+
+export const serverSetDelayParams = mutation({
+  args: { projectId: v.string(), trackId: v.string(), params: delayParamsValidator },
+  handler: async (ctx, { projectId, trackId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
+    if (!normalizedTrackId) return
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'delay', params })
+  },
+})
+
+export const serverSetMasterSaturatorParams = mutation({
+  args: { projectId: v.string(), params: saturatorParamsValidator },
+  handler: async (ctx, { projectId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'saturator', params })
+  },
+})
+
+export const serverSetMasterDelayParams = mutation({
+  args: { projectId: v.string(), params: delayParamsValidator },
+  handler: async (ctx, { projectId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'delay', params })
   },
 })

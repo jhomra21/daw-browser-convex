@@ -13,9 +13,11 @@ import { createAudioStretchCache } from './audio-stretch-cache'
 import {
   getExportAudioFormatMetadata,
   type ArpParams,
+  type DelayParamsLite,
   type EqParamsLite,
   type ExportAudioFormat,
   type ReverbParamsLite,
+  type SaturatorParamsLite,
   type SynthParamsInput,
 } from '@daw-browser/shared'
 import {
@@ -38,8 +40,10 @@ export type ExportRange =
 export type ExportFx = {
   masterVolume?: number
   masterEq?: EqParamsLite
+  masterSaturator?: SaturatorParamsLite
+  masterDelay?: DelayParamsLite
   masterReverb?: ReverbParamsLite
-  trackFx?: Record<string, { eq?: EqParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput }>
+  trackFx?: Record<string, { eq?: EqParamsLite; saturator?: SaturatorParamsLite; delay?: DelayParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput }>
 }
 
 export type ExportRequest = {
@@ -154,6 +158,8 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
     mixerGraph: resolveMixerGraph({
       channels: createMixerChannels(tracks),
       masterEq: fx?.masterEq,
+      masterSaturator: fx?.masterSaturator,
+      masterDelay: fx?.masterDelay,
       masterReverb: fx?.masterReverb,
       masterVolume: fx?.masterVolume,
       trackFx: fx?.trackFx,
@@ -174,7 +180,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
     createBuffer: (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
   })
   const graph = includeMasterFx ? prepared.mixerGraph : { ...prepared.mixerGraph, master: { volume: prepared.mixerGraph.master.volume } }
-  const { trackNodes } = createOfflineMixerNodes(ctx, graph)
+  const { trackNodes } = createOfflineMixerNodes(ctx, graph, prepared.bpm)
 
   for (const resolvedTrack of graph.channels) {
     const track = prepared.trackById.get(resolvedTrack.channel.id)

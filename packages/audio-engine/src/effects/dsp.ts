@@ -1,4 +1,4 @@
-import { normalizeReverbParams, REVERB_DIFFUSION_HIGH_CUT_HZ_MAX, REVERB_DIFFUSION_LOW_CUT_HZ_MIN, supportsGain, type ArpParams, type EqBandParams, type EqChannelMode, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
+import { DELAY_MAX_DELAY_TIME_SEC, normalizeReverbParams, normalizeSaturatorParams, normalizeDelayParams, REVERB_DIFFUSION_HIGH_CUT_HZ_MAX, REVERB_DIFFUSION_LOW_CUT_HZ_MIN, supportsGain, type ArpParams, type DelayParamsLite, type EqBandParams, type EqChannelMode, type EqParamsLite, type ReverbParamsLite, type SaturatorCurve, type SaturatorParamsLite } from '@daw-browser/shared'
 import { formatReverbImpulseSignature, getReverbImpulseSignatureParts, type ReverbImpulseSignatureParts } from './reverb-signature'
 
 type MidiNote = { beat: number; length: number; pitch: number; velocity?: number }
@@ -201,6 +201,87 @@ function applyEqBandParams(filter: BiquadFilterNode, band: EqBandParams) {
   filter.frequency.value = band.frequency
   filter.Q.value = band.q
   filter.gain.value = supportsGain(band.type) ? band.gainDb : 0
+}
+
+export function dbToGain(db: number): number {
+  return Math.pow(10, db / 20)
+}
+
+export function createSaturatorCurve(curve: SaturatorCurve): Float32Array<ArrayBuffer> {
+  const values = new Float32Array(new ArrayBuffer(4096 * Float32Array.BYTES_PER_ELEMENT))
+  for (let index = 0; index < values.length; index++) {
+    const x = (index / (values.length - 1)) * 2 - 1
+    let y = x
+    if (curve === 'soft') y = Math.tanh(1.8 * x)
+    else if (curve === 'medium') y = x < -0.666 ? -1 : x > 0.666 ? 1 : 1.5 * x - 0.5 * x * x * x
+    else if (curve === 'hard') y = Math.atan(4 * x) / Math.atan(4)
+    else y = Math.max(-0.82, Math.min(0.82, x)) / 0.82
+    values[index] = Math.max(-1, Math.min(1, Number.isFinite(y) ? y : 0))
+  }
+  return values
+}
+
+export function applySaturatorNodeParams(nodes: {
+  driveGain: GainNode
+  colorFilter: BiquadFilterNode
+  shaper: WaveShaperNode
+  dryGain: GainNode
+  wetGain: GainNode
+  outputGain: GainNode
+}, params: SaturatorParamsLite) {
+  const normalized = normalizeSaturatorParams(params)
+  nodes.driveGain.gain.value = dbToGain(normalized.driveDb)
+  nodes.colorFilter.type = 'peaking'
+  nodes.colorFilter.frequency.value = normalized.colorFrequencyHz
+  nodes.colorFilter.Q.value = 0.8
+  nodes.colorFilter.gain.value = normalized.color ? normalized.colorAmount * 12 : 0
+  nodes.shaper.curve = createSaturatorCurve(normalized.curve)
+  nodes.shaper.oversample = '4x'
+  nodes.dryGain.gain.value = 1 - normalized.dryWet
+  nodes.wetGain.gain.value = normalized.dryWet
+  nodes.outputGain.gain.value = dbToGain(normalized.outputDb)
+}
+
+export function resolveDelayTimeSec(params: DelayParamsLite, bpm: number): number {
+  const normalized = normalizeDelayParams(params)
+  if (normalized.mode === 'time') return Math.min(DELAY_MAX_DELAY_TIME_SEC, normalized.timeMs / 1000)
+  const beatSec = 60 / (Number.isFinite(bpm) && bpm > 0 ? bpm : 120)
+  const multipliers: Record<string, number> = { '1/16': 0.25, '1/8': 0.5, '1/4': 1, '1/2': 2, '1/1': 4 }
+  return Math.min(DELAY_MAX_DELAY_TIME_SEC, beatSec * (multipliers[normalized.syncDivision] ?? 0.5))
+}
+
+export function applyDelayNodeParams(nodes: {
+  delayLeft: DelayNode
+  delayRight?: DelayNode
+  feedbackLeft: GainNode
+  feedbackRight?: GainNode
+  dryGain: GainNode
+  wetGain: GainNode
+  lowCutLeft: BiquadFilterNode
+  highCutLeft: BiquadFilterNode
+  lowCutRight?: BiquadFilterNode
+  highCutRight?: BiquadFilterNode
+}, params: DelayParamsLite, bpm: number) {
+  const normalized = normalizeDelayParams(params)
+  const timeSec = resolveDelayTimeSec(normalized, bpm)
+  nodes.delayLeft.delayTime.value = timeSec
+  if (nodes.delayRight) nodes.delayRight.delayTime.value = timeSec
+  nodes.feedbackLeft.gain.value = normalized.feedback
+  if (nodes.feedbackRight) nodes.feedbackRight.gain.value = normalized.feedback
+  nodes.dryGain.gain.value = 1 - normalized.dryWet
+  nodes.wetGain.gain.value = normalized.dryWet
+  for (const filter of [nodes.lowCutLeft, nodes.lowCutRight]) {
+    if (!filter) continue
+    filter.type = 'highpass'
+    filter.frequency.value = normalized.filterEnabled ? normalized.lowCutHz : 20
+    filter.Q.value = 0.707
+  }
+  for (const filter of [nodes.highCutLeft, nodes.highCutRight]) {
+    if (!filter) continue
+    filter.type = 'lowpass'
+    filter.frequency.value = normalized.filterEnabled ? normalized.highCutHz : 20000
+    filter.Q.value = 0.707
+  }
 }
 
 export function applyArpeggiatorToNotes(

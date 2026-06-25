@@ -213,6 +213,16 @@ export const persistHistoryEffectParams = async (
       await publishHistoryOperation(deps, { kind: "effects.setMasterReverbParams", payload: { params } });
       return;
     }
+    case "master-saturator": {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+      await publishHistoryOperation(deps, { kind: "effects.setMasterSaturatorParams", payload: { params } });
+      return;
+    }
+    case "master-delay": {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+      await publishHistoryOperation(deps, { kind: "effects.setMasterDelayParams", payload: { params } });
+      return;
+    }
     case "eq": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setEqParams", payload: { trackId: targetId, params } });
@@ -221,6 +231,16 @@ export const persistHistoryEffectParams = async (
     case "reverb": {
       const params = normalizeReverbParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
       await publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId: targetId, params } });
+      return;
+    }
+    case "saturator": {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+      await publishHistoryOperation(deps, { kind: "effects.setSaturatorParams", payload: { trackId: targetId, params } });
+      return;
+    }
+    case "delay": {
+      const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+      await publishHistoryOperation(deps, { kind: "effects.setDelayParams", payload: { trackId: targetId, params } });
       return;
     }
     case "synth": {

@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import {
   createDefaultEqParams,
   createDefaultReverbParams,
+  DELAY_FEEDBACK_MAX,
+  DELAY_TIME_MS_MAX,
   createDefaultEqBand,
   EQ_FREQUENCY_MAX,
   EQ_FREQUENCY_MIN,
@@ -11,10 +13,16 @@ import {
   EQ_Q_MIN,
   normalizeEqParams,
   normalizeEqParamsForUpdate,
+  normalizeDelayParams,
   normalizeReverbParams,
   normalizeReverbParamsForUpdate,
+  normalizeSaturatorParams,
+  SATURATOR_DRIVE_DB_MAX,
+  SATURATOR_OUTPUT_DB_MIN,
+  serializeDelayParams,
   serializeEqParams,
   serializeReverbParams,
+  serializeSaturatorParams,
   REVERB_DECAY_SEC_MAX,
   REVERB_WET_MAX,
   serializeNormalizedEqParams,
@@ -140,6 +148,49 @@ describe('EQ params', () => {
         },
       },
     })
+  })
+})
+
+describe('Saturator params', () => {
+  test('normalizes and serializes equivalent inputs', () => {
+    const normalized = normalizeSaturatorParams({ driveDb: 999, outputDb: -999, dryWet: 2, colorFrequencyHz: 1, colorAmount: 2 })
+
+    expect(normalized.driveDb).toBe(SATURATOR_DRIVE_DB_MAX)
+    expect(normalized.outputDb).toBe(SATURATOR_OUTPUT_DB_MIN)
+    expect(normalized.dryWet).toBe(1)
+    expect(normalized.colorFrequencyHz).toBe(100)
+    expect(normalized.colorAmount).toBe(1)
+    expect(serializeSaturatorParams(normalized)).toBe(serializeSaturatorParams({ ...normalized, driveDb: 999 }))
+  })
+})
+
+describe('Delay params', () => {
+  test('normalizes limits and keeps low cut below high cut', () => {
+    const normalized = normalizeDelayParams({ timeMs: 9999, feedback: 4, dryWet: -1, lowCutHz: 1900, highCutHz: 1000 })
+
+    expect(normalized.timeMs).toBe(DELAY_TIME_MS_MAX)
+    expect(normalized.feedback).toBe(DELAY_FEEDBACK_MAX)
+    expect(normalized.dryWet).toBe(0)
+    expect(normalized.lowCutHz).toBeLessThan(normalized.highCutHz)
+    expect(serializeDelayParams(normalized)).toBe(serializeDelayParams({ ...normalized, feedback: 4 }))
+  })
+
+  test('parses shared track and master delay operations', () => {
+    const params = normalizeDelayParams({})
+    expect(parseSharedTimelineOperation({ kind: 'effects.setDelayParams', payload: { trackId: 'track-1', params } })?.kind)
+      .toBe('effects.setDelayParams')
+    expect(parseSharedTimelineOperation({ kind: 'effects.setMasterDelayParams', payload: { params } })?.kind)
+      .toBe('effects.setMasterDelayParams')
+  })
+})
+
+describe('Saturator shared operations', () => {
+  test('parses shared track and master saturator operations', () => {
+    const params = normalizeSaturatorParams({})
+    expect(parseSharedTimelineOperation({ kind: 'effects.setSaturatorParams', payload: { trackId: 'track-1', params } })?.kind)
+      .toBe('effects.setSaturatorParams')
+    expect(parseSharedTimelineOperation({ kind: 'effects.setMasterSaturatorParams', payload: { params } })?.kind)
+      .toBe('effects.setMasterSaturatorParams')
   })
 })
 

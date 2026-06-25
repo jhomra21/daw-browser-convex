@@ -1,7 +1,7 @@
 import { createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 
-export type LocalEffectKind = 'eq' | 'reverb' | 'synth' | 'arp' | 'master-eq' | 'master-reverb'
+export type LocalEffectKind = 'eq' | 'saturator' | 'delay' | 'reverb' | 'synth' | 'arp' | 'master-eq' | 'master-saturator' | 'master-delay' | 'master-reverb'
 
 export type LocalEffectRow<TParams = any> = {
   id: string

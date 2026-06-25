@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { addEarlyReflectionTaps, configureEqNodeChannels, createReverbImpulseRenderInfo, getEqTopologySignature, resolveEqChannelCount } from './dsp'
+import { addEarlyReflectionTaps, configureEqNodeChannels, createReverbImpulseRenderInfo, createSaturatorCurve, getEqTopologySignature, resolveDelayTimeSec, resolveEqChannelCount } from './dsp'
 import { getAppliedReverbSignature, getReverbImpulseBucket, getReverbImpulseSignature, getReverbTopologySignature } from './reverb-signature'
-import { createDefaultReverbParams, normalizeEqParams, normalizeReverbParams, REVERB_DECAY_SEC_MAX } from '@daw-browser/shared'
+import { createDefaultDelayParams, createDefaultReverbParams, normalizeDelayParams, normalizeEqParams, normalizeReverbParams, REVERB_DECAY_SEC_MAX } from '@daw-browser/shared'
 
 describe('EQ channel mode', () => {
   test('uses one channel for mono EQ nodes', () => {
@@ -38,6 +38,21 @@ describe('EQ channel mode', () => {
     })
 
     expect(getEqTopologySignature(mono)).toBe('')
+  })
+})
+
+describe('saturator and delay helpers', () => {
+  test('creates finite distinct saturator curves', () => {
+    const soft = createSaturatorCurve('soft')
+    const hard = createSaturatorCurve('hard')
+    expect(soft.length).toBe(4096)
+    expect(Array.from(soft).every((value) => Number.isFinite(value) && value >= -1 && value <= 1)).toBe(true)
+    expect(soft[3000]).not.toBe(hard[3000])
+  })
+
+  test('resolves sync delay time and clamps feedback', () => {
+    expect(resolveDelayTimeSec(createDefaultDelayParams(), 120)).toBe(0.25)
+    expect(normalizeDelayParams({ feedback: 2 }).feedback).toBe(0.95)
   })
 })
 

@@ -37,11 +37,15 @@ const deviceInsertActionsEqual = (
   a?.addMidiClip === b.addMidiClip &&
   a.addArpeggiator === b.addArpeggiator &&
   a.addEq === b.addEq &&
+  a.addSaturator === b.addSaturator &&
+  a.addDelay === b.addDelay &&
   a.addReverb === b.addReverb &&
   a.canWrite === b.canWrite &&
   a.canAddMidiClip === b.canAddMidiClip &&
   a.canAddArpeggiator === b.canAddArpeggiator &&
   a.canAddEq === b.canAddEq &&
+  a.canAddSaturator === b.canAddSaturator &&
+  a.canAddDelay === b.canAddDelay &&
   a.canAddReverb === b.canAddReverb
 );
 
@@ -113,6 +117,8 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     playheadSec: options.playheadSec,
     localDraftEffects: {
       eq: audioEffects.eq.readDraftForTarget,
+      saturator: audioEffects.saturator.readDraftForTarget,
+      delay: audioEffects.delay.readDraftForTarget,
       reverb: audioEffects.reverb.readDraftForTarget,
       synth: instrument.synth.readDraftForTarget,
       arp: instrument.arp.readDraftForTarget,
@@ -166,11 +172,15 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       addMidiClip: instrument.addMidiClip,
       addArpeggiator: instrument.arp.add,
       addEq: audioEffects.eq.add,
+      addSaturator: audioEffects.saturator.add,
+      addDelay: audioEffects.delay.add,
       addReverb: audioEffects.reverb.add,
       canWrite: canWriteCurrentTargetEffects(),
       canAddMidiClip: isInstrumentTrack(),
       canAddArpeggiator: isInstrumentTrack() && !instrument.arp.params(),
       canAddEq: !audioEffects.eq.params(),
+      canAddSaturator: !audioEffects.saturator.params(),
+      canAddDelay: !audioEffects.delay.params(),
       canAddReverb: !audioEffects.reverb.params(),
     };
     if (deviceInsertActionsEqual(previousDeviceInsertActions, nextActions)) return;

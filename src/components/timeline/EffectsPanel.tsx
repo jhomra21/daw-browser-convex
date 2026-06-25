@@ -4,8 +4,10 @@ import {
   For,
 } from "solid-js";
 import Arpeggiator from "~/components/effects/Arpeggiator";
+import Delay from "~/components/effects/Delay";
 import Eq from "~/components/effects/Eq";
 import Reverb from "~/components/effects/Reverb";
+import Saturator from "~/components/effects/Saturator";
 import Synth from "~/components/effects/Synth";
 import SynthCard from "~/components/effects/SynthCard";
 import type { AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
@@ -160,37 +162,28 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
   >
     <For each={props.audioEffects.orderedEffects()}>
       {(effect) => (
-        <Show
-          when={effect === "eq"}
-          fallback={
-            <Show when={props.audioEffects.reverb.params()}>
-              {(params) => (
-                <Reverb
-                  params={params()}
-                  onChange={props.audioEffects.reverb.change}
-                  onToggleEnabled={props.audioEffects.reverb.toggleEnabled}
-                  onReset={props.audioEffects.reverb.reset}
-                />
-              )}
-            </Show>
-          }
-        >
+        <>
           <Show when={props.audioEffects.eq.params()}>
-            {(params) => (
-              <Eq
-                bands={params().bands}
-                enabled={params().enabled}
-                channelMode={params().channelMode}
-                onBandChange={props.audioEffects.eq.changeBand}
-                onChannelModeChange={props.audioEffects.eq.changeChannelMode}
-                onBandToggle={props.audioEffects.eq.toggleBand}
-                onToggleEnabled={props.audioEffects.eq.toggleEnabled}
-                onReset={props.audioEffects.eq.reset}
-                spectrumData={props.spectrum}
-              />
+            {(params) => effect === "eq" && (
+              <Eq bands={params().bands} enabled={params().enabled} channelMode={params().channelMode} onBandChange={props.audioEffects.eq.changeBand} onChannelModeChange={props.audioEffects.eq.changeChannelMode} onBandToggle={props.audioEffects.eq.toggleBand} onToggleEnabled={props.audioEffects.eq.toggleEnabled} onReset={props.audioEffects.eq.reset} spectrumData={props.spectrum} />
             )}
           </Show>
-        </Show>
+          <Show when={props.audioEffects.saturator.params()}>
+            {(params) => effect === "saturator" && (
+              <Saturator params={params()} onChange={props.audioEffects.saturator.change} onToggleEnabled={props.audioEffects.saturator.toggleEnabled} onReset={props.audioEffects.saturator.reset} />
+            )}
+          </Show>
+          <Show when={props.audioEffects.delay.params()}>
+            {(params) => effect === "delay" && (
+              <Delay params={params()} onChange={props.audioEffects.delay.change} onToggleEnabled={props.audioEffects.delay.toggleEnabled} onReset={props.audioEffects.delay.reset} />
+            )}
+          </Show>
+          <Show when={props.audioEffects.reverb.params()}>
+            {(params) => effect === "reverb" && (
+              <Reverb params={params()} onChange={props.audioEffects.reverb.change} onToggleEnabled={props.audioEffects.reverb.toggleEnabled} onReset={props.audioEffects.reverb.reset} />
+            )}
+          </Show>
+        </>
       )}
     </For>
   </div>
@@ -267,6 +260,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const { target, devices, spectrum, canWriteCurrentTargetEffects, isCurrentTargetReadOnly } = controller;
   const { instrument, audioEffects } = devices;
   const eqForTarget = audioEffects.eq.params;
+  const saturatorForTarget = audioEffects.saturator.params;
+  const delayForTarget = audioEffects.delay.params;
   const reverbForTarget = audioEffects.reverb.params;
 
   return (
@@ -309,6 +304,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     empty={{
                       visible:
                         !eqForTarget() &&
+                        !saturatorForTarget() &&
+                        !delayForTarget() &&
                         !reverbForTarget() &&
                         !instrument.arp.params() &&
                         (!instrument.synth.params() ||

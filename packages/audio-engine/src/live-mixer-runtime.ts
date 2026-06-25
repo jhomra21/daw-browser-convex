@@ -1,7 +1,9 @@
-import { normalizeEqParams, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
-import { connectParallelFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
+import { normalizeEqParams, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
+import { createDelayChainState, type DelayChainState } from './effects/delay-chain-state'
 import { createReverbChainState, type ReverbChainState } from './effects/reverb-chain-state'
+import { createSaturatorChainState, type SaturatorChainState } from './effects/saturator-chain-state'
 import { applyLiveMixerGraph } from './mixer/apply-live-routing'
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
@@ -38,6 +40,11 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const eqTopologySignatures = new Map<string, string>()
   const reverbChains = new Map<string, ReverbChainState>()
   const pendingReverbParams = new Map<string, ReverbParamsLite>()
+  const saturatorChains = new Map<string, SaturatorChainState>()
+  const pendingSaturatorParams = new Map<string, SaturatorParamsLite>()
+  const delayChains = new Map<string, DelayChainState>()
+  const pendingDelayParams = new Map<string, DelayParamsLite>()
+  let currentBpm = 120
 
   const cleanupTrackSendGains = (trackId: string) => {
     const sendMap = sendGains.get(trackId)
@@ -48,7 +55,12 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
   const rebuildTrackRouting = (trackId: string, nodes: Pick<TrackNodeGroup, 'input' | 'gain'>) => {
     disconnectAudioNodes([nodes.input])
-    connectParallelFxChain(nodes.input, nodes.gain, eqChains.get(trackId) || [], reverbChains.get(trackId)?.chain())
+    connectFxChain(nodes.input, nodes.gain, {
+      eqNodes: eqChains.get(trackId) || [],
+      saturatorChain: saturatorChains.get(trackId)?.chain(),
+      delayChain: delayChains.get(trackId)?.chain(),
+      reverbChain: reverbChains.get(trackId)?.chain(),
+    })
   }
 
   const ensureTrackNodes = (trackId: string): TrackNodeGroup => {
@@ -93,6 +105,16 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       if (pendingReverb) {
         pendingReverbParams.delete(trackId)
         setTrackReverb(trackId, pendingReverb)
+      }
+      const pendingSaturator = pendingSaturatorParams.get(trackId)
+      if (pendingSaturator) {
+        pendingSaturatorParams.delete(trackId)
+        setTrackSaturator(trackId, pendingSaturator)
+      }
+      const pendingDelay = pendingDelayParams.get(trackId)
+      if (pendingDelay) {
+        pendingDelayParams.delete(trackId)
+        setTrackDelay(trackId, pendingDelay)
       }
     }
 
@@ -149,6 +171,36 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     }
   }
 
+  const setTrackSaturator = (trackId: string, params: SaturatorParamsLite) => {
+    const ctx = options.getAudioContext()
+    if (!ctx) {
+      pendingSaturatorParams.set(trackId, params)
+      return
+    }
+    let state = saturatorChains.get(trackId)
+    if (!state) {
+      state = createSaturatorChainState()
+      saturatorChains.set(trackId, state)
+    }
+    const result = state.set(ctx, params)
+    if (result.changed && result.requiresRoutingRebuild) rebuildTrackRouting(trackId, ensureTrackNodes(trackId))
+  }
+
+  const setTrackDelay = (trackId: string, params: DelayParamsLite) => {
+    const ctx = options.getAudioContext()
+    if (!ctx) {
+      pendingDelayParams.set(trackId, params)
+      return
+    }
+    let state = delayChains.get(trackId)
+    if (!state) {
+      state = createDelayChainState()
+      delayChains.set(trackId, state)
+    }
+    const result = state.set(ctx, params, currentBpm)
+    if (result.changed && result.requiresRoutingRebuild) rebuildTrackRouting(trackId, ensureTrackNodes(trackId))
+  }
+
   const disposeTrack = (trackId: string) => {
     const gain = gains.get(trackId)
     disconnectAudioNodes([gain])
@@ -172,8 +224,14 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
     reverbChains.get(trackId)?.close()
     reverbChains.delete(trackId)
+    saturatorChains.get(trackId)?.close()
+    saturatorChains.delete(trackId)
+    delayChains.get(trackId)?.close()
+    delayChains.delete(trackId)
     pendingEqParams.delete(trackId)
     pendingReverbParams.delete(trackId)
+    pendingSaturatorParams.delete(trackId)
+    pendingDelayParams.delete(trackId)
 
     options.disposeSynthTrack(trackId)
     options.disposeTrackMeters(trackId)
@@ -194,6 +252,12 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     for (const reverbState of reverbChains.values()) reverbState.close()
     reverbChains.clear()
     pendingReverbParams.clear()
+    for (const state of saturatorChains.values()) state.close()
+    saturatorChains.clear()
+    pendingSaturatorParams.clear()
+    for (const state of delayChains.values()) state.close()
+    delayChains.clear()
+    pendingDelayParams.clear()
   }
 
   return {
@@ -245,7 +309,13 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       try { gain.gain.value = next } catch {}
     },
     setTrackEq,
+    setTrackSaturator,
+    setTrackDelay,
     setTrackReverb,
+    setBpm: (bpm: number) => {
+      currentBpm = bpm
+      for (const state of delayChains.values()) state.setBpm(bpm)
+    },
     disposeTrack,
     clear,
   }

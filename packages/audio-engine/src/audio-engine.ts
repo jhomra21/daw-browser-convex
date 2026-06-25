@@ -1,7 +1,7 @@
 import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime } from './audio-runtime'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
-import { normalizeMasterVolume, type ArpParams, type EqParamsLite, type ReverbParamsLite, type SynthParamsInput } from '@daw-browser/shared'
+import { normalizeMasterVolume, type ArpParams, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite, type SynthParamsInput } from '@daw-browser/shared'
 import { createReverbImpulseCache } from './effects/reverb-impulse-cache'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
@@ -157,6 +157,8 @@ export class AudioEngine {
   setBpm(nextBpm: number) {
     if (!this.clock.setBpm(nextBpm)) return
     this.metronome.onBpmChange(this.audioCtx)
+    this.mixerRuntime.setBpm(nextBpm)
+    this.masterFx.setBpm(nextBpm)
   }
 
   setMetronomeEnabled(enabled: boolean) {
@@ -200,6 +202,14 @@ export class AudioEngine {
     this.mixerRuntime.setTrackReverb(trackId, params)
   }
 
+  setTrackSaturator(trackId: string, params: SaturatorParamsLite) {
+    this.mixerRuntime.setTrackSaturator(trackId, params)
+  }
+
+  setTrackDelay(trackId: string, params: DelayParamsLite) {
+    this.mixerRuntime.setTrackDelay(trackId, params)
+  }
+
   setMasterReverb(params: ReverbParamsLite) {
     this.masterFx.setReverb(
       this.audioCtx,
@@ -208,6 +218,14 @@ export class AudioEngine {
       params,
       (nextParams) => this.createImpulseResponse(nextParams),
     )
+  }
+
+  setMasterSaturator(params: SaturatorParamsLite) {
+    this.masterFx.setSaturator(this.audioCtx, this.masterGain, this.destination, params)
+  }
+
+  setMasterDelay(params: DelayParamsLite) {
+    this.masterFx.setDelay(this.audioCtx, this.masterGain, this.destination, params)
   }
 
   previewTrackVolume(trackId: string, volume: number, muted: boolean) {

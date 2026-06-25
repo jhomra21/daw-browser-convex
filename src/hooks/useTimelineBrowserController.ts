@@ -16,6 +16,8 @@ type Options = {
 
 const BROWSER_EFFECT_ITEM_IDS = {
   eq: "builtin:audio-effect:eq",
+  saturator: "builtin:audio-effect:saturator",
+  delay: "builtin:audio-effect:delay",
   reverb: "builtin:audio-effect:reverb",
   arpeggiator: "builtin:midi-effect:arpeggiator",
 };
@@ -143,6 +145,24 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         disabled: !canWrite || actions?.canAddReverb !== true,
       },
       {
+        id: BROWSER_EFFECT_ITEM_IDS.saturator,
+        source: "builtin",
+        category: "audio-effect",
+        label: "Saturator",
+        subtitle: "Audio effect",
+        searchText: "saturator saturation drive distortion audio effect",
+        disabled: !canWrite || actions?.canAddSaturator !== true,
+      },
+      {
+        id: BROWSER_EFFECT_ITEM_IDS.delay,
+        source: "builtin",
+        category: "audio-effect",
+        label: "Delay",
+        subtitle: "Audio effect",
+        searchText: "delay echo ping pong audio effect",
+        disabled: !canWrite || actions?.canAddDelay !== true,
+      },
+      {
         id: BROWSER_EFFECT_ITEM_IDS.arpeggiator,
         source: "builtin",
         category: "midi-effect",
@@ -209,6 +229,8 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     const actions = options.deviceInsertActions();
     if (!actions?.canWrite) return;
     if (itemId === BROWSER_EFFECT_ITEM_IDS.eq && actions.canAddEq) actions.addEq();
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.saturator && actions.canAddSaturator) actions.addSaturator();
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.delay && actions.canAddDelay) actions.addDelay();
     if (itemId === BROWSER_EFFECT_ITEM_IDS.reverb && actions.canAddReverb) actions.addReverb();
     if (itemId === BROWSER_EFFECT_ITEM_IDS.arpeggiator && actions.canAddArpeggiator) actions.addArpeggiator();
   };

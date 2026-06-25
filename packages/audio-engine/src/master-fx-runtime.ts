@@ -1,7 +1,9 @@
-import { normalizeEqParams, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
-import { connectParallelFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
+import { normalizeEqParams, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
+import { createDelayChainState } from './effects/delay-chain-state'
 import { createReverbChainState } from './effects/reverb-chain-state'
+import { createSaturatorChainState } from './effects/saturator-chain-state'
 import type { SpectrumFrame } from './metering-runtime'
 
 export function createMasterFxRuntime() {
@@ -13,13 +15,23 @@ export function createMasterFxRuntime() {
   let spectrumLast: SpectrumFrame | null = null
   let analyserConnected = false
   const reverbState = createReverbChainState()
+  const saturatorState = createSaturatorChainState()
+  const delayState = createDelayChainState()
   let pendingEqParams: EqParamsLite | null = null
   let pendingReverbParams: ReverbParamsLite | null = null
+  let pendingSaturatorParams: SaturatorParamsLite | null = null
+  let pendingDelayParams: DelayParamsLite | null = null
+  let currentBpm = 120
 
   const rebuildRouting = (ctx: AudioContext, masterGain: GainNode, destination: AudioDestinationNode) => {
     disconnectAudioNodes([masterGain])
     if (analyserConnected) analyserConnected = false
-    connectParallelFxChain(masterGain, destination, eqChain, reverbState.chain())
+    connectFxChain(masterGain, destination, {
+      eqNodes: eqChain,
+      saturatorChain: saturatorState.chain(),
+      delayChain: delayState.chain(),
+      reverbChain: reverbState.chain(),
+    })
     if (analyser) {
       try {
         masterGain.connect(analyser)
@@ -60,6 +72,16 @@ export function createMasterFxRuntime() {
         pendingReverbParams = null
         reverbState.set(ctx, params, createImpulseResponse)
       }
+      if (pendingSaturatorParams) {
+        const params = pendingSaturatorParams
+        pendingSaturatorParams = null
+        saturatorState.set(ctx, params)
+      }
+      if (pendingDelayParams) {
+        const params = pendingDelayParams
+        pendingDelayParams = null
+        delayState.set(ctx, params, currentBpm)
+      }
       rebuildRouting(ctx, masterGain, destination)
     },
     setEq: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: EqParamsLite) => {
@@ -93,6 +115,26 @@ export function createMasterFxRuntime() {
         rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
       }
     },
+    setSaturator: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: SaturatorParamsLite) => {
+      if (!ctx || !masterGain) {
+        pendingSaturatorParams = params
+        return
+      }
+      const result = saturatorState.set(ctx, params)
+      if (result.changed && result.requiresRoutingRebuild) rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
+    },
+    setDelay: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: DelayParamsLite) => {
+      if (!ctx || !masterGain) {
+        pendingDelayParams = params
+        return
+      }
+      const result = delayState.set(ctx, params, currentBpm)
+      if (result.changed && result.requiresRoutingRebuild) rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
+    },
+    setBpm: (bpm: number) => {
+      currentBpm = bpm
+      delayState.setBpm(bpm)
+    },
     rebuildRouting,
     getSpectrum: (ctx: AudioContext | null, masterGain: GainNode | null) => {
       ensureAnalyser(ctx, masterGain)
@@ -115,9 +157,13 @@ export function createMasterFxRuntime() {
       eqTopologySignature = null
       pendingEqParams = null
       pendingReverbParams = null
+      pendingSaturatorParams = null
+      pendingDelayParams = null
       disconnectAudioNodes(eqChain)
       eqChain = []
       reverbState.close()
+      saturatorState.close()
+      delayState.close()
       disconnectAudioNodes([analyser])
       analyser = null
       spectrumTmp = null

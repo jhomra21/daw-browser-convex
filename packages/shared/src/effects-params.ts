@@ -245,6 +245,164 @@ export function serializeReverbParams(params: ReverbParams): string {
   return `${normalized.enabled ? 1 : 0}|${normalized.wet}|${normalized.decaySec}|${normalized.preDelayMs}|${normalized.reflections}|${normalized.reflectionSpin ? 1 : 0}|${normalized.reflectionModAmountMs}|${normalized.reflectionModRateHz}|${normalized.reflectionShape}|${normalized.diffuse}|${normalized.size}|${normalized.diffusion}|${normalized.density}|${normalized.lowCutHz}|${normalized.highCutHz}|${normalized.diffusionLowCutHz}|${normalized.diffusionHighCutHz}|${normalized.stereoWidth}`
 }
 
+export type SaturatorCurve = 'soft' | 'medium' | 'hard' | 'clip'
+
+export type SaturatorParams = {
+  enabled: boolean
+  driveDb: number
+  curve: SaturatorCurve
+  color: boolean
+  colorFrequencyHz: number
+  colorAmount: number
+  outputDb: number
+  dryWet: number
+}
+
+export type SaturatorParamsLite = SaturatorParams
+export type SaturatorParamsInput = Partial<Omit<SaturatorParams, 'curve'>> & { curve?: unknown }
+
+export const SATURATOR_DRIVE_DB_MIN = 0
+export const SATURATOR_DRIVE_DB_MAX = 36
+export const SATURATOR_OUTPUT_DB_MIN = -24
+export const SATURATOR_OUTPUT_DB_MAX = 12
+export const SATURATOR_DRY_WET_MIN = 0
+export const SATURATOR_DRY_WET_MAX = 1
+export const SATURATOR_COLOR_FREQUENCY_HZ_MIN = 100
+export const SATURATOR_COLOR_FREQUENCY_HZ_MAX = 10000
+export const SATURATOR_COLOR_AMOUNT_MIN = 0
+export const SATURATOR_COLOR_AMOUNT_MAX = 1
+
+export function createDefaultSaturatorParams(): SaturatorParams {
+  return {
+    enabled: true,
+    driveDb: 6,
+    curve: 'soft',
+    color: false,
+    colorFrequencyHz: 1200,
+    colorAmount: 0,
+    outputDb: 0,
+    dryWet: 1,
+  }
+}
+
+export function isSaturatorCurve(value: unknown): value is SaturatorCurve {
+  return value === 'soft' || value === 'medium' || value === 'hard' || value === 'clip'
+}
+
+export function normalizeSaturatorParams(input: SaturatorParamsInput = {}): SaturatorParams {
+  const defaults = createDefaultSaturatorParams()
+  const driveDb = readFiniteNumber(input.driveDb)
+  const colorFrequencyHz = readFiniteNumber(input.colorFrequencyHz)
+  const colorAmount = readFiniteNumber(input.colorAmount)
+  const outputDb = readFiniteNumber(input.outputDb)
+  const dryWet = readFiniteNumber(input.dryWet)
+  return {
+    enabled: typeof input.enabled === 'boolean' ? input.enabled : defaults.enabled,
+    driveDb: driveDb === undefined ? defaults.driveDb : clamp(driveDb, SATURATOR_DRIVE_DB_MIN, SATURATOR_DRIVE_DB_MAX),
+    curve: isSaturatorCurve(input.curve) ? input.curve : defaults.curve,
+    color: typeof input.color === 'boolean' ? input.color : defaults.color,
+    colorFrequencyHz: colorFrequencyHz === undefined ? defaults.colorFrequencyHz : clamp(colorFrequencyHz, SATURATOR_COLOR_FREQUENCY_HZ_MIN, SATURATOR_COLOR_FREQUENCY_HZ_MAX),
+    colorAmount: colorAmount === undefined ? defaults.colorAmount : clamp(colorAmount, SATURATOR_COLOR_AMOUNT_MIN, SATURATOR_COLOR_AMOUNT_MAX),
+    outputDb: outputDb === undefined ? defaults.outputDb : clamp(outputDb, SATURATOR_OUTPUT_DB_MIN, SATURATOR_OUTPUT_DB_MAX),
+    dryWet: dryWet === undefined ? defaults.dryWet : clamp(dryWet, SATURATOR_DRY_WET_MIN, SATURATOR_DRY_WET_MAX),
+  }
+}
+
+export function normalizeSaturatorParamsForUpdate(input: SaturatorParamsInput, existing?: SaturatorParamsInput): SaturatorParams {
+  return normalizeSaturatorParams({ ...(existing === undefined ? {} : normalizeSaturatorParams(existing)), ...input })
+}
+
+export function serializeSaturatorParams(params: SaturatorParams): string {
+  const normalized = normalizeSaturatorParams(params)
+  return `${normalized.enabled ? 1 : 0}|${normalized.driveDb}|${normalized.curve}|${normalized.color ? 1 : 0}|${normalized.colorFrequencyHz}|${normalized.colorAmount}|${normalized.outputDb}|${normalized.dryWet}`
+}
+
+export type DelayMode = 'sync' | 'time'
+export type DelaySyncDivision = '1/16' | '1/8' | '1/4' | '1/2' | '1/1'
+
+export type DelayParams = {
+  enabled: boolean
+  mode: DelayMode
+  timeMs: number
+  syncDivision: DelaySyncDivision
+  feedback: number
+  dryWet: number
+  pingPong: boolean
+  filterEnabled: boolean
+  lowCutHz: number
+  highCutHz: number
+}
+
+export type DelayParamsLite = DelayParams
+export type DelayParamsInput = Partial<Omit<DelayParams, 'mode' | 'syncDivision'>> & { mode?: unknown; syncDivision?: unknown }
+
+export const DELAY_TIME_MS_MIN = 1
+export const DELAY_TIME_MS_MAX = 2000
+export const DELAY_MAX_DELAY_TIME_SEC = 3
+export const DELAY_FEEDBACK_MIN = 0
+export const DELAY_FEEDBACK_MAX = 0.95
+export const DELAY_DRY_WET_MIN = 0
+export const DELAY_DRY_WET_MAX = 1
+export const DELAY_LOW_CUT_HZ_MIN = 20
+export const DELAY_LOW_CUT_HZ_MAX = 2000
+export const DELAY_HIGH_CUT_HZ_MIN = 1000
+export const DELAY_HIGH_CUT_HZ_MAX = 20000
+
+export function createDefaultDelayParams(): DelayParams {
+  return {
+    enabled: true,
+    mode: 'sync',
+    timeMs: 250,
+    syncDivision: '1/8',
+    feedback: 0.25,
+    dryWet: 0.2,
+    pingPong: false,
+    filterEnabled: false,
+    lowCutHz: 120,
+    highCutHz: 8000,
+  }
+}
+
+export function isDelayMode(value: unknown): value is DelayMode {
+  return value === 'sync' || value === 'time'
+}
+
+export function isDelaySyncDivision(value: unknown): value is DelaySyncDivision {
+  return value === '1/16' || value === '1/8' || value === '1/4' || value === '1/2' || value === '1/1'
+}
+
+export function normalizeDelayParams(input: DelayParamsInput = {}): DelayParams {
+  const defaults = createDefaultDelayParams()
+  const timeMs = readFiniteNumber(input.timeMs)
+  const feedback = readFiniteNumber(input.feedback)
+  const dryWet = readFiniteNumber(input.dryWet)
+  const lowCutInput = readFiniteNumber(input.lowCutHz)
+  const highCutInput = readFiniteNumber(input.highCutHz)
+  const lowCutHz = lowCutInput === undefined ? defaults.lowCutHz : clamp(lowCutInput, DELAY_LOW_CUT_HZ_MIN, DELAY_LOW_CUT_HZ_MAX)
+  const highCutHz = highCutInput === undefined ? defaults.highCutHz : clamp(highCutInput, Math.max(DELAY_HIGH_CUT_HZ_MIN, lowCutHz + 1), DELAY_HIGH_CUT_HZ_MAX)
+  return {
+    enabled: typeof input.enabled === 'boolean' ? input.enabled : defaults.enabled,
+    mode: isDelayMode(input.mode) ? input.mode : defaults.mode,
+    timeMs: timeMs === undefined ? defaults.timeMs : clamp(timeMs, DELAY_TIME_MS_MIN, DELAY_TIME_MS_MAX),
+    syncDivision: isDelaySyncDivision(input.syncDivision) ? input.syncDivision : defaults.syncDivision,
+    feedback: feedback === undefined ? defaults.feedback : clamp(feedback, DELAY_FEEDBACK_MIN, DELAY_FEEDBACK_MAX),
+    dryWet: dryWet === undefined ? defaults.dryWet : clamp(dryWet, DELAY_DRY_WET_MIN, DELAY_DRY_WET_MAX),
+    pingPong: typeof input.pingPong === 'boolean' ? input.pingPong : defaults.pingPong,
+    filterEnabled: typeof input.filterEnabled === 'boolean' ? input.filterEnabled : defaults.filterEnabled,
+    lowCutHz,
+    highCutHz,
+  }
+}
+
+export function normalizeDelayParamsForUpdate(input: DelayParamsInput, existing?: DelayParamsInput): DelayParams {
+  return normalizeDelayParams({ ...(existing === undefined ? {} : normalizeDelayParams(existing)), ...input })
+}
+
+export function serializeDelayParams(params: DelayParams): string {
+  const normalized = normalizeDelayParams(params)
+  return `${normalized.enabled ? 1 : 0}|${normalized.mode}|${normalized.timeMs}|${normalized.syncDivision}|${normalized.feedback}|${normalized.dryWet}|${normalized.pingPong ? 1 : 0}|${normalized.filterEnabled ? 1 : 0}|${normalized.lowCutHz}|${normalized.highCutHz}`
+}
+
 export type SynthWave = 'sine' | 'square' | 'sawtooth' | 'triangle'
 
 export type SynthParams = {

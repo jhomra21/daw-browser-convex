@@ -137,6 +137,18 @@ export const executeTimelineOperation = async (
         trackId: operation.payload.trackId,
         params: operation.payload.params,
       })
+    case 'effects.setSaturatorParams':
+      return await context.convex.mutation(convexApi.effects.serverSetSaturatorParams, {
+        projectId: context.projectId,
+        trackId: operation.payload.trackId,
+        params: operation.payload.params,
+      })
+    case 'effects.setDelayParams':
+      return await context.convex.mutation(convexApi.effects.serverSetDelayParams, {
+        projectId: context.projectId,
+        trackId: operation.payload.trackId,
+        params: operation.payload.params,
+      })
     case 'effects.setSynthParams':
       return await context.convex.mutation(convexApi.effects.serverSetSynthParams, {
         projectId: context.projectId,
@@ -156,6 +168,16 @@ export const executeTimelineOperation = async (
       })
     case 'effects.setMasterReverbParams':
       return await context.convex.mutation(convexApi.effects.serverSetMasterReverbParams, {
+        projectId: context.projectId,
+        params: operation.payload.params,
+      })
+    case 'effects.setMasterSaturatorParams':
+      return await context.convex.mutation(convexApi.effects.serverSetMasterSaturatorParams, {
+        projectId: context.projectId,
+        params: operation.payload.params,
+      })
+    case 'effects.setMasterDelayParams':
+      return await context.convex.mutation(convexApi.effects.serverSetMasterDelayParams, {
         projectId: context.projectId,
         params: operation.payload.params,
       })

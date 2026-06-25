@@ -1,4 +1,5 @@
-import { normalizeReverbParams, type ReverbParamsLite } from '@daw-browser/shared'
+import { DELAY_MAX_DELAY_TIME_SEC, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type DelayParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { applyDelayNodeParams, applySaturatorNodeParams } from './dsp'
 import { getReverbImpulseSignature } from './reverb-signature'
 
 export type CreateReverbImpulseResponse = (params: ReverbParamsLite) => AudioBuffer
@@ -20,6 +21,37 @@ export type ReverbNodeChain = {
   rightToLeft: GainNode
   leftToRight: GainNode
   rightToRight: GainNode
+}
+
+export type SaturatorNodeChain = {
+  enabled: boolean
+  outputTarget: AudioNode | null
+  internalsConnected: boolean
+  dryGain: GainNode
+  wetGain: GainNode
+  driveGain: GainNode
+  colorFilter: BiquadFilterNode
+  shaper: WaveShaperNode
+  outputGain: GainNode
+}
+
+export type DelayNodeChain = {
+  enabled: boolean
+  pingPong: boolean
+  outputTarget: AudioNode | null
+  internalsConnected: boolean
+  dryGain: GainNode
+  wetGain: GainNode
+  delayLeft: DelayNode
+  delayRight: DelayNode
+  feedbackLeft: GainNode
+  feedbackRight: GainNode
+  lowCutLeft: BiquadFilterNode
+  highCutLeft: BiquadFilterNode
+  lowCutRight: BiquadFilterNode
+  highCutRight: BiquadFilterNode
+  splitter: ChannelSplitterNode
+  merger: ChannelMergerNode
 }
 
 export function disconnectAudioNodes(nodes: Array<AudioNode | null | undefined>) {
@@ -122,6 +154,110 @@ export function disconnectReverbChain(chain: ReverbNodeChain) {
   chain.impulseSignature = null
 }
 
+export function createSaturatorNodeChain(ctx: BaseAudioContext, params: SaturatorParamsLite): SaturatorNodeChain {
+  const chain: SaturatorNodeChain = {
+    enabled: !!params.enabled,
+    outputTarget: null,
+    internalsConnected: false,
+    dryGain: ctx.createGain(),
+    wetGain: ctx.createGain(),
+    driveGain: ctx.createGain(),
+    colorFilter: ctx.createBiquadFilter(),
+    shaper: ctx.createWaveShaper(),
+    outputGain: ctx.createGain(),
+  }
+  applySaturatorNodeChainParams(chain, params)
+  return chain
+}
+
+export function applySaturatorNodeChainParams(chain: SaturatorNodeChain, params: SaturatorParamsLite) {
+  const normalized = normalizeSaturatorParams(params)
+  chain.enabled = normalized.enabled
+  applySaturatorNodeParams(chain, normalized)
+}
+
+export function disconnectSaturatorChain(chain: SaturatorNodeChain) {
+  disconnectAudioNodes([chain.dryGain, chain.wetGain, chain.driveGain, chain.colorFilter, chain.shaper, chain.outputGain])
+  chain.internalsConnected = false
+  chain.outputTarget = null
+}
+
+function connectSaturatorInternals(chain: SaturatorNodeChain) {
+  if (chain.internalsConnected) return
+  chain.driveGain.connect(chain.colorFilter)
+  chain.colorFilter.connect(chain.shaper)
+  chain.shaper.connect(chain.wetGain)
+  chain.dryGain.connect(chain.outputGain)
+  chain.wetGain.connect(chain.outputGain)
+  chain.internalsConnected = true
+}
+
+export function createDelayNodeChain(ctx: BaseAudioContext, params: DelayParamsLite, bpm: number): DelayNodeChain {
+  const normalized = normalizeDelayParams(params)
+  const chain: DelayNodeChain = {
+    enabled: normalized.enabled,
+    pingPong: normalized.pingPong,
+    outputTarget: null,
+    internalsConnected: false,
+    dryGain: ctx.createGain(),
+    wetGain: ctx.createGain(),
+    delayLeft: ctx.createDelay(DELAY_MAX_DELAY_TIME_SEC),
+    delayRight: ctx.createDelay(DELAY_MAX_DELAY_TIME_SEC),
+    feedbackLeft: ctx.createGain(),
+    feedbackRight: ctx.createGain(),
+    lowCutLeft: ctx.createBiquadFilter(),
+    highCutLeft: ctx.createBiquadFilter(),
+    lowCutRight: ctx.createBiquadFilter(),
+    highCutRight: ctx.createBiquadFilter(),
+    splitter: ctx.createChannelSplitter(2),
+    merger: ctx.createChannelMerger(2),
+  }
+  applyDelayNodeChainParams(chain, normalized, bpm)
+  return chain
+}
+
+export function applyDelayNodeChainParams(chain: DelayNodeChain, params: DelayParamsLite, bpm: number) {
+  const normalized = normalizeDelayParams(params)
+  chain.enabled = normalized.enabled
+  chain.pingPong = normalized.pingPong
+  applyDelayNodeParams(chain, normalized, bpm)
+}
+
+export function disconnectDelayChain(chain: DelayNodeChain) {
+  disconnectAudioNodes([
+    chain.dryGain, chain.wetGain, chain.delayLeft, chain.delayRight, chain.feedbackLeft, chain.feedbackRight,
+    chain.lowCutLeft, chain.highCutLeft, chain.lowCutRight, chain.highCutRight, chain.splitter, chain.merger,
+  ])
+  chain.internalsConnected = false
+  chain.outputTarget = null
+}
+
+function connectDelayInternals(chain: DelayNodeChain) {
+  if (chain.internalsConnected) return
+  if (chain.pingPong) {
+    chain.splitter.connect(chain.delayLeft, 0)
+    chain.splitter.connect(chain.delayRight, 1)
+    chain.delayLeft.connect(chain.lowCutLeft)
+    chain.lowCutLeft.connect(chain.highCutLeft)
+    chain.highCutLeft.connect(chain.merger, 0, 0)
+    chain.highCutLeft.connect(chain.feedbackRight)
+    chain.feedbackRight.connect(chain.delayRight)
+    chain.delayRight.connect(chain.lowCutRight)
+    chain.lowCutRight.connect(chain.highCutRight)
+    chain.highCutRight.connect(chain.merger, 0, 1)
+    chain.highCutRight.connect(chain.feedbackLeft)
+    chain.feedbackLeft.connect(chain.delayLeft)
+    chain.merger.connect(chain.wetGain)
+  } else {
+    chain.delayLeft.connect(chain.lowCutLeft)
+    chain.lowCutLeft.connect(chain.highCutLeft)
+    chain.highCutLeft.connect(chain.wetGain)
+    chain.highCutLeft.connect(chain.feedbackLeft)
+    chain.feedbackLeft.connect(chain.delayLeft)
+  }
+  chain.internalsConnected = true
+}
+
 function connectReverbInternals(chain: ReverbNodeChain) {
   if (chain.internalsConnected) return
   chain.preDelay.connect(chain.lowCut)
@@ -148,25 +284,73 @@ function connectReverbOutputs(chain: ReverbNodeChain, destination: AudioNode) {
   chain.outputTarget = destination
 }
 
-export function connectParallelFxChain(
+export function connectFxChain(
   input: AudioNode,
   destination: AudioNode,
-  eqNodes: BiquadFilterNode[],
-  reverbChain?: ReverbNodeChain | null,
+  config: {
+    eqNodes?: BiquadFilterNode[]
+    saturatorChain?: SaturatorNodeChain | null
+    delayChain?: DelayNodeChain | null
+    reverbChain?: ReverbNodeChain | null
+  },
 ) {
-  connectEqNodes(eqNodes, destination)
-  const eqEntry = getEqEntryNode(eqNodes, destination)
+  const eqNodes = config.eqNodes ?? []
+  const saturator = config.saturatorChain?.enabled ? config.saturatorChain : null
+  const delay = config.delayChain?.enabled ? config.delayChain : null
+  const reverb = config.reverbChain?.enabled ? config.reverbChain : null
+  if (saturator) connectSaturatorInternals(saturator)
+  else if (config.saturatorChain) disconnectSaturatorChain(config.saturatorChain)
+  if (delay) connectDelayInternals(delay)
+  else if (config.delayChain) disconnectDelayChain(config.delayChain)
+  if (reverb) connectReverbInternals(reverb)
+  else if (config.reverbChain) disconnectReverbChain(config.reverbChain)
 
-  if (reverbChain?.enabled) {
-    input.connect(reverbChain.dryGain)
-    input.connect(reverbChain.preDelay)
-    connectReverbInternals(reverbChain)
-    connectReverbOutputs(reverbChain, eqEntry)
-    return
+  const connectToSaturator = (source: AudioNode) => {
+    if (!saturator) return
+    source.connect(saturator.dryGain)
+    source.connect(saturator.driveGain)
+  }
+  const connectToDelay = (source: AudioNode) => {
+    if (!delay) return
+    source.connect(delay.dryGain)
+    if (delay.pingPong) source.connect(delay.splitter)
+    else source.connect(delay.delayLeft)
+  }
+  const connectToReverb = (source: AudioNode) => {
+    if (!reverb) return
+    source.connect(reverb.dryGain)
+    source.connect(reverb.preDelay)
+  }
+  const connectToNext = (source: AudioNode, start: 'eq' | 'saturator' | 'delay' | 'reverb') => {
+    try { source.disconnect() } catch {}
+    if (start === 'eq' && saturator) return connectToSaturator(source)
+    if ((start === 'eq' || start === 'saturator') && delay) return connectToDelay(source)
+    if ((start === 'eq' || start === 'saturator' || start === 'delay') && reverb) return connectToReverb(source)
+    source.connect(destination)
   }
 
-  if (reverbChain) {
-    disconnectReverbChain(reverbChain)
+  if (eqNodes.length > 0) {
+    try { input.disconnect() } catch {}
+    input.connect(eqNodes[0])
+    disconnectAudioNodes(eqNodes)
+    for (let index = 0; index < eqNodes.length; index++) {
+      if (index < eqNodes.length - 1) eqNodes[index].connect(eqNodes[index + 1])
+      else connectToNext(eqNodes[index], 'eq')
+    }
+  } else if (saturator) {
+    try { input.disconnect() } catch {}
+    connectToSaturator(input)
+  } else if (delay) {
+    try { input.disconnect() } catch {}
+    connectToDelay(input)
+  } else if (reverb) {
+    try { input.disconnect() } catch {}
+    connectToReverb(input)
+  } else {
+    try { input.disconnect() } catch {}
+    input.connect(destination)
   }
-  input.connect(eqEntry)
+  if (saturator) connectToNext(saturator.outputGain, 'saturator')
+  if (delay) connectToNext(delay.wetGain, 'delay')
+  if (reverb) connectToNext(reverb.widthMerger, 'reverb')
 }

@@ -2,12 +2,18 @@ import { createEffect, createSignal, on, onCleanup, type Accessor } from "solid-
 import type { FunctionReturnType } from "convex/server";
 import {
   createDefaultEqParams,
+  createDefaultDelayParams,
   createDefaultReverbParams,
+  createDefaultSaturatorParams,
+  normalizeDelayParams,
   normalizeReverbParams,
+  normalizeSaturatorParams,
   normalizeSynthParams,
   type ArpeggiatorParams,
+  type DelayParams,
   type EqParams,
   type ReverbParams,
+  type SaturatorParams,
   type SynthParams,
 } from "@daw-browser/shared";
 import type { AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
@@ -28,6 +34,8 @@ type UseEffectsPanelAudioSyncOptions = {
   playheadSec?: Accessor<number | undefined>;
   localDraftEffects?: {
     eq?: (targetId: string) => EqParams | undefined;
+    saturator?: (targetId: string) => SaturatorParams | undefined;
+    delay?: (targetId: string) => DelayParams | undefined;
     reverb?: (targetId: string) => ReverbParams | undefined;
     synth?: (targetId: string) => SynthParams | undefined;
     arp?: (targetId: string) => ArpeggiatorParams | undefined;
@@ -69,6 +77,8 @@ export function useEffectsPanelAudioSync(
   }));
 
   const disabledEq = { ...createDefaultEqParams(), enabled: false };
+  const disabledSaturator = { ...createDefaultSaturatorParams(), enabled: false };
+  const disabledDelay = { ...createDefaultDelayParams(), enabled: false };
   const disabledReverb = { ...createDefaultReverbParams(), enabled: false };
   let syncedTrackIds = new Set<Track["id"]>();
   let syncedProjectId: string | null = null;
@@ -76,6 +86,8 @@ export function useEffectsPanelAudioSync(
   const clearSyncedTrackState = (audioEngine: AudioEngine, trackIds: Iterable<Track["id"]>) => {
     for (const trackId of trackIds) {
       audioEngine.setTrackEq(trackId, disabledEq);
+      audioEngine.setTrackSaturator(trackId, disabledSaturator);
+      audioEngine.setTrackDelay(trackId, disabledDelay);
       audioEngine.setTrackReverb(trackId, disabledReverb);
       audioEngine.clearTrackSynth(trackId);
       audioEngine.clearTrackArpeggiator(trackId);
@@ -84,6 +96,8 @@ export function useEffectsPanelAudioSync(
 
   const clearSyncedMasterState = (audioEngine: AudioEngine) => {
     audioEngine.setMasterEq(disabledEq);
+    audioEngine.setMasterSaturator(disabledSaturator);
+    audioEngine.setMasterDelay(disabledDelay);
     audioEngine.setMasterReverb(disabledReverb);
   };
 
@@ -120,10 +134,14 @@ export function useEffectsPanelAudioSync(
     if (!projectId) return;
 
     const eqByTrackId = new Map<string, EqParams>();
+    const saturatorByTrackId = new Map<string, SaturatorParams>();
+    const delayByTrackId = new Map<string, DelayParams>();
     const reverbByTrackId = new Map<string, ReverbParams>();
     const synthByTrackId = new Map<string, SynthParams>();
     const arpByTrackId = new Map<string, ArpeggiatorParams>();
     let hasMasterEq = false;
+    let hasMasterSaturator = false;
+    let hasMasterDelay = false;
     let hasMasterReverb = false;
 
     for (const row of effects) {
@@ -142,12 +160,34 @@ export function useEffectsPanelAudioSync(
           }
           continue;
         }
+        if (row.effect === "master-saturator") {
+          if (activeTargetId !== "master") {
+            hasMasterSaturator = true;
+            audioEngine.setMasterSaturator(normalizeSaturatorParams(row.params));
+          }
+          continue;
+        }
+        if (row.effect === "master-delay") {
+          if (activeTargetId !== "master") {
+            hasMasterDelay = true;
+            audioEngine.setMasterDelay(normalizeDelayParams(row.params));
+          }
+          continue;
+        }
         if (row.effect === "eq") {
           if (row.targetId !== activeTargetId) eqByTrackId.set(row.targetId, row.params);
           continue;
         }
         if (row.effect === "reverb") {
           if (row.targetId !== activeTargetId) reverbByTrackId.set(row.targetId, normalizeReverbParams(row.params));
+          continue;
+        }
+        if (row.effect === "saturator") {
+          if (row.targetId !== activeTargetId) saturatorByTrackId.set(row.targetId, normalizeSaturatorParams(row.params));
+          continue;
+        }
+        if (row.effect === "delay") {
+          if (row.targetId !== activeTargetId) delayByTrackId.set(row.targetId, normalizeDelayParams(row.params));
           continue;
         }
         if (row.effect === "synth") {
@@ -170,6 +210,14 @@ export function useEffectsPanelAudioSync(
           hasMasterReverb = true;
           audioEngine.setMasterReverb(normalizeReverbParams(row.params));
         }
+        if (row.type === "saturator" && row.params) {
+          hasMasterSaturator = true;
+          audioEngine.setMasterSaturator(normalizeSaturatorParams(row.params));
+        }
+        if (row.type === "delay" && row.params) {
+          hasMasterDelay = true;
+          audioEngine.setMasterDelay(normalizeDelayParams(row.params));
+        }
         continue;
       }
 
@@ -177,6 +225,8 @@ export function useEffectsPanelAudioSync(
       if (!trackId || trackId === activeTargetId) continue;
       if (row.type === "eq" && row.params) eqByTrackId.set(trackId, row.params);
       if (row.type === "reverb" && row.params) reverbByTrackId.set(trackId, normalizeReverbParams(row.params));
+      if (row.type === "saturator" && row.params) saturatorByTrackId.set(trackId, normalizeSaturatorParams(row.params));
+      if (row.type === "delay" && row.params) delayByTrackId.set(trackId, normalizeDelayParams(row.params));
       if (row.type === "synth" && row.params) synthByTrackId.set(trackId, normalizeSynthParams(row.params));
       if (row.type === "arpeggiator" && row.params) arpByTrackId.set(trackId, row.params);
     }
@@ -196,9 +246,21 @@ export function useEffectsPanelAudioSync(
       hasMasterReverb = true;
       audioEngine.setMasterReverb(masterReverbDraft);
     }
+    const masterSaturatorDraft = activeTargetId === "master" ? undefined : options.localDraftEffects?.saturator?.("master");
+    if (masterSaturatorDraft) {
+      hasMasterSaturator = true;
+      audioEngine.setMasterSaturator(masterSaturatorDraft);
+    }
+    const masterDelayDraft = activeTargetId === "master" ? undefined : options.localDraftEffects?.delay?.("master");
+    if (masterDelayDraft) {
+      hasMasterDelay = true;
+      audioEngine.setMasterDelay(masterDelayDraft);
+    }
 
     if (activeTargetId !== "master") {
       if (!hasMasterEq) audioEngine.setMasterEq(disabledEq);
+      if (!hasMasterSaturator) audioEngine.setMasterSaturator(disabledSaturator);
+      if (!hasMasterDelay) audioEngine.setMasterDelay(disabledDelay);
       if (!hasMasterReverb) audioEngine.setMasterReverb(disabledReverb);
     }
 
@@ -216,6 +278,12 @@ export function useEffectsPanelAudioSync(
       if (eq) audioEngine.setTrackEq(track.id, eq);
       else audioEngine.setTrackEq(track.id, disabledEq);
       const reverb = options.localDraftEffects?.reverb?.(track.id) ?? reverbByTrackId.get(track.id);
+      const saturator = options.localDraftEffects?.saturator?.(track.id) ?? saturatorByTrackId.get(track.id);
+      if (saturator) audioEngine.setTrackSaturator(track.id, saturator);
+      else audioEngine.setTrackSaturator(track.id, disabledSaturator);
+      const delay = options.localDraftEffects?.delay?.(track.id) ?? delayByTrackId.get(track.id);
+      if (delay) audioEngine.setTrackDelay(track.id, delay);
+      else audioEngine.setTrackDelay(track.id, disabledDelay);
       if (reverb) audioEngine.setTrackReverb(track.id, reverb);
       else audioEngine.setTrackReverb(track.id, disabledReverb);
       if (track.kind === "instrument") {

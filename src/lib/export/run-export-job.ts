@@ -1,6 +1,6 @@
 import type { ExportRange, ExportFx } from '@daw-browser/audio-engine/export-mixdown'
 import type { ExportAudioFormat } from '@daw-browser/shared'
-import { formatExportFileTimestamp, getExportAudioFormatMetadata, isLocalId, normalizeReverbParams } from '@daw-browser/shared'
+import { formatExportFileTimestamp, getExportAudioFormatMetadata, isLocalId, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams } from '@daw-browser/shared'
 import type { FunctionReturnType } from 'convex/server'
 
 import { convexApi, convexClient } from '~/lib/convex'
@@ -81,7 +81,17 @@ const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
       fx.masterReverb = normalizeReverbParams(row.params)
       continue
     }
+    if (row.effect === 'master-saturator') {
+      fx.masterSaturator = normalizeSaturatorParams(row.params)
+      continue
+    }
+    if (row.effect === 'master-delay') {
+      fx.masterDelay = normalizeDelayParams(row.params)
+      continue
+    }
     if (row.effect === 'eq') applyTrackFxPatch(trackFx, row.targetId, { eq: row.params })
+    if (row.effect === 'saturator') applyTrackFxPatch(trackFx, row.targetId, { saturator: normalizeSaturatorParams(row.params) })
+    if (row.effect === 'delay') applyTrackFxPatch(trackFx, row.targetId, { delay: normalizeDelayParams(row.params) })
     if (row.effect === 'reverb') applyTrackFxPatch(trackFx, row.targetId, { reverb: normalizeReverbParams(row.params) })
     if (row.effect === 'arp') applyTrackFxPatch(trackFx, row.targetId, { arp: row.params })
     if (row.effect === 'synth') applyTrackFxPatch(trackFx, row.targetId, { synth: row.params })
@@ -93,12 +103,16 @@ const applyRoomEffectRowsToFx = (fx: ExportFx, rows: RoomEffectRow[]) => {
   for (const row of rows) {
     if (row.targetType === 'master') {
       if (row.type === 'eq' && row.params) fx.masterEq = row.params
+      if (row.type === 'saturator' && row.params) fx.masterSaturator = normalizeSaturatorParams(row.params)
+      if (row.type === 'delay' && row.params) fx.masterDelay = normalizeDelayParams(row.params)
       if (row.type === 'reverb' && row.params) fx.masterReverb = normalizeReverbParams(row.params)
       continue
     }
     const trackId = row.trackId
     if (!trackId || !row.params) continue
     if (row.type === 'eq') applyTrackFxPatch(trackFx, trackId, { eq: row.params })
+    if (row.type === 'saturator') applyTrackFxPatch(trackFx, trackId, { saturator: normalizeSaturatorParams(row.params) })
+    if (row.type === 'delay') applyTrackFxPatch(trackFx, trackId, { delay: normalizeDelayParams(row.params) })
     if (row.type === 'reverb') applyTrackFxPatch(trackFx, trackId, { reverb: normalizeReverbParams(row.params) })
     if (row.type === 'arpeggiator') applyTrackFxPatch(trackFx, trackId, { arp: row.params })
     if (row.type === 'synth') applyTrackFxPatch(trackFx, trackId, { synth: row.params })

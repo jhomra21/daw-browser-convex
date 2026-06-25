@@ -1,10 +1,14 @@
 import type {
   ArpeggiatorParams,
+  DelayParams,
+  DelayParamsInput,
   EqParams,
   ReverbParamsInput,
+  SaturatorParams,
+  SaturatorParamsInput,
   SynthWave,
 } from './effects-params'
-import { isEqBandType, normalizeEqParams } from './effects-params'
+import { isDelayMode, isDelaySyncDivision, isEqBandType, isSaturatorCurve, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams } from './effects-params'
 import { normalizeAudioWarp, normalizeClipGain, type AudioWarpPayload } from './audio-warp'
 import { normalizeMasterVolume } from './master-volume'
 
@@ -74,10 +78,14 @@ export type SharedTimelineOperation =
   | { kind: 'tracks.setMix'; payload: { trackId: string; muted?: boolean; soloed?: boolean } }
   | { kind: 'mixer.setMasterVolume'; payload: { volume: number } }
   | { kind: 'effects.setEqParams'; payload: { trackId: string; params: EqParams } }
+  | { kind: 'effects.setSaturatorParams'; payload: { trackId: string; params: SaturatorParams } }
+  | { kind: 'effects.setDelayParams'; payload: { trackId: string; params: DelayParams } }
   | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: SharedReverbParams } }
   | { kind: 'effects.setSynthParams'; payload: { trackId: string; params: SharedSynthParams } }
   | { kind: 'effects.setArpeggiatorParams'; payload: { trackId: string; params: ArpeggiatorParams } }
   | { kind: 'effects.setMasterEqParams'; payload: { params: EqParams } }
+  | { kind: 'effects.setMasterSaturatorParams'; payload: { params: SaturatorParams } }
+  | { kind: 'effects.setMasterDelayParams'; payload: { params: DelayParams } }
   | { kind: 'effects.setMasterReverbParams'; payload: { params: SharedReverbParams } }
 
 export type SharedTimelineOperationKind = SharedTimelineOperation['kind']
@@ -237,6 +245,38 @@ const readReverbParams = (value: unknown): SharedReverbParams | null => {
   }
 }
 
+const readSaturatorParams = (value: unknown): SaturatorParams | null => {
+  if (!isRecord(value) || typeof value.enabled !== 'boolean') return null
+  const params: SaturatorParamsInput = {
+    enabled: value.enabled,
+    driveDb: readOptionalNumber(value.driveDb),
+    curve: isSaturatorCurve(value.curve) ? value.curve : undefined,
+    color: typeof value.color === 'boolean' ? value.color : undefined,
+    colorFrequencyHz: readOptionalNumber(value.colorFrequencyHz),
+    colorAmount: readOptionalNumber(value.colorAmount),
+    outputDb: readOptionalNumber(value.outputDb),
+    dryWet: readOptionalNumber(value.dryWet),
+  }
+  return normalizeSaturatorParams(params)
+}
+
+const readDelayParams = (value: unknown): DelayParams | null => {
+  if (!isRecord(value) || typeof value.enabled !== 'boolean') return null
+  const params: DelayParamsInput = {
+    enabled: value.enabled,
+    mode: isDelayMode(value.mode) ? value.mode : undefined,
+    timeMs: readOptionalNumber(value.timeMs),
+    syncDivision: isDelaySyncDivision(value.syncDivision) ? value.syncDivision : undefined,
+    feedback: readOptionalNumber(value.feedback),
+    dryWet: readOptionalNumber(value.dryWet),
+    pingPong: typeof value.pingPong === 'boolean' ? value.pingPong : undefined,
+    filterEnabled: typeof value.filterEnabled === 'boolean' ? value.filterEnabled : undefined,
+    lowCutHz: readOptionalNumber(value.lowCutHz),
+    highCutHz: readOptionalNumber(value.highCutHz),
+  }
+  return normalizeDelayParams(params)
+}
+
 const readSynthWave = (value: unknown): SynthWave | null => (
   value === 'sine' || value === 'square' || value === 'sawtooth' || value === 'triangle' ? value : null
 )
@@ -392,6 +432,16 @@ const parseTrackReverb = (payload: Record<string, unknown>): SharedTimelineOpera
   return typeof payload.trackId === 'string' && params ? { kind: 'effects.setReverbParams', payload: { trackId: payload.trackId, params } } : null
 }
 
+const parseTrackSaturator = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  const params = readSaturatorParams(payload.params)
+  return typeof payload.trackId === 'string' && params ? { kind: 'effects.setSaturatorParams', payload: { trackId: payload.trackId, params } } : null
+}
+
+const parseTrackDelay = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  const params = readDelayParams(payload.params)
+  return typeof payload.trackId === 'string' && params ? { kind: 'effects.setDelayParams', payload: { trackId: payload.trackId, params } } : null
+}
+
 const parseTrackSynth = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readSynthParams(payload.params)
   return typeof payload.trackId === 'string' && params ? { kind: 'effects.setSynthParams', payload: { trackId: payload.trackId, params } } : null
@@ -410,6 +460,16 @@ const parseMasterEq = (payload: Record<string, unknown>): SharedTimelineOperatio
 const parseMasterReverb = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readReverbParams(payload.params)
   return params ? { kind: 'effects.setMasterReverbParams', payload: { params } } : null
+}
+
+const parseMasterSaturator = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  const params = readSaturatorParams(payload.params)
+  return params ? { kind: 'effects.setMasterSaturatorParams', payload: { params } } : null
+}
+
+const parseMasterDelay = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  const params = readDelayParams(payload.params)
+  return params ? { kind: 'effects.setMasterDelayParams', payload: { params } } : null
 }
 
 const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
@@ -467,10 +527,14 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   { kind: 'tracks.setMix', parse: parseTrackMix, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'mixer.setMasterVolume', parse: parseMasterVolume, targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setEqParams', parse: parseTrackEq, targets: readTrackIdTargets, durableQueue: true },
+  { kind: 'effects.setSaturatorParams', parse: parseTrackSaturator, targets: readTrackIdTargets, durableQueue: true },
+  { kind: 'effects.setDelayParams', parse: parseTrackDelay, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setReverbParams', parse: parseTrackReverb, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setSynthParams', parse: parseTrackSynth, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setArpeggiatorParams', parse: parseTrackArpeggiator, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setMasterEqParams', parse: parseMasterEq, targets: emptyTargets, durableQueue: true },
+  { kind: 'effects.setMasterSaturatorParams', parse: parseMasterSaturator, targets: emptyTargets, durableQueue: true },
+  { kind: 'effects.setMasterDelayParams', parse: parseMasterDelay, targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setMasterReverbParams', parse: parseMasterReverb, targets: emptyTargets, durableQueue: true },
 ]
 

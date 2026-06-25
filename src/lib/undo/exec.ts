@@ -130,6 +130,16 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
         deps.audioEngine.setMasterReverb(normalizeReverbParams(params))
         return
       }
+      case 'master-saturator': {
+        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+        deps.audioEngine.setMasterSaturator(params)
+        return
+      }
+      case 'master-delay': {
+        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+        deps.audioEngine.setMasterDelay(params)
+        return
+      }
       case 'eq': {
         const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
         deps.audioEngine.setTrackEq(targetId, params)
@@ -138,6 +148,16 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
       case 'reverb': {
         const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
         deps.audioEngine.setTrackReverb(targetId, normalizeReverbParams(params))
+        return
+      }
+      case 'saturator': {
+        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+        deps.audioEngine.setTrackSaturator(targetId, params)
+        return
+      }
+      case 'delay': {
+        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+        deps.audioEngine.setTrackDelay(targetId, params)
         return
       }
       case 'synth': {
@@ -155,7 +175,7 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
 }
 
 async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, direction: HistoryDirection) {
-  const targetId = entry.data.effect === 'master-eq' || entry.data.effect === 'master-reverb'
+  const targetId = entry.data.effect === 'master-eq' || entry.data.effect === 'master-reverb' || entry.data.effect === 'master-saturator' || entry.data.effect === 'master-delay'
     ? 'master'
     : readEffectTrackId(entry, deps)
   await persistHistoryEffectParams(deps, entry, targetId, direction)

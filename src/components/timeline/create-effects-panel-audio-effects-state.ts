@@ -3,14 +3,22 @@ import type { FunctionReturnType } from "convex/server";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import {
   createDefaultEqParams,
+  createDefaultDelayParams,
   createDefaultReverbParams,
+  createDefaultSaturatorParams,
+  normalizeDelayParams,
   normalizeEqParams,
   normalizeReverbParams,
+  normalizeSaturatorParams,
+  serializeDelayParams,
   serializeEqParams,
   serializeReverbParams,
+  serializeSaturatorParams,
+  type DelayParams,
   type EqChannelMode,
   type EqParams,
   type ReverbParams,
+  type SaturatorParams,
 } from "@daw-browser/shared";
 import { isLocalId } from "@daw-browser/shared";
 import type { Track } from "@daw-browser/timeline-core/types";
@@ -26,10 +34,12 @@ import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-a
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 
-type EffectKind = "eq" | "reverb";
+type EffectKind = "eq" | "saturator" | "delay" | "reverb";
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
 type EqRow = RoomEffectRow | LocalEffectRow<EqParams> | undefined;
+type SaturatorRow = RoomEffectRow | LocalEffectRow<SaturatorParams> | undefined;
+type DelayRow = RoomEffectRow | LocalEffectRow<DelayParams> | undefined;
 type ReverbRow = RoomEffectRow | LocalEffectRow<ReverbParams> | undefined;
 
 type EffectsPanelAudioEffectsContext = {
@@ -51,6 +61,22 @@ type EffectsPanelAudioDevice = {
     readDraftForTarget: (targetId: string) => EqParams | undefined;
     reset: () => void;
     toggleBand: (bandId: string) => void;
+    toggleEnabled: (enabled: boolean) => void;
+  };
+  saturator: {
+    add: () => void;
+    change: (updates: Partial<SaturatorParams>) => void;
+    params: Accessor<SaturatorParams | undefined>;
+    readDraftForTarget: (targetId: string) => SaturatorParams | undefined;
+    reset: () => void;
+    toggleEnabled: (enabled: boolean) => void;
+  };
+  delay: {
+    add: () => void;
+    change: (updates: Partial<DelayParams>) => void;
+    params: Accessor<DelayParams | undefined>;
+    readDraftForTarget: (targetId: string) => DelayParams | undefined;
+    reset: () => void;
     toggleEnabled: (enabled: boolean) => void;
   };
   flushPending: () => Promise<void>;
@@ -94,6 +120,8 @@ export function createEffectsPanelAudioDevice(
       const idx = { ...idxCurrent, [kind]: index };
       const entries: { kind: EffectKind; idx: number }[] = [];
       if (typeof idx.eq === "number") entries.push({ kind: "eq", idx: idx.eq });
+      if (typeof idx.saturator === "number") entries.push({ kind: "saturator", idx: idx.saturator });
+      if (typeof idx.delay === "number") entries.push({ kind: "delay", idx: idx.delay });
       if (typeof idx.reverb === "number") entries.push({ kind: "reverb", idx: idx.reverb });
       entries.sort((a, b) => a.idx - b.idx);
       const nextOrder = entries.map((entry) => entry.kind);
@@ -121,6 +149,18 @@ export function createEffectsPanelAudioDevice(
     targetId: currentTargetId,
     effect: (targetId) => targetId === "master" ? "master-reverb" : "reverb",
     normalize: normalizeReverbParams,
+  });
+  const localSaturator = createLocalEffectRows<SaturatorParams>({
+    projectId: context.projectId,
+    targetId: currentTargetId,
+    effect: (targetId) => targetId === "master" ? "master-saturator" : "saturator",
+    normalize: normalizeSaturatorParams,
+  });
+  const localDelay = createLocalEffectRows<DelayParams>({
+    projectId: context.projectId,
+    targetId: currentTargetId,
+    effect: (targetId) => targetId === "master" ? "master-delay" : "delay",
+    normalize: normalizeDelayParams,
   });
   const isLocalProject = localEq.isLocalProject;
 
@@ -245,14 +285,124 @@ export function createEffectsPanelAudioDevice(
     },
   });
 
+  const saturatorState = createPersistedEffectState<SaturatorRow, SaturatorParams>({
+    targetId: currentTargetId,
+    scopeId: context.projectId,
+    row: () => isLocalProject() ? localSaturator.row(currentTargetId()) : remoteEffectForTarget(currentTargetId(), "saturator"),
+    readQueryParams: (row) => row?.params ? normalizeSaturatorParams(row.params) : undefined,
+    createInitialParams: () => createDefaultSaturatorParams(),
+    serializeParams: serializeSaturatorParams,
+    applyToEngine: (targetId, params) => {
+      if (targetId === "master") context.audioEngine().setMasterSaturator(params);
+      else context.audioEngine().setTrackSaturator(targetId, params);
+    },
+    createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
+    persistParams: (targetId, params, persistContext) => {
+      if (!persistContext.projectId) return Promise.resolve();
+      if (isLocalId("project", persistContext.projectId)) return localSaturator.persist(persistContext.projectId, targetId, params);
+      if (!persistContext.userId) return Promise.resolve();
+      const normalizedParams = normalizeSaturatorParams(params);
+      if (targetId === "master") {
+        return publishEffectOperation(persistContext.projectId, persistContext.userId, {
+          kind: "effects.setMasterSaturatorParams",
+          payload: { params: normalizedParams },
+        });
+      }
+      const track = resolveTrackByTargetId(targetId);
+      if (!track) return Promise.resolve();
+      return publishEffectOperation(persistContext.projectId, persistContext.userId, {
+        kind: "effects.setSaturatorParams",
+        payload: { trackId: track.id, params: normalizedParams },
+      });
+    },
+    debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
+    remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
+    onPersistError: (error) => {
+      if (!isLocalProject()) return;
+      context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
+    },
+    onQueryRow: (targetId, row) => {
+      if (row?.params) setEffectOrderForTarget(targetId, "saturator", typeof row.index === "number" ? row.index : undefined);
+    },
+    onParamsCommitted: (targetId, previous, next, persistContext) => {
+      if (previous === undefined) return;
+      if (targetId === "master") {
+        context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-saturator", from: previous, to: next }, persistContext.projectId);
+        return;
+      }
+      const track = resolveTrackByTargetId(targetId);
+      if (!track) return;
+      context.onEffectParamsCommitted?.({ targetId: track.id, effect: "saturator", from: previous, to: next }, persistContext.projectId);
+    },
+  });
+
+  const delayState = createPersistedEffectState<DelayRow, DelayParams>({
+    targetId: currentTargetId,
+    scopeId: context.projectId,
+    row: () => isLocalProject() ? localDelay.row(currentTargetId()) : remoteEffectForTarget(currentTargetId(), "delay"),
+    readQueryParams: (row) => row?.params ? normalizeDelayParams(row.params) : undefined,
+    createInitialParams: () => createDefaultDelayParams(),
+    serializeParams: serializeDelayParams,
+    applyToEngine: (targetId, params) => {
+      if (targetId === "master") context.audioEngine().setMasterDelay(params);
+      else context.audioEngine().setTrackDelay(targetId, params);
+    },
+    createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
+    persistParams: (targetId, params, persistContext) => {
+      if (!persistContext.projectId) return Promise.resolve();
+      if (isLocalId("project", persistContext.projectId)) return localDelay.persist(persistContext.projectId, targetId, params);
+      if (!persistContext.userId) return Promise.resolve();
+      const normalizedParams = normalizeDelayParams(params);
+      if (targetId === "master") {
+        return publishEffectOperation(persistContext.projectId, persistContext.userId, {
+          kind: "effects.setMasterDelayParams",
+          payload: { params: normalizedParams },
+        });
+      }
+      const track = resolveTrackByTargetId(targetId);
+      if (!track) return Promise.resolve();
+      return publishEffectOperation(persistContext.projectId, persistContext.userId, {
+        kind: "effects.setDelayParams",
+        payload: { trackId: track.id, params: normalizedParams },
+      });
+    },
+    debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
+    remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
+    onPersistError: (error) => {
+      if (!isLocalProject()) return;
+      context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
+    },
+    onQueryRow: (targetId, row) => {
+      if (row?.params) setEffectOrderForTarget(targetId, "delay", typeof row.index === "number" ? row.index : undefined);
+    },
+    onParamsCommitted: (targetId, previous, next, persistContext) => {
+      if (previous === undefined) return;
+      if (targetId === "master") {
+        context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-delay", from: previous, to: next }, persistContext.projectId);
+        return;
+      }
+      const track = resolveTrackByTargetId(targetId);
+      if (!track) return;
+      context.onEffectParamsCommitted?.({ targetId: track.id, effect: "delay", from: previous, to: next }, persistContext.projectId);
+    },
+  });
+
   const orderedEffects = createMemo<EffectKind[]>(() => {
     const id = currentTargetId();
-    const arr = effectOrderByTarget()[effectScopeKey(id)];
-    if (arr && arr.length > 0) return arr;
+    const key = effectScopeKey(id);
     const present: EffectKind[] = [];
     if (eqState.params()) present.push("eq");
+    if (saturatorState.params()) present.push("saturator");
+    if (delayState.params()) present.push("delay");
     if (reverbState.params()) present.push("reverb");
-    if (present.length === 2) return ["eq", "reverb"];
+    const fixedOrder: EffectKind[] = ["eq", "saturator", "delay", "reverb"];
+    const indexByKind = effectIndexByTarget()[key];
+    if (indexByKind && Object.keys(indexByKind).length > 0) {
+      return fixedOrder
+        .filter((kind) => present.includes(kind))
+        .sort((a, b) => (indexByKind[a] ?? fixedOrder.indexOf(a)) - (indexByKind[b] ?? fixedOrder.indexOf(b)));
+    }
+    if (present.length > 1) return fixedOrder.filter((kind) => present.includes(kind));
     return present;
   });
 
@@ -264,6 +414,14 @@ export function createEffectsPanelAudioDevice(
     if (!context.canWriteCurrentTargetEffects()) return;
     reverbState.update(updater);
   };
+  const updateSaturator = (updater: (prev: SaturatorParams) => SaturatorParams) => {
+    if (!context.canWriteCurrentTargetEffects()) return;
+    saturatorState.update(updater);
+  };
+  const updateDelay = (updater: (prev: DelayParams) => DelayParams) => {
+    if (!context.canWriteCurrentTargetEffects()) return;
+    delayState.update(updater);
+  };
   const addEq = () => {
     if (!context.canWriteCurrentTargetEffects()) return;
     eqState.add();
@@ -271,6 +429,14 @@ export function createEffectsPanelAudioDevice(
   const addReverb = () => {
     if (!context.canWriteCurrentTargetEffects()) return;
     reverbState.add();
+  };
+  const addSaturator = () => {
+    if (!context.canWriteCurrentTargetEffects()) return;
+    saturatorState.add();
+  };
+  const addDelay = () => {
+    if (!context.canWriteCurrentTargetEffects()) return;
+    delayState.add();
   };
 
   return {
@@ -293,9 +459,25 @@ export function createEffectsPanelAudioDevice(
       toggleEnabled: (enabled) => updateEq((prev) => ({ ...prev, enabled })),
     },
     flushPending: async () => {
-      await Promise.all([eqState.flushPending(), reverbState.flushPending()]);
+      await Promise.all([eqState.flushPending(), saturatorState.flushPending(), delayState.flushPending(), reverbState.flushPending()]);
     },
     orderedEffects,
+    saturator: {
+      add: addSaturator,
+      change: (updates) => updateSaturator((prev) => normalizeSaturatorParams({ ...prev, ...updates })),
+      params: saturatorState.params,
+      readDraftForTarget: saturatorState.readDraftForTarget,
+      reset: () => updateSaturator(() => createDefaultSaturatorParams()),
+      toggleEnabled: (enabled) => updateSaturator((prev) => ({ ...prev, enabled })),
+    },
+    delay: {
+      add: addDelay,
+      change: (updates) => updateDelay((prev) => normalizeDelayParams({ ...prev, ...updates })),
+      params: delayState.params,
+      readDraftForTarget: delayState.readDraftForTarget,
+      reset: () => updateDelay(() => createDefaultDelayParams()),
+      toggleEnabled: (enabled) => updateDelay((prev) => ({ ...prev, enabled })),
+    },
     reverb: {
       add: addReverb,
       change: (updates) => updateReverb((prev) => normalizeReverbParams({ ...prev, ...updates })),

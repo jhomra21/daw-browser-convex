@@ -182,61 +182,24 @@ export function buildEffectParamsHistoryEntry(input: EffectParamsHistoryEntryInp
           to: input.payload.to,
         },
       }
+    case 'saturator':
+      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
+    case 'delay':
+      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
     case 'reverb':
-      return {
-        type: 'effect-params',
-        projectId: input.projectId,
-        data: {
-          effect: input.payload.effect,
-          trackRef,
-          from: input.payload.from,
-          to: input.payload.to,
-        },
-      }
+      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
     case 'synth':
-      return {
-        type: 'effect-params',
-        projectId: input.projectId,
-        data: {
-          effect: input.payload.effect,
-          trackRef,
-          from: input.payload.from,
-          to: input.payload.to,
-        },
-      }
+      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
     case 'arp':
-      return {
-        type: 'effect-params',
-        projectId: input.projectId,
-        data: {
-          effect: input.payload.effect,
-          trackRef,
-          from: input.payload.from,
-          to: input.payload.to,
-        },
-      }
+      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
     case 'master-eq':
-      return {
-        type: 'effect-params',
-        projectId: input.projectId,
-        data: {
-          effect: input.payload.effect,
-          trackRef,
-          from: input.payload.from,
-          to: input.payload.to,
-        },
-      }
+      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
+    case 'master-saturator':
+      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
+    case 'master-delay':
+      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
     case 'master-reverb':
-      return {
-        type: 'effect-params',
-        projectId: input.projectId,
-        data: {
-          effect: input.payload.effect,
-          trackRef,
-          from: input.payload.from,
-          to: input.payload.to,
-        },
-      }
+      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
   }
 }
 

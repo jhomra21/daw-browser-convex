@@ -13,6 +13,7 @@ export function createDelayChainState(): DelayChainState {
   let params: DelayParamsLite | null = null
   let signature: string | null = null
   let enabled: boolean | null = null
+  let pingPong: boolean | null = null
   let currentBpm = 120
   return {
     chain: () => delay,
@@ -21,7 +22,9 @@ export function createDelayChainState(): DelayChainState {
       const normalized = normalizeDelayParams(nextParams)
       const nextSignature = serializeDelayParams(normalized)
       if (signature === nextSignature && params?.mode !== 'sync') return { changed: false, requiresRoutingRebuild: false }
-      const requiresRoutingRebuild = enabled !== normalized.enabled && (enabled !== null || normalized.enabled)
+      const enabledChanged = enabled !== normalized.enabled && (enabled !== null || normalized.enabled)
+      const topologyChanged = normalized.enabled && pingPong !== null && pingPong !== normalized.pingPong
+      const requiresRoutingRebuild = enabledChanged || topologyChanged
       params = normalized
       if (!normalized.enabled) {
         if (delay) {
@@ -30,12 +33,18 @@ export function createDelayChainState(): DelayChainState {
         }
         signature = nextSignature
         enabled = false
+        pingPong = normalized.pingPong
         return { changed: true, requiresRoutingRebuild }
+      }
+      if (topologyChanged && delay) {
+        disconnectDelayChain(delay)
+        delay = null
       }
       if (!delay) delay = createDelayNodeChain(ctx, normalized, currentBpm)
       else applyDelayNodeChainParams(delay, normalized, currentBpm)
       signature = nextSignature
       enabled = true
+      pingPong = normalized.pingPong
       return { changed: true, requiresRoutingRebuild }
     },
     setBpm: (bpm) => {
@@ -46,6 +55,7 @@ export function createDelayChainState(): DelayChainState {
       params = null
       signature = null
       enabled = null
+      pingPong = null
       if (delay) {
         disconnectDelayChain(delay)
         delay = null

@@ -1,4 +1,4 @@
-import { createMemo, createSignal, untrack, type Accessor } from "solid-js";
+import { createMemo, type Accessor } from "solid-js";
 import type { FunctionReturnType } from "convex/server";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import {
@@ -96,48 +96,6 @@ export function createEffectsPanelAudioDevice(
   currentTargetId: Accessor<string>,
   resolveTrackByTargetId: (targetId: string) => Track | undefined,
 ): EffectsPanelAudioDevice {
-  const effectScopeKey = (targetId: string) => `${context.projectId() ?? "no-project"}:${targetId}`;
-  const [effectOrderByTarget, setEffectOrderByTarget] = createSignal<Record<string, EffectKind[]>>({});
-  const [effectIndexByTarget, setEffectIndexByTarget] = createSignal<Record<string, Partial<Record<EffectKind, number>>>>({});
-
-  function appendEffectOrder(targetId: string, kind: EffectKind) {
-    const key = effectScopeKey(targetId);
-    setEffectOrderByTarget((prev) => {
-      const arr = prev[key] ?? [];
-      if (arr.includes(kind)) return prev;
-      return { ...prev, [key]: [...arr, kind] };
-    });
-  }
-
-  function setEffectOrderForTarget(targetId: string, kind: EffectKind, index?: number) {
-    const key = effectScopeKey(targetId);
-    if (typeof index === "number") {
-      setEffectIndexByTarget((prev) => {
-        if (prev[key]?.[kind] === index) return prev;
-        return { ...prev, [key]: { ...(prev[key] ?? {}), [kind]: index } };
-      });
-      const idxCurrent = untrack(() => effectIndexByTarget()[key] ?? {});
-      const idx = { ...idxCurrent, [kind]: index };
-      const entries: { kind: EffectKind; idx: number }[] = [];
-      if (typeof idx.eq === "number") entries.push({ kind: "eq", idx: idx.eq });
-      if (typeof idx.saturator === "number") entries.push({ kind: "saturator", idx: idx.saturator });
-      if (typeof idx.delay === "number") entries.push({ kind: "delay", idx: idx.delay });
-      if (typeof idx.reverb === "number") entries.push({ kind: "reverb", idx: idx.reverb });
-      entries.sort((a, b) => a.idx - b.idx);
-      const nextOrder = entries.map((entry) => entry.kind);
-      setEffectOrderByTarget((prev) => {
-        const currentOrder = prev[key] ?? [];
-        if (
-          currentOrder.length === nextOrder.length &&
-          currentOrder.every((entry, entryIndex) => entry === nextOrder[entryIndex])
-        ) return prev;
-        return { ...prev, [key]: nextOrder };
-      });
-      return;
-    }
-    appendEffectOrder(targetId, kind);
-  }
-
   const localEq = createLocalEffectRows<EqParams>({
     projectId: context.projectId,
     targetId: currentTargetId,
@@ -216,9 +174,6 @@ export function createEffectsPanelAudioDevice(
       if (!isLocalProject()) return;
       context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
     },
-    onQueryRow: (targetId, row) => {
-      if (row?.params) setEffectOrderForTarget(targetId, "eq", typeof row.index === "number" ? row.index : undefined);
-    },
     onParamsCommitted: (targetId, previous, next, persistContext) => {
       if (previous === undefined) return;
       if (targetId === "master") {
@@ -270,9 +225,6 @@ export function createEffectsPanelAudioDevice(
       if (!isLocalProject()) return;
       context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
     },
-    onQueryRow: (targetId, row) => {
-      if (row?.params) setEffectOrderForTarget(targetId, "reverb", typeof row.index === "number" ? row.index : undefined);
-    },
     onParamsCommitted: (targetId, previous, next, persistContext) => {
       if (previous === undefined) return;
       if (targetId === "master") {
@@ -320,9 +272,6 @@ export function createEffectsPanelAudioDevice(
     onPersistError: (error) => {
       if (!isLocalProject()) return;
       context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
-    },
-    onQueryRow: (targetId, row) => {
-      if (row?.params) setEffectOrderForTarget(targetId, "saturator", typeof row.index === "number" ? row.index : undefined);
     },
     onParamsCommitted: (targetId, previous, next, persistContext) => {
       if (previous === undefined) return;
@@ -372,9 +321,6 @@ export function createEffectsPanelAudioDevice(
       if (!isLocalProject()) return;
       context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
     },
-    onQueryRow: (targetId, row) => {
-      if (row?.params) setEffectOrderForTarget(targetId, "delay", typeof row.index === "number" ? row.index : undefined);
-    },
     onParamsCommitted: (targetId, previous, next, persistContext) => {
       if (previous === undefined) return;
       if (targetId === "master") {
@@ -388,22 +334,13 @@ export function createEffectsPanelAudioDevice(
   });
 
   const orderedEffects = createMemo<EffectKind[]>(() => {
-    const id = currentTargetId();
-    const key = effectScopeKey(id);
     const present: EffectKind[] = [];
     if (eqState.params()) present.push("eq");
     if (saturatorState.params()) present.push("saturator");
     if (delayState.params()) present.push("delay");
     if (reverbState.params()) present.push("reverb");
     const fixedOrder: EffectKind[] = ["eq", "saturator", "delay", "reverb"];
-    const indexByKind = effectIndexByTarget()[key];
-    if (indexByKind && Object.keys(indexByKind).length > 0) {
-      return fixedOrder
-        .filter((kind) => present.includes(kind))
-        .sort((a, b) => (indexByKind[a] ?? fixedOrder.indexOf(a)) - (indexByKind[b] ?? fixedOrder.indexOf(b)));
-    }
-    if (present.length > 1) return fixedOrder.filter((kind) => present.includes(kind));
-    return present;
+    return fixedOrder.filter((kind) => present.includes(kind));
   });
 
   const updateEq = (updater: (prev: EqParams) => EqParams) => {

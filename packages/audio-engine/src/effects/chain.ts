@@ -351,6 +351,12 @@ export function connectFxChain(
     input.connect(destination)
   }
   if (saturator) connectToNext(saturator.outputGain, 'saturator')
-  if (delay) connectToNext(delay.wetGain, 'delay')
-  if (reverb) connectToNext(reverb.widthMerger, 'reverb')
+  if (delay) {
+    connectToNext(delay.dryGain, 'delay')
+    connectToNext(delay.wetGain, 'delay')
+  }
+  if (reverb) {
+    connectToNext(reverb.dryGain, 'reverb')
+    connectToNext(reverb.widthMerger, 'reverb')
+  }
 }

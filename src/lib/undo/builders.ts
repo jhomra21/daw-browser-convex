@@ -172,16 +172,7 @@ export function buildEffectParamsHistoryEntry(input: EffectParamsHistoryEntryInp
   const trackRef = track ? getTrackHistoryRef(track) : undefined
   switch (input.payload.effect) {
     case 'eq':
-      return {
-        type: 'effect-params',
-        projectId: input.projectId,
-        data: {
-          effect: input.payload.effect,
-          trackRef,
-          from: input.payload.from,
-          to: input.payload.to,
-        },
-      }
+      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
     case 'saturator':
       return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
     case 'delay':

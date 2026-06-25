@@ -1,5 +1,5 @@
 import { buildLocalClip } from "~/lib/clip-create";
-import { buildClipCreatePayload, normalizeAudioWarp, normalizeReverbParams, type ClipCreateSnapshot } from "@daw-browser/shared";
+import { buildClipCreatePayload, normalizeAudioWarp, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
@@ -167,6 +167,8 @@ export const persistHistoryTrackEffects = async (
   if (isLocalHistoryProject(deps)) {
     await Promise.all([
       effects.eq ? setLocalEffect(deps.projectId, trackId, "eq", effects.eq) : null,
+      effects.saturator ? setLocalEffect(deps.projectId, trackId, "saturator", normalizeSaturatorParams(effects.saturator)) : null,
+      effects.delay ? setLocalEffect(deps.projectId, trackId, "delay", normalizeDelayParams(effects.delay)) : null,
       effects.reverb ? setLocalEffect(deps.projectId, trackId, "reverb", normalizeReverbParams(effects.reverb)) : null,
       effects.synth ? setLocalEffect(deps.projectId, trackId, "synth", effects.synth) : null,
       effects.arp ? setLocalEffect(deps.projectId, trackId, "arp", effects.arp) : null,
@@ -175,6 +177,8 @@ export const persistHistoryTrackEffects = async (
   }
   await Promise.all([
     effects.eq ? publishHistoryOperation(deps, { kind: "effects.setEqParams", payload: { trackId, params: effects.eq } }) : null,
+    effects.saturator ? publishHistoryOperation(deps, { kind: "effects.setSaturatorParams", payload: { trackId, params: normalizeSaturatorParams(effects.saturator) } }) : null,
+    effects.delay ? publishHistoryOperation(deps, { kind: "effects.setDelayParams", payload: { trackId, params: normalizeDelayParams(effects.delay) } }) : null,
     effects.reverb ? publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId, params: normalizeReverbParams(effects.reverb) } }) : null,
     effects.synth ? publishHistoryOperation(deps, { kind: "effects.setSynthParams", payload: { trackId, params: effects.synth } }) : null,
     effects.arp ? publishHistoryOperation(deps, { kind: "effects.setArpeggiatorParams", payload: { trackId, params: effects.arp } }) : null,

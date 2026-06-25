@@ -368,6 +368,22 @@ export const getReverbForTrack = query({
   },
 });
 
+export const getSaturatorForTrack = query({
+  args: { projectId: v.string(), trackId: v.id("tracks") },
+  handler: async (ctx, { projectId, trackId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    return await getTrackEffect(ctx, { projectId, trackId, userId, type: "saturator" });
+  },
+});
+
+export const getDelayForTrack = query({
+  args: { projectId: v.string(), trackId: v.id("tracks") },
+  handler: async (ctx, { projectId, trackId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    return await getTrackEffect(ctx, { projectId, trackId, userId, type: "delay" });
+  },
+});
+
 // Reverb: get first master reverb row for room
 export const getReverbForMaster = query({
   args: { projectId: v.string() },

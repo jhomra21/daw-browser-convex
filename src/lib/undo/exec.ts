@@ -3,6 +3,7 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
+import { normalizeReverbParams } from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
@@ -126,7 +127,7 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
       }
       case 'master-reverb': {
         const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-        deps.audioEngine.setMasterReverb(params)
+        deps.audioEngine.setMasterReverb(normalizeReverbParams(params))
         return
       }
       case 'eq': {
@@ -136,7 +137,7 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
       }
       case 'reverb': {
         const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-        deps.audioEngine.setTrackReverb(targetId, params)
+        deps.audioEngine.setTrackReverb(targetId, normalizeReverbParams(params))
         return
       }
       case 'synth': {

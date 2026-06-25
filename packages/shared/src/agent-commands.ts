@@ -1,4 +1,28 @@
 import { z } from 'zod'
+import {
+  REVERB_DECAY_SEC_MAX,
+  REVERB_DECAY_SEC_MIN,
+  REVERB_DIFFUSION_HIGH_CUT_HZ_MAX,
+  REVERB_DIFFUSION_HIGH_CUT_HZ_MIN,
+  REVERB_DIFFUSION_LOW_CUT_HZ_MAX,
+  REVERB_DIFFUSION_LOW_CUT_HZ_MIN,
+  REVERB_HIGH_CUT_HZ_MAX,
+  REVERB_HIGH_CUT_HZ_MIN,
+  REVERB_LOW_CUT_HZ_MAX,
+  REVERB_LOW_CUT_HZ_MIN,
+  REVERB_PRE_DELAY_MS_MAX,
+  REVERB_PRE_DELAY_MS_MIN,
+  REVERB_REFLECTION_MOD_AMOUNT_MS_MAX,
+  REVERB_REFLECTION_MOD_AMOUNT_MS_MIN,
+  REVERB_REFLECTION_MOD_RATE_HZ_MAX,
+  REVERB_REFLECTION_MOD_RATE_HZ_MIN,
+  REVERB_STEREO_WIDTH_MAX,
+  REVERB_STEREO_WIDTH_MIN,
+  REVERB_UNIT_PARAM_MAX,
+  REVERB_UNIT_PARAM_MIN,
+  REVERB_WET_MAX,
+  REVERB_WET_MIN,
+} from './effects-params'
 
 const EqBandSchema = z.object({
   id: z.string(),
@@ -50,6 +74,7 @@ export const SetEqParamsCommandSchema = z.object({
   type: z.literal('setEqParams'),
   target: z.union([z.literal('master'), z.number().int().min(1)]),
   enabled: z.boolean(),
+  channelMode: z.union([z.literal('mono'), z.literal('stereo')]).optional(),
   bands: z.array(EqBandSchema),
 })
 
@@ -57,9 +82,23 @@ export const SetReverbParamsCommandSchema = z.object({
   type: z.literal('setReverbParams'),
   target: z.union([z.literal('master'), z.number().int().min(1)]),
   enabled: z.boolean(),
-  wet: z.number().min(0).max(1),
-  decaySec: z.number().min(0.05).max(12),
-  preDelayMs: z.number().min(0).max(250),
+  wet: z.number().min(REVERB_WET_MIN).max(REVERB_WET_MAX),
+  decaySec: z.number().min(REVERB_DECAY_SEC_MIN).max(REVERB_DECAY_SEC_MAX),
+  preDelayMs: z.number().min(REVERB_PRE_DELAY_MS_MIN).max(REVERB_PRE_DELAY_MS_MAX),
+  reflections: z.number().min(REVERB_UNIT_PARAM_MIN).max(REVERB_UNIT_PARAM_MAX).optional(),
+  reflectionSpin: z.boolean().optional(),
+  reflectionModAmountMs: z.number().min(REVERB_REFLECTION_MOD_AMOUNT_MS_MIN).max(REVERB_REFLECTION_MOD_AMOUNT_MS_MAX).optional(),
+  reflectionModRateHz: z.number().min(REVERB_REFLECTION_MOD_RATE_HZ_MIN).max(REVERB_REFLECTION_MOD_RATE_HZ_MAX).optional(),
+  reflectionShape: z.number().min(REVERB_UNIT_PARAM_MIN).max(REVERB_UNIT_PARAM_MAX).optional(),
+  diffuse: z.number().min(REVERB_UNIT_PARAM_MIN).max(REVERB_UNIT_PARAM_MAX).optional(),
+  size: z.number().min(REVERB_UNIT_PARAM_MIN).max(REVERB_UNIT_PARAM_MAX).optional(),
+  diffusion: z.number().min(REVERB_UNIT_PARAM_MIN).max(REVERB_UNIT_PARAM_MAX).optional(),
+  density: z.number().min(REVERB_UNIT_PARAM_MIN).max(REVERB_UNIT_PARAM_MAX).optional(),
+  lowCutHz: z.number().min(REVERB_LOW_CUT_HZ_MIN).max(REVERB_LOW_CUT_HZ_MAX).optional(),
+  highCutHz: z.number().min(REVERB_HIGH_CUT_HZ_MIN).max(REVERB_HIGH_CUT_HZ_MAX).optional(),
+  diffusionLowCutHz: z.number().min(REVERB_DIFFUSION_LOW_CUT_HZ_MIN).max(REVERB_DIFFUSION_LOW_CUT_HZ_MAX).optional(),
+  diffusionHighCutHz: z.number().min(REVERB_DIFFUSION_HIGH_CUT_HZ_MIN).max(REVERB_DIFFUSION_HIGH_CUT_HZ_MAX).optional(),
+  stereoWidth: z.number().min(REVERB_STEREO_WIDTH_MIN).max(REVERB_STEREO_WIDTH_MAX).optional(),
 })
 
 export const SetSynthParamsCommandSchema = z.object({

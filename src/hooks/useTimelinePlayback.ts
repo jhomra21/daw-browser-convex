@@ -97,6 +97,11 @@ export function useTimelinePlayback(audioEngine: TimelinePlaybackAudioEngine, lo
       deferredStretchWindows = []
       deferredStretchQueue.add(windows)
     },
+    replaceForClipIds: (clipIds: string[], windows: DeferredStretchWindow[]) => {
+      const ids = new Set(clipIds)
+      deferredStretchWindows = deferredStretchWindows.filter((window) => !ids.has(window.clipId))
+      deferredStretchQueue.add(windows)
+    },
     read: () => deferredStretchWindows,
   }
 
@@ -107,7 +112,7 @@ export function useTimelinePlayback(audioEngine: TimelinePlaybackAudioEngine, lo
 
   const rescheduleAndTrackDeferred = (tracks: Track[], sec: number, clipIds: string[], opts?: Parameters<AudioEngine['rescheduleClipsAtPlayhead']>[3]) => {
     const result = audioEngine.rescheduleClipsAtPlayhead(tracks, sec, clipIds, opts)
-    deferredStretchQueue.add(result.deferredStretchWindows)
+    deferredStretchQueue.replaceForClipIds(clipIds, result.deferredStretchWindows)
   }
 
   const applyLoopIfNeeded = (candidateSec: number) => {

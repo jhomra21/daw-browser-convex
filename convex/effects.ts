@@ -2,9 +2,60 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProjectAccess } from "./projectAccess";
 import { getTrackWriteAccess } from "./trackWrites";
-import { normalizeSynthParams } from "@daw-browser/shared";
+import {
+  normalizeEqParamsForUpdate,
+  normalizeReverbParamsForUpdate,
+  normalizeSynthParams,
+  serializeEqParams,
+  serializeReverbParams,
+} from "@daw-browser/shared";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
+const reverbParamsValidator = v.object({
+  enabled: v.boolean(),
+  wet: v.number(),
+  decaySec: v.number(),
+  preDelayMs: v.number(),
+  reflections: v.optional(v.number()),
+  reflectionSpin: v.optional(v.boolean()),
+  reflectionModAmountMs: v.optional(v.number()),
+  reflectionModRateHz: v.optional(v.number()),
+  reflectionShape: v.optional(v.number()),
+  diffuse: v.optional(v.number()),
+  size: v.optional(v.number()),
+  diffusion: v.optional(v.number()),
+  density: v.optional(v.number()),
+  lowCutHz: v.optional(v.number()),
+  highCutHz: v.optional(v.number()),
+  diffusionLowCutHz: v.optional(v.number()),
+  diffusionHighCutHz: v.optional(v.number()),
+  stereoWidth: v.optional(v.number()),
+})
+
+const eqBandTypeValidator = v.union(
+  v.literal("allpass"),
+  v.literal("bandpass"),
+  v.literal("highpass"),
+  v.literal("highshelf"),
+  v.literal("lowpass"),
+  v.literal("lowshelf"),
+  v.literal("notch"),
+  v.literal("peaking"),
+)
+
+const eqParamsValidator = v.object({
+  enabled: v.boolean(),
+  channelMode: v.optional(v.union(v.literal("mono"), v.literal("stereo"))),
+  bands: v.array(v.object({
+    id: v.string(),
+    type: eqBandTypeValidator,
+    frequency: v.number(),
+    gainDb: v.number(),
+    q: v.number(),
+    enabled: v.boolean(),
+  })),
+})
 
 const sanitizeArpParams = (params: {
   enabled: boolean
@@ -26,6 +77,26 @@ const sanitizeArpParams = (params: {
   }
 }
 
+const normalizeEffectParamsForUpdate = (
+  type: 'synth' | 'arpeggiator' | 'reverb' | 'eq',
+  params: any,
+  existing?: any,
+) => {
+  if (type === 'eq') return normalizeEqParamsForUpdate(params, existing)
+  if (type === 'reverb') return normalizeReverbParamsForUpdate(params, existing)
+  return params
+}
+
+const areEffectParamsEqual = (
+  type: 'synth' | 'arpeggiator' | 'reverb' | 'eq',
+  current: any,
+  next: any,
+) => {
+  if (type === 'eq') return serializeEqParams(current) === serializeEqParams(next)
+  if (type === 'reverb') return serializeReverbParams(current) === serializeReverbParams(next)
+  return current === next
+}
+
 const upsertTrackEffect = async (
   ctx: any,
   input: {
@@ -33,7 +104,7 @@ const upsertTrackEffect = async (
     userId: string
     trackId: any
     type: 'synth' | 'arpeggiator' | 'reverb' | 'eq'
-    params: unknown
+    params: any
   },
 ) => {
   const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
@@ -42,16 +113,19 @@ const upsertTrackEffect = async (
   const byIndex = existing.sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0))
   const row = byIndex.find((entry: any) => entry.type === input.type) ?? null
   if (row) {
-    await ctx.db.patch(row._id, { params: input.params, targetType: 'track' })
+    const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
+    if (row.targetType === 'track' && areEffectParamsEqual(input.type, row.params, params)) return row._id
+    await ctx.db.patch(row._id, { params, targetType: 'track' })
     return row._id
   }
+  const params = normalizeEffectParamsForUpdate(input.type, input.params)
   return await ctx.db.insert('effects', {
     projectId: input.projectId,
     targetType: 'track',
     trackId: input.trackId,
     index: existing.length,
     type: input.type,
-    params: input.params,
+    params,
     createdAt: Date.now(),
   })
 }
@@ -62,7 +136,7 @@ const upsertMasterEffect = async (
     projectId: string
     userId: string
     type: 'reverb' | 'eq'
-    params: unknown
+    params: any
   },
 ) => {
   await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
@@ -70,15 +144,18 @@ const upsertMasterEffect = async (
   const byIndex = existing.sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0))
   const row = byIndex.find((entry: any) => entry.type === input.type && entry.targetType === 'master') ?? null
   if (row) {
-    await ctx.db.patch(row._id, { params: input.params, targetType: 'master' })
+    const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
+    if (areEffectParamsEqual(input.type, row.params, params)) return row._id
+    await ctx.db.patch(row._id, { params, targetType: 'master' })
     return row._id
   }
+  const params = normalizeEffectParamsForUpdate(input.type, input.params)
   return await ctx.db.insert('effects', {
     projectId: input.projectId,
     targetType: 'master',
     index: existing.filter((entry: any) => entry.targetType === 'master').length,
     type: input.type,
-    params: input.params,
+    params,
     createdAt: Date.now(),
   })
 }
@@ -213,12 +290,7 @@ export const setReverbParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.id("tracks"),
-    params: v.object({
-      enabled: v.boolean(),
-      wet: v.number(), // 0..1
-      decaySec: v.number(), // 0.1..10
-      preDelayMs: v.number(), // 0..200
-    }),
+    params: reverbParamsValidator,
   },
   handler: async (ctx, { projectId, trackId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx);
@@ -229,12 +301,7 @@ export const setReverbParams = mutation({
 export const setMasterReverbParams = mutation({
   args: {
     projectId: v.string(),
-    params: v.object({
-      enabled: v.boolean(),
-      wet: v.number(),
-      decaySec: v.number(),
-      preDelayMs: v.number(),
-    }),
+    params: reverbParamsValidator,
   },
   handler: async (ctx, { projectId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
@@ -286,17 +353,7 @@ export const setEqParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.id("tracks"),
-    params: v.object({
-      enabled: v.boolean(),
-      bands: v.array(v.object({
-        id: v.string(),
-        type: v.string(),
-        frequency: v.number(),
-        gainDb: v.number(),
-        q: v.number(),
-        enabled: v.boolean(),
-      })),
-    }),
+    params: eqParamsValidator,
   },
   handler: async (ctx, { projectId, trackId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx);
@@ -308,17 +365,7 @@ export const setEqParams = mutation({
 export const setMasterEqParams = mutation({
   args: {
     projectId: v.string(),
-    params: v.object({
-      enabled: v.boolean(),
-      bands: v.array(v.object({
-        id: v.string(),
-        type: v.string(),
-        frequency: v.number(),
-        gainDb: v.number(),
-        q: v.number(),
-        enabled: v.boolean(),
-      })),
-    }),
+    params: eqParamsValidator,
   },
   handler: async (ctx, { projectId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
@@ -373,12 +420,7 @@ export const serverSetReverbParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.string(),
-    params: v.object({
-      enabled: v.boolean(),
-      wet: v.number(),
-      decaySec: v.number(),
-      preDelayMs: v.number(),
-    }),
+    params: reverbParamsValidator,
   },
   handler: async (ctx, { projectId, trackId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
@@ -392,17 +434,7 @@ export const serverSetEqParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.string(),
-    params: v.object({
-      enabled: v.boolean(),
-      bands: v.array(v.object({
-        id: v.string(),
-        type: v.string(),
-        frequency: v.number(),
-        gainDb: v.number(),
-        q: v.number(),
-        enabled: v.boolean(),
-      })),
-    }),
+    params: eqParamsValidator,
   },
   handler: async (ctx, { projectId, trackId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
@@ -415,12 +447,7 @@ export const serverSetEqParams = mutation({
 export const serverSetMasterReverbParams = mutation({
   args: {
     projectId: v.string(),
-    params: v.object({
-      enabled: v.boolean(),
-      wet: v.number(),
-      decaySec: v.number(),
-      preDelayMs: v.number(),
-    }),
+    params: reverbParamsValidator,
   },
   handler: async (ctx, { projectId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
@@ -431,17 +458,7 @@ export const serverSetMasterReverbParams = mutation({
 export const serverSetMasterEqParams = mutation({
   args: {
     projectId: v.string(),
-    params: v.object({
-      enabled: v.boolean(),
-      bands: v.array(v.object({
-        id: v.string(),
-        type: v.string(),
-        frequency: v.number(),
-        gainDb: v.number(),
-        q: v.number(),
-        enabled: v.boolean(),
-      })),
-    }),
+    params: eqParamsValidator,
   },
   handler: async (ctx, { projectId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)

@@ -162,6 +162,52 @@ describe('useTimelinePlayback deferred stretch retries', () => {
     })
   })
 
+  test('live reschedule clears stale deferred stretch windows when a clip no longer needs stretching', async () => {
+    await withFakeRaf(async () => {
+      let currentTimelineSec = 0
+      let stretchListener = () => {}
+      const scheduleCalls: ScheduleCall[] = []
+      const engine = {
+        get currentTimelineSec() {
+          return currentTimelineSec
+        },
+        ensureAudio: () => {},
+        onTransportPause: () => {},
+        onTransportSeek: () => {},
+        onTransportStart: () => {},
+        onTransportStop: () => {},
+        resume: async () => {},
+        rescheduleClipsAtPlayhead: (_tracks, playheadSec, clipIds, opts) => {
+          scheduleCalls.push({ playheadSec, opts: { ...opts, clipIds } })
+          return { deferredStretchWindows: [] }
+        },
+        scheduleAllClipsFromPlayhead: (_tracks, playheadSec, opts) => {
+          scheduleCalls.push({ playheadSec, opts })
+          return scheduleCalls.length === 1
+            ? { deferredStretchWindows: [{ clipId: 'clip-1', startSec: 12, endSec: 16 }] }
+            : { deferredStretchWindows: [] }
+        },
+        stopAllSources: () => {},
+        subscribeStretchRenderState: (listener) => {
+          stretchListener = listener
+          return () => true
+        },
+      } satisfies Parameters<typeof useTimelinePlayback>[0]
+
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(engine)
+        await playback.handlePlay([track])
+
+        currentTimelineSec = 10
+        playback.rescheduleChangedClips([track], 10, ['clip-1'], { endLimitSec: 16 })
+        stretchListener()
+
+        expect(scheduleCalls).toHaveLength(2)
+        dispose()
+      })
+    })
+  })
+
   test('RAF keeps fallback stretch windows queued for render readiness replacement', async () => {
     await withFakeRaf(async (flushRaf) => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 11, endSec: 15, replaceExistingSource: true })

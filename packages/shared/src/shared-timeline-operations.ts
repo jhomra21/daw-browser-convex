@@ -1,10 +1,10 @@
 import type {
   ArpeggiatorParams,
-  EqBandParams,
   EqParams,
-  ReverbParams,
+  ReverbParamsInput,
   SynthWave,
 } from './effects-params'
+import { isEqBandType, normalizeEqParams } from './effects-params'
 import { normalizeAudioWarp, normalizeClipGain, type AudioWarpPayload } from './audio-warp'
 import { normalizeMasterVolume } from './master-volume'
 
@@ -57,6 +57,8 @@ type SharedSynthParams = {
   releaseMs?: number
 }
 
+type SharedReverbParams = Required<Pick<ReverbParamsInput, 'enabled' | 'wet' | 'decaySec' | 'preDelayMs'>> & Omit<ReverbParamsInput, 'enabled' | 'wet' | 'decaySec' | 'preDelayMs'>
+
 export type SharedTimelineOperation =
   | { kind: 'tracks.create'; payload: { index?: number; kind?: string; channelRole?: string; operationId?: string } }
   | { kind: 'tracks.lock'; payload: { trackId: string } }
@@ -72,11 +74,11 @@ export type SharedTimelineOperation =
   | { kind: 'tracks.setMix'; payload: { trackId: string; muted?: boolean; soloed?: boolean } }
   | { kind: 'mixer.setMasterVolume'; payload: { volume: number } }
   | { kind: 'effects.setEqParams'; payload: { trackId: string; params: EqParams } }
-  | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: ReverbParams } }
+  | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: SharedReverbParams } }
   | { kind: 'effects.setSynthParams'; payload: { trackId: string; params: SharedSynthParams } }
   | { kind: 'effects.setArpeggiatorParams'; payload: { trackId: string; params: ArpeggiatorParams } }
   | { kind: 'effects.setMasterEqParams'; payload: { params: EqParams } }
-  | { kind: 'effects.setMasterReverbParams'; payload: { params: ReverbParams } }
+  | { kind: 'effects.setMasterReverbParams'; payload: { params: SharedReverbParams } }
 
 export type SharedTimelineOperationKind = SharedTimelineOperation['kind']
 
@@ -185,20 +187,6 @@ export const readSharedTimelineClipCreatePayload = (
   }
 }
 
-const readEqBandType = (value: unknown): EqBandParams['type'] | null => {
-  if (
-    value === 'allpass'
-    || value === 'bandpass'
-    || value === 'highpass'
-    || value === 'highshelf'
-    || value === 'lowpass'
-    || value === 'lowshelf'
-    || value === 'notch'
-    || value === 'peaking'
-  ) return value
-  return null
-}
-
 const readEqParams = (value: unknown): EqParams | null => {
   if (!isRecord(value) || typeof value.enabled !== 'boolean' || !Array.isArray(value.bands)) return null
   const bands = value.bands.flatMap((band) => {
@@ -210,21 +198,44 @@ const readEqParams = (value: unknown): EqParams | null => {
       || typeof band.q !== 'number'
       || typeof band.enabled !== 'boolean'
     ) return []
-    const type = readEqBandType(band.type)
-    return type ? [{ id: band.id, type, frequency: band.frequency, gainDb: band.gainDb, q: band.q, enabled: band.enabled }] : []
+    return isEqBandType(band.type)
+      ? [{ id: band.id, type: band.type, frequency: band.frequency, gainDb: band.gainDb, q: band.q, enabled: band.enabled }]
+      : []
   })
-  return bands.length === value.bands.length ? { enabled: value.enabled, bands } : null
+  return bands.length === value.bands.length ? normalizeEqParams({ enabled: value.enabled, channelMode: value.channelMode, bands }) : null
 }
 
-const readReverbParams = (value: unknown): ReverbParams | null => (
-  isRecord(value)
-  && typeof value.enabled === 'boolean'
-  && typeof value.wet === 'number'
-  && typeof value.decaySec === 'number'
-  && typeof value.preDelayMs === 'number'
-    ? { enabled: value.enabled, wet: value.wet, decaySec: value.decaySec, preDelayMs: value.preDelayMs }
-    : null
-)
+const readReverbParams = (value: unknown): SharedReverbParams | null => {
+  if (!isRecord(value) || typeof value.enabled !== 'boolean') return null
+  const params: ReverbParamsInput = {
+    enabled: value.enabled,
+    wet: readOptionalNumber(value.wet),
+    decaySec: readOptionalNumber(value.decaySec),
+    preDelayMs: readOptionalNumber(value.preDelayMs),
+    reflections: readOptionalNumber(value.reflections),
+    reflectionSpin: typeof value.reflectionSpin === 'boolean' ? value.reflectionSpin : undefined,
+    reflectionModAmountMs: readOptionalNumber(value.reflectionModAmountMs),
+    reflectionModRateHz: readOptionalNumber(value.reflectionModRateHz),
+    reflectionShape: readOptionalNumber(value.reflectionShape),
+    diffuse: readOptionalNumber(value.diffuse),
+    size: readOptionalNumber(value.size),
+    diffusion: readOptionalNumber(value.diffusion),
+    density: readOptionalNumber(value.density),
+    lowCutHz: readOptionalNumber(value.lowCutHz),
+    highCutHz: readOptionalNumber(value.highCutHz),
+    diffusionLowCutHz: readOptionalNumber(value.diffusionLowCutHz),
+    diffusionHighCutHz: readOptionalNumber(value.diffusionHighCutHz),
+    stereoWidth: readOptionalNumber(value.stereoWidth),
+  }
+  if (params.wet === undefined || params.decaySec === undefined || params.preDelayMs === undefined) return null
+  return {
+    ...params,
+    enabled: value.enabled,
+    wet: params.wet,
+    decaySec: params.decaySec,
+    preDelayMs: params.preDelayMs,
+  }
+}
 
 const readSynthWave = (value: unknown): SynthWave | null => (
   value === 'sine' || value === 'square' || value === 'sawtooth' || value === 'triangle' ? value : null

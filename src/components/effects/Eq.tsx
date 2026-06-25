@@ -1,10 +1,26 @@
-import { Show, For, createSignal, onMount, onCleanup, createEffect } from 'solid-js'
+import { For, createSignal, createMemo, onMount, onCleanup, createEffect } from 'solid-js'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
+import EffectShell from '~/components/effects/EffectShell'
+import EqFilterTypeSelect from '~/components/effects/eq-filter-type-select'
 import Knob from '~/components/ui/knob'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '~/components/ui/dropdown-menu'
+import {
+  createDefaultEqParams,
+  createDefaultEqBand,
+  EQ_FREQUENCY_MAX,
+  EQ_FREQUENCY_MIN,
+  EQ_GAIN_DB_MAX,
+  EQ_GAIN_DB_MIN,
+  EQ_Q_MAX,
+  EQ_Q_MIN,
   supportsGain,
+  type EqChannelMode,
   type EqBandParams,
-  type EqBandType,
 } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
 
@@ -13,7 +29,9 @@ import { cn } from '~/lib/utils'
 type EqProps = {
   bands: EqBandParams[]
   enabled: boolean
+  channelMode: EqChannelMode
   onBandChange: (bandId: string, updates: Partial<EqBandParams>) => void
+  onChannelModeChange: (mode: EqChannelMode) => void
   onBandToggle?: (bandId: string) => void
   onToggleEnabled?: (enabled: boolean) => void
   onReset?: () => void
@@ -21,32 +39,102 @@ type EqProps = {
   spectrumData?: SpectrumFrame | null
 }
 
-const FREQ_MIN = 20
-const FREQ_MAX = 20000
-const GAIN_MIN = -24
-const GAIN_MAX = 24
-const Q_MIN = 0.2
-const Q_MAX = 18
-
-const FILTER_TYPES: { value: EqBandType; label: string; short: string }[] = [
-  { value: 'lowpass', label: 'Low Pass', short: 'LP' },
-  { value: 'highpass', label: 'High Pass', short: 'HP' },
-  { value: 'bandpass', label: 'Band Pass', short: 'BP' },
-  { value: 'notch', label: 'Notch', short: 'NT' },
-  { value: 'lowshelf', label: 'Low Shelf', short: 'LS' },
-  { value: 'highshelf', label: 'High Shelf', short: 'HS' },
-  { value: 'peaking', label: 'Peaking', short: 'PK' },
+const DEFAULT_EQ_PARAMS = createDefaultEqParams()
+const FREQ_MIN = EQ_FREQUENCY_MIN
+const FREQ_MAX = EQ_FREQUENCY_MAX
+const GAIN_MIN = EQ_GAIN_DB_MIN
+const GAIN_MAX = EQ_GAIN_DB_MAX
+const Q_MIN = EQ_Q_MIN
+const Q_MAX = EQ_Q_MAX
+const EQ_CHANNEL_MODE_OPTIONS: { value: EqChannelMode; label: string }[] = [
+  { value: 'mono', label: 'Mono' },
+  { value: 'stereo', label: 'Stereo' },
 ]
+const SPECTRUM_DECAY_GRACE_MS = 90
+const SPECTRUM_DECAY_PER_SECOND = 0.04
+const SPECTRUM_SILENCE_THRESHOLD = 0.003
+const SPECTRUM_MIN_SMOOTHING_PX = 3
+const SPECTRUM_MAX_SMOOTHING_PX = 18
+
+const formatFrequency = (frequency: number) =>
+  frequency >= 1000 ? `${(frequency / 1000).toFixed(2)} kHz` : `${Math.round(frequency)} Hz`
+
+const formatDb = (value: number) => `${value.toFixed(2)} dB`
+
+const formatQ = (value: number) => value.toFixed(2)
+
+const formatChannelMode = (mode: EqChannelMode) => mode === 'mono' ? 'Mono' : 'Stereo'
+
+const hasAudibleSpectrum = (data: Float32Array) => {
+  for (let i = 0; i < data.length; i++) {
+    if (data[i] > SPECTRUM_SILENCE_THRESHOLD) return true
+  }
+  return false
+}
+
+const sampleSpectrumMagnitude = (data: Float32Array, frequency: number, nyquist: number) => {
+  const binPosition = Math.min(data.length - 1, Math.max(0, (frequency / nyquist) * (data.length - 1)))
+  const center = Math.floor(binPosition)
+  let total = 0
+  let weightTotal = 0
+
+  for (let bin = center - 2; bin <= center + 2; bin++) {
+    if (bin < 0 || bin >= data.length) continue
+    const distance = Math.abs(bin - binPosition)
+    const weight = Math.max(0, 1 - distance / 3)
+    total += (data[bin] || 0) * weight
+    weightTotal += weight
+  }
+
+  return weightTotal > 0 ? total / weightTotal : 0
+}
+
+const smoothSpectrumY = (values: Float32Array, index: number) => {
+  const t = values.length <= 1 ? 1 : index / (values.length - 1)
+  const radius = Math.round(SPECTRUM_MIN_SMOOTHING_PX + (1 - t) * (SPECTRUM_MAX_SMOOTHING_PX - SPECTRUM_MIN_SMOOTHING_PX))
+  let total = 0
+  let weightTotal = 0
+
+  for (let offset = -radius; offset <= radius; offset++) {
+    const nextIndex = index + offset
+    if (nextIndex < 0 || nextIndex >= values.length) continue
+    const weight = radius === 0 ? 1 : 1 - Math.abs(offset) / (radius + 1)
+    total += values[nextIndex] * weight
+    weightTotal += weight
+  }
+
+  return weightTotal > 0 ? total / weightTotal : values[index]
+}
+
+function applyEqResponseBandParams(filter: BiquadFilterNode, band: EqBandParams) {
+  filter.type = band.type
+  filter.frequency.value = Math.max(FREQ_MIN, Math.min(FREQ_MAX, band.frequency))
+  filter.Q.value = Math.max(0.001, band.q)
+  filter.gain.value = supportsGain(band.type) ? band.gainDb : 0
+}
 
 export default function Eq(props: EqProps) {
   const [selectedId, setSelectedId] = createSignal<string>(props.bands[0]?.id ?? '')
   const [draggedId, setDraggedId] = createSignal<string | null>(null)
   const [canvasSize, setCanvasSize] = createSignal({ width: 640, height: 160 })
+  const [spectrumTick, setSpectrumTick] = createSignal(0)
 
   // canvas + container refs
   let canvasRef: HTMLCanvasElement | undefined
   let containerRef: HTMLDivElement | undefined
   let resizeObs: ResizeObserver | undefined
+  let displayedSpectrum: Float32Array | undefined
+  let spectrumYBuf: Float32Array | undefined
+  let smoothedYBuf: Float32Array | undefined
+  let responseFilter: BiquadFilterNode | undefined
+  let responseFrequencies: Float32Array<ArrayBuffer> | undefined
+  let responseMagnitudes: Float32Array<ArrayBuffer> | undefined
+  let responsePhases: Float32Array<ArrayBuffer> | undefined
+  let responseDb: Float32Array | undefined
+  let displayedSpectrumSampleRate = 44100
+  let lastFreshSpectrumAt = 0
+  let lastSpectrumDecayAt = 0
+  let spectrumDecayFrame: number | null = null
 
   onMount(() => {
     // Initialize size based on container (very compact)
@@ -55,16 +143,62 @@ export default function Eq(props: EqProps) {
       if (!el) return
       const rect = el.getBoundingClientRect()
       const width = Math.floor(rect.width)
-      const height = Math.max(120, Math.min(220, Math.floor(width * 0.35)))
-      setCanvasSize({ width, height })
+      const height = Math.max(120, Math.floor(rect.height))
+      setCanvasSize((current) => current.width === width && current.height === height ? current : { width, height })
     }
     update()
     resizeObs = new ResizeObserver(() => update())
     containerRef && resizeObs.observe(containerRef)
+    const responseContext = new OfflineAudioContext(1, 1, 44100)
+    responseFilter = responseContext.createBiquadFilter()
   })
 
   onCleanup(() => {
     try { resizeObs?.disconnect() } catch {}
+    if (spectrumDecayFrame !== null) cancelAnimationFrame(spectrumDecayFrame)
+    responseFilter = undefined
+  })
+
+  const runSpectrumDecay = (time: number) => {
+    spectrumDecayFrame = null
+    const data = displayedSpectrum
+    if (!data) return
+
+    const elapsedSinceFresh = time - lastFreshSpectrumAt
+    const elapsed = Math.max(0, time - lastSpectrumDecayAt) / 1000
+    lastSpectrumDecayAt = time
+
+    if (elapsedSinceFresh > SPECTRUM_DECAY_GRACE_MS) {
+      const decay = Math.pow(SPECTRUM_DECAY_PER_SECOND, elapsed)
+      for (let index = 0; index < data.length; index++) data[index] *= decay
+      setSpectrumTick((tick) => tick + 1)
+    }
+
+    if (hasAudibleSpectrum(data)) spectrumDecayFrame = requestAnimationFrame(runSpectrumDecay)
+  }
+
+  const startSpectrumDecay = () => {
+    if (spectrumDecayFrame !== null) return
+    // The analyser stops producing fresh frames when transport pauses; this visual-only RAF lets the displayed spectrum decay to silence instead of freezing.
+    lastSpectrumDecayAt = performance.now()
+    spectrumDecayFrame = requestAnimationFrame(runSpectrumDecay)
+  }
+
+  createEffect(() => {
+    const frame = props.spectrumData
+    const data = frame?.data
+    if (!data || data.length === 0) {
+      startSpectrumDecay()
+      return
+    }
+
+    if (!displayedSpectrum || displayedSpectrum.length !== data.length) {
+      displayedSpectrum = new Float32Array(data.length)
+    }
+    displayedSpectrum.set(data)
+    displayedSpectrumSampleRate = frame.sampleRate
+    lastFreshSpectrumAt = performance.now()
+    startSpectrumDecay()
   })
 
   // Helpers: mapping
@@ -88,82 +222,31 @@ export default function Eq(props: EqProps) {
   }
   const gainToY = (g: number) => {
     const { height } = canvasSize()
-    const top = 4, bottom = 8
+    const top = 18, bottom = 18
     const h = Math.max(1, height - (top + bottom))
     const t = (GAIN_MAX - Math.max(GAIN_MIN, Math.min(GAIN_MAX, g))) / (GAIN_MAX - GAIN_MIN)
     return top + t * h
   }
   const yToGain = (y: number) => {
     const { height } = canvasSize()
-    const top = 6, bottom = 12
+    const top = 18, bottom = 18
     const h = Math.max(1, height - (top + bottom))
     const clamped = Math.min(Math.max(y, top), height - bottom)
     const t = (clamped - top) / h
     return GAIN_MAX - t * (GAIN_MAX - GAIN_MIN)
   }
 
-  // Simple response model per type. This is an approximation for visualization only.
-  const responseAt = (freq: number) => {
-    let total = 0
-    const A = 24 // attenuation depth for non-gain filters (dB)
-    for (const b of props.bands) {
-      if (!b.enabled) continue
-      const ratio = Math.max(1e-6, freq / b.frequency)
-      const l = Math.log(ratio)
-      const q = Math.max(0.1, b.q)
-
-      switch (b.type) {
-        case 'peaking': {
-          if (Math.abs(b.gainDb) < 0.05) break
-          const resp = b.gainDb * Math.exp(-Math.pow(l * q, 2))
-          total += resp
-          break
-        }
-        case 'lowshelf': {
-          if (Math.abs(b.gainDb) < 0.05) break
-          const k = Math.min(6, Math.max(0.2, q))
-          const sigmoid = 1 / (1 + Math.exp(+k * l)) // ~1 below cutoff, ~0 above
-          const resp = b.gainDb * sigmoid
-          total += resp
-          break
-        }
-        case 'highshelf': {
-          if (Math.abs(b.gainDb) < 0.05) break
-          const k = Math.min(6, Math.max(0.2, q))
-          const sigmoid = 1 / (1 + Math.exp(-k * l)) // ~0 below cutoff, ~1 above
-          const resp = b.gainDb * sigmoid
-          total += resp
-          break
-        }
-        case 'lowpass': {
-          const k = Math.min(6, Math.max(0.2, q))
-          const sigmoid = 1 / (1 + Math.exp(-k * l)) // rises above cutoff
-          const resp = -A * sigmoid // attenuate highs
-          total += resp
-          break
-        }
-        case 'highpass': {
-          const k = Math.min(6, Math.max(0.2, q))
-          const sigmoid = 1 / (1 + Math.exp(-k * l)) // rises above cutoff
-          const resp = -A * (1 - sigmoid) // attenuate lows
-          total += resp
-          break
-        }
-        case 'bandpass': {
-          const resp = -A * (1 - Math.exp(-Math.pow(l * q, 2))) // attenuate away from center
-          total += resp
-          break
-        }
-        case 'notch': {
-          const resp = -A * Math.exp(-Math.pow(l * q, 2)) // attenuate at center
-          total += resp
-          break
-        }
-        default:
-          break
-      }
+  const ensureResponseBuffers = (length: number) => {
+    if (!responseFrequencies || responseFrequencies.length !== length) responseFrequencies = new Float32Array(length)
+    if (!responseMagnitudes || responseMagnitudes.length !== length) responseMagnitudes = new Float32Array(length)
+    if (!responsePhases || responsePhases.length !== length) responsePhases = new Float32Array(length)
+    if (!responseDb || responseDb.length !== length) responseDb = new Float32Array(length)
+    return {
+      frequencies: responseFrequencies,
+      magnitudes: responseMagnitudes,
+      phases: responsePhases,
+      dbValues: responseDb,
     }
-    return total
   }
 
   // Drawing
@@ -228,28 +311,44 @@ export default function Eq(props: EqProps) {
     ctx.stroke()
 
     // Live spectrum (if available)
-    const frame = props.spectrumData
-    const spec = frame?.data
+    const spec = displayedSpectrum
     if (spec && spec.length > 0) {
       const grad = ctx.createLinearGradient(6, 0, width - 6, 0)
       grad.addColorStop(0, '#22c55e')
       grad.addColorStop(1, '#ef4444')
-      ctx.beginPath()
-      ctx.moveTo(6, height)
       const L = 6, R = 6
-      const nyquist = Math.max(1, (frame?.sampleRate ?? 44100) / 2)
-      for (let x = L; x <= width - R; x += 2) {
-        const inner = Math.max(1, width - (L + R))
+      const inner = Math.max(1, width - (L + R))
+      const nyquist = Math.max(1, displayedSpectrumSampleRate / 2)
+      const sampleCount = Math.max(1, width - R - L + 1)
+      if (!spectrumYBuf || spectrumYBuf.length !== sampleCount) spectrumYBuf = new Float32Array(sampleCount)
+      if (!smoothedYBuf || smoothedYBuf.length !== sampleCount) smoothedYBuf = new Float32Array(sampleCount)
+      const spectrumY = spectrumYBuf
+      const smoothedSpectrumY = smoothedYBuf
+      for (let index = 0; index < sampleCount; index++) {
+        const x = L + index
         const t = (x - L) / inner
         const freq = FREQ_MIN * Math.pow(FREQ_MAX / FREQ_MIN, t)
-        const bin = Math.min(spec.length - 1, Math.max(0, Math.floor((freq / nyquist) * spec.length)))
-        let mag = spec[bin] || 0
-        if (bin > 0 && bin < spec.length - 1) {
-          mag = (spec[bin - 1] + spec[bin] + spec[bin + 1]) / 3
-        }
+        const mag = sampleSpectrumMagnitude(spec, freq, nyquist)
         const scaled = Math.pow(mag, 0.7)
-        const y = height - (scaled * height * 0.5)
-        ctx.lineTo(x, y)
+        spectrumY[index] = height - (scaled * height * 0.5)
+      }
+      for (let index = 0; index < sampleCount; index++) {
+        smoothedSpectrumY[index] = smoothSpectrumY(spectrumY, index)
+      }
+      let previousX = L
+      let previousY = height
+      for (let index = 0; index < sampleCount; index++) {
+        const x = L + index
+        const y = smoothedSpectrumY[index]
+        if (x === L) {
+          ctx.beginPath()
+          ctx.moveTo(L, height)
+          ctx.lineTo(x, y)
+        } else {
+          ctx.quadraticCurveTo(previousX, previousY, (previousX + x) / 2, (previousY + y) / 2)
+        }
+        previousX = x
+        previousY = y
       }
       ctx.lineTo(width - R, height)
       ctx.closePath()
@@ -265,32 +364,62 @@ export default function Eq(props: EqProps) {
 
     // Response curve
     if (props.enabled) {
-      ctx.strokeStyle = '#22c55e'
-      ctx.lineWidth = 2.5
-      ctx.beginPath()
       const L = 6, R = 6
-      for (let x = L; x <= width - R; x += 2) {
-        const inner = Math.max(1, width - (L + R))
-        const t = (x - L) / inner
-        const freq = FREQ_MIN * Math.pow(FREQ_MAX / FREQ_MIN, t)
-        const y = gainToY(responseAt(freq))
-        if (x === L) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+      const inner = Math.max(1, width - (L + R))
+      let pointCount = 0
+      for (let x = L; x <= width - R; x += 2) pointCount++
+      const { frequencies, magnitudes, phases, dbValues } = ensureResponseBuffers(pointCount)
+      const filter = responseFilter
+      if (filter) {
+        let pointIndex = 0
+        for (let x = L; x <= width - R; x += 2) {
+          const t = (x - L) / inner
+          frequencies[pointIndex] = FREQ_MIN * Math.pow(FREQ_MAX / FREQ_MIN, t)
+          dbValues[pointIndex] = 0
+          pointIndex++
+        }
+        for (const band of props.bands) {
+          if (!band.enabled) continue
+          applyEqResponseBandParams(filter, band)
+          filter.getFrequencyResponse(frequencies, magnitudes, phases)
+          for (let index = 0; index < pointCount; index++) {
+            dbValues[index] += 20 * Math.log10(Math.max(0.000001, magnitudes[index] ?? 1))
+          }
+        }
+
+        ctx.strokeStyle = '#22c55e'
+        ctx.lineWidth = 2.5
+        ctx.beginPath()
+        pointIndex = 0
+        for (let x = L; x <= width - R; x += 2) {
+          const y = gainToY(dbValues[pointIndex] ?? 0)
+          if (x === L) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+          pointIndex++
+        }
+        ctx.stroke()
       }
-      ctx.stroke()
     }
 
     // Nodes
-    for (const b of props.bands) {
+    ctx.font = 'bold 9px ui-monospace, SFMono-Regular, Menlo, monospace'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    for (let index = 0; index < props.bands.length; index++) {
+      const b = props.bands[index]
       if (!b.enabled) continue
       const x = freqToX(b.frequency)
       const y = gainToY(supportsGain(b.type) ? b.gainDb : 0)
       const isSel = selectedId() === b.id
       ctx.beginPath()
-      ctx.arc(x, y, isSel ? 4 : 3, 0, Math.PI * 2)
-      ctx.fillStyle = isSel ? '#3b82f6' : '#e5e7eb'
-      ctx.strokeStyle = isSel ? '#1d4ed8' : '#9ca3af'
-      ctx.lineWidth = isSel ? 1.25 : 1
-      ctx.fill(); ctx.stroke()
+      ctx.arc(x, y, isSel ? 8 : 7, 0, Math.PI * 2)
+      ctx.fillStyle = isSel ? '#facc15' : '#d97706'
+      ctx.strokeStyle = '#0a0a0a'
+      ctx.lineWidth = 2
+      ctx.fill()
+      ctx.stroke()
+
+      ctx.fillStyle = '#111827'
+      ctx.fillText(String(index + 1), x, y + 0.5)
     }
   }
 
@@ -308,12 +437,21 @@ export default function Eq(props: EqProps) {
     void selectedId()
     void canvasSize()
     void props.spectrumData
+    void spectrumTick()
     draw()
+  })
+
+  createEffect(() => {
+    const current = selectedId()
+    if (props.bands.some((band) => band.id === current)) return
+    const next = props.bands[0]?.id ?? ''
+    if (current !== next) setSelectedId(next)
   })
 
   // Interaction: drag nodes to set freq/gain
   const onCanvasPointerDown = (ev: PointerEvent) => {
     if (!props.enabled || !canvasRef) return
+    ev.preventDefault()
     if (ev.currentTarget instanceof HTMLCanvasElement) {
       ev.currentTarget.setPointerCapture(ev.pointerId)
     }
@@ -335,215 +473,227 @@ export default function Eq(props: EqProps) {
     setSelectedId(closest.id)
     setDraggedId(closest.id)
 
-    // Apply immediately
-    const nf = Math.max(FREQ_MIN, Math.min(FREQ_MAX, xToFreq(x)))
-    const band = props.bands.find(b => b.id === closest.id)
-    if (band && supportsGain(band.type)) {
-      const ng = Math.max(GAIN_MIN, Math.min(GAIN_MAX, yToGain(y)))
-      props.onBandChange(closest.id, { gainDb: Math.round(ng * 10) / 10, frequency: Math.round(nf) })
-    } else {
-      props.onBandChange(closest.id, { frequency: Math.round(nf) })
-    }
+    applyBandPointerValue(closest.id, x, y)
   }
 
   const onCanvasPointerMove = (ev: PointerEvent) => {
     const id = draggedId(); if (!id || !canvasRef) return
+    ev.preventDefault()
     const rect = canvasRef.getBoundingClientRect()
     const x = ev.clientX - rect.left
     const y = ev.clientY - rect.top
+    applyBandPointerValue(id, x, y)
+  }
+
+  const applyBandPointerValue = (id: string, x: number, y: number) => {
     const nf = Math.max(FREQ_MIN, Math.min(FREQ_MAX, xToFreq(x)))
     const band = props.bands.find(b => b.id === id)
-    if (band && supportsGain(band.type)) {
+    if (!band) return
+    if (supportsGain(band.type)) {
       const ng = Math.max(GAIN_MIN, Math.min(GAIN_MAX, yToGain(y)))
-      props.onBandChange(id, { gainDb: Math.round(ng * 10) / 10, frequency: Math.round(nf) })
+      const gainDb = Math.round(ng * 10) / 10
+      const frequency = Math.round(nf)
+      if (band.gainDb !== gainDb || band.frequency !== frequency) {
+        props.onBandChange(id, { gainDb, frequency })
+      }
     } else {
-      props.onBandChange(id, { frequency: Math.round(nf) })
+      const frequency = Math.round(nf)
+      if (band.frequency !== frequency) props.onBandChange(id, { frequency })
     }
   }
 
   const onCanvasPointerUp = () => setDraggedId(null)
 
   // UI helpers
-  const selBand = () => props.bands.find(b => b.id === selectedId())
+  const selectedBandState = createMemo(() => {
+    const index = props.bands.findIndex((band) => band.id === selectedId())
+    return {
+      band: index === -1 ? undefined : props.bands[index],
+      index,
+    }
+  })
+  const selectedBand = () => selectedBandState().band
+  const defaultSelectedBand = createMemo(() => {
+    const index = selectedBandState().index
+    return index === -1 ? DEFAULT_EQ_PARAMS.bands[0] : (DEFAULT_EQ_PARAMS.bands[index] ?? createDefaultEqBand(index))
+  })
 
-  const selectedFrequencyLabel = () => {
-    const frequency = selBand()?.frequency ?? 0
-    return frequency >= 1000 ? `${(frequency / 1000).toFixed(1)} kHz` : `${frequency} Hz`
-  }
+  const selectedFrequencyLabel = () => formatFrequency(selectedBand()?.frequency ?? 0)
 
   const selectedGainLabel = () => {
-    const band = selBand()
+    const band = selectedBand()
     const gain = band?.gainDb ?? 0
     const gainDisabled = band ? !supportsGain(band.type) : false
-    return gainDisabled ? '-' : `${gain >= 0 ? '+' : ''}${gain.toFixed(1)} dB`
+    return gainDisabled ? '-' : formatDb(gain)
   }
 
+  const selectedQLabel = () => formatQ(selectedBand()?.q ?? 0)
+
   return (
-    <div class={cn('flex flex-col border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
-      {/* Header */}
-      <div class="flex items-center justify-between border-b border-neutral-800 px-2 py-1">
-        <div class="flex items-center gap-2">
-          <span class="text-xs font-semibold">EQ</span>
-          <Show when={props.onToggleEnabled}>
-            <button
+    <EffectShell
+      title="EQ Eight"
+      typeLabel={formatChannelMode(props.channelMode)}
+      enabled={props.enabled}
+      onToggleEnabled={props.onToggleEnabled}
+      onReset={props.onReset}
+      class={cn('w-[704px] min-w-[704px]', props.class)}
+    >
+      <div
+        class="grid min-h-0 flex-1 overflow-hidden"
+        style={{
+          'grid-template-columns': '72px minmax(220px, 1fr) 72px',
+          'grid-template-rows': 'minmax(0, 1fr) 52px',
+        }}
+      >
+        <div class="row-span-2 flex flex-col border-r border-neutral-800 bg-neutral-950/30 px-1 py-1">
+          <Knob
+            class="min-h-0 flex-1 justify-center px-1 py-1"
+            label="Freq"
+            valueLabel={selectedFrequencyLabel()}
+            value={selectedBand()?.frequency ?? 1000}
+            resetValue={defaultSelectedBand()?.frequency}
+            min={FREQ_MIN}
+            max={FREQ_MAX}
+            step={1}
+            unit="Hz"
+            disabled={!props.enabled || !selectedBand()?.enabled}
+            logarithmic={true}
+            onValueChange={(v) => {
+              const band = selectedBand()
+              if (!band) return
+              props.onBandChange(band.id, { frequency: v })
+            }}
+          />
+
+          <Knob
+            class="min-h-0 flex-1 justify-center px-1 py-1"
+            label="Gain"
+            valueLabel={selectedGainLabel()}
+            value={selectedBand()?.gainDb ?? 0}
+            resetValue={defaultSelectedBand()?.gainDb}
+            min={GAIN_MIN}
+            max={GAIN_MAX}
+            step={0.1}
+            unit="dB"
+            disabled={!props.enabled || !selectedBand()?.enabled || !supportsGain(selectedBand()?.type ?? 'peaking')}
+            bipolar={true}
+            onValueChange={(v) => {
+              const band = selectedBand()
+              if (!band) return
+              props.onBandChange(band.id, { gainDb: v })
+            }}
+          />
+
+          <Knob
+            class="min-h-0 flex-1 justify-center px-1 py-1"
+            label="Q"
+            valueLabel={selectedQLabel()}
+            value={selectedBand()?.q ?? 1}
+            resetValue={defaultSelectedBand()?.q}
+            min={Q_MIN}
+            max={Q_MAX}
+            step={0.1}
+            disabled={!props.enabled || !selectedBand()?.enabled}
+            onValueChange={(v) => {
+              const band = selectedBand()
+              if (!band) return
+              props.onBandChange(band.id, { q: v })
+            }}
+          />
+        </div>
+
+        <div ref={containerRef} class="relative min-w-0 overflow-hidden bg-neutral-950">
+          <canvas
+            ref={(el) => (canvasRef = el || undefined)}
+            width={canvasSize().width}
+            height={canvasSize().height}
+            class={cn('absolute inset-0 block h-full w-full touch-none', props.enabled ? 'cursor-crosshair' : 'cursor-not-allowed opacity-60')}
+            onPointerDown={onCanvasPointerDown}
+            onPointerMove={onCanvasPointerMove}
+            onPointerUp={onCanvasPointerUp}
+            onPointerCancel={onCanvasPointerUp}
+          />
+        </div>
+
+        <div class="row-span-2 flex flex-col border-l border-neutral-800 bg-neutral-950/40 px-1 py-2 text-[10px]">
+          <div class="mb-1 text-neutral-500">Mode</div>
+          <DropdownMenu>
+            <DropdownMenuTrigger
               class={cn(
-                'ml-2 px-2 py-0.5 text-xs',
-                props.enabled ? 'bg-green-500/20 text-green-400 ring-1 ring-green-500/30' : 'bg-neutral-800 text-neutral-400',
+                'mb-3 flex h-5 w-full items-center justify-between border border-neutral-700 bg-neutral-900 px-1 text-left text-neutral-300 hover:bg-neutral-800',
+                !props.enabled && 'cursor-not-allowed opacity-60',
               )}
-              onClick={() => props.onToggleEnabled?.(!props.enabled)}
-              title={props.enabled ? 'Disable EQ' : 'Enable EQ'}
+              disabled={!props.enabled}
+              title="EQ channel mode"
             >
-              {props.enabled ? 'On' : 'Off'}
-            </button>
-          </Show>
+              <span class="min-w-0 truncate">{formatChannelMode(props.channelMode)}</span>
+              <svg viewBox="0 0 8 8" class="h-1.5 w-1.5 shrink-0 text-neutral-400" aria-hidden="true">
+                <path d="M1 3 L4 6 L7 3 Z" fill="currentColor" />
+              </svg>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent class="w-20 min-w-20 border-neutral-700 bg-neutral-900 p-1">
+              <For each={EQ_CHANNEL_MODE_OPTIONS}>
+                {(option) => (
+                  <DropdownMenuItem
+                    class={cn(
+                      'h-6 cursor-pointer px-2 py-1 text-xs text-neutral-200 focus:bg-neutral-800 focus:text-neutral-50',
+                      option.value === props.channelMode && 'bg-cyan-500/20 text-cyan-100',
+                    )}
+                    disabled={!props.enabled}
+                    onSelect={() => {
+                      if (option.value !== props.channelMode) props.onChannelModeChange(option.value)
+                    }}
+                  >
+                    {option.label}
+                  </DropdownMenuItem>
+                )}
+              </For>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <div class="mb-1 text-neutral-500">Edit</div>
+          <div class="mb-3 border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-neutral-300">A</div>
         </div>
-        <div class="flex items-center gap-2">
-          <Show when={props.onReset}>
-            <button
-              class="border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
-              onClick={() => props.onReset?.()}
-            >Reset</button>
-          </Show>
-        </div>
-      </div>
 
-      {/* Band selectors */}
-      <div class="px-2 py-1">
-        <div class="flex items-center gap-1">
+        <div class="relative z-10 flex min-w-0 border-t border-neutral-800 bg-neutral-950">
           <For each={props.bands}>
-            {(b, i) => (
-              <button
-                class={cn(
-                  'flex h-4 w-4 items-center justify-center text-3xs font-bold transition-colors',
-                  selectedId() === b.id
-                    ? 'bg-blue-500 text-white'
-                    : b.enabled
-                      ? 'bg-neutral-700 text-neutral-200 hover:bg-neutral-600'
-                      : 'bg-neutral-800 text-neutral-500',
-                )}
-                onClick={() => setSelectedId(b.id)}
-                title={`Band ${i() + 1}`}
-              >{i() + 1}</button>
-            )}
-          </For>
-          <Show when={props.onBandToggle && selBand()}>
-            <button
-              class={cn(
-                'ml-1 px-1 py-0.5 text-3xs',
-                selBand()?.enabled ? 'bg-neutral-300 text-black' : 'bg-neutral-800 text-neutral-300',
-              )}
-              onClick={() => selBand() && props.onBandToggle?.(selBand()!.id)}
-              title={selBand()?.enabled ? 'Disable band' : 'Enable band'}
-            >{selBand()?.enabled ? 'On' : 'Off'}</button>
-          </Show>
-        </div>
-      </div>
+            {(band, index) => (
+              <div class="flex min-w-0 flex-1 flex-col items-center justify-center gap-1 border-r border-neutral-800 p-1 last:border-r-0">
+                <EqFilterTypeSelect
+                  band={band}
+                  enabled={props.enabled}
+                  selected={selectedId() === band.id}
+                  onSelectBand={() => setSelectedId(band.id)}
+                  onTypeChange={(type) => props.onBandChange(band.id, { type })}
+                />
 
-      {/* Controls + Graph (compact) */}
-      <div class="px-2 pb-1">
-        <div class="grid items-start gap-1.5" style={{ 'grid-template-columns': '44px minmax(0, 1fr)' }}>
-          {/* Left: vertical controls */}
-          <div class="flex flex-col gap-1">
-            {/* Frequency */}
-            <div class="flex flex-col items-center gap-1">
-              <div class="text-3xs leading-none text-neutral-400">Freq</div>
-              <Knob
-                value={selBand()?.frequency ?? 1000}
-                min={FREQ_MIN}
-                max={FREQ_MAX}
-                step={1}
-                size={20}
-                label=""
-                unit="Hz"
-                disabled={!props.enabled || !selBand()?.enabled}
-                logarithmic={true}
-                showValue={false}
-                onValueChange={(v) => selBand() && props.onBandChange(selBand()!.id, { frequency: Math.round(v) })}
-              />
-              <div class="text-3xs leading-none text-neutral-300 font-mono">
-                {selectedFrequencyLabel()}
+                <div class="flex h-5 items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    aria-pressed={band.enabled}
+                    aria-label={band.enabled ? `Disable EQ band ${index() + 1}` : `Enable EQ band ${index() + 1}`}
+                    class={cn(
+                      'h-3.5 w-3.5 border border-neutral-600',
+                      band.enabled ? 'bg-cyan-400' : 'bg-neutral-900',
+                    )}
+                    disabled={!props.enabled || !props.onBandToggle}
+                    onClick={() => props.onBandToggle?.(band.id)}
+                    title={band.enabled ? 'Disable band' : 'Enable band'}
+                  />
+                  <span
+                    class={cn(
+                      'w-3 text-center text-[11px] font-semibold leading-none',
+                      selectedId() === band.id ? 'text-amber-300' : 'text-neutral-300',
+                      !band.enabled && 'text-neutral-500',
+                    )}
+                  >
+                    {index() + 1}
+                  </span>
+                </div>
               </div>
-            </div>
-
-            {/* Gain */}
-            <div class="flex flex-col items-center gap-1">
-              <div class="text-3xs leading-none text-neutral-400">Gain</div>
-              <Knob
-                value={selBand()?.gainDb ?? 0}
-                min={GAIN_MIN}
-                max={GAIN_MAX}
-                step={0.1}
-                size={20}
-                label=""
-                unit="dB"
-                disabled={!props.enabled || !selBand()?.enabled || (selBand() ? !supportsGain(selBand()!.type) : false)}
-                bipolar={true}
-                showValue={false}
-                onValueChange={(v) => selBand() && props.onBandChange(selBand()!.id, { gainDb: Math.round(v * 10) / 10 })}
-              />
-              <div class="text-3xs text-neutral-300 font-mono">
-                {selectedGainLabel()}
-              </div>
-            </div>
-
-            {/* Q */}
-            <div class="flex flex-col items-center gap-1">
-              <div class="text-3xs leading-none text-neutral-400">Q</div>
-              <Knob
-                value={selBand()?.q ?? 1}
-                min={Q_MIN}
-                max={Q_MAX}
-                step={0.1}
-                size={20}
-                label=""
-                disabled={!props.enabled || !selBand()?.enabled}
-                showValue={false}
-                onValueChange={(v) => selBand() && props.onBandChange(selBand()!.id, { q: Math.round(v * 10) / 10 })}
-              />
-              <div class="text-3xs leading-none text-neutral-300 font-mono">{selBand()?.q?.toFixed(1) ?? '0.0'}</div>
-            </div>
-          </div>
-
-          {/* Right: Graph */}
-          <div ref={containerRef}>
-            <canvas
-              ref={(el) => (canvasRef = el || undefined)}
-              width={canvasSize().width}
-              height={canvasSize().height}
-              class={cn('w-full', props.enabled ? 'cursor-crosshair' : 'cursor-not-allowed opacity-60')}
-              onPointerDown={onCanvasPointerDown}
-              onPointerMove={onCanvasPointerMove}
-              onPointerUp={onCanvasPointerUp}
-              onPointerCancel={onCanvasPointerUp}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Type selector for selected band */}
-      <div class="px-2 pt-1 pb-2">
-        <div class="flex items-center justify-center gap-1 flex-wrap">
-          <For each={FILTER_TYPES}>
-            {(ft) => (
-              <button
-                class={cn(
-                  'border border-neutral-700 px-1 py-0.5 text-3xs',
-                  selBand()?.type === ft.value
-                    ? 'border-blue-400/30 bg-blue-500/20 text-blue-300'
-                    : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
-                )}
-                disabled={!props.enabled || !selBand()?.enabled}
-                onClick={() => selBand() && props.onBandChange(selBand()!.id, { type: ft.value })}
-                title={ft.label}
-              >
-                {ft.short}
-              </button>
             )}
           </For>
         </div>
       </div>
-
-      {/* (Moved controls to the left of graph) */}
-    </div>
+    </EffectShell>
   )
 }

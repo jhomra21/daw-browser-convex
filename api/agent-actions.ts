@@ -26,7 +26,7 @@ import {
 import { buildClipCreatePayload } from '@daw-browser/shared'
 import { getPersistableAudioSourceMetadata } from '@daw-browser/shared'
 import { sanitizeAudioSourceKind } from '@daw-browser/shared'
-import { normalizeSynthParams } from '@daw-browser/shared'
+import { normalizeEqParams, normalizeSynthParams } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import { getClipKindFromClip, getClipTargetError } from './clip-targets'
 import { listSortedClipsForTrack, resolveTrackClip, selectTrackClips, trackAtIndex as trackAtIndexImpl } from './indexing'
@@ -74,14 +74,12 @@ type ConvexClientLike = {
 }
 
 type ConvexApi = typeof generatedConvexApi
+type AgentEqParams = ReturnType<typeof normalizeEqParams>
+type AgentReverbParams = Omit<SetReverbParamsInput, 'type' | 'target'>
 type AgentEffectParams =
-  | { enabled: boolean; bands: SetEqParamsInput['bands'] }
-  | {
-    enabled: boolean
-    wet: number
-    decaySec: number
-    preDelayMs: number
-  }
+  | AgentEqParams
+  | Pick<AgentEqParams, 'enabled' | 'bands'>
+  | AgentReverbParams
 
 type AgentActionContext = {
   convex: ConvexClientLike
@@ -447,7 +445,10 @@ export function createAgentActions(context: AgentActionContext) {
     },
 
     async setEqParams(input: Omit<SetEqParamsInput, 'type'>) {
-      const params = { enabled: input.enabled, bands: input.bands }
+      const normalized = normalizeEqParams({ enabled: input.enabled, channelMode: input.channelMode, bands: input.bands })
+      const params = input.channelMode === undefined
+        ? { enabled: normalized.enabled, bands: normalized.bands }
+        : normalized
       return mutateEffectTarget({
         target: input.target,
         params,
@@ -455,14 +456,9 @@ export function createAgentActions(context: AgentActionContext) {
     },
 
     async setReverbParams(input: Omit<SetReverbParamsInput, 'type'>) {
-      const params = {
-        enabled: input.enabled,
-        wet: input.wet,
-        decaySec: input.decaySec,
-        preDelayMs: input.preDelayMs,
-      }
+      const { target, ...params } = input
       return mutateEffectTarget({
-        target: input.target,
+        target,
         params,
       })
     },

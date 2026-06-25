@@ -1,10 +1,16 @@
-import { supportsGain, type ArpParams, type EqBandParams, type EqParamsLite } from '@daw-browser/shared'
+import { normalizeReverbParams, REVERB_DIFFUSION_HIGH_CUT_HZ_MAX, REVERB_DIFFUSION_LOW_CUT_HZ_MIN, supportsGain, type ArpParams, type EqBandParams, type EqChannelMode, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
+import { formatReverbImpulseSignature, getReverbImpulseSignatureParts, type ReverbImpulseSignatureParts } from './reverb-signature'
 
 type MidiNote = { beat: number; length: number; pitch: number; velocity?: number }
 
-type ImpulseBucket = {
-  bucketIndex: number
-  bucketSec: number
+type ReverbImpulseInfo = ReverbImpulseSignatureParts & {
+  length: number
+  signature: string
+}
+
+type ReverbImpulseRender = {
+  params: ReverbParamsLite
+  info: ReverbImpulseInfo
 }
 
 function createSeededRandom(seed: number) {
@@ -17,46 +23,131 @@ function createSeededRandom(seed: number) {
   }
 }
 
-export function getImpulseBucket(decaySec: number, bucketSize = 0.1): ImpulseBucket {
-  const clampedDecay = Math.min(10, Math.max(0.05, decaySec))
-  const bucketIndex = Math.max(1, Math.round(clampedDecay / bucketSize))
-  return {
-    bucketIndex,
-    bucketSec: Math.min(10, Math.max(bucketSize, bucketIndex * bucketSize)),
-  }
+function getOnePoleLowpassAlpha(cutoffHz: number, sampleRate: number): number {
+  return 1 - Math.exp(-2 * Math.PI * cutoffHz / sampleRate)
+}
+
+function getOnePoleHighpassAlpha(cutoffHz: number, sampleRate: number): number {
+  return Math.exp(-2 * Math.PI * cutoffHz / sampleRate)
 }
 
 export function getImpulseResponseBufferInfo(
-  ctx: BaseAudioContext,
-  decaySec: number,
+  ctx: Pick<BaseAudioContext, 'sampleRate'>,
+  params: ReverbParamsLite,
   options?: { bucketSize?: number },
-) {
-  const bucket = getImpulseBucket(decaySec, options?.bucketSize)
+): ReverbImpulseInfo {
+  return createReverbImpulseRender(ctx, params, options).info
+}
+
+export function createReverbImpulseRender(
+  ctx: Pick<BaseAudioContext, 'sampleRate'>,
+  params: ReverbParamsLite,
+  options?: { bucketSize?: number },
+): ReverbImpulseRender {
+  const normalized = normalizeReverbParams(params)
+  const info = createReverbImpulseRenderInfo(ctx.sampleRate, normalized, options)
+  return { params: normalized, info }
+}
+
+export function createReverbImpulseRenderInfo(
+  sampleRate: number,
+  params: ReverbParamsLite,
+  options?: { bucketSize?: number },
+): ReverbImpulseInfo {
+  const signatureParts = getReverbImpulseSignatureParts(params, options)
+  const length = Math.max(1, Math.floor(sampleRate * signatureParts.bucketSec))
   return {
-    bucketIndex: bucket.bucketIndex,
-    bucketSec: bucket.bucketSec,
-    length: Math.max(1, Math.floor(ctx.sampleRate * bucket.bucketSec)),
+    ...signatureParts,
+    length,
+    signature: formatReverbImpulseSignature(signatureParts, length),
+  }
+}
+
+export function addEarlyReflectionTaps(
+  data: Float32Array,
+  sampleRate: number,
+  params: ReverbParamsLite,
+  channel: number,
+) {
+  const normalized = normalizeReverbParams(params)
+  const reflections = normalized.reflections
+  if (reflections <= 0) return
+  const spacingScale = 0.7 + normalized.size * 0.8
+  const shape = normalized.reflectionShape
+  const modAmountMs = normalized.reflectionSpin ? normalized.reflectionModAmountMs : 0
+  const modRateHz = normalized.reflectionModRateHz
+  const taps = channel === 0
+    ? [
+        { delayMs: 7, gain: 0.34 },
+        { delayMs: 13, gain: -0.25 },
+        { delayMs: 23, gain: 0.19 },
+        { delayMs: 37, gain: -0.14 },
+      ]
+    : [
+        { delayMs: 9, gain: -0.31 },
+        { delayMs: 17, gain: 0.23 },
+        { delayMs: 29, gain: -0.17 },
+        { delayMs: 41, gain: 0.13 },
+      ]
+  for (const tap of taps) {
+    const delaySec = (tap.delayMs * spacingScale) / 1000
+    const spinPhase = channel * Math.PI * 0.5 + delaySec * modRateHz * Math.PI * 2
+    const modDelayMs = Math.sin(spinPhase) * modAmountMs * 0.5
+    const frame = Math.round(((tap.delayMs * spacingScale + modDelayMs) * sampleRate) / 1000)
+    const shapedGain = tap.gain * (0.65 + shape * 0.7)
+    if (frame >= 0 && frame < data.length) data[frame] += shapedGain * reflections
   }
 }
 
 export function createImpulseResponseBuffer(
-  ctx: BaseAudioContext,
-  decaySec: number,
-  options?: { bucketSize?: number; channelCount?: number },
+  ctx: Pick<BaseAudioContext, 'sampleRate' | 'createBuffer'>,
+  render: ReverbImpulseRender,
+  options?: { channelCount?: number },
 ) {
-  const info = getImpulseResponseBufferInfo(ctx, decaySec, options)
+  const params = render.params
+  const info = render.info
   const channelCount = Math.max(1, Math.min(2, options?.channelCount ?? 2))
   const impulse = ctx.createBuffer(channelCount, info.length, ctx.sampleRate)
   for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
     const data = impulse.getChannelData(channel)
-    const noise = createSeededRandom(info.bucketIndex * 0x9E3779B1 + channel * 0x85EBCA77)
+    const noise = createSeededRandom(
+      info.bucketIndex * 0x9E3779B1
+      + info.densityBucket * 0x85EBCA77
+      + info.diffusionBucket * 0xC2B2AE3D
+      + channel * 0x27D4EB2F,
+    )
+    const density = Math.max(0.05, params.density)
+    const diffusion = params.diffusion
+    const diffusionAlpha = 0.08 + diffusion * 0.35
+    const highCutActive = params.diffusionHighCutHz < REVERB_DIFFUSION_HIGH_CUT_HZ_MAX
+    const lowCutActive = params.diffusionLowCutHz > REVERB_DIFFUSION_LOW_CUT_HZ_MIN
+    const lowpassAlpha = highCutActive ? getOnePoleLowpassAlpha(params.diffusionHighCutHz, ctx.sampleRate) : 1
+    const highpassAlpha = lowCutActive ? getOnePoleHighpassAlpha(params.diffusionLowCutHz, ctx.sampleRate) : 1
+    const reflectionShape = 0.75 + params.reflectionShape * 1.5
+    let diffusedState = 0
+    let lowPassed = 0
+    let previousHighpassInput = 0
+    let highPassed = 0
     for (let frame = 0; frame < info.length; frame++) {
       const t = frame / info.length
-      const decay = Math.pow(1 - t, 3)
-      data[frame] = (noise() * 2 - 1) * decay
+      const decay = Math.pow(1 - t, 1.5 + diffusion * 2.5)
+      const sparse = noise() <= density ? noise() * 2 - 1 : 0
+      diffusedState += (sparse - diffusedState) * diffusionAlpha
+      let shaped = (sparse * (1 - diffusion) + diffusedState * diffusion) * params.diffuse * Math.pow(1 - t, reflectionShape)
+      if (highCutActive) {
+        lowPassed += lowpassAlpha * (shaped - lowPassed)
+        shaped = lowPassed
+      }
+      if (lowCutActive) {
+        highPassed = highpassAlpha * (highPassed + shaped - previousHighpassInput)
+        previousHighpassInput = shaped
+        shaped = highPassed
+      }
+      data[frame] = shaped * decay
     }
+    addEarlyReflectionTaps(data, ctx.sampleRate, params, channel)
   }
-  return { buffer: impulse, bucketIndex: info.bucketIndex, bucketSec: info.bucketSec, length: info.length }
+  return { buffer: impulse, bucketIndex: info.bucketIndex, bucketSec: info.bucketSec, length: info.length, signature: info.signature }
 }
 
 export function createEqNodes(ctx: BaseAudioContext, params?: EqParamsLite, channels = 2): BiquadFilterNode[] {
@@ -65,25 +156,37 @@ export function createEqNodes(ctx: BaseAudioContext, params?: EqParamsLite, chan
   for (const band of params.bands) {
     if (!band.enabled) continue
     const filter = ctx.createBiquadFilter()
-    try {
-      ;(filter as any).channelCountMode = 'explicit'
-      ;(filter as any).channelInterpretation = 'speakers'
-      filter.channelCount = Math.max(1, Math.min(2, channels))
-    } catch {
-      // Some browsers may not allow changing channel configuration.
-    }
+    configureEqNodeChannels(filter, params.channelMode, channels)
     applyEqBandParams(filter, band)
     nodes.push(filter)
   }
   return nodes
 }
 
+export function resolveEqChannelCount(mode: EqChannelMode, availableChannels = 2): number {
+  if (mode === 'mono') return 1
+  return Math.max(1, Math.min(2, availableChannels))
+}
+
+type ConfigurableEqNodeChannels = Pick<AudioNode, 'channelCount' | 'channelCountMode' | 'channelInterpretation'>
+
+export function configureEqNodeChannels(node: ConfigurableEqNodeChannels, mode: EqChannelMode, availableChannels = 2) {
+  try {
+    node.channelCountMode = 'explicit'
+    node.channelInterpretation = 'speakers'
+    node.channelCount = resolveEqChannelCount(mode, availableChannels)
+  } catch {
+    // Some browsers may not allow changing channel configuration.
+  }
+}
+
 export function getEqTopologySignature(params?: EqParamsLite): string {
   if (!params?.enabled) return ''
-  return params.bands
+  const bandsSignature = params.bands
     .filter((band) => band.enabled)
     .map((band) => `${band.id}:${band.type}`)
     .join('|')
+  return bandsSignature ? `${params.channelMode}|${bandsSignature}` : ''
 }
 
 export function applyEqNodeParams(nodes: BiquadFilterNode[], params: EqParamsLite) {
@@ -95,8 +198,8 @@ export function applyEqNodeParams(nodes: BiquadFilterNode[], params: EqParamsLit
 
 function applyEqBandParams(filter: BiquadFilterNode, band: EqBandParams) {
   filter.type = band.type
-  filter.frequency.value = Math.max(20, Math.min(20000, band.frequency))
-  filter.Q.value = Math.max(0.001, band.q)
+  filter.frequency.value = band.frequency
+  filter.Q.value = band.q
   filter.gain.value = supportsGain(band.type) ? band.gainDb : 0
 }
 

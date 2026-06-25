@@ -140,7 +140,7 @@ export function createMeteringRuntime() {
     let analyser = analysers.get(trackId)
     if (!analyser) {
       analyser = ctx.createAnalyser()
-      analyser.fftSize = 512
+      analyser.fftSize = 2048
       analyser.smoothingTimeConstant = 0.7
       analysers.set(trackId, analyser)
     }
@@ -151,6 +151,7 @@ export function createMeteringRuntime() {
   return {
     subscribeTrackStereoLevels: (listener: TrackStereoLevelsListener) => {
       listeners.add(listener)
+      if (workletLevels.size > 0) listener(new Map(workletLevels))
       updateWorkletSubscriptionState()
       return () => {
         listeners.delete(listener)

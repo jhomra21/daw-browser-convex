@@ -1,6 +1,7 @@
-import { serializeEqParams, serializeReverbParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
-import { connectParallelFxChain, createReverbNodeChain, disconnectAudioNodes, applyReverbNodeChainParams, type ReverbNodeChain } from './effects/chain'
+import { normalizeEqParams, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
+import { connectParallelFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
+import { createReverbChainState } from './effects/reverb-chain-state'
 import type { SpectrumFrame } from './metering-runtime'
 
 export function createMasterFxRuntime() {
@@ -11,15 +12,14 @@ export function createMasterFxRuntime() {
   let spectrumTmp: Uint8Array<ArrayBuffer> | null = null
   let spectrumLast: SpectrumFrame | null = null
   let analyserConnected = false
-  let reverb: ReverbNodeChain | null = null
-  let reverbSignature: string | null = null
+  const reverbState = createReverbChainState()
   let pendingEqParams: EqParamsLite | null = null
   let pendingReverbParams: ReverbParamsLite | null = null
 
   const rebuildRouting = (ctx: AudioContext, masterGain: GainNode, destination: AudioDestinationNode) => {
     disconnectAudioNodes([masterGain])
     if (analyserConnected) analyserConnected = false
-    connectParallelFxChain(masterGain, destination, eqChain, reverb)
+    connectParallelFxChain(masterGain, destination, eqChain, reverbState.chain())
     if (analyser) {
       try {
         masterGain.connect(analyser)
@@ -45,11 +45,11 @@ export function createMasterFxRuntime() {
   }
 
   return {
-    applyPending: (ctx: AudioContext, masterGain: GainNode, destination: AudioDestinationNode, createImpulseResponse: (decaySec: number) => AudioBuffer | null) => {
+    applyPending: (ctx: AudioContext, masterGain: GainNode, destination: AudioDestinationNode, createImpulseResponse: CreateReverbImpulseResponse) => {
       if (pendingEqParams) {
         const params = pendingEqParams
         pendingEqParams = null
-        const signature = serializeEqParams(params)
+        const signature = serializeNormalizedEqParams(params)
         const topologySignature = getEqTopologySignature(params)
         eqChain = createEqNodes(ctx, params, ctx.destination.maxChannelCount || 2)
         eqSignature = signature
@@ -58,41 +58,40 @@ export function createMasterFxRuntime() {
       if (pendingReverbParams) {
         const params = pendingReverbParams
         pendingReverbParams = null
-        reverb = createReverbNodeChain(ctx, params, createImpulseResponse)
-        reverbSignature = serializeReverbParams(params)
+        reverbState.set(ctx, params, createImpulseResponse)
       }
       rebuildRouting(ctx, masterGain, destination)
     },
     setEq: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: EqParamsLite) => {
+      const normalized = normalizeEqParams(params)
       if (!ctx || !masterGain) {
-        pendingEqParams = params
+        pendingEqParams = normalized
         return
       }
-      const signature = serializeEqParams(params)
+      const signature = serializeNormalizedEqParams(normalized)
       if (eqSignature === signature) return
-      const topologySignature = getEqTopologySignature(params)
+      const topologySignature = getEqTopologySignature(normalized)
       if (eqTopologySignature === topologySignature) {
-        applyEqNodeParams(eqChain, params)
+        applyEqNodeParams(eqChain, normalized)
         eqSignature = signature
         return
       }
       disconnectAudioNodes(eqChain)
-      eqChain = createEqNodes(ctx, params, ctx.destination.maxChannelCount || 2)
+      eqChain = createEqNodes(ctx, normalized, ctx.destination.maxChannelCount || 2)
       eqSignature = signature
       eqTopologySignature = topologySignature
       rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
     },
-    setReverb: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: ReverbParamsLite, createImpulseResponse: (decaySec: number) => AudioBuffer | null) => {
+    setReverb: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: ReverbParamsLite, createImpulseResponse: CreateReverbImpulseResponse) => {
       if (!ctx || !masterGain) {
         pendingReverbParams = params
         return
       }
-      const signature = serializeReverbParams(params)
-      if (reverbSignature === signature) return
-      if (!reverb) reverb = createReverbNodeChain(ctx, params, createImpulseResponse)
-      else applyReverbNodeChainParams(reverb, params, createImpulseResponse)
-      reverbSignature = signature
-      rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
+      const result = reverbState.set(ctx, params, createImpulseResponse)
+      if (!result.changed) return
+      if (result.requiresRoutingRebuild) {
+        rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
+      }
     },
     rebuildRouting,
     getSpectrum: (ctx: AudioContext | null, masterGain: GainNode | null) => {
@@ -114,15 +113,11 @@ export function createMasterFxRuntime() {
     close: () => {
       eqSignature = null
       eqTopologySignature = null
-      reverbSignature = null
       pendingEqParams = null
       pendingReverbParams = null
       disconnectAudioNodes(eqChain)
       eqChain = []
-      if (reverb) {
-        disconnectAudioNodes([reverb.dryGain, reverb.wetGain, reverb.preDelay, reverb.convolver])
-        reverb = null
-      }
+      reverbState.close()
       disconnectAudioNodes([analyser])
       analyser = null
       spectrumTmp = null

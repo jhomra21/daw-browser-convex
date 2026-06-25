@@ -2,7 +2,6 @@ import {
   createEffect,
   createMemo,
   createSignal,
-  onCleanup,
   type Accessor,
 } from "solid-js";
 import {
@@ -400,10 +399,6 @@ export function createEffectsPanelState(
       synthState.flushPending(),
     ]);
   };
-
-  onCleanup(() => {
-    void flushPending();
-  });
 
   return {
     addMidiClip: handleAddMidiClip,

@@ -6,7 +6,7 @@ import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import { getTrackDeleteConflictMessage } from '~/lib/delete-conflict-messages'
 import { buildTrackEffectQueryArgs } from '~/lib/effect-track-args'
 import { getLocalEffect } from '~/lib/local-effects'
-import { isLocalId } from '@daw-browser/shared'
+import { isLocalId, normalizeReverbParams } from '@daw-browser/shared'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { isClipCompatibleWithTrack } from '@daw-browser/timeline-core/track-routing'
@@ -124,7 +124,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
     return {
       eq: eqRow?.params,
-      reverb: rvRow?.params,
+      reverb: rvRow?.params ? normalizeReverbParams(rvRow.params) : undefined,
       synth: synthRow?.params,
       arp: arpRow?.params,
     }
@@ -140,7 +140,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
     return {
       eq: eqRow?.params,
-      reverb: rvRow?.params,
+      reverb: rvRow?.params ? normalizeReverbParams(rvRow.params) : undefined,
       synth: synthRow?.params,
       arp: arpRow?.params,
     }

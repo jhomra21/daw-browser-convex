@@ -1,4 +1,5 @@
-import { Show, For, createMemo } from 'solid-js'
+import { For, createMemo } from 'solid-js'
+import EffectShell from '~/components/effects/EffectShell'
 import Knob from '~/components/ui/knob'
 import {
   type SynthParams,
@@ -17,8 +18,6 @@ type SynthProps = {
   class?: string
 }
 
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
-
 const WAVEFORMS: { value: SynthWave; label: string; icon: string }[] = [
   { value: 'sine', label: 'Sine', icon: '~' },
   { value: 'square', label: 'Square', icon: '[]' },
@@ -32,31 +31,26 @@ export default function Synth(props: SynthProps) {
   const wvH = () => (variant() === 'expanded' ? 64 : 28)
   const envW = () => (variant() === 'expanded' ? 360 : 220)
   const envH = () => (variant() === 'expanded' ? 80 : 48)
-  return (
-    <div class={cn('flex flex-col border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
-      {/* Header */}
-      <div class="flex items-center justify-between border-b border-neutral-800 px-2 py-1">
-        <div class="flex items-center gap-2">
-          <span class="text-xs font-semibold">Synth</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <Show when={props.onExpand}>
-            <button
-              class="border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
-              disabled={props.disabled}
-              onClick={() => props.onExpand?.()}
-            >Expand</button>
-          </Show>
-          <Show when={props.onReset}>
-            <button
-              class="border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
-              disabled={props.disabled}
-              onClick={() => props.onReset?.()}
-            >Reset</button>
-          </Show>
-        </div>
-      </div>
 
+  return (
+    <EffectShell
+      title="Synth"
+      typeLabel="Instrument"
+      onReset={props.onReset}
+      disabled={props.disabled}
+      class={cn(variant() === 'expanded' ? 'min-w-160' : 'min-w-72', props.class)}
+      actionsBeforeReset={
+        props.onExpand ? (
+          <button
+            class="bg-transparent px-2 text-xs text-neutral-300 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={props.disabled}
+            onClick={() => props.onExpand?.()}
+          >
+            Expand
+          </button>
+        ) : undefined
+      }
+    >
       {/* Oscillator controls */}
       <div class="px-2 py-2 border-b border-neutral-800/50">
         <div class="grid gap-3" style={{ 'grid-template-columns': '1fr 1fr' }}>
@@ -117,58 +111,38 @@ export default function Synth(props: SynthProps) {
 
       {/* Controls */}
       <div class="px-3 py-3 flex flex-1 items-center justify-evenly gap-4">
-        {/* Gain */}
-        <div class="flex flex-col items-center gap-1">
-          <div class="text-xs leading-none text-neutral-400">Gain</div>
-          <Knob
-            value={props.params.gain}
-            min={0}
-            max={1.5}
-            step={0.05}
-            size={28}
-            label=""
-            showValue={false}
-            onValueChange={(v) => props.onChange({ gain: Math.round(clamp(v, 0, 1.5) * 100) / 100 })}
-            disabled={props.disabled}
-          />
-          <div class="text-xs leading-none text-neutral-300 font-mono">{props.params.gain.toFixed(2)}</div>
-        </div>
-
-        {/* Attack */}
-        <div class="flex flex-col items-center gap-1">
-          <div class="text-xs leading-none text-neutral-400">Attack</div>
-          <Knob
-            value={props.params.attackMs}
-            min={0}
-            max={200}
-            step={1}
-            size={28}
-            label=""
-            unit="ms"
-            showValue={false}
-            onValueChange={(v) => props.onChange({ attackMs: Math.round(clamp(v, 0, 200)) })}
-            disabled={props.disabled}
-          />
-          <div class="text-xs leading-none text-neutral-300 font-mono">{props.params.attackMs}ms</div>
-        </div>
-
-        {/* Release */}
-        <div class="flex flex-col items-center gap-1">
-          <div class="text-xs leading-none text-neutral-400">Release</div>
-          <Knob
-            value={props.params.releaseMs}
-            min={0}
-            max={200}
-            step={1}
-            size={28}
-            label=""
-            unit="ms"
-            showValue={false}
-            onValueChange={(v) => props.onChange({ releaseMs: Math.round(clamp(v, 0, 200)) })}
-            disabled={props.disabled}
-          />
-          <div class="text-xs leading-none text-neutral-300 font-mono">{props.params.releaseMs}ms</div>
-        </div>
+        <Knob
+          label="Gain"
+          valueLabel={props.params.gain.toFixed(2)}
+          value={props.params.gain}
+          min={0}
+          max={1.5}
+          step={0.05}
+          onValueChange={(gain) => props.onChange({ gain })}
+          disabled={props.disabled}
+        />
+        <Knob
+          label="Attack"
+          valueLabel={`${props.params.attackMs}ms`}
+          value={props.params.attackMs}
+          min={0}
+          max={200}
+          step={1}
+          unit="ms"
+          onValueChange={(attackMs) => props.onChange({ attackMs })}
+          disabled={props.disabled}
+        />
+        <Knob
+          label="Release"
+          valueLabel={`${props.params.releaseMs}ms`}
+          value={props.params.releaseMs}
+          min={0}
+          max={200}
+          step={1}
+          unit="ms"
+          onValueChange={(releaseMs) => props.onChange({ releaseMs })}
+          disabled={props.disabled}
+        />
       </div>
 
       {/* Envelope preview */}
@@ -179,7 +153,7 @@ export default function Synth(props: SynthProps) {
           </div>
         </div>
       </div>
-    </div>
+    </EffectShell>
   )
 }
 

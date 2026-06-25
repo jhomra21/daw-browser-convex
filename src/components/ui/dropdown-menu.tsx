@@ -30,8 +30,6 @@ const DropdownMenuContent = <T extends ValidComponent = "div">(
       <DropdownMenuPrimitive.Content
         class={cn(
           "z-50 min-w-32 max-h-(--kb-menu-content-available-height) overflow-y-auto overflow-x-hidden border bg-popover p-1 text-popover-foreground shadow-md",
-          "origin-[var(--kb-menu-content-transform-origin)] data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0 data-[closed]:zoom-out-95 data-[expanded]:zoom-in-95",
-          "data-[placement=bottom]:slide-in-from-top-2 data-[placement=left]:slide-in-from-right-2 data-[placement=right]:slide-in-from-left-2 data-[placement=top]:slide-in-from-bottom-2",
           props.class
         )}
         {...rest}
@@ -147,8 +145,6 @@ const DropdownMenuSubContent = <T extends ValidComponent = "div">(
     <DropdownMenuPrimitive.SubContent
       class={cn(
         "z-50 min-w-32 overflow-hidden border bg-popover p-1 text-popover-foreground shadow-md",
-        "origin-[var(--kb-menu-content-transform-origin)] data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0 data-[closed]:zoom-out-95 data-[expanded]:zoom-in-95",
-        "data-[placement=bottom]:slide-in-from-top-2 data-[placement=left]:slide-in-from-right-2 data-[placement=right]:slide-in-from-left-2 data-[placement=top]:slide-in-from-bottom-2",
         props.class
       )}
       {...rest}

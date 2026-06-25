@@ -948,6 +948,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       },
       selectedFXTarget: selection.selectedFXTarget(),
       tracks: renderTracks(),
+      isPlaying: isPlaying(),
       playheadSec: playheadSec(),
       projectId: projectId(),
       userId: userId(),

@@ -7,6 +7,7 @@ import { exportAudioFormats, getExportAudioFormatMetadata, type ExportAudioForma
 import { getCachedSupportedExportAudioFormats, probeSupportedExportAudioFormats, retrySupportedExportAudioFormats } from '~/lib/export-format-support'
 import { useExportContext } from '~/context/export'
 import type { ExportOutput } from '~/lib/export/run-export-job'
+import ExportProgressStatus from '~/components/export/ExportProgressStatus'
 
 type ExportMode = ExportRange['mode']
 type ExportSource = 'mixdown' | 'all-stems' | 'selected-stems'
@@ -105,6 +106,7 @@ const ExportDialog: Component<Props> = (props) => {
   const exportDisabled = () => busy() || selectedFormats().length === 0
   const cloudOutputs = createMemo(() => outputs().filter((output) => output.destination === 'cloud'))
   const localOutputs = createMemo(() => outputs().filter((output) => output.destination === 'local'))
+  const activeExportJob = () => exportContext.activeJob()
 
   const selectedStemAvailable = () => {
     const selectedTrack = props.tracks.find((track) => track.id === props.selectedTrackId)
@@ -232,6 +234,18 @@ const ExportDialog: Component<Props> = (props) => {
           </Show>
           <Show when={localOutputs().length > 1}>
             <div class="text-sm text-green-400">Saved {localOutputs().length} exports locally.</div>
+          </Show>
+          <Show when={activeExportJob()}>
+            {(job) => (
+              <div class="flex items-center gap-3 px-1 py-1 text-sm text-neutral-100">
+                <ExportProgressStatus job={job()} onCancel={exportContext.cancelExport} />
+              </div>
+            )}
+          </Show>
+          <Show when={busy() && !activeExportJob()}>
+            <div class="px-1 py-1 text-sm text-neutral-100">
+              Preparing export...
+            </div>
           </Show>
           <Show when={source() !== 'mixdown'}>
             <div class="text-xs text-neutral-400">Stems are local-only and save into a stems folder inside the folder you choose.</div>

@@ -15,15 +15,6 @@ function buildRoomShareUrl(
   return url.toString()
 }
 
-export function getRoomShareUrl(currentProjectId: string | undefined): string | undefined {
-  if (typeof window === 'undefined') return normalizeProjectId(currentProjectId)
-  try {
-    return buildRoomShareUrl(currentProjectId, window.location.href)
-  } catch {
-    return normalizeProjectId(currentProjectId)
-  }
-}
-
 export function getInviteShareUrl(
   currentProjectId: string | undefined,
   shareToken: string,

@@ -23,6 +23,12 @@ function mergeEntry(prev: HistoryEntry, entry: HistoryEntry): HistoryEntry {
       case 'eq':
         if (prev.data.effect !== 'eq') return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
+      case 'saturator':
+        if (prev.data.effect !== 'saturator') return entry
+        return { ...entry, data: { ...entry.data, from: prev.data.from } }
+      case 'delay':
+        if (prev.data.effect !== 'delay') return entry
+        return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'reverb':
         if (prev.data.effect !== 'reverb') return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
@@ -34,6 +40,12 @@ function mergeEntry(prev: HistoryEntry, entry: HistoryEntry): HistoryEntry {
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'master-eq':
         if (prev.data.effect !== 'master-eq') return entry
+        return { ...entry, data: { ...entry.data, from: prev.data.from } }
+      case 'master-saturator':
+        if (prev.data.effect !== 'master-saturator') return entry
+        return { ...entry, data: { ...entry.data, from: prev.data.from } }
+      case 'master-delay':
+        if (prev.data.effect !== 'master-delay') return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'master-reverb':
         if (prev.data.effect !== 'master-reverb') return entry

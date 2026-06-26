@@ -7,7 +7,6 @@ export type CreateReverbImpulseResponse = (params: ReverbParamsLite) => AudioBuf
 export type ReverbNodeChain = {
   enabled: boolean
   internalsConnected: boolean
-  outputTarget: AudioNode | null
   impulseSignature: string | null
   dryGain: GainNode
   wetGain: GainNode
@@ -25,7 +24,6 @@ export type ReverbNodeChain = {
 
 export type SaturatorNodeChain = {
   enabled: boolean
-  outputTarget: AudioNode | null
   internalsConnected: boolean
   dryGain: GainNode
   wetGain: GainNode
@@ -38,7 +36,6 @@ export type SaturatorNodeChain = {
 export type DelayNodeChain = {
   enabled: boolean
   pingPong: boolean
-  outputTarget: AudioNode | null
   internalsConnected: boolean
   dryGain: GainNode
   wetGain: GainNode
@@ -61,19 +58,6 @@ export function disconnectAudioNodes(nodes: Array<AudioNode | null | undefined>)
   }
 }
 
-function connectEqNodes(eqNodes: BiquadFilterNode[], destination: AudioNode) {
-  if (eqNodes.length === 0) return
-  for (let index = 0; index < eqNodes.length; index++) {
-    const node = eqNodes[index]
-    try { node.disconnect() } catch {}
-    node.connect(index < eqNodes.length - 1 ? eqNodes[index + 1] : destination)
-  }
-}
-
-function getEqEntryNode(eqNodes: BiquadFilterNode[], destination: AudioNode) {
-  return eqNodes[0] ?? destination
-}
-
 export function createReverbNodeChain(
   ctx: BaseAudioContext,
   params: ReverbParamsLite,
@@ -82,7 +66,6 @@ export function createReverbNodeChain(
   const chain: ReverbNodeChain = {
     enabled: !!params.enabled,
     internalsConnected: false,
-    outputTarget: null,
     impulseSignature: null,
     dryGain: ctx.createGain(),
     wetGain: ctx.createGain(),
@@ -150,14 +133,12 @@ export function disconnectReverbChain(chain: ReverbNodeChain) {
     chain.rightToRight,
   ])
   chain.internalsConnected = false
-  chain.outputTarget = null
   chain.impulseSignature = null
 }
 
 export function createSaturatorNodeChain(ctx: BaseAudioContext, params: SaturatorParamsLite): SaturatorNodeChain {
   const chain: SaturatorNodeChain = {
     enabled: !!params.enabled,
-    outputTarget: null,
     internalsConnected: false,
     dryGain: ctx.createGain(),
     wetGain: ctx.createGain(),
@@ -179,7 +160,6 @@ export function applySaturatorNodeChainParams(chain: SaturatorNodeChain, params:
 export function disconnectSaturatorChain(chain: SaturatorNodeChain) {
   disconnectAudioNodes([chain.dryGain, chain.wetGain, chain.driveGain, chain.colorFilter, chain.shaper, chain.outputGain])
   chain.internalsConnected = false
-  chain.outputTarget = null
 }
 
 function connectSaturatorInternals(chain: SaturatorNodeChain) {
@@ -197,7 +177,6 @@ export function createDelayNodeChain(ctx: BaseAudioContext, params: DelayParamsL
   const chain: DelayNodeChain = {
     enabled: normalized.enabled,
     pingPong: normalized.pingPong,
-    outputTarget: null,
     internalsConnected: false,
     dryGain: ctx.createGain(),
     wetGain: ctx.createGain(),
@@ -229,7 +208,6 @@ export function disconnectDelayChain(chain: DelayNodeChain) {
     chain.lowCutLeft, chain.highCutLeft, chain.lowCutRight, chain.highCutRight, chain.splitter, chain.merger,
   ])
   chain.internalsConnected = false
-  chain.outputTarget = null
 }
 
 function connectDelayInternals(chain: DelayNodeChain) {
@@ -276,14 +254,6 @@ function connectReverbInternals(chain: ReverbNodeChain) {
   chain.internalsConnected = true
 }
 
-function connectReverbOutputs(chain: ReverbNodeChain, destination: AudioNode) {
-  if (chain.outputTarget === destination) return
-  disconnectAudioNodes([chain.dryGain, chain.widthMerger])
-  chain.dryGain.connect(destination)
-  chain.widthMerger.connect(destination)
-  chain.outputTarget = destination
-}
-
 export function connectFxChain(
   input: AudioNode,
   destination: AudioNode,
@@ -305,58 +275,68 @@ export function connectFxChain(
   if (reverb) connectReverbInternals(reverb)
   else if (config.reverbChain) disconnectReverbChain(config.reverbChain)
 
-  const connectToSaturator = (source: AudioNode) => {
-    if (!saturator) return
-    source.connect(saturator.dryGain)
-    source.connect(saturator.driveGain)
+  type FxStage = {
+    connectInput: (source: AudioNode) => void
+    outputs: AudioNode[]
   }
-  const connectToDelay = (source: AudioNode) => {
-    if (!delay) return
-    source.connect(delay.dryGain)
-    if (delay.pingPong) source.connect(delay.splitter)
-    else source.connect(delay.delayLeft)
-  }
-  const connectToReverb = (source: AudioNode) => {
-    if (!reverb) return
-    source.connect(reverb.dryGain)
-    source.connect(reverb.preDelay)
-  }
-  const connectToNext = (source: AudioNode, start: 'eq' | 'saturator' | 'delay' | 'reverb') => {
-    try { source.disconnect() } catch {}
-    if (start === 'eq' && saturator) return connectToSaturator(source)
-    if ((start === 'eq' || start === 'saturator') && delay) return connectToDelay(source)
-    if ((start === 'eq' || start === 'saturator' || start === 'delay') && reverb) return connectToReverb(source)
-    source.connect(destination)
-  }
+  const stages: FxStage[] = []
 
   if (eqNodes.length > 0) {
-    try { input.disconnect() } catch {}
-    input.connect(eqNodes[0])
     disconnectAudioNodes(eqNodes)
     for (let index = 0; index < eqNodes.length; index++) {
       if (index < eqNodes.length - 1) eqNodes[index].connect(eqNodes[index + 1])
-      else connectToNext(eqNodes[index], 'eq')
     }
-  } else if (saturator) {
-    try { input.disconnect() } catch {}
-    connectToSaturator(input)
-  } else if (delay) {
-    try { input.disconnect() } catch {}
-    connectToDelay(input)
-  } else if (reverb) {
-    try { input.disconnect() } catch {}
-    connectToReverb(input)
-  } else {
-    try { input.disconnect() } catch {}
-    input.connect(destination)
+    stages.push({
+      connectInput: (source) => source.connect(eqNodes[0]),
+      outputs: [eqNodes[eqNodes.length - 1]],
+    })
   }
-  if (saturator) connectToNext(saturator.outputGain, 'saturator')
+
+  if (saturator) {
+    disconnectAudioNodes([saturator.outputGain])
+    stages.push({
+      connectInput: (source) => {
+        source.connect(saturator.dryGain)
+        source.connect(saturator.driveGain)
+      },
+      outputs: [saturator.outputGain],
+    })
+  }
+
   if (delay) {
-    connectToNext(delay.dryGain, 'delay')
-    connectToNext(delay.wetGain, 'delay')
+    disconnectAudioNodes([delay.dryGain, delay.wetGain])
+    stages.push({
+      connectInput: (source) => {
+        source.connect(delay.dryGain)
+        source.connect(delay.pingPong ? delay.splitter : delay.delayLeft)
+      },
+      outputs: [delay.dryGain, delay.wetGain],
+    })
   }
+
   if (reverb) {
-    connectToNext(reverb.dryGain, 'reverb')
-    connectToNext(reverb.widthMerger, 'reverb')
+    disconnectAudioNodes([reverb.dryGain, reverb.widthMerger])
+    stages.push({
+      connectInput: (source) => {
+        source.connect(reverb.dryGain)
+        source.connect(reverb.preDelay)
+      },
+      outputs: [reverb.dryGain, reverb.widthMerger],
+    })
+  }
+
+  try { input.disconnect() } catch {}
+  if (stages.length === 0) {
+    input.connect(destination)
+    return
+  }
+
+  stages[0].connectInput(input)
+  for (let index = 0; index < stages.length; index++) {
+    const nextStage = stages[index + 1]
+    for (const output of stages[index].outputs) {
+      if (nextStage) nextStage.connectInput(output)
+      else output.connect(destination)
+    }
   }
 }

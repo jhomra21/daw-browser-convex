@@ -170,27 +170,14 @@ type EffectParamsHistoryEntryInput = {
 export function buildEffectParamsHistoryEntry(input: EffectParamsHistoryEntryInput): EffectParamsHistoryEntry {
   const track = input.tracks.find((entry) => entry.id === input.payload.targetId)
   const trackRef = track ? getTrackHistoryRef(track) : undefined
-  switch (input.payload.effect) {
-    case 'eq':
-      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
-    case 'saturator':
-      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
-    case 'delay':
-      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
-    case 'reverb':
-      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
-    case 'synth':
-      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
-    case 'arp':
-      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
-    case 'master-eq':
-      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
-    case 'master-saturator':
-      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
-    case 'master-delay':
-      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
-    case 'master-reverb':
-      return { type: 'effect-params', projectId: input.projectId, data: { effect: input.payload.effect, trackRef, from: input.payload.from, to: input.payload.to } }
+  const { targetId: _targetId, ...data } = input.payload
+  return {
+    type: 'effect-params',
+    projectId: input.projectId,
+    data: {
+      ...data,
+      trackRef,
+    },
   }
 }
 

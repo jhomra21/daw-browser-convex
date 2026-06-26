@@ -106,20 +106,16 @@ type EffectParamsCommitPayloadMap = {
 
 export type EffectParamsCommitPayload<Effect extends EffectType = EffectType> = EffectParamsCommitPayloadMap[Effect]
 
-type EffectParamsHistoryEntryMap = {
-  [Effect in EffectType]: {
-    type: 'effect-params'
-    projectId: string
-    data: {
-      trackRef?: TrackRef
-      effect: Effect
-      from: EffectParamsByEffect[Effect]
-      to: EffectParamsByEffect[Effect]
-    }
-  }
-}
+type EffectParamsHistoryEntryData<Effect extends EffectType = EffectType> =
+  Effect extends EffectType
+    ? Omit<EffectParamsCommitPayload<Effect>, 'targetId'> & { trackRef?: TrackRef }
+    : never
 
-export type EffectParamsHistoryEntry<Effect extends EffectType = EffectType> = EffectParamsHistoryEntryMap[Effect]
+export type EffectParamsHistoryEntry<Effect extends EffectType = EffectType> = {
+  type: 'effect-params'
+  projectId: string
+  data: EffectParamsHistoryEntryData<Effect>
+}
 
 export type HistoryEntry =
   | {

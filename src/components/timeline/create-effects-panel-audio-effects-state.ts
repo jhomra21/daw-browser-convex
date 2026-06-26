@@ -37,10 +37,20 @@ import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 type EffectKind = "eq" | "saturator" | "delay" | "reverb";
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
-type EqRow = RoomEffectRow | LocalEffectRow<EqParams> | undefined;
-type SaturatorRow = RoomEffectRow | LocalEffectRow<SaturatorParams> | undefined;
-type DelayRow = RoomEffectRow | LocalEffectRow<DelayParams> | undefined;
-type ReverbRow = RoomEffectRow | LocalEffectRow<ReverbParams> | undefined;
+type PersistedAudioEffectDescriptor<Params> = {
+  kind: EffectKind;
+  createDefaultParams: () => Params;
+  normalizeParams: (params: Params) => Params;
+  serializeParams: (params: Params) => string;
+  setTrackEngineParams: (audioEngine: AudioEngine, trackId: string, params: Params) => void;
+  setMasterEngineParams: (audioEngine: AudioEngine, params: Params) => void;
+  row: (targetId: string) => LocalEffectRow<Params> | undefined;
+  persistLocal: (projectId: string, targetId: string, params: Params) => Promise<void>;
+  publishTrackParams: (projectId: string, userId: string, trackId: string, params: Params) => Promise<unknown>;
+  publishMasterParams: (projectId: string, userId: string, params: Params) => Promise<unknown>;
+  commitTrackParams: (trackId: string, previous: Params, next: Params, projectId?: string) => void;
+  commitMasterParams: (previous: Params, next: Params, projectId?: string) => void;
+};
 
 type EffectsPanelAudioEffectsContext = {
   audioEngine: Accessor<AudioEngine>;
@@ -136,201 +146,135 @@ export function createEffectsPanelAudioDevice(
     operation: SharedTimelineOperation,
   ) => publishDurableSharedTimelineOperation({ projectId, userId, operation });
 
-  const eqState = createPersistedEffectState<EqRow, EqParams>({
+  function createAudioEffectState<Params>(descriptor: PersistedAudioEffectDescriptor<Params>) {
+    return createPersistedEffectState<RoomEffectRow | LocalEffectRow<Params> | undefined, Params>({
     targetId: currentTargetId,
     scopeId: context.projectId,
-    row: () => isLocalProject() ? localEq.row(currentTargetId()) : remoteEffectForTarget(currentTargetId(), "eq"),
-    readQueryParams: (row) => row?.params ? normalizeEqParams(row.params) : undefined,
-    createInitialParams: () => createDefaultEqParams(),
+    row: () => isLocalProject() ? descriptor.row(currentTargetId()) : remoteEffectForTarget(currentTargetId(), descriptor.kind),
+    readQueryParams: (row) => row?.params ? descriptor.normalizeParams(row.params) : undefined,
+    createInitialParams: () => descriptor.createDefaultParams(),
+    serializeParams: descriptor.serializeParams,
+    applyToEngine: (targetId, params) => {
+      if (targetId === "master") {
+        descriptor.setMasterEngineParams(context.audioEngine(), params);
+      } else {
+        descriptor.setTrackEngineParams(context.audioEngine(), targetId, params);
+      }
+    },
+    createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
+    persistParams: (targetId, params, persistContext) => {
+      if (!persistContext.projectId) return Promise.resolve();
+      if (isLocalId("project", persistContext.projectId)) return descriptor.persistLocal(persistContext.projectId, targetId, params);
+      if (!persistContext.userId) return Promise.resolve();
+      const normalizedParams = descriptor.normalizeParams(params);
+      if (targetId === "master") {
+        return descriptor.publishMasterParams(persistContext.projectId, persistContext.userId, normalizedParams);
+      }
+      const track = resolveTrackByTargetId(targetId);
+      if (!track) return Promise.resolve();
+      return descriptor.publishTrackParams(persistContext.projectId, persistContext.userId, track.id, normalizedParams);
+    },
+    debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
+    remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
+    onPersistError: (error) => {
+      if (!isLocalProject()) return;
+      context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
+    },
+    onParamsCommitted: (targetId, previous, next, persistContext) => {
+      if (previous === undefined) return;
+      if (targetId === "master") {
+        descriptor.commitMasterParams(previous, next, persistContext.projectId);
+        return;
+      }
+      const track = resolveTrackByTargetId(targetId);
+      if (!track) return;
+      descriptor.commitTrackParams(track.id, previous, next, persistContext.projectId);
+    },
+  });
+  }
+
+  const eqState = createAudioEffectState<EqParams>({
+    kind: "eq",
+    createDefaultParams: createDefaultEqParams,
+    normalizeParams: normalizeEqParams,
     serializeParams: serializeEqParams,
-    applyToEngine: (targetId, params) => {
-      if (targetId === "master") {
-        context.audioEngine().setMasterEq(params);
-      } else {
-        context.audioEngine().setTrackEq(targetId, params);
-      }
-    },
-    createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
-    persistParams: (targetId, params, persistContext) => {
-      if (!persistContext.projectId) return Promise.resolve();
-      if (isLocalId("project", persistContext.projectId)) return localEq.persist(persistContext.projectId, targetId, params);
-      if (!persistContext.userId) return Promise.resolve();
-      if (targetId === "master") {
-        return publishEffectOperation(persistContext.projectId, persistContext.userId, {
-          kind: "effects.setMasterEqParams",
-          payload: { params: normalizeEqParams(params) },
-        });
-      }
-      const track = resolveTrackByTargetId(targetId);
-      if (!track) return Promise.resolve();
-      return publishEffectOperation(persistContext.projectId, persistContext.userId, {
-        kind: "effects.setEqParams",
-        payload: { trackId: track.id, params: normalizeEqParams(params) },
-      });
-    },
-    debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
-    remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
-    onPersistError: (error) => {
-      if (!isLocalProject()) return;
-      context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
-    },
-    onParamsCommitted: (targetId, previous, next, persistContext) => {
-      if (previous === undefined) return;
-      if (targetId === "master") {
-        context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-eq", from: previous, to: next }, persistContext.projectId);
-        return;
-      }
-      const track = resolveTrackByTargetId(targetId);
-      if (!track) return;
-      context.onEffectParamsCommitted?.({ targetId: track.id, effect: "eq", from: previous, to: next }, persistContext.projectId);
-    },
+    setTrackEngineParams: (audioEngine, trackId, params) => audioEngine.setTrackEq(trackId, params),
+    setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterEq(params),
+    row: localEq.row,
+    persistLocal: localEq.persist,
+    publishTrackParams: (projectId, userId, trackId, params) => publishEffectOperation(projectId, userId, {
+      kind: "effects.setEqParams",
+      payload: { trackId, params },
+    }),
+    publishMasterParams: (projectId, userId, params) => publishEffectOperation(projectId, userId, {
+      kind: "effects.setMasterEqParams",
+      payload: { params },
+    }),
+    commitTrackParams: (trackId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "eq", from: previous, to: next }, projectId),
+    commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-eq", from: previous, to: next }, projectId),
   });
 
-  const reverbState = createPersistedEffectState<ReverbRow, ReverbParams>({
-    targetId: currentTargetId,
-    scopeId: context.projectId,
-    row: () => isLocalProject() ? localReverb.row(currentTargetId()) : remoteEffectForTarget(currentTargetId(), "reverb"),
-    readQueryParams: (row) => row?.params ? normalizeReverbParams(row.params) : undefined,
-    createInitialParams: () => createDefaultReverbParams(),
+  const reverbState = createAudioEffectState<ReverbParams>({
+    kind: "reverb",
+    createDefaultParams: createDefaultReverbParams,
+    normalizeParams: normalizeReverbParams,
     serializeParams: serializeReverbParams,
-    applyToEngine: (targetId, params) => {
-      if (targetId === "master") {
-        context.audioEngine().setMasterReverb(params);
-      } else {
-        context.audioEngine().setTrackReverb(targetId, params);
-      }
-    },
-    createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
-    persistParams: (targetId, params, persistContext) => {
-      if (!persistContext.projectId) return Promise.resolve();
-      if (isLocalId("project", persistContext.projectId)) return localReverb.persist(persistContext.projectId, targetId, params);
-      if (!persistContext.userId) return Promise.resolve();
-      const normalizedParams = normalizeReverbParams(params);
-      if (targetId === "master") {
-        return publishEffectOperation(persistContext.projectId, persistContext.userId, {
-          kind: "effects.setMasterReverbParams",
-          payload: { params: normalizedParams },
-        });
-      }
-      const track = resolveTrackByTargetId(targetId);
-      if (!track) return Promise.resolve();
-      return publishEffectOperation(persistContext.projectId, persistContext.userId, {
-        kind: "effects.setReverbParams",
-        payload: { trackId: track.id, params: normalizedParams },
-      });
-    },
-    debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
-    remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
-    onPersistError: (error) => {
-      if (!isLocalProject()) return;
-      context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
-    },
-    onParamsCommitted: (targetId, previous, next, persistContext) => {
-      if (previous === undefined) return;
-      if (targetId === "master") {
-        context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-reverb", from: previous, to: next }, persistContext.projectId);
-        return;
-      }
-      const track = resolveTrackByTargetId(targetId);
-      if (!track) return;
-      context.onEffectParamsCommitted?.({ targetId: track.id, effect: "reverb", from: previous, to: next }, persistContext.projectId);
-    },
+    setTrackEngineParams: (audioEngine, trackId, params) => audioEngine.setTrackReverb(trackId, params),
+    setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterReverb(params),
+    row: localReverb.row,
+    persistLocal: localReverb.persist,
+    publishTrackParams: (projectId, userId, trackId, params) => publishEffectOperation(projectId, userId, {
+      kind: "effects.setReverbParams",
+      payload: { trackId, params },
+    }),
+    publishMasterParams: (projectId, userId, params) => publishEffectOperation(projectId, userId, {
+      kind: "effects.setMasterReverbParams",
+      payload: { params },
+    }),
+    commitTrackParams: (trackId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "reverb", from: previous, to: next }, projectId),
+    commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-reverb", from: previous, to: next }, projectId),
   });
 
-  const saturatorState = createPersistedEffectState<SaturatorRow, SaturatorParams>({
-    targetId: currentTargetId,
-    scopeId: context.projectId,
-    row: () => isLocalProject() ? localSaturator.row(currentTargetId()) : remoteEffectForTarget(currentTargetId(), "saturator"),
-    readQueryParams: (row) => row?.params ? normalizeSaturatorParams(row.params) : undefined,
-    createInitialParams: () => createDefaultSaturatorParams(),
+  const saturatorState = createAudioEffectState<SaturatorParams>({
+    kind: "saturator",
+    createDefaultParams: createDefaultSaturatorParams,
+    normalizeParams: normalizeSaturatorParams,
     serializeParams: serializeSaturatorParams,
-    applyToEngine: (targetId, params) => {
-      if (targetId === "master") context.audioEngine().setMasterSaturator(params);
-      else context.audioEngine().setTrackSaturator(targetId, params);
-    },
-    createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
-    persistParams: (targetId, params, persistContext) => {
-      if (!persistContext.projectId) return Promise.resolve();
-      if (isLocalId("project", persistContext.projectId)) return localSaturator.persist(persistContext.projectId, targetId, params);
-      if (!persistContext.userId) return Promise.resolve();
-      const normalizedParams = normalizeSaturatorParams(params);
-      if (targetId === "master") {
-        return publishEffectOperation(persistContext.projectId, persistContext.userId, {
-          kind: "effects.setMasterSaturatorParams",
-          payload: { params: normalizedParams },
-        });
-      }
-      const track = resolveTrackByTargetId(targetId);
-      if (!track) return Promise.resolve();
-      return publishEffectOperation(persistContext.projectId, persistContext.userId, {
-        kind: "effects.setSaturatorParams",
-        payload: { trackId: track.id, params: normalizedParams },
-      });
-    },
-    debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
-    remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
-    onPersistError: (error) => {
-      if (!isLocalProject()) return;
-      context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
-    },
-    onParamsCommitted: (targetId, previous, next, persistContext) => {
-      if (previous === undefined) return;
-      if (targetId === "master") {
-        context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-saturator", from: previous, to: next }, persistContext.projectId);
-        return;
-      }
-      const track = resolveTrackByTargetId(targetId);
-      if (!track) return;
-      context.onEffectParamsCommitted?.({ targetId: track.id, effect: "saturator", from: previous, to: next }, persistContext.projectId);
-    },
+    setTrackEngineParams: (audioEngine, trackId, params) => audioEngine.setTrackSaturator(trackId, params),
+    setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterSaturator(params),
+    row: localSaturator.row,
+    persistLocal: localSaturator.persist,
+    publishTrackParams: (projectId, userId, trackId, params) => publishEffectOperation(projectId, userId, {
+      kind: "effects.setSaturatorParams",
+      payload: { trackId, params },
+    }),
+    publishMasterParams: (projectId, userId, params) => publishEffectOperation(projectId, userId, {
+      kind: "effects.setMasterSaturatorParams",
+      payload: { params },
+    }),
+    commitTrackParams: (trackId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "saturator", from: previous, to: next }, projectId),
+    commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-saturator", from: previous, to: next }, projectId),
   });
 
-  const delayState = createPersistedEffectState<DelayRow, DelayParams>({
-    targetId: currentTargetId,
-    scopeId: context.projectId,
-    row: () => isLocalProject() ? localDelay.row(currentTargetId()) : remoteEffectForTarget(currentTargetId(), "delay"),
-    readQueryParams: (row) => row?.params ? normalizeDelayParams(row.params) : undefined,
-    createInitialParams: () => createDefaultDelayParams(),
+  const delayState = createAudioEffectState<DelayParams>({
+    kind: "delay",
+    createDefaultParams: createDefaultDelayParams,
+    normalizeParams: normalizeDelayParams,
     serializeParams: serializeDelayParams,
-    applyToEngine: (targetId, params) => {
-      if (targetId === "master") context.audioEngine().setMasterDelay(params);
-      else context.audioEngine().setTrackDelay(targetId, params);
-    },
-    createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
-    persistParams: (targetId, params, persistContext) => {
-      if (!persistContext.projectId) return Promise.resolve();
-      if (isLocalId("project", persistContext.projectId)) return localDelay.persist(persistContext.projectId, targetId, params);
-      if (!persistContext.userId) return Promise.resolve();
-      const normalizedParams = normalizeDelayParams(params);
-      if (targetId === "master") {
-        return publishEffectOperation(persistContext.projectId, persistContext.userId, {
-          kind: "effects.setMasterDelayParams",
-          payload: { params: normalizedParams },
-        });
-      }
-      const track = resolveTrackByTargetId(targetId);
-      if (!track) return Promise.resolve();
-      return publishEffectOperation(persistContext.projectId, persistContext.userId, {
-        kind: "effects.setDelayParams",
-        payload: { trackId: track.id, params: normalizedParams },
-      });
-    },
-    debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
-    remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
-    onPersistError: (error) => {
-      if (!isLocalProject()) return;
-      context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
-    },
-    onParamsCommitted: (targetId, previous, next, persistContext) => {
-      if (previous === undefined) return;
-      if (targetId === "master") {
-        context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-delay", from: previous, to: next }, persistContext.projectId);
-        return;
-      }
-      const track = resolveTrackByTargetId(targetId);
-      if (!track) return;
-      context.onEffectParamsCommitted?.({ targetId: track.id, effect: "delay", from: previous, to: next }, persistContext.projectId);
-    },
+    setTrackEngineParams: (audioEngine, trackId, params) => audioEngine.setTrackDelay(trackId, params),
+    setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterDelay(params),
+    row: localDelay.row,
+    persistLocal: localDelay.persist,
+    publishTrackParams: (projectId, userId, trackId, params) => publishEffectOperation(projectId, userId, {
+      kind: "effects.setDelayParams",
+      payload: { trackId, params },
+    }),
+    publishMasterParams: (projectId, userId, params) => publishEffectOperation(projectId, userId, {
+      kind: "effects.setMasterDelayParams",
+      payload: { params },
+    }),
+    commitTrackParams: (trackId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "delay", from: previous, to: next }, projectId),
+    commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-delay", from: previous, to: next }, projectId),
   });
 
   const orderedEffects = createMemo<EffectKind[]>(() => {

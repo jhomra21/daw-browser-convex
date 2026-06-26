@@ -1,5 +1,5 @@
 import { normalizeAudioWarp } from '@daw-browser/shared'
-import type { HistoryEntry, PersistedHistory } from '~/lib/undo/types'
+import type { EffectType, HistoryEntry, PersistedHistory } from '~/lib/undo/types'
 
 const PERSISTED_HISTORY_VERSION = 2 as const
 
@@ -9,7 +9,18 @@ type PersistedHistoryEnvelope = {
   redo: unknown[]
 }
 
-const EFFECT_TYPES = new Set(['eq', 'reverb', 'synth', 'arp', 'master-eq', 'master-reverb'])
+const EFFECT_TYPES: ReadonlySet<string> = new Set([
+  'eq',
+  'saturator',
+  'delay',
+  'reverb',
+  'synth',
+  'arp',
+  'master-eq',
+  'master-saturator',
+  'master-delay',
+  'master-reverb',
+] satisfies EffectType[])
 
 function isPersistedHistoryEnvelope(value: unknown): value is PersistedHistoryEnvelope {
   return isRecord(value) && value.version === PERSISTED_HISTORY_VERSION && Array.isArray(value.undo) && Array.isArray(value.redo)

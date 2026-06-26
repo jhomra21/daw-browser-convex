@@ -217,6 +217,16 @@ export function createSaturatorCurve(curve: SaturatorCurve): Float32Array<ArrayB
   return values
 }
 
+const saturatorCurveCache = new Map<SaturatorCurve, Float32Array<ArrayBuffer>>()
+
+function getSaturatorCurve(curve: SaturatorCurve): Float32Array<ArrayBuffer> {
+  const cached = saturatorCurveCache.get(curve)
+  if (cached) return cached
+  const values = createSaturatorCurve(curve)
+  saturatorCurveCache.set(curve, values)
+  return values
+}
+
 export function applySaturatorNodeParams(nodes: {
   driveGain: GainNode
   colorFilter: BiquadFilterNode
@@ -231,7 +241,7 @@ export function applySaturatorNodeParams(nodes: {
   nodes.colorFilter.frequency.value = normalized.colorFrequencyHz
   nodes.colorFilter.Q.value = 0.8
   nodes.colorFilter.gain.value = normalized.color ? normalized.colorAmount * 12 : 0
-  nodes.shaper.curve = createSaturatorCurve(normalized.curve)
+  nodes.shaper.curve = getSaturatorCurve(normalized.curve)
   nodes.shaper.oversample = '4x'
   nodes.dryGain.gain.value = 1 - normalized.dryWet
   nodes.wetGain.gain.value = normalized.dryWet

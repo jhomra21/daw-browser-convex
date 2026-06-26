@@ -18,10 +18,11 @@ export function createDelayChainState(): DelayChainState {
   return {
     chain: () => delay,
     set: (ctx, nextParams, bpm) => {
+      const bpmChanged = currentBpm !== bpm
       currentBpm = bpm
       const normalized = normalizeDelayParams(nextParams)
       const nextSignature = serializeDelayParams(normalized)
-      if (signature === nextSignature && params?.mode !== 'sync') return { changed: false, requiresRoutingRebuild: false }
+      if (signature === nextSignature && (!normalized.enabled || normalized.mode !== 'sync' || !bpmChanged)) return { changed: false, requiresRoutingRebuild: false }
       const enabledChanged = enabled !== normalized.enabled && (enabled !== null || normalized.enabled)
       const topologyChanged = normalized.enabled && pingPong !== null && pingPong !== normalized.pingPong
       const requiresRoutingRebuild = enabledChanged || topologyChanged

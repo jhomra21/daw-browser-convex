@@ -271,12 +271,27 @@ export function createEffectsPanelAudioDevice(
   });
 
   const orderedEffects = createMemo<AudioEffectKind[]>(() => {
-    const present: AudioEffectKind[] = [];
-    if (eqState.params()) present.push("eq");
-    if (saturatorState.params()) present.push("saturator");
-    if (delayState.params()) present.push("delay");
-    if (reverbState.params()) present.push("reverb");
-    return AUDIO_EFFECT_ORDER.filter((kind) => present.includes(kind));
+    const targetId = currentTargetId();
+    const rowForKind = (kind: AudioEffectKind) => {
+      if (!isLocalProject()) return remoteEffectForTarget(targetId, kind);
+      if (kind === "eq") return localEq.row(targetId);
+      if (kind === "saturator") return localSaturator.row(targetId);
+      if (kind === "delay") return localDelay.row(targetId);
+      return localReverb.row(targetId);
+    };
+    return AUDIO_EFFECT_ORDER
+      .flatMap((kind, fallbackIndex) => {
+        const hasParams =
+          (kind === "eq" && eqState.params())
+          || (kind === "saturator" && saturatorState.params())
+          || (kind === "delay" && delayState.params())
+          || (kind === "reverb" && reverbState.params());
+        if (!hasParams) return [];
+        const rowIndex = rowForKind(kind)?.index;
+        return [{ kind, index: typeof rowIndex === "number" ? rowIndex : fallbackIndex }];
+      })
+      .sort((a, b) => a.index - b.index)
+      .map((entry) => entry.kind);
   });
 
   const updateEq = (updater: (prev: EqParams) => EqParams) => {

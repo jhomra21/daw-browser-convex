@@ -1,5 +1,5 @@
-import { Show, createSignal } from 'solid-js'
-import { useDrag } from '~/hooks/useDrag'
+import { Show } from 'solid-js'
+import { useSteppedValueControl } from '~/hooks/useSteppedValueControl'
 import { cn } from '~/lib/utils'
 
 type KnobProps = {
@@ -27,15 +27,32 @@ const KNOB_POINTER_END_Y = 18
 const KNOB_CENTER_VALUE = 0
 
 export default function Knob(props: KnobProps) {
-  const [dragValue, setDragValue] = createSignal<number | null>(null)
-  let startY = 0
-  let startValue = 0
-  let lastEmittedValue = props.value
-  
   const size = () => props.size ?? 36
   const step = () => props.step ?? 0.1
   const bipolar = () => props.bipolar ?? false
-  const visualValue = () => dragValue() ?? props.value
+  const control = useSteppedValueControl({
+    value: () => props.value,
+    min: () => props.min,
+    max: () => props.max,
+    step,
+    disabled: () => props.disabled ?? false,
+    onValueChange: (value) => props.onValueChange(value),
+    valueFromDrag: ({ startValue, startPosition, currentPosition }) => {
+      const deltaY = startPosition.y - currentPosition.y
+      const sensitivity = props.logarithmic ? 1.0 : 1.5
+
+      if (props.logarithmic) {
+        const normalizedStart = (startValue - props.min) / (props.max - props.min)
+        const logMin = Math.log10(props.min)
+        const logMax = Math.log10(props.max)
+        const logStart = logMin + normalizedStart * (logMax - logMin)
+        return Math.pow(10, Math.max(logMin, Math.min(logMax, logStart + (deltaY * sensitivity * 0.005))))
+      }
+
+      return startValue + (deltaY * sensitivity * (props.max - props.min)) / 150
+    },
+  })
+  const visualValue = control.visualValue
   const displayValue = () => props.valueLabel ?? formatValue()
   
   const getAngle = () => {
@@ -63,12 +80,6 @@ export default function Knob(props: KnobProps) {
     const fill = fillArcFraction() * 100
     return `${fill < center ? -fill : -center}`
   }
-  const normalizeValue = (value: number) => {
-    const clamped = Math.max(props.min, Math.min(props.max, value))
-    const stepped = Math.round(clamped / step()) * step()
-    return Math.max(props.min, Math.min(props.max, Number(stepped.toFixed(6))))
-  }
-
   const formatValue = () => {
     const unit = props.unit ?? ''
     const value = visualValue()
@@ -84,99 +95,10 @@ export default function Knob(props: KnobProps) {
     return `${value.toFixed(1)}${unit}`
   }
 
-  const emitValue = (value: number) => {
-    if (value === lastEmittedValue) return
-    lastEmittedValue = value
-    props.onValueChange(value)
-  }
-
-  const drag = useDrag({
-    disabled: () => props.disabled ?? false,
-    onDragStart: (pos, event) => {
-      event.stopPropagation()
-      startY = pos.y
-      startValue = props.value
-      lastEmittedValue = props.value
-      setDragValue(props.value)
-    },
-    onDragMove: (pos, event) => {
-      event.preventDefault()
-      const deltaY = startY - pos.y
-      const sensitivity = props.logarithmic ? 1.0 : 1.5
-      
-      let newValue: number
-      
-      if (props.logarithmic) {
-        const normalizedStart = (startValue - props.min) / (props.max - props.min)
-        const logMin = Math.log10(props.min)
-        const logMax = Math.log10(props.max)
-        const logStart = logMin + normalizedStart * (logMax - logMin)
-        const logNew = logStart + (deltaY * sensitivity * 0.005)
-        newValue = Math.pow(10, Math.max(logMin, Math.min(logMax, logNew)))
-      } else {
-        const range = props.max - props.min
-        const deltaValue = (deltaY * sensitivity * range) / 150
-        newValue = startValue + deltaValue
-      }
-      
-      const finalValue = normalizeValue(newValue)
-      
-      setDragValue(finalValue)
-      emitValue(finalValue)
-    },
-    onDragEnd: (_pos, event) => {
-      event.preventDefault()
-      setDragValue(null)
-    },
-  })
-
   const handleDoubleClick = () => {
     if (props.disabled) return
     
-    const resetValue = normalizeValue(props.resetValue ?? (bipolar() ? (props.min + props.max) / 2 : props.min))
-    lastEmittedValue = props.value
-    setDragValue(resetValue)
-    emitValue(resetValue)
-    queueMicrotask(() => setDragValue(null))
-  }
-
-  const handleKeyDown = (event: KeyboardEvent) => {
-    if (props.disabled) return
-    const currentValue = visualValue()
-    const largeStep = step() * 10
-    let nextValue: number | undefined
-
-    switch (event.key) {
-      case 'ArrowUp':
-      case 'ArrowRight':
-        nextValue = currentValue + step()
-        break
-      case 'ArrowDown':
-      case 'ArrowLeft':
-        nextValue = currentValue - step()
-        break
-      case 'PageUp':
-        nextValue = currentValue + largeStep
-        break
-      case 'PageDown':
-        nextValue = currentValue - largeStep
-        break
-      case 'Home':
-        nextValue = props.min
-        break
-      case 'End':
-        nextValue = props.max
-        break
-      default:
-        return
-    }
-
-    event.preventDefault()
-    lastEmittedValue = props.value
-    const finalValue = normalizeValue(nextValue)
-    setDragValue(finalValue)
-    emitValue(finalValue)
-    queueMicrotask(() => setDragValue(null))
+    control.setVisualValue(props.resetValue ?? (bipolar() ? (props.min + props.max) / 2 : props.min))
   }
 
   return (
@@ -207,8 +129,8 @@ export default function Knob(props: KnobProps) {
           '-webkit-user-select': 'none',
           'touch-action': 'none',
         }}
-        onPointerDown={drag.onPointerDown}
-        onKeyDown={handleKeyDown}
+        onPointerDown={control.onPointerDown}
+        onKeyDown={control.handleKeyDown}
         onDblClick={handleDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
         onDragStart={(e) => e.preventDefault()}
@@ -230,8 +152,8 @@ export default function Knob(props: KnobProps) {
           
           <path
             classList={{
-              'stroke-sky-300': drag.isDragging(),
-              'stroke-cyan-400': !drag.isDragging(),
+              'stroke-sky-300': control.isDragging(),
+              'stroke-cyan-400': !control.isDragging(),
             }}
             d={KNOB_ARC_PATH}
             fill="none"
@@ -247,8 +169,8 @@ export default function Knob(props: KnobProps) {
             x2="50"
             y2={KNOB_POINTER_END_Y}
             classList={{
-              'stroke-sky-100': drag.isDragging(),
-              'stroke-neutral-100': !drag.isDragging(),
+              'stroke-sky-100': control.isDragging(),
+              'stroke-neutral-100': !control.isDragging(),
             }}
             stroke-width="5"
             stroke-linecap="round"
@@ -263,8 +185,8 @@ export default function Knob(props: KnobProps) {
           classList={{
             'text-[11px]': displayValue().length > 6,
             'text-xs': displayValue().length <= 6,
-            'text-neutral-50': drag.isDragging(),
-            'text-neutral-200': !drag.isDragging(),
+            'text-neutral-50': control.isDragging(),
+            'text-neutral-200': !control.isDragging(),
           }}
           style={{ 'word-spacing': '-0.18em' }}
         >

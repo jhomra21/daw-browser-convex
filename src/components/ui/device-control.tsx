@@ -29,12 +29,13 @@ export function DeviceToggleButton(props: DeviceToggleButtonProps) {
 type DeviceValueStripProps = {
   value: string
   class?: string
+  valueClass?: string
 }
 
 export function DeviceValueStrip(props: DeviceValueStripProps) {
   return (
     <div class={cn('flex overflow-hidden border border-neutral-700 bg-neutral-300 font-mono text-2xs leading-none text-neutral-950', props.class)}>
-      <div class="min-w-0 flex-1 overflow-hidden whitespace-nowrap bg-orange-400 px-1 py-1">{props.value}</div>
+      <div class={cn('min-w-0 flex-1 overflow-hidden whitespace-nowrap bg-orange-400 px-1 py-1', props.valueClass)}>{props.value}</div>
       <div class="w-2 shrink-0" />
     </div>
   )

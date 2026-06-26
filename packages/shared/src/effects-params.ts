@@ -289,6 +289,13 @@ export function isSaturatorCurve(value: unknown): value is SaturatorCurve {
   return value === 'soft' || value === 'medium' || value === 'hard' || value === 'clip'
 }
 
+export function evaluateSaturatorCurvePoint(curve: SaturatorCurve, input: number): number {
+  if (curve === 'soft') return Math.tanh(1.8 * input)
+  if (curve === 'medium') return input < -0.666 ? -1 : input > 0.666 ? 1 : 1.5 * input - 0.5 * input * input * input
+  if (curve === 'hard') return Math.atan(4 * input) / Math.atan(4)
+  return clamp(input, -0.82, 0.82) / 0.82
+}
+
 export function normalizeSaturatorParams(input: SaturatorParamsInput = {}): SaturatorParams {
   const defaults = createDefaultSaturatorParams()
   const driveDb = readFiniteNumber(input.driveDb)

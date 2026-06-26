@@ -1,5 +1,6 @@
-import { createSignal, createUniqueId, For, type JSX } from 'solid-js'
+import { type JSX } from 'solid-js'
 import EffectShell from '~/components/effects/EffectShell'
+import { DraggableDeviceGraph, handleGraphKeyDelta } from '~/components/effects/draggable-device-graph'
 import { DeviceToggleButton, DeviceValueStrip } from '~/components/ui/device-control'
 import Knob from '~/components/ui/knob'
 import {
@@ -116,108 +117,6 @@ function DiffusionNetworkReadout(props: { label: string, value: string }) {
   )
 }
 
-type ReverbGraphHandle = {
-  label: string
-  x: () => number
-  y: () => number
-  onDrag: (point: { x: number, y: number }) => void
-  onKeyDown?: (event: KeyboardEvent) => void
-}
-
-function handleGraphKeyDelta(
-  event: KeyboardEvent,
-  deltas: Record<string, () => void>,
-) {
-  const apply = deltas[event.key]
-  if (!apply) return
-  event.preventDefault()
-  apply()
-}
-
-function DraggableReverbGraph(props: {
-  patternId: string
-  disabled: boolean
-  path: () => string
-  handles: ReverbGraphHandle[]
-}) {
-  const [activeHandle, setActiveHandle] = createSignal<ReverbGraphHandle>()
-  let graphRef: HTMLDivElement | undefined
-  let dragBounds: DOMRect | undefined
-  const graphPoint = (event: PointerEvent) => {
-    const bounds = dragBounds ?? graphRef?.getBoundingClientRect()
-    if (!bounds) return { x: 0, y: 0 }
-    return {
-      x: clamp(((event.clientX - bounds.left) / bounds.width) * 180, 0, 180),
-      y: clamp(((event.clientY - bounds.top) / bounds.height) * 58, 0, 58),
-    }
-  }
-  const dragActiveHandle = (event: PointerEvent) => {
-    if (activeHandle()) event.preventDefault()
-    activeHandle()?.onDrag(graphPoint(event))
-  }
-  const endDrag = (event: PointerEvent) => {
-    if (graphRef?.hasPointerCapture(event.pointerId)) {
-      graphRef.releasePointerCapture(event.pointerId)
-    }
-    dragBounds = undefined
-    setActiveHandle()
-  }
-
-  return (
-    <div
-      ref={(element) => (graphRef = element)}
-      class="relative h-[116px] shrink-0 touch-none overflow-hidden rounded-sm border border-neutral-800 bg-neutral-950"
-      onPointerMove={dragActiveHandle}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-    >
-      <svg
-        viewBox="0 0 180 58"
-        class="absolute inset-0 h-full w-full"
-        preserveAspectRatio="none"
-        aria-hidden="true"
-      >
-        <defs>
-          <pattern id={props.patternId} width="18" height="14" patternUnits="userSpaceOnUse">
-            <path d="M 18 0 L 0 0 0 14" fill="none" stroke="#262626" stroke-width="1" />
-          </pattern>
-        </defs>
-        <rect width="180" height="58" fill={`url(#${props.patternId})`} />
-        <path d={props.path()} fill="none" stroke="#fb923c" stroke-width="2" vector-effect="non-scaling-stroke" />
-      </svg>
-      <For each={props.handles}>
-        {(handle) => (
-          <button
-            type="button"
-            aria-label={handle.label}
-            class={cn(
-              'absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-cyan-300 bg-neutral-950',
-              props.disabled ? 'cursor-not-allowed opacity-60' : 'cursor-grab active:cursor-grabbing',
-            )}
-            style={{
-              left: `${(handle.x() / 180) * 100}%`,
-              top: `${(handle.y() / 58) * 100}%`,
-            }}
-            disabled={props.disabled}
-            onPointerDown={(event) => {
-              if (props.disabled) return
-              event.preventDefault()
-              dragBounds = graphRef?.getBoundingClientRect()
-              graphRef?.setPointerCapture(event.pointerId)
-              setActiveHandle(handle)
-              handle.onDrag(graphPoint(event))
-            }}
-            onKeyDown={(event) => {
-              if (props.disabled) return
-              handle.onKeyDown?.(event)
-            }}
-          />
-        )}
-      </For>
-    </div>
-  )
-}
-
 function FilterGraph(props: {
   params: ReverbParams
   disabled: boolean
@@ -226,7 +125,6 @@ function FilterGraph(props: {
   onLowCutChange: (value: number) => void
   onHighCutChange: (value: number) => void
 }) {
-  const patternId = createUniqueId()
   const lowCutX = () => 8 + clamp((props.params.lowCutHz - REVERB_LOW_CUT_HZ_MIN) / (REVERB_LOW_CUT_HZ_MAX - REVERB_LOW_CUT_HZ_MIN), 0, 1) * 46
   const highCutX = () => 74 + clamp((props.params.highCutHz - REVERB_HIGH_CUT_HZ_MIN) / (REVERB_HIGH_CUT_HZ_MAX - REVERB_HIGH_CUT_HZ_MIN), 0, 1) * 88
   const pointToLowCut = (x: number) => REVERB_LOW_CUT_HZ_MIN + (clamp((x - 8) / 46, 0, 1) * (REVERB_LOW_CUT_HZ_MAX - REVERB_LOW_CUT_HZ_MIN))
@@ -268,8 +166,7 @@ function FilterGraph(props: {
   ]
 
   return (
-    <DraggableReverbGraph
-      patternId={patternId}
+    <DraggableDeviceGraph
       disabled={props.disabled}
       path={filterPath}
       handles={handles()}
@@ -282,7 +179,6 @@ function SpaceGraph(props: {
   disabled: boolean
   onSpaceChange: (updates: Pick<ReverbParams, 'size' | 'decaySec' | 'diffusion'>) => void
 }) {
-  const patternId = createUniqueId()
   const size = () => normalizeUnitParam(props.params.size)
   const decay = () => clamp(props.params.decaySec / REVERB_DECAY_SEC_MAX, 0, 1)
   const diffusion = () => normalizeUnitParam(props.params.diffusion)
@@ -318,8 +214,7 @@ function SpaceGraph(props: {
   })
 
   return (
-    <DraggableReverbGraph
-      patternId={patternId}
+    <DraggableDeviceGraph
       disabled={props.disabled}
       path={() => `M 0 ${42 - size() * 12} C 38 ${28 - diffusion() * 8} 72 ${26 + size() * 10} 104 ${30 - decay() * 8} C 132 ${34 + diffusion() * 8} 152 ${40 - decay() * 8} 180 ${38 + size() * 8}`}
       handles={[
@@ -518,31 +413,72 @@ function EarlyReflectionsPanel(props: {
 }
 
 export default function Reverb(props: ReverbProps) {
-  const updateParam = (updates: Partial<ReverbParams>) => {
-    props.onChange(updates)
+  const updateWet = (value: number) => {
+    const wet = normalizeWet(value)
+    if (wet !== props.params.wet) props.onChange({ wet })
   }
-
-  const updateWet = (value: number) => updateParam({ wet: normalizeWet(value) })
-  const updateDecay = (value: number) => updateParam({ decaySec: normalizeDecay(value) })
-  const updatePreDelay = (value: number) => updateParam({ preDelayMs: normalizePreDelay(value) })
-  const updateReflections = (value: number) => updateParam({ reflections: normalizeUnitParam(value) })
-  const updateReflectionShape = (value: number) => updateParam({ reflectionShape: normalizeUnitParam(value) })
-  const updateReflectionModAmount = (value: number) => updateParam({ reflectionModAmountMs: normalizeReflectionModAmount(value) })
-  const updateReflectionModRate = (value: number) => updateParam({ reflectionModRateHz: normalizeReflectionModRate(value) })
-  const updateDiffuse = (value: number) => updateParam({ diffuse: normalizeUnitParam(value) })
-  const updateDiffusion = (value: number) => updateParam({ diffusion: normalizeUnitParam(value) })
-  const updateDensity = (value: number) => updateParam({ density: normalizeUnitParam(value) })
-  const updateLowCut = (value: number) => updateParam({ lowCutHz: normalizeLowCut(value) })
-  const updateHighCut = (value: number) => updateParam({ highCutHz: normalizeHighCut(value) })
-  const updateDiffusionLowCut = (value: number) => updateParam({ diffusionLowCutHz: normalizeDiffusionLowCut(value) })
-  const updateDiffusionHighCut = (value: number) => updateParam({ diffusionHighCutHz: normalizeDiffusionHighCut(value) })
-  const updateStereoWidth = (value: number) => updateParam({ stereoWidth: normalizeStereoWidth(value) })
+  const updateDecay = (value: number) => {
+    const decaySec = normalizeDecay(value)
+    if (decaySec !== props.params.decaySec) props.onChange({ decaySec })
+  }
+  const updatePreDelay = (value: number) => {
+    const preDelayMs = normalizePreDelay(value)
+    if (preDelayMs !== props.params.preDelayMs) props.onChange({ preDelayMs })
+  }
+  const updateReflections = (value: number) => {
+    const reflections = normalizeUnitParam(value)
+    if (reflections !== props.params.reflections) props.onChange({ reflections })
+  }
+  const updateReflectionShape = (value: number) => {
+    const reflectionShape = normalizeUnitParam(value)
+    if (reflectionShape !== props.params.reflectionShape) props.onChange({ reflectionShape })
+  }
+  const updateReflectionModAmount = (value: number) => {
+    const reflectionModAmountMs = normalizeReflectionModAmount(value)
+    if (reflectionModAmountMs !== props.params.reflectionModAmountMs) props.onChange({ reflectionModAmountMs })
+  }
+  const updateReflectionModRate = (value: number) => {
+    const reflectionModRateHz = normalizeReflectionModRate(value)
+    if (reflectionModRateHz !== props.params.reflectionModRateHz) props.onChange({ reflectionModRateHz })
+  }
+  const updateDiffuse = (value: number) => {
+    const diffuse = normalizeUnitParam(value)
+    if (diffuse !== props.params.diffuse) props.onChange({ diffuse })
+  }
+  const updateDiffusion = (value: number) => {
+    const diffusion = normalizeUnitParam(value)
+    if (diffusion !== props.params.diffusion) props.onChange({ diffusion })
+  }
+  const updateDensity = (value: number) => {
+    const density = normalizeUnitParam(value)
+    if (density !== props.params.density) props.onChange({ density })
+  }
+  const updateLowCut = (value: number) => {
+    const lowCutHz = normalizeLowCut(value)
+    if (lowCutHz !== props.params.lowCutHz) props.onChange({ lowCutHz })
+  }
+  const updateHighCut = (value: number) => {
+    const highCutHz = normalizeHighCut(value)
+    if (highCutHz !== props.params.highCutHz) props.onChange({ highCutHz })
+  }
+  const updateDiffusionLowCut = (value: number) => {
+    const diffusionLowCutHz = normalizeDiffusionLowCut(value)
+    if (diffusionLowCutHz !== props.params.diffusionLowCutHz) props.onChange({ diffusionLowCutHz })
+  }
+  const updateDiffusionHighCut = (value: number) => {
+    const diffusionHighCutHz = normalizeDiffusionHighCut(value)
+    if (diffusionHighCutHz !== props.params.diffusionHighCutHz) props.onChange({ diffusionHighCutHz })
+  }
+  const updateStereoWidth = (value: number) => {
+    const stereoWidth = normalizeStereoWidth(value)
+    if (stereoWidth !== props.params.stereoWidth) props.onChange({ stereoWidth })
+  }
   const updateSpace = (updates: Pick<ReverbParams, 'size' | 'decaySec' | 'diffusion'>) => {
-    updateParam({
-      size: normalizeUnitParam(updates.size),
-      decaySec: normalizeDecay(updates.decaySec),
-      diffusion: normalizeUnitParam(updates.diffusion),
-    })
+    const size = normalizeUnitParam(updates.size)
+    const decaySec = normalizeDecay(updates.decaySec)
+    const diffusion = normalizeUnitParam(updates.diffusion)
+    if (size === props.params.size && decaySec === props.params.decaySec && diffusion === props.params.diffusion) return
+    props.onChange({ size, decaySec, diffusion })
   }
   const lowCutActive = () => props.params.lowCutHz > REVERB_LOW_CUT_HZ_MIN
   const highCutActive = () => props.params.highCutHz < REVERB_HIGH_CUT_HZ_MAX
@@ -552,7 +488,7 @@ export default function Reverb(props: ReverbProps) {
   const diffusionHighCutActive = () => props.params.diffusionHighCutHz < REVERB_DIFFUSION_HIGH_CUT_HZ_MAX
   const toggleDiffusionLowCut = () => updateDiffusionLowCut(diffusionLowCutActive() ? REVERB_DIFFUSION_LOW_CUT_HZ_MIN : DIFFUSION_LOW_CUT_TOGGLE_HZ)
   const toggleDiffusionHighCut = () => updateDiffusionHighCut(diffusionHighCutActive() ? REVERB_DIFFUSION_HIGH_CUT_HZ_MAX : DIFFUSION_HIGH_CUT_TOGGLE_HZ)
-  const toggleReflectionSpin = () => updateParam({ reflectionSpin: !props.params.reflectionSpin })
+  const toggleReflectionSpin = () => props.onChange({ reflectionSpin: !props.params.reflectionSpin })
 
   return (
     <EffectShell

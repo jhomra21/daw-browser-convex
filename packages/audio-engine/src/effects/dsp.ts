@@ -1,4 +1,4 @@
-import { DELAY_MAX_DELAY_TIME_SEC, normalizeReverbParams, normalizeSaturatorParams, normalizeDelayParams, REVERB_DIFFUSION_HIGH_CUT_HZ_MAX, REVERB_DIFFUSION_LOW_CUT_HZ_MIN, supportsGain, type ArpParams, type DelayParamsLite, type EqBandParams, type EqChannelMode, type EqParamsLite, type ReverbParamsLite, type SaturatorCurve, type SaturatorParamsLite } from '@daw-browser/shared'
+import { DELAY_MAX_DELAY_TIME_SEC, evaluateSaturatorCurvePoint, normalizeReverbParams, normalizeSaturatorParams, normalizeDelayParams, REVERB_DIFFUSION_HIGH_CUT_HZ_MAX, REVERB_DIFFUSION_LOW_CUT_HZ_MIN, supportsGain, type ArpParams, type DelayParamsLite, type EqBandParams, type EqChannelMode, type EqParamsLite, type ReverbParamsLite, type SaturatorCurve, type SaturatorParamsLite } from '@daw-browser/shared'
 import { formatReverbImpulseSignature, getReverbImpulseSignatureParts, type ReverbImpulseSignatureParts } from './reverb-signature'
 
 type MidiNote = { beat: number; length: number; pitch: number; velocity?: number }
@@ -211,11 +211,7 @@ export function createSaturatorCurve(curve: SaturatorCurve): Float32Array<ArrayB
   const values = new Float32Array(new ArrayBuffer(4096 * Float32Array.BYTES_PER_ELEMENT))
   for (let index = 0; index < values.length; index++) {
     const x = (index / (values.length - 1)) * 2 - 1
-    let y = x
-    if (curve === 'soft') y = Math.tanh(1.8 * x)
-    else if (curve === 'medium') y = x < -0.666 ? -1 : x > 0.666 ? 1 : 1.5 * x - 0.5 * x * x * x
-    else if (curve === 'hard') y = Math.atan(4 * x) / Math.atan(4)
-    else y = Math.max(-0.82, Math.min(0.82, x)) / 0.82
+    const y = evaluateSaturatorCurvePoint(curve, x)
     values[index] = Math.max(-1, Math.min(1, Number.isFinite(y) ? y : 0))
   }
   return values

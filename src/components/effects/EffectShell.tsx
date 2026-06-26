@@ -45,9 +45,9 @@ export default function EffectShell(props: EffectShellProps) {
               {(onToggleEnabled) => (
                 <button
                   class={cn(
-                    'border-l border-neutral-800 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50',
+                    'flex w-9 items-center justify-center border-l border-neutral-800 text-xs disabled:cursor-not-allowed disabled:opacity-50',
                     props.enabled
-                      ? 'bg-cyan-500/10 text-cyan-300 shadow-[inset_0_0_0_1px_rgba(34,211,238,0.38)]'
+                      ? 'bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/15'
                       : 'bg-transparent text-neutral-400 hover:bg-neutral-800',
                   )}
                   disabled={props.disabled}

@@ -247,32 +247,52 @@ const readReverbParams = (value: unknown): SharedReverbParams | null => {
 
 const readSaturatorParams = (value: unknown): SaturatorParams | null => {
   if (!isRecord(value) || typeof value.enabled !== 'boolean') return null
+  if (
+    typeof value.driveDb !== 'number'
+    || !isSaturatorCurve(value.curve)
+    || typeof value.color !== 'boolean'
+    || typeof value.colorFrequencyHz !== 'number'
+    || typeof value.colorAmount !== 'number'
+    || typeof value.outputDb !== 'number'
+    || typeof value.dryWet !== 'number'
+  ) return null
   const params: SaturatorParamsInput = {
     enabled: value.enabled,
-    driveDb: readOptionalNumber(value.driveDb),
-    curve: isSaturatorCurve(value.curve) ? value.curve : undefined,
-    color: typeof value.color === 'boolean' ? value.color : undefined,
-    colorFrequencyHz: readOptionalNumber(value.colorFrequencyHz),
-    colorAmount: readOptionalNumber(value.colorAmount),
-    outputDb: readOptionalNumber(value.outputDb),
-    dryWet: readOptionalNumber(value.dryWet),
+    driveDb: value.driveDb,
+    curve: value.curve,
+    color: value.color,
+    colorFrequencyHz: value.colorFrequencyHz,
+    colorAmount: value.colorAmount,
+    outputDb: value.outputDb,
+    dryWet: value.dryWet,
   }
   return normalizeSaturatorParams(params)
 }
 
 const readDelayParams = (value: unknown): DelayParams | null => {
   if (!isRecord(value) || typeof value.enabled !== 'boolean') return null
+  if (
+    !isDelayMode(value.mode)
+    || typeof value.timeMs !== 'number'
+    || !isDelaySyncDivision(value.syncDivision)
+    || typeof value.feedback !== 'number'
+    || typeof value.dryWet !== 'number'
+    || typeof value.pingPong !== 'boolean'
+    || typeof value.filterEnabled !== 'boolean'
+    || typeof value.lowCutHz !== 'number'
+    || typeof value.highCutHz !== 'number'
+  ) return null
   const params: DelayParamsInput = {
     enabled: value.enabled,
-    mode: isDelayMode(value.mode) ? value.mode : undefined,
-    timeMs: readOptionalNumber(value.timeMs),
-    syncDivision: isDelaySyncDivision(value.syncDivision) ? value.syncDivision : undefined,
-    feedback: readOptionalNumber(value.feedback),
-    dryWet: readOptionalNumber(value.dryWet),
-    pingPong: typeof value.pingPong === 'boolean' ? value.pingPong : undefined,
-    filterEnabled: typeof value.filterEnabled === 'boolean' ? value.filterEnabled : undefined,
-    lowCutHz: readOptionalNumber(value.lowCutHz),
-    highCutHz: readOptionalNumber(value.highCutHz),
+    mode: value.mode,
+    timeMs: value.timeMs,
+    syncDivision: value.syncDivision,
+    feedback: value.feedback,
+    dryWet: value.dryWet,
+    pingPong: value.pingPong,
+    filterEnabled: value.filterEnabled,
+    lowCutHz: value.lowCutHz,
+    highCutHz: value.highCutHz,
   }
   return normalizeDelayParams(params)
 }

@@ -87,6 +87,27 @@ const delayParamsValidator = v.object({
 
 type TrackAudioEffectType = 'synth' | 'arpeggiator' | 'reverb' | 'eq' | 'saturator' | 'delay'
 type MasterAudioEffectType = 'reverb' | 'eq' | 'saturator' | 'delay'
+type SharedAudioEffectType = TrackAudioEffectType | MasterAudioEffectType
+
+const audioEffectPersistenceDescriptors = {
+  eq: {
+    normalizeParamsForUpdate: normalizeEqParamsForUpdate,
+    serializeParams: serializeEqParams,
+  },
+  saturator: {
+    normalizeParamsForUpdate: normalizeSaturatorParamsForUpdate,
+    serializeParams: serializeSaturatorParams,
+  },
+  delay: {
+    normalizeParamsForUpdate: normalizeDelayParamsForUpdate,
+    serializeParams: serializeDelayParams,
+  },
+  reverb: {
+    normalizeParamsForUpdate: normalizeReverbParamsForUpdate,
+    serializeParams: serializeReverbParams,
+  },
+}
+type AudioEffectPersistenceType = keyof typeof audioEffectPersistenceDescriptors
 
 const sanitizeArpParams = (params: {
   enabled: boolean
@@ -108,27 +129,30 @@ const sanitizeArpParams = (params: {
   }
 }
 
+const isAudioEffectPersistenceType = (type: SharedAudioEffectType): type is AudioEffectPersistenceType => (
+  type === 'eq' || type === 'saturator' || type === 'delay' || type === 'reverb'
+)
+
 const normalizeEffectParamsForUpdate = (
-  type: TrackAudioEffectType | MasterAudioEffectType,
+  type: SharedAudioEffectType,
   params: any,
   existing?: any,
 ) => {
-  if (type === 'eq') return normalizeEqParamsForUpdate(params, existing)
-  if (type === 'saturator') return normalizeSaturatorParamsForUpdate(params, existing)
-  if (type === 'delay') return normalizeDelayParamsForUpdate(params, existing)
-  if (type === 'reverb') return normalizeReverbParamsForUpdate(params, existing)
+  if (isAudioEffectPersistenceType(type)) {
+    return audioEffectPersistenceDescriptors[type].normalizeParamsForUpdate(params, existing)
+  }
   return params
 }
 
 const areEffectParamsEqual = (
-  type: TrackAudioEffectType | MasterAudioEffectType,
+  type: SharedAudioEffectType,
   current: any,
   next: any,
 ) => {
-  if (type === 'eq') return serializeEqParams(current) === serializeEqParams(next)
-  if (type === 'saturator') return serializeSaturatorParams(current) === serializeSaturatorParams(next)
-  if (type === 'delay') return serializeDelayParams(current) === serializeDelayParams(next)
-  if (type === 'reverb') return serializeReverbParams(current) === serializeReverbParams(next)
+  if (isAudioEffectPersistenceType(type)) {
+    const descriptor = audioEffectPersistenceDescriptors[type]
+    return descriptor.serializeParams(current) === descriptor.serializeParams(next)
+  }
   return current === next
 }
 

@@ -410,6 +410,83 @@ export function serializeDelayParams(params: DelayParams): string {
   return `${normalized.enabled ? 1 : 0}|${normalized.mode}|${normalized.timeMs}|${normalized.syncDivision}|${normalized.feedback}|${normalized.dryWet}|${normalized.pingPong ? 1 : 0}|${normalized.filterEnabled ? 1 : 0}|${normalized.lowCutHz}|${normalized.highCutHz}`
 }
 
+export type AudioEffectKind = 'eq' | 'saturator' | 'delay' | 'reverb'
+export type MasterAudioEffectKind = 'master-eq' | 'master-saturator' | 'master-delay' | 'master-reverb'
+
+type EqAudioEffectContract = {
+  kind: 'eq'
+  masterKind: 'master-eq'
+  createDefaultParams: () => EqParams
+  normalizeParams: (params: EqParamsInput) => EqParams
+  serializeParams: (params: EqParams) => string
+}
+
+type SaturatorAudioEffectContract = {
+  kind: 'saturator'
+  masterKind: 'master-saturator'
+  createDefaultParams: () => SaturatorParams
+  normalizeParams: (params: SaturatorParamsInput) => SaturatorParams
+  serializeParams: (params: SaturatorParams) => string
+}
+
+type DelayAudioEffectContract = {
+  kind: 'delay'
+  masterKind: 'master-delay'
+  createDefaultParams: () => DelayParams
+  normalizeParams: (params: DelayParamsInput) => DelayParams
+  serializeParams: (params: DelayParams) => string
+}
+
+type ReverbAudioEffectContract = {
+  kind: 'reverb'
+  masterKind: 'master-reverb'
+  createDefaultParams: () => ReverbParams
+  normalizeParams: (params: ReverbParamsInput) => ReverbParams
+  serializeParams: (params: ReverbParams) => string
+}
+
+type AudioEffectContractByKind = {
+  eq: EqAudioEffectContract
+  saturator: SaturatorAudioEffectContract
+  delay: DelayAudioEffectContract
+  reverb: ReverbAudioEffectContract
+}
+
+export type AudioEffectContract = AudioEffectContractByKind[AudioEffectKind]
+
+export const AUDIO_EFFECT_CONTRACTS = {
+  eq: {
+    kind: 'eq',
+    masterKind: 'master-eq',
+    createDefaultParams: createDefaultEqParams,
+    normalizeParams: normalizeEqParams,
+    serializeParams: serializeEqParams,
+  },
+  saturator: {
+    kind: 'saturator',
+    masterKind: 'master-saturator',
+    createDefaultParams: createDefaultSaturatorParams,
+    normalizeParams: normalizeSaturatorParams,
+    serializeParams: serializeSaturatorParams,
+  },
+  delay: {
+    kind: 'delay',
+    masterKind: 'master-delay',
+    createDefaultParams: createDefaultDelayParams,
+    normalizeParams: normalizeDelayParams,
+    serializeParams: serializeDelayParams,
+  },
+  reverb: {
+    kind: 'reverb',
+    masterKind: 'master-reverb',
+    createDefaultParams: createDefaultReverbParams,
+    normalizeParams: normalizeReverbParams,
+    serializeParams: serializeReverbParams,
+  },
+} satisfies AudioEffectContractByKind
+
+export const AUDIO_EFFECT_ORDER: AudioEffectKind[] = ['eq', 'saturator', 'delay', 'reverb']
+
 export type SynthWave = 'sine' | 'square' | 'sawtooth' | 'triangle'
 
 export type SynthParams = {

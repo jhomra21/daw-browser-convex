@@ -162,6 +162,17 @@ describe('Saturator params', () => {
     expect(normalized.colorAmount).toBe(1)
     expect(serializeSaturatorParams(normalized)).toBe(serializeSaturatorParams({ ...normalized, driveDb: 999 }))
   })
+
+  test('rejects partial shared track and master operations', () => {
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setSaturatorParams',
+      payload: { trackId: 'track-1', params: { enabled: false } },
+    })).toBeNull()
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setMasterSaturatorParams',
+      payload: { params: { enabled: false } },
+    })).toBeNull()
+  })
 })
 
 describe('Delay params', () => {
@@ -181,6 +192,17 @@ describe('Delay params', () => {
       .toBe('effects.setDelayParams')
     expect(parseSharedTimelineOperation({ kind: 'effects.setMasterDelayParams', payload: { params } })?.kind)
       .toBe('effects.setMasterDelayParams')
+  })
+
+  test('rejects partial shared track and master operations', () => {
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setDelayParams',
+      payload: { trackId: 'track-1', params: { enabled: false } },
+    })).toBeNull()
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setMasterDelayParams',
+      payload: { params: { enabled: false } },
+    })).toBeNull()
   })
 })
 

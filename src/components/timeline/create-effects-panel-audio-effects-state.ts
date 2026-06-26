@@ -2,18 +2,13 @@ import { createMemo, type Accessor } from "solid-js";
 import type { FunctionReturnType } from "convex/server";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import {
-  createDefaultEqParams,
-  createDefaultDelayParams,
-  createDefaultReverbParams,
-  createDefaultSaturatorParams,
+  AUDIO_EFFECT_CONTRACTS,
+  AUDIO_EFFECT_ORDER,
   normalizeDelayParams,
   normalizeEqParams,
   normalizeReverbParams,
   normalizeSaturatorParams,
-  serializeDelayParams,
-  serializeEqParams,
-  serializeReverbParams,
-  serializeSaturatorParams,
+  type AudioEffectKind,
   type DelayParams,
   type EqChannelMode,
   type EqParams,
@@ -34,11 +29,9 @@ import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-a
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 
-type EffectKind = "eq" | "saturator" | "delay" | "reverb";
-
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
 type PersistedAudioEffectDescriptor<Params> = {
-  kind: EffectKind;
+  kind: AudioEffectKind;
   createDefaultParams: () => Params;
   normalizeParams: (params: Params) => Params;
   serializeParams: (params: Params) => string;
@@ -90,7 +83,7 @@ type EffectsPanelAudioDevice = {
     toggleEnabled: (enabled: boolean) => void;
   };
   flushPending: () => Promise<void>;
-  orderedEffects: Accessor<EffectKind[]>;
+  orderedEffects: Accessor<AudioEffectKind[]>;
   reverb: {
     add: () => void;
     change: (updates: Partial<ReverbParams>) => void;
@@ -109,30 +102,30 @@ export function createEffectsPanelAudioDevice(
   const localEq = createLocalEffectRows<EqParams>({
     projectId: context.projectId,
     targetId: currentTargetId,
-    effect: (targetId) => targetId === "master" ? "master-eq" : "eq",
-    normalize: normalizeEqParams,
+    effect: (targetId) => targetId === "master" ? AUDIO_EFFECT_CONTRACTS.eq.masterKind : AUDIO_EFFECT_CONTRACTS.eq.kind,
+    normalize: AUDIO_EFFECT_CONTRACTS.eq.normalizeParams,
   });
   const localReverb = createLocalEffectRows<ReverbParams>({
     projectId: context.projectId,
     targetId: currentTargetId,
-    effect: (targetId) => targetId === "master" ? "master-reverb" : "reverb",
-    normalize: normalizeReverbParams,
+    effect: (targetId) => targetId === "master" ? AUDIO_EFFECT_CONTRACTS.reverb.masterKind : AUDIO_EFFECT_CONTRACTS.reverb.kind,
+    normalize: AUDIO_EFFECT_CONTRACTS.reverb.normalizeParams,
   });
   const localSaturator = createLocalEffectRows<SaturatorParams>({
     projectId: context.projectId,
     targetId: currentTargetId,
-    effect: (targetId) => targetId === "master" ? "master-saturator" : "saturator",
-    normalize: normalizeSaturatorParams,
+    effect: (targetId) => targetId === "master" ? AUDIO_EFFECT_CONTRACTS.saturator.masterKind : AUDIO_EFFECT_CONTRACTS.saturator.kind,
+    normalize: AUDIO_EFFECT_CONTRACTS.saturator.normalizeParams,
   });
   const localDelay = createLocalEffectRows<DelayParams>({
     projectId: context.projectId,
     targetId: currentTargetId,
-    effect: (targetId) => targetId === "master" ? "master-delay" : "delay",
-    normalize: normalizeDelayParams,
+    effect: (targetId) => targetId === "master" ? AUDIO_EFFECT_CONTRACTS.delay.masterKind : AUDIO_EFFECT_CONTRACTS.delay.kind,
+    normalize: AUDIO_EFFECT_CONTRACTS.delay.normalizeParams,
   });
   const isLocalProject = localEq.isLocalProject;
 
-  const remoteEffectForTarget = (targetId: string, effectType: EffectKind) => {
+  const remoteEffectForTarget = (targetId: string, effectType: AudioEffectKind) => {
     const targetType = targetId === "master" ? "master" : "track";
     return context.roomEffects()?.find((row) => {
       if (row.type !== effectType || row.targetType !== targetType) return false;
@@ -194,10 +187,10 @@ export function createEffectsPanelAudioDevice(
   }
 
   const eqState = createAudioEffectState<EqParams>({
-    kind: "eq",
-    createDefaultParams: createDefaultEqParams,
-    normalizeParams: normalizeEqParams,
-    serializeParams: serializeEqParams,
+    kind: AUDIO_EFFECT_CONTRACTS.eq.kind,
+    createDefaultParams: AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams,
+    normalizeParams: AUDIO_EFFECT_CONTRACTS.eq.normalizeParams,
+    serializeParams: AUDIO_EFFECT_CONTRACTS.eq.serializeParams,
     setTrackEngineParams: (audioEngine, trackId, params) => audioEngine.setTrackEq(trackId, params),
     setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterEq(params),
     row: localEq.row,
@@ -215,10 +208,10 @@ export function createEffectsPanelAudioDevice(
   });
 
   const reverbState = createAudioEffectState<ReverbParams>({
-    kind: "reverb",
-    createDefaultParams: createDefaultReverbParams,
-    normalizeParams: normalizeReverbParams,
-    serializeParams: serializeReverbParams,
+    kind: AUDIO_EFFECT_CONTRACTS.reverb.kind,
+    createDefaultParams: AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams,
+    normalizeParams: AUDIO_EFFECT_CONTRACTS.reverb.normalizeParams,
+    serializeParams: AUDIO_EFFECT_CONTRACTS.reverb.serializeParams,
     setTrackEngineParams: (audioEngine, trackId, params) => audioEngine.setTrackReverb(trackId, params),
     setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterReverb(params),
     row: localReverb.row,
@@ -236,10 +229,10 @@ export function createEffectsPanelAudioDevice(
   });
 
   const saturatorState = createAudioEffectState<SaturatorParams>({
-    kind: "saturator",
-    createDefaultParams: createDefaultSaturatorParams,
-    normalizeParams: normalizeSaturatorParams,
-    serializeParams: serializeSaturatorParams,
+    kind: AUDIO_EFFECT_CONTRACTS.saturator.kind,
+    createDefaultParams: AUDIO_EFFECT_CONTRACTS.saturator.createDefaultParams,
+    normalizeParams: AUDIO_EFFECT_CONTRACTS.saturator.normalizeParams,
+    serializeParams: AUDIO_EFFECT_CONTRACTS.saturator.serializeParams,
     setTrackEngineParams: (audioEngine, trackId, params) => audioEngine.setTrackSaturator(trackId, params),
     setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterSaturator(params),
     row: localSaturator.row,
@@ -257,10 +250,10 @@ export function createEffectsPanelAudioDevice(
   });
 
   const delayState = createAudioEffectState<DelayParams>({
-    kind: "delay",
-    createDefaultParams: createDefaultDelayParams,
-    normalizeParams: normalizeDelayParams,
-    serializeParams: serializeDelayParams,
+    kind: AUDIO_EFFECT_CONTRACTS.delay.kind,
+    createDefaultParams: AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams,
+    normalizeParams: AUDIO_EFFECT_CONTRACTS.delay.normalizeParams,
+    serializeParams: AUDIO_EFFECT_CONTRACTS.delay.serializeParams,
     setTrackEngineParams: (audioEngine, trackId, params) => audioEngine.setTrackDelay(trackId, params),
     setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterDelay(params),
     row: localDelay.row,
@@ -277,14 +270,13 @@ export function createEffectsPanelAudioDevice(
     commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-delay", from: previous, to: next }, projectId),
   });
 
-  const orderedEffects = createMemo<EffectKind[]>(() => {
-    const present: EffectKind[] = [];
+  const orderedEffects = createMemo<AudioEffectKind[]>(() => {
+    const present: AudioEffectKind[] = [];
     if (eqState.params()) present.push("eq");
     if (saturatorState.params()) present.push("saturator");
     if (delayState.params()) present.push("delay");
     if (reverbState.params()) present.push("reverb");
-    const fixedOrder: EffectKind[] = ["eq", "saturator", "delay", "reverb"];
-    return fixedOrder.filter((kind) => present.includes(kind));
+    return AUDIO_EFFECT_ORDER.filter((kind) => present.includes(kind));
   });
 
   const updateEq = (updater: (prev: EqParams) => EqParams) => {
@@ -332,7 +324,7 @@ export function createEffectsPanelAudioDevice(
       )),
       params: eqState.params,
       readDraftForTarget: eqState.readDraftForTarget,
-      reset: () => updateEq(() => createDefaultEqParams()),
+      reset: () => updateEq(() => AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams()),
       toggleBand: (bandId) => updateEq((prev) => ({
         ...prev,
         bands: prev.bands.map((band) => band.id === bandId ? { ...band, enabled: !band.enabled } : band),
@@ -348,7 +340,7 @@ export function createEffectsPanelAudioDevice(
       change: (updates) => updateSaturator((prev) => normalizeSaturatorParams({ ...prev, ...updates })),
       params: saturatorState.params,
       readDraftForTarget: saturatorState.readDraftForTarget,
-      reset: () => updateSaturator(() => createDefaultSaturatorParams()),
+      reset: () => updateSaturator(() => AUDIO_EFFECT_CONTRACTS.saturator.createDefaultParams()),
       toggleEnabled: (enabled) => updateSaturator((prev) => ({ ...prev, enabled })),
     },
     delay: {
@@ -356,7 +348,7 @@ export function createEffectsPanelAudioDevice(
       change: (updates) => updateDelay((prev) => normalizeDelayParams({ ...prev, ...updates })),
       params: delayState.params,
       readDraftForTarget: delayState.readDraftForTarget,
-      reset: () => updateDelay(() => createDefaultDelayParams()),
+      reset: () => updateDelay(() => AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams()),
       toggleEnabled: (enabled) => updateDelay((prev) => ({ ...prev, enabled })),
     },
     reverb: {
@@ -364,7 +356,7 @@ export function createEffectsPanelAudioDevice(
       change: (updates) => updateReverb((prev) => normalizeReverbParams({ ...prev, ...updates })),
       params: reverbState.params,
       readDraftForTarget: reverbState.readDraftForTarget,
-      reset: () => updateReverb(() => createDefaultReverbParams()),
+      reset: () => updateReverb(() => AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams()),
       toggleEnabled: (enabled) => updateReverb((prev) => ({ ...prev, enabled })),
     },
   };

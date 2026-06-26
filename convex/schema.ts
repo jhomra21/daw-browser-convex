@@ -173,6 +173,7 @@ export default defineSchema({
   })
     .index("by_track", ["trackId"])
     .index("by_room", ["projectId"])
+    .index("by_room_target", ["projectId", "targetType"])
     .index("by_track_order", ["trackId", "index"]),
 
   chatHistories: defineTable({

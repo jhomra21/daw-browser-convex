@@ -14,6 +14,7 @@ import {
   normalizeEqParams,
   normalizeEqParamsForUpdate,
   normalizeDelayParams,
+  normalizeAudioEffectOrder,
   normalizeReverbParams,
   normalizeReverbParamsForUpdate,
   normalizeSaturatorParams,
@@ -148,6 +149,30 @@ describe('EQ params', () => {
         },
       },
     })
+  })
+})
+
+describe('Audio effect order', () => {
+  test('normalizes order against enabled effects', () => {
+    expect(normalizeAudioEffectOrder(['delay', 'unknown', 'eq', 'delay'], ['eq', 'delay', 'reverb'])).toEqual(['delay', 'eq', 'reverb'])
+  })
+
+  test('parses shared reorder operations and rejects unknown effects', () => {
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.reorderAudioChain',
+      payload: { trackId: 'track-1', order: ['delay', 'eq'] },
+    })).toEqual({
+      kind: 'effects.reorderAudioChain',
+      payload: { trackId: 'track-1', order: ['delay', 'eq'] },
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.reorderMasterAudioChain',
+      payload: { order: ['reverb', 'saturator'] },
+    })?.kind).toBe('effects.reorderMasterAudioChain')
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.reorderAudioChain',
+      payload: { trackId: 'track-1', order: ['delay', 'chorus'] },
+    })).toBeNull()
   })
 })
 

@@ -85,9 +85,12 @@ const delayParamsValidator = v.object({
   highCutHz: v.number(),
 })
 
+const audioEffectKindValidator = v.union(v.literal("eq"), v.literal("saturator"), v.literal("delay"), v.literal("reverb"))
+
 type TrackAudioEffectType = 'synth' | 'arpeggiator' | 'reverb' | 'eq' | 'saturator' | 'delay'
 type MasterAudioEffectType = 'reverb' | 'eq' | 'saturator' | 'delay'
 type SharedAudioEffectType = TrackAudioEffectType | MasterAudioEffectType
+type AudioEffectKind = MasterAudioEffectType
 
 const audioEffectPersistenceDescriptors = {
   eq: {
@@ -236,6 +239,46 @@ const getTrackEffect = async (
     .collect();
   rows.sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0));
   return rows.find((row: any) => row.type === input.type && row.targetType === 'track') ?? null;
+}
+
+const reorderRows = async (ctx: any, rows: any[], order: AudioEffectKind[]) => {
+  const audioRows = rows
+    .filter((row) => row.type === 'eq' || row.type === 'saturator' || row.type === 'delay' || row.type === 'reverb')
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+  const requestedKinds = new Set<AudioEffectKind>()
+  const requested = order.flatMap((kind) => {
+    if (requestedKinds.has(kind)) return []
+    const row = audioRows.find((entry) => entry.type === kind)
+    if (!row) return []
+    requestedKinds.add(kind)
+    return [row]
+  })
+  const requestedIds = new Set(requested.map((row) => row._id))
+  const omitted = audioRows.filter((row) => !requestedIds.has(row._id))
+  const nextRows = [...requested, ...omitted]
+  await Promise.all(nextRows.map((row, index) => row.index === index ? undefined : ctx.db.patch(row._id, { index })))
+}
+
+const reorderAudioEffectsForUser = async (
+  ctx: any,
+  input: {
+    projectId: string
+    userId: string
+    targetType: 'track' | 'master'
+    trackId?: any
+    order: AudioEffectKind[]
+  },
+) => {
+  if (input.targetType === 'track') {
+    const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
+    if (!access || access.track.projectId !== input.projectId) return
+    const rows = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
+    await reorderRows(ctx, rows.filter((row: any) => row.targetType === 'track'), input.order)
+    return
+  }
+  await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
+  const rows = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
+  await reorderRows(ctx, rows, input.order)
 }
 
 // Return the EQ effect row for a track if it exists (we use a single EQ per track for now)
@@ -480,6 +523,21 @@ export const setMasterDelayParams = mutation({
   },
 })
 
+export const reorderAudioEffects = mutation({
+  args: {
+    projectId: v.string(),
+    targetType: v.union(v.literal('track'), v.literal('master')),
+    trackId: v.optional(v.id('tracks')),
+    order: v.array(audioEffectKindValidator),
+  },
+  handler: async (ctx, { projectId, targetType, trackId, order }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    if (targetType === 'track' && !trackId) return
+    await reorderAudioEffectsForUser(ctx, { projectId, userId, targetType, trackId, order })
+    return { status: 'applied' }
+  },
+})
+
 export const serverSetSynthParams = mutation({
   args: {
     projectId: v.string(),
@@ -606,5 +664,26 @@ export const serverSetMasterDelayParams = mutation({
   handler: async (ctx, { projectId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     return await upsertMasterEffect(ctx, { projectId, userId, type: 'delay', params })
+  },
+})
+
+export const serverReorderAudioEffects = mutation({
+  args: {
+    projectId: v.string(),
+    targetType: v.union(v.literal('track'), v.literal('master')),
+    trackId: v.optional(v.string()),
+    order: v.array(audioEffectKindValidator),
+  },
+  handler: async (ctx, { projectId, targetType, trackId, order }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    if (targetType === 'track') {
+      if (!trackId) return
+      const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
+      if (!normalizedTrackId) return
+      await reorderAudioEffectsForUser(ctx, { projectId, userId, targetType, trackId: normalizedTrackId, order })
+      return { status: 'applied' }
+    }
+    await reorderAudioEffectsForUser(ctx, { projectId, userId, targetType, order })
+    return { status: 'applied' }
   },
 })

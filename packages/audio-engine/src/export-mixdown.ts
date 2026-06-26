@@ -13,6 +13,7 @@ import { createAudioStretchCache } from './audio-stretch-cache'
 import {
   getExportAudioFormatMetadata,
   type ArpParams,
+  type AudioEffectKind,
   type DelayParamsLite,
   type EqParamsLite,
   type ExportAudioFormat,
@@ -43,7 +44,8 @@ export type ExportFx = {
   masterSaturator?: SaturatorParamsLite
   masterDelay?: DelayParamsLite
   masterReverb?: ReverbParamsLite
-  trackFx?: Record<string, { eq?: EqParamsLite; saturator?: SaturatorParamsLite; delay?: DelayParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput }>
+  masterFxOrder?: AudioEffectKind[]
+  trackFx?: Record<string, { order?: AudioEffectKind[]; eq?: EqParamsLite; saturator?: SaturatorParamsLite; delay?: DelayParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput }>
 }
 
 export type ExportRequest = {
@@ -162,6 +164,7 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
       masterDelay: fx?.masterDelay,
       masterReverb: fx?.masterReverb,
       masterVolume: fx?.masterVolume,
+      masterFxOrder: fx?.masterFxOrder,
       trackFx: fx?.trackFx,
     }),
     signal,

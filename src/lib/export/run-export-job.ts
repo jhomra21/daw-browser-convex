@@ -1,6 +1,6 @@
 import type { ExportRange, ExportFx } from '@daw-browser/audio-engine/export-mixdown'
 import type { ExportAudioFormat } from '@daw-browser/shared'
-import { formatExportFileTimestamp, getExportAudioFormatMetadata, isLocalId, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams } from '@daw-browser/shared'
+import { formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectKind, isLocalId, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams } from '@daw-browser/shared'
 import type { FunctionReturnType } from 'convex/server'
 
 import { convexApi, convexClient } from '~/lib/convex'
@@ -8,7 +8,8 @@ import { saveCloudExport } from '~/lib/cloud-export'
 import { isAbortError } from '~/lib/dom-errors'
 import { chooseLocalExportDirectory, chooseLocalExportFile, createLocalExportDirectoryWritable, createLocalExportTarget, createLocalExportWritable, saveBlobLocally } from '~/lib/local-export'
 import { chooseStemExportDirectory, createStemExportWritable, sanitizeStemFileName } from '~/lib/local-stem-export'
-import { listLocalEffects, type LocalEffectRow } from '~/lib/local-effects'
+import { audioEffectKindFromLocalEffect, listLocalEffects, type LocalEffectRow } from '~/lib/local-effects'
+import { collectAudioEffectOrders, type AudioEffectOrderEntry } from '~/lib/audio-effect-order-rows'
 import { saveLocalExportMetadataBatch, type LocalExportMetadataInput } from '~/lib/local-export-metadata'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
@@ -72,7 +73,10 @@ const applyTrackFxPatch = (trackFx: TrackFxMap, trackId: string, patch: TrackFxP
 
 const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
   const trackFx = ensureTrackFxMap(fx)
+  const orderEntries: AudioEffectOrderEntry[] = []
   for (const row of rows) {
+    const kind = audioEffectKindFromLocalEffect(row.effect)
+    if (kind) orderEntries.push({ targetId: row.targetId, kind, index: row.index })
     if (row.effect === 'master-eq') {
       fx.masterEq = row.params
       continue
@@ -96,11 +100,19 @@ const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
     if (row.effect === 'arp') applyTrackFxPatch(trackFx, row.targetId, { arp: row.params })
     if (row.effect === 'synth') applyTrackFxPatch(trackFx, row.targetId, { synth: row.params })
   }
+  const orders = collectAudioEffectOrders(orderEntries)
+  fx.masterFxOrder = orders.master
+  for (const [trackId, order] of orders.tracks) applyTrackFxPatch(trackFx, trackId, { order })
 }
 
 const applyRoomEffectRowsToFx = (fx: ExportFx, rows: RoomEffectRow[]) => {
   const trackFx = ensureTrackFxMap(fx)
+  const orderEntries: AudioEffectOrderEntry[] = []
   for (const row of rows) {
+    if (isAudioEffectKind(row.type)) {
+      if (row.targetType === 'master') orderEntries.push({ targetId: 'master', kind: row.type, index: row.index })
+      else if (row.trackId) orderEntries.push({ targetId: row.trackId, kind: row.type, index: row.index })
+    }
     if (row.targetType === 'master') {
       if (row.type === 'eq' && row.params) fx.masterEq = row.params
       if (row.type === 'saturator' && row.params) fx.masterSaturator = normalizeSaturatorParams(row.params)
@@ -117,6 +129,9 @@ const applyRoomEffectRowsToFx = (fx: ExportFx, rows: RoomEffectRow[]) => {
     if (row.type === 'arpeggiator') applyTrackFxPatch(trackFx, trackId, { arp: row.params })
     if (row.type === 'synth') applyTrackFxPatch(trackFx, trackId, { synth: row.params })
   }
+  const orders = collectAudioEffectOrders(orderEntries)
+  fx.masterFxOrder = orders.master
+  for (const [trackId, order] of orders.tracks) applyTrackFxPatch(trackFx, trackId, { order })
 }
 
 const throwIfExportAborted = (signal: AbortSignal) => {

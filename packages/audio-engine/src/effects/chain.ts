@@ -1,4 +1,4 @@
-import { DELAY_MAX_DELAY_TIME_SEC, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type DelayParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { AUDIO_EFFECT_ORDER, DELAY_MAX_DELAY_TIME_SEC, normalizeAudioEffectOrder, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type AudioEffectKind, type DelayParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { applyDelayNodeParams, applySaturatorNodeParams } from './dsp'
 import { getReverbImpulseSignature } from './reverb-signature'
 
@@ -262,6 +262,7 @@ export function connectFxChain(
     saturatorChain?: SaturatorNodeChain | null
     delayChain?: DelayNodeChain | null
     reverbChain?: ReverbNodeChain | null
+    order?: AudioEffectKind[]
   },
 ) {
   const eqNodes = config.eqNodes ?? []
@@ -279,14 +280,14 @@ export function connectFxChain(
     connectInput: (source: AudioNode) => void
     outputs: AudioNode[]
   }
-  const stages: FxStage[] = []
+  const stagesByKind = new Map<AudioEffectKind, FxStage>()
 
   if (eqNodes.length > 0) {
     disconnectAudioNodes(eqNodes)
     for (let index = 0; index < eqNodes.length; index++) {
       if (index < eqNodes.length - 1) eqNodes[index].connect(eqNodes[index + 1])
     }
-    stages.push({
+    stagesByKind.set('eq', {
       connectInput: (source) => source.connect(eqNodes[0]),
       outputs: [eqNodes[eqNodes.length - 1]],
     })
@@ -294,7 +295,7 @@ export function connectFxChain(
 
   if (saturator) {
     disconnectAudioNodes([saturator.outputGain])
-    stages.push({
+    stagesByKind.set('saturator', {
       connectInput: (source) => {
         source.connect(saturator.dryGain)
         source.connect(saturator.driveGain)
@@ -305,7 +306,7 @@ export function connectFxChain(
 
   if (delay) {
     disconnectAudioNodes([delay.dryGain, delay.wetGain])
-    stages.push({
+    stagesByKind.set('delay', {
       connectInput: (source) => {
         source.connect(delay.dryGain)
         source.connect(delay.pingPong ? delay.splitter : delay.delayLeft)
@@ -316,7 +317,7 @@ export function connectFxChain(
 
   if (reverb) {
     disconnectAudioNodes([reverb.dryGain, reverb.widthMerger])
-    stages.push({
+    stagesByKind.set('reverb', {
       connectInput: (source) => {
         source.connect(reverb.dryGain)
         source.connect(reverb.preDelay)
@@ -326,6 +327,11 @@ export function connectFxChain(
   }
 
   try { input.disconnect() } catch {}
+  const stages = normalizeAudioEffectOrder(config.order ?? AUDIO_EFFECT_ORDER, AUDIO_EFFECT_ORDER)
+    .flatMap((kind) => {
+      const stage = stagesByKind.get(kind)
+      return stage ? [stage] : []
+    })
   if (stages.length === 0) {
     input.connect(destination)
     return

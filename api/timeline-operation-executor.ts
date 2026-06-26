@@ -149,6 +149,13 @@ export const executeTimelineOperation = async (
         trackId: operation.payload.trackId,
         params: operation.payload.params,
       })
+    case 'effects.reorderAudioChain':
+      return await context.convex.mutation(convexApi.effects.serverReorderAudioEffects, {
+        projectId: context.projectId,
+        targetType: 'track',
+        trackId: operation.payload.trackId,
+        order: operation.payload.order,
+      })
     case 'effects.setSynthParams':
       return await context.convex.mutation(convexApi.effects.serverSetSynthParams, {
         projectId: context.projectId,
@@ -180,6 +187,12 @@ export const executeTimelineOperation = async (
       return await context.convex.mutation(convexApi.effects.serverSetMasterDelayParams, {
         projectId: context.projectId,
         params: operation.payload.params,
+      })
+    case 'effects.reorderMasterAudioChain':
+      return await context.convex.mutation(convexApi.effects.serverReorderAudioEffects, {
+        projectId: context.projectId,
+        targetType: 'master',
+        order: operation.payload.order,
       })
   }
 }

@@ -487,6 +487,31 @@ export const AUDIO_EFFECT_CONTRACTS = {
 
 export const AUDIO_EFFECT_ORDER: AudioEffectKind[] = ['eq', 'saturator', 'delay', 'reverb']
 
+export function isAudioEffectKind(value: unknown): value is AudioEffectKind {
+  return value === 'eq' || value === 'saturator' || value === 'delay' || value === 'reverb'
+}
+
+export function normalizeAudioEffectOrder(order: readonly unknown[], enabled: readonly AudioEffectKind[]): AudioEffectKind[] {
+  const enabledSet = new Set(enabled)
+  const seen = new Set<AudioEffectKind>()
+  const normalized: AudioEffectKind[] = []
+  for (const value of order) {
+    if (!isAudioEffectKind(value) || !enabledSet.has(value) || seen.has(value)) continue
+    seen.add(value)
+    normalized.push(value)
+  }
+  for (const kind of AUDIO_EFFECT_ORDER) {
+    if (!enabledSet.has(kind) || seen.has(kind)) continue
+    seen.add(kind)
+    normalized.push(kind)
+  }
+  return normalized
+}
+
+export function areAudioEffectOrdersEqual(left: readonly AudioEffectKind[] | undefined, right: readonly AudioEffectKind[]): boolean {
+  return !!left && left.length === right.length && left.every((kind, index) => kind === right[index])
+}
+
 export type SynthWave = 'sine' | 'square' | 'sawtooth' | 'triangle'
 
 export type SynthParams = {

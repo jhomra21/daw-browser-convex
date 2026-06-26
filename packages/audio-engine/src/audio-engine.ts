@@ -1,7 +1,7 @@
 import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime } from './audio-runtime'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
-import { normalizeMasterVolume, type ArpParams, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite, type SynthParamsInput } from '@daw-browser/shared'
+import { normalizeMasterVolume, type ArpParams, type AudioEffectKind, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite, type SynthParamsInput } from '@daw-browser/shared'
 import { createReverbImpulseCache } from './effects/reverb-impulse-cache'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
@@ -210,6 +210,10 @@ export class AudioEngine {
     this.mixerRuntime.setTrackDelay(trackId, params)
   }
 
+  setTrackFxOrder(trackId: string, order: AudioEffectKind[]) {
+    this.mixerRuntime.setTrackFxOrder(trackId, order)
+  }
+
   setMasterReverb(params: ReverbParamsLite) {
     this.masterFx.setReverb(
       this.audioCtx,
@@ -226,6 +230,10 @@ export class AudioEngine {
 
   setMasterDelay(params: DelayParamsLite) {
     this.masterFx.setDelay(this.audioCtx, this.masterGain, this.destination, params)
+  }
+
+  setMasterFxOrder(order: AudioEffectKind[]) {
+    this.masterFx.setOrder(this.audioCtx, this.masterGain, this.destination, order)
   }
 
   previewTrackVolume(trackId: string, volume: number, muted: boolean) {

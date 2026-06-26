@@ -1,4 +1,4 @@
-import { normalizeEqParams, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeEqParams, type AudioEffectKind, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createDelayChainState, type DelayChainState } from './effects/delay-chain-state'
@@ -44,6 +44,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const pendingSaturatorParams = new Map<string, SaturatorParamsLite>()
   const delayChains = new Map<string, DelayChainState>()
   const pendingDelayParams = new Map<string, DelayParamsLite>()
+  const trackFxOrders = new Map<string, AudioEffectKind[]>()
   let currentBpm = 120
 
   const cleanupTrackSendGains = (trackId: string) => {
@@ -60,6 +61,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       saturatorChain: saturatorChains.get(trackId)?.chain(),
       delayChain: delayChains.get(trackId)?.chain(),
       reverbChain: reverbChains.get(trackId)?.chain(),
+      order: trackFxOrders.get(trackId),
     })
   }
 
@@ -232,6 +234,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     pendingReverbParams.delete(trackId)
     pendingSaturatorParams.delete(trackId)
     pendingDelayParams.delete(trackId)
+    trackFxOrders.delete(trackId)
 
     options.disposeSynthTrack(trackId)
     options.disposeTrackMeters(trackId)
@@ -258,6 +261,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     for (const state of delayChains.values()) state.close()
     delayChains.clear()
     pendingDelayParams.clear()
+    trackFxOrders.clear()
   }
 
   return {
@@ -311,6 +315,14 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     setTrackEq,
     setTrackSaturator,
     setTrackDelay,
+    setTrackFxOrder: (trackId: string, order: AudioEffectKind[]) => {
+      const normalized = normalizeAudioEffectOrder(order, order)
+      if (areAudioEffectOrdersEqual(trackFxOrders.get(trackId), normalized)) return
+      trackFxOrders.set(trackId, normalized)
+      const input = inputs.get(trackId)
+      const gain = gains.get(trackId)
+      if (input && gain) rebuildTrackRouting(trackId, { input, gain })
+    },
     setTrackReverb,
     setBpm: (bpm: number) => {
       currentBpm = bpm

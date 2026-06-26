@@ -320,20 +320,20 @@ Effect row index
 
 ## Progress
 
-- [ ] Phase 1: Shared effect order helpers
-- [ ] Phase 2: Shared timeline operations
-- [ ] Phase 3: Convex reorder mutations
-- [ ] Phase 4: Timeline operation executor
-- [ ] Phase 5: Local effects reorder
-- [ ] Phase 6: Audio engine type plumbing
-- [ ] Phase 7: Reorder existing `connectFxChain` stages
-- [ ] Phase 8: Live mixer runtime
-- [ ] Phase 9: Master FX runtime
-- [ ] Phase 10: AudioEngine facade
-- [ ] Phase 11: Offline export
-- [ ] Phase 12: Effects panel state
-- [ ] Phase 13: Audio sync hook
-- [ ] Phase 14: Drag UI
-- [ ] Phase 15: Tests
-- [ ] Phase 16: Simplification pass
-- [ ] Phase 17: Validation
+- [x] Phase 1: Shared effect order helpers
+- [x] Phase 2: Shared timeline operations
+- [x] Phase 3: Convex reorder mutations
+- [x] Phase 4: Timeline operation executor
+- [x] Phase 5: Local effects reorder
+- [x] Phase 6: Audio engine type plumbing
+- [x] Phase 7: Reorder existing `connectFxChain` stages
+- [x] Phase 8: Live mixer runtime
+- [x] Phase 9: Master FX runtime
+- [x] Phase 10: AudioEngine facade
+- [x] Phase 11: Offline export
+- [x] Phase 12: Effects panel state
+- [x] Phase 13: Audio sync hook
+- [x] Phase 14: Drag UI
+- [x] Phase 15: Tests
+- [x] Phase 16: Simplification pass
+- [x] Phase 17: Validation

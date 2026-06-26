@@ -3,6 +3,7 @@ import {
   Show,
   For,
 } from "solid-js";
+import type { AudioEffectKind } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Delay from "~/components/effects/Delay";
 import Eq from "~/components/effects/Eq";
@@ -23,6 +24,7 @@ import {
   type EffectsPanelAudioEffects,
   type EffectsPanelInstrumentDevice,
 } from "~/components/timeline/create-effects-panel-controller";
+import { createEffectCardReorderDrag } from "~/components/timeline/create-effect-card-reorder-drag";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -155,36 +157,62 @@ type EffectsPanelEffectCardsProps = {
   spectrum: SpectrumFrame | null;
 };
 
+type EffectsPanelAudioEffectCardProps = {
+  effect: AudioEffectKind;
+  audioEffects: EffectsPanelAudioEffects;
+  spectrum: SpectrumFrame | null;
+};
+
+const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> = (props) => {
+  if (props.effect === "eq") {
+    return (
+      <Show when={props.audioEffects.eq.params()}>
+        {(params) => <Eq bands={params().bands} enabled={params().enabled} channelMode={params().channelMode} onBandChange={props.audioEffects.eq.changeBand} onChannelModeChange={props.audioEffects.eq.changeChannelMode} onBandToggle={props.audioEffects.eq.toggleBand} onToggleEnabled={props.audioEffects.eq.toggleEnabled} onReset={props.audioEffects.eq.reset} spectrumData={props.spectrum} />}
+      </Show>
+    );
+  }
+  if (props.effect === "saturator") {
+    return (
+      <Show when={props.audioEffects.saturator.params()}>
+        {(params) => <Saturator params={params()} onChange={props.audioEffects.saturator.change} onToggleEnabled={props.audioEffects.saturator.toggleEnabled} onReset={props.audioEffects.saturator.reset} />}
+      </Show>
+    );
+  }
+  if (props.effect === "delay") {
+    return (
+      <Show when={props.audioEffects.delay.params()}>
+        {(params) => <Delay params={params()} onChange={props.audioEffects.delay.change} onToggleEnabled={props.audioEffects.delay.toggleEnabled} onReset={props.audioEffects.delay.reset} />}
+      </Show>
+    );
+  }
+  return (
+    <Show when={props.audioEffects.reverb.params()}>
+      {(params) => <Reverb params={params()} onChange={props.audioEffects.reverb.change} onToggleEnabled={props.audioEffects.reverb.toggleEnabled} onReset={props.audioEffects.reverb.reset} />}
+    </Show>
+  );
+};
+
 const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props) => (
   <div
     class="flex h-full shrink-0 items-stretch gap-3"
     classList={{ "pointer-events-none opacity-60": !props.canWrite }}
   >
     <For each={props.audioEffects.orderedEffects()}>
-      {(effect) => (
-        <>
-          <Show when={props.audioEffects.eq.params()}>
-            {(params) => effect === "eq" && (
-              <Eq bands={params().bands} enabled={params().enabled} channelMode={params().channelMode} onBandChange={props.audioEffects.eq.changeBand} onChannelModeChange={props.audioEffects.eq.changeChannelMode} onBandToggle={props.audioEffects.eq.toggleBand} onToggleEnabled={props.audioEffects.eq.toggleEnabled} onReset={props.audioEffects.eq.reset} spectrumData={props.spectrum} />
-            )}
-          </Show>
-          <Show when={props.audioEffects.saturator.params()}>
-            {(params) => effect === "saturator" && (
-              <Saturator params={params()} onChange={props.audioEffects.saturator.change} onToggleEnabled={props.audioEffects.saturator.toggleEnabled} onReset={props.audioEffects.saturator.reset} />
-            )}
-          </Show>
-          <Show when={props.audioEffects.delay.params()}>
-            {(params) => effect === "delay" && (
-              <Delay params={params()} onChange={props.audioEffects.delay.change} onToggleEnabled={props.audioEffects.delay.toggleEnabled} onReset={props.audioEffects.delay.reset} />
-            )}
-          </Show>
-          <Show when={props.audioEffects.reverb.params()}>
-            {(params) => effect === "reverb" && (
-              <Reverb params={params()} onChange={props.audioEffects.reverb.change} onToggleEnabled={props.audioEffects.reverb.toggleEnabled} onReset={props.audioEffects.reverb.reset} />
-            )}
-          </Show>
-        </>
-      )}
+      {(effect) => {
+        const drag = createEffectCardReorderDrag({
+          effect,
+          orderedEffects: props.audioEffects.orderedEffects,
+          canWrite: () => props.canWrite,
+          onReorder: props.audioEffects.reorder,
+        });
+        return (
+        <div
+          class="touch-none"
+          onPointerDown={drag.onPointerDown}
+        >
+          <EffectsPanelAudioEffectCard effect={effect} audioEffects={props.audioEffects} spectrum={props.spectrum} />
+        </div>
+      )}}
     </For>
   </div>
 );

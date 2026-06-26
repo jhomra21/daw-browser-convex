@@ -1,4 +1,4 @@
-import { normalizeEqParams, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeEqParams, type AudioEffectKind, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createDelayChainState } from './effects/delay-chain-state'
@@ -21,6 +21,7 @@ export function createMasterFxRuntime() {
   let pendingReverbParams: ReverbParamsLite | null = null
   let pendingSaturatorParams: SaturatorParamsLite | null = null
   let pendingDelayParams: DelayParamsLite | null = null
+  let masterFxOrder: AudioEffectKind[] | undefined
   let currentBpm = 120
 
   const rebuildRouting = (ctx: AudioContext, masterGain: GainNode, destination: AudioDestinationNode) => {
@@ -31,6 +32,7 @@ export function createMasterFxRuntime() {
       saturatorChain: saturatorState.chain(),
       delayChain: delayState.chain(),
       reverbChain: reverbState.chain(),
+      order: masterFxOrder,
     })
     if (analyser) {
       try {
@@ -131,6 +133,13 @@ export function createMasterFxRuntime() {
       const result = delayState.set(ctx, params, currentBpm)
       if (result.changed && result.requiresRoutingRebuild) rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
     },
+    setOrder: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, order: AudioEffectKind[]) => {
+      const normalized = normalizeAudioEffectOrder(order, order)
+      if (areAudioEffectOrdersEqual(masterFxOrder, normalized)) return
+      masterFxOrder = normalized
+      if (!ctx || !masterGain) return
+      rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
+    },
     setBpm: (bpm: number) => {
       currentBpm = bpm
       delayState.setBpm(bpm)
@@ -159,6 +168,7 @@ export function createMasterFxRuntime() {
       pendingReverbParams = null
       pendingSaturatorParams = null
       pendingDelayParams = null
+      masterFxOrder = undefined
       disconnectAudioNodes(eqChain)
       eqChain = []
       reverbState.close()

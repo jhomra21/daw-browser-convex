@@ -207,6 +207,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
         });
         return (
         <div
+          data-effect-kind={effect}
           class="touch-none"
           onPointerDown={drag.onPointerDown}
         >

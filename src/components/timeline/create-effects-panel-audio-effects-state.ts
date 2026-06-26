@@ -1,4 +1,4 @@
-import { createEffect, createMemo, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, type Accessor } from "solid-js";
 import type { FunctionReturnType } from "convex/server";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import {
@@ -273,7 +273,9 @@ export function createEffectsPanelAudioDevice(
     commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-delay", from: previous, to: next }, projectId),
   });
 
-  const orderedEffects = createMemo<AudioEffectKind[]>(() => {
+  const [optimisticOrder, setOptimisticOrder] = createSignal<{ targetId: string; order: AudioEffectKind[] }>();
+
+  const persistedOrderedEffects = createMemo<AudioEffectKind[]>(() => {
     const targetId = currentTargetId();
     const rowForKind = (kind: AudioEffectKind) => {
       if (!isLocalProject()) return remoteEffectForTarget(targetId, kind);
@@ -295,6 +297,21 @@ export function createEffectsPanelAudioDevice(
       })
       .sort((a, b) => a.index - b.index)
       .map((entry) => entry.kind);
+  });
+
+  const orderedEffects = createMemo<AudioEffectKind[]>(() => {
+    const persistedOrder = persistedOrderedEffects();
+    const optimistic = optimisticOrder();
+    if (optimistic?.targetId !== currentTargetId()) return persistedOrder;
+    return normalizeAudioEffectOrder(optimistic.order, persistedOrder);
+  });
+
+  createEffect(() => {
+    const optimistic = optimisticOrder();
+    if (!optimistic || optimistic.targetId !== currentTargetId()) return;
+    if (areAudioEffectOrdersEqual(optimistic.order, persistedOrderedEffects())) {
+      setOptimisticOrder();
+    }
   });
 
   createEffect(() => {
@@ -339,9 +356,15 @@ export function createEffectsPanelAudioDevice(
     nextOrder.splice(clampedIndex, 0, effect);
     const normalized = normalizeAudioEffectOrder(nextOrder, currentOrder);
     if (areAudioEffectOrdersEqual(currentOrder, normalized)) return;
+    setOptimisticOrder({ targetId: currentTargetId(), order: normalized });
     if (currentTargetId() === "master") context.audioEngine().setMasterFxOrder(normalized);
     else context.audioEngine().setTrackFxOrder(currentTargetId(), normalized);
-    void persistReorder(normalized);
+    void persistReorder(normalized).catch(() => {
+      const optimistic = optimisticOrder();
+      if (optimistic?.targetId === currentTargetId() && areAudioEffectOrdersEqual(optimistic.order, normalized)) {
+        setOptimisticOrder();
+      }
+    });
   };
 
   const updateEq = (updater: (prev: EqParams) => EqParams) => {

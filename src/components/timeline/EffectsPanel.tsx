@@ -160,6 +160,7 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
 type EffectsPanelEffectCardsProps = {
   audioEffects: EffectsPanelAudioEffects;
   canWrite: boolean;
+  onElementChange?: (element: HTMLElement) => void;
   spectrum: SpectrumFrame | null;
 };
 
@@ -204,8 +205,9 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
   return (
     <>
       <div
-        class="flex h-full shrink-0 items-stretch gap-3"
+        class="flex h-full min-w-16 shrink-0 items-stretch gap-3"
         classList={{ "pointer-events-none opacity-60": !props.canWrite }}
+        ref={(element) => props.onElementChange?.(element)}
       >
         <For each={props.audioEffects.orderedEffects()}>
           {(effect) => {
@@ -370,13 +372,12 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       }}
                     />
                   </Show>
-                  <div class="flex min-w-16 items-stretch" ref={(element) => props.onEffectChainElementChange?.(element)}>
-                    <EffectsPanelEffectCards
-                      audioEffects={audioEffects}
-                      canWrite={canWriteCurrentTargetEffects()}
-                      spectrum={spectrum()}
-                    />
-                  </div>
+                  <EffectsPanelEffectCards
+                    audioEffects={audioEffects}
+                    canWrite={canWriteCurrentTargetEffects()}
+                    onElementChange={props.onEffectChainElementChange}
+                    spectrum={spectrum()}
+                  />
                   <Show when={isCurrentTargetReadOnly()}>
                     <EffectsPanelReadOnlyNotice />
                   </Show>

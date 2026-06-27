@@ -26,6 +26,7 @@ import {
   EFFECT_PANEL_SAVE_DEBOUNCE_MS,
 } from "~/components/timeline/create-effects-panel-state";
 import { convexApi } from "~/lib/convex";
+import { compareAudioEffectOrderEntries } from "~/lib/audio-effect-order-rows";
 import { reorderLocalAudioEffects, type LocalEffectRow } from "~/lib/local-effects";
 import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
@@ -286,7 +287,7 @@ export function createEffectsPanelAudioDevice(
       return localReverb.row(targetId);
     };
     return AUDIO_EFFECT_ORDER
-      .flatMap((kind, fallbackIndex) => {
+      .flatMap((kind) => {
         const row = rowForKind(kind);
         const hasParams =
           (kind === "eq" && eqState.readForTarget(targetId))
@@ -295,10 +296,9 @@ export function createEffectsPanelAudioDevice(
           || (kind === "reverb" && reverbState.readForTarget(targetId))
           || row?.params;
         if (!hasParams) return [];
-        const rowIndex = row?.index;
-        return [{ kind, index: typeof rowIndex === "number" ? rowIndex : fallbackIndex }];
+        return [{ kind, index: row?.index }];
       })
-      .sort((a, b) => a.index - b.index)
+      .sort(compareAudioEffectOrderEntries)
       .map((entry) => entry.kind);
   }
 

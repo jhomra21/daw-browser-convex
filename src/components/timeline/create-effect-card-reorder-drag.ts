@@ -8,6 +8,12 @@ type EffectCardReorderDragOptions = {
   onReorder: (effect: AudioEffectKind, targetIndex: number) => void;
 };
 
+const shouldStartReorderDrag = (event: PointerEvent) => {
+  if (!(event.target instanceof Element)) return false;
+  if (!event.target.closest('[data-effect-shell-header="true"]')) return false;
+  return !event.target.closest('button,input,select,textarea,[role="slider"],[contenteditable="true"]');
+};
+
 export function createEffectCardReorderDrag(options: EffectCardReorderDragOptions) {
   let cardRects: Array<{ kind: AudioEffectKind; centerX: number }> = [];
 
@@ -44,7 +50,7 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
 
   return {
     onPointerDown: (event: PointerEvent) => {
-      if (!options.canWrite() || event.button !== 0) return;
+      if (!options.canWrite() || event.button !== 0 || !shouldStartReorderDrag(event)) return;
       drag.onPointerDown(event);
     },
   };

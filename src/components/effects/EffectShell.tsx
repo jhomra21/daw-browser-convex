@@ -19,7 +19,7 @@ export default function EffectShell(props: EffectShellProps) {
 
   return (
     <div class={cn('flex h-full flex-col border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
-      <div class="flex items-stretch justify-between border-b border-neutral-800 px-2 py-1">
+      <div data-effect-shell-header="true" class="flex items-stretch justify-between border-b border-neutral-800 px-2 py-1">
         <div class="flex min-w-0 items-center gap-2">
           <span class="truncate text-xs font-semibold">{props.title}</span>
           <Show when={props.typeLabel}>

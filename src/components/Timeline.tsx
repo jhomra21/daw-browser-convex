@@ -21,7 +21,7 @@ import { useClipDrag } from "~/hooks/useClipDrag";
 import { useClipResize } from "~/hooks/useClipResize";
 import { useTimelineSelection } from "~/hooks/useTimelineSelection";
 import { useClipBuffers } from "~/hooks/useClipBuffers";
-import { normalizeCommandTrackIndices } from "@daw-browser/shared";
+import { isLocalId, normalizeCommandTrackIndices } from "@daw-browser/shared";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
 import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
@@ -163,6 +163,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     onBufferChange: () => setBufferVersion((current) => current + 1),
   });
   const currentLocalProjectMode = createMemo(() => projects().find((project) => project.projectId === projectId())?.mode);
+  const canCreateTrack = createMemo(() => {
+    if (isLocalId("project", projectId())) return true;
+    const role = currentProjectRole();
+    return role === "owner" || role === "editor";
+  });
   const { mediaRecovery } = useTimelinePersistenceController({
     projectId,
     remoteTimelineAvailable: () => Boolean(fullView.data),
@@ -876,6 +881,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     leftBrowser,
     onResizePointerDown: leftBrowserResize.onPointerDown,
     deviceInsertActions,
+    canCreateTrack,
     tracks: () => renderTracks(),
     scrollElement: () => scrollRef,
     effectsChainElement: () => effectsChainElement,

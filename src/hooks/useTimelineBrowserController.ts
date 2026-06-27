@@ -14,6 +14,7 @@ type Options = {
   leftBrowser: TimelineLeftBrowserState;
   onResizePointerDown: (event: PointerEvent) => void;
   deviceInsertActions: Accessor<TimelineDeviceInsertActions | undefined>;
+  canCreateTrack: Accessor<boolean>;
   tracks: Accessor<Track[]>;
   scrollElement: () => HTMLDivElement | undefined;
   effectsChainElement: () => HTMLElement | undefined;
@@ -280,14 +281,14 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       }
       if (payload.kind === "audio-effect") {
         if (target.kind === "track") return actions.canAddAudioEffectToTarget(target.trackId, payload.effect);
-        return target.kind === "new-track";
+        return target.kind === "new-track" && options.canCreateTrack();
       }
       if (payload.kind === "midi-effect") {
         if (target.kind === "track") return actions.canAddArpeggiatorToTarget(target.trackId);
-        return target.kind === "new-track";
+        return target.kind === "new-track" && options.canCreateTrack();
       }
       if (target.kind === "track") return actions.canAddMidiClipToTarget(target.trackId);
-      if (target.kind === "new-track") return true;
+      if (target.kind === "new-track") return options.canCreateTrack();
       return false;
     },
     onDrop: options.onDeviceDrop,

@@ -416,8 +416,21 @@ export function createEffectsPanelAudioDevice(
     if (effect === "delay") return delayState;
     return reverbState;
   };
+  const localRowsForKind = (effect: AudioEffectKind) => {
+    if (effect === "eq") return localEq;
+    if (effect === "saturator") return localSaturator;
+    if (effect === "delay") return localDelay;
+    return localReverb;
+  };
+  const hasPersistedLocalEffectForTarget = async (targetId: Track["id"] | "master", effect: AudioEffectKind) => {
+    const projectId = context.projectId();
+    if (!projectId || !isLocalId("project", projectId)) return false;
+    const row = await localRowsForKind(effect).fetchRow(projectId, targetId);
+    return row?.params !== undefined;
+  };
   const addByKindToTarget = async (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => {
     if (!canAddByKindToTarget(targetId, effect)) return false;
+    if (await hasPersistedLocalEffectForTarget(targetId, effect)) return false;
     const state = stateForKind(effect);
     state.addForTarget(targetId);
     if (index === undefined) return true;

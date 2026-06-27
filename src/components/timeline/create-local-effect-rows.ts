@@ -5,6 +5,7 @@ import { isLocalId } from "@daw-browser/shared";
 type LocalEffectSelector = LocalEffectKind | ((targetId: string) => LocalEffectKind);
 
 type LocalEffectRows<TParams> = {
+  fetchRow: (projectId: string, targetId: string) => Promise<LocalEffectRow<TParams> | undefined>;
   isLocalProject: Accessor<boolean>;
   persist: (projectId: string, targetId: string, params: TParams) => Promise<void>;
   row: (targetId: string | undefined) => LocalEffectRow<TParams> | undefined;
@@ -63,7 +64,20 @@ export function createLocalEffectRows<TParams>(input: {
     setRows((prev) => ({ ...prev, [scopeKey(projectId, targetId, effect)]: row }));
   };
 
+  const fetchRow = async (projectId: string, targetId: string) => {
+    if (!isLocalId("project", projectId)) return undefined;
+    const effect = resolveEffect(input.effect, targetId);
+    const key = scopeKey(projectId, targetId, effect);
+    const cached = rows()[key];
+    if (cached) return cached;
+    const row = await getLocalEffect<TParams>(projectId, targetId, effect);
+    if (input.projectId() !== projectId) return row;
+    setRows((prev) => ({ ...prev, [key]: row }));
+    return row;
+  };
+
   return {
+    fetchRow,
     isLocalProject,
     persist,
     row: (targetId) => {

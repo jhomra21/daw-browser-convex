@@ -184,10 +184,9 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     return !instrument.arp.readForTarget(track.id);
   };
 
-  const addArpeggiatorToTarget = (targetId: Track["id"]) => {
+  const addArpeggiatorToTarget = async (targetId: Track["id"]) => {
     if (!canAddArpeggiatorToTarget(targetId)) return false;
-    instrument.arp.addToTarget(targetId);
-    return true;
+    return await instrument.arp.addToTarget(targetId);
   };
 
   const canAddMidiClipToTarget = (targetId: Track["id"]) => {

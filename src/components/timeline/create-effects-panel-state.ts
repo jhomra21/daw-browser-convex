@@ -71,7 +71,7 @@ type EffectsPanelInstrumentDevice = {
   flushPending: () => Promise<void>;
   arp: {
     add: () => void;
-    addToTarget: (targetId: Track["id"]) => void;
+    addToTarget: (targetId: Track["id"]) => Promise<boolean>;
     change: (updates: Partial<ArpeggiatorParams>) => void;
     params: Accessor<ArpeggiatorParams | undefined>;
     readDraftForTarget: (targetId: string) => ArpeggiatorParams | undefined;
@@ -384,6 +384,19 @@ export function createEffectsPanelInstrumentDevice(
     }
   }
 
+  async function addArpeggiatorToTarget(targetId: Track["id"]): Promise<boolean> {
+    const track = getTrackByTargetId(targetId);
+    if (!track || track.kind !== "instrument") return false;
+    const projectId = context.projectId();
+    if (projectId && isLocalId("project", projectId)) {
+      const row = await localArp.fetchRow(projectId, targetId);
+      if (row?.params !== undefined) return false;
+    }
+    if (arpState.readForTarget(targetId)) return false;
+    arpState.addForTarget(targetId);
+    return true;
+  }
+
   async function handleAddMidiClip(): Promise<void> {
     const track = currentTrack();
     if (!track) return;
@@ -423,7 +436,7 @@ export function createEffectsPanelInstrumentDevice(
     flushPending,
     arp: {
       add: arpState.add,
-      addToTarget: arpState.addForTarget,
+      addToTarget: addArpeggiatorToTarget,
       change: handleArpChange,
       params: arpState.params,
       readDraftForTarget: arpState.readDraftForTarget,

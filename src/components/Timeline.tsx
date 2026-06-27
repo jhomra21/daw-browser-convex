@@ -812,9 +812,12 @@ const Timeline: Component<TimelineProps> = (props) => {
     enabled: dashboardSamplesEnabled,
     includeFilePath: () => true,
   });
-  const openEffectsForTarget = (targetId: Track["id"] | "master") => {
+  const openEffectsForTarget = (
+    targetId: Track["id"] | "master",
+    options?: { preserveClipSelection?: boolean },
+  ) => {
     if (targetId === "master") selection.selectMasterTarget();
-    else selection.selectTrackTarget(targetId, { clearClipSelection: true });
+    else selection.selectTrackTarget(targetId, { clearClipSelection: !options?.preserveClipSelection });
     bottomPanel.setMode("effects");
     bottomPanel.setOpen(true);
   };
@@ -842,20 +845,20 @@ const Timeline: Component<TimelineProps> = (props) => {
       return;
     }
     if (payload.kind === "midi-effect" && target.kind === "track") {
-      if (!actions.addArpeggiatorToTarget(target.trackId)) return;
+      if (!await actions.addArpeggiatorToTarget(target.trackId)) return;
       openEffectsForTarget(target.trackId);
       return;
     }
     if (payload.kind === "midi-effect" && target.kind === "new-track") {
       const track = await createTimelineTrack({ kind: "instrument" });
       if (!track) return;
-      if (!actions.addArpeggiatorToTarget(track.id)) return;
+      if (!await actions.addArpeggiatorToTarget(track.id)) return;
       openEffectsForTarget(track.id);
       return;
     }
     if (payload.kind === "midi-instrument" && target.kind === "track") {
       if (!await actions.addMidiClipToTarget(target.trackId)) return;
-      openEffectsForTarget(target.trackId);
+      openEffectsForTarget(target.trackId, { preserveClipSelection: true });
       actions.openSynthForTarget(target.trackId);
       return;
     }
@@ -863,7 +866,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       const track = await createTimelineTrack({ kind: "instrument" });
       if (!track) return;
       if (!await actions.addMidiClipToTarget(track.id)) return;
-      openEffectsForTarget(track.id);
+      openEffectsForTarget(track.id, { preserveClipSelection: true });
       actions.openSynthForTarget(track.id);
     }
   };

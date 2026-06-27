@@ -276,10 +276,8 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     canDrop: (payload, target) => {
       const actions = options.deviceInsertActions();
       if (!actions) return false;
-      if (target.kind === "effect-chain") {
-        return payload.kind === "audio-effect" && actions.canAddAudioEffectToTarget(target.targetId, payload.effect);
-      }
       if (payload.kind === "audio-effect") {
+        if (target.kind === "effect-chain") return actions.canAddAudioEffectToTarget(target.targetId, payload.effect);
         if (target.kind === "track") return actions.canAddAudioEffectToTarget(target.trackId, payload.effect);
         return target.kind === "new-track" && options.canCreateTrack();
       }

@@ -419,5 +419,8 @@ Fix failures and rerun failed validators.
   - 2026-06-27: Implemented Phase 4 audio-effect drop commits locally only. Browser pointerup now commits `audio-effect` payloads for effect-chain, existing track, and new-track targets through target-aware actions; no-drop and MIDI/instrument payloads remain non-mutating.
   - 2026-06-27: Simplify pass changed audio drops to open/select only after successful inserts, added target-aware can-add checks for preview/drop, preserved master selection semantics, and caught async drop failures.
   - 2026-06-27: Validators passed: `git diff --check`, `bun run typecheck`, `bun test`, `bun run knip`.
-- [ ] Phase 5 complete, simplified, validated, committed, pushed.
+- [x] Phase 5 complete, simplified, validated, committed, pushed.
+  - 2026-06-27: Implemented Phase 5 MIDI effect/instrument drop commits locally. Browser pointerup now commits Arpeggiator and Synth payloads for existing instrument tracks and new instrument tracks through target-aware actions; audio tracks remain no-drop through target resolution.
+  - 2026-06-27: Simplify pass added target-aware MIDI/instrument can-drop checks, prevented duplicate Arpeggiator resets, and opens/selects only after successful target mutations.
+  - 2026-06-27: Validators passed: `git diff --check`, `bun run typecheck`, `bun test`, `bun run knip`.
 - [ ] Final reviews and validators complete.

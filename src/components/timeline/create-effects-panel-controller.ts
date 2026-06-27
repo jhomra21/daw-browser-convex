@@ -36,8 +36,10 @@ const deviceInsertActionsEqual = (
 ) => (
   a?.addMidiClip === b.addMidiClip &&
   a.addMidiClipToTarget === b.addMidiClipToTarget &&
+  a.canAddMidiClipToTarget === b.canAddMidiClipToTarget &&
   a.addArpeggiator === b.addArpeggiator &&
   a.addArpeggiatorToTarget === b.addArpeggiatorToTarget &&
+  a.canAddArpeggiatorToTarget === b.canAddArpeggiatorToTarget &&
   a.addAudioEffectToTarget === b.addAudioEffectToTarget &&
   a.canAddAudioEffectToTarget === b.canAddAudioEffectToTarget &&
   a.addEq === b.addEq &&
@@ -175,18 +177,29 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     options.onClose();
   };
 
-  const addArpeggiatorToTarget = (targetId: Track["id"]) => {
+  const canAddArpeggiatorToTarget = (targetId: Track["id"]) => {
     const track = resolveTrackByTargetId(targetId);
-    if (!track || track.kind !== "instrument") return;
-    if (options.canWriteTrackRouting && !options.canWriteTrackRouting(track.id)) return;
-    instrument.arp.addToTarget(track.id);
+    if (!track || track.kind !== "instrument") return false;
+    if (options.canWriteTrackRouting && !options.canWriteTrackRouting(track.id)) return false;
+    return !instrument.arp.readForTarget(track.id);
+  };
+
+  const addArpeggiatorToTarget = (targetId: Track["id"]) => {
+    if (!canAddArpeggiatorToTarget(targetId)) return false;
+    instrument.arp.addToTarget(targetId);
+    return true;
+  };
+
+  const canAddMidiClipToTarget = (targetId: Track["id"]) => {
+    const track = resolveTrackByTargetId(targetId);
+    if (!track || track.kind !== "instrument") return false;
+    if (options.canWriteTrackRouting && !options.canWriteTrackRouting(track.id)) return false;
+    return true;
   };
 
   const addMidiClipToTarget = async (targetId: Track["id"]) => {
-    const track = resolveTrackByTargetId(targetId);
-    if (!track || track.kind !== "instrument") return;
-    if (options.canWriteTrackRouting && !options.canWriteTrackRouting(track.id)) return;
-    await instrument.addMidiClipToTarget(track.id);
+    if (!canAddMidiClipToTarget(targetId)) return false;
+    return await instrument.addMidiClipToTarget(targetId);
   };
 
   const canAddAudioEffectToTarget = (targetId: Track["id"] | "master", effect: AudioEffectKind) => (
@@ -204,8 +217,10 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     const nextActions = {
       addMidiClip: instrument.addMidiClip,
       addMidiClipToTarget,
+      canAddMidiClipToTarget,
       addArpeggiator: instrument.arp.add,
       addArpeggiatorToTarget,
+      canAddArpeggiatorToTarget,
       addAudioEffectToTarget,
       canAddAudioEffectToTarget,
       addEq: audioEffects.eq.add,

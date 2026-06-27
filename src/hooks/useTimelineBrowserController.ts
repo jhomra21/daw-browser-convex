@@ -177,7 +177,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: "Arpeggiator",
         subtitle: "MIDI effect",
         searchText: "arpeggiator arp midi effect",
-        disabled: !canWrite || actions?.canAddArpeggiator !== true,
+        disabled: !canWrite,
       },
     ];
     const query = browserDeviceQuery("effects");
@@ -206,7 +206,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: "Synth",
         subtitle: "Create a MIDI clip on the selected instrument track",
         searchText: "synth midi instrument clip",
-        disabled: actions?.canWrite !== true || actions.canAddMidiClip !== true,
+        disabled: actions?.canWrite !== true,
       },
     ];
     const query = browserDeviceQuery("midi-instruments");
@@ -240,8 +240,8 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     if (itemId === BROWSER_EFFECT_ITEM_IDS.saturator) return { kind: "audio-effect", effect: "saturator", label: "Saturator" };
     if (itemId === BROWSER_EFFECT_ITEM_IDS.delay) return { kind: "audio-effect", effect: "delay", label: "Delay" };
     if (itemId === BROWSER_EFFECT_ITEM_IDS.reverb) return { kind: "audio-effect", effect: "reverb", label: "Reverb" };
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.arpeggiator && actions.canAddArpeggiator) return { kind: "midi-effect", effect: "arpeggiator", label: "Arpeggiator" };
-    if (itemId === BROWSER_INSTRUMENT_ITEM_IDS.synth && actions.canAddMidiClip) return { kind: "midi-instrument", instrument: "synth", label: "Synth" };
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.arpeggiator) return { kind: "midi-effect", effect: "arpeggiator", label: "Arpeggiator" };
+    if (itemId === BROWSER_INSTRUMENT_ITEM_IDS.synth) return { kind: "midi-instrument", instrument: "synth", label: "Synth" };
     return undefined;
   };
 
@@ -256,13 +256,13 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       if (payload.effect === "reverb" && actions.canAddReverb) actions.addReverb();
       return;
     }
-    if (payload.kind === "midi-effect") actions.addArpeggiator();
+    if (payload.kind === "midi-effect" && actions.canAddArpeggiator) actions.addArpeggiator();
   };
 
   const addBrowserInstrument = (itemId: string) => {
     const payload = resolveBrowserDevicePayload(itemId);
     const actions = options.deviceInsertActions();
-    if (!actions || payload?.kind !== "midi-instrument") return;
+    if (!actions || payload?.kind !== "midi-instrument" || !actions.canAddMidiClip) return;
     void actions.addMidiClip();
   };
 
@@ -275,9 +275,18 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     canDrop: (payload, target) => {
       const actions = options.deviceInsertActions();
       if (!actions) return false;
-      if (payload.kind !== "audio-effect") return target.kind !== "effect-chain";
-      if (target.kind === "effect-chain") return actions.canAddAudioEffectToTarget(target.targetId, payload.effect);
-      if (target.kind === "track") return actions.canAddAudioEffectToTarget(target.trackId, payload.effect);
+      if (target.kind === "effect-chain") {
+        return payload.kind === "audio-effect" && actions.canAddAudioEffectToTarget(target.targetId, payload.effect);
+      }
+      if (payload.kind === "audio-effect") {
+        if (target.kind === "track") return actions.canAddAudioEffectToTarget(target.trackId, payload.effect);
+        return target.kind === "new-track";
+      }
+      if (payload.kind === "midi-effect") {
+        if (target.kind === "track") return actions.canAddArpeggiatorToTarget(target.trackId);
+        return target.kind === "new-track";
+      }
+      if (target.kind === "track") return actions.canAddMidiClipToTarget(target.trackId);
       if (target.kind === "new-track") return true;
       return false;
     },

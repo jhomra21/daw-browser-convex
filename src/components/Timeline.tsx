@@ -822,24 +822,49 @@ const Timeline: Component<TimelineProps> = (props) => {
     payload: BrowserDragPayload,
     target: BrowserDropTarget,
   ) => {
-    if (payload.kind !== "audio-effect") return;
     const actions = deviceInsertActions();
     if (!actions) return;
-    if (target.kind === "effect-chain") {
+    if (payload.kind === "audio-effect" && target.kind === "effect-chain") {
       if (!actions.addAudioEffectToTarget(target.targetId, payload.effect, target.index)) return;
       openEffectsForTarget(target.targetId);
       return;
     }
-    if (target.kind === "track") {
+    if (payload.kind === "audio-effect" && target.kind === "track") {
       if (!actions.addAudioEffectToTarget(target.trackId, payload.effect)) return;
       openEffectsForTarget(target.trackId);
       return;
     }
-    if (target.kind === "new-track") {
+    if (payload.kind === "audio-effect" && target.kind === "new-track") {
       const track = await createTimelineTrack();
       if (!track) return;
       if (!actions.addAudioEffectToTarget(track.id, payload.effect)) return;
       openEffectsForTarget(track.id);
+      return;
+    }
+    if (payload.kind === "midi-effect" && target.kind === "track") {
+      if (!actions.addArpeggiatorToTarget(target.trackId)) return;
+      openEffectsForTarget(target.trackId);
+      return;
+    }
+    if (payload.kind === "midi-effect" && target.kind === "new-track") {
+      const track = await createTimelineTrack({ kind: "instrument" });
+      if (!track) return;
+      if (!actions.addArpeggiatorToTarget(track.id)) return;
+      openEffectsForTarget(track.id);
+      return;
+    }
+    if (payload.kind === "midi-instrument" && target.kind === "track") {
+      if (!await actions.addMidiClipToTarget(target.trackId)) return;
+      openEffectsForTarget(target.trackId);
+      actions.openSynthForTarget(target.trackId);
+      return;
+    }
+    if (payload.kind === "midi-instrument" && target.kind === "new-track") {
+      const track = await createTimelineTrack({ kind: "instrument" });
+      if (!track) return;
+      if (!await actions.addMidiClipToTarget(track.id)) return;
+      openEffectsForTarget(track.id);
+      actions.openSynthForTarget(track.id);
     }
   };
   const timelineBrowser = useTimelineBrowserController({

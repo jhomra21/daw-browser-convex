@@ -67,7 +67,7 @@ type ExpandedSynthCard = ExpandedSynthBounds & {
 
 type EffectsPanelInstrumentDevice = {
   addMidiClip: () => Promise<void>;
-  addMidiClipToTarget: (targetId: Track["id"]) => Promise<void>;
+  addMidiClipToTarget: (targetId: Track["id"]) => Promise<boolean>;
   flushPending: () => Promise<void>;
   arp: {
     add: () => void;
@@ -75,6 +75,7 @@ type EffectsPanelInstrumentDevice = {
     change: (updates: Partial<ArpeggiatorParams>) => void;
     params: Accessor<ArpeggiatorParams | undefined>;
     readDraftForTarget: (targetId: string) => ArpeggiatorParams | undefined;
+    readForTarget: (targetId: string) => ArpeggiatorParams | undefined;
     reset: () => void;
     syncRemoteForTarget: (targetId: string, params: ArpeggiatorParams | undefined) => void;
     toggle: (enabled: boolean) => void;
@@ -323,12 +324,12 @@ export function createEffectsPanelInstrumentDevice(
     return synthState.readForTarget(targetId) ?? ensureSynthDefaults(targetId);
   }
 
-  async function addMidiClipToTarget(targetId: Track["id"]): Promise<void> {
+  async function addMidiClipToTarget(targetId: Track["id"]): Promise<boolean> {
     const track = getTrackByTargetId(targetId);
-    if (!track || track.kind !== "instrument") return;
+    if (!track || track.kind !== "instrument") return false;
 
     const projectId = context.projectId();
-    if (!projectId) return;
+    if (!projectId) return false;
     const grantScope = readOptimisticGrantScope({
       projectId,
       userId: context.userId(),
@@ -354,10 +355,10 @@ export function createEffectsPanelInstrumentDevice(
         });
         context.insertLocalClip?.(track.id, toLocalTimelineClip(row));
         context.onSelectClip?.(track.id, row.id, start);
-        return;
+        return true;
       }
 
-      if (!grantScope) return;
+      if (!grantScope) return false;
       const operation = buildSharedClipCreateOperation(
         buildClipCreatePayload({
           projectId,
@@ -367,17 +368,19 @@ export function createEffectsPanelInstrumentDevice(
       );
       const result = await publishDurableSharedTimelineOperation({ projectId, userId: grantScope.userId, operation });
       const clipId = typeof result === "string" ? result : null;
-      if (!clipId) return;
+      if (!clipId) return false;
 
       context.grantClipWrite?.(clipId, grantScope);
       const currentScope = readOptimisticGrantScope({
         projectId: context.projectId(),
         userId: context.userId(),
       });
-      if (!currentScope || didOptimisticGrantScopeChange(grantScope, currentScope)) return;
+      if (!currentScope || didOptimisticGrantScopeChange(grantScope, currentScope)) return false;
       context.onSelectClip?.(track.id, clipId, start);
+      return true;
     } catch (error) {
       console.warn("[EffectsPanel] failed to add MIDI clip", error);
+      return false;
     }
   }
 
@@ -424,6 +427,7 @@ export function createEffectsPanelInstrumentDevice(
       change: handleArpChange,
       params: arpState.params,
       readDraftForTarget: arpState.readDraftForTarget,
+      readForTarget: arpState.readForTarget,
       reset: arpState.reset,
       syncRemoteForTarget: arpState.syncRemoteForTarget,
       toggle: handleArpToggle,

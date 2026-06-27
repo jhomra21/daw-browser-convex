@@ -3,9 +3,11 @@ import type { Track } from "@daw-browser/timeline-core/types";
 
 export type TimelineDeviceInsertActions = {
   addMidiClip: () => Promise<void>;
-  addMidiClipToTarget: (targetId: Track["id"]) => Promise<void>;
+  addMidiClipToTarget: (targetId: Track["id"]) => Promise<boolean>;
+  canAddMidiClipToTarget: (targetId: Track["id"]) => boolean;
   addArpeggiator: () => void;
-  addArpeggiatorToTarget: (targetId: Track["id"]) => void;
+  addArpeggiatorToTarget: (targetId: Track["id"]) => boolean;
+  canAddArpeggiatorToTarget: (targetId: Track["id"]) => boolean;
   addAudioEffectToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => boolean;
   canAddAudioEffectToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind) => boolean;
   addEq: () => void;

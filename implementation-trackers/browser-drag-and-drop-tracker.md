@@ -423,6 +423,6 @@ Fix failures and rerun failed validators.
   - 2026-06-27: Implemented Phase 5 MIDI effect/instrument drop commits locally. Browser pointerup now commits Arpeggiator and Synth payloads for existing instrument tracks and new instrument tracks through target-aware actions; audio tracks remain no-drop through target resolution.
   - 2026-06-27: Simplify pass added target-aware MIDI/instrument can-drop checks, prevented duplicate Arpeggiator resets, and opens/selects only after successful target mutations.
   - 2026-06-27: Validators passed: `git diff --check`, `bun run typecheck`, `bun test`, `bun run knip`.
-- [ ] Final reviews and validators complete.
+- [x] Final reviews and validators complete.
   - 2026-06-27: Final simplify/reference/defensive/thermos reviews found and fixed effect-chain hit-area overreach, persisted insertion order for new audio effects dropped into an existing chain, redundant pre-compatibility checks, and current-target write gating that blocked valid cross-target drags.
   - 2026-06-27: Final validators passed after fixes: `git diff --check`, `bun run typecheck`, `bun test`, `bun run knip`, `bun run build`.

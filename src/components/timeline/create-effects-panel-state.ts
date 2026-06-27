@@ -67,9 +67,11 @@ type ExpandedSynthCard = ExpandedSynthBounds & {
 
 type EffectsPanelInstrumentDevice = {
   addMidiClip: () => Promise<void>;
+  addMidiClipToTarget: (targetId: Track["id"]) => Promise<void>;
   flushPending: () => Promise<void>;
   arp: {
     add: () => void;
+    addToTarget: (targetId: Track["id"]) => void;
     change: (updates: Partial<ArpeggiatorParams>) => void;
     params: Accessor<ArpeggiatorParams | undefined>;
     readDraftForTarget: (targetId: string) => ArpeggiatorParams | undefined;
@@ -83,6 +85,7 @@ type EffectsPanelInstrumentDevice = {
     expandedCard: Accessor<ExpandedSynthCard | null>;
     isExpandedForCurrentTarget: Accessor<boolean>;
     open: () => void;
+    openForTarget: (targetId: Track["id"]) => void;
     params: Accessor<SynthParams | undefined>;
     readDraftForTarget: (targetId: string) => SynthParams | undefined;
     reset: () => void;
@@ -290,11 +293,16 @@ export function createEffectsPanelInstrumentDevice(
     synthState.update((prev) => ({ ...prev, ...updates }));
   }
 
+  function openSynthForTarget(targetId: Track["id"]): void {
+    const track = getTrackByTargetId(targetId);
+    if (!track || track.kind !== "instrument") return;
+    setExpandedSynth({ targetId, ...createInitialSynthCardBounds() });
+  }
+
   function openSynthCard(): void {
     const targetId = getTrackTargetId();
     if (!targetId) return;
-
-    setExpandedSynth({ targetId, ...createInitialSynthCardBounds() });
+    openSynthForTarget(targetId);
   }
 
   function closeSynthCard(): void {
@@ -315,8 +323,8 @@ export function createEffectsPanelInstrumentDevice(
     return synthState.readForTarget(targetId) ?? ensureSynthDefaults(targetId);
   }
 
-  async function handleAddMidiClip(): Promise<void> {
-    const track = currentTrack();
+  async function addMidiClipToTarget(targetId: Track["id"]): Promise<void> {
+    const track = getTrackByTargetId(targetId);
     if (!track || track.kind !== "instrument") return;
 
     const projectId = context.projectId();
@@ -373,6 +381,12 @@ export function createEffectsPanelInstrumentDevice(
     }
   }
 
+  async function handleAddMidiClip(): Promise<void> {
+    const track = currentTrack();
+    if (!track) return;
+    await addMidiClipToTarget(track.id);
+  }
+
   const expandedSynthCard = createMemo<ExpandedSynthCard | null>(() => {
     const current = expandedSynth();
     if (!current) return null;
@@ -402,9 +416,11 @@ export function createEffectsPanelInstrumentDevice(
 
   return {
     addMidiClip: handleAddMidiClip,
+    addMidiClipToTarget,
     flushPending,
     arp: {
       add: arpState.add,
+      addToTarget: arpState.addForTarget,
       change: handleArpChange,
       params: arpState.params,
       readDraftForTarget: arpState.readDraftForTarget,
@@ -418,6 +434,7 @@ export function createEffectsPanelInstrumentDevice(
       expandedCard: expandedSynthCard,
       isExpandedForCurrentTarget: isSynthExpandedForCurrentTarget,
       open: openSynthCard,
+      openForTarget: openSynthForTarget,
       params: synthState.params,
       readDraftForTarget: synthState.readDraftForTarget,
       reset: synthState.reset,

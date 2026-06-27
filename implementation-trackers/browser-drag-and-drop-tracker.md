@@ -410,7 +410,11 @@ Fix failures and rerun failed validators.
   - 2026-06-27: Compatibility is visual-only: audio effects preview tracks, new track, and effect chain; MIDI effects/instruments preview only instrument tracks or new track; audio tracks no-drop for MIDI effects/instruments.
   - 2026-06-27: Simplify pass fixed stale effect-chain indicators, avoided pre-threshold target resolution, removed redundant new-track compatibility checks, and carried lane index on track targets to avoid repeated scans.
   - 2026-06-27: Validators passed: `git diff --check`, `bun run typecheck`, `bun test`, `bun run knip`.
-- [ ] Phase 3 complete, simplified, validated, committed, pushed.
+- [x] Phase 3 complete, simplified, validated, committed, pushed.
+  - 2026-06-27: Implemented Phase 3 action plumbing locally without browser pointerup drop mutations. Effects panel now publishes target-aware device drop actions to `Timeline`, audio effects expose target/index insertion helpers, and instrument actions expose target-aware Arpeggiator/Synth/MIDI clip helpers for later drop commits.
+  - 2026-06-27: Chose target-aware actions because existing persisted effect state already supports target-scoped updates through `updateForTarget`/draft maps, so this avoids selected-target races without timers or broad rewrites.
+  - 2026-06-27: Simplify pass removed unused action surface, reused target helpers, guarded target-aware MIDI writes, avoided duplicate target devices, and fixed remote non-current audio order reads.
+  - 2026-06-27: Validators passed: `git diff --check`, `bun run typecheck`, `bun test`, `bun run knip`.
 - [ ] Phase 4 complete, simplified, validated, committed, pushed.
 - [ ] Phase 5 complete, simplified, validated, committed, pushed.
 - [ ] Final reviews and validators complete.

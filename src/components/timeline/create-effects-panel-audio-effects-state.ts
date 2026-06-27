@@ -84,6 +84,7 @@ type EffectsPanelAudioDevice = {
     reset: () => void;
     toggleEnabled: (enabled: boolean) => void;
   };
+  addByKindToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => void;
   flushPending: () => Promise<void>;
   orderedEffects: Accessor<AudioEffectKind[]>;
   reorder: (effect: AudioEffectKind, targetIndex: number) => void;
@@ -275,8 +276,7 @@ export function createEffectsPanelAudioDevice(
 
   const [optimisticOrder, setOptimisticOrder] = createSignal<{ targetId: string; order: AudioEffectKind[] }>();
 
-  const persistedOrderedEffects = createMemo<AudioEffectKind[]>(() => {
-    const targetId = currentTargetId();
+  function readPersistedOrderedEffectsForTarget(targetId: string): AudioEffectKind[] {
     const rowForKind = (kind: AudioEffectKind) => {
       if (!isLocalProject()) return remoteEffectForTarget(targetId, kind);
       if (kind === "eq") return localEq.row(targetId);
@@ -286,17 +286,24 @@ export function createEffectsPanelAudioDevice(
     };
     return AUDIO_EFFECT_ORDER
       .flatMap((kind, fallbackIndex) => {
+        const row = rowForKind(kind);
         const hasParams =
-          (kind === "eq" && eqState.params())
-          || (kind === "saturator" && saturatorState.params())
-          || (kind === "delay" && delayState.params())
-          || (kind === "reverb" && reverbState.params());
+          (kind === "eq" && eqState.readForTarget(targetId))
+          || (kind === "saturator" && saturatorState.readForTarget(targetId))
+          || (kind === "delay" && delayState.readForTarget(targetId))
+          || (kind === "reverb" && reverbState.readForTarget(targetId))
+          || row?.params;
         if (!hasParams) return [];
-        const rowIndex = rowForKind(kind)?.index;
+        const rowIndex = row?.index;
         return [{ kind, index: typeof rowIndex === "number" ? rowIndex : fallbackIndex }];
       })
       .sort((a, b) => a.index - b.index)
       .map((entry) => entry.kind);
+  }
+
+  const persistedOrderedEffects = createMemo<AudioEffectKind[]>(() => {
+    const targetId = currentTargetId();
+    return readPersistedOrderedEffectsForTarget(targetId);
   });
 
   const orderedEffects = createMemo<AudioEffectKind[]>(() => {
@@ -347,7 +354,11 @@ export function createEffectsPanelAudioDevice(
 
   const reorder = (effect: AudioEffectKind, targetIndex: number) => {
     if (!context.canWriteCurrentTargetEffects()) return;
-    const currentOrder = orderedEffects();
+    reorderForTarget(currentTargetId(), effect, targetIndex);
+  };
+
+  const reorderForTarget = (targetId: string, effect: AudioEffectKind, targetIndex: number) => {
+    const currentOrder = targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(targetId);
     const fromIndex = currentOrder.indexOf(effect);
     if (fromIndex < 0) return;
     const nextOrder = currentOrder.filter((kind) => kind !== effect);
@@ -355,7 +366,6 @@ export function createEffectsPanelAudioDevice(
     nextOrder.splice(clampedIndex, 0, effect);
     const normalized = normalizeAudioEffectOrder(nextOrder, currentOrder);
     if (areAudioEffectOrdersEqual(currentOrder, normalized)) return;
-    const targetId = currentTargetId();
     setOptimisticOrder({ targetId, order: normalized });
     if (targetId === "master") context.audioEngine().setMasterFxOrder(normalized);
     else context.audioEngine().setTrackFxOrder(targetId, normalized);
@@ -399,8 +409,19 @@ export function createEffectsPanelAudioDevice(
     if (!context.canWriteCurrentTargetEffects()) return;
     delayState.add();
   };
+  const addByKindToTarget = (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => {
+    const currentOrder = targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(targetId);
+    if (currentOrder.includes(effect)) return;
+    if (effect === "eq") eqState.addForTarget(targetId);
+    if (effect === "saturator") saturatorState.addForTarget(targetId);
+    if (effect === "delay") delayState.addForTarget(targetId);
+    if (effect === "reverb") reverbState.addForTarget(targetId);
+    if (index === undefined) return;
+    reorderForTarget(targetId, effect, index);
+  };
 
   return {
+    addByKindToTarget,
     eq: {
       add: addEq,
       changeBand: (bandId, updates) => updateEq((prev) => ({

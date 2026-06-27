@@ -38,6 +38,7 @@ type PersistedEffectStateOptions<TRow, TParams> = {
 
 type PersistedEffectState<TParams> = {
   add: () => void
+  addForTarget: (targetId: string) => void
   flushPending: () => Promise<void>
   params: Accessor<TParams | undefined>
   readDraftForTarget: (targetId: string) => TParams | undefined
@@ -313,14 +314,19 @@ export function createPersistedEffectState<TRow, TParams>(
     })
   })
 
+  const addForTarget = (targetId: string) => {
+    const initial = options.createInitialParams(targetId)
+    if (!initial) return
+    applyUpdate(targetId, () => initial)
+  }
+
   return {
     add: () => {
       const targetId = options.targetId()
       if (!targetId) return
-      const initial = options.createInitialParams(targetId)
-      if (!initial) return
-      applyUpdate(targetId, () => initial)
+      addForTarget(targetId)
     },
+    addForTarget,
     flushPending,
     params,
     readDraftForTarget: (targetId) => draftByTarget()[keyForTarget(targetId)],

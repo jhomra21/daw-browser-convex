@@ -160,21 +160,20 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
     selectMarqueeClips(selected)
   }
 
-  const laneDrag = useDrag({
-    onDragMove: (_, event) => {
-      onLaneDragMove(event, currentScrollEl)
-    },
-    onDragEnd: () => {
-      onLaneDragUp()
-    },
-  })
-
   const onLaneDragUp = () => {
     stopScrub()
     setMarqueeRect(null)
     marqueeActive = false
     marqueeBaseClipIds = new Set<string>()
   }
+
+  const laneDrag = useDrag({
+    onDragMove: (_, event) => {
+      onLaneDragMove(event, currentScrollEl)
+    },
+    onDragEnd: onLaneDragUp,
+    onDragCancel: onLaneDragUp,
+  })
 
   onCleanup(() => {
     onLaneDragUp()

@@ -1,10 +1,24 @@
-import { normalizeAudioEffectOrder, type AudioEffectKind } from '@daw-browser/shared'
+import { AUDIO_EFFECT_ORDER, normalizeAudioEffectOrder, type AudioEffectKind } from '@daw-browser/shared'
 
 export type AudioEffectOrderEntry = {
   targetId: string
   kind: AudioEffectKind
   index?: number
 }
+
+const getAudioEffectOrderSortIndex = (entry: Pick<AudioEffectOrderEntry, 'kind' | 'index'>) => (
+  entry.index ?? AUDIO_EFFECT_ORDER.indexOf(entry.kind)
+)
+
+export const compareAudioEffectOrderEntries = (
+  left: Pick<AudioEffectOrderEntry, 'kind' | 'index'>,
+  right: Pick<AudioEffectOrderEntry, 'kind' | 'index'>,
+) => (
+  (left.index === undefined && right.index !== undefined ? 1 : 0)
+  || (left.index !== undefined && right.index === undefined ? -1 : 0)
+  || getAudioEffectOrderSortIndex(left) - getAudioEffectOrderSortIndex(right)
+  || AUDIO_EFFECT_ORDER.indexOf(left.kind) - AUDIO_EFFECT_ORDER.indexOf(right.kind)
+)
 
 export const collectAudioEffectOrders = (entries: Iterable<AudioEffectOrderEntry>) => {
   const masterRows: AudioEffectOrderEntry[] = []
@@ -21,7 +35,9 @@ export const collectAudioEffectOrders = (entries: Iterable<AudioEffectOrderEntry
   }
 
   const toOrder = (rows: AudioEffectOrderEntry[]) => {
-    const order = rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0)).map((entry) => entry.kind)
+    const order = rows
+      .sort(compareAudioEffectOrderEntries)
+      .map((entry) => entry.kind)
     return normalizeAudioEffectOrder(order, order)
   }
 

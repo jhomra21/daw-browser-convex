@@ -46,6 +46,9 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     props.clipDurationSec,
   ))
   let boundsDrag: ReturnType<typeof createTimelineMidiBoundsDrag> | null = null
+  const clearBoundsDrag = () => {
+    boundsDrag = null
+  }
   const currentMidi = (): NonNullable<Clip['midi']> => ({
     wave: props.midi?.wave ?? 'sawtooth',
     gain: props.midi?.gain ?? 0.8,
@@ -69,9 +72,8 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
       const drag = boundsDrag
       if (drag) props.onChangeBounds(drag.moveTo(pos))
     },
-    onDragEnd: () => {
-      boundsDrag = null
-    },
+    onDragEnd: clearBoundsDrag,
+    onDragCancel: clearBoundsDrag,
   })
 
   const resizeDrag = useDrag({
@@ -83,9 +85,8 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
       const drag = boundsDrag
       if (drag) props.onChangeBounds(drag.resizeTo(pos))
     },
-    onDragEnd: () => {
-      boundsDrag = null
-    },
+    onDragEnd: clearBoundsDrag,
+    onDragCancel: clearBoundsDrag,
   })
 
   const onHeaderPointerDown = (event: PointerEvent) => {

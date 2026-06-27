@@ -6,6 +6,7 @@ type UseDragOptions = {
   onDragStart?: (pos: Point, event: PointerEvent) => void | Promise<void>
   onDragMove?: (pos: Point, event: PointerEvent) => void | Promise<void>
   onDragEnd?: (pos: Point, event: PointerEvent) => void | Promise<void>
+  onDragCancel?: (pos: Point, event: PointerEvent) => void | Promise<void>
   disabled?: () => boolean
   dragCursorClass?: string
 }
@@ -22,7 +23,7 @@ export function useDrag(options: UseDragOptions = {}) {
   const removeGlobalListeners = () => {
     window.removeEventListener('pointermove', handlePointerMove)
     window.removeEventListener('pointerup', handlePointerUp, { capture: true })
-    window.removeEventListener('pointercancel', handlePointerUp, { capture: true })
+    window.removeEventListener('pointercancel', handlePointerCancel, { capture: true })
     document.body.classList.remove('select-none')
     if (options.dragCursorClass) document.body.classList.remove(options.dragCursorClass)
   }
@@ -38,13 +39,17 @@ export function useDrag(options: UseDragOptions = {}) {
     void options.onDragMove?.(getPointerPos(event), event)
   }
 
-  const handlePointerUp = (event: PointerEvent) => {
+  const finishDrag = (event: PointerEvent, callback: UseDragOptions['onDragEnd']) => {
     if (activePointerId !== null && event.pointerId !== activePointerId) return
     activePointerId = null
     setIsDragging(false)
     removeGlobalListeners()
-    void options.onDragEnd?.(getPointerPos(event), event)
+    void callback?.(getPointerPos(event), event)
   }
+
+  const handlePointerUp = (event: PointerEvent) => finishDrag(event, options.onDragEnd)
+
+  const handlePointerCancel = (event: PointerEvent) => finishDrag(event, options.onDragCancel)
 
   const onPointerDown = (event: PointerEvent) => {
     if (options.disabled?.()) return
@@ -56,7 +61,7 @@ export function useDrag(options: UseDragOptions = {}) {
     if (options.dragCursorClass) document.body.classList.add(options.dragCursorClass)
     window.addEventListener('pointermove', handlePointerMove)
     window.addEventListener('pointerup', handlePointerUp, { capture: true })
-    window.addEventListener('pointercancel', handlePointerUp, { capture: true })
+    window.addEventListener('pointercancel', handlePointerCancel, { capture: true })
     void options.onDragStart?.(getPointerPos(event), event)
   }
 

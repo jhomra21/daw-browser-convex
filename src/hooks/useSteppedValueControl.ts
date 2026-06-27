@@ -65,6 +65,9 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
       event.preventDefault()
       setDragValue(null)
     },
+    onDragCancel: () => {
+      setDragValue(null)
+    },
   })
   const handleKeyDown = (event: KeyboardEvent) => {
     if (options.disabled()) return

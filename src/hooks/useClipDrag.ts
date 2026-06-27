@@ -186,6 +186,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
   } = useDrag({
     onDragMove: (_, event) => onPointerDragMove(event),
     onDragEnd: (_, event) => onPointerDragEnd(event),
+    onDragCancel: resetDragState,
     dragCursorClass: 'cursor-grabbing',
   })
 

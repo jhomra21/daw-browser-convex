@@ -1,6 +1,7 @@
 import { createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_ORDER, type AudioEffectKind } from '@daw-browser/shared'
+import { compareAudioEffectOrderEntries } from '~/lib/audio-effect-order-rows'
 
 export type LocalEffectKind = 'eq' | 'saturator' | 'delay' | 'reverb' | 'synth' | 'arp' | 'master-eq' | 'master-saturator' | 'master-delay' | 'master-reverb'
 
@@ -52,14 +53,16 @@ export const setLocalEffect = async <TParams>(
   params: TParams,
   index?: number,
 ): Promise<LocalEffectRow<TParams>> => {
+  const existingRow = await getLocalEffect<TParams>(projectId, targetId, effect)
   const db = await openLocalProjectDb(projectId)
   const timestamp = now()
+  const rowIndex = index ?? existingRow?.index
   const row: LocalEffectRow<TParams> = {
     id: effectId(targetId, effect),
     targetId,
     effect,
     params,
-    index,
+    index: rowIndex,
     updatedAt: timestamp,
   }
   await db.put('entities', createLocalProjectEntityRow(EFFECT_KIND, row.id, row, row.updatedAt))
@@ -85,7 +88,10 @@ export const reorderLocalAudioEffects = async (
       const kind = audioEffectKindFromLocalEffect(row.effect)
       return kind ? [{ row, kind }] : []
     })
-    .sort((a, b) => (a.row.index ?? 0) - (b.row.index ?? 0))
+    .sort((a, b) => compareAudioEffectOrderEntries(
+      { kind: a.kind, index: a.row.index },
+      { kind: b.kind, index: b.row.index },
+    ))
   const requestedKinds = new Set<AudioEffectKind>()
   const requested = order.flatMap((kind) => {
     if (requestedKinds.has(kind)) return []

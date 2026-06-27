@@ -12,6 +12,8 @@ type BrowserDeviceDragOptions = {
   scrollElement: () => HTMLDivElement | undefined;
   effectsChainElement: () => HTMLElement | undefined;
   currentEffectsTargetId: Accessor<Track["id"] | "master">;
+  canDrop: (payload: BrowserDragPayload, target: BrowserDropTarget) => boolean;
+  onDrop: (payload: BrowserDragPayload, target: BrowserDropTarget) => void | Promise<void>;
 };
 
 const pointerPosition = (event: PointerEvent) => ({
@@ -80,13 +82,14 @@ const resolveCompatibleTarget = (
 ): Pick<BrowserDragSession, "target" | "effectChainPreview"> => {
   if (payload.kind === "audio-effect") {
     const chain = resolveEffectChainPreview(pointer, options.effectsChainElement(), options.currentEffectsTargetId());
-    if (chain) return chain;
+    if (chain) return options.canDrop(payload, chain.target) ? chain : { target: { kind: "none" } };
   }
   const tracks = options.tracks();
   const target = resolveTimelineTrackTarget(pointer, options.scrollElement(), tracks);
   if (target.kind === "track") {
-    return { target: isCompatibleTrack(payload, tracks[target.laneIndex]) ? target : { kind: "none" } };
+    return { target: isCompatibleTrack(payload, tracks[target.laneIndex]) && options.canDrop(payload, target) ? target : { kind: "none" } };
   }
+  if (target.kind === "new-track" && !options.canDrop(payload, target)) return { target: { kind: "none" } };
   return { target };
 };
 
@@ -152,7 +155,13 @@ export function createBrowserDeviceDrag(options: BrowserDeviceDragOptions): {
       event.preventDefault();
     },
     onDragEnd: () => {
-      if (session()) suppressNextClick();
+      const droppedSession = session();
+      if (droppedSession) {
+        suppressNextClick();
+        if (droppedSession.target.kind !== "none") {
+          void Promise.resolve(options.onDrop(droppedSession.payload, droppedSession.target)).catch(() => {});
+        }
+      }
       cleanup();
     },
     onDragCancel: cleanup,

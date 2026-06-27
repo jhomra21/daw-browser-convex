@@ -85,6 +85,7 @@ type EffectsPanelAudioDevice = {
     toggleEnabled: (enabled: boolean) => void;
   };
   addByKindToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => void;
+  canAddByKindToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind) => boolean;
   flushPending: () => Promise<void>;
   orderedEffects: Accessor<AudioEffectKind[]>;
   reorder: (effect: AudioEffectKind, targetIndex: number) => void;
@@ -410,8 +411,7 @@ export function createEffectsPanelAudioDevice(
     delayState.add();
   };
   const addByKindToTarget = (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => {
-    const currentOrder = targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(targetId);
-    if (currentOrder.includes(effect)) return;
+    if (!canAddByKindToTarget(targetId, effect)) return;
     if (effect === "eq") eqState.addForTarget(targetId);
     if (effect === "saturator") saturatorState.addForTarget(targetId);
     if (effect === "delay") delayState.addForTarget(targetId);
@@ -419,9 +419,14 @@ export function createEffectsPanelAudioDevice(
     if (index === undefined) return;
     reorderForTarget(targetId, effect, index);
   };
+  const canAddByKindToTarget = (targetId: Track["id"] | "master", effect: AudioEffectKind) => {
+    const currentOrder = targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(targetId);
+    return !currentOrder.includes(effect);
+  };
 
   return {
     addByKindToTarget,
+    canAddByKindToTarget,
     eq: {
       add: addEq,
       changeBand: (bandId, updates) => updateEq((prev) => ({

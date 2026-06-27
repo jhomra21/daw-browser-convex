@@ -48,6 +48,7 @@ import { useTimelineLeftBrowserResize } from "~/hooks/useTimelineLeftBrowserResi
 import { useTimelineLeftBrowserState } from "~/hooks/useTimelineLeftBrowserState";
 import { useTimelineBrowserController } from "~/hooks/useTimelineBrowserController";
 import { BrowserDragOverlay } from "./timeline/browser/browser-drag-overlay";
+import type { BrowserDragPayload, BrowserDropTarget } from "./timeline/browser/browser-drag-types";
 import type { TimelineDeviceInsertActions } from "./timeline/timeline-device-insert-actions";
 import { isTimelineSampleDetailClip, useTimelineSampleDetailController } from "~/hooks/useTimelineSampleDetailController";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
@@ -811,6 +812,36 @@ const Timeline: Component<TimelineProps> = (props) => {
     enabled: dashboardSamplesEnabled,
     includeFilePath: () => true,
   });
+  const openEffectsForTarget = (targetId: Track["id"] | "master") => {
+    if (targetId === "master") selection.selectMasterTarget();
+    else selection.selectTrackTarget(targetId, { clearClipSelection: true });
+    bottomPanel.setMode("effects");
+    bottomPanel.setOpen(true);
+  };
+  const handleBrowserDeviceDrop = async (
+    payload: BrowserDragPayload,
+    target: BrowserDropTarget,
+  ) => {
+    if (payload.kind !== "audio-effect") return;
+    const actions = deviceInsertActions();
+    if (!actions) return;
+    if (target.kind === "effect-chain") {
+      if (!actions.addAudioEffectToTarget(target.targetId, payload.effect, target.index)) return;
+      openEffectsForTarget(target.targetId);
+      return;
+    }
+    if (target.kind === "track") {
+      if (!actions.addAudioEffectToTarget(target.trackId, payload.effect)) return;
+      openEffectsForTarget(target.trackId);
+      return;
+    }
+    if (target.kind === "new-track") {
+      const track = await createTimelineTrack();
+      if (!track) return;
+      if (!actions.addAudioEffectToTarget(track.id, payload.effect)) return;
+      openEffectsForTarget(track.id);
+    }
+  };
   const timelineBrowser = useTimelineBrowserController({
     projectId,
     userId,
@@ -822,6 +853,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     effectsChainElement: () => effectsChainElement,
     currentEffectsTargetId: () => selection.selectedFXTarget(),
     handleInsertSample,
+    onDeviceDrop: handleBrowserDeviceDrop,
   });
   const browserDropTargetLane = createMemo(() => {
     const target = timelineBrowser().devices.dragSession()?.target;

@@ -39,6 +39,7 @@ const deviceInsertActionsEqual = (
   a.addArpeggiator === b.addArpeggiator &&
   a.addArpeggiatorToTarget === b.addArpeggiatorToTarget &&
   a.addAudioEffectToTarget === b.addAudioEffectToTarget &&
+  a.canAddAudioEffectToTarget === b.canAddAudioEffectToTarget &&
   a.addEq === b.addEq &&
   a.addSaturator === b.addSaturator &&
   a.addDelay === b.addDelay &&
@@ -188,9 +189,14 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     await instrument.addMidiClipToTarget(track.id);
   };
 
+  const canAddAudioEffectToTarget = (targetId: Track["id"] | "master", effect: AudioEffectKind) => (
+    canWriteEffectsTarget(targetId) && audioEffects.canAddByKindToTarget(targetId, effect)
+  );
+
   const addAudioEffectToTarget = (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => {
-    if (!canWriteEffectsTarget(targetId)) return;
+    if (!canAddAudioEffectToTarget(targetId, effect)) return false;
     audioEffects.addByKindToTarget(targetId, effect, index);
+    return true;
   };
 
   let previousDeviceInsertActions: TimelineDeviceInsertActions | undefined;
@@ -201,6 +207,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       addArpeggiator: instrument.arp.add,
       addArpeggiatorToTarget,
       addAudioEffectToTarget,
+      canAddAudioEffectToTarget,
       addEq: audioEffects.eq.add,
       addSaturator: audioEffects.saturator.add,
       addDelay: audioEffects.delay.add,

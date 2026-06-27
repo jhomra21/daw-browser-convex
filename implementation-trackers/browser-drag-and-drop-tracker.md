@@ -415,6 +415,9 @@ Fix failures and rerun failed validators.
   - 2026-06-27: Chose target-aware actions because existing persisted effect state already supports target-scoped updates through `updateForTarget`/draft maps, so this avoids selected-target races without timers or broad rewrites.
   - 2026-06-27: Simplify pass removed unused action surface, reused target helpers, guarded target-aware MIDI writes, avoided duplicate target devices, and fixed remote non-current audio order reads.
   - 2026-06-27: Validators passed: `git diff --check`, `bun run typecheck`, `bun test`, `bun run knip`.
-- [ ] Phase 4 complete, simplified, validated, committed, pushed.
+- [x] Phase 4 complete, simplified, validated, committed, pushed.
+  - 2026-06-27: Implemented Phase 4 audio-effect drop commits locally only. Browser pointerup now commits `audio-effect` payloads for effect-chain, existing track, and new-track targets through target-aware actions; no-drop and MIDI/instrument payloads remain non-mutating.
+  - 2026-06-27: Simplify pass changed audio drops to open/select only after successful inserts, added target-aware can-add checks for preview/drop, preserved master selection semantics, and caught async drop failures.
+  - 2026-06-27: Validators passed: `git diff --check`, `bun run typecheck`, `bun test`, `bun run knip`.
 - [ ] Phase 5 complete, simplified, validated, committed, pushed.
 - [ ] Final reviews and validators complete.

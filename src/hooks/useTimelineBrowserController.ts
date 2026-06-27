@@ -5,7 +5,7 @@ import type { BrowserItem, BrowserItemSource, BrowserSection, TimelineLeftBrowse
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData, type SampleDragData } from "~/lib/sample-drag-data";
 import { createBrowserDeviceDrag } from "~/components/timeline/browser/create-browser-device-drag";
-import type { BrowserDragPayload } from "~/components/timeline/browser/browser-drag-types";
+import type { BrowserDragPayload, BrowserDropTarget } from "~/components/timeline/browser/browser-drag-types";
 import type { Track } from "@daw-browser/timeline-core/types";
 
 type Options = {
@@ -19,6 +19,7 @@ type Options = {
   effectsChainElement: () => HTMLElement | undefined;
   currentEffectsTargetId: Accessor<Track["id"] | "master">;
   handleInsertSample: (sample: SampleDragData) => void | Promise<void>;
+  onDeviceDrop: (payload: BrowserDragPayload, target: BrowserDropTarget) => void | Promise<void>;
 };
 
 const BROWSER_EFFECT_ITEM_IDS = {
@@ -140,7 +141,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: "EQ",
         subtitle: "Audio effect",
         searchText: "eq audio effect equalizer",
-        disabled: !canWrite || actions?.canAddEq !== true,
+        disabled: !canWrite,
       },
       {
         id: BROWSER_EFFECT_ITEM_IDS.reverb,
@@ -149,7 +150,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: "Reverb",
         subtitle: "Audio effect",
         searchText: "reverb audio effect space",
-        disabled: !canWrite || actions?.canAddReverb !== true,
+        disabled: !canWrite,
       },
       {
         id: BROWSER_EFFECT_ITEM_IDS.saturator,
@@ -158,7 +159,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: "Saturator",
         subtitle: "Audio effect",
         searchText: "saturator saturation drive distortion audio effect",
-        disabled: !canWrite || actions?.canAddSaturator !== true,
+        disabled: !canWrite,
       },
       {
         id: BROWSER_EFFECT_ITEM_IDS.delay,
@@ -167,7 +168,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: "Delay",
         subtitle: "Audio effect",
         searchText: "delay echo ping pong audio effect",
-        disabled: !canWrite || actions?.canAddDelay !== true,
+        disabled: !canWrite,
       },
       {
         id: BROWSER_EFFECT_ITEM_IDS.arpeggiator,
@@ -235,10 +236,10 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   const resolveBrowserDevicePayload = (itemId: string): BrowserDragPayload | undefined => {
     const actions = options.deviceInsertActions();
     if (!actions?.canWrite) return undefined;
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.eq && actions.canAddEq) return { kind: "audio-effect", effect: "eq", label: "EQ" };
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.saturator && actions.canAddSaturator) return { kind: "audio-effect", effect: "saturator", label: "Saturator" };
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.delay && actions.canAddDelay) return { kind: "audio-effect", effect: "delay", label: "Delay" };
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.reverb && actions.canAddReverb) return { kind: "audio-effect", effect: "reverb", label: "Reverb" };
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.eq) return { kind: "audio-effect", effect: "eq", label: "EQ" };
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.saturator) return { kind: "audio-effect", effect: "saturator", label: "Saturator" };
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.delay) return { kind: "audio-effect", effect: "delay", label: "Delay" };
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.reverb) return { kind: "audio-effect", effect: "reverb", label: "Reverb" };
     if (itemId === BROWSER_EFFECT_ITEM_IDS.arpeggiator && actions.canAddArpeggiator) return { kind: "midi-effect", effect: "arpeggiator", label: "Arpeggiator" };
     if (itemId === BROWSER_INSTRUMENT_ITEM_IDS.synth && actions.canAddMidiClip) return { kind: "midi-instrument", instrument: "synth", label: "Synth" };
     return undefined;
@@ -249,10 +250,10 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     const actions = options.deviceInsertActions();
     if (!payload || !actions) return;
     if (payload.kind === "audio-effect") {
-      if (payload.effect === "eq") actions.addEq();
-      if (payload.effect === "saturator") actions.addSaturator();
-      if (payload.effect === "delay") actions.addDelay();
-      if (payload.effect === "reverb") actions.addReverb();
+      if (payload.effect === "eq" && actions.canAddEq) actions.addEq();
+      if (payload.effect === "saturator" && actions.canAddSaturator) actions.addSaturator();
+      if (payload.effect === "delay" && actions.canAddDelay) actions.addDelay();
+      if (payload.effect === "reverb" && actions.canAddReverb) actions.addReverb();
       return;
     }
     if (payload.kind === "midi-effect") actions.addArpeggiator();
@@ -271,6 +272,16 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     scrollElement: options.scrollElement,
     effectsChainElement: options.effectsChainElement,
     currentEffectsTargetId: options.currentEffectsTargetId,
+    canDrop: (payload, target) => {
+      const actions = options.deviceInsertActions();
+      if (!actions) return false;
+      if (payload.kind !== "audio-effect") return target.kind !== "effect-chain";
+      if (target.kind === "effect-chain") return actions.canAddAudioEffectToTarget(target.targetId, payload.effect);
+      if (target.kind === "track") return actions.canAddAudioEffectToTarget(target.trackId, payload.effect);
+      if (target.kind === "new-track") return true;
+      return false;
+    },
+    onDrop: options.onDeviceDrop,
   });
 
   return createMemo(() => ({

@@ -15,7 +15,7 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
     for (let index = 0; index < cardRects.length; index++) {
       if (clientX < cardRects[index].centerX) return index;
     }
-    return Math.max(0, cardRects.length - 1);
+    return cardRects.length;
   };
 
   const drag = useDrag({
@@ -27,7 +27,7 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
       for (const element of event.currentTarget.parentElement?.children ?? []) {
         if (!(element instanceof HTMLElement)) continue;
         const kind = element.dataset.effectKind;
-        if (!isAudioEffectKind(kind)) continue;
+        if (!isAudioEffectKind(kind) || kind === options.effect) continue;
         const rect = element.getBoundingClientRect();
         cardRects.push({ kind, centerX: rect.left + rect.width / 2 });
       }

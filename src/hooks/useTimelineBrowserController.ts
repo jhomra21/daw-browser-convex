@@ -4,6 +4,8 @@ import type { TimelineLeftBrowserState } from "~/components/timeline/browser/bro
 import type { BrowserItem, BrowserItemSource, BrowserSection, TimelineLeftBrowserModel } from "~/components/timeline/browser/browser-types";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData, type SampleDragData } from "~/lib/sample-drag-data";
+import { createBrowserDeviceDrag } from "~/components/timeline/browser/create-browser-device-drag";
+import type { BrowserDragPayload } from "~/components/timeline/browser/browser-drag-types";
 
 type Options = {
   projectId: Accessor<string>;
@@ -225,21 +227,42 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     event.dataTransfer.setData(SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData(sample));
   };
 
-  const addBrowserEffect = (itemId: string) => {
+  const resolveBrowserDevicePayload = (itemId: string): BrowserDragPayload | undefined => {
     const actions = options.deviceInsertActions();
-    if (!actions?.canWrite) return;
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.eq && actions.canAddEq) actions.addEq();
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.saturator && actions.canAddSaturator) actions.addSaturator();
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.delay && actions.canAddDelay) actions.addDelay();
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.reverb && actions.canAddReverb) actions.addReverb();
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.arpeggiator && actions.canAddArpeggiator) actions.addArpeggiator();
+    if (!actions?.canWrite) return undefined;
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.eq && actions.canAddEq) return { kind: "audio-effect", effect: "eq", label: "EQ" };
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.saturator && actions.canAddSaturator) return { kind: "audio-effect", effect: "saturator", label: "Saturator" };
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.delay && actions.canAddDelay) return { kind: "audio-effect", effect: "delay", label: "Delay" };
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.reverb && actions.canAddReverb) return { kind: "audio-effect", effect: "reverb", label: "Reverb" };
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.arpeggiator && actions.canAddArpeggiator) return { kind: "midi-effect", effect: "arpeggiator", label: "Arpeggiator" };
+    if (itemId === BROWSER_INSTRUMENT_ITEM_IDS.synth && actions.canAddMidiClip) return { kind: "midi-instrument", instrument: "synth", label: "Synth" };
+    return undefined;
+  };
+
+  const addBrowserEffect = (itemId: string) => {
+    const payload = resolveBrowserDevicePayload(itemId);
+    const actions = options.deviceInsertActions();
+    if (!payload || !actions) return;
+    if (payload.kind === "audio-effect") {
+      if (payload.effect === "eq") actions.addEq();
+      if (payload.effect === "saturator") actions.addSaturator();
+      if (payload.effect === "delay") actions.addDelay();
+      if (payload.effect === "reverb") actions.addReverb();
+      return;
+    }
+    if (payload.kind === "midi-effect") actions.addArpeggiator();
   };
 
   const addBrowserInstrument = (itemId: string) => {
+    const payload = resolveBrowserDevicePayload(itemId);
     const actions = options.deviceInsertActions();
-    if (!actions?.canWrite || itemId !== BROWSER_INSTRUMENT_ITEM_IDS.synth || !actions.canAddMidiClip) return;
+    if (!actions || payload?.kind !== "midi-instrument") return;
     void actions.addMidiClip();
   };
+
+  const browserDeviceDrag = createBrowserDeviceDrag({
+    resolvePayload: resolveBrowserDevicePayload,
+  });
 
   return createMemo(() => ({
     open: options.leftBrowser.open(),
@@ -255,8 +278,10 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     devices: {
       effectSections: browserEffectSections,
       instrumentSections: browserInstrumentSections,
+      dragSession: browserDeviceDrag.session,
       onAddEffect: addBrowserEffect,
       onAddInstrument: addBrowserInstrument,
+      onDevicePointerDown: browserDeviceDrag.onPointerDown,
     },
     onToggle: options.leftBrowser.toggleOpen,
     onSelectTab: options.leftBrowser.setActiveTab,

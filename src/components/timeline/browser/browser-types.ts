@@ -1,4 +1,5 @@
 import type { Accessor } from "solid-js";
+import type { BrowserDragSession } from "./browser-drag-types";
 
 export type TimelineBrowserTab = "assets" | "effects" | "midi-instruments";
 
@@ -35,8 +36,10 @@ export type BrowserAssetsModel = {
 export type BrowserDevicesModel = {
   effectSections: Accessor<BrowserSection[]>;
   instrumentSections: Accessor<BrowserSection[]>;
+  dragSession: Accessor<BrowserDragSession | undefined>;
   onAddEffect: (itemId: string) => void;
   onAddInstrument: (itemId: string) => void;
+  onDevicePointerDown: (event: PointerEvent, itemId: string) => void;
 };
 
 export type TimelineLeftBrowserModel = {

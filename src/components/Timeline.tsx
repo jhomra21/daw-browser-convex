@@ -47,6 +47,7 @@ import { useTimelineBottomPanelState } from "~/hooks/useTimelineBottomPanelState
 import { useTimelineLeftBrowserResize } from "~/hooks/useTimelineLeftBrowserResize";
 import { useTimelineLeftBrowserState } from "~/hooks/useTimelineLeftBrowserState";
 import { useTimelineBrowserController } from "~/hooks/useTimelineBrowserController";
+import { BrowserDragOverlay } from "./timeline/browser/browser-drag-overlay";
 import type { TimelineDeviceInsertActions } from "./timeline/timeline-device-insert-actions";
 import { isTimelineSampleDetailClip, useTimelineSampleDetailController } from "~/hooks/useTimelineSampleDetailController";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
@@ -1157,6 +1158,8 @@ const Timeline: Component<TimelineProps> = (props) => {
           onToggleRecordArm: handleToggleRecordArm,
         }}
       />
+
+      <BrowserDragOverlay session={timelineBrowser().devices.dragSession} />
 
       <DeleteTrackDialog
         open={confirmOpen()}

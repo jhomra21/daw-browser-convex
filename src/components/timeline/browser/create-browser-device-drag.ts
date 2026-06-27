@@ -1,11 +1,17 @@
 import { createSignal, onCleanup, type Accessor } from "solid-js";
+import type { Track } from "@daw-browser/timeline-core/types";
 import { useDrag } from "~/hooks/useDrag";
-import type { BrowserDragPayload, BrowserDragSession } from "./browser-drag-types";
+import { yToLaneIndex } from "~/lib/timeline-utils";
+import type { BrowserDragPayload, BrowserDragSession, BrowserDropTarget } from "./browser-drag-types";
 
 const DRAG_THRESHOLD_PX = 4;
 
 type BrowserDeviceDragOptions = {
   resolvePayload: (itemId: string) => BrowserDragPayload | undefined;
+  tracks: Accessor<Track[]>;
+  scrollElement: () => HTMLDivElement | undefined;
+  effectsChainElement: () => HTMLElement | undefined;
+  currentEffectsTargetId: Accessor<Track["id"] | "master">;
 };
 
 const pointerPosition = (event: PointerEvent) => ({
@@ -15,6 +21,74 @@ const pointerPosition = (event: PointerEvent) => ({
 
 const distanceFromStart = (start: { x: number; y: number }, pointer: { x: number; y: number }) =>
   Math.hypot(pointer.x - start.x, pointer.y - start.y);
+
+const isInsideRect = (pointer: { x: number; y: number }, rect: DOMRect) => (
+  pointer.x >= rect.left &&
+  pointer.x <= rect.right &&
+  pointer.y >= rect.top &&
+  pointer.y <= rect.bottom
+);
+
+const isCompatibleTrack = (payload: BrowserDragPayload, track: Track | undefined) => {
+  if (payload.kind === "audio-effect") return true;
+  return track?.kind === "instrument";
+};
+
+const resolveTimelineTrackTarget = (
+  pointer: { x: number; y: number },
+  scrollElement: HTMLDivElement | undefined,
+  tracks: Track[],
+): BrowserDropTarget => {
+  if (!scrollElement) return { kind: "none" };
+  if (!isInsideRect(pointer, scrollElement.getBoundingClientRect())) return { kind: "none" };
+  const laneIndex = yToLaneIndex(pointer.y, scrollElement);
+  if (laneIndex >= 0 && laneIndex < tracks.length) return { kind: "track", trackId: tracks[laneIndex].id, laneIndex };
+  if (laneIndex >= tracks.length) return { kind: "new-track" };
+  return { kind: "none" };
+};
+
+const resolveEffectChainPreview = (
+  pointer: { x: number; y: number },
+  chainElement: HTMLElement | undefined,
+  currentTargetId: Track["id"] | "master",
+): Pick<BrowserDragSession, "target" | "effectChainPreview"> | undefined => {
+  if (!chainElement) return;
+  const chainRect = chainElement.getBoundingClientRect();
+  if (!isInsideRect(pointer, chainRect)) return;
+  const cards = Array.from(chainElement.querySelectorAll("[data-effect-kind]"));
+  for (let index = 0; index < cards.length; index += 1) {
+    const card = cards[index];
+    if (!(card instanceof HTMLElement)) continue;
+    const rect = card.getBoundingClientRect();
+    if (pointer.x < rect.left + rect.width / 2) {
+      return {
+        target: { kind: "effect-chain", targetId: currentTargetId, index },
+        effectChainPreview: { x: rect.left, top: rect.top, height: rect.height },
+      };
+    }
+  }
+  return {
+    target: { kind: "effect-chain", targetId: currentTargetId, index: cards.length },
+    effectChainPreview: { x: chainRect.right, top: chainRect.top, height: chainRect.height },
+  };
+};
+
+const resolveCompatibleTarget = (
+  payload: BrowserDragPayload,
+  pointer: { x: number; y: number },
+  options: BrowserDeviceDragOptions,
+): Pick<BrowserDragSession, "target" | "effectChainPreview"> => {
+  if (payload.kind === "audio-effect") {
+    const chain = resolveEffectChainPreview(pointer, options.effectsChainElement(), options.currentEffectsTargetId());
+    if (chain) return chain;
+  }
+  const tracks = options.tracks();
+  const target = resolveTimelineTrackTarget(pointer, options.scrollElement(), tracks);
+  if (target.kind === "track") {
+    return { target: isCompatibleTrack(payload, tracks[target.laneIndex]) ? target : { kind: "none" } };
+  }
+  return { target };
+};
 
 export function createBrowserDeviceDrag(options: BrowserDeviceDragOptions): {
   session: Accessor<BrowserDragSession | undefined>;
@@ -60,15 +134,18 @@ export function createBrowserDeviceDrag(options: BrowserDeviceDragOptions): {
       if (!pending) return;
       const currentSession = session();
       if (currentSession) {
-        setSession({ ...currentSession, pointer });
+        const target = resolveCompatibleTarget(pending.payload, pointer, options);
+        setSession({ ...currentSession, pointer, target: target.target, effectChainPreview: target.effectChainPreview });
         event.preventDefault();
         return;
       }
       if (distanceFromStart(pending.start, pointer) < DRAG_THRESHOLD_PX) return;
+      const target = resolveCompatibleTarget(pending.payload, pointer, options);
       setSession({
         payload: pending.payload,
         pointer,
-        target: { kind: "none" },
+        target: target.target,
+        effectChainPreview: target.effectChainPreview,
         ghostOffset: pending.ghostOffset,
         ghostSize: pending.ghostSize,
       });

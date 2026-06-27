@@ -55,6 +55,7 @@ export type TimelinePanelsProps = {
     onEffectParamsCommitted: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void
     onLocalSaveFailed?: (message: string) => void
     onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void
+    onEffectChainElementChange?: (element: HTMLElement | undefined) => void
   }
   sampleDetailPanel: {
     isOpen: boolean
@@ -177,6 +178,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         onEffectParamsCommitted={props.effectsPanel.onEffectParamsCommitted}
         onLocalSaveFailed={props.effectsPanel.onLocalSaveFailed}
         onDeviceInsertActionsChange={props.effectsPanel.onDeviceInsertActionsChange}
+        onEffectChainElementChange={props.effectsPanel.onEffectChainElementChange}
       />
 
       <Show when={props.sampleDetailPanel.isOpen && props.sampleDetailPanel.selectedClip}>

@@ -460,6 +460,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   let archiveInputRef: HTMLInputElement | undefined;
   let containerRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
+  let effectsChainElement: HTMLElement | undefined;
 
   const leftBrowser = useTimelineLeftBrowserState({
     projectId,
@@ -816,8 +817,18 @@ const Timeline: Component<TimelineProps> = (props) => {
     leftBrowser,
     onResizePointerDown: leftBrowserResize.onPointerDown,
     deviceInsertActions,
+    tracks: () => renderTracks(),
+    scrollElement: () => scrollRef,
+    effectsChainElement: () => effectsChainElement,
+    currentEffectsTargetId: () => selection.selectedFXTarget(),
     handleInsertSample,
   });
+  const browserDropTargetLane = createMemo(() => {
+    const target = timelineBrowser().devices.dragSession()?.target;
+    if (target?.kind !== "track") return null;
+    return target.laneIndex;
+  });
+  const browserDropAtNewTrack = createMemo(() => timelineBrowser().devices.dragSession()?.target.kind === "new-track");
   useTimelineAudioLifecycle({
     audioEngine,
     tracks: () => renderTracks(),
@@ -966,6 +977,9 @@ const Timeline: Component<TimelineProps> = (props) => {
       onEffectParamsCommitted: pushEffectParamsHistory,
       onLocalSaveFailed: localProject.setLocalSaveFailure,
       onDeviceInsertActionsChange: setDeviceInsertActions,
+      onEffectChainElementChange: (element: HTMLElement | undefined) => {
+        effectsChainElement = element;
+      },
     },
     sampleDetailPanel: {
       isOpen: bottomPanel.open() && bottomPanel.mode() === "sample-detail",
@@ -1065,8 +1079,8 @@ const Timeline: Component<TimelineProps> = (props) => {
         durationSec={duration()}
         sidebarWidth={sidebarWidth()}
         tracks={renderTracks()}
-        dropAtNewTrack={dropAtNewTrack()}
-        dropTargetLane={dropTargetLane()}
+        dropAtNewTrack={dropAtNewTrack() || browserDropAtNewTrack()}
+        dropTargetLane={browserDropTargetLane() ?? dropTargetLane()}
         bpm={bpm()}
         gridDenominator={gridDenominator()}
         gridEnabled={gridEnabled()}

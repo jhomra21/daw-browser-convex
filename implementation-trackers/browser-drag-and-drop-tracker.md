@@ -405,7 +405,11 @@ Fix failures and rerun failed validators.
   - 2026-06-27: Implemented Phase 1 browser device drag foundation locally. Added device drag types, 4px pointer threshold, floating ghost overlay, click suppression after real drags, and deterministic cleanup.
   - 2026-06-27: Simplify pass adopted reuse/quality fixes: reused `useDrag` lifecycle, removed redundant `didStartDragging`, cleaned stale click suppressor cleanup, and centralized Browser device payload/capability resolution.
   - 2026-06-27: Validators passed: `git diff --check`, `bun run typecheck`, `bun test`, `bun run knip`.
-- [ ] Phase 2 complete, simplified, validated, committed, pushed.
+- [x] Phase 2 complete, simplified, validated, committed, pushed.
+  - 2026-06-27: Implemented Phase 2 browser device target resolution and visual previews. Track/new-track detection uses `yToLaneIndex` with timeline bounds, effect-chain insertion uses effects panel bounds plus `[data-effect-kind]` card rects, and no `elementFromPoint` is used.
+  - 2026-06-27: Compatibility is visual-only: audio effects preview tracks, new track, and effect chain; MIDI effects/instruments preview only instrument tracks or new track; audio tracks no-drop for MIDI effects/instruments.
+  - 2026-06-27: Simplify pass fixed stale effect-chain indicators, avoided pre-threshold target resolution, removed redundant new-track compatibility checks, and carried lane index on track targets to avoid repeated scans.
+  - 2026-06-27: Validators passed: `git diff --check`, `bun run typecheck`, `bun test`, `bun run knip`.
 - [ ] Phase 3 complete, simplified, validated, committed, pushed.
 - [ ] Phase 4 complete, simplified, validated, committed, pushed.
 - [ ] Phase 5 complete, simplified, validated, committed, pushed.

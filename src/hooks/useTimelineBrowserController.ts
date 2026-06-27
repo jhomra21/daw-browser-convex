@@ -6,6 +6,7 @@ import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData, type SampleDragData } from "~/lib/sample-drag-data";
 import { createBrowserDeviceDrag } from "~/components/timeline/browser/create-browser-device-drag";
 import type { BrowserDragPayload } from "~/components/timeline/browser/browser-drag-types";
+import type { Track } from "@daw-browser/timeline-core/types";
 
 type Options = {
   projectId: Accessor<string>;
@@ -13,6 +14,10 @@ type Options = {
   leftBrowser: TimelineLeftBrowserState;
   onResizePointerDown: (event: PointerEvent) => void;
   deviceInsertActions: Accessor<TimelineDeviceInsertActions | undefined>;
+  tracks: Accessor<Track[]>;
+  scrollElement: () => HTMLDivElement | undefined;
+  effectsChainElement: () => HTMLElement | undefined;
+  currentEffectsTargetId: Accessor<Track["id"] | "master">;
   handleInsertSample: (sample: SampleDragData) => void | Promise<void>;
 };
 
@@ -262,6 +267,10 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
 
   const browserDeviceDrag = createBrowserDeviceDrag({
     resolvePayload: resolveBrowserDevicePayload,
+    tracks: options.tracks,
+    scrollElement: options.scrollElement,
+    effectsChainElement: options.effectsChainElement,
+    currentEffectsTargetId: options.currentEffectsTargetId,
   });
 
   return createMemo(() => ({

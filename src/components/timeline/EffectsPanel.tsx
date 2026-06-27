@@ -360,7 +360,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
             <div class="flex flex-1 flex-col overflow-hidden min-h-0">
               <div
                 class="flex-1 overflow-x-auto overflow-y-hidden px-1 py-[3px] min-h-0"
-                ref={(element) => props.onEffectChainElementChange?.(element)}
               >
                 <div class="flex items-stretch gap-3 h-full min-w-min min-h-0">
                   <Show when={target.isInstrumentTrack()}>
@@ -371,11 +370,13 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       }}
                     />
                   </Show>
-                  <EffectsPanelEffectCards
-                    audioEffects={audioEffects}
-                    canWrite={canWriteCurrentTargetEffects()}
-                    spectrum={spectrum()}
-                  />
+                  <div class="flex min-w-16 items-stretch" ref={(element) => props.onEffectChainElementChange?.(element)}>
+                    <EffectsPanelEffectCards
+                      audioEffects={audioEffects}
+                      canWrite={canWriteCurrentTargetEffects()}
+                      spectrum={spectrum()}
+                    />
+                  </div>
                   <Show when={isCurrentTargetReadOnly()}>
                     <EffectsPanelReadOnlyNotice />
                   </Show>

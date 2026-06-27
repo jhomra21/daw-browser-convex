@@ -132,7 +132,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   const browserDeviceQuery = (tab: "effects" | "midi-instruments") => options.leftBrowser.searchQueryByTab()[tab].trim().toLowerCase();
   const browserEffectItems = createMemo<BrowserItem[]>(() => {
     const actions = options.deviceInsertActions();
-    const canWrite = actions?.canWrite === true;
+    const canDragDevice = actions !== undefined;
     const items: BrowserItem[] = [
       {
         id: BROWSER_EFFECT_ITEM_IDS.eq,
@@ -141,7 +141,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: "EQ",
         subtitle: "Audio effect",
         searchText: "eq audio effect equalizer",
-        disabled: !canWrite,
+        disabled: !canDragDevice,
       },
       {
         id: BROWSER_EFFECT_ITEM_IDS.reverb,
@@ -150,7 +150,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: "Reverb",
         subtitle: "Audio effect",
         searchText: "reverb audio effect space",
-        disabled: !canWrite,
+        disabled: !canDragDevice,
       },
       {
         id: BROWSER_EFFECT_ITEM_IDS.saturator,
@@ -159,7 +159,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: "Saturator",
         subtitle: "Audio effect",
         searchText: "saturator saturation drive distortion audio effect",
-        disabled: !canWrite,
+        disabled: !canDragDevice,
       },
       {
         id: BROWSER_EFFECT_ITEM_IDS.delay,
@@ -168,7 +168,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: "Delay",
         subtitle: "Audio effect",
         searchText: "delay echo ping pong audio effect",
-        disabled: !canWrite,
+        disabled: !canDragDevice,
       },
       {
         id: BROWSER_EFFECT_ITEM_IDS.arpeggiator,
@@ -177,7 +177,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: "Arpeggiator",
         subtitle: "MIDI effect",
         searchText: "arpeggiator arp midi effect",
-        disabled: !canWrite,
+        disabled: !canDragDevice,
       },
     ];
     const query = browserDeviceQuery("effects");
@@ -206,7 +206,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: "Synth",
         subtitle: "Create a MIDI clip on the selected instrument track",
         searchText: "synth midi instrument clip",
-        disabled: actions?.canWrite !== true,
+        disabled: actions === undefined,
       },
     ];
     const query = browserDeviceQuery("midi-instruments");
@@ -235,7 +235,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
 
   const resolveBrowserDevicePayload = (itemId: string): BrowserDragPayload | undefined => {
     const actions = options.deviceInsertActions();
-    if (!actions?.canWrite) return undefined;
+    if (!actions) return undefined;
     if (itemId === BROWSER_EFFECT_ITEM_IDS.eq) return { kind: "audio-effect", effect: "eq", label: "EQ" };
     if (itemId === BROWSER_EFFECT_ITEM_IDS.saturator) return { kind: "audio-effect", effect: "saturator", label: "Saturator" };
     if (itemId === BROWSER_EFFECT_ITEM_IDS.delay) return { kind: "audio-effect", effect: "delay", label: "Delay" };

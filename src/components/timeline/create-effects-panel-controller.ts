@@ -206,10 +206,9 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     canWriteEffectsTarget(targetId) && audioEffects.canAddByKindToTarget(targetId, effect)
   );
 
-  const addAudioEffectToTarget = (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => {
+  const addAudioEffectToTarget = async (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => {
     if (!canAddAudioEffectToTarget(targetId, effect)) return false;
-    audioEffects.addByKindToTarget(targetId, effect, index);
-    return true;
+    return await audioEffects.addByKindToTarget(targetId, effect, index);
   };
 
   let previousDeviceInsertActions: TimelineDeviceInsertActions | undefined;

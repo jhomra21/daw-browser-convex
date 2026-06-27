@@ -84,7 +84,7 @@ type EffectsPanelAudioDevice = {
     reset: () => void;
     toggleEnabled: (enabled: boolean) => void;
   };
-  addByKindToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => void;
+  addByKindToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => Promise<boolean>;
   canAddByKindToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind) => boolean;
   flushPending: () => Promise<void>;
   orderedEffects: Accessor<AudioEffectKind[]>;
@@ -410,14 +410,20 @@ export function createEffectsPanelAudioDevice(
     if (!context.canWriteCurrentTargetEffects()) return;
     delayState.add();
   };
-  const addByKindToTarget = (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => {
-    if (!canAddByKindToTarget(targetId, effect)) return;
-    if (effect === "eq") eqState.addForTarget(targetId);
-    if (effect === "saturator") saturatorState.addForTarget(targetId);
-    if (effect === "delay") delayState.addForTarget(targetId);
-    if (effect === "reverb") reverbState.addForTarget(targetId);
-    if (index === undefined) return;
+  const stateForKind = (effect: AudioEffectKind) => {
+    if (effect === "eq") return eqState;
+    if (effect === "saturator") return saturatorState;
+    if (effect === "delay") return delayState;
+    return reverbState;
+  };
+  const addByKindToTarget = async (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => {
+    if (!canAddByKindToTarget(targetId, effect)) return false;
+    const state = stateForKind(effect);
+    state.addForTarget(targetId);
+    if (index === undefined) return true;
+    await state.flushPending();
     reorderForTarget(targetId, effect, index);
+    return true;
   };
   const canAddByKindToTarget = (targetId: Track["id"] | "master", effect: AudioEffectKind) => {
     const currentOrder = targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(targetId);

@@ -825,19 +825,19 @@ const Timeline: Component<TimelineProps> = (props) => {
     const actions = deviceInsertActions();
     if (!actions) return;
     if (payload.kind === "audio-effect" && target.kind === "effect-chain") {
-      if (!actions.addAudioEffectToTarget(target.targetId, payload.effect, target.index)) return;
+      if (!await actions.addAudioEffectToTarget(target.targetId, payload.effect, target.index)) return;
       openEffectsForTarget(target.targetId);
       return;
     }
     if (payload.kind === "audio-effect" && target.kind === "track") {
-      if (!actions.addAudioEffectToTarget(target.trackId, payload.effect)) return;
+      if (!await actions.addAudioEffectToTarget(target.trackId, payload.effect)) return;
       openEffectsForTarget(target.trackId);
       return;
     }
     if (payload.kind === "audio-effect" && target.kind === "new-track") {
       const track = await createTimelineTrack();
       if (!track) return;
-      if (!actions.addAudioEffectToTarget(track.id, payload.effect)) return;
+      if (!await actions.addAudioEffectToTarget(track.id, payload.effect)) return;
       openEffectsForTarget(track.id);
       return;
     }

@@ -31,11 +31,6 @@ const isInsideRect = (pointer: { x: number; y: number }, rect: DOMRect) => (
   pointer.y <= rect.bottom
 );
 
-const isCompatibleTrack = (payload: BrowserDragPayload, track: Track | undefined) => {
-  if (payload.kind === "audio-effect") return true;
-  return track?.kind === "instrument";
-};
-
 const resolveTimelineTrackTarget = (
   pointer: { x: number; y: number },
   scrollElement: HTMLDivElement | undefined,
@@ -87,7 +82,7 @@ const resolveCompatibleTarget = (
   const tracks = options.tracks();
   const target = resolveTimelineTrackTarget(pointer, options.scrollElement(), tracks);
   if (target.kind === "track") {
-    return { target: isCompatibleTrack(payload, tracks[target.laneIndex]) && options.canDrop(payload, target) ? target : { kind: "none" } };
+    return { target: options.canDrop(payload, target) ? target : { kind: "none" } };
   }
   if (target.kind === "new-track" && !options.canDrop(payload, target)) return { target: { kind: "none" } };
   return { target };

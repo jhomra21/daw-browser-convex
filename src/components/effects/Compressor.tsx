@@ -140,7 +140,7 @@ export default function Compressor(props: CompressorProps) {
           <Knob label="Ratio" valueLabel={formatRatio(props.params.ratio)} value={props.params.ratio} resetValue={DEFAULT_PARAMS.ratio} min={COMPRESSOR_RATIO_MIN} max={COMPRESSOR_RATIO_MAX} step={0.1} disabled={!props.params.enabled} onValueChange={(ratio) => props.onChange({ ratio })} />
           <Knob label="Attack" valueLabel={formatMs(props.params.attackMs)} value={props.params.attackMs} resetValue={DEFAULT_PARAMS.attackMs} min={COMPRESSOR_ATTACK_MS_MIN} max={COMPRESSOR_ATTACK_MS_MAX} step={0.1} disabled={!props.params.enabled} onValueChange={(attackMs) => props.onChange({ attackMs })} />
           <Knob label="Release" valueLabel={formatMs(props.params.releaseMs)} value={props.params.releaseMs} resetValue={DEFAULT_PARAMS.releaseMs} min={COMPRESSOR_RELEASE_MS_MIN} max={COMPRESSOR_RELEASE_MS_MAX} step={1} disabled={!props.params.enabled || props.params.autoRelease} onValueChange={(releaseMs) => props.onChange({ releaseMs })} />
-          <DeviceToggleButton label="Auto" active={props.params.autoRelease} disabled={!props.params.enabled} onClick={() => props.onChange({ autoRelease: !props.params.autoRelease })} />
+          <DeviceToggleButton class="h-7 self-center" label="Auto" active={props.params.autoRelease} disabled={!props.params.enabled} onClick={() => props.onChange({ autoRelease: !props.params.autoRelease })} />
         </div>
         <div class="flex min-w-0 flex-col gap-1.5">
           <div class="grid grid-cols-4 gap-1">
@@ -150,13 +150,17 @@ export default function Compressor(props: CompressorProps) {
             <MiniStatus label="Out" value={formatDb(props.params.outputDb)} />
           </div>
           <CompressorGraph params={props.params} viewMode={viewMode()} history={history()} />
-          <div class="grid grid-cols-6 gap-1">
-            <For each={VIEW_MODES}>
-              {(mode) => <DeviceToggleButton label={mode === 'gain-reduction' ? 'GR' : label(mode)} active={viewMode() === mode} disabled={!props.params.enabled} onClick={() => setViewMode(mode)} />}
-            </For>
-            <Knob label="Thresh" valueLabel={formatDb(props.params.thresholdDb)} value={props.params.thresholdDb} resetValue={DEFAULT_PARAMS.thresholdDb} min={COMPRESSOR_THRESHOLD_DB_MIN} max={COMPRESSOR_THRESHOLD_DB_MAX} step={0.1} disabled={!props.params.enabled} onValueChange={(thresholdDb) => props.onChange({ thresholdDb })} />
-            <Knob label="Knee" valueLabel={formatDb(props.params.kneeDb)} value={props.params.kneeDb} resetValue={DEFAULT_PARAMS.kneeDb} min={COMPRESSOR_KNEE_DB_MIN} max={COMPRESSOR_KNEE_DB_MAX} step={0.1} disabled={!props.params.enabled} onValueChange={(kneeDb) => props.onChange({ kneeDb })} />
-            <Knob label="Look" valueLabel={formatMs(props.params.lookaheadMs)} value={props.params.lookaheadMs} resetValue={DEFAULT_PARAMS.lookaheadMs} min={COMPRESSOR_LOOKAHEAD_MS_MIN} max={COMPRESSOR_LOOKAHEAD_MS_MAX} step={0.1} disabled={!props.params.enabled} onValueChange={(lookaheadMs) => props.onChange({ lookaheadMs })} />
+          <div class="grid grid-cols-[auto_1fr] items-start gap-2">
+            <div class="flex gap-1 pt-1">
+              <For each={VIEW_MODES}>
+                {(mode) => <DeviceToggleButton class="h-7 min-w-12 px-2" label={mode === 'gain-reduction' ? 'GR' : label(mode)} active={viewMode() === mode} disabled={!props.params.enabled} onClick={() => setViewMode(mode)} />}
+              </For>
+            </div>
+            <div class="grid grid-cols-3 gap-1">
+              <Knob label="Thresh" valueLabel={formatDb(props.params.thresholdDb)} value={props.params.thresholdDb} resetValue={DEFAULT_PARAMS.thresholdDb} min={COMPRESSOR_THRESHOLD_DB_MIN} max={COMPRESSOR_THRESHOLD_DB_MAX} step={0.1} disabled={!props.params.enabled} onValueChange={(thresholdDb) => props.onChange({ thresholdDb })} />
+              <Knob label="Knee" valueLabel={formatDb(props.params.kneeDb)} value={props.params.kneeDb} resetValue={DEFAULT_PARAMS.kneeDb} min={COMPRESSOR_KNEE_DB_MIN} max={COMPRESSOR_KNEE_DB_MAX} step={0.1} disabled={!props.params.enabled} onValueChange={(kneeDb) => props.onChange({ kneeDb })} />
+              <Knob label="Look" valueLabel={formatMs(props.params.lookaheadMs)} value={props.params.lookaheadMs} resetValue={DEFAULT_PARAMS.lookaheadMs} min={COMPRESSOR_LOOKAHEAD_MS_MIN} max={COMPRESSOR_LOOKAHEAD_MS_MAX} step={0.1} disabled={!props.params.enabled} onValueChange={(lookaheadMs) => props.onChange({ lookaheadMs })} />
+            </div>
           </div>
         </div>
         <div class="flex min-h-0 flex-col gap-2">

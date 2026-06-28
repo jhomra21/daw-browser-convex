@@ -249,7 +249,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   const addBrowserEffect = (itemId: string) => {
     const payload = resolveBrowserDevicePayload(itemId);
     const actions = options.deviceInsertActions();
-    if (!payload || !actions) return;
+    if (!payload || !actions?.canWrite) return;
     if (payload.kind === "audio-effect") {
       if (payload.effect === "eq" && actions.canAddEq) actions.addEq();
       if (payload.effect === "saturator" && actions.canAddSaturator) actions.addSaturator();
@@ -263,7 +263,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   const addBrowserInstrument = (itemId: string) => {
     const payload = resolveBrowserDevicePayload(itemId);
     const actions = options.deviceInsertActions();
-    if (!actions || payload?.kind !== "midi-instrument" || !actions.canAddMidiClip) return;
+    if (!actions?.canWrite || payload?.kind !== "midi-instrument" || !actions.canAddMidiClip) return;
     void actions.addMidiClip();
   };
 

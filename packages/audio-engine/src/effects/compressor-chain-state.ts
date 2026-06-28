@@ -1,10 +1,11 @@
 import { normalizeCompressorParams, type CompressorParamsLite } from '@daw-browser/shared'
 import { applyCompressorNodeChainParams, createCompressorNodeChain, disconnectCompressorChain, type CompressorNodeChain } from './chain'
-import { getCompressorParamsSignature } from './compressor-worklet'
+import { getCompressorParamsSignature, readCompressorMeterFrame, type CompressorMeterListener } from './compressor-worklet'
 
 export type CompressorChainState = {
   chain: () => CompressorNodeChain | null
   set: (ctx: BaseAudioContext, params: CompressorParamsLite) => Promise<{ changed: boolean; requiresRoutingRebuild: boolean }>
+  subscribeMeter: (listener: CompressorMeterListener) => () => void
   close: () => void
 }
 
@@ -13,6 +14,16 @@ export function createCompressorChainState(): CompressorChainState {
   let signature: string | null = null
   let enabled: boolean | null = null
   let token = 0
+  const meterListeners = new Set<CompressorMeterListener>()
+
+  const bindMeterPort = (chain: CompressorNodeChain) => {
+    chain.workletNode.port.onmessage = (event) => {
+      const frame = readCompressorMeterFrame(event.data)
+      if (!frame) return
+      for (const listener of meterListeners) listener(frame)
+    }
+  }
+
   return {
     chain: () => compressor,
     set: async (ctx, params) => {
@@ -37,12 +48,19 @@ export function createCompressorChainState(): CompressorChainState {
           return { changed: false, requiresRoutingRebuild: false }
         }
         compressor = next
+        bindMeterPort(compressor)
       } else {
         applyCompressorNodeChainParams(compressor, normalized)
       }
       signature = nextSignature
       enabled = true
       return { changed: true, requiresRoutingRebuild }
+    },
+    subscribeMeter: (listener) => {
+      meterListeners.add(listener)
+      return () => {
+        meterListeners.delete(listener)
+      }
     },
     close: () => {
       token++

@@ -1,5 +1,14 @@
 import { normalizeCompressorParams, serializeCompressorParams, type CompressorParamsLite } from '@daw-browser/shared'
 
+export type CompressorMeterFrame = {
+  inputDb: number
+  outputDb: number
+  gainReductionDb: number
+  thresholdDb: number
+}
+
+export type CompressorMeterListener = (frame: CompressorMeterFrame) => void
+
 const registeredContexts = new WeakSet<BaseAudioContext>()
 const registeringContexts = new WeakMap<BaseAudioContext, Promise<void>>()
 
@@ -47,6 +56,12 @@ class CompressorProcessor extends AudioWorkletProcessor {
     this.rms = 0
     this.scLow = 0
     this.scBand = 0
+    this.meterFrames = 0
+    this.meterInSum = 0
+    this.meterOutSum = 0
+    this.meterGainReductionDb = 0
+    this.meterReportEveryFrames = 2048
+    this.meterMessage = { type: 'meter', inputDb: MIN_DB, outputDb: MIN_DB, gainReductionDb: 0, thresholdDb: this.params.thresholdDb }
     this.port.onmessage = (event) => {
       if (event.data && event.data.type === 'params') this.params = event.data.params
     }
@@ -112,6 +127,21 @@ class CompressorProcessor extends AudioWorkletProcessor {
       const processedR = delayedR * gain
       outL[i] = delayedL * dry + processedL * wet
       outR[i] = delayedR * dry + processedR * wet
+      this.meterInSum += (inL * inL + inR * inR) * 0.5
+      this.meterOutSum += (outL[i] * outL[i] + outR[i] * outR[i]) * 0.5
+      this.meterGainReductionDb = Math.min(this.meterGainReductionDb, this.envelopeDb)
+    }
+    this.meterFrames += left.length
+    if (this.meterFrames >= this.meterReportEveryFrames) {
+      this.meterMessage.inputDb = gainToDb(Math.sqrt(this.meterInSum / this.meterFrames))
+      this.meterMessage.outputDb = gainToDb(Math.sqrt(this.meterOutSum / this.meterFrames))
+      this.meterMessage.gainReductionDb = this.meterGainReductionDb
+      this.meterMessage.thresholdDb = p.thresholdDb
+      this.port.postMessage(this.meterMessage)
+      this.meterFrames = 0
+      this.meterInSum = 0
+      this.meterOutSum = 0
+      this.meterGainReductionDb = 0
     }
     return true
   }
@@ -142,6 +172,21 @@ export async function ensureCompressorWorklet(ctx: BaseAudioContext): Promise<vo
 
 export function postCompressorParams(node: AudioWorkletNode, params: CompressorParamsLite) {
   node.port.postMessage({ type: 'params', params: normalizeCompressorParams(params) })
+}
+
+export function readCompressorMeterFrame(data: unknown): CompressorMeterFrame | null {
+  if (!data || typeof data !== 'object') return null
+  if (!('type' in data) || data.type !== 'meter') return null
+  if (!('inputDb' in data) || typeof data.inputDb !== 'number') return null
+  if (!('outputDb' in data) || typeof data.outputDb !== 'number') return null
+  if (!('gainReductionDb' in data) || typeof data.gainReductionDb !== 'number') return null
+  if (!('thresholdDb' in data) || typeof data.thresholdDb !== 'number') return null
+  return {
+    inputDb: data.inputDb,
+    outputDb: data.outputDb,
+    gainReductionDb: data.gainReductionDb,
+    thresholdDb: data.thresholdDb,
+  }
 }
 
 export function getCompressorParamsSignature(params: CompressorParamsLite): string {

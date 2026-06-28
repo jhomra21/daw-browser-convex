@@ -5,6 +5,7 @@ import { createCompressorChainState } from './effects/compressor-chain-state'
 import { createDelayChainState } from './effects/delay-chain-state'
 import { createReverbChainState } from './effects/reverb-chain-state'
 import { createSaturatorChainState } from './effects/saturator-chain-state'
+import type { CompressorMeterListener } from './effects/compressor-worklet'
 import type { SpectrumFrame } from './metering-runtime'
 
 export function createMasterFxRuntime() {
@@ -135,6 +136,7 @@ export function createMasterFxRuntime() {
         if (result.changed && result.requiresRoutingRebuild) rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
       })
     },
+    subscribeCompressorMeter: (listener: CompressorMeterListener) => compressorState.subscribeMeter(listener),
     setSaturator: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: SaturatorParamsLite) => {
       if (!ctx || !masterGain) {
         pendingSaturatorParams = params

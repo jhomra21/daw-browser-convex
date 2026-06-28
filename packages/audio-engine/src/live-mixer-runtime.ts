@@ -2,6 +2,7 @@ import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeCompress
 import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState, type CompressorChainState } from './effects/compressor-chain-state'
+import type { CompressorMeterListener } from './effects/compressor-worklet'
 import { createDelayChainState, type DelayChainState } from './effects/delay-chain-state'
 import { createReverbChainState, type ReverbChainState } from './effects/reverb-chain-state'
 import { createSaturatorChainState, type SaturatorChainState } from './effects/saturator-chain-state'
@@ -357,6 +358,14 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       if (input && gain) rebuildTrackRouting(trackId, { input, gain })
     },
     setTrackCompressor: (trackId: string, params: CompressorParamsLite) => { void setTrackCompressor(trackId, params) },
+    subscribeTrackCompressorMeter: (trackId: string, listener: CompressorMeterListener) => {
+      let state = compressorChains.get(trackId)
+      if (!state) {
+        state = createCompressorChainState()
+        compressorChains.set(trackId, state)
+      }
+      return state.subscribeMeter(listener)
+    },
     setTrackReverb,
     setBpm: (bpm: number) => {
       currentBpm = bpm

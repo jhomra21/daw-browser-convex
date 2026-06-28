@@ -163,12 +163,16 @@ type EffectsPanelEffectCardsProps = {
   canWrite: boolean;
   onElementChange?: (element: HTMLElement) => void;
   spectrum: SpectrumFrame | null;
+  audioEngine: AudioEngine;
+  targetId: Track["id"] | "master";
 };
 
 type EffectsPanelAudioEffectCardProps = {
   effect: AudioEffectKind;
   audioEffects: EffectsPanelAudioEffects;
   spectrum: SpectrumFrame | null;
+  audioEngine: AudioEngine;
+  targetId: Track["id"] | "master";
 };
 
 const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> = (props) => {
@@ -189,7 +193,7 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
   if (props.effect === "compressor") {
     return (
       <Show when={props.audioEffects.compressor.params()}>
-        {(params) => <Compressor params={params()} onChange={props.audioEffects.compressor.change} onToggleEnabled={props.audioEffects.compressor.toggleEnabled} onReset={props.audioEffects.compressor.reset} />}
+        {(params) => <Compressor params={params()} audioEngine={props.audioEngine} targetId={props.targetId} onChange={props.audioEffects.compressor.change} onToggleEnabled={props.audioEffects.compressor.toggleEnabled} onReset={props.audioEffects.compressor.reset} />}
       </Show>
     );
   }
@@ -233,7 +237,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                 classList={{ "opacity-30": reorderPreview()?.effect === effect }}
                 onPointerDown={drag.onPointerDown}
               >
-                <EffectsPanelAudioEffectCard effect={effect} audioEffects={props.audioEffects} spectrum={props.spectrum} />
+                <EffectsPanelAudioEffectCard effect={effect} audioEffects={props.audioEffects} spectrum={props.spectrum} audioEngine={props.audioEngine} targetId={props.targetId} />
               </div>
             );
           }}
@@ -261,7 +265,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                 height: `${preview().ghost.height}px`,
               }}
             >
-              <EffectsPanelAudioEffectCard effect={preview().effect} audioEffects={props.audioEffects} spectrum={props.spectrum} />
+              <EffectsPanelAudioEffectCard effect={preview().effect} audioEffects={props.audioEffects} spectrum={props.spectrum} audioEngine={props.audioEngine} targetId={props.targetId} />
             </div>
           </>
         )}
@@ -386,6 +390,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     canWrite={canWriteCurrentTargetEffects()}
                     onElementChange={props.onEffectChainElementChange}
                     spectrum={spectrum()}
+                    audioEngine={props.audioEngine}
+                    targetId={props.selectedFXTarget}
                   />
                   <Show when={isCurrentTargetReadOnly()}>
                     <EffectsPanelReadOnlyNotice />

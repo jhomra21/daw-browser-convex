@@ -337,6 +337,14 @@ export const getEqForTrack = query({
   },
 });
 
+export const getCompressorForTrack = query({
+  args: { projectId: v.string(), trackId: v.id("tracks") },
+  handler: async (ctx, { projectId, trackId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    return await getTrackEffect(ctx, { projectId, trackId, userId, type: "compressor" });
+  },
+});
+
 // Synth: get synth row for a track
 export const getSynthForTrack = query({
   args: { projectId: v.string(), trackId: v.id('tracks') },

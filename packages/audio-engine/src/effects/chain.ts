@@ -25,7 +25,6 @@ export type ReverbNodeChain = {
 
 export type CompressorNodeChain = {
   enabled: boolean
-  internalsConnected: boolean
   workletNode: AudioWorkletNode
 }
 
@@ -148,7 +147,6 @@ export async function createCompressorNodeChain(ctx: BaseAudioContext, params: C
   await ensureCompressorWorklet(ctx)
   const chain: CompressorNodeChain = {
     enabled: normalized.enabled,
-    internalsConnected: false,
     workletNode: new AudioWorkletNode(ctx, 'daw-compressor-processor', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] }),
   }
   postCompressorParams(chain.workletNode, normalized)
@@ -164,7 +162,6 @@ export function applyCompressorNodeChainParams(chain: CompressorNodeChain, param
 export function disconnectCompressorChain(chain: CompressorNodeChain) {
   disconnectAudioNodes([chain.workletNode])
   chain.workletNode.port.close()
-  chain.internalsConnected = false
 }
 
 export function createSaturatorNodeChain(ctx: BaseAudioContext, params: SaturatorParamsLite): SaturatorNodeChain {

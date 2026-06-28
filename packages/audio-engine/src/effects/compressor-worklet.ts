@@ -204,5 +204,5 @@ export function readCompressorMeterFrame(data: unknown): CompressorMeterFrame | 
 }
 
 export function getCompressorParamsSignature(params: CompressorParamsLite): string {
-  return serializeCompressorParams(normalizeCompressorParams(params))
+  return serializeCompressorParams(params)
 }

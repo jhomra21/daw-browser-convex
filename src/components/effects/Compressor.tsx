@@ -78,10 +78,8 @@ function CompressorGraph(props: { params: CompressorParams; viewMode: ViewMode; 
     return values.join(' ')
   }
   const historyPoints = (value: (frame: CompressorMeterFrame) => number, yForValue: (value: number) => number) => {
-    const frames = props.history
-    if (frames.length === 0) return ''
-    return frames.map((frame, index) => {
-      const denominator = Math.max(1, HISTORY_SIZE - 1)
+    const denominator = HISTORY_SIZE - 1
+    return props.history.map((frame, index) => {
       return `${(index / denominator) * 180},${yForValue(value(frame))}`
     }).join(' ')
   }
@@ -124,11 +122,11 @@ export default function Compressor(props: CompressorProps) {
     const unsubscribe = targetId === 'master'
       ? audioEngine.subscribeMasterCompressorMeter((frame) => {
         setMeter(frame)
-        setHistory((frames) => [...frames.slice(Math.max(0, frames.length - HISTORY_SIZE + 1)), frame])
+        setHistory((frames) => [...frames.slice(1 - HISTORY_SIZE), frame])
       })
       : audioEngine.subscribeTrackCompressorMeter(targetId, (frame) => {
         setMeter(frame)
-        setHistory((frames) => [...frames.slice(Math.max(0, frames.length - HISTORY_SIZE + 1)), frame])
+        setHistory((frames) => [...frames.slice(1 - HISTORY_SIZE), frame])
       })
     onCleanup(unsubscribe)
   })

@@ -1,7 +1,7 @@
 import EffectShell from '~/components/effects/EffectShell'
 import { DeviceToggleButton } from '~/components/ui/device-control'
 import Knob from '~/components/ui/knob'
-import { For, createEffect, createSignal, createUniqueId, onCleanup } from 'solid-js'
+import { For, batch, createEffect, createSignal, createUniqueId, onCleanup } from 'solid-js'
 import type { AudioEngine, CompressorMeterFrame } from '@daw-browser/audio-engine/audio-engine'
 import {
   COMPRESSOR_ATTACK_MS_MAX,
@@ -60,8 +60,8 @@ const normalizeGainReductionY = (value: number) => Math.max(0, Math.min(100, 10 
 function MiniStatus(props: { label: string; value: string; tone?: 'cyan' | 'yellow' }) {
   return (
     <div class="min-w-0 border border-neutral-800 bg-neutral-950/80 px-1.5 py-1">
-      <div class="text-[9px] uppercase leading-none text-neutral-500">{props.label}</div>
-      <div class={cn('truncate font-mono text-[10px] leading-tight', props.tone === 'yellow' ? 'text-yellow-300' : props.tone === 'cyan' ? 'text-cyan-300' : 'text-neutral-200')}>{props.value}</div>
+      <div class="text-3xs uppercase leading-none text-neutral-500">{props.label}</div>
+      <div class={cn('truncate font-mono text-2xs leading-tight', props.tone === 'yellow' ? 'text-yellow-300' : props.tone === 'cyan' ? 'text-cyan-300' : 'text-neutral-200')}>{props.value}</div>
     </div>
   )
 }
@@ -118,6 +118,10 @@ export default function Compressor(props: CompressorProps) {
   createEffect(() => {
     const audioEngine = props.audioEngine
     const targetId = props.targetId
+    batch(() => {
+      setMeter(null)
+      setHistory([])
+    })
     if (!audioEngine || !targetId) return
     const unsubscribe = targetId === 'master'
       ? audioEngine.subscribeMasterCompressorMeter((frame) => {

@@ -171,8 +171,8 @@ type EffectsPanelAudioEffectCardProps = {
   effect: AudioEffectKind;
   audioEffects: EffectsPanelAudioEffects;
   spectrum: SpectrumFrame | null;
-  audioEngine: AudioEngine;
-  targetId: Track["id"] | "master";
+  audioEngine?: AudioEngine;
+  targetId?: Track["id"] | "master";
 };
 
 const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> = (props) => {
@@ -265,7 +265,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                 height: `${preview().ghost.height}px`,
               }}
             >
-              <EffectsPanelAudioEffectCard effect={preview().effect} audioEffects={props.audioEffects} spectrum={props.spectrum} audioEngine={props.audioEngine} targetId={props.targetId} />
+              <EffectsPanelAudioEffectCard effect={preview().effect} audioEffects={props.audioEffects} spectrum={props.spectrum} />
             </div>
           </>
         )}

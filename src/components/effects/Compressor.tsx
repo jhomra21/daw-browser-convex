@@ -136,11 +136,11 @@ export default function Compressor(props: CompressorProps) {
   return (
     <EffectShell title="Compressor" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class={cn('w-[560px] min-w-[560px]', props.class)}>
       <div class={cn('grid min-h-0 flex-1 grid-cols-[84px_1fr_96px] gap-2 px-3 py-2', !props.params.enabled && 'opacity-70')}>
-        <div class="grid min-h-0 grid-rows-4 gap-2">
+        <div class="flex min-h-0 flex-col items-stretch gap-2">
           <Knob label="Ratio" valueLabel={formatRatio(props.params.ratio)} value={props.params.ratio} resetValue={DEFAULT_PARAMS.ratio} min={COMPRESSOR_RATIO_MIN} max={COMPRESSOR_RATIO_MAX} step={0.1} disabled={!props.params.enabled} onValueChange={(ratio) => props.onChange({ ratio })} />
           <Knob label="Attack" valueLabel={formatMs(props.params.attackMs)} value={props.params.attackMs} resetValue={DEFAULT_PARAMS.attackMs} min={COMPRESSOR_ATTACK_MS_MIN} max={COMPRESSOR_ATTACK_MS_MAX} step={0.1} disabled={!props.params.enabled} onValueChange={(attackMs) => props.onChange({ attackMs })} />
           <Knob label="Release" valueLabel={formatMs(props.params.releaseMs)} value={props.params.releaseMs} resetValue={DEFAULT_PARAMS.releaseMs} min={COMPRESSOR_RELEASE_MS_MIN} max={COMPRESSOR_RELEASE_MS_MAX} step={1} disabled={!props.params.enabled || props.params.autoRelease} onValueChange={(releaseMs) => props.onChange({ releaseMs })} />
-          <DeviceToggleButton class="h-7 self-center" label="Auto" active={props.params.autoRelease} disabled={!props.params.enabled} onClick={() => props.onChange({ autoRelease: !props.params.autoRelease })} />
+          <DeviceToggleButton class="mt-auto h-6 py-0" label="Auto" active={props.params.autoRelease} disabled={!props.params.enabled} onClick={() => props.onChange({ autoRelease: !props.params.autoRelease })} />
         </div>
         <div class="flex min-w-0 flex-col gap-1.5">
           <div class="grid grid-cols-4 gap-1">
@@ -151,9 +151,9 @@ export default function Compressor(props: CompressorProps) {
           </div>
           <CompressorGraph params={props.params} viewMode={viewMode()} history={history()} />
           <div class="grid grid-cols-[auto_1fr] items-start gap-2">
-            <div class="flex gap-1 pt-1">
+            <div class="flex items-start gap-1 pt-2">
               <For each={VIEW_MODES}>
-                {(mode) => <DeviceToggleButton class="h-7 min-w-12 px-2" label={mode === 'gain-reduction' ? 'GR' : label(mode)} active={viewMode() === mode} disabled={!props.params.enabled} onClick={() => setViewMode(mode)} />}
+                {(mode) => <DeviceToggleButton class="h-6 min-w-10 px-1.5 py-0" label={mode === 'gain-reduction' ? 'GR' : label(mode)} active={viewMode() === mode} disabled={!props.params.enabled} onClick={() => setViewMode(mode)} />}
               </For>
             </div>
             <div class="grid grid-cols-3 gap-1">

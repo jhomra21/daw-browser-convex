@@ -43,6 +43,7 @@ const deviceInsertActionsEqual = (
   a.addAudioEffectToTarget === b.addAudioEffectToTarget &&
   a.canAddAudioEffectToTarget === b.canAddAudioEffectToTarget &&
   a.addEq === b.addEq &&
+  a.addCompressor === b.addCompressor &&
   a.addSaturator === b.addSaturator &&
   a.addDelay === b.addDelay &&
   a.addReverb === b.addReverb &&
@@ -51,6 +52,7 @@ const deviceInsertActionsEqual = (
   a.canAddMidiClip === b.canAddMidiClip &&
   a.canAddArpeggiator === b.canAddArpeggiator &&
   a.canAddEq === b.canAddEq &&
+  a.canAddCompressor === b.canAddCompressor &&
   a.canAddSaturator === b.canAddSaturator &&
   a.canAddDelay === b.canAddDelay &&
   a.canAddReverb === b.canAddReverb
@@ -128,6 +130,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     playheadSec: options.playheadSec,
     localDraftEffects: {
       eq: audioEffects.eq.readDraftForTarget,
+      compressor: audioEffects.compressor.readDraftForTarget,
       saturator: audioEffects.saturator.readDraftForTarget,
       delay: audioEffects.delay.readDraftForTarget,
       reverb: audioEffects.reverb.readDraftForTarget,
@@ -222,6 +225,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       addAudioEffectToTarget,
       canAddAudioEffectToTarget,
       addEq: audioEffects.eq.add,
+      addCompressor: audioEffects.compressor.add,
       addSaturator: audioEffects.saturator.add,
       addDelay: audioEffects.delay.add,
       addReverb: audioEffects.reverb.add,
@@ -230,6 +234,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       canAddMidiClip: isInstrumentTrack(),
       canAddArpeggiator: isInstrumentTrack() && !instrument.arp.params(),
       canAddEq: !audioEffects.eq.params(),
+      canAddCompressor: !audioEffects.compressor.params(),
       canAddSaturator: !audioEffects.saturator.params(),
       canAddDelay: !audioEffects.delay.params(),
       canAddReverb: !audioEffects.reverb.params(),

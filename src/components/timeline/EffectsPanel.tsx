@@ -8,6 +8,7 @@ import {
 import type { AudioEffectKind } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Delay from "~/components/effects/Delay";
+import Compressor from "~/components/effects/Compressor";
 import Eq from "~/components/effects/Eq";
 import Reverb from "~/components/effects/Reverb";
 import Saturator from "~/components/effects/Saturator";
@@ -162,12 +163,16 @@ type EffectsPanelEffectCardsProps = {
   canWrite: boolean;
   onElementChange?: (element: HTMLElement) => void;
   spectrum: SpectrumFrame | null;
+  audioEngine: AudioEngine;
+  targetId: Track["id"] | "master";
 };
 
 type EffectsPanelAudioEffectCardProps = {
   effect: AudioEffectKind;
   audioEffects: EffectsPanelAudioEffects;
   spectrum: SpectrumFrame | null;
+  audioEngine?: AudioEngine;
+  targetId?: Track["id"] | "master";
 };
 
 const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> = (props) => {
@@ -182,6 +187,13 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
     return (
       <Show when={props.audioEffects.saturator.params()}>
         {(params) => <Saturator params={params()} onChange={props.audioEffects.saturator.change} onToggleEnabled={props.audioEffects.saturator.toggleEnabled} onReset={props.audioEffects.saturator.reset} />}
+      </Show>
+    );
+  }
+  if (props.effect === "compressor") {
+    return (
+      <Show when={props.audioEffects.compressor.params()}>
+        {(params) => <Compressor params={params()} audioEngine={props.audioEngine} targetId={props.targetId} onChange={props.audioEffects.compressor.change} onToggleEnabled={props.audioEffects.compressor.toggleEnabled} onReset={props.audioEffects.compressor.reset} />}
       </Show>
     );
   }
@@ -225,7 +237,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                 classList={{ "opacity-30": reorderPreview()?.effect === effect }}
                 onPointerDown={drag.onPointerDown}
               >
-                <EffectsPanelAudioEffectCard effect={effect} audioEffects={props.audioEffects} spectrum={props.spectrum} />
+                <EffectsPanelAudioEffectCard effect={effect} audioEffects={props.audioEffects} spectrum={props.spectrum} audioEngine={props.audioEngine} targetId={props.targetId} />
               </div>
             );
           }}
@@ -333,6 +345,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const { target, devices, spectrum, canWriteCurrentTargetEffects, isCurrentTargetReadOnly } = controller;
   const { instrument, audioEffects } = devices;
   const eqForTarget = audioEffects.eq.params;
+  const compressorForTarget = audioEffects.compressor.params;
   const saturatorForTarget = audioEffects.saturator.params;
   const delayForTarget = audioEffects.delay.params;
   const reverbForTarget = audioEffects.reverb.params;
@@ -377,6 +390,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     canWrite={canWriteCurrentTargetEffects()}
                     onElementChange={props.onEffectChainElementChange}
                     spectrum={spectrum()}
+                    audioEngine={props.audioEngine}
+                    targetId={props.selectedFXTarget}
                   />
                   <Show when={isCurrentTargetReadOnly()}>
                     <EffectsPanelReadOnlyNotice />
@@ -385,6 +400,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     empty={{
                       visible:
                         !eqForTarget() &&
+                        !compressorForTarget() &&
                         !saturatorForTarget() &&
                         !delayForTarget() &&
                         !reverbForTarget() &&

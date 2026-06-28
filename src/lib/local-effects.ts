@@ -3,7 +3,7 @@ import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_ORDER, type AudioEffectKind } from '@daw-browser/shared'
 import { compareAudioEffectOrderEntries } from '~/lib/audio-effect-order-rows'
 
-export type LocalEffectKind = 'eq' | 'saturator' | 'delay' | 'reverb' | 'synth' | 'arp' | 'master-eq' | 'master-saturator' | 'master-delay' | 'master-reverb'
+export type LocalEffectKind = 'eq' | 'compressor' | 'saturator' | 'delay' | 'reverb' | 'synth' | 'arp' | 'master-eq' | 'master-compressor' | 'master-saturator' | 'master-delay' | 'master-reverb'
 
 export type LocalEffectRow<TParams = any> = {
   id: string

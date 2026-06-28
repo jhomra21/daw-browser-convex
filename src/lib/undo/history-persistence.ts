@@ -1,5 +1,5 @@
 import { buildLocalClip } from "~/lib/clip-create";
-import { buildClipCreatePayload, normalizeAudioWarp, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type ClipCreateSnapshot } from "@daw-browser/shared";
+import { buildClipCreatePayload, normalizeAudioWarp, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
@@ -167,6 +167,7 @@ export const persistHistoryTrackEffects = async (
   if (isLocalHistoryProject(deps)) {
     await Promise.all([
       effects.eq ? setLocalEffect(deps.projectId, trackId, "eq", effects.eq) : null,
+      effects.compressor ? setLocalEffect(deps.projectId, trackId, "compressor", normalizeCompressorParams(effects.compressor)) : null,
       effects.saturator ? setLocalEffect(deps.projectId, trackId, "saturator", normalizeSaturatorParams(effects.saturator)) : null,
       effects.delay ? setLocalEffect(deps.projectId, trackId, "delay", normalizeDelayParams(effects.delay)) : null,
       effects.reverb ? setLocalEffect(deps.projectId, trackId, "reverb", normalizeReverbParams(effects.reverb)) : null,
@@ -177,6 +178,7 @@ export const persistHistoryTrackEffects = async (
   }
   await Promise.all([
     effects.eq ? publishHistoryOperation(deps, { kind: "effects.setEqParams", payload: { trackId, params: effects.eq } }) : null,
+    effects.compressor ? publishHistoryOperation(deps, { kind: "effects.setCompressorParams", payload: { trackId, params: normalizeCompressorParams(effects.compressor) } }) : null,
     effects.saturator ? publishHistoryOperation(deps, { kind: "effects.setSaturatorParams", payload: { trackId, params: normalizeSaturatorParams(effects.saturator) } }) : null,
     effects.delay ? publishHistoryOperation(deps, { kind: "effects.setDelayParams", payload: { trackId, params: normalizeDelayParams(effects.delay) } }) : null,
     effects.reverb ? publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId, params: normalizeReverbParams(effects.reverb) } }) : null,
@@ -212,6 +214,11 @@ export const persistHistoryEffectParams = async (
       await publishHistoryOperation(deps, { kind: "effects.setMasterEqParams", payload: { params } });
       return;
     }
+    case "master-compressor": {
+      const params = normalizeCompressorParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
+      await publishHistoryOperation(deps, { kind: "effects.setMasterCompressorParams", payload: { params } });
+      return;
+    }
     case "master-reverb": {
       const params = normalizeReverbParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
       await publishHistoryOperation(deps, { kind: "effects.setMasterReverbParams", payload: { params } });
@@ -230,6 +237,11 @@ export const persistHistoryEffectParams = async (
     case "eq": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setEqParams", payload: { trackId: targetId, params } });
+      return;
+    }
+    case "compressor": {
+      const params = normalizeCompressorParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
+      await publishHistoryOperation(deps, { kind: "effects.setCompressorParams", payload: { trackId: targetId, params } });
       return;
     }
     case "reverb": {

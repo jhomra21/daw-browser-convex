@@ -3,7 +3,7 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { normalizeReverbParams } from '@daw-browser/shared'
+import { normalizeCompressorParams, normalizeReverbParams } from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
@@ -130,6 +130,11 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
         deps.audioEngine.setMasterReverb(normalizeReverbParams(params))
         return
       }
+      case 'master-compressor': {
+        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+        deps.audioEngine.setMasterCompressor(normalizeCompressorParams(params))
+        return
+      }
       case 'master-saturator': {
         const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
         deps.audioEngine.setMasterSaturator(params)
@@ -148,6 +153,11 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
       case 'reverb': {
         const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
         deps.audioEngine.setTrackReverb(targetId, normalizeReverbParams(params))
+        return
+      }
+      case 'compressor': {
+        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+        deps.audioEngine.setTrackCompressor(targetId, normalizeCompressorParams(params))
         return
       }
       case 'saturator': {
@@ -174,8 +184,16 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
   } catch {}
 }
 
+const MASTER_EFFECT_TYPES: ReadonlySet<EffectParamsEntry['data']['effect']> = new Set([
+  'master-eq',
+  'master-compressor',
+  'master-reverb',
+  'master-saturator',
+  'master-delay',
+])
+
 async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, direction: HistoryDirection) {
-  const targetId = entry.data.effect === 'master-eq' || entry.data.effect === 'master-reverb' || entry.data.effect === 'master-saturator' || entry.data.effect === 'master-delay'
+  const targetId = MASTER_EFFECT_TYPES.has(entry.data.effect)
     ? 'master'
     : readEffectTrackId(entry, deps)
   await persistHistoryEffectParams(deps, entry, targetId, direction)

@@ -1,6 +1,8 @@
 import type {
   ArpeggiatorParams,
   AudioEffectKind,
+  CompressorParams,
+  CompressorParamsInput,
   DelayParams,
   DelayParamsInput,
   EqParams,
@@ -9,7 +11,21 @@ import type {
   SaturatorParamsInput,
   SynthWave,
 } from './effects-params'
-import { isAudioEffectKind, isDelayMode, isDelaySyncDivision, isEqBandType, isSaturatorCurve, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams } from './effects-params'
+import {
+  isAudioEffectKind,
+  isCompressorDetectorMode,
+  isCompressorDynamicsMode,
+  isCompressorEnvelopeCurve,
+  isCompressorSidechainFilterType,
+  isDelayMode,
+  isDelaySyncDivision,
+  isEqBandType,
+  isSaturatorCurve,
+  normalizeCompressorParams,
+  normalizeDelayParams,
+  normalizeEqParams,
+  normalizeSaturatorParams,
+} from './effects-params'
 import { normalizeAudioWarp, normalizeClipGain, type AudioWarpPayload } from './audio-warp'
 import { normalizeMasterVolume } from './master-volume'
 
@@ -79,6 +95,7 @@ export type SharedTimelineOperation =
   | { kind: 'tracks.setMix'; payload: { trackId: string; muted?: boolean; soloed?: boolean } }
   | { kind: 'mixer.setMasterVolume'; payload: { volume: number } }
   | { kind: 'effects.setEqParams'; payload: { trackId: string; params: EqParams } }
+  | { kind: 'effects.setCompressorParams'; payload: { trackId: string; params: CompressorParams } }
   | { kind: 'effects.setSaturatorParams'; payload: { trackId: string; params: SaturatorParams } }
   | { kind: 'effects.setDelayParams'; payload: { trackId: string; params: DelayParams } }
   | { kind: 'effects.reorderAudioChain'; payload: { trackId: string; order: AudioEffectKind[] } }
@@ -86,6 +103,7 @@ export type SharedTimelineOperation =
   | { kind: 'effects.setSynthParams'; payload: { trackId: string; params: SharedSynthParams } }
   | { kind: 'effects.setArpeggiatorParams'; payload: { trackId: string; params: ArpeggiatorParams } }
   | { kind: 'effects.setMasterEqParams'; payload: { params: EqParams } }
+  | { kind: 'effects.setMasterCompressorParams'; payload: { params: CompressorParams } }
   | { kind: 'effects.setMasterSaturatorParams'; payload: { params: SaturatorParams } }
   | { kind: 'effects.setMasterDelayParams'; payload: { params: DelayParams } }
   | { kind: 'effects.setMasterReverbParams'; payload: { params: SharedReverbParams } }
@@ -114,6 +132,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
 )
 
 const readOptionalNumber = (value: unknown) => typeof value === 'number' ? value : undefined
+const readOptionalBoolean = (value: unknown) => typeof value === 'boolean' ? value : undefined
 const readOptionalString = (value: unknown) => typeof value === 'string' ? value : undefined
 
 const readAudioWarp = (value: unknown) => normalizeAudioWarp(value)
@@ -259,6 +278,53 @@ const readReverbParams = (value: unknown): SharedReverbParams | null => {
     decaySec: params.decaySec,
     preDelayMs: params.preDelayMs,
   }
+}
+
+const readCompressorParams = (value: unknown): CompressorParams | null => {
+  if (!isRecord(value) || typeof value.enabled !== 'boolean') return null
+  if (
+    typeof value.thresholdDb !== 'number'
+    || typeof value.ratio !== 'number'
+    || typeof value.attackMs !== 'number'
+    || typeof value.releaseMs !== 'number'
+    || typeof value.autoRelease !== 'boolean'
+    || typeof value.makeupDb !== 'number'
+    || typeof value.outputDb !== 'number'
+    || typeof value.dryWet !== 'number'
+    || typeof value.kneeDb !== 'number'
+    || typeof value.lookaheadMs !== 'number'
+    || !isCompressorDetectorMode(value.detectorMode)
+    || !isCompressorDynamicsMode(value.dynamicsMode)
+    || !isCompressorEnvelopeCurve(value.envelopeCurve)
+    || !isRecord(value.sidechain)
+    || typeof value.sidechain.enabled !== 'boolean'
+    || !isCompressorSidechainFilterType(value.sidechain.filterType)
+    || typeof value.sidechain.frequencyHz !== 'number'
+    || typeof value.sidechain.q !== 'number'
+  ) return null
+  const params: CompressorParamsInput = {
+    enabled: value.enabled,
+    thresholdDb: value.thresholdDb,
+    ratio: value.ratio,
+    attackMs: value.attackMs,
+    releaseMs: value.releaseMs,
+    autoRelease: value.autoRelease,
+    makeupDb: value.makeupDb,
+    outputDb: value.outputDb,
+    dryWet: value.dryWet,
+    kneeDb: value.kneeDb,
+    lookaheadMs: value.lookaheadMs,
+    detectorMode: value.detectorMode,
+    dynamicsMode: value.dynamicsMode,
+    envelopeCurve: value.envelopeCurve,
+    sidechain: {
+      enabled: value.sidechain.enabled,
+      filterType: value.sidechain.filterType,
+      frequencyHz: value.sidechain.frequencyHz,
+      q: value.sidechain.q,
+    },
+  }
+  return normalizeCompressorParams(params)
 }
 
 const readSaturatorParams = (value: unknown): SaturatorParams | null => {
@@ -468,6 +534,11 @@ const parseTrackReverb = (payload: Record<string, unknown>): SharedTimelineOpera
   return typeof payload.trackId === 'string' && params ? { kind: 'effects.setReverbParams', payload: { trackId: payload.trackId, params } } : null
 }
 
+const parseTrackCompressor = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  const params = readCompressorParams(payload.params)
+  return typeof payload.trackId === 'string' && params ? { kind: 'effects.setCompressorParams', payload: { trackId: payload.trackId, params } } : null
+}
+
 const parseTrackSaturator = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readSaturatorParams(payload.params)
   return typeof payload.trackId === 'string' && params ? { kind: 'effects.setSaturatorParams', payload: { trackId: payload.trackId, params } } : null
@@ -501,6 +572,11 @@ const parseMasterEq = (payload: Record<string, unknown>): SharedTimelineOperatio
 const parseMasterReverb = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readReverbParams(payload.params)
   return params ? { kind: 'effects.setMasterReverbParams', payload: { params } } : null
+}
+
+const parseMasterCompressor = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  const params = readCompressorParams(payload.params)
+  return params ? { kind: 'effects.setMasterCompressorParams', payload: { params } } : null
 }
 
 const parseMasterSaturator = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
@@ -573,6 +649,7 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   { kind: 'tracks.setMix', parse: parseTrackMix, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'mixer.setMasterVolume', parse: parseMasterVolume, targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setEqParams', parse: parseTrackEq, targets: readTrackIdTargets, durableQueue: true },
+  { kind: 'effects.setCompressorParams', parse: parseTrackCompressor, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setSaturatorParams', parse: parseTrackSaturator, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setDelayParams', parse: parseTrackDelay, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.reorderAudioChain', parse: parseTrackAudioChainReorder, targets: readTrackIdTargets, durableQueue: true },
@@ -580,6 +657,7 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   { kind: 'effects.setSynthParams', parse: parseTrackSynth, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setArpeggiatorParams', parse: parseTrackArpeggiator, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setMasterEqParams', parse: parseMasterEq, targets: emptyTargets, durableQueue: true },
+  { kind: 'effects.setMasterCompressorParams', parse: parseMasterCompressor, targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setMasterSaturatorParams', parse: parseMasterSaturator, targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setMasterDelayParams', parse: parseMasterDelay, targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setMasterReverbParams', parse: parseMasterReverb, targets: emptyTargets, durableQueue: true },

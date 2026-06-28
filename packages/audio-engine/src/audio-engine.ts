@@ -1,11 +1,12 @@
 import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime } from './audio-runtime'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
-import { normalizeMasterVolume, type ArpParams, type AudioEffectKind, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite, type SynthParamsInput } from '@daw-browser/shared'
+import { normalizeMasterVolume, type ArpParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite, type SynthParamsInput } from '@daw-browser/shared'
 import { createReverbImpulseCache } from './effects/reverb-impulse-cache'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
 import { createMeteringRuntime, type SpectrumFrame, type TrackStereoLevels, type TrackStereoLevelsBatch, type TrackStereoLevelsListener } from './metering-runtime'
+import type { CompressorMeterFrame, CompressorMeterListener } from './effects/compressor-worklet'
 import { createMetronomeRuntime } from './metronome-runtime'
 import { createSourceRegistry, stopAndDisconnectSource } from './source-registry'
 import { createSynthRuntime } from './synth-runtime'
@@ -22,7 +23,7 @@ const MASTER_STOP_DELAY_SEC = 0.004
 export const LIVE_SCHEDULE_HORIZON_SEC = 30
 
 export { canFallbackToRepitchStretch, isStretchQualityWarning }
-export type { AudioStretchRenderState, DeferredStretchWindow, SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch }
+export type { AudioStretchRenderState, CompressorMeterFrame, DeferredStretchWindow, SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch }
 
 export class AudioEngine {
   private runtime: AudioRuntime | null = null
@@ -202,6 +203,14 @@ export class AudioEngine {
     this.mixerRuntime.setTrackReverb(trackId, params)
   }
 
+  setTrackCompressor(trackId: string, params: CompressorParamsLite) {
+    this.mixerRuntime.setTrackCompressor(trackId, params)
+  }
+
+  subscribeTrackCompressorMeter(trackId: string, listener: CompressorMeterListener) {
+    return this.mixerRuntime.subscribeTrackCompressorMeter(trackId, listener)
+  }
+
   setTrackSaturator(trackId: string, params: SaturatorParamsLite) {
     this.mixerRuntime.setTrackSaturator(trackId, params)
   }
@@ -222,6 +231,14 @@ export class AudioEngine {
       params,
       (nextParams) => this.createImpulseResponse(nextParams),
     )
+  }
+
+  setMasterCompressor(params: CompressorParamsLite) {
+    this.masterFx.setCompressor(this.audioCtx, this.masterGain, this.destination, params)
+  }
+
+  subscribeMasterCompressorMeter(listener: CompressorMeterListener) {
+    return this.masterFx.subscribeCompressorMeter(listener)
   }
 
   setMasterSaturator(params: SaturatorParamsLite) {

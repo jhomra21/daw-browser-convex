@@ -1,10 +1,11 @@
-import type { ArpParams, AudioEffectKind, DelayParamsLite, EqParamsLite, ReverbParamsLite, SaturatorParamsLite, SynthParamsInput } from '@daw-browser/shared'
+import type { ArpParams, AudioEffectKind, CompressorParamsLite, DelayParamsLite, EqParamsLite, ReverbParamsLite, SaturatorParamsLite, SynthParamsInput } from '@daw-browser/shared'
 import type { MixerChannel } from './channels'
 import type { Track, TrackSend } from '@daw-browser/timeline-core/types'
 
 export type MixerTrackFx = {
   order?: AudioEffectKind[]
   eq?: EqParamsLite
+  compressor?: CompressorParamsLite
   saturator?: SaturatorParamsLite
   delay?: DelayParamsLite
   reverb?: ReverbParamsLite
@@ -18,6 +19,7 @@ export type ResolveMixerGraphOptions = {
   channels: MixerChannel[]
   masterVolume?: number
   masterEq?: EqParamsLite
+  masterCompressor?: CompressorParamsLite
   masterSaturator?: SaturatorParamsLite
   masterDelay?: DelayParamsLite
   masterReverb?: ReverbParamsLite
@@ -39,6 +41,7 @@ export type ResolvedMixerGraph = {
   master: {
     volume: number
     eq?: EqParamsLite
+    compressor?: CompressorParamsLite
     saturator?: SaturatorParamsLite
     delay?: DelayParamsLite
     reverb?: ReverbParamsLite

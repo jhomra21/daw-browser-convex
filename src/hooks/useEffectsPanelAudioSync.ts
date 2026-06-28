@@ -4,11 +4,13 @@ import {
   AUDIO_EFFECT_CONTRACTS,
   isAudioEffectKind,
   createDefaultEqParams,
+  createDefaultCompressorParams,
   createDefaultDelayParams,
   createDefaultReverbParams,
   createDefaultSaturatorParams,
   normalizeSynthParams,
   type AudioEffectKind,
+  type CompressorParams,
   type ArpeggiatorParams,
   type DelayParams,
   type EqParams,
@@ -35,6 +37,7 @@ type UseEffectsPanelAudioSyncOptions = {
   playheadSec?: Accessor<number | undefined>;
   localDraftEffects?: {
     eq?: (targetId: string) => EqParams | undefined;
+    compressor?: (targetId: string) => CompressorParams | undefined;
     saturator?: (targetId: string) => SaturatorParams | undefined;
     delay?: (targetId: string) => DelayParams | undefined;
     reverb?: (targetId: string) => ReverbParams | undefined;
@@ -178,6 +181,7 @@ export function useEffectsPanelAudioSync(
   }));
 
   const disabledEq = { ...createDefaultEqParams(), enabled: false };
+  const disabledCompressor = { ...createDefaultCompressorParams(), enabled: false };
   const disabledSaturator = { ...createDefaultSaturatorParams(), enabled: false };
   const disabledDelay = { ...createDefaultDelayParams(), enabled: false };
   const disabledReverb = { ...createDefaultReverbParams(), enabled: false };
@@ -188,6 +192,14 @@ export function useEffectsPanelAudioSync(
     readDraft: (drafts, targetId) => drafts?.eq?.(targetId),
     setMaster: (audioEngine, params) => audioEngine.setMasterEq(params),
     setTrack: (audioEngine, trackId, params) => audioEngine.setTrackEq(trackId, params),
+  };
+  const compressorSyncDescriptor: SyncedAudioEffectDescriptor<CompressorParams> = {
+    kind: AUDIO_EFFECT_CONTRACTS.compressor.kind,
+    normalize: AUDIO_EFFECT_CONTRACTS.compressor.normalizeParams,
+    disabled: disabledCompressor,
+    readDraft: (drafts, targetId) => drafts?.compressor?.(targetId),
+    setMaster: (audioEngine, params) => audioEngine.setMasterCompressor(params),
+    setTrack: (audioEngine, trackId, params) => audioEngine.setTrackCompressor(trackId, params),
   };
   const saturatorSyncDescriptor: SyncedAudioEffectDescriptor<SaturatorParams> = {
     kind: AUDIO_EFFECT_CONTRACTS.saturator.kind,
@@ -219,6 +231,7 @@ export function useEffectsPanelAudioSync(
   const clearSyncedTrackState = (audioEngine: AudioEngine, trackIds: Iterable<Track["id"]>) => {
     for (const trackId of trackIds) {
       audioEngine.setTrackEq(trackId, disabledEq);
+      audioEngine.setTrackCompressor(trackId, disabledCompressor);
       audioEngine.setTrackSaturator(trackId, disabledSaturator);
       audioEngine.setTrackDelay(trackId, disabledDelay);
       audioEngine.setTrackReverb(trackId, disabledReverb);
@@ -229,6 +242,7 @@ export function useEffectsPanelAudioSync(
 
   const clearSyncedMasterState = (audioEngine: AudioEngine) => {
     audioEngine.setMasterEq(disabledEq);
+    audioEngine.setMasterCompressor(disabledCompressor);
     audioEngine.setMasterSaturator(disabledSaturator);
     audioEngine.setMasterDelay(disabledDelay);
     audioEngine.setMasterReverb(disabledReverb);
@@ -267,6 +281,7 @@ export function useEffectsPanelAudioSync(
     if (!projectId) return;
 
     const eqState = createSyncedAudioEffectState<EqParams>();
+    const compressorState = createSyncedAudioEffectState<CompressorParams>();
     const saturatorState = createSyncedAudioEffectState<SaturatorParams>();
     const delayState = createSyncedAudioEffectState<DelayParams>();
     const reverbState = createSyncedAudioEffectState<ReverbParams>();
@@ -277,6 +292,7 @@ export function useEffectsPanelAudioSync(
     for (const row of effects) {
       if ("effect" in row) {
         if (syncLocalAudioEffect(row, eqSyncDescriptor, eqState, activeTargetId, audioEngine)) continue;
+        if (syncLocalAudioEffect(row, compressorSyncDescriptor, compressorState, activeTargetId, audioEngine)) continue;
         if (syncLocalAudioEffect(row, saturatorSyncDescriptor, saturatorState, activeTargetId, audioEngine)) continue;
         if (syncLocalAudioEffect(row, delaySyncDescriptor, delayState, activeTargetId, audioEngine)) continue;
         if (syncLocalAudioEffect(row, reverbSyncDescriptor, reverbState, activeTargetId, audioEngine)) continue;
@@ -291,6 +307,7 @@ export function useEffectsPanelAudioSync(
         continue;
       }
       if (syncRemoteAudioEffect(row, eqSyncDescriptor, eqState, activeTargetId, audioEngine)) continue;
+      if (syncRemoteAudioEffect(row, compressorSyncDescriptor, compressorState, activeTargetId, audioEngine)) continue;
       if (syncRemoteAudioEffect(row, saturatorSyncDescriptor, saturatorState, activeTargetId, audioEngine)) continue;
       if (syncRemoteAudioEffect(row, delaySyncDescriptor, delayState, activeTargetId, audioEngine)) continue;
       if (syncRemoteAudioEffect(row, reverbSyncDescriptor, reverbState, activeTargetId, audioEngine)) continue;
@@ -302,6 +319,7 @@ export function useEffectsPanelAudioSync(
     }
 
     applyMasterAudioDraft(eqSyncDescriptor, eqState, activeTargetId, audioEngine, options.localDraftEffects);
+    applyMasterAudioDraft(compressorSyncDescriptor, compressorState, activeTargetId, audioEngine, options.localDraftEffects);
     applyMasterAudioDraft(saturatorSyncDescriptor, saturatorState, activeTargetId, audioEngine, options.localDraftEffects);
     applyMasterAudioDraft(delaySyncDescriptor, delayState, activeTargetId, audioEngine, options.localDraftEffects);
     applyMasterAudioDraft(reverbSyncDescriptor, reverbState, activeTargetId, audioEngine, options.localDraftEffects);
@@ -309,6 +327,7 @@ export function useEffectsPanelAudioSync(
     if (activeTargetId !== "master") {
       audioEngine.setMasterFxOrder(effectOrders.master);
       if (!eqState.hasMaster) audioEngine.setMasterEq(disabledEq);
+      if (!compressorState.hasMaster) audioEngine.setMasterCompressor(disabledCompressor);
       if (!saturatorState.hasMaster) audioEngine.setMasterSaturator(disabledSaturator);
       if (!delayState.hasMaster) audioEngine.setMasterDelay(disabledDelay);
       if (!reverbState.hasMaster) audioEngine.setMasterReverb(disabledReverb);
@@ -326,6 +345,7 @@ export function useEffectsPanelAudioSync(
       if (track.id === activeTargetId) continue;
       audioEngine.setTrackFxOrder(track.id, effectOrders.tracks.get(track.id) ?? []);
       applyTrackAudioEffect(eqSyncDescriptor, eqState, track.id, audioEngine, options.localDraftEffects);
+      applyTrackAudioEffect(compressorSyncDescriptor, compressorState, track.id, audioEngine, options.localDraftEffects);
       applyTrackAudioEffect(saturatorSyncDescriptor, saturatorState, track.id, audioEngine, options.localDraftEffects);
       applyTrackAudioEffect(delaySyncDescriptor, delayState, track.id, audioEngine, options.localDraftEffects);
       applyTrackAudioEffect(reverbSyncDescriptor, reverbState, track.id, audioEngine, options.localDraftEffects);

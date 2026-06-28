@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  AUDIO_EFFECT_ORDER,
+  computeCompressorStaticCurveDb,
+  COMPRESSOR_RATIO_MAX,
+  createDefaultCompressorParams,
   createDefaultEqParams,
   createDefaultReverbParams,
   DELAY_FEEDBACK_MAX,
@@ -15,11 +19,13 @@ import {
   normalizeEqParamsForUpdate,
   normalizeDelayParams,
   normalizeAudioEffectOrder,
+  normalizeCompressorParams,
   normalizeReverbParams,
   normalizeReverbParamsForUpdate,
   normalizeSaturatorParams,
   SATURATOR_DRIVE_DB_MAX,
   SATURATOR_OUTPUT_DB_MIN,
+  serializeCompressorParams,
   serializeDelayParams,
   serializeEqParams,
   serializeReverbParams,
@@ -149,6 +155,84 @@ describe('EQ params', () => {
         },
       },
     })
+  })
+})
+
+
+describe('Compressor params', () => {
+  test('normalizes defaults, clamps ratio, and falls back for invalid enums', () => {
+    const defaults = createDefaultCompressorParams()
+    const normalized = normalizeCompressorParams({
+      ratio: 999,
+      thresholdDb: -999,
+      detectorMode: 'average',
+      dynamicsMode: 'limit',
+      envelopeCurve: 'fast',
+      sidechain: { enabled: true, filterType: 'tilt', frequencyHz: 999999, q: 0 },
+    })
+
+    expect(normalized.ratio).toBe(COMPRESSOR_RATIO_MAX)
+    expect(normalized.thresholdDb).toBe(-60)
+    expect(normalized.detectorMode).toBe(defaults.detectorMode)
+    expect(normalized.dynamicsMode).toBe(defaults.dynamicsMode)
+    expect(normalized.envelopeCurve).toBe(defaults.envelopeCurve)
+    expect(normalized.sidechain.filterType).toBe(defaults.sidechain.filterType)
+    expect(normalized.sidechain.frequencyHz).toBe(20000)
+    expect(normalized.sidechain.q).toBe(0.1)
+  })
+
+  test('serializes normalized compressor params stably without Infinity', () => {
+    const normalized = normalizeCompressorParams({ ratio: 999 })
+    expect(normalized.ratio).toBe(100)
+    expect(serializeCompressorParams(normalized)).not.toContain('Infinity')
+    expect(serializeCompressorParams(normalized)).toBe(serializeCompressorParams({ ...normalized, ratio: 999 }))
+  })
+
+  test('adds compressor to audio effect order', () => {
+    expect(AUDIO_EFFECT_ORDER).toEqual(['eq', 'compressor', 'saturator', 'delay', 'reverb'])
+    expect(normalizeAudioEffectOrder(['delay', 'compressor'], ['eq', 'compressor', 'delay'])).toEqual(['delay', 'compressor', 'eq'])
+  })
+
+  test('computes hard-knee compression and expansion static curves', () => {
+    expect(computeCompressorStaticCurveDb(-12, { thresholdDb: -24, ratio: 4, kneeDb: 0 })).toBeCloseTo(-21, 5)
+    expect(computeCompressorStaticCurveDb(-12, { thresholdDb: -24, ratio: 4, kneeDb: 0, dynamicsMode: 'expand' })).toBeCloseTo(-12, 5)
+    expect(computeCompressorStaticCurveDb(-36, { thresholdDb: -24, ratio: 2, kneeDb: 0, dynamicsMode: 'expand' })).toBeCloseTo(-48, 5)
+  })
+
+  test('keeps soft-knee compression continuous around threshold', () => {
+    const below = computeCompressorStaticCurveDb(-24.01, { thresholdDb: -24, ratio: 4, kneeDb: 6 })
+    const above = computeCompressorStaticCurveDb(-23.99, { thresholdDb: -24, ratio: 4, kneeDb: 6 })
+    expect(Math.abs(above - below)).toBeLessThan(0.03)
+  })
+
+  test('keeps soft-knee expansion continuous around threshold', () => {
+    const below = computeCompressorStaticCurveDb(-24.01, { thresholdDb: -24, ratio: 4, kneeDb: 6, dynamicsMode: 'expand' })
+    const above = computeCompressorStaticCurveDb(-23.99, { thresholdDb: -24, ratio: 4, kneeDb: 6, dynamicsMode: 'expand' })
+    expect(Math.abs(above - below)).toBeLessThan(0.03)
+  })
+
+  test('computes soft-knee expansion fixtures around threshold and knee edge', () => {
+    expect(computeCompressorStaticCurveDb(-25, { thresholdDb: -24, ratio: 2, kneeDb: 6, dynamicsMode: 'expand' })).toBeCloseTo(-25.33333, 5)
+    expect(computeCompressorStaticCurveDb(-27, { thresholdDb: -24, ratio: 2, kneeDb: 6, dynamicsMode: 'expand' })).toBeCloseTo(-30, 5)
+  })
+
+  test('parses shared track and master compressor operations', () => {
+    const params = normalizeCompressorParams({})
+    expect(parseSharedTimelineOperation({ kind: 'effects.setCompressorParams', payload: { trackId: 'track-1', params } })?.kind)
+      .toBe('effects.setCompressorParams')
+    expect(parseSharedTimelineOperation({ kind: 'effects.setMasterCompressorParams', payload: { params } })?.kind)
+      .toBe('effects.setMasterCompressorParams')
+  })
+
+  test('rejects partial shared track and master compressor operations', () => {
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setCompressorParams',
+      payload: { trackId: 'track-1', params: { enabled: true } },
+    })).toBeNull()
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setMasterCompressorParams',
+      payload: { params: { enabled: true } },
+    })).toBeNull()
   })
 })
 

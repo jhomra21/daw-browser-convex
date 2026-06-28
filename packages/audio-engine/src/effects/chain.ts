@@ -1,6 +1,7 @@
-import { AUDIO_EFFECT_ORDER, DELAY_MAX_DELAY_TIME_SEC, normalizeAudioEffectOrder, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type AudioEffectKind, type DelayParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { AUDIO_EFFECT_ORDER, DELAY_MAX_DELAY_TIME_SEC, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { applyDelayNodeParams, applySaturatorNodeParams } from './dsp'
 import { getReverbImpulseSignature } from './reverb-signature'
+import { ensureCompressorWorklet, postCompressorParams } from './compressor-worklet'
 
 export type CreateReverbImpulseResponse = (params: ReverbParamsLite) => AudioBuffer
 
@@ -20,6 +21,11 @@ export type ReverbNodeChain = {
   rightToLeft: GainNode
   leftToRight: GainNode
   rightToRight: GainNode
+}
+
+export type CompressorNodeChain = {
+  enabled: boolean
+  workletNode: AudioWorkletNode
 }
 
 export type SaturatorNodeChain = {
@@ -134,6 +140,28 @@ export function disconnectReverbChain(chain: ReverbNodeChain) {
   ])
   chain.internalsConnected = false
   chain.impulseSignature = null
+}
+
+export async function createCompressorNodeChain(ctx: BaseAudioContext, params: CompressorParamsLite): Promise<CompressorNodeChain> {
+  const normalized = normalizeCompressorParams(params)
+  await ensureCompressorWorklet(ctx)
+  const chain: CompressorNodeChain = {
+    enabled: normalized.enabled,
+    workletNode: new AudioWorkletNode(ctx, 'daw-compressor-processor', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] }),
+  }
+  postCompressorParams(chain.workletNode, normalized)
+  return chain
+}
+
+export function applyCompressorNodeChainParams(chain: CompressorNodeChain, params: CompressorParamsLite) {
+  const normalized = normalizeCompressorParams(params)
+  chain.enabled = normalized.enabled
+  postCompressorParams(chain.workletNode, normalized)
+}
+
+export function disconnectCompressorChain(chain: CompressorNodeChain) {
+  disconnectAudioNodes([chain.workletNode])
+  chain.workletNode.port.close()
 }
 
 export function createSaturatorNodeChain(ctx: BaseAudioContext, params: SaturatorParamsLite): SaturatorNodeChain {
@@ -259,6 +287,7 @@ export function connectFxChain(
   destination: AudioNode,
   config: {
     eqNodes?: BiquadFilterNode[]
+    compressorChain?: CompressorNodeChain | null
     saturatorChain?: SaturatorNodeChain | null
     delayChain?: DelayNodeChain | null
     reverbChain?: ReverbNodeChain | null
@@ -266,9 +295,11 @@ export function connectFxChain(
   },
 ) {
   const eqNodes = config.eqNodes ?? []
+  const compressor = config.compressorChain?.enabled ? config.compressorChain : null
   const saturator = config.saturatorChain?.enabled ? config.saturatorChain : null
   const delay = config.delayChain?.enabled ? config.delayChain : null
   const reverb = config.reverbChain?.enabled ? config.reverbChain : null
+  if (!compressor && config.compressorChain) disconnectAudioNodes([config.compressorChain.workletNode])
   if (saturator) connectSaturatorInternals(saturator)
   else if (config.saturatorChain) disconnectSaturatorChain(config.saturatorChain)
   if (delay) connectDelayInternals(delay)
@@ -290,6 +321,14 @@ export function connectFxChain(
     stagesByKind.set('eq', {
       connectInput: (source) => source.connect(eqNodes[0]),
       outputs: [eqNodes[eqNodes.length - 1]],
+    })
+  }
+
+  if (compressor) {
+    disconnectAudioNodes([compressor.workletNode])
+    stagesByKind.set('compressor', {
+      connectInput: (source) => source.connect(compressor.workletNode),
+      outputs: [compressor.workletNode],
     })
   }
 

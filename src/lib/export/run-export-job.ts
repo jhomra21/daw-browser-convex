@@ -1,6 +1,7 @@
 import type { ExportRange, ExportFx } from '@daw-browser/audio-engine/export-mixdown'
 import type { ExportAudioFormat } from '@daw-browser/shared'
-import { formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectKind, isLocalId, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams } from '@daw-browser/shared'
+import { formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectKind, isLocalId, normalizeCompressorParams,
+  normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams } from '@daw-browser/shared'
 import type { FunctionReturnType } from 'convex/server'
 
 import { convexApi, convexClient } from '~/lib/convex'
@@ -85,6 +86,10 @@ const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
       fx.masterReverb = normalizeReverbParams(row.params)
       continue
     }
+    if (row.effect === 'master-compressor') {
+      fx.masterCompressor = normalizeCompressorParams(row.params)
+      continue
+    }
     if (row.effect === 'master-saturator') {
       fx.masterSaturator = normalizeSaturatorParams(row.params)
       continue
@@ -94,6 +99,7 @@ const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
       continue
     }
     if (row.effect === 'eq') applyTrackFxPatch(trackFx, row.targetId, { eq: row.params })
+    if (row.effect === 'compressor') applyTrackFxPatch(trackFx, row.targetId, { compressor: normalizeCompressorParams(row.params) })
     if (row.effect === 'saturator') applyTrackFxPatch(trackFx, row.targetId, { saturator: normalizeSaturatorParams(row.params) })
     if (row.effect === 'delay') applyTrackFxPatch(trackFx, row.targetId, { delay: normalizeDelayParams(row.params) })
     if (row.effect === 'reverb') applyTrackFxPatch(trackFx, row.targetId, { reverb: normalizeReverbParams(row.params) })
@@ -115,6 +121,7 @@ const applyRoomEffectRowsToFx = (fx: ExportFx, rows: RoomEffectRow[]) => {
     }
     if (row.targetType === 'master') {
       if (row.type === 'eq' && row.params) fx.masterEq = row.params
+      if (row.type === 'compressor' && row.params) fx.masterCompressor = normalizeCompressorParams(row.params)
       if (row.type === 'saturator' && row.params) fx.masterSaturator = normalizeSaturatorParams(row.params)
       if (row.type === 'delay' && row.params) fx.masterDelay = normalizeDelayParams(row.params)
       if (row.type === 'reverb' && row.params) fx.masterReverb = normalizeReverbParams(row.params)
@@ -123,6 +130,7 @@ const applyRoomEffectRowsToFx = (fx: ExportFx, rows: RoomEffectRow[]) => {
     const trackId = row.trackId
     if (!trackId || !row.params) continue
     if (row.type === 'eq') applyTrackFxPatch(trackFx, trackId, { eq: row.params })
+    if (row.type === 'compressor') applyTrackFxPatch(trackFx, trackId, { compressor: normalizeCompressorParams(row.params) })
     if (row.type === 'saturator') applyTrackFxPatch(trackFx, trackId, { saturator: normalizeSaturatorParams(row.params) })
     if (row.type === 'delay') applyTrackFxPatch(trackFx, trackId, { delay: normalizeDelayParams(row.params) })
     if (row.type === 'reverb') applyTrackFxPatch(trackFx, trackId, { reverb: normalizeReverbParams(row.params) })

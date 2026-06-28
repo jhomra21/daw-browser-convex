@@ -8,6 +8,7 @@ import {
 import type { AudioEffectKind } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Delay from "~/components/effects/Delay";
+import Compressor from "~/components/effects/Compressor";
 import Eq from "~/components/effects/Eq";
 import Reverb from "~/components/effects/Reverb";
 import Saturator from "~/components/effects/Saturator";
@@ -182,6 +183,13 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
     return (
       <Show when={props.audioEffects.saturator.params()}>
         {(params) => <Saturator params={params()} onChange={props.audioEffects.saturator.change} onToggleEnabled={props.audioEffects.saturator.toggleEnabled} onReset={props.audioEffects.saturator.reset} />}
+      </Show>
+    );
+  }
+  if (props.effect === "compressor") {
+    return (
+      <Show when={props.audioEffects.compressor.params()}>
+        {(params) => <Compressor params={params()} onChange={props.audioEffects.compressor.change} onToggleEnabled={props.audioEffects.compressor.toggleEnabled} onReset={props.audioEffects.compressor.reset} />}
       </Show>
     );
   }

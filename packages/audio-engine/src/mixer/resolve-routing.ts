@@ -146,6 +146,7 @@ export function resolveMixerGraph(options: ResolveMixerGraphOptions): ResolvedMi
     master: {
       volume: normalizeMasterVolume(options.masterVolume ?? 1),
       eq: options.masterEq,
+      compressor: options.masterCompressor,
       saturator: options.masterSaturator,
       delay: options.masterDelay,
       reverb: options.masterReverb,

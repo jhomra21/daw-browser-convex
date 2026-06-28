@@ -6,11 +6,13 @@ import {
   AUDIO_EFFECT_ORDER,
   areAudioEffectOrdersEqual,
   normalizeAudioEffectOrder,
+  normalizeCompressorParams,
   normalizeDelayParams,
   normalizeEqParams,
   normalizeReverbParams,
   normalizeSaturatorParams,
   type AudioEffectKind,
+  type CompressorParams,
   type DelayParams,
   type EqChannelMode,
   type EqParams,
@@ -69,6 +71,14 @@ type EffectsPanelAudioDevice = {
     toggleBand: (bandId: string) => void;
     toggleEnabled: (enabled: boolean) => void;
   };
+  compressor: {
+    add: () => void;
+    change: (updates: Partial<CompressorParams>) => void;
+    params: Accessor<CompressorParams | undefined>;
+    readDraftForTarget: (targetId: string) => CompressorParams | undefined;
+    reset: () => void;
+    toggleEnabled: (enabled: boolean) => void;
+  };
   saturator: {
     add: () => void;
     change: (updates: Partial<SaturatorParams>) => void;
@@ -116,6 +126,12 @@ export function createEffectsPanelAudioDevice(
     targetId: currentTargetId,
     effect: (targetId) => targetId === "master" ? AUDIO_EFFECT_CONTRACTS.reverb.masterKind : AUDIO_EFFECT_CONTRACTS.reverb.kind,
     normalize: AUDIO_EFFECT_CONTRACTS.reverb.normalizeParams,
+  });
+  const localCompressor = createLocalEffectRows<CompressorParams>({
+    projectId: context.projectId,
+    targetId: currentTargetId,
+    effect: (targetId) => targetId === "master" ? AUDIO_EFFECT_CONTRACTS.compressor.masterKind : AUDIO_EFFECT_CONTRACTS.compressor.kind,
+    normalize: AUDIO_EFFECT_CONTRACTS.compressor.normalizeParams,
   });
   const localSaturator = createLocalEffectRows<SaturatorParams>({
     projectId: context.projectId,
@@ -234,6 +250,27 @@ export function createEffectsPanelAudioDevice(
     commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-reverb", from: previous, to: next }, projectId),
   });
 
+  const compressorState = createAudioEffectState<CompressorParams>({
+    kind: AUDIO_EFFECT_CONTRACTS.compressor.kind,
+    createDefaultParams: AUDIO_EFFECT_CONTRACTS.compressor.createDefaultParams,
+    normalizeParams: AUDIO_EFFECT_CONTRACTS.compressor.normalizeParams,
+    serializeParams: AUDIO_EFFECT_CONTRACTS.compressor.serializeParams,
+    setTrackEngineParams: (audioEngine, trackId, params) => audioEngine.setTrackCompressor(trackId, params),
+    setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterCompressor(params),
+    row: localCompressor.row,
+    persistLocal: localCompressor.persist,
+    publishTrackParams: (projectId, userId, trackId, params) => publishEffectOperation(projectId, userId, {
+      kind: "effects.setCompressorParams",
+      payload: { trackId, params },
+    }),
+    publishMasterParams: (projectId, userId, params) => publishEffectOperation(projectId, userId, {
+      kind: "effects.setMasterCompressorParams",
+      payload: { params },
+    }),
+    commitTrackParams: (trackId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "compressor", from: previous, to: next }, projectId),
+    commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-compressor", from: previous, to: next }, projectId),
+  });
+
   const saturatorState = createAudioEffectState<SaturatorParams>({
     kind: AUDIO_EFFECT_CONTRACTS.saturator.kind,
     createDefaultParams: AUDIO_EFFECT_CONTRACTS.saturator.createDefaultParams,
@@ -282,6 +319,7 @@ export function createEffectsPanelAudioDevice(
     const rowForKind = (kind: AudioEffectKind) => {
       if (!isLocalProject()) return remoteEffectForTarget(targetId, kind);
       if (kind === "eq") return localEq.row(targetId);
+      if (kind === "compressor") return localCompressor.row(targetId);
       if (kind === "saturator") return localSaturator.row(targetId);
       if (kind === "delay") return localDelay.row(targetId);
       return localReverb.row(targetId);
@@ -291,6 +329,7 @@ export function createEffectsPanelAudioDevice(
         const row = rowForKind(kind);
         const hasParams =
           (kind === "eq" && eqState.readForTarget(targetId))
+          || (kind === "compressor" && compressorState.readForTarget(targetId))
           || (kind === "saturator" && saturatorState.readForTarget(targetId))
           || (kind === "delay" && delayState.readForTarget(targetId))
           || (kind === "reverb" && reverbState.readForTarget(targetId))
@@ -386,6 +425,10 @@ export function createEffectsPanelAudioDevice(
     if (!context.canWriteCurrentTargetEffects()) return;
     reverbState.update(updater);
   };
+  const updateCompressor = (updater: (prev: CompressorParams) => CompressorParams) => {
+    if (!context.canWriteCurrentTargetEffects()) return;
+    compressorState.update(updater);
+  };
   const updateSaturator = (updater: (prev: SaturatorParams) => SaturatorParams) => {
     if (!context.canWriteCurrentTargetEffects()) return;
     saturatorState.update(updater);
@@ -402,6 +445,10 @@ export function createEffectsPanelAudioDevice(
     if (!context.canWriteCurrentTargetEffects()) return;
     reverbState.add();
   };
+  const addCompressor = () => {
+    if (!context.canWriteCurrentTargetEffects()) return;
+    compressorState.add();
+  };
   const addSaturator = () => {
     if (!context.canWriteCurrentTargetEffects()) return;
     saturatorState.add();
@@ -412,12 +459,14 @@ export function createEffectsPanelAudioDevice(
   };
   const stateForKind = (effect: AudioEffectKind) => {
     if (effect === "eq") return eqState;
+    if (effect === "compressor") return compressorState;
     if (effect === "saturator") return saturatorState;
     if (effect === "delay") return delayState;
     return reverbState;
   };
   const localRowsForKind = (effect: AudioEffectKind) => {
     if (effect === "eq") return localEq;
+    if (effect === "compressor") return localCompressor;
     if (effect === "saturator") return localSaturator;
     if (effect === "delay") return localDelay;
     return localReverb;
@@ -465,10 +514,18 @@ export function createEffectsPanelAudioDevice(
       toggleEnabled: (enabled) => updateEq((prev) => ({ ...prev, enabled })),
     },
     flushPending: async () => {
-      await Promise.all([eqState.flushPending(), saturatorState.flushPending(), delayState.flushPending(), reverbState.flushPending()]);
+      await Promise.all([eqState.flushPending(), compressorState.flushPending(), saturatorState.flushPending(), delayState.flushPending(), reverbState.flushPending()]);
     },
     orderedEffects,
     reorder,
+    compressor: {
+      add: addCompressor,
+      change: (updates) => updateCompressor((prev) => normalizeCompressorParams({ ...prev, ...updates })),
+      params: compressorState.params,
+      readDraftForTarget: compressorState.readDraftForTarget,
+      reset: () => updateCompressor(() => AUDIO_EFFECT_CONTRACTS.compressor.createDefaultParams()),
+      toggleEnabled: (enabled) => updateCompressor((prev) => ({ ...prev, enabled })),
+    },
     saturator: {
       add: addSaturator,
       change: (updates) => updateSaturator((prev) => normalizeSaturatorParams({ ...prev, ...updates })),

@@ -137,6 +137,12 @@ export const executeTimelineOperation = async (
         trackId: operation.payload.trackId,
         params: operation.payload.params,
       })
+    case 'effects.setCompressorParams':
+      return await context.convex.mutation(convexApi.effects.serverSetCompressorParams, {
+        projectId: context.projectId,
+        trackId: operation.payload.trackId,
+        params: operation.payload.params,
+      })
     case 'effects.setSaturatorParams':
       return await context.convex.mutation(convexApi.effects.serverSetSaturatorParams, {
         projectId: context.projectId,
@@ -175,6 +181,11 @@ export const executeTimelineOperation = async (
       })
     case 'effects.setMasterReverbParams':
       return await context.convex.mutation(convexApi.effects.serverSetMasterReverbParams, {
+        projectId: context.projectId,
+        params: operation.payload.params,
+      })
+    case 'effects.setMasterCompressorParams':
+      return await context.convex.mutation(convexApi.effects.serverSetMasterCompressorParams, {
         projectId: context.projectId,
         params: operation.payload.params,
       })

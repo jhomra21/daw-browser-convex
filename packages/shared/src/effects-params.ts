@@ -410,8 +410,192 @@ export function serializeDelayParams(params: DelayParams): string {
   return `${normalized.enabled ? 1 : 0}|${normalized.mode}|${normalized.timeMs}|${normalized.syncDivision}|${normalized.feedback}|${normalized.dryWet}|${normalized.pingPong ? 1 : 0}|${normalized.filterEnabled ? 1 : 0}|${normalized.lowCutHz}|${normalized.highCutHz}`
 }
 
-export type AudioEffectKind = 'eq' | 'saturator' | 'delay' | 'reverb'
-export type MasterAudioEffectKind = 'master-eq' | 'master-saturator' | 'master-delay' | 'master-reverb'
+
+export type CompressorDetectorMode = 'peak' | 'rms'
+export type CompressorDynamicsMode = 'compress' | 'expand'
+export type CompressorEnvelopeCurve = 'log' | 'linear'
+export type CompressorSidechainFilterType = 'lowpass' | 'highpass' | 'bandpass'
+
+export type CompressorSidechainParams = {
+  enabled: boolean
+  filterType: CompressorSidechainFilterType
+  frequencyHz: number
+  q: number
+}
+
+export type CompressorParams = {
+  enabled: boolean
+  thresholdDb: number
+  ratio: number
+  attackMs: number
+  releaseMs: number
+  autoRelease: boolean
+  makeupDb: number
+  outputDb: number
+  dryWet: number
+  kneeDb: number
+  lookaheadMs: number
+  detectorMode: CompressorDetectorMode
+  dynamicsMode: CompressorDynamicsMode
+  envelopeCurve: CompressorEnvelopeCurve
+  sidechain: CompressorSidechainParams
+}
+
+export type CompressorParamsLite = CompressorParams
+export type CompressorSidechainParamsInput = Partial<Omit<CompressorSidechainParams, 'filterType'>> & { filterType?: unknown }
+export type CompressorParamsInput = Partial<Omit<CompressorParams, 'detectorMode' | 'dynamicsMode' | 'envelopeCurve' | 'sidechain'>> & {
+  detectorMode?: unknown
+  dynamicsMode?: unknown
+  envelopeCurve?: unknown
+  sidechain?: CompressorSidechainParamsInput
+}
+
+export const COMPRESSOR_THRESHOLD_DB_MIN = -60
+export const COMPRESSOR_THRESHOLD_DB_MAX = 0
+export const COMPRESSOR_RATIO_MIN = 1
+export const COMPRESSOR_RATIO_MAX = 100
+export const COMPRESSOR_ATTACK_MS_MIN = 0.1
+export const COMPRESSOR_ATTACK_MS_MAX = 100
+export const COMPRESSOR_RELEASE_MS_MIN = 5
+export const COMPRESSOR_RELEASE_MS_MAX = 1000
+export const COMPRESSOR_GAIN_DB_MIN = -36
+export const COMPRESSOR_GAIN_DB_MAX = 36
+export const COMPRESSOR_DRY_WET_MIN = 0
+export const COMPRESSOR_DRY_WET_MAX = 1
+export const COMPRESSOR_KNEE_DB_MIN = 0
+export const COMPRESSOR_KNEE_DB_MAX = 24
+export const COMPRESSOR_LOOKAHEAD_MS_MIN = 0
+export const COMPRESSOR_LOOKAHEAD_MS_MAX = 10
+export const COMPRESSOR_SIDECHAIN_FREQUENCY_HZ_MIN = 20
+export const COMPRESSOR_SIDECHAIN_FREQUENCY_HZ_MAX = 20000
+export const COMPRESSOR_SIDECHAIN_Q_MIN = 0.1
+export const COMPRESSOR_SIDECHAIN_Q_MAX = 18
+
+const DEFAULT_COMPRESSOR_SIDECHAIN_PARAMS: CompressorSidechainParams = {
+  enabled: false,
+  filterType: 'highpass',
+  frequencyHz: 120,
+  q: 0.707,
+}
+
+const DEFAULT_COMPRESSOR_PARAMS: CompressorParams = {
+  enabled: true,
+  thresholdDb: -24,
+  ratio: 4,
+  attackMs: 10,
+  releaseMs: 120,
+  autoRelease: true,
+  makeupDb: 0,
+  outputDb: 0,
+  dryWet: 1,
+  kneeDb: 6,
+  lookaheadMs: 0,
+  detectorMode: 'rms',
+  dynamicsMode: 'compress',
+  envelopeCurve: 'log',
+  sidechain: DEFAULT_COMPRESSOR_SIDECHAIN_PARAMS,
+}
+
+export function createDefaultCompressorParams(): CompressorParams {
+  return {
+    ...DEFAULT_COMPRESSOR_PARAMS,
+    sidechain: { ...DEFAULT_COMPRESSOR_SIDECHAIN_PARAMS },
+  }
+}
+
+export function isCompressorDetectorMode(value: unknown): value is CompressorDetectorMode {
+  return value === 'peak' || value === 'rms'
+}
+
+export function isCompressorDynamicsMode(value: unknown): value is CompressorDynamicsMode {
+  return value === 'compress' || value === 'expand'
+}
+
+export function isCompressorEnvelopeCurve(value: unknown): value is CompressorEnvelopeCurve {
+  return value === 'log' || value === 'linear'
+}
+
+export function isCompressorSidechainFilterType(value: unknown): value is CompressorSidechainFilterType {
+  return value === 'lowpass' || value === 'highpass' || value === 'bandpass'
+}
+
+function normalizeCompressorSidechainParams(input: CompressorSidechainParamsInput | undefined): CompressorSidechainParams {
+  const defaults = DEFAULT_COMPRESSOR_SIDECHAIN_PARAMS
+  const frequencyHz = readFiniteNumber(input?.frequencyHz)
+  const q = readFiniteNumber(input?.q)
+  return {
+    enabled: typeof input?.enabled === 'boolean' ? input.enabled : defaults.enabled,
+    filterType: isCompressorSidechainFilterType(input?.filterType) ? input.filterType : defaults.filterType,
+    frequencyHz: frequencyHz === undefined ? defaults.frequencyHz : clamp(frequencyHz, COMPRESSOR_SIDECHAIN_FREQUENCY_HZ_MIN, COMPRESSOR_SIDECHAIN_FREQUENCY_HZ_MAX),
+    q: q === undefined ? defaults.q : clamp(q, COMPRESSOR_SIDECHAIN_Q_MIN, COMPRESSOR_SIDECHAIN_Q_MAX),
+  }
+}
+
+export function normalizeCompressorParams(input: CompressorParamsInput = {}): CompressorParams {
+  const defaults = DEFAULT_COMPRESSOR_PARAMS
+  const thresholdDb = readFiniteNumber(input.thresholdDb)
+  const ratio = readFiniteNumber(input.ratio)
+  const attackMs = readFiniteNumber(input.attackMs)
+  const releaseMs = readFiniteNumber(input.releaseMs)
+  const makeupDb = readFiniteNumber(input.makeupDb)
+  const outputDb = readFiniteNumber(input.outputDb)
+  const dryWet = readFiniteNumber(input.dryWet)
+  const kneeDb = readFiniteNumber(input.kneeDb)
+  const lookaheadMs = readFiniteNumber(input.lookaheadMs)
+  return {
+    enabled: typeof input.enabled === 'boolean' ? input.enabled : defaults.enabled,
+    thresholdDb: thresholdDb === undefined ? defaults.thresholdDb : clamp(thresholdDb, COMPRESSOR_THRESHOLD_DB_MIN, COMPRESSOR_THRESHOLD_DB_MAX),
+    ratio: ratio === undefined ? defaults.ratio : clamp(ratio, COMPRESSOR_RATIO_MIN, COMPRESSOR_RATIO_MAX),
+    attackMs: attackMs === undefined ? defaults.attackMs : clamp(attackMs, COMPRESSOR_ATTACK_MS_MIN, COMPRESSOR_ATTACK_MS_MAX),
+    releaseMs: releaseMs === undefined ? defaults.releaseMs : clamp(releaseMs, COMPRESSOR_RELEASE_MS_MIN, COMPRESSOR_RELEASE_MS_MAX),
+    autoRelease: typeof input.autoRelease === 'boolean' ? input.autoRelease : defaults.autoRelease,
+    makeupDb: makeupDb === undefined ? defaults.makeupDb : clamp(makeupDb, COMPRESSOR_GAIN_DB_MIN, COMPRESSOR_GAIN_DB_MAX),
+    outputDb: outputDb === undefined ? defaults.outputDb : clamp(outputDb, COMPRESSOR_GAIN_DB_MIN, COMPRESSOR_GAIN_DB_MAX),
+    dryWet: dryWet === undefined ? defaults.dryWet : clamp(dryWet, COMPRESSOR_DRY_WET_MIN, COMPRESSOR_DRY_WET_MAX),
+    kneeDb: kneeDb === undefined ? defaults.kneeDb : clamp(kneeDb, COMPRESSOR_KNEE_DB_MIN, COMPRESSOR_KNEE_DB_MAX),
+    lookaheadMs: lookaheadMs === undefined ? defaults.lookaheadMs : clamp(lookaheadMs, COMPRESSOR_LOOKAHEAD_MS_MIN, COMPRESSOR_LOOKAHEAD_MS_MAX),
+    detectorMode: isCompressorDetectorMode(input.detectorMode) ? input.detectorMode : defaults.detectorMode,
+    dynamicsMode: isCompressorDynamicsMode(input.dynamicsMode) ? input.dynamicsMode : defaults.dynamicsMode,
+    envelopeCurve: isCompressorEnvelopeCurve(input.envelopeCurve) ? input.envelopeCurve : defaults.envelopeCurve,
+    sidechain: normalizeCompressorSidechainParams(input.sidechain),
+  }
+}
+
+export function normalizeCompressorParamsForUpdate(input: CompressorParamsInput, existing?: CompressorParamsInput): CompressorParams {
+  return normalizeCompressorParams({ ...(existing === undefined ? {} : normalizeCompressorParams(existing)), ...input, sidechain: { ...(existing?.sidechain ?? {}), ...(input.sidechain ?? {}) } })
+}
+
+export function serializeCompressorParams(params: CompressorParams): string {
+  const normalized = normalizeCompressorParams(params)
+  const sidechain = normalized.sidechain
+  return `${normalized.enabled ? 1 : 0}|${normalized.thresholdDb}|${normalized.ratio}|${normalized.attackMs}|${normalized.releaseMs}|${normalized.autoRelease ? 1 : 0}|${normalized.makeupDb}|${normalized.outputDb}|${normalized.dryWet}|${normalized.kneeDb}|${normalized.lookaheadMs}|${normalized.detectorMode}|${normalized.dynamicsMode}|${normalized.envelopeCurve}|${sidechain.enabled ? 1 : 0}|${sidechain.filterType}|${sidechain.frequencyHz}|${sidechain.q}`
+}
+
+export function computeCompressorStaticCurveDb(inputDb: number, params: CompressorParamsInput = {}): number {
+  const normalized = normalizeCompressorParams(params)
+  const threshold = normalized.thresholdDb
+  const ratio = normalized.ratio
+  const knee = normalized.kneeDb
+  if (normalized.dynamicsMode === 'expand') {
+    if (inputDb >= threshold) return inputDb
+    const expanded = threshold + (inputDb - threshold) * ratio
+    if (knee <= 0 || inputDb <= threshold - knee / 2) return expanded
+    const x = threshold + knee / 2 - inputDb
+    const blend = (x * x) / (2 * knee)
+    return inputDb + (expanded - inputDb) * (blend / Math.max(0.0001, threshold - inputDb))
+  }
+  const compressed = threshold + (inputDb - threshold) / ratio
+  if (knee <= 0) return inputDb <= threshold ? inputDb : compressed
+  const lower = threshold - knee / 2
+  const upper = threshold + knee / 2
+  if (inputDb <= lower) return inputDb
+  if (inputDb >= upper) return compressed
+  const x = inputDb - lower
+  return inputDb + ((1 / ratio - 1) * x * x) / (2 * knee)
+}
+
+export type AudioEffectKind = 'eq' | 'compressor' | 'saturator' | 'delay' | 'reverb'
+export type MasterAudioEffectKind = 'master-eq' | 'master-compressor' | 'master-saturator' | 'master-delay' | 'master-reverb'
 
 type EqAudioEffectContract = {
   kind: 'eq'
@@ -419,6 +603,14 @@ type EqAudioEffectContract = {
   createDefaultParams: () => EqParams
   normalizeParams: (params: EqParamsInput) => EqParams
   serializeParams: (params: EqParams) => string
+}
+
+type CompressorAudioEffectContract = {
+  kind: 'compressor'
+  masterKind: 'master-compressor'
+  createDefaultParams: () => CompressorParams
+  normalizeParams: (params: CompressorParamsInput) => CompressorParams
+  serializeParams: (params: CompressorParams) => string
 }
 
 type SaturatorAudioEffectContract = {
@@ -447,6 +639,7 @@ type ReverbAudioEffectContract = {
 
 type AudioEffectContractByKind = {
   eq: EqAudioEffectContract
+  compressor: CompressorAudioEffectContract
   saturator: SaturatorAudioEffectContract
   delay: DelayAudioEffectContract
   reverb: ReverbAudioEffectContract
@@ -461,6 +654,13 @@ export const AUDIO_EFFECT_CONTRACTS = {
     createDefaultParams: createDefaultEqParams,
     normalizeParams: normalizeEqParams,
     serializeParams: serializeEqParams,
+  },
+  compressor: {
+    kind: 'compressor',
+    masterKind: 'master-compressor',
+    createDefaultParams: createDefaultCompressorParams,
+    normalizeParams: normalizeCompressorParams,
+    serializeParams: serializeCompressorParams,
   },
   saturator: {
     kind: 'saturator',
@@ -485,10 +685,10 @@ export const AUDIO_EFFECT_CONTRACTS = {
   },
 } satisfies AudioEffectContractByKind
 
-export const AUDIO_EFFECT_ORDER: AudioEffectKind[] = ['eq', 'saturator', 'delay', 'reverb']
+export const AUDIO_EFFECT_ORDER: AudioEffectKind[] = ['eq', 'compressor', 'saturator', 'delay', 'reverb']
 
 export function isAudioEffectKind(value: unknown): value is AudioEffectKind {
-  return value === 'eq' || value === 'saturator' || value === 'delay' || value === 'reverb'
+  return value === 'eq' || value === 'compressor' || value === 'saturator' || value === 'delay' || value === 'reverb'
 }
 
 export function normalizeAudioEffectOrder(order: readonly unknown[], enabled: readonly AudioEffectKind[]): AudioEffectKind[] {

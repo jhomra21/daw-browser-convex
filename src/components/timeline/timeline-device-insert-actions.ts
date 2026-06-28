@@ -11,6 +11,7 @@ export type TimelineDeviceInsertActions = {
   addAudioEffectToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => Promise<boolean>;
   canAddAudioEffectToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind) => boolean;
   addEq: () => void;
+  addCompressor: () => void;
   addSaturator: () => void;
   addDelay: () => void;
   addReverb: () => void;
@@ -19,6 +20,7 @@ export type TimelineDeviceInsertActions = {
   canAddMidiClip: boolean;
   canAddArpeggiator: boolean;
   canAddEq: boolean;
+  canAddCompressor: boolean;
   canAddSaturator: boolean;
   canAddDelay: boolean;
   canAddReverb: boolean;

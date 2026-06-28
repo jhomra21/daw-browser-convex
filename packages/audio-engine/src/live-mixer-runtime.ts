@@ -1,6 +1,7 @@
-import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeEqParams, type AudioEffectKind, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
+import { createCompressorChainState, type CompressorChainState } from './effects/compressor-chain-state'
 import { createDelayChainState, type DelayChainState } from './effects/delay-chain-state'
 import { createReverbChainState, type ReverbChainState } from './effects/reverb-chain-state'
 import { createSaturatorChainState, type SaturatorChainState } from './effects/saturator-chain-state'
@@ -38,6 +39,8 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const pendingEqParams = new Map<string, EqParamsLite>()
   const eqSignatures = new Map<string, string>()
   const eqTopologySignatures = new Map<string, string>()
+  const compressorChains = new Map<string, CompressorChainState>()
+  const pendingCompressorParams = new Map<string, CompressorParamsLite>()
   const reverbChains = new Map<string, ReverbChainState>()
   const pendingReverbParams = new Map<string, ReverbParamsLite>()
   const saturatorChains = new Map<string, SaturatorChainState>()
@@ -58,6 +61,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     disconnectAudioNodes([nodes.input])
     connectFxChain(nodes.input, nodes.gain, {
       eqNodes: eqChains.get(trackId) || [],
+      compressorChain: compressorChains.get(trackId)?.chain(),
       saturatorChain: saturatorChains.get(trackId)?.chain(),
       delayChain: delayChains.get(trackId)?.chain(),
       reverbChain: reverbChains.get(trackId)?.chain(),
@@ -101,6 +105,12 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       if (pendingEq) {
         pendingEqParams.delete(trackId)
         applyTrackEq(ctx, trackId, pendingEq)
+      }
+
+      const pendingCompressor = pendingCompressorParams.get(trackId)
+      if (pendingCompressor) {
+        pendingCompressorParams.delete(trackId)
+        void setTrackCompressor(trackId, pendingCompressor)
       }
 
       const pendingReverb = pendingReverbParams.get(trackId)
@@ -173,6 +183,23 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     }
   }
 
+  const setTrackCompressor = async (trackId: string, params: CompressorParamsLite) => {
+    const normalized = normalizeCompressorParams(params)
+    const ctx = options.getAudioContext()
+    if (!ctx) {
+      pendingCompressorParams.set(trackId, normalized)
+      return
+    }
+    let state = compressorChains.get(trackId)
+    if (!state && !normalized.enabled) return
+    if (!state) {
+      state = createCompressorChainState()
+      compressorChains.set(trackId, state)
+    }
+    const result = await state.set(ctx, normalized)
+    if (result.changed && result.requiresRoutingRebuild) rebuildTrackRouting(trackId, ensureTrackNodes(trackId))
+  }
+
   const setTrackSaturator = (trackId: string, params: SaturatorParamsLite) => {
     const ctx = options.getAudioContext()
     if (!ctx) {
@@ -224,6 +251,8 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     eqSignatures.delete(trackId)
     eqTopologySignatures.delete(trackId)
 
+    compressorChains.get(trackId)?.close()
+    compressorChains.delete(trackId)
     reverbChains.get(trackId)?.close()
     reverbChains.delete(trackId)
     saturatorChains.get(trackId)?.close()
@@ -231,6 +260,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     delayChains.get(trackId)?.close()
     delayChains.delete(trackId)
     pendingEqParams.delete(trackId)
+    pendingCompressorParams.delete(trackId)
     pendingReverbParams.delete(trackId)
     pendingSaturatorParams.delete(trackId)
     pendingDelayParams.delete(trackId)
@@ -252,6 +282,9 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     pendingEqParams.clear()
     eqSignatures.clear()
     eqTopologySignatures.clear()
+    for (const compressorState of compressorChains.values()) compressorState.close()
+    compressorChains.clear()
+    pendingCompressorParams.clear()
     for (const reverbState of reverbChains.values()) reverbState.close()
     reverbChains.clear()
     pendingReverbParams.clear()
@@ -323,6 +356,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       const gain = gains.get(trackId)
       if (input && gain) rebuildTrackRouting(trackId, { input, gain })
     },
+    setTrackCompressor: (trackId: string, params: CompressorParamsLite) => { void setTrackCompressor(trackId, params) },
     setTrackReverb,
     setBpm: (bpm: number) => {
       currentBpm = bpm

@@ -4,10 +4,12 @@ import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProject
 import { getTrackWriteAccess } from "./trackWrites";
 import {
   normalizeEqParamsForUpdate,
+  normalizeCompressorParamsForUpdate,
   normalizeDelayParamsForUpdate,
   normalizeReverbParamsForUpdate,
   normalizeSaturatorParamsForUpdate,
   normalizeSynthParams,
+  serializeCompressorParams,
   serializeDelayParams,
   serializeEqParams,
   serializeReverbParams,
@@ -61,6 +63,29 @@ const eqParamsValidator = v.object({
   })),
 })
 
+const compressorParamsValidator = v.object({
+  enabled: v.boolean(),
+  thresholdDb: v.number(),
+  ratio: v.number(),
+  attackMs: v.number(),
+  releaseMs: v.number(),
+  autoRelease: v.boolean(),
+  makeupDb: v.number(),
+  outputDb: v.number(),
+  dryWet: v.number(),
+  kneeDb: v.number(),
+  lookaheadMs: v.number(),
+  detectorMode: v.union(v.literal('peak'), v.literal('rms')),
+  dynamicsMode: v.union(v.literal('compress'), v.literal('expand')),
+  envelopeCurve: v.union(v.literal('log'), v.literal('linear')),
+  sidechain: v.object({
+    enabled: v.boolean(),
+    filterType: v.union(v.literal('lowpass'), v.literal('highpass'), v.literal('bandpass')),
+    frequencyHz: v.number(),
+    q: v.number(),
+  }),
+})
+
 const saturatorParamsValidator = v.object({
   enabled: v.boolean(),
   driveDb: v.number(),
@@ -85,10 +110,10 @@ const delayParamsValidator = v.object({
   highCutHz: v.number(),
 })
 
-const audioEffectKindValidator = v.union(v.literal("eq"), v.literal("saturator"), v.literal("delay"), v.literal("reverb"))
+const audioEffectKindValidator = v.union(v.literal("eq"), v.literal("compressor"), v.literal("saturator"), v.literal("delay"), v.literal("reverb"))
 
-type TrackAudioEffectType = 'synth' | 'arpeggiator' | 'reverb' | 'eq' | 'saturator' | 'delay'
-type MasterAudioEffectType = 'reverb' | 'eq' | 'saturator' | 'delay'
+type TrackAudioEffectType = 'synth' | 'arpeggiator' | 'reverb' | 'eq' | 'compressor' | 'saturator' | 'delay'
+type MasterAudioEffectType = 'reverb' | 'eq' | 'compressor' | 'saturator' | 'delay'
 type SharedAudioEffectType = TrackAudioEffectType | MasterAudioEffectType
 type AudioEffectKind = MasterAudioEffectType
 
@@ -96,6 +121,10 @@ const audioEffectPersistenceDescriptors = {
   eq: {
     normalizeParamsForUpdate: normalizeEqParamsForUpdate,
     serializeParams: serializeEqParams,
+  },
+  compressor: {
+    normalizeParamsForUpdate: normalizeCompressorParamsForUpdate,
+    serializeParams: serializeCompressorParams,
   },
   saturator: {
     normalizeParamsForUpdate: normalizeSaturatorParamsForUpdate,
@@ -133,7 +162,7 @@ const sanitizeArpParams = (params: {
 }
 
 const isAudioEffectPersistenceType = (type: SharedAudioEffectType): type is AudioEffectPersistenceType => (
-  type === 'eq' || type === 'saturator' || type === 'delay' || type === 'reverb'
+  type === 'eq' || type === 'compressor' || type === 'saturator' || type === 'delay' || type === 'reverb'
 )
 
 const normalizeEffectParamsForUpdate = (
@@ -243,7 +272,7 @@ const getTrackEffect = async (
 
 const reorderRows = async (ctx: any, rows: any[], order: AudioEffectKind[]) => {
   const audioRows = rows
-    .filter((row) => row.type === 'eq' || row.type === 'saturator' || row.type === 'delay' || row.type === 'reverb')
+    .filter((row) => row.type === 'eq' || row.type === 'compressor' || row.type === 'saturator' || row.type === 'delay' || row.type === 'reverb')
     .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
   const requestedKinds = new Set<AudioEffectKind>()
   const requested = order.flatMap((kind) => {
@@ -491,6 +520,14 @@ export const setMasterEqParams = mutation({
   }
 })
 
+export const setCompressorParams = mutation({
+  args: { projectId: v.string(), trackId: v.id("tracks"), params: compressorParamsValidator },
+  handler: async (ctx, { projectId, trackId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'compressor', params })
+  },
+})
+
 export const setSaturatorParams = mutation({
   args: { projectId: v.string(), trackId: v.id("tracks"), params: saturatorParamsValidator },
   handler: async (ctx, { projectId, trackId, params }) => {
@@ -504,6 +541,14 @@ export const setDelayParams = mutation({
   handler: async (ctx, { projectId, trackId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'delay', params })
+  },
+})
+
+export const setMasterCompressorParams = mutation({
+  args: { projectId: v.string(), params: compressorParamsValidator },
+  handler: async (ctx, { projectId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'compressor', params })
   },
 })
 
@@ -631,6 +676,16 @@ export const serverSetMasterEqParams = mutation({
   },
 })
 
+export const serverSetCompressorParams = mutation({
+  args: { projectId: v.string(), trackId: v.string(), params: compressorParamsValidator },
+  handler: async (ctx, { projectId, trackId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
+    if (!normalizedTrackId) return
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'compressor', params })
+  },
+})
+
 export const serverSetSaturatorParams = mutation({
   args: { projectId: v.string(), trackId: v.string(), params: saturatorParamsValidator },
   handler: async (ctx, { projectId, trackId, params }) => {
@@ -648,6 +703,14 @@ export const serverSetDelayParams = mutation({
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
     if (!normalizedTrackId) return
     return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'delay', params })
+  },
+})
+
+export const serverSetMasterCompressorParams = mutation({
+  args: { projectId: v.string(), params: compressorParamsValidator },
+  handler: async (ctx, { projectId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'compressor', params })
   },
 })
 

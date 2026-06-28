@@ -1,7 +1,7 @@
 import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime } from './audio-runtime'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
-import { normalizeMasterVolume, type ArpParams, type AudioEffectKind, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite, type SynthParamsInput } from '@daw-browser/shared'
+import { normalizeMasterVolume, type ArpParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite, type SynthParamsInput } from '@daw-browser/shared'
 import { createReverbImpulseCache } from './effects/reverb-impulse-cache'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
@@ -202,6 +202,10 @@ export class AudioEngine {
     this.mixerRuntime.setTrackReverb(trackId, params)
   }
 
+  setTrackCompressor(trackId: string, params: CompressorParamsLite) {
+    this.mixerRuntime.setTrackCompressor(trackId, params)
+  }
+
   setTrackSaturator(trackId: string, params: SaturatorParamsLite) {
     this.mixerRuntime.setTrackSaturator(trackId, params)
   }
@@ -222,6 +226,10 @@ export class AudioEngine {
       params,
       (nextParams) => this.createImpulseResponse(nextParams),
     )
+  }
+
+  setMasterCompressor(params: CompressorParamsLite) {
+    this.masterFx.setCompressor(this.audioCtx, this.masterGain, this.destination, params)
   }
 
   setMasterSaturator(params: SaturatorParamsLite) {

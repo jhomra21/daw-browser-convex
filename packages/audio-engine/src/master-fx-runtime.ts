@@ -1,6 +1,7 @@
-import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeEqParams, type AudioEffectKind, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
+import { createCompressorChainState } from './effects/compressor-chain-state'
 import { createDelayChainState } from './effects/delay-chain-state'
 import { createReverbChainState } from './effects/reverb-chain-state'
 import { createSaturatorChainState } from './effects/saturator-chain-state'
@@ -14,10 +15,12 @@ export function createMasterFxRuntime() {
   let spectrumTmp: Uint8Array<ArrayBuffer> | null = null
   let spectrumLast: SpectrumFrame | null = null
   let analyserConnected = false
+  const compressorState = createCompressorChainState()
   const reverbState = createReverbChainState()
   const saturatorState = createSaturatorChainState()
   const delayState = createDelayChainState()
   let pendingEqParams: EqParamsLite | null = null
+  let pendingCompressorParams: CompressorParamsLite | null = null
   let pendingReverbParams: ReverbParamsLite | null = null
   let pendingSaturatorParams: SaturatorParamsLite | null = null
   let pendingDelayParams: DelayParamsLite | null = null
@@ -29,6 +32,7 @@ export function createMasterFxRuntime() {
     if (analyserConnected) analyserConnected = false
     connectFxChain(masterGain, destination, {
       eqNodes: eqChain,
+      compressorChain: compressorState.chain(),
       saturatorChain: saturatorState.chain(),
       delayChain: delayState.chain(),
       reverbChain: reverbState.chain(),
@@ -68,6 +72,11 @@ export function createMasterFxRuntime() {
         eqChain = createEqNodes(ctx, params, ctx.destination.maxChannelCount || 2)
         eqSignature = signature
         eqTopologySignature = topologySignature
+      }
+      if (pendingCompressorParams) {
+        const params = pendingCompressorParams
+        pendingCompressorParams = null
+        void compressorState.set(ctx, params).then((result) => { if (result.changed && result.requiresRoutingRebuild) rebuildRouting(ctx, masterGain, destination) })
       }
       if (pendingReverbParams) {
         const params = pendingReverbParams
@@ -117,6 +126,15 @@ export function createMasterFxRuntime() {
         rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
       }
     },
+    setCompressor: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: CompressorParamsLite) => {
+      if (!ctx || !masterGain) {
+        pendingCompressorParams = params
+        return
+      }
+      void compressorState.set(ctx, params).then((result) => {
+        if (result.changed && result.requiresRoutingRebuild) rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
+      })
+    },
     setSaturator: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: SaturatorParamsLite) => {
       if (!ctx || !masterGain) {
         pendingSaturatorParams = params
@@ -165,12 +183,14 @@ export function createMasterFxRuntime() {
       eqSignature = null
       eqTopologySignature = null
       pendingEqParams = null
+      pendingCompressorParams = null
       pendingReverbParams = null
       pendingSaturatorParams = null
       pendingDelayParams = null
       masterFxOrder = undefined
       disconnectAudioNodes(eqChain)
       eqChain = []
+      compressorState.close()
       reverbState.close()
       saturatorState.close()
       delayState.close()

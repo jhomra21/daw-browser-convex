@@ -25,6 +25,7 @@ type Options = {
 
 const BROWSER_EFFECT_ITEM_IDS = {
   eq: "builtin:audio-effect:eq",
+  compressor: "builtin:audio-effect:compressor",
   saturator: "builtin:audio-effect:saturator",
   delay: "builtin:audio-effect:delay",
   reverb: "builtin:audio-effect:reverb",
@@ -154,6 +155,15 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         disabled: !canDragDevice,
       },
       {
+        id: BROWSER_EFFECT_ITEM_IDS.compressor,
+        source: "builtin",
+        category: "audio-effect",
+        label: "Compressor",
+        subtitle: "Dynamics",
+        searchText: "compressor dynamics sidechain peak rms expand",
+        disabled: !canDragDevice,
+      },
+      {
         id: BROWSER_EFFECT_ITEM_IDS.saturator,
         source: "builtin",
         category: "audio-effect",
@@ -238,6 +248,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     const actions = options.deviceInsertActions();
     if (!actions) return undefined;
     if (itemId === BROWSER_EFFECT_ITEM_IDS.eq) return { kind: "audio-effect", effect: "eq", label: "EQ" };
+    if (itemId === BROWSER_EFFECT_ITEM_IDS.compressor) return { kind: "audio-effect", effect: "compressor", label: "Compressor" };
     if (itemId === BROWSER_EFFECT_ITEM_IDS.saturator) return { kind: "audio-effect", effect: "saturator", label: "Saturator" };
     if (itemId === BROWSER_EFFECT_ITEM_IDS.delay) return { kind: "audio-effect", effect: "delay", label: "Delay" };
     if (itemId === BROWSER_EFFECT_ITEM_IDS.reverb) return { kind: "audio-effect", effect: "reverb", label: "Reverb" };
@@ -252,6 +263,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     if (!payload || !actions?.canWrite) return;
     if (payload.kind === "audio-effect") {
       if (payload.effect === "eq" && actions.canAddEq) actions.addEq();
+      if (payload.effect === "compressor" && actions.canAddCompressor) actions.addCompressor();
       if (payload.effect === "saturator" && actions.canAddSaturator) actions.addSaturator();
       if (payload.effect === "delay" && actions.canAddDelay) actions.addDelay();
       if (payload.effect === "reverb" && actions.canAddReverb) actions.addReverb();

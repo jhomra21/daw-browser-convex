@@ -32,7 +32,8 @@ async function buildOfflineFxChain(
   config: OfflineFxChainConfig,
 ) {
   const eq = createEqNodes(ctx, config.eq ? normalizeEqParams(config.eq) : undefined, ctx.destination.channelCount || 2)
-  const compressor = config.compressor ? await createCompressorNodeChain(ctx, normalizeCompressorParams(config.compressor)) : null
+  const compressorParams = config.compressor ? normalizeCompressorParams(config.compressor) : null
+  const compressor = compressorParams?.enabled ? await createCompressorNodeChain(ctx, compressorParams) : null
   const saturator = config.saturator ? createSaturatorNodeChain(ctx, normalizeSaturatorParams(config.saturator)) : null
   const delay = config.delay ? createDelayNodeChain(ctx, normalizeDelayParams(config.delay), config.bpm ?? 120) : null
   const reverb = config.reverb

@@ -146,15 +146,6 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         disabled: !canDragDevice,
       },
       {
-        id: BROWSER_EFFECT_ITEM_IDS.reverb,
-        source: "builtin",
-        category: "audio-effect",
-        label: "Reverb",
-        subtitle: "Audio effect",
-        searchText: "reverb audio effect space",
-        disabled: !canDragDevice,
-      },
-      {
         id: BROWSER_EFFECT_ITEM_IDS.compressor,
         source: "builtin",
         category: "audio-effect",
@@ -179,6 +170,15 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: "Delay",
         subtitle: "Audio effect",
         searchText: "delay echo ping pong audio effect",
+        disabled: !canDragDevice,
+      },
+      {
+        id: BROWSER_EFFECT_ITEM_IDS.reverb,
+        source: "builtin",
+        category: "audio-effect",
+        label: "Reverb",
+        subtitle: "Audio effect",
+        searchText: "reverb audio effect space",
         disabled: !canDragDevice,
       },
       {

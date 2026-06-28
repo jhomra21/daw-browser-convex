@@ -223,6 +223,17 @@ describe('Compressor params', () => {
     expect(parseSharedTimelineOperation({ kind: 'effects.setMasterCompressorParams', payload: { params } })?.kind)
       .toBe('effects.setMasterCompressorParams')
   })
+
+  test('rejects partial shared track and master compressor operations', () => {
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setCompressorParams',
+      payload: { trackId: 'track-1', params: { enabled: true } },
+    })).toBeNull()
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setMasterCompressorParams',
+      payload: { params: { enabled: true } },
+    })).toBeNull()
+  })
 })
 
 describe('Audio effect order', () => {

@@ -2,6 +2,7 @@ import type {
   ArpeggiatorParams,
   AudioEffectKind,
   CompressorParams,
+  CompressorParamsInput,
   DelayParams,
   DelayParamsInput,
   EqParams,
@@ -10,7 +11,21 @@ import type {
   SaturatorParamsInput,
   SynthWave,
 } from './effects-params'
-import { isAudioEffectKind, isDelayMode, isDelaySyncDivision, isEqBandType, isSaturatorCurve, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams } from './effects-params'
+import {
+  isAudioEffectKind,
+  isCompressorDetectorMode,
+  isCompressorDynamicsMode,
+  isCompressorEnvelopeCurve,
+  isCompressorSidechainFilterType,
+  isDelayMode,
+  isDelaySyncDivision,
+  isEqBandType,
+  isSaturatorCurve,
+  normalizeCompressorParams,
+  normalizeDelayParams,
+  normalizeEqParams,
+  normalizeSaturatorParams,
+} from './effects-params'
 import { normalizeAudioWarp, normalizeClipGain, type AudioWarpPayload } from './audio-warp'
 import { normalizeMasterVolume } from './master-volume'
 
@@ -266,30 +281,50 @@ const readReverbParams = (value: unknown): SharedReverbParams | null => {
 }
 
 const readCompressorParams = (value: unknown): CompressorParams | null => {
-  if (!isRecord(value)) return null
-  const sidechain = isRecord(value.sidechain) ? value.sidechain : undefined
-  return normalizeCompressorParams({
-    enabled: readOptionalBoolean(value.enabled),
-    thresholdDb: readOptionalNumber(value.thresholdDb),
-    ratio: readOptionalNumber(value.ratio),
-    attackMs: readOptionalNumber(value.attackMs),
-    releaseMs: readOptionalNumber(value.releaseMs),
-    autoRelease: readOptionalBoolean(value.autoRelease),
-    makeupDb: readOptionalNumber(value.makeupDb),
-    outputDb: readOptionalNumber(value.outputDb),
-    dryWet: readOptionalNumber(value.dryWet),
-    kneeDb: readOptionalNumber(value.kneeDb),
-    lookaheadMs: readOptionalNumber(value.lookaheadMs),
+  if (!isRecord(value) || typeof value.enabled !== 'boolean') return null
+  if (
+    typeof value.thresholdDb !== 'number'
+    || typeof value.ratio !== 'number'
+    || typeof value.attackMs !== 'number'
+    || typeof value.releaseMs !== 'number'
+    || typeof value.autoRelease !== 'boolean'
+    || typeof value.makeupDb !== 'number'
+    || typeof value.outputDb !== 'number'
+    || typeof value.dryWet !== 'number'
+    || typeof value.kneeDb !== 'number'
+    || typeof value.lookaheadMs !== 'number'
+    || !isCompressorDetectorMode(value.detectorMode)
+    || !isCompressorDynamicsMode(value.dynamicsMode)
+    || !isCompressorEnvelopeCurve(value.envelopeCurve)
+    || !isRecord(value.sidechain)
+    || typeof value.sidechain.enabled !== 'boolean'
+    || !isCompressorSidechainFilterType(value.sidechain.filterType)
+    || typeof value.sidechain.frequencyHz !== 'number'
+    || typeof value.sidechain.q !== 'number'
+  ) return null
+  const params: CompressorParamsInput = {
+    enabled: value.enabled,
+    thresholdDb: value.thresholdDb,
+    ratio: value.ratio,
+    attackMs: value.attackMs,
+    releaseMs: value.releaseMs,
+    autoRelease: value.autoRelease,
+    makeupDb: value.makeupDb,
+    outputDb: value.outputDb,
+    dryWet: value.dryWet,
+    kneeDb: value.kneeDb,
+    lookaheadMs: value.lookaheadMs,
     detectorMode: value.detectorMode,
     dynamicsMode: value.dynamicsMode,
     envelopeCurve: value.envelopeCurve,
-    sidechain: sidechain ? {
-      enabled: readOptionalBoolean(sidechain.enabled),
-      filterType: sidechain.filterType,
-      frequencyHz: readOptionalNumber(sidechain.frequencyHz),
-      q: readOptionalNumber(sidechain.q),
-    } : undefined,
-  })
+    sidechain: {
+      enabled: value.sidechain.enabled,
+      filterType: value.sidechain.filterType,
+      frequencyHz: value.sidechain.frequencyHz,
+      q: value.sidechain.q,
+    },
+  }
+  return normalizeCompressorParams(params)
 }
 
 const readSaturatorParams = (value: unknown): SaturatorParams | null => {

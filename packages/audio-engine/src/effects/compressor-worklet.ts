@@ -130,10 +130,10 @@ class CompressorProcessor extends AudioWorkletProcessor {
         const readIndex = (this.writeIndex + readOffset) % this.lookaheadFrames
         delayedL = this.delayL[readIndex]
         delayedR = this.delayR[readIndex]
-        this.delayL[this.writeIndex] = inL
-        this.delayR[this.writeIndex] = inR
-        this.writeIndex = (this.writeIndex + 1) % this.lookaheadFrames
       }
+      this.delayL[this.writeIndex] = inL
+      this.delayR[this.writeIndex] = inR
+      this.writeIndex = (this.writeIndex + 1) % this.lookaheadFrames
       const processedL = delayedL * gain
       const processedR = delayedR * gain
       outL[i] = delayedL * dry + processedL * wet

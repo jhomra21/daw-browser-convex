@@ -198,6 +198,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       compressorChains.set(trackId, state)
     }
     const result = await state.set(ctx, normalized)
+    if (state.isIdle()) compressorChains.delete(trackId)
     if (result.changed && result.requiresRoutingRebuild) rebuildTrackRouting(trackId, ensureTrackNodes(trackId))
   }
 
@@ -364,7 +365,11 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
         state = createCompressorChainState()
         compressorChains.set(trackId, state)
       }
-      return state.subscribeMeter(listener)
+      const unsubscribe = state.subscribeMeter(listener)
+      return () => {
+        unsubscribe()
+        if (state.isIdle()) compressorChains.delete(trackId)
+      }
     },
     setTrackReverb,
     setBpm: (bpm: number) => {

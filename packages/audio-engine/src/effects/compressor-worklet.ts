@@ -1,4 +1,4 @@
-import { normalizeCompressorParams, serializeCompressorParams, type CompressorParamsLite } from '@daw-browser/shared'
+import { normalizeCompressorParams, type CompressorParamsLite } from '@daw-browser/shared'
 
 export type CompressorMeterFrame = {
   inputDb: number
@@ -97,6 +97,7 @@ class CompressorProcessor extends AudioWorkletProcessor {
     const dry = 1 - wet
     const cutoff = clamp(p.sidechain.frequencyHz / sampleRate, 0.00001, 0.45)
     const filterCoeff = 1 - Math.exp(-2 * Math.PI * cutoff)
+    const sidechainQ = clamp(p.sidechain.q, 0.1, 18)
     for (let i = 0; i < left.length; i++) {
       const inL = left[i]
       const inR = right[i]
@@ -104,7 +105,6 @@ class CompressorProcessor extends AudioWorkletProcessor {
       let detector = mono
       if (p.sidechain.enabled) {
         this.scLow += filterCoeff * (mono - this.scLow)
-        const sidechainQ = clamp(p.sidechain.q, 0.1, 18)
         this.scBand += filterCoeff * (mono - this.scLow - this.scBand / sidechainQ)
         if (p.sidechain.filterType === 'lowpass') detector = this.scLow
         else if (p.sidechain.filterType === 'bandpass') detector = this.scBand
@@ -223,8 +223,4 @@ export function readCompressorMeterFrame(data: unknown): CompressorMeterFrame | 
     gainReductionDb: data.gainReductionDb,
     thresholdDb: data.thresholdDb,
   }
-}
-
-export function getCompressorParamsSignature(params: CompressorParamsLite): string {
-  return serializeCompressorParams(params)
 }

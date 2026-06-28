@@ -299,7 +299,7 @@ export function connectFxChain(
   const saturator = config.saturatorChain?.enabled ? config.saturatorChain : null
   const delay = config.delayChain?.enabled ? config.delayChain : null
   const reverb = config.reverbChain?.enabled ? config.reverbChain : null
-  if (!compressor && config.compressorChain) disconnectCompressorChain(config.compressorChain)
+  if (!compressor && config.compressorChain) disconnectAudioNodes([config.compressorChain.workletNode])
   if (saturator) connectSaturatorInternals(saturator)
   else if (config.saturatorChain) disconnectSaturatorChain(config.saturatorChain)
   if (delay) connectDelayInternals(delay)

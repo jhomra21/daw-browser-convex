@@ -151,7 +151,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         category: "audio-effect",
         label: "Compressor",
         subtitle: "Dynamics",
-        searchText: "compressor dynamics sidechain peak rms expand",
+        searchText: "compressor dynamics peak rms expand",
         disabled: !canDragDevice,
       },
       {

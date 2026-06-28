@@ -1,6 +1,7 @@
 import { normalizeCompressorParams, serializeCompressorParams, type CompressorParamsLite } from '@daw-browser/shared'
 
 const registeredContexts = new WeakSet<BaseAudioContext>()
+const registeringContexts = new WeakMap<BaseAudioContext, Promise<void>>()
 
 const WORKLET_SOURCE = `
 const MIN_DB = -120
@@ -97,12 +98,16 @@ class CompressorProcessor extends AudioWorkletProcessor {
         this.envelopeDb = targetDb + coeff * (this.envelopeDb - targetDb)
       }
       const gain = dbToGain(this.envelopeDb) * makeup
-      const readIndex = (this.writeIndex + readOffset) % this.lookaheadFrames
-      const delayedL = this.delayL[readIndex]
-      const delayedR = this.delayR[readIndex]
-      this.delayL[this.writeIndex] = inL
-      this.delayR[this.writeIndex] = inR
-      this.writeIndex = (this.writeIndex + 1) % this.lookaheadFrames
+      let delayedL = inL
+      let delayedR = inR
+      if (lookahead > 0) {
+        const readIndex = (this.writeIndex + readOffset) % this.lookaheadFrames
+        delayedL = this.delayL[readIndex]
+        delayedR = this.delayR[readIndex]
+        this.delayL[this.writeIndex] = inL
+        this.delayR[this.writeIndex] = inR
+        this.writeIndex = (this.writeIndex + 1) % this.lookaheadFrames
+      }
       const processedL = delayedL * gain
       const processedR = delayedR * gain
       outL[i] = delayedL * dry + processedL * wet
@@ -116,11 +121,20 @@ registerProcessor('daw-compressor-processor', CompressorProcessor)
 
 export async function ensureCompressorWorklet(ctx: BaseAudioContext): Promise<void> {
   if (registeredContexts.has(ctx)) return
+  const registration = registeringContexts.get(ctx)
+  if (registration) return registration
   const blob = new Blob([WORKLET_SOURCE], { type: 'text/javascript' })
   const url = URL.createObjectURL(blob)
-  try {
+  const nextRegistration = (async () => {
     await ctx.audioWorklet.addModule(url)
     registeredContexts.add(ctx)
+  })()
+  registeringContexts.set(ctx, nextRegistration)
+  try {
+    await nextRegistration
+  } catch (error) {
+    registeringContexts.delete(ctx)
+    throw error
   } finally {
     URL.revokeObjectURL(url)
   }

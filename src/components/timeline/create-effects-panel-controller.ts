@@ -130,6 +130,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     playheadSec: options.playheadSec,
     localDraftEffects: {
       eq: audioEffects.eq.readDraftForTarget,
+      compressor: audioEffects.compressor.readDraftForTarget,
       saturator: audioEffects.saturator.readDraftForTarget,
       delay: audioEffects.delay.readDraftForTarget,
       reverb: audioEffects.reverb.readDraftForTarget,

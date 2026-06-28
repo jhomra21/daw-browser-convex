@@ -67,12 +67,15 @@ type ExpandedSynthCard = ExpandedSynthBounds & {
 
 type EffectsPanelInstrumentDevice = {
   addMidiClip: () => Promise<void>;
+  addMidiClipToTarget: (targetId: Track["id"]) => Promise<boolean>;
   flushPending: () => Promise<void>;
   arp: {
     add: () => void;
+    addToTarget: (targetId: Track["id"]) => Promise<boolean>;
     change: (updates: Partial<ArpeggiatorParams>) => void;
     params: Accessor<ArpeggiatorParams | undefined>;
     readDraftForTarget: (targetId: string) => ArpeggiatorParams | undefined;
+    readForTarget: (targetId: string) => ArpeggiatorParams | undefined;
     reset: () => void;
     syncRemoteForTarget: (targetId: string, params: ArpeggiatorParams | undefined) => void;
     toggle: (enabled: boolean) => void;
@@ -83,6 +86,7 @@ type EffectsPanelInstrumentDevice = {
     expandedCard: Accessor<ExpandedSynthCard | null>;
     isExpandedForCurrentTarget: Accessor<boolean>;
     open: () => void;
+    openForTarget: (targetId: Track["id"]) => void;
     params: Accessor<SynthParams | undefined>;
     readDraftForTarget: (targetId: string) => SynthParams | undefined;
     reset: () => void;
@@ -290,11 +294,16 @@ export function createEffectsPanelInstrumentDevice(
     synthState.update((prev) => ({ ...prev, ...updates }));
   }
 
+  function openSynthForTarget(targetId: Track["id"]): void {
+    const track = getTrackByTargetId(targetId);
+    if (!track || track.kind !== "instrument") return;
+    setExpandedSynth({ targetId, ...createInitialSynthCardBounds() });
+  }
+
   function openSynthCard(): void {
     const targetId = getTrackTargetId();
     if (!targetId) return;
-
-    setExpandedSynth({ targetId, ...createInitialSynthCardBounds() });
+    openSynthForTarget(targetId);
   }
 
   function closeSynthCard(): void {
@@ -315,12 +324,12 @@ export function createEffectsPanelInstrumentDevice(
     return synthState.readForTarget(targetId) ?? ensureSynthDefaults(targetId);
   }
 
-  async function handleAddMidiClip(): Promise<void> {
-    const track = currentTrack();
-    if (!track || track.kind !== "instrument") return;
+  async function addMidiClipToTarget(targetId: Track["id"]): Promise<boolean> {
+    const track = getTrackByTargetId(targetId);
+    if (!track || track.kind !== "instrument") return false;
 
     const projectId = context.projectId();
-    if (!projectId) return;
+    if (!projectId) return false;
     const grantScope = readOptimisticGrantScope({
       projectId,
       userId: context.userId(),
@@ -346,10 +355,10 @@ export function createEffectsPanelInstrumentDevice(
         });
         context.insertLocalClip?.(track.id, toLocalTimelineClip(row));
         context.onSelectClip?.(track.id, row.id, start);
-        return;
+        return true;
       }
 
-      if (!grantScope) return;
+      if (!grantScope) return false;
       const operation = buildSharedClipCreateOperation(
         buildClipCreatePayload({
           projectId,
@@ -359,18 +368,39 @@ export function createEffectsPanelInstrumentDevice(
       );
       const result = await publishDurableSharedTimelineOperation({ projectId, userId: grantScope.userId, operation });
       const clipId = typeof result === "string" ? result : null;
-      if (!clipId) return;
+      if (!clipId) return false;
 
       context.grantClipWrite?.(clipId, grantScope);
       const currentScope = readOptimisticGrantScope({
         projectId: context.projectId(),
         userId: context.userId(),
       });
-      if (!currentScope || didOptimisticGrantScopeChange(grantScope, currentScope)) return;
+      if (!currentScope || didOptimisticGrantScopeChange(grantScope, currentScope)) return false;
       context.onSelectClip?.(track.id, clipId, start);
+      return true;
     } catch (error) {
       console.warn("[EffectsPanel] failed to add MIDI clip", error);
+      return false;
     }
+  }
+
+  async function addArpeggiatorToTarget(targetId: Track["id"]): Promise<boolean> {
+    const track = getTrackByTargetId(targetId);
+    if (!track || track.kind !== "instrument") return false;
+    const projectId = context.projectId();
+    if (projectId && isLocalId("project", projectId)) {
+      const row = await localArp.fetchRow(projectId, targetId);
+      if (row?.params !== undefined) return false;
+    }
+    if (arpState.readForTarget(targetId)) return false;
+    arpState.addForTarget(targetId);
+    return true;
+  }
+
+  async function handleAddMidiClip(): Promise<void> {
+    const track = currentTrack();
+    if (!track) return;
+    await addMidiClipToTarget(track.id);
   }
 
   const expandedSynthCard = createMemo<ExpandedSynthCard | null>(() => {
@@ -402,12 +432,15 @@ export function createEffectsPanelInstrumentDevice(
 
   return {
     addMidiClip: handleAddMidiClip,
+    addMidiClipToTarget,
     flushPending,
     arp: {
       add: arpState.add,
+      addToTarget: addArpeggiatorToTarget,
       change: handleArpChange,
       params: arpState.params,
       readDraftForTarget: arpState.readDraftForTarget,
+      readForTarget: arpState.readForTarget,
       reset: arpState.reset,
       syncRemoteForTarget: arpState.syncRemoteForTarget,
       toggle: handleArpToggle,
@@ -418,6 +451,7 @@ export function createEffectsPanelInstrumentDevice(
       expandedCard: expandedSynthCard,
       isExpandedForCurrentTarget: isSynthExpandedForCurrentTarget,
       open: openSynthCard,
+      openForTarget: openSynthForTarget,
       params: synthState.params,
       readDraftForTarget: synthState.readDraftForTarget,
       reset: synthState.reset,

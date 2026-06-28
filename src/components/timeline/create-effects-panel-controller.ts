@@ -1,5 +1,5 @@
 import { createEffect, createMemo, onCleanup, type Accessor } from "solid-js";
-import { isLocalId, normalizeSynthParams, type ArpeggiatorParams } from "@daw-browser/shared";
+import { isLocalId, normalizeSynthParams, type ArpeggiatorParams, type AudioEffectKind } from "@daw-browser/shared";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { createEffectsPanelAudioDevice } from "~/components/timeline/create-effects-panel-audio-effects-state";
@@ -35,11 +35,18 @@ const deviceInsertActionsEqual = (
   b: TimelineDeviceInsertActions,
 ) => (
   a?.addMidiClip === b.addMidiClip &&
+  a.addMidiClipToTarget === b.addMidiClipToTarget &&
+  a.canAddMidiClipToTarget === b.canAddMidiClipToTarget &&
   a.addArpeggiator === b.addArpeggiator &&
+  a.addArpeggiatorToTarget === b.addArpeggiatorToTarget &&
+  a.canAddArpeggiatorToTarget === b.canAddArpeggiatorToTarget &&
+  a.addAudioEffectToTarget === b.addAudioEffectToTarget &&
+  a.canAddAudioEffectToTarget === b.canAddAudioEffectToTarget &&
   a.addEq === b.addEq &&
   a.addSaturator === b.addSaturator &&
   a.addDelay === b.addDelay &&
   a.addReverb === b.addReverb &&
+  a.openSynthForTarget === b.openSynthForTarget &&
   a.canWrite === b.canWrite &&
   a.canAddMidiClip === b.canAddMidiClip &&
   a.canAddArpeggiator === b.canAddArpeggiator &&
@@ -92,6 +99,10 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
   );
   const canWriteCurrentTargetEffects = createMemo(() => currentTargetId() === "master" || canWriteCurrentTrackRouting());
   const isCurrentTargetReadOnly = createMemo(() => currentTargetId() !== "master" && !canWriteCurrentTrackRouting());
+  const canWriteEffectsTarget = (targetId: Track["id"] | "master") => {
+    if (targetId === "master") return true;
+    return options.canWriteTrackRouting ? options.canWriteTrackRouting(targetId) : true;
+  };
   const audioEffects = createEffectsPanelAudioDevice(
     {
       audioEngine: options.audioEngine,
@@ -166,15 +177,55 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     options.onClose();
   };
 
+  const canAddArpeggiatorToTarget = (targetId: Track["id"]) => {
+    const track = resolveTrackByTargetId(targetId);
+    if (!track || track.kind !== "instrument") return false;
+    if (options.canWriteTrackRouting && !options.canWriteTrackRouting(track.id)) return false;
+    return !instrument.arp.readForTarget(track.id);
+  };
+
+  const addArpeggiatorToTarget = async (targetId: Track["id"]) => {
+    if (!canAddArpeggiatorToTarget(targetId)) return false;
+    return await instrument.arp.addToTarget(targetId);
+  };
+
+  const canAddMidiClipToTarget = (targetId: Track["id"]) => {
+    const track = resolveTrackByTargetId(targetId);
+    if (!track || track.kind !== "instrument") return false;
+    if (options.canWriteTrackRouting && !options.canWriteTrackRouting(track.id)) return false;
+    return true;
+  };
+
+  const addMidiClipToTarget = async (targetId: Track["id"]) => {
+    if (!canAddMidiClipToTarget(targetId)) return false;
+    return await instrument.addMidiClipToTarget(targetId);
+  };
+
+  const canAddAudioEffectToTarget = (targetId: Track["id"] | "master", effect: AudioEffectKind) => (
+    canWriteEffectsTarget(targetId) && audioEffects.canAddByKindToTarget(targetId, effect)
+  );
+
+  const addAudioEffectToTarget = async (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => {
+    if (!canAddAudioEffectToTarget(targetId, effect)) return false;
+    return await audioEffects.addByKindToTarget(targetId, effect, index);
+  };
+
   let previousDeviceInsertActions: TimelineDeviceInsertActions | undefined;
   createEffect(() => {
     const nextActions = {
       addMidiClip: instrument.addMidiClip,
+      addMidiClipToTarget,
+      canAddMidiClipToTarget,
       addArpeggiator: instrument.arp.add,
+      addArpeggiatorToTarget,
+      canAddArpeggiatorToTarget,
+      addAudioEffectToTarget,
+      canAddAudioEffectToTarget,
       addEq: audioEffects.eq.add,
       addSaturator: audioEffects.saturator.add,
       addDelay: audioEffects.delay.add,
       addReverb: audioEffects.reverb.add,
+      openSynthForTarget: instrument.synth.openForTarget,
       canWrite: canWriteCurrentTargetEffects(),
       canAddMidiClip: isInstrumentTrack(),
       canAddArpeggiator: isInstrumentTrack() && !instrument.arp.params(),

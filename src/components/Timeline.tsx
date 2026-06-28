@@ -21,7 +21,7 @@ import { useClipDrag } from "~/hooks/useClipDrag";
 import { useClipResize } from "~/hooks/useClipResize";
 import { useTimelineSelection } from "~/hooks/useTimelineSelection";
 import { useClipBuffers } from "~/hooks/useClipBuffers";
-import { normalizeCommandTrackIndices } from "@daw-browser/shared";
+import { isLocalId, normalizeCommandTrackIndices } from "@daw-browser/shared";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
 import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
@@ -47,6 +47,8 @@ import { useTimelineBottomPanelState } from "~/hooks/useTimelineBottomPanelState
 import { useTimelineLeftBrowserResize } from "~/hooks/useTimelineLeftBrowserResize";
 import { useTimelineLeftBrowserState } from "~/hooks/useTimelineLeftBrowserState";
 import { useTimelineBrowserController } from "~/hooks/useTimelineBrowserController";
+import { BrowserDragOverlay } from "./timeline/browser/browser-drag-overlay";
+import type { BrowserDragPayload, BrowserDropTarget } from "./timeline/browser/browser-drag-types";
 import type { TimelineDeviceInsertActions } from "./timeline/timeline-device-insert-actions";
 import { isTimelineSampleDetailClip, useTimelineSampleDetailController } from "~/hooks/useTimelineSampleDetailController";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
@@ -161,6 +163,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     onBufferChange: () => setBufferVersion((current) => current + 1),
   });
   const currentLocalProjectMode = createMemo(() => projects().find((project) => project.projectId === projectId())?.mode);
+  const canCreateTrack = createMemo(() => {
+    if (isLocalId("project", projectId())) return true;
+    const role = currentProjectRole();
+    return role === "owner" || role === "editor";
+  });
   const { mediaRecovery } = useTimelinePersistenceController({
     projectId,
     remoteTimelineAvailable: () => Boolean(fullView.data),
@@ -459,6 +466,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   let archiveInputRef: HTMLInputElement | undefined;
   let containerRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
+  let effectsChainElement: HTMLElement | undefined;
 
   const leftBrowser = useTimelineLeftBrowserState({
     projectId,
@@ -809,14 +817,84 @@ const Timeline: Component<TimelineProps> = (props) => {
     enabled: dashboardSamplesEnabled,
     includeFilePath: () => true,
   });
+  const openEffectsForTarget = (
+    targetId: Track["id"] | "master",
+    options?: { preserveClipSelection?: boolean },
+  ) => {
+    if (targetId === "master") selection.selectMasterTarget();
+    else selection.selectTrackTarget(targetId, { clearClipSelection: !options?.preserveClipSelection });
+    bottomPanel.setMode("effects");
+    bottomPanel.setOpen(true);
+  };
+  const handleBrowserDeviceDrop = async (
+    payload: BrowserDragPayload,
+    target: BrowserDropTarget,
+  ) => {
+    const actions = deviceInsertActions();
+    if (!actions) return;
+    if (payload.kind === "audio-effect" && target.kind === "effect-chain") {
+      if (!await actions.addAudioEffectToTarget(target.targetId, payload.effect, target.index)) return;
+      openEffectsForTarget(target.targetId);
+      return;
+    }
+    if (payload.kind === "audio-effect" && target.kind === "track") {
+      if (!await actions.addAudioEffectToTarget(target.trackId, payload.effect)) return;
+      openEffectsForTarget(target.trackId);
+      return;
+    }
+    if (payload.kind === "audio-effect" && target.kind === "new-track") {
+      const track = await createTimelineTrack();
+      if (!track) return;
+      if (!await actions.addAudioEffectToTarget(track.id, payload.effect)) return;
+      openEffectsForTarget(track.id);
+      return;
+    }
+    if (payload.kind === "midi-effect" && target.kind === "track") {
+      if (!await actions.addArpeggiatorToTarget(target.trackId)) return;
+      openEffectsForTarget(target.trackId);
+      return;
+    }
+    if (payload.kind === "midi-effect" && target.kind === "new-track") {
+      const track = await createTimelineTrack({ kind: "instrument" });
+      if (!track) return;
+      if (!await actions.addArpeggiatorToTarget(track.id)) return;
+      openEffectsForTarget(track.id);
+      return;
+    }
+    if (payload.kind === "midi-instrument" && target.kind === "track") {
+      if (!await actions.addMidiClipToTarget(target.trackId)) return;
+      openEffectsForTarget(target.trackId, { preserveClipSelection: true });
+      actions.openSynthForTarget(target.trackId);
+      return;
+    }
+    if (payload.kind === "midi-instrument" && target.kind === "new-track") {
+      const track = await createTimelineTrack({ kind: "instrument" });
+      if (!track) return;
+      if (!await actions.addMidiClipToTarget(track.id)) return;
+      openEffectsForTarget(track.id, { preserveClipSelection: true });
+      actions.openSynthForTarget(track.id);
+    }
+  };
   const timelineBrowser = useTimelineBrowserController({
     projectId,
     userId,
     leftBrowser,
     onResizePointerDown: leftBrowserResize.onPointerDown,
     deviceInsertActions,
+    canCreateTrack,
+    tracks: () => renderTracks(),
+    scrollElement: () => scrollRef,
+    effectsChainElement: () => effectsChainElement,
+    currentEffectsTargetId: () => selection.selectedFXTarget(),
     handleInsertSample,
+    onDeviceDrop: handleBrowserDeviceDrop,
   });
+  const browserDropTargetLane = createMemo(() => {
+    const target = timelineBrowser().devices.dragSession()?.target;
+    if (target?.kind !== "track") return null;
+    return target.laneIndex;
+  });
+  const browserDropAtNewTrack = createMemo(() => timelineBrowser().devices.dragSession()?.target.kind === "new-track");
   useTimelineAudioLifecycle({
     audioEngine,
     tracks: () => renderTracks(),
@@ -965,6 +1043,9 @@ const Timeline: Component<TimelineProps> = (props) => {
       onEffectParamsCommitted: pushEffectParamsHistory,
       onLocalSaveFailed: localProject.setLocalSaveFailure,
       onDeviceInsertActionsChange: setDeviceInsertActions,
+      onEffectChainElementChange: (element: HTMLElement | undefined) => {
+        effectsChainElement = element;
+      },
     },
     sampleDetailPanel: {
       isOpen: bottomPanel.open() && bottomPanel.mode() === "sample-detail",
@@ -1064,8 +1145,8 @@ const Timeline: Component<TimelineProps> = (props) => {
         durationSec={duration()}
         sidebarWidth={sidebarWidth()}
         tracks={renderTracks()}
-        dropAtNewTrack={dropAtNewTrack()}
-        dropTargetLane={dropTargetLane()}
+        dropAtNewTrack={dropAtNewTrack() || browserDropAtNewTrack()}
+        dropTargetLane={browserDropTargetLane() ?? dropTargetLane()}
         bpm={bpm()}
         gridDenominator={gridDenominator()}
         gridEnabled={gridEnabled()}
@@ -1157,6 +1238,8 @@ const Timeline: Component<TimelineProps> = (props) => {
           onToggleRecordArm: handleToggleRecordArm,
         }}
       />
+
+      <BrowserDragOverlay session={timelineBrowser().devices.dragSession} />
 
       <DeleteTrackDialog
         open={confirmOpen()}

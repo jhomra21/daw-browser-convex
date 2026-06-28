@@ -68,6 +68,7 @@ const BrowserItemRow: Component<{
   draggable?: boolean;
   onClick: () => void;
   onDragStart?: (event: DragEvent) => void;
+  onPointerDown?: (event: PointerEvent) => void;
 }> = (props) => (
   <button
     type="button"
@@ -76,6 +77,7 @@ const BrowserItemRow: Component<{
     class="group flex h-6 w-full items-center px-5 text-left text-xs hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
     onClick={props.onClick}
     onDragStart={props.onDragStart}
+    onPointerDown={props.onPointerDown}
   >
     <span class="min-w-0 flex-1 truncate text-neutral-200 group-hover:text-neutral-50">{props.item.label}</span>
   </button>
@@ -163,6 +165,7 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
                 <BrowserItemRow
                   item={item}
                   onClick={() => visibleDeviceTree().onAdd(item.id)}
+                  onPointerDown={(event) => props.browser.devices.onDevicePointerDown(event, item.id)}
                 />
               )}
             />

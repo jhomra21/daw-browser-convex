@@ -9,6 +9,7 @@ type UseDragOptions = {
   onDragCancel?: (pos: Point, event: PointerEvent) => void | Promise<void>
   disabled?: () => boolean
   dragCursorClass?: string
+  preventDefaultOnPointerDown?: boolean
 }
 
 export function useDrag(options: UseDragOptions = {}) {
@@ -53,7 +54,7 @@ export function useDrag(options: UseDragOptions = {}) {
 
   const onPointerDown = (event: PointerEvent) => {
     if (options.disabled?.()) return
-    event.preventDefault()
+    if (options.preventDefaultOnPointerDown !== false) event.preventDefault()
     ;(event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId)
     activePointerId = event.pointerId
     setIsDragging(true)

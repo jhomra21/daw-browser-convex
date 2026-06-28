@@ -580,9 +580,8 @@ export function computeCompressorStaticCurveDb(inputDb: number, params: Compress
     if (inputDb >= threshold) return inputDb
     const expanded = threshold + (inputDb - threshold) * ratio
     if (knee <= 0 || inputDb <= threshold - knee / 2) return expanded
-    const x = threshold + knee / 2 - inputDb
-    const blend = (x * x) / (2 * knee)
-    return inputDb + (expanded - inputDb) * (blend / Math.max(0.0001, threshold - inputDb))
+    const distance = threshold - inputDb
+    return inputDb - (2 * (ratio - 1) * distance * distance) / knee
   }
   const compressed = threshold + (inputDb - threshold) / ratio
   if (knee <= 0) return inputDb <= threshold ? inputDb : compressed

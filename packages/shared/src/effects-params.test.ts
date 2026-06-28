@@ -205,6 +205,17 @@ describe('Compressor params', () => {
     expect(Math.abs(above - below)).toBeLessThan(0.03)
   })
 
+  test('keeps soft-knee expansion continuous around threshold', () => {
+    const below = computeCompressorStaticCurveDb(-24.01, { thresholdDb: -24, ratio: 4, kneeDb: 6, dynamicsMode: 'expand' })
+    const above = computeCompressorStaticCurveDb(-23.99, { thresholdDb: -24, ratio: 4, kneeDb: 6, dynamicsMode: 'expand' })
+    expect(Math.abs(above - below)).toBeLessThan(0.03)
+  })
+
+  test('computes soft-knee expansion fixtures around threshold and knee edge', () => {
+    expect(computeCompressorStaticCurveDb(-25, { thresholdDb: -24, ratio: 2, kneeDb: 6, dynamicsMode: 'expand' })).toBeCloseTo(-25.33333, 5)
+    expect(computeCompressorStaticCurveDb(-27, { thresholdDb: -24, ratio: 2, kneeDb: 6, dynamicsMode: 'expand' })).toBeCloseTo(-30, 5)
+  })
+
   test('parses shared track and master compressor operations', () => {
     const params = normalizeCompressorParams({})
     expect(parseSharedTimelineOperation({ kind: 'effects.setCompressorParams', payload: { trackId: 'track-1', params } })?.kind)

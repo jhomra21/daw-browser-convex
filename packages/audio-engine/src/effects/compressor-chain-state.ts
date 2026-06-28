@@ -1,6 +1,6 @@
 import { normalizeCompressorParams, type CompressorParamsLite } from '@daw-browser/shared'
 import { applyCompressorNodeChainParams, createCompressorNodeChain, disconnectCompressorChain, type CompressorNodeChain } from './chain'
-import { getCompressorParamsSignature, readCompressorMeterFrame, type CompressorMeterListener } from './compressor-worklet'
+import { getCompressorParamsSignature, readCompressorMeterFrame, setCompressorMeteringEnabled, type CompressorMeterListener } from './compressor-worklet'
 
 export type CompressorChainState = {
   chain: () => CompressorNodeChain | null
@@ -22,6 +22,7 @@ export function createCompressorChainState(): CompressorChainState {
       if (!frame) return
       for (const listener of meterListeners) listener(frame)
     }
+    setCompressorMeteringEnabled(chain.workletNode, meterListeners.size > 0)
   }
 
   return {
@@ -57,9 +58,12 @@ export function createCompressorChainState(): CompressorChainState {
       return { changed: true, requiresRoutingRebuild }
     },
     subscribeMeter: (listener) => {
+      const hadListeners = meterListeners.size > 0
       meterListeners.add(listener)
+      if (!hadListeners && compressor) setCompressorMeteringEnabled(compressor.workletNode, true)
       return () => {
         meterListeners.delete(listener)
+        if (meterListeners.size === 0 && compressor) setCompressorMeteringEnabled(compressor.workletNode, false)
       }
     },
     close: () => {

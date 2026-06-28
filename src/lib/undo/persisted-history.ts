@@ -11,12 +11,14 @@ type PersistedHistoryEnvelope = {
 
 const EFFECT_TYPES: ReadonlySet<string> = new Set([
   'eq',
+  'compressor',
   'saturator',
   'delay',
   'reverb',
   'synth',
   'arp',
   'master-eq',
+  'master-compressor',
   'master-saturator',
   'master-delay',
   'master-reverb',

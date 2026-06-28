@@ -23,6 +23,9 @@ function mergeEntry(prev: HistoryEntry, entry: HistoryEntry): HistoryEntry {
       case 'eq':
         if (prev.data.effect !== 'eq') return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
+      case 'compressor':
+        if (prev.data.effect !== 'compressor') return entry
+        return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'saturator':
         if (prev.data.effect !== 'saturator') return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
@@ -40,6 +43,9 @@ function mergeEntry(prev: HistoryEntry, entry: HistoryEntry): HistoryEntry {
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'master-eq':
         if (prev.data.effect !== 'master-eq') return entry
+        return { ...entry, data: { ...entry.data, from: prev.data.from } }
+      case 'master-compressor':
+        if (prev.data.effect !== 'master-compressor') return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'master-saturator':
         if (prev.data.effect !== 'master-saturator') return entry

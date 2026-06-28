@@ -25,9 +25,8 @@ const curveDb = (inputDb, p) => {
     if (inputDb >= threshold) return inputDb
     const expanded = threshold + (inputDb - threshold) * ratio
     if (knee <= 0 || inputDb <= threshold - knee / 2) return expanded
-    const lower = threshold - knee / 2
-    const blend = clamp((threshold + knee / 2 - inputDb) / Math.max(0.0001, knee), 0, 1)
-    return inputDb + (expanded - inputDb) * blend * blend
+    const distance = threshold - inputDb
+    return inputDb - (2 * (ratio - 1) * distance * distance) / knee
   }
   const compressed = threshold + (inputDb - threshold) / ratio
   if (knee <= 0) return inputDb <= threshold ? inputDb : compressed
@@ -62,9 +61,21 @@ class CompressorProcessor extends AudioWorkletProcessor {
     this.meterGainReductionDb = 0
     this.meterReportEveryFrames = 2048
     this.meterMessage = { type: 'meter', inputDb: MIN_DB, outputDb: MIN_DB, gainReductionDb: 0, thresholdDb: this.params.thresholdDb }
+    this.meteringEnabled = false
     this.port.onmessage = (event) => {
       if (event.data && event.data.type === 'params') this.params = event.data.params
+      if (event.data && event.data.type === 'metering') {
+        this.meteringEnabled = event.data.enabled === true
+        if (!this.meteringEnabled) this.resetMeter()
+      }
     }
+  }
+
+  resetMeter() {
+    this.meterFrames = 0
+    this.meterInSum = 0
+    this.meterOutSum = 0
+    this.meterGainReductionDb = 0
   }
 
   process(inputs, outputs) {
@@ -127,21 +138,20 @@ class CompressorProcessor extends AudioWorkletProcessor {
       const processedR = delayedR * gain
       outL[i] = delayedL * dry + processedL * wet
       outR[i] = delayedR * dry + processedR * wet
-      this.meterInSum += (inL * inL + inR * inR) * 0.5
-      this.meterOutSum += (outL[i] * outL[i] + outR[i] * outR[i]) * 0.5
-      this.meterGainReductionDb = Math.min(this.meterGainReductionDb, this.envelopeDb)
+      if (this.meteringEnabled) {
+        this.meterInSum += (inL * inL + inR * inR) * 0.5
+        this.meterOutSum += (outL[i] * outL[i] + outR[i] * outR[i]) * 0.5
+        this.meterGainReductionDb = Math.min(this.meterGainReductionDb, this.envelopeDb)
+      }
     }
-    this.meterFrames += left.length
-    if (this.meterFrames >= this.meterReportEveryFrames) {
+    if (this.meteringEnabled) this.meterFrames += left.length
+    if (this.meteringEnabled && this.meterFrames >= this.meterReportEveryFrames) {
       this.meterMessage.inputDb = gainToDb(Math.sqrt(this.meterInSum / this.meterFrames))
       this.meterMessage.outputDb = gainToDb(Math.sqrt(this.meterOutSum / this.meterFrames))
       this.meterMessage.gainReductionDb = this.meterGainReductionDb
       this.meterMessage.thresholdDb = p.thresholdDb
       this.port.postMessage(this.meterMessage)
-      this.meterFrames = 0
-      this.meterInSum = 0
-      this.meterOutSum = 0
-      this.meterGainReductionDb = 0
+      this.resetMeter()
     }
     return true
   }
@@ -172,6 +182,10 @@ export async function ensureCompressorWorklet(ctx: BaseAudioContext): Promise<vo
 
 export function postCompressorParams(node: AudioWorkletNode, params: CompressorParamsLite) {
   node.port.postMessage({ type: 'params', params: normalizeCompressorParams(params) })
+}
+
+export function setCompressorMeteringEnabled(node: AudioWorkletNode, enabled: boolean) {
+  node.port.postMessage({ type: 'metering', enabled })
 }
 
 export function readCompressorMeterFrame(data: unknown): CompressorMeterFrame | null {

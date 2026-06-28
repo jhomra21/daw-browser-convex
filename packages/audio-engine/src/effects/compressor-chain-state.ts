@@ -43,7 +43,17 @@ export function createCompressorChainState(): CompressorChainState {
         return { changed: true, requiresRoutingRebuild }
       }
       if (!compressor) {
-        const next = await createCompressorNodeChain(ctx, normalized)
+        const next = await createCompressorNodeChain(ctx, normalized).catch(() => null)
+        if (!next) {
+          if (currentToken === token) {
+            if (compressor) {
+              disconnectCompressorChain(compressor)
+              compressor = null
+            }
+            enabled = false
+          }
+          return { changed: false, requiresRoutingRebuild: false }
+        }
         if (currentToken !== token) {
           disconnectCompressorChain(next)
           return { changed: false, requiresRoutingRebuild: false }

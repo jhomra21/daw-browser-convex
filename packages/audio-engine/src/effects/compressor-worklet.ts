@@ -159,6 +159,28 @@ class CompressorProcessor extends AudioWorkletProcessor {
 registerProcessor('daw-compressor-processor', CompressorProcessor)
 `
 
+export function computeCompressorWorkletCurveDb(inputDb: number, params: CompressorParamsLite): number {
+  const normalized = normalizeCompressorParams(params)
+  const threshold = normalized.thresholdDb
+  const ratio = normalized.ratio
+  const knee = normalized.kneeDb
+  if (normalized.dynamicsMode === 'expand') {
+    if (inputDb >= threshold) return inputDb
+    const expanded = threshold + (inputDb - threshold) * ratio
+    if (knee <= 0 || inputDb <= threshold - knee / 2) return expanded
+    const distance = threshold - inputDb
+    return inputDb - (2 * (ratio - 1) * distance * distance) / knee
+  }
+  const compressed = threshold + (inputDb - threshold) / ratio
+  if (knee <= 0) return inputDb <= threshold ? inputDb : compressed
+  const lower = threshold - knee / 2
+  const upper = threshold + knee / 2
+  if (inputDb <= lower) return inputDb
+  if (inputDb >= upper) return compressed
+  const x = inputDb - lower
+  return inputDb + ((1 / ratio - 1) * x * x) / (2 * knee)
+}
+
 export async function ensureCompressorWorklet(ctx: BaseAudioContext): Promise<void> {
   if (registeredContexts.has(ctx)) return
   const registration = registeringContexts.get(ctx)

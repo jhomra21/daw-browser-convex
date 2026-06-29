@@ -1,7 +1,6 @@
 import { type Component, createMemo, createSignal, onCleanup, createEffect, For } from 'solid-js'
 import { cn } from '~/lib/utils'
 import { useDrag } from '~/hooks/useDrag'
-import { useMidiKeyboardInput } from '~/hooks/useMidiKeyboardInput'
 import { useMidiEditorPersistence } from '~/hooks/useMidiEditorPersistence'
 import {
   createTimelineMidiBoundsDrag,
@@ -26,19 +25,15 @@ type MidiEditorCardProps = {
   onAuditionNote?: (pitch: number, velocity?: number, durSec?: number) => void
   // Local-only: current room id for per-room persistence
   projectId?: string
-  // Live note callbacks for computer keyboard play
-  onStartLiveNote?: (pitch: number, velocity?: number) => void
-  onStopLiveNote?: (pitch: number) => void
+  midiKeyboard?: {
+    isActive: (pitch: number) => boolean
+  }
   onLocalMidiSaved?: (clipId: string, midi: Clip['midi']) => void
 }
 
 const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   const [notes, setNotes] = createSignal<MidiEditorNote[]>([])
-  const midiKeyboard = useMidiKeyboardInput({
-    projectId: () => props.projectId,
-    onStartLiveNote: (pitch, velocity) => props.onStartLiveNote?.(pitch, velocity),
-    onStopLiveNote: (pitch) => props.onStopLiveNote?.(pitch),
-  })
+  const [lastCreatedNoteLength, setLastCreatedNoteLength] = createSignal(0)
   const warnMissingUser = () => console.warn('[MidiEditorCard] Cannot edit or persist MIDI without a writable project.')
   const grid = createMemo(() => createMidiEditorGrid(
     props.bpm,
@@ -138,8 +133,10 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     if (existingIdx >= 0) {
       setNotes(prev => prev.filter((_, i) => i !== existingIdx))
     } else {
-      setNotes(prev => [...prev, note])
-      props.onAuditionNote?.(note.pitch, note.velocity, grid().noteDurationSeconds(note.length, 0.5))
+      const length = lastCreatedNoteLength() || note.length
+      const nextNote = { ...note, length }
+      setNotes(prev => [...prev, nextNote])
+      props.onAuditionNote?.(nextNote.pitch, nextNote.velocity, grid().noteDurationSeconds(nextNote.length, 0.5))
     }
     persistence.saveSoon()
   }
@@ -215,6 +212,9 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     if (grid().notesEqual(note, next)) return
     drag.changed = true
     setNotes(prev => grid().replaceNote(prev, drag.idx, next))
+    if (drag.drag.mode === 'move' && note.pitch !== next.pitch) {
+      props.onAuditionNote?.(next.pitch, next.velocity ?? 0.9, grid().noteDurationSeconds(next.length, 0.25))
+    }
   }
   const onNotePointerUp = (_e: PointerEvent) => {
     const drag = dragNote
@@ -223,7 +223,11 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
       dragNote = null
       return
     }
-    if (drag?.changed) persistence.saveSoon()
+    if (drag?.changed) {
+      const note = notes()[drag.idx]
+      if (note) setLastCreatedNoteLength(note.length)
+      persistence.saveSoon()
+    }
     dragNote = null
   }
   onCleanup(cleanupNoteDragListeners)
@@ -235,21 +239,6 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     >
       <div class="flex items-center gap-3 text-sm font-semibold text-neutral-200">
         <div class="flex items-center gap-2">
-          <button
-            class={cn(
-              'border px-2 py-0.5 text-xs',
-              midiKeyboard.enabled() ? 'border-green-500 bg-green-600/20 text-green-300' : 'border-neutral-600 bg-neutral-700/30 text-neutral-300',
-            )}
-            onPointerDown={stopEditorEvent}
-            onClick={(event) => {
-              stopEditorEvent(event)
-              midiKeyboard.toggle()
-            }}
-            title="Toggle computer keyboard input (local only)"
-          >
-            ⌨ MIDI Keys
-          </button>
-          <span class="text-neutral-400">•</span>
           <span>MIDI Editor</span>
         </div>
         <span class="text-neutral-400">•</span>
@@ -278,7 +267,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
               <div
                 class={cn(
                   'relative flex cursor-pointer items-center justify-center border-b border-neutral-800 font-mono text-2xs',
-                  midiKeyboard.isActive(pitch)
+                  props.midiKeyboard?.isActive(pitch)
                     ? 'border-green-400 bg-green-600/50 text-white'
                     : isBlackKey
                       ? 'bg-neutral-700/70 text-neutral-100'

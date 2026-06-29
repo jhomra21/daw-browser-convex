@@ -92,8 +92,9 @@ type Props = {
     close: () => void;
     changeBounds: (bounds: TimelineMidiBounds) => void;
     auditionNote: (note: number, velocity?: number) => void;
-    startLiveNote: (note: number, velocity?: number) => void;
-    stopLiveNote: (note: number) => void;
+    keyboard: {
+      isActive: (pitch: number) => boolean;
+    };
     onLocalMidiSaved: (clipId: string, midi: Clip["midi"]) => void;
   };
   sidebar: {

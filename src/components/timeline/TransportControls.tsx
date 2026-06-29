@@ -230,6 +230,38 @@ const SaveStatus: Component<{ projectMenu: TransportControlsProps["projectMenu"]
   );
 };
 
+const MidiKeyboardToggle: Component<{ midiKeyboard: TransportControlsProps["midiKeyboard"] }> = (props) => {
+  const midiKeyboard = () => props.midiKeyboard;
+  const velocityLabel = () => Math.round(midiKeyboard().velocity * 100);
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={midiKeyboard().onToggle}
+      aria-pressed={midiKeyboard().enabled}
+      aria-disabled={midiKeyboard().enabled && !midiKeyboard().canPlay}
+      aria-label="Toggle computer MIDI keyboard input"
+      title={
+        midiKeyboard().targetLabel
+          ? `Computer MIDI keyboard: ${midiKeyboard().targetLabel}, octave ${midiKeyboard().octave}, velocity ${velocityLabel()}%`
+          : "Select an instrument track or MIDI clip to use computer MIDI keyboard input"
+      }
+      class={cn(
+        nativeMenuTriggerClass,
+        "h-7 gap-1 px-2 text-xs",
+        midiKeyboard().enabled && midiKeyboard().canPlay && "border-green-500/50 bg-green-600/20 text-green-300",
+        midiKeyboard().enabled && !midiKeyboard().canPlay && "opacity-60",
+      )}
+    >
+      <span>⌨ MIDI Keys</span>
+      <span class="text-2xs text-neutral-400">
+        O{midiKeyboard().octave} V{velocityLabel()}
+      </span>
+    </Button>
+  );
+};
+
 const TransportControls: Component<TransportControlsProps> = (props) => {
   const tempo = useTransportTempoController({
     bpm: () => props.bpm,
@@ -290,6 +322,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
       />
 
       <div class="justify-self-end flex items-center gap-3">
+        <MidiKeyboardToggle midiKeyboard={props.midiKeyboard} />
         <SaveStatus projectMenu={props.projectMenu} />
         <div class="flex items-center gap-2 text-xs">
           <span class="text-neutral-500">Playhead</span>

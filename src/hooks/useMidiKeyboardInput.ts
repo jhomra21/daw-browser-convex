@@ -3,7 +3,8 @@ import { createEffect, createSignal, on, onCleanup } from 'solid-js'
 import { canUseLocalStorage } from '~/lib/timeline-storage'
 
 const BASE_C4 = 60
-const VELOCITY = 0.9
+const DEFAULT_VELOCITY = 0.9
+const VELOCITY_STEP = 0.1
 
 const whiteKeySemitones: Record<string, number> = {
   KeyA: 0,
@@ -30,45 +31,53 @@ const blackKeySemitones: Record<string, number> = {
 
 type UseMidiKeyboardInputOptions = {
   projectId: () => string | undefined
+  enabled: () => boolean
+  canPlay: () => boolean
   onStartLiveNote?: (pitch: number, velocity?: number) => void
   onStopLiveNote?: (pitch: number) => void
 }
 
-const codeToSemitone = (code: string): number | undefined => {
+export const midiKeyboardCodeToSemitone = (code: string): number | undefined => {
   const white = whiteKeySemitones[code]
   if (white !== undefined) return white
   return blackKeySemitones[code]
 }
 
-const isTextInputTarget = (target: EventTarget | null) => (
+const isMidiKeyboardTextInputTarget = (target: EventTarget | null) => (
   target instanceof HTMLElement
   && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
 )
 
+export const clampMidiKeyboardOctave = (value: number) => Math.max(-4, Math.min(4, value))
+export const clampMidiKeyboardVelocity = (value: number) => Math.max(0.1, Math.min(1, value))
+
 export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
-  const storageKey = () => `mb:midi_kb:${options.projectId() || 'default'}`
   const octaveKey = () => `mb:midi_kb_oct:${options.projectId() || 'default'}`
-  const readStoredEnabled = () => {
-    if (!canUseLocalStorage()) return false
-    try {
-      return window.localStorage.getItem(storageKey()) === '1'
-    } catch {
-      return false
-    }
-  }
+  const velocityKey = () => `mb:midi_kb_vel:${options.projectId() || 'default'}`
   const readStoredOctave = () => {
     if (!canUseLocalStorage()) return 0
     try {
       const raw = window.localStorage.getItem(octaveKey())
       if (raw === null) return 0
       const value = Number.parseInt(raw, 10)
-      return Number.isFinite(value) ? Math.max(-4, Math.min(4, value)) : 0
+      return Number.isFinite(value) ? clampMidiKeyboardOctave(value) : 0
     } catch {
       return 0
     }
   }
-  const [enabled, setEnabled] = createSignal(readStoredEnabled())
+  const readStoredVelocity = () => {
+    if (!canUseLocalStorage()) return DEFAULT_VELOCITY
+    try {
+      const raw = window.localStorage.getItem(velocityKey())
+      if (raw === null) return DEFAULT_VELOCITY
+      const value = Number.parseFloat(raw)
+      return Number.isFinite(value) ? clampMidiKeyboardVelocity(value) : DEFAULT_VELOCITY
+    } catch {
+      return DEFAULT_VELOCITY
+    }
+  }
   const [octave, setOctave] = createSignal(readStoredOctave())
+  const [velocity, setVelocity] = createSignal(readStoredVelocity())
   const [activeRows, setActiveRows] = createSignal<Set<number>>(new Set(), { equals: false })
   const pressed = new Map<string, number>()
 
@@ -81,22 +90,36 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
   }
 
   const handleKeyDown = (event: KeyboardEvent) => {
-    if (isTextInputTarget(event.target)) return
+    if (event.metaKey || event.ctrlKey || event.altKey) return
+    if (isMidiKeyboardTextInputTarget(event.target)) return
 
     if (event.code === 'KeyZ') {
-      setOctave(value => Math.max(-4, Math.min(4, value - 1)))
+      setOctave(value => clampMidiKeyboardOctave(value - 1))
       event.preventDefault()
       event.stopPropagation()
       return
     }
     if (event.code === 'KeyX') {
-      setOctave(value => Math.max(-4, Math.min(4, value + 1)))
+      setOctave(value => clampMidiKeyboardOctave(value + 1))
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+    if (event.code === 'KeyC') {
+      setVelocity(value => clampMidiKeyboardVelocity(value - VELOCITY_STEP))
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+    if (event.code === 'KeyV') {
+      setVelocity(value => clampMidiKeyboardVelocity(value + VELOCITY_STEP))
       event.preventDefault()
       event.stopPropagation()
       return
     }
 
-    const semitone = codeToSemitone(event.code)
+    if (!options.canPlay()) return
+    const semitone = midiKeyboardCodeToSemitone(event.code)
     if (semitone === undefined) return
     if (pressed.has(event.code)) {
       event.preventDefault()
@@ -111,13 +134,13 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
       next.add(pitch)
       return next
     })
-    options.onStartLiveNote?.(pitch, VELOCITY)
+    options.onStartLiveNote?.(pitch, velocity())
     event.preventDefault()
     event.stopPropagation()
   }
 
   const handleKeyUp = (event: KeyboardEvent) => {
-    const semitone = codeToSemitone(event.code)
+    const semitone = midiKeyboardCodeToSemitone(event.code)
     if (semitone === undefined) return
     const pitch = pressed.get(event.code)
     if (pitch === undefined) return
@@ -137,18 +160,11 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
     () => options.projectId(),
     () => {
       stopPressedNotes()
-      setEnabled(readStoredEnabled())
       setOctave(readStoredOctave())
+      setVelocity(readStoredVelocity())
     },
     { defer: true },
   ))
-
-  createEffect(() => {
-    if (!canUseLocalStorage()) return
-    try {
-      window.localStorage.setItem(storageKey(), enabled() ? '1' : '0')
-    } catch {}
-  })
 
   createEffect(() => {
     if (!canUseLocalStorage()) return
@@ -158,7 +174,20 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
   })
 
   createEffect(() => {
-    if (!enabled()) return
+    if (!canUseLocalStorage()) return
+    try {
+      window.localStorage.setItem(velocityKey(), velocity().toFixed(2))
+    } catch {}
+  })
+
+  createEffect(() => {
+    if (!options.enabled() || !options.canPlay()) {
+      stopPressedNotes()
+    }
+  })
+
+  createEffect(() => {
+    if (!options.enabled()) return
     const listenerOptions: AddEventListenerOptions = { capture: true }
     window.addEventListener('keydown', handleKeyDown, listenerOptions)
     window.addEventListener('keyup', handleKeyUp, listenerOptions)
@@ -172,8 +201,8 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
   })
 
   return {
-    enabled,
-    toggle: () => setEnabled(value => !value),
+    octave,
+    velocity,
     isActive: (pitch: number) => activeRows().has(pitch),
   }
 }

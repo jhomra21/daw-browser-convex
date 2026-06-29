@@ -11,6 +11,7 @@ import { canUseLocalStorage } from '~/lib/timeline-storage'
 import { clampMidiVelocity, midiPitchFrequency } from '~/lib/midi-note-audio'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { useMidiKeyboardInput } from './useMidiKeyboardInput'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 
@@ -30,6 +31,15 @@ type UseTimelineMidiOverlayReturn = {
   auditionNote: (pitch: number, velocity?: number, durSec?: number) => void
   startLiveNote: (pitch: number, velocity?: number) => void
   stopLiveNote: (pitch: number) => void
+  midiKeyboard: {
+    enabled: Accessor<boolean>
+    canPlay: Accessor<boolean>
+    targetLabel: Accessor<string | null>
+    octave: Accessor<number>
+    velocity: Accessor<number>
+    toggle: () => void
+    isActive: (pitch: number) => boolean
+  }
 }
 
 type LiveNote = {
@@ -55,12 +65,18 @@ export function useTimelineMidiOverlay(
   options: UseTimelineMidiOverlayOptions,
 ): UseTimelineMidiOverlayReturn {
   const [midiEditorClipId, setMidiEditorClipId] = createSignal<string | null>(null)
+  const [midiKeyboardEnabled, setMidiKeyboardEnabled] = createSignal(false)
   const [midiCard, setMidiCard] = createSignal<TimelineMidiBounds>(
     clampTimelineMidiBounds({ x: 80, y: 80, w: 720, h: 360 }),
   )
   const activeLiveNotes = new Map<number, LiveNote>()
   let midiCardPersistTimer: number | null = null
   const trackIndex = createMemo(() => createTimelineTrackIndex(options.tracks()))
+
+  const midiKeyboardStorageKey = () => {
+    const projectId = options.projectId() || 'default'
+    return `mb:midi_kb:${projectId}`
+  }
 
   const midiCardStorageKey = () => {
     const projectId = options.projectId() || 'default'
@@ -87,14 +103,29 @@ export function useTimelineMidiOverlay(
     }, 250)
   }
 
-  const resolveTargetTrackId = () => {
+  const isPlayableMidiTrack = (track: Track | undefined) => (
+    track?.kind === 'instrument' && track.channelRole !== 'return' && track.channelRole !== 'group'
+  )
+
+  const resolveTargetTrack = () => {
     const clipId = midiEditorClipId()
     if (clipId) {
       const match = trackIndex().clipEntryById.get(clipId)
-      if (match) return match.track.id
+      if (isPlayableMidiTrack(match?.track)) return match?.track
     }
-    return options.selection.selectedFXTarget() || options.selection.selectedTrackId()
+    const fxTarget = options.selection.selectedFXTarget()
+    if (fxTarget !== 'master') {
+      const track = trackIndex().trackById.get(fxTarget)
+      if (isPlayableMidiTrack(track)) return track
+    }
+    const selectedTrack = trackIndex().trackById.get(options.selection.selectedTrackId())
+    if (isPlayableMidiTrack(selectedTrack)) return selectedTrack
+    return undefined
   }
+
+  const resolveTargetTrackId = () => resolveTargetTrack()?.id
+  const midiKeyboardCanPlay = createMemo(() => Boolean(resolveTargetTrack()))
+  const midiKeyboardTargetLabel = createMemo(() => resolveTargetTrack()?.name ?? null)
 
   const stopLiveNote = (pitch: number) => {
     try {
@@ -156,7 +187,8 @@ export function useTimelineMidiOverlay(
       options.audioEngine.ensureAudio()
       const ctx = options.audioEngine.getAudioContext()
       if (!ctx) return
-      const trackId = resolveTargetTrackId() || 'master'
+      const trackId = resolveTargetTrackId()
+      if (!trackId) return
       if (options.audioEngine.getTrackInstrumentKind(trackId) === 'drum-rack') {
         options.audioEngine.previewDrumRackNote(trackId, pitch, velocity)
         return
@@ -246,6 +278,39 @@ export function useTimelineMidiOverlay(
     }
   })
 
+  createEffect(() => {
+    const key = midiKeyboardStorageKey()
+    if (!canUseLocalStorage()) {
+      setMidiKeyboardEnabled(false)
+      return
+    }
+    try {
+      setMidiKeyboardEnabled(window.localStorage.getItem(key) === '1')
+    } catch {
+      setMidiKeyboardEnabled(false)
+    }
+  })
+
+  createEffect(() => {
+    if (!canUseLocalStorage()) return
+    try {
+      window.localStorage.setItem(midiKeyboardStorageKey(), midiKeyboardEnabled() ? '1' : '0')
+    } catch {}
+  })
+
+  createEffect(() => {
+    if (!midiKeyboardEnabled() || midiKeyboardCanPlay()) return
+    stopAllLiveNotes()
+  })
+
+  const midiKeyboard = useMidiKeyboardInput({
+    projectId: () => options.projectId(),
+    enabled: midiKeyboardEnabled,
+    canPlay: midiKeyboardCanPlay,
+    onStartLiveNote: startLiveNote,
+    onStopLiveNote: stopLiveNote,
+  })
+
   onCleanup(() => {
     if (midiCardPersistTimer) {
       clearTimeout(midiCardPersistTimer)
@@ -263,5 +328,14 @@ export function useTimelineMidiOverlay(
     auditionNote,
     startLiveNote,
     stopLiveNote,
+    midiKeyboard: {
+      enabled: midiKeyboardEnabled,
+      canPlay: midiKeyboardCanPlay,
+      targetLabel: midiKeyboardTargetLabel,
+      octave: midiKeyboard.octave,
+      velocity: midiKeyboard.velocity,
+      toggle: () => setMidiKeyboardEnabled(value => !value),
+      isActive: midiKeyboard.isActive,
+    },
   }
 }

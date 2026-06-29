@@ -39,8 +39,9 @@ type TimelineOverlaysProps = {
     close: () => void
     changeBounds: (next: TimelineMidiBounds) => void
     auditionNote: (pitch: number, velocity?: number, durSec?: number) => void
-    startLiveNote: (pitch: number, velocity?: number) => void
-    stopLiveNote: (pitch: number) => void
+    keyboard: {
+      isActive: (pitch: number) => boolean
+    }
     onLocalMidiSaved: (clipId: string, midi: Clip['midi']) => void
   }
 }
@@ -65,11 +66,6 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
       topPx: trackIndexValue * LANE_HEIGHT,
     }
   })
-
-  const stopOverlayEvent = (event: Event) => {
-    event.preventDefault()
-    event.stopPropagation()
-  }
 
   return (
     <>
@@ -117,16 +113,6 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
       </Show>
       <div class="absolute top-0 bottom-0 z-[25] w-px bg-red-500 pointer-events-none" style={{ left: `${props.timeline.playheadSec * PPS}px` }} />
       <Show when={props.midi.clipId}>
-        <div
-          class="absolute inset-0 z-40 bg-transparent"
-          style={{ 'touch-action': 'none' }}
-          onPointerDown={stopOverlayEvent}
-          onPointerMove={stopOverlayEvent}
-          onPointerUp={stopOverlayEvent}
-          onClick={stopOverlayEvent}
-          onWheel={stopOverlayEvent}
-          onContextMenu={stopOverlayEvent}
-        />
         <Show when={midiClip()}>
           {(clip) => (
             <MidiEditorCard
@@ -141,8 +127,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
               userId={props.midi.userId}
               projectId={props.midi.projectId}
               onAuditionNote={props.midi.auditionNote}
-              onStartLiveNote={props.midi.startLiveNote}
-              onStopLiveNote={props.midi.stopLiveNote}
+              midiKeyboard={props.midi.keyboard}
               onLocalMidiSaved={props.midi.onLocalMidiSaved}
             />
           )}

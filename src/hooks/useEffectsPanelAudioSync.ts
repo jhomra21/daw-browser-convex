@@ -25,6 +25,7 @@ import { isLocalId } from "@daw-browser/shared";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import type { Track } from "@daw-browser/timeline-core/types";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
+import { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
 
 type UseEffectsPanelAudioSyncOptions = {
   isOpen: Accessor<boolean>;
@@ -227,6 +228,7 @@ export function useEffectsPanelAudioSync(
   };
   let syncedTrackIds = new Set<Track["id"]>();
   let syncedProjectId: string | null = null;
+  const drumRackBufferSync = createDrumRackBufferSync();
 
   const clearSyncedTrackState = (audioEngine: AudioEngine, trackIds: Iterable<Track["id"]>) => {
     for (const trackId of trackIds) {
@@ -237,6 +239,7 @@ export function useEffectsPanelAudioSync(
       audioEngine.setTrackReverb(trackId, disabledReverb);
       audioEngine.clearTrackInstrument(trackId);
       audioEngine.clearTrackArpeggiator(trackId);
+      drumRackBufferSync.clearTrack(trackId);
     }
   };
 
@@ -355,14 +358,21 @@ export function useEffectsPanelAudioSync(
       applyTrackAudioEffect(reverbSyncDescriptor, reverbState, track.id, audioEngine, options.localDraftEffects);
       if (track.kind === "instrument") {
         const instrument = options.localDraftEffects?.instrument?.(track.id) ?? instrumentByTrackId.get(track.id);
-        if (instrument?.kind === "synth") audioEngine.setTrackSynth(track.id, instrument.params);
-        else if (instrument?.kind === "drum-rack") audioEngine.setTrackDrumRack(track.id, instrument.params);
-        else audioEngine.clearTrackInstrument(track.id);
+        if (instrument?.kind === "synth") {
+          drumRackBufferSync.clearTrack(track.id);
+          audioEngine.setTrackSynth(track.id, instrument.params);
+        } else if (instrument?.kind === "drum-rack") {
+          drumRackBufferSync.syncTrack(audioEngine, track.id, instrument.params);
+        } else {
+          drumRackBufferSync.clearTrack(track.id);
+          audioEngine.clearTrackInstrument(track.id);
+        }
         const arp = options.localDraftEffects?.arp?.(track.id) ?? arpByTrackId.get(track.id);
         if (arp) audioEngine.setTrackArpeggiator(track.id, arp);
         else audioEngine.clearTrackArpeggiator(track.id);
         continue;
       }
+      drumRackBufferSync.clearTrack(track.id);
       audioEngine.clearTrackInstrument(track.id);
       audioEngine.clearTrackArpeggiator(track.id);
     }

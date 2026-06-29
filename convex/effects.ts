@@ -191,6 +191,12 @@ const areEffectParamsEqual = (
     const descriptor = audioEffectPersistenceDescriptors[type]
     return descriptor.serializeParams(current) === descriptor.serializeParams(next)
   }
+  if (type === 'instrument') {
+    return JSON.stringify(normalizeTrackInstrumentParams(current)) === JSON.stringify(normalizeTrackInstrumentParams(next))
+  }
+  if (type === 'synth') {
+    return JSON.stringify(normalizeSynthParams(current)) === JSON.stringify(normalizeSynthParams(next))
+  }
   return current === next
 }
 

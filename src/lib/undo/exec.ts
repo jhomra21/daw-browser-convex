@@ -27,6 +27,7 @@ import {
   removeHistoryTrackOrThrow,
   syncHistoryClipCreateEntryIds,
 } from './history-persistence'
+import type { createDrumRackBufferSync } from '~/lib/drum-rack-buffer-sync'
 
 export type Deps = {
   convexClient: typeof import('~/lib/convex').convexClient
@@ -37,6 +38,7 @@ export type Deps = {
   userId: string
   persistLocalMix: (projectId: string, trackId: Track['id'], patch: LocalMixPatch) => void
   audioEngine: AudioEngine
+  drumRackBufferSync?: ReturnType<typeof createDrumRackBufferSync>
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
   grantTrackWrite: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
   grantClipWrite: (clipId: string, scope?: OptimisticGrantScope | null) => void
@@ -178,6 +180,7 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
       case 'instrument': {
         const instrument = pickDirectionalValue(direction, entry.data.from, entry.data.to)
         if (instrument.kind === 'synth') deps.audioEngine.setTrackSynth(targetId, instrument.params)
+        else if (deps.drumRackBufferSync) deps.drumRackBufferSync.syncTrack(deps.audioEngine, targetId, instrument.params)
         else deps.audioEngine.setTrackInstrument(targetId, { instrument })
         return
       }

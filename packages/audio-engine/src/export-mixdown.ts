@@ -30,7 +30,7 @@ import {
   getExportAudioDefaultBitrate,
 } from './export-audio-support'
 import { createSynthVoiceOscillators, getSynthVoiceConfig, getSynthVoiceVelocity, scheduleSynthVoiceEnvelope } from './synth-voice'
-import { scheduleDrumRackHit, type DrumRackResolvedBuffers } from './drum-rack-runtime'
+import { DRUM_RACK_CHOKE_FADE_SEC, scheduleDrumRackHit, type DrumRackResolvedBuffers } from './drum-rack-runtime'
 import { createOfflineMixerNodes } from './mixer/apply-offline-routing'
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
@@ -197,8 +197,8 @@ function renderOfflineDrumRackEvents(input: {
         for (const hit of activeHits) {
           try {
             hit.gain.gain.cancelScheduledValues(when)
-            hit.gain.gain.linearRampToValueAtTime(0, when + 0.006)
-            hit.source.stop(when + 0.006)
+            hit.gain.gain.linearRampToValueAtTime(0, when + DRUM_RACK_CHOKE_FADE_SEC)
+            hit.source.stop(when + DRUM_RACK_CHOKE_FADE_SEC)
           } catch {}
         }
       }

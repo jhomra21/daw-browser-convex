@@ -12,6 +12,7 @@ import {
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
+import { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
 import { assignSampleToDrumRackPad, buildClipCreatePayload, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { convexApi } from "~/lib/convex";
 import type { LocalEffectRow } from "~/lib/local-effects";
@@ -138,6 +139,7 @@ export function createEffectsPanelInstrumentDevice(
     const projectId = context.projectId();
     return Boolean(projectId && isLocalId("project", projectId));
   };
+  const drumRackBufferSync = createDrumRackBufferSync();
   const localArp = createLocalEffectRows<ArpeggiatorParams>({
     projectId: context.projectId,
     targetId: getTrackTargetId,
@@ -287,9 +289,10 @@ export function createEffectsPanelInstrumentDevice(
         context.audioEngine().setTrackSynth(targetId, params.params);
         return;
       }
-      context.audioEngine().setTrackDrumRack(targetId, params.params);
+      drumRackBufferSync.syncTrack(context.audioEngine(), targetId, params.params);
     },
     clearFromEngine: (targetId) => {
+      drumRackBufferSync.clearTrack(targetId);
       context.audioEngine().clearTrackInstrument(targetId);
     },
     createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),

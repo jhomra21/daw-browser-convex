@@ -27,6 +27,7 @@ import {
   removeTrackFromHistoryModel,
 } from '~/lib/undo/history-model'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { createDrumRackBufferSync } from '~/lib/drum-rack-buffer-sync'
 
 type TimelineHistoryActions = Parameters<typeof execUndo>[1]['actions']
 
@@ -80,6 +81,7 @@ const mergeLocalHistoryState = (
 export function useTimelineHistory(
   options: UseTimelineHistoryOptions,
 ): UseTimelineHistoryReturn {
+  const drumRackBufferSync = createDrumRackBufferSync()
   const scopeContexts = new Map<string, HistoryScopeContext>()
 
   const readCurrentScope = () => readOptimisticGrantScope({
@@ -277,6 +279,7 @@ export function useTimelineHistory(
           userId: scope.userId,
           persistLocalMix: options.persistLocalMix,
           audioEngine: options.audioEngine,
+          drumRackBufferSync,
           ensureClipBuffer: options.ensureClipBuffer,
           grantTrackWrite: options.grantTrackWrite,
           grantClipWrite: options.grantClipWrite,

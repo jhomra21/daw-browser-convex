@@ -34,7 +34,7 @@ type DrumRackRuntimeOptions = {
   getArpeggiator: (trackId: string) => ArpParams | undefined
 }
 
-const CHOKE_FADE_SEC = 0.006
+export const DRUM_RACK_CHOKE_FADE_SEC = 0.006
 const EMPTY_DRUM_RACK_BUFFERS: DrumRackResolvedBuffers = new Map()
 
 const getPadPlaybackDurationSec = (pad: DrumRackPadParams, buffer: AudioBuffer) => {
@@ -119,9 +119,9 @@ export function createDrumRackRuntime(options: DrumRackRuntimeOptions) {
       try {
         hit.gain.gain.cancelScheduledValues(when)
         hit.gain.gain.setValueAtTime(hit.gain.gain.value, when)
-        hit.gain.gain.linearRampToValueAtTime(0, when + CHOKE_FADE_SEC)
+        hit.gain.gain.linearRampToValueAtTime(0, when + DRUM_RACK_CHOKE_FADE_SEC)
       } catch {}
-      stopHitAfterFade(trackId, hit, when + CHOKE_FADE_SEC)
+      stopHitAfterFade(trackId, hit, when + DRUM_RACK_CHOKE_FADE_SEC)
     }
   }
 
@@ -158,14 +158,15 @@ export function createDrumRackRuntime(options: DrumRackRuntimeOptions) {
   }
 
   return {
-    setTrackDrumRack: (trackId: string, params: DrumRackParams, buffers: DrumRackResolvedBuffers = EMPTY_DRUM_RACK_BUFFERS) => {
+    setTrackDrumRack: (trackId: string, params: DrumRackParams, buffers?: DrumRackResolvedBuffers) => {
       const current = configs.get(trackId)
-      if (current?.inputParams === params && current.buffers === buffers) return
+      const resolvedBuffers = buffers ?? current?.buffers ?? EMPTY_DRUM_RACK_BUFFERS
+      if (current?.inputParams === params && current.buffers === resolvedBuffers) return
       const normalized = normalizeDrumRackParams(params)
       configs.set(trackId, {
         inputParams: params,
         params: normalized,
-        buffers,
+        buffers: resolvedBuffers,
         padIndexByNote: buildPadIndex(normalized),
       })
     },

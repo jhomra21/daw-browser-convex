@@ -8,7 +8,7 @@ type DrumRackBufferCacheEntry = {
   buffers: ReadonlyMap<string, AudioBuffer>;
 };
 
-const drumRackSampleKey = (sample: DrumRackPadSample): string => [
+export const drumRackSampleKey = (sample: DrumRackPadSample): string => [
   sample.assetKey,
   sample.url,
   sample.sourceKind,

@@ -122,10 +122,14 @@ export function createDefaultDrumRackParams(): DrumRackParams {
   }
 }
 
-export function getDrumRackPadNoteLabel(note: number): string {
+export function getMidiNoteLabel(note: number): string {
   const noteName = NOTE_NAMES[((note % 12) + 12) % 12]
-  const octave = Math.floor(note / 12) - 2
+  const octave = Math.floor(note / 12) - 1
   return `${noteName}${octave}`
+}
+
+export function getDrumRackPadNoteLabel(note: number): string {
+  return getMidiNoteLabel(note)
 }
 
 export function findDrumRackPadByNote(params: DrumRackParams, note: number): DrumRackPadParams | undefined {

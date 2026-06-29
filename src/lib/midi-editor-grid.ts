@@ -1,3 +1,5 @@
+import { getMidiNoteLabel } from '@daw-browser/shared'
+
 export type MidiEditorNote = {
   beat: number
   length: number
@@ -18,7 +20,6 @@ export type MidiNoteDrag = {
   pointerStep: number
 }
 
-const MIDI_NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 const BLACK_KEY_INDICES = new Set([1, 3, 6, 8, 10])
 
 const MIDI_EDITOR_MIN_PITCH = 12
@@ -55,11 +56,6 @@ const getMidiPitchForRow = (row: number) => (
 
 const getMidiRowForPitch = (pitch: number) => getMidiEditorTopPitch() - pitch
 
-const getMidiNoteName = (pitch: number) => {
-  const octave = Math.floor(pitch / 12) - 1
-  return `${MIDI_NOTE_NAMES[pitchIndex(pitch)]}${octave}`
-}
-
 const isBlackMidiKey = (pitch: number) => BLACK_KEY_INDICES.has(pitchIndex(pitch))
 
 const createMidiEditorRowIndexes = () => (
@@ -93,7 +89,7 @@ export const createMidiEditorGrid = (
       getMidiGridCellFromPointer(container, event, columns)
     ),
     pitchForRow: getMidiPitchForRow,
-    noteName: getMidiNoteName,
+    noteName: getMidiNoteLabel,
     isBlackKey: isBlackMidiKey,
     noteLeftPercent: (note: MidiEditorNote) => getMidiNoteLeftPercent(note, clipBeats),
     noteWidthPercent: (note: MidiEditorNote) => getMidiNoteWidthPercent(note, clipBeats, stepsPerBeat),

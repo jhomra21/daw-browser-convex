@@ -6,6 +6,7 @@ import {
   DRUM_RACK_PAD_COUNT,
   findDrumRackPadByNote,
   getDrumRackPadNoteLabel,
+  getMidiNoteLabel,
   INSTRUMENT_CONTRACTS,
   isInstrumentKind,
   normalizeDrumRackParams,
@@ -150,8 +151,9 @@ describe('Drum Rack params', () => {
   test('provides note helpers', () => {
     const params = createDefaultDrumRackParams()
 
-    expect(getDrumRackPadNoteLabel(36)).toBe('C1')
-    expect(getDrumRackPadNoteLabel(60)).toBe('C3')
+    expect(getDrumRackPadNoteLabel(36)).toBe('C2')
+    expect(getDrumRackPadNoteLabel(60)).toBe('C4')
+    expect(getDrumRackPadNoteLabel(36)).toBe(getMidiNoteLabel(36))
     expect(findDrumRackPadByNote(params, 38)?.id).toBe('pad-38')
     expect(findDrumRackPadByNote(params, 99)).toBeUndefined()
   })

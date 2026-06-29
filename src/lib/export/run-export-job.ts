@@ -10,9 +10,11 @@ import { isAbortError } from '~/lib/dom-errors'
 import { chooseLocalExportDirectory, chooseLocalExportFile, createLocalExportDirectoryWritable, createLocalExportTarget, createLocalExportWritable, saveBlobLocally } from '~/lib/local-export'
 import { chooseStemExportDirectory, createStemExportWritable, sanitizeStemFileName } from '~/lib/local-stem-export'
 import { audioEffectKindFromLocalEffect, listLocalEffects, type LocalEffectRow } from '~/lib/local-effects'
+import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
 import { collectAudioEffectOrders, type AudioEffectOrderEntry } from '~/lib/audio-effect-order-rows'
 import { saveLocalExportMetadataBatch, type LocalExportMetadataInput } from '~/lib/local-export-metadata'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
+import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number]
@@ -105,6 +107,10 @@ const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
     if (row.effect === 'reverb') applyTrackFxPatch(trackFx, row.targetId, { reverb: normalizeReverbParams(row.params) })
     if (row.effect === 'arp') applyTrackFxPatch(trackFx, row.targetId, { arp: row.params })
     if (row.effect === 'synth') applyTrackFxPatch(trackFx, row.targetId, { synth: row.params })
+    if (row.effect === 'instrument') {
+      const instrument = readInstrumentParamsFromEffectRow(row)
+      if (instrument) applyTrackFxPatch(trackFx, row.targetId, { instrument })
+    }
   }
   const orders = collectAudioEffectOrders(orderEntries)
   fx.masterFxOrder = orders.master
@@ -136,6 +142,10 @@ const applyRoomEffectRowsToFx = (fx: ExportFx, rows: RoomEffectRow[]) => {
     if (row.type === 'reverb') applyTrackFxPatch(trackFx, trackId, { reverb: normalizeReverbParams(row.params) })
     if (row.type === 'arpeggiator') applyTrackFxPatch(trackFx, trackId, { arp: row.params })
     if (row.type === 'synth') applyTrackFxPatch(trackFx, trackId, { synth: row.params })
+    if (row.type === 'instrument') {
+      const instrument = readInstrumentParamsFromEffectRow(row)
+      if (instrument) applyTrackFxPatch(trackFx, trackId, { instrument })
+    }
   }
   const orders = collectAudioEffectOrders(orderEntries)
   fx.masterFxOrder = orders.master
@@ -211,6 +221,52 @@ async function loadExportFx(projectId: string | undefined, userId: string | unde
       applyRoomEffectRowsToFx(fx, rows)
     } catch {}
   }
+  return fx
+}
+
+async function loadDrumRackExportBuffers(fx: ExportFx, signal: AbortSignal, allowedTrackIds?: ReadonlySet<string>): Promise<void> {
+  const trackFx = fx.trackFx
+  if (!trackFx) return
+  const jobs: Array<{ url: string; padId: string; buffers: Map<string, AudioBuffer> }> = []
+  for (const [trackId, entry] of Object.entries(trackFx)) {
+    if (allowedTrackIds && !allowedTrackIds.has(trackId)) continue
+    if (entry.instrument?.kind !== 'drum-rack') continue
+    const buffers = new Map<string, AudioBuffer>()
+    entry.drumRackBuffers = buffers
+    for (const pad of entry.instrument.params.pads) {
+      const sample = pad.sample
+      if (!sample) continue
+      jobs.push({
+        url: sample.url,
+        padId: pad.id,
+        buffers,
+      })
+    }
+  }
+  if (jobs.length === 0) return
+  const ctx = new AudioContext()
+  const loader = createSampleBufferLoader()
+  try {
+    await runWithConcurrency(jobs, MAX_CONCURRENT_BUFFER_LOADS, async (job) => {
+      throwIfExportAborted(signal)
+      const buffer = await loader.load(job.url, (data) => ctx.decodeAudioData(data))
+      if (buffer) job.buffers.set(job.padId, buffer)
+    })
+  } finally {
+    await ctx.close().catch(() => undefined)
+  }
+  throwIfExportAborted(signal)
+}
+
+async function loadExportFxWithDrumRackBuffers(
+  projectId: string | undefined,
+  userId: string | undefined,
+  masterVolume: number,
+  signal: AbortSignal,
+  allowedTrackIds?: ReadonlySet<string>,
+): Promise<ExportFx> {
+  const fx = await loadExportFx(projectId, userId, masterVolume)
+  await loadDrumRackExportBuffers(fx, signal, allowedTrackIds)
   return fx
 }
 
@@ -319,7 +375,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     const [exportMixdown, , fx] = await Promise.all([
       mixdownModule,
       ensureBuffersForRange({ ...input, tracks: preloadTracks }),
-      loadExportFx(input.projectId, input.userId, input.masterVolume),
+      loadExportFxWithDrumRackBuffers(input.projectId, input.userId, input.masterVolume, input.signal),
     ])
     throwIfExportAborted(input.signal)
     const tracks = input.getTracks()
@@ -409,10 +465,11 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
     const exportDirectory = await chooseStemExportDirectory()
     throwIfExportAborted(input.signal)
     const mixdownModule = import('@daw-browser/audio-engine/export-mixdown')
+    const preloadStemTrackIds = new Set(preloadStemTracks.map((track) => track.id))
     const [exportMixdown, , fx] = await Promise.all([
       mixdownModule,
       ensureBuffersForRange({ ...input, tracks: preloadStemTracks }),
-      loadExportFx(input.projectId, input.userId, input.masterVolume),
+      loadExportFxWithDrumRackBuffers(input.projectId, input.userId, input.masterVolume, input.signal, preloadStemTrackIds),
     ])
     throwIfExportAborted(input.signal)
     const tracks = input.getTracks()

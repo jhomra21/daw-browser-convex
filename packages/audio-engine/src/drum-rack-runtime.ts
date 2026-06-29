@@ -46,7 +46,7 @@ const getPadPlaybackDurationSec = (pad: DrumRackPadParams, buffer: AudioBuffer) 
   }
 }
 
-function scheduleDrumRackHit(input: {
+export function scheduleDrumRackHit(input: {
   ctx: BaseAudioContext
   destination: AudioNode
   buffer: AudioBuffer

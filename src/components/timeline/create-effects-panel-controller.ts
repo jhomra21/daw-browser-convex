@@ -3,7 +3,7 @@ import { isLocalId, type ArpeggiatorParams, type AudioEffectKind, type TrackInst
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { createEffectsPanelAudioDevice } from "~/components/timeline/create-effects-panel-audio-effects-state";
-import { readInstrumentParamsFromEffectRow } from "~/components/timeline/effect-row-instrument-params";
+import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
 import { createEffectsPanelInstrumentDevice } from "~/components/timeline/create-effects-panel-state";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 import { useEffectsPanelAudioSync } from "~/hooks/useEffectsPanelAudioSync";

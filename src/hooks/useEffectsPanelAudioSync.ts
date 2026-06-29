@@ -24,7 +24,7 @@ import { collectAudioEffectOrders as collectAudioEffectOrdersFromEntries } from 
 import { isLocalId } from "@daw-browser/shared";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import type { Track } from "@daw-browser/timeline-core/types";
-import { readInstrumentParamsFromEffectRow } from "~/components/timeline/effect-row-instrument-params";
+import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
 
 type UseEffectsPanelAudioSyncOptions = {
   isOpen: Accessor<boolean>;

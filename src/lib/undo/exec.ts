@@ -175,6 +175,12 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
         deps.audioEngine.setTrackSynth(targetId, params)
         return
       }
+      case 'instrument': {
+        const instrument = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+        if (instrument.kind === 'synth') deps.audioEngine.setTrackSynth(targetId, instrument.params)
+        else deps.audioEngine.setTrackInstrument(targetId, { instrument })
+        return
+      }
       case 'arp': {
         const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
         deps.audioEngine.setTrackArpeggiator(targetId, params)

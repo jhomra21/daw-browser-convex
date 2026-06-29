@@ -171,7 +171,8 @@ export const persistHistoryTrackEffects = async (
       effects.saturator ? setLocalEffect(deps.projectId, trackId, "saturator", normalizeSaturatorParams(effects.saturator)) : null,
       effects.delay ? setLocalEffect(deps.projectId, trackId, "delay", normalizeDelayParams(effects.delay)) : null,
       effects.reverb ? setLocalEffect(deps.projectId, trackId, "reverb", normalizeReverbParams(effects.reverb)) : null,
-      effects.synth ? setLocalEffect(deps.projectId, trackId, "synth", effects.synth) : null,
+      effects.instrument ? setLocalEffect(deps.projectId, trackId, "instrument", effects.instrument) : null,
+      !effects.instrument && effects.synth ? setLocalEffect(deps.projectId, trackId, "synth", effects.synth) : null,
       effects.arp ? setLocalEffect(deps.projectId, trackId, "arp", effects.arp) : null,
     ]);
     return;
@@ -182,7 +183,8 @@ export const persistHistoryTrackEffects = async (
     effects.saturator ? publishHistoryOperation(deps, { kind: "effects.setSaturatorParams", payload: { trackId, params: normalizeSaturatorParams(effects.saturator) } }) : null,
     effects.delay ? publishHistoryOperation(deps, { kind: "effects.setDelayParams", payload: { trackId, params: normalizeDelayParams(effects.delay) } }) : null,
     effects.reverb ? publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId, params: normalizeReverbParams(effects.reverb) } }) : null,
-    effects.synth ? publishHistoryOperation(deps, { kind: "effects.setSynthParams", payload: { trackId, params: effects.synth } }) : null,
+    effects.instrument ? publishHistoryOperation(deps, { kind: "instruments.setTrackInstrument", payload: { trackId, instrument: effects.instrument } }) : null,
+    !effects.instrument && effects.synth ? publishHistoryOperation(deps, { kind: "effects.setSynthParams", payload: { trackId, params: effects.synth } }) : null,
     effects.arp ? publishHistoryOperation(deps, { kind: "effects.setArpeggiatorParams", payload: { trackId, params: effects.arp } }) : null,
   ]);
 };
@@ -262,6 +264,11 @@ export const persistHistoryEffectParams = async (
     case "synth": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setSynthParams", payload: { trackId: targetId, params } });
+      return;
+    }
+    case "instrument": {
+      const instrument = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+      await publishHistoryOperation(deps, { kind: "instruments.setTrackInstrument", payload: { trackId: targetId, instrument } });
       return;
     }
     case "arp": {

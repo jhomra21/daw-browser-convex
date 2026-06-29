@@ -16,11 +16,13 @@ import {
   type AudioEffectKind,
   type CompressorParamsLite,
   type DelayParamsLite,
+  type DrumRackParams,
   type EqParamsLite,
   type ExportAudioFormat,
   type ReverbParamsLite,
   type SaturatorParamsLite,
   type SynthParamsInput,
+  type TrackInstrumentParams,
 } from '@daw-browser/shared'
 import {
   createExportAudioOutputFormat,
@@ -28,6 +30,7 @@ import {
   getExportAudioDefaultBitrate,
 } from './export-audio-support'
 import { createSynthVoiceOscillators, getSynthVoiceConfig, getSynthVoiceVelocity, scheduleSynthVoiceEnvelope } from './synth-voice'
+import { scheduleDrumRackHit, type DrumRackResolvedBuffers } from './drum-rack-runtime'
 import { createOfflineMixerNodes } from './mixer/apply-offline-routing'
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
@@ -47,7 +50,7 @@ export type ExportFx = {
   masterDelay?: DelayParamsLite
   masterReverb?: ReverbParamsLite
   masterFxOrder?: AudioEffectKind[]
-  trackFx?: Record<string, { order?: AudioEffectKind[]; eq?: EqParamsLite; compressor?: CompressorParamsLite; saturator?: SaturatorParamsLite; delay?: DelayParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput }>
+  trackFx?: Record<string, { order?: AudioEffectKind[]; eq?: EqParamsLite; compressor?: CompressorParamsLite; saturator?: SaturatorParamsLite; delay?: DelayParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput; instrument?: TrackInstrumentParams; drumRackBuffers?: DrumRackResolvedBuffers }>
 }
 
 export type ExportRequest = {
@@ -86,12 +89,19 @@ type PreparedExportRender = {
   numberOfChannels: number
   trackById: Map<string, Track<AudioBuffer>>
   mixerGraph: ResolvedMixerGraph
+  exportTrackFx?: ExportFx['trackFx']
   signal?: AbortSignal
 }
 
 type SourceIsolatedRenderOptions = {
   sourceTrackIds?: Set<string>
   includeMasterFx?: boolean
+}
+
+type OfflineDrumRackHit = {
+  source: AudioBufferSourceNode
+  gain: GainNode
+  chokeGroup: number
 }
 
 type ExportResult = {
@@ -121,6 +131,95 @@ type EncodeAudioBufferOptions = {
 
 const throwIfAborted = (signal: AbortSignal | undefined): void => {
   signal?.throwIfAborted()
+}
+
+const readTrackInstrument = (
+  fxCfg: NonNullable<ExportFx['trackFx']>[string] | undefined,
+): TrackInstrumentParams | undefined => fxCfg?.instrument
+
+function renderOfflineSynthEvents(input: {
+  ctx: OfflineAudioContext
+  destination: AudioNode
+  events: ReturnType<typeof getScheduledMidiEvents>
+  rangeStartSec: number
+  synth: SynthParamsInput | undefined
+  midi: NonNullable<Track<AudioBuffer>['clips'][number]['midi']>
+}) {
+  const voice = getSynthVoiceConfig({ synth: input.synth, midi: input.midi })
+  for (const event of input.events) {
+    const when = Math.max(0, event.startSec - input.rangeStartSec)
+    const noteDur = event.endSec - event.startSec
+    if (noteDur <= 0) continue
+
+    const oscs = createSynthVoiceOscillators(input.ctx, {
+      startTime: when,
+      pitch: event.pitch,
+      wave1: voice.wave1,
+      wave2: voice.wave2,
+    })
+    const gain = input.ctx.createGain()
+    const peakGain = (getSynthVoiceVelocity(event.velocity) * voice.clipGain * voice.synthGain) / oscs.length
+    const envelope = scheduleSynthVoiceEnvelope(gain.gain, {
+      startTime: when,
+      durationSec: noteDur,
+      attackSec: voice.attackSec,
+      releaseSec: voice.releaseSec,
+      peakGain,
+    })
+    for (const osc of oscs) osc.connect(gain)
+    gain.connect(input.destination)
+    for (const osc of oscs) {
+      try { osc.start(when) } catch {}
+      try { osc.stop(envelope.endTime) } catch {}
+    }
+  }
+}
+
+function renderOfflineDrumRackEvents(input: {
+  ctx: OfflineAudioContext
+  destination: AudioNode
+  events: ReturnType<typeof getScheduledMidiEvents>
+  padsByNote: ReadonlyMap<number, DrumRackParams['pads'][number]>
+  rangeStartSec: number
+  buffers: DrumRackResolvedBuffers | undefined
+  activeHitsByChokeGroup: Map<number, OfflineDrumRackHit[]>
+}) {
+  if (!input.buffers) return
+  for (const event of input.events) {
+    const pad = input.padsByNote.get(event.pitch)
+    if (!pad) continue
+    const buffer = input.buffers.get(pad.id)
+    if (!buffer) continue
+    const when = Math.max(0, event.startSec - input.rangeStartSec)
+    if (pad.chokeGroup > 0) {
+      const activeHits = input.activeHitsByChokeGroup.get(pad.chokeGroup)
+      if (activeHits) {
+        for (const hit of activeHits) {
+          try {
+            hit.gain.gain.cancelScheduledValues(when)
+            hit.gain.gain.linearRampToValueAtTime(0, when + 0.006)
+            hit.source.stop(when + 0.006)
+          } catch {}
+        }
+      }
+      input.activeHitsByChokeGroup.set(pad.chokeGroup, [])
+    }
+    try {
+      const scheduled = scheduleDrumRackHit({
+        ctx: input.ctx,
+        destination: input.destination,
+        buffer,
+        pad,
+        when,
+        velocity: event.velocity ?? 1,
+      })
+      if (scheduled && pad.chokeGroup > 0) {
+        const activeHits = input.activeHitsByChokeGroup.get(pad.chokeGroup) ?? []
+        activeHits.push({ source: scheduled.source, gain: scheduled.gain, chokeGroup: pad.chokeGroup })
+        input.activeHitsByChokeGroup.set(pad.chokeGroup, activeHits)
+      }
+    } catch {}
+  }
 }
 
 function lastClipEndSec(tracks: Track<AudioBuffer>[]): number {
@@ -170,6 +269,7 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
       masterFxOrder: fx?.masterFxOrder,
       trackFx: fx?.trackFx,
     }),
+    exportTrackFx: fx?.trackFx,
     signal,
   }
 }
@@ -195,11 +295,16 @@ async function renderSourceIsolatedMixdownFromPrepared(
     const trackInput = trackNodes.get(track.id)?.input
     if (!trackInput) continue
     const fxCfg = resolvedTrack.fx
+    const exportFxCfg = prepared.exportTrackFx?.[track.id]
+    const instrument = readTrackInstrument(exportFxCfg)
+    const drumRackPadsByNote = instrument?.kind === 'drum-rack'
+      ? new Map(instrument.params.pads.map((pad) => [pad.note, pad]))
+      : undefined
+    const activeDrumRackHitsByChokeGroup = new Map<number, OfflineDrumRackHit[]>()
 
     for (const clip of track.clips) {
       const midi = clip.midi
       if (midi && Array.isArray(midi.notes)) {
-        const voice = getSynthVoiceConfig({ synth: fxCfg?.synth, midi })
         const events = getScheduledMidiEvents({
           clip,
           bpm: prepared.bpm,
@@ -208,33 +313,25 @@ async function renderSourceIsolatedMixdownFromPrepared(
           rangeEndSec: prepared.range.endSec,
           arp: fxCfg?.arp,
         })
-
-        for (const event of events) {
-          const when = Math.max(0, event.startSec - prepared.range.startSec)
-          const noteDur = event.endSec - event.startSec
-          if (noteDur <= 0) continue
-
-          const oscs = createSynthVoiceOscillators(ctx, {
-            startTime: when,
-            pitch: event.pitch,
-            wave1: voice.wave1,
-            wave2: voice.wave2,
+        if (instrument?.kind === 'drum-rack' && drumRackPadsByNote) {
+          renderOfflineDrumRackEvents({
+            ctx,
+            destination: trackInput,
+            events,
+            padsByNote: drumRackPadsByNote,
+            rangeStartSec: prepared.range.startSec,
+            buffers: exportFxCfg?.drumRackBuffers,
+            activeHitsByChokeGroup: activeDrumRackHitsByChokeGroup,
           })
-          const gain = ctx.createGain()
-          const peakGain = (getSynthVoiceVelocity(event.velocity) * voice.clipGain * voice.synthGain) / oscs.length
-          const envelope = scheduleSynthVoiceEnvelope(gain.gain, {
-            startTime: when,
-            durationSec: noteDur,
-            attackSec: voice.attackSec,
-            releaseSec: voice.releaseSec,
-            peakGain,
+        } else {
+          renderOfflineSynthEvents({
+            ctx,
+            destination: trackInput,
+            events,
+            rangeStartSec: prepared.range.startSec,
+            synth: instrument?.kind === 'synth' ? instrument.params : fxCfg?.synth,
+            midi,
           })
-          for (const osc of oscs) osc.connect(gain)
-          gain.connect(trackInput)
-          for (const osc of oscs) {
-            try { osc.start(when) } catch {}
-            try { osc.stop(envelope.endTime) } catch {}
-          }
         }
         continue
       }

@@ -5,6 +5,7 @@ import { buildClipCreateSnapshot, buildCreatedClipSelection, createProjectedClip
 import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import { getTrackDeleteConflictMessage } from '~/lib/delete-conflict-messages'
 import { buildTrackEffectQueryArgs } from '~/lib/effect-track-args'
+import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
 import { getLocalEffect } from '~/lib/local-effects'
 import { isLocalId, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams } from '@daw-browser/shared'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
@@ -113,20 +114,23 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         saturator: undefined,
         delay: undefined,
         reverb: undefined,
+        instrument: undefined,
         synth: undefined,
         arp: undefined,
       }
     }
     const args = buildTrackEffectQueryArgs({ projectId: rid, trackId })
-    const [eqRow, compressorRow, saturatorRow, delayRow, rvRow, synthRow, arpRow] = await Promise.all([
+    const [eqRow, compressorRow, saturatorRow, delayRow, rvRow, instrumentRow, synthRow, arpRow] = await Promise.all([
       convexClient.query(convexApi.effects.getEqForTrack, args),
       convexClient.query(convexApi.effects.getCompressorForTrack, args),
       convexClient.query(convexApi.effects.getSaturatorForTrack, args),
       convexClient.query(convexApi.effects.getDelayForTrack, args),
       convexClient.query(convexApi.effects.getReverbForTrack, args),
+      convexClient.query(convexApi.effects.getInstrumentForTrack, args),
       convexClient.query(convexApi.effects.getSynthForTrack, args),
       convexClient.query(convexApi.effects.getArpeggiatorForTrack, args),
     ])
+    const instrument = instrumentRow ? readInstrumentParamsFromEffectRow(instrumentRow) : undefined
 
     return {
       eq: eqRow?.params,
@@ -134,18 +138,20 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       saturator: saturatorRow?.params ? normalizeSaturatorParams(saturatorRow.params) : undefined,
       delay: delayRow?.params ? normalizeDelayParams(delayRow.params) : undefined,
       reverb: rvRow?.params ? normalizeReverbParams(rvRow.params) : undefined,
+      instrument,
       synth: synthRow?.params,
       arp: arpRow?.params,
     }
   }
 
   const loadLocalTrackDeleteEffects = async (projectId: string, trackId: Track['id']): Promise<TrackEffectSnapshot> => {
-    const [eqRow, compressorRow, saturatorRow, delayRow, rvRow, synthRow, arpRow] = await Promise.all([
+    const [eqRow, compressorRow, saturatorRow, delayRow, rvRow, instrumentRow, synthRow, arpRow] = await Promise.all([
       getLocalEffect<TrackEffectSnapshot['eq']>(projectId, trackId, 'eq'),
       getLocalEffect<TrackEffectSnapshot['compressor']>(projectId, trackId, 'compressor'),
       getLocalEffect<TrackEffectSnapshot['saturator']>(projectId, trackId, 'saturator'),
       getLocalEffect<TrackEffectSnapshot['delay']>(projectId, trackId, 'delay'),
       getLocalEffect<TrackEffectSnapshot['reverb']>(projectId, trackId, 'reverb'),
+      getLocalEffect(projectId, trackId, 'instrument'),
       getLocalEffect<TrackEffectSnapshot['synth']>(projectId, trackId, 'synth'),
       getLocalEffect<TrackEffectSnapshot['arp']>(projectId, trackId, 'arp'),
     ])
@@ -156,6 +162,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       saturator: saturatorRow?.params ? normalizeSaturatorParams(saturatorRow.params) : undefined,
       delay: delayRow?.params ? normalizeDelayParams(delayRow.params) : undefined,
       reverb: rvRow?.params ? normalizeReverbParams(rvRow.params) : undefined,
+      instrument: instrumentRow ? readInstrumentParamsFromEffectRow(instrumentRow) : undefined,
       synth: synthRow?.params,
       arp: arpRow?.params,
     }

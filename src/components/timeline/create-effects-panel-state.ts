@@ -11,7 +11,7 @@ import {
 } from "~/components/effects/synth-card-bounds";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
-import { readInstrumentParamsFromEffectRow } from "~/components/timeline/effect-row-instrument-params";
+import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
 import { assignSampleToDrumRackPad, buildClipCreatePayload, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { convexApi } from "~/lib/convex";
 import type { LocalEffectRow } from "~/lib/local-effects";
@@ -197,16 +197,16 @@ export function createEffectsPanelInstrumentDevice(
     }, projectId);
   }
 
-  function commitSynthChange(
+  function commitInstrumentChange(
     targetId: Track["id"],
-    previous: EffectParamsByEffect["synth"] | undefined,
-    next: EffectParamsByEffect["synth"],
+    previous: EffectParamsByEffect["instrument"] | undefined,
+    next: EffectParamsByEffect["instrument"],
     projectId?: string,
   ): void {
     if (previous === undefined) return;
     context.onEffectParamsCommitted?.({
       targetId,
-      effect: "synth",
+      effect: "instrument",
       from: previous,
       to: next,
     }, projectId);
@@ -306,8 +306,8 @@ export function createEffectsPanelInstrumentDevice(
     },
     onParamsCommitted: (targetId, previous, next, persistContext) => {
       const track = getTrackByTargetId(targetId);
-      if (!track || previous?.kind !== "synth" || next.kind !== "synth") return;
-      commitSynthChange(track.id, previous.params, next.params, persistContext.projectId);
+      if (!track) return;
+      commitInstrumentChange(track.id, previous, next, persistContext.projectId);
     },
   });
 

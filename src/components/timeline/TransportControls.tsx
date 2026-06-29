@@ -232,7 +232,7 @@ const SaveStatus: Component<{ projectMenu: TransportControlsProps["projectMenu"]
 
 const MidiKeyboardToggle: Component<{ midiKeyboard: TransportControlsProps["midiKeyboard"] }> = (props) => {
   const midiKeyboard = () => props.midiKeyboard;
-  const velocityLabel = () => Math.round(midiKeyboard().velocity * 100);
+  const baseNoteLabel = () => `C${midiKeyboard().octave + 4}`;
 
   return (
     <Button
@@ -244,7 +244,7 @@ const MidiKeyboardToggle: Component<{ midiKeyboard: TransportControlsProps["midi
       aria-label="Toggle computer MIDI keyboard input"
       title={
         midiKeyboard().targetLabel
-          ? `Computer MIDI keyboard: ${midiKeyboard().targetLabel}, octave ${midiKeyboard().octave}, velocity ${velocityLabel()}%`
+          ? `Computer MIDI keyboard: ${midiKeyboard().targetLabel}, ${baseNoteLabel()}`
           : "Select an instrument track or MIDI clip to use computer MIDI keyboard input"
       }
       class={cn(
@@ -256,7 +256,7 @@ const MidiKeyboardToggle: Component<{ midiKeyboard: TransportControlsProps["midi
     >
       <span>⌨ MIDI Keys</span>
       <span class="text-2xs text-neutral-400">
-        O{midiKeyboard().octave} V{velocityLabel()}
+        {baseNoteLabel()}
       </span>
     </Button>
   );

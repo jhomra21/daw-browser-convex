@@ -951,7 +951,6 @@ const Timeline: Component<TimelineProps> = (props) => {
       canPlay: midiKeyboard.canPlay(),
       targetLabel: midiKeyboard.targetLabel(),
       octave: midiKeyboard.octave(),
-      velocity: midiKeyboard.velocity(),
       onToggle: midiKeyboard.toggle,
     },
     bpm: bpm(),

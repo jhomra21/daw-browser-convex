@@ -79,7 +79,6 @@ export type TransportControlsProps = {
     canPlay: boolean;
     targetLabel: string | null;
     octave: number;
-    velocity: number;
     onToggle: () => void;
   };
 };

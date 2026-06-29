@@ -15,14 +15,14 @@ Add an Ableton-inspired Drum Rack instrument for instrument tracks, backed by re
 
 ### Ableton behavior
 
-- Ableton's closest model is Drum Rack plus Simpler.
+- Ableton's closest model is Drum Rack plus Sampler.
 - Drum Rack is a pad grid. Pads map to MIDI notes.
 - Dropping a sample onto an empty pad creates or configures an internal sample playback device for that pad.
 - Empty pads show their MIDI note assignment, not default drum names.
 - When a sample is dropped on a pad, the pad label becomes the sample filename.
-- Simpler/Sampler handles sample playback, envelopes, pitch behavior, and one-shot style playback.
+- Sampler handles sample playback, envelopes, pitch behavior, and one-shot style playback.
 - C3 is commonly treated as the original pitch/root for sampler-style pitched playback, while Drum Rack pads trigger fixed samples by assigned MIDI note.
-- Local Ableton reference directory currently only has effects screenshots, no Drum Rack or Simpler images.
+- Local Ableton reference directory currently only has effects screenshots, no Drum Rack or Sampler images.
 
 ### Current repo findings
 

@@ -168,6 +168,12 @@ export const executeTimelineOperation = async (
         trackId: operation.payload.trackId,
         params: operation.payload.params,
       })
+    case 'instruments.setTrackInstrument':
+      return await context.convex.mutation(convexApi.effects.serverSetTrackInstrument, {
+        projectId: context.projectId,
+        trackId: operation.payload.trackId,
+        instrument: operation.payload.instrument,
+      })
     case 'effects.setArpeggiatorParams':
       return await context.convex.mutation(convexApi.effects.serverSetArpeggiatorParams, {
         projectId: context.projectId,

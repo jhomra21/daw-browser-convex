@@ -1,5 +1,5 @@
 import { createEffect, createMemo, onCleanup, type Accessor } from "solid-js";
-import { isLocalId, normalizeSynthParams, type ArpeggiatorParams, type AudioEffectKind } from "@daw-browser/shared";
+import { isLocalId, normalizeSynthParams, normalizeTrackInstrumentParams, type ArpeggiatorParams, type AudioEffectKind } from "@daw-browser/shared";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { createEffectsPanelAudioDevice } from "~/components/timeline/create-effects-panel-audio-effects-state";
@@ -149,6 +149,10 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       if (row?.targetType !== "track" || !row.trackId) continue;
       if (row.type === "synth" && row.params) {
         synthByTrackId.set(row.trackId, normalizeSynthParams(row.params));
+      }
+      if (row.type === "instrument" && row.params) {
+        const instrumentParams = normalizeTrackInstrumentParams(row.params);
+        if (instrumentParams?.kind === "synth") synthByTrackId.set(row.trackId, instrumentParams.params);
       }
       if (row.type === "arpeggiator" && row.params) {
         arpByTrackId.set(row.trackId, row.params);

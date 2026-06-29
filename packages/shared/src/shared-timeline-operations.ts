@@ -28,6 +28,10 @@ import {
 } from './effects-params'
 import { normalizeAudioWarp, normalizeClipGain, type AudioWarpPayload } from './audio-warp'
 import { normalizeMasterVolume } from './master-volume'
+import {
+  normalizeTrackInstrumentParams,
+  type TrackInstrumentParams,
+} from './instrument-params'
 
 export type MoveClipInput = {
   clipId: string
@@ -101,6 +105,7 @@ export type SharedTimelineOperation =
   | { kind: 'effects.reorderAudioChain'; payload: { trackId: string; order: AudioEffectKind[] } }
   | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: SharedReverbParams } }
   | { kind: 'effects.setSynthParams'; payload: { trackId: string; params: SharedSynthParams } }
+  | { kind: 'instruments.setTrackInstrument'; payload: { trackId: string; instrument: TrackInstrumentParams } }
   | { kind: 'effects.setArpeggiatorParams'; payload: { trackId: string; params: ArpeggiatorParams } }
   | { kind: 'effects.setMasterEqParams'; payload: { params: EqParams } }
   | { kind: 'effects.setMasterCompressorParams'; payload: { params: CompressorParams } }
@@ -559,6 +564,17 @@ const parseTrackSynth = (payload: Record<string, unknown>): SharedTimelineOperat
   return typeof payload.trackId === 'string' && params ? { kind: 'effects.setSynthParams', payload: { trackId: payload.trackId, params } } : null
 }
 
+const readTrackInstrumentParams = (value: unknown): TrackInstrumentParams | null => {
+  return normalizeTrackInstrumentParams(value) ?? null
+}
+
+const parseTrackInstrument = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  const instrument = readTrackInstrumentParams(payload.instrument)
+  return typeof payload.trackId === 'string' && instrument
+    ? { kind: 'instruments.setTrackInstrument', payload: { trackId: payload.trackId, instrument } }
+    : null
+}
+
 const parseTrackArpeggiator = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readArpeggiatorParams(payload.params)
   return typeof payload.trackId === 'string' && params ? { kind: 'effects.setArpeggiatorParams', payload: { trackId: payload.trackId, params } } : null
@@ -655,6 +671,7 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   { kind: 'effects.reorderAudioChain', parse: parseTrackAudioChainReorder, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setReverbParams', parse: parseTrackReverb, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setSynthParams', parse: parseTrackSynth, targets: readTrackIdTargets, durableQueue: true },
+  { kind: 'instruments.setTrackInstrument', parse: parseTrackInstrument, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setArpeggiatorParams', parse: parseTrackArpeggiator, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setMasterEqParams', parse: parseMasterEq, targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setMasterCompressorParams', parse: parseMasterCompressor, targets: emptyTargets, durableQueue: true },

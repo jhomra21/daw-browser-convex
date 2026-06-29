@@ -12,7 +12,7 @@ import {
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
 import { readInstrumentParamsFromEffectRow } from "~/components/timeline/effect-row-instrument-params";
-import { buildClipCreatePayload, type ClipCreateSnapshot } from "@daw-browser/shared";
+import { assignSampleToDrumRackPad, buildClipCreatePayload, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { convexApi } from "~/lib/convex";
 import type { LocalEffectRow } from "~/lib/local-effects";
 import { isLocalId } from "@daw-browser/shared";
@@ -24,9 +24,11 @@ import {
   createDefaultArpeggiatorParams,
   createDefaultDrumRackParams,
   createDefaultSynthParams,
+  INSTRUMENT_CONTRACTS,
   normalizeTrackInstrumentParams,
   type ArpeggiatorParams,
   type DrumRackParams,
+  type DrumRackSampleAssignment,
   type InstrumentKind,
   type SynthParams,
   type TrackInstrumentParams,
@@ -98,6 +100,7 @@ type EffectsPanelInstrumentDevice = {
     updateCardBounds: (next: SynthCardBounds) => void;
   };
   drumRack: {
+    assignSampleToPad: (padId: string, sample: DrumRackSampleAssignment) => void;
     params: Accessor<DrumRackParams | undefined>;
     readDraftForTarget: (targetId: string) => DrumRackParams | undefined;
     readForTarget: (targetId: string) => DrumRackParams | undefined;
@@ -108,7 +111,7 @@ type EffectsPanelInstrumentDevice = {
   readInstrumentForTarget: (targetId: string) => TrackInstrumentParams | undefined;
   syncRemoteInstrumentForTarget: (targetId: string, params: TrackInstrumentParams | undefined) => void;
   switchInstrument: (kind: InstrumentKind) => void;
-  switchInstrumentForTarget: (targetId: Track["id"], kind: InstrumentKind) => Promise<boolean>;
+  switchInstrumentForTarget: (targetId: Track["id"], kind: InstrumentKind) => boolean;
 };
 
 export const EFFECT_PANEL_SAVE_DEBOUNCE_MS = 200;
@@ -360,14 +363,43 @@ export function createEffectsPanelInstrumentDevice(
     return current?.kind === "drum-rack" ? current.params : undefined;
   }
 
-  async function switchInstrumentForTarget(targetId: Track["id"], kind: InstrumentKind): Promise<boolean> {
+  function samplesEqual(a: DrumRackSampleAssignment | undefined, b: DrumRackSampleAssignment): boolean {
+    return a?.assetKey === b.assetKey
+      && a.url === b.url
+      && a.name === b.name
+      && a.sourceKind === b.sourceKind
+      && a.source.durationSec === b.source.durationSec
+      && a.source.sampleRate === b.source.sampleRate
+      && a.source.channelCount === b.source.channelCount;
+  }
+
+  function assignSampleToCurrentDrumRackPad(padId: string, sample: DrumRackSampleAssignment): void {
+    const targetId = getTrackTargetId();
+    if (!targetId) return;
+    const current = instrumentState.readForTarget(targetId);
+    const currentParams = current?.kind === "drum-rack" ? current.params : undefined;
+    const currentPad = currentParams?.pads.find((pad) => pad.id === padId);
+    if (currentParams?.selectedPadId === padId && samplesEqual(currentPad?.sample, sample)) return;
+    instrumentState.updateForTarget(targetId, (prev) => ({
+      kind: "drum-rack",
+      params: assignSampleToDrumRackPad(
+        prev.kind === "drum-rack" ? prev.params : INSTRUMENT_CONTRACTS["drum-rack"].createDefaultParams(),
+        padId,
+        sample,
+      ),
+    }));
+  }
+
+  function switchInstrumentForTarget(targetId: Track["id"], kind: InstrumentKind): boolean {
     const track = getTrackByTargetId(targetId);
     if (!track || track.kind !== "instrument") return false;
+    const current = instrumentState.readForTarget(targetId);
+    if (current?.kind === kind) return true;
     instrumentState.updateForTarget(targetId, (prev) => {
       if (prev.kind === kind) return prev;
       return kind === "synth"
         ? { kind, params: ensureSynthDefaults(targetId) }
-        : { kind, params: createDefaultDrumRackParams() };
+        : { kind, params: INSTRUMENT_CONTRACTS["drum-rack"].createDefaultParams() };
     });
     return true;
   }
@@ -375,7 +407,7 @@ export function createEffectsPanelInstrumentDevice(
   function switchInstrument(kind: InstrumentKind): void {
     const targetId = getTrackTargetId();
     if (!targetId) return;
-    void switchInstrumentForTarget(targetId, kind);
+    switchInstrumentForTarget(targetId, kind);
   }
 
   async function addMidiClipToTarget(targetId: Track["id"]): Promise<boolean> {
@@ -528,6 +560,7 @@ export function createEffectsPanelInstrumentDevice(
       updateCardBounds: updateSynthCardBounds,
     },
     drumRack: {
+      assignSampleToPad: assignSampleToCurrentDrumRackPad,
       params: createMemo(() => {
         const current = instrumentState.params();
         return current?.kind === "drum-rack" ? current.params : undefined;

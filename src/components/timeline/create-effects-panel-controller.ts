@@ -49,6 +49,7 @@ const deviceInsertActionsEqual = (
   a.addDelay === b.addDelay &&
   a.addReverb === b.addReverb &&
   a.openSynthForTarget === b.openSynthForTarget &&
+  a.switchInstrumentForTarget === b.switchInstrumentForTarget &&
   a.canWrite === b.canWrite &&
   a.canAddMidiClip === b.canAddMidiClip &&
   a.canAddArpeggiator === b.canAddArpeggiator &&
@@ -232,6 +233,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       addDelay: audioEffects.delay.add,
       addReverb: audioEffects.reverb.add,
       openSynthForTarget: instrument.synth.openForTarget,
+      switchInstrumentForTarget: instrument.switchInstrumentForTarget,
       canWrite: canWriteCurrentTargetEffects(),
       canAddMidiClip: isInstrumentTrack(),
       canAddArpeggiator: isInstrumentTrack() && !instrument.arp.params(),

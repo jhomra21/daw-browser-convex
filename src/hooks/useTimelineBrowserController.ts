@@ -33,6 +33,7 @@ const BROWSER_EFFECT_ITEM_IDS = {
 };
 const BROWSER_INSTRUMENT_ITEM_IDS = {
   synth: "builtin:midi-instrument:synth",
+  drumRack: "builtin:midi-instrument:drum-rack",
 };
 
 const visibleBrowserSections = (sections: BrowserSection[]): BrowserSection[] => {
@@ -219,6 +220,15 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         searchText: "synth midi instrument clip",
         disabled: actions === undefined,
       },
+      {
+        id: BROWSER_INSTRUMENT_ITEM_IDS.drumRack,
+        source: "builtin",
+        category: "midi-instrument",
+        label: "Drum Rack",
+        subtitle: "Create a MIDI clip on the selected instrument track",
+        searchText: "drum rack drums sampler pads midi instrument clip",
+        disabled: actions === undefined,
+      },
     ];
     const query = browserDeviceQuery("midi-instruments");
     if (!query) return items;
@@ -254,6 +264,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     if (itemId === BROWSER_EFFECT_ITEM_IDS.reverb) return { kind: "audio-effect", effect: "reverb", label: "Reverb" };
     if (itemId === BROWSER_EFFECT_ITEM_IDS.arpeggiator) return { kind: "midi-effect", effect: "arpeggiator", label: "Arpeggiator" };
     if (itemId === BROWSER_INSTRUMENT_ITEM_IDS.synth) return { kind: "midi-instrument", instrument: "synth", label: "Synth" };
+    if (itemId === BROWSER_INSTRUMENT_ITEM_IDS.drumRack) return { kind: "midi-instrument", instrument: "drum-rack", label: "Drum Rack" };
     return undefined;
   };
 
@@ -276,7 +287,11 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     const payload = resolveBrowserDevicePayload(itemId);
     const actions = options.deviceInsertActions();
     if (!actions?.canWrite || payload?.kind !== "midi-instrument" || !actions.canAddMidiClip) return;
-    void actions.addMidiClip();
+    const targetId = options.currentEffectsTargetId();
+    if (targetId === "master") return;
+    const laneIndex = options.tracks().findIndex((track) => track.id === targetId);
+    if (laneIndex < 0) return;
+    void options.onDeviceDrop(payload, { kind: "track", trackId: targetId, laneIndex });
   };
 
   const browserDeviceDrag = createBrowserDeviceDrag({

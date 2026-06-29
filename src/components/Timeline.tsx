@@ -862,17 +862,19 @@ const Timeline: Component<TimelineProps> = (props) => {
       return;
     }
     if (payload.kind === "midi-instrument" && target.kind === "track") {
+      if (!actions.switchInstrumentForTarget(target.trackId, payload.instrument)) return;
       if (!await actions.addMidiClipToTarget(target.trackId)) return;
       openEffectsForTarget(target.trackId, { preserveClipSelection: true });
-      actions.openSynthForTarget(target.trackId);
+      if (payload.instrument === "synth") actions.openSynthForTarget(target.trackId);
       return;
     }
     if (payload.kind === "midi-instrument" && target.kind === "new-track") {
       const track = await createTimelineTrack({ kind: "instrument" });
       if (!track) return;
+      if (!actions.switchInstrumentForTarget(track.id, payload.instrument)) return;
       if (!await actions.addMidiClipToTarget(track.id)) return;
       openEffectsForTarget(track.id, { preserveClipSelection: true });
-      actions.openSynthForTarget(track.id);
+      if (payload.instrument === "synth") actions.openSynthForTarget(track.id);
     }
   };
   const timelineBrowser = useTimelineBrowserController({

@@ -23,6 +23,7 @@ import TimelineBottomPanelFooter from "~/components/timeline/TimelineBottomPanel
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { BOTTOM_PANEL_EDGE_PADDING_PX } from "~/lib/bottom-panel-layout";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
+import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE } from "~/lib/sample-drag-data";
 import {
   createEffectsPanelController,
   type EffectsPanelAudioEffects,
@@ -124,6 +125,21 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
                   <div
                     class="flex h-8 items-center justify-center border border-neutral-800 bg-neutral-900 px-1 text-[10px] text-neutral-400"
                     classList={{ "border-cyan-500 text-cyan-200": pad.id === selectedPadId() }}
+                    onDragOver={(event) => {
+                      if (!props.instrument.canWrite) return;
+                      if (!event.dataTransfer?.types.includes(SAMPLE_DRAG_DATA_TYPE)) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "copy";
+                    }}
+                    onDrop={(event) => {
+                      if (!props.instrument.canWrite) return;
+                      const raw = event.dataTransfer?.getData(SAMPLE_DRAG_DATA_TYPE);
+                      if (!raw) return;
+                      const sample = parseSampleDragData(raw);
+                      if (!sample) return;
+                      event.preventDefault();
+                      props.instrument.state.drumRack.assignSampleToPad(pad.id, sample);
+                    }}
                   >
                     {pad.name ?? getDrumRackPadNoteLabel(pad.note)}
                   </div>

@@ -1,4 +1,4 @@
-import type { AudioEffectKind } from "@daw-browser/shared";
+import type { AudioEffectKind, InstrumentKind } from "@daw-browser/shared";
 import type { Track } from "@daw-browser/timeline-core/types";
 
 export type TimelineDeviceInsertActions = {
@@ -16,6 +16,7 @@ export type TimelineDeviceInsertActions = {
   addDelay: () => void;
   addReverb: () => void;
   openSynthForTarget: (targetId: Track["id"]) => void;
+  switchInstrumentForTarget: (targetId: Track["id"], kind: InstrumentKind) => boolean;
   canWrite: boolean;
   canAddMidiClip: boolean;
   canAddArpeggiator: boolean;

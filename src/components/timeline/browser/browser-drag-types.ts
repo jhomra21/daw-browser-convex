@@ -4,7 +4,7 @@ import type { Track } from "@daw-browser/timeline-core/types";
 export type BrowserDragPayload =
   | { kind: "audio-effect"; effect: AudioEffectKind; label: string }
   | { kind: "midi-effect"; effect: "arpeggiator"; label: string }
-  | { kind: "midi-instrument"; instrument: "synth"; label: string };
+  | { kind: "midi-instrument"; instrument: "synth" | "drum-rack"; label: string };
 
 export type BrowserDropTarget =
   | { kind: "track"; trackId: Track["id"]; laneIndex: number }

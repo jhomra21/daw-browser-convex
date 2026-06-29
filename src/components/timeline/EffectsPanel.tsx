@@ -6,6 +6,7 @@ import {
   createSignal,
 } from "solid-js";
 import type { AudioEffectKind } from "@daw-browser/shared";
+import { getDrumRackPadNoteLabel } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Delay from "~/components/effects/Delay";
 import Compressor from "~/components/effects/Compressor";
@@ -109,6 +110,29 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
           disabled={!props.instrument.canWrite}
         />
       )}
+    </Show>
+
+    <Show when={props.instrument.state.drumRack.params()}>
+      {(params) => {
+        const selectedPadId = () => params().selectedPadId;
+        return (
+          <div class="flex min-w-48 flex-col justify-between border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-300">
+            <div class="font-medium text-neutral-200">Drum Rack</div>
+            <div class="mt-2 grid grid-cols-4 gap-1">
+              <For each={params().pads}>
+                {(pad) => (
+                  <div
+                    class="flex h-8 items-center justify-center border border-neutral-800 bg-neutral-900 px-1 text-[10px] text-neutral-400"
+                    classList={{ "border-cyan-500 text-cyan-200": pad.id === selectedPadId() }}
+                  >
+                    {pad.name ?? getDrumRackPadNoteLabel(pad.note)}
+                  </div>
+                )}
+              </For>
+            </div>
+          </div>
+        );
+      }}
     </Show>
 
     <Show
@@ -405,7 +429,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                         !delayForTarget() &&
                         !reverbForTarget() &&
                         !instrument.arp.params() &&
-                        (!instrument.synth.params() ||
+                        (!instrument.activeInstrument() ||
                           !target.isInstrumentTrack()),
                       currentTargetId: target.currentTargetId(),
                     }}

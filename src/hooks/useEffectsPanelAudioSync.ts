@@ -8,7 +8,6 @@ import {
   createDefaultDelayParams,
   createDefaultReverbParams,
   createDefaultSaturatorParams,
-  normalizeSynthParams,
   type AudioEffectKind,
   type CompressorParams,
   type ArpeggiatorParams,
@@ -16,7 +15,7 @@ import {
   type EqParams,
   type ReverbParams,
   type SaturatorParams,
-  type SynthParams,
+  type TrackInstrumentParams,
 } from "@daw-browser/shared";
 import type { AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import { convexApi } from "~/lib/convex";
@@ -25,6 +24,7 @@ import { collectAudioEffectOrders as collectAudioEffectOrdersFromEntries } from 
 import { isLocalId } from "@daw-browser/shared";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import type { Track } from "@daw-browser/timeline-core/types";
+import { readInstrumentParamsFromEffectRow } from "~/components/timeline/effect-row-instrument-params";
 
 type UseEffectsPanelAudioSyncOptions = {
   isOpen: Accessor<boolean>;
@@ -41,7 +41,7 @@ type UseEffectsPanelAudioSyncOptions = {
     saturator?: (targetId: string) => SaturatorParams | undefined;
     delay?: (targetId: string) => DelayParams | undefined;
     reverb?: (targetId: string) => ReverbParams | undefined;
-    synth?: (targetId: string) => SynthParams | undefined;
+    instrument?: (targetId: string) => TrackInstrumentParams | undefined;
     arp?: (targetId: string) => ArpeggiatorParams | undefined;
   };
 };
@@ -285,7 +285,7 @@ export function useEffectsPanelAudioSync(
     const saturatorState = createSyncedAudioEffectState<SaturatorParams>();
     const delayState = createSyncedAudioEffectState<DelayParams>();
     const reverbState = createSyncedAudioEffectState<ReverbParams>();
-    const synthByTrackId = new Map<string, SynthParams>();
+    const instrumentByTrackId = new Map<string, TrackInstrumentParams>();
     const arpByTrackId = new Map<string, ArpeggiatorParams>();
     const effectOrders = collectSyncedAudioEffectOrders(effects);
 
@@ -296,8 +296,9 @@ export function useEffectsPanelAudioSync(
         if (syncLocalAudioEffect(row, saturatorSyncDescriptor, saturatorState, activeTargetId, audioEngine)) continue;
         if (syncLocalAudioEffect(row, delaySyncDescriptor, delayState, activeTargetId, audioEngine)) continue;
         if (syncLocalAudioEffect(row, reverbSyncDescriptor, reverbState, activeTargetId, audioEngine)) continue;
-        if (row.effect === "synth") {
-          if (row.targetId !== activeTargetId) synthByTrackId.set(row.targetId, normalizeSynthParams(row.params));
+        if (row.effect === "synth" || row.effect === "instrument") {
+          const instrument = readInstrumentParamsFromEffectRow(row);
+          if (row.targetId !== activeTargetId && instrument) instrumentByTrackId.set(row.targetId, instrument);
           continue;
         }
         if (row.effect === "arp") {
@@ -314,7 +315,10 @@ export function useEffectsPanelAudioSync(
 
       const trackId = row.trackId;
       if (!trackId || trackId === activeTargetId) continue;
-      if (row.type === "synth" && row.params) synthByTrackId.set(trackId, normalizeSynthParams(row.params));
+      if (row.type === "synth" || row.type === "instrument") {
+        const instrument = readInstrumentParamsFromEffectRow(row);
+        if (instrument) instrumentByTrackId.set(trackId, instrument);
+      }
       if (row.type === "arpeggiator" && row.params) arpByTrackId.set(trackId, row.params);
     }
 
@@ -350,7 +354,8 @@ export function useEffectsPanelAudioSync(
       applyTrackAudioEffect(delaySyncDescriptor, delayState, track.id, audioEngine, options.localDraftEffects);
       applyTrackAudioEffect(reverbSyncDescriptor, reverbState, track.id, audioEngine, options.localDraftEffects);
       if (track.kind === "instrument") {
-        const synth = options.localDraftEffects?.synth?.(track.id) ?? synthByTrackId.get(track.id);
+        const instrument = options.localDraftEffects?.instrument?.(track.id) ?? instrumentByTrackId.get(track.id);
+        const synth = instrument?.kind === "synth" ? instrument.params : undefined;
         if (synth) audioEngine.setTrackSynth(track.id, synth);
         else audioEngine.clearTrackSynth(track.id);
         const arp = options.localDraftEffects?.arp?.(track.id) ?? arpByTrackId.get(track.id);

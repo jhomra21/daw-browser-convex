@@ -11,6 +11,7 @@ import {
 } from "~/components/effects/synth-card-bounds";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
+import { readInstrumentParamsFromEffectRow } from "~/components/timeline/effect-row-instrument-params";
 import { buildClipCreatePayload, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { convexApi } from "~/lib/convex";
 import type { LocalEffectRow } from "~/lib/local-effects";
@@ -21,11 +22,14 @@ import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-t
 import { toLocalTimelineClip } from "~/lib/timeline-repository/track-row-adapter";
 import {
   createDefaultArpeggiatorParams,
+  createDefaultDrumRackParams,
   createDefaultSynthParams,
-  normalizeSynthParams,
-  serializeSynthParams,
+  normalizeTrackInstrumentParams,
   type ArpeggiatorParams,
+  type DrumRackParams,
+  type InstrumentKind,
   type SynthParams,
+  type TrackInstrumentParams,
 } from "@daw-browser/shared";
 import {
   didOptimisticGrantScopeChange,
@@ -38,9 +42,9 @@ import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
 type LocalArpRow = LocalEffectRow<ArpeggiatorParams>;
-type LocalSynthRow = LocalEffectRow<SynthParams>;
+type LocalInstrumentRow = LocalEffectRow<TrackInstrumentParams>;
 type ArpRow = RoomEffectRow | LocalArpRow | undefined;
-type SynthRow = RoomEffectRow | LocalSynthRow | undefined;
+type InstrumentRow = RoomEffectRow | LocalInstrumentRow | undefined;
 
 type EffectsPanelContext = {
   audioEngine: Accessor<AudioEngine>;
@@ -93,6 +97,18 @@ type EffectsPanelInstrumentDevice = {
     syncRemoteForTarget: (targetId: string, params: SynthParams | undefined) => void;
     updateCardBounds: (next: SynthCardBounds) => void;
   };
+  drumRack: {
+    params: Accessor<DrumRackParams | undefined>;
+    readDraftForTarget: (targetId: string) => DrumRackParams | undefined;
+    readForTarget: (targetId: string) => DrumRackParams | undefined;
+    reset: () => void;
+  };
+  activeInstrument: Accessor<TrackInstrumentParams | undefined>;
+  readDraftInstrumentForTarget: (targetId: string) => TrackInstrumentParams | undefined;
+  readInstrumentForTarget: (targetId: string) => TrackInstrumentParams | undefined;
+  syncRemoteInstrumentForTarget: (targetId: string, params: TrackInstrumentParams | undefined) => void;
+  switchInstrument: (kind: InstrumentKind) => void;
+  switchInstrumentForTarget: (targetId: Track["id"], kind: InstrumentKind) => Promise<boolean>;
 };
 
 export const EFFECT_PANEL_SAVE_DEBOUNCE_MS = 200;
@@ -123,12 +139,28 @@ export function createEffectsPanelInstrumentDevice(
     targetId: getTrackTargetId,
     effect: "arp",
   });
-  const localSynth = createLocalEffectRows<SynthParams>({
+  const localInstrument = createLocalEffectRows<TrackInstrumentParams>({
     projectId: context.projectId,
     targetId: getTrackTargetId,
-    effect: "synth",
-    normalize: normalizeSynthParams,
+    effect: "instrument",
+    normalize: (params) => normalizeTrackInstrumentParams(params) ?? { kind: "synth", params: createDefaultSynthParams() },
   });
+
+  function persistInstrument(trackId: Track["id"], instrument: TrackInstrumentParams, persistContext: { projectId?: string; userId?: string }) {
+    const projectId = persistContext.projectId;
+    const userId = persistContext.userId;
+    if (!projectId) return;
+    if (isLocalId("project", projectId)) {
+      return localInstrument.persist(projectId, trackId, instrument);
+    }
+    if (!userId) return;
+
+    const operation: SharedTimelineOperation = {
+      kind: "instruments.setTrackInstrument",
+      payload: { trackId, instrument },
+    };
+    return publishDurableSharedTimelineOperation({ projectId, userId, operation });
+  }
 
   function persistArpeggiator(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setArpeggiatorParams>["params"], persistContext: { projectId?: string; userId?: string }) {
     const projectId = persistContext.projectId;
@@ -141,22 +173,6 @@ export function createEffectsPanelInstrumentDevice(
 
     const operation: SharedTimelineOperation = {
       kind: "effects.setArpeggiatorParams",
-      payload: { trackId, params },
-    };
-    return publishDurableSharedTimelineOperation({ projectId, userId, operation });
-  }
-
-  function persistSynth(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setSynthParams>["params"], persistContext: { projectId?: string; userId?: string }) {
-    const projectId = persistContext.projectId;
-    const userId = persistContext.userId;
-    if (!projectId) return;
-    if (isLocalId("project", projectId)) {
-      return localSynth.persist(projectId, trackId, normalizeSynthParams(params));
-    }
-    if (!userId) return;
-
-    const operation: SharedTimelineOperation = {
-      kind: "effects.setSynthParams",
       payload: { trackId, params },
     };
     return publishDurableSharedTimelineOperation({ projectId, userId, operation });
@@ -207,9 +223,14 @@ export function createEffectsPanelInstrumentDevice(
       : undefined;
   };
 
-  const remoteEffectForTarget = (targetId: string | undefined, effectType: "synth" | "arpeggiator") => {
+  const remoteEffectForTarget = (targetId: string | undefined, effectType: "instrument" | "synth" | "arpeggiator") => {
     if (!targetId || isLocalProject()) return undefined;
-    return context.roomEffects?.()?.find((row) => row.trackId === targetId && row.type === effectType && row.targetType === "track");
+    const rows = context.roomEffects?.();
+    if (effectType === "instrument") {
+      return rows?.find((row) => row.trackId === targetId && row.type === "instrument" && row.targetType === "track")
+        ?? rows?.find((row) => row.trackId === targetId && row.type === "synth" && row.targetType === "track");
+    }
+    return rows?.find((row) => row.trackId === targetId && row.type === effectType && row.targetType === "track");
   };
 
   const arpState = createPersistedEffectState<ArpRow, ArpeggiatorParams>({
@@ -243,20 +264,26 @@ export function createEffectsPanelInstrumentDevice(
     },
   });
 
-  const synthState = createPersistedEffectState<SynthRow, SynthParams>({
+  const instrumentState = createPersistedEffectState<InstrumentRow, TrackInstrumentParams>({
     targetId: getTrackTargetId,
     scopeId: context.projectId,
-    row: () => isLocalProject() ? localSynth.row(getTrackTargetId()) : remoteEffectForTarget(getTrackTargetId(), "synth"),
-    readQueryParams: (row) => {
-      return row?.params
-        ? normalizeSynthParams(row.params)
-        : undefined;
+    row: () => isLocalProject() ? localInstrument.row(getTrackTargetId()) : remoteEffectForTarget(getTrackTargetId(), "instrument"),
+    readQueryParams: (row) => row ? readInstrumentParamsFromEffectRow(row) : undefined,
+    readVisibleParams: (targetId) => {
+      const params = readSynthDefaults(targetId);
+      return params ? { kind: "synth", params } : undefined;
     },
-    readVisibleParams: readSynthDefaults,
-    createInitialParams: readSynthDefaults,
-    serializeParams: serializeSynthParams,
+    createInitialParams: (targetId) => {
+      const params = readSynthDefaults(targetId);
+      return params ? { kind: "synth", params } : undefined;
+    },
+    serializeParams: (params) => JSON.stringify(params),
     applyToEngine: (targetId, params) => {
-      context.audioEngine().setTrackSynth(targetId, params);
+      if (params.kind === "synth") {
+        context.audioEngine().setTrackSynth(targetId, params.params);
+        return;
+      }
+      context.audioEngine().clearTrackSynth(targetId);
     },
     clearFromEngine: (targetId) => {
       context.audioEngine().clearTrackSynth(targetId);
@@ -265,7 +292,7 @@ export function createEffectsPanelInstrumentDevice(
     persistParams: (targetId, params, persistContext) => {
       const track = getTrackByTargetId(targetId);
       if (!track) return;
-      return persistSynth(track.id, params, persistContext);
+      return persistInstrument(track.id, params, persistContext);
     },
     debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
     remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
@@ -275,8 +302,8 @@ export function createEffectsPanelInstrumentDevice(
     },
     onParamsCommitted: (targetId, previous, next, persistContext) => {
       const track = getTrackByTargetId(targetId);
-      if (!track) return;
-      commitSynthChange(track.id, previous, next, persistContext.projectId);
+      if (!track || previous?.kind !== "synth" || next.kind !== "synth") return;
+      commitSynthChange(track.id, previous.params, next.params, persistContext.projectId);
     },
   });
 
@@ -291,7 +318,10 @@ export function createEffectsPanelInstrumentDevice(
   }
 
   function handleSynthChange(updates: Partial<SynthParams>): void {
-    synthState.update((prev) => ({ ...prev, ...updates }));
+    instrumentState.update((prev) => ({
+      kind: "synth",
+      params: { ...(prev.kind === "synth" ? prev.params : createDefaultSynthParams()), ...updates },
+    }));
   }
 
   function openSynthForTarget(targetId: Track["id"]): void {
@@ -321,7 +351,31 @@ export function createEffectsPanelInstrumentDevice(
   }
 
   function getSynthParamsForTarget(targetId: string): SynthParams {
-    return synthState.readForTarget(targetId) ?? ensureSynthDefaults(targetId);
+    const current = instrumentState.readForTarget(targetId);
+    return current?.kind === "synth" ? current.params : ensureSynthDefaults(targetId);
+  }
+
+  function readDrumRackForTarget(targetId: string): DrumRackParams | undefined {
+    const current = instrumentState.readForTarget(targetId);
+    return current?.kind === "drum-rack" ? current.params : undefined;
+  }
+
+  async function switchInstrumentForTarget(targetId: Track["id"], kind: InstrumentKind): Promise<boolean> {
+    const track = getTrackByTargetId(targetId);
+    if (!track || track.kind !== "instrument") return false;
+    instrumentState.updateForTarget(targetId, (prev) => {
+      if (prev.kind === kind) return prev;
+      return kind === "synth"
+        ? { kind, params: ensureSynthDefaults(targetId) }
+        : { kind, params: createDefaultDrumRackParams() };
+    });
+    return true;
+  }
+
+  function switchInstrument(kind: InstrumentKind): void {
+    const targetId = getTrackTargetId();
+    if (!targetId) return;
+    void switchInstrumentForTarget(targetId, kind);
   }
 
   async function addMidiClipToTarget(targetId: Track["id"]): Promise<boolean> {
@@ -411,10 +465,13 @@ export function createEffectsPanelInstrumentDevice(
       ...current,
       params: getSynthParamsForTarget(current.targetId),
       onChange: (updates) => {
-        synthState.updateForTarget(current.targetId, (prev) => ({ ...prev, ...updates }));
+        instrumentState.updateForTarget(current.targetId, (prev) => ({
+          kind: "synth",
+          params: { ...(prev.kind === "synth" ? prev.params : createDefaultSynthParams()), ...updates },
+        }));
       },
       onReset: () => {
-        synthState.updateForTarget(current.targetId, () => ensureSynthDefaults(current.targetId));
+        instrumentState.updateForTarget(current.targetId, () => ({ kind: "synth", params: ensureSynthDefaults(current.targetId) }));
       },
     };
   });
@@ -426,7 +483,7 @@ export function createEffectsPanelInstrumentDevice(
   const flushPending = async () => {
     await Promise.all([
       arpState.flushPending(),
-      synthState.flushPending(),
+      instrumentState.flushPending(),
     ]);
   };
 
@@ -452,11 +509,45 @@ export function createEffectsPanelInstrumentDevice(
       isExpandedForCurrentTarget: isSynthExpandedForCurrentTarget,
       open: openSynthCard,
       openForTarget: openSynthForTarget,
-      params: synthState.params,
-      readDraftForTarget: synthState.readDraftForTarget,
-      reset: synthState.reset,
-      syncRemoteForTarget: synthState.syncRemoteForTarget,
+      params: createMemo(() => {
+        const current = instrumentState.params();
+        return current?.kind === "synth" ? current.params : undefined;
+      }),
+      readDraftForTarget: (targetId) => {
+        const current = instrumentState.readDraftForTarget(targetId);
+        return current?.kind === "synth" ? current.params : undefined;
+      },
+      reset: () => {
+        const targetId = getTrackTargetId();
+        if (!targetId) return;
+        instrumentState.updateForTarget(targetId, () => ({ kind: "synth", params: ensureSynthDefaults(targetId) }));
+      },
+      syncRemoteForTarget: (targetId, params) => {
+        instrumentState.syncRemoteForTarget(targetId, params ? { kind: "synth", params } : undefined);
+      },
       updateCardBounds: updateSynthCardBounds,
     },
+    drumRack: {
+      params: createMemo(() => {
+        const current = instrumentState.params();
+        return current?.kind === "drum-rack" ? current.params : undefined;
+      }),
+      readDraftForTarget: (targetId) => {
+        const current = instrumentState.readDraftForTarget(targetId);
+        return current?.kind === "drum-rack" ? current.params : undefined;
+      },
+      readForTarget: readDrumRackForTarget,
+      reset: () => {
+        const targetId = getTrackTargetId();
+        if (!targetId) return;
+        instrumentState.updateForTarget(targetId, () => ({ kind: "drum-rack", params: createDefaultDrumRackParams() }));
+      },
+    },
+    activeInstrument: instrumentState.params,
+    readDraftInstrumentForTarget: instrumentState.readDraftForTarget,
+    readInstrumentForTarget: instrumentState.readForTarget,
+    syncRemoteInstrumentForTarget: instrumentState.syncRemoteForTarget,
+    switchInstrument,
+    switchInstrumentForTarget,
   };
 }

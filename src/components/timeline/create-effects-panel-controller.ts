@@ -1,8 +1,9 @@
 import { createEffect, createMemo, onCleanup, type Accessor } from "solid-js";
-import { isLocalId, normalizeSynthParams, normalizeTrackInstrumentParams, type ArpeggiatorParams, type AudioEffectKind } from "@daw-browser/shared";
+import { isLocalId, type ArpeggiatorParams, type AudioEffectKind, type TrackInstrumentParams } from "@daw-browser/shared";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { createEffectsPanelAudioDevice } from "~/components/timeline/create-effects-panel-audio-effects-state";
+import { readInstrumentParamsFromEffectRow } from "~/components/timeline/effect-row-instrument-params";
 import { createEffectsPanelInstrumentDevice } from "~/components/timeline/create-effects-panel-state";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 import { useEffectsPanelAudioSync } from "~/hooks/useEffectsPanelAudioSync";
@@ -134,7 +135,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       saturator: audioEffects.saturator.readDraftForTarget,
       delay: audioEffects.delay.readDraftForTarget,
       reverb: audioEffects.reverb.readDraftForTarget,
-      synth: instrument.synth.readDraftForTarget,
+      instrument: instrument.readDraftInstrumentForTarget,
       arp: instrument.arp.readDraftForTarget,
     },
   });
@@ -143,16 +144,13 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     const effects = roomEffectsQuery.data;
     if (effects === undefined) return;
     const activeTarget = currentTargetId();
-    const synthByTrackId = new Map<string, ReturnType<typeof normalizeSynthParams>>();
+    const instrumentByTrackId = new Map<string, TrackInstrumentParams>();
     const arpByTrackId = new Map<string, ArpeggiatorParams>();
     for (const row of effects) {
       if (row?.targetType !== "track" || !row.trackId) continue;
-      if (row.type === "synth" && row.params) {
-        synthByTrackId.set(row.trackId, normalizeSynthParams(row.params));
-      }
-      if (row.type === "instrument" && row.params) {
-        const instrumentParams = normalizeTrackInstrumentParams(row.params);
-        if (instrumentParams?.kind === "synth") synthByTrackId.set(row.trackId, instrumentParams.params);
+      if (row.type === "synth" || row.type === "instrument") {
+        const instrumentParams = readInstrumentParamsFromEffectRow(row);
+        if (instrumentParams) instrumentByTrackId.set(row.trackId, instrumentParams);
       }
       if (row.type === "arpeggiator" && row.params) {
         arpByTrackId.set(row.trackId, row.params);
@@ -160,9 +158,9 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     }
     for (const track of options.tracks()) {
       if (track.id === activeTarget) continue;
-      const synthParams = track.kind === "instrument" ? synthByTrackId.get(track.id) : undefined;
+      const instrumentParams = track.kind === "instrument" ? instrumentByTrackId.get(track.id) : undefined;
       const arpParams = track.kind === "instrument" ? arpByTrackId.get(track.id) : undefined;
-      instrument.synth.syncRemoteForTarget(track.id, synthParams);
+      instrument.syncRemoteInstrumentForTarget(track.id, instrumentParams);
       instrument.arp.syncRemoteForTarget(track.id, arpParams);
     }
   });

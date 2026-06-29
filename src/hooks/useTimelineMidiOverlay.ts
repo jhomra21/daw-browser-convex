@@ -157,6 +157,10 @@ export function useTimelineMidiOverlay(
       const ctx = options.audioEngine.getAudioContext()
       if (!ctx) return
       const trackId = resolveTargetTrackId() || 'master'
+      if (options.audioEngine.getTrackInstrumentKind(trackId) === 'drum-rack') {
+        options.audioEngine.previewDrumRackNote(trackId, pitch, velocity)
+        return
+      }
       const synthGain = options.audioEngine.getTrackSynthGainNode(trackId)
       if (!synthGain) return
       const osc = ctx.createOscillator()
@@ -183,6 +187,10 @@ export function useTimelineMidiOverlay(
       if (!ctx || activeLiveNotes.has(pitch)) return
       const trackId = resolveTargetTrackId()
       if (!trackId) return
+      if (options.audioEngine.getTrackInstrumentKind(trackId) === 'drum-rack') {
+        options.audioEngine.previewDrumRackNote(trackId, pitch, velocity)
+        return
+      }
       const synthGain = options.audioEngine.getTrackSynthGainNode(trackId)
       if (!synthGain) return
       const osc1 = ctx.createOscillator()

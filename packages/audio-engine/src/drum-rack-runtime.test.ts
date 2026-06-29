@@ -144,6 +144,7 @@ describe('Instrument runtime', () => {
       instrument: { kind: 'synth', params: createDefaultSynthParams() },
     })
 
+    expect(runtime.getTrackInstrumentKind('track-1')).toBe('synth')
     expect(runtime.scheduleMidiClip(createTrack(), createMidiClip(36), 0, 0, 1)).toBe(true)
     expect(audio.sources).toHaveLength(1)
   })
@@ -192,6 +193,33 @@ describe('Drum Rack runtime', () => {
     expect(registryAdds).toEqual(['clip-1'])
 
     expect(runtime.scheduleMidiClip(createTrack(), createMidiClip(39), 0, 10, 1)).toBe(false)
+    expect(audio.sources).toHaveLength(1)
+  })
+
+  test('previews keyboard notes through mapped pads', () => {
+    const audio = createTestAudio()
+    const params = createDefaultDrumRackParams()
+    const buffers = new Map([[params.pads[0]?.id ?? '', createBuffer(1)]])
+    const runtime = createDrumRackRuntime({
+      ensureAudio: () => {},
+      getAudioContext: () => audio.ctx,
+      getBpm: () => 120,
+      timelineToCtxTime: (timelineSec) => timelineSec,
+      ensureTrackInput: () => audio.ctx.createGain(),
+      sources: {
+        add: () => {},
+        remove: () => {},
+        snapshot: () => [],
+        clear: () => {},
+        stopClip: () => {},
+      },
+      getArpeggiator: () => undefined,
+    })
+
+    runtime.setTrackDrumRack('track-1', params, buffers)
+
+    expect(runtime.previewNote('track-1', 36, 0.5)).toBe(true)
+    expect(runtime.previewNote('track-1', 37, 0.5)).toBe(false)
     expect(audio.sources).toHaveLength(1)
   })
 

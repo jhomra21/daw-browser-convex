@@ -206,6 +206,17 @@ export function createDrumRackRuntime(options: DrumRackRuntimeOptions) {
       if (!pad || !buffer) return
       triggerPad(trackId, pad, buffer, ctx.currentTime, velocity)
     },
+    previewNote: (trackId: string, pitch: number, velocity: number) => {
+      options.ensureAudio()
+      const config = configs.get(trackId)
+      const ctx = options.getAudioContext()
+      if (!config || !ctx) return false
+      const padIndex = config.padIndexByNote.get(pitch)
+      const pad = padIndex === undefined ? undefined : config.params.pads[padIndex]
+      const buffer = pad ? config.buffers.get(pad.id) : undefined
+      if (!pad || !buffer) return false
+      return triggerPad(trackId, pad, buffer, ctx.currentTime, velocity)
+    },
     stopAll: () => {
       for (const trackId of Array.from(activeHitsByTrack.keys())) {
         const hits = activeHitsByTrack.get(trackId)

@@ -1,7 +1,7 @@
 import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime } from './audio-runtime'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
-import { normalizeMasterVolume, type ArpParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite, type SynthParamsInput } from '@daw-browser/shared'
+import { normalizeMasterVolume, type ArpParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { createReverbImpulseCache } from './effects/reverb-impulse-cache'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
@@ -113,6 +113,10 @@ export class AudioEngine {
     return this.instrumentRuntime.getTrackSynthPreviewState(trackId)
   }
 
+  getTrackInstrumentKind(trackId: string): TrackInstrumentParams['kind'] | undefined {
+    return this.instrumentRuntime.getTrackInstrumentKind(trackId)
+  }
+
   ensureAudio(opts?: { applyCachedTrackGains?: boolean }) {
     if (!this.audioCtx) {
       this.runtime = createAudioRuntime()
@@ -146,6 +150,10 @@ export class AudioEngine {
 
   previewDrumRackPad(trackId: string, padId: string, velocity = 1) {
     this.instrumentRuntime.previewDrumRackPad(trackId, padId, velocity)
+  }
+
+  previewDrumRackNote(trackId: string, pitch: number, velocity = 1) {
+    return this.instrumentRuntime.previewDrumRackNote(trackId, pitch, velocity)
   }
 
   setTrackArpeggiator(trackId: string, params: ArpParams) {

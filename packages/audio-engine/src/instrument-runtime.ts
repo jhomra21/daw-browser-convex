@@ -71,6 +71,7 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
     clearTrackArpeggiator: (trackId: string) => {
       arpeggiators.delete(trackId)
     },
+    getTrackInstrumentKind: (trackId: string) => activeKinds.get(trackId),
     getTrackSynthGainNode: synthRuntime.getTrackSynthGainNode,
     getTrackSynthPreviewState: synthRuntime.getTrackSynthPreviewState,
     scheduleMidiClip: (track: RuntimeTrack, clip: RuntimeClip, playheadSec: number, nowCtx: number, endLimitSec?: number): boolean => {
@@ -78,6 +79,7 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       return synthRuntime.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec)
     },
     previewDrumRackPad: drumRackRuntime.previewPad,
+    previewDrumRackNote: drumRackRuntime.previewNote,
     stopClip: (clipId: string) => {
       synthRuntime.stopClip(clipId)
       drumRackRuntime.stopClip(clipId)

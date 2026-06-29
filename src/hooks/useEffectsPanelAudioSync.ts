@@ -229,6 +229,7 @@ export function useEffectsPanelAudioSync(
   let syncedTrackIds = new Set<Track["id"]>();
   let syncedProjectId: string | null = null;
   const drumRackBufferSync = createDrumRackBufferSync();
+  onCleanup(drumRackBufferSync.dispose);
 
   const clearSyncedTrackState = (audioEngine: AudioEngine, trackIds: Iterable<Track["id"]>) => {
     for (const trackId of trackIds) {
@@ -299,7 +300,7 @@ export function useEffectsPanelAudioSync(
         if (syncLocalAudioEffect(row, saturatorSyncDescriptor, saturatorState, activeTargetId, audioEngine)) continue;
         if (syncLocalAudioEffect(row, delaySyncDescriptor, delayState, activeTargetId, audioEngine)) continue;
         if (syncLocalAudioEffect(row, reverbSyncDescriptor, reverbState, activeTargetId, audioEngine)) continue;
-        if (row.effect === "synth" || row.effect === "instrument") {
+        if (row.effect === "instrument" || (row.effect === "synth" && !instrumentByTrackId.has(row.targetId))) {
           const instrument = readInstrumentParamsFromEffectRow(row);
           if (row.targetId !== activeTargetId && instrument) instrumentByTrackId.set(row.targetId, instrument);
           continue;
@@ -318,7 +319,7 @@ export function useEffectsPanelAudioSync(
 
       const trackId = row.trackId;
       if (!trackId || trackId === activeTargetId) continue;
-      if (row.type === "synth" || row.type === "instrument") {
+      if (row.type === "instrument" || (row.type === "synth" && !instrumentByTrackId.has(trackId))) {
         const instrument = readInstrumentParamsFromEffectRow(row);
         if (instrument) instrumentByTrackId.set(trackId, instrument);
       }

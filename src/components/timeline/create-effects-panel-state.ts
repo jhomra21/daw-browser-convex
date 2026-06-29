@@ -2,6 +2,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  onCleanup,
   type Accessor,
 } from "solid-js";
 import {
@@ -140,6 +141,7 @@ export function createEffectsPanelInstrumentDevice(
     return Boolean(projectId && isLocalId("project", projectId));
   };
   const drumRackBufferSync = createDrumRackBufferSync();
+  onCleanup(drumRackBufferSync.dispose);
   const localArp = createLocalEffectRows<ArpeggiatorParams>({
     projectId: context.projectId,
     targetId: getTrackTargetId,

@@ -25,6 +25,7 @@ export function createDrumRackBufferSync() {
   const loader = createSampleBufferLoader();
   const cache = new Map<Track["id"], DrumRackBufferCacheEntry>();
   const versions = new Map<Track["id"], number>();
+  let disposed = false;
 
   const clearTrack = (trackId: Track["id"]) => {
     cache.delete(trackId);
@@ -32,7 +33,10 @@ export function createDrumRackBufferSync() {
   };
 
   const syncTrack = (audioEngine: AudioEngine, trackId: Track["id"], params: DrumRackParams) => {
+    if (disposed) return;
     const key = drumRackParamsBufferKey(params);
+    const version = (versions.get(trackId) ?? 0) + 1;
+    versions.set(trackId, version);
     const cached = cache.get(trackId);
     if (cached?.key === key) {
       audioEngine.setTrackDrumRack(trackId, params, cached.buffers);
@@ -40,8 +44,6 @@ export function createDrumRackBufferSync() {
     }
 
     audioEngine.setTrackDrumRack(trackId, params);
-    const version = (versions.get(trackId) ?? 0) + 1;
-    versions.set(trackId, version);
 
     const jobs = params.pads.flatMap((pad) => pad.sample ? [{ padId: pad.id, sample: pad.sample }] : []);
     if (jobs.length === 0) {
@@ -55,6 +57,7 @@ export function createDrumRackBufferSync() {
       const buffer = await loader.load(job.sample.url, (data) => audioEngine.decodeAudioData(data));
       return buffer ? { padId: job.padId, buffer } : undefined;
     })).then((loaded) => {
+      if (disposed) return;
       if (versions.get(trackId) !== version) return;
       const buffers = new Map<string, AudioBuffer>();
       for (const entry of loaded) {
@@ -65,8 +68,16 @@ export function createDrumRackBufferSync() {
     });
   };
 
+  const dispose = () => {
+    disposed = true;
+    cache.clear();
+    versions.clear();
+    loader.clear();
+  };
+
   return {
     clearTrack,
+    dispose,
     syncTrack,
   };
 }

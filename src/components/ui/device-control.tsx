@@ -2,6 +2,7 @@ import { cn } from '~/lib/utils'
 
 type DeviceToggleButtonProps = {
   label: string
+  ariaLabel?: string
   active?: boolean
   disabled?: boolean
   class?: string
@@ -19,6 +20,7 @@ export function DeviceToggleButton(props: DeviceToggleButtonProps) {
       )}
       disabled={props.disabled}
       aria-pressed={props.active === true}
+      aria-label={props.ariaLabel}
       onClick={props.onClick}
     >
       {props.label}

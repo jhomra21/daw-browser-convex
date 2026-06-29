@@ -149,7 +149,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     const arpByTrackId = new Map<string, ArpeggiatorParams>();
     for (const row of effects) {
       if (row?.targetType !== "track" || !row.trackId) continue;
-      if (row.type === "synth" || row.type === "instrument") {
+      if (row.type === "instrument" || (row.type === "synth" && !instrumentByTrackId.has(row.trackId))) {
         const instrumentParams = readInstrumentParamsFromEffectRow(row);
         if (instrumentParams) instrumentByTrackId.set(row.trackId, instrumentParams);
       }

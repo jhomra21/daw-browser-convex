@@ -2,6 +2,8 @@ import { createEffect, createSignal, For, onCleanup, Show, type Component } from
 import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
 import { getWaveformSlice } from "@daw-browser/waveforms/select-waveform-window";
 import {
+  DRUM_RACK_FIRST_NOTE,
+  DRUM_RACK_PAD_COUNT,
   getDrumRackPadNoteLabel,
   type DrumRackPadParams,
   type DrumRackParams,
@@ -14,7 +16,6 @@ import Knob from "~/components/ui/knob";
 import { drumRackSampleKey } from "~/lib/drum-rack-buffer-sync";
 import { createSampleBufferLoader } from "~/lib/sample-buffer-loader";
 import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE, type SampleDragData } from "~/lib/sample-drag-data";
-import { cn } from "~/lib/utils";
 
 type DrumRackProps = {
   params: DrumRackParams;
@@ -197,8 +198,7 @@ const DrumRack: Component<DrumRackProps> = (props) => {
   const [bufferState, setBufferState] = createSignal<DrumRackBufferState>(createEmptyBufferState(props.targetId));
 
   createEffect(() => {
-    const next = props.params.selectedPadId;
-    if (next) setSelectedPadId(next);
+    setSelectedPadId(props.params.selectedPadId ?? props.params.pads[0]?.id);
   });
 
   createEffect(() => {
@@ -321,14 +321,14 @@ const DrumRack: Component<DrumRackProps> = (props) => {
       typeLabel="Instrument"
       onReset={props.onReset}
       disabled={!props.canWrite}
-      class="w-[38rem] min-w-[38rem]"
+      class="w-152 min-w-152"
     >
       <div class="flex h-full min-h-0 text-xs text-neutral-300">
         <div class="flex w-72 flex-col border-r border-neutral-800 p-3">
           <div class="flex items-center justify-between">
-            <div class="text-[10px] uppercase tracking-[0.18em] text-neutral-500">16 pads</div>
-            <div class="text-[10px] text-neutral-600">
-              {getDrumRackPadNoteLabel(props.params.pads[0]?.note ?? 36)}-{getDrumRackPadNoteLabel(props.params.pads[props.params.pads.length - 1]?.note ?? 51)}
+            <div class="text-2xs uppercase tracking-widest text-neutral-500">{DRUM_RACK_PAD_COUNT} pads</div>
+            <div class="text-2xs text-neutral-600">
+              {getDrumRackPadNoteLabel(props.params.pads[0]?.note ?? DRUM_RACK_FIRST_NOTE)}-{getDrumRackPadNoteLabel(props.params.pads[props.params.pads.length - 1]?.note ?? DRUM_RACK_FIRST_NOTE + DRUM_RACK_PAD_COUNT - 1)}
             </div>
           </div>
 
@@ -336,21 +336,27 @@ const DrumRack: Component<DrumRackProps> = (props) => {
             <For each={props.params.pads}>
               {(pad) => (
                 <button
-                  class={cn(
-                    "relative flex h-14 flex-col justify-between border p-1.5 text-left text-[10px] transition-colors",
-                    pad.id === selectedPadId()
-                      ? "border-cyan-500/70 bg-cyan-950/30 text-cyan-100"
-                      : pad.sample
-                        ? "border-neutral-700 bg-neutral-800/80 text-neutral-300 hover:border-neutral-500"
-                        : "border-neutral-800/60 bg-neutral-900/40 text-neutral-600 hover:border-neutral-700",
-                    pad.mute && "opacity-40",
-                  )}
+                  class="relative flex h-14 flex-col justify-between border p-1.5 text-left text-2xs transition-colors"
+                  classList={{
+                    "border-cyan-500/70 bg-cyan-950/30 text-cyan-100": pad.id === selectedPadId(),
+                    "border-neutral-700 bg-neutral-800/80 text-neutral-300 hover:border-neutral-500": pad.id !== selectedPadId() && !!pad.sample,
+                    "border-neutral-800/60 bg-neutral-900/40 text-neutral-600 hover:border-neutral-700": pad.id !== selectedPadId() && !pad.sample,
+                    "opacity-40": pad.mute,
+                  }}
                   onClick={() => setSelectedPadId(pad.id)}
                   onDblClick={() => previewPad(pad)}
                   onDragOver={handleSampleDragOver}
                   onDrop={(event) => handleSampleDrop(event, pad)}
                 >
-                  <span class={cn("truncate", pad.sample ? "text-neutral-200" : "text-neutral-500")}>{padDisplayName(pad)}</span>
+                  <span
+                    class="truncate"
+                    classList={{
+                      "text-neutral-200": !!pad.sample,
+                      "text-neutral-500": !pad.sample,
+                    }}
+                  >
+                    {padDisplayName(pad)}
+                  </span>
                   <div class="flex items-center justify-between">
                     <span class="text-neutral-500">{getDrumRackPadNoteLabel(pad.note)}</span>
                     <Show when={pad.sample}>
@@ -369,7 +375,7 @@ const DrumRack: Component<DrumRackProps> = (props) => {
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
                   <div class="truncate font-medium text-neutral-100">{padDisplayName(pad())}</div>
-                  <div class="mt-1 text-[10px] uppercase tracking-[0.18em] text-neutral-500">
+                  <div class="mt-1 text-2xs uppercase tracking-widest text-neutral-500">
                     {getDrumRackPadNoteLabel(pad().note)} · {formatSampleLength(pad())}
                   </div>
                 </div>
@@ -377,13 +383,14 @@ const DrumRack: Component<DrumRackProps> = (props) => {
                   class="flex h-6 w-6 shrink-0 items-center justify-center border border-neutral-700 bg-neutral-900 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-50"
                   disabled={!pad().sample || pad().mute || loadingPadId() === pad().id}
                   onClick={() => void previewPad(pad())}
+                  aria-label={`Preview ${padDisplayName(pad())}`}
                   title="Preview"
                 >
                   <Show
                     when={loadingPadId() !== pad().id}
-                    fallback={<span class="font-mono text-[10px] leading-none">...</span>}
+                    fallback={<span class="font-mono text-2xs leading-none">...</span>}
                   >
-                    <span class="ml-px h-0 w-0 border-y-[4px] border-l-[7px] border-y-transparent border-l-current" />
+                    <span class="ml-px h-0 w-0 border-y-4 border-l-8 border-y-transparent border-l-current" />
                   </Show>
                 </button>
               </div>
@@ -393,7 +400,7 @@ const DrumRack: Component<DrumRackProps> = (props) => {
                   when={pad().sample}
                   fallback={
                     <div
-                      class="flex h-16 items-center justify-center border border-dashed border-neutral-700/50 bg-neutral-900/30 text-[10px] text-neutral-600"
+                      class="flex h-16 items-center justify-center border border-dashed border-neutral-700/50 bg-neutral-900/30 text-2xs text-neutral-600"
                       onDragOver={handleSampleDragOver}
                       onDrop={(event) => handleSampleDrop(event, pad())}
                     >
@@ -408,7 +415,7 @@ const DrumRack: Component<DrumRackProps> = (props) => {
                       onDrop={(event) => handleSampleDrop(event, pad())}
                     >
                       <SampleWaveform sample={sample()} buffer={readCachedPadBuffer(props.targetId, pad())} />
-                      <div class="mt-1 flex items-center gap-2 text-[10px] leading-none text-neutral-500">
+                      <div class="mt-1 flex items-center gap-2 text-2xs leading-none text-neutral-500">
                         <span>{formatSampleLength(pad())}</span>
                         <span>{formatSampleRate(sample().source.sampleRate)}</span>
                         <span>{sampleChannelLabel(sample().source.channelCount)}</span>
@@ -460,6 +467,7 @@ const DrumRack: Component<DrumRackProps> = (props) => {
                     <div class="text-xs font-medium leading-none text-neutral-400">Mute</div>
                     <DeviceToggleButton
                       label={pad().mute ? "On" : "Off"}
+                      ariaLabel={`Mute ${padDisplayName(pad())}: ${pad().mute ? "on" : "off"}`}
                       active={pad().mute}
                       disabled={!props.canWrite}
                       class="w-10"
@@ -468,7 +476,7 @@ const DrumRack: Component<DrumRackProps> = (props) => {
                   </div>
                 </div>
 
-                <label class="mt-3 flex items-center gap-2 text-[10px]">
+                <label class="mt-3 flex items-center gap-2 text-2xs">
                   <span class="text-neutral-500">Choke</span>
                   <select
                     class="border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-neutral-200 disabled:cursor-not-allowed disabled:opacity-50"

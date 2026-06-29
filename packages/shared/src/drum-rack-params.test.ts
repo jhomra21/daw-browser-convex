@@ -10,6 +10,7 @@ import {
   isInstrumentKind,
   normalizeDrumRackParams,
   serializeDrumRackParams,
+  type DrumRackSampleAssignment,
 } from './index'
 
 describe('Drum Rack params', () => {
@@ -118,6 +119,19 @@ describe('Drum Rack params', () => {
     expect(updated.selectedPadId).toBe('pad-37')
     expect(updated.pads[1]?.name).toBe('snare.wav')
     expect(updated.pads[1]?.sample?.assetKey).toBe('samples/snare.wav')
+  })
+
+  test('sample assignment preserves existing sample drag identity fields', () => {
+    const sample: DrumRackSampleAssignment = {
+      assetKey: 'samples/kick.wav',
+      url: 'blob:kick',
+      name: 'kick.wav',
+      sourceKind: 'upload',
+      source: { durationSec: 0.5, sampleRate: 48000, channelCount: 2 },
+    }
+    const updated = assignSampleToDrumRackPad(createDefaultDrumRackParams(), 'pad-36', sample)
+
+    expect(updated.pads[0]?.sample).toEqual(sample)
   })
 
   test('ignores sample assignment for missing pads', () => {

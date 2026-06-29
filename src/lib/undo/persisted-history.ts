@@ -16,6 +16,7 @@ const EFFECT_TYPES: ReadonlySet<string> = new Set([
   'delay',
   'reverb',
   'synth',
+  'instrument',
   'arp',
   'master-eq',
   'master-compressor',

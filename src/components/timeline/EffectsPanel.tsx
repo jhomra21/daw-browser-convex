@@ -6,7 +6,6 @@ import {
   createSignal,
 } from "solid-js";
 import type { AudioEffectKind } from "@daw-browser/shared";
-import { getDrumRackPadNoteLabel } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Delay from "~/components/effects/Delay";
 import Compressor from "~/components/effects/Compressor";
@@ -15,6 +14,7 @@ import Reverb from "~/components/effects/Reverb";
 import Saturator from "~/components/effects/Saturator";
 import Synth from "~/components/effects/Synth";
 import SynthCard from "~/components/effects/SynthCard";
+import DrumRack from "~/components/effects/DrumRack";
 import type { AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
@@ -23,7 +23,6 @@ import TimelineBottomPanelFooter from "~/components/timeline/TimelineBottomPanel
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { BOTTOM_PANEL_EDGE_PADDING_PX } from "~/lib/bottom-panel-layout";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
-import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE } from "~/lib/sample-drag-data";
 import {
   createEffectsPanelController,
   type EffectsPanelAudioEffects,
@@ -85,6 +84,8 @@ type EffectsPanelInstrumentSectionProps = {
     state: EffectsPanelInstrumentDevice;
     canWrite: boolean;
   };
+  audioEngine: AudioEngine;
+  targetId: string;
 };
 
 const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProps> = (props) => (
@@ -114,41 +115,17 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
     </Show>
 
     <Show when={props.instrument.state.drumRack.params()}>
-      {(params) => {
-        const selectedPadId = () => params().selectedPadId;
-        return (
-          <div class="flex min-w-48 flex-col justify-between border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-300">
-            <div class="font-medium text-neutral-200">Drum Rack</div>
-            <div class="mt-2 grid grid-cols-4 gap-1">
-              <For each={params().pads}>
-                {(pad) => (
-                  <div
-                    class="flex h-8 items-center justify-center border border-neutral-800 bg-neutral-900 px-1 text-[10px] text-neutral-400"
-                    classList={{ "border-cyan-500 text-cyan-200": pad.id === selectedPadId() }}
-                    onDragOver={(event) => {
-                      if (!props.instrument.canWrite) return;
-                      if (!event.dataTransfer?.types.includes(SAMPLE_DRAG_DATA_TYPE)) return;
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "copy";
-                    }}
-                    onDrop={(event) => {
-                      if (!props.instrument.canWrite) return;
-                      const raw = event.dataTransfer?.getData(SAMPLE_DRAG_DATA_TYPE);
-                      if (!raw) return;
-                      const sample = parseSampleDragData(raw);
-                      if (!sample) return;
-                      event.preventDefault();
-                      props.instrument.state.drumRack.assignSampleToPad(pad.id, sample);
-                    }}
-                  >
-                    {pad.name ?? getDrumRackPadNoteLabel(pad.note)}
-                  </div>
-                )}
-              </For>
-            </div>
-          </div>
-        );
-      }}
+      {(params) => (
+        <DrumRack
+          params={params()}
+          targetId={props.targetId}
+          audioEngine={props.audioEngine}
+          canWrite={props.instrument.canWrite}
+          onAssignSampleToPad={props.instrument.state.drumRack.assignSampleToPad}
+          onReset={props.instrument.state.drumRack.reset}
+          onUpdatePad={props.instrument.state.drumRack.updatePad}
+        />
+      )}
     </Show>
 
     <Show
@@ -423,6 +400,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                         state: instrument,
                         canWrite: canWriteCurrentTargetEffects(),
                       }}
+                      audioEngine={props.audioEngine}
+                      targetId={props.selectedFXTarget}
                     />
                   </Show>
                   <EffectsPanelEffectCards

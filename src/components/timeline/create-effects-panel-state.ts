@@ -105,6 +105,7 @@ type EffectsPanelInstrumentDevice = {
     readDraftForTarget: (targetId: string) => DrumRackParams | undefined;
     readForTarget: (targetId: string) => DrumRackParams | undefined;
     reset: () => void;
+    updatePad: (padId: string, updates: Partial<DrumRackParams["pads"][number]>) => void;
   };
   activeInstrument: Accessor<TrackInstrumentParams | undefined>;
   readDraftInstrumentForTarget: (targetId: string) => TrackInstrumentParams | undefined;
@@ -390,6 +391,22 @@ export function createEffectsPanelInstrumentDevice(
     }));
   }
 
+  function updateCurrentDrumRackPad(padId: string, updates: Partial<DrumRackParams["pads"][number]>): void {
+    const targetId = getTrackTargetId();
+    if (!targetId) return;
+    instrumentState.updateForTarget(targetId, (prev) => {
+      const params = prev.kind === "drum-rack" ? prev.params : INSTRUMENT_CONTRACTS["drum-rack"].createDefaultParams();
+      return {
+        kind: "drum-rack",
+        params: {
+          ...params,
+          pads: params.pads.map((pad) => pad.id === padId ? { ...pad, ...updates, id: pad.id, note: pad.note } : pad),
+          selectedPadId: padId,
+        },
+      };
+    });
+  }
+
   function switchInstrumentForTarget(targetId: Track["id"], kind: InstrumentKind): boolean {
     const track = getTrackByTargetId(targetId);
     if (!track || track.kind !== "instrument") return false;
@@ -575,6 +592,7 @@ export function createEffectsPanelInstrumentDevice(
         if (!targetId) return;
         instrumentState.updateForTarget(targetId, () => ({ kind: "drum-rack", params: createDefaultDrumRackParams() }));
       },
+      updatePad: updateCurrentDrumRackPad,
     },
     activeInstrument: instrumentState.params,
     readDraftInstrumentForTarget: instrumentState.readDraftForTarget,

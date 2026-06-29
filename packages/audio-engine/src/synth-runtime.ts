@@ -37,6 +37,7 @@ type SynthRuntimeOptions = {
   timelineToCtxTime: (timelineSec: number) => number
   ensureTrackInput: (trackId: string) => GainNode
   sources: SourceRegistry
+  getArpeggiator?: (trackId: string) => ArpParams | undefined
 }
 
 export function createSynthRuntime(options: SynthRuntimeOptions) {
@@ -216,7 +217,7 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
         notes: midi.notes,
         rangeStartSec: playheadSec,
         rangeEndSec: endLimitSec,
-        arp: arpeggiators.get(track.id),
+        arp: options.getArpeggiator?.(track.id) ?? arpeggiators.get(track.id),
       })
       const voice = getSynthVoiceConfig({ synth: configs.get(track.id), midi })
 

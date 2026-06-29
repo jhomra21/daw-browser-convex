@@ -283,10 +283,10 @@ export function createEffectsPanelInstrumentDevice(
         context.audioEngine().setTrackSynth(targetId, params.params);
         return;
       }
-      context.audioEngine().clearTrackSynth(targetId);
+      context.audioEngine().setTrackDrumRack(targetId, params.params);
     },
     clearFromEngine: (targetId) => {
-      context.audioEngine().clearTrackSynth(targetId);
+      context.audioEngine().clearTrackInstrument(targetId);
     },
     createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
     persistParams: (targetId, params, persistContext) => {

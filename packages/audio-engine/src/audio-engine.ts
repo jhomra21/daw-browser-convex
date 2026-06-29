@@ -9,7 +9,8 @@ import { createMeteringRuntime, type SpectrumFrame, type TrackStereoLevels, type
 import type { CompressorMeterFrame, CompressorMeterListener } from './effects/compressor-worklet'
 import { createMetronomeRuntime } from './metronome-runtime'
 import { createSourceRegistry, stopAndDisconnectSource } from './source-registry'
-import { createSynthRuntime } from './synth-runtime'
+import { createInstrumentRuntime, type SetTrackInstrumentInput } from './instrument-runtime'
+import type { DrumRackResolvedBuffers } from './drum-rack-runtime'
 import { createTransportClock } from './transport-clock'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
@@ -33,7 +34,7 @@ export class AudioEngine {
   private tracksSnapshot: RuntimeTrack[] = []
   private masterVolume = 1
   private sources = createSourceRegistry()
-  private synthRuntime = createSynthRuntime({
+  private instrumentRuntime = createInstrumentRuntime({
     ensureAudio: () => this.ensureAudio(),
     getAudioContext: () => this.audioCtx,
     getBpm: () => this.clock.getBpm(),
@@ -105,11 +106,11 @@ export class AudioEngine {
 
   getTrackSynthGainNode(trackId: string) {
     this.ensureAudio()
-    return this.synthRuntime.getTrackSynthGainNode(trackId)
+    return this.instrumentRuntime.getTrackSynthGainNode(trackId)
   }
 
   getTrackSynthPreviewState(trackId: string) {
-    return this.synthRuntime.getTrackSynthPreviewState(trackId)
+    return this.instrumentRuntime.getTrackSynthPreviewState(trackId)
   }
 
   ensureAudio(opts?: { applyCachedTrackGains?: boolean }) {
@@ -132,27 +133,47 @@ export class AudioEngine {
   }
 
   setTrackSynth(trackId: string, params: SynthParamsInput) {
-    this.synthRuntime.setTrackSynth(trackId, params)
+    this.instrumentRuntime.setTrackSynth(trackId, params)
+  }
+
+  setTrackInstrument(trackId: string, input: SetTrackInstrumentInput) {
+    this.instrumentRuntime.setTrackInstrument(trackId, input)
+  }
+
+  setTrackDrumRack(trackId: string, params: Extract<SetTrackInstrumentInput['instrument'], { kind: 'drum-rack' }>['params'], buffers?: DrumRackResolvedBuffers) {
+    this.instrumentRuntime.setTrackDrumRack(trackId, params, buffers)
+  }
+
+  previewDrumRackPad(trackId: string, padId: string, velocity = 1) {
+    this.instrumentRuntime.previewDrumRackPad(trackId, padId, velocity)
   }
 
   setTrackArpeggiator(trackId: string, params: ArpParams) {
-    this.synthRuntime.setTrackArpeggiator(trackId, params)
+    this.instrumentRuntime.setTrackArpeggiator(trackId, params)
   }
 
   clearTrackArpeggiator(trackId: string) {
-    this.synthRuntime.clearTrackArpeggiator(trackId)
+    this.instrumentRuntime.clearTrackArpeggiator(trackId)
   }
 
   clearTrackSynth(trackId: string) {
-    this.synthRuntime.clearTrackSynth(trackId)
+    this.instrumentRuntime.clearTrackSynth(trackId)
+  }
+
+  clearTrackDrumRack(trackId: string) {
+    this.instrumentRuntime.clearTrackDrumRack(trackId)
+  }
+
+  clearTrackInstrument(trackId: string) {
+    this.instrumentRuntime.clearTrackInstrument(trackId)
   }
 
   private stopActiveNotesForClip(clipId: string) {
-    this.synthRuntime.stopClip(clipId)
+    this.instrumentRuntime.stopClip(clipId)
   }
 
   private stopAllActiveNotes() {
-    this.synthRuntime.stopAll()
+    this.instrumentRuntime.stopAll()
   }
 
   setBpm(nextBpm: number) {
@@ -275,7 +296,7 @@ export class AudioEngine {
   }
 
   private disposeSynthTrack(id: string) {
-    this.synthRuntime.disposeTrack(id)
+    this.instrumentRuntime.disposeTrack(id)
   }
 
   private stopClipSources() {
@@ -284,7 +305,7 @@ export class AudioEngine {
     const toStop = this.sources.snapshot()
     // Reset tracking immediately so subsequent schedules are isolated
     this.sources.clear()
-    this.synthRuntime.clearActiveOscillators()
+    this.instrumentRuntime.clearActiveOscillators()
 
     // Quick master fade to avoid clicks
     const ctx = this.audioCtx
@@ -314,7 +335,7 @@ export class AudioEngine {
 
   private scheduleMidiClip(track: RuntimeTrack, clip: RuntimeClip, playheadSec: number, nowCtx: number, startLimitSec?: number, endLimitSec?: number): boolean {
     if (!this.audioCtx) return false
-    return this.synthRuntime.scheduleMidiClip(track, clip, startLimitSec ?? playheadSec, nowCtx, endLimitSec)
+    return this.instrumentRuntime.scheduleMidiClip(track, clip, startLimitSec ?? playheadSec, nowCtx, endLimitSec)
   }
   scheduleAllClipsFromPlayhead(tracks: RuntimeTrack[], playheadSec: number, opts?: ScheduleOptions): ScheduleResult {
     return this.scheduler.scheduleAllClipsFromPlayhead(tracks, playheadSec, opts)
@@ -360,7 +381,7 @@ export class AudioEngine {
     this.impulseCache.clear()
     this.mixerRuntime.clear()
     this.metering.close()
-    this.synthRuntime.clear()
+    this.instrumentRuntime.clear()
     this.masterFx.close()
     closeAudioRuntime(this.runtime)
     this.masterGain = null

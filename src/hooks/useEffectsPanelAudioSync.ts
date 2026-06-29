@@ -235,7 +235,7 @@ export function useEffectsPanelAudioSync(
       audioEngine.setTrackSaturator(trackId, disabledSaturator);
       audioEngine.setTrackDelay(trackId, disabledDelay);
       audioEngine.setTrackReverb(trackId, disabledReverb);
-      audioEngine.clearTrackSynth(trackId);
+      audioEngine.clearTrackInstrument(trackId);
       audioEngine.clearTrackArpeggiator(trackId);
     }
   };
@@ -355,15 +355,15 @@ export function useEffectsPanelAudioSync(
       applyTrackAudioEffect(reverbSyncDescriptor, reverbState, track.id, audioEngine, options.localDraftEffects);
       if (track.kind === "instrument") {
         const instrument = options.localDraftEffects?.instrument?.(track.id) ?? instrumentByTrackId.get(track.id);
-        const synth = instrument?.kind === "synth" ? instrument.params : undefined;
-        if (synth) audioEngine.setTrackSynth(track.id, synth);
-        else audioEngine.clearTrackSynth(track.id);
+        if (instrument?.kind === "synth") audioEngine.setTrackSynth(track.id, instrument.params);
+        else if (instrument?.kind === "drum-rack") audioEngine.setTrackDrumRack(track.id, instrument.params);
+        else audioEngine.clearTrackInstrument(track.id);
         const arp = options.localDraftEffects?.arp?.(track.id) ?? arpByTrackId.get(track.id);
         if (arp) audioEngine.setTrackArpeggiator(track.id, arp);
         else audioEngine.clearTrackArpeggiator(track.id);
         continue;
       }
-      audioEngine.clearTrackSynth(track.id);
+      audioEngine.clearTrackInstrument(track.id);
       audioEngine.clearTrackArpeggiator(track.id);
     }
 

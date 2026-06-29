@@ -189,8 +189,8 @@ export function useTimelineMidiOverlay(
       if (!ctx) return
       const trackId = resolveTargetTrackId()
       if (!trackId) return
-      if (options.audioEngine.getTrackInstrumentKind(trackId) === 'drum-rack') {
-        options.audioEngine.previewDrumRackNote(trackId, pitch, velocity)
+      const instrumentKind = options.audioEngine.getTrackInstrumentKind(trackId)
+      if (options.audioEngine.previewDrumRackNote(trackId, pitch, velocity) || instrumentKind === 'drum-rack') {
         return
       }
       const synthGain = options.audioEngine.getTrackSynthGainNode(trackId)
@@ -219,8 +219,8 @@ export function useTimelineMidiOverlay(
       if (!ctx || activeLiveNotes.has(pitch)) return
       const trackId = resolveTargetTrackId()
       if (!trackId) return
-      if (options.audioEngine.getTrackInstrumentKind(trackId) === 'drum-rack') {
-        options.audioEngine.previewDrumRackNote(trackId, pitch, velocity)
+      const instrumentKind = options.audioEngine.getTrackInstrumentKind(trackId)
+      if (options.audioEngine.previewDrumRackNote(trackId, pitch, velocity) || instrumentKind === 'drum-rack') {
         return
       }
       const synthGain = options.audioEngine.getTrackSynthGainNode(trackId)

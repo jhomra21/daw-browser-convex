@@ -3,7 +3,6 @@ import { v } from "convex/values";
 import {
   automationTargetKey,
   getAutomationParameterDescriptor,
-  isAutomationParameterSupportedForTarget,
   normalizeAutomationPoints,
 } from "@daw-browser/shared";
 import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
@@ -36,11 +35,10 @@ const normalizeEnvelopeInput = async (
     points: Array<{ id: string; timeSec: number; value: number; interpolation: "linear" | "hold" }>;
   },
 ) => {
-  if (!isAutomationParameterSupportedForTarget(input.parameterId, input.targetKind)) {
+  const descriptor = getAutomationParameterDescriptor(input.parameterId);
+  if (!descriptor || !descriptor.targetKinds.includes(input.targetKind)) {
     throw new Error("Unsupported automation parameter.");
   }
-  const descriptor = getAutomationParameterDescriptor(input.parameterId);
-  if (!descriptor) throw new Error("Unsupported automation parameter.");
   const trackId = input.targetKind === "track"
     ? await normalizeTrackId(ctx, input.projectId, input.trackId)
     : undefined;

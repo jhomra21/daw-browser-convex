@@ -14,7 +14,7 @@ const optionLabel = (label: string, parameterId: string, automatedParameterIds: 
 
 const parameterOptions = getAutomationParameterOptions()
 
-const groupedParameterOptions = () => {
+const groupedParameterOptions = (() => {
   const groups: Array<{ group: string; devices: Array<{ device: string; options: typeof parameterOptions }> }> = []
   for (const option of parameterOptions) {
     let group = groups.find((entry) => entry.group === option.group)
@@ -30,7 +30,7 @@ const groupedParameterOptions = () => {
     device.options.push(option)
   }
   return groups
-}
+})()
 
 const optionById = new Map(parameterOptions.map((option) => [option.id, option]))
 
@@ -73,7 +73,7 @@ export default function AutomationParameterPicker(props: AutomationParameterPick
       </button>
       <Show when={open()}>
         <div class="absolute left-0 top-full z-50 mt-1 max-h-80 w-72 overflow-auto rounded border border-neutral-700 bg-neutral-950 p-1 shadow-xl shadow-black/50" role="listbox">
-          <For each={groupedParameterOptions()}>
+          <For each={groupedParameterOptions}>
             {(group) => (
               <div class="py-1">
                 <div class="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">{group.group}</div>

@@ -4,7 +4,7 @@ import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
 import { setLocalEffect } from "~/lib/local-effects";
-import { deleteLocalAutomationEnvelope, deleteLocalTrackAutomationEnvelopes, setLocalAutomationEnvelope } from "~/lib/local-automation";
+import { deleteLocalAutomationEnvelope, setLocalAutomationEnvelope } from "~/lib/local-automation";
 import { automationTargetKey, isLocalId } from "@daw-browser/shared";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
@@ -370,7 +370,6 @@ export const removeHistoryClipIdsOrThrow = async (deps: Deps, clipIds: string[],
 
 export const removeHistoryTrackOrThrow = async (deps: Deps, trackId: Track["id"], message: string) => {
   if (isLocalHistoryProject(deps)) {
-    await deleteLocalTrackAutomationEnvelopes(deps.projectId, trackId);
     await createLocalTimelineRepository(deps.projectId).deleteTrack(trackId);
     return;
   }

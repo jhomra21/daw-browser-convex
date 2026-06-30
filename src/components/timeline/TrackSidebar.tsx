@@ -9,7 +9,7 @@ import {
 } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
-import { automationEnvelopeValueRange, automationTargetKey, type AutomationEnvelope } from "@daw-browser/shared";
+import { automationEnvelopeValueRange, automationTargetKey, getAutomationParameterOptions, type AutomationEnvelope } from "@daw-browser/shared";
 import {
   canTrackReceiveAudioClip,
   getTrackChannelRole,
@@ -23,6 +23,8 @@ import MasterSidebarRow, {
   type MasterSidebarModel,
 } from "~/components/timeline/MasterSidebarRow";
 import AutomationParameterPicker from "./automation-parameter-picker";
+
+const automationParameterOptions = getAutomationParameterOptions();
 
 type TrackSidebarProps = {
   sidebar: {
@@ -411,10 +413,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               if (!automationVisible()) return false;
               const visible = new Set(visibleAutomationParameterIds());
               if (!visible.has(selectedAutomationParameter())) return true;
-              for (const parameterId of automationMeta()?.automatedParameterIds ?? []) {
-                if (!visible.has(parameterId)) return true;
-              }
-              return false;
+              return automationParameterOptions.some((option) => !visible.has(option.id));
             };
 
             return (

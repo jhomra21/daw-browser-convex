@@ -30,6 +30,7 @@ import {
   automationTargetKeysAfterReEnable,
   automationTargetKeysForManualOverride,
   filterAutomationEnvelopesForScheduling,
+  getAutomationParameterOptions,
   type AutomationEnvelope,
 } from "@daw-browser/shared";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
@@ -105,6 +106,8 @@ const replaceAutomationEnvelope = (
   next[existingIndex === -1 ? next.length - 1 : existingIndex] = envelope;
   return next;
 };
+
+const automationParameterOptions = getAutomationParameterOptions();
 
 const Timeline: Component<TimelineProps> = (props) => {
   const [confirmOpen, setConfirmOpen] = createSignal(false);
@@ -627,6 +630,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     const selectedParameter = selectedAutomationParameters.value()[trackId] ?? "volume";
     if (!visible.has(selectedParameter)) {
       showAutomationLane(trackId, selectedParameter);
+      return;
+    }
+    const nextOption = automationParameterOptions.find((option) => !visible.has(option.id));
+    if (nextOption) {
+      showAutomationLane(trackId, nextOption.id);
+      selectedAutomationParameters.setValue((current) => (
+        current[trackId] === nextOption.id ? current : { ...current, [trackId]: nextOption.id }
+      ));
       return;
     }
     for (const envelope of persistedAutomation.envelopes()) {

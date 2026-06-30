@@ -57,4 +57,32 @@ describe('createPersistedAutomationState', () => {
       dispose()
     })
   })
+
+  test('passes previous envelopes and changed target keys when deleting a draft', async () => {
+    await createRoot(async (dispose) => {
+      const applied: Array<{
+        next: AutomationEnvelope[]
+        previous: AutomationEnvelope[]
+        changed: string[]
+      }> = []
+      const state = createPersistedAutomationState({
+        targetKey: () => envelope.targetKey,
+        envelopes: () => [envelope],
+        applyToEngine: (next, previous, changed) => {
+          applied.push({ next, previous, changed: [...changed] })
+        },
+        persistEnvelope: () => {},
+        deleteEnvelope: () => {},
+      })
+
+      await state.commitEnvelope(undefined, envelope.targetKey)
+
+      expect(applied).toEqual([{
+        next: [],
+        previous: [envelope],
+        changed: [envelope.targetKey],
+      }])
+      dispose()
+    })
+  })
 })

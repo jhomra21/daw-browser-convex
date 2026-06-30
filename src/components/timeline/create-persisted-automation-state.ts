@@ -9,7 +9,7 @@ type PersistedAutomationContext = {
 type PersistedAutomationStateOptions = {
   targetKey: Accessor<string | undefined>
   envelopes: Accessor<AutomationEnvelope[]>
-  applyToEngine: (envelopes: AutomationEnvelope[]) => void
+  applyToEngine: (envelopes: AutomationEnvelope[], previousEnvelopes: AutomationEnvelope[], changedTargetKeys: ReadonlySet<string>) => void
   persistEnvelope: (envelope: AutomationEnvelope, context: PersistedAutomationContext) => void | Promise<unknown>
   deleteEnvelope: (targetKey: string, context: PersistedAutomationContext) => void | Promise<unknown>
   createPersistContext?: () => PersistedAutomationContext
@@ -61,7 +61,7 @@ export function createPersistedAutomationState(options: PersistedAutomationState
       if (draft) next.set(draftTargetKey, draft)
       else next.delete(draftTargetKey)
     }
-    options.applyToEngine(Array.from(next.values()))
+    options.applyToEngine(Array.from(next.values()), options.envelopes(), new Set([targetKey]))
   }
 
   const commitEnvelope = async (envelope: AutomationEnvelope | undefined, explicitTargetKey?: string) => {
@@ -80,7 +80,7 @@ export function createPersistedAutomationState(options: PersistedAutomationState
       delete next[targetKey]
       return next
     })
-    options.applyToEngine(Array.from(next.values()))
+    options.applyToEngine(Array.from(next.values()), options.envelopes(), new Set([targetKey]))
     options.onEnvelopeCommitted?.(previous, envelope, context)
   }
 
@@ -93,17 +93,17 @@ export function createPersistedAutomationState(options: PersistedAutomationState
       delete next[targetKey]
       return next
     })
-    options.applyToEngine(options.envelopes())
+    options.applyToEngine(options.envelopes(), envelopes(), new Set([targetKey]))
   }
 
   const syncRemote = () => {
     const dirty = dirtyTargetKeys()
     const nextEnvelopes = options.envelopes()
     if (dirty.size === 0) {
-      options.applyToEngine(nextEnvelopes)
+      options.applyToEngine(nextEnvelopes, options.envelopes(), new Set())
       return
     }
-    options.applyToEngine(envelopes())
+    options.applyToEngine(envelopes(), options.envelopes(), dirty)
   }
 
   return {

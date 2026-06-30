@@ -309,7 +309,7 @@ export class AudioEngine {
     this.automationEnvelopes = envelopes
   }
 
-  scheduleAutomationFromPlayhead(playheadSec: number, opts?: { horizonSec?: number }) {
+  scheduleAutomationFromPlayhead(playheadSec: number, opts?: { horizonSec?: number; targetKeys?: ReadonlySet<string> }) {
     if (!this.audioCtx) return
     const horizonSec = opts?.horizonSec ?? LIVE_SCHEDULE_HORIZON_SEC
     const window = {
@@ -318,6 +318,7 @@ export class AudioEngine {
       endLimitSec: playheadSec + horizonSec,
     }
     for (const envelope of this.automationEnvelopes) {
+      if (opts?.targetKeys && !opts.targetKeys.has(envelope.targetKey)) continue
       if (!envelope.enabled) continue
       const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
       const fallback = descriptor?.defaultValue ?? 0
@@ -332,9 +333,10 @@ export class AudioEngine {
     this.scheduleAutomationFromPlayhead(timeSec, { horizonSec: 0 })
   }
 
-  cancelAutomationSchedules() {
+  cancelAutomationSchedules(targetKeys?: ReadonlySet<string>, envelopes = this.automationEnvelopes) {
     const now = this.audioCtx?.currentTime ?? 0
-    for (const envelope of this.automationEnvelopes) {
+    for (const envelope of envelopes) {
+      if (targetKeys && !targetKeys.has(envelope.targetKey)) continue
       const bindings = envelope.target.kind === 'master'
         ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain)
         : this.mixerRuntime.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId)

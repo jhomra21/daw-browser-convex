@@ -350,14 +350,29 @@ const Timeline: Component<TimelineProps> = (props) => {
   const applyAutomationEnvelopeState = (envelope: AutomationEnvelope | undefined, targetKey: string) => {
     setAutomationEnvelopes((current) => {
       const rows = replaceAutomationEnvelope(current, targetKey, envelope);
+      audioEngine.cancelAutomationSchedules(new Set([targetKey]), current);
       audioEngine.setAutomationEnvelopes(rows);
+      if (isPlaying()) audioEngine.scheduleAutomationFromPlayhead(playheadSec(), { targetKeys: new Set([targetKey]) });
       return rows;
     });
+  };
+  const applyAutomationRowsToEngine = (
+    next: AutomationEnvelope[],
+    previous: AutomationEnvelope[],
+    changedTargetKeys: ReadonlySet<string>,
+  ) => {
+    audioEngine.cancelAutomationSchedules(changedTargetKeys.size === 0 ? undefined : changedTargetKeys, previous);
+    audioEngine.setAutomationEnvelopes(next);
+    if (isPlaying()) {
+      audioEngine.scheduleAutomationFromPlayhead(playheadSec(), {
+        targetKeys: changedTargetKeys.size === 0 ? undefined : changedTargetKeys,
+      });
+    }
   };
   const persistedAutomation = createPersistedAutomationState({
     targetKey: automationTargetKeyAccessor,
     envelopes: automationEnvelopes,
-    applyToEngine: (next) => audioEngine.setAutomationEnvelopes(next),
+    applyToEngine: applyAutomationRowsToEngine,
     persistEnvelope: async (envelope) => {
       const rid = projectId();
       if (!rid) return;

@@ -98,7 +98,7 @@ type Props = {
     onLocalMidiSaved: (clipId: string, midi: Clip["midi"]) => void;
   };
   sidebar: {
-    isPlaying: boolean;
+    meteringActive: boolean;
     currentUserId: string;
     master: MasterSidebarModel;
     subscribeTrackLevels: AudioEngine["subscribeTrackStereoLevels"];
@@ -229,7 +229,7 @@ export default function TimelineWorkspace(props: Props) {
                 sidebarWidth: props.sidebarWidth,
                 bottomOffsetPx: props.bottomPanelOffsetPx,
                 master: props.sidebar.master,
-                isPlaying: props.sidebar.isPlaying,
+                meteringActive: props.sidebar.meteringActive,
                 recordArmTrackId: props.recording.recordArmTrackId,
                 currentUserId: props.sidebar.currentUserId,
                 subscribeTrackLevels: props.sidebar.subscribeTrackLevels,

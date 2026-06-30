@@ -51,7 +51,7 @@ type EffectsPanelProps = {
   canWriteTrackRouting?: (trackId: Track["id"]) => boolean;
   grantClipWrite?: OptimisticGrantWrite;
   // Timeline context
-  isPlaying: boolean;
+  spectrumActive: boolean;
   playheadSec?: number;
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
@@ -348,7 +348,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     audioEngine: () => props.audioEngine,
     projectId: () => props.projectId,
     userId: () => props.userId,
-    isPlaying: () => props.isPlaying,
+    spectrumActive: () => props.spectrumActive,
     playheadSec: () => props.playheadSec,
     canWriteTrackRouting: props.canWriteTrackRouting,
     grantClipWrite: props.grantClipWrite,

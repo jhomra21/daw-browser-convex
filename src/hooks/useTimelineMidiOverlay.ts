@@ -35,6 +35,7 @@ type UseTimelineMidiOverlayReturn = {
     canPlay: Accessor<boolean>
     targetLabel: Accessor<string | null>
     octave: Accessor<number>
+    hasActiveNotes: Accessor<boolean>
     toggle: () => void
     isActive: (pitch: number) => boolean
   }
@@ -325,6 +326,7 @@ export function useTimelineMidiOverlay(
       canPlay: midiKeyboardCanPlay,
       targetLabel: midiKeyboardTargetLabel,
       octave: midiKeyboard.octave,
+      hasActiveNotes: midiKeyboard.hasActiveNotes,
       toggle: () => setMidiKeyboardEnabled(value => !value),
       isActive: midiKeyboard.isActive,
     },

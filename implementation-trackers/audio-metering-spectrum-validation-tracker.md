@@ -7,7 +7,20 @@ Investigate and fix two related visual feedback gaps:
 - The EQ device shows no live spectrum when no project audio has played yet.
 - Live MIDI keyboard playback while transport is stopped does not visibly drive the target track meter in the right sidebar or the selected track spectrum in the effects panel.
 
-This tracker is a plan only. It should be implemented in a focused follow-up branch.
+This tracker was executed on the `audio-metering-refactor` branch.
+
+## Execution Status
+
+- [x] Validated tracker assumptions against the current source.
+- [x] Exposed live MIDI visual activity from existing active keyboard rows.
+- [x] Threaded transport-independent visualization activity through `Timeline`.
+- [x] Renamed sidebar meter activation from `isPlaying` to `meteringActive`.
+- [x] Renamed effects spectrum activation from `isPlaying` to `spectrumActive`.
+- [x] Added a bounded effects-panel spectrum sampling clock for stopped-transport live MIDI.
+- [x] Preserved existing audio routing and mixer graph behavior without speculative routing refreshes.
+- [x] Ran final validators.
+
+Corrected implementation note: Phase 5 was required by code inspection because `useEffectsPanelAudioSync` only re-sampled from reactive dependency changes; stopped-transport held notes do not advance `playheadSec`, so the effects panel needs a scoped RAF sampler while open and spectrum-active.
 
 ## Evidence from Current Code
 

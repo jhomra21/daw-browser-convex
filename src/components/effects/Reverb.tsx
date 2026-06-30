@@ -37,6 +37,9 @@ type ReverbProps = {
   onToggleEnabled?: (enabled: boolean) => void
   onReset?: () => void
   class?: string
+  automationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>
+  onAutomationParameterTouch?: (parameterId: string) => void
+  onManualAutomationOverride?: (parameterId: string) => void
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
@@ -413,9 +416,14 @@ function EarlyReflectionsPanel(props: {
 }
 
 export default function Reverb(props: ReverbProps) {
+  const automationRange = (parameterId: string) => props.automationRangesByParameterId?.get(parameterId)
+  const touchAutomation = (parameterId: string) => props.onAutomationParameterTouch?.(parameterId)
   const updateWet = (value: number) => {
     const wet = normalizeWet(value)
-    if (wet !== props.params.wet) props.onChange({ wet })
+    if (wet !== props.params.wet) {
+      props.onManualAutomationOverride?.('reverb.wet')
+      props.onChange({ wet })
+    }
   }
   const updateDecay = (value: number) => {
     const decaySec = normalizeDecay(value)
@@ -423,7 +431,10 @@ export default function Reverb(props: ReverbProps) {
   }
   const updatePreDelay = (value: number) => {
     const preDelayMs = normalizePreDelay(value)
-    if (preDelayMs !== props.params.preDelayMs) props.onChange({ preDelayMs })
+    if (preDelayMs !== props.params.preDelayMs) {
+      props.onManualAutomationOverride?.('reverb.preDelayMs')
+      props.onChange({ preDelayMs })
+    }
   }
   const updateReflections = (value: number) => {
     const reflections = normalizeUnitParam(value)
@@ -471,7 +482,10 @@ export default function Reverb(props: ReverbProps) {
   }
   const updateStereoWidth = (value: number) => {
     const stereoWidth = normalizeStereoWidth(value)
-    if (stereoWidth !== props.params.stereoWidth) props.onChange({ stereoWidth })
+    if (stereoWidth !== props.params.stereoWidth) {
+      props.onManualAutomationOverride?.('reverb.stereoWidth')
+      props.onChange({ stereoWidth })
+    }
   }
   const updateSpace = (updates: Pick<ReverbParams, 'size' | 'decaySec' | 'diffusion'>) => {
     const size = normalizeUnitParam(updates.size)
@@ -538,6 +552,9 @@ export default function Reverb(props: ReverbProps) {
                 step={1}
                 unit="ms"
                 disabled={!props.params.enabled}
+                automationRange={automationRange('reverb.preDelayMs')}
+                automated={!!automationRange('reverb.preDelayMs')}
+                onAutomationSelect={() => touchAutomation('reverb.preDelayMs')}
                 onValueChange={updatePreDelay}
               />
             </div>
@@ -593,6 +610,9 @@ export default function Reverb(props: ReverbProps) {
               max={REVERB_STEREO_WIDTH_MAX}
               step={0.01}
               disabled={!props.params.enabled}
+              automationRange={automationRange('reverb.stereoWidth')}
+              automated={!!automationRange('reverb.stereoWidth')}
+              onAutomationSelect={() => touchAutomation('reverb.stereoWidth')}
               onValueChange={updateStereoWidth}
             />
             <Knob
@@ -605,6 +625,9 @@ export default function Reverb(props: ReverbProps) {
               max={REVERB_WET_MAX}
               step={0.01}
               disabled={!props.params.enabled}
+              automationRange={automationRange('reverb.wet')}
+              automated={!!automationRange('reverb.wet')}
+              onAutomationSelect={() => touchAutomation('reverb.wet')}
               onValueChange={updateWet}
             />
           </div>

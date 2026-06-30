@@ -1,6 +1,6 @@
 import { normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams, parseEqBandParameterId, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { createEqNodes } from '../effects/dsp'
-import { connectFxChain, createCompressorNodeChain, createDelayNodeChain, createReverbNodeChain, createSaturatorNodeChain, type CreateReverbImpulseResponse } from '../effects/chain'
+import { connectFxChain, createCompressorNodeChain, createDelayNodeChain, createReverbNodeChain, createSaturatorNodeChain, type CreateReverbImpulseResponse, type DelayNodeChain, type ReverbNodeChain, type SaturatorNodeChain } from '../effects/chain'
 import { createReverbImpulseCache } from '../effects/reverb-impulse-cache'
 import type { ResolvedMixerGraph } from './types'
 import type { AutomationAudioBinding } from '../automation'
@@ -10,6 +10,9 @@ type OfflineTrackNodes = {
   gain: GainNode
   output: GainNode
   eqNodesByBand: Map<string, BiquadFilterNode>
+  saturator: SaturatorNodeChain | null
+  delay: DelayNodeChain | null
+  reverb: ReverbNodeChain | null
 }
 
 type OfflineMixerNodes = {
@@ -32,6 +35,9 @@ type OfflineFxChainConfig = {
 
 type OfflineFxChain = {
   eqNodesByBand: Map<string, BiquadFilterNode>
+  saturator: SaturatorNodeChain | null
+  delay: DelayNodeChain | null
+  reverb: ReverbNodeChain | null
 }
 
 async function buildOfflineFxChain(
@@ -55,7 +61,7 @@ async function buildOfflineFxChain(
     ? createReverbNodeChain(ctx, config.reverb, createImpulseResponse)
     : null
   connectFxChain(input, destination, { eqNodes: eq, compressorChain: compressor, saturatorChain: saturator, delayChain: delay, reverbChain: reverb, order: config.order })
-  return { eqNodesByBand }
+  return { eqNodesByBand, saturator, delay, reverb }
 }
 
 const resolveEqAutomationBindings = (
@@ -69,6 +75,60 @@ const resolveEqAutomationBindings = (
   if (eq.property === 'frequencyHz') return [{ param: node.frequency, valueToAudioValue: (value) => value }]
   if (eq.property === 'gainDb') return [{ param: node.gain, valueToAudioValue: (value) => value }]
   return [{ param: node.Q, valueToAudioValue: (value) => value }]
+}
+
+const resolveFxAutomationBindings = (
+  parameterId: string,
+  nodes: { saturator: SaturatorNodeChain | null; delay: DelayNodeChain | null; reverb: ReverbNodeChain | null },
+): AutomationAudioBinding[] => {
+  const { saturator, delay, reverb } = nodes
+  if (saturator) {
+    if (parameterId === 'saturator.driveDb') return [{ param: saturator.driveGain.gain, valueToAudioValue: (value) => 10 ** (value / 20) }]
+    if (parameterId === 'saturator.outputDb') return [{ param: saturator.outputGain.gain, valueToAudioValue: (value) => 10 ** (value / 20) }]
+    if (parameterId === 'saturator.dryWet') return [
+      { param: saturator.dryGain.gain, valueToAudioValue: (value) => 1 - value },
+      { param: saturator.wetGain.gain, valueToAudioValue: (value) => value },
+    ]
+    if (parameterId === 'saturator.colorFrequencyHz') return [{ param: saturator.colorFilter.frequency, valueToAudioValue: (value) => value }]
+  }
+  if (delay) {
+    if (parameterId === 'delay.timeMs') return [
+      { param: delay.delayLeft.delayTime, valueToAudioValue: (value) => value / 1000 },
+      { param: delay.delayRight.delayTime, valueToAudioValue: (value) => value / 1000 },
+    ]
+    if (parameterId === 'delay.feedback') return [
+      { param: delay.feedbackLeft.gain, valueToAudioValue: (value) => value },
+      { param: delay.feedbackRight.gain, valueToAudioValue: (value) => value },
+    ]
+    if (parameterId === 'delay.dryWet') return [
+      { param: delay.dryGain.gain, valueToAudioValue: (value) => 1 - value },
+      { param: delay.wetGain.gain, valueToAudioValue: (value) => value },
+    ]
+    if (parameterId === 'delay.lowCutHz') return [
+      { param: delay.lowCutLeft.frequency, valueToAudioValue: (value) => value },
+      { param: delay.lowCutRight.frequency, valueToAudioValue: (value) => value },
+    ]
+    if (parameterId === 'delay.highCutHz') return [
+      { param: delay.highCutLeft.frequency, valueToAudioValue: (value) => value },
+      { param: delay.highCutRight.frequency, valueToAudioValue: (value) => value },
+    ]
+  }
+  if (reverb) {
+    if (parameterId === 'reverb.wet') return [
+      { param: reverb.dryGain.gain, valueToAudioValue: (value) => 1 - value },
+      { param: reverb.wetGain.gain, valueToAudioValue: (value) => value },
+    ]
+    if (parameterId === 'reverb.preDelayMs') return [{ param: reverb.preDelay.delayTime, valueToAudioValue: (value) => value / 1000 }]
+    if (parameterId === 'reverb.lowCutHz') return [{ param: reverb.lowCut.frequency, valueToAudioValue: (value) => value }]
+    if (parameterId === 'reverb.highCutHz') return [{ param: reverb.highCut.frequency, valueToAudioValue: (value) => value }]
+    if (parameterId === 'reverb.stereoWidth') return [
+      { param: reverb.leftToLeft.gain, valueToAudioValue: (value) => (1 + value) / 2 },
+      { param: reverb.rightToLeft.gain, valueToAudioValue: (value) => (1 - value) / 2 },
+      { param: reverb.leftToRight.gain, valueToAudioValue: (value) => (1 - value) / 2 },
+      { param: reverb.rightToRight.gain, valueToAudioValue: (value) => (1 + value) / 2 },
+    ]
+  }
+  return []
 }
 
 export async function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: ResolvedMixerGraph, bpm = 120): Promise<OfflineMixerNodes> {
@@ -86,7 +146,7 @@ export async function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: R
     gain.gain.value = resolvedTrack.gain
     output.gain.value = resolvedTrack.outputGain
     const fx = await buildOfflineFxChain(ctx, input, gain, createCachedImpulseResponse, { eq: resolvedTrack.fx?.eq, compressor: resolvedTrack.fx?.compressor, saturator: resolvedTrack.fx?.saturator, delay: resolvedTrack.fx?.delay, reverb: resolvedTrack.fx?.reverb, order: resolvedTrack.fx?.order, bpm })
-    trackNodes.set(resolvedTrack.channel.id, { input, gain, output, eqNodesByBand: fx.eqNodesByBand })
+    trackNodes.set(resolvedTrack.channel.id, { input, gain, output, eqNodesByBand: fx.eqNodesByBand, saturator: fx.saturator, delay: fx.delay, reverb: fx.reverb })
   }
 
   for (const resolvedTrack of graph.channels) {
@@ -114,11 +174,17 @@ export async function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: R
       const nodes = trackNodes.get(trackId)
       if (!nodes) return []
       if (parameterId === 'volume') return [{ param: nodes.gain.gain, valueToAudioValue: (value) => value }]
-      return resolveEqAutomationBindings(nodes.eqNodesByBand, parameterId)
+      return [
+        ...resolveEqAutomationBindings(nodes.eqNodesByBand, parameterId),
+        ...resolveFxAutomationBindings(parameterId, nodes),
+      ]
     },
     resolveMasterAutomationBindings: (parameterId) => {
       if (parameterId === 'volume') return [{ param: masterInput.gain, valueToAudioValue: (value) => value }]
-      return resolveEqAutomationBindings(masterFx.eqNodesByBand, parameterId)
+      return [
+        ...resolveEqAutomationBindings(masterFx.eqNodesByBand, parameterId),
+        ...resolveFxAutomationBindings(parameterId, { saturator: masterFx.saturator, delay: masterFx.delay, reverb: masterFx.reverb }),
+      ]
     },
   }
 }

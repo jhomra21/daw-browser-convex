@@ -27,6 +27,9 @@ type DelayProps = {
   onToggleEnabled?: (enabled: boolean) => void
   onReset?: () => void
   class?: string
+  automationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>
+  onAutomationParameterTouch?: (parameterId: string) => void
+  onManualAutomationOverride?: (parameterId: string) => void
 }
 
 const DEFAULT_PARAMS = createDefaultDelayParams()
@@ -163,6 +166,11 @@ function DelayFilterGraph(props: {
 
 export default function Delay(props: DelayProps) {
   const timeMode = () => props.params.mode === 'time'
+  const automationRange = (parameterId: string) => props.automationRangesByParameterId?.get(parameterId)
+  const changeAutomated = (parameterId: string, updates: Partial<DelayParams>) => {
+    props.onManualAutomationOverride?.(parameterId)
+    props.onChange(updates)
+  }
   const updateLowCut = (value: number) => {
     const lowCutHz = normalizeLowCut(value, props.params.highCutHz)
     if (lowCutHz === props.params.lowCutHz) return
@@ -207,7 +215,7 @@ export default function Delay(props: DelayProps) {
                 </div>
               }
             >
-              <Knob class="py-1" label="Time" valueLabel={formatMs(props.params.timeMs)} value={props.params.timeMs} resetValue={DEFAULT_PARAMS.timeMs} min={DELAY_TIME_MS_MIN} max={DELAY_TIME_MS_MAX} step={1} disabled={!props.params.enabled} onValueChange={(timeMs) => props.onChange({ timeMs })} />
+              <Knob class="py-1" label="Time" valueLabel={formatMs(props.params.timeMs)} value={props.params.timeMs} resetValue={DEFAULT_PARAMS.timeMs} min={DELAY_TIME_MS_MIN} max={DELAY_TIME_MS_MAX} step={1} disabled={!props.params.enabled} automationRange={automationRange('delay.timeMs')} automated={!!automationRange('delay.timeMs')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.timeMs')} onValueChange={(timeMs) => changeAutomated('delay.timeMs', { timeMs })} />
             </Show>
           </div>
 
@@ -231,10 +239,10 @@ export default function Delay(props: DelayProps) {
         </div>
 
         <div class="mt-auto grid grid-cols-4 gap-3 pb-2 pt-3">
-          <Knob class="px-1 py-1" label="Low Cut" valueLabel={formatFrequency(props.params.lowCutHz)} value={props.params.lowCutHz} resetValue={DEFAULT_PARAMS.lowCutHz} min={DELAY_LOW_CUT_HZ_MIN} max={DELAY_LOW_CUT_HZ_MAX} step={1} logarithmic disabled={!props.params.enabled || !props.params.filterEnabled} onValueChange={updateLowCut} />
-          <Knob class="px-1 py-1" label="High Cut" valueLabel={formatFrequency(props.params.highCutHz)} value={props.params.highCutHz} resetValue={DEFAULT_PARAMS.highCutHz} min={DELAY_HIGH_CUT_HZ_MIN} max={DELAY_HIGH_CUT_HZ_MAX} step={100} logarithmic disabled={!props.params.enabled || !props.params.filterEnabled} onValueChange={updateHighCut} />
-          <Knob class="px-1 py-1" label="Feedback" valueLabel={formatPercent(props.params.feedback)} value={props.params.feedback} resetValue={DEFAULT_PARAMS.feedback} min={DELAY_FEEDBACK_MIN} max={DELAY_FEEDBACK_MAX} step={0.01} disabled={!props.params.enabled} onValueChange={(feedback) => props.onChange({ feedback })} />
-          <Knob class="px-1 py-1" label="Dry/Wet" valueLabel={formatPercent(props.params.dryWet)} value={props.params.dryWet} resetValue={DEFAULT_PARAMS.dryWet} min={DELAY_DRY_WET_MIN} max={DELAY_DRY_WET_MAX} step={0.01} disabled={!props.params.enabled} onValueChange={(dryWet) => props.onChange({ dryWet })} />
+          <Knob class="px-1 py-1" label="Low Cut" valueLabel={formatFrequency(props.params.lowCutHz)} value={props.params.lowCutHz} resetValue={DEFAULT_PARAMS.lowCutHz} min={DELAY_LOW_CUT_HZ_MIN} max={DELAY_LOW_CUT_HZ_MAX} step={1} logarithmic disabled={!props.params.enabled || !props.params.filterEnabled} automationRange={automationRange('delay.lowCutHz')} automated={!!automationRange('delay.lowCutHz')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.lowCutHz')} onValueChange={(value) => { props.onManualAutomationOverride?.('delay.lowCutHz'); updateLowCut(value) }} />
+          <Knob class="px-1 py-1" label="High Cut" valueLabel={formatFrequency(props.params.highCutHz)} value={props.params.highCutHz} resetValue={DEFAULT_PARAMS.highCutHz} min={DELAY_HIGH_CUT_HZ_MIN} max={DELAY_HIGH_CUT_HZ_MAX} step={100} logarithmic disabled={!props.params.enabled || !props.params.filterEnabled} automationRange={automationRange('delay.highCutHz')} automated={!!automationRange('delay.highCutHz')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.highCutHz')} onValueChange={(value) => { props.onManualAutomationOverride?.('delay.highCutHz'); updateHighCut(value) }} />
+          <Knob class="px-1 py-1" label="Feedback" valueLabel={formatPercent(props.params.feedback)} value={props.params.feedback} resetValue={DEFAULT_PARAMS.feedback} min={DELAY_FEEDBACK_MIN} max={DELAY_FEEDBACK_MAX} step={0.01} disabled={!props.params.enabled} automationRange={automationRange('delay.feedback')} automated={!!automationRange('delay.feedback')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.feedback')} onValueChange={(feedback) => changeAutomated('delay.feedback', { feedback })} />
+          <Knob class="px-1 py-1" label="Dry/Wet" valueLabel={formatPercent(props.params.dryWet)} value={props.params.dryWet} resetValue={DEFAULT_PARAMS.dryWet} min={DELAY_DRY_WET_MIN} max={DELAY_DRY_WET_MAX} step={0.01} disabled={!props.params.enabled} automationRange={automationRange('delay.dryWet')} automated={!!automationRange('delay.dryWet')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.dryWet')} onValueChange={(dryWet) => changeAutomated('delay.dryWet', { dryWet })} />
         </div>
       </div>
     </EffectShell>

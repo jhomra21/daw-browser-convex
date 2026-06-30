@@ -41,6 +41,29 @@ describe('automation helpers', () => {
     expect(options.some((option) => option.id === createEqBandParameterId('low', 'frequencyHz'))).toBe(false)
   })
 
+  test('exposes only effect parameters with supported automation bindings and UI controls', () => {
+    const options = getAutomationParameterOptions()
+    for (const parameterId of [
+      'saturator.driveDb',
+      'saturator.outputDb',
+      'saturator.dryWet',
+      'saturator.colorFrequencyHz',
+      'delay.timeMs',
+      'delay.feedback',
+      'delay.dryWet',
+      'delay.lowCutHz',
+      'delay.highCutHz',
+      'reverb.wet',
+      'reverb.preDelayMs',
+      'reverb.stereoWidth',
+    ]) {
+      expect(options.some((option) => option.id === parameterId)).toBe(true)
+      expect(getAutomationParameterDescriptor(parameterId)?.targetKinds).toEqual(['track', 'master'])
+    }
+    expect(getAutomationParameterDescriptor('compressor.thresholdDb')).toBeUndefined()
+    expect(getAutomationParameterDescriptor('reverb.decaySec')).toBeUndefined()
+  })
+
   test('computes envelope value ranges with optional bounds', () => {
     const envelope: AutomationEnvelope = {
       id: 'automation-1',

@@ -20,6 +20,64 @@ type TrackNodeGroup = {
   output: GainNode
 }
 
+const resolveSaturatorAutomationBindings = (chain: SaturatorChainState | undefined, parameterId: string): AutomationAudioBinding[] => {
+  const saturator = chain?.chain()
+  if (!saturator) return []
+  if (parameterId === 'saturator.driveDb') return [{ param: saturator.driveGain.gain, valueToAudioValue: (value) => 10 ** (value / 20) }]
+  if (parameterId === 'saturator.outputDb') return [{ param: saturator.outputGain.gain, valueToAudioValue: (value) => 10 ** (value / 20) }]
+  if (parameterId === 'saturator.dryWet') return [
+    { param: saturator.dryGain.gain, valueToAudioValue: (value) => 1 - value },
+    { param: saturator.wetGain.gain, valueToAudioValue: (value) => value },
+  ]
+  if (parameterId === 'saturator.colorFrequencyHz') return [{ param: saturator.colorFilter.frequency, valueToAudioValue: (value) => value }]
+  return []
+}
+
+const resolveDelayAutomationBindings = (chain: DelayChainState | undefined, parameterId: string): AutomationAudioBinding[] => {
+  const delay = chain?.chain()
+  if (!delay) return []
+  if (parameterId === 'delay.timeMs') return [
+    { param: delay.delayLeft.delayTime, valueToAudioValue: (value) => value / 1000 },
+    { param: delay.delayRight.delayTime, valueToAudioValue: (value) => value / 1000 },
+  ]
+  if (parameterId === 'delay.feedback') return [
+    { param: delay.feedbackLeft.gain, valueToAudioValue: (value) => value },
+    { param: delay.feedbackRight.gain, valueToAudioValue: (value) => value },
+  ]
+  if (parameterId === 'delay.dryWet') return [
+    { param: delay.dryGain.gain, valueToAudioValue: (value) => 1 - value },
+    { param: delay.wetGain.gain, valueToAudioValue: (value) => value },
+  ]
+  if (parameterId === 'delay.lowCutHz') return [
+    { param: delay.lowCutLeft.frequency, valueToAudioValue: (value) => value },
+    { param: delay.lowCutRight.frequency, valueToAudioValue: (value) => value },
+  ]
+  if (parameterId === 'delay.highCutHz') return [
+    { param: delay.highCutLeft.frequency, valueToAudioValue: (value) => value },
+    { param: delay.highCutRight.frequency, valueToAudioValue: (value) => value },
+  ]
+  return []
+}
+
+const resolveReverbAutomationBindings = (chain: ReverbChainState | undefined, parameterId: string): AutomationAudioBinding[] => {
+  const reverb = chain?.chain()
+  if (!reverb) return []
+  if (parameterId === 'reverb.wet') return [
+    { param: reverb.dryGain.gain, valueToAudioValue: (value) => 1 - value },
+    { param: reverb.wetGain.gain, valueToAudioValue: (value) => value },
+  ]
+  if (parameterId === 'reverb.preDelayMs') return [{ param: reverb.preDelay.delayTime, valueToAudioValue: (value) => value / 1000 }]
+  if (parameterId === 'reverb.lowCutHz') return [{ param: reverb.lowCut.frequency, valueToAudioValue: (value) => value }]
+  if (parameterId === 'reverb.highCutHz') return [{ param: reverb.highCut.frequency, valueToAudioValue: (value) => value }]
+  if (parameterId === 'reverb.stereoWidth') return [
+    { param: reverb.leftToLeft.gain, valueToAudioValue: (value) => (1 + value) / 2 },
+    { param: reverb.rightToLeft.gain, valueToAudioValue: (value) => (1 - value) / 2 },
+    { param: reverb.leftToRight.gain, valueToAudioValue: (value) => (1 - value) / 2 },
+    { param: reverb.rightToRight.gain, valueToAudioValue: (value) => (1 + value) / 2 },
+  ]
+  return []
+}
+
 type LiveMixerRuntimeOptions = {
   ensureAudio: () => void
   getAudioContext: () => AudioContext | null
@@ -362,12 +420,18 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       const trackNodes = ensureTrackNodes(trackId)
       if (parameterId === 'volume') return [{ param: trackNodes.gain.gain, valueToAudioValue: (value) => value }]
       const eq = parseEqBandParameterId(parameterId)
-      if (!eq) return []
-      const node = eqNodesByBand.get(trackId)?.get(eq.bandId)
-      if (!node) return []
-      if (eq.property === 'frequencyHz') return [{ param: node.frequency, valueToAudioValue: (value) => value }]
-      if (eq.property === 'gainDb') return [{ param: node.gain, valueToAudioValue: (value) => value }]
-      return [{ param: node.Q, valueToAudioValue: (value) => value }]
+      if (eq) {
+        const node = eqNodesByBand.get(trackId)?.get(eq.bandId)
+        if (!node) return []
+        if (eq.property === 'frequencyHz') return [{ param: node.frequency, valueToAudioValue: (value) => value }]
+        if (eq.property === 'gainDb') return [{ param: node.gain, valueToAudioValue: (value) => value }]
+        return [{ param: node.Q, valueToAudioValue: (value) => value }]
+      }
+      return [
+        ...resolveSaturatorAutomationBindings(saturatorChains.get(trackId), parameterId),
+        ...resolveDelayAutomationBindings(delayChains.get(trackId), parameterId),
+        ...resolveReverbAutomationBindings(reverbChains.get(trackId), parameterId),
+      ]
     },
     setTrackFxOrder: (trackId: string, order: AudioEffectKind[]) => {
       const normalized = normalizeAudioEffectOrder(order, order)

@@ -26,6 +26,9 @@ type SaturatorProps = {
   onToggleEnabled?: (enabled: boolean) => void
   onReset?: () => void
   class?: string
+  automationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>
+  onAutomationParameterTouch?: (parameterId: string) => void
+  onManualAutomationOverride?: (parameterId: string) => void
 }
 
 const DEFAULT_PARAMS = createDefaultSaturatorParams()
@@ -80,6 +83,11 @@ function SaturatorCurveGraph(props: { curve: SaturatorCurve }) {
 }
 
 export default function Saturator(props: SaturatorProps) {
+  const automationRange = (parameterId: string) => props.automationRangesByParameterId?.get(parameterId)
+  const changeAutomated = (parameterId: string, updates: Partial<SaturatorParams>) => {
+    props.onManualAutomationOverride?.(parameterId)
+    props.onChange(updates)
+  }
   return (
     <EffectShell
       title="Saturator"
@@ -106,15 +114,15 @@ export default function Saturator(props: SaturatorProps) {
           <SaturatorCurveGraph curve={props.params.curve} />
           <div class="grid grid-cols-[4.2rem_repeat(2,minmax(0,1fr))] items-end gap-2">
             <DeviceToggleButton label="Color" active={props.params.color} disabled={!props.params.enabled} onClick={() => props.onChange({ color: !props.params.color })} />
-            <Knob class="px-0 py-0" size={28} label="Freq" valueLabel={formatFrequency(props.params.colorFrequencyHz)} value={props.params.colorFrequencyHz} resetValue={DEFAULT_PARAMS.colorFrequencyHz} min={SATURATOR_COLOR_FREQUENCY_HZ_MIN} max={SATURATOR_COLOR_FREQUENCY_HZ_MAX} step={1} logarithmic disabled={!props.params.enabled || !props.params.color} onValueChange={(colorFrequencyHz) => props.onChange({ colorFrequencyHz })} />
+            <Knob class="px-0 py-0" size={28} label="Freq" valueLabel={formatFrequency(props.params.colorFrequencyHz)} value={props.params.colorFrequencyHz} resetValue={DEFAULT_PARAMS.colorFrequencyHz} min={SATURATOR_COLOR_FREQUENCY_HZ_MIN} max={SATURATOR_COLOR_FREQUENCY_HZ_MAX} step={1} logarithmic disabled={!props.params.enabled || !props.params.color} automationRange={automationRange('saturator.colorFrequencyHz')} automated={!!automationRange('saturator.colorFrequencyHz')} onAutomationSelect={() => props.onAutomationParameterTouch?.('saturator.colorFrequencyHz')} onValueChange={(colorFrequencyHz) => changeAutomated('saturator.colorFrequencyHz', { colorFrequencyHz })} />
             <Knob class="px-0 py-0" size={28} label="Amt" valueLabel={formatPercent(props.params.colorAmount)} value={props.params.colorAmount} resetValue={DEFAULT_PARAMS.colorAmount} min={SATURATOR_COLOR_AMOUNT_MIN} max={SATURATOR_COLOR_AMOUNT_MAX} step={0.01} disabled={!props.params.enabled || !props.params.color} onValueChange={(colorAmount) => props.onChange({ colorAmount })} />
           </div>
         </div>
 
         <div class="grid grid-cols-3 gap-3">
-          <Knob label="Drive" valueLabel={formatDb(props.params.driveDb)} value={props.params.driveDb} resetValue={DEFAULT_PARAMS.driveDb} min={SATURATOR_DRIVE_DB_MIN} max={SATURATOR_DRIVE_DB_MAX} step={0.1} disabled={!props.params.enabled} onValueChange={(driveDb) => props.onChange({ driveDb })} />
-          <Knob label="Output" valueLabel={formatDb(props.params.outputDb)} value={props.params.outputDb} resetValue={DEFAULT_PARAMS.outputDb} min={SATURATOR_OUTPUT_DB_MIN} max={SATURATOR_OUTPUT_DB_MAX} step={0.1} bipolar disabled={!props.params.enabled} onValueChange={(outputDb) => props.onChange({ outputDb })} />
-          <Knob label="Dry/Wet" valueLabel={formatPercent(props.params.dryWet)} value={props.params.dryWet} resetValue={DEFAULT_PARAMS.dryWet} min={SATURATOR_DRY_WET_MIN} max={SATURATOR_DRY_WET_MAX} step={0.01} disabled={!props.params.enabled} onValueChange={(dryWet) => props.onChange({ dryWet })} />
+          <Knob label="Drive" valueLabel={formatDb(props.params.driveDb)} value={props.params.driveDb} resetValue={DEFAULT_PARAMS.driveDb} min={SATURATOR_DRIVE_DB_MIN} max={SATURATOR_DRIVE_DB_MAX} step={0.1} disabled={!props.params.enabled} automationRange={automationRange('saturator.driveDb')} automated={!!automationRange('saturator.driveDb')} onAutomationSelect={() => props.onAutomationParameterTouch?.('saturator.driveDb')} onValueChange={(driveDb) => changeAutomated('saturator.driveDb', { driveDb })} />
+          <Knob label="Output" valueLabel={formatDb(props.params.outputDb)} value={props.params.outputDb} resetValue={DEFAULT_PARAMS.outputDb} min={SATURATOR_OUTPUT_DB_MIN} max={SATURATOR_OUTPUT_DB_MAX} step={0.1} bipolar disabled={!props.params.enabled} automationRange={automationRange('saturator.outputDb')} automated={!!automationRange('saturator.outputDb')} onAutomationSelect={() => props.onAutomationParameterTouch?.('saturator.outputDb')} onValueChange={(outputDb) => changeAutomated('saturator.outputDb', { outputDb })} />
+          <Knob label="Dry/Wet" valueLabel={formatPercent(props.params.dryWet)} value={props.params.dryWet} resetValue={DEFAULT_PARAMS.dryWet} min={SATURATOR_DRY_WET_MIN} max={SATURATOR_DRY_WET_MAX} step={0.01} disabled={!props.params.enabled} automationRange={automationRange('saturator.dryWet')} automated={!!automationRange('saturator.dryWet')} onAutomationSelect={() => props.onAutomationParameterTouch?.('saturator.dryWet')} onValueChange={(dryWet) => changeAutomated('saturator.dryWet', { dryWet })} />
         </div>
       </div>
     </EffectShell>

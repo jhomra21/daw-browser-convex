@@ -212,7 +212,7 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
   if (props.effect === "saturator") {
     return (
       <Show when={props.audioEffects.saturator.params()}>
-        {(params) => <Saturator params={params()} onChange={props.audioEffects.saturator.change} onToggleEnabled={props.audioEffects.saturator.toggleEnabled} onReset={props.audioEffects.saturator.reset} />}
+        {(params) => <Saturator params={params()} onChange={props.audioEffects.saturator.change} onToggleEnabled={props.audioEffects.saturator.toggleEnabled} onReset={props.audioEffects.saturator.reset} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}
       </Show>
     );
   }
@@ -226,13 +226,13 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
   if (props.effect === "delay") {
     return (
       <Show when={props.audioEffects.delay.params()}>
-        {(params) => <Delay params={params()} onChange={props.audioEffects.delay.change} onToggleEnabled={props.audioEffects.delay.toggleEnabled} onReset={props.audioEffects.delay.reset} />}
+        {(params) => <Delay params={params()} onChange={props.audioEffects.delay.change} onToggleEnabled={props.audioEffects.delay.toggleEnabled} onReset={props.audioEffects.delay.reset} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}
       </Show>
     );
   }
   return (
     <Show when={props.audioEffects.reverb.params()}>
-      {(params) => <Reverb params={params()} onChange={props.audioEffects.reverb.change} onToggleEnabled={props.audioEffects.reverb.toggleEnabled} onReset={props.audioEffects.reverb.reset} />}
+      {(params) => <Reverb params={params()} onChange={props.audioEffects.reverb.change} onToggleEnabled={props.audioEffects.reverb.toggleEnabled} onReset={props.audioEffects.reverb.reset} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}
     </Show>
   );
 };

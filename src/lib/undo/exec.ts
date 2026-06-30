@@ -3,7 +3,7 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { normalizeCompressorParams, normalizeReverbParams } from '@daw-browser/shared'
+import { normalizeCompressorParams, normalizeReverbParams, type AutomationEnvelope } from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
@@ -58,6 +58,7 @@ export type Deps = {
     applyTrackVolume: (trackId: Track['id'], volume: number, scope?: 'local' | 'shared') => void
     applyTrackMixState: (trackId: Track['id'], patch: { muted?: boolean; soloed?: boolean }, scope?: 'local' | 'shared') => void
     applyTrackRouting: (trackId: Track['id'], routing: TrackRouting) => void
+    applyAutomationEnvelope: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
   }
 }
 
@@ -212,6 +213,9 @@ async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, dire
 
 async function applyAutomationEnvelopeEntry(entry: Extract<HistoryEntry, { type: 'automation-envelope-change' }>, deps: Deps, direction: HistoryDirection) {
   await persistHistoryAutomationEnvelope(deps, entry, direction)
+  const envelope = pickDirectionalValue(direction, entry.data.before, entry.data.after)
+  const targetKey = envelope?.targetKey ?? entry.data.before?.targetKey ?? entry.data.after?.targetKey
+  if (targetKey) deps.actions.applyAutomationEnvelope(envelope ?? undefined, targetKey)
 }
 
 async function applyClipTimingEntry(entry: Extract<HistoryEntry, { type: 'clip-timing' }>, deps: Deps, direction: HistoryDirection) {

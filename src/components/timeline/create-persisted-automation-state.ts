@@ -71,13 +71,29 @@ export function createPersistedAutomationState(options: PersistedAutomationState
     const context = options.createPersistContext?.() ?? {}
     if (envelope) await options.persistEnvelope(envelope, context)
     else await options.deleteEnvelope(targetKey, context)
+    const next = new Map(persistedByTargetKey())
+    if (envelope) next.set(targetKey, envelope)
+    else next.delete(targetKey)
     clearDirty(targetKey)
     setDraftByTargetKey((prev) => {
       const next = { ...prev }
       delete next[targetKey]
       return next
     })
+    options.applyToEngine(Array.from(next.values()))
     options.onEnvelopeCommitted?.(previous, envelope, context)
+  }
+
+  const cancelPreview = (targetKey = options.targetKey()) => {
+    if (!targetKey) return
+    clearDirty(targetKey)
+    setDraftByTargetKey((prev) => {
+      if (!(targetKey in prev)) return prev
+      const next = { ...prev }
+      delete next[targetKey]
+      return next
+    })
+    options.applyToEngine(options.envelopes())
   }
 
   const syncRemote = () => {
@@ -92,6 +108,7 @@ export function createPersistedAutomationState(options: PersistedAutomationState
 
   return {
     commitEnvelope,
+    cancelPreview,
     envelopes,
     previewEnvelope,
     selectedEnvelope,

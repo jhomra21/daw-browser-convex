@@ -37,4 +37,24 @@ describe('createPersistedAutomationState', () => {
       dispose()
     })
   })
+
+  test('cancels a draft preview back to persisted envelopes', async () => {
+    await createRoot(async (dispose) => {
+      const applied: AutomationEnvelope[][] = []
+      const state = createPersistedAutomationState({
+        targetKey: () => envelope.targetKey,
+        envelopes: () => [],
+        applyToEngine: (envelopes) => applied.push(envelopes),
+        persistEnvelope: () => {},
+        deleteEnvelope: () => {},
+      })
+
+      state.previewEnvelope(envelope)
+      state.cancelPreview(envelope.targetKey)
+
+      expect(applied).toEqual([[envelope], []])
+      expect(state.envelopes()).toEqual([])
+      dispose()
+    })
+  })
 })

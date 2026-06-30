@@ -30,6 +30,7 @@ type TrackLaneProps = {
     durationSec: number
     onPreview: (envelope: AutomationEnvelope | undefined) => void
     onCommit: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
+    onCancelPreview: (targetKey: string) => void
   }
 }
 
@@ -53,6 +54,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
             durationSec={props.automation.durationSec}
             onPreview={props.automation.onPreview}
             onCommit={props.automation.onCommit}
+            onCancelPreview={props.automation.onCancelPreview}
           />
         </div>
       ) : null}

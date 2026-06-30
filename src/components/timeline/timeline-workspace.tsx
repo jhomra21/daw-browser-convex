@@ -125,6 +125,7 @@ type Props = {
     envelopesByTargetKey: Map<string, AutomationEnvelope>;
     onPreviewEnvelope: (envelope: AutomationEnvelope | undefined) => void;
     onCommitEnvelope: (envelope: AutomationEnvelope | undefined, targetKey?: string) => void;
+    onCancelPreview: (targetKey: string) => void;
   };
 };
 
@@ -234,6 +235,7 @@ export default function TimelineWorkspace(props: Props) {
                           durationSec: props.durationSec,
                           onPreview: props.automation.onPreviewEnvelope,
                           onCommit: props.automation.onCommitEnvelope,
+                          onCancelPreview: props.automation.onCancelPreview,
                         }}
                         onClipDblClick={(_, clipId) => {
                           const match = props.trackLookup.clipEntryById.get(clipId);

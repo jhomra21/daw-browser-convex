@@ -18,6 +18,7 @@ type AutomationLaneProps = {
   durationSec: number
   onPreview: (envelope: AutomationEnvelope | undefined) => void
   onCommit: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
+  onCancelPreview: (targetKey: string) => void
 }
 
 const AUTOMATION_LINE_COLOR = '#ef4444'
@@ -148,7 +149,10 @@ export default function AutomationLane(props: AutomationLaneProps) {
       if (!nextPoint) return
       commitPoints(points().map((point) => point.id === pointId ? { ...point, timeSec: nextPoint.timeSec, value: nextPoint.value } : point))
     }
-    const cancel = () => cleanup()
+    const cancel = () => {
+      cleanup()
+      props.onCancelPreview(targetKey())
+    }
     cleanupDrag?.()
     cleanupDrag = cleanup
     window.addEventListener('pointermove', move)
@@ -174,7 +178,10 @@ export default function AutomationLane(props: AutomationLaneProps) {
     setSelectedPointId(null)
   }
 
-  onCleanup(() => cleanupDrag?.())
+  onCleanup(() => {
+    cleanupDrag?.()
+    props.onCancelPreview(targetKey())
+  })
 
   return (
     <div

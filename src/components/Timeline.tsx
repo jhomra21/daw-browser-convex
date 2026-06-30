@@ -321,6 +321,8 @@ const Timeline: Component<TimelineProps> = (props) => {
           sends: routing.sends ?? [],
           outputTargetId: routing.outputTargetId,
         }),
+      applyAutomationEnvelope: (envelope, targetKey) =>
+        applyAutomationEnvelopeState(envelope, targetKey),
     }),
   });
   const automationTargetKeyAccessor = createMemo(() => {
@@ -329,6 +331,16 @@ const Timeline: Component<TimelineProps> = (props) => {
     const parameterId = selectedAutomationParameters.value()[trackId] ?? "volume";
     return automationTargetKey({ kind: "track", trackId }, parameterId);
   });
+  const applyAutomationEnvelopeState = (envelope: AutomationEnvelope | undefined, targetKey: string) => {
+    setAutomationEnvelopes((current) => {
+      const next = new Map(current.map((entry) => [entry.targetKey, entry]));
+      if (envelope) next.set(targetKey, envelope);
+      else next.delete(targetKey);
+      const rows = Array.from(next.values());
+      audioEngine.setAutomationEnvelopes(rows);
+      return rows;
+    });
+  };
   const persistedAutomation = createPersistedAutomationState({
     targetKey: automationTargetKeyAccessor,
     envelopes: automationEnvelopes,
@@ -398,11 +410,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       void loadLocalAutomationEnvelopes(rid).then((rows) => {
         if (projectId() !== rid) return;
         setAutomationEnvelopes(rows);
-        audioEngine.setAutomationEnvelopes(rows);
+        persistedAutomation.syncRemote();
       }).catch(() => {
         if (projectId() !== rid) return;
         setAutomationEnvelopes([]);
-        audioEngine.setAutomationEnvelopes([]);
+        persistedAutomation.syncRemote();
       });
       return;
     }
@@ -435,7 +447,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       });
     }
     setAutomationEnvelopes(next);
-    audioEngine.setAutomationEnvelopes(next);
+    persistedAutomation.syncRemote();
   });
   const {
     pendingSharedTrackVolumes,
@@ -1431,6 +1443,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           onCommitEnvelope: (envelope, targetKey) => {
             void persistedAutomation.commitEnvelope(envelope, targetKey);
           },
+          onCancelPreview: persistedAutomation.cancelPreview,
         }}
       />
 

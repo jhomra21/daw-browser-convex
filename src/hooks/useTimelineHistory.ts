@@ -264,6 +264,9 @@ export function useTimelineHistory(
           applyTrackRoutingInHistoryModel(workingTracks, trackId, routing)
           runVisibleAction(scopeKey, () => sourceActions.applyTrackRouting(trackId, routing))
         },
+        applyAutomationEnvelope: (envelope, targetKey) => {
+          runVisibleAction(scopeKey, () => sourceActions.applyAutomationEnvelope(envelope, targetKey))
+        },
       }
 
       try {

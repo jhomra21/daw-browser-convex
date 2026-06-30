@@ -27,11 +27,13 @@ export function scheduleAutomationEnvelope(
     param.cancelScheduledValues(startCtx)
     param.setValueAtTime(binding.valueToAudioValue(startValue), startCtx)
 
-    for (const point of envelope.points) {
-      if (point.timeSec < window.startLimitSec || point.timeSec > window.endLimitSec) continue
+    for (let index = 0; index < envelope.points.length; index += 1) {
+      const point = envelope.points[index]
+      if (!point || point.timeSec <= window.startLimitSec || point.timeSec > window.endLimitSec) continue
+      const previous = envelope.points[index - 1]
       const ctxTime = timelineToCtxTime(point.timeSec)
       const value = binding.valueToAudioValue(point.value)
-      if (point.interpolation === 'hold') param.setValueAtTime(value, ctxTime)
+      if (!previous || previous.interpolation === 'hold') param.setValueAtTime(value, ctxTime)
       else param.linearRampToValueAtTime(value, ctxTime)
     }
   }

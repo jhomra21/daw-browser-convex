@@ -61,6 +61,7 @@ export function createMeteringRuntime() {
           this.frames = 0
           this.sumL = 0
           this.sumR = 0
+          this.emittedSilence = false
           this.reportEveryFrames = 4096
           this.port.onmessage = (event) => {
             this.active = event.data?.active === true
@@ -68,6 +69,7 @@ export function createMeteringRuntime() {
               this.frames = 0
               this.sumL = 0
               this.sumR = 0
+              this.emittedSilence = false
             }
           }
         }
@@ -78,7 +80,10 @@ export function createMeteringRuntime() {
           if (!left) {
             this.frames += 128
             if (this.frames >= this.reportEveryFrames) {
-              this.port.postMessage({ left: 0, right: 0 })
+              if (!this.emittedSilence) {
+                this.port.postMessage({ left: 0, right: 0 })
+                this.emittedSilence = true
+              }
               this.frames = 0
               this.sumL = 0
               this.sumR = 0
@@ -94,10 +99,12 @@ export function createMeteringRuntime() {
           }
           this.frames += left.length
           if (this.frames >= this.reportEveryFrames) {
-            this.port.postMessage({
-              left: Math.min(1, Math.max(0, Math.sqrt(Math.sqrt(this.sumL / this.frames)))),
-              right: Math.min(1, Math.max(0, Math.sqrt(Math.sqrt(this.sumR / this.frames)))),
-            })
+            const nextLeft = Math.min(1, Math.max(0, Math.sqrt(Math.sqrt(this.sumL / this.frames))))
+            const nextRight = Math.min(1, Math.max(0, Math.sqrt(Math.sqrt(this.sumR / this.frames))))
+            if (nextLeft > 0 || nextRight > 0 || !this.emittedSilence) {
+              this.port.postMessage({ left: nextLeft, right: nextRight })
+              this.emittedSilence = nextLeft === 0 && nextRight === 0
+            }
             this.frames = 0
             this.sumL = 0
             this.sumR = 0

@@ -407,6 +407,15 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const visibleAutomationParameterIds = () => props.automation?.visibleTrackLanesByTrackId[track.id] ?? [];
             const automationHeight = () => props.automation?.laneHeightsByTrackId[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
             const automationTotalHeight = () => automationVisible() ? automationHeight() * Math.max(1, visibleAutomationParameterIds().length) : 0;
+            const canAddAutomationLane = () => {
+              if (!automationVisible()) return false;
+              const visible = new Set(visibleAutomationParameterIds());
+              if (!visible.has(selectedAutomationParameter())) return true;
+              for (const parameterId of automationMeta()?.automatedParameterIds ?? []) {
+                if (!visible.has(parameterId)) return true;
+              }
+              return false;
+            };
 
             return (
               <div
@@ -644,12 +653,19 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           A
                         </button>
                         <button
-                          class="h-7 border border-neutral-700 bg-neutral-800 text-xs font-semibold text-red-200 transition-colors hover:bg-red-500/20"
+                          class={cn(
+                            "h-7 border text-xs font-semibold transition-colors",
+                            canAddAutomationLane()
+                              ? "border-neutral-700 bg-neutral-800 text-red-200 hover:bg-red-500/20"
+                              : "cursor-not-allowed border-neutral-800 bg-neutral-900 text-neutral-600",
+                          )}
+                          disabled={!canAddAutomationLane()}
                           onClick={(event) => {
                             event.stopPropagation();
+                            if (!canAddAutomationLane()) return;
                             props.automation?.onAddTrackLane(track.id);
                           }}
-                          title="Add visible automation lane"
+                          title={automationVisible() ? "Add another automation lane" : "Show automation with A before adding lanes"}
                         >
                           +
                         </button>

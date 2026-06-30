@@ -623,6 +623,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   };
   const handleAddAutomationLane = (trackId: Track["id"]) => {
     const visible = new Set(visibleAutomationLanes.value()[trackId] ?? []);
+    if (visible.size === 0) return;
     const selectedParameter = selectedAutomationParameters.value()[trackId] ?? "volume";
     if (!visible.has(selectedParameter)) {
       showAutomationLane(trackId, selectedParameter);

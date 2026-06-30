@@ -192,6 +192,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_project", ["projectId"])
+    .index("by_project_track", ["projectId", "trackId"])
     .index("by_project_target_key", ["projectId", "targetKey"]),
 
   chatHistories: defineTable({

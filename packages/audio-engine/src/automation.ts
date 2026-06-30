@@ -29,7 +29,8 @@ export function scheduleAutomationEnvelope(
 
     for (let index = 0; index < envelope.points.length; index += 1) {
       const point = envelope.points[index]
-      if (!point || point.timeSec <= window.startLimitSec || point.timeSec > window.endLimitSec) continue
+      if (!point || point.timeSec <= window.startLimitSec) continue
+      if (point.timeSec > window.endLimitSec) break
       const previous = envelope.points[index - 1]
       const ctxTime = timelineToCtxTime(point.timeSec)
       const value = binding.valueToAudioValue(point.value)

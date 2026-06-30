@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, onCleanup } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import { getAutomationParameterOptions } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
 
@@ -47,8 +47,11 @@ export default function AutomationParameterPicker(props: AutomationParameterPick
     close()
   }
 
-  document.addEventListener('pointerdown', onDocumentPointerDown)
-  onCleanup(() => document.removeEventListener('pointerdown', onDocumentPointerDown))
+  createEffect(() => {
+    if (!open()) return
+    document.addEventListener('pointerdown', onDocumentPointerDown)
+    onCleanup(() => document.removeEventListener('pointerdown', onDocumentPointerDown))
+  })
 
   return (
     <div

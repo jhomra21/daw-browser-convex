@@ -11,6 +11,8 @@ import { canUseLocalStorage } from '~/lib/timeline-storage'
 import { clampMidiVelocity, midiPitchFrequency } from '~/lib/midi-note-audio'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { isClipKindCompatibleWithTrack } from '@daw-browser/shared'
+import { useMidiKeyboardInput } from './useMidiKeyboardInput'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 
@@ -28,8 +30,14 @@ type UseTimelineMidiOverlayReturn = {
   openMidiEditorFor: (clipId: string) => void
   changeMidiCardBounds: (next: TimelineMidiBounds) => void
   auditionNote: (pitch: number, velocity?: number, durSec?: number) => void
-  startLiveNote: (pitch: number, velocity?: number) => void
-  stopLiveNote: (pitch: number) => void
+  midiKeyboard: {
+    enabled: Accessor<boolean>
+    canPlay: Accessor<boolean>
+    targetLabel: Accessor<string | null>
+    octave: Accessor<number>
+    toggle: () => void
+    isActive: (pitch: number) => boolean
+  }
 }
 
 type LiveNote = {
@@ -55,12 +63,18 @@ export function useTimelineMidiOverlay(
   options: UseTimelineMidiOverlayOptions,
 ): UseTimelineMidiOverlayReturn {
   const [midiEditorClipId, setMidiEditorClipId] = createSignal<string | null>(null)
+  const [midiKeyboardEnabled, setMidiKeyboardEnabled] = createSignal(false)
   const [midiCard, setMidiCard] = createSignal<TimelineMidiBounds>(
     clampTimelineMidiBounds({ x: 80, y: 80, w: 720, h: 360 }),
   )
   const activeLiveNotes = new Map<number, LiveNote>()
   let midiCardPersistTimer: number | null = null
   const trackIndex = createMemo(() => createTimelineTrackIndex(options.tracks()))
+
+  const midiKeyboardStorageKey = () => {
+    const projectId = options.projectId() || 'default'
+    return `mb:midi_kb:${projectId}`
+  }
 
   const midiCardStorageKey = () => {
     const projectId = options.projectId() || 'default'
@@ -87,14 +101,28 @@ export function useTimelineMidiOverlay(
     }, 250)
   }
 
-  const resolveTargetTrackId = () => {
+  const isPlayableMidiTrack = (track: Track | undefined) => isClipKindCompatibleWithTrack(track, 'midi')
+
+  const resolveTargetTrack = () => {
     const clipId = midiEditorClipId()
     if (clipId) {
       const match = trackIndex().clipEntryById.get(clipId)
-      if (match) return match.track.id
+      if (match && isPlayableMidiTrack(match.track)) return match.track
     }
-    return options.selection.selectedFXTarget() || options.selection.selectedTrackId()
+    const fxTarget = options.selection.selectedFXTarget()
+    if (fxTarget !== 'master') {
+      const track = trackIndex().trackById.get(fxTarget)
+      if (isPlayableMidiTrack(track)) return track
+    }
+    const selectedTrack = trackIndex().trackById.get(options.selection.selectedTrackId())
+    if (isPlayableMidiTrack(selectedTrack)) return selectedTrack
+    return undefined
   }
+
+  const midiKeyboardTarget = createMemo(resolveTargetTrack)
+  const resolveTargetTrackId = () => midiKeyboardTarget()?.id
+  const midiKeyboardCanPlay = createMemo(() => Boolean(midiKeyboardTarget()))
+  const midiKeyboardTargetLabel = createMemo(() => midiKeyboardTarget()?.name ?? null)
 
   const stopLiveNote = (pitch: number) => {
     try {
@@ -151,16 +179,21 @@ export function useTimelineMidiOverlay(
     schedulePersistMidiCard()
   }
 
+  const previewDrumRackNote = (trackId: string, pitch: number, velocity: number) => {
+    const instrumentKind = options.audioEngine.getTrackInstrumentKind(trackId)
+    if (instrumentKind === 'synth') return false
+    if (options.audioEngine.previewDrumRackNote(trackId, pitch, velocity)) return true
+    return instrumentKind === 'drum-rack'
+  }
+
   const auditionNote = (pitch: number, velocity = 0.9, durSec = 0.35) => {
     try {
       options.audioEngine.ensureAudio()
       const ctx = options.audioEngine.getAudioContext()
       if (!ctx) return
-      const trackId = resolveTargetTrackId() || 'master'
-      if (options.audioEngine.getTrackInstrumentKind(trackId) === 'drum-rack') {
-        options.audioEngine.previewDrumRackNote(trackId, pitch, velocity)
-        return
-      }
+      const trackId = resolveTargetTrackId()
+      if (!trackId) return
+      if (previewDrumRackNote(trackId, pitch, velocity)) return
       const synthGain = options.audioEngine.getTrackSynthGainNode(trackId)
       if (!synthGain) return
       const osc = ctx.createOscillator()
@@ -187,10 +220,7 @@ export function useTimelineMidiOverlay(
       if (!ctx || activeLiveNotes.has(pitch)) return
       const trackId = resolveTargetTrackId()
       if (!trackId) return
-      if (options.audioEngine.getTrackInstrumentKind(trackId) === 'drum-rack') {
-        options.audioEngine.previewDrumRackNote(trackId, pitch, velocity)
-        return
-      }
+      if (previewDrumRackNote(trackId, pitch, velocity)) return
       const synthGain = options.audioEngine.getTrackSynthGainNode(trackId)
       if (!synthGain) return
       const osc1 = ctx.createOscillator()
@@ -246,6 +276,35 @@ export function useTimelineMidiOverlay(
     }
   })
 
+  createEffect(() => {
+    const key = midiKeyboardStorageKey()
+    if (!canUseLocalStorage()) {
+      setMidiKeyboardEnabled(false)
+      return
+    }
+    try {
+      setMidiKeyboardEnabled(window.localStorage.getItem(key) === '1')
+    } catch {
+      setMidiKeyboardEnabled(false)
+    }
+  })
+
+  createEffect(() => {
+    if (!canUseLocalStorage()) return
+    try {
+      window.localStorage.setItem(midiKeyboardStorageKey(), midiKeyboardEnabled() ? '1' : '0')
+    } catch {}
+  })
+
+  const midiKeyboard = useMidiKeyboardInput({
+    projectId: () => options.projectId(),
+    targetId: resolveTargetTrackId,
+    enabled: midiKeyboardEnabled,
+    canPlay: midiKeyboardCanPlay,
+    onStartLiveNote: startLiveNote,
+    onStopLiveNote: stopLiveNote,
+  })
+
   onCleanup(() => {
     if (midiCardPersistTimer) {
       clearTimeout(midiCardPersistTimer)
@@ -261,7 +320,13 @@ export function useTimelineMidiOverlay(
     openMidiEditorFor,
     changeMidiCardBounds,
     auditionNote,
-    startLiveNote,
-    stopLiveNote,
+    midiKeyboard: {
+      enabled: midiKeyboardEnabled,
+      canPlay: midiKeyboardCanPlay,
+      targetLabel: midiKeyboardTargetLabel,
+      octave: midiKeyboard.octave,
+      toggle: () => setMidiKeyboardEnabled(value => !value),
+      isActive: midiKeyboard.isActive,
+    },
   }
 }

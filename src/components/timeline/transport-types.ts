@@ -1,3 +1,4 @@
+import type { Accessor } from "solid-js";
 import type { InsertSampleInput } from "~/hooks/useTimelineClipImport";
 import type { TimelineProject } from "~/hooks/useTimelineData";
 import type { CloudBackupStatus } from "~/hooks/useLocalProjectActions";
@@ -73,5 +74,12 @@ export type TransportControlsProps = {
     onOpen: () => void;
     onToggle: () => void;
     onSelectTab: (tab: TimelineBrowserTab) => void;
+  };
+  midiKeyboard: {
+    enabled: Accessor<boolean>;
+    canPlay: Accessor<boolean>;
+    targetLabel: Accessor<string | null>;
+    octave: Accessor<number>;
+    toggle: () => void;
   };
 };

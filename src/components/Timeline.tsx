@@ -494,8 +494,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     openMidiEditorFor,
     changeMidiCardBounds,
     auditionNote,
-    startLiveNote,
-    stopLiveNote,
+    midiKeyboard,
   } = useTimelineMidiOverlay({
     audioEngine,
     tracks: () => renderTracks(),
@@ -785,21 +784,12 @@ const Timeline: Component<TimelineProps> = (props) => {
       event.target.closest('[data-timeline-ruler="1"]')
     )
       return;
-    if (midiEditorClipId()) {
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
     bottomPanel.setMode("effects");
     onLanePointerDown(event, scrollRef);
   };
 
   const onRulerPointerDown = (event: PointerEvent) => {
     event.preventDefault();
-    if (midiEditorClipId()) {
-      event.stopPropagation();
-      return;
-    }
     startScrub(event.clientX);
   };
 
@@ -956,6 +946,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       onToggle: leftBrowser.toggleOpen,
       onSelectTab: leftBrowser.setActiveTab,
     },
+    midiKeyboard,
     bpm: bpm(),
     onChangeBpm: (next: number) => setBpm(clampBpm(next)),
     metronomeEnabled: metronomeEnabled(),
@@ -1198,8 +1189,9 @@ const Timeline: Component<TimelineProps> = (props) => {
           close: closeMidiEditor,
           changeBounds: changeMidiCardBounds,
           auditionNote,
-          startLiveNote,
-          stopLiveNote,
+          keyboard: {
+            isActive: midiKeyboard.isActive,
+          },
           onLocalMidiSaved: handleLocalMidiSaved,
         }}
         sidebar={{

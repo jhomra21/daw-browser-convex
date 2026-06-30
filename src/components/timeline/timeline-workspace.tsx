@@ -92,8 +92,9 @@ type Props = {
     close: () => void;
     changeBounds: (bounds: TimelineMidiBounds) => void;
     auditionNote: (note: number, velocity?: number) => void;
-    startLiveNote: (note: number, velocity?: number) => void;
-    stopLiveNote: (note: number) => void;
+    keyboard: {
+      isActive: (pitch: number) => boolean;
+    };
     onLocalMidiSaved: (clipId: string, midi: Clip["midi"]) => void;
   };
   sidebar: {
@@ -190,7 +191,7 @@ export default function TimelineWorkspace(props: Props) {
                     viewportRedrawVersion={viewportRedrawVersion()}
                     onClipDblClick={(_, clipId) => {
                       const match = props.trackLookup.clipEntryById.get(clipId);
-                      if (match && match.trackId === track.id && match.clip.midi) {
+                      if (match?.clip.midi) {
                         props.openMidiEditorFor(clipId);
                         return;
                       }

@@ -203,8 +203,8 @@ export default function TimelineWorkspace(props: Props) {
               <For each={props.tracks}>
                 {(track, i) => (
                   (() => {
-                    const parameterId = props.automation.selectedParametersByTargetKey[track.id] ?? "volume";
-                    const targetKey = automationTargetKey({ kind: "track", trackId: track.id }, parameterId);
+                    const parameterId = () => props.automation.selectedParametersByTargetKey[track.id] ?? "volume";
+                    const targetKey = () => automationTargetKey({ kind: "track", trackId: track.id }, parameterId());
                     return (
                       <TrackLane
                         track={track}
@@ -230,8 +230,8 @@ export default function TimelineWorkspace(props: Props) {
                         automation={{
                           projectId: props.automation.projectId,
                           visible: props.automation.visibleByTrackId[track.id] === true,
-                          parameterId,
-                          envelope: props.automation.envelopesByTargetKey.get(targetKey),
+                          parameterId: parameterId(),
+                          envelope: props.automation.envelopesByTargetKey.get(targetKey()),
                           durationSec: props.durationSec,
                           onPreview: props.automation.onPreviewEnvelope,
                           onCommit: props.automation.onCommitEnvelope,

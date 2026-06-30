@@ -52,6 +52,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
             parameterId={props.automation.parameterId}
             envelope={props.automation.envelope}
             durationSec={props.automation.durationSec}
+            heightPx={props.automationHeightPx}
             onPreview={props.automation.onPreview}
             onCommit={props.automation.onCommit}
             onCancelPreview={props.automation.onCancelPreview}

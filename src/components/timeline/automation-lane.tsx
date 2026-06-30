@@ -16,6 +16,7 @@ type AutomationLaneProps = {
   parameterId: string
   envelope: AutomationEnvelope | undefined
   durationSec: number
+  heightPx: number
   onPreview: (envelope: AutomationEnvelope | undefined) => void
   onCommit: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
   onCancelPreview: (targetKey: string) => void
@@ -46,7 +47,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
 
   const descriptor = createMemo(() => getAutomationParameterDescriptor(props.parameterId))
   const targetKey = createMemo(() => automationTargetKey(props.target, props.parameterId))
-  const height = () => root?.clientHeight ?? 36
+  const height = () => props.heightPx || root?.clientHeight || 36
   const points = createMemo(() => props.envelope?.points ?? [])
   const valueToY = (value: number) => {
     const desc = descriptor()

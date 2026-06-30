@@ -1,3 +1,4 @@
+import { For } from 'solid-js'
 import { getAutomationParameterOptions } from '@daw-browser/shared'
 
 type AutomationParameterPickerProps = {
@@ -20,9 +21,11 @@ export default function AutomationParameterPicker(props: AutomationParameterPick
       onChange={(event) => props.onChange(event.currentTarget.value)}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      {parameterOptions.map((option) => (
-        <option value={option.id}>{optionLabel(option.label, option.id, props.automatedParameterIds)}</option>
-      ))}
+      <For each={parameterOptions}>
+        {(option) => (
+          <option value={option.id}>{optionLabel(option.label, option.id, props.automatedParameterIds)}</option>
+        )}
+      </For>
     </select>
   )
 }

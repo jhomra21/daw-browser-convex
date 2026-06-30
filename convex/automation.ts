@@ -19,7 +19,9 @@ const targetKindValidator = v.union(v.literal("track"), v.literal("master"));
 
 const normalizeTrackId = async (ctx: any, projectId: string, trackId: string | undefined) => {
   if (!trackId) return undefined;
-  const track = await ctx.db.get(trackId);
+  const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
+  if (!normalizedTrackId) throw new Error("Invalid automation track id.");
+  const track = await ctx.db.get(normalizedTrackId);
   if (!track || track.projectId !== projectId) throw new Error("Automation track does not belong to this project.");
   return track._id;
 };

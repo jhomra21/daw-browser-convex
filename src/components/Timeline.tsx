@@ -5,6 +5,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  untrack,
 } from "solid-js";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { getAudioEngine } from "~/lib/audio-engine-singleton";
@@ -64,7 +65,7 @@ import DeleteTrackDialog from "./timeline/delete-track-dialog";
 import TimelineWorkspace from "./timeline/timeline-workspace";
 import { createPersistedAutomationState } from "./timeline/create-persisted-automation-state";
 import { loadLocalAutomationEnvelopes, setLocalAutomationEnvelope, deleteLocalAutomationEnvelope } from "~/lib/local-automation";
-import { publishSharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
+import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import { useProjectPersistedState } from "~/hooks/useProjectPersistedState";
 import { Dashboard } from "~/components/dashboard/dashboard";
 import type { DashboardTimelineModel, DashboardView } from "~/components/dashboard/types";
@@ -82,6 +83,21 @@ type TimelineProps = {
   dashboardEnabled: boolean;
   dashboardView: Accessor<DashboardView | null>;
   setDashboardParam: (view: DashboardView | null) => void;
+};
+
+const replaceAutomationEnvelope = (
+  envelopes: AutomationEnvelope[],
+  targetKey: string,
+  envelope: AutomationEnvelope | undefined,
+) => {
+  const existingIndex = envelopes.findIndex((entry) => entry.targetKey === targetKey);
+  if (!envelope) {
+    return existingIndex === -1 ? envelopes : envelopes.filter((entry) => entry.targetKey !== targetKey);
+  }
+  if (existingIndex !== -1 && envelopes[existingIndex] === envelope) return envelopes;
+  const next = existingIndex === -1 ? [...envelopes, envelope] : [...envelopes];
+  next[existingIndex === -1 ? next.length - 1 : existingIndex] = envelope;
+  return next;
 };
 
 const Timeline: Component<TimelineProps> = (props) => {
@@ -333,10 +349,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   });
   const applyAutomationEnvelopeState = (envelope: AutomationEnvelope | undefined, targetKey: string) => {
     setAutomationEnvelopes((current) => {
-      const next = new Map(current.map((entry) => [entry.targetKey, entry]));
-      if (envelope) next.set(targetKey, envelope);
-      else next.delete(targetKey);
-      const rows = Array.from(next.values());
+      const rows = replaceAutomationEnvelope(current, targetKey, envelope);
       audioEngine.setAutomationEnvelopes(rows);
       return rows;
     });
@@ -350,24 +363,27 @@ const Timeline: Component<TimelineProps> = (props) => {
       if (!rid) return;
       if (isLocalId("project", rid)) {
         await setLocalAutomationEnvelope(rid, envelope);
-        setAutomationEnvelopes((current) => {
-          const next = new Map(current.map((entry) => [entry.targetKey, entry]));
-          next.set(envelope.targetKey, envelope);
-          return Array.from(next.values());
-        });
+        setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, envelope.targetKey, envelope));
         return;
       }
-      await publishSharedTimelineOperation(rid, {
-        kind: "automation.setEnvelope",
-        payload: {
-          targetKind: envelope.target.kind,
-          trackId: envelope.target.kind === "track" ? envelope.target.trackId : undefined,
-          parameterId: envelope.parameterId,
-          enabled: envelope.enabled,
-          points: envelope.points,
-          updatedAt: envelope.updatedAt,
+      const uid = userId();
+      if (!uid) throw new Error("Cannot persist shared automation without a user id.");
+      await publishDurableSharedTimelineOperation({
+        projectId: rid,
+        userId: uid,
+        operation: {
+          kind: "automation.setEnvelope",
+          payload: {
+            targetKind: envelope.target.kind,
+            trackId: envelope.target.kind === "track" ? envelope.target.trackId : undefined,
+            parameterId: envelope.parameterId,
+            enabled: envelope.enabled,
+            points: envelope.points,
+            updatedAt: envelope.updatedAt,
+          },
         },
       });
+      setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, envelope.targetKey, envelope));
     },
     deleteEnvelope: async (targetKey) => {
       const rid = projectId();
@@ -375,18 +391,25 @@ const Timeline: Component<TimelineProps> = (props) => {
       const envelope = automationEnvelopes().find((entry) => entry.targetKey === targetKey);
       if (isLocalId("project", rid)) {
         await deleteLocalAutomationEnvelope(rid, targetKey);
-        setAutomationEnvelopes((current) => current.filter((entry) => entry.targetKey !== targetKey));
+        setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, targetKey, undefined));
         return;
       }
       if (!envelope) return;
-      await publishSharedTimelineOperation(rid, {
-        kind: "automation.deleteEnvelope",
-        payload: {
-          targetKind: envelope.target.kind,
-          trackId: envelope.target.kind === "track" ? envelope.target.trackId : undefined,
-          parameterId: envelope.parameterId,
+      const uid = userId();
+      if (!uid) throw new Error("Cannot persist shared automation without a user id.");
+      await publishDurableSharedTimelineOperation({
+        projectId: rid,
+        userId: uid,
+        operation: {
+          kind: "automation.deleteEnvelope",
+          payload: {
+            targetKind: envelope.target.kind,
+            trackId: envelope.target.kind === "track" ? envelope.target.trackId : undefined,
+            parameterId: envelope.parameterId,
+          },
         },
       });
+      setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, targetKey, undefined));
     },
     onEnvelopeCommitted: (previous, next) => {
       const rid = projectId();
@@ -410,11 +433,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       void loadLocalAutomationEnvelopes(rid).then((rows) => {
         if (projectId() !== rid) return;
         setAutomationEnvelopes(rows);
-        persistedAutomation.syncRemote();
+        untrack(persistedAutomation.syncRemote);
       }).catch(() => {
         if (projectId() !== rid) return;
         setAutomationEnvelopes([]);
-        persistedAutomation.syncRemote();
+        untrack(persistedAutomation.syncRemote);
       });
       return;
     }
@@ -447,8 +470,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       });
     }
     setAutomationEnvelopes(next);
-    persistedAutomation.syncRemote();
+    untrack(persistedAutomation.syncRemote);
   });
+  const automationEnvelopesByTargetKey = createMemo(() => (
+    new Map(persistedAutomation.envelopes().map((envelope) => [envelope.targetKey, envelope]))
+  ));
   const {
     pendingSharedTrackVolumes,
     pendingSharedTrackRouting,
@@ -1432,13 +1458,17 @@ const Timeline: Component<TimelineProps> = (props) => {
           laneHeightsByTrackId: automationLaneHeights.value(),
           onResizeTrackLane: (trackId, height) => {
             const nextHeight = clampAutomationLaneHeight(height || DEFAULT_AUTOMATION_LANE_HEIGHT);
-            automationLaneHeights.setValue((current) => ({ ...current, [trackId]: nextHeight }));
+            automationLaneHeights.setValue((current) => (
+              current[trackId] === nextHeight ? current : { ...current, [trackId]: nextHeight }
+            ));
           },
           selectedParametersByTargetKey: selectedAutomationParameters.value(),
           onSelectParameter: (targetKey, parameterId) => {
-            selectedAutomationParameters.setValue((current) => ({ ...current, [targetKey]: parameterId }));
+            selectedAutomationParameters.setValue((current) => (
+              current[targetKey] === parameterId ? current : { ...current, [targetKey]: parameterId }
+            ));
           },
-          envelopesByTargetKey: new Map(persistedAutomation.envelopes().map((envelope) => [envelope.targetKey, envelope])),
+          envelopesByTargetKey: automationEnvelopesByTargetKey(),
           onPreviewEnvelope: persistedAutomation.previewEnvelope,
           onCommitEnvelope: (envelope, targetKey) => {
             void persistedAutomation.commitEnvelope(envelope, targetKey);

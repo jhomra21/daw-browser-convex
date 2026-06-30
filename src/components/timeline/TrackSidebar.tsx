@@ -15,7 +15,7 @@ import {
   getTrackChannelRole,
 } from "@daw-browser/timeline-core/track-routing";
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
-import { LANE_HEIGHT, RULER_HEIGHT } from "~/lib/timeline-utils";
+import { DEFAULT_AUTOMATION_LANE_HEIGHT, LANE_HEIGHT, RULER_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Track, TrackSend } from "@daw-browser/timeline-core/types";
 import MasterSidebarRow, {
@@ -57,6 +57,8 @@ type TrackSidebarProps = {
   automation?: {
     visibleByTrackId: Record<string, boolean>;
     onToggleTrackVisibility: (trackId: Track["id"]) => void;
+    laneHeightsByTrackId: Record<string, number>;
+    onResizeTrackLane: (trackId: Track["id"], height: number) => void;
     selectedParametersByTargetKey: Record<string, string>;
     envelopesByTargetKey: Map<string, AutomationEnvelope>;
     onSelectParameter: (targetKey: string, parameterId: string) => void;
@@ -82,6 +84,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const [selectedSendTargets, setSelectedSendTargets] = createSignal<
     Map<Track["id"], string>
   >(new Map());
+  let cleanupAutomationResize: (() => void) | undefined;
 
   createEffect(() => {
     const unsubscribe = sidebar().subscribeTrackLevels((levelsByTrackId) => {
@@ -287,6 +290,31 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     sidebar().onVolumeChange(trackId, volume);
   };
 
+  const startAutomationResize = (trackId: Track["id"], startHeight: number, event: PointerEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startY = event.clientY;
+    const move = (moveEvent: PointerEvent) => {
+      props.automation?.onResizeTrackLane(
+        trackId,
+        clampAutomationLaneHeight(startHeight + moveEvent.clientY - startY),
+      );
+    };
+    const cleanup = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", cleanup);
+      window.removeEventListener("pointercancel", cleanup);
+      if (cleanupAutomationResize === cleanup) cleanupAutomationResize = undefined;
+    };
+    cleanupAutomationResize?.();
+    cleanupAutomationResize = cleanup;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", cleanup, { once: true });
+    window.addEventListener("pointercancel", cleanup, { once: true });
+  };
+
+  onCleanup(() => cleanupAutomationResize?.());
+
   const updateVolumeFromPointer = (
     track: Track,
     input: HTMLInputElement,
@@ -343,6 +371,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const selectedAutomationEnvelope = () => props.automation?.envelopesByTargetKey.get(selectedAutomationTargetKey());
             const automationMeta = () => automationMetaByTrackId().get(track.id);
             const automationVisible = () => props.automation?.visibleByTrackId[track.id] === true;
+            const automationHeight = () => props.automation?.laneHeightsByTrackId[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
 
             return (
               <div
@@ -352,12 +381,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     ? "bg-neutral-800"
                     : "bg-neutral-900",
                 )}
-                style={{ height: `${LANE_HEIGHT}px` }}
+                style={{ height: `${LANE_HEIGHT + (automationVisible() ? automationHeight() : 0)}px` }}
                 onClick={() => sidebar().onTrackClick(track.id)}
               >
                 <div
-                  class="grid h-full grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 p-2"
-                  classList={{ "pb-10": automationVisible() }}
+                  class="grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 p-2"
+                  style={{ height: `${LANE_HEIGHT}px` }}
                 >
                   <div class="min-w-0 overflow-hidden">
                     <button
@@ -724,9 +753,14 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 </div>
                 {automationVisible() ? (
                   <div
-                    class="absolute inset-x-0 bottom-0 z-10 grid h-9 grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-t border-red-500/30 bg-neutral-950/95 px-2 text-[11px] text-red-100"
+                    class="absolute inset-x-0 z-10 grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-t border-red-500/30 bg-neutral-950/95 px-2 text-[11px] text-red-100"
+                    style={{ top: `${LANE_HEIGHT}px`, height: `${automationHeight()}px` }}
                     onClick={(event) => event.stopPropagation()}
                   >
+                    <div
+                      class="absolute inset-x-0 top-0 h-2 -translate-y-1/2 cursor-row-resize"
+                      onPointerDown={(event) => startAutomationResize(track.id, automationHeight(), event)}
+                    />
                     <div class="flex items-center gap-1 overflow-hidden">
                       <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" classList={{ "opacity-30": !selectedAutomationEnvelope() }} />
                       <span class="truncate">Automation</span>

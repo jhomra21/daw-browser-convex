@@ -5,8 +5,15 @@ import type { Clip, Track } from '@daw-browser/timeline-core/types'
 export const PPS = 100 // pixels per second
 export const RULER_HEIGHT = 32 // px
 export const LANE_HEIGHT = 96 // px per track lane
+export const DEFAULT_AUTOMATION_LANE_HEIGHT = 48
+const MIN_AUTOMATION_LANE_HEIGHT = 32
+const MAX_AUTOMATION_LANE_HEIGHT = 160
 // Shared Effects panel layout constants
 export const FX_PANEL_HEIGHT_PX = 360
+
+export const clampAutomationLaneHeight = (height: number) => (
+  Math.max(MIN_AUTOMATION_LANE_HEIGHT, Math.min(MAX_AUTOMATION_LANE_HEIGHT, height))
+)
 
 export function timelineDurationSec(tracks: Track[]) {
   let maxEnd = 0

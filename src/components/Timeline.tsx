@@ -9,6 +9,8 @@ import {
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { getAudioEngine } from "~/lib/audio-engine-singleton";
 import {
+  clampAutomationLaneHeight,
+  DEFAULT_AUTOMATION_LANE_HEIGHT,
   timelineDurationSec,
 } from "~/lib/timeline-utils";
 import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
@@ -140,6 +142,26 @@ const Timeline: Component<TimelineProps> = (props) => {
       }
     },
     save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-visible-tracks`, JSON.stringify(value)),
+  });
+  const automationLaneHeights = useProjectPersistedState<Record<string, number>>({
+    projectId,
+    createInitial: () => ({}),
+    load: (rid) => {
+      const raw = localStorage.getItem(`timeline:${rid}:automation-lane-heights`);
+      if (!raw) return {};
+      try {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+        const next: Record<string, number> = {};
+        for (const [key, value] of Object.entries(parsed)) {
+          if (typeof value === "number" && Number.isFinite(value)) next[key] = clampAutomationLaneHeight(value);
+        }
+        return next;
+      } catch {
+        return {};
+      }
+    },
+    save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-lane-heights`, JSON.stringify(value)),
   });
   const selectedAutomationParameters = useProjectPersistedState<Record<string, string>>({
     projectId,
@@ -1394,6 +1416,11 @@ const Timeline: Component<TimelineProps> = (props) => {
           visibleByTrackId: visibleAutomationTracks.value(),
           onToggleTrackVisibility: (trackId) => {
             visibleAutomationTracks.setValue((current) => ({ ...current, [trackId]: !current[trackId] }));
+          },
+          laneHeightsByTrackId: automationLaneHeights.value(),
+          onResizeTrackLane: (trackId, height) => {
+            const nextHeight = clampAutomationLaneHeight(height || DEFAULT_AUTOMATION_LANE_HEIGHT);
+            automationLaneHeights.setValue((current) => ({ ...current, [trackId]: nextHeight }));
           },
           selectedParametersByTargetKey: selectedAutomationParameters.value(),
           onSelectParameter: (targetKey, parameterId) => {

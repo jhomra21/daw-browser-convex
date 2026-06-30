@@ -1,4 +1,4 @@
-import { createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
 import type { MasterSidebarModel } from "~/components/timeline/MasterSidebarRow";
@@ -7,7 +7,7 @@ import { TimelineLeftBrowser } from "~/components/timeline/browser/timeline-left
 import type { TimelineLeftBrowserModel } from "~/components/timeline/browser/browser-types";
 import TimelineOverlays from "~/components/timeline/timeline-overlays";
 import type { TimelineMidiBounds } from "~/lib/timeline-midi-bounds";
-import { LANE_HEIGHT, PPS, RULER_HEIGHT } from "~/lib/timeline-utils";
+import { DEFAULT_AUTOMATION_LANE_HEIGHT, LANE_HEIGHT, PPS, RULER_HEIGHT } from "~/lib/timeline-utils";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionState";
 import type { Clip, Track, TrackId, TrackSend } from "@daw-browser/timeline-core/types";
@@ -118,6 +118,8 @@ type Props = {
     projectId: string;
     visibleByTrackId: Record<string, boolean>;
     onToggleTrackVisibility: (trackId: Track["id"]) => void;
+    laneHeightsByTrackId: Record<string, number>;
+    onResizeTrackLane: (trackId: Track["id"], height: number) => void;
     selectedParametersByTargetKey: Record<string, string>;
     onSelectParameter: (targetKey: string, parameterId: string) => void;
     envelopesByTargetKey: Map<string, AutomationEnvelope>;
@@ -128,7 +130,26 @@ type Props = {
 
 export default function TimelineWorkspace(props: Props) {
   const viewportRedrawVersion = createViewportRedrawVersion();
-  const trackAreaHeight = () => (props.tracks.length + (props.dropAtNewTrack ? 1 : 0)) * LANE_HEIGHT;
+  const trackLayout = createMemo(() => {
+    let topPx = 0;
+    return props.tracks.map((track) => {
+      const automationHeight = props.automation.visibleByTrackId[track.id] === true
+        ? (props.automation.laneHeightsByTrackId[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT)
+        : 0;
+      const row = {
+        topPx,
+        heightPx: LANE_HEIGHT + automationHeight,
+        automationHeight,
+      };
+      topPx += row.heightPx;
+      return row;
+    });
+  });
+  const trackAreaHeight = () => {
+    const layout = trackLayout();
+    const tracksHeight = layout.length === 0 ? 0 : layout[layout.length - 1].topPx + layout[layout.length - 1].heightPx;
+    return tracksHeight + (props.dropAtNewTrack ? LANE_HEIGHT : 0);
+  };
   const fullHeight = () => RULER_HEIGHT + trackAreaHeight();
   const scrollContentHeight = () => fullHeight() + props.bottomPanelOffsetPx;
   return (
@@ -186,7 +207,8 @@ export default function TimelineWorkspace(props: Props) {
                     return (
                       <TrackLane
                         track={track}
-                        topPx={i() * LANE_HEIGHT}
+                        topPx={trackLayout()[i()].topPx}
+                        automationHeightPx={trackLayout()[i()].automationHeight}
                         isDropTarget={props.dropTargetLane === i()}
                         selectedClipIds={props.selection.selectedClipIds()}
                         onClipPointerDown={props.onClipPointerDown}
@@ -240,6 +262,8 @@ export default function TimelineWorkspace(props: Props) {
                   playheadSec: props.playheadSec,
                   dropAtNewTrack: props.dropAtNewTrack,
                   marqueeRect: props.marqueeRect,
+                  rowTops: trackLayout().map((row) => row.topPx),
+                  trackAreaHeight: trackAreaHeight(),
                 }}
                 recording={props.recording}
                 midi={props.midi}
@@ -275,6 +299,8 @@ export default function TimelineWorkspace(props: Props) {
                 selectedParametersByTargetKey: props.automation.selectedParametersByTargetKey,
                 envelopesByTargetKey: props.automation.envelopesByTargetKey,
                 onSelectParameter: props.automation.onSelectParameter,
+                laneHeightsByTrackId: props.automation.laneHeightsByTrackId,
+                onResizeTrackLane: props.automation.onResizeTrackLane,
               }}
             />
           </div>

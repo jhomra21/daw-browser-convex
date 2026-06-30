@@ -24,6 +24,8 @@ type TimelineOverlaysProps = {
     playheadSec: number
     dropAtNewTrack: boolean
     marqueeRect: MarqueeRect
+    rowTops: number[]
+    trackAreaHeight: number
   }
   recording: {
     isRecording: boolean
@@ -63,7 +65,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
     return {
       start,
       points,
-      topPx: trackIndexValue * LANE_HEIGHT,
+      topPx: props.timeline.rowTops[trackIndexValue] ?? trackIndexValue * LANE_HEIGHT,
     }
   })
 
@@ -82,7 +84,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
       {props.timeline.dropAtNewTrack && (
         <div
           class="absolute left-0 right-0 border-t border-green-500/40 bg-green-500/10 pointer-events-none"
-          style={{ top: `${props.timeline.tracks.length * LANE_HEIGHT}px`, height: `${LANE_HEIGHT}px` }}
+          style={{ top: `${props.timeline.trackAreaHeight - LANE_HEIGHT}px`, height: `${LANE_HEIGHT}px` }}
         />
       )}
       <GridOverlay

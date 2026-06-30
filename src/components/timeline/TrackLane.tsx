@@ -9,6 +9,7 @@ import type { AutomationEnvelope } from '@daw-browser/shared'
 type TrackLaneProps = {
   track: Track
   topPx: number
+  automationHeightPx: number
   selectedClipIds: Set<string>
   onClipPointerDown: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
   onClipPointerUp: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
@@ -36,11 +37,14 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
   return (
     <div
       class={cn('absolute left-0 right-0 overflow-hidden bg-neutral-950', props.isDropTarget && 'bg-green-500/10')}
-      style={{ top: `${props.topPx}px`, height: `${LANE_HEIGHT}px` }}
+      style={{ top: `${props.topPx}px`, height: `${LANE_HEIGHT + props.automationHeightPx}px` }}
     >
-      <div class="absolute left-0 right-0 bottom-0 h-[1.5px] bg-neutral-800" />
+      <div class="absolute left-0 right-0 h-[1.5px] bg-neutral-800" style={{ top: `${LANE_HEIGHT - 1}px` }} />
       {props.automation?.visible ? (
-        <div class="absolute inset-x-0 bottom-0 z-30 h-9 border-t border-red-500/30 bg-neutral-950/95">
+        <div
+          class="absolute inset-x-0 z-30 border-t border-red-500/30 bg-neutral-950/95"
+          style={{ top: `${LANE_HEIGHT}px`, height: `${props.automationHeightPx}px` }}
+        >
           <AutomationLane
             projectId={props.automation.projectId}
             target={{ kind: 'track', trackId: props.track.id }}

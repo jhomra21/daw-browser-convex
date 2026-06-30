@@ -1,5 +1,5 @@
 import type { ComponentProps, JSX } from "solid-js";
-import { mergeProps, Show, splitProps } from "solid-js";
+import { mergeProps, splitProps } from "solid-js";
 import {
   Tooltip as TooltipPrimitive,
   type TooltipContentProps as KobalteTooltipContentProps,
@@ -29,11 +29,10 @@ const TooltipTrigger = TooltipPrimitive.Trigger;
 type TooltipContentProps = KobalteTooltipContentProps<"div"> & ComponentProps<"div"> & {
   class?: string;
   children?: JSX.Element;
-  shortcut?: string;
 };
 
 const TooltipContent = (props: TooltipContentProps) => {
-  const [local, rest] = splitProps(props, ["class", "children", "shortcut"]);
+  const [local, rest] = splitProps(props, ["class", "children"]);
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content
@@ -44,9 +43,6 @@ const TooltipContent = (props: TooltipContentProps) => {
         {...rest}
       >
         {local.children}
-        <Show when={local.shortcut}>
-          <span class="ml-2 text-neutral-500">{local.shortcut}</span>
-        </Show>
       </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>
   );

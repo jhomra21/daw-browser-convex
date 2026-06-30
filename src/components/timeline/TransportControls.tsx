@@ -241,8 +241,6 @@ const SaveStatus: Component<{ projectMenu: TransportControlsProps["projectMenu"]
 
 type TopRightIconButtonProps = {
   tooltip: string;
-  active?: boolean;
-  playable?: boolean;
   class?: string;
   ariaPressed?: boolean;
   onClick?: () => void;
@@ -261,8 +259,6 @@ const TopRightIconButton: Component<TopRightIconButtonProps> = (props) => (
       class={cn(
         nativeMenuTriggerClass,
         "h-7 w-7 p-0",
-        props.active && "border-amber-500/60 bg-amber-500/20 text-amber-300",
-        props.active && props.playable && "border-green-500/50 bg-green-600/20 text-green-300",
         props.class,
       )}
     >
@@ -307,8 +303,10 @@ const MidiKeyboardToggle: Component<{ midiKeyboard: TransportControlsProps["midi
       onClick={midiKeyboard().onToggle}
       ariaPressed={midiKeyboard().enabled}
       tooltip={title()}
-      active={midiKeyboard().enabled}
-      playable={midiKeyboard().canPlay}
+      class={cn(
+        midiKeyboard().enabled && "border-amber-500/60 bg-amber-500/20 text-amber-300",
+        midiKeyboard().enabled && midiKeyboard().canPlay && "border-green-500/50 bg-green-600/20 text-green-300",
+      )}
     >
       <PianoKeysIcon />
     </TopRightIconButton>

@@ -11,6 +11,7 @@ import { canUseLocalStorage } from '~/lib/timeline-storage'
 import { clampMidiVelocity, midiPitchFrequency } from '~/lib/midi-note-audio'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { isClipKindCompatibleWithTrack } from '@daw-browser/shared'
 import { useMidiKeyboardInput } from './useMidiKeyboardInput'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
@@ -102,9 +103,7 @@ export function useTimelineMidiOverlay(
     }, 250)
   }
 
-  const isPlayableMidiTrack = (track: Track | undefined) => (
-    track?.kind === 'instrument' && track.channelRole !== 'return' && track.channelRole !== 'group'
-  )
+  const isPlayableMidiTrack = (track: Track | undefined) => isClipKindCompatibleWithTrack(track, 'midi')
 
   const resolveTargetTrack = () => {
     const clipId = midiEditorClipId()
@@ -122,9 +121,10 @@ export function useTimelineMidiOverlay(
     return undefined
   }
 
-  const resolveTargetTrackId = () => resolveTargetTrack()?.id
-  const midiKeyboardCanPlay = createMemo(() => Boolean(resolveTargetTrack()))
-  const midiKeyboardTargetLabel = createMemo(() => resolveTargetTrack()?.name ?? null)
+  const midiKeyboardTarget = createMemo(resolveTargetTrack)
+  const resolveTargetTrackId = () => midiKeyboardTarget()?.id
+  const midiKeyboardCanPlay = createMemo(() => Boolean(midiKeyboardTarget()))
+  const midiKeyboardTargetLabel = createMemo(() => midiKeyboardTarget()?.name ?? null)
 
   const stopLiveNote = (pitch: number) => {
     try {
@@ -181,6 +181,13 @@ export function useTimelineMidiOverlay(
     schedulePersistMidiCard()
   }
 
+  const previewDrumRackNote = (trackId: string, pitch: number, velocity: number) => {
+    const instrumentKind = options.audioEngine.getTrackInstrumentKind(trackId)
+    if (instrumentKind === 'synth') return false
+    if (options.audioEngine.previewDrumRackNote(trackId, pitch, velocity)) return true
+    return instrumentKind === 'drum-rack'
+  }
+
   const auditionNote = (pitch: number, velocity = 0.9, durSec = 0.35) => {
     try {
       options.audioEngine.ensureAudio()
@@ -188,10 +195,7 @@ export function useTimelineMidiOverlay(
       if (!ctx) return
       const trackId = resolveTargetTrackId()
       if (!trackId) return
-      const instrumentKind = options.audioEngine.getTrackInstrumentKind(trackId)
-      if (options.audioEngine.previewDrumRackNote(trackId, pitch, velocity) || instrumentKind === 'drum-rack') {
-        return
-      }
+      if (previewDrumRackNote(trackId, pitch, velocity)) return
       const synthGain = options.audioEngine.getTrackSynthGainNode(trackId)
       if (!synthGain) return
       const osc = ctx.createOscillator()
@@ -218,10 +222,7 @@ export function useTimelineMidiOverlay(
       if (!ctx || activeLiveNotes.has(pitch)) return
       const trackId = resolveTargetTrackId()
       if (!trackId) return
-      const instrumentKind = options.audioEngine.getTrackInstrumentKind(trackId)
-      if (options.audioEngine.previewDrumRackNote(trackId, pitch, velocity) || instrumentKind === 'drum-rack') {
-        return
-      }
+      if (previewDrumRackNote(trackId, pitch, velocity)) return
       const synthGain = options.audioEngine.getTrackSynthGainNode(trackId)
       if (!synthGain) return
       const osc1 = ctx.createOscillator()

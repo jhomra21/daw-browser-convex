@@ -135,6 +135,7 @@ export default function Eq(props: EqProps) {
   let lastFreshSpectrumAt = 0
   let lastSpectrumDecayAt = 0
   let spectrumDecayFrame: number | null = null
+  let initialDrawFrame: number | null = null
 
   onMount(() => {
     // Initialize size based on container (very compact)
@@ -151,11 +152,16 @@ export default function Eq(props: EqProps) {
     containerRef && resizeObs.observe(containerRef)
     const responseContext = new OfflineAudioContext(1, 1, 44100)
     responseFilter = responseContext.createBiquadFilter()
+    initialDrawFrame = requestAnimationFrame(() => {
+      initialDrawFrame = null
+      draw()
+    })
   })
 
   onCleanup(() => {
     try { resizeObs?.disconnect() } catch {}
     if (spectrumDecayFrame !== null) cancelAnimationFrame(spectrumDecayFrame)
+    if (initialDrawFrame !== null) cancelAnimationFrame(initialDrawFrame)
     responseFilter = undefined
   })
 

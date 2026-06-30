@@ -501,7 +501,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     selection,
   });
-
   const removeCreatedCloudTrack = (track: Track | undefined) => removeAutoCreatedCloudTrack({
     convexClient,
     convexApi,
@@ -1019,7 +1018,6 @@ const Timeline: Component<TimelineProps> = (props) => {
       },
       selectedFXTarget: selection.selectedFXTarget(),
       tracks: renderTracks(),
-      isPlaying: isPlaying(),
       playheadSec: playheadSec(),
       projectId: projectId(),
       userId: userId(),
@@ -1195,7 +1193,6 @@ const Timeline: Component<TimelineProps> = (props) => {
           onLocalMidiSaved: handleLocalMidiSaved,
         }}
         sidebar={{
-          isPlaying: isPlaying(),
           currentUserId: userId(),
           master: {
             selected: selection.selectedFXTarget() === "master",

@@ -41,7 +41,6 @@ export type TimelinePanelsProps = {
     }
     selectedFXTarget: Track['id'] | 'master'
     tracks: Track[]
-    isPlaying: boolean
     playheadSec: number
     projectId?: string
     userId?: string
@@ -164,7 +163,6 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         clipTab={props.effectsPanel.clipTab}
         selectedFXTarget={props.effectsPanel.selectedFXTarget}
         tracks={props.effectsPanel.tracks}
-        isPlaying={props.effectsPanel.isPlaying}
         onClose={props.effectsPanel.onClose}
         onOpen={props.effectsPanel.onOpen}
         audioEngine={props.effectsPanel.audioEngine}

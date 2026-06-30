@@ -19,7 +19,6 @@ type EffectsPanelControllerOptions = {
   audioEngine: Accessor<AudioEngine>;
   projectId: Accessor<string | undefined>;
   userId: Accessor<string | undefined>;
-  isPlaying: Accessor<boolean>;
   playheadSec: Accessor<number | undefined>;
   canWriteTrackRouting?: (trackId: Track["id"]) => boolean;
   grantClipWrite?: OptimisticGrantWrite;
@@ -128,8 +127,6 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     tracks: options.tracks,
     audioEngine: options.audioEngine,
     roomEffects: () => roomEffectsQuery.data,
-    isPlaying: options.isPlaying,
-    playheadSec: options.playheadSec,
     localDraftEffects: {
       eq: audioEffects.eq.readDraftForTarget,
       compressor: audioEffects.compressor.readDraftForTarget,

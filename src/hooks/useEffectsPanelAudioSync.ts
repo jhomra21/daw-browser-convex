@@ -34,8 +34,6 @@ type UseEffectsPanelAudioSyncOptions = {
   tracks: Accessor<Track[]>;
   audioEngine: Accessor<AudioEngine>;
   roomEffects: Accessor<RoomEffectRow[] | undefined>;
-  isPlaying: Accessor<boolean>;
-  playheadSec?: Accessor<number | undefined>;
   localDraftEffects?: {
     eq?: (targetId: string) => EqParams | undefined;
     compressor?: (targetId: string) => CompressorParams | undefined;
@@ -384,12 +382,7 @@ export function useEffectsPanelAudioSync(
 
   const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null);
 
-  createEffect(() => {
-    if (!options.isOpen() || !options.isPlaying()) {
-      setSpectrum(null);
-      return;
-    }
-    options.playheadSec?.();
+  const sampleSpectrum = () => {
     try {
       const audioEngine = options.audioEngine();
       const id = options.currentTargetId();
@@ -400,6 +393,22 @@ export function useEffectsPanelAudioSync(
     } catch {
       setSpectrum(null);
     }
+  };
+
+  createEffect(() => {
+    if (!options.isOpen()) {
+      setSpectrum(null);
+      return;
+    }
+    sampleSpectrum();
+
+    // Spectrum visualization needs its own bounded sampling clock because live
+    // MIDI can produce audio while the transport playhead is stopped.
+    let frame = requestAnimationFrame(function tick() {
+      sampleSpectrum();
+      frame = requestAnimationFrame(tick);
+    });
+    onCleanup(() => cancelAnimationFrame(frame));
   });
 
   return {

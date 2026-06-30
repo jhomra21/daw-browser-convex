@@ -61,6 +61,7 @@ export function createMeteringRuntime() {
           this.frames = 0
           this.sumL = 0
           this.sumR = 0
+          this.emittedSilence = false
           this.reportEveryFrames = 4096
           this.port.onmessage = (event) => {
             this.active = event.data?.active === true
@@ -68,6 +69,7 @@ export function createMeteringRuntime() {
               this.frames = 0
               this.sumL = 0
               this.sumR = 0
+              this.emittedSilence = false
             }
           }
         }
@@ -75,7 +77,19 @@ export function createMeteringRuntime() {
           if (!this.active) return true
           const input = inputs[0]
           const left = input && input[0]
-          if (!left) return true
+          if (!left) {
+            this.frames += 128
+            if (this.frames >= this.reportEveryFrames) {
+              if (!this.emittedSilence) {
+                this.port.postMessage({ left: 0, right: 0 })
+                this.emittedSilence = true
+              }
+              this.frames = 0
+              this.sumL = 0
+              this.sumR = 0
+            }
+            return true
+          }
           const right = input[1] || left
           for (let i = 0; i < left.length; i++) {
             const l = left[i] || 0
@@ -85,10 +99,12 @@ export function createMeteringRuntime() {
           }
           this.frames += left.length
           if (this.frames >= this.reportEveryFrames) {
-            this.port.postMessage({
-              left: Math.min(1, Math.max(0, Math.sqrt(Math.sqrt(this.sumL / this.frames)))),
-              right: Math.min(1, Math.max(0, Math.sqrt(Math.sqrt(this.sumR / this.frames)))),
-            })
+            const nextLeft = Math.min(1, Math.max(0, Math.sqrt(Math.sqrt(this.sumL / this.frames))))
+            const nextRight = Math.min(1, Math.max(0, Math.sqrt(Math.sqrt(this.sumR / this.frames))))
+            if (nextLeft > 0 || nextRight > 0 || !this.emittedSilence) {
+              this.port.postMessage({ left: nextLeft, right: nextRight })
+              this.emittedSilence = nextLeft === 0 && nextRight === 0
+            }
             this.frames = 0
             this.sumL = 0
             this.sumR = 0
@@ -186,7 +202,10 @@ export function createMeteringRuntime() {
       try { analyser.getByteFrequencyData(tmp) } catch { return spectrumLast.get(trackId) ?? null }
       let sum = 0
       for (let i = 0; i < tmp.length; i++) sum += tmp[i]
-      if (sum === 0) return spectrumLast.get(trackId) ?? null
+      if (sum === 0) {
+        spectrumLast.delete(trackId)
+        return null
+      }
       let out = spectrumOut.get(trackId)
       if (!out || out.length !== tmp.length) {
         out = new Float32Array(tmp.length)

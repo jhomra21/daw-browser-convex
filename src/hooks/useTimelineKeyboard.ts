@@ -1,5 +1,7 @@
 import { onMount, onCleanup, type Accessor } from "solid-js";
 
+import { isEditableKeyboardTarget } from "~/lib/keyboard-event-target";
+
 type KeyboardHandlers = {
   enabled: Accessor<boolean>;
   onSpace: () => void;
@@ -21,15 +23,7 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
   function onKeyDown(e: KeyboardEvent) {
     if (!handlers.enabled()) return;
 
-    const target = e.target;
-    if (
-      target instanceof HTMLElement &&
-      (target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.tagName === "SELECT" ||
-        target.isContentEditable)
-    )
-      return;
+    if (isEditableKeyboardTarget(e.target)) return;
 
 
     if (

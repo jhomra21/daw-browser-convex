@@ -1,5 +1,6 @@
 import { createEffect, createSignal, on, onCleanup } from 'solid-js'
 
+import { isEditableKeyboardTarget } from '~/lib/keyboard-event-target'
 import { canUseLocalStorage } from '~/lib/timeline-storage'
 
 const BASE_C4 = 60
@@ -31,6 +32,7 @@ const blackKeySemitones: Record<string, number> = {
 
 type UseMidiKeyboardInputOptions = {
   projectId: () => string | undefined
+  targetId: () => string | null | undefined
   enabled: () => boolean
   canPlay: () => boolean
   onStartLiveNote?: (pitch: number, velocity?: number) => void
@@ -42,11 +44,6 @@ export const midiKeyboardCodeToSemitone = (code: string): number | undefined => 
   if (white !== undefined) return white
   return blackKeySemitones[code]
 }
-
-const isMidiKeyboardTextInputTarget = (target: EventTarget | null) => (
-  target instanceof HTMLElement
-  && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-)
 
 export const clampMidiKeyboardOctave = (value: number) => Math.max(-4, Math.min(4, value))
 export const clampMidiKeyboardVelocity = (value: number) => Math.max(0.1, Math.min(1, value))
@@ -82,7 +79,7 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
   const pressed = new Map<string, number>()
 
   const stopPressedNotes = () => {
-    for (const pitch of pressed.values()) {
+    for (const pitch of new Set(pressed.values())) {
       options.onStopLiveNote?.(pitch)
     }
     pressed.clear()
@@ -91,7 +88,7 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
 
   const handleKeyDown = (event: KeyboardEvent) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return
-    if (isMidiKeyboardTextInputTarget(event.target)) return
+    if (isEditableKeyboardTarget(event.target)) return
 
     if (event.code === 'KeyZ') {
       setOctave(value => clampMidiKeyboardOctave(value - 1))
@@ -129,11 +126,7 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
 
     const pitch = BASE_C4 + semitone + octave() * 12
     pressed.set(event.code, pitch)
-    setActiveRows(prev => {
-      const next = new Set(prev)
-      next.add(pitch)
-      return next
-    })
+    setActiveRows(new Set(pressed.values()))
     options.onStartLiveNote?.(pitch, velocity())
     event.preventDefault()
     event.stopPropagation()
@@ -146,12 +139,10 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
     if (pitch === undefined) return
 
     pressed.delete(event.code)
-    options.onStopLiveNote?.(pitch)
-    setActiveRows(prev => {
-      const next = new Set(prev)
-      next.delete(pitch)
-      return next
-    })
+    if (![...pressed.values()].includes(pitch)) {
+      options.onStopLiveNote?.(pitch)
+    }
+    setActiveRows(new Set(pressed.values()))
     event.preventDefault()
     event.stopPropagation()
   }
@@ -163,6 +154,12 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
       setOctave(readStoredOctave())
       setVelocity(readStoredVelocity())
     },
+    { defer: true },
+  ))
+
+  createEffect(on(
+    () => options.targetId(),
+    () => stopPressedNotes(),
     { defer: true },
   ))
 

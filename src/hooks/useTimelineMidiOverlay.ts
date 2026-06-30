@@ -305,6 +305,7 @@ export function useTimelineMidiOverlay(
 
   const midiKeyboard = useMidiKeyboardInput({
     projectId: () => options.projectId(),
+    targetId: resolveTargetTrackId,
     enabled: midiKeyboardEnabled,
     canPlay: midiKeyboardCanPlay,
     onStartLiveNote: startLiveNote,

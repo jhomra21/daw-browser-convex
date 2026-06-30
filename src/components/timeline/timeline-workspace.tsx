@@ -118,9 +118,13 @@ type Props = {
   automation: {
     projectId: string;
     visibleByTrackId: Record<string, boolean>;
+    visibleTrackLanesByTrackId: Record<string, string[]>;
     masterVisible: boolean;
     onToggleMasterVisibility: () => void;
     onToggleTrackVisibility: (trackId: Track["id"]) => void;
+    onAddTrackLane: (trackId: Track["id"]) => void;
+    onShowTrackLane: (trackId: Track["id"], parameterId: string) => void;
+    onHideTrackLane: (trackId: Track["id"], parameterId: string) => void;
     laneHeightsByTrackId: Record<string, number>;
     masterLaneHeight: number;
     onResizeMasterLane: (height: number) => void;
@@ -141,6 +145,7 @@ export default function TimelineWorkspace(props: Props) {
     return props.tracks.map((track) => {
       const automationHeight = props.automation.visibleByTrackId[track.id] === true
         ? (props.automation.laneHeightsByTrackId[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT)
+          * (props.automation.visibleTrackLanesByTrackId[track.id]?.length || 1)
         : 0;
       const row = {
         topPx,
@@ -211,8 +216,8 @@ export default function TimelineWorkspace(props: Props) {
               <For each={props.tracks}>
                 {(track, i) => (
                   (() => {
-                    const parameterId = () => props.automation.selectedParametersByTargetKey[track.id] ?? "volume";
-                    const targetKey = () => automationTargetKey({ kind: "track", trackId: track.id }, parameterId());
+                    const visibleParameterIds = () => props.automation.visibleTrackLanesByTrackId[track.id] ?? [];
+                    const laneHeight = () => props.automation.laneHeightsByTrackId[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
                     return (
                       <TrackLane
                         track={track}
@@ -238,8 +243,11 @@ export default function TimelineWorkspace(props: Props) {
                         automation={{
                           projectId: props.automation.projectId,
                           visible: props.automation.visibleByTrackId[track.id] === true,
-                          parameterId: parameterId(),
-                          envelope: props.automation.envelopesByTargetKey.get(targetKey()),
+                          parameterIds: visibleParameterIds(),
+                          laneHeightPx: laneHeight(),
+                          envelopeForParameter: (parameterId) => props.automation.envelopesByTargetKey.get(
+                            automationTargetKey({ kind: "track", trackId: track.id }, parameterId),
+                          ),
                           durationSec: props.durationSec,
                           onPreview: props.automation.onPreviewEnvelope,
                           onCommit: props.automation.onCommitEnvelope,
@@ -326,9 +334,13 @@ export default function TimelineWorkspace(props: Props) {
               }}
               automation={{
                 visibleByTrackId: props.automation.visibleByTrackId,
+                visibleTrackLanesByTrackId: props.automation.visibleTrackLanesByTrackId,
                 masterVisible: props.automation.masterVisible,
                 onToggleMasterVisibility: props.automation.onToggleMasterVisibility,
                 onToggleTrackVisibility: props.automation.onToggleTrackVisibility,
+                onAddTrackLane: props.automation.onAddTrackLane,
+                onShowTrackLane: props.automation.onShowTrackLane,
+                onHideTrackLane: props.automation.onHideTrackLane,
                 selectedParametersByTargetKey: props.automation.selectedParametersByTargetKey,
                 envelopesByTargetKey: props.automation.envelopesByTargetKey,
                 onSelectParameter: props.automation.onSelectParameter,

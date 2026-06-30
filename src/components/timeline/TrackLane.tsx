@@ -25,8 +25,9 @@ type TrackLaneProps = {
   automation?: {
     projectId: string
     visible: boolean
-    parameterId: string
-    envelope: AutomationEnvelope | undefined
+    parameterIds: string[]
+    laneHeightPx: number
+    envelopeForParameter: (parameterId: string) => AutomationEnvelope | undefined
     durationSec: number
     onPreview: (envelope: AutomationEnvelope | undefined) => void
     onCommit: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
@@ -35,28 +36,41 @@ type TrackLaneProps = {
 }
 
 const TrackLane: Component<TrackLaneProps> = (props) => {
+  const automation = () => props.automation
   return (
     <div
       class={cn('absolute left-0 right-0 overflow-hidden bg-neutral-950', props.isDropTarget && 'bg-green-500/10')}
       style={{ top: `${props.topPx}px`, height: `${LANE_HEIGHT + props.automationHeightPx}px` }}
     >
       <div class="absolute left-0 right-0 h-[1.5px] bg-neutral-800" style={{ top: `${LANE_HEIGHT - 1}px` }} />
-      {props.automation?.visible ? (
+      {automation()?.visible ? (
         <div
           class="absolute inset-x-0 z-30 border-t border-red-500/30 bg-neutral-950/95"
           style={{ top: `${LANE_HEIGHT}px`, height: `${props.automationHeightPx}px` }}
         >
-          <AutomationLane
-            projectId={props.automation.projectId}
-            target={{ kind: 'track', trackId: props.track.id }}
-            parameterId={props.automation.parameterId}
-            envelope={props.automation.envelope}
-            durationSec={props.automation.durationSec}
-            heightPx={props.automationHeightPx}
-            onPreview={props.automation.onPreview}
-            onCommit={props.automation.onCommit}
-            onCancelPreview={props.automation.onCancelPreview}
-          />
+          <For each={automation()?.parameterIds ?? []}>
+            {(parameterId, index) => (
+              <div
+                class="absolute inset-x-0 border-b border-red-500/20"
+                style={{
+                  top: `${index() * (automation()?.laneHeightPx ?? 0)}px`,
+                  height: `${automation()?.laneHeightPx ?? 0}px`,
+                }}
+              >
+                <AutomationLane
+                  projectId={automation()?.projectId ?? ''}
+                  target={{ kind: 'track', trackId: props.track.id }}
+                  parameterId={parameterId}
+                  envelope={automation()?.envelopeForParameter(parameterId)}
+                  durationSec={automation()?.durationSec ?? 0}
+                  heightPx={automation()?.laneHeightPx ?? 0}
+                  onPreview={(envelope) => automation()?.onPreview(envelope)}
+                  onCommit={(envelope, targetKey) => automation()?.onCommit(envelope, targetKey)}
+                  onCancelPreview={(targetKey) => automation()?.onCancelPreview(targetKey)}
+                />
+              </div>
+            )}
+          </For>
         </div>
       ) : null}
       <For each={props.track.clips}>

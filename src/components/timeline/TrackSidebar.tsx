@@ -56,9 +56,13 @@ type TrackSidebarProps = {
   };
   automation?: {
     visibleByTrackId: Record<string, boolean>;
+    visibleTrackLanesByTrackId: Record<string, string[]>;
     masterVisible: boolean;
     onToggleMasterVisibility: () => void;
     onToggleTrackVisibility: (trackId: Track["id"]) => void;
+    onAddTrackLane: (trackId: Track["id"]) => void;
+    onShowTrackLane: (trackId: Track["id"], parameterId: string) => void;
+    onHideTrackLane: (trackId: Track["id"], parameterId: string) => void;
     laneHeightsByTrackId: Record<string, number>;
     masterLaneHeight: number;
     onResizeMasterLane: (height: number) => void;
@@ -400,7 +404,9 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const selectedAutomationEnvelope = () => props.automation?.envelopesByTargetKey.get(selectedAutomationTargetKey());
             const automationMeta = () => automationMetaByTrackId().get(track.id);
             const automationVisible = () => props.automation?.visibleByTrackId[track.id] === true;
+            const visibleAutomationParameterIds = () => props.automation?.visibleTrackLanesByTrackId[track.id] ?? [];
             const automationHeight = () => props.automation?.laneHeightsByTrackId[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
+            const automationTotalHeight = () => automationVisible() ? automationHeight() * Math.max(1, visibleAutomationParameterIds().length) : 0;
 
             return (
               <div
@@ -410,7 +416,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     ? "bg-neutral-800"
                     : "bg-neutral-900",
                 )}
-                style={{ height: `${LANE_HEIGHT + (automationVisible() ? automationHeight() : 0)}px` }}
+                style={{ height: `${LANE_HEIGHT + automationTotalHeight()}px` }}
                 onClick={() => sidebar().onTrackClick(track.id)}
               >
                 <div
@@ -563,7 +569,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
                   <div class="flex w-[92px] items-center gap-2">
                     <div class="flex w-[72px] shrink-0 flex-col gap-1">
-                      <div class="grid grid-cols-3 gap-1">
+                      <div class="grid grid-cols-4 gap-1">
                         <button
                           class={cn(
                             "flex h-7 items-center justify-center border text-xs font-bold transition-colors",
@@ -598,7 +604,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
                         <button
                           class={cn(
-                            "h-7 border px-2 text-xs font-semibold",
+                            "h-7 border text-xs font-semibold",
                             soloDisabled
                               ? "cursor-not-allowed border-neutral-700 bg-neutral-700/40 text-neutral-500"
                               : soloed()
@@ -636,6 +642,16 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           title={automationVisible() ? "Hide automation lane" : "Show automation lane"}
                         >
                           A
+                        </button>
+                        <button
+                          class="h-7 border border-neutral-700 bg-neutral-800 text-xs font-semibold text-red-200 transition-colors hover:bg-red-500/20"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            props.automation?.onAddTrackLane(track.id);
+                          }}
+                          title="Add visible automation lane"
+                        >
+                          +
                         </button>
                       </div>
 
@@ -786,26 +802,54 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 </div>
                 {automationVisible() ? (
                   <div
-                    class="absolute inset-x-0 z-10 grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-t border-red-500/30 bg-neutral-950/95 px-2 text-[11px] text-red-100"
-                    style={{ top: `${LANE_HEIGHT}px`, height: `${automationHeight()}px` }}
+                    class="absolute inset-x-0 z-10 border-t border-red-500/30 bg-neutral-950/95 text-[11px] text-red-100"
+                    style={{ top: `${LANE_HEIGHT}px`, height: `${automationTotalHeight()}px` }}
                     onClick={(event) => event.stopPropagation()}
                   >
                     <div
                       class="absolute inset-x-0 top-0 h-2 -translate-y-1/2 cursor-row-resize"
                       onPointerDown={(event) => startAutomationResize(track.id, automationHeight(), event)}
                     />
-                    <div class="flex items-center gap-1 overflow-hidden">
-                      <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" classList={{ "opacity-30": !selectedAutomationEnvelope() }} />
-                      <span class="truncate">Automation</span>
-                    </div>
-                    <AutomationParameterPicker
-                      value={selectedAutomationParameter()}
-                      automatedParameterIds={automationMeta()?.automatedParameterIds}
-                      onChange={(parameterId) => props.automation?.onSelectParameter(track.id, parameterId)}
-                    />
-                    <div class="truncate text-right text-red-200/70">
-                      {selectedAutomationEnvelope()?.points.length ?? 0} pts
-                    </div>
+                    <For each={visibleAutomationParameterIds()}>
+                      {(parameterId) => {
+                        const targetKey = () => automationTargetKey({ kind: "track", trackId: track.id }, parameterId);
+                        const envelope = () => props.automation?.envelopesByTargetKey.get(targetKey());
+                        return (
+                          <div
+                            class="grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-b border-red-500/20 px-2"
+                            style={{ height: `${automationHeight()}px` }}
+                          >
+                            <div class="flex items-center gap-1 overflow-hidden">
+                              <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" classList={{ "opacity-30": !envelope() }} />
+                              <span class="truncate">Automation</span>
+                            </div>
+                            <AutomationParameterPicker
+                              value={parameterId}
+                              automatedParameterIds={automationMeta()?.automatedParameterIds}
+                              onChange={(nextParameterId) => {
+                                props.automation?.onHideTrackLane(track.id, parameterId);
+                                props.automation?.onShowTrackLane(track.id, nextParameterId);
+                                props.automation?.onSelectParameter(track.id, nextParameterId);
+                              }}
+                            />
+                            <div class="flex items-center justify-end gap-2 text-red-200/70">
+                              <span class="truncate">{envelope()?.points.length ?? 0} pts</span>
+                              <button
+                                type="button"
+                                class="h-5 w-5 border border-red-500/30 text-red-100 hover:border-red-400"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  props.automation?.onHideTrackLane(track.id, parameterId);
+                                }}
+                                title="Hide automation lane"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      }}
+                    </For>
                   </div>
                 ) : null}
               </div>

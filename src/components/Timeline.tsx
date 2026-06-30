@@ -159,6 +159,56 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
     save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-visible-tracks`, JSON.stringify(value)),
   });
+  const visibleAutomationLanes = useProjectPersistedState<Record<string, string[]>>({
+    projectId,
+    createInitial: () => ({}),
+    load: (rid) => {
+      const raw = localStorage.getItem(`timeline:${rid}:automation-visible-lanes`);
+      const legacyRaw = localStorage.getItem(`timeline:${rid}:automation-visible-tracks`);
+      const selectedRaw = localStorage.getItem(`timeline:${rid}:automation-parameters`);
+      const legacySelected: Record<string, string> = {};
+      if (selectedRaw) {
+        try {
+          const parsed = JSON.parse(selectedRaw);
+          if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+            for (const [key, value] of Object.entries(parsed)) {
+              if (typeof value === "string") legacySelected[key] = value;
+            }
+          }
+        } catch {}
+      }
+      const readLegacy = () => {
+        if (!legacyRaw) return {};
+        try {
+          const parsed = JSON.parse(legacyRaw);
+          if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+          const next: Record<string, string[]> = {};
+          for (const [key, value] of Object.entries(parsed)) {
+            if (key === "master" || value !== true) continue;
+            next[key] = [legacySelected[key] ?? "volume"];
+          }
+          return next;
+        } catch {
+          return {};
+        }
+      };
+      if (!raw) return readLegacy();
+      try {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return readLegacy();
+        const next: Record<string, string[]> = {};
+        for (const [key, value] of Object.entries(parsed)) {
+          if (!Array.isArray(value)) continue;
+          const parameterIds = value.filter((entry): entry is string => typeof entry === "string");
+          if (parameterIds.length > 0) next[key] = Array.from(new Set(parameterIds));
+        }
+        return next;
+      } catch {
+        return readLegacy();
+      }
+    },
+    save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-visible-lanes`, JSON.stringify(value)),
+  });
   const automationLaneHeights = useProjectPersistedState<Record<string, number>>({
     projectId,
     createInitial: () => ({}),
@@ -490,6 +540,67 @@ const Timeline: Component<TimelineProps> = (props) => {
   const automationEnvelopesByTargetKey = createMemo(() => (
     new Map(persistedAutomation.envelopes().map((envelope) => [envelope.targetKey, envelope]))
   ));
+  const showAutomationLane = (trackId: Track["id"], parameterId: string) => {
+    visibleAutomationLanes.setValue((current) => {
+      const lanes = current[trackId] ?? [];
+      if (lanes.includes(parameterId)) return current;
+      return { ...current, [trackId]: [...lanes, parameterId] };
+    });
+    visibleAutomationTracks.setValue((current) => (
+      current[trackId] === true ? current : { ...current, [trackId]: true }
+    ));
+  };
+  const hideAutomationLane = (trackId: Track["id"], parameterId: string) => {
+    let hiddenLastLane = false;
+    visibleAutomationLanes.setValue((current) => {
+      const lanes = current[trackId] ?? [];
+      const nextLanes = lanes.filter((entry) => entry !== parameterId);
+      if (nextLanes.length === lanes.length) return current;
+      const next = { ...current };
+      if (nextLanes.length > 0) next[trackId] = nextLanes;
+      else {
+        delete next[trackId];
+        hiddenLastLane = true;
+      }
+      return next;
+    });
+    if (hiddenLastLane) {
+      visibleAutomationTracks.setValue((current) => ({ ...current, [trackId]: false }));
+    }
+  };
+  const handleTogglePrimaryAutomationLane = (trackId: Track["id"]) => {
+    const parameterId = selectedAutomationParameters.value()[trackId] ?? "volume";
+    const lanes = visibleAutomationLanes.value()[trackId] ?? (
+      visibleAutomationTracks.value()[trackId] === true ? [parameterId] : []
+    );
+    if (lanes.length > 0) {
+      visibleAutomationLanes.setValue((current) => {
+        const next = { ...current };
+        delete next[trackId];
+        return next;
+      });
+      visibleAutomationTracks.setValue((current) => ({ ...current, [trackId]: false }));
+      return;
+    }
+    showAutomationLane(trackId, parameterId);
+  };
+  const handleAddAutomationLane = (trackId: Track["id"]) => {
+    const visible = new Set(visibleAutomationLanes.value()[trackId] ?? []);
+    const selectedParameter = selectedAutomationParameters.value()[trackId] ?? "volume";
+    if (!visible.has(selectedParameter)) {
+      showAutomationLane(trackId, selectedParameter);
+      return;
+    }
+    for (const envelope of persistedAutomation.envelopes()) {
+      if (envelope.target.kind !== "track" || envelope.target.trackId !== trackId) continue;
+      if (visible.has(envelope.parameterId)) continue;
+      showAutomationLane(trackId, envelope.parameterId);
+      selectedAutomationParameters.setValue((current) => (
+        current[trackId] === envelope.parameterId ? current : { ...current, [trackId]: envelope.parameterId }
+      ));
+      return;
+    }
+  };
   const {
     pendingSharedTrackVolumes,
     pendingSharedTrackRouting,
@@ -1474,13 +1585,15 @@ const Timeline: Component<TimelineProps> = (props) => {
         automation={{
           projectId: projectId(),
           visibleByTrackId: visibleAutomationTracks.value(),
+          visibleTrackLanesByTrackId: visibleAutomationLanes.value(),
           masterVisible: visibleAutomationTracks.value().master === true,
           onToggleMasterVisibility: () => {
             visibleAutomationTracks.setValue((current) => ({ ...current, master: !current.master }));
           },
-          onToggleTrackVisibility: (trackId) => {
-            visibleAutomationTracks.setValue((current) => ({ ...current, [trackId]: !current[trackId] }));
-          },
+          onToggleTrackVisibility: handleTogglePrimaryAutomationLane,
+          onAddTrackLane: handleAddAutomationLane,
+          onShowTrackLane: showAutomationLane,
+          onHideTrackLane: hideAutomationLane,
           laneHeightsByTrackId: automationLaneHeights.value(),
           masterLaneHeight: automationLaneHeights.value().master ?? DEFAULT_AUTOMATION_LANE_HEIGHT,
           onResizeMasterLane: (height) => {

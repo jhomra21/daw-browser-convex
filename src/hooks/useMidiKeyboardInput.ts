@@ -133,8 +133,6 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
   }
 
   const handleKeyUp = (event: KeyboardEvent) => {
-    const semitone = midiKeyboardCodeToSemitone(event.code)
-    if (semitone === undefined) return
     const pitch = pressed.get(event.code)
     if (pitch === undefined) return
 

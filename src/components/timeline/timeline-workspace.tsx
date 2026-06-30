@@ -191,7 +191,7 @@ export default function TimelineWorkspace(props: Props) {
                     viewportRedrawVersion={viewportRedrawVersion()}
                     onClipDblClick={(_, clipId) => {
                       const match = props.trackLookup.clipEntryById.get(clipId);
-                      if (match && match.trackId === track.id && match.clip.midi) {
+                      if (match?.clip.midi) {
                         props.openMidiEditorFor(clipId);
                         return;
                       }

@@ -296,11 +296,6 @@ export function useTimelineMidiOverlay(
     } catch {}
   })
 
-  createEffect(() => {
-    if (!midiKeyboardEnabled() || midiKeyboardCanPlay()) return
-    stopAllLiveNotes()
-  })
-
   const midiKeyboard = useMidiKeyboardInput({
     projectId: () => options.projectId(),
     targetId: resolveTargetTrackId,

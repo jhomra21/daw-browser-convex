@@ -1,9 +1,10 @@
-import { For, createMemo, createSignal, onCleanup } from 'solid-js'
+import { For, Show, createMemo, createSignal, onCleanup } from 'solid-js'
 import {
   automationTargetKey,
   getAutomationParameterDescriptor,
   normalizeAutomationPoints,
   valueAtAutomationTime,
+  type AutomationParameterDescriptor,
   type AutomationEnvelope,
   type AutomationPoint,
   type AutomationTarget,
@@ -24,6 +25,18 @@ type AutomationLaneProps = {
 
 const AUTOMATION_LINE_COLOR = '#ef4444'
 const VERTICAL_PADDING = 7
+const POINT_TIME_NUDGE_SEC = 0.05
+const POINT_VALUE_NUDGE_RATIO = 0.01
+
+const formatTime = (timeSec: number) => `${timeSec.toFixed(2)}s`
+
+const formatValue = (value: number, unit: AutomationParameterDescriptor['unit']) => {
+  if (unit === 'percent') return `${Math.round(value * 100)}%`
+  if (unit === 'db') return `${value.toFixed(1)} dB`
+  if (unit === 'hz') return value >= 1000 ? `${(value / 1000).toFixed(2)} kHz` : `${Math.round(value)} Hz`
+  if (unit === 'seconds') return `${value.toFixed(2)}s`
+  return value.toFixed(2)
+}
 
 const createEnvelope = (props: AutomationLaneProps, points: AutomationPoint[]): AutomationEnvelope => {
   const targetKey = automationTargetKey(props.target, props.parameterId)
@@ -42,6 +55,7 @@ const createEnvelope = (props: AutomationLaneProps, points: AutomationPoint[]): 
 
 export default function AutomationLane(props: AutomationLaneProps) {
   const [selectedPointId, setSelectedPointId] = createSignal<string | null>(null)
+  const [hoveredPointId, setHoveredPointId] = createSignal<string | null>(null)
   let root: HTMLDivElement | undefined
   let cleanupDrag: (() => void) | undefined
 
@@ -69,8 +83,8 @@ export default function AutomationLane(props: AutomationLaneProps) {
     if (!desc) return []
     if (ordered.length === 0) {
       return [
-        { timeSec: 0, value: desc.defaultValue },
-        { timeSec: props.durationSec, value: desc.defaultValue },
+        { id: 'automation-empty-start', timeSec: 0, value: desc.defaultValue, interpolation: 'linear' },
+        { id: 'automation-empty-end', timeSec: props.durationSec, value: desc.defaultValue, interpolation: 'linear' },
       ]
     }
     const first = ordered[0]
@@ -94,10 +108,39 @@ export default function AutomationLane(props: AutomationLaneProps) {
     }
     return next
   })
+  const displayedPoint = createMemo(() => {
+    const activeId = hoveredPointId() ?? selectedPointId()
+    if (!activeId) return undefined
+    return points().find((point) => point.id === activeId)
+  })
+  const selectedPoint = createMemo(() => {
+    const selected = selectedPointId()
+    return selected ? points().find((point) => point.id === selected) : undefined
+  })
+  const readout = createMemo(() => {
+    const point = displayedPoint()
+    const desc = descriptor()
+    if (!point || !desc) return undefined
+    return `${formatTime(point.timeSec)} · ${formatValue(point.value, desc.unit)} · ${point.interpolation}`
+  })
   const path = createMemo(() => {
     const ordered = displayPoints()
     if (ordered.length === 0) return ''
-    return ordered.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.timeSec * PPS} ${valueToY(point.value)}`).join(' ')
+    const commands: string[] = []
+    ordered.forEach((point, index) => {
+      const x = point.timeSec * PPS
+      const y = valueToY(point.value)
+      if (index === 0) {
+        commands.push(`M ${x} ${y}`)
+        return
+      }
+      const previous = ordered[index - 1]
+      if (previous?.interpolation === 'hold') {
+        commands.push(`L ${x} ${valueToY(previous.value)}`)
+      }
+      commands.push(`L ${x} ${y}`)
+    })
+    return commands.join(' ')
   })
 
   const pointFromEvent = (event: PointerEvent): AutomationPoint | null => {
@@ -170,13 +213,56 @@ export default function AutomationLane(props: AutomationLaneProps) {
     commitPoints([...points(), point])
   }
 
-  const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== 'Delete' && event.key !== 'Backspace') return
+  const updateSelectedPoint = (update: (point: AutomationPoint) => AutomationPoint) => {
     const selected = selectedPointId()
     if (!selected) return
-    event.preventDefault()
-    commitPoints(points().filter((point) => point.id !== selected))
-    setSelectedPointId(null)
+    const nextPoints = points().map((point) => point.id === selected ? update(point) : point)
+    commitPoints(nextPoints)
+  }
+
+  const toggleSelectedInterpolation = () => {
+    updateSelectedPoint((point) => ({
+      ...point,
+      interpolation: point.interpolation === 'hold' ? 'linear' : 'hold',
+    }))
+  }
+
+  const onKeyDown = (event: KeyboardEvent) => {
+    const selected = selectedPointId()
+    if (!selected) return
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault()
+      commitPoints(points().filter((point) => point.id !== selected))
+      setSelectedPointId(null)
+      return
+    }
+    if (event.key === 'i' || event.key === 'I') {
+      event.preventDefault()
+      toggleSelectedInterpolation()
+      return
+    }
+    const desc = descriptor()
+    if (!desc) return
+    const multiplier = event.shiftKey ? 10 : 1
+    const timeDelta = POINT_TIME_NUDGE_SEC * multiplier
+    const valueDelta = (desc.max - desc.min) * POINT_VALUE_NUDGE_RATIO * multiplier
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault()
+      const direction = event.key === 'ArrowLeft' ? -1 : 1
+      updateSelectedPoint((point) => ({
+        ...point,
+        timeSec: Math.max(0, Math.min(props.durationSec, point.timeSec + direction * timeDelta)),
+      }))
+      return
+    }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault()
+      const direction = event.key === 'ArrowDown' ? -1 : 1
+      updateSelectedPoint((point) => ({
+        ...point,
+        value: Math.max(desc.min, Math.min(desc.max, point.value + direction * valueDelta)),
+      }))
+    }
   }
 
   onCleanup(() => {
@@ -204,6 +290,8 @@ export default function AutomationLane(props: AutomationLaneProps) {
           {(point) => (
             <g
               onPointerDown={(event) => startDrag(point.id, event)}
+              onPointerEnter={() => setHoveredPointId(point.id)}
+              onPointerLeave={() => setHoveredPointId((current) => current === point.id ? null : current)}
               class="cursor-grab"
             >
               <circle cx={point.timeSec * PPS} cy={valueToY(point.value)} r="10" fill="transparent" />
@@ -219,6 +307,29 @@ export default function AutomationLane(props: AutomationLaneProps) {
           )}
         </For>
       </svg>
+      <Show when={readout()}>
+        {(label) => (
+          <div class="pointer-events-none absolute right-2 top-1 rounded border border-red-500/40 bg-neutral-950/90 px-2 py-1 text-[10px] text-red-100 shadow-lg shadow-black/30">
+            {label()}
+          </div>
+        )}
+      </Show>
+      <Show when={selectedPoint()}>
+        {(point) => (
+          <button
+            type="button"
+            class="absolute bottom-1 right-2 rounded border border-red-500/40 bg-neutral-950/90 px-2 py-1 text-[10px] uppercase tracking-wide text-red-100 hover:border-red-400"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation()
+              toggleSelectedInterpolation()
+            }}
+            title="Toggle interpolation (I)"
+          >
+            {point().interpolation === 'hold' ? 'Hold' : 'Linear'}
+          </button>
+        )}
+      </Show>
     </div>
   )
 }

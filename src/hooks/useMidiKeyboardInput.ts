@@ -197,7 +197,6 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
 
   return {
     octave,
-    hasActiveNotes: () => activeRows().size > 0,
     isActive: (pitch: number) => activeRows().has(pitch),
   }
 }

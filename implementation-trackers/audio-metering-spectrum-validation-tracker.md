@@ -12,15 +12,18 @@ This tracker was executed on the `audio-metering-refactor` branch.
 ## Execution Status
 
 - [x] Validated tracker assumptions against the current source.
-- [x] Exposed live MIDI visual activity from existing active keyboard rows.
+- [x] Exposed live MIDI visual activity from MIDI keyboard enabled/target-ready state.
 - [x] Threaded transport-independent visualization activity through `Timeline`.
 - [x] Renamed sidebar meter activation from `isPlaying` to `meteringActive`.
 - [x] Renamed effects spectrum activation from `isPlaying` to `spectrumActive`.
 - [x] Added a bounded effects-panel spectrum sampling clock for stopped-transport live MIDI.
 - [x] Preserved existing audio routing and mixer graph behavior without speculative routing refreshes.
 - [x] Ran final validators.
+- [x] Follow-up fix: kept visualizers armed while MIDI Keys can target a playable track, so one-shot Drum Rack samples and other post-keyup tails remain visible after key release.
 
 Corrected implementation note: Phase 5 was required by code inspection because `useEffectsPanelAudioSync` only re-sampled from reactive dependency changes; stopped-transport held notes do not advance `playheadSec`, so the effects panel needs a scoped RAF sampler while open and spectrum-active.
+
+Follow-up implementation note: using only held keyboard rows for visualizer activity was too narrow for one-shot samples. Drum Rack preview can continue outputting audio after the key is released, so `Timeline` now keeps metering and spectrum sampling active while MIDI Keys are enabled and a playable target exists. The now-unused `hasActiveNotes` API was removed during the simplification pass.
 
 ## Evidence from Current Code
 

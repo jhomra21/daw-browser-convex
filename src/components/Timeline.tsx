@@ -501,7 +501,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     selection,
   });
-  const audioVisualizationActive = () => isPlaying() || midiKeyboard.hasActiveNotes();
+  const audioVisualizationActive = () =>
+    isPlaying() || (midiKeyboard.enabled() && midiKeyboard.canPlay());
 
   const removeCreatedCloudTrack = (track: Track | undefined) => removeAutoCreatedCloudTrack({
     convexClient,

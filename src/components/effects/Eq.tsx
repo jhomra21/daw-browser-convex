@@ -40,6 +40,7 @@ type EqProps = {
   spectrumData?: SpectrumFrame | null
   automationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>
   onAutomationParameterTouch?: (parameterId: string) => void
+  onManualAutomationOverride?: (parameterId: string) => void
 }
 
 const DEFAULT_EQ_PARAMS = createDefaultEqParams()
@@ -503,11 +504,16 @@ export default function Eq(props: EqProps) {
       const gainDb = Math.round(ng * 10) / 10
       const frequency = Math.round(nf)
       if (band.gainDb !== gainDb || band.frequency !== frequency) {
+        props.onManualAutomationOverride?.(createEqBandParameterId(band.id, 'frequencyHz'))
+        props.onManualAutomationOverride?.(createEqBandParameterId(band.id, 'gainDb'))
         props.onBandChange(id, { gainDb, frequency })
       }
     } else {
       const frequency = Math.round(nf)
-      if (band.frequency !== frequency) props.onBandChange(id, { frequency })
+      if (band.frequency !== frequency) {
+        props.onManualAutomationOverride?.(createEqBandParameterId(band.id, 'frequencyHz'))
+        props.onBandChange(id, { frequency })
+      }
     }
   }
 
@@ -585,6 +591,7 @@ export default function Eq(props: EqProps) {
             onValueChange={(v) => {
               const band = selectedBand()
               if (!band) return
+              props.onManualAutomationOverride?.(createEqBandParameterId(band.id, 'frequencyHz'))
               props.onBandChange(band.id, { frequency: v })
             }}
           />
@@ -610,6 +617,7 @@ export default function Eq(props: EqProps) {
             onValueChange={(v) => {
               const band = selectedBand()
               if (!band) return
+              props.onManualAutomationOverride?.(createEqBandParameterId(band.id, 'gainDb'))
               props.onBandChange(band.id, { gainDb: v })
             }}
           />
@@ -633,6 +641,7 @@ export default function Eq(props: EqProps) {
             onValueChange={(v) => {
               const band = selectedBand()
               if (!band) return
+              props.onManualAutomationOverride?.(createEqBandParameterId(band.id, 'q'))
               props.onBandChange(band.id, { q: v })
             }}
           />

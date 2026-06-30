@@ -289,6 +289,14 @@ const PianoKeysIcon: Component = () => (
   </svg>
 );
 
+const AutomationReEnableIcon: Component = () => (
+  <svg viewBox="0 0 20 20" class="h-4 w-4" aria-hidden="true">
+    <path d="M5 12.5 8 9.5l2.5 2.5L15 7.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" />
+    <path d="M4.5 5.5A7 7 0 1 1 3 10" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.4" />
+    <path d="M3 5.5h1.5V7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4" />
+  </svg>
+);
+
 const MidiKeyboardToggle: Component<{ midiKeyboard: TransportControlsProps["midiKeyboard"] }> = (props) => {
   const midiKeyboard = () => props.midiKeyboard;
   const baseNoteLabel = () => `C${midiKeyboard().octave() + 4}`;
@@ -374,6 +382,15 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
       />
 
       <div class="justify-self-end flex items-center gap-3">
+        <Show when={props.automationOverrideCount > 0}>
+          <TopRightIconButton
+            onClick={props.onReEnableAutomation}
+            tooltip={`Re-enable automation (${props.automationOverrideCount})`}
+            class="border-red-500/60 bg-red-500/20 text-red-200"
+          >
+            <AutomationReEnableIcon />
+          </TopRightIconButton>
+        </Show>
         <MidiKeyboardToggle midiKeyboard={props.midiKeyboard} />
         <SaveStatus projectMenu={props.projectMenu} />
         <div class="flex items-center gap-2 text-xs">

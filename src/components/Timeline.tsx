@@ -25,7 +25,13 @@ import { useClipResize } from "~/hooks/useClipResize";
 import { useTimelineSelection } from "~/hooks/useTimelineSelection";
 import { useClipBuffers } from "~/hooks/useClipBuffers";
 import { isLocalId, normalizeCommandTrackIndices } from "@daw-browser/shared";
-import { automationTargetKey, type AutomationEnvelope } from "@daw-browser/shared";
+import {
+  automationTargetKey,
+  automationTargetKeysAfterReEnable,
+  automationTargetKeysForManualOverride,
+  filterAutomationEnvelopesForScheduling,
+  type AutomationEnvelope,
+} from "@daw-browser/shared";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
 import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
@@ -110,6 +116,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
   const [automationEnvelopes, setAutomationEnvelopes] = createSignal<AutomationEnvelope[]>([]);
+  const [overriddenAutomationTargetKeys, setOverriddenAutomationTargetKeys] = createSignal<Set<string>>(new Set());
 
   // Audio engine
   const audioEngine = getAudioEngine();
@@ -401,8 +408,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     setAutomationEnvelopes((current) => {
       const rows = replaceAutomationEnvelope(current, targetKey, envelope);
       audioEngine.cancelAutomationSchedules(new Set([targetKey]), current);
-      audioEngine.setAutomationEnvelopes(rows);
-      if (isPlaying()) audioEngine.scheduleAutomationFromPlayhead(playheadSec(), { targetKeys: new Set([targetKey]) });
+      audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(rows, overriddenAutomationTargetKeys()));
+      if (isPlaying() && !overriddenAutomationTargetKeys().has(targetKey)) audioEngine.scheduleAutomationFromPlayhead(playheadSec(), { targetKeys: new Set([targetKey]) });
       return rows;
     });
   };
@@ -412,12 +419,40 @@ const Timeline: Component<TimelineProps> = (props) => {
     changedTargetKeys: ReadonlySet<string>,
   ) => {
     audioEngine.cancelAutomationSchedules(changedTargetKeys.size === 0 ? undefined : changedTargetKeys, previous);
-    audioEngine.setAutomationEnvelopes(next);
+    const overrides = overriddenAutomationTargetKeys();
+    audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(next, overrides));
     if (isPlaying()) {
+      const targetKeys = changedTargetKeys.size === 0
+        ? undefined
+        : new Set([...changedTargetKeys].filter((targetKey) => !overrides.has(targetKey)));
+      if (targetKeys && targetKeys.size === 0) return;
       audioEngine.scheduleAutomationFromPlayhead(playheadSec(), {
-        targetKeys: changedTargetKeys.size === 0 ? undefined : changedTargetKeys,
+        targetKeys,
       });
     }
+  };
+  const overrideAutomationTarget = (targetKey: string) => {
+    if (!isPlaying()) return;
+    const envelope = automationEnvelopesByTargetKey().get(targetKey);
+    if (!envelope?.enabled) return;
+    setOverriddenAutomationTargetKeys((current) => {
+      const next = automationTargetKeysForManualOverride(current, targetKey);
+      if (next.size === current.size) return current;
+      audioEngine.cancelAutomationSchedules(new Set([targetKey]), automationEnvelopes());
+      audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(automationEnvelopes(), next));
+      return next;
+    });
+  };
+  const reEnableAutomation = () => {
+    const current = overriddenAutomationTargetKeys();
+    if (current.size === 0) return;
+    const reEnabledTargetKeys = new Set(current);
+    const next = automationTargetKeysAfterReEnable(current, reEnabledTargetKeys);
+    setOverriddenAutomationTargetKeys(next);
+    audioEngine.cancelAutomationSchedules(reEnabledTargetKeys, automationEnvelopes());
+    audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(automationEnvelopes(), next));
+    if (isPlaying()) audioEngine.scheduleAutomationFromPlayhead(playheadSec(), { targetKeys: reEnabledTargetKeys });
+    else audioEngine.applyAutomationAtTimelineSec(playheadSec());
   };
   const persistedAutomation = createPersistedAutomationState({
     targetKey: automationTargetKeyAccessor,
@@ -491,9 +526,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     const rid = projectId();
     if (!rid) {
       setAutomationEnvelopes([]);
+      setOverriddenAutomationTargetKeys(new Set<string>());
       audioEngine.setAutomationEnvelopes([]);
       return;
     }
+    setOverriddenAutomationTargetKeys(new Set<string>());
     if (isLocalId("project", rid)) {
       void loadLocalAutomationEnvelopes(rid).then((rows) => {
         if (projectId() !== rid) return;
@@ -1308,6 +1345,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     onToggleRecord: toggleRecording,
     onUndo: handleUndo,
     onRedo: handleRedo,
+    automationOverrideCount: overriddenAutomationTargetKeys().size,
+    onReEnableAutomation: reEnableAutomation,
     onDeleteSelection: handleKeyboardAction,
     onDuplicateSelection: () => {
       void duplicateSelectedClips();
@@ -1387,6 +1426,13 @@ const Timeline: Component<TimelineProps> = (props) => {
         selectedAutomationParameters.setValue((current) => (
           current[targetKey] === parameterId ? current : { ...current, [targetKey]: parameterId }
         ));
+      },
+      onManualAutomationOverride: (targetKey: Track["id"] | "master", parameterId: string) => {
+        overrideAutomationTarget(
+          targetKey === "master"
+            ? automationTargetKey({ kind: "master" }, parameterId)
+            : automationTargetKey({ kind: "track", trackId: targetKey }, parameterId),
+        );
       },
       onEffectChainElementChange: (element: HTMLElement | undefined) => {
         effectsChainElement = element;
@@ -1558,8 +1604,12 @@ const Timeline: Component<TimelineProps> = (props) => {
               bottomPanel.setOpen(true);
               selection.selectMasterTarget();
             },
-            onVolumePreview: masterVolume.previewVolume,
+            onVolumePreview: (volume) => {
+              overrideAutomationTarget(automationTargetKey({ kind: "master" }, "volume"));
+              masterVolume.previewVolume(volume);
+            },
             onVolumeChange: (volume) => {
+              overrideAutomationTarget(automationTargetKey({ kind: "master" }, "volume"));
               masterVolume.commitVolume(volume);
             },
           },
@@ -1574,9 +1624,13 @@ const Timeline: Component<TimelineProps> = (props) => {
           onTrackSendsChange: updateTrackSends,
           onTrackOutputTargetChange: updateTrackOutputTargetId,
           onVolumePreview: (trackId, volume, muted) => {
+            overrideAutomationTarget(automationTargetKey({ kind: "track", trackId }, "volume"));
             audioEngine.previewTrackVolume(trackId, volume, muted);
           },
-          onVolumeChange: setTrackVolume,
+          onVolumeChange: (trackId, volume) => {
+            overrideAutomationTarget(automationTargetKey({ kind: "track", trackId }, "volume"));
+            setTrackVolume(trackId, volume);
+          },
           onToggleMute: handleToggleTrackMute,
           onToggleSolo: handleToggleTrackSolo,
           onSidebarPointerDown,

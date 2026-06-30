@@ -60,6 +60,8 @@ export type TransportControlsProps = {
   onToggleRecord: () => void;
   onUndo: () => void;
   onRedo: () => void;
+  automationOverrideCount: number;
+  onReEnableAutomation: () => void;
   onDeleteSelection: () => void;
   onDuplicateSelection: () => void;
   onJumpToClip: (

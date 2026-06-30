@@ -57,6 +57,7 @@ export type TimelinePanelsProps = {
     onEffectChainElementChange?: (element: HTMLElement | undefined) => void
     automationEnvelopes?: AutomationEnvelope[]
     onSelectAutomationParameter?: (targetKey: Track['id'] | 'master', parameterId: string) => void
+    onManualAutomationOverride?: (targetKey: Track['id'] | 'master', parameterId: string) => void
   }
   sampleDetailPanel: {
     isOpen: boolean
@@ -181,6 +182,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         onEffectChainElementChange={props.effectsPanel.onEffectChainElementChange}
         automationEnvelopes={props.effectsPanel.automationEnvelopes}
         onSelectAutomationParameter={props.effectsPanel.onSelectAutomationParameter}
+        onManualAutomationOverride={props.effectsPanel.onManualAutomationOverride}
       />
 
       <Show when={props.sampleDetailPanel.isOpen && props.sampleDetailPanel.selectedClip}>

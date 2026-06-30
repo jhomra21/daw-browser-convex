@@ -49,3 +49,29 @@ export const automationEnvelopeValueRange = (
     max: Math.max(bounds.min, Math.min(bounds.max, max)),
   }
 }
+
+export const automationTargetKeysForManualOverride = (
+  current: ReadonlySet<string>,
+  targetKey: string,
+): Set<string> => {
+  if (current.has(targetKey)) return new Set(current)
+  return new Set([...current, targetKey])
+}
+
+export const automationTargetKeysAfterReEnable = (
+  current: ReadonlySet<string>,
+  targetKeys: Iterable<string>,
+): Set<string> => {
+  const next = new Set(current)
+  for (const targetKey of targetKeys) next.delete(targetKey)
+  return next
+}
+
+export const filterAutomationEnvelopesForScheduling = (
+  envelopes: AutomationEnvelope[],
+  overriddenTargetKeys: ReadonlySet<string>,
+): AutomationEnvelope[] => (
+  overriddenTargetKeys.size === 0
+    ? envelopes
+    : envelopes.filter((envelope) => !overriddenTargetKeys.has(envelope.targetKey))
+)

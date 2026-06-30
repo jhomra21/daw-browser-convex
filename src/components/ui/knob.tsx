@@ -17,6 +17,8 @@ type KnobProps = {
   logarithmic?: boolean
   bipolar?: boolean
   automationRange?: { min: number; max: number }
+  automated?: boolean
+  onAutomationSelect?: () => void
   showValue?: boolean
   class?: string
 }
@@ -143,12 +145,18 @@ export default function Knob(props: KnobProps) {
           '-webkit-user-select': 'none',
           'touch-action': 'none',
         }}
-        onPointerDown={control.onPointerDown}
+        onPointerDown={(event) => {
+          props.onAutomationSelect?.()
+          control.onPointerDown(event)
+        }}
         onKeyDown={control.handleKeyDown}
         onDblClick={handleDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
         onDragStart={(e) => e.preventDefault()}
       >
+        <Show when={props.automated}>
+          <span class="absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.75)]" />
+        </Show>
         <svg
           class="absolute inset-1.5 h-full w-full"
           style={{ width: `${size()}px`, height: `${size()}px` }}

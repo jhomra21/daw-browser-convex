@@ -5,6 +5,8 @@ import { createDefaultEqParams } from './effects-params'
 export type AutomationParameterDescriptor = {
   id: string
   label: string
+  group: string
+  device: string
   targetKinds: AutomationTargetKind[]
   min: number
   max: number
@@ -16,22 +18,24 @@ export type AutomationParameterDescriptor = {
 export type AutomationParameterOption = {
   id: string
   label: string
+  group: string
+  device: string
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
 const staticDescriptors: AutomationParameterDescriptor[] = [
-  { id: 'volume', label: 'Volume', targetKinds: ['track', 'master'], min: 0, max: 1.5, defaultValue: 1, scale: 'linear', unit: 'percent' },
+  { id: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer', targetKinds: ['track', 'master'], min: 0, max: 1.5, defaultValue: 1, scale: 'linear', unit: 'percent' },
 ]
 
 export const getAutomationParameterOptions = (): AutomationParameterOption[] => [
-  { id: 'volume', label: 'Volume' },
+  { id: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer' },
   ...createDefaultEqParams().bands.flatMap((band, index) => {
     const label = `EQ ${index + 1}`
     return [
-      { id: createEqBandParameterId(band.id, 'frequencyHz'), label: `${label} Frequency` },
-      { id: createEqBandParameterId(band.id, 'gainDb'), label: `${label} Gain` },
-      { id: createEqBandParameterId(band.id, 'q'), label: `${label} Q` },
+      { id: createEqBandParameterId(band.id, 'frequencyHz'), label: `${label} Frequency`, group: 'Audio Effects', device: 'EQ Eight' },
+      { id: createEqBandParameterId(band.id, 'gainDb'), label: `${label} Gain`, group: 'Audio Effects', device: 'EQ Eight' },
+      { id: createEqBandParameterId(band.id, 'q'), label: `${label} Q`, group: 'Audio Effects', device: 'EQ Eight' },
     ]
   }),
 ]
@@ -57,12 +61,12 @@ export const getAutomationParameterDescriptor = (
   const eq = parseEqBandParameterId(parameterId)
   if (!eq) return undefined
   if (eq.property === 'frequencyHz') {
-    return { id: parameterId, label: 'EQ Frequency', targetKinds: ['track', 'master'], min: 20, max: 20000, defaultValue: 1000, scale: 'log', unit: 'hz' }
+    return { id: parameterId, label: 'EQ Frequency', group: 'Audio Effects', device: 'EQ Eight', targetKinds: ['track', 'master'], min: 20, max: 20000, defaultValue: 1000, scale: 'log', unit: 'hz' }
   }
   if (eq.property === 'gainDb') {
-    return { id: parameterId, label: 'EQ Gain', targetKinds: ['track', 'master'], min: -24, max: 24, defaultValue: 0, scale: 'linear', unit: 'db' }
+    return { id: parameterId, label: 'EQ Gain', group: 'Audio Effects', device: 'EQ Eight', targetKinds: ['track', 'master'], min: -24, max: 24, defaultValue: 0, scale: 'linear', unit: 'db' }
   }
-  return { id: parameterId, label: 'EQ Q', targetKinds: ['track', 'master'], min: 0.1, max: 18, defaultValue: 1, scale: 'linear' }
+  return { id: parameterId, label: 'EQ Q', group: 'Audio Effects', device: 'EQ Eight', targetKinds: ['track', 'master'], min: 0.1, max: 18, defaultValue: 1, scale: 'linear' }
 }
 
 export const isAutomationParameterSupportedForTarget = (

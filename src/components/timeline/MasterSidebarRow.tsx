@@ -1,5 +1,5 @@
-import { type Component, Show, createSignal, onCleanup } from "solid-js";
-import type { AutomationEnvelope } from "@daw-browser/shared";
+import { type Component, Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { automationEnvelopeValueRange, type AutomationEnvelope } from "@daw-browser/shared";
 import { normalizeMasterVolume } from "@daw-browser/shared";
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
 import { DEFAULT_AUTOMATION_LANE_HEIGHT, LANE_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
@@ -59,6 +59,11 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   };
   const automationHeight = () => props.automation?.heightPx ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
   const rowHeight = () => MASTER_ROW_HEIGHT + (props.automation?.visible ? automationHeight() : 0);
+  const volumeAutomated = () => props.automation?.automatedParameterIds.has("volume") ?? false;
+  const volumeEnvelope = createMemo(() => (
+    props.automation?.selectedParameterId === "volume" ? props.automation.selectedEnvelope : undefined
+  ));
+  const volumeRange = () => volumeEnvelope() ? automationEnvelopeValueRange(volumeEnvelope(), { min: 0, max: 1 }) : undefined;
   let cleanupAutomationResize: (() => void) | undefined;
   const startAutomationResize = (event: PointerEvent) => {
     const automation = props.automation;
@@ -121,27 +126,38 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
         <div class="flex w-[92px] items-center gap-2">
           <div class="flex h-7 w-[72px] shrink-0 items-center gap-1 px-0.5">
             <Show when={master().ready}>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={displayMasterVolume()}
-                disabled={!master().canEditVolume}
-                style={{
-                  "--track-volume-percent": `${displayMasterVolume() * 100}%`,
-                }}
-                onClick={(event) => event.stopPropagation()}
-                onInput={(event) => {
-                  event.stopPropagation();
-                  previewVolume(parseFloat(event.currentTarget.value));
-                }}
-                onChange={commitVolume}
-                onPointerUp={commitVolume}
-                onPointerCancel={cancelVolume}
-                class="track-volume-slider w-full cursor-pointer disabled:cursor-not-allowed"
-                title="Master volume"
-              />
+              <div class="relative flex flex-1 items-center">
+                <Show when={volumeAutomated()}>
+                  <span class="absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.75)]" />
+                </Show>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={displayMasterVolume()}
+                  disabled={!master().canEditVolume}
+                  style={{
+                    "--track-volume-percent": `${displayMasterVolume() * 100}%`,
+                    "--track-volume-automation-start": `${(volumeRange()?.min ?? 0) * 100}%`,
+                    "--track-volume-automation-end": `${(volumeRange()?.max ?? 0) * 100}%`,
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                  onPointerDown={() => props.automation?.onSelectParameter("volume")}
+                  onInput={(event) => {
+                    event.stopPropagation();
+                    previewVolume(parseFloat(event.currentTarget.value));
+                  }}
+                  onChange={commitVolume}
+                  onPointerUp={commitVolume}
+                  onPointerCancel={cancelVolume}
+                  class={cn(
+                    "track-volume-slider w-full cursor-pointer disabled:cursor-not-allowed",
+                    volumeEnvelope() && "track-volume-slider-automated",
+                  )}
+                  title="Master volume"
+                />
+              </div>
             </Show>
             <button
               class={cn(

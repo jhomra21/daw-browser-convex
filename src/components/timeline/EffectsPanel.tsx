@@ -60,6 +60,7 @@ type EffectsPanelProps = {
   onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
   onEffectChainElementChange?: (element: HTMLElement | undefined) => void;
   automationEnvelopes?: AutomationEnvelope[];
+  onSelectAutomationParameter?: (targetKey: Track["id"] | "master", parameterId: string) => void;
 };
 
 const EffectsPanelClosedFooter: Component<{
@@ -184,6 +185,7 @@ type EffectsPanelEffectCardsProps = {
   audioEngine: AudioEngine;
   targetId: Track["id"] | "master";
   automationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>;
+  onSelectAutomationParameter?: (parameterId: string) => void;
 };
 
 type EffectsPanelAudioEffectCardProps = {
@@ -193,13 +195,14 @@ type EffectsPanelAudioEffectCardProps = {
   audioEngine?: AudioEngine;
   targetId?: Track["id"] | "master";
   automationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>;
+  onSelectAutomationParameter?: (parameterId: string) => void;
 };
 
 const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> = (props) => {
   if (props.effect === "eq") {
     return (
       <Show when={props.audioEffects.eq.params()}>
-        {(params) => <Eq bands={params().bands} enabled={params().enabled} channelMode={params().channelMode} onBandChange={props.audioEffects.eq.changeBand} onChannelModeChange={props.audioEffects.eq.changeChannelMode} onBandToggle={props.audioEffects.eq.toggleBand} onToggleEnabled={props.audioEffects.eq.toggleEnabled} onReset={props.audioEffects.eq.reset} spectrumData={props.spectrum} automationRangesByParameterId={props.automationRangesByParameterId} />}
+        {(params) => <Eq bands={params().bands} enabled={params().enabled} channelMode={params().channelMode} onBandChange={props.audioEffects.eq.changeBand} onChannelModeChange={props.audioEffects.eq.changeChannelMode} onBandToggle={props.audioEffects.eq.toggleBand} onToggleEnabled={props.audioEffects.eq.toggleEnabled} onReset={props.audioEffects.eq.reset} spectrumData={props.spectrum} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} />}
       </Show>
     );
   }
@@ -257,7 +260,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                 classList={{ "opacity-30": reorderPreview()?.effect === effect }}
                 onPointerDown={drag.onPointerDown}
               >
-                <EffectsPanelAudioEffectCard effect={effect} audioEffects={props.audioEffects} spectrum={props.spectrum} audioEngine={props.audioEngine} targetId={props.targetId} automationRangesByParameterId={props.automationRangesByParameterId} />
+                <EffectsPanelAudioEffectCard effect={effect} audioEffects={props.audioEffects} spectrum={props.spectrum} audioEngine={props.audioEngine} targetId={props.targetId} automationRangesByParameterId={props.automationRangesByParameterId} onSelectAutomationParameter={props.onSelectAutomationParameter} />
               </div>
             );
           }}
@@ -426,6 +429,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     audioEngine={props.audioEngine}
                     targetId={props.selectedFXTarget}
                     automationRangesByParameterId={automationRangesByParameterId()}
+                    onSelectAutomationParameter={(parameterId) => props.onSelectAutomationParameter?.(props.selectedFXTarget, parameterId)}
                   />
                   <Show when={isCurrentTargetReadOnly()}>
                     <EffectsPanelReadOnlyNotice />

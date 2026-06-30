@@ -1272,6 +1272,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       onLocalSaveFailed: localProject.setLocalSaveFailure,
       onDeviceInsertActionsChange: setDeviceInsertActions,
       automationEnvelopes: persistedAutomation.envelopes(),
+      onSelectAutomationParameter: (targetKey: Track["id"] | "master", parameterId: string) => {
+        selectedAutomationParameters.setValue((current) => (
+          current[targetKey] === parameterId ? current : { ...current, [targetKey]: parameterId }
+        ));
+      },
       onEffectChainElementChange: (element: HTMLElement | undefined) => {
         effectsChainElement = element;
       },

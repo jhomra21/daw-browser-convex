@@ -39,6 +39,7 @@ type EqProps = {
   class?: string
   spectrumData?: SpectrumFrame | null
   automationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>
+  onAutomationParameterTouch?: (parameterId: string) => void
 }
 
 const DEFAULT_EQ_PARAMS = createDefaultEqParams()
@@ -541,6 +542,10 @@ export default function Eq(props: EqProps) {
     if (!band) return undefined
     return props.automationRangesByParameterId?.get(createEqBandParameterId(band.id, property))
   }
+  const selectedBandParameterId = (property: 'frequencyHz' | 'gainDb' | 'q') => {
+    const band = selectedBand()
+    return band ? createEqBandParameterId(band.id, property) : undefined
+  }
 
   return (
     <EffectShell
@@ -572,6 +577,11 @@ export default function Eq(props: EqProps) {
             disabled={!props.enabled || !selectedBand()?.enabled}
             logarithmic={true}
             automationRange={selectedBandAutomationRange('frequencyHz')}
+            automated={!!selectedBandAutomationRange('frequencyHz')}
+            onAutomationSelect={() => {
+              const parameterId = selectedBandParameterId('frequencyHz')
+              if (parameterId) props.onAutomationParameterTouch?.(parameterId)
+            }}
             onValueChange={(v) => {
               const band = selectedBand()
               if (!band) return
@@ -592,6 +602,11 @@ export default function Eq(props: EqProps) {
             disabled={!props.enabled || !selectedBand()?.enabled || !supportsGain(selectedBand()?.type ?? 'peaking')}
             bipolar={true}
             automationRange={selectedBandAutomationRange('gainDb')}
+            automated={!!selectedBandAutomationRange('gainDb')}
+            onAutomationSelect={() => {
+              const parameterId = selectedBandParameterId('gainDb')
+              if (parameterId) props.onAutomationParameterTouch?.(parameterId)
+            }}
             onValueChange={(v) => {
               const band = selectedBand()
               if (!band) return
@@ -610,6 +625,11 @@ export default function Eq(props: EqProps) {
             step={0.1}
             disabled={!props.enabled || !selectedBand()?.enabled}
             automationRange={selectedBandAutomationRange('q')}
+            automated={!!selectedBandAutomationRange('q')}
+            onAutomationSelect={() => {
+              const parameterId = selectedBandParameterId('q')
+              if (parameterId) props.onAutomationParameterTouch?.(parameterId)
+            }}
             onValueChange={(v) => {
               const band = selectedBand()
               if (!band) return
@@ -678,7 +698,10 @@ export default function Eq(props: EqProps) {
                   band={band}
                   enabled={props.enabled}
                   selected={selectedId() === band.id}
-                  onSelectBand={() => setSelectedId(band.id)}
+                  onSelectBand={() => {
+                    setSelectedId(band.id)
+                    props.onAutomationParameterTouch?.(createEqBandParameterId(band.id, 'gainDb'))
+                  }}
                   onTypeChange={(type) => props.onBandChange(band.id, { type })}
                 />
 

@@ -639,7 +639,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                         </button>
                       </div>
 
-                      <div class="flex h-7 items-center px-0.5">
+                      <div class="relative flex h-7 items-center px-0.5">
+                        <Show when={automationMeta()?.volumeEnvelope}>
+                          <span class="absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.75)]" />
+                        </Show>
                         <input
                           type="range"
                           min="0"
@@ -655,6 +658,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           onClick={(event) => event.stopPropagation()}
                           onPointerDown={(event) => {
                             event.stopPropagation();
+                            props.automation?.onSelectParameter(track.id, "volume");
                             if (volumeDisabled) return;
                             event.preventDefault();
                             const startValue = quantizeVolume(track.volume ?? 0.8);

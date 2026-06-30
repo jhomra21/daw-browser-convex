@@ -176,6 +176,24 @@ export default defineSchema({
     .index("by_room_target", ["projectId", "targetType"])
     .index("by_track_order", ["trackId", "index"]),
 
+  automationEnvelopes: defineTable({
+    projectId: v.string(),
+    targetKind: v.union(v.literal("track"), v.literal("master")),
+    trackId: v.optional(v.id("tracks")),
+    targetKey: v.string(),
+    parameterId: v.string(),
+    enabled: v.boolean(),
+    points: v.array(v.object({
+      id: v.string(),
+      timeSec: v.number(),
+      value: v.number(),
+      interpolation: v.union(v.literal("linear"), v.literal("hold")),
+    })),
+    updatedAt: v.number(),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_project_target_key", ["projectId", "targetKey"]),
+
   chatHistories: defineTable({
     projectId: v.string(),
     ownerUserId: v.string(),

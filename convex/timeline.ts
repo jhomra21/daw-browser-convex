@@ -11,16 +11,20 @@ const readFullTimelineView = async (
   const userId = await requireAuthenticatedUserId(ctx);
   await requireProjectAccess(ctx, projectId, userId);
 
-  const [tracks, mixerSettings, clips] = await Promise.all([
+  const [tracks, mixerSettings, clips, automationEnvelopes] = await Promise.all([
     listProjectTracksWithMixerChannels(ctx, projectId),
     getProjectMixerSettings(ctx, projectId),
     ctx.db
       .query("clips")
       .withIndex("by_room", q => q.eq("projectId", projectId))
       .collect(),
+    ctx.db
+      .query("automationEnvelopes")
+      .withIndex("by_project", q => q.eq("projectId", projectId))
+      .collect(),
   ]);
 
-  return { tracks, clips, mixerSettings };
+  return { tracks, clips, mixerSettings, automationEnvelopes };
 };
 
 export const fullView = query({

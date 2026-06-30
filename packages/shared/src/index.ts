@@ -1,5 +1,7 @@
 export * from './agent-command-targets'
 export * from './agent-commands'
+export * from './automation'
+export * from './automation-parameters'
 export * from './audio-warp'
 export * from './audio-source-metadata'
 export * from './audio-source-rules'

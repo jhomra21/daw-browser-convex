@@ -1,5 +1,5 @@
 import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
-import type { ArpeggiatorParams, CompressorParams, DelayParams, EqParams, ReverbParams, SaturatorParams, SynthParams, TrackInstrumentParams } from '@daw-browser/shared'
+import type { ArpeggiatorParams, AutomationEnvelope, CompressorParams, DelayParams, EqParams, ReverbParams, SaturatorParams, SynthParams, TrackInstrumentParams } from '@daw-browser/shared'
 import type { AudioWarp, Track, TrackChannelRole, TrackSend } from '@daw-browser/timeline-core/types'
 
 export type TrackRef = string
@@ -122,6 +122,15 @@ export type EffectParamsHistoryEntry<Effect extends EffectType = EffectType> = {
   data: EffectParamsHistoryEntryData<Effect>
 }
 
+export type AutomationEnvelopeHistoryEntry = {
+  type: 'automation-envelope-change'
+  projectId: string
+  data: {
+    before: AutomationEnvelope | null
+    after: AutomationEnvelope | null
+  }
+}
+
 export type HistoryEntry =
   | {
       type: 'clip-create'
@@ -238,6 +247,7 @@ export type HistoryEntry =
       projectId: string
       data: { trackRef: TrackRef; from: TrackRoutingHistorySnapshot; to: TrackRoutingHistorySnapshot }
     }
+  | AutomationEnvelopeHistoryEntry
   | EffectParamsHistoryEntry
 
 export type MergeKey = string

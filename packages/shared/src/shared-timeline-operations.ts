@@ -32,6 +32,12 @@ import {
   normalizeTrackInstrumentParams,
   type TrackInstrumentParams,
 } from './instrument-params'
+import type { AutomationPoint } from './automation'
+import {
+  getAutomationParameterDescriptor,
+  isAutomationParameterSupportedForTarget,
+  normalizeAutomationPoints,
+} from './automation-parameters'
 
 export type MoveClipInput = {
   clipId: string
@@ -113,6 +119,8 @@ export type SharedTimelineOperation =
   | { kind: 'effects.setMasterDelayParams'; payload: { params: DelayParams } }
   | { kind: 'effects.setMasterReverbParams'; payload: { params: SharedReverbParams } }
   | { kind: 'effects.reorderMasterAudioChain'; payload: { order: AudioEffectKind[] } }
+  | { kind: 'automation.setEnvelope'; payload: { targetKind: 'track' | 'master'; trackId?: string; parameterId: string; enabled: boolean; points: AutomationPoint[]; updatedAt: number } }
+  | { kind: 'automation.deleteEnvelope'; payload: { targetKind: 'track' | 'master'; trackId?: string; parameterId: string } }
 
 export type SharedTimelineOperationKind = SharedTimelineOperation['kind']
 
@@ -610,6 +618,68 @@ const parseMasterAudioChainReorder = (payload: Record<string, unknown>): SharedT
   return order ? { kind: 'effects.reorderMasterAudioChain', payload: { order } } : null
 }
 
+const readAutomationTargetKind = (value: unknown): 'track' | 'master' | null => (
+  value === 'track' || value === 'master' ? value : null
+)
+
+const readAutomationPoints = (parameterId: string, value: unknown): AutomationPoint[] | null => {
+  const descriptor = getAutomationParameterDescriptor(parameterId)
+  if (!descriptor || !Array.isArray(value)) return null
+  const points: AutomationPoint[] = []
+  for (const point of value) {
+    if (
+      isRecord(point)
+      && typeof point.id === 'string'
+      && typeof point.timeSec === 'number'
+      && typeof point.value === 'number'
+    ) {
+      points.push({
+          id: point.id,
+          timeSec: point.timeSec,
+          value: point.value,
+          interpolation: point.interpolation === 'hold' ? 'hold' : 'linear',
+        })
+    }
+  }
+  return normalizeAutomationPoints(points, descriptor)
+}
+
+const parseAutomationSetEnvelope = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  const targetKind = readAutomationTargetKind(payload.targetKind)
+  if (!targetKind || typeof payload.parameterId !== 'string' || typeof payload.enabled !== 'boolean' || typeof payload.updatedAt !== 'number') return null
+  if (targetKind === 'track' && typeof payload.trackId !== 'string') return null
+  const trackId = targetKind === 'track' && typeof payload.trackId === 'string' ? payload.trackId : undefined
+  if (!isAutomationParameterSupportedForTarget(payload.parameterId, targetKind)) return null
+  const points = readAutomationPoints(payload.parameterId, payload.points)
+  return points ? {
+    kind: 'automation.setEnvelope',
+    payload: {
+      targetKind,
+      trackId,
+      parameterId: payload.parameterId,
+      enabled: payload.enabled,
+      points,
+      updatedAt: payload.updatedAt,
+    },
+  } : null
+}
+
+const parseAutomationDeleteEnvelope = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  const targetKind = readAutomationTargetKind(payload.targetKind)
+  if (!targetKind || typeof payload.parameterId !== 'string') return null
+  if (targetKind === 'track' && typeof payload.trackId !== 'string') return null
+  const trackId = targetKind === 'track' && typeof payload.trackId === 'string' ? payload.trackId : undefined
+  if (!isAutomationParameterSupportedForTarget(payload.parameterId, targetKind)) return null
+  return {
+    kind: 'automation.deleteEnvelope',
+    payload: {
+      targetKind,
+      trackId,
+      parameterId: payload.parameterId,
+    },
+  }
+}
+
 const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   { kind: 'tracks.create', parse: parseTrackCreate, targets: emptyTargets, durableQueue: true },
   { kind: 'tracks.lock', parse: parseTrackLock, targets: readTrackIdTargets, durableQueue: false },
@@ -679,6 +749,8 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   { kind: 'effects.setMasterDelayParams', parse: parseMasterDelay, targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setMasterReverbParams', parse: parseMasterReverb, targets: emptyTargets, durableQueue: true },
   { kind: 'effects.reorderMasterAudioChain', parse: parseMasterAudioChainReorder, targets: emptyTargets, durableQueue: true },
+  { kind: 'automation.setEnvelope', parse: parseAutomationSetEnvelope, targets: readTrackIdTargets, durableQueue: true },
+  { kind: 'automation.deleteEnvelope', parse: parseAutomationDeleteEnvelope, targets: readTrackIdTargets, durableQueue: true },
 ]
 
 const sharedTimelineOperationKinds = sharedTimelineOperationDescriptors.map((descriptor) => descriptor.kind)

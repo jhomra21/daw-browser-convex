@@ -211,5 +211,22 @@ export const executeTimelineOperation = async (
         targetType: 'master',
         order: operation.payload.order,
       })
+    case 'automation.setEnvelope':
+      return await context.convex.mutation(convexApi.automation.serverSetEnvelope, {
+        projectId: context.projectId,
+        targetKind: operation.payload.targetKind,
+        trackId: operation.payload.trackId,
+        parameterId: operation.payload.parameterId,
+        enabled: operation.payload.enabled,
+        points: operation.payload.points,
+        updatedAt: operation.payload.updatedAt,
+      })
+    case 'automation.deleteEnvelope':
+      return await context.convex.mutation(convexApi.automation.serverDeleteEnvelope, {
+        projectId: context.projectId,
+        targetKind: operation.payload.targetKind,
+        trackId: operation.payload.trackId,
+        parameterId: operation.payload.parameterId,
+      })
   }
 }

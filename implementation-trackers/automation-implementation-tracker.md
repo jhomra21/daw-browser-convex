@@ -389,8 +389,8 @@ Rules:
 ## Implementation Order
 
 - [ ] Add shared automation types, registry, normalization, and tests.
-- [ ] Add Convex schema, queries, and server mutations.
-- [ ] Add shared timeline operation parser, builders, and executor handling.
+- [x] Add Convex schema, queries, and server mutations.
+- [x] Add shared timeline operation parser, builders, and executor handling.
 - [ ] Add local automation persistence.
 - [ ] Add persisted automation state adapter.
 - [ ] Add audio engine scheduler and live parameter resolvers.

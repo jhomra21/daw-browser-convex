@@ -1,7 +1,7 @@
 import { normalizeAudioWarp } from '@daw-browser/shared'
 import type { EffectType, HistoryEntry, PersistedHistory } from '~/lib/undo/types'
 
-const PERSISTED_HISTORY_VERSION = 2 as const
+const PERSISTED_HISTORY_VERSION = 3 as const
 
 type PersistedHistoryEnvelope = {
   version: typeof PERSISTED_HISTORY_VERSION
@@ -82,6 +82,24 @@ const isTrackSnapshot = (value: unknown) => isRecord(value)
   && (value.channelRole === undefined || value.channelRole === 'track' || value.channelRole === 'group' || value.channelRole === 'return')
   && isRoutingSnapshot(value.routing)
 
+const isAutomationPoint = (value: unknown) => isRecord(value)
+  && isString(value.id)
+  && isNumber(value.timeSec)
+  && isNumber(value.value)
+  && (value.interpolation === 'linear' || value.interpolation === 'hold')
+
+const isAutomationEnvelope = (value: unknown) => isRecord(value)
+  && isString(value.id)
+  && isString(value.projectId)
+  && isRecord(value.target)
+  && (value.target.kind === 'master' || (value.target.kind === 'track' && isString(value.target.trackId)))
+  && isString(value.targetKey)
+  && isString(value.parameterId)
+  && isBoolean(value.enabled)
+  && Array.isArray(value.points)
+  && value.points.every(isAutomationPoint)
+  && isNumber(value.updatedAt)
+
 function isHistoryEntryData(type: string, data: Record<string, unknown>) {
   switch (type) {
     case 'clip-create':
@@ -129,6 +147,9 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>) {
         && EFFECT_TYPES.has(data.effect)
         && isRecord(data.from)
         && isRecord(data.to)
+    case 'automation-envelope-change':
+      return (data.before === null || isAutomationEnvelope(data.before))
+        && (data.after === null || isAutomationEnvelope(data.after))
     default:
       return false
   }

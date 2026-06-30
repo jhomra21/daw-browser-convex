@@ -22,11 +22,12 @@ import { useClipResize } from "~/hooks/useClipResize";
 import { useTimelineSelection } from "~/hooks/useTimelineSelection";
 import { useClipBuffers } from "~/hooks/useClipBuffers";
 import { isLocalId, normalizeCommandTrackIndices } from "@daw-browser/shared";
+import { automationTargetKey, type AutomationEnvelope } from "@daw-browser/shared";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
 import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
 import { useTrackRecording } from "~/hooks/useTrackRecording";
-import { buildEffectParamsHistoryEntry } from "~/lib/undo/builders";
+import { buildAutomationEnvelopeHistoryEntry, buildEffectParamsHistoryEntry } from "~/lib/undo/builders";
 import type { EffectParamsCommitPayload } from "~/lib/undo/types";
 import { useTimelinePreferences } from "~/hooks/useTimelinePreferences";
 import { useTimelineMidiOverlay } from "~/hooks/useTimelineMidiOverlay";
@@ -59,6 +60,10 @@ import AppMessageDialog, { type AppMessageDialogState } from "./timeline/app-mes
 import CloudBackupDialog from "./timeline/cloud-backup-dialog";
 import DeleteTrackDialog from "./timeline/delete-track-dialog";
 import TimelineWorkspace from "./timeline/timeline-workspace";
+import { createPersistedAutomationState } from "./timeline/create-persisted-automation-state";
+import { loadLocalAutomationEnvelopes, setLocalAutomationEnvelope, deleteLocalAutomationEnvelope } from "~/lib/local-automation";
+import { publishSharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
+import { useProjectPersistedState } from "~/hooks/useProjectPersistedState";
 import { Dashboard } from "~/components/dashboard/dashboard";
 import type { DashboardTimelineModel, DashboardView } from "~/components/dashboard/types";
 
@@ -86,6 +91,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   // Transport tempo & metronome
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
+  const [automationEnvelopes, setAutomationEnvelopes] = createSignal<AutomationEnvelope[]>([]);
 
   // Audio engine
   const audioEngine = getAudioEngine();
@@ -115,6 +121,32 @@ const Timeline: Component<TimelineProps> = (props) => {
     navigateToRoom,
   });
   const bottomPanel = useTimelineBottomPanelState({ projectId });
+  const automationMode = useProjectPersistedState<boolean>({
+    projectId,
+    createInitial: () => false,
+    load: (rid) => localStorage.getItem(`timeline:${rid}:automation-mode`) === "true",
+    save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-mode`, value ? "true" : "false"),
+  });
+  const selectedAutomationParameters = useProjectPersistedState<Record<string, string>>({
+    projectId,
+    createInitial: () => ({}),
+    load: (rid) => {
+      const raw = localStorage.getItem(`timeline:${rid}:automation-parameters`);
+      if (!raw) return {};
+      try {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+        const next: Record<string, string> = {};
+        for (const [key, value] of Object.entries(parsed)) {
+          if (typeof value === "string") next[key] = value;
+        }
+        return next;
+      } catch {
+        return {};
+      }
+    },
+    save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-parameters`, JSON.stringify(value)),
+  });
 
   const {
     sidebarWidth,
@@ -254,6 +286,120 @@ const Timeline: Component<TimelineProps> = (props) => {
           outputTargetId: routing.outputTargetId,
         }),
     }),
+  });
+  const automationTargetKeyAccessor = createMemo(() => {
+    const trackId = selection.selectedTrackId();
+    if (!trackId) return undefined;
+    const parameterId = selectedAutomationParameters.value()[trackId] ?? "volume";
+    return automationTargetKey({ kind: "track", trackId }, parameterId);
+  });
+  const persistedAutomation = createPersistedAutomationState({
+    targetKey: automationTargetKeyAccessor,
+    envelopes: automationEnvelopes,
+    applyToEngine: (next) => audioEngine.setAutomationEnvelopes(next),
+    persistEnvelope: async (envelope) => {
+      const rid = projectId();
+      if (!rid) return;
+      if (isLocalId("project", rid)) {
+        await setLocalAutomationEnvelope(rid, envelope);
+        setAutomationEnvelopes((current) => {
+          const next = new Map(current.map((entry) => [entry.targetKey, entry]));
+          next.set(envelope.targetKey, envelope);
+          return Array.from(next.values());
+        });
+        return;
+      }
+      await publishSharedTimelineOperation(rid, {
+        kind: "automation.setEnvelope",
+        payload: {
+          targetKind: envelope.target.kind,
+          trackId: envelope.target.kind === "track" ? envelope.target.trackId : undefined,
+          parameterId: envelope.parameterId,
+          enabled: envelope.enabled,
+          points: envelope.points,
+          updatedAt: envelope.updatedAt,
+        },
+      });
+    },
+    deleteEnvelope: async (targetKey) => {
+      const rid = projectId();
+      if (!rid) return;
+      const envelope = automationEnvelopes().find((entry) => entry.targetKey === targetKey);
+      if (isLocalId("project", rid)) {
+        await deleteLocalAutomationEnvelope(rid, targetKey);
+        setAutomationEnvelopes((current) => current.filter((entry) => entry.targetKey !== targetKey));
+        return;
+      }
+      if (!envelope) return;
+      await publishSharedTimelineOperation(rid, {
+        kind: "automation.deleteEnvelope",
+        payload: {
+          targetKind: envelope.target.kind,
+          trackId: envelope.target.kind === "track" ? envelope.target.trackId : undefined,
+          parameterId: envelope.parameterId,
+        },
+      });
+    },
+    onEnvelopeCommitted: (previous, next) => {
+      const rid = projectId();
+      if (!rid) return;
+      pushHistory(buildAutomationEnvelopeHistoryEntry({
+        projectId: rid,
+        before: previous ?? null,
+        after: next ?? null,
+      }), `automation:${next?.targetKey ?? previous?.targetKey ?? "unknown"}`, 0);
+    },
+  });
+
+  createEffect(() => {
+    const rid = projectId();
+    if (!rid) {
+      setAutomationEnvelopes([]);
+      audioEngine.setAutomationEnvelopes([]);
+      return;
+    }
+    if (isLocalId("project", rid)) {
+      void loadLocalAutomationEnvelopes(rid).then((rows) => {
+        if (projectId() !== rid) return;
+        setAutomationEnvelopes(rows);
+        audioEngine.setAutomationEnvelopes(rows);
+      }).catch(() => {
+        if (projectId() !== rid) return;
+        setAutomationEnvelopes([]);
+        audioEngine.setAutomationEnvelopes([]);
+      });
+      return;
+    }
+    const rows = fullView.data?.automationEnvelopes ?? [];
+    const next: AutomationEnvelope[] = [];
+    for (const row of rows) {
+      if (row.targetKind === "master") {
+        next.push({
+          id: row._id,
+          projectId: row.projectId,
+          target: { kind: "master" },
+          targetKey: row.targetKey,
+          parameterId: row.parameterId,
+          enabled: row.enabled,
+          points: row.points,
+          updatedAt: row.updatedAt,
+        });
+        continue;
+      }
+      if (!row.trackId) continue;
+      next.push({
+        id: row._id,
+        projectId: row.projectId,
+        target: { kind: "track", trackId: row.trackId },
+        targetKey: row.targetKey,
+        parameterId: row.parameterId,
+        enabled: row.enabled,
+        points: row.points,
+        updatedAt: row.updatedAt,
+      });
+    }
+    setAutomationEnvelopes(next);
+    audioEngine.setAutomationEnvelopes(next);
   });
   const {
     pendingSharedTrackVolumes,
@@ -1227,6 +1373,20 @@ const Timeline: Component<TimelineProps> = (props) => {
           onToggleSolo: handleToggleTrackSolo,
           onSidebarPointerDown,
           onToggleRecordArm: handleToggleRecordArm,
+        }}
+        automation={{
+          projectId: projectId(),
+          mode: automationMode.value(),
+          onToggleMode: () => automationMode.setValue((current) => !current),
+          selectedParametersByTargetKey: selectedAutomationParameters.value(),
+          onSelectParameter: (targetKey, parameterId) => {
+            selectedAutomationParameters.setValue((current) => ({ ...current, [targetKey]: parameterId }));
+          },
+          envelopesByTargetKey: new Map(persistedAutomation.envelopes().map((envelope) => [envelope.targetKey, envelope])),
+          onPreviewEnvelope: persistedAutomation.previewEnvelope,
+          onCommitEnvelope: (envelope) => {
+            void persistedAutomation.commitEnvelope(envelope);
+          },
         }}
       />
 

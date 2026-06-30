@@ -13,6 +13,9 @@ import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionSt
 import type { Clip, Track, TrackId, TrackSend } from "@daw-browser/timeline-core/types";
 import type { TimelineTrackIndex } from "@daw-browser/timeline-core/track-index";
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types";
+import type { AutomationEnvelope } from "@daw-browser/shared";
+import { automationTargetKey } from "@daw-browser/shared";
+import AutomationParameterPicker from "./automation-parameter-picker";
 
 const createViewportRedrawVersion = () => {
   const [version, setVersion] = createSignal(0);
@@ -112,6 +115,16 @@ type Props = {
     onSidebarPointerDown: (event: PointerEvent) => void;
     onToggleRecordArm: (trackId: Track["id"]) => void;
   };
+  automation: {
+    projectId: string;
+    mode: boolean;
+    onToggleMode: () => void;
+    selectedParametersByTargetKey: Record<string, string>;
+    onSelectParameter: (targetKey: string, parameterId: string) => void;
+    envelopesByTargetKey: Map<string, AutomationEnvelope>;
+    onPreviewEnvelope: (envelope: AutomationEnvelope | undefined) => void;
+    onCommitEnvelope: (envelope: AutomationEnvelope | undefined) => void;
+  };
 };
 
 export default function TimelineWorkspace(props: Props) {
@@ -168,35 +181,50 @@ export default function TimelineWorkspace(props: Props) {
             >
               <For each={props.tracks}>
                 {(track, i) => (
-                  <TrackLane
-                    track={track}
-                    index={i()}
-                    isDropTarget={props.dropTargetLane === i()}
-                    selectedClipIds={props.selection.selectedClipIds()}
-                    onClipPointerDown={props.onClipPointerDown}
-                    onClipPointerUp={props.onClipPointerUp}
-                    onClipResizeStart={props.onClipResizeStart}
-                    onRetryMedia={(clipId) => {
-                      void props.ensureClipBuffer(clipId);
-                    }}
-                    onReplaceMedia={(trackId, clipId) => {
-                      void props.replaceMissingMediaClip(trackId, clipId);
-                    }}
-                    onRemoveMissingMedia={(trackId, clipId) => {
-                      void props.removeMissingMediaClip(trackId, clipId);
-                    }}
-                    ensureClipBuffer={props.ensureClipBuffer}
-                    bpm={props.bpm}
-                    viewportRedrawVersion={viewportRedrawVersion()}
-                    onClipDblClick={(_, clipId) => {
-                      const match = props.trackLookup.clipEntryById.get(clipId);
-                      if (match?.clip.midi) {
-                        props.openMidiEditorFor(clipId);
-                        return;
-                      }
-                      props.openSampleDetailFor(clipId);
-                    }}
-                  />
+                  (() => {
+                    const parameterId = props.automation.selectedParametersByTargetKey[track.id] ?? "volume";
+                    const targetKey = automationTargetKey({ kind: "track", trackId: track.id }, parameterId);
+                    return (
+                      <TrackLane
+                        track={track}
+                        index={i()}
+                        isDropTarget={props.dropTargetLane === i()}
+                        selectedClipIds={props.selection.selectedClipIds()}
+                        onClipPointerDown={props.onClipPointerDown}
+                        onClipPointerUp={props.onClipPointerUp}
+                        onClipResizeStart={props.onClipResizeStart}
+                        onRetryMedia={(clipId) => {
+                          void props.ensureClipBuffer(clipId);
+                        }}
+                        onReplaceMedia={(trackId, clipId) => {
+                          void props.replaceMissingMediaClip(trackId, clipId);
+                        }}
+                        onRemoveMissingMedia={(trackId, clipId) => {
+                          void props.removeMissingMediaClip(trackId, clipId);
+                        }}
+                        ensureClipBuffer={props.ensureClipBuffer}
+                        bpm={props.bpm}
+                        viewportRedrawVersion={viewportRedrawVersion()}
+                        automation={{
+                          projectId: props.automation.projectId,
+                          mode: props.automation.mode,
+                          parameterId,
+                          envelope: props.automation.envelopesByTargetKey.get(targetKey),
+                          durationSec: props.durationSec,
+                          onPreview: props.automation.onPreviewEnvelope,
+                          onCommit: props.automation.onCommitEnvelope,
+                        }}
+                        onClipDblClick={(_, clipId) => {
+                          const match = props.trackLookup.clipEntryById.get(clipId);
+                          if (match?.clip.midi) {
+                            props.openMidiEditorFor(clipId);
+                            return;
+                          }
+                          props.openSampleDetailFor(clipId);
+                        }}
+                      />
+                    );
+                  })()
                 )}
               </For>
               <TimelineOverlays
@@ -221,6 +249,24 @@ export default function TimelineWorkspace(props: Props) {
           </div>
 
           <div class="sticky right-0 z-40 flex h-full shrink-0" style={{ width: `${props.sidebarWidth}px` }}>
+            <div class="absolute left-0 top-0 z-50 flex gap-2 p-2">
+              <button
+                class="rounded border border-red-500/40 bg-neutral-950/90 px-2 py-1 text-[11px] text-red-100"
+                onClick={props.automation.onToggleMode}
+              >
+                Automation {props.automation.mode ? "On" : "Off"}
+              </button>
+              {props.automation.mode && props.selection.selectedTrackId() ? (
+                <AutomationParameterPicker
+                  value={props.automation.selectedParametersByTargetKey[props.selection.selectedTrackId() || ""] ?? "volume"}
+                  onChange={(parameterId) => {
+                    const trackId = props.selection.selectedTrackId();
+                    if (!trackId) return;
+                    props.automation.onSelectParameter(trackId, parameterId);
+                  }}
+                />
+              ) : null}
+            </div>
             <TrackSidebar
               sidebar={{
                 tracks: props.tracks,

@@ -394,10 +394,10 @@ Rules:
 - [x] Add local automation persistence.
 - [x] Add persisted automation state adapter.
 - [x] Add audio engine scheduler and live parameter resolvers.
-- [ ] Add offline export automation scheduling.
-- [ ] Add timeline SVG UI and parameter picker.
+- [x] Add offline export automation scheduling.
+- [x] Add timeline SVG UI and parameter picker.
 - [x] Add undo/redo integration.
-- [ ] Run final validation.
+- [x] Run final validation.
 
 ## Validation
 

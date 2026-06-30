@@ -12,8 +12,10 @@ import { connectSourceWithClipGain, getAudioBufferPlaybackParams, getScheduledMi
 import { createAudioStretchCache } from './audio-stretch-cache'
 import {
   getExportAudioFormatMetadata,
+  getAutomationParameterDescriptor,
   type ArpParams,
   type AudioEffectKind,
+  type AutomationEnvelope,
   type CompressorParamsLite,
   type DelayParamsLite,
   type DrumRackParams,
@@ -36,6 +38,7 @@ import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { ResolvedMixerGraph } from './mixer/types'
+import { scheduleAutomationEnvelope } from './automation'
 
 export type ExportRange =
   | { mode: 'whole' }
@@ -61,6 +64,7 @@ export type ExportRequest = {
   numberOfChannels?: number
   signal?: AbortSignal
   fx?: ExportFx
+  automationEnvelopes?: AutomationEnvelope[]
 }
 
 type StemDefinition = {
@@ -90,6 +94,7 @@ type PreparedExportRender = {
   trackById: Map<string, Track<AudioBuffer>>
   mixerGraph: ResolvedMixerGraph
   exportTrackFx?: ExportFx['trackFx']
+  automationEnvelopes: AutomationEnvelope[]
   signal?: AbortSignal
 }
 
@@ -270,6 +275,7 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
       trackFx: fx?.trackFx,
     }),
     exportTrackFx: fx?.trackFx,
+    automationEnvelopes: req.automationEnvelopes ?? [],
     signal,
   }
 }
@@ -286,7 +292,30 @@ async function renderSourceIsolatedMixdownFromPrepared(
     createBuffer: (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
   })
   const graph = includeMasterFx ? prepared.mixerGraph : { ...prepared.mixerGraph, master: { volume: prepared.mixerGraph.master.volume } }
-  const { trackNodes } = await createOfflineMixerNodes(ctx, graph, prepared.bpm)
+  const mixerNodes = await createOfflineMixerNodes(ctx, graph, prepared.bpm)
+  const { trackNodes } = mixerNodes
+
+  for (const envelope of prepared.automationEnvelopes) {
+    if (!envelope.enabled) continue
+    if (sourceTrackIds && envelope.target.kind === 'track' && !sourceTrackIds.has(envelope.target.trackId)) continue
+    if (!includeMasterFx && envelope.target.kind === 'master') continue
+    const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
+    const fallback = descriptor?.defaultValue ?? 0
+    const bindings = envelope.target.kind === 'master'
+      ? mixerNodes.resolveMasterAutomationBindings(envelope.parameterId)
+      : mixerNodes.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId)
+    scheduleAutomationEnvelope(
+      bindings,
+      envelope,
+      {
+        playheadSec: prepared.range.startSec,
+        startLimitSec: prepared.range.startSec,
+        endLimitSec: prepared.range.endSec,
+      },
+      (timeSec) => Math.max(0, timeSec - prepared.range.startSec),
+      fallback,
+    )
+  }
 
   for (const resolvedTrack of graph.channels) {
     const track = prepared.trackById.get(resolvedTrack.channel.id)

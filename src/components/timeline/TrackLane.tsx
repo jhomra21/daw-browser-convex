@@ -3,6 +3,8 @@ import { cn } from '~/lib/utils'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { LANE_HEIGHT } from '~/lib/timeline-utils'
 import ClipComponent from './ClipComponent'
+import AutomationLane from './automation-lane'
+import type { AutomationEnvelope } from '@daw-browser/shared'
 
 type TrackLaneProps = {
   track: Track
@@ -19,6 +21,15 @@ type TrackLaneProps = {
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
   bpm: number
   viewportRedrawVersion: number
+  automation?: {
+    projectId: string
+    mode: boolean
+    parameterId: string
+    envelope: AutomationEnvelope | undefined
+    durationSec: number
+    onPreview: (envelope: AutomationEnvelope | undefined) => void
+    onCommit: (envelope: AutomationEnvelope | undefined) => void
+  }
 }
 
 const TrackLane: Component<TrackLaneProps> = (props) => {
@@ -28,6 +39,17 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
       style={{ top: `${props.index * LANE_HEIGHT}px`, height: `${LANE_HEIGHT}px` }}
     >
       <div class="absolute left-0 right-0 bottom-0 h-[1.5px] bg-neutral-800" />
+      {props.automation?.mode ? (
+        <AutomationLane
+          projectId={props.automation.projectId}
+          target={{ kind: 'track', trackId: props.track.id }}
+          parameterId={props.automation.parameterId}
+          envelope={props.automation.envelope}
+          durationSec={props.automation.durationSec}
+          onPreview={props.automation.onPreview}
+          onCommit={props.automation.onCommit}
+        />
+      ) : null}
       <For each={props.track.clips}>
         {(clip) => (
           <ClipComponent

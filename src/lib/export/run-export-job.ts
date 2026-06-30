@@ -10,12 +10,14 @@ import { isAbortError } from '~/lib/dom-errors'
 import { chooseLocalExportDirectory, chooseLocalExportFile, createLocalExportDirectoryWritable, createLocalExportTarget, createLocalExportWritable, saveBlobLocally } from '~/lib/local-export'
 import { chooseStemExportDirectory, createStemExportWritable, sanitizeStemFileName } from '~/lib/local-stem-export'
 import { audioEffectKindFromLocalEffect, listLocalEffects, type LocalEffectRow } from '~/lib/local-effects'
+import { loadLocalAutomationEnvelopes } from '~/lib/local-automation'
 import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
 import { collectAudioEffectOrders, type AudioEffectOrderEntry } from '~/lib/audio-effect-order-rows'
 import { saveLocalExportMetadataBatch, type LocalExportMetadataInput } from '~/lib/local-export-metadata'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
+import type { AutomationEnvelope } from '@daw-browser/shared'
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number]
 
@@ -224,6 +226,53 @@ async function loadExportFx(projectId: string | undefined, userId: string | unde
   return fx
 }
 
+async function loadExportAutomation(projectId: string | undefined, userId: string | undefined): Promise<AutomationEnvelope[]> {
+  const localOnly = projectId ? isLocalId('project', projectId) : false
+  if (localOnly && projectId) {
+    try {
+      return await loadLocalAutomationEnvelopes(projectId)
+    } catch {
+      return []
+    }
+  }
+  if (!localOnly && projectId && userId) {
+    try {
+      const rows = await convexClient.query(convexApi.automation.listByProject, { projectId })
+      const envelopes: AutomationEnvelope[] = []
+      for (const row of rows) {
+        if (row.targetKind === 'master') {
+          envelopes.push({
+            id: row._id,
+            projectId: row.projectId,
+            target: { kind: 'master' },
+            targetKey: row.targetKey,
+            parameterId: row.parameterId,
+            enabled: row.enabled,
+            points: row.points,
+            updatedAt: row.updatedAt,
+          })
+          continue
+        }
+        if (!row.trackId) continue
+        envelopes.push({
+          id: row._id,
+          projectId: row.projectId,
+          target: { kind: 'track', trackId: row.trackId },
+          targetKey: row.targetKey,
+          parameterId: row.parameterId,
+          enabled: row.enabled,
+          points: row.points,
+          updatedAt: row.updatedAt,
+        })
+      }
+      return envelopes
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
 async function loadDrumRackExportBuffers(fx: ExportFx, signal: AbortSignal, allowedTrackIds?: ReadonlySet<string>): Promise<void> {
   const trackFx = fx.trackFx
   if (!trackFx) return
@@ -372,10 +421,11 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     throwIfExportAborted(input.signal)
     const preloadTracks = input.getTracks()
     const mixdownModule = import('@daw-browser/audio-engine/export-mixdown')
-    const [exportMixdown, , fx] = await Promise.all([
+    const [exportMixdown, , fx, automationEnvelopes] = await Promise.all([
       mixdownModule,
       ensureBuffersForRange({ ...input, tracks: preloadTracks }),
       loadExportFxWithDrumRackBuffers(input.projectId, input.userId, input.masterVolume, input.signal),
+      loadExportAutomation(input.projectId, input.userId),
     ])
     throwIfExportAborted(input.signal)
     const tracks = input.getTracks()
@@ -385,6 +435,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       bpm: input.bpm,
       range: input.range,
       fx,
+      automationEnvelopes,
       signal: input.signal,
     })
     throwIfExportAborted(input.signal)
@@ -466,10 +517,11 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
     throwIfExportAborted(input.signal)
     const mixdownModule = import('@daw-browser/audio-engine/export-mixdown')
     const preloadStemTrackIds = new Set(preloadStemTracks.map((track) => track.id))
-    const [exportMixdown, , fx] = await Promise.all([
+    const [exportMixdown, , fx, automationEnvelopes] = await Promise.all([
       mixdownModule,
       ensureBuffersForRange({ ...input, tracks: preloadStemTracks }),
       loadExportFxWithDrumRackBuffers(input.projectId, input.userId, input.masterVolume, input.signal, preloadStemTrackIds),
+      loadExportAutomation(input.projectId, input.userId),
     ])
     throwIfExportAborted(input.signal)
     const tracks = input.getTracks()
@@ -482,6 +534,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
       bpm: input.bpm,
       range: input.range,
       fx,
+      automationEnvelopes,
       signal: input.signal,
     })
     for (const track of stemTracks) {

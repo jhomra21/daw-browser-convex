@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { automationEnvelopeValueRange, automationTargetKey, automationTargetKeysAfterReEnable, automationTargetKeysForManualOverride, filterAutomationEnvelopesForScheduling, type AutomationEnvelope } from './automation'
-import { createEqBandParameterId, getAutomationParameterDescriptor, getAutomationParameterOptions, normalizeAutomationPoints, valueAtAutomationTime } from './automation-parameters'
+import { automationRatioToValue, automationValueToRatio, createEqBandParameterId, getAutomationParameterDescriptor, getAutomationParameterOptions, normalizeAutomationPoints, valueAtAutomationTime } from './automation-parameters'
 
 describe('automation helpers', () => {
   test('builds stable target keys', () => {
@@ -33,6 +33,26 @@ describe('automation helpers', () => {
       { id: 'a', timeSec: 0, value: 0, interpolation: 'hold' },
       { id: 'b', timeSec: 10, value: 10, interpolation: 'linear' },
     ], 5, 1)).toBe(0)
+  })
+
+  test('maps linear automation values to ratios and back', () => {
+    const descriptor = getAutomationParameterDescriptor('volume')
+    expect(descriptor).toBeDefined()
+    if (!descriptor) return
+
+    expect(automationValueToRatio(descriptor, descriptor.min)).toBe(0)
+    expect(automationValueToRatio(descriptor, descriptor.max)).toBe(1)
+    expect(automationRatioToValue(descriptor, 0.5)).toBe(0.75)
+  })
+
+  test('maps log automation values to ratios and back', () => {
+    const descriptor = getAutomationParameterDescriptor('delay.lowCutHz')
+    expect(descriptor).toBeDefined()
+    if (!descriptor) return
+
+    const value = Math.sqrt(descriptor.min * descriptor.max)
+    expect(automationValueToRatio(descriptor, value)).toBeCloseTo(0.5, 6)
+    expect(automationRatioToValue(descriptor, 0.5)).toBeCloseTo(value, 6)
   })
 
   test('lists EQ automation options with real default band ids', () => {

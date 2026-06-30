@@ -1,6 +1,8 @@
 import { For, Show, createMemo, createSignal, onCleanup } from 'solid-js'
 import {
   automationTargetKey,
+  automationRatioToValue,
+  automationValueToRatio,
   getAutomationParameterDescriptor,
   normalizeAutomationPoints,
   valueAtAutomationTime,
@@ -66,7 +68,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
   const valueToY = (value: number) => {
     const desc = descriptor()
     if (!desc) return height() / 2
-    const ratio = (value - desc.min) / (desc.max - desc.min)
+    const ratio = automationValueToRatio(desc, value)
     const innerHeight = Math.max(1, height() - VERTICAL_PADDING * 2)
     return Math.max(VERTICAL_PADDING, Math.min(height() - VERTICAL_PADDING, (1 - ratio) * innerHeight + VERTICAL_PADDING))
   }
@@ -75,7 +77,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
     if (!desc) return 0
     const innerHeight = Math.max(1, height() - VERTICAL_PADDING * 2)
     const ratio = 1 - ((Math.max(VERTICAL_PADDING, Math.min(height() - VERTICAL_PADDING, y)) - VERTICAL_PADDING) / innerHeight)
-    return desc.min + ratio * (desc.max - desc.min)
+    return automationRatioToValue(desc, ratio)
   }
   const displayPoints = createMemo(() => {
     const desc = descriptor()
@@ -246,7 +248,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
     if (!desc) return
     const multiplier = event.shiftKey ? 10 : 1
     const timeDelta = POINT_TIME_NUDGE_SEC * multiplier
-    const valueDelta = (desc.max - desc.min) * POINT_VALUE_NUDGE_RATIO * multiplier
+    const ratioDelta = POINT_VALUE_NUDGE_RATIO * multiplier
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       event.preventDefault()
       const direction = event.key === 'ArrowLeft' ? -1 : 1
@@ -261,7 +263,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
       const direction = event.key === 'ArrowDown' ? -1 : 1
       updateSelectedPoint((point) => ({
         ...point,
-        value: Math.max(desc.min, Math.min(desc.max, point.value + direction * valueDelta)),
+        value: automationRatioToValue(desc, automationValueToRatio(desc, point.value) + direction * ratioDelta),
       }))
     }
   }

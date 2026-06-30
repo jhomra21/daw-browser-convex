@@ -39,3 +39,17 @@ export function scheduleAutomationEnvelope(
     }
   }
 }
+
+export function applyAutomationEnvelopeAtTime(
+  bindings: AutomationAudioBinding[],
+  envelope: AutomationEnvelope,
+  timelineSec: number,
+  audioCtxTime: number,
+  fallbackValue: number,
+) {
+  const value = valueAtAutomationTime(envelope.points, timelineSec, fallbackValue)
+  for (const binding of bindings) {
+    binding.param.cancelScheduledValues(audioCtxTime)
+    binding.param.setValueAtTime(binding.valueToAudioValue(value), audioCtxTime)
+  }
+}

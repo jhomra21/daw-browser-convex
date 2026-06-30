@@ -121,6 +121,32 @@ export const isAutomationParameterSupportedForTarget = (
   targetKind: AutomationTargetKind,
 ) => getAutomationParameterDescriptor(parameterId)?.targetKinds.includes(targetKind) ?? false
 
+export const automationValueToRatio = (
+  descriptor: AutomationParameterDescriptor,
+  value: number,
+): number => {
+  const clamped = clamp(value, descriptor.min, descriptor.max)
+  if (descriptor.scale === 'log') {
+    const min = Math.max(Number.MIN_VALUE, descriptor.min)
+    const max = Math.max(min, descriptor.max)
+    return clamp(Math.log(clamped / min) / Math.log(max / min), 0, 1)
+  }
+  return clamp((clamped - descriptor.min) / (descriptor.max - descriptor.min), 0, 1)
+}
+
+export const automationRatioToValue = (
+  descriptor: AutomationParameterDescriptor,
+  ratio: number,
+): number => {
+  const clamped = clamp(ratio, 0, 1)
+  if (descriptor.scale === 'log') {
+    const min = Math.max(Number.MIN_VALUE, descriptor.min)
+    const max = Math.max(min, descriptor.max)
+    return min * ((max / min) ** clamped)
+  }
+  return descriptor.min + clamped * (descriptor.max - descriptor.min)
+}
+
 export const normalizeAutomationPoints = (
   points: AutomationPoint[],
   descriptor: AutomationParameterDescriptor,

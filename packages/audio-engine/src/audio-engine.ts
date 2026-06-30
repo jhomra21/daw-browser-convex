@@ -13,7 +13,7 @@ import { createInstrumentRuntime, type SetTrackInstrumentInput } from './instrum
 import type { DrumRackResolvedBuffers } from './drum-rack-runtime'
 import { createTransportClock } from './transport-clock'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
-import { scheduleAutomationEnvelope } from './automation'
+import { applyAutomationEnvelopeAtTime, scheduleAutomationEnvelope } from './automation'
 
 type RuntimeClip = Clip<AudioBuffer>
 type RuntimeTrack = Track<AudioBuffer>
@@ -330,7 +330,17 @@ export class AudioEngine {
   }
 
   applyAutomationAtTimelineSec(timeSec: number) {
-    this.scheduleAutomationFromPlayhead(timeSec, { horizonSec: 0 })
+    if (!this.audioCtx) return
+    const now = this.audioCtx.currentTime
+    for (const envelope of this.automationEnvelopes) {
+      if (!envelope.enabled) continue
+      const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
+      const fallback = descriptor?.defaultValue ?? 0
+      const bindings = envelope.target.kind === 'master'
+        ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain)
+        : this.mixerRuntime.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId)
+      applyAutomationEnvelopeAtTime(bindings, envelope, timeSec, now, fallback)
+    }
   }
 
   cancelAutomationSchedules(targetKeys?: ReadonlySet<string>, envelopes = this.automationEnvelopes) {

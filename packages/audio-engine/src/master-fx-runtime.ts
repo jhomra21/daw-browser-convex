@@ -1,4 +1,4 @@
-import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeEqParams, parseEqBandParameterId, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState } from './effects/compressor-chain-state'
@@ -8,64 +8,7 @@ import { createSaturatorChainState } from './effects/saturator-chain-state'
 import type { CompressorMeterListener } from './effects/compressor-worklet'
 import type { SpectrumFrame } from './metering-runtime'
 import type { AutomationAudioBinding } from './automation'
-
-const resolveSaturatorAutomationBindings = (chain: ReturnType<typeof createSaturatorChainState>, parameterId: string): AutomationAudioBinding[] => {
-  const saturator = chain.chain()
-  if (!saturator) return []
-  if (parameterId === 'saturator.driveDb') return [{ param: saturator.driveGain.gain, valueToAudioValue: (value) => 10 ** (value / 20) }]
-  if (parameterId === 'saturator.outputDb') return [{ param: saturator.outputGain.gain, valueToAudioValue: (value) => 10 ** (value / 20) }]
-  if (parameterId === 'saturator.dryWet') return [
-    { param: saturator.dryGain.gain, valueToAudioValue: (value) => 1 - value },
-    { param: saturator.wetGain.gain, valueToAudioValue: (value) => value },
-  ]
-  if (parameterId === 'saturator.colorFrequencyHz') return [{ param: saturator.colorFilter.frequency, valueToAudioValue: (value) => value }]
-  return []
-}
-
-const resolveDelayAutomationBindings = (chain: ReturnType<typeof createDelayChainState>, parameterId: string): AutomationAudioBinding[] => {
-  const delay = chain.chain()
-  if (!delay) return []
-  if (parameterId === 'delay.timeMs') return [
-    { param: delay.delayLeft.delayTime, valueToAudioValue: (value) => value / 1000 },
-    { param: delay.delayRight.delayTime, valueToAudioValue: (value) => value / 1000 },
-  ]
-  if (parameterId === 'delay.feedback') return [
-    { param: delay.feedbackLeft.gain, valueToAudioValue: (value) => value },
-    { param: delay.feedbackRight.gain, valueToAudioValue: (value) => value },
-  ]
-  if (parameterId === 'delay.dryWet') return [
-    { param: delay.dryGain.gain, valueToAudioValue: (value) => 1 - value },
-    { param: delay.wetGain.gain, valueToAudioValue: (value) => value },
-  ]
-  if (parameterId === 'delay.lowCutHz') return [
-    { param: delay.lowCutLeft.frequency, valueToAudioValue: (value) => value },
-    { param: delay.lowCutRight.frequency, valueToAudioValue: (value) => value },
-  ]
-  if (parameterId === 'delay.highCutHz') return [
-    { param: delay.highCutLeft.frequency, valueToAudioValue: (value) => value },
-    { param: delay.highCutRight.frequency, valueToAudioValue: (value) => value },
-  ]
-  return []
-}
-
-const resolveReverbAutomationBindings = (chain: ReturnType<typeof createReverbChainState>, parameterId: string): AutomationAudioBinding[] => {
-  const reverb = chain.chain()
-  if (!reverb) return []
-  if (parameterId === 'reverb.wet') return [
-    { param: reverb.dryGain.gain, valueToAudioValue: (value) => 1 - value },
-    { param: reverb.wetGain.gain, valueToAudioValue: (value) => value },
-  ]
-  if (parameterId === 'reverb.preDelayMs') return [{ param: reverb.preDelay.delayTime, valueToAudioValue: (value) => value / 1000 }]
-  if (parameterId === 'reverb.lowCutHz') return [{ param: reverb.lowCut.frequency, valueToAudioValue: (value) => value }]
-  if (parameterId === 'reverb.highCutHz') return [{ param: reverb.highCut.frequency, valueToAudioValue: (value) => value }]
-  if (parameterId === 'reverb.stereoWidth') return [
-    { param: reverb.leftToLeft.gain, valueToAudioValue: (value) => (1 + value) / 2 },
-    { param: reverb.rightToLeft.gain, valueToAudioValue: (value) => (1 - value) / 2 },
-    { param: reverb.leftToRight.gain, valueToAudioValue: (value) => (1 - value) / 2 },
-    { param: reverb.rightToRight.gain, valueToAudioValue: (value) => (1 + value) / 2 },
-  ]
-  return []
-}
+import { resolveDelayAutomationBindings, resolveEqAutomationBindings, resolveReverbAutomationBindings, resolveSaturatorAutomationBindings } from './automation-bindings'
 
 export function createMasterFxRuntime() {
   let eqChain: BiquadFilterNode[] = []
@@ -234,15 +177,8 @@ export function createMasterFxRuntime() {
     },
     resolveMasterAutomationBindings: (parameterId: string, masterGain: GainNode | null): AutomationAudioBinding[] => {
       if (parameterId === 'volume') return masterGain ? [{ param: masterGain.gain, valueToAudioValue: (value) => value }] : []
-      const eq = parseEqBandParameterId(parameterId)
-      if (eq) {
-        const node = eqNodesByBand.get(eq.bandId)
-        if (!node) return []
-        if (eq.property === 'frequencyHz') return [{ param: node.frequency, valueToAudioValue: (value) => value }]
-        if (eq.property === 'gainDb') return [{ param: node.gain, valueToAudioValue: (value) => value }]
-        return [{ param: node.Q, valueToAudioValue: (value) => value }]
-      }
       return [
+        ...resolveEqAutomationBindings(eqNodesByBand, parameterId),
         ...resolveSaturatorAutomationBindings(saturatorState, parameterId),
         ...resolveDelayAutomationBindings(delayState, parameterId),
         ...resolveReverbAutomationBindings(reverbState, parameterId),

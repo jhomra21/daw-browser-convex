@@ -55,6 +55,11 @@ type TrackSidebarProps = {
 };
 
 const clampUnit = (value: number) => Math.max(0, Math.min(1, value));
+const METER_SILENCE_FLOOR = 0.005;
+const displayMeterLevel = (value: number | undefined) => {
+  const clamped = clampUnit(value ?? 0);
+  return clamped > METER_SILENCE_FLOOR ? clamped : 0;
+};
 const clampVolume = (volume: number) => clampUnit(volume);
 const quantizeVolume = (volume: number) =>
   Math.round(clampVolume(volume) * 100) / 100;
@@ -621,8 +626,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       <div class="absolute inset-0 flex items-end justify-center gap-1">
                         {(() => {
                           const meter = meters[track.id];
-                          const left = meter?.left ?? 0;
-                          const right = meter?.right ?? 0;
+                          const left = displayMeterLevel(meter?.left);
+                          const right = displayMeterLevel(meter?.right);
                           const leftColor =
                             left >= 0.98 ? "bg-red-500" : "bg-green-500";
                           const rightColor =

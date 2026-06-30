@@ -75,7 +75,16 @@ export function createMeteringRuntime() {
           if (!this.active) return true
           const input = inputs[0]
           const left = input && input[0]
-          if (!left) return true
+          if (!left) {
+            this.frames += 128
+            if (this.frames >= this.reportEveryFrames) {
+              this.port.postMessage({ left: 0, right: 0 })
+              this.frames = 0
+              this.sumL = 0
+              this.sumR = 0
+            }
+            return true
+          }
           const right = input[1] || left
           for (let i = 0; i < left.length; i++) {
             const l = left[i] || 0

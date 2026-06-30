@@ -19,12 +19,15 @@ This tracker was executed on the `audio-metering-refactor` branch.
 - [x] Ran final validators.
 - [x] Superseded follow-up: replaced the MIDI Keys enabled/target-ready visualizer gate with signal-based meter and analyser sampling.
 - [x] Signal-based correction: removed the MIDI-keyboard visualizer gate entirely and let the existing engine meter/analyser outputs report signal or silence.
+- [x] Follow-up cleanup: made meter worklets emit explicit zero levels when their input is silent/missing, clamped sub-floor meter residue in the UI, and forced an initial EQ canvas draw so the grid appears before analyser data.
 
 Corrected implementation note: Phase 5 was required by code inspection because `useEffectsPanelAudioSync` only re-sampled from reactive dependency changes; stopped-transport held notes do not advance `playheadSec`, so the effects panel needs a scoped RAF sampler while open.
 
 Follow-up implementation note: using only held keyboard rows for visualizer activity was too narrow for one-shot samples. Keeping visualizers active while MIDI Keys were enabled was still an input-intent gate, not signal-based metering. The now-unused `hasActiveNotes` API was removed during the simplification pass.
 
 Signal-based correction note: the right model is that meters should reflect track signal, not transport or input intent. The existing engine already supports this: `subscribeTrackStereoLevels` activates AudioWorklet meters on track outputs and those meters report actual audio levels, including silence. `TrackSidebar` now stays subscribed while mounted. The effects panel samples spectrum while open, and `getTrackSpectrum`/`getMasterSpectrum` now return `null` on zero-bin silence instead of keeping a stale non-zero frame.
+
+Meter/EQ cleanup note: a disconnected or missing worklet input could leave the last non-zero track level visible. The meter processor now publishes `{ left: 0, right: 0 }` for silent/missing input windows, and the sidebar clamps tiny sub-floor values to zero. The EQ canvas also requests an initial draw on mount so the grid/curve are visible before the first spectrum frame.
 
 ## Evidence from Current Code
 

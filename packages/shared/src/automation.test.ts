@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { automationTargetKey } from './automation'
-import { getAutomationParameterDescriptor, normalizeAutomationPoints, valueAtAutomationTime } from './automation-parameters'
+import { automationEnvelopeValueRange, automationTargetKey, type AutomationEnvelope } from './automation'
+import { createEqBandParameterId, getAutomationParameterDescriptor, getAutomationParameterOptions, normalizeAutomationPoints, valueAtAutomationTime } from './automation-parameters'
 
 describe('automation helpers', () => {
   test('builds stable target keys', () => {
@@ -33,5 +33,28 @@ describe('automation helpers', () => {
       { id: 'a', timeSec: 0, value: 0, interpolation: 'hold' },
       { id: 'b', timeSec: 10, value: 10, interpolation: 'linear' },
     ], 5, 1)).toBe(0)
+  })
+
+  test('lists EQ automation options with real default band ids', () => {
+    const options = getAutomationParameterOptions()
+    expect(options.some((option) => option.id === createEqBandParameterId('b1', 'frequencyHz'))).toBe(true)
+    expect(options.some((option) => option.id === createEqBandParameterId('low', 'frequencyHz'))).toBe(false)
+  })
+
+  test('computes envelope value ranges with optional bounds', () => {
+    const envelope: AutomationEnvelope = {
+      id: 'automation-1',
+      projectId: 'project-1',
+      target: { kind: 'master' },
+      targetKey: 'master:volume',
+      parameterId: 'volume',
+      enabled: true,
+      points: [
+        { id: 'a', timeSec: 0, value: -1, interpolation: 'linear' },
+        { id: 'b', timeSec: 1, value: 2, interpolation: 'linear' },
+      ],
+      updatedAt: 1,
+    }
+    expect(automationEnvelopeValueRange(envelope, { min: 0, max: 1 })).toEqual({ min: 0, max: 1 })
   })
 })

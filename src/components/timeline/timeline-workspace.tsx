@@ -15,7 +15,6 @@ import type { TimelineTrackIndex } from "@daw-browser/timeline-core/track-index"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types";
 import type { AutomationEnvelope } from "@daw-browser/shared";
 import { automationTargetKey } from "@daw-browser/shared";
-import AutomationParameterPicker from "./automation-parameter-picker";
 
 const createViewportRedrawVersion = () => {
   const [version, setVersion] = createSignal(0);
@@ -123,7 +122,7 @@ type Props = {
     onSelectParameter: (targetKey: string, parameterId: string) => void;
     envelopesByTargetKey: Map<string, AutomationEnvelope>;
     onPreviewEnvelope: (envelope: AutomationEnvelope | undefined) => void;
-    onCommitEnvelope: (envelope: AutomationEnvelope | undefined) => void;
+    onCommitEnvelope: (envelope: AutomationEnvelope | undefined, targetKey?: string) => void;
   };
 };
 
@@ -187,7 +186,7 @@ export default function TimelineWorkspace(props: Props) {
                     return (
                       <TrackLane
                         track={track}
-                        index={i()}
+                        topPx={i() * LANE_HEIGHT}
                         isDropTarget={props.dropTargetLane === i()}
                         selectedClipIds={props.selection.selectedClipIds()}
                         onClipPointerDown={props.onClipPointerDown}
@@ -256,16 +255,6 @@ export default function TimelineWorkspace(props: Props) {
               >
                 Automation {props.automation.mode ? "On" : "Off"}
               </button>
-              {props.automation.mode && props.selection.selectedTrackId() ? (
-                <AutomationParameterPicker
-                  value={props.automation.selectedParametersByTargetKey[props.selection.selectedTrackId() || ""] ?? "volume"}
-                  onChange={(parameterId) => {
-                    const trackId = props.selection.selectedTrackId();
-                    if (!trackId) return;
-                    props.automation.onSelectParameter(trackId, parameterId);
-                  }}
-                />
-              ) : null}
             </div>
             <TrackSidebar
               sidebar={{
@@ -287,6 +276,12 @@ export default function TimelineWorkspace(props: Props) {
                 onToggleSolo: props.sidebar.onToggleSolo,
                 onSidebarPointerDown: props.sidebar.onSidebarPointerDown,
                 onToggleRecordArm: props.sidebar.onToggleRecordArm,
+              }}
+              automation={{
+                mode: props.automation.mode,
+                selectedParametersByTargetKey: props.automation.selectedParametersByTargetKey,
+                envelopesByTargetKey: props.automation.envelopesByTargetKey,
+                onSelectParameter: props.automation.onSelectParameter,
               }}
             />
           </div>

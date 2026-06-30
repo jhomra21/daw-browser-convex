@@ -18,6 +18,7 @@ import {
   EQ_GAIN_DB_MIN,
   EQ_Q_MAX,
   EQ_Q_MIN,
+  createEqBandParameterId,
   supportsGain,
   type EqChannelMode,
   type EqBandParams,
@@ -37,6 +38,7 @@ type EqProps = {
   onReset?: () => void
   class?: string
   spectrumData?: SpectrumFrame | null
+  automationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>
 }
 
 const DEFAULT_EQ_PARAMS = createDefaultEqParams()
@@ -534,6 +536,11 @@ export default function Eq(props: EqProps) {
   }
 
   const selectedQLabel = () => formatQ(selectedBand()?.q ?? 0)
+  const selectedBandAutomationRange = (property: 'frequencyHz' | 'gainDb' | 'q') => {
+    const band = selectedBand()
+    if (!band) return undefined
+    return props.automationRangesByParameterId?.get(createEqBandParameterId(band.id, property))
+  }
 
   return (
     <EffectShell
@@ -564,6 +571,7 @@ export default function Eq(props: EqProps) {
             unit="Hz"
             disabled={!props.enabled || !selectedBand()?.enabled}
             logarithmic={true}
+            automationRange={selectedBandAutomationRange('frequencyHz')}
             onValueChange={(v) => {
               const band = selectedBand()
               if (!band) return
@@ -583,6 +591,7 @@ export default function Eq(props: EqProps) {
             unit="dB"
             disabled={!props.enabled || !selectedBand()?.enabled || !supportsGain(selectedBand()?.type ?? 'peaking')}
             bipolar={true}
+            automationRange={selectedBandAutomationRange('gainDb')}
             onValueChange={(v) => {
               const band = selectedBand()
               if (!band) return
@@ -600,6 +609,7 @@ export default function Eq(props: EqProps) {
             max={Q_MAX}
             step={0.1}
             disabled={!props.enabled || !selectedBand()?.enabled}
+            automationRange={selectedBandAutomationRange('q')}
             onValueChange={(v) => {
               const band = selectedBand()
               if (!band) return

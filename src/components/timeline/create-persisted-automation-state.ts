@@ -64,8 +64,8 @@ export function createPersistedAutomationState(options: PersistedAutomationState
     options.applyToEngine(Array.from(next.values()))
   }
 
-  const commitEnvelope = async (envelope: AutomationEnvelope | undefined) => {
-    const targetKey = envelope?.targetKey ?? options.targetKey()
+  const commitEnvelope = async (envelope: AutomationEnvelope | undefined, explicitTargetKey?: string) => {
+    const targetKey = envelope?.targetKey ?? explicitTargetKey ?? options.targetKey()
     if (!targetKey) return
     const previous = persistedByTargetKey().get(targetKey)
     const context = options.createPersistContext?.() ?? {}

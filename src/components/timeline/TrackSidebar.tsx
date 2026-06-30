@@ -9,6 +9,7 @@ import {
 } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
+import { automationEnvelopeValueRange, automationTargetKey, type AutomationEnvelope } from "@daw-browser/shared";
 import {
   canTrackReceiveAudioClip,
   getTrackChannelRole,
@@ -21,6 +22,7 @@ import MasterSidebarRow, {
   MASTER_ROW_HEIGHT,
   type MasterSidebarModel,
 } from "~/components/timeline/MasterSidebarRow";
+import AutomationParameterPicker from "./automation-parameter-picker";
 
 type TrackSidebarProps = {
   sidebar: {
@@ -52,6 +54,12 @@ type TrackSidebarProps = {
       muted: boolean,
     ) => void;
   };
+  automation?: {
+    mode: boolean;
+    selectedParametersByTargetKey: Record<string, string>;
+    envelopesByTargetKey: Map<string, AutomationEnvelope>;
+    onSelectParameter: (targetKey: string, parameterId: string) => void;
+  };
 };
 
 const clampUnit = (value: number) => Math.max(0, Math.min(1, value));
@@ -63,7 +71,6 @@ const displayMeterLevel = (value: number | undefined) => {
 const clampVolume = (volume: number) => clampUnit(volume);
 const quantizeVolume = (volume: number) =>
   Math.round(clampVolume(volume) * 100) / 100;
-
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const sidebar = () => props.sidebar;
 
@@ -121,6 +128,34 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   );
   const displayTrackName = (track: Track) =>
     returnTrackNames().get(track.id) ?? track.name;
+  const automationMetaByTrackId = createMemo(() => {
+    const byTrackId = new Map<string, {
+      automatedParameterIds: ReadonlySet<string>;
+      volumeRange?: { min: number; max: number };
+      volumeEnvelope?: AutomationEnvelope;
+    }>();
+    const automation = props.automation;
+    if (!automation) return byTrackId;
+    const mutable = new Map<string, {
+      automatedParameterIds: Set<string>;
+      volumeRange?: { min: number; max: number };
+      volumeEnvelope?: AutomationEnvelope;
+    }>();
+    for (const envelope of automation.envelopesByTargetKey.values()) {
+      if (envelope.target.kind !== "track") continue;
+      const existing = mutable.get(envelope.target.trackId) ?? { automatedParameterIds: new Set<string>() };
+      existing.automatedParameterIds.add(envelope.parameterId);
+      if (envelope.parameterId === "volume") {
+        existing.volumeEnvelope = envelope;
+        existing.volumeRange = automationEnvelopeValueRange(envelope, { min: 0, max: 1 });
+      }
+      mutable.set(envelope.target.trackId, existing);
+    }
+    for (const [trackId, meta] of mutable) {
+      byTrackId.set(trackId, meta);
+    }
+    return byTrackId;
+  });
   const actualOutputTargetId = (track: Track) => track.outputTargetId ?? "";
   const selectedOutputTargetId = (track: Track) =>
     selectedOutputTargets().get(track.id) ?? actualOutputTargetId(track);
@@ -302,11 +337,15 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const muted = () => !!track.muted;
             const soloed = () => !!track.soloed;
             const currentSendTargetId = () => selectedSendTargetId(track);
+            const selectedAutomationParameter = () => props.automation?.selectedParametersByTargetKey[track.id] ?? "volume";
+            const selectedAutomationTargetKey = () => automationTargetKey({ kind: "track", trackId: track.id }, selectedAutomationParameter());
+            const selectedAutomationEnvelope = () => props.automation?.envelopesByTargetKey.get(selectedAutomationTargetKey());
+            const automationMeta = () => automationMetaByTrackId().get(track.id);
 
             return (
               <div
                 class={cn(
-                  "[box-shadow:inset_0_-1px_0_rgb(38_38_38)]",
+                  "relative [box-shadow:inset_0_-1px_0_rgb(38_38_38)]",
                   sidebar().selectedTrackId === track.id
                     ? "bg-neutral-800"
                     : "bg-neutral-900",
@@ -314,7 +353,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 style={{ height: `${LANE_HEIGHT}px` }}
                 onClick={() => sidebar().onTrackClick(track.id)}
               >
-                <div class="grid h-full grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 p-2">
+                <div
+                  class="grid h-full grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 p-2"
+                  classList={{ "pb-10": props.automation?.mode }}
+                >
                   <div class="min-w-0 overflow-hidden">
                     <button
                       class={cn(
@@ -531,6 +573,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           disabled={volumeDisabled}
                           style={{
                             "--track-volume-percent": `${volume() * 100}%`,
+                            "--track-volume-automation-start": `${(automationMeta()?.volumeRange?.min ?? 0) * 100}%`,
+                            "--track-volume-automation-end": `${(automationMeta()?.volumeRange?.max ?? 0) * 100}%`,
                           }}
                           onClick={(event) => event.stopPropagation()}
                           onPointerDown={(event) => {
@@ -611,6 +655,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           }}
                           class={cn(
                             "track-volume-slider w-full cursor-pointer",
+                            automationMeta()?.volumeEnvelope && "track-volume-slider-automated",
                             volumeDisabled && "cursor-not-allowed opacity-60",
                           )}
                           title={
@@ -659,6 +704,25 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     </div>
                   </div>
                 </div>
+                {props.automation?.mode ? (
+                  <div
+                    class="absolute inset-x-0 bottom-0 z-10 grid h-9 grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-t border-red-500/30 bg-neutral-950/95 px-2 text-[11px] text-red-100"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div class="flex items-center gap-1 overflow-hidden">
+                      <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" classList={{ "opacity-30": !selectedAutomationEnvelope() }} />
+                      <span class="truncate">Automation</span>
+                    </div>
+                    <AutomationParameterPicker
+                      value={selectedAutomationParameter()}
+                      automatedParameterIds={automationMeta()?.automatedParameterIds}
+                      onChange={(parameterId) => props.automation?.onSelectParameter(track.id, parameterId)}
+                    />
+                    <div class="truncate text-right text-red-200/70">
+                      {selectedAutomationEnvelope()?.points.length ?? 0} pts
+                    </div>
+                  </div>
+                ) : null}
               </div>
             );
           }}

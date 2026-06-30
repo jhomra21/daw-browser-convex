@@ -1,7 +1,7 @@
 import { type Component, Show, Suspense, createEffect, lazy } from 'solid-js'
 import { Button } from '~/components/ui/button'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { isLocalId } from '@daw-browser/shared'
+import { isLocalId, type AutomationEnvelope } from '@daw-browser/shared'
 import { ExportProvider } from '~/context/export'
 import ExportProgressOverlay from '~/components/export/ExportProgressOverlay'
 import EffectsPanel from '~/components/timeline/EffectsPanel'
@@ -55,6 +55,7 @@ export type TimelinePanelsProps = {
     onLocalSaveFailed?: (message: string) => void
     onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void
     onEffectChainElementChange?: (element: HTMLElement | undefined) => void
+    automationEnvelopes?: AutomationEnvelope[]
   }
   sampleDetailPanel: {
     isOpen: boolean
@@ -177,6 +178,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         onLocalSaveFailed={props.effectsPanel.onLocalSaveFailed}
         onDeviceInsertActionsChange={props.effectsPanel.onDeviceInsertActionsChange}
         onEffectChainElementChange={props.effectsPanel.onEffectChainElementChange}
+        automationEnvelopes={props.effectsPanel.automationEnvelopes}
       />
 
       <Show when={props.sampleDetailPanel.isOpen && props.sampleDetailPanel.selectedClip}>

@@ -8,7 +8,7 @@ import type { AutomationEnvelope } from '@daw-browser/shared'
 
 type TrackLaneProps = {
   track: Track
-  index: number
+  topPx: number
   selectedClipIds: Set<string>
   onClipPointerDown: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
   onClipPointerUp: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
@@ -28,27 +28,29 @@ type TrackLaneProps = {
     envelope: AutomationEnvelope | undefined
     durationSec: number
     onPreview: (envelope: AutomationEnvelope | undefined) => void
-    onCommit: (envelope: AutomationEnvelope | undefined) => void
+    onCommit: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
   }
 }
 
 const TrackLane: Component<TrackLaneProps> = (props) => {
   return (
     <div
-      class={cn('absolute left-0 right-0 bg-neutral-950', props.isDropTarget && 'bg-green-500/10')}
-      style={{ top: `${props.index * LANE_HEIGHT}px`, height: `${LANE_HEIGHT}px` }}
+      class={cn('absolute left-0 right-0 overflow-hidden bg-neutral-950', props.isDropTarget && 'bg-green-500/10')}
+      style={{ top: `${props.topPx}px`, height: `${LANE_HEIGHT}px` }}
     >
       <div class="absolute left-0 right-0 bottom-0 h-[1.5px] bg-neutral-800" />
       {props.automation?.mode ? (
-        <AutomationLane
-          projectId={props.automation.projectId}
-          target={{ kind: 'track', trackId: props.track.id }}
-          parameterId={props.automation.parameterId}
-          envelope={props.automation.envelope}
-          durationSec={props.automation.durationSec}
-          onPreview={props.automation.onPreview}
-          onCommit={props.automation.onCommit}
-        />
+        <div class="absolute inset-x-0 bottom-0 z-30 h-9 border-t border-red-500/30 bg-neutral-950/95">
+          <AutomationLane
+            projectId={props.automation.projectId}
+            target={{ kind: 'track', trackId: props.track.id }}
+            parameterId={props.automation.parameterId}
+            envelope={props.automation.envelope}
+            durationSec={props.automation.durationSec}
+            onPreview={props.automation.onPreview}
+            onCommit={props.automation.onCommit}
+          />
+        </div>
       ) : null}
       <For each={props.track.clips}>
         {(clip) => (

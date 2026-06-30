@@ -1,5 +1,6 @@
 import type { AutomationPoint, AutomationTargetKind } from './automation'
 import { isAutomationInterpolation } from './automation'
+import { createDefaultEqParams } from './effects-params'
 
 export type AutomationParameterDescriptor = {
   id: string
@@ -12,10 +13,27 @@ export type AutomationParameterDescriptor = {
   unit?: 'db' | 'hz' | 'percent' | 'seconds'
 }
 
+export type AutomationParameterOption = {
+  id: string
+  label: string
+}
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
 const staticDescriptors: AutomationParameterDescriptor[] = [
   { id: 'volume', label: 'Volume', targetKinds: ['track', 'master'], min: 0, max: 1.5, defaultValue: 1, scale: 'linear', unit: 'percent' },
+]
+
+export const getAutomationParameterOptions = (): AutomationParameterOption[] => [
+  { id: 'volume', label: 'Volume' },
+  ...createDefaultEqParams().bands.flatMap((band, index) => {
+    const label = `EQ ${index + 1}`
+    return [
+      { id: createEqBandParameterId(band.id, 'frequencyHz'), label: `${label} Frequency` },
+      { id: createEqBandParameterId(band.id, 'gainDb'), label: `${label} Gain` },
+      { id: createEqBandParameterId(band.id, 'q'), label: `${label} Q` },
+    ]
+  }),
 ]
 
 export const createEqBandParameterId = (

@@ -3,9 +3,10 @@ import {
   Show,
   For,
   createEffect,
+  createMemo,
   createSignal,
 } from "solid-js";
-import type { AudioEffectKind } from "@daw-browser/shared";
+import { automationEnvelopeValueRange, automationTargetKey, type AudioEffectKind, type AutomationEnvelope } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Delay from "~/components/effects/Delay";
 import Compressor from "~/components/effects/Compressor";
@@ -58,6 +59,7 @@ type EffectsPanelProps = {
   onLocalSaveFailed?: (message: string) => void;
   onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
   onEffectChainElementChange?: (element: HTMLElement | undefined) => void;
+  automationEnvelopes?: AutomationEnvelope[];
 };
 
 const EffectsPanelClosedFooter: Component<{
@@ -181,6 +183,7 @@ type EffectsPanelEffectCardsProps = {
   spectrum: SpectrumFrame | null;
   audioEngine: AudioEngine;
   targetId: Track["id"] | "master";
+  automationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>;
 };
 
 type EffectsPanelAudioEffectCardProps = {
@@ -189,13 +192,14 @@ type EffectsPanelAudioEffectCardProps = {
   spectrum: SpectrumFrame | null;
   audioEngine?: AudioEngine;
   targetId?: Track["id"] | "master";
+  automationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>;
 };
 
 const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> = (props) => {
   if (props.effect === "eq") {
     return (
       <Show when={props.audioEffects.eq.params()}>
-        {(params) => <Eq bands={params().bands} enabled={params().enabled} channelMode={params().channelMode} onBandChange={props.audioEffects.eq.changeBand} onChannelModeChange={props.audioEffects.eq.changeChannelMode} onBandToggle={props.audioEffects.eq.toggleBand} onToggleEnabled={props.audioEffects.eq.toggleEnabled} onReset={props.audioEffects.eq.reset} spectrumData={props.spectrum} />}
+        {(params) => <Eq bands={params().bands} enabled={params().enabled} channelMode={params().channelMode} onBandChange={props.audioEffects.eq.changeBand} onChannelModeChange={props.audioEffects.eq.changeChannelMode} onBandToggle={props.audioEffects.eq.toggleBand} onToggleEnabled={props.audioEffects.eq.toggleEnabled} onReset={props.audioEffects.eq.reset} spectrumData={props.spectrum} automationRangesByParameterId={props.automationRangesByParameterId} />}
       </Show>
     );
   }
@@ -253,7 +257,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                 classList={{ "opacity-30": reorderPreview()?.effect === effect }}
                 onPointerDown={drag.onPointerDown}
               >
-                <EffectsPanelAudioEffectCard effect={effect} audioEffects={props.audioEffects} spectrum={props.spectrum} audioEngine={props.audioEngine} targetId={props.targetId} />
+                <EffectsPanelAudioEffectCard effect={effect} audioEffects={props.audioEffects} spectrum={props.spectrum} audioEngine={props.audioEngine} targetId={props.targetId} automationRangesByParameterId={props.automationRangesByParameterId} />
               </div>
             );
           }}
@@ -364,6 +368,18 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const saturatorForTarget = audioEffects.saturator.params;
   const delayForTarget = audioEffects.delay.params;
   const reverbForTarget = audioEffects.reverb.params;
+  const automationRangesByParameterId = createMemo(() => {
+    const targetKeyFor = (parameterId: string) => props.selectedFXTarget === "master"
+      ? automationTargetKey({ kind: "master" }, parameterId)
+      : automationTargetKey({ kind: "track", trackId: props.selectedFXTarget }, parameterId);
+    const ranges = new Map<string, { min: number; max: number }>();
+    for (const envelope of props.automationEnvelopes ?? []) {
+      if (envelope.targetKey !== targetKeyFor(envelope.parameterId) || envelope.points.length === 0) continue;
+      const range = automationEnvelopeValueRange(envelope);
+      if (range) ranges.set(envelope.parameterId, range);
+    }
+    return ranges;
+  });
 
   createEffect(() => {
     if (props.isOpen) return;
@@ -409,6 +425,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     spectrum={spectrum()}
                     audioEngine={props.audioEngine}
                     targetId={props.selectedFXTarget}
+                    automationRangesByParameterId={automationRangesByParameterId()}
                   />
                   <Show when={isCurrentTargetReadOnly()}>
                     <EffectsPanelReadOnlyNotice />

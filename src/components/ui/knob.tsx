@@ -16,6 +16,7 @@ type KnobProps = {
   onValueChange: (value: number) => void
   logarithmic?: boolean
   bipolar?: boolean
+  automationRange?: { min: number; max: number }
   showValue?: boolean
   class?: string
 }
@@ -79,6 +80,19 @@ export default function Knob(props: KnobProps) {
     const center = centerArcFraction() * 100
     const fill = fillArcFraction() * 100
     return `${fill < center ? -fill : -center}`
+  }
+  const automationArcDashArray = () => {
+    const range = props.automationRange
+    if (!range) return '0 100'
+    const start = valueToArcFraction(Math.min(range.min, range.max)) * 100
+    const end = valueToArcFraction(Math.max(range.min, range.max)) * 100
+    const visible = Math.max(0, end - start)
+    return `${visible} ${100 - visible}`
+  }
+  const automationArcDashOffset = () => {
+    const range = props.automationRange
+    if (!range) return '0'
+    return `${-valueToArcFraction(Math.min(range.min, range.max)) * 100}`
   }
   const formatValue = () => {
     const unit = props.unit ?? ''
@@ -149,6 +163,18 @@ export default function Knob(props: KnobProps) {
             stroke-linecap="round"
             pathLength="100"
           />
+          <Show when={props.automationRange}>
+            <path
+              class="stroke-red-500"
+              d={KNOB_ARC_PATH}
+              fill="none"
+              stroke-width="7"
+              stroke-linecap="round"
+              pathLength="100"
+              stroke-dasharray={automationArcDashArray()}
+              stroke-dashoffset={automationArcDashOffset()}
+            />
+          </Show>
           
           <path
             classList={{

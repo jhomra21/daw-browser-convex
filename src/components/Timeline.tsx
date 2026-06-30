@@ -1180,6 +1180,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       onEffectParamsCommitted: pushEffectParamsHistory,
       onLocalSaveFailed: localProject.setLocalSaveFailure,
       onDeviceInsertActionsChange: setDeviceInsertActions,
+      automationEnvelopes: persistedAutomation.envelopes(),
       onEffectChainElementChange: (element: HTMLElement | undefined) => {
         effectsChainElement = element;
       },
@@ -1384,8 +1385,8 @@ const Timeline: Component<TimelineProps> = (props) => {
           },
           envelopesByTargetKey: new Map(persistedAutomation.envelopes().map((envelope) => [envelope.targetKey, envelope])),
           onPreviewEnvelope: persistedAutomation.previewEnvelope,
-          onCommitEnvelope: (envelope) => {
-            void persistedAutomation.commitEnvelope(envelope);
+          onCommitEnvelope: (envelope, targetKey) => {
+            void persistedAutomation.commitEnvelope(envelope, targetKey);
           },
         }}
       />

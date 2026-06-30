@@ -315,6 +315,24 @@ html {
   );
 }
 
+.track-volume-slider-automated {
+  background:
+    linear-gradient(
+      to right,
+      transparent 0 var(--track-volume-automation-start),
+      rgb(239 68 68) var(--track-volume-automation-start) var(--track-volume-automation-end),
+      transparent var(--track-volume-automation-end) 100%
+    ),
+    linear-gradient(
+      to right,
+      rgb(251 191 36) 0 var(--track-volume-percent),
+      rgb(163 163 163) var(--track-volume-percent) 100%
+    );
+  background-position: 0 0, 0 0;
+  background-repeat: no-repeat;
+  background-size: 100% 4px, 100% 100%;
+}
+
 .track-volume-slider::-webkit-slider-runnable-track {
   height: 100%;
   background: transparent;

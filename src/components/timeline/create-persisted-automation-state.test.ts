@@ -85,4 +85,65 @@ describe('createPersistedAutomationState', () => {
       dispose()
     })
   })
+
+  test('uses last applied envelopes when persistence mutates source state before deletion applies', async () => {
+    await createRoot(async (dispose) => {
+      let persisted: AutomationEnvelope[] = [envelope]
+      const applied: Array<{
+        next: AutomationEnvelope[]
+        previous: AutomationEnvelope[]
+        changed: string[]
+      }> = []
+      const state = createPersistedAutomationState({
+        targetKey: () => envelope.targetKey,
+        envelopes: () => persisted,
+        applyToEngine: (next, previous, changed) => {
+          applied.push({ next, previous, changed: [...changed] })
+        },
+        persistEnvelope: () => {},
+        deleteEnvelope: () => {
+          persisted = []
+        },
+      })
+
+      await state.commitEnvelope(undefined, envelope.targetKey)
+
+      expect(applied).toEqual([{
+        next: [],
+        previous: [envelope],
+        changed: [envelope.targetKey],
+      }])
+      dispose()
+    })
+  })
+
+  test('uses last applied envelopes when remote sync deletes an envelope', async () => {
+    await createRoot(async (dispose) => {
+      let persisted: AutomationEnvelope[] = [envelope]
+      const applied: Array<{
+        next: AutomationEnvelope[]
+        previous: AutomationEnvelope[]
+        changed: string[]
+      }> = []
+      const state = createPersistedAutomationState({
+        targetKey: () => envelope.targetKey,
+        envelopes: () => persisted,
+        applyToEngine: (next, previous, changed) => {
+          applied.push({ next, previous, changed: [...changed] })
+        },
+        persistEnvelope: () => {},
+        deleteEnvelope: () => {},
+      })
+
+      state.syncRemote()
+      persisted = []
+      state.syncRemote()
+
+      expect(applied).toEqual([
+        { next: [envelope], previous: [envelope], changed: [] },
+        { next: [], previous: [envelope], changed: [] },
+      ])
+      dispose()
+    })
+  })
 })

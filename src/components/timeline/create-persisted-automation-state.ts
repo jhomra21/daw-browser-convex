@@ -19,6 +19,7 @@ type PersistedAutomationStateOptions = {
 export function createPersistedAutomationState(options: PersistedAutomationStateOptions) {
   const [draftByTargetKey, setDraftByTargetKey] = createSignal<Record<string, AutomationEnvelope | undefined>>({})
   const [dirtyTargetKeys, setDirtyTargetKeys] = createSignal<ReadonlySet<string>>(new Set())
+  let lastAppliedEnvelopes = options.envelopes()
 
   const persistedByTargetKey = createMemo(() => new Map(options.envelopes().map((envelope) => [envelope.targetKey, envelope])))
 
@@ -50,6 +51,12 @@ export function createPersistedAutomationState(options: PersistedAutomationState
     })
   }
 
+  const applyToEngine = (nextEnvelopes: AutomationEnvelope[], changedTargetKeys: ReadonlySet<string>) => {
+    const previousEnvelopes = lastAppliedEnvelopes
+    options.applyToEngine(nextEnvelopes, previousEnvelopes, changedTargetKeys)
+    lastAppliedEnvelopes = nextEnvelopes
+  }
+
   const previewEnvelope = (envelope: AutomationEnvelope | undefined) => {
     const targetKey = envelope?.targetKey ?? options.targetKey()
     if (!targetKey) return
@@ -61,7 +68,7 @@ export function createPersistedAutomationState(options: PersistedAutomationState
       if (draft) next.set(draftTargetKey, draft)
       else next.delete(draftTargetKey)
     }
-    options.applyToEngine(Array.from(next.values()), options.envelopes(), new Set([targetKey]))
+    applyToEngine(Array.from(next.values()), new Set([targetKey]))
   }
 
   const commitEnvelope = async (envelope: AutomationEnvelope | undefined, explicitTargetKey?: string) => {
@@ -80,7 +87,7 @@ export function createPersistedAutomationState(options: PersistedAutomationState
       delete next[targetKey]
       return next
     })
-    options.applyToEngine(Array.from(next.values()), options.envelopes(), new Set([targetKey]))
+    applyToEngine(Array.from(next.values()), new Set([targetKey]))
     options.onEnvelopeCommitted?.(previous, envelope, context)
   }
 
@@ -93,17 +100,17 @@ export function createPersistedAutomationState(options: PersistedAutomationState
       delete next[targetKey]
       return next
     })
-    options.applyToEngine(options.envelopes(), envelopes(), new Set([targetKey]))
+    applyToEngine(options.envelopes(), new Set([targetKey]))
   }
 
   const syncRemote = () => {
     const dirty = dirtyTargetKeys()
     const nextEnvelopes = options.envelopes()
     if (dirty.size === 0) {
-      options.applyToEngine(nextEnvelopes, options.envelopes(), new Set())
+      applyToEngine(nextEnvelopes, new Set())
       return
     }
-    options.applyToEngine(envelopes(), options.envelopes(), dirty)
+    applyToEngine(envelopes(), dirty)
   }
 
   return {

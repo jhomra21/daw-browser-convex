@@ -103,6 +103,11 @@ type SourceIsolatedRenderOptions = {
   includeMasterFx?: boolean
 }
 
+type SourceAutomationScope = {
+  trackIds?: ReadonlySet<string>
+  includeMasterFx: boolean
+}
+
 type OfflineDrumRackHit = {
   source: AudioBufferSourceNode
   gain: GainNode
@@ -280,6 +285,61 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
   }
 }
 
+function collectOutputPathChannelIds(
+  channelId: string,
+  outputTargetByChannelId: ReadonlyMap<string, string | undefined>,
+): string[] {
+  const path: string[] = []
+  const visited = new Set<string>()
+  let currentId: string | undefined = channelId
+
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId)
+    path.push(currentId)
+    currentId = outputTargetByChannelId.get(currentId)
+  }
+
+  return path
+}
+
+export function createSourceAutomationScope(
+  graph: ResolvedMixerGraph,
+  options: SourceIsolatedRenderOptions,
+): SourceAutomationScope {
+  const { sourceTrackIds, includeMasterFx = true } = options
+  if (!sourceTrackIds) return { includeMasterFx }
+
+  const channelById = new Map(
+    graph.channels.map((resolvedTrack) => [resolvedTrack.channel.id, resolvedTrack] as const),
+  )
+  const outputTargetByChannelId = new Map(
+    graph.channels.map((resolvedTrack) => [resolvedTrack.channel.id, resolvedTrack.outputTargetId] as const),
+  )
+  const scopedTrackIds = new Set<string>()
+
+  const addReachableChannel = (channelId: string, queue: string[]) => {
+    if (!channelById.has(channelId) || scopedTrackIds.has(channelId)) return
+    scopedTrackIds.add(channelId)
+    queue.push(channelId)
+  }
+
+  const queue: string[] = []
+  for (const sourceTrackId of sourceTrackIds) {
+    addReachableChannel(sourceTrackId, queue)
+  }
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const channelId = queue[index]
+    const channel = channelById.get(channelId)
+    if (!channel) continue
+    const outputPath = collectOutputPathChannelIds(channelId, outputTargetByChannelId)
+    for (const pathChannelId of outputPath) addReachableChannel(pathChannelId, queue)
+    for (const send of channel.sends) addReachableChannel(send.targetId, queue)
+  }
+
+  return { trackIds: scopedTrackIds, includeMasterFx }
+}
+
 async function renderSourceIsolatedMixdownFromPrepared(
   prepared: PreparedExportRender,
   options: SourceIsolatedRenderOptions = {},
@@ -292,13 +352,14 @@ async function renderSourceIsolatedMixdownFromPrepared(
     createBuffer: (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
   })
   const graph = includeMasterFx ? prepared.mixerGraph : { ...prepared.mixerGraph, master: { volume: prepared.mixerGraph.master.volume } }
+  const automationScope = createSourceAutomationScope(graph, options)
   const mixerNodes = await createOfflineMixerNodes(ctx, graph, prepared.bpm)
   const { trackNodes } = mixerNodes
 
   for (const envelope of prepared.automationEnvelopes) {
     if (!envelope.enabled) continue
-    if (sourceTrackIds && envelope.target.kind === 'track' && !sourceTrackIds.has(envelope.target.trackId)) continue
-    if (!includeMasterFx && envelope.target.kind === 'master') continue
+    if (automationScope.trackIds && envelope.target.kind === 'track' && !automationScope.trackIds.has(envelope.target.trackId)) continue
+    if (!automationScope.includeMasterFx && envelope.target.kind === 'master') continue
     const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
     const fallback = descriptor?.defaultValue ?? 0
     const bindings = envelope.target.kind === 'master'

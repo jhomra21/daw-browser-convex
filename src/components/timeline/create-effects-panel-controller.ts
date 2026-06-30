@@ -129,7 +129,6 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     audioEngine: options.audioEngine,
     roomEffects: () => roomEffectsQuery.data,
     spectrumActive: options.spectrumActive,
-    playheadSec: options.playheadSec,
     localDraftEffects: {
       eq: audioEffects.eq.readDraftForTarget,
       compressor: audioEffects.compressor.readDraftForTarget,

@@ -35,7 +35,6 @@ type UseEffectsPanelAudioSyncOptions = {
   audioEngine: Accessor<AudioEngine>;
   roomEffects: Accessor<RoomEffectRow[] | undefined>;
   spectrumActive: Accessor<boolean>;
-  playheadSec?: Accessor<number | undefined>;
   localDraftEffects?: {
     eq?: (targetId: string) => EqParams | undefined;
     compressor?: (targetId: string) => CompressorParams | undefined;
@@ -402,7 +401,6 @@ export function useEffectsPanelAudioSync(
       setSpectrum(null);
       return;
     }
-    options.playheadSec?.();
     sampleSpectrum();
 
     // Spectrum visualization needs its own bounded sampling clock because live

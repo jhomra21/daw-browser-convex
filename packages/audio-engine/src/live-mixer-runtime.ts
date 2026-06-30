@@ -1,4 +1,4 @@
-import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, parseEqBandParameterId, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState, type CompressorChainState } from './effects/compressor-chain-state'
@@ -10,6 +10,7 @@ import { applyLiveMixerGraph } from './mixer/apply-live-routing'
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
 import type { Track } from '@daw-browser/timeline-core/types'
+import type { AutomationAudioBinding } from './automation'
 
 type RuntimeTrack = Track<AudioBuffer>
 
@@ -37,6 +38,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const sendGains = new Map<string, Map<string, GainNode>>()
   const routingSignatures = new Map<string, string>()
   const eqChains = new Map<string, BiquadFilterNode[]>()
+  const eqNodesByBand = new Map<string, Map<string, BiquadFilterNode>>()
   const pendingEqParams = new Map<string, EqParamsLite>()
   const eqSignatures = new Map<string, string>()
   const eqTopologySignatures = new Map<string, string>()
@@ -150,6 +152,10 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     const targetChannels = destination?.maxChannelCount ?? ctx.destination.maxChannelCount ?? 2
     const eqNodes = createEqNodes(ctx, normalized, targetChannels)
     eqChains.set(trackId, eqNodes)
+    eqNodesByBand.set(trackId, new Map(normalized.bands.filter((band) => band.enabled).flatMap((band, index) => {
+      const node = eqNodes[index]
+      return node ? [[band.id, node]] : []
+    })))
     eqSignatures.set(trackId, signature)
     eqTopologySignatures.set(trackId, topologySignature)
     rebuildTrackRouting(trackId, trackNodes)
@@ -250,6 +256,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     const nodes = eqChains.get(trackId)
     if (nodes) disconnectAudioNodes(nodes)
     eqChains.delete(trackId)
+    eqNodesByBand.delete(trackId)
     eqSignatures.delete(trackId)
     eqTopologySignatures.delete(trackId)
 
@@ -281,6 +288,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     routingSignatures.clear()
     inputs.clear()
     eqChains.clear()
+    eqNodesByBand.clear()
     pendingEqParams.clear()
     eqSignatures.clear()
     eqTopologySignatures.clear()
@@ -350,6 +358,17 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     setTrackEq,
     setTrackSaturator,
     setTrackDelay,
+    resolveTrackAutomationBindings: (trackId: string, parameterId: string): AutomationAudioBinding[] => {
+      const trackNodes = ensureTrackNodes(trackId)
+      if (parameterId === 'volume') return [{ param: trackNodes.gain.gain, valueToAudioValue: (value) => value }]
+      const eq = parseEqBandParameterId(parameterId)
+      if (!eq) return []
+      const node = eqNodesByBand.get(trackId)?.get(eq.bandId)
+      if (!node) return []
+      if (eq.property === 'frequencyHz') return [{ param: node.frequency, valueToAudioValue: (value) => value }]
+      if (eq.property === 'gainDb') return [{ param: node.gain, valueToAudioValue: (value) => value }]
+      return [{ param: node.Q, valueToAudioValue: (value) => value }]
+    },
     setTrackFxOrder: (trackId: string, order: AudioEffectKind[]) => {
       const normalized = normalizeAudioEffectOrder(order, order)
       if (areAudioEffectOrdersEqual(trackFxOrders.get(trackId), normalized)) return

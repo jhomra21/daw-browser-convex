@@ -46,6 +46,8 @@ const createFakeEngine = (deferredWindow: DeferredStretchWindow) => {
       return currentTimelineSec
     },
     ensureAudio: () => {},
+    applyAutomationAtTimelineSec: () => {},
+    cancelAutomationSchedules: () => {},
     onTransportPause: () => {},
     onTransportSeek: () => {},
     onTransportStart: () => {},
@@ -61,6 +63,7 @@ const createFakeEngine = (deferredWindow: DeferredStretchWindow) => {
         ? { deferredStretchWindows: [deferredWindow] }
         : { deferredStretchWindows: [] }
     },
+    scheduleAutomationFromPlayhead: () => {},
     stopAllSources: () => {},
     subscribeStretchRenderState: (listener) => {
       stretchListener = listener
@@ -172,6 +175,8 @@ describe('useTimelinePlayback deferred stretch retries', () => {
           return currentTimelineSec
         },
         ensureAudio: () => {},
+        applyAutomationAtTimelineSec: () => {},
+        cancelAutomationSchedules: () => {},
         onTransportPause: () => {},
         onTransportSeek: () => {},
         onTransportStart: () => {},
@@ -187,6 +192,7 @@ describe('useTimelinePlayback deferred stretch retries', () => {
             ? { deferredStretchWindows: [{ clipId: 'clip-1', startSec: 12, endSec: 16 }] }
             : { deferredStretchWindows: [] }
         },
+        scheduleAutomationFromPlayhead: () => {},
         stopAllSources: () => {},
         subscribeStretchRenderState: (listener) => {
           stretchListener = listener
@@ -243,6 +249,8 @@ describe('useTimelinePlayback deferred stretch retries', () => {
           return currentTimelineSec
         },
         ensureAudio: () => {},
+        applyAutomationAtTimelineSec: () => {},
+        cancelAutomationSchedules: () => {},
         onTransportPause: () => {},
         onTransportSeek: () => {},
         onTransportStart: () => {},
@@ -258,6 +266,7 @@ describe('useTimelinePlayback deferred stretch retries', () => {
           scheduleCalls.push({ playheadSec, opts })
           return { deferredStretchWindows: [{ clipId: 'clip-1', startSec: 12, endSec: 16 }] }
         },
+        scheduleAutomationFromPlayhead: () => {},
         stopAllSources: () => {},
         subscribeStretchRenderState: (listener) => {
           stretchListener = listener

@@ -15,6 +15,7 @@ import type { HistoryEntry } from './types'
 import {
   isLocalHistoryProject,
   persistHistoryEffectParams,
+  persistHistoryAutomationEnvelope,
   persistHistoryClipAudioWarpOrThrow,
   persistHistoryClipMovesOrThrow,
   persistHistoryClipTimingOrThrow,
@@ -207,6 +208,10 @@ async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, dire
     : readEffectTrackId(entry, deps)
   await persistHistoryEffectParams(deps, entry, targetId, direction)
   applyEffectParamsToEngine(entry, deps, targetId, direction)
+}
+
+async function applyAutomationEnvelopeEntry(entry: Extract<HistoryEntry, { type: 'automation-envelope-change' }>, deps: Deps, direction: HistoryDirection) {
+  await persistHistoryAutomationEnvelope(deps, entry, direction)
 }
 
 async function applyClipTimingEntry(entry: Extract<HistoryEntry, { type: 'clip-timing' }>, deps: Deps, direction: HistoryDirection) {
@@ -425,6 +430,10 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
 
     case 'effect-params':
       await applyEffectParamsEntry(entry, deps, direction)
+      return
+
+    case 'automation-envelope-change':
+      await applyAutomationEnvelopeEntry(entry, deps, direction)
       return
   }
 }

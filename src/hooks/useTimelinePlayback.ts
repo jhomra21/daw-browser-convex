@@ -18,6 +18,8 @@ type TimelinePlaybackAudioEngine = Pick<
   AudioEngine,
   | 'currentTimelineSec'
   | 'ensureAudio'
+  | 'applyAutomationAtTimelineSec'
+  | 'cancelAutomationSchedules'
   | 'onTransportPause'
   | 'onTransportSeek'
   | 'onTransportStart'
@@ -25,6 +27,7 @@ type TimelinePlaybackAudioEngine = Pick<
   | 'resume'
   | 'rescheduleClipsAtPlayhead'
   | 'scheduleAllClipsFromPlayhead'
+  | 'scheduleAutomationFromPlayhead'
   | 'stopAllSources'
   | 'subscribeStretchRenderState'
 >
@@ -129,6 +132,7 @@ export function useTimelinePlayback(audioEngine: TimelinePlaybackAudioEngine, lo
     audioEngine.onTransportSeek(wrapped, SCHED_AHEAD_SEC)
     scheduledUntilSec = getScheduleHorizonEnd(wrapped, isActive ? end : undefined)
     scheduleAndTrackDeferred(tracks, wrapped, { endLimitSec: scheduledUntilSec })
+    audioEngine.scheduleAutomationFromPlayhead(wrapped, { horizonSec: scheduledUntilSec - wrapped })
     return { sec: wrapped, looped: true }
   }
 
@@ -159,6 +163,7 @@ export function useTimelinePlayback(audioEngine: TimelinePlaybackAudioEngine, lo
       startLimitSec: scheduledUntilSec,
       endLimitSec: nextEnd,
     })
+    audioEngine.scheduleAutomationFromPlayhead(scheduledUntilSec, { horizonSec: nextEnd - scheduledUntilSec })
     scheduledUntilSec = nextEnd
   }
 
@@ -232,6 +237,7 @@ export function useTimelinePlayback(audioEngine: TimelinePlaybackAudioEngine, lo
     const { isActive, end } = getLoopParams()
     scheduledUntilSec = getScheduleHorizonEnd(playheadSec(), isActive ? end : undefined)
     scheduleAndTrackDeferred(tracks, playheadSec(), { endLimitSec: scheduledUntilSec })
+    audioEngine.scheduleAutomationFromPlayhead(playheadSec(), { horizonSec: scheduledUntilSec - playheadSec() })
     setRafId(requestAnimationFrame(tick))
   }
 
@@ -241,6 +247,7 @@ export function useTimelinePlayback(audioEngine: TimelinePlaybackAudioEngine, lo
     publishPlayhead(sec)
     setIsPlaying(false)
     audioEngine.stopAllSources()
+    audioEngine.cancelAutomationSchedules()
     deferredStretchQueue.clear()
     audioEngine.onTransportPause()
     cancelRaf()
@@ -252,6 +259,7 @@ export function useTimelinePlayback(audioEngine: TimelinePlaybackAudioEngine, lo
     lastPlayheadUiUpdateMs = 0
     setPlayheadSec(0)
     audioEngine.onTransportStop()
+    audioEngine.applyAutomationAtTimelineSec(0)
   }
 
   const setPlayhead = (sec: number, tracks: Track[]) => {
@@ -264,6 +272,9 @@ export function useTimelinePlayback(audioEngine: TimelinePlaybackAudioEngine, lo
       const { isActive, end } = getLoopParams()
       scheduledUntilSec = getScheduleHorizonEnd(sec, isActive ? end : undefined)
       scheduleAndTrackDeferred(tracks, sec, { endLimitSec: scheduledUntilSec })
+      audioEngine.scheduleAutomationFromPlayhead(sec, { horizonSec: scheduledUntilSec - sec })
+    } else {
+      audioEngine.applyAutomationAtTimelineSec(sec)
     }
   }
 

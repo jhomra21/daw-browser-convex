@@ -388,15 +388,15 @@ Rules:
 
 ## Implementation Order
 
-- [ ] Add shared automation types, registry, normalization, and tests.
+- [x] Add shared automation types, registry, normalization, and tests.
 - [x] Add Convex schema, queries, and server mutations.
 - [x] Add shared timeline operation parser, builders, and executor handling.
-- [ ] Add local automation persistence.
-- [ ] Add persisted automation state adapter.
-- [ ] Add audio engine scheduler and live parameter resolvers.
+- [x] Add local automation persistence.
+- [x] Add persisted automation state adapter.
+- [x] Add audio engine scheduler and live parameter resolvers.
 - [ ] Add offline export automation scheduling.
 - [ ] Add timeline SVG UI and parameter picker.
-- [ ] Add undo/redo integration.
+- [x] Add undo/redo integration.
 - [ ] Run final validation.
 
 ## Validation

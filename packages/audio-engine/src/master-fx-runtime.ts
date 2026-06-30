@@ -1,4 +1,4 @@
-import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeEqParams, parseEqBandParameterId, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState } from './effects/compressor-chain-state'
@@ -7,9 +7,11 @@ import { createReverbChainState } from './effects/reverb-chain-state'
 import { createSaturatorChainState } from './effects/saturator-chain-state'
 import type { CompressorMeterListener } from './effects/compressor-worklet'
 import type { SpectrumFrame } from './metering-runtime'
+import type { AutomationAudioBinding } from './automation'
 
 export function createMasterFxRuntime() {
   let eqChain: BiquadFilterNode[] = []
+  let eqNodesByBand = new Map<string, BiquadFilterNode>()
   let eqSignature: string | null = null
   let eqTopologySignature: string | null = null
   let analyser: AnalyserNode | null = null
@@ -71,6 +73,10 @@ export function createMasterFxRuntime() {
         const signature = serializeNormalizedEqParams(params)
         const topologySignature = getEqTopologySignature(params)
         eqChain = createEqNodes(ctx, params, ctx.destination.maxChannelCount || 2)
+        eqNodesByBand = new Map(params.bands.filter((band) => band.enabled).flatMap((band, index) => {
+          const node = eqChain[index]
+          return node ? [[band.id, node]] : []
+        }))
         eqSignature = signature
         eqTopologySignature = topologySignature
       }
@@ -112,6 +118,10 @@ export function createMasterFxRuntime() {
       }
       disconnectAudioNodes(eqChain)
       eqChain = createEqNodes(ctx, normalized, ctx.destination.maxChannelCount || 2)
+      eqNodesByBand = new Map(normalized.bands.filter((band) => band.enabled).flatMap((band, index) => {
+        const node = eqChain[index]
+        return node ? [[band.id, node]] : []
+      }))
       eqSignature = signature
       eqTopologySignature = topologySignature
       rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
@@ -164,6 +174,16 @@ export function createMasterFxRuntime() {
       currentBpm = bpm
       delayState.setBpm(bpm)
     },
+    resolveMasterAutomationBindings: (parameterId: string, masterGain: GainNode | null): AutomationAudioBinding[] => {
+      if (parameterId === 'volume') return masterGain ? [{ param: masterGain.gain, valueToAudioValue: (value) => value }] : []
+      const eq = parseEqBandParameterId(parameterId)
+      if (!eq) return []
+      const node = eqNodesByBand.get(eq.bandId)
+      if (!node) return []
+      if (eq.property === 'frequencyHz') return [{ param: node.frequency, valueToAudioValue: (value) => value }]
+      if (eq.property === 'gainDb') return [{ param: node.gain, valueToAudioValue: (value) => value }]
+      return [{ param: node.Q, valueToAudioValue: (value) => value }]
+    },
     rebuildRouting,
     getSpectrum: (ctx: AudioContext | null, masterGain: GainNode | null) => {
       ensureAnalyser(ctx, masterGain)
@@ -195,6 +215,7 @@ export function createMasterFxRuntime() {
       masterFxOrder = undefined
       disconnectAudioNodes(eqChain)
       eqChain = []
+      eqNodesByBand = new Map()
       compressorState.close()
       reverbState.close()
       saturatorState.close()

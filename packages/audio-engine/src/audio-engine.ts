@@ -1,7 +1,7 @@
 import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime } from './audio-runtime'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
-import { normalizeMasterVolume, type ArpParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
+import { getAutomationParameterDescriptor, normalizeMasterVolume, type ArpParams, type AudioEffectKind, type AutomationEnvelope, type CompressorParamsLite, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { createReverbImpulseCache } from './effects/reverb-impulse-cache'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
@@ -13,6 +13,7 @@ import { createInstrumentRuntime, type SetTrackInstrumentInput } from './instrum
 import type { DrumRackResolvedBuffers } from './drum-rack-runtime'
 import { createTransportClock } from './transport-clock'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import { scheduleAutomationEnvelope } from './automation'
 
 type RuntimeClip = Clip<AudioBuffer>
 type RuntimeTrack = Track<AudioBuffer>
@@ -32,6 +33,7 @@ export class AudioEngine {
   private masterGain: GainNode | null = null
   private destination: AudioDestinationNode | null = null
   private tracksSnapshot: RuntimeTrack[] = []
+  private automationEnvelopes: AutomationEnvelope[] = []
   private masterVolume = 1
   private sources = createSourceRegistry()
   private instrumentRuntime = createInstrumentRuntime({
@@ -303,6 +305,43 @@ export class AudioEngine {
     this.mixerRuntime.updateTrackGains(tracks)
   }
 
+  setAutomationEnvelopes(envelopes: AutomationEnvelope[]) {
+    this.automationEnvelopes = envelopes
+  }
+
+  scheduleAutomationFromPlayhead(playheadSec: number, opts?: { horizonSec?: number }) {
+    if (!this.audioCtx) return
+    const horizonSec = opts?.horizonSec ?? LIVE_SCHEDULE_HORIZON_SEC
+    const window = {
+      playheadSec,
+      startLimitSec: playheadSec,
+      endLimitSec: playheadSec + horizonSec,
+    }
+    for (const envelope of this.automationEnvelopes) {
+      if (!envelope.enabled) continue
+      const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
+      const fallback = descriptor?.defaultValue ?? 0
+      const bindings = envelope.target.kind === 'master'
+        ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain)
+        : this.mixerRuntime.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId)
+      scheduleAutomationEnvelope(bindings, envelope, window, (timeSec) => this.timelineToCtxTime(timeSec), fallback)
+    }
+  }
+
+  applyAutomationAtTimelineSec(timeSec: number) {
+    this.scheduleAutomationFromPlayhead(timeSec, { horizonSec: 0 })
+  }
+
+  cancelAutomationSchedules() {
+    const now = this.audioCtx?.currentTime ?? 0
+    for (const envelope of this.automationEnvelopes) {
+      const bindings = envelope.target.kind === 'master'
+        ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain)
+        : this.mixerRuntime.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId)
+      for (const binding of bindings) binding.param.cancelScheduledValues(now)
+    }
+  }
+
   private disposeSynthTrack(id: string) {
     this.instrumentRuntime.disposeTrack(id)
   }
@@ -390,6 +429,7 @@ export class AudioEngine {
     this.mixerRuntime.clear()
     this.metering.close()
     this.instrumentRuntime.clear()
+    this.automationEnvelopes = []
     this.masterFx.close()
     closeAudioRuntime(this.runtime)
     this.masterGain = null

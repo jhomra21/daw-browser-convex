@@ -1,0 +1,100 @@
+import { createMemo, createSignal, type Accessor } from 'solid-js'
+import type { AutomationEnvelope } from '@daw-browser/shared'
+
+type PersistedAutomationContext = {
+  projectId?: string
+  userId?: string
+}
+
+type PersistedAutomationStateOptions = {
+  targetKey: Accessor<string | undefined>
+  envelopes: Accessor<AutomationEnvelope[]>
+  applyToEngine: (envelopes: AutomationEnvelope[]) => void
+  persistEnvelope: (envelope: AutomationEnvelope, context: PersistedAutomationContext) => void | Promise<unknown>
+  deleteEnvelope: (targetKey: string, context: PersistedAutomationContext) => void | Promise<unknown>
+  createPersistContext?: () => PersistedAutomationContext
+  onEnvelopeCommitted?: (previous: AutomationEnvelope | undefined, next: AutomationEnvelope | undefined, context: PersistedAutomationContext) => void
+}
+
+export function createPersistedAutomationState(options: PersistedAutomationStateOptions) {
+  const [draftByTargetKey, setDraftByTargetKey] = createSignal<Record<string, AutomationEnvelope | undefined>>({})
+  const [dirtyTargetKeys, setDirtyTargetKeys] = createSignal<ReadonlySet<string>>(new Set())
+
+  const persistedByTargetKey = createMemo(() => new Map(options.envelopes().map((envelope) => [envelope.targetKey, envelope])))
+
+  const envelopes = createMemo(() => {
+    const drafts = draftByTargetKey()
+    const next = new Map(persistedByTargetKey())
+    for (const [targetKey, draft] of Object.entries(drafts)) {
+      if (draft) next.set(targetKey, draft)
+      else next.delete(targetKey)
+    }
+    return Array.from(next.values())
+  })
+
+  const selectedEnvelope = createMemo(() => {
+    const targetKey = options.targetKey()
+    return targetKey ? draftByTargetKey()[targetKey] ?? persistedByTargetKey().get(targetKey) : undefined
+  })
+
+  const markDirty = (targetKey: string) => {
+    setDirtyTargetKeys((prev) => new Set([...prev, targetKey]))
+  }
+
+  const clearDirty = (targetKey: string) => {
+    setDirtyTargetKeys((prev) => {
+      if (!prev.has(targetKey)) return prev
+      const next = new Set(prev)
+      next.delete(targetKey)
+      return next
+    })
+  }
+
+  const previewEnvelope = (envelope: AutomationEnvelope | undefined) => {
+    const targetKey = envelope?.targetKey ?? options.targetKey()
+    if (!targetKey) return
+    markDirty(targetKey)
+    const nextDrafts = { ...draftByTargetKey(), [targetKey]: envelope }
+    setDraftByTargetKey(nextDrafts)
+    const next = new Map(persistedByTargetKey())
+    for (const [draftTargetKey, draft] of Object.entries(nextDrafts)) {
+      if (draft) next.set(draftTargetKey, draft)
+      else next.delete(draftTargetKey)
+    }
+    options.applyToEngine(Array.from(next.values()))
+  }
+
+  const commitEnvelope = async (envelope: AutomationEnvelope | undefined) => {
+    const targetKey = envelope?.targetKey ?? options.targetKey()
+    if (!targetKey) return
+    const previous = persistedByTargetKey().get(targetKey)
+    const context = options.createPersistContext?.() ?? {}
+    if (envelope) await options.persistEnvelope(envelope, context)
+    else await options.deleteEnvelope(targetKey, context)
+    clearDirty(targetKey)
+    setDraftByTargetKey((prev) => {
+      const next = { ...prev }
+      delete next[targetKey]
+      return next
+    })
+    options.onEnvelopeCommitted?.(previous, envelope, context)
+  }
+
+  const syncRemote = () => {
+    const dirty = dirtyTargetKeys()
+    const nextEnvelopes = options.envelopes()
+    if (dirty.size === 0) {
+      options.applyToEngine(nextEnvelopes)
+      return
+    }
+    options.applyToEngine(envelopes())
+  }
+
+  return {
+    commitEnvelope,
+    envelopes,
+    previewEnvelope,
+    selectedEnvelope,
+    syncRemote,
+  }
+}

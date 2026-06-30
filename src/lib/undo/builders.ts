@@ -1,5 +1,6 @@
 import { buildClipHistorySnapshot } from '~/lib/clip-create'
 import type { ClipCreateSnapshot } from '@daw-browser/shared'
+import type { AutomationEnvelope } from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 
@@ -177,6 +178,21 @@ export function buildEffectParamsHistoryEntry(input: EffectParamsHistoryEntryInp
     data: {
       ...data,
       trackRef,
+    },
+  }
+}
+
+export function buildAutomationEnvelopeHistoryEntry(input: {
+  projectId: string
+  before: AutomationEnvelope | null
+  after: AutomationEnvelope | null
+}): Extract<HistoryEntry, { type: 'automation-envelope-change' }> {
+  return {
+    type: 'automation-envelope-change',
+    projectId: input.projectId,
+    data: {
+      before: input.before,
+      after: input.after,
     },
   }
 }

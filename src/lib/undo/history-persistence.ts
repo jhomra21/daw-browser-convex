@@ -4,6 +4,7 @@ import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
 import { setLocalEffect } from "~/lib/local-effects";
+import { deleteLocalAutomationEnvelope, setLocalAutomationEnvelope } from "~/lib/local-automation";
 import { isLocalId } from "@daw-browser/shared";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
@@ -148,6 +149,7 @@ export const createHistoryClip = async (
 
 type TrackDeleteEffects = NonNullable<Extract<HistoryEntry, { type: "track-delete" }>["data"]["effects"]>;
 type EffectParamsEntry = Extract<HistoryEntry, { type: "effect-params" }>;
+type AutomationEnvelopeEntry = Extract<HistoryEntry, { type: "automation-envelope-change" }>;
 type HistoryDirection = "undo" | "redo";
 
 function pickDirectionalValue<T>(direction: HistoryDirection, from: T, to: T) {
@@ -277,6 +279,45 @@ export const persistHistoryEffectParams = async (
       return;
     }
   }
+};
+
+export const persistHistoryAutomationEnvelope = async (
+  deps: Deps,
+  entry: AutomationEnvelopeEntry,
+  direction: HistoryDirection,
+) => {
+  const envelope = pickDirectionalValue(direction, entry.data.before, entry.data.after);
+  const targetKey = envelope?.targetKey ?? entry.data.before?.targetKey ?? entry.data.after?.targetKey;
+  if (!targetKey) return;
+  if (isLocalHistoryProject(deps)) {
+    if (envelope) await setLocalAutomationEnvelope(deps.projectId, envelope);
+    else await deleteLocalAutomationEnvelope(deps.projectId, targetKey);
+    return;
+  }
+  if (envelope) {
+    await publishHistoryOperation(deps, {
+      kind: "automation.setEnvelope",
+      payload: {
+        targetKind: envelope.target.kind,
+        trackId: envelope.target.kind === "track" ? envelope.target.trackId : undefined,
+        parameterId: envelope.parameterId,
+        enabled: envelope.enabled,
+        points: envelope.points,
+        updatedAt: envelope.updatedAt,
+      },
+    });
+    return;
+  }
+  const before = entry.data.before ?? entry.data.after;
+  if (!before) return;
+  await publishHistoryOperation(deps, {
+    kind: "automation.deleteEnvelope",
+    payload: {
+      targetKind: before.target.kind,
+      trackId: before.target.kind === "track" ? before.target.trackId : undefined,
+      parameterId: before.parameterId,
+    },
+  });
 };
 
 export const removeHistoryClipIdsOrThrow = async (deps: Deps, clipIds: string[], message: string) => {

@@ -25,7 +25,7 @@ type MidiEditorCardProps = {
   onAuditionNote?: (pitch: number, velocity?: number, durSec?: number) => void
   // Local-only: current room id for per-room persistence
   projectId?: string
-  midiKeyboard?: {
+  midiKeyboard: {
     isActive: (pitch: number) => boolean
   }
   onLocalMidiSaved?: (clipId: string, midi: Clip['midi']) => void
@@ -267,7 +267,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
               <div
                 class={cn(
                   'relative flex cursor-pointer items-center justify-center border-b border-neutral-800 font-mono text-2xs',
-                  props.midiKeyboard?.isActive(pitch)
+                  props.midiKeyboard.isActive(pitch)
                     ? 'border-green-400 bg-green-600/50 text-white'
                     : isBlackKey
                       ? 'bg-neutral-700/70 text-neutral-100'

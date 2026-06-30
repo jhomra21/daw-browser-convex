@@ -109,7 +109,7 @@ export function useTimelineMidiOverlay(
     const clipId = midiEditorClipId()
     if (clipId) {
       const match = trackIndex().clipEntryById.get(clipId)
-      if (isPlayableMidiTrack(match?.track)) return match?.track
+      if (match && isPlayableMidiTrack(match.track)) return match.track
     }
     const fxTarget = options.selection.selectedFXTarget()
     if (fxTarget !== 'master') {

@@ -1,43 +1,55 @@
-import type { ValidComponent } from "solid-js"
-import { splitProps, type Component } from "solid-js"
+import type { ComponentProps, JSX } from "solid-js";
+import { mergeProps, Show, splitProps } from "solid-js";
+import {
+  Tooltip as TooltipPrimitive,
+  type TooltipContentProps as KobalteTooltipContentProps,
+  type TooltipRootProps,
+} from "@kobalte/core/tooltip";
 
-import type { PolymorphicProps } from "@kobalte/core/polymorphic"
-import * as TooltipPrimitive from "@kobalte/core/tooltip"
+import { cn } from "~/lib/utils";
 
-import { cn } from "~/lib/utils"
+type TooltipProps = TooltipRootProps;
 
-const TooltipTrigger = TooltipPrimitive.Trigger
+const Tooltip = (props: TooltipProps) => {
+  const merged = mergeProps<TooltipProps[]>(
+    {
+      closeDelay: 0,
+      openDelay: 250,
+      placement: "top",
+      gutter: 6,
+    },
+    props,
+  );
 
-const Tooltip: Component<TooltipPrimitive.TooltipRootProps> = (props) => {
-  const [local, others] = splitProps(props, ["openDelay", "closeDelay"]);
-  return <TooltipPrimitive.Root 
-    gutter={4} 
-    openDelay={local.openDelay === undefined ? 500 : local.openDelay} 
-    closeDelay={local.closeDelay === undefined ? 100 : local.closeDelay} 
-    {...others} 
-  />
-}
+  return <TooltipPrimitive {...merged} />;
+};
 
-type TooltipContentProps<T extends ValidComponent = "div"> =
-  TooltipPrimitive.TooltipContentProps<T> & { class?: string | undefined }
+const TooltipTrigger = TooltipPrimitive.Trigger;
 
-const TooltipContent = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, TooltipContentProps<T>>
-) => {
-  const [local, others] = splitProps(props as TooltipContentProps, ["class"]);
+type TooltipContentProps = KobalteTooltipContentProps<"div"> & ComponentProps<"div"> & {
+  class?: string;
+  children?: JSX.Element;
+  shortcut?: string;
+};
+
+const TooltipContent = (props: TooltipContentProps) => {
+  const [local, rest] = splitProps(props, ["class", "children", "shortcut"]);
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content
         class={cn(
-          "z-50 origin-[var(--kb-tooltip-content-transform-origin)] overflow-hidden border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md",
-          "animate-[tooltip-content-hide_150ms_ease-in-out_forwards]",
-          "data-[expanded]:animate-[tooltip-content-show_150ms_ease-in-out_forwards]",
-          local.class
+          "z-50 flex w-fit items-center rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-200 shadow-md",
+          local.class,
         )}
-        {...others}
-      />
+        {...rest}
+      >
+        {local.children}
+        <Show when={local.shortcut}>
+          <span class="ml-2 text-neutral-500">{local.shortcut}</span>
+        </Show>
+      </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>
   );
 };
 
-export { Tooltip, TooltipTrigger, TooltipContent }
+export { Tooltip, TooltipContent, TooltipTrigger };

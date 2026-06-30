@@ -1,6 +1,7 @@
-import { type Accessor, type Component, For, Show } from "solid-js";
+import { type Accessor, type Component, For, Show, type JSX } from "solid-js";
 import Icon from "~/components/ui/Icon";
 import { Button } from "~/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,7 +13,7 @@ import { useTransportTempoController } from "~/hooks/useTransportTempoController
 import { cn } from "~/lib/utils";
 import { nativeMenuTriggerClass } from "./toolbar-context";
 import type { TransportControlsProps } from "./transport-types";
-import { ProjectSaveStatusBadge } from "~/components/project-save-status-badge";
+import { getProjectSaveStatus } from "~/lib/project-save-status";
 import { EditMenu } from "./menus/edit-menu";
 import { FileMenu } from "./menus/file-menu";
 import { SettingsMenu } from "./menus/settings-menu";
@@ -217,48 +218,100 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
 const SaveStatus: Component<{ projectMenu: TransportControlsProps["projectMenu"] }> = (props) => {
   const currentProject = () =>
     props.projectMenu.projects.find((project) => project.projectId === props.projectMenu.currentProjectId);
+  const status = () => getProjectSaveStatus({
+    projectId: props.projectMenu.currentProjectId,
+    userId: props.projectMenu.currentUserId,
+    mode: currentProject()?.mode,
+    sharedOutboxStatus: props.projectMenu.sharedOutboxStatus,
+    cloudBackupStatus: props.projectMenu.cloudBackupStatus,
+  });
+  const isLocal = () => status().compactLabel === "Local";
 
   return (
-    <ProjectSaveStatusBadge
-      label="short"
-      projectId={props.projectMenu.currentProjectId}
-      userId={props.projectMenu.currentUserId}
-      mode={currentProject()?.mode}
-      sharedOutboxStatus={props.projectMenu.sharedOutboxStatus}
-      cloudBackupStatus={props.projectMenu.cloudBackupStatus}
-    />
+    <TopRightIconButton
+      tooltip={status().label}
+      class={status().class}
+    >
+      <Show when={isLocal()} fallback={<CloudSaveIcon />}>
+        <LocalSaveIcon />
+      </Show>
+    </TopRightIconButton>
   );
 };
+
+type TopRightIconButtonProps = {
+  tooltip: string;
+  active?: boolean;
+  playable?: boolean;
+  class?: string;
+  ariaPressed?: boolean;
+  onClick?: () => void;
+  children: JSX.Element;
+};
+
+const TopRightIconButton: Component<TopRightIconButtonProps> = (props) => (
+  <Tooltip>
+    <TooltipTrigger
+      as={Button}
+      variant="ghost"
+      size="icon"
+      onClick={props.onClick}
+      aria-pressed={props.ariaPressed}
+      aria-label={props.tooltip}
+      class={cn(
+        nativeMenuTriggerClass,
+        "h-7 w-7 p-0",
+        props.active && "border-amber-500/60 bg-amber-500/20 text-amber-300",
+        props.active && props.playable && "border-green-500/50 bg-green-600/20 text-green-300",
+        props.class,
+      )}
+    >
+      {props.children}
+    </TooltipTrigger>
+    <TooltipContent>{props.tooltip}</TooltipContent>
+  </Tooltip>
+);
+
+const LocalSaveIcon: Component = () => (
+  <svg viewBox="0 0 20 20" class="h-4 w-4" aria-hidden="true">
+    <path d="M4 5.5C4 4.7 4.7 4 5.5 4h9c.8 0 1.5.7 1.5 1.5v9c0 .8-.7 1.5-1.5 1.5h-9c-.8 0-1.5-.7-1.5-1.5z" fill="none" stroke="currentColor" stroke-width="1.5" />
+    <path d="M7 4v4h6V4M7 13h6" stroke="currentColor" stroke-width="1.5" />
+  </svg>
+);
+
+const CloudSaveIcon: Component = () => (
+  <svg viewBox="0 0 20 20" class="h-4 w-4" aria-hidden="true">
+    <path d="M6.5 15h7a3 3 0 0 0 .4-6 4.4 4.4 0 0 0-8.3-1.4A3.7 3.7 0 0 0 6.5 15Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" />
+  </svg>
+);
+
+const PianoKeysIcon: Component = () => (
+  <svg viewBox="0 0 20 20" class="h-4 w-4" aria-hidden="true">
+    <rect x="2.5" y="4" width="15" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5" />
+    <path d="M6 4v12M10 4v12M14 4v12" stroke="currentColor" stroke-width="1" />
+    <path d="M5 4h2.4v6H5zM9 4h2.4v6H9zM13 4h2.4v6H13z" fill="currentColor" />
+  </svg>
+);
 
 const MidiKeyboardToggle: Component<{ midiKeyboard: TransportControlsProps["midiKeyboard"] }> = (props) => {
   const midiKeyboard = () => props.midiKeyboard;
   const baseNoteLabel = () => `C${midiKeyboard().octave + 4}`;
+  const title = () => {
+    if (!midiKeyboard().enabled) return "Turn on computer MIDI keyboard input";
+    if (!midiKeyboard().targetLabel) return "Computer MIDI keyboard is on. Select an instrument track to play.";
+    return `Computer MIDI keyboard is on: ${midiKeyboard().targetLabel}, ${baseNoteLabel()}`;
+  };
 
   return (
-    <Button
-      variant="ghost"
-      size="sm"
+    <TopRightIconButton
       onClick={midiKeyboard().onToggle}
-      aria-pressed={midiKeyboard().enabled}
-      aria-disabled={midiKeyboard().enabled && !midiKeyboard().canPlay}
-      aria-label="Toggle computer MIDI keyboard input"
-      title={
-        midiKeyboard().targetLabel
-          ? `Computer MIDI keyboard: ${midiKeyboard().targetLabel}, ${baseNoteLabel()}`
-          : "Select an instrument track or MIDI clip to use computer MIDI keyboard input"
-      }
-      class={cn(
-        nativeMenuTriggerClass,
-        "h-7 gap-1 px-2 text-xs",
-        midiKeyboard().enabled && midiKeyboard().canPlay && "border-green-500/50 bg-green-600/20 text-green-300",
-        midiKeyboard().enabled && !midiKeyboard().canPlay && "opacity-60",
-      )}
+      ariaPressed={midiKeyboard().enabled}
+      tooltip={title()}
+      active={midiKeyboard().enabled}
+      playable={midiKeyboard().canPlay}
     >
-      <span>⌨ MIDI Keys</span>
-      <span class="text-2xs text-neutral-400">
-        {baseNoteLabel()}
-      </span>
-    </Button>
+      <PianoKeysIcon />
+    </TopRightIconButton>
   );
 };
 

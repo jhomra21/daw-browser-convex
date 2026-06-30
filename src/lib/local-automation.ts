@@ -102,6 +102,24 @@ export const deleteLocalAutomationEnvelope = async (
   notifyLocalProjectChanged(projectId)
 }
 
+export const deleteLocalTrackAutomationEnvelopes = async (
+  projectId: string,
+  trackId: string,
+): Promise<void> => {
+  const db = await openLocalProjectDb(projectId)
+  const tx = db.transaction('entities', 'readwrite')
+  const rows = await tx.store.index('by-kind').getAll(AUTOMATION_KIND)
+  let changed = false
+  for (const row of rows) {
+    const envelope = normalizeLocalAutomationEnvelope(row.value)
+    if (envelope?.target.kind !== 'track' || envelope.target.trackId !== trackId) continue
+    await tx.store.delete([AUTOMATION_KIND, row.id])
+    changed = true
+  }
+  await tx.done
+  if (changed) notifyLocalProjectChanged(projectId)
+}
+
 export const replaceLocalAutomationEnvelopes = async (
   projectId: string,
   envelopes: AutomationEnvelope[],

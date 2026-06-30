@@ -100,6 +100,8 @@ export type TrackEffectSnapshot = Partial<{
   arp: ArpeggiatorParams
 }>
 
+export type TrackAutomationSnapshot = AutomationEnvelope[]
+
 type EffectParamsCommitPayloadMap = {
   [Effect in EffectType]: {
     targetId: EffectTargetId<Effect>
@@ -222,6 +224,7 @@ export type HistoryEntry =
         track: TrackSnapshot
         clips: HistoryClipSnapshot[]
         effects?: TrackEffectSnapshot
+        automation?: TrackAutomationSnapshot
         inboundRouting?: InboundTrackRoutingSnapshot[]
         recreatedTrackId?: string
         recreatedClips?: Array<{ clipRef: ClipRef; clipId: string }>

@@ -154,6 +154,15 @@ async function deleteTrackFromPreflight(
   }
 
   await removeTrackRoutingReferences(ctx, track.projectId, track._id);
+  const automationEnvelopes = await ctx.db
+    .query("automationEnvelopes")
+    .withIndex("by_project", (q: any) => q.eq("projectId", track.projectId))
+    .collect();
+  for (const envelope of automationEnvelopes) {
+    if (envelope.targetKind === "track" && envelope.trackId === track._id) {
+      await ctx.db.delete(envelope._id);
+    }
+  }
   await deleteMixerStateForTrack(ctx, track._id);
   await ctx.db.delete(owner._id);
   await ctx.db.delete(track._id);

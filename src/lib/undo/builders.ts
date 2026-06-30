@@ -10,6 +10,7 @@ import type {
   EffectParamsHistoryEntry,
   HistoryEntry,
   HistoryScope,
+  TrackAutomationSnapshot,
   TrackEffectSnapshot,
 } from './types'
 
@@ -67,8 +68,9 @@ export function buildTrackDeleteHistoryEntry(input: {
   track: Track
   tracks: Track[]
   effects?: TrackEffectSnapshot
+  automation?: TrackAutomationSnapshot
 }): Extract<HistoryEntry, { type: 'track-delete' }> {
-  const { projectId, track, tracks, effects } = input
+  const { projectId, track, tracks, effects, automation } = input
   const trackRef = getTrackHistoryRef(track)
   const trackIndex = tracks.findIndex((entry) => entry.id === track.id)
   const inboundRouting = tracks
@@ -100,6 +102,7 @@ export function buildTrackDeleteHistoryEntry(input: {
       },
       clips: track.clips.map((clip) => buildClipHistorySnapshot(clip)),
       effects,
+      automation,
       inboundRouting,
     },
   }

@@ -133,6 +133,7 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>) {
       return isTrackSnapshot(data.track)
         && Array.isArray(data.clips)
         && data.clips.every(isClipSnapshot)
+        && (data.automation === undefined || (Array.isArray(data.automation) && data.automation.every(isAutomationEnvelope)))
         && (data.recreatedTrackId === undefined || isString(data.recreatedTrackId))
     case 'track-volume':
       return isString(data.trackRef) && isScope(data.scope) && isNumber(data.from) && isNumber(data.to)

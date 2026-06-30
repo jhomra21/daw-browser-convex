@@ -21,6 +21,7 @@ import { buildTimelineTrackRow } from './track-row-builder'
 
 const TRACK_KIND = 'track'
 const CLIP_KIND = 'clip'
+const AUTOMATION_KIND = 'automation-envelope'
 const pendingLocalTimelineFlushers = new Map<string, Set<() => Promise<void>>>()
 const pendingRepositoryWritesByProject = new Map<string, Set<Promise<unknown>>>()
 const entityWriteQueuesByProject = new Map<string, LocalEntityWriteQueue>()
@@ -63,6 +64,13 @@ const isClipRow = (value: unknown): value is TimelineClipRow => {
     && isNumber(value.createdAt)
     && isNumber(value.updatedAt)
 }
+
+const isAutomationEnvelopeForTrack = (value: unknown, trackId: TimelineTrackId) => (
+  isObject(value)
+  && isObject(value.target)
+  && value.target.kind === 'track'
+  && value.target.trackId === trackId
+)
 
 const toEntityRow = createLocalProjectEntityRow
 
@@ -339,9 +347,10 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
     const tx = db.transaction('entities', 'readwrite')
-    const [trackRows, clipRows] = await Promise.all([
+    const [trackRows, clipRows, automationRows] = await Promise.all([
       tx.store.index('by-kind').getAll(TRACK_KIND),
       tx.store.index('by-kind').getAll(CLIP_KIND),
+      tx.store.index('by-kind').getAll(AUTOMATION_KIND),
     ])
     const trackRow = trackRows.find((row) => row.id === trackId && isTrackRow(row.value))
     const deletedIndex = trackRow && isTrackRow(trackRow.value) ? trackRow.value.index : null
@@ -351,6 +360,9 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       tx.store.delete([TRACK_KIND, trackId]),
       ...clipRows
         .filter((row) => isClipRow(row.value) && row.value.trackId === trackId)
+        .map((row) => tx.store.delete([row.kind, row.id])),
+      ...automationRows
+        .filter((row) => isAutomationEnvelopeForTrack(row.value, trackId))
         .map((row) => tx.store.delete([row.kind, row.id])),
       ...remainingTracks.map((row) => {
         const routing = normalizeTrackRouting({

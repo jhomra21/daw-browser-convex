@@ -1,5 +1,6 @@
 import { buildLocalClip } from '~/lib/clip-create'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
+import { automationTargetKey } from '@daw-browser/shared'
 import { createLocalTrack } from '~/lib/tracks'
 import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 
@@ -11,6 +12,7 @@ import {
   createHistoryTrack,
   isLocalHistoryProject,
   persistHistoryTrackEffects,
+  persistHistoryTrackAutomation,
   persistHistoryTrackMixState,
   persistHistoryTrackRouting,
   persistHistoryTrackVolume,
@@ -127,6 +129,9 @@ export async function applyTrackDeleteEntry(
       'Track not found for track-delete redo',
     )
     await removeHistoryTrackOrThrow(deps, trackId, 'Failed to remove track during track-delete redo')
+    for (const envelope of entry.data.automation ?? []) {
+      deps.actions.applyAutomationEnvelope(undefined, automationTargetKey({ kind: 'track', trackId }, envelope.parameterId))
+    }
     deps.actions.removeLocalTrack(trackId)
     entry.data.recreatedTrackId = undefined
     entry.data.recreatedClips = []
@@ -178,6 +183,15 @@ export async function applyTrackDeleteEntry(
 
   try {
     await persistHistoryTrackEffects(deps, newTrackId, entry.data.effects)
+    await persistHistoryTrackAutomation(deps, entry.data.automation, newTrackId)
+    for (const envelope of entry.data.automation ?? []) {
+      const targetKey = automationTargetKey({ kind: 'track', trackId: newTrackId }, envelope.parameterId)
+      deps.actions.applyAutomationEnvelope({
+        ...envelope,
+        target: { kind: 'track', trackId: newTrackId },
+        targetKey,
+      }, targetKey)
+    }
 
     const recreatedClipIdsByRef = new Map((entry.data.recreatedClips ?? []).map((item) => [item.clipRef, item.clipId]))
     const restoredClipIds: string[] = []

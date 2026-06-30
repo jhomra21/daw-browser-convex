@@ -7,7 +7,7 @@ import { getTrackDeleteConflictMessage } from '~/lib/delete-conflict-messages'
 import { buildTrackEffectQueryArgs } from '~/lib/effect-track-args'
 import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
 import { getLocalEffect } from '~/lib/local-effects'
-import { isLocalId, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams } from '@daw-browser/shared'
+import { isLocalId, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type AutomationEnvelope } from '@daw-browser/shared'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { isClipCompatibleWithTrack } from '@daw-browser/timeline-core/track-routing'
@@ -46,6 +46,8 @@ type TimelineClipActionsOptions = {
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
   historyPush: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
+  automationEnvelopes: Accessor<AutomationEnvelope[]>
+  applyAutomationEnvelope: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
   grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void
   notify: (title: string, message: string) => void
 }
@@ -76,6 +78,8 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     gridEnabled,
     gridDenominator,
     historyPush,
+    automationEnvelopes,
+    applyAutomationEnvelope,
     grantClipWrites,
     notify,
   } = options
@@ -317,8 +321,12 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     const track = snapshot.find(entry => entry.id === trackId)
     if (!track) return
     const rid = projectId()
+    const trackAutomation = automationEnvelopes().filter((envelope) => (
+      envelope.target.kind === 'track' && envelope.target.trackId === trackId
+    ))
     const completeDeletedTrack = (historyEntry: ReturnType<typeof buildTrackDeleteHistoryEntry> | null) => {
       if (historyEntry) historyPush(historyEntry)
+      for (const envelope of trackAutomation) applyAutomationEnvelope(undefined, envelope.targetKey)
       removeLocalTrack(trackId)
       const next = snapshot.filter(entry => entry.id !== trackId)
       batch(() => {
@@ -338,6 +346,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
           track,
           tracks: snapshot,
           effects: await loadLocalTrackDeleteEffects(rid, trackId),
+          automation: trackAutomation,
         })
       } catch {
         showTrackDeleteFailure(null)
@@ -359,6 +368,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
           track,
           tracks: snapshot,
           effects: await loadTrackDeleteEffects(trackId),
+          automation: trackAutomation,
         })
       }
     } catch {

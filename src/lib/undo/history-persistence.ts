@@ -4,8 +4,8 @@ import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
 import { setLocalEffect } from "~/lib/local-effects";
-import { deleteLocalAutomationEnvelope, setLocalAutomationEnvelope } from "~/lib/local-automation";
-import { isLocalId } from "@daw-browser/shared";
+import { deleteLocalAutomationEnvelope, deleteLocalTrackAutomationEnvelopes, setLocalAutomationEnvelope } from "~/lib/local-automation";
+import { automationTargetKey, isLocalId } from "@daw-browser/shared";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
@@ -148,6 +148,7 @@ export const createHistoryClip = async (
 };
 
 type TrackDeleteEffects = NonNullable<Extract<HistoryEntry, { type: "track-delete" }>["data"]["effects"]>;
+type TrackDeleteAutomation = NonNullable<Extract<HistoryEntry, { type: "track-delete" }>["data"]["automation"]>;
 type EffectParamsEntry = Extract<HistoryEntry, { type: "effect-params" }>;
 type AutomationEnvelopeEntry = Extract<HistoryEntry, { type: "automation-envelope-change" }>;
 type HistoryDirection = "undo" | "redo";
@@ -189,6 +190,33 @@ export const persistHistoryTrackEffects = async (
     !effects.instrument && effects.synth ? publishHistoryOperation(deps, { kind: "effects.setSynthParams", payload: { trackId, params: effects.synth } }) : null,
     effects.arp ? publishHistoryOperation(deps, { kind: "effects.setArpeggiatorParams", payload: { trackId, params: effects.arp } }) : null,
   ]);
+};
+
+export const persistHistoryTrackAutomation = async (
+  deps: Deps,
+  envelopes: TrackDeleteAutomation | undefined,
+  trackId: Track["id"],
+) => {
+  if (!envelopes || envelopes.length === 0) return;
+  if (isLocalHistoryProject(deps)) {
+    await Promise.all(envelopes.map((envelope) => setLocalAutomationEnvelope(deps.projectId, {
+      ...envelope,
+      target: { kind: "track", trackId },
+      targetKey: automationTargetKey({ kind: "track", trackId }, envelope.parameterId),
+    })));
+    return;
+  }
+  await Promise.all(envelopes.map((envelope) => publishHistoryOperation(deps, {
+    kind: "automation.setEnvelope",
+    payload: {
+      targetKind: "track",
+      trackId,
+      parameterId: envelope.parameterId,
+      enabled: envelope.enabled,
+      points: envelope.points,
+      updatedAt: envelope.updatedAt,
+    },
+  })));
 };
 
 export const persistHistoryEffectParams = async (
@@ -342,6 +370,7 @@ export const removeHistoryClipIdsOrThrow = async (deps: Deps, clipIds: string[],
 
 export const removeHistoryTrackOrThrow = async (deps: Deps, trackId: Track["id"], message: string) => {
   if (isLocalHistoryProject(deps)) {
+    await deleteLocalTrackAutomationEnvelopes(deps.projectId, trackId);
     await createLocalTimelineRepository(deps.projectId).deleteTrack(trackId);
     return;
   }

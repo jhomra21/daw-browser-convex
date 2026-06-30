@@ -892,6 +892,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     gridEnabled,
     gridDenominator,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
+    automationEnvelopes: persistedAutomation.envelopes,
+    applyAutomationEnvelope: applyAutomationEnvelopeState,
     grantClipWrites,
     notify,
   });

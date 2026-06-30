@@ -1469,10 +1469,21 @@ const Timeline: Component<TimelineProps> = (props) => {
         automation={{
           projectId: projectId(),
           visibleByTrackId: visibleAutomationTracks.value(),
+          masterVisible: visibleAutomationTracks.value().master === true,
+          onToggleMasterVisibility: () => {
+            visibleAutomationTracks.setValue((current) => ({ ...current, master: !current.master }));
+          },
           onToggleTrackVisibility: (trackId) => {
             visibleAutomationTracks.setValue((current) => ({ ...current, [trackId]: !current[trackId] }));
           },
           laneHeightsByTrackId: automationLaneHeights.value(),
+          masterLaneHeight: automationLaneHeights.value().master ?? DEFAULT_AUTOMATION_LANE_HEIGHT,
+          onResizeMasterLane: (height) => {
+            const nextHeight = clampAutomationLaneHeight(height || DEFAULT_AUTOMATION_LANE_HEIGHT);
+            automationLaneHeights.setValue((current) => (
+              current.master === nextHeight ? current : { ...current, master: nextHeight }
+            ));
+          },
           onResizeTrackLane: (trackId, height) => {
             const nextHeight = clampAutomationLaneHeight(height || DEFAULT_AUTOMATION_LANE_HEIGHT);
             automationLaneHeights.setValue((current) => (

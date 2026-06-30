@@ -1,8 +1,9 @@
-import { createMemo, createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
+import { createMemo, createSignal, For, Show, onCleanup, onMount, type JSX } from "solid-js";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
-import type { MasterSidebarModel } from "~/components/timeline/MasterSidebarRow";
+import { MASTER_ROW_HEIGHT, type MasterSidebarModel } from "~/components/timeline/MasterSidebarRow";
 import TrackSidebar from "~/components/timeline/TrackSidebar";
+import AutomationLane from "~/components/timeline/automation-lane";
 import { TimelineLeftBrowser } from "~/components/timeline/browser/timeline-left-browser";
 import type { TimelineLeftBrowserModel } from "~/components/timeline/browser/browser-types";
 import TimelineOverlays from "~/components/timeline/timeline-overlays";
@@ -117,8 +118,12 @@ type Props = {
   automation: {
     projectId: string;
     visibleByTrackId: Record<string, boolean>;
+    masterVisible: boolean;
+    onToggleMasterVisibility: () => void;
     onToggleTrackVisibility: (trackId: Track["id"]) => void;
     laneHeightsByTrackId: Record<string, number>;
+    masterLaneHeight: number;
+    onResizeMasterLane: (height: number) => void;
     onResizeTrackLane: (trackId: Track["id"], height: number) => void;
     selectedParametersByTargetKey: Record<string, string>;
     onSelectParameter: (targetKey: string, parameterId: string) => void;
@@ -151,8 +156,11 @@ export default function TimelineWorkspace(props: Props) {
     const tracksHeight = layout.length === 0 ? 0 : layout[layout.length - 1].topPx + layout[layout.length - 1].heightPx;
     return tracksHeight + (props.dropAtNewTrack ? LANE_HEIGHT : 0);
   };
-  const fullHeight = () => RULER_HEIGHT + trackAreaHeight();
+  const masterAreaHeight = () => MASTER_ROW_HEIGHT + (props.automation.masterVisible ? props.automation.masterLaneHeight : 0);
+  const fullHeight = () => RULER_HEIGHT + trackAreaHeight() + masterAreaHeight();
   const scrollContentHeight = () => fullHeight() + props.bottomPanelOffsetPx;
+  const masterParameterId = () => props.automation.selectedParametersByTargetKey.master ?? "volume";
+  const masterTargetKey = () => automationTargetKey({ kind: "master" }, masterParameterId());
   return (
     <div class="flex-1 flex min-h-0" ref={props.containerRef}>
       <div
@@ -270,6 +278,27 @@ export default function TimelineWorkspace(props: Props) {
                 recording={props.recording}
                 midi={props.midi}
               />
+              <Show when={props.automation.masterVisible}>
+                <div
+                  class="absolute left-0 right-0 z-30 border-t border-red-500/30 bg-neutral-950/95"
+                  style={{
+                    bottom: `${MASTER_ROW_HEIGHT}px`,
+                    height: `${props.automation.masterLaneHeight}px`,
+                  }}
+                >
+                  <AutomationLane
+                    projectId={props.automation.projectId}
+                    target={{ kind: "master" }}
+                    parameterId={masterParameterId()}
+                    envelope={props.automation.envelopesByTargetKey.get(masterTargetKey())}
+                    durationSec={props.durationSec}
+                    heightPx={props.automation.masterLaneHeight}
+                    onPreview={props.automation.onPreviewEnvelope}
+                    onCommit={props.automation.onCommitEnvelope}
+                    onCancelPreview={props.automation.onCancelPreview}
+                  />
+                </div>
+              </Show>
             </div>
           </div>
 
@@ -297,11 +326,15 @@ export default function TimelineWorkspace(props: Props) {
               }}
               automation={{
                 visibleByTrackId: props.automation.visibleByTrackId,
+                masterVisible: props.automation.masterVisible,
+                onToggleMasterVisibility: props.automation.onToggleMasterVisibility,
                 onToggleTrackVisibility: props.automation.onToggleTrackVisibility,
                 selectedParametersByTargetKey: props.automation.selectedParametersByTargetKey,
                 envelopesByTargetKey: props.automation.envelopesByTargetKey,
                 onSelectParameter: props.automation.onSelectParameter,
                 laneHeightsByTrackId: props.automation.laneHeightsByTrackId,
+                masterLaneHeight: props.automation.masterLaneHeight,
+                onResizeMasterLane: props.automation.onResizeMasterLane,
                 onResizeTrackLane: props.automation.onResizeTrackLane,
               }}
             />

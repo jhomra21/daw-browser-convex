@@ -56,8 +56,12 @@ type TrackSidebarProps = {
   };
   automation?: {
     visibleByTrackId: Record<string, boolean>;
+    masterVisible: boolean;
+    onToggleMasterVisibility: () => void;
     onToggleTrackVisibility: (trackId: Track["id"]) => void;
     laneHeightsByTrackId: Record<string, number>;
+    masterLaneHeight: number;
+    onResizeMasterLane: (height: number) => void;
     onResizeTrackLane: (trackId: Track["id"], height: number) => void;
     selectedParametersByTargetKey: Record<string, string>;
     envelopesByTargetKey: Map<string, AutomationEnvelope>;
@@ -160,6 +164,31 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     }
     return byTrackId;
   });
+  const masterAutomationMeta = createMemo<{
+    automatedParameterIds: Set<string>;
+    selectedEnvelope: AutomationEnvelope | undefined;
+  }>(() => {
+    const automation = props.automation;
+    const meta: {
+      automatedParameterIds: Set<string>;
+      selectedEnvelope: AutomationEnvelope | undefined;
+    } = {
+      automatedParameterIds: new Set<string>(),
+      selectedEnvelope: undefined,
+    };
+    if (!automation) return meta;
+    const selectedParameter = automation.selectedParametersByTargetKey.master ?? "volume";
+    const selectedTargetKey = automationTargetKey({ kind: "master" }, selectedParameter);
+    for (const envelope of automation.envelopesByTargetKey.values()) {
+      if (envelope.target.kind !== "master") continue;
+      meta.automatedParameterIds.add(envelope.parameterId);
+      if (envelope.targetKey === selectedTargetKey) meta.selectedEnvelope = envelope;
+    }
+    return meta;
+  });
+  const masterRowReservedHeight = () => (
+    MASTER_ROW_HEIGHT + (props.automation?.masterVisible ? props.automation.masterLaneHeight : 0)
+  );
   const actualOutputTargetId = (track: Track) => track.outputTargetId ?? "";
   const selectedOutputTargetId = (track: Track) =>
     selectedOutputTargets().get(track.id) ?? actualOutputTargetId(track);
@@ -781,12 +810,22 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         </For>
         <div
           class="min-h-6 flex-1 shrink-0"
-          style={{ "padding-bottom": `${MASTER_ROW_HEIGHT}px` }}
+          style={{ "padding-bottom": `${masterRowReservedHeight()}px` }}
         />
         <MasterSidebarRow
           master={sidebar().master}
           sidebarWidth={sidebar().sidebarWidth}
           bottomOffsetPx={sidebar().bottomOffsetPx}
+          automation={props.automation ? {
+            visible: props.automation.masterVisible,
+            heightPx: props.automation.masterLaneHeight,
+            selectedParameterId: props.automation.selectedParametersByTargetKey.master ?? "volume",
+            automatedParameterIds: masterAutomationMeta().automatedParameterIds,
+            selectedEnvelope: masterAutomationMeta().selectedEnvelope,
+            onToggleVisibility: props.automation.onToggleMasterVisibility,
+            onResizeLane: props.automation.onResizeMasterLane,
+            onSelectParameter: (parameterId) => props.automation?.onSelectParameter("master", parameterId),
+          } : undefined}
         />
       </div>
     </>

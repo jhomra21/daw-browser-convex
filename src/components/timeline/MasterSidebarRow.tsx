@@ -1,8 +1,10 @@
-import { type Component, Show, createSignal } from "solid-js";
+import { type Component, Show, createSignal, onCleanup } from "solid-js";
+import type { AutomationEnvelope } from "@daw-browser/shared";
 import { normalizeMasterVolume } from "@daw-browser/shared";
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
-import { LANE_HEIGHT } from "~/lib/timeline-utils";
+import { DEFAULT_AUTOMATION_LANE_HEIGHT, LANE_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
+import AutomationParameterPicker from "./automation-parameter-picker";
 
 export type MasterSidebarModel = {
   selected: boolean;
@@ -20,6 +22,16 @@ type MasterSidebarRowProps = {
   master: MasterSidebarModel;
   sidebarWidth: number;
   bottomOffsetPx: number;
+  automation?: {
+    visible: boolean;
+    heightPx: number;
+    selectedParameterId: string;
+    automatedParameterIds: ReadonlySet<string>;
+    selectedEnvelope: AutomationEnvelope | undefined;
+    onToggleVisibility: () => void;
+    onResizeLane: (heightPx: number) => void;
+    onSelectParameter: (parameterId: string) => void;
+  };
 };
 
 const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
@@ -45,6 +57,32 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
     setActiveVolume(undefined);
     master().onVolumePreview(committedVolume());
   };
+  const automationHeight = () => props.automation?.heightPx ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
+  const rowHeight = () => MASTER_ROW_HEIGHT + (props.automation?.visible ? automationHeight() : 0);
+  let cleanupAutomationResize: (() => void) | undefined;
+  const startAutomationResize = (event: PointerEvent) => {
+    const automation = props.automation;
+    if (!automation) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startY = event.clientY;
+    const startHeight = automationHeight();
+    const move = (moveEvent: PointerEvent) => {
+      automation.onResizeLane(clampAutomationLaneHeight(startHeight + moveEvent.clientY - startY));
+    };
+    const cleanup = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", cleanup);
+      window.removeEventListener("pointercancel", cleanup);
+      if (cleanupAutomationResize === cleanup) cleanupAutomationResize = undefined;
+    };
+    cleanupAutomationResize?.();
+    cleanupAutomationResize = cleanup;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", cleanup, { once: true });
+    window.addEventListener("pointercancel", cleanup, { once: true });
+  };
+  onCleanup(() => cleanupAutomationResize?.());
 
   return (
     <div
@@ -54,13 +92,13 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
       )}
       style={{
         bottom: `${props.bottomOffsetPx}px`,
-        height: `${MASTER_ROW_HEIGHT}px`,
+        height: `${rowHeight()}px`,
         width: `${props.sidebarWidth}px`,
         "min-width": `${TIMELINE_SIDEBAR_MIN_WIDTH}px`,
       }}
       onClick={master().onClick}
     >
-      <div class="grid h-full grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 p-2">
+      <div class="grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 p-2" style={{ height: `${MASTER_ROW_HEIGHT}px` }}>
         <button
           class={cn(
             "flex h-7 w-full items-center justify-center border px-2 text-center text-sm font-semibold",
@@ -81,7 +119,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
           Master Out
         </div>
         <div class="flex w-[92px] items-center gap-2">
-          <div class="flex h-7 w-[72px] shrink-0 items-center px-0.5">
+          <div class="flex h-7 w-[72px] shrink-0 items-center gap-1 px-0.5">
             <Show when={master().ready}>
               <input
                 type="range"
@@ -105,10 +143,51 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
                 title="Master volume"
               />
             </Show>
+            <button
+              class={cn(
+                "h-7 w-7 shrink-0 border text-xs font-semibold transition-colors",
+                props.automation?.visible
+                  ? "border-red-400 bg-red-500/90 text-black"
+                  : "border-neutral-700 bg-neutral-800 text-red-300 hover:bg-red-500/20",
+              )}
+              onClick={(event) => {
+                event.stopPropagation();
+                props.automation?.onToggleVisibility();
+              }}
+              title={props.automation?.visible ? "Hide master automation lane" : "Show master automation lane"}
+            >
+              A
+            </button>
           </div>
           <div class="h-8 w-[12px] shrink-0 bg-neutral-950/70" />
         </div>
       </div>
+      <Show when={props.automation?.visible && props.automation}>
+        {(automation) => (
+          <div
+            class="relative grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-t border-red-500/30 bg-neutral-950/95 px-2 text-[11px] text-red-100"
+            style={{ height: `${automationHeight()}px` }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div
+              class="absolute inset-x-0 top-0 h-2 -translate-y-1/2 cursor-row-resize"
+              onPointerDown={startAutomationResize}
+            />
+            <div class="flex items-center gap-1 overflow-hidden">
+              <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" classList={{ "opacity-30": !automation().selectedEnvelope }} />
+              <span class="truncate">Automation</span>
+            </div>
+            <AutomationParameterPicker
+              value={automation().selectedParameterId}
+              automatedParameterIds={automation().automatedParameterIds}
+              onChange={automation().onSelectParameter}
+            />
+            <div class="truncate text-right text-red-200/70">
+              {automation().selectedEnvelope?.points.length ?? 0} pts
+            </div>
+          </div>
+        )}
+      </Show>
     </div>
   );
 };

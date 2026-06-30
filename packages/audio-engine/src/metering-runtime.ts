@@ -186,7 +186,10 @@ export function createMeteringRuntime() {
       try { analyser.getByteFrequencyData(tmp) } catch { return spectrumLast.get(trackId) ?? null }
       let sum = 0
       for (let i = 0; i < tmp.length; i++) sum += tmp[i]
-      if (sum === 0) return spectrumLast.get(trackId) ?? null
+      if (sum === 0) {
+        spectrumLast.delete(trackId)
+        return null
+      }
       let out = spectrumOut.get(trackId)
       if (!out || out.length !== tmp.length) {
         out = new Float32Array(tmp.length)

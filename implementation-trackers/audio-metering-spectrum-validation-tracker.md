@@ -12,18 +12,19 @@ This tracker was executed on the `audio-metering-refactor` branch.
 ## Execution Status
 
 - [x] Validated tracker assumptions against the current source.
-- [x] Exposed live MIDI visual activity from MIDI keyboard enabled/target-ready state.
-- [x] Threaded transport-independent visualization activity through `Timeline`.
-- [x] Renamed sidebar meter activation from `isPlaying` to `meteringActive`.
-- [x] Renamed effects spectrum activation from `isPlaying` to `spectrumActive`.
-- [x] Added a bounded effects-panel spectrum sampling clock for stopped-transport live MIDI.
+- [x] Removed transport and MIDI-state gating from sidebar meters so they reflect actual track output signal while the sidebar is mounted.
+- [x] Removed transport and MIDI-state gating from effects spectrum sampling so the open panel reflects actual analyser signal.
+- [x] Added a bounded effects-panel spectrum sampling clock for stopped-transport live audio.
 - [x] Preserved existing audio routing and mixer graph behavior without speculative routing refreshes.
 - [x] Ran final validators.
-- [x] Follow-up fix: kept visualizers armed while MIDI Keys can target a playable track, so one-shot Drum Rack samples and other post-keyup tails remain visible after key release.
+- [x] Superseded follow-up: replaced the MIDI Keys enabled/target-ready visualizer gate with signal-based meter and analyser sampling.
+- [x] Signal-based correction: removed the MIDI-keyboard visualizer gate entirely and let the existing engine meter/analyser outputs report signal or silence.
 
-Corrected implementation note: Phase 5 was required by code inspection because `useEffectsPanelAudioSync` only re-sampled from reactive dependency changes; stopped-transport held notes do not advance `playheadSec`, so the effects panel needs a scoped RAF sampler while open and spectrum-active.
+Corrected implementation note: Phase 5 was required by code inspection because `useEffectsPanelAudioSync` only re-sampled from reactive dependency changes; stopped-transport held notes do not advance `playheadSec`, so the effects panel needs a scoped RAF sampler while open.
 
-Follow-up implementation note: using only held keyboard rows for visualizer activity was too narrow for one-shot samples. Drum Rack preview can continue outputting audio after the key is released, so `Timeline` now keeps metering and spectrum sampling active while MIDI Keys are enabled and a playable target exists. The now-unused `hasActiveNotes` API was removed during the simplification pass.
+Follow-up implementation note: using only held keyboard rows for visualizer activity was too narrow for one-shot samples. Keeping visualizers active while MIDI Keys were enabled was still an input-intent gate, not signal-based metering. The now-unused `hasActiveNotes` API was removed during the simplification pass.
+
+Signal-based correction note: the right model is that meters should reflect track signal, not transport or input intent. The existing engine already supports this: `subscribeTrackStereoLevels` activates AudioWorklet meters on track outputs and those meters report actual audio levels, including silence. `TrackSidebar` now stays subscribed while mounted. The effects panel samples spectrum while open, and `getTrackSpectrum`/`getMasterSpectrum` now return `null` on zero-bin silence instead of keeping a stale non-zero frame.
 
 ## Evidence from Current Code
 

@@ -501,9 +501,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     selection,
   });
-  const audioVisualizationActive = () =>
-    isPlaying() || (midiKeyboard.enabled() && midiKeyboard.canPlay());
-
   const removeCreatedCloudTrack = (track: Track | undefined) => removeAutoCreatedCloudTrack({
     convexClient,
     convexApi,
@@ -1021,7 +1018,6 @@ const Timeline: Component<TimelineProps> = (props) => {
       },
       selectedFXTarget: selection.selectedFXTarget(),
       tracks: renderTracks(),
-      spectrumActive: audioVisualizationActive(),
       playheadSec: playheadSec(),
       projectId: projectId(),
       userId: userId(),
@@ -1197,7 +1193,6 @@ const Timeline: Component<TimelineProps> = (props) => {
           onLocalMidiSaved: handleLocalMidiSaved,
         }}
         sidebar={{
-          meteringActive: audioVisualizationActive(),
           currentUserId: userId(),
           master: {
             selected: selection.selectedFXTarget() === "master",

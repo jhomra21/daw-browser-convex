@@ -43,7 +43,6 @@ type TrackSidebarProps = {
     recordArmTrackId: Track["id"] | null;
     onToggleRecordArm: (trackId: Track["id"]) => void;
     currentUserId: string;
-    meteringActive: boolean;
     subscribeTrackLevels: (
       listener: (levels: ReadonlyMap<string, TrackStereoLevels>) => void,
     ) => () => void;
@@ -72,12 +71,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   >(new Map());
 
   createEffect(() => {
-    if (!sidebar().meteringActive) {
-      setMeters(produce((current) => {
-        for (const trackId of Object.keys(current)) delete current[trackId];
-      }));
-      return;
-    }
     const unsubscribe = sidebar().subscribeTrackLevels((levelsByTrackId) => {
       setMeters(produce((current) => {
         for (const [trackId, levels] of levelsByTrackId) {
@@ -627,9 +620,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     <div class="relative h-16 w-[12px] shrink-0">
                       <div class="absolute inset-0 flex items-end justify-center gap-1">
                         {(() => {
-                          const meter = sidebar().meteringActive
-                            ? meters[track.id]
-                            : undefined;
+                          const meter = meters[track.id];
                           const left = meter?.left ?? 0;
                           const right = meter?.right ?? 0;
                           const leftColor =

@@ -34,7 +34,6 @@ type UseEffectsPanelAudioSyncOptions = {
   tracks: Accessor<Track[]>;
   audioEngine: Accessor<AudioEngine>;
   roomEffects: Accessor<RoomEffectRow[] | undefined>;
-  spectrumActive: Accessor<boolean>;
   localDraftEffects?: {
     eq?: (targetId: string) => EqParams | undefined;
     compressor?: (targetId: string) => CompressorParams | undefined;
@@ -397,7 +396,7 @@ export function useEffectsPanelAudioSync(
   };
 
   createEffect(() => {
-    if (!options.isOpen() || !options.spectrumActive()) {
+    if (!options.isOpen()) {
       setSpectrum(null);
       return;
     }

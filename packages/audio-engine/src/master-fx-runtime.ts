@@ -174,7 +174,10 @@ export function createMasterFxRuntime() {
       try { analyser.getByteFrequencyData(spectrumTmp) } catch { return spectrumLast }
       let sum = 0
       for (let i = 0; i < spectrumTmp.length; i++) sum += spectrumTmp[i]
-      if (sum === 0) return spectrumLast
+      if (sum === 0) {
+        spectrumLast = null
+        return null
+      }
       let out = spectrumLast?.data
       if (!out || out.length !== spectrumTmp.length) out = new Float32Array(spectrumTmp.length)
       for (let i = 0; i < out.length; i++) out[i] = spectrumTmp[i] / 255

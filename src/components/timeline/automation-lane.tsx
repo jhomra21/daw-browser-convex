@@ -143,7 +143,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
     return commands.join(' ')
   })
 
-  const pointFromEvent = (event: PointerEvent): AutomationPoint | null => {
+  const pointFromEvent = (event: PointerEvent | MouseEvent): AutomationPoint | null => {
     const rect = root?.getBoundingClientRect()
     if (!rect) return null
     const timeSec = Math.max(0, Math.min(props.durationSec, (event.clientX - rect.left) / PPS))
@@ -204,8 +204,9 @@ export default function AutomationLane(props: AutomationLaneProps) {
     window.addEventListener('pointercancel', cancel, { once: true })
   }
 
-  const addPoint = (event: PointerEvent) => {
+  const addPoint = (event: MouseEvent) => {
     event.stopPropagation()
+    event.preventDefault()
     root?.focus()
     const point = pointFromEvent(event)
     if (!point) return
@@ -275,7 +276,11 @@ export default function AutomationLane(props: AutomationLaneProps) {
       ref={root}
       tabIndex={0}
       class="absolute inset-0 z-20 touch-none"
-      onPointerDown={addPoint}
+      onPointerDown={(event) => {
+        event.stopPropagation()
+        root?.focus()
+      }}
+      onDblClick={addPoint}
       onKeyDown={onKeyDown}
     >
       <svg class="h-full w-full overflow-visible" aria-hidden="true">
@@ -290,6 +295,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
           {(point) => (
             <g
               onPointerDown={(event) => startDrag(point.id, event)}
+              onDblClick={(event) => event.stopPropagation()}
               onPointerEnter={() => setHoveredPointId(point.id)}
               onPointerLeave={() => setHoveredPointId((current) => current === point.id ? null : current)}
               class="cursor-grab"

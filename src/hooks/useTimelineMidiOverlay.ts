@@ -30,8 +30,6 @@ type UseTimelineMidiOverlayReturn = {
   openMidiEditorFor: (clipId: string) => void
   changeMidiCardBounds: (next: TimelineMidiBounds) => void
   auditionNote: (pitch: number, velocity?: number, durSec?: number) => void
-  startLiveNote: (pitch: number, velocity?: number) => void
-  stopLiveNote: (pitch: number) => void
   midiKeyboard: {
     enabled: Accessor<boolean>
     canPlay: Accessor<boolean>
@@ -327,8 +325,6 @@ export function useTimelineMidiOverlay(
     openMidiEditorFor,
     changeMidiCardBounds,
     auditionNote,
-    startLiveNote,
-    stopLiveNote,
     midiKeyboard: {
       enabled: midiKeyboardEnabled,
       canPlay: midiKeyboardCanPlay,

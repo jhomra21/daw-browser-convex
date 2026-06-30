@@ -89,6 +89,7 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
   const handleKeyDown = (event: KeyboardEvent) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return
     if (isEditableKeyboardTarget(event.target)) return
+    if (!options.canPlay()) return
 
     if (event.code === 'KeyZ') {
       setOctave(value => clampMidiKeyboardOctave(value - 1))
@@ -115,7 +116,6 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
       return
     }
 
-    if (!options.canPlay()) return
     const semitone = midiKeyboardCodeToSemitone(event.code)
     if (semitone === undefined) return
     if (pressed.has(event.code)) {

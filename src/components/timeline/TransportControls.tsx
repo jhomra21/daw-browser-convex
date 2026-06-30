@@ -291,21 +291,22 @@ const PianoKeysIcon: Component = () => (
 
 const MidiKeyboardToggle: Component<{ midiKeyboard: TransportControlsProps["midiKeyboard"] }> = (props) => {
   const midiKeyboard = () => props.midiKeyboard;
-  const baseNoteLabel = () => `C${midiKeyboard().octave + 4}`;
+  const baseNoteLabel = () => `C${midiKeyboard().octave() + 4}`;
   const title = () => {
-    if (!midiKeyboard().enabled) return "Turn on computer MIDI keyboard input";
-    if (!midiKeyboard().targetLabel) return "Computer MIDI keyboard is on. Select an instrument track to play.";
-    return `Computer MIDI keyboard is on: ${midiKeyboard().targetLabel}, ${baseNoteLabel()}`;
+    const targetLabel = midiKeyboard().targetLabel();
+    if (!midiKeyboard().enabled()) return "Turn on computer MIDI keyboard input";
+    if (!targetLabel) return "Computer MIDI keyboard is on. Select an instrument track to play.";
+    return `Computer MIDI keyboard is on: ${targetLabel}, ${baseNoteLabel()}`;
   };
 
   return (
     <TopRightIconButton
-      onClick={midiKeyboard().onToggle}
-      ariaPressed={midiKeyboard().enabled}
+      onClick={midiKeyboard().toggle}
+      ariaPressed={midiKeyboard().enabled()}
       tooltip={title()}
       class={cn(
-        midiKeyboard().enabled && "border-amber-500/60 bg-amber-500/20 text-amber-300",
-        midiKeyboard().enabled && midiKeyboard().canPlay && "border-green-500/50 bg-green-600/20 text-green-300",
+        midiKeyboard().enabled() && "border-amber-500/60 bg-amber-500/20 text-amber-300",
+        midiKeyboard().enabled() && midiKeyboard().canPlay() && "border-green-500/50 bg-green-600/20 text-green-300",
       )}
     >
       <PianoKeysIcon />

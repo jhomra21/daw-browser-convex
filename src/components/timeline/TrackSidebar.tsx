@@ -55,7 +55,8 @@ type TrackSidebarProps = {
     ) => void;
   };
   automation?: {
-    mode: boolean;
+    visibleByTrackId: Record<string, boolean>;
+    onToggleTrackVisibility: (trackId: Track["id"]) => void;
     selectedParametersByTargetKey: Record<string, string>;
     envelopesByTargetKey: Map<string, AutomationEnvelope>;
     onSelectParameter: (targetKey: string, parameterId: string) => void;
@@ -341,6 +342,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const selectedAutomationTargetKey = () => automationTargetKey({ kind: "track", trackId: track.id }, selectedAutomationParameter());
             const selectedAutomationEnvelope = () => props.automation?.envelopesByTargetKey.get(selectedAutomationTargetKey());
             const automationMeta = () => automationMetaByTrackId().get(track.id);
+            const automationVisible = () => props.automation?.visibleByTrackId[track.id] === true;
 
             return (
               <div
@@ -355,7 +357,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               >
                 <div
                   class="grid h-full grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 p-2"
-                  classList={{ "pb-10": props.automation?.mode }}
+                  classList={{ "pb-10": automationVisible() }}
                 >
                   <div class="min-w-0 overflow-hidden">
                     <button
@@ -503,7 +505,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
                   <div class="flex w-[92px] items-center gap-2">
                     <div class="flex w-[72px] shrink-0 flex-col gap-1">
-                      <div class="grid grid-cols-2 gap-1">
+                      <div class="grid grid-cols-3 gap-1">
                         <button
                           class={cn(
                             "flex h-7 items-center justify-center border text-xs font-bold transition-colors",
@@ -560,6 +562,22 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           }
                         >
                           S
+                        </button>
+
+                        <button
+                          class={cn(
+                            "h-7 border text-xs font-semibold transition-colors",
+                            automationVisible()
+                              ? "border-red-400 bg-red-500/90 text-black"
+                              : "border-neutral-700 bg-neutral-800 text-red-300 hover:bg-red-500/20",
+                          )}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            props.automation?.onToggleTrackVisibility(track.id);
+                          }}
+                          title={automationVisible() ? "Hide automation lane" : "Show automation lane"}
+                        >
+                          A
                         </button>
                       </div>
 
@@ -704,7 +722,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     </div>
                   </div>
                 </div>
-                {props.automation?.mode ? (
+                {automationVisible() ? (
                   <div
                     class="absolute inset-x-0 bottom-0 z-10 grid h-9 grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-t border-red-500/30 bg-neutral-950/95 px-2 text-[11px] text-red-100"
                     onClick={(event) => event.stopPropagation()}

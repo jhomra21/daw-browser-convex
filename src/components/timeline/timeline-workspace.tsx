@@ -116,8 +116,8 @@ type Props = {
   };
   automation: {
     projectId: string;
-    mode: boolean;
-    onToggleMode: () => void;
+    visibleByTrackId: Record<string, boolean>;
+    onToggleTrackVisibility: (trackId: Track["id"]) => void;
     selectedParametersByTargetKey: Record<string, string>;
     onSelectParameter: (targetKey: string, parameterId: string) => void;
     envelopesByTargetKey: Map<string, AutomationEnvelope>;
@@ -206,7 +206,7 @@ export default function TimelineWorkspace(props: Props) {
                         viewportRedrawVersion={viewportRedrawVersion()}
                         automation={{
                           projectId: props.automation.projectId,
-                          mode: props.automation.mode,
+                          visible: props.automation.visibleByTrackId[track.id] === true,
                           parameterId,
                           envelope: props.automation.envelopesByTargetKey.get(targetKey),
                           durationSec: props.durationSec,
@@ -248,14 +248,6 @@ export default function TimelineWorkspace(props: Props) {
           </div>
 
           <div class="sticky right-0 z-40 flex h-full shrink-0" style={{ width: `${props.sidebarWidth}px` }}>
-            <div class="absolute left-0 top-0 z-50 flex gap-2 p-2">
-              <button
-                class="rounded border border-red-500/40 bg-neutral-950/90 px-2 py-1 text-[11px] text-red-100"
-                onClick={props.automation.onToggleMode}
-              >
-                Automation {props.automation.mode ? "On" : "Off"}
-              </button>
-            </div>
             <TrackSidebar
               sidebar={{
                 tracks: props.tracks,
@@ -278,7 +270,8 @@ export default function TimelineWorkspace(props: Props) {
                 onToggleRecordArm: props.sidebar.onToggleRecordArm,
               }}
               automation={{
-                mode: props.automation.mode,
+                visibleByTrackId: props.automation.visibleByTrackId,
+                onToggleTrackVisibility: props.automation.onToggleTrackVisibility,
                 selectedParametersByTargetKey: props.automation.selectedParametersByTargetKey,
                 envelopesByTargetKey: props.automation.envelopesByTargetKey,
                 onSelectParameter: props.automation.onSelectParameter,

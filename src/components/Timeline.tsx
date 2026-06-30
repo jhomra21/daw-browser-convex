@@ -121,11 +121,25 @@ const Timeline: Component<TimelineProps> = (props) => {
     navigateToRoom,
   });
   const bottomPanel = useTimelineBottomPanelState({ projectId });
-  const automationMode = useProjectPersistedState<boolean>({
+  const visibleAutomationTracks = useProjectPersistedState<Record<string, boolean>>({
     projectId,
-    createInitial: () => false,
-    load: (rid) => localStorage.getItem(`timeline:${rid}:automation-mode`) === "true",
-    save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-mode`, value ? "true" : "false"),
+    createInitial: () => ({}),
+    load: (rid) => {
+      const raw = localStorage.getItem(`timeline:${rid}:automation-visible-tracks`);
+      if (!raw) return {};
+      try {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+        const next: Record<string, boolean> = {};
+        for (const [key, value] of Object.entries(parsed)) {
+          if (typeof value === "boolean") next[key] = value;
+        }
+        return next;
+      } catch {
+        return {};
+      }
+    },
+    save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-visible-tracks`, JSON.stringify(value)),
   });
   const selectedAutomationParameters = useProjectPersistedState<Record<string, string>>({
     projectId,
@@ -1377,8 +1391,10 @@ const Timeline: Component<TimelineProps> = (props) => {
         }}
         automation={{
           projectId: projectId(),
-          mode: automationMode.value(),
-          onToggleMode: () => automationMode.setValue((current) => !current),
+          visibleByTrackId: visibleAutomationTracks.value(),
+          onToggleTrackVisibility: (trackId) => {
+            visibleAutomationTracks.setValue((current) => ({ ...current, [trackId]: !current[trackId] }));
+          },
           selectedParametersByTargetKey: selectedAutomationParameters.value(),
           onSelectParameter: (targetKey, parameterId) => {
             selectedAutomationParameters.setValue((current) => ({ ...current, [targetKey]: parameterId }));

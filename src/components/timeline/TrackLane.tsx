@@ -23,7 +23,7 @@ type TrackLaneProps = {
   viewportRedrawVersion: number
   automation?: {
     projectId: string
-    mode: boolean
+    visible: boolean
     parameterId: string
     envelope: AutomationEnvelope | undefined
     durationSec: number
@@ -39,7 +39,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
       style={{ top: `${props.topPx}px`, height: `${LANE_HEIGHT}px` }}
     >
       <div class="absolute left-0 right-0 bottom-0 h-[1.5px] bg-neutral-800" />
-      {props.automation?.mode ? (
+      {props.automation?.visible ? (
         <div class="absolute inset-x-0 bottom-0 z-30 h-9 border-t border-red-500/30 bg-neutral-950/95">
           <AutomationLane
             projectId={props.automation.projectId}

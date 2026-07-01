@@ -14,8 +14,8 @@ import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionSt
 import type { Clip, Track, TrackId, TrackSend } from "@daw-browser/timeline-core/types";
 import type { TimelineTrackIndex } from "@daw-browser/timeline-core/track-index";
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types";
-import type { AutomationEnvelope } from "@daw-browser/shared";
 import { automationTargetKey } from "@daw-browser/shared";
+import type { TimelineWorkspaceAutomationModel } from "~/hooks/useTimelineAutomationController";
 
 const createViewportRedrawVersion = () => {
   const [version, setVersion] = createSignal(0);
@@ -115,27 +115,7 @@ type Props = {
     onSidebarPointerDown: (event: PointerEvent) => void;
     onToggleRecordArm: (trackId: Track["id"]) => void;
   };
-  automation: {
-    projectId: string;
-    visibleByTrackId: Record<string, boolean>;
-    visibleTrackLanesByTrackId: Record<string, string[]>;
-    masterVisible: boolean;
-    onToggleMasterVisibility: () => void;
-    onToggleTrackVisibility: (trackId: Track["id"]) => void;
-    onAddTrackLane: (trackId: Track["id"]) => void;
-    onShowTrackLane: (trackId: Track["id"], parameterId: string) => void;
-    onHideTrackLane: (trackId: Track["id"], parameterId: string) => void;
-    laneHeightsByTrackId: Record<string, number>;
-    masterLaneHeight: number;
-    onResizeMasterLane: (height: number) => void;
-    onResizeTrackLane: (trackId: Track["id"], height: number) => void;
-    selectedParametersByTargetKey: Record<string, string>;
-    onSelectParameter: (targetKey: string, parameterId: string) => void;
-    envelopesByTargetKey: Map<string, AutomationEnvelope>;
-    onPreviewEnvelope: (envelope: AutomationEnvelope | undefined) => void;
-    onCommitEnvelope: (envelope: AutomationEnvelope | undefined, targetKey?: string) => void;
-    onCancelPreview: (targetKey: string) => void;
-  };
+  automation: TimelineWorkspaceAutomationModel;
 };
 
 export default function TimelineWorkspace(props: Props) {
@@ -143,9 +123,9 @@ export default function TimelineWorkspace(props: Props) {
   const trackLayout = createMemo(() => {
     let topPx = 0;
     return props.tracks.map((track) => {
-      const automationHeight = props.automation.visibleByTrackId[track.id] === true
-        ? (props.automation.laneHeightsByTrackId[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT)
-          * (props.automation.visibleTrackLanesByTrackId[track.id]?.length || 1)
+      const automationHeight = props.automation.lanes.visibleByTrackId[track.id] === true
+        ? (props.automation.lanes.heightsByTargetKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT)
+          * (props.automation.lanes.visibleParameterIdsByTrackId[track.id]?.length || 1)
         : 0;
       const row = {
         topPx,
@@ -161,10 +141,10 @@ export default function TimelineWorkspace(props: Props) {
     const tracksHeight = layout.length === 0 ? 0 : layout[layout.length - 1].topPx + layout[layout.length - 1].heightPx;
     return tracksHeight + (props.dropAtNewTrack ? LANE_HEIGHT : 0);
   };
-  const masterAreaHeight = () => MASTER_ROW_HEIGHT + (props.automation.masterVisible ? props.automation.masterLaneHeight : 0);
+  const masterAreaHeight = () => MASTER_ROW_HEIGHT + (props.automation.lanes.masterVisible ? props.automation.lanes.masterHeight : 0);
   const fullHeight = () => RULER_HEIGHT + trackAreaHeight() + masterAreaHeight();
   const scrollContentHeight = () => fullHeight() + props.bottomPanelOffsetPx;
-  const masterParameterId = () => props.automation.selectedParametersByTargetKey.master ?? "volume";
+  const masterParameterId = () => props.automation.lanes.selectedParametersByTargetKey.master ?? "volume";
   const masterTargetKey = () => automationTargetKey({ kind: "master" }, masterParameterId());
   return (
     <div class="flex-1 flex min-h-0" ref={props.containerRef}>
@@ -216,8 +196,8 @@ export default function TimelineWorkspace(props: Props) {
               <For each={props.tracks}>
                 {(track, i) => (
                   (() => {
-                    const visibleParameterIds = () => props.automation.visibleTrackLanesByTrackId[track.id] ?? [];
-                    const laneHeight = () => props.automation.laneHeightsByTrackId[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
+                    const visibleParameterIds = () => props.automation.lanes.visibleParameterIdsByTrackId[track.id] ?? [];
+                    const laneHeight = () => props.automation.lanes.heightsByTargetKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
                     return (
                       <TrackLane
                         track={track}
@@ -242,16 +222,16 @@ export default function TimelineWorkspace(props: Props) {
                         viewportRedrawVersion={viewportRedrawVersion()}
                         automation={{
                           projectId: props.automation.projectId,
-                          visible: props.automation.visibleByTrackId[track.id] === true,
+                          visible: props.automation.lanes.visibleByTrackId[track.id] === true,
                           parameterIds: visibleParameterIds(),
                           laneHeightPx: laneHeight(),
-                          envelopeForParameter: (parameterId) => props.automation.envelopesByTargetKey.get(
+                          envelopeForParameter: (parameterId) => props.automation.envelopes.byTargetKey.get(
                             automationTargetKey({ kind: "track", trackId: track.id }, parameterId),
                           ),
                           durationSec: props.durationSec,
-                          onPreview: props.automation.onPreviewEnvelope,
-                          onCommit: props.automation.onCommitEnvelope,
-                          onCancelPreview: props.automation.onCancelPreview,
+                          onPreview: props.automation.envelopes.preview,
+                          onCommit: props.automation.envelopes.commit,
+                          onCancelPreview: props.automation.envelopes.cancelPreview,
                         }}
                         onClipDblClick={(_, clipId) => {
                           const match = props.trackLookup.clipEntryById.get(clipId);
@@ -286,24 +266,24 @@ export default function TimelineWorkspace(props: Props) {
                 recording={props.recording}
                 midi={props.midi}
               />
-              <Show when={props.automation.masterVisible}>
+              <Show when={props.automation.lanes.masterVisible}>
                 <div
                   class="absolute left-0 right-0 z-30 border-t border-red-500/30 bg-neutral-950/95"
                   style={{
                     bottom: `${MASTER_ROW_HEIGHT}px`,
-                    height: `${props.automation.masterLaneHeight}px`,
+                    height: `${props.automation.lanes.masterHeight}px`,
                   }}
                 >
                   <AutomationLane
                     projectId={props.automation.projectId}
                     target={{ kind: "master" }}
                     parameterId={masterParameterId()}
-                    envelope={props.automation.envelopesByTargetKey.get(masterTargetKey())}
+                    envelope={props.automation.envelopes.byTargetKey.get(masterTargetKey())}
                     durationSec={props.durationSec}
-                    heightPx={props.automation.masterLaneHeight}
-                    onPreview={props.automation.onPreviewEnvelope}
-                    onCommit={props.automation.onCommitEnvelope}
-                    onCancelPreview={props.automation.onCancelPreview}
+                    heightPx={props.automation.lanes.masterHeight}
+                    onPreview={props.automation.envelopes.preview}
+                    onCommit={props.automation.envelopes.commit}
+                    onCancelPreview={props.automation.envelopes.cancelPreview}
                   />
                 </div>
               </Show>
@@ -332,23 +312,7 @@ export default function TimelineWorkspace(props: Props) {
                 onSidebarPointerDown: props.sidebar.onSidebarPointerDown,
                 onToggleRecordArm: props.sidebar.onToggleRecordArm,
               }}
-              automation={{
-                visibleByTrackId: props.automation.visibleByTrackId,
-                visibleTrackLanesByTrackId: props.automation.visibleTrackLanesByTrackId,
-                masterVisible: props.automation.masterVisible,
-                onToggleMasterVisibility: props.automation.onToggleMasterVisibility,
-                onToggleTrackVisibility: props.automation.onToggleTrackVisibility,
-                onAddTrackLane: props.automation.onAddTrackLane,
-                onShowTrackLane: props.automation.onShowTrackLane,
-                onHideTrackLane: props.automation.onHideTrackLane,
-                selectedParametersByTargetKey: props.automation.selectedParametersByTargetKey,
-                envelopesByTargetKey: props.automation.envelopesByTargetKey,
-                onSelectParameter: props.automation.onSelectParameter,
-                laneHeightsByTrackId: props.automation.laneHeightsByTrackId,
-                masterLaneHeight: props.automation.masterLaneHeight,
-                onResizeMasterLane: props.automation.onResizeMasterLane,
-                onResizeTrackLane: props.automation.onResizeTrackLane,
-              }}
+              automation={props.automation}
             />
           </div>
         </div>

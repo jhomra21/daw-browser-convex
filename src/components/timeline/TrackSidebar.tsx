@@ -18,6 +18,7 @@ import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
 import { DEFAULT_AUTOMATION_LANE_HEIGHT, LANE_HEIGHT, RULER_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Track, TrackSend } from "@daw-browser/timeline-core/types";
+import type { TimelineWorkspaceAutomationModel } from "~/hooks/useTimelineAutomationController";
 import MasterSidebarRow, {
   MASTER_ROW_HEIGHT,
   type MasterSidebarModel,
@@ -56,23 +57,7 @@ type TrackSidebarProps = {
       muted: boolean,
     ) => void;
   };
-  automation?: {
-    visibleByTrackId: Record<string, boolean>;
-    visibleTrackLanesByTrackId: Record<string, string[]>;
-    masterVisible: boolean;
-    onToggleMasterVisibility: () => void;
-    onToggleTrackVisibility: (trackId: Track["id"]) => void;
-    onAddTrackLane: (trackId: Track["id"]) => void;
-    onShowTrackLane: (trackId: Track["id"], parameterId: string) => void;
-    onHideTrackLane: (trackId: Track["id"], parameterId: string) => void;
-    laneHeightsByTrackId: Record<string, number>;
-    masterLaneHeight: number;
-    onResizeMasterLane: (height: number) => void;
-    onResizeTrackLane: (trackId: Track["id"], height: number) => void;
-    selectedParametersByTargetKey: Record<string, string>;
-    envelopesByTargetKey: Map<string, AutomationEnvelope>;
-    onSelectParameter: (targetKey: string, parameterId: string) => void;
-  };
+  automation?: TimelineWorkspaceAutomationModel;
 };
 
 const clampUnit = (value: number) => Math.max(0, Math.min(1, value));
@@ -155,7 +140,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       volumeRange?: { min: number; max: number };
       volumeEnvelope?: AutomationEnvelope;
     }>();
-    for (const envelope of automation.envelopesByTargetKey.values()) {
+    for (const envelope of automation.envelopes.byTargetKey.values()) {
       if (envelope.target.kind !== "track") continue;
       const existing = mutable.get(envelope.target.trackId) ?? { automatedParameterIds: new Set<string>() };
       existing.automatedParameterIds.add(envelope.parameterId);
@@ -183,9 +168,9 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       selectedEnvelope: undefined,
     };
     if (!automation) return meta;
-    const selectedParameter = automation.selectedParametersByTargetKey.master ?? "volume";
+    const selectedParameter = automation.lanes.selectedParametersByTargetKey.master ?? "volume";
     const selectedTargetKey = automationTargetKey({ kind: "master" }, selectedParameter);
-    for (const envelope of automation.envelopesByTargetKey.values()) {
+    for (const envelope of automation.envelopes.byTargetKey.values()) {
       if (envelope.target.kind !== "master") continue;
       meta.automatedParameterIds.add(envelope.parameterId);
       if (envelope.targetKey === selectedTargetKey) meta.selectedEnvelope = envelope;
@@ -193,7 +178,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     return meta;
   });
   const masterRowReservedHeight = () => (
-    MASTER_ROW_HEIGHT + (props.automation?.masterVisible ? props.automation.masterLaneHeight : 0)
+    MASTER_ROW_HEIGHT + (props.automation?.lanes.masterVisible ? props.automation.lanes.masterHeight : 0)
   );
   const actualOutputTargetId = (track: Track) => track.outputTargetId ?? "";
   const selectedOutputTargetId = (track: Track) =>
@@ -330,7 +315,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     event.stopPropagation();
     const startY = event.clientY;
     const move = (moveEvent: PointerEvent) => {
-      props.automation?.onResizeTrackLane(
+      props.automation?.actions.resizeTrackLane(
         trackId,
         clampAutomationLaneHeight(startHeight + moveEvent.clientY - startY),
       );
@@ -401,13 +386,13 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const muted = () => !!track.muted;
             const soloed = () => !!track.soloed;
             const currentSendTargetId = () => selectedSendTargetId(track);
-            const selectedAutomationParameter = () => props.automation?.selectedParametersByTargetKey[track.id] ?? "volume";
+            const selectedAutomationParameter = () => props.automation?.lanes.selectedParametersByTargetKey[track.id] ?? "volume";
             const selectedAutomationTargetKey = () => automationTargetKey({ kind: "track", trackId: track.id }, selectedAutomationParameter());
-            const selectedAutomationEnvelope = () => props.automation?.envelopesByTargetKey.get(selectedAutomationTargetKey());
+            const selectedAutomationEnvelope = () => props.automation?.envelopes.byTargetKey.get(selectedAutomationTargetKey());
             const automationMeta = () => automationMetaByTrackId().get(track.id);
-            const automationVisible = () => props.automation?.visibleByTrackId[track.id] === true;
-            const visibleAutomationParameterIds = () => props.automation?.visibleTrackLanesByTrackId[track.id] ?? [];
-            const automationHeight = () => props.automation?.laneHeightsByTrackId[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
+            const automationVisible = () => props.automation?.lanes.visibleByTrackId[track.id] === true;
+            const visibleAutomationParameterIds = () => props.automation?.lanes.visibleParameterIdsByTrackId[track.id] ?? [];
+            const automationHeight = () => props.automation?.lanes.heightsByTargetKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
             const automationTotalHeight = () => automationVisible() ? automationHeight() * Math.max(1, visibleAutomationParameterIds().length) : 0;
             const canAddAutomationLane = () => {
               if (!automationVisible()) return false;
@@ -645,7 +630,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           )}
                           onClick={(event) => {
                             event.stopPropagation();
-                            props.automation?.onToggleTrackVisibility(track.id);
+                            props.automation?.actions.toggleTrackVisibility(track.id);
                           }}
                           title={automationVisible() ? "Hide automation lane" : "Show automation lane"}
                         >
@@ -662,7 +647,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           onClick={(event) => {
                             event.stopPropagation();
                             if (!canAddAutomationLane()) return;
-                            props.automation?.onAddTrackLane(track.id);
+                            props.automation?.actions.addTrackLane(track.id);
                           }}
                           title={automationVisible() ? "Add another automation lane" : "Show automation with A before adding lanes"}
                         >
@@ -689,7 +674,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           onClick={(event) => event.stopPropagation()}
                           onPointerDown={(event) => {
                             event.stopPropagation();
-                            props.automation?.onSelectParameter(track.id, "volume");
+                            props.automation?.actions.selectParameter(track.id, "volume");
                             if (volumeDisabled) return;
                             event.preventDefault();
                             const startValue = quantizeVolume(track.volume ?? 0.8);
@@ -828,7 +813,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     <For each={visibleAutomationParameterIds()}>
                       {(parameterId) => {
                         const targetKey = () => automationTargetKey({ kind: "track", trackId: track.id }, parameterId);
-                        const envelope = () => props.automation?.envelopesByTargetKey.get(targetKey());
+                        const envelope = () => props.automation?.envelopes.byTargetKey.get(targetKey());
                         return (
                           <div
                             class="grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-b border-red-500/20 px-2"
@@ -842,9 +827,9 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                               value={parameterId}
                               automatedParameterIds={automationMeta()?.automatedParameterIds}
                               onChange={(nextParameterId) => {
-                                props.automation?.onHideTrackLane(track.id, parameterId);
-                                props.automation?.onShowTrackLane(track.id, nextParameterId);
-                                props.automation?.onSelectParameter(track.id, nextParameterId);
+                                props.automation?.actions.hideTrackLane(track.id, parameterId);
+                                props.automation?.actions.showTrackLane(track.id, nextParameterId);
+                                props.automation?.actions.selectParameter(track.id, nextParameterId);
                               }}
                             />
                             <div class="flex items-center justify-end gap-2 text-red-200/70">
@@ -854,7 +839,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                                 class="h-5 w-5 border border-red-500/30 text-red-100 hover:border-red-400"
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  props.automation?.onHideTrackLane(track.id, parameterId);
+                                  props.automation?.actions.hideTrackLane(track.id, parameterId);
                                 }}
                                 title="Hide automation lane"
                               >
@@ -880,14 +865,14 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
           sidebarWidth={sidebar().sidebarWidth}
           bottomOffsetPx={sidebar().bottomOffsetPx}
           automation={props.automation ? {
-            visible: props.automation.masterVisible,
-            heightPx: props.automation.masterLaneHeight,
-            selectedParameterId: props.automation.selectedParametersByTargetKey.master ?? "volume",
+            visible: props.automation.lanes.masterVisible,
+            heightPx: props.automation.lanes.masterHeight,
+            selectedParameterId: props.automation.lanes.selectedParametersByTargetKey.master ?? "volume",
             automatedParameterIds: masterAutomationMeta().automatedParameterIds,
             selectedEnvelope: masterAutomationMeta().selectedEnvelope,
-            onToggleVisibility: props.automation.onToggleMasterVisibility,
-            onResizeLane: props.automation.onResizeMasterLane,
-            onSelectParameter: (parameterId) => props.automation?.onSelectParameter("master", parameterId),
+            onToggleVisibility: props.automation.actions.toggleMasterVisibility,
+            onResizeLane: props.automation.actions.resizeMasterLane,
+            onSelectParameter: (parameterId) => props.automation?.actions.selectParameter("master", parameterId),
           } : undefined}
         />
       </div>

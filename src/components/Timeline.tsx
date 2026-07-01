@@ -5,15 +5,10 @@ import {
   createEffect,
   createMemo,
   createSignal,
-  untrack,
 } from "solid-js";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { getAudioEngine } from "~/lib/audio-engine-singleton";
-import {
-  clampAutomationLaneHeight,
-  DEFAULT_AUTOMATION_LANE_HEIGHT,
-  timelineDurationSec,
-} from "~/lib/timeline-utils";
+import { timelineDurationSec } from "~/lib/timeline-utils";
 import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
 import { useTimelineClipImport } from "~/hooks/useTimelineClipImport";
 import { useTimelineClipActions } from "~/hooks/useTimelineClipActions";
@@ -25,19 +20,12 @@ import { useClipResize } from "~/hooks/useClipResize";
 import { useTimelineSelection } from "~/hooks/useTimelineSelection";
 import { useClipBuffers } from "~/hooks/useClipBuffers";
 import { isLocalId, normalizeCommandTrackIndices } from "@daw-browser/shared";
-import {
-  automationTargetKey,
-  automationTargetKeysAfterReEnable,
-  automationTargetKeysForManualOverride,
-  filterAutomationEnvelopesForScheduling,
-  getAutomationParameterOptions,
-  type AutomationEnvelope,
-} from "@daw-browser/shared";
+import { automationTargetKey } from "@daw-browser/shared";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
 import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
 import { useTrackRecording } from "~/hooks/useTrackRecording";
-import { buildAutomationEnvelopeHistoryEntry, buildEffectParamsHistoryEntry } from "~/lib/undo/builders";
+import { buildEffectParamsHistoryEntry } from "~/lib/undo/builders";
 import type { EffectParamsCommitPayload } from "~/lib/undo/types";
 import { useTimelinePreferences } from "~/hooks/useTimelinePreferences";
 import { useTimelineMidiOverlay } from "~/hooks/useTimelineMidiOverlay";
@@ -58,6 +46,7 @@ import { useTimelineBottomPanelState } from "~/hooks/useTimelineBottomPanelState
 import { useTimelineLeftBrowserResize } from "~/hooks/useTimelineLeftBrowserResize";
 import { useTimelineLeftBrowserState } from "~/hooks/useTimelineLeftBrowserState";
 import { useTimelineBrowserController } from "~/hooks/useTimelineBrowserController";
+import { useTimelineAutomationController } from "~/hooks/useTimelineAutomationController";
 import { BrowserDragOverlay } from "./timeline/browser/browser-drag-overlay";
 import type { BrowserDragPayload, BrowserDropTarget } from "./timeline/browser/browser-drag-types";
 import type { TimelineDeviceInsertActions } from "./timeline/timeline-device-insert-actions";
@@ -70,10 +59,6 @@ import AppMessageDialog, { type AppMessageDialogState } from "./timeline/app-mes
 import CloudBackupDialog from "./timeline/cloud-backup-dialog";
 import DeleteTrackDialog from "./timeline/delete-track-dialog";
 import TimelineWorkspace from "./timeline/timeline-workspace";
-import { createPersistedAutomationState } from "./timeline/create-persisted-automation-state";
-import { loadLocalAutomationEnvelopes, setLocalAutomationEnvelope, deleteLocalAutomationEnvelope } from "~/lib/local-automation";
-import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
-import { useProjectPersistedState } from "~/hooks/useProjectPersistedState";
 import { Dashboard } from "~/components/dashboard/dashboard";
 import type { DashboardTimelineModel, DashboardView } from "~/components/dashboard/types";
 
@@ -92,23 +77,6 @@ type TimelineProps = {
   setDashboardParam: (view: DashboardView | null) => void;
 };
 
-const replaceAutomationEnvelope = (
-  envelopes: AutomationEnvelope[],
-  targetKey: string,
-  envelope: AutomationEnvelope | undefined,
-) => {
-  const existingIndex = envelopes.findIndex((entry) => entry.targetKey === targetKey);
-  if (!envelope) {
-    return existingIndex === -1 ? envelopes : envelopes.filter((entry) => entry.targetKey !== targetKey);
-  }
-  if (existingIndex !== -1 && envelopes[existingIndex] === envelope) return envelopes;
-  const next = existingIndex === -1 ? [...envelopes, envelope] : [...envelopes];
-  next[existingIndex === -1 ? next.length - 1 : existingIndex] = envelope;
-  return next;
-};
-
-const automationParameterOptions = getAutomationParameterOptions();
-
 const Timeline: Component<TimelineProps> = (props) => {
   const [confirmOpen, setConfirmOpen] = createSignal(false);
   const [appMessage, setAppMessage] = createSignal<AppMessageDialogState | null>(null);
@@ -118,9 +86,6 @@ const Timeline: Component<TimelineProps> = (props) => {
   // Transport tempo & metronome
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
-  const [automationEnvelopes, setAutomationEnvelopes] = createSignal<AutomationEnvelope[]>([]);
-  const [overriddenAutomationTargetKeys, setOverriddenAutomationTargetKeys] = createSignal<Set<string>>(new Set());
-
   // Audio engine
   const audioEngine = getAudioEngine();
   // Collaboration: projectId from ?projectId=; ownership tied to Better Auth userId
@@ -149,117 +114,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     navigateToRoom,
   });
   const bottomPanel = useTimelineBottomPanelState({ projectId });
-  const visibleAutomationTracks = useProjectPersistedState<Record<string, boolean>>({
-    projectId,
-    createInitial: () => ({}),
-    load: (rid) => {
-      const raw = localStorage.getItem(`timeline:${rid}:automation-visible-tracks`);
-      if (!raw) return {};
-      try {
-        const parsed = JSON.parse(raw);
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-        const next: Record<string, boolean> = {};
-        for (const [key, value] of Object.entries(parsed)) {
-          if (typeof value === "boolean") next[key] = value;
-        }
-        return next;
-      } catch {
-        return {};
-      }
-    },
-    save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-visible-tracks`, JSON.stringify(value)),
-  });
-  const visibleAutomationLanes = useProjectPersistedState<Record<string, string[]>>({
-    projectId,
-    createInitial: () => ({}),
-    load: (rid) => {
-      const raw = localStorage.getItem(`timeline:${rid}:automation-visible-lanes`);
-      const legacyRaw = localStorage.getItem(`timeline:${rid}:automation-visible-tracks`);
-      const selectedRaw = localStorage.getItem(`timeline:${rid}:automation-parameters`);
-      const legacySelected: Record<string, string> = {};
-      if (selectedRaw) {
-        try {
-          const parsed = JSON.parse(selectedRaw);
-          if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-            for (const [key, value] of Object.entries(parsed)) {
-              if (typeof value === "string") legacySelected[key] = value;
-            }
-          }
-        } catch {}
-      }
-      const readLegacy = () => {
-        if (!legacyRaw) return {};
-        try {
-          const parsed = JSON.parse(legacyRaw);
-          if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-          const next: Record<string, string[]> = {};
-          for (const [key, value] of Object.entries(parsed)) {
-            if (key === "master" || value !== true) continue;
-            next[key] = [legacySelected[key] ?? "volume"];
-          }
-          return next;
-        } catch {
-          return {};
-        }
-      };
-      if (!raw) return readLegacy();
-      try {
-        const parsed = JSON.parse(raw);
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return readLegacy();
-        const next: Record<string, string[]> = {};
-        for (const [key, value] of Object.entries(parsed)) {
-          if (!Array.isArray(value)) continue;
-          const parameterIds = value.filter((entry): entry is string => typeof entry === "string");
-          if (parameterIds.length > 0) next[key] = Array.from(new Set(parameterIds));
-        }
-        return next;
-      } catch {
-        return readLegacy();
-      }
-    },
-    save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-visible-lanes`, JSON.stringify(value)),
-  });
-  const automationLaneHeights = useProjectPersistedState<Record<string, number>>({
-    projectId,
-    createInitial: () => ({}),
-    load: (rid) => {
-      const raw = localStorage.getItem(`timeline:${rid}:automation-lane-heights`);
-      if (!raw) return {};
-      try {
-        const parsed = JSON.parse(raw);
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-        const next: Record<string, number> = {};
-        for (const [key, value] of Object.entries(parsed)) {
-          if (typeof value === "number" && Number.isFinite(value)) next[key] = clampAutomationLaneHeight(value);
-        }
-        return next;
-      } catch {
-        return {};
-      }
-    },
-    save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-lane-heights`, JSON.stringify(value)),
-  });
-  const selectedAutomationParameters = useProjectPersistedState<Record<string, string>>({
-    projectId,
-    createInitial: () => ({}),
-    load: (rid) => {
-      const raw = localStorage.getItem(`timeline:${rid}:automation-parameters`);
-      if (!raw) return {};
-      try {
-        const parsed = JSON.parse(raw);
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-        const next: Record<string, string> = {};
-        for (const [key, value] of Object.entries(parsed)) {
-          if (typeof value === "string") next[key] = value;
-        }
-        return next;
-      } catch {
-        return {};
-      }
-    },
-    save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-parameters`, JSON.stringify(value)),
-  });
-
   const {
     sidebarWidth,
     setSidebarWidth,
@@ -398,258 +252,19 @@ const Timeline: Component<TimelineProps> = (props) => {
           outputTargetId: routing.outputTargetId,
         }),
       applyAutomationEnvelope: (envelope, targetKey) =>
-        applyAutomationEnvelopeState(envelope, targetKey),
+        automation.applyEnvelope(envelope, targetKey),
     }),
   });
-  const automationTargetKeyAccessor = createMemo(() => {
-    const trackId = selection.selectedTrackId();
-    if (!trackId) return undefined;
-    const parameterId = selectedAutomationParameters.value()[trackId] ?? "volume";
-    return automationTargetKey({ kind: "track", trackId }, parameterId);
+  const automation = useTimelineAutomationController({
+    projectId,
+    userId,
+    remoteRows: () => fullView.data?.automationEnvelopes,
+    audioEngine,
+    isPlaying: () => isPlaying(),
+    playheadSec: () => playheadSec(),
+    selectedTrackId: selection.selectedTrackId,
+    pushHistory,
   });
-  const applyAutomationEnvelopeState = (envelope: AutomationEnvelope | undefined, targetKey: string) => {
-    setAutomationEnvelopes((current) => {
-      const rows = replaceAutomationEnvelope(current, targetKey, envelope);
-      audioEngine.cancelAutomationSchedules(new Set([targetKey]), current);
-      audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(rows, overriddenAutomationTargetKeys()));
-      if (isPlaying() && !overriddenAutomationTargetKeys().has(targetKey)) audioEngine.scheduleAutomationFromPlayhead(playheadSec(), { targetKeys: new Set([targetKey]) });
-      return rows;
-    });
-  };
-  const applyAutomationRowsToEngine = (
-    next: AutomationEnvelope[],
-    previous: AutomationEnvelope[],
-    changedTargetKeys: ReadonlySet<string>,
-  ) => {
-    audioEngine.cancelAutomationSchedules(changedTargetKeys.size === 0 ? undefined : changedTargetKeys, previous);
-    const overrides = overriddenAutomationTargetKeys();
-    audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(next, overrides));
-    if (isPlaying()) {
-      const targetKeys = changedTargetKeys.size === 0
-        ? undefined
-        : new Set([...changedTargetKeys].filter((targetKey) => !overrides.has(targetKey)));
-      if (targetKeys && targetKeys.size === 0) return;
-      audioEngine.scheduleAutomationFromPlayhead(playheadSec(), {
-        targetKeys,
-      });
-    }
-  };
-  const overrideAutomationTarget = (targetKey: string) => {
-    if (!isPlaying()) return;
-    const envelope = automationEnvelopesByTargetKey().get(targetKey);
-    if (!envelope?.enabled) return;
-    setOverriddenAutomationTargetKeys((current) => {
-      const next = automationTargetKeysForManualOverride(current, targetKey);
-      if (next.size === current.size) return current;
-      audioEngine.cancelAutomationSchedules(new Set([targetKey]), automationEnvelopes());
-      audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(automationEnvelopes(), next));
-      return next;
-    });
-  };
-  const reEnableAutomation = () => {
-    const current = overriddenAutomationTargetKeys();
-    if (current.size === 0) return;
-    const reEnabledTargetKeys = new Set(current);
-    const next = automationTargetKeysAfterReEnable(current, reEnabledTargetKeys);
-    setOverriddenAutomationTargetKeys(next);
-    audioEngine.cancelAutomationSchedules(reEnabledTargetKeys, automationEnvelopes());
-    audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(automationEnvelopes(), next));
-    if (isPlaying()) audioEngine.scheduleAutomationFromPlayhead(playheadSec(), { targetKeys: reEnabledTargetKeys });
-    else audioEngine.applyAutomationAtTimelineSec(playheadSec());
-  };
-  const persistedAutomation = createPersistedAutomationState({
-    targetKey: automationTargetKeyAccessor,
-    envelopes: automationEnvelopes,
-    applyToEngine: applyAutomationRowsToEngine,
-    persistEnvelope: async (envelope) => {
-      const rid = projectId();
-      if (!rid) return;
-      if (isLocalId("project", rid)) {
-        await setLocalAutomationEnvelope(rid, envelope);
-        setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, envelope.targetKey, envelope));
-        return;
-      }
-      const uid = userId();
-      if (!uid) throw new Error("Cannot persist shared automation without a user id.");
-      await publishDurableSharedTimelineOperation({
-        projectId: rid,
-        userId: uid,
-        operation: {
-          kind: "automation.setEnvelope",
-          payload: {
-            targetKind: envelope.target.kind,
-            trackId: envelope.target.kind === "track" ? envelope.target.trackId : undefined,
-            parameterId: envelope.parameterId,
-            enabled: envelope.enabled,
-            points: envelope.points,
-            updatedAt: envelope.updatedAt,
-          },
-        },
-      });
-      setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, envelope.targetKey, envelope));
-    },
-    deleteEnvelope: async (targetKey) => {
-      const rid = projectId();
-      if (!rid) return;
-      const envelope = automationEnvelopes().find((entry) => entry.targetKey === targetKey);
-      if (isLocalId("project", rid)) {
-        await deleteLocalAutomationEnvelope(rid, targetKey);
-        setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, targetKey, undefined));
-        return;
-      }
-      if (!envelope) return;
-      const uid = userId();
-      if (!uid) throw new Error("Cannot persist shared automation without a user id.");
-      await publishDurableSharedTimelineOperation({
-        projectId: rid,
-        userId: uid,
-        operation: {
-          kind: "automation.deleteEnvelope",
-          payload: {
-            targetKind: envelope.target.kind,
-            trackId: envelope.target.kind === "track" ? envelope.target.trackId : undefined,
-            parameterId: envelope.parameterId,
-          },
-        },
-      });
-      setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, targetKey, undefined));
-    },
-    onEnvelopeCommitted: (previous, next) => {
-      const rid = projectId();
-      if (!rid) return;
-      pushHistory(buildAutomationEnvelopeHistoryEntry({
-        projectId: rid,
-        before: previous ?? null,
-        after: next ?? null,
-      }), `automation:${next?.targetKey ?? previous?.targetKey ?? "unknown"}`, 0);
-    },
-  });
-
-  createEffect(() => {
-    const rid = projectId();
-    if (!rid) {
-      setAutomationEnvelopes([]);
-      setOverriddenAutomationTargetKeys(new Set<string>());
-      audioEngine.setAutomationEnvelopes([]);
-      return;
-    }
-    setOverriddenAutomationTargetKeys(new Set<string>());
-    if (isLocalId("project", rid)) {
-      void loadLocalAutomationEnvelopes(rid).then((rows) => {
-        if (projectId() !== rid) return;
-        setAutomationEnvelopes(rows);
-        untrack(persistedAutomation.syncRemote);
-      }).catch(() => {
-        if (projectId() !== rid) return;
-        setAutomationEnvelopes([]);
-        untrack(persistedAutomation.syncRemote);
-      });
-      return;
-    }
-    const rows = fullView.data?.automationEnvelopes ?? [];
-    const next: AutomationEnvelope[] = [];
-    for (const row of rows) {
-      if (row.targetKind === "master") {
-        next.push({
-          id: row._id,
-          projectId: row.projectId,
-          target: { kind: "master" },
-          targetKey: row.targetKey,
-          parameterId: row.parameterId,
-          enabled: row.enabled,
-          points: row.points,
-          updatedAt: row.updatedAt,
-        });
-        continue;
-      }
-      if (!row.trackId) continue;
-      next.push({
-        id: row._id,
-        projectId: row.projectId,
-        target: { kind: "track", trackId: row.trackId },
-        targetKey: row.targetKey,
-        parameterId: row.parameterId,
-        enabled: row.enabled,
-        points: row.points,
-        updatedAt: row.updatedAt,
-      });
-    }
-    setAutomationEnvelopes(next);
-    untrack(persistedAutomation.syncRemote);
-  });
-  const automationEnvelopesByTargetKey = createMemo(() => (
-    new Map(persistedAutomation.envelopes().map((envelope) => [envelope.targetKey, envelope]))
-  ));
-  const showAutomationLane = (trackId: Track["id"], parameterId: string) => {
-    visibleAutomationLanes.setValue((current) => {
-      const lanes = current[trackId] ?? [];
-      if (lanes.includes(parameterId)) return current;
-      return { ...current, [trackId]: [...lanes, parameterId] };
-    });
-    visibleAutomationTracks.setValue((current) => (
-      current[trackId] === true ? current : { ...current, [trackId]: true }
-    ));
-  };
-  const hideAutomationLane = (trackId: Track["id"], parameterId: string) => {
-    let hiddenLastLane = false;
-    visibleAutomationLanes.setValue((current) => {
-      const lanes = current[trackId] ?? [];
-      const nextLanes = lanes.filter((entry) => entry !== parameterId);
-      if (nextLanes.length === lanes.length) return current;
-      const next = { ...current };
-      if (nextLanes.length > 0) next[trackId] = nextLanes;
-      else {
-        delete next[trackId];
-        hiddenLastLane = true;
-      }
-      return next;
-    });
-    if (hiddenLastLane) {
-      visibleAutomationTracks.setValue((current) => ({ ...current, [trackId]: false }));
-    }
-  };
-  const handleTogglePrimaryAutomationLane = (trackId: Track["id"]) => {
-    const parameterId = selectedAutomationParameters.value()[trackId] ?? "volume";
-    const lanes = visibleAutomationLanes.value()[trackId] ?? (
-      visibleAutomationTracks.value()[trackId] === true ? [parameterId] : []
-    );
-    if (lanes.length > 0) {
-      visibleAutomationLanes.setValue((current) => {
-        const next = { ...current };
-        delete next[trackId];
-        return next;
-      });
-      visibleAutomationTracks.setValue((current) => ({ ...current, [trackId]: false }));
-      return;
-    }
-    showAutomationLane(trackId, parameterId);
-  };
-  const handleAddAutomationLane = (trackId: Track["id"]) => {
-    const visible = new Set(visibleAutomationLanes.value()[trackId] ?? []);
-    if (visible.size === 0) return;
-    const selectedParameter = selectedAutomationParameters.value()[trackId] ?? "volume";
-    if (!visible.has(selectedParameter)) {
-      showAutomationLane(trackId, selectedParameter);
-      return;
-    }
-    const nextOption = automationParameterOptions.find((option) => !visible.has(option.id));
-    if (nextOption) {
-      showAutomationLane(trackId, nextOption.id);
-      selectedAutomationParameters.setValue((current) => (
-        current[trackId] === nextOption.id ? current : { ...current, [trackId]: nextOption.id }
-      ));
-      return;
-    }
-    for (const envelope of persistedAutomation.envelopes()) {
-      if (envelope.target.kind !== "track" || envelope.target.trackId !== trackId) continue;
-      if (visible.has(envelope.parameterId)) continue;
-      showAutomationLane(trackId, envelope.parameterId);
-      selectedAutomationParameters.setValue((current) => (
-        current[trackId] === envelope.parameterId ? current : { ...current, [trackId]: envelope.parameterId }
-      ));
-      return;
-    }
-  };
   const {
     pendingSharedTrackVolumes,
     pendingSharedTrackRouting,
@@ -1052,8 +667,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     gridEnabled,
     gridDenominator,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
-    automationEnvelopes: persistedAutomation.envelopes,
-    applyAutomationEnvelope: applyAutomationEnvelopeState,
+    automationEnvelopes: automation.envelopes,
+    applyAutomationEnvelope: automation.applyEnvelope,
     grantClipWrites,
     notify,
   });
@@ -1357,8 +972,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     onToggleRecord: toggleRecording,
     onUndo: handleUndo,
     onRedo: handleRedo,
-    automationOverrideCount: overriddenAutomationTargetKeys().size,
-    onReEnableAutomation: reEnableAutomation,
+    automationOverrideCount: automation.overrideCount(),
+    onReEnableAutomation: automation.reEnable,
     onDeleteSelection: handleKeyboardAction,
     onDuplicateSelection: () => {
       void duplicateSelectedClips();
@@ -1433,14 +1048,12 @@ const Timeline: Component<TimelineProps> = (props) => {
       onEffectParamsCommitted: pushEffectParamsHistory,
       onLocalSaveFailed: localProject.setLocalSaveFailure,
       onDeviceInsertActionsChange: setDeviceInsertActions,
-      automationEnvelopes: persistedAutomation.envelopes(),
+      automationEnvelopes: automation.envelopes(),
       onSelectAutomationParameter: (targetKey: Track["id"] | "master", parameterId: string) => {
-        selectedAutomationParameters.setValue((current) => (
-          current[targetKey] === parameterId ? current : { ...current, [targetKey]: parameterId }
-        ));
+        automation.effectsPanel.selectParameter(targetKey, parameterId);
       },
       onManualAutomationOverride: (targetKey: Track["id"] | "master", parameterId: string) => {
-        overrideAutomationTarget(
+        automation.overrideTarget(
           targetKey === "master"
             ? automationTargetKey({ kind: "master" }, parameterId)
             : automationTargetKey({ kind: "track", trackId: targetKey }, parameterId),
@@ -1617,11 +1230,11 @@ const Timeline: Component<TimelineProps> = (props) => {
               selection.selectMasterTarget();
             },
             onVolumePreview: (volume) => {
-              overrideAutomationTarget(automationTargetKey({ kind: "master" }, "volume"));
+              automation.overrideTarget(automationTargetKey({ kind: "master" }, "volume"));
               masterVolume.previewVolume(volume);
             },
             onVolumeChange: (volume) => {
-              overrideAutomationTarget(automationTargetKey({ kind: "master" }, "volume"));
+              automation.overrideTarget(automationTargetKey({ kind: "master" }, "volume"));
               masterVolume.commitVolume(volume);
             },
           },
@@ -1636,11 +1249,11 @@ const Timeline: Component<TimelineProps> = (props) => {
           onTrackSendsChange: updateTrackSends,
           onTrackOutputTargetChange: updateTrackOutputTargetId,
           onVolumePreview: (trackId, volume, muted) => {
-            overrideAutomationTarget(automationTargetKey({ kind: "track", trackId }, "volume"));
+            automation.overrideTarget(automationTargetKey({ kind: "track", trackId }, "volume"));
             audioEngine.previewTrackVolume(trackId, volume, muted);
           },
           onVolumeChange: (trackId, volume) => {
-            overrideAutomationTarget(automationTargetKey({ kind: "track", trackId }, "volume"));
+            automation.overrideTarget(automationTargetKey({ kind: "track", trackId }, "volume"));
             setTrackVolume(trackId, volume);
           },
           onToggleMute: handleToggleTrackMute,
@@ -1648,45 +1261,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           onSidebarPointerDown,
           onToggleRecordArm: handleToggleRecordArm,
         }}
-        automation={{
-          projectId: projectId(),
-          visibleByTrackId: visibleAutomationTracks.value(),
-          visibleTrackLanesByTrackId: visibleAutomationLanes.value(),
-          masterVisible: visibleAutomationTracks.value().master === true,
-          onToggleMasterVisibility: () => {
-            visibleAutomationTracks.setValue((current) => ({ ...current, master: !current.master }));
-          },
-          onToggleTrackVisibility: handleTogglePrimaryAutomationLane,
-          onAddTrackLane: handleAddAutomationLane,
-          onShowTrackLane: showAutomationLane,
-          onHideTrackLane: hideAutomationLane,
-          laneHeightsByTrackId: automationLaneHeights.value(),
-          masterLaneHeight: automationLaneHeights.value().master ?? DEFAULT_AUTOMATION_LANE_HEIGHT,
-          onResizeMasterLane: (height) => {
-            const nextHeight = clampAutomationLaneHeight(height || DEFAULT_AUTOMATION_LANE_HEIGHT);
-            automationLaneHeights.setValue((current) => (
-              current.master === nextHeight ? current : { ...current, master: nextHeight }
-            ));
-          },
-          onResizeTrackLane: (trackId, height) => {
-            const nextHeight = clampAutomationLaneHeight(height || DEFAULT_AUTOMATION_LANE_HEIGHT);
-            automationLaneHeights.setValue((current) => (
-              current[trackId] === nextHeight ? current : { ...current, [trackId]: nextHeight }
-            ));
-          },
-          selectedParametersByTargetKey: selectedAutomationParameters.value(),
-          onSelectParameter: (targetKey, parameterId) => {
-            selectedAutomationParameters.setValue((current) => (
-              current[targetKey] === parameterId ? current : { ...current, [targetKey]: parameterId }
-            ));
-          },
-          envelopesByTargetKey: automationEnvelopesByTargetKey(),
-          onPreviewEnvelope: persistedAutomation.previewEnvelope,
-          onCommitEnvelope: (envelope, targetKey) => {
-            void persistedAutomation.commitEnvelope(envelope, targetKey);
-          },
-          onCancelPreview: persistedAutomation.cancelPreview,
-        }}
+        automation={automation.workspace()}
       />
 
       <BrowserDragOverlay session={timelineBrowser().devices.dragSession} />

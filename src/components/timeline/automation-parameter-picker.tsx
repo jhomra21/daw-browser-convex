@@ -49,8 +49,8 @@ export default function AutomationParameterPicker(props: AutomationParameterPick
 
   createEffect(() => {
     if (!open()) return
-    document.addEventListener('pointerdown', onDocumentPointerDown)
-    onCleanup(() => document.removeEventListener('pointerdown', onDocumentPointerDown))
+    document.addEventListener('pointerdown', onDocumentPointerDown, true)
+    onCleanup(() => document.removeEventListener('pointerdown', onDocumentPointerDown, true))
   })
 
   return (

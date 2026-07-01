@@ -129,6 +129,7 @@ export function useTimelinePlayback(audioEngine: TimelinePlaybackAudioEngine, lo
     const tracks = resolveTracks()
     audioEngine.stopAllSources()
     deferredStretchQueue.clear()
+    audioEngine.cancelAutomationSchedules()
     audioEngine.onTransportSeek(wrapped, SCHED_AHEAD_SEC)
     scheduledUntilSec = getScheduleHorizonEnd(wrapped, isActive ? end : undefined)
     scheduleAndTrackDeferred(tracks, wrapped, { endLimitSec: scheduledUntilSec })
@@ -267,6 +268,7 @@ export function useTimelinePlayback(audioEngine: TimelinePlaybackAudioEngine, lo
     setLastTracks(tracks)
     if (isPlaying()) {
       // IMPORTANT: Update transport epoch BEFORE scheduling, so MIDI events use the correct mapping
+      audioEngine.cancelAutomationSchedules()
       audioEngine.onTransportSeek(sec, SCHED_AHEAD_SEC)
       deferredStretchQueue.clear()
       const { isActive, end } = getLoopParams()

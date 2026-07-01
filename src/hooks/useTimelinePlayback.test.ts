@@ -41,15 +41,20 @@ const createFakeEngine = (deferredWindow: DeferredStretchWindow) => {
   let currentTimelineSec = 0
   let stretchListener = () => {}
   const scheduleCalls: ScheduleCall[] = []
+  const transportEvents: string[] = []
   const engine = {
     get currentTimelineSec() {
       return currentTimelineSec
     },
     ensureAudio: () => {},
     applyAutomationAtTimelineSec: () => {},
-    cancelAutomationSchedules: () => {},
+    cancelAutomationSchedules: () => {
+      transportEvents.push('cancelAutomationSchedules')
+    },
     onTransportPause: () => {},
-    onTransportSeek: () => {},
+    onTransportSeek: () => {
+      transportEvents.push('onTransportSeek')
+    },
     onTransportStart: () => {},
     onTransportStop: () => {},
     resume: async () => {},
@@ -74,6 +79,7 @@ const createFakeEngine = (deferredWindow: DeferredStretchWindow) => {
   return {
     engine,
     scheduleCalls,
+    transportEvents,
     setCurrentTimelineSec: (sec: number) => {
       currentTimelineSec = sec
     },
@@ -82,6 +88,44 @@ const createFakeEngine = (deferredWindow: DeferredStretchWindow) => {
 }
 
 describe('useTimelinePlayback deferred stretch retries', () => {
+  test('playing seek cancels automation before updating transport seek', async () => {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 12, endSec: 16 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine)
+        await playback.handlePlay([track])
+
+        fake.transportEvents.length = 0
+        playback.setPlayhead(4, [track])
+
+        expect(fake.transportEvents).toEqual(['cancelAutomationSchedules', 'onTransportSeek'])
+        dispose()
+      })
+    })
+  })
+
+  test('loop wrap cancels automation before updating transport seek', async () => {
+    await withFakeRaf(async (flushRaf) => {
+      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 12, endSec: 16 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, {
+          loopEnabled: () => true,
+          loopStartSec: () => 2,
+          loopEndSec: () => 6,
+          getTracks: () => [track],
+        })
+        await playback.handlePlay([track])
+
+        fake.transportEvents.length = 0
+        fake.setCurrentTimelineSec(6.1)
+        flushRaf()
+
+        expect(fake.transportEvents).toEqual(['cancelAutomationSchedules', 'onTransportSeek'])
+        dispose()
+      })
+    })
+  })
+
   test('RAF does not retry deferred stretch windows before they become imminent', async () => {
     await withFakeRaf(async (flushRaf) => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 12, endSec: 16 })

@@ -37,11 +37,6 @@ export function createPersistedAutomationState(options: PersistedAutomationState
     return mergeDrafts(options.envelopes(), drafts)
   })
 
-  const selectedEnvelope = createMemo(() => {
-    const targetKey = options.targetKey()
-    return targetKey ? draftByTargetKey()[targetKey] ?? persistedByTargetKey().get(targetKey) : undefined
-  })
-
   const markDirty = (targetKey: string) => {
     setDirtyTargetKeys((prev) => new Set([...prev, targetKey]))
   }
@@ -67,7 +62,7 @@ export function createPersistedAutomationState(options: PersistedAutomationState
     const changed = new Set<string>()
     for (const [targetKey, next] of nextByTargetKey) {
       const previous = previousByTargetKey.get(targetKey)
-      if (!previous || previous.updatedAt !== next.updatedAt || previous.points !== next.points || previous.enabled !== next.enabled) {
+      if (!previous || previous.updatedAt !== next.updatedAt || previous.enabled !== next.enabled) {
         changed.add(targetKey)
       }
     }
@@ -122,7 +117,8 @@ export function createPersistedAutomationState(options: PersistedAutomationState
     const dirty = dirtyTargetKeys()
     const nextEnvelopes = options.envelopes()
     if (dirty.size === 0) {
-      applyToEngine(nextEnvelopes, new Set())
+      const changed = changedTargetKeysFromLastApplied(nextEnvelopes)
+      if (changed.size > 0) applyToEngine(nextEnvelopes, changed)
       return
     }
     const merged = mergeDrafts(nextEnvelopes, draftByTargetKey())
@@ -135,7 +131,6 @@ export function createPersistedAutomationState(options: PersistedAutomationState
     cancelPreview,
     envelopes,
     previewEnvelope,
-    selectedEnvelope,
     syncRemote,
   }
 }

@@ -130,7 +130,7 @@ describe('createPersistedAutomationState', () => {
 
   test('uses last applied envelopes when remote sync deletes an envelope', async () => {
     await createRoot(async (dispose) => {
-      let persisted: AutomationEnvelope[] = [envelope]
+      let persisted: AutomationEnvelope[] = []
       const applied: Array<{
         next: AutomationEnvelope[]
         previous: AutomationEnvelope[]
@@ -146,14 +146,39 @@ describe('createPersistedAutomationState', () => {
         deleteEnvelope: () => {},
       })
 
+      persisted = [envelope]
       state.syncRemote()
       persisted = []
       state.syncRemote()
 
       expect(applied).toEqual([
-        { next: [envelope], previous: [envelope], changed: [] },
-        { next: [], previous: [envelope], changed: [] },
+        { next: [envelope], previous: [], changed: [envelope.targetKey] },
+        { next: [], previous: [envelope], changed: [envelope.targetKey] },
       ])
+      dispose()
+    })
+  })
+
+  test('skips remote sync when applied envelopes are unchanged', async () => {
+    await createRoot(async (dispose) => {
+      let persisted: AutomationEnvelope[] = []
+      const applied: AutomationEnvelope[][] = []
+      const state = createPersistedAutomationState({
+        targetKey: () => envelope.targetKey,
+        envelopes: () => persisted,
+        applyToEngine: (next) => {
+          applied.push(next)
+        },
+        persistEnvelope: () => {},
+        deleteEnvelope: () => {},
+      })
+
+      state.syncRemote()
+      persisted = [envelope]
+      state.syncRemote()
+      state.syncRemote()
+
+      expect(applied).toEqual([[envelope]])
       dispose()
     })
   })

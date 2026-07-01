@@ -1,6 +1,6 @@
 import { onMount, onCleanup, type Accessor } from "solid-js";
 
-import { isEditableKeyboardTarget } from "~/lib/keyboard-event-target";
+import { isEditableKeyboardTarget, isLocalTimelineKeyboardTarget } from "~/lib/keyboard-event-target";
 
 type KeyboardHandlers = {
   enabled: Accessor<boolean>;
@@ -23,7 +23,7 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
   function onKeyDown(e: KeyboardEvent) {
     if (!handlers.enabled()) return;
 
-    if (isEditableKeyboardTarget(e.target)) return;
+    if (isEditableKeyboardTarget(e.target) || isLocalTimelineKeyboardTarget(e.target)) return;
 
 
     if (

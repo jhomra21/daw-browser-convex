@@ -277,6 +277,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
     <div
       ref={root}
       tabIndex={0}
+      data-timeline-keyboard-local="true"
       class="absolute inset-0 z-20 touch-none"
       onPointerDown={(event) => {
         event.stopPropagation()

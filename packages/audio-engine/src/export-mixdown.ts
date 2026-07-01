@@ -108,6 +108,15 @@ type SourceAutomationScope = {
   includeMasterFx: boolean
 }
 
+export function isAutomationEnvelopeInSourceScope(
+  scope: SourceAutomationScope,
+  envelope: AutomationEnvelope,
+): boolean {
+  if (scope.trackIds && envelope.target.kind === 'track' && !scope.trackIds.has(envelope.target.trackId)) return false
+  if (!scope.includeMasterFx && envelope.target.kind === 'master' && envelope.parameterId !== 'volume') return false
+  return true
+}
+
 type OfflineDrumRackHit = {
   source: AudioBufferSourceNode
   gain: GainNode
@@ -358,8 +367,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
 
   for (const envelope of prepared.automationEnvelopes) {
     if (!envelope.enabled) continue
-    if (automationScope.trackIds && envelope.target.kind === 'track' && !automationScope.trackIds.has(envelope.target.trackId)) continue
-    if (!automationScope.includeMasterFx && envelope.target.kind === 'master') continue
+    if (!isAutomationEnvelopeInSourceScope(automationScope, envelope)) continue
     const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
     const fallback = descriptor?.defaultValue ?? 0
     const bindings = envelope.target.kind === 'master'

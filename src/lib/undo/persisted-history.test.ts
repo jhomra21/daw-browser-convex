@@ -40,6 +40,24 @@ const createInstrumentEntry = (from: TrackInstrumentParams, to: TrackInstrumentP
   },
 })
 
+const automationEntry: HistoryEntry = {
+  type: 'automation-envelope-change',
+  projectId: 'project-1',
+  data: {
+    before: null,
+    after: {
+      id: 'automation-1',
+      projectId: 'project-1',
+      target: { kind: 'master' },
+      targetKey: 'master:volume',
+      parameterId: 'volume',
+      enabled: true,
+      points: [{ id: 'point-1', timeSec: 0, value: 0.5, interpolation: 'linear' }],
+      updatedAt: 1,
+    },
+  },
+}
+
 describe('persisted undo history', () => {
   test('keeps compressor effect parameter entries', () => {
     const serialized = serializePersistedHistory({
@@ -97,6 +115,38 @@ describe('persisted undo history', () => {
       redo: [],
     }))).toEqual({
       undo: [trackDeleteEntry],
+      redo: [],
+    })
+  })
+
+  test('keeps readable version 2 effect and track entries', () => {
+    const trackVolumeEntry: HistoryEntry = {
+      type: 'track-volume',
+      projectId: 'project-1',
+      data: {
+        trackRef: 'track-ref-1',
+        scope: 'local',
+        from: 0.5,
+        to: 0.75,
+      },
+    }
+
+    expect(normalizePersistedHistory({
+      version: 2,
+      undo: [compressorEntry],
+      redo: [trackVolumeEntry],
+    })).toEqual({
+      undo: [compressorEntry],
+      redo: [trackVolumeEntry],
+    })
+  })
+
+  test('round-trips version 3 automation entries', () => {
+    expect(normalizePersistedHistory(serializePersistedHistory({
+      undo: [automationEntry],
+      redo: [],
+    }))).toEqual({
+      undo: [automationEntry],
       redo: [],
     })
   })

@@ -33,6 +33,9 @@ import {
   createEffectCardReorderDrag,
   type EffectCardReorderPreview,
 } from "~/components/timeline/create-effect-card-reorder-drag";
+import TimelineContextMenu, {
+  type TimelineContextMenuItem,
+} from "~/components/timeline/context-menu/timeline-context-menu";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -201,6 +204,80 @@ type EffectsPanelAudioEffectCardProps = {
   onManualAutomationOverride?: (parameterId: string) => void;
 };
 
+const audioEffectLabels: Record<AudioEffectKind, string> = {
+  eq: "EQ",
+  compressor: "Compressor",
+  saturator: "Saturator",
+  delay: "Delay",
+  reverb: "Reverb",
+};
+
+const createAudioEffectContextMenuItems = (input: {
+  label: string;
+  canWrite: boolean;
+  enabled: () => boolean;
+  toggleEnabled: (enabled: boolean) => void;
+  reset: () => void;
+}): TimelineContextMenuItem[] => [
+  { kind: "label", label: input.label },
+  {
+    kind: "item",
+    label: input.enabled() ? "Disable device" : "Enable device",
+    disabled: !input.canWrite,
+    onSelect: () => input.toggleEnabled(!input.enabled()),
+  },
+  {
+    kind: "item",
+    label: "Reset device",
+    disabled: !input.canWrite,
+    onSelect: input.reset,
+  },
+];
+
+const createAudioEffectContextMenuControls = (
+  effect: AudioEffectKind,
+  audioEffects: EffectsPanelAudioEffects,
+) => {
+  if (effect === "eq") {
+    return {
+      label: audioEffectLabels.eq,
+      enabled: () => audioEffects.eq.params()?.enabled !== false,
+      toggleEnabled: audioEffects.eq.toggleEnabled,
+      reset: audioEffects.eq.reset,
+    };
+  }
+  if (effect === "compressor") {
+    return {
+      label: audioEffectLabels.compressor,
+      enabled: () => audioEffects.compressor.params()?.enabled !== false,
+      toggleEnabled: audioEffects.compressor.toggleEnabled,
+      reset: audioEffects.compressor.reset,
+    };
+  }
+  if (effect === "saturator") {
+    return {
+      label: audioEffectLabels.saturator,
+      enabled: () => audioEffects.saturator.params()?.enabled !== false,
+      toggleEnabled: audioEffects.saturator.toggleEnabled,
+      reset: audioEffects.saturator.reset,
+    };
+  }
+  if (effect === "delay") {
+    return {
+      label: audioEffectLabels.delay,
+      enabled: () => audioEffects.delay.params()?.enabled !== false,
+      toggleEnabled: audioEffects.delay.toggleEnabled,
+      reset: audioEffects.delay.reset,
+    };
+  }
+  return {
+    label: audioEffectLabels.reverb,
+    enabled: () => audioEffects.reverb.params()?.enabled !== false,
+    toggleEnabled: audioEffects.reverb.toggleEnabled,
+    reset: audioEffects.reverb.reset,
+  };
+};
+
 const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> = (props) => {
   if (props.effect === "eq") {
     return (
@@ -239,6 +316,12 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
 
 const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props) => {
   const [reorderPreview, setReorderPreview] = createSignal<EffectCardReorderPreview>();
+  const contextMenuItems = (effect: AudioEffectKind): TimelineContextMenuItem[] => {
+    return createAudioEffectContextMenuItems({
+      ...createAudioEffectContextMenuControls(effect, props.audioEffects),
+      canWrite: props.canWrite,
+    });
+  };
 
   return (
     <>
@@ -263,7 +346,9 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                 classList={{ "opacity-30": reorderPreview()?.effect === effect }}
                 onPointerDown={drag.onPointerDown}
               >
-                <EffectsPanelAudioEffectCard effect={effect} audioEffects={props.audioEffects} spectrum={props.spectrum} audioEngine={props.audioEngine} targetId={props.targetId} automationRangesByParameterId={props.automationRangesByParameterId} onSelectAutomationParameter={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />
+                <TimelineContextMenu items={() => contextMenuItems(effect)}>
+                  <EffectsPanelAudioEffectCard effect={effect} audioEffects={props.audioEffects} spectrum={props.spectrum} audioEngine={props.audioEngine} targetId={props.targetId} automationRangesByParameterId={props.automationRangesByParameterId} onSelectAutomationParameter={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />
+                </TimelineContextMenu>
               </div>
             );
           }}

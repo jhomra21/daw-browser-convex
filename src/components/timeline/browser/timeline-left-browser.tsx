@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, on, onMount, Show, type Component, type JSX } from "solid-js";
 import type { BrowserItem, BrowserSection, TimelineBrowserTab, TimelineLeftBrowserModel } from "./browser-types";
 import { timelineBrowserTabLabels, timelineBrowserTabs } from "~/lib/timeline-left-browser-preferences";
+import TimelineContextMenu, { type TimelineContextMenuItem } from "../context-menu/timeline-context-menu";
 
 const tabPlaceholder: Record<TimelineBrowserTab, string> = {
   assets: "",
@@ -69,19 +70,32 @@ const BrowserItemRow: Component<{
   onClick: () => void;
   onDragStart?: (event: DragEvent) => void;
   onPointerDown?: (event: PointerEvent) => void;
-}> = (props) => (
-  <button
-    type="button"
-    draggable={props.draggable}
-    disabled={props.item.disabled}
-    class="group flex h-6 w-full items-center px-5 text-left text-xs hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
-    onClick={props.onClick}
-    onDragStart={props.onDragStart}
-    onPointerDown={props.onPointerDown}
-  >
-    <span class="min-w-0 flex-1 truncate text-neutral-200 group-hover:text-neutral-50">{props.item.label}</span>
-  </button>
-);
+  contextActionLabel: string;
+}> = (props) => {
+  const items = (): TimelineContextMenuItem[] => [
+    { kind: "label", label: props.item.label },
+    {
+      kind: "item",
+      label: props.contextActionLabel,
+      disabled: props.item.disabled,
+      onSelect: props.onClick,
+    },
+  ];
+  const row = (
+    <button
+      type="button"
+      draggable={props.draggable}
+      disabled={props.item.disabled}
+      class="group flex h-6 w-full items-center px-5 text-left text-xs hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
+      onClick={props.onClick}
+      onDragStart={props.onDragStart}
+      onPointerDown={props.onPointerDown}
+    >
+      <span class="min-w-0 flex-1 truncate text-neutral-200 group-hover:text-neutral-50">{props.item.label}</span>
+    </button>
+  );
+  return <TimelineContextMenu items={items}>{row}</TimelineContextMenu>;
+};
 
 export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel }> = (props) => {
   let scrollRef: HTMLDivElement | undefined;
@@ -164,6 +178,7 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
               renderItem={(item) => (
                 <BrowserItemRow
                   item={item}
+                  contextActionLabel={props.browser.activeTab === "effects" ? "Add effect" : "Add instrument"}
                   onClick={() => visibleDeviceTree().onAdd(item.id)}
                   onPointerDown={(event) => props.browser.devices.onDevicePointerDown(event, item.id)}
                 />
@@ -177,6 +192,7 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
             renderItem={(item) => (
               <BrowserItemRow
                 item={item}
+                contextActionLabel="Insert sample"
                 draggable={!item.disabled}
                 onClick={() => props.browser.assets.onInsert(item.id)}
                 onDragStart={(event) => props.browser.assets.onDragStart(event, item.id)}

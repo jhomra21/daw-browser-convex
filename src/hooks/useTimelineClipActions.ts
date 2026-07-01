@@ -54,8 +54,10 @@ type TimelineClipActionsOptions = {
 
 type TimelineClipActionsHandlers = {
   onClipPointerUp: (trackId: Track['id'], clipId: string, event: PointerEvent) => void
+  deleteSelectedClips: () => Promise<void>
   duplicateSelectedClips: () => Promise<void>
   performDeleteTrack: (trackId: Track['id']) => Promise<void>
+  requestDeleteTrack: (trackId: Track['id']) => void
   handleKeyboardAction: () => void
 }
 
@@ -387,19 +389,23 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     completeDeletedTrack(historyEntry)
   }
 
-  const requestDeleteSelectedTrack = () => {
-    const id = selectedTrackId()
-    if (!id) return
-    const track = tracks().find(entry => entry.id === id)
+  const requestDeleteTrack = (trackId: Track['id']) => {
+    const track = tracks().find(entry => entry.id === trackId)
     if (!track) return
 
     if (track.clips.length > 0) {
-      setPendingDeleteTrackId(id)
+      setPendingDeleteTrackId(trackId)
       setConfirmOpen(true)
       return
     }
 
-    void performDeleteTrack(id)
+    void performDeleteTrack(trackId)
+  }
+
+  const requestDeleteSelectedTrack = () => {
+    const id = selectedTrackId()
+    if (!id) return
+    requestDeleteTrack(id)
   }
 
   const handleKeyboardAction = () => {
@@ -412,8 +418,10 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
   return {
     onClipPointerUp,
+    deleteSelectedClips,
     duplicateSelectedClips,
     performDeleteTrack,
+    requestDeleteTrack,
     handleKeyboardAction,
   }
 }

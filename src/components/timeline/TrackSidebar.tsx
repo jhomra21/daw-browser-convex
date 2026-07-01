@@ -24,6 +24,7 @@ import MasterSidebarRow, {
   type MasterSidebarModel,
 } from "~/components/timeline/MasterSidebarRow";
 import AutomationParameterPicker from "./automation-parameter-picker";
+import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
 
 const automationParameterOptions = getAutomationParameterOptions();
 
@@ -56,6 +57,7 @@ type TrackSidebarProps = {
       volume: number,
       muted: boolean,
     ) => void;
+    onDeleteTrack?: (trackId: Track["id"]) => void;
   };
   automation?: TimelineWorkspaceAutomationModel;
 };
@@ -400,8 +402,51 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               if (!visible.has(selectedAutomationParameter())) return true;
               return automationParameterOptions.some((option) => !visible.has(option.id));
             };
+            const trackContextMenuItems = (): TimelineContextMenuItem[] => [
+              { kind: "label", label: displayTrackName(track) },
+              { kind: "item", label: "Open effects", onSelect: () => sidebar().onTrackClick(track.id) },
+              { kind: "separator" },
+              {
+                kind: "item",
+                label: muted() ? "Unmute track" : "Mute track",
+                disabled: muteDisabled,
+                onSelect: () => sidebar().onToggleMute(track.id),
+              },
+              {
+                kind: "item",
+                label: soloed() ? "Unsolo track" : "Solo track",
+                disabled: soloDisabled,
+                onSelect: () => sidebar().onToggleSolo(track.id),
+              },
+              {
+                kind: "item",
+                label: isRecordArmed() ? "Disarm recording" : "Arm for recording",
+                disabled: recordDisabled,
+                onSelect: () => sidebar().onToggleRecordArm(track.id),
+              },
+              { kind: "separator" },
+              {
+                kind: "item",
+                label: automationVisible() ? "Hide automation lane" : "Show automation lane",
+                onSelect: () => props.automation?.actions.toggleTrackVisibility(track.id),
+              },
+              {
+                kind: "item",
+                label: "Add automation lane",
+                disabled: !canAddAutomationLane(),
+                onSelect: () => props.automation?.actions.addTrackLane(track.id),
+              },
+              { kind: "separator" },
+              {
+                kind: "item",
+                label: "Delete track",
+                shortcut: "⌫",
+                disabled: !sidebar().onDeleteTrack,
+                onSelect: () => sidebar().onDeleteTrack?.(track.id),
+              },
+            ];
 
-            return (
+            const row = (
               <div
                 class={cn(
                   "relative [box-shadow:inset_0_-1px_0_rgb(38_38_38)]",
@@ -853,6 +898,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   </div>
                 ) : null}
               </div>
+            );
+            return (
+              <TimelineContextMenu items={trackContextMenuItems}>
+                {row}
+              </TimelineContextMenu>
             );
           }}
         </For>

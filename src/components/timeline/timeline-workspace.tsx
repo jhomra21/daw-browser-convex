@@ -1,6 +1,7 @@
 import { createMemo, createSignal, For, Show, onCleanup, onMount, type JSX } from "solid-js";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
+import type { ClipContextMenuActions } from "~/components/timeline/ClipComponent";
 import { MASTER_ROW_HEIGHT, type MasterSidebarModel } from "~/components/timeline/MasterSidebarRow";
 import TrackSidebar from "~/components/timeline/TrackSidebar";
 import AutomationLane from "~/components/timeline/automation-lane";
@@ -16,6 +17,7 @@ import type { TimelineTrackIndex } from "@daw-browser/timeline-core/track-index"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types";
 import { automationTargetKey } from "@daw-browser/shared";
 import type { TimelineWorkspaceAutomationModel } from "~/hooks/useTimelineAutomationController";
+import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
 
 const createViewportRedrawVersion = () => {
   const [version, setVersion] = createSignal(0);
@@ -73,6 +75,7 @@ type Props = {
   onClipPointerDown: (trackId: Track["id"], clipId: string, event: PointerEvent) => void;
   onClipPointerUp: (trackId: Track["id"], clipId: string, event: PointerEvent) => void;
   onClipResizeStart: (trackId: Track["id"], clipId: string, edge: "left" | "right", event: PointerEvent) => void;
+  clipContextMenu: ClipContextMenuActions;
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>;
   replaceMissingMediaClip: (trackId: Track["id"], clipId: string) => Promise<void>;
   removeMissingMediaClip: (trackId: Track["id"], clipId: string) => Promise<void>;
@@ -114,6 +117,7 @@ type Props = {
     onToggleSolo: (trackId: Track["id"]) => void;
     onSidebarPointerDown: (event: PointerEvent) => void;
     onToggleRecordArm: (trackId: Track["id"]) => void;
+    onDeleteTrack?: (trackId: Track["id"]) => void;
   };
   automation: TimelineWorkspaceAutomationModel;
 };
@@ -146,6 +150,15 @@ export default function TimelineWorkspace(props: Props) {
   const scrollContentHeight = () => fullHeight() + props.bottomPanelOffsetPx;
   const masterParameterId = () => props.automation.lanes.selectedParametersByTargetKey.master ?? "volume";
   const masterTargetKey = () => automationTargetKey({ kind: "master" }, masterParameterId());
+  const fallbackMenuItems = (): TimelineContextMenuItem[] => [
+    { kind: "label", label: "Timeline" },
+    {
+      kind: "item",
+      label: "Show master automation lane",
+      disabled: props.automation.lanes.masterVisible,
+      onSelect: props.automation.actions.toggleMasterVisibility,
+    },
+  ];
   return (
     <div class="flex-1 flex min-h-0" ref={props.containerRef}>
       <div
@@ -154,10 +167,11 @@ export default function TimelineWorkspace(props: Props) {
       >
         <TimelineLeftBrowser browser={props.leftBrowser} />
       </div>
-      <div
-        class="flex-1 relative overflow-auto"
-        ref={props.scrollRef}
-      >
+      <TimelineContextMenu items={fallbackMenuItems}>
+        <div
+          class="flex-1 relative overflow-auto"
+          ref={props.scrollRef}
+        >
         <div
           class="relative flex select-none"
           style={{
@@ -208,6 +222,7 @@ export default function TimelineWorkspace(props: Props) {
                         onClipPointerDown={props.onClipPointerDown}
                         onClipPointerUp={props.onClipPointerUp}
                         onClipResizeStart={props.onClipResizeStart}
+                        clipContextMenu={props.clipContextMenu}
                         onRetryMedia={(clipId) => {
                           void props.ensureClipBuffer(clipId);
                         }}
@@ -311,12 +326,14 @@ export default function TimelineWorkspace(props: Props) {
                 onToggleSolo: props.sidebar.onToggleSolo,
                 onSidebarPointerDown: props.sidebar.onSidebarPointerDown,
                 onToggleRecordArm: props.sidebar.onToggleRecordArm,
+                onDeleteTrack: props.sidebar.onDeleteTrack,
               }}
               automation={props.automation}
             />
           </div>
         </div>
-      </div>
+        </div>
+      </TimelineContextMenu>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
 import { DEFAULT_AUTOMATION_LANE_HEIGHT, LANE_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import AutomationParameterPicker from "./automation-parameter-picker";
+import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
 
 export type MasterSidebarModel = {
   selected: boolean;
@@ -89,7 +90,18 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   };
   onCleanup(() => cleanupAutomationResize?.());
 
-  return (
+  const contextMenuItems = (): TimelineContextMenuItem[] => [
+    { kind: "label", label: "Master" },
+    { kind: "item", label: "Open effects", onSelect: master().onClick },
+    {
+      kind: "item",
+      label: props.automation?.visible ? "Hide master automation lane" : "Show master automation lane",
+      disabled: !props.automation,
+      onSelect: () => props.automation?.onToggleVisibility(),
+    },
+  ];
+
+  const row = (
     <div
       class={cn(
         "fixed right-0 z-30 [box-shadow:inset_0_1px_0_rgb(38_38_38)]",
@@ -205,6 +217,12 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
         )}
       </Show>
     </div>
+  );
+
+  return (
+    <TimelineContextMenu items={contextMenuItems}>
+      {row}
+    </TimelineContextMenu>
   );
 };
 

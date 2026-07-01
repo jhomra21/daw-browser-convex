@@ -12,6 +12,7 @@ import {
   type AutomationTarget,
 } from '@daw-browser/shared'
 import { PPS } from '~/lib/timeline-utils'
+import TimelineContextMenu, { type TimelineContextMenuItem } from './context-menu/timeline-context-menu'
 
 type AutomationLaneProps = {
   projectId: string
@@ -145,17 +146,20 @@ export default function AutomationLane(props: AutomationLaneProps) {
     return commands.join(' ')
   })
 
-  const pointFromEvent = (event: PointerEvent | MouseEvent): AutomationPoint | null => {
+  const pointFromClientPosition = (clientX: number, clientY: number): AutomationPoint | null => {
     const rect = root?.getBoundingClientRect()
     if (!rect) return null
-    const timeSec = Math.max(0, Math.min(props.durationSec, (event.clientX - rect.left) / PPS))
+    const timeSec = Math.max(0, Math.min(props.durationSec, (clientX - rect.left) / PPS))
     return {
       id: crypto.randomUUID(),
       timeSec,
-      value: yToValue(event.clientY - rect.top),
+      value: yToValue(clientY - rect.top),
       interpolation: 'linear',
     }
   }
+
+  const pointFromEvent = (event: PointerEvent | MouseEvent): AutomationPoint | null =>
+    pointFromClientPosition(event.clientX, event.clientY)
 
   const commitPoints = (nextPoints: AutomationPoint[]) => {
     if (nextPoints.length === 0) {
@@ -216,6 +220,16 @@ export default function AutomationLane(props: AutomationLaneProps) {
     commitPoints([...points(), point])
   }
 
+  const addPointAtStoredPosition = () => {
+    const position = contextMenuPosition()
+    if (!position) return
+    root?.focus()
+    const point = pointFromClientPosition(position.clientX, position.clientY)
+    if (!point) return
+    setSelectedPointId(point.id)
+    commitPoints([...points(), point])
+  }
+
   const updateSelectedPoint = (update: (point: AutomationPoint) => AutomationPoint) => {
     const selected = selectedPointId()
     if (!selected) return
@@ -230,13 +244,40 @@ export default function AutomationLane(props: AutomationLaneProps) {
     }))
   }
 
+  const deleteSelectedPoint = () => {
+    const selected = selectedPointId()
+    if (!selected) return
+    commitPoints(points().filter((point) => point.id !== selected))
+    setSelectedPointId(null)
+  }
+
+  const [contextMenuPosition, setContextMenuPosition] = createSignal<{ clientX: number; clientY: number } | null>(null)
+  const contextMenuItems = (): TimelineContextMenuItem[] => [
+    { kind: 'label', label: descriptor()?.label ?? props.parameterId },
+    { kind: 'item', label: 'Add point', disabled: !contextMenuPosition(), onSelect: addPointAtStoredPosition },
+    { kind: 'separator' },
+    {
+      kind: 'item',
+      label: selectedPoint()?.interpolation === 'hold' ? 'Set interpolation: linear' : 'Set interpolation: hold',
+      shortcut: 'I',
+      disabled: !selectedPoint(),
+      onSelect: toggleSelectedInterpolation,
+    },
+    {
+      kind: 'item',
+      label: 'Delete selected point',
+      shortcut: '⌫',
+      disabled: !selectedPoint(),
+      onSelect: deleteSelectedPoint,
+    },
+  ]
+
   const onKeyDown = (event: KeyboardEvent) => {
     const selected = selectedPointId()
     if (!selected) return
     if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault()
-      commitPoints(points().filter((point) => point.id !== selected))
-      setSelectedPointId(null)
+      deleteSelectedPoint()
       return
     }
     if (event.key === 'i' || event.key === 'I') {
@@ -273,7 +314,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
     props.onCancelPreview(targetKey())
   })
 
-  return (
+  const laneElement = (
     <div
       ref={root}
       tabIndex={0}
@@ -284,6 +325,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
         root?.focus()
       }}
       onDblClick={addPoint}
+      onContextMenu={(event) => setContextMenuPosition({ clientX: event.clientX, clientY: event.clientY })}
       onKeyDown={onKeyDown}
     >
       <svg class="h-full w-full overflow-visible" aria-hidden="true">
@@ -340,5 +382,16 @@ export default function AutomationLane(props: AutomationLaneProps) {
         )}
       </Show>
     </div>
+  )
+
+  return (
+    <TimelineContextMenu
+      items={contextMenuItems}
+      onOpenChange={(open) => {
+        if (!open) setContextMenuPosition(null)
+      }}
+    >
+      {laneElement}
+    </TimelineContextMenu>
   )
 }

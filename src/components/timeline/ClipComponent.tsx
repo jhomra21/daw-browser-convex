@@ -9,6 +9,13 @@ import { LANE_HEIGHT, PPS } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import type { RuntimeClip } from "~/lib/timeline-runtime-types";
+import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
+
+export type ClipContextMenuActions = {
+  selectClip: (trackId: Track["id"], clipId: string) => void;
+  duplicateSelectedClips: () => void;
+  deleteSelectedClips: () => void;
+};
 
 type ClipComponentProps = {
   clip: RuntimeClip;
@@ -27,6 +34,7 @@ type ClipComponentProps = {
     e: PointerEvent,
   ) => void;
   onDblClick?: (trackId: Track["id"], clipId: string) => void;
+  contextMenu?: ClipContextMenuActions;
   onRetryMedia?: (clipId: string) => void;
   onReplaceMedia?: (trackId: Track["id"], clipId: string) => void;
   onRemoveMissingMedia?: (trackId: Track["id"], clipId: string) => void;
@@ -71,6 +79,53 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     ensureClipBuffer: props.ensureClipBuffer,
   });
   const isGhost = () => props.clip.id.startsWith("__dup_preview:");
+  const openClip = () => props.onDblClick?.(props.trackId, props.clip.id);
+  const selectClipForMenu = () => props.contextMenu?.selectClip(props.trackId, props.clip.id);
+  const contextMenuItems = (): TimelineContextMenuItem[] => {
+    const items: TimelineContextMenuItem[] = [
+      { kind: "label", label: props.clip.name },
+      { kind: "item", label: props.clip.midi ? "Open MIDI editor" : "Open sample editor", onSelect: openClip },
+      { kind: "separator" },
+      {
+        kind: "item",
+        label: "Duplicate",
+        shortcut: "⌘D",
+        disabled: !props.contextMenu,
+        onSelect: props.contextMenu?.duplicateSelectedClips,
+      },
+      {
+        kind: "item",
+        label: "Delete",
+        shortcut: "⌫",
+        disabled: !props.contextMenu,
+        onSelect: props.contextMenu?.deleteSelectedClips,
+      },
+    ];
+    if (mediaStatusLabel()) {
+      items.push(
+        { kind: "separator" },
+        {
+          kind: "item",
+          label: "Retry media",
+          disabled: !props.onRetryMedia,
+          onSelect: () => props.onRetryMedia?.(props.clip.id),
+        },
+        {
+          kind: "item",
+          label: "Replace media",
+          disabled: !props.onReplaceMedia,
+          onSelect: () => props.onReplaceMedia?.(props.trackId, props.clip.id),
+        },
+        {
+          kind: "item",
+          label: "Remove missing media clip",
+          disabled: !props.onRemoveMissingMedia,
+          onSelect: () => props.onRemoveMissingMedia?.(props.trackId, props.clip.id),
+        },
+      );
+    }
+    return items;
+  };
   const mediaStatusLabel = () => {
     if (props.clip.mediaStatus === "permission-denied") return "Permission needed";
     if (props.clip.mediaStatus === "missing") return "Missing media";
@@ -295,7 +350,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     drawWaveform();
   });
 
-  return (
+  const clipElement = (
     <div
       class={cn(
         "group absolute overflow-hidden border z-20 select-none",
@@ -422,6 +477,12 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         </div>
       </div>
     </div>
+  );
+
+  return (
+    <TimelineContextMenu items={contextMenuItems} onOpenChange={(open) => { if (open && !props.isSelected) selectClipForMenu(); }}>
+      {clipElement}
+    </TimelineContextMenu>
   );
 };
 

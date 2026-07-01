@@ -2,7 +2,7 @@ import { type Component, For } from 'solid-js'
 import { cn } from '~/lib/utils'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { LANE_HEIGHT } from '~/lib/timeline-utils'
-import ClipComponent from './ClipComponent'
+import ClipComponent, { type ClipContextMenuActions } from './ClipComponent'
 import AutomationLane from './automation-lane'
 import type { AutomationEnvelope } from '@daw-browser/shared'
 
@@ -16,6 +16,7 @@ type TrackLaneProps = {
   onClipResizeStart: (trackId: Track['id'], clipId: string, edge: 'left' | 'right', e: PointerEvent) => void
   isDropTarget?: boolean
   onClipDblClick?: (trackId: Track['id'], clipId: string) => void
+  clipContextMenu?: ClipContextMenuActions
   onRetryMedia?: (clipId: string) => void
   onReplaceMedia?: (trackId: Track['id'], clipId: string) => void
   onRemoveMissingMedia?: (trackId: Track['id'], clipId: string) => void
@@ -82,6 +83,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
             onPointerUp={props.onClipPointerUp}
             onResizeStart={props.onClipResizeStart}
             onDblClick={props.onClipDblClick}
+            contextMenu={props.clipContextMenu}
             onRetryMedia={props.onRetryMedia}
             onReplaceMedia={props.onReplaceMedia}
             onRemoveMissingMedia={props.onRemoveMissingMedia}

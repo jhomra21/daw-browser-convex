@@ -646,8 +646,10 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   const {
     onClipPointerUp,
+    deleteSelectedClips,
     duplicateSelectedClips,
     performDeleteTrack,
+    requestDeleteTrack,
     handleKeyboardAction,
   } = useTimelineClipActions({
     tracks: () => renderTracks(),
@@ -1177,6 +1179,15 @@ const Timeline: Component<TimelineProps> = (props) => {
         onClipPointerDown={onClipPointerDown}
         onClipPointerUp={onClipPointerUp}
         onClipResizeStart={onClipResizeStart}
+        clipContextMenu={{
+          selectClip: (trackId, clipId) => selection.selectPrimaryClip({ trackId, clipId }),
+          duplicateSelectedClips: () => {
+            void duplicateSelectedClips();
+          },
+          deleteSelectedClips: () => {
+            void deleteSelectedClips();
+          },
+        }}
         ensureClipBuffer={clipBuffers.preload}
         replaceMissingMediaClip={mediaRecovery.replaceMissingMediaClip}
         removeMissingMediaClip={mediaRecovery.removeMissingMediaClip}
@@ -1260,6 +1271,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           onToggleSolo: handleToggleTrackSolo,
           onSidebarPointerDown,
           onToggleRecordArm: handleToggleRecordArm,
+          onDeleteTrack: requestDeleteTrack,
         }}
         automation={automation.workspace()}
       />

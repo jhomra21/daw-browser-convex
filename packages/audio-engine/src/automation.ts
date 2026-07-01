@@ -2,7 +2,11 @@ import type { AutomationEnvelope } from '@daw-browser/shared'
 import { valueAtAutomationTime } from '@daw-browser/shared'
 
 export type AutomationAudioBinding = {
-  param: AudioParam
+  param: {
+    cancelScheduledValues: (startTime: number) => unknown
+    linearRampToValueAtTime: (value: number, endTime: number) => unknown
+    setValueAtTime: (value: number, startTime: number) => unknown
+  }
   valueToAudioValue: (value: number) => number
 }
 
@@ -21,6 +25,17 @@ export function scheduleAutomationEnvelope(
 ) {
   const startValue = valueAtAutomationTime(envelope.points, window.startLimitSec, fallbackValue)
   const startCtx = timelineToCtxTime(window.startLimitSec)
+  const endBoundaryPoint = envelope.points.find((point) => point.timeSec === window.endLimitSec)
+  const nextAfterEndIndex = envelope.points.findIndex((point) => point.timeSec > window.endLimitSec)
+  const nextAfterEnd = nextAfterEndIndex === -1 ? undefined : envelope.points[nextAfterEndIndex]
+  const previousBeforeEnd = nextAfterEndIndex <= 0 ? undefined : envelope.points[nextAfterEndIndex - 1]
+  const shouldRampToWindowEnd = Boolean(
+    !endBoundaryPoint
+      && nextAfterEnd
+      && previousBeforeEnd
+      && previousBeforeEnd.timeSec < window.endLimitSec
+      && previousBeforeEnd.interpolation === 'linear',
+  )
 
   for (const binding of bindings) {
     const param = binding.param
@@ -36,6 +51,11 @@ export function scheduleAutomationEnvelope(
       const value = binding.valueToAudioValue(point.value)
       if (!previous || previous.interpolation === 'hold') param.setValueAtTime(value, ctxTime)
       else param.linearRampToValueAtTime(value, ctxTime)
+    }
+
+    if (shouldRampToWindowEnd) {
+      const endValue = valueAtAutomationTime(envelope.points, window.endLimitSec, fallbackValue)
+      param.linearRampToValueAtTime(binding.valueToAudioValue(endValue), timelineToCtxTime(window.endLimitSec))
     }
   }
 }

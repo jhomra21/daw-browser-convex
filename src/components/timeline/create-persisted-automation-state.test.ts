@@ -14,6 +14,17 @@ const envelope: AutomationEnvelope = {
   updatedAt: 1,
 }
 
+const trackEnvelope: AutomationEnvelope = {
+  id: 'automation-2',
+  projectId: 'project-1',
+  target: { kind: 'track', trackId: 'track-1' },
+  targetKey: 'track:track-1:volume',
+  parameterId: 'volume',
+  enabled: true,
+  points: [],
+  updatedAt: 1,
+}
+
 describe('createPersistedAutomationState', () => {
   test('previews and commits an envelope through the provided adapter', async () => {
     await createRoot(async (dispose) => {
@@ -143,6 +154,40 @@ describe('createPersistedAutomationState', () => {
         { next: [envelope], previous: [envelope], changed: [] },
         { next: [], previous: [envelope], changed: [] },
       ])
+      dispose()
+    })
+  })
+
+  test('applies dirty drafts and remotely changed non-dirty envelopes during sync', async () => {
+    await createRoot(async (dispose) => {
+      const draftEnvelope = { ...envelope, updatedAt: 2 }
+      const remoteTrackEnvelope = { ...trackEnvelope, updatedAt: 2 }
+      let persisted: AutomationEnvelope[] = [envelope, trackEnvelope]
+      const applied: Array<{
+        next: AutomationEnvelope[]
+        previous: AutomationEnvelope[]
+        changed: string[]
+      }> = []
+      const state = createPersistedAutomationState({
+        targetKey: () => envelope.targetKey,
+        envelopes: () => persisted,
+        applyToEngine: (next, previous, changed) => {
+          applied.push({ next, previous, changed: [...changed] })
+        },
+        persistEnvelope: () => {},
+        deleteEnvelope: () => {},
+      })
+
+      state.syncRemote()
+      state.previewEnvelope(draftEnvelope)
+      persisted = [envelope, remoteTrackEnvelope]
+      state.syncRemote()
+
+      expect(applied.at(-1)).toEqual({
+        next: [draftEnvelope, remoteTrackEnvelope],
+        previous: [draftEnvelope, trackEnvelope],
+        changed: [envelope.targetKey, trackEnvelope.targetKey],
+      })
       dispose()
     })
   })

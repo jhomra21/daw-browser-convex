@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import {
   automationTargetKey,
@@ -16,7 +16,7 @@ const automationPointValidator = v.object({
 
 const targetKindValidator = v.union(v.literal("track"), v.literal("master"));
 
-const normalizeTrackId = async (ctx: any, projectId: string, trackId: string | undefined) => {
+const normalizeTrackId = async (ctx: MutationCtx, projectId: string, trackId: string | undefined) => {
   if (!trackId) return undefined;
   const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
   if (!normalizedTrackId) throw new Error("Invalid automation track id.");
@@ -26,7 +26,7 @@ const normalizeTrackId = async (ctx: any, projectId: string, trackId: string | u
 };
 
 const normalizeEnvelopeInput = async (
-  ctx: any,
+  ctx: MutationCtx,
   input: {
     projectId: string;
     targetKind: "track" | "master";

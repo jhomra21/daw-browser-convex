@@ -56,13 +56,27 @@ export function createPersistedAutomationState(options: PersistedAutomationState
     lastAppliedEnvelopes = nextEnvelopes
   }
 
+  const hasEnvelopeSchedulingChanged = (previous: AutomationEnvelope | undefined, next: AutomationEnvelope) => {
+    if (!previous) return true
+    if (previous.updatedAt !== next.updatedAt || previous.enabled !== next.enabled || previous.parameterId !== next.parameterId) return true
+    if (previous.points.length !== next.points.length) return true
+    return next.points.some((point, index) => {
+      const previousPoint = previous.points[index]
+      return !previousPoint
+        || previousPoint.id !== point.id
+        || previousPoint.timeSec !== point.timeSec
+        || previousPoint.value !== point.value
+        || previousPoint.interpolation !== point.interpolation
+    })
+  }
+
   const changedTargetKeysFromLastApplied = (nextEnvelopes: AutomationEnvelope[]) => {
     const previousByTargetKey = new Map(lastAppliedEnvelopes.map((envelope) => [envelope.targetKey, envelope]))
     const nextByTargetKey = new Map(nextEnvelopes.map((envelope) => [envelope.targetKey, envelope]))
     const changed = new Set<string>()
     for (const [targetKey, next] of nextByTargetKey) {
       const previous = previousByTargetKey.get(targetKey)
-      if (!previous || previous.updatedAt !== next.updatedAt || previous.enabled !== next.enabled) {
+      if (hasEnvelopeSchedulingChanged(previous, next)) {
         changed.add(targetKey)
       }
     }

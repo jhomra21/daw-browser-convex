@@ -46,7 +46,7 @@ export type TimelineWorkspaceAutomationModel = {
   lanes: {
     visibleByTrackId: Record<string, boolean>;
     visibleParameterIdsByTrackId: Record<string, string[]>;
-    heightsByTargetKey: Record<string, number>;
+    heightsByLaneOwnerKey: Record<string, number>;
     masterVisible: boolean;
     masterHeight: number;
     selectedParametersByTargetKey: Record<string, string>;
@@ -458,7 +458,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     lanes: {
       visibleByTrackId: visibleAutomationTracks.value(),
       visibleParameterIdsByTrackId: visibleAutomationLanes.value(),
-      heightsByTargetKey: automationLaneHeights.value(),
+      heightsByLaneOwnerKey: automationLaneHeights.value(),
       masterVisible: visibleAutomationTracks.value().master === true,
       masterHeight: automationLaneHeights.value().master ?? DEFAULT_AUTOMATION_LANE_HEIGHT,
       selectedParametersByTargetKey: selectedAutomationParameters.value(),

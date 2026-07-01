@@ -392,7 +392,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const automationMeta = () => automationMetaByTrackId().get(track.id);
             const automationVisible = () => props.automation?.lanes.visibleByTrackId[track.id] === true;
             const visibleAutomationParameterIds = () => props.automation?.lanes.visibleParameterIdsByTrackId[track.id] ?? [];
-            const automationHeight = () => props.automation?.lanes.heightsByTargetKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
+            const automationHeight = () => props.automation?.lanes.heightsByLaneOwnerKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
             const automationTotalHeight = () => automationVisible() ? automationHeight() * Math.max(1, visibleAutomationParameterIds().length) : 0;
             const canAddAutomationLane = () => {
               if (!automationVisible()) return false;

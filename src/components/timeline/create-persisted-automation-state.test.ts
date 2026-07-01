@@ -183,6 +183,47 @@ describe('createPersistedAutomationState', () => {
     })
   })
 
+  test('applies remote point changes even when updatedAt is unchanged', async () => {
+    await createRoot(async (dispose) => {
+      let persisted: AutomationEnvelope[] = [envelope]
+      const remotePoint: AutomationEnvelope['points'][number] = {
+        id: 'point-1',
+        timeSec: 1,
+        value: 0.5,
+        interpolation: 'linear',
+      }
+      const remoteEnvelope = {
+        ...envelope,
+        points: [remotePoint],
+      }
+      const applied: Array<{
+        next: AutomationEnvelope[]
+        previous: AutomationEnvelope[]
+        changed: string[]
+      }> = []
+      const state = createPersistedAutomationState({
+        targetKey: () => envelope.targetKey,
+        envelopes: () => persisted,
+        applyToEngine: (next, previous, changed) => {
+          applied.push({ next, previous, changed: [...changed] })
+        },
+        persistEnvelope: () => {},
+        deleteEnvelope: () => {},
+      })
+
+      state.syncRemote()
+      persisted = [remoteEnvelope]
+      state.syncRemote()
+
+      expect(applied.at(-1)).toEqual({
+        next: [remoteEnvelope],
+        previous: [envelope],
+        changed: [envelope.targetKey],
+      })
+      dispose()
+    })
+  })
+
   test('applies dirty drafts and remotely changed non-dirty envelopes during sync', async () => {
     await createRoot(async (dispose) => {
       const draftEnvelope = { ...envelope, updatedAt: 2 }

@@ -124,7 +124,7 @@ export default function TimelineWorkspace(props: Props) {
     let topPx = 0;
     return props.tracks.map((track) => {
       const automationHeight = props.automation.lanes.visibleByTrackId[track.id] === true
-        ? (props.automation.lanes.heightsByTargetKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT)
+        ? (props.automation.lanes.heightsByLaneOwnerKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT)
           * (props.automation.lanes.visibleParameterIdsByTrackId[track.id]?.length || 1)
         : 0;
       const row = {
@@ -197,7 +197,7 @@ export default function TimelineWorkspace(props: Props) {
                 {(track, i) => (
                   (() => {
                     const visibleParameterIds = () => props.automation.lanes.visibleParameterIdsByTrackId[track.id] ?? [];
-                    const laneHeight = () => props.automation.lanes.heightsByTargetKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
+                    const laneHeight = () => props.automation.lanes.heightsByLaneOwnerKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
                     return (
                       <TrackLane
                         track={track}

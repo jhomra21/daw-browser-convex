@@ -10,7 +10,7 @@ export const EditMenu: Component<{ toolbar: TransportControlsProps }> = (props) 
   return (
     <MenubarMenu value="edit">
       <NativeMenuTrigger label="Edit" />
-      <MenubarContent class="w-44 border-neutral-800 bg-neutral-900">
+      <MenubarContent class="border-neutral-800 bg-neutral-900">
         <MenubarItem class={nativeMenuItemClass} onSelect={toolbar().onUndo}>
           <span>Undo</span>
           <MenubarShortcut>Ctrl/Cmd + Z</MenubarShortcut>
@@ -45,4 +45,3 @@ export const EditMenu: Component<{ toolbar: TransportControlsProps }> = (props) 
     </MenubarMenu>
   );
 };
-

@@ -28,7 +28,7 @@ export const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) 
   return (
     <MenubarMenu value="file">
       <NativeMenuTrigger label="File" />
-      <MenubarContent class="w-64 border-neutral-800 bg-neutral-900">
+      <MenubarContent class="border-neutral-800 bg-neutral-900">
         <MenubarItem
           class={nativeMenuItemClass}
           onSelect={() => void toolbar().projectMenu.onCreateProject()}
@@ -102,4 +102,3 @@ export const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) 
     </MenubarMenu>
   );
 };
-

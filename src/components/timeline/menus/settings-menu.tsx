@@ -11,7 +11,7 @@ export const SettingsMenu: Component<{ toolbar: TransportControlsProps }> = (pro
   return (
     <MenubarMenu value="settings">
       <NativeMenuTrigger label="Settings" />
-      <MenubarContent class="w-56 border-neutral-800 bg-neutral-900">
+      <MenubarContent class="border-neutral-800 bg-neutral-900">
         <MenubarItem class={nativeMenuItemClass} onSelect={() => toolbar().projectMenu.onOpenDashboard("general")}>
           Dashboard settings
         </MenubarItem>
@@ -26,4 +26,3 @@ export const SettingsMenu: Component<{ toolbar: TransportControlsProps }> = (pro
     </MenubarMenu>
   );
 };
-

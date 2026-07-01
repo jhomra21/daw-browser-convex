@@ -137,7 +137,7 @@ const MenubarContent = <T extends ValidComponent = "div">(
     <MenubarPrimitive.Portal>
       <MenubarPrimitive.Content
         class={cn(
-          "z-50 min-w-32 max-h-(--kb-menu-content-available-height) overflow-y-auto overflow-x-hidden border bg-popover p-0.5 text-xs text-popover-foreground shadow-md outline-none",
+          "z-50 w-max min-w-32 max-h-(--kb-menu-content-available-height) overflow-y-auto overflow-x-hidden border bg-popover p-0.5 text-xs text-popover-foreground shadow-md outline-none",
           shouldAnimate()
             ? "origin-[var(--kb-menu-content-transform-origin)] data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0 data-[closed]:zoom-out-95 data-[expanded]:zoom-in-95 data-[placement=bottom]:slide-in-from-top-2 data-[placement=left]:slide-in-from-right-2 data-[placement=right]:slide-in-from-left-2 data-[placement=top]:slide-in-from-bottom-2"
             : "data-[closed]:hidden",
@@ -165,7 +165,7 @@ const MenubarItem = <T extends ValidComponent = "div">(
   return (
     <MenubarPrimitive.Item
       class={cn(
-        "relative flex min-h-6 cursor-default select-none items-center gap-2 px-2 py-0.5 leading-5 outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-3.5 [&>svg]:shrink-0",
+        "relative flex min-h-6 cursor-default select-none items-center gap-2 whitespace-nowrap px-2 py-0.5 leading-5 outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-3.5 [&>svg]:shrink-0",
         local.inset && "pl-6",
         local.class,
       )}
@@ -178,7 +178,7 @@ const MenubarShortcut: Component<ComponentProps<"span">> = (props) => {
   const [local, rest] = splitProps(props, ["class"]);
   return (
     <span
-      class={cn("ml-auto pl-4 text-[11px] tracking-wide opacity-60", local.class)}
+      class={cn("ml-auto shrink-0 whitespace-nowrap pl-4 text-[11px] tracking-wide opacity-60", local.class)}
       {...rest}
     />
   );

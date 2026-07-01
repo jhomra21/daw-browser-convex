@@ -24,7 +24,7 @@ export const ViewMenu: Component<ViewMenuProps> = (props) => {
   return (
     <MenubarMenu value="view">
       <NativeMenuTrigger label="View" />
-      <MenubarContent class="w-64 border-neutral-800 bg-neutral-900">
+      <MenubarContent class="border-neutral-800 bg-neutral-900">
         <For each={timelineBrowserTabs}>
           {(tab) => (
             <MenubarItem class={viewMenuItemClass} onSelect={() => selectBrowserTab(tab)}>

@@ -23,7 +23,7 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
   function onKeyDown(e: KeyboardEvent) {
     if (!handlers.enabled()) return;
 
-    if (isEditableKeyboardTarget(e.target) || isLocalTimelineKeyboardTarget(e.target)) return;
+    if (isEditableKeyboardTarget(e.target)) return;
 
 
     if (
@@ -134,6 +134,7 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
       e.stopPropagation();
       handlers.onSpace();
     } else if (e.key === "Delete" || e.key === "Backspace") {
+      if (isLocalTimelineKeyboardTarget(e.target)) return;
       e.preventDefault();
       e.stopPropagation();
       handlers.onDelete();

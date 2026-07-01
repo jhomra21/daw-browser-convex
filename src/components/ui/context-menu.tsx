@@ -98,7 +98,7 @@ const ContextMenuSubTrigger: Component<ContextMenuSubTriggerProps> = (props) => 
   return (
     <ContextMenuPrimitive.SubTrigger
       class={cn(
-        "flex min-h-6 cursor-default select-none items-center gap-2 px-2 py-0.5 text-xs leading-5 outline-none focus:bg-neutral-800 data-[state=open]:bg-neutral-800 [&_svg]:pointer-events-none [&_svg]:size-3.5 [&_svg]:shrink-0",
+        "flex min-h-6 cursor-default select-none items-center gap-2 px-2 py-0.5 text-xs leading-5 outline-none focus:bg-neutral-800 data-[expanded]:bg-neutral-800 [&_svg]:pointer-events-none [&_svg]:size-3.5 [&_svg]:shrink-0",
         local.inset && "pl-6",
         local.class,
       )}

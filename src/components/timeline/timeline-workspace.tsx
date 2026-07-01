@@ -117,7 +117,7 @@ type Props = {
     onToggleSolo: (trackId: Track["id"]) => void;
     onSidebarPointerDown: (event: PointerEvent) => void;
     onToggleRecordArm: (trackId: Track["id"]) => void;
-    onDeleteTrack?: (trackId: Track["id"]) => void;
+    onDeleteTrack: (trackId: Track["id"]) => void;
   };
   automation: TimelineWorkspaceAutomationModel;
 };

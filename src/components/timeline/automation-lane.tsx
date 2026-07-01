@@ -179,6 +179,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
 
   const startDrag = (pointId: string, event: PointerEvent) => {
     event.stopPropagation()
+    if (event.button !== 0) return
     event.preventDefault()
     root?.focus()
     setSelectedPointId(pointId)
@@ -340,6 +341,10 @@ export default function AutomationLane(props: AutomationLaneProps) {
           {(point) => (
             <g
               onPointerDown={(event) => startDrag(point.id, event)}
+              onContextMenu={(event) => {
+                setSelectedPointId(point.id)
+                setContextMenuPosition({ clientX: event.clientX, clientY: event.clientY })
+              }}
               onDblClick={(event) => event.stopPropagation()}
               onPointerEnter={() => setHoveredPointId(point.id)}
               onPointerLeave={() => setHoveredPointId((current) => current === point.id ? null : current)}

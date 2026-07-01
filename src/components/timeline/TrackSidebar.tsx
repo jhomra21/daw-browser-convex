@@ -57,9 +57,9 @@ type TrackSidebarProps = {
       volume: number,
       muted: boolean,
     ) => void;
-    onDeleteTrack?: (trackId: Track["id"]) => void;
+    onDeleteTrack: (trackId: Track["id"]) => void;
   };
-  automation?: TimelineWorkspaceAutomationModel;
+  automation: TimelineWorkspaceAutomationModel;
 };
 
 const clampUnit = (value: number) => Math.max(0, Math.min(1, value));
@@ -135,14 +135,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       volumeRange?: { min: number; max: number };
       volumeEnvelope?: AutomationEnvelope;
     }>();
-    const automation = props.automation;
-    if (!automation) return byTrackId;
     const mutable = new Map<string, {
       automatedParameterIds: Set<string>;
       volumeRange?: { min: number; max: number };
       volumeEnvelope?: AutomationEnvelope;
     }>();
-    for (const envelope of automation.envelopes.byTargetKey.values()) {
+    for (const envelope of props.automation.envelopes.byTargetKey.values()) {
       if (envelope.target.kind !== "track") continue;
       const existing = mutable.get(envelope.target.trackId) ?? { automatedParameterIds: new Set<string>() };
       existing.automatedParameterIds.add(envelope.parameterId);
@@ -161,7 +159,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     automatedParameterIds: Set<string>;
     selectedEnvelope: AutomationEnvelope | undefined;
   }>(() => {
-    const automation = props.automation;
     const meta: {
       automatedParameterIds: Set<string>;
       selectedEnvelope: AutomationEnvelope | undefined;
@@ -169,10 +166,9 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       automatedParameterIds: new Set<string>(),
       selectedEnvelope: undefined,
     };
-    if (!automation) return meta;
-    const selectedParameter = automation.lanes.selectedParametersByTargetKey.master ?? "volume";
+    const selectedParameter = props.automation.lanes.selectedParametersByTargetKey.master ?? "volume";
     const selectedTargetKey = automationTargetKey({ kind: "master" }, selectedParameter);
-    for (const envelope of automation.envelopes.byTargetKey.values()) {
+    for (const envelope of props.automation.envelopes.byTargetKey.values()) {
       if (envelope.target.kind !== "master") continue;
       meta.automatedParameterIds.add(envelope.parameterId);
       if (envelope.targetKey === selectedTargetKey) meta.selectedEnvelope = envelope;
@@ -180,7 +176,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     return meta;
   });
   const masterRowReservedHeight = () => (
-    MASTER_ROW_HEIGHT + (props.automation?.lanes.masterVisible ? props.automation.lanes.masterHeight : 0)
+    MASTER_ROW_HEIGHT + (props.automation.lanes.masterVisible ? props.automation.lanes.masterHeight : 0)
   );
   const actualOutputTargetId = (track: Track) => track.outputTargetId ?? "";
   const selectedOutputTargetId = (track: Track) =>
@@ -317,7 +313,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     event.stopPropagation();
     const startY = event.clientY;
     const move = (moveEvent: PointerEvent) => {
-      props.automation?.actions.resizeTrackLane(
+      props.automation.actions.resizeTrackLane(
         trackId,
         clampAutomationLaneHeight(startHeight + moveEvent.clientY - startY),
       );
@@ -388,13 +384,13 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const muted = () => !!track.muted;
             const soloed = () => !!track.soloed;
             const currentSendTargetId = () => selectedSendTargetId(track);
-            const selectedAutomationParameter = () => props.automation?.lanes.selectedParametersByTargetKey[track.id] ?? "volume";
+            const selectedAutomationParameter = () => props.automation.lanes.selectedParametersByTargetKey[track.id] ?? "volume";
             const selectedAutomationTargetKey = () => automationTargetKey({ kind: "track", trackId: track.id }, selectedAutomationParameter());
-            const selectedAutomationEnvelope = () => props.automation?.envelopes.byTargetKey.get(selectedAutomationTargetKey());
+            const selectedAutomationEnvelope = () => props.automation.envelopes.byTargetKey.get(selectedAutomationTargetKey());
             const automationMeta = () => automationMetaByTrackId().get(track.id);
-            const automationVisible = () => props.automation?.lanes.visibleByTrackId[track.id] === true;
-            const visibleAutomationParameterIds = () => props.automation?.lanes.visibleParameterIdsByTrackId[track.id] ?? [];
-            const automationHeight = () => props.automation?.lanes.heightsByLaneOwnerKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
+            const automationVisible = () => props.automation.lanes.visibleByTrackId[track.id] === true;
+            const visibleAutomationParameterIds = () => props.automation.lanes.visibleParameterIdsByTrackId[track.id] ?? [];
+            const automationHeight = () => props.automation.lanes.heightsByLaneOwnerKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
             const automationTotalHeight = () => automationVisible() ? automationHeight() * Math.max(1, visibleAutomationParameterIds().length) : 0;
             const canAddAutomationLane = () => {
               if (!automationVisible()) return false;
@@ -428,21 +424,20 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               {
                 kind: "item",
                 label: automationVisible() ? "Hide automation lane" : "Show automation lane",
-                onSelect: () => props.automation?.actions.toggleTrackVisibility(track.id),
+                onSelect: () => props.automation.actions.toggleTrackVisibility(track.id),
               },
               {
                 kind: "item",
                 label: "Add automation lane",
                 disabled: !canAddAutomationLane(),
-                onSelect: () => props.automation?.actions.addTrackLane(track.id),
+                onSelect: () => props.automation.actions.addTrackLane(track.id),
               },
               { kind: "separator" },
               {
                 kind: "item",
                 label: "Delete track",
                 shortcut: "⌫",
-                disabled: !sidebar().onDeleteTrack,
-                onSelect: () => sidebar().onDeleteTrack?.(track.id),
+                onSelect: () => sidebar().onDeleteTrack(track.id),
               },
             ];
 
@@ -675,7 +670,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           )}
                           onClick={(event) => {
                             event.stopPropagation();
-                            props.automation?.actions.toggleTrackVisibility(track.id);
+                            props.automation.actions.toggleTrackVisibility(track.id);
                           }}
                           title={automationVisible() ? "Hide automation lane" : "Show automation lane"}
                         >
@@ -692,7 +687,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           onClick={(event) => {
                             event.stopPropagation();
                             if (!canAddAutomationLane()) return;
-                            props.automation?.actions.addTrackLane(track.id);
+                            props.automation.actions.addTrackLane(track.id);
                           }}
                           title={automationVisible() ? "Add another automation lane" : "Show automation with A before adding lanes"}
                         >
@@ -719,7 +714,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           onClick={(event) => event.stopPropagation()}
                           onPointerDown={(event) => {
                             event.stopPropagation();
-                            props.automation?.actions.selectParameter(track.id, "volume");
+                            props.automation.actions.selectParameter(track.id, "volume");
                             if (volumeDisabled) return;
                             event.preventDefault();
                             const startValue = quantizeVolume(track.volume ?? 0.8);
@@ -858,7 +853,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     <For each={visibleAutomationParameterIds()}>
                       {(parameterId) => {
                         const targetKey = () => automationTargetKey({ kind: "track", trackId: track.id }, parameterId);
-                        const envelope = () => props.automation?.envelopes.byTargetKey.get(targetKey());
+                        const envelope = () => props.automation.envelopes.byTargetKey.get(targetKey());
                         return (
                           <div
                             class="grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-b border-red-500/20 px-2"
@@ -872,9 +867,9 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                               value={parameterId}
                               automatedParameterIds={automationMeta()?.automatedParameterIds}
                               onChange={(nextParameterId) => {
-                                props.automation?.actions.hideTrackLane(track.id, parameterId);
-                                props.automation?.actions.showTrackLane(track.id, nextParameterId);
-                                props.automation?.actions.selectParameter(track.id, nextParameterId);
+                                props.automation.actions.hideTrackLane(track.id, parameterId);
+                                props.automation.actions.showTrackLane(track.id, nextParameterId);
+                                props.automation.actions.selectParameter(track.id, nextParameterId);
                               }}
                             />
                             <div class="flex items-center justify-end gap-2 text-red-200/70">
@@ -884,7 +879,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                                 class="h-5 w-5 border border-red-500/30 text-red-100 hover:border-red-400"
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  props.automation?.actions.hideTrackLane(track.id, parameterId);
+                                  props.automation.actions.hideTrackLane(track.id, parameterId);
                                 }}
                                 title="Hide automation lane"
                               >
@@ -914,7 +909,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
           master={sidebar().master}
           sidebarWidth={sidebar().sidebarWidth}
           bottomOffsetPx={sidebar().bottomOffsetPx}
-          automation={props.automation ? {
+          automation={{
             visible: props.automation.lanes.masterVisible,
             heightPx: props.automation.lanes.masterHeight,
             selectedParameterId: props.automation.lanes.selectedParametersByTargetKey.master ?? "volume",
@@ -922,8 +917,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             selectedEnvelope: masterAutomationMeta().selectedEnvelope,
             onToggleVisibility: props.automation.actions.toggleMasterVisibility,
             onResizeLane: props.automation.actions.resizeMasterLane,
-            onSelectParameter: (parameterId) => props.automation?.actions.selectParameter("master", parameterId),
-          } : undefined}
+            onSelectParameter: (parameterId) => props.automation.actions.selectParameter("master", parameterId),
+          }}
         />
       </div>
     </>

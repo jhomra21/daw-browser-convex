@@ -34,10 +34,10 @@ type ClipComponentProps = {
     e: PointerEvent,
   ) => void;
   onDblClick?: (trackId: Track["id"], clipId: string) => void;
-  contextMenu?: ClipContextMenuActions;
-  onRetryMedia?: (clipId: string) => void;
-  onReplaceMedia?: (trackId: Track["id"], clipId: string) => void;
-  onRemoveMissingMedia?: (trackId: Track["id"], clipId: string) => void;
+  contextMenu: ClipContextMenuActions;
+  onRetryMedia: (clipId: string) => void;
+  onReplaceMedia: (trackId: Track["id"], clipId: string) => void;
+  onRemoveMissingMedia: (trackId: Track["id"], clipId: string) => void;
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>;
   bpm: number;
   viewportRedrawVersion: number;
@@ -80,7 +80,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
   });
   const isGhost = () => props.clip.id.startsWith("__dup_preview:");
   const openClip = () => props.onDblClick?.(props.trackId, props.clip.id);
-  const selectClipForMenu = () => props.contextMenu?.selectClip(props.trackId, props.clip.id);
+  const selectClipForMenu = () => props.contextMenu.selectClip(props.trackId, props.clip.id);
   const contextMenuItems = (): TimelineContextMenuItem[] => {
     const items: TimelineContextMenuItem[] = [
       { kind: "label", label: props.clip.name },
@@ -90,15 +90,13 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         kind: "item",
         label: "Duplicate",
         shortcut: "⌘D",
-        disabled: !props.contextMenu,
-        onSelect: props.contextMenu?.duplicateSelectedClips,
+        onSelect: props.contextMenu.duplicateSelectedClips,
       },
       {
         kind: "item",
         label: "Delete",
         shortcut: "⌫",
-        disabled: !props.contextMenu,
-        onSelect: props.contextMenu?.deleteSelectedClips,
+        onSelect: props.contextMenu.deleteSelectedClips,
       },
     ];
     if (mediaStatusLabel()) {
@@ -107,20 +105,17 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         {
           kind: "item",
           label: "Retry media",
-          disabled: !props.onRetryMedia,
-          onSelect: () => props.onRetryMedia?.(props.clip.id),
+          onSelect: () => props.onRetryMedia(props.clip.id),
         },
         {
           kind: "item",
           label: "Replace media",
-          disabled: !props.onReplaceMedia,
-          onSelect: () => props.onReplaceMedia?.(props.trackId, props.clip.id),
+          onSelect: () => props.onReplaceMedia(props.trackId, props.clip.id),
         },
         {
           kind: "item",
           label: "Remove missing media clip",
-          disabled: !props.onRemoveMissingMedia,
-          onSelect: () => props.onRemoveMissingMedia?.(props.trackId, props.clip.id),
+          onSelect: () => props.onRemoveMissingMedia(props.trackId, props.clip.id),
         },
       );
     }
@@ -367,6 +362,11 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         height: `${LANE_HEIGHT - 1}px`,
       }}
       onPointerDown={(e) => {
+        if (e.button !== 0) {
+          e.stopPropagation();
+          selectedTapStart = undefined;
+          return;
+        }
         if (e.detail >= 2 || isDoubleTap(e)) {
           e.stopPropagation();
           e.preventDefault();
@@ -385,6 +385,11 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         openFromDoubleTap();
       }}
       onPointerUp={(e) => {
+        if (e.button !== 0) {
+          e.stopPropagation();
+          selectedTapStart = undefined;
+          return;
+        }
         props.onPointerUp(props.trackId, props.clip.id, e);
         const start = selectedTapStart;
         selectedTapStart = undefined;
@@ -403,6 +408,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         style={{ width: `${handleWidthPx()}px` }}
         onPointerDown={(e) => {
           e.stopPropagation();
+          if (e.button !== 0) return;
           props.onResizeStart(props.trackId, props.clip.id, "left", e);
         }}
       >
@@ -415,6 +421,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         style={{ width: `${handleWidthPx()}px` }}
         onPointerDown={(e) => {
           e.stopPropagation();
+          if (e.button !== 0) return;
           props.onResizeStart(props.trackId, props.clip.id, "right", e);
         }}
       >
@@ -438,7 +445,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
             class="border border-red-300/40 px-1 py-0.5 text-[9px] text-red-50 hover:bg-red-300/20"
             onClick={(event) => {
               event.stopPropagation();
-              props.onRetryMedia?.(props.clip.id);
+              props.onRetryMedia(props.clip.id);
             }}
           >
             Retry
@@ -447,7 +454,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
             class="border border-red-300/40 px-1 py-0.5 text-[9px] text-red-50 hover:bg-red-300/20"
             onClick={(event) => {
               event.stopPropagation();
-              props.onReplaceMedia?.(props.trackId, props.clip.id);
+              props.onReplaceMedia(props.trackId, props.clip.id);
             }}
           >
             Replace
@@ -456,7 +463,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
             class="border border-red-300/40 px-1 py-0.5 text-[9px] text-red-50 hover:bg-red-300/20"
             onClick={(event) => {
               event.stopPropagation();
-              props.onRemoveMissingMedia?.(props.trackId, props.clip.id);
+              props.onRemoveMissingMedia(props.trackId, props.clip.id);
             }}
           >
             Remove

@@ -1,4 +1,4 @@
-import { For, Show, createSignal, type Component, type JSX } from "solid-js";
+import { For, Show, type Component, type JSX } from "solid-js";
 
 import {
   ContextMenu,
@@ -68,16 +68,11 @@ const TimelineContextMenuEntry: Component<{ item: TimelineContextMenuItem }> = (
 };
 
 const TimelineContextMenu: Component<TimelineContextMenuProps> = (props) => {
-  const [open, setOpen] = createSignal(false);
-
   return (
     <ContextMenu
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
-        props.onOpenChange?.(nextOpen);
-      }}
+      onOpenChange={props.onOpenChange}
     >
-      <ContextMenuTrigger class="contents">
+      <ContextMenuTrigger class="contents" onContextMenu={(event) => event.stopPropagation()}>
         <div
           class="contents"
           on:contextmenu={(event) => {
@@ -87,13 +82,11 @@ const TimelineContextMenu: Component<TimelineContextMenuProps> = (props) => {
           {props.children}
         </div>
       </ContextMenuTrigger>
-      <Show when={open()}>
-        <ContextMenuContent class="min-w-40">
-          <For each={props.items()}>
-            {(item) => <TimelineContextMenuEntry item={item} />}
-          </For>
-        </ContextMenuContent>
-      </Show>
+      <ContextMenuContent class="min-w-40">
+        <For each={props.items()}>
+          {(item) => <TimelineContextMenuEntry item={item} />}
+        </For>
+      </ContextMenuContent>
     </ContextMenu>
   );
 };

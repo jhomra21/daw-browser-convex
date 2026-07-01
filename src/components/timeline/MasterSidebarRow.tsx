@@ -2,7 +2,7 @@ import { type Component, Show, createMemo, createSignal, onCleanup } from "solid
 import { automationEnvelopeValueRange, type AutomationEnvelope } from "@daw-browser/shared";
 import { normalizeMasterVolume } from "@daw-browser/shared";
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
-import { DEFAULT_AUTOMATION_LANE_HEIGHT, LANE_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
+import { LANE_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import AutomationParameterPicker from "./automation-parameter-picker";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
@@ -23,7 +23,7 @@ type MasterSidebarRowProps = {
   master: MasterSidebarModel;
   sidebarWidth: number;
   bottomOffsetPx: number;
-  automation?: {
+  automation: {
     visible: boolean;
     heightPx: number;
     selectedParameterId: string;
@@ -58,23 +58,21 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
     setActiveVolume(undefined);
     master().onVolumePreview(committedVolume());
   };
-  const automationHeight = () => props.automation?.heightPx ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
-  const rowHeight = () => MASTER_ROW_HEIGHT + (props.automation?.visible ? automationHeight() : 0);
-  const volumeAutomated = () => props.automation?.automatedParameterIds.has("volume") ?? false;
+  const automationHeight = () => props.automation.heightPx;
+  const rowHeight = () => MASTER_ROW_HEIGHT + (props.automation.visible ? automationHeight() : 0);
+  const volumeAutomated = () => props.automation.automatedParameterIds.has("volume");
   const volumeEnvelope = createMemo(() => (
-    props.automation?.selectedParameterId === "volume" ? props.automation.selectedEnvelope : undefined
+    props.automation.selectedParameterId === "volume" ? props.automation.selectedEnvelope : undefined
   ));
   const volumeRange = () => volumeEnvelope() ? automationEnvelopeValueRange(volumeEnvelope(), { min: 0, max: 1 }) : undefined;
   let cleanupAutomationResize: (() => void) | undefined;
   const startAutomationResize = (event: PointerEvent) => {
-    const automation = props.automation;
-    if (!automation) return;
     event.preventDefault();
     event.stopPropagation();
     const startY = event.clientY;
     const startHeight = automationHeight();
     const move = (moveEvent: PointerEvent) => {
-      automation.onResizeLane(clampAutomationLaneHeight(startHeight + moveEvent.clientY - startY));
+      props.automation.onResizeLane(clampAutomationLaneHeight(startHeight + moveEvent.clientY - startY));
     };
     const cleanup = () => {
       window.removeEventListener("pointermove", move);
@@ -95,9 +93,8 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
     { kind: "item", label: "Open effects", onSelect: master().onClick },
     {
       kind: "item",
-      label: props.automation?.visible ? "Hide master automation lane" : "Show master automation lane",
-      disabled: !props.automation,
-      onSelect: () => props.automation?.onToggleVisibility(),
+      label: props.automation.visible ? "Hide master automation lane" : "Show master automation lane",
+      onSelect: props.automation.onToggleVisibility,
     },
   ];
 
@@ -155,7 +152,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
                     "--track-volume-automation-end": `${(volumeRange()?.max ?? 0) * 100}%`,
                   }}
                   onClick={(event) => event.stopPropagation()}
-                  onPointerDown={() => props.automation?.onSelectParameter("volume")}
+                  onPointerDown={() => props.automation.onSelectParameter("volume")}
                   onInput={(event) => {
                     event.stopPropagation();
                     previewVolume(parseFloat(event.currentTarget.value));
@@ -174,15 +171,15 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
             <button
               class={cn(
                 "h-7 w-7 shrink-0 border text-xs font-semibold transition-colors",
-                props.automation?.visible
+                props.automation.visible
                   ? "border-red-400 bg-red-500/90 text-black"
                   : "border-neutral-700 bg-neutral-800 text-red-300 hover:bg-red-500/20",
               )}
               onClick={(event) => {
                 event.stopPropagation();
-                props.automation?.onToggleVisibility();
+                props.automation.onToggleVisibility();
               }}
-              title={props.automation?.visible ? "Hide master automation lane" : "Show master automation lane"}
+              title={props.automation.visible ? "Hide master automation lane" : "Show master automation lane"}
             >
               A
             </button>
@@ -190,31 +187,29 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
           <div class="h-8 w-[12px] shrink-0 bg-neutral-950/70" />
         </div>
       </div>
-      <Show when={props.automation?.visible && props.automation}>
-        {(automation) => (
+      <Show when={props.automation.visible}>
+        <div
+          class="relative grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-t border-red-500/30 bg-neutral-950/95 px-2 text-[11px] text-red-100"
+          style={{ height: `${automationHeight()}px` }}
+          onClick={(event) => event.stopPropagation()}
+        >
           <div
-            class="relative grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-t border-red-500/30 bg-neutral-950/95 px-2 text-[11px] text-red-100"
-            style={{ height: `${automationHeight()}px` }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div
-              class="absolute inset-x-0 top-0 h-2 -translate-y-1/2 cursor-row-resize"
-              onPointerDown={startAutomationResize}
-            />
-            <div class="flex items-center gap-1 overflow-hidden">
-              <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" classList={{ "opacity-30": !automation().selectedEnvelope }} />
-              <span class="truncate">Automation</span>
-            </div>
-            <AutomationParameterPicker
-              value={automation().selectedParameterId}
-              automatedParameterIds={automation().automatedParameterIds}
-              onChange={automation().onSelectParameter}
-            />
-            <div class="truncate text-right text-red-200/70">
-              {automation().selectedEnvelope?.points.length ?? 0} pts
-            </div>
+            class="absolute inset-x-0 top-0 h-2 -translate-y-1/2 cursor-row-resize"
+            onPointerDown={startAutomationResize}
+          />
+          <div class="flex items-center gap-1 overflow-hidden">
+            <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" classList={{ "opacity-30": !props.automation.selectedEnvelope }} />
+            <span class="truncate">Automation</span>
           </div>
-        )}
+          <AutomationParameterPicker
+            value={props.automation.selectedParameterId}
+            automatedParameterIds={props.automation.automatedParameterIds}
+            onChange={props.automation.onSelectParameter}
+          />
+          <div class="truncate text-right text-red-200/70">
+            {props.automation.selectedEnvelope?.points.length ?? 0} pts
+          </div>
+        </div>
       </Show>
     </div>
   );

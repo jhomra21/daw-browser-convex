@@ -792,6 +792,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     HTMLDivElement,
     PointerEvent
   > = (event) => {
+    if (event.button !== 0) return;
     if (
       event.target instanceof Element &&
       event.target.closest('[data-timeline-ruler="1"]')

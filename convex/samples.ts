@@ -56,3 +56,26 @@ export const removeFromRoom = mutation({
     await ctx.db.delete(row._id)
   },
 })
+
+export const moveToFolder = mutation({
+  args: {
+    projectId: v.string(),
+    assetKey: v.string(),
+    folderId: v.optional(v.string()),
+  },
+  handler: async (ctx, { projectId, assetKey, folderId }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const row = await findSampleRow(ctx, { projectId, assetKey })
+    if (!row) return null
+    await requireProjectRole(ctx, projectId, userId, ['owner', 'editor'])
+    if (folderId) {
+      const folders = await ctx.db
+        .query('assetFolders')
+        .withIndex('by_project', q => q.eq('projectId', projectId))
+        .collect()
+      if (!folders.some((folder) => String(folder._id) === folderId)) return null
+    }
+    await ctx.db.patch(row._id, { folderId })
+    return row._id
+  },
+})

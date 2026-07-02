@@ -19,6 +19,8 @@ export type BrowserItem = {
   subtitle?: string;
   searchText: string;
   disabled?: boolean;
+  assetKey?: string;
+  folderId?: string;
 };
 
 export type BrowserLeafRow = {
@@ -32,6 +34,7 @@ export type BrowserFolderRow = {
   source: BrowserItemSource;
   label: string;
   searchText: string;
+  folderId?: string;
   children: BrowserTreeRow[];
 };
 
@@ -47,8 +50,15 @@ export type BrowserTreeExpansionState = Record<string, boolean>;
 
 export type BrowserAssetsModel = {
   sections: Accessor<BrowserSection[]>;
+  folderOptions: Accessor<Array<{ id: string; name: string }>>;
   onInsert: (itemId: string) => void;
   onDragStart: (event: DragEvent, itemId: string) => void;
+  onCreateFolder: () => void;
+  onRenameFolder: (folderId: string) => void;
+  onDeleteFolder: (folderId: string) => void;
+  onMoveSampleToFolder: (itemId: string, folderId: string | undefined) => void;
+  sampleFolderId: (itemId: string) => string | undefined;
+  folderSampleCount: (folderId: string) => number;
 };
 
 export type BrowserDevicesModel = {

@@ -1,13 +1,21 @@
 import { createMemo, type Accessor } from "solid-js";
-import { useProjectSamples } from "~/hooks/useProjectSamples";
+import { useProjectAssetFolders, useProjectSamples, type ProjectAssetFolder } from "~/hooks/useProjectSamples";
 import type { TimelineLeftBrowserState } from "~/components/timeline/browser/browser-types";
-import type { BrowserItem, BrowserItemSource, BrowserSection, TimelineLeftBrowserModel } from "~/components/timeline/browser/browser-types";
+import type { BrowserFolderRow, BrowserItem, BrowserItemSource, BrowserSection, TimelineLeftBrowserModel, BrowserTreeRow } from "~/components/timeline/browser/browser-types";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData, type SampleDragData } from "~/lib/sample-drag-data";
 import { createBrowserDeviceDrag } from "~/components/timeline/browser/create-browser-device-drag";
 import type { BrowserDragPayload, BrowserDropTarget } from "~/components/timeline/browser/browser-drag-types";
 import type { Track } from "@daw-browser/timeline-core/types";
 import { countBrowserTreeLeaves, createBrowserLeafRow, filterBrowserTreeRows } from "~/components/timeline/browser/browser-tree";
+import { isLocalId } from "@daw-browser/shared";
+import { convexApi, convexClient } from "~/lib/convex";
+import {
+  createLocalAssetFolder,
+  deleteEmptyLocalAssetFolder,
+  moveLocalAssetToFolder,
+  renameLocalAssetFolder,
+} from "~/lib/local-asset-folders";
 
 type Options = {
   projectId: Accessor<string>;
@@ -45,6 +53,10 @@ const visibleBrowserSections = (sections: BrowserSection[]): BrowserSection[] =>
   return visibleSections;
 };
 
+const visibleAssetSections = (sections: BrowserSection[]): BrowserSection[] => (
+  sections.filter((section) => section.id === "project-samples" || countBrowserTreeLeaves(section.rows) > 0)
+);
+
 const buildBrowserSampleRow = (
   sample: {
     key: string;
@@ -54,6 +66,7 @@ const buildBrowserSampleRow = (
     assetKey: string;
     sourceKind: SampleDragData["sourceKind"];
     source: SampleDragData["source"];
+    folderId?: string;
   },
   options: {
     idPrefix: string;
@@ -70,6 +83,8 @@ const buildBrowserSampleRow = (
       label,
       subtitle: options.subtitle,
       searchText: `${label} ${options.subtitle}`.toLowerCase(),
+      assetKey: sample.assetKey,
+      folderId: sample.folderId,
     },
     sample: {
       url: sample.url,
@@ -91,6 +106,11 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     includeFilePath: () => false,
     includeUsage: () => false,
   });
+  const assetFolders = useProjectAssetFolders({
+    projectId: options.projectId,
+    userId: options.userId,
+    enabled: browserSamplesEnabled,
+  });
   const browserAssetQuery = () => options.leftBrowser.searchQueryByTab().assets.trim().toLowerCase();
   const browserAssetRows = createMemo(() => {
     const rows: Array<{ item: BrowserItem; sample: SampleDragData }> = [];
@@ -110,29 +130,84 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     }
     return rows;
   });
-  const filteredBrowserAssetRows = createMemo(() => {
-    const query = browserAssetQuery();
-    if (!query) return browserAssetRows();
-    return browserAssetRows().filter((row) => row.item.searchText.includes(query));
+  const browserProjectFolderById = createMemo(() => {
+    const map = new Map<string, ProjectAssetFolder>();
+    for (const folder of assetFolders.folders()) map.set(folder.id, folder);
+    return map;
   });
-  const browserAssetItems = createMemo(() => filteredBrowserAssetRows().map((row) => row.item));
-  const browserAssetSections = createMemo(() => {
-    const projectItems: BrowserItem[] = [];
+  const browserAssetSampleRowsByFolder = createMemo(() => {
+    const rowsByFolderId = new Map<string, BrowserItem[]>();
+    const unfiled: BrowserItem[] = [];
     const defaultItems: BrowserItem[] = [];
-    for (const item of browserAssetItems()) {
-      if (item.source === "project") projectItems.push(item);
-      if (item.source === "default") defaultItems.push(item);
+    for (const row of browserAssetRows()) {
+      const item = row.item;
+      if (item.source === "default") {
+        defaultItems.push(item);
+        continue;
+      }
+      if (!item.folderId || !browserProjectFolderById().has(item.folderId)) {
+        unfiled.push(item);
+        continue;
+      }
+      const rows = rowsByFolderId.get(item.folderId);
+      if (rows) rows.push(item); else rowsByFolderId.set(item.folderId, [item]);
     }
-    return visibleBrowserSections([
-      { id: "project-samples", label: "Project", rows: projectItems.map(createBrowserLeafRow) },
-      { id: "default-samples", label: "Default", rows: defaultItems.map(createBrowserLeafRow) },
+    return { rowsByFolderId, unfiled, defaultItems };
+  });
+  const browserAssetSections = createMemo(() => {
+    const query = browserAssetQuery();
+    const { rowsByFolderId, unfiled, defaultItems } = browserAssetSampleRowsByFolder();
+    const projectRows: BrowserTreeRow[] = [];
+    for (const folder of assetFolders.folders()) {
+      const children = rowsByFolderId.get(folder.id) ?? [];
+      const row: BrowserFolderRow = {
+        kind: "folder",
+        id: `project-folder:${folder.id}`,
+        source: "project",
+        label: folder.name,
+        searchText: folder.name.toLowerCase(),
+        folderId: folder.id,
+        children: children.map(createBrowserLeafRow),
+      };
+      projectRows.push(row);
+    }
+    if (!query || unfiled.length > 0 || assetFolders.folders().length === 0) {
+      projectRows.push({
+        kind: "folder",
+        id: "project-samples:unfiled",
+        source: "project",
+        label: "Unfiled",
+        searchText: "unfiled root project samples",
+        children: unfiled.map(createBrowserLeafRow),
+      });
+    }
+    return visibleAssetSections([
+      { id: "project-samples", label: "Project", rows: filterBrowserTreeRows(projectRows, query) },
+      { id: "default-samples", label: "Default", rows: filterBrowserTreeRows(defaultItems.map(createBrowserLeafRow), query) },
     ]);
   });
   const browserAssetSampleById = createMemo(() => {
     const map = new Map<string, SampleDragData>();
-    for (const row of filteredBrowserAssetRows()) map.set(row.item.id, row.sample);
+    for (const row of browserAssetRows()) map.set(row.item.id, row.sample);
     return map;
   });
+  const browserAssetItemById = createMemo(() => {
+    const map = new Map<string, BrowserItem>();
+    for (const row of browserAssetRows()) map.set(row.item.id, row.item);
+    return map;
+  });
+  const folderSampleCountById = createMemo(() => {
+    const counts = new Map<string, number>();
+    for (const sample of browserSamples.samples()) {
+      if (!sample.folderId) continue;
+      counts.set(sample.folderId, (counts.get(sample.folderId) ?? 0) + 1);
+    }
+    return counts;
+  });
+  const folderOptions = createMemo(() => assetFolders.folders().map((folder) => ({
+    id: folder.id,
+    name: folder.name,
+  })));
   const browserDeviceQuery = (tab: "effects" | "midi-instruments") => options.leftBrowser.searchQueryByTab()[tab].trim().toLowerCase();
   const browserEffectItems = createMemo<BrowserItem[]>(() => {
     const actions = options.deviceInsertActions();
@@ -281,6 +356,85 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     event.dataTransfer.setData(SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData(sample));
   };
 
+  const runAssetFolderAction = (action: () => Promise<void>) => {
+    void action().catch((error) => {
+      console.warn("Asset folder action failed", error);
+    });
+  };
+
+  const currentProjectId = () => options.projectId();
+  const currentProjectIsLocal = () => {
+    const projectId = currentProjectId();
+    return Boolean(projectId && isLocalId("project", projectId));
+  };
+
+  const createAssetFolder = () => {
+    if (typeof window === "undefined") return;
+    const name = window.prompt("Folder name");
+    if (name === null) return;
+    runAssetFolderAction(async () => {
+      const projectId = currentProjectId();
+      if (!projectId) return;
+      if (currentProjectIsLocal()) {
+        await createLocalAssetFolder(projectId, name);
+        assetFolders.refreshFolders();
+        return;
+      }
+      await convexClient.mutation(convexApi.assetFolders.create, { projectId, name });
+    });
+  };
+
+  const renameAssetFolder = (folderId: string) => {
+    if (typeof window === "undefined") return;
+    const folder = browserProjectFolderById().get(folderId);
+    if (!folder) return;
+    const name = window.prompt("Folder name", folder.name);
+    if (name === null) return;
+    runAssetFolderAction(async () => {
+      const projectId = currentProjectId();
+      if (!projectId) return;
+      if (currentProjectIsLocal()) {
+        await renameLocalAssetFolder(projectId, folderId, name);
+        assetFolders.refreshFolders();
+        return;
+      }
+      await convexClient.mutation(convexApi.assetFolders.rename, { projectId, folderId, name });
+    });
+  };
+
+  const deleteAssetFolder = (folderId: string) => {
+    runAssetFolderAction(async () => {
+      const projectId = currentProjectId();
+      if (!projectId || folderSampleCountById().get(folderId)) return;
+      if (currentProjectIsLocal()) {
+        await deleteEmptyLocalAssetFolder(projectId, folderId);
+        assetFolders.refreshFolders();
+        return;
+      }
+      await convexClient.mutation(convexApi.assetFolders.deleteEmpty, { projectId, folderId });
+    });
+  };
+
+  const moveSampleToFolder = (itemId: string, folderId: string | undefined) => {
+    const item = browserAssetItemById().get(itemId);
+    if (!item || item.source !== "project") return;
+    if (folderId && !browserProjectFolderById().has(folderId)) return;
+    runAssetFolderAction(async () => {
+      const projectId = currentProjectId();
+      if (!projectId || !item.assetKey) return;
+      if (currentProjectIsLocal()) {
+        await moveLocalAssetToFolder(projectId, item.assetKey, folderId);
+        browserSamples.refreshSamples();
+        return;
+      }
+      await convexClient.mutation(convexApi.samples.moveToFolder, {
+        projectId,
+        assetKey: item.assetKey,
+        folderId,
+      });
+    });
+  };
+
   const resolveBrowserDevicePayload = (itemId: string): BrowserDragPayload | undefined => {
     const actions = options.deviceInsertActions();
     if (!actions) return undefined;
@@ -355,8 +509,15 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     treeExpansionByTab: options.leftBrowser.treeExpansionByTab(),
     assets: {
       sections: browserAssetSections,
+      folderOptions,
       onInsert: insertBrowserSample,
       onDragStart: startBrowserSampleDrag,
+      onCreateFolder: createAssetFolder,
+      onRenameFolder: renameAssetFolder,
+      onDeleteFolder: deleteAssetFolder,
+      onMoveSampleToFolder: moveSampleToFolder,
+      sampleFolderId: (itemId: string) => browserAssetItemById().get(itemId)?.folderId,
+      folderSampleCount: (folderId: string) => folderSampleCountById().get(folderId) ?? 0,
     },
     devices: {
       effectSections: browserEffectSections,

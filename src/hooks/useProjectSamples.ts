@@ -6,12 +6,13 @@ import { getPersistedAudioSource, type AudioSourceKind, type AudioSourceMetadata
 import { sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { ensureDefaultSampleMetadata, loadCachedDefaultSampleMetadata } from '~/lib/default-sample-cache'
 import { listLocalAssets } from '~/lib/local-assets'
+import { listLocalAssetFolders } from '~/lib/local-asset-folders'
 import { getProjectDirectoryHandle } from '~/lib/local-project-db'
 import { isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
-import type { Track } from '@daw-browser/timeline-core/types'
 
 type SampleRow = FunctionReturnType<typeof convexApi.samples.listByRoom>[number]
+type AssetFolderRow = FunctionReturnType<typeof convexApi.assetFolders.listByProject>[number]
 type ClipRow = FunctionReturnType<typeof convexApi.clips.listByRoom>[number]
 
 type ProjectSampleInventoryItem = {
@@ -22,13 +23,14 @@ type ProjectSampleInventoryItem = {
   source: AudioSourceMetadata
   ownerUserId?: string
   createdAt?: number
+  folderId?: string
 }
 
 type ProjectSampleUsage = {
   assetKey: string
   sourceKind: AudioSourceKind
   clipId: string
-  trackId: Track['id']
+  trackId: string
   startSec: number
   name?: string
   source: AudioSourceMetadata
@@ -45,6 +47,7 @@ export type ProjectSampleListItem = {
   source: AudioSourceMetadata
   createdAt: number
   ownerUserId: string
+  folderId?: string
   count: number
   earliestClip?: ProjectSampleUsage
 }
@@ -91,6 +94,24 @@ type UseProjectSamplesResult = {
   refreshSamples: () => void
 }
 
+export type ProjectAssetFolder = {
+  id: string
+  name: string
+  createdAt: number
+  updatedAt: number
+}
+
+type UseProjectAssetFoldersArgs = {
+  projectId: Accessor<string>
+  userId?: Accessor<string>
+  enabled?: Accessor<boolean>
+}
+
+type UseProjectAssetFoldersResult = {
+  folders: Accessor<ProjectAssetFolder[]>
+  refreshFolders: () => void
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null
 }
@@ -106,8 +127,6 @@ const readString = (value: unknown) => {
 const readAudioSourceKind = (value: unknown): AudioSourceKind | undefined => {
   return typeof value === 'string' ? sanitizeAudioSourceKind(value) : undefined
 }
-
-const toTrackId = (value: string): Track['id'] => value as Track['id']
 
 const readAudioSourceMetadata = (value: unknown): AudioSourceMetadata | undefined => {
   if (!isRecord(value)) return undefined
@@ -166,6 +185,7 @@ const buildProjectSampleInventoryItem = (item: SampleRow): ProjectSampleInventor
     },
     ownerUserId: readString(item.ownerUserId),
     createdAt: readFiniteNumber(item.createdAt),
+    folderId: readString(item.folderId),
   }
 }
 
@@ -227,6 +247,79 @@ function mergeDefaultSampleMetadata(
     ...sample,
     duration: sample.duration ?? source.durationSec,
     source,
+  }
+}
+
+const sortProjectAssetFolders = (folders: ProjectAssetFolder[]) => (
+  [...folders].sort((left, right) => left.name.localeCompare(right.name))
+)
+
+const buildProjectAssetFolder = (folder: AssetFolderRow): ProjectAssetFolder => ({
+  id: String(folder._id),
+  name: folder.name,
+  createdAt: folder.createdAt,
+  updatedAt: folder.updatedAt,
+})
+
+export function useProjectAssetFolders(options: UseProjectAssetFoldersArgs): UseProjectAssetFoldersResult {
+  const { projectId, enabled, userId } = options
+  const [refreshKey, setRefreshKey] = createSignal(0)
+  const [localFolders, setLocalFolders] = createSignal<ProjectAssetFolder[]>([])
+  const [localFoldersProjectId, setLocalFoldersProjectId] = createSignal('')
+  const isLocalProject = createMemo(() => {
+    const id = projectId()
+    return Boolean(id && isLocalId('project', id))
+  })
+  const cloudFolders = useConvexQuery(
+    convexApi.assetFolders.listByProject,
+    () => {
+      if (enabled && !enabled()) return null
+      const rid = projectId()
+      if (rid && isLocalId('project', rid)) return null
+      const uid = userId ? userId() : ''
+      return rid && uid ? ({ projectId: rid }) : null
+    },
+    () => ['asset-folders', 'by_project', projectId(), userId ? userId() : '']
+  )
+
+  createEffect(on(
+    () => ({
+      projectId: projectId(),
+      enabled: enabled ? enabled() : true,
+      refreshKey: refreshKey(),
+    }),
+    ({ projectId: rid, enabled: isEnabled }) => {
+      if (!rid || !isLocalId('project', rid)) {
+        setLocalFolders([])
+        setLocalFoldersProjectId('')
+        return
+      }
+      if (!isEnabled) return
+
+      const isCurrentProject = () => projectId() === rid && (!enabled || enabled())
+      void listLocalAssetFolders(rid)
+        .then((folders) => {
+          if (isCurrentProject()) {
+            setLocalFolders(sortProjectAssetFolders(folders))
+            setLocalFoldersProjectId(rid)
+          }
+        })
+        .catch(() => {
+          if (isCurrentProject()) setLocalFolders([])
+        })
+    },
+  ))
+
+  const folders = createMemo<ProjectAssetFolder[]>(() => {
+    if (isLocalProject()) return localFoldersProjectId() === projectId() ? localFolders() : []
+    const data = cloudFolders.data
+    if (!Array.isArray(data)) return []
+    return sortProjectAssetFolders(data.map(buildProjectAssetFolder))
+  })
+
+  return {
+    folders,
+    refreshFolders: () => setRefreshKey((value) => value + 1),
   }
 }
 
@@ -316,7 +409,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
             assetKey: clip.sourceAssetKey,
             sourceKind: clip.sourceKind,
             clipId: clip.id,
-            trackId: toTrackId(clip.trackId),
+            trackId: clip.trackId,
             startSec: clip.startSec,
             name: clip.name,
             source: {
@@ -356,6 +449,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
             source,
             createdAt: asset.createdAt,
             ownerUserId: 'local',
+            folderId: asset.folderId,
             count: usages.length,
             earliestClip: earliest,
           })
@@ -483,6 +577,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
         source,
         createdAt: inv?.createdAt ?? 0,
         ownerUserId: inv?.ownerUserId ?? '',
+        folderId: inv?.folderId,
         count: usages.length,
         earliestClip: earliest,
       })

@@ -40,6 +40,8 @@ async function deleteRoomDataRows(ctx: MutationCtx, projectId: string) {
   await Promise.all([
     ctx.db.query("samples").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
       .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("assetFolders").withIndex("by_project", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
     ctx.db.query("exports").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
       .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
     ctx.db.query("effects").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()

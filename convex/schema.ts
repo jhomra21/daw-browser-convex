@@ -81,10 +81,19 @@ export default defineSchema({
     sampleRate: v.number(),
     channelCount: v.number(),
     ownerUserId: v.string(),
+    folderId: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_room", ["projectId"])
     .index("by_room_assetKey", ["projectId", "assetKey"]),
+
+  assetFolders: defineTable({
+    projectId: v.string(),
+    name: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_project", ["projectId"]),
 
   projects: defineTable({
     projectId: v.string(),

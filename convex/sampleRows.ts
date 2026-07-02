@@ -17,6 +17,7 @@ export type UpsertSampleRowInput = {
   duration?: number
   sampleRate?: number
   channelCount?: number
+  folderId?: string
 }
 
 const numbersDiffer = (left: number | undefined, right: number | undefined, epsilon = 1e-6) => {
@@ -56,13 +57,14 @@ export async function upsertSampleRow(ctx: any, input: UpsertSampleRowInput) {
     }
     if (existingRow.sampleRate !== sampleRate) patch.sampleRate = sampleRate
     if (existingRow.channelCount !== channelCount) patch.channelCount = channelCount
+    if (typeof input.folderId === 'string' && existingRow.folderId !== input.folderId) patch.folderId = input.folderId
     if (Object.keys(patch).length > 0) {
       await ctx.db.patch(existingRow._id, patch)
     }
     return existingRow._id
   }
 
-  return await ctx.db.insert('samples', {
+  const row = {
     projectId: input.projectId,
     url,
     assetKey,
@@ -73,5 +75,6 @@ export async function upsertSampleRow(ctx: any, input: UpsertSampleRowInput) {
     channelCount,
     ownerUserId: input.ownerUserId,
     createdAt: Date.now(),
-  })
+  }
+  return await ctx.db.insert('samples', typeof input.folderId === 'string' ? { ...row, folderId: input.folderId } : row)
 }

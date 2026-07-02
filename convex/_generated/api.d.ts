@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as assetFolders from "../assetFolders.js";
 import type * as audioWarpValidator from "../audioWarpValidator.js";
 import type * as authIdentity from "../authIdentity.js";
 import type * as automation from "../automation.js";
@@ -42,6 +43,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  assetFolders: typeof assetFolders;
   audioWarpValidator: typeof audioWarpValidator;
   authIdentity: typeof authIdentity;
   automation: typeof automation;

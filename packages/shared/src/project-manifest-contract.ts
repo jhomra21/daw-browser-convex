@@ -23,6 +23,7 @@ export type ProjectManifestAsset = {
   contentHash?: string;
   durationSec?: number;
   sampleRate?: number;
+  folderId?: string;
   createdAt: number;
   updatedAt: number;
   cloudKey?: string;
@@ -164,6 +165,7 @@ export const normalizeProjectManifest = (raw: unknown): ProjectManifest => {
       contentHash: readOptionalString(asset.contentHash),
       durationSec: readOptionalNumber(asset.durationSec),
       sampleRate: readOptionalNumber(asset.sampleRate),
+      folderId: readOptionalString(asset.folderId),
       createdAt: readNumber(asset.createdAt, "asset.createdAt"),
       updatedAt: readNumber(asset.updatedAt, "asset.updatedAt"),
       cloudKey: readOptionalString(asset.cloudKey),

@@ -1,5 +1,5 @@
 import { createEffect, createMemo, For, on, onMount, Show, type Component, type JSX } from "solid-js";
-import type { BrowserItem, BrowserSection, BrowserTreeExpansionState, BrowserTreeRow, TimelineBrowserTab, TimelineLeftBrowserModel } from "./browser-types";
+import type { BrowserFolderRow, BrowserItem, BrowserSection, BrowserTreeExpansionState, BrowserTreeRow, TimelineBrowserTab, TimelineLeftBrowserModel } from "./browser-types";
 import { timelineBrowserTabLabels, timelineBrowserTabs } from "~/lib/timeline-left-browser-preferences";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "../context-menu/timeline-context-menu";
 import { countBrowserTreeLeaves } from "./browser-tree";
@@ -20,6 +20,7 @@ const BrowserTreeRows: Component<{
   searchActive: boolean;
   renderItem: (item: BrowserItem) => JSX.Element;
   onRowExpandedChange: (rowId: string, expanded: boolean) => void;
+  folderContextItems?: (folder: BrowserFolderRow) => TimelineContextMenuItem[];
 }> = (props) => (
   <ul class="py-0.5">
     <For each={props.rows}>
@@ -33,18 +34,24 @@ const BrowserTreeRows: Component<{
               const expanded = () => isExpanded(props.expandedRows, folder().id);
               const visible = () => props.searchActive || expanded();
               const toggle = () => props.onRowExpandedChange(folder().id, !expanded());
+              const contextItems = () => props.folderContextItems?.(folder()) ?? [];
+              const button = (
+                <button
+                  type="button"
+                  class="flex h-6 w-full items-center gap-1 px-3 text-left text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100"
+                  aria-expanded={visible()}
+                  onClick={toggle}
+                >
+                  <span class="w-3 text-center text-xs text-neutral-600">{visible() ? "▾" : "▸"}</span>
+                  <span class="min-w-0 flex-1 truncate">{folder().label}</span>
+                  <span class="text-xs text-neutral-600">{countBrowserTreeLeaves(folder().children)}</span>
+                </button>
+              );
               return (
                 <>
-                  <button
-                    type="button"
-                    class="flex h-6 w-full items-center gap-1 px-3 text-left text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100"
-                    aria-expanded={visible()}
-                    onClick={toggle}
-                  >
-                    <span class="w-3 text-center text-xs text-neutral-600">{visible() ? "▾" : "▸"}</span>
-                    <span class="min-w-0 flex-1 truncate">{folder().label}</span>
-                    <span class="text-xs text-neutral-600">{countBrowserTreeLeaves(folder().children)}</span>
-                  </button>
+                  <Show when={contextItems().length > 0} fallback={button}>
+                    <TimelineContextMenu items={contextItems}>{button}</TimelineContextMenu>
+                  </Show>
                   <Show when={visible()}>
                     <div class="pl-3">
                       <BrowserTreeRows
@@ -53,6 +60,7 @@ const BrowserTreeRows: Component<{
                         searchActive={props.searchActive}
                         renderItem={props.renderItem}
                         onRowExpandedChange={props.onRowExpandedChange}
+                        folderContextItems={props.folderContextItems}
                       />
                     </div>
                   </Show>
@@ -73,6 +81,8 @@ const BrowserTree: Component<{
   searchActive: boolean;
   renderItem: (item: BrowserItem) => JSX.Element;
   onRowExpandedChange: (rowId: string, expanded: boolean) => void;
+  sectionContextItems?: (section: BrowserSection) => TimelineContextMenuItem[];
+  folderContextItems?: (folder: BrowserFolderRow) => TimelineContextMenuItem[];
 }> = (props) => {
   return (
     <Show
@@ -90,18 +100,24 @@ const BrowserTree: Component<{
             const expanded = () => isExpanded(props.expandedRows, rowId);
             const visible = () => props.searchActive || expanded();
             const toggle = () => props.onRowExpandedChange(rowId, !expanded());
+            const contextItems = () => props.sectionContextItems?.(section) ?? [];
+            const button = (
+              <button
+                type="button"
+                class="flex h-6 w-full items-center gap-1 px-1.5 text-left text-xs font-semibold uppercase tracking-widest text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300"
+                aria-expanded={visible()}
+                onClick={toggle}
+              >
+                <span class="w-3 text-center text-xs text-neutral-600">{visible() ? "▾" : "▸"}</span>
+                <span class="min-w-0 flex-1 truncate">{section.label}</span>
+                <span class="text-xs font-normal tracking-normal text-neutral-600">{countBrowserTreeLeaves(section.rows)}</span>
+              </button>
+            );
             return (
               <section>
-                <button
-                  type="button"
-                  class="flex h-6 w-full items-center gap-1 px-1.5 text-left text-xs font-semibold uppercase tracking-widest text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300"
-                  aria-expanded={visible()}
-                  onClick={toggle}
-                >
-                  <span class="w-3 text-center text-xs text-neutral-600">{visible() ? "▾" : "▸"}</span>
-                  <span class="min-w-0 flex-1 truncate">{section.label}</span>
-                  <span class="text-xs font-normal tracking-normal text-neutral-600">{countBrowserTreeLeaves(section.rows)}</span>
-                </button>
+                <Show when={contextItems().length > 0} fallback={button}>
+                  <TimelineContextMenu items={contextItems}>{button}</TimelineContextMenu>
+                </Show>
                 <Show when={visible()}>
                   <BrowserTreeRows
                     rows={section.rows}
@@ -109,6 +125,7 @@ const BrowserTree: Component<{
                     searchActive={props.searchActive}
                     renderItem={props.renderItem}
                     onRowExpandedChange={props.onRowExpandedChange}
+                    folderContextItems={props.folderContextItems}
                   />
                 </Show>
               </section>
@@ -127,16 +144,25 @@ const BrowserItemRow: Component<{
   onDragStart?: (event: DragEvent) => void;
   onPointerDown?: (event: PointerEvent) => void;
   contextActionLabel: string;
+  extraContextItems?: () => TimelineContextMenuItem[];
 }> = (props) => {
-  const items = (): TimelineContextMenuItem[] => [
-    { kind: "label", label: props.item.label },
-    {
-      kind: "item",
-      label: props.contextActionLabel,
-      disabled: props.item.disabled,
-      onSelect: props.onClick,
-    },
-  ];
+  const items = (): TimelineContextMenuItem[] => {
+    const entries: TimelineContextMenuItem[] = [
+      { kind: "label", label: props.item.label },
+      {
+        kind: "item",
+        label: props.contextActionLabel,
+        disabled: props.item.disabled,
+        onSelect: props.onClick,
+      },
+    ];
+    const extraItems = props.extraContextItems?.() ?? [];
+    if (extraItems.length > 0) {
+      entries.push({ kind: "separator" });
+      entries.push(...extraItems);
+    }
+    return entries;
+  };
   const row = (
     <button
       type="button"
@@ -151,6 +177,65 @@ const BrowserItemRow: Component<{
     </button>
   );
   return <TimelineContextMenu items={items}>{row}</TimelineContextMenu>;
+};
+
+const assetSectionContextItems = (
+  browser: TimelineLeftBrowserModel,
+  section: BrowserSection,
+): TimelineContextMenuItem[] => {
+  if (section.id !== "project-samples") return [];
+  return [{
+    kind: "item",
+    label: "New folder",
+    onSelect: browser.assets.onCreateFolder,
+  }];
+};
+
+const assetFolderContextItems = (
+  browser: TimelineLeftBrowserModel,
+  folder: BrowserFolderRow,
+): TimelineContextMenuItem[] => {
+  if (folder.source !== "project" || !folder.folderId) return [];
+  const folderId = folder.folderId;
+  return [
+    { kind: "label", label: folder.label },
+    {
+      kind: "item",
+      label: "Rename folder",
+      onSelect: () => browser.assets.onRenameFolder(folderId),
+    },
+    {
+      kind: "item",
+      label: "Delete empty folder",
+      disabled: browser.assets.folderSampleCount(folderId) > 0,
+      onSelect: () => browser.assets.onDeleteFolder(folderId),
+    },
+  ];
+};
+
+const assetItemContextItems = (
+  browser: TimelineLeftBrowserModel,
+  item: BrowserItem,
+): TimelineContextMenuItem[] => {
+  if (item.source !== "project") return [];
+  const entries: TimelineContextMenuItem[] = [];
+  const currentFolderId = browser.assets.sampleFolderId(item.id);
+  for (const folder of browser.assets.folderOptions()) {
+    if (folder.id === currentFolderId) continue;
+    entries.push({
+      kind: "item",
+      label: `Move to ${folder.name}`,
+      onSelect: () => browser.assets.onMoveSampleToFolder(item.id, folder.id),
+    });
+  }
+  if (currentFolderId) {
+    entries.push({
+      kind: "item",
+      label: "Move to Unfiled",
+      onSelect: () => browser.assets.onMoveSampleToFolder(item.id, undefined),
+    });
+  }
+  return entries;
 };
 
 export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel }> = (props) => {
@@ -255,10 +340,13 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
             expandedRows={activeTreeExpansion()}
             searchActive={searchActive()}
             onRowExpandedChange={setTreeRowExpanded}
+            sectionContextItems={(section) => assetSectionContextItems(props.browser, section)}
+            folderContextItems={(folder) => assetFolderContextItems(props.browser, folder)}
             renderItem={(item) => (
               <BrowserItemRow
                 item={item}
                 contextActionLabel="Insert sample"
+                extraContextItems={() => assetItemContextItems(props.browser, item)}
                 draggable={!item.disabled}
                 onClick={() => props.browser.assets.onInsert(item.id)}
                 onDragStart={(event) => props.browser.assets.onDragStart(event, item.id)}

@@ -56,6 +56,7 @@ export type LocalProjectAssetRow = {
   contentHash?: string
   durationSec?: number
   sampleRate?: number
+  folderId?: string
   createdAt: number
   updatedAt: number
 }

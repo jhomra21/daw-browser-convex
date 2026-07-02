@@ -595,6 +595,11 @@ export function computeCompressorStaticCurveDb(inputDb: number, params: Compress
 
 export type AudioEffectKind = 'eq' | 'compressor' | 'saturator' | 'delay' | 'reverb'
 export type MasterAudioEffectKind = 'master-eq' | 'master-compressor' | 'master-saturator' | 'master-delay' | 'master-reverb'
+export type AudioEffectInstance = {
+  id: string
+  kind: AudioEffectKind
+}
+export type AudioEffectOrderItem = AudioEffectKind | AudioEffectInstance
 
 type EqAudioEffectContract = {
   kind: 'eq'
@@ -709,6 +714,64 @@ export function normalizeAudioEffectOrder(order: readonly unknown[], enabled: re
 
 export function areAudioEffectOrdersEqual(left: readonly AudioEffectKind[] | undefined, right: readonly AudioEffectKind[]): boolean {
   return !!left && left.length === right.length && left.every((kind, index) => kind === right[index])
+}
+
+export function isAudioEffectInstance(value: unknown): value is AudioEffectInstance {
+  return (
+    typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && 'id' in value
+    && 'kind' in value
+    && typeof value.id === 'string'
+    && isAudioEffectKind(value.kind)
+  )
+}
+
+export function audioEffectOrderItemKind(item: AudioEffectOrderItem): AudioEffectKind {
+  return typeof item === 'string' ? item : item.kind
+}
+
+export function audioEffectOrderItemId(item: AudioEffectOrderItem): string {
+  return typeof item === 'string' ? item : item.id
+}
+
+export function normalizeAudioEffectInstanceOrder(
+  order: readonly AudioEffectOrderItem[],
+  enabled: readonly AudioEffectInstance[],
+): AudioEffectInstance[] {
+  const enabledById = new Map(enabled.map((entry) => [entry.id, entry]))
+  const legacyQueues = new Map<AudioEffectKind, AudioEffectInstance[]>()
+  for (const entry of enabled) {
+    const queue = legacyQueues.get(entry.kind)
+    if (queue) queue.push(entry)
+    else legacyQueues.set(entry.kind, [entry])
+  }
+  const seen = new Set<string>()
+  const normalized: AudioEffectInstance[] = []
+  for (const item of order) {
+    const entry = typeof item === 'string'
+      ? legacyQueues.get(item)?.find((candidate) => !seen.has(candidate.id))
+      : enabledById.get(item.id)
+    if (!entry || seen.has(entry.id)) continue
+    seen.add(entry.id)
+    normalized.push(entry)
+  }
+  for (const entry of enabled) {
+    if (seen.has(entry.id)) continue
+    seen.add(entry.id)
+    normalized.push(entry)
+  }
+  return normalized
+}
+
+export function areAudioEffectInstanceOrdersEqual(
+  left: readonly AudioEffectInstance[] | undefined,
+  right: readonly AudioEffectInstance[],
+): boolean {
+  return !!left && left.length === right.length && left.every((entry, index) => (
+    entry.id === right[index].id && entry.kind === right[index].kind
+  ))
 }
 
 export type SynthWave = 'sine' | 'square' | 'sawtooth' | 'triangle'

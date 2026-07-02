@@ -40,6 +40,9 @@ import { resolveMixerGraph } from './mixer/resolve-routing'
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { ResolvedMixerGraph } from './mixer/types'
 import { scheduleAutomationEnvelope } from './automation'
+import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
+
+export type { AudioEffectRuntimeInstance }
 
 export type ExportRange =
   | { mode: 'whole' }
@@ -54,7 +57,8 @@ export type ExportFx = {
   masterDelay?: DelayParamsLite
   masterReverb?: ReverbParamsLite
   masterFxOrder?: AudioEffectKind[]
-  trackFx?: Record<string, { order?: AudioEffectKind[]; eq?: EqParamsLite; compressor?: CompressorParamsLite; saturator?: SaturatorParamsLite; delay?: DelayParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput; instrument?: TrackInstrumentParams; drumRackBuffers?: DrumRackResolvedBuffers }>
+  masterFxInstances?: AudioEffectRuntimeInstance[]
+  trackFx?: Record<string, { order?: AudioEffectKind[]; instances?: AudioEffectRuntimeInstance[]; eq?: EqParamsLite; compressor?: CompressorParamsLite; saturator?: SaturatorParamsLite; delay?: DelayParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput; instrument?: TrackInstrumentParams; drumRackBuffers?: DrumRackResolvedBuffers }>
 }
 
 export type ExportRequest = {
@@ -287,6 +291,7 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
       masterReverb: fx?.masterReverb,
       masterVolume: fx?.masterVolume,
       masterFxOrder: fx?.masterFxOrder,
+      masterFxInstances: fx?.masterFxInstances,
       trackFx: fx?.trackFx,
     }),
     exportTrackFx: fx?.trackFx,

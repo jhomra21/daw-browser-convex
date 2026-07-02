@@ -14,6 +14,7 @@ import type { DrumRackResolvedBuffers } from './drum-rack-runtime'
 import { createTransportClock } from './transport-clock'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import { applyAutomationEnvelopeAtTime, scheduleAutomationEnvelope } from './automation'
+import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 
 type RuntimeClip = Clip<AudioBuffer>
 type RuntimeTrack = Track<AudioBuffer>
@@ -25,7 +26,7 @@ const MASTER_STOP_DELAY_SEC = 0.004
 export const LIVE_SCHEDULE_HORIZON_SEC = 30
 
 export { canFallbackToRepitchStretch, isStretchQualityWarning }
-export type { AudioStretchRenderState, CompressorMeterFrame, DeferredStretchWindow, SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch }
+export type { AudioEffectRuntimeInstance, AudioStretchRenderState, CompressorMeterFrame, DeferredStretchWindow, SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch }
 
 export class AudioEngine {
   private runtime: AudioRuntime | null = null
@@ -255,6 +256,10 @@ export class AudioEngine {
     this.mixerRuntime.setTrackFxOrder(trackId, order)
   }
 
+  setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]) {
+    this.mixerRuntime.setTrackFxInstances(trackId, instances)
+  }
+
   setMasterReverb(params: ReverbParamsLite) {
     this.masterFx.setReverb(
       this.audioCtx,
@@ -283,6 +288,16 @@ export class AudioEngine {
 
   setMasterFxOrder(order: AudioEffectKind[]) {
     this.masterFx.setOrder(this.audioCtx, this.masterGain, this.destination, order)
+  }
+
+  setMasterFxInstances(instances: AudioEffectRuntimeInstance[]) {
+    this.masterFx.setFxInstances(
+      this.audioCtx,
+      this.masterGain,
+      this.destination,
+      instances,
+      (nextParams) => this.createImpulseResponse(nextParams),
+    )
   }
 
   previewTrackVolume(trackId: string, volume: number, muted: boolean) {

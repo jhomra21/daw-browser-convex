@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { collectAudioEffectOrders } from './audio-effect-order-rows'
+import { collectAudioEffectInstances, collectAudioEffectOrders } from './audio-effect-order-rows'
 
 describe('collectAudioEffectOrders', () => {
   test('uses canonical order fallback for rows without indexes', () => {
@@ -29,5 +29,19 @@ describe('collectAudioEffectOrders', () => {
     ])
 
     expect(orders.tracks.get('track-1')).toEqual(['reverb', 'eq'])
+  })
+
+  test('keeps repeated effect instances in indexed order', () => {
+    const orders = collectAudioEffectInstances([
+      { targetId: 'track-1', kind: 'eq', instanceId: 'eq-a', index: 0 },
+      { targetId: 'track-1', kind: 'compressor', instanceId: 'comp-a', index: 1 },
+      { targetId: 'track-1', kind: 'eq', instanceId: 'eq-b', index: 2 },
+    ])
+
+    expect(orders.tracks.get('track-1')).toEqual([
+      { id: 'eq-a', kind: 'eq' },
+      { id: 'comp-a', kind: 'compressor' },
+      { id: 'eq-b', kind: 'eq' },
+    ])
   })
 })

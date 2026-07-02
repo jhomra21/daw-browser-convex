@@ -151,6 +151,7 @@ export function resolveMixerGraph(options: ResolveMixerGraphOptions): ResolvedMi
       delay: options.masterDelay,
       reverb: options.masterReverb,
       order: options.masterFxOrder,
+      instances: options.masterFxInstances,
     },
   }
 }

@@ -57,6 +57,16 @@ export type DelayNodeChain = {
   merger: ChannelMergerNode
 }
 
+export type FxChainStageConfig = {
+  id: string
+  kind: AudioEffectKind
+  eqNodes?: BiquadFilterNode[]
+  compressorChain?: CompressorNodeChain | null
+  saturatorChain?: SaturatorNodeChain | null
+  delayChain?: DelayNodeChain | null
+  reverbChain?: ReverbNodeChain | null
+}
+
 export function disconnectAudioNodes(nodes: Array<AudioNode | null | undefined>) {
   for (const node of nodes) {
     if (!node) continue
@@ -292,85 +302,115 @@ export function connectFxChain(
     delayChain?: DelayNodeChain | null
     reverbChain?: ReverbNodeChain | null
     order?: AudioEffectKind[]
+    instances?: FxChainStageConfig[]
   },
 ) {
-  const eqNodes = config.eqNodes ?? []
-  const compressor = config.compressorChain?.enabled ? config.compressorChain : null
-  const saturator = config.saturatorChain?.enabled ? config.saturatorChain : null
-  const delay = config.delayChain?.enabled ? config.delayChain : null
-  const reverb = config.reverbChain?.enabled ? config.reverbChain : null
-  if (!compressor && config.compressorChain) disconnectAudioNodes([config.compressorChain.workletNode])
-  if (saturator) connectSaturatorInternals(saturator)
-  else if (config.saturatorChain) disconnectSaturatorChain(config.saturatorChain)
-  if (delay) connectDelayInternals(delay)
-  else if (config.delayChain) disconnectDelayChain(config.delayChain)
-  if (reverb) connectReverbInternals(reverb)
-  else if (config.reverbChain) disconnectReverbChain(config.reverbChain)
-
   type FxStage = {
     connectInput: (source: AudioNode) => void
     outputs: AudioNode[]
   }
-  const stagesByKind = new Map<AudioEffectKind, FxStage>()
 
-  if (eqNodes.length > 0) {
-    disconnectAudioNodes(eqNodes)
-    for (let index = 0; index < eqNodes.length; index++) {
-      if (index < eqNodes.length - 1) eqNodes[index].connect(eqNodes[index + 1])
+  const createStage = (stageConfig: FxChainStageConfig): FxStage | null => {
+    const eqNodes = stageConfig.eqNodes ?? []
+    const compressor = stageConfig.compressorChain?.enabled ? stageConfig.compressorChain : null
+    const saturator = stageConfig.saturatorChain?.enabled ? stageConfig.saturatorChain : null
+    const delay = stageConfig.delayChain?.enabled ? stageConfig.delayChain : null
+    const reverb = stageConfig.reverbChain?.enabled ? stageConfig.reverbChain : null
+
+    if (!compressor && stageConfig.compressorChain) disconnectAudioNodes([stageConfig.compressorChain.workletNode])
+    if (saturator) connectSaturatorInternals(saturator)
+    else if (stageConfig.saturatorChain) disconnectSaturatorChain(stageConfig.saturatorChain)
+    if (delay) connectDelayInternals(delay)
+    else if (stageConfig.delayChain) disconnectDelayChain(stageConfig.delayChain)
+    if (reverb) connectReverbInternals(reverb)
+    else if (stageConfig.reverbChain) disconnectReverbChain(stageConfig.reverbChain)
+
+    if (stageConfig.kind === 'eq' && eqNodes.length > 0) {
+      disconnectAudioNodes(eqNodes)
+      for (let index = 0; index < eqNodes.length; index++) {
+        if (index < eqNodes.length - 1) eqNodes[index].connect(eqNodes[index + 1])
+      }
+      return {
+        connectInput: (source) => source.connect(eqNodes[0]),
+        outputs: [eqNodes[eqNodes.length - 1]],
+      }
     }
-    stagesByKind.set('eq', {
-      connectInput: (source) => source.connect(eqNodes[0]),
-      outputs: [eqNodes[eqNodes.length - 1]],
-    })
+
+    if (stageConfig.kind === 'compressor' && compressor) {
+      disconnectAudioNodes([compressor.workletNode])
+      return {
+        connectInput: (source) => source.connect(compressor.workletNode),
+        outputs: [compressor.workletNode],
+      }
+    }
+
+    if (stageConfig.kind === 'saturator' && saturator) {
+      disconnectAudioNodes([saturator.outputGain])
+      return {
+        connectInput: (source) => {
+          source.connect(saturator.dryGain)
+          source.connect(saturator.driveGain)
+        },
+        outputs: [saturator.outputGain],
+      }
+    }
+
+    if (stageConfig.kind === 'delay' && delay) {
+      disconnectAudioNodes([delay.dryGain, delay.wetGain])
+      return {
+        connectInput: (source) => {
+          source.connect(delay.dryGain)
+          source.connect(delay.pingPong ? delay.splitter : delay.delayLeft)
+        },
+        outputs: [delay.dryGain, delay.wetGain],
+      }
+    }
+
+    if (stageConfig.kind === 'reverb' && reverb) {
+      disconnectAudioNodes([reverb.dryGain, reverb.widthMerger])
+      return {
+        connectInput: (source) => {
+          source.connect(reverb.dryGain)
+          source.connect(reverb.preDelay)
+        },
+        outputs: [reverb.dryGain, reverb.widthMerger],
+      }
+    }
+
+    return null
   }
 
-  if (compressor) {
-    disconnectAudioNodes([compressor.workletNode])
-    stagesByKind.set('compressor', {
-      connectInput: (source) => source.connect(compressor.workletNode),
-      outputs: [compressor.workletNode],
-    })
-  }
+  const createLegacyStages = () => {
+    const stagesByKind = new Map<AudioEffectKind, FxStage>()
+    const eqNodes = config.eqNodes ?? []
+    if (eqNodes.length > 0) {
+      const stage = createStage({ id: 'eq', kind: 'eq', eqNodes })
+      if (stage) stagesByKind.set('eq', stage)
+    }
 
-  if (saturator) {
-    disconnectAudioNodes([saturator.outputGain])
-    stagesByKind.set('saturator', {
-      connectInput: (source) => {
-        source.connect(saturator.dryGain)
-        source.connect(saturator.driveGain)
-      },
-      outputs: [saturator.outputGain],
-    })
-  }
+    const compressorStage = createStage({ id: 'compressor', kind: 'compressor', compressorChain: config.compressorChain })
+    if (compressorStage) stagesByKind.set('compressor', compressorStage)
+    const saturatorStage = createStage({ id: 'saturator', kind: 'saturator', saturatorChain: config.saturatorChain })
+    if (saturatorStage) stagesByKind.set('saturator', saturatorStage)
+    const delayStage = createStage({ id: 'delay', kind: 'delay', delayChain: config.delayChain })
+    if (delayStage) stagesByKind.set('delay', delayStage)
+    const reverbStage = createStage({ id: 'reverb', kind: 'reverb', reverbChain: config.reverbChain })
+    if (reverbStage) stagesByKind.set('reverb', reverbStage)
 
-  if (delay) {
-    disconnectAudioNodes([delay.dryGain, delay.wetGain])
-    stagesByKind.set('delay', {
-      connectInput: (source) => {
-        source.connect(delay.dryGain)
-        source.connect(delay.pingPong ? delay.splitter : delay.delayLeft)
-      },
-      outputs: [delay.dryGain, delay.wetGain],
-    })
-  }
-
-  if (reverb) {
-    disconnectAudioNodes([reverb.dryGain, reverb.widthMerger])
-    stagesByKind.set('reverb', {
-      connectInput: (source) => {
-        source.connect(reverb.dryGain)
-        source.connect(reverb.preDelay)
-      },
-      outputs: [reverb.dryGain, reverb.widthMerger],
-    })
+    return normalizeAudioEffectOrder(config.order ?? AUDIO_EFFECT_ORDER, AUDIO_EFFECT_ORDER)
+      .flatMap((kind) => {
+        const stage = stagesByKind.get(kind)
+        return stage ? [stage] : []
+      })
   }
 
   try { input.disconnect() } catch {}
-  const stages = normalizeAudioEffectOrder(config.order ?? AUDIO_EFFECT_ORDER, AUDIO_EFFECT_ORDER)
-    .flatMap((kind) => {
-      const stage = stagesByKind.get(kind)
+  const stages = config.instances
+    ? config.instances.flatMap((stageConfig) => {
+      const stage = createStage(stageConfig)
       return stage ? [stage] : []
     })
+    : createLegacyStages()
   if (stages.length === 0) {
     input.connect(destination)
     return

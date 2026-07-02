@@ -117,11 +117,16 @@ const trackInstrumentValidator = v.union(
 )
 
 const audioEffectKindValidator = v.union(v.literal("eq"), v.literal("compressor"), v.literal("saturator"), v.literal("delay"), v.literal("reverb"))
+const audioEffectOrderItemValidator = v.union(
+  audioEffectKindValidator,
+  v.object({ id: v.string(), kind: audioEffectKindValidator }),
+)
 
 type TrackAudioEffectType = 'instrument' | 'synth' | 'arpeggiator' | 'reverb' | 'eq' | 'compressor' | 'saturator' | 'delay'
 type MasterAudioEffectType = 'reverb' | 'eq' | 'compressor' | 'saturator' | 'delay'
 type SharedAudioEffectType = TrackAudioEffectType | MasterAudioEffectType
 type AudioEffectKind = MasterAudioEffectType
+type AudioEffectOrderItem = AudioEffectKind | { id: string; kind: AudioEffectKind }
 
 const audioEffectPersistenceDescriptors = {
   eq: {
@@ -210,6 +215,7 @@ const upsertTrackEffect = async (
     trackId: any
     type: TrackAudioEffectType
     params: any
+    instanceId?: string
   },
 ) => {
   const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
@@ -220,7 +226,9 @@ const upsertTrackEffect = async (
       entry.type === 'synth' && entry.targetType === 'track' ? [ctx.db.delete(entry._id)] : []
     )))
   }
-  const row = existing.find((entry: any) => entry.type === input.type && entry.targetType === 'track') ?? null
+  const row = input.instanceId
+    ? existing.find((entry: EffectOrderRow) => entry.instanceId === input.instanceId && entry.targetType === 'track') ?? null
+    : existing.find((entry: EffectOrderRow) => entry.type === input.type && entry.targetType === 'track' && !entry.instanceId) ?? null
   if (row) {
     const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
     if (row.targetType === 'track' && areEffectParamsEqual(input.type, row.params, params)) return row._id
@@ -234,6 +242,7 @@ const upsertTrackEffect = async (
     trackId: input.trackId,
     index: existing.filter((entry: any) => entry.targetType === 'track').length,
     type: input.type,
+    instanceId: input.instanceId,
     params,
     createdAt: Date.now(),
   })
@@ -260,11 +269,14 @@ const upsertMasterEffect = async (
     userId: string
     type: MasterAudioEffectType
     params: any
+    instanceId?: string
   },
 ) => {
   await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
   const existing = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
-  const row = existing.find((entry: any) => entry.type === input.type) ?? null
+  const row = input.instanceId
+    ? existing.find((entry: EffectOrderRow) => entry.instanceId === input.instanceId) ?? null
+    : existing.find((entry: EffectOrderRow) => entry.type === input.type && !entry.instanceId) ?? null
   if (row) {
     const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
     if (areEffectParamsEqual(input.type, row.params, params)) return row._id
@@ -277,6 +289,7 @@ const upsertMasterEffect = async (
     targetType: 'master',
     index: existing.filter((entry: any) => entry.targetType === 'master').length,
     type: input.type,
+    instanceId: input.instanceId,
     params,
     createdAt: Date.now(),
   })
@@ -301,20 +314,41 @@ const getTrackEffect = async (
   return rows.find((row: any) => row.type === input.type && row.targetType === 'track') ?? null;
 }
 
-const reorderRows = async (ctx: any, rows: any[], order: AudioEffectKind[]) => {
+const audioEffectOrderItemId = (item: AudioEffectOrderItem) => typeof item === 'string' ? item : item.id
+const audioEffectOrderItemKind = (item: AudioEffectOrderItem) => typeof item === 'string' ? item : item.kind
+
+type EffectOrderRow = {
+  _id: string
+  type: string
+  targetType?: string
+  instanceId?: string
+  index?: number
+}
+
+type EffectOrderContext = {
+  db: {
+    patch: (id: string, value: { index: number }) => Promise<unknown>
+  }
+}
+
+const reorderRows = async (ctx: EffectOrderContext, rows: EffectOrderRow[], order: AudioEffectOrderItem[]) => {
   const audioRows = rows
     .filter((row) => row.type === 'eq' || row.type === 'compressor' || row.type === 'saturator' || row.type === 'delay' || row.type === 'reverb')
     .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
-  const requestedKinds = new Set<AudioEffectKind>()
-  const requested = order.flatMap((kind) => {
-    if (requestedKinds.has(kind)) return []
-    const row = audioRows.find((entry) => entry.type === kind)
+  const requestedIds = new Set<string>()
+  const requested = order.flatMap((item) => {
+    const id = audioEffectOrderItemId(item)
+    if (requestedIds.has(id)) return []
+    const kind = audioEffectOrderItemKind(item)
+    const row = typeof item === 'string'
+      ? audioRows.find((entry) => entry.type === kind && !requestedIds.has(entry.instanceId ?? entry.type))
+      : audioRows.find((entry) => entry.instanceId === item.id && entry.type === item.kind)
     if (!row) return []
-    requestedKinds.add(kind)
+    requestedIds.add(row.instanceId ?? row.type)
     return [row]
   })
-  const requestedIds = new Set(requested.map((row) => row._id))
-  const omitted = audioRows.filter((row) => !requestedIds.has(row._id))
+  const requestedRowIds = new Set(requested.map((row) => row._id))
+  const omitted = audioRows.filter((row) => !requestedRowIds.has(row._id))
   const nextRows = [...requested, ...omitted]
   await Promise.all(nextRows.map((row, index) => row.index === index ? undefined : ctx.db.patch(row._id, { index })))
 }
@@ -326,14 +360,14 @@ const reorderAudioEffectsForUser = async (
     userId: string
     targetType: 'track' | 'master'
     trackId?: any
-    order: AudioEffectKind[]
+    order: AudioEffectOrderItem[]
   },
 ) => {
   if (input.targetType === 'track') {
     const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
     if (!access || access.track.projectId !== input.projectId) return
     const rows = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
-    await reorderRows(ctx, rows.filter((row: any) => row.targetType === 'track'), input.order)
+    await reorderRows(ctx, rows.filter((row: EffectOrderRow) => row.targetType === 'track'), input.order)
     return
   }
   await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
@@ -349,24 +383,29 @@ const removeAudioEffectForUser = async (
     targetType: 'track' | 'master'
     trackId?: any
     effect: AudioEffectKind
+    instanceId?: string
   },
 ) => {
   if (input.targetType === 'track') {
     const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
     if (!access || access.track.projectId !== input.projectId) return notFoundStatus()
     const rows = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
-    const row = rows.find((entry: any) => entry.type === input.effect && entry.targetType === 'track') ?? null
+    const row = input.instanceId
+      ? rows.find((entry: EffectOrderRow) => entry.instanceId === input.instanceId && entry.type === input.effect && entry.targetType === 'track') ?? null
+      : rows.find((entry: EffectOrderRow) => entry.type === input.effect && entry.targetType === 'track' && !entry.instanceId) ?? null
     if (!row) return notFoundStatus()
     await ctx.db.delete(row._id)
-    await reorderRows(ctx, rows.filter((entry: any) => entry._id !== row._id && entry.targetType === 'track'), [])
+    await reorderRows(ctx, rows.filter((entry: EffectOrderRow) => entry._id !== row._id && entry.targetType === 'track'), [])
     return deletedStatus()
   }
   await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
   const rows = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
-  const row = rows.find((entry: any) => entry.type === input.effect) ?? null
+  const row = input.instanceId
+    ? rows.find((entry: EffectOrderRow) => entry.instanceId === input.instanceId && entry.type === input.effect) ?? null
+    : rows.find((entry: EffectOrderRow) => entry.type === input.effect && !entry.instanceId) ?? null
   if (!row) return notFoundStatus()
   await ctx.db.delete(row._id)
-  await reorderRows(ctx, rows.filter((entry: any) => entry._id !== row._id), [])
+  await reorderRows(ctx, rows.filter((entry: EffectOrderRow) => entry._id !== row._id), [])
   return deletedStatus()
 }
 
@@ -527,22 +566,24 @@ export const setReverbParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.id("tracks"),
+    instanceId: v.optional(v.string()),
     params: reverbParamsValidator,
   },
-  handler: async (ctx, { projectId, trackId, params }) => {
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'reverb', params });
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'reverb', instanceId, params });
   },
 });
 
 export const setMasterReverbParams = mutation({
   args: {
     projectId: v.string(),
+    instanceId: v.optional(v.string()),
     params: reverbParamsValidator,
   },
-  handler: async (ctx, { projectId, params }) => {
+  handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'reverb', params })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'reverb', instanceId, params })
   },
 });
 
@@ -606,11 +647,12 @@ export const setEqParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.id("tracks"),
+    instanceId: v.optional(v.string()),
     params: eqParamsValidator,
   },
-  handler: async (ctx, { projectId, trackId, params }) => {
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'eq', params });
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'eq', instanceId, params });
   },
 });
 
@@ -618,59 +660,60 @@ export const setEqParams = mutation({
 export const setMasterEqParams = mutation({
   args: {
     projectId: v.string(),
+    instanceId: v.optional(v.string()),
     params: eqParamsValidator,
   },
-  handler: async (ctx, { projectId, params }) => {
+  handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'eq', params })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'eq', instanceId, params })
   }
 })
 
 export const setCompressorParams = mutation({
-  args: { projectId: v.string(), trackId: v.id("tracks"), params: compressorParamsValidator },
-  handler: async (ctx, { projectId, trackId, params }) => {
+  args: { projectId: v.string(), trackId: v.id("tracks"), instanceId: v.optional(v.string()), params: compressorParamsValidator },
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'compressor', params })
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'compressor', instanceId, params })
   },
 })
 
 export const setSaturatorParams = mutation({
-  args: { projectId: v.string(), trackId: v.id("tracks"), params: saturatorParamsValidator },
-  handler: async (ctx, { projectId, trackId, params }) => {
+  args: { projectId: v.string(), trackId: v.id("tracks"), instanceId: v.optional(v.string()), params: saturatorParamsValidator },
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'saturator', params })
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'saturator', instanceId, params })
   },
 })
 
 export const setDelayParams = mutation({
-  args: { projectId: v.string(), trackId: v.id("tracks"), params: delayParamsValidator },
-  handler: async (ctx, { projectId, trackId, params }) => {
+  args: { projectId: v.string(), trackId: v.id("tracks"), instanceId: v.optional(v.string()), params: delayParamsValidator },
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'delay', params })
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'delay', instanceId, params })
   },
 })
 
 export const setMasterCompressorParams = mutation({
-  args: { projectId: v.string(), params: compressorParamsValidator },
-  handler: async (ctx, { projectId, params }) => {
+  args: { projectId: v.string(), instanceId: v.optional(v.string()), params: compressorParamsValidator },
+  handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'compressor', params })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'compressor', instanceId, params })
   },
 })
 
 export const setMasterSaturatorParams = mutation({
-  args: { projectId: v.string(), params: saturatorParamsValidator },
-  handler: async (ctx, { projectId, params }) => {
+  args: { projectId: v.string(), instanceId: v.optional(v.string()), params: saturatorParamsValidator },
+  handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'saturator', params })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'saturator', instanceId, params })
   },
 })
 
 export const setMasterDelayParams = mutation({
-  args: { projectId: v.string(), params: delayParamsValidator },
-  handler: async (ctx, { projectId, params }) => {
+  args: { projectId: v.string(), instanceId: v.optional(v.string()), params: delayParamsValidator },
+  handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'delay', params })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'delay', instanceId, params })
   },
 })
 
@@ -679,7 +722,7 @@ export const reorderAudioEffects = mutation({
     projectId: v.string(),
     targetType: v.union(v.literal('track'), v.literal('master')),
     trackId: v.optional(v.id('tracks')),
-    order: v.array(audioEffectKindValidator),
+    order: v.array(audioEffectOrderItemValidator),
   },
   handler: async (ctx, { projectId, targetType, trackId, order }) => {
     const userId = await requireAuthenticatedUserId(ctx)
@@ -695,11 +738,12 @@ export const removeAudioEffect = mutation({
     targetType: v.union(v.literal('track'), v.literal('master')),
     trackId: v.optional(v.id('tracks')),
     effect: audioEffectKindValidator,
+    instanceId: v.optional(v.string()),
   },
-  handler: async (ctx, { projectId, targetType, trackId, effect }) => {
+  handler: async (ctx, { projectId, targetType, trackId, effect, instanceId }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     if (targetType === 'track' && !trackId) return notFoundStatus()
-    return await removeAudioEffectForUser(ctx, { projectId, userId, targetType, trackId, effect })
+    return await removeAudioEffectForUser(ctx, { projectId, userId, targetType, trackId, effect, instanceId })
   },
 })
 
@@ -764,13 +808,14 @@ export const serverSetReverbParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.string(),
+    instanceId: v.optional(v.string()),
     params: reverbParamsValidator,
   },
-  handler: async (ctx, { projectId, trackId, params }) => {
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
     if (!normalizedTrackId) return
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'reverb', params })
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'reverb', instanceId, params })
   },
 })
 
@@ -778,89 +823,92 @@ export const serverSetEqParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.string(),
+    instanceId: v.optional(v.string()),
     params: eqParamsValidator,
   },
-  handler: async (ctx, { projectId, trackId, params }) => {
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
     if (!normalizedTrackId) return
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'eq', params })
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'eq', instanceId, params })
   },
 })
 
 export const serverSetMasterReverbParams = mutation({
   args: {
     projectId: v.string(),
+    instanceId: v.optional(v.string()),
     params: reverbParamsValidator,
   },
-  handler: async (ctx, { projectId, params }) => {
+  handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'reverb', params })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'reverb', instanceId, params })
   },
 })
 
 export const serverSetMasterEqParams = mutation({
   args: {
     projectId: v.string(),
+    instanceId: v.optional(v.string()),
     params: eqParamsValidator,
   },
-  handler: async (ctx, { projectId, params }) => {
+  handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'eq', params })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'eq', instanceId, params })
   },
 })
 
 export const serverSetCompressorParams = mutation({
-  args: { projectId: v.string(), trackId: v.string(), params: compressorParamsValidator },
-  handler: async (ctx, { projectId, trackId, params }) => {
+  args: { projectId: v.string(), trackId: v.string(), instanceId: v.optional(v.string()), params: compressorParamsValidator },
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
     if (!normalizedTrackId) return
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'compressor', params })
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'compressor', instanceId, params })
   },
 })
 
 export const serverSetSaturatorParams = mutation({
-  args: { projectId: v.string(), trackId: v.string(), params: saturatorParamsValidator },
-  handler: async (ctx, { projectId, trackId, params }) => {
+  args: { projectId: v.string(), trackId: v.string(), instanceId: v.optional(v.string()), params: saturatorParamsValidator },
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
     if (!normalizedTrackId) return
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'saturator', params })
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'saturator', instanceId, params })
   },
 })
 
 export const serverSetDelayParams = mutation({
-  args: { projectId: v.string(), trackId: v.string(), params: delayParamsValidator },
-  handler: async (ctx, { projectId, trackId, params }) => {
+  args: { projectId: v.string(), trackId: v.string(), instanceId: v.optional(v.string()), params: delayParamsValidator },
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
     if (!normalizedTrackId) return
-    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'delay', params })
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'delay', instanceId, params })
   },
 })
 
 export const serverSetMasterCompressorParams = mutation({
-  args: { projectId: v.string(), params: compressorParamsValidator },
-  handler: async (ctx, { projectId, params }) => {
+  args: { projectId: v.string(), instanceId: v.optional(v.string()), params: compressorParamsValidator },
+  handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'compressor', params })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'compressor', instanceId, params })
   },
 })
 
 export const serverSetMasterSaturatorParams = mutation({
-  args: { projectId: v.string(), params: saturatorParamsValidator },
-  handler: async (ctx, { projectId, params }) => {
+  args: { projectId: v.string(), instanceId: v.optional(v.string()), params: saturatorParamsValidator },
+  handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'saturator', params })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'saturator', instanceId, params })
   },
 })
 
 export const serverSetMasterDelayParams = mutation({
-  args: { projectId: v.string(), params: delayParamsValidator },
-  handler: async (ctx, { projectId, params }) => {
+  args: { projectId: v.string(), instanceId: v.optional(v.string()), params: delayParamsValidator },
+  handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await upsertMasterEffect(ctx, { projectId, userId, type: 'delay', params })
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'delay', instanceId, params })
   },
 })
 
@@ -869,7 +917,7 @@ export const serverReorderAudioEffects = mutation({
     projectId: v.string(),
     targetType: v.union(v.literal('track'), v.literal('master')),
     trackId: v.optional(v.string()),
-    order: v.array(audioEffectKindValidator),
+    order: v.array(audioEffectOrderItemValidator),
   },
   handler: async (ctx, { projectId, targetType, trackId, order }) => {
     const userId = await requireAuthenticatedUserId(ctx)
@@ -891,15 +939,16 @@ export const serverRemoveAudioEffect = mutation({
     targetType: v.union(v.literal('track'), v.literal('master')),
     trackId: v.optional(v.string()),
     effect: audioEffectKindValidator,
+    instanceId: v.optional(v.string()),
   },
-  handler: async (ctx, { projectId, targetType, trackId, effect }) => {
+  handler: async (ctx, { projectId, targetType, trackId, effect, instanceId }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     if (targetType === 'track') {
       if (!trackId) return notFoundStatus()
       const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
       if (!normalizedTrackId) return notFoundStatus()
-      return await removeAudioEffectForUser(ctx, { projectId, userId, targetType, trackId: normalizedTrackId, effect })
+      return await removeAudioEffectForUser(ctx, { projectId, userId, targetType, trackId: normalizedTrackId, effect, instanceId })
     }
-    return await removeAudioEffectForUser(ctx, { projectId, userId, targetType, effect })
+    return await removeAudioEffectForUser(ctx, { projectId, userId, targetType, effect, instanceId })
   },
 })

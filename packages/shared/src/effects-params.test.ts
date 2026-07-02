@@ -255,6 +255,13 @@ describe('Audio effect order', () => {
     })?.kind).toBe('effects.reorderMasterAudioChain')
     expect(parseSharedTimelineOperation({
       kind: 'effects.reorderAudioChain',
+      payload: { trackId: 'track-1', order: [{ id: 'eq-a', kind: 'eq' }, { id: 'eq-b', kind: 'eq' }] },
+    })).toEqual({
+      kind: 'effects.reorderAudioChain',
+      payload: { trackId: 'track-1', order: [{ id: 'eq-a', kind: 'eq' }, { id: 'eq-b', kind: 'eq' }] },
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.reorderAudioChain',
       payload: { trackId: 'track-1', order: ['delay', 'chorus'] },
     })).toBeNull()
   })
@@ -273,6 +280,13 @@ describe('Audio effect order', () => {
     })).toEqual({
       kind: 'effects.removeAudioEffect',
       payload: { targetType: 'master', effect: 'reverb' },
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.removeAudioEffect',
+      payload: { targetType: 'track', trackId: 'track-1', effect: 'eq', instanceId: 'eq-a' },
+    })).toEqual({
+      kind: 'effects.removeAudioEffect',
+      payload: { targetType: 'track', trackId: 'track-1', effect: 'eq', instanceId: 'eq-a' },
     })
     expect(parseSharedTimelineOperation({
       kind: 'effects.removeAudioEffect',

@@ -129,30 +129,35 @@ export const executeTimelineOperation = async (
       return await context.convex.mutation(convexApi.effects.serverSetEqParams, {
         projectId: context.projectId,
         trackId: operation.payload.trackId,
+        instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })
     case 'effects.setReverbParams':
       return await context.convex.mutation(convexApi.effects.serverSetReverbParams, {
         projectId: context.projectId,
         trackId: operation.payload.trackId,
+        instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })
     case 'effects.setCompressorParams':
       return await context.convex.mutation(convexApi.effects.serverSetCompressorParams, {
         projectId: context.projectId,
         trackId: operation.payload.trackId,
+        instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })
     case 'effects.setSaturatorParams':
       return await context.convex.mutation(convexApi.effects.serverSetSaturatorParams, {
         projectId: context.projectId,
         trackId: operation.payload.trackId,
+        instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })
     case 'effects.setDelayParams':
       return await context.convex.mutation(convexApi.effects.serverSetDelayParams, {
         projectId: context.projectId,
         trackId: operation.payload.trackId,
+        instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })
     case 'effects.reorderAudioChain':
@@ -168,6 +173,7 @@ export const executeTimelineOperation = async (
         targetType: operation.payload.targetType,
         trackId: operation.payload.targetType === 'track' ? operation.payload.trackId : undefined,
         effect: operation.payload.effect,
+        instanceId: operation.payload.instanceId,
       })
     case 'effects.setSynthParams':
       return await context.convex.mutation(convexApi.effects.serverSetSynthParams, {
@@ -190,26 +196,31 @@ export const executeTimelineOperation = async (
     case 'effects.setMasterEqParams':
       return await context.convex.mutation(convexApi.effects.serverSetMasterEqParams, {
         projectId: context.projectId,
+        instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })
     case 'effects.setMasterReverbParams':
       return await context.convex.mutation(convexApi.effects.serverSetMasterReverbParams, {
         projectId: context.projectId,
+        instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })
     case 'effects.setMasterCompressorParams':
       return await context.convex.mutation(convexApi.effects.serverSetMasterCompressorParams, {
         projectId: context.projectId,
+        instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })
     case 'effects.setMasterSaturatorParams':
       return await context.convex.mutation(convexApi.effects.serverSetMasterSaturatorParams, {
         projectId: context.projectId,
+        instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })
     case 'effects.setMasterDelayParams':
       return await context.convex.mutation(convexApi.effects.serverSetMasterDelayParams, {
         projectId: context.projectId,
+        instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })
     case 'effects.reorderMasterAudioChain':

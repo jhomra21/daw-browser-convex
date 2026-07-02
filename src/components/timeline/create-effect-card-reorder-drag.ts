@@ -1,17 +1,17 @@
-import { isAudioEffectKind, type AudioEffectKind } from "@daw-browser/shared";
+import type { AudioEffectInstance } from "@daw-browser/shared";
 import { onCleanup } from "solid-js";
 import { useDrag } from "~/hooks/useDrag";
 
 type EffectCardReorderDragOptions = {
-  effect: AudioEffectKind;
-  orderedEffects: () => AudioEffectKind[];
+  effect: AudioEffectInstance;
+  orderedEffects: () => AudioEffectInstance[];
   canWrite: () => boolean;
-  onReorder: (effect: AudioEffectKind, targetIndex: number) => void;
+  onReorder: (effect: AudioEffectInstance, targetIndex: number) => void;
   onPreviewChange: (preview: EffectCardReorderPreview | undefined) => void;
 };
 
 export type EffectCardReorderPreview = {
-  effect: AudioEffectKind;
+  effect: AudioEffectInstance;
   indicatorX: number;
   top: number;
   height: number;
@@ -90,8 +90,8 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
       chainRect = parentRect ? { top: parentRect.top, height: parentRect.height } : undefined;
       for (const element of event.currentTarget.parentElement?.children ?? []) {
         if (!(element instanceof HTMLElement)) continue;
-        const kind = element.dataset.effectKind;
-        if (!isAudioEffectKind(kind) || kind === options.effect) continue;
+        const effectId = element.dataset.effectId;
+        if (!effectId || effectId === options.effect.id) continue;
         const rect = element.getBoundingClientRect();
         cardRects.push({ left: rect.left, right: rect.right, centerX: rect.left + rect.width / 2 });
       }
@@ -102,7 +102,7 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
     },
     onDragEnd: (position) => {
       const order = options.orderedEffects();
-      const currentIndex = order.indexOf(options.effect);
+      const currentIndex = order.findIndex((entry) => entry.id === options.effect.id);
       const targetIndex = targetIndexForPoint(position.x);
       const canReorder = cardRects.length > 0;
       clearPreview();

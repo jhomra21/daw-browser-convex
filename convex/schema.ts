@@ -177,6 +177,7 @@ export default defineSchema({
     trackId: v.optional(v.id("tracks")),
     index: v.number(),
     type: v.string(),
+    instanceId: v.optional(v.string()),
     params: v.any(),
     createdAt: v.number(),
   })

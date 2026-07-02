@@ -1,4 +1,4 @@
-import type { ExportRange, ExportFx } from '@daw-browser/audio-engine/export-mixdown'
+import type { AudioEffectRuntimeInstance, ExportRange, ExportFx } from '@daw-browser/audio-engine/export-mixdown'
 import type { ExportAudioFormat } from '@daw-browser/shared'
 import { formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectKind, isLocalId, normalizeCompressorParams,
   normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams } from '@daw-browser/shared'
@@ -12,7 +12,7 @@ import { chooseStemExportDirectory, createStemExportWritable, sanitizeStemFileNa
 import { audioEffectKindFromLocalEffect, listLocalEffects, type LocalEffectRow } from '~/lib/local-effects'
 import { loadLocalAutomationEnvelopes } from '~/lib/local-automation'
 import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
-import { collectAudioEffectOrders, type AudioEffectOrderEntry } from '~/lib/audio-effect-order-rows'
+import { collectAudioEffectOrders, type AudioEffectOrderEntry, compareAudioEffectOrderEntries } from '~/lib/audio-effect-order-rows'
 import { saveLocalExportMetadataBatch, type LocalExportMetadataInput } from '~/lib/local-export-metadata'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
@@ -65,6 +65,10 @@ export type ExportOutcome =
 
 type TrackFxMap = NonNullable<ExportFx['trackFx']>
 type TrackFxPatch = TrackFxMap[string]
+type ExportEffectInstanceRow = AudioEffectRuntimeInstance & {
+  targetId: string
+  index?: number
+}
 
 const ensureTrackFxMap = (fx: ExportFx): TrackFxMap => {
   const trackFx = fx.trackFx ?? {}
@@ -76,12 +80,55 @@ const applyTrackFxPatch = (trackFx: TrackFxMap, trackId: string, patch: TrackFxP
   trackFx[trackId] = { ...(trackFx[trackId] ?? {}), ...patch }
 }
 
+const normalizeExportEffectInstances = (rows: ExportEffectInstanceRow[]): AudioEffectRuntimeInstance[] => {
+  const seen = new Set<string>()
+  const instances: AudioEffectRuntimeInstance[] = []
+  for (const row of rows.sort(compareAudioEffectOrderEntries)) {
+    if (seen.has(row.id)) continue
+    seen.add(row.id)
+    if (row.kind === 'eq') instances.push({ id: row.id, kind: row.kind, params: row.params })
+    else if (row.kind === 'compressor') instances.push({ id: row.id, kind: row.kind, params: row.params })
+    else if (row.kind === 'saturator') instances.push({ id: row.id, kind: row.kind, params: row.params })
+    else if (row.kind === 'delay') instances.push({ id: row.id, kind: row.kind, params: row.params })
+    else instances.push({ id: row.id, kind: row.kind, params: row.params })
+  }
+  return instances
+}
+
+const applyExportEffectInstances = (fx: ExportFx, rows: ExportEffectInstanceRow[]) => {
+  const trackFx = ensureTrackFxMap(fx)
+  const masterRows: ExportEffectInstanceRow[] = []
+  const trackRows = new Map<string, ExportEffectInstanceRow[]>()
+  for (const row of rows) {
+    if (row.targetId === 'master') {
+      masterRows.push(row)
+      continue
+    }
+    const existing = trackRows.get(row.targetId)
+    if (existing) existing.push(row)
+    else trackRows.set(row.targetId, [row])
+  }
+  fx.masterFxInstances = normalizeExportEffectInstances(masterRows)
+  for (const [trackId, instances] of trackRows) {
+    applyTrackFxPatch(trackFx, trackId, { instances: normalizeExportEffectInstances(instances) })
+  }
+}
+
 const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
   const trackFx = ensureTrackFxMap(fx)
   const orderEntries: AudioEffectOrderEntry[] = []
+  const instanceRows: ExportEffectInstanceRow[] = []
   for (const row of rows) {
     const kind = audioEffectKindFromLocalEffect(row.effect)
-    if (kind) orderEntries.push({ targetId: row.targetId, kind, index: row.index })
+    if (kind) {
+      orderEntries.push({ targetId: row.targetId, kind, instanceId: row.instanceId, index: row.index })
+      const id = row.instanceId ?? kind
+      if (kind === 'eq') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: row.params })
+      if (kind === 'compressor') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: normalizeCompressorParams(row.params) })
+      if (kind === 'saturator') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: normalizeSaturatorParams(row.params) })
+      if (kind === 'delay') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: normalizeDelayParams(row.params) })
+      if (kind === 'reverb') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: normalizeReverbParams(row.params) })
+    }
     if (row.effect === 'master-eq') {
       fx.masterEq = row.params
       continue
@@ -117,15 +164,26 @@ const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
   const orders = collectAudioEffectOrders(orderEntries)
   fx.masterFxOrder = orders.master
   for (const [trackId, order] of orders.tracks) applyTrackFxPatch(trackFx, trackId, { order })
+  applyExportEffectInstances(fx, instanceRows)
 }
 
 const applyRoomEffectRowsToFx = (fx: ExportFx, rows: RoomEffectRow[]) => {
   const trackFx = ensureTrackFxMap(fx)
   const orderEntries: AudioEffectOrderEntry[] = []
+  const instanceRows: ExportEffectInstanceRow[] = []
   for (const row of rows) {
     if (isAudioEffectKind(row.type)) {
-      if (row.targetType === 'master') orderEntries.push({ targetId: 'master', kind: row.type, index: row.index })
-      else if (row.trackId) orderEntries.push({ targetId: row.trackId, kind: row.type, index: row.index })
+      if (row.targetType === 'master') orderEntries.push({ targetId: 'master', kind: row.type, instanceId: row.instanceId, index: row.index })
+      else if (row.trackId) orderEntries.push({ targetId: row.trackId, kind: row.type, instanceId: row.instanceId, index: row.index })
+      const targetId = row.targetType === 'master' ? 'master' : row.trackId
+      if (targetId && row.params) {
+        const id = row.instanceId ?? row.type
+        if (row.type === 'eq') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: row.params })
+        if (row.type === 'compressor') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeCompressorParams(row.params) })
+        if (row.type === 'saturator') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeSaturatorParams(row.params) })
+        if (row.type === 'delay') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeDelayParams(row.params) })
+        if (row.type === 'reverb') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeReverbParams(row.params) })
+      }
     }
     if (row.targetType === 'master') {
       if (row.type === 'eq' && row.params) fx.masterEq = row.params
@@ -152,6 +210,7 @@ const applyRoomEffectRowsToFx = (fx: ExportFx, rows: RoomEffectRow[]) => {
   const orders = collectAudioEffectOrders(orderEntries)
   fx.masterFxOrder = orders.master
   for (const [trackId, order] of orders.tracks) applyTrackFxPatch(trackFx, trackId, { order })
+  applyExportEffectInstances(fx, instanceRows)
 }
 
 const throwIfExportAborted = (signal: AbortSignal) => {

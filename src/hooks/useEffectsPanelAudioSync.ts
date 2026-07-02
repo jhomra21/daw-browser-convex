@@ -17,10 +17,10 @@ import {
   type SaturatorParams,
   type TrackInstrumentParams,
 } from "@daw-browser/shared";
-import type { AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
+import type { AudioEffectRuntimeInstance, AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import { convexApi } from "~/lib/convex";
 import { audioEffectKindFromLocalEffect, listLocalEffects, type LocalEffectRow } from "~/lib/local-effects";
-import { collectAudioEffectOrders as collectAudioEffectOrdersFromEntries } from "~/lib/audio-effect-order-rows";
+import { collectAudioEffectInstances } from "~/lib/audio-effect-order-rows";
 import { isLocalId } from "@daw-browser/shared";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import type { Track } from "@daw-browser/timeline-core/types";
@@ -140,17 +140,64 @@ const applyTrackAudioEffect = <Params,>(
   descriptor.setTrack(audioEngine, trackId, params ?? descriptor.disabled);
 };
 
-const collectSyncedAudioEffectOrders = (effects: SyncedEffectRow[]) => collectAudioEffectOrdersFromEntries(
-  effects.flatMap((row) => {
+type SyncedAudioEffectInstanceRow = AudioEffectRuntimeInstance & {
+  targetId: string;
+  index?: number;
+};
+
+const objectParamInput = (params: unknown): object => (params && typeof params === "object" ? params : {});
+
+const createSyncedAudioEffectInstanceRow = (
+  targetId: string,
+  kind: AudioEffectKind,
+  params: unknown,
+  instanceId?: string,
+  index?: number,
+): SyncedAudioEffectInstanceRow => {
+  const id = instanceId ?? kind;
+  const input = objectParamInput(params);
+  if (kind === "eq") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.eq.normalizeParams(input), index };
+  if (kind === "compressor") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.compressor.normalizeParams(input), index };
+  if (kind === "saturator") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.saturator.normalizeParams(input), index };
+  if (kind === "delay") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.delay.normalizeParams(input), index };
+  return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.reverb.normalizeParams(input), index };
+};
+
+const collectSyncedAudioEffectInstances = (effects: SyncedEffectRow[]) => {
+  const rows = effects.flatMap((row): SyncedAudioEffectInstanceRow[] => {
     if ("effect" in row) {
       const kind = audioEffectKindFromLocalEffect(row.effect);
-      return kind ? [{ targetId: row.targetId, kind, index: row.index }] : [];
+      return kind ? [createSyncedAudioEffectInstanceRow(row.targetId, kind, row.params, row.instanceId, row.index)] : [];
     }
-    if (!isAudioEffectKind(row.type)) return [];
-    if (row.targetType === "master") return [{ targetId: "master", kind: row.type, index: row.index }];
-    return row.trackId ? [{ targetId: row.trackId, kind: row.type, index: row.index }] : [];
-  }),
-);
+    if (!isAudioEffectKind(row.type) || !row.params) return [];
+    const targetId = row.targetType === "master" ? "master" : row.trackId;
+    return targetId ? [createSyncedAudioEffectInstanceRow(targetId, row.type, row.params, row.instanceId, row.index)] : [];
+  });
+  const instances = collectAudioEffectInstances(rows.map((row) => ({
+    targetId: row.targetId,
+    kind: row.kind,
+    instanceId: row.id,
+    index: row.index,
+  })));
+  const rowByKey = new Map(rows.map((row) => [`${row.targetId}:${row.id}`, row]));
+  const toRuntimeInstances = (targetId: string, order: ReturnType<typeof collectAudioEffectInstances>["master"]): AudioEffectRuntimeInstance[] => {
+    const runtimeInstances: AudioEffectRuntimeInstance[] = [];
+    for (const instance of order) {
+      const row = rowByKey.get(`${targetId}:${instance.id}`);
+      if (!row) continue;
+      if (row.kind === "eq") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else if (row.kind === "compressor") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else if (row.kind === "saturator") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else if (row.kind === "delay") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+    }
+    return runtimeInstances;
+  };
+  return {
+    master: toRuntimeInstances("master", instances.master),
+    tracks: new Map([...instances.tracks].map(([trackId, order]) => [trackId, toRuntimeInstances(trackId, order)])),
+  };
+};
 
 export function useEffectsPanelAudioSync(
   options: UseEffectsPanelAudioSyncOptions,
@@ -236,6 +283,7 @@ export function useEffectsPanelAudioSync(
       audioEngine.setTrackSaturator(trackId, disabledSaturator);
       audioEngine.setTrackDelay(trackId, disabledDelay);
       audioEngine.setTrackReverb(trackId, disabledReverb);
+      audioEngine.setTrackFxInstances(trackId, []);
       audioEngine.clearTrackInstrument(trackId);
       audioEngine.clearTrackArpeggiator(trackId);
       drumRackBufferSync.clearTrack(trackId);
@@ -248,6 +296,7 @@ export function useEffectsPanelAudioSync(
     audioEngine.setMasterSaturator(disabledSaturator);
     audioEngine.setMasterDelay(disabledDelay);
     audioEngine.setMasterReverb(disabledReverb);
+    audioEngine.setMasterFxInstances([]);
   };
 
   createEffect(() => {
@@ -289,7 +338,7 @@ export function useEffectsPanelAudioSync(
     const reverbState = createSyncedAudioEffectState<ReverbParams>();
     const instrumentByTrackId = new Map<string, TrackInstrumentParams>();
     const arpByTrackId = new Map<string, ArpeggiatorParams>();
-    const effectOrders = collectSyncedAudioEffectOrders(effects);
+    const effectInstances = collectSyncedAudioEffectInstances(effects);
 
     for (const row of effects) {
       if ("effect" in row) {
@@ -331,7 +380,7 @@ export function useEffectsPanelAudioSync(
     applyMasterAudioDraft(reverbSyncDescriptor, reverbState, activeTargetId, audioEngine, options.localDraftEffects);
 
     if (activeTargetId !== "master") {
-      audioEngine.setMasterFxOrder(effectOrders.master);
+      audioEngine.setMasterFxInstances(effectInstances.master);
       if (!eqState.hasMaster) audioEngine.setMasterEq(disabledEq);
       if (!compressorState.hasMaster) audioEngine.setMasterCompressor(disabledCompressor);
       if (!saturatorState.hasMaster) audioEngine.setMasterSaturator(disabledSaturator);
@@ -349,7 +398,7 @@ export function useEffectsPanelAudioSync(
 
     for (const track of tracks) {
       if (track.id === activeTargetId) continue;
-      audioEngine.setTrackFxOrder(track.id, effectOrders.tracks.get(track.id) ?? []);
+      audioEngine.setTrackFxInstances(track.id, effectInstances.tracks.get(track.id) ?? []);
       applyTrackAudioEffect(eqSyncDescriptor, eqState, track.id, audioEngine, options.localDraftEffects);
       applyTrackAudioEffect(compressorSyncDescriptor, compressorState, track.id, audioEngine, options.localDraftEffects);
       applyTrackAudioEffect(saturatorSyncDescriptor, saturatorState, track.id, audioEngine, options.localDraftEffects);

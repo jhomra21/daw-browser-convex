@@ -1,6 +1,6 @@
 import { createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_ORDER, INSTRUMENT_CONTRACTS, normalizeTrackInstrumentParams, type AudioEffectKind, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
+import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_ORDER, INSTRUMENT_CONTRACTS, audioEffectOrderItemId, audioEffectOrderItemKind, normalizeTrackInstrumentParams, type AudioEffectKind, type AudioEffectOrderItem, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { compareAudioEffectOrderEntries } from '~/lib/audio-effect-order-rows'
 
 export type LocalEffectKind = 'eq' | 'compressor' | 'saturator' | 'delay' | 'reverb' | 'instrument' | 'synth' | 'arp' | 'master-eq' | 'master-compressor' | 'master-saturator' | 'master-delay' | 'master-reverb'
@@ -9,6 +9,7 @@ export type LocalEffectRow<TParams = any> = {
   id: string
   targetId: string
   effect: LocalEffectKind
+  instanceId?: string
   params: TParams
   index?: number
   updatedAt: number
@@ -16,6 +17,8 @@ export type LocalEffectRow<TParams = any> = {
 
 const EFFECT_KIND = 'effect'
 const effectId = (targetId: string, effect: LocalEffectKind) => `${targetId}:${effect}`
+const effectInstanceRowId = (targetId: string, instanceId: string) => `${targetId}:effect:${instanceId}`
+export const createAudioEffectInstanceId = () => `audio-effect:${crypto.randomUUID()}`
 const now = () => Date.now()
 
 const isObject = (value: unknown): value is Record<string, unknown> => (
@@ -111,6 +114,33 @@ export const setLocalEffect = async <TParams>(
   return row
 }
 
+export const setLocalEffectInstance = async <TParams>(
+  projectId: string,
+  targetId: string,
+  effect: LocalEffectKind,
+  params: TParams,
+  input?: {
+    instanceId?: string
+    index?: number
+  },
+): Promise<LocalEffectRow<TParams>> => {
+  const instanceId = input?.instanceId ?? createAudioEffectInstanceId()
+  const db = await openLocalProjectDb(projectId)
+  const timestamp = now()
+  const row: LocalEffectRow<TParams> = {
+    id: effectInstanceRowId(targetId, instanceId),
+    targetId,
+    effect,
+    instanceId,
+    params,
+    index: input?.index,
+    updatedAt: timestamp,
+  }
+  await db.put('entities', createLocalProjectEntityRow(EFFECT_KIND, row.id, row, row.updatedAt))
+  notifyLocalProjectChanged(projectId)
+  return row
+}
+
 export const deleteLocalEffect = async (
   projectId: string,
   targetId: string,
@@ -118,6 +148,24 @@ export const deleteLocalEffect = async (
 ): Promise<void> => {
   const db = await openLocalProjectDb(projectId)
   const key: [string, string] = [EFFECT_KIND, effectId(targetId, effect)]
+  const row = await db.get('entities', key)
+  if (!isLocalEffectRow(row?.value)) return
+  await db.delete('entities', key)
+  notifyLocalProjectChanged(projectId)
+}
+
+export const deleteLocalEffectInstance = async (
+  projectId: string,
+  targetId: string,
+  effect: LocalEffectKind,
+  instanceId?: string,
+): Promise<void> => {
+  if (!instanceId) {
+    await deleteLocalEffect(projectId, targetId, effect)
+    return
+  }
+  const db = await openLocalProjectDb(projectId)
+  const key: [string, string] = [EFFECT_KIND, effectInstanceRowId(targetId, instanceId)]
   const row = await db.get('entities', key)
   if (!isLocalEffectRow(row?.value)) return
   await db.delete('entities', key)
@@ -134,7 +182,7 @@ export const audioEffectKindFromLocalEffect = (effect: LocalEffectKind): AudioEf
 export const reorderLocalAudioEffects = async (
   projectId: string,
   targetId: string,
-  order: AudioEffectKind[],
+  order: AudioEffectOrderItem[],
 ): Promise<void> => {
   const rows = (await listLocalEffects(projectId))
     .filter((row) => row.targetId === targetId)
@@ -146,16 +194,20 @@ export const reorderLocalAudioEffects = async (
       { kind: a.kind, index: a.row.index },
       { kind: b.kind, index: b.row.index },
     ))
-  const requestedKinds = new Set<AudioEffectKind>()
-  const requested = order.flatMap((kind) => {
-    if (requestedKinds.has(kind)) return []
-    const row = rows.find((entry) => entry.kind === kind)
+  const requestedIds = new Set<string>()
+  const requested = order.flatMap((item) => {
+    const id = audioEffectOrderItemId(item)
+    if (requestedIds.has(id)) return []
+    const kind = audioEffectOrderItemKind(item)
+    const row = typeof item === 'string'
+      ? rows.find((entry) => entry.kind === kind && !requestedIds.has(entry.row.instanceId ?? entry.kind))
+      : rows.find((entry) => entry.row.instanceId === item.id && entry.kind === item.kind)
     if (!row) return []
-    requestedKinds.add(kind)
+    requestedIds.add(row.row.instanceId ?? row.kind)
     return [row]
   })
-  const requestedIds = new Set(requested.map((entry) => entry.row.id))
-  const omitted = rows.filter((entry) => !requestedIds.has(entry.row.id))
+  const requestedRowIds = new Set(requested.map((entry) => entry.row.id))
+  const omitted = rows.filter((entry) => !requestedRowIds.has(entry.row.id))
   const changes = [...requested, ...omitted].flatMap((entry, index) => (
     entry.row.index === index ? [] : [{ row: entry.row, index }]
   ))

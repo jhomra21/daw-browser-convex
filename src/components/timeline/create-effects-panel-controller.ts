@@ -234,11 +234,11 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       canWrite: canWriteCurrentTargetEffects(),
       canAddMidiClip: isInstrumentTrack(),
       canAddArpeggiator: isInstrumentTrack() && !instrument.arp.params(),
-      canAddEq: !audioEffects.eq.params(),
-      canAddCompressor: !audioEffects.compressor.params(),
-      canAddSaturator: !audioEffects.saturator.params(),
-      canAddDelay: !audioEffects.delay.params(),
-      canAddReverb: !audioEffects.reverb.params(),
+      canAddEq: true,
+      canAddCompressor: true,
+      canAddSaturator: true,
+      canAddDelay: true,
+      canAddReverb: true,
     };
     if (deviceInsertActionsEqual(previousDeviceInsertActions, nextActions)) return;
     previousDeviceInsertActions = nextActions;

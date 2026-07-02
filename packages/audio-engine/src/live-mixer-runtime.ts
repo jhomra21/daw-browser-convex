@@ -1,5 +1,5 @@
-import { areAudioEffectOrdersEqual, assert, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
-import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
+import { areAudioEffectOrdersEqual, assert, normalizeAudioEffectInstanceOrder, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse, type FxChainStageConfig } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState, type CompressorChainState } from './effects/compressor-chain-state'
 import type { CompressorMeterListener } from './effects/compressor-worklet'
@@ -12,6 +12,7 @@ import { resolveMixerGraph } from './mixer/resolve-routing'
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { AutomationAudioBinding } from './automation'
 import { resolveDelayAutomationBindings, resolveEqAutomationBindings, resolveReverbAutomationBindings, resolveSaturatorAutomationBindings } from './automation-bindings'
+import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 
 type RuntimeTrack = Track<AudioBuffer>
 
@@ -52,6 +53,16 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const delayChains = new Map<string, DelayChainState>()
   const pendingDelayParams = new Map<string, DelayParamsLite>()
   const trackFxOrders = new Map<string, AudioEffectKind[]>()
+  const trackFxInstances = new Map<string, AudioEffectRuntimeInstance[]>()
+  const pendingTrackFxInstances = new Map<string, AudioEffectRuntimeInstance[]>()
+  const instanceEqChains = new Map<string, Map<string, BiquadFilterNode[]>>()
+  const instanceEqNodesByBand = new Map<string, Map<string, Map<string, BiquadFilterNode>>>()
+  const instanceEqSignatures = new Map<string, Map<string, string>>()
+  const instanceEqTopologySignatures = new Map<string, Map<string, string>>()
+  const instanceCompressorChains = new Map<string, Map<string, CompressorChainState>>()
+  const instanceReverbChains = new Map<string, Map<string, ReverbChainState>>()
+  const instanceSaturatorChains = new Map<string, Map<string, SaturatorChainState>>()
+  const instanceDelayChains = new Map<string, Map<string, DelayChainState>>()
   let currentBpm = 120
 
   const cleanupTrackSendGains = (trackId: string) => {
@@ -61,8 +72,80 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     sendGains.delete(trackId)
   }
 
+  const normalizeRuntimeInstances = (instances: AudioEffectRuntimeInstance[]): AudioEffectRuntimeInstance[] => {
+    const order = normalizeAudioEffectInstanceOrder(instances, instances)
+    return order.flatMap((entry) => {
+      const instance = instances.find((candidate) => candidate.id === entry.id && candidate.kind === entry.kind)
+      return instance ? [instance] : []
+    })
+  }
+
+  const ensureNestedMap = <Value,>(map: Map<string, Map<string, Value>>, trackId: string): Map<string, Value> => {
+    const existing = map.get(trackId)
+    if (existing) return existing
+    const next = new Map<string, Value>()
+    map.set(trackId, next)
+    return next
+  }
+
+  const closeInstanceState = (trackId: string, instanceId: string) => {
+    const eq = instanceEqChains.get(trackId)?.get(instanceId)
+    if (eq) disconnectAudioNodes(eq)
+    instanceEqChains.get(trackId)?.delete(instanceId)
+    instanceEqNodesByBand.get(trackId)?.delete(instanceId)
+    instanceEqSignatures.get(trackId)?.delete(instanceId)
+    instanceEqTopologySignatures.get(trackId)?.delete(instanceId)
+    instanceCompressorChains.get(trackId)?.get(instanceId)?.close()
+    instanceCompressorChains.get(trackId)?.delete(instanceId)
+    instanceReverbChains.get(trackId)?.get(instanceId)?.close()
+    instanceReverbChains.get(trackId)?.delete(instanceId)
+    instanceSaturatorChains.get(trackId)?.get(instanceId)?.close()
+    instanceSaturatorChains.get(trackId)?.delete(instanceId)
+    instanceDelayChains.get(trackId)?.get(instanceId)?.close()
+    instanceDelayChains.get(trackId)?.delete(instanceId)
+  }
+
+  const closeTrackInstanceStates = (trackId: string) => {
+    const ids = new Set<string>()
+    for (const map of [
+      instanceEqChains,
+      instanceCompressorChains,
+      instanceReverbChains,
+      instanceSaturatorChains,
+      instanceDelayChains,
+    ]) {
+      for (const id of map.get(trackId)?.keys() ?? []) ids.add(id)
+    }
+    for (const id of ids) closeInstanceState(trackId, id)
+    instanceEqChains.delete(trackId)
+    instanceEqNodesByBand.delete(trackId)
+    instanceEqSignatures.delete(trackId)
+    instanceEqTopologySignatures.delete(trackId)
+    instanceCompressorChains.delete(trackId)
+    instanceReverbChains.delete(trackId)
+    instanceSaturatorChains.delete(trackId)
+    instanceDelayChains.delete(trackId)
+  }
+
+  const createInstanceStageConfigs = (trackId: string, instances: AudioEffectRuntimeInstance[]): FxChainStageConfig[] => instances.map((instance) => ({
+    id: instance.id,
+    kind: instance.kind,
+    eqNodes: instance.kind === 'eq' ? instanceEqChains.get(trackId)?.get(instance.id) : undefined,
+    compressorChain: instance.kind === 'compressor' ? instanceCompressorChains.get(trackId)?.get(instance.id)?.chain() : undefined,
+    saturatorChain: instance.kind === 'saturator' ? instanceSaturatorChains.get(trackId)?.get(instance.id)?.chain() : undefined,
+    delayChain: instance.kind === 'delay' ? instanceDelayChains.get(trackId)?.get(instance.id)?.chain() : undefined,
+    reverbChain: instance.kind === 'reverb' ? instanceReverbChains.get(trackId)?.get(instance.id)?.chain() : undefined,
+  }))
+
   const rebuildTrackRouting = (trackId: string, nodes: Pick<TrackNodeGroup, 'input' | 'gain'>) => {
     disconnectAudioNodes([nodes.input])
+    const instances = trackFxInstances.get(trackId)
+    if (instances) {
+      connectFxChain(nodes.input, nodes.gain, {
+        instances: createInstanceStageConfigs(trackId, instances),
+      })
+      return
+    }
     connectFxChain(nodes.input, nodes.gain, {
       eqNodes: eqChains.get(trackId) || [],
       compressorChain: compressorChains.get(trackId)?.chain(),
@@ -129,6 +212,11 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       if (pendingDelay) {
         pendingDelayParams.delete(trackId)
         setTrackDelay(trackId, pendingDelay)
+      }
+      const pendingInstances = pendingTrackFxInstances.get(trackId)
+      if (pendingInstances) {
+        pendingTrackFxInstances.delete(trackId)
+        setTrackFxInstances(trackId, pendingInstances)
       }
     }
 
@@ -237,6 +325,116 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     if (result.changed && result.requiresRoutingRebuild) rebuildTrackRouting(trackId, ensureTrackNodes(trackId))
   }
 
+  const applyTrackInstanceEq = (ctx: AudioContext, trackId: string, instanceId: string, params: EqParamsLite): boolean => {
+    const normalized = normalizeEqParams(params)
+    const signature = serializeNormalizedEqParams(normalized)
+    const signatureMap = ensureNestedMap(instanceEqSignatures, trackId)
+    if (signatureMap.get(instanceId) === signature) return false
+    const topologySignature = getEqTopologySignature(normalized)
+    const topologyMap = ensureNestedMap(instanceEqTopologySignatures, trackId)
+    const chainMap = ensureNestedMap(instanceEqChains, trackId)
+    const old = chainMap.get(instanceId)
+    if (old && topologyMap.get(instanceId) === topologySignature) {
+      applyEqNodeParams(old, normalized)
+      signatureMap.set(instanceId, signature)
+      return false
+    }
+    if (old) disconnectAudioNodes(old)
+    const destination = options.getDestination()
+    const targetChannels = destination?.maxChannelCount ?? ctx.destination.maxChannelCount ?? 2
+    const eqNodes = createEqNodes(ctx, normalized, targetChannels)
+    chainMap.set(instanceId, eqNodes)
+    ensureNestedMap(instanceEqNodesByBand, trackId).set(instanceId, new Map(normalized.bands.filter((band) => band.enabled).flatMap((band, index) => {
+      const node = eqNodes[index]
+      return node ? [[band.id, node]] : []
+    })))
+    signatureMap.set(instanceId, signature)
+    topologyMap.set(instanceId, topologySignature)
+    return true
+  }
+
+  const applyTrackFxInstances = async (trackId: string, instances: AudioEffectRuntimeInstance[]) => {
+    const wasInstanceMode = trackFxInstances.has(trackId)
+    const ctx = options.getAudioContext()
+    if (!ctx) {
+      trackFxInstances.set(trackId, instances)
+      pendingTrackFxInstances.set(trackId, instances)
+      return
+    }
+    const normalized = normalizeRuntimeInstances(instances)
+    trackFxInstances.set(trackId, normalized)
+    const activeIds = new Set(normalized.map((instance) => instance.id))
+    const staleIds = new Set<string>()
+    for (const map of [
+      instanceEqChains,
+      instanceCompressorChains,
+      instanceReverbChains,
+      instanceSaturatorChains,
+      instanceDelayChains,
+    ]) {
+      for (const id of map.get(trackId)?.keys() ?? []) {
+        if (!activeIds.has(id)) staleIds.add(id)
+      }
+    }
+    for (const id of staleIds) closeInstanceState(trackId, id)
+
+    let requiresRoutingRebuild = !wasInstanceMode || staleIds.size > 0
+    for (const instance of normalized) {
+      if (instance.kind === 'eq') {
+        requiresRoutingRebuild = applyTrackInstanceEq(ctx, trackId, instance.id, instance.params) || requiresRoutingRebuild
+        continue
+      }
+      if (instance.kind === 'compressor') {
+        const stateMap = ensureNestedMap(instanceCompressorChains, trackId)
+        let state = stateMap.get(instance.id)
+        if (!state) {
+          state = createCompressorChainState()
+          stateMap.set(instance.id, state)
+        }
+        const result = await state.set(ctx, normalizeCompressorParams(instance.params))
+        if (state.isIdle()) stateMap.delete(instance.id)
+        requiresRoutingRebuild = (result.changed && result.requiresRoutingRebuild) || requiresRoutingRebuild
+        continue
+      }
+      if (instance.kind === 'saturator') {
+        const stateMap = ensureNestedMap(instanceSaturatorChains, trackId)
+        let state = stateMap.get(instance.id)
+        if (!state) {
+          state = createSaturatorChainState()
+          stateMap.set(instance.id, state)
+        }
+        const result = state.set(ctx, instance.params)
+        requiresRoutingRebuild = (result.changed && result.requiresRoutingRebuild) || requiresRoutingRebuild
+        continue
+      }
+      if (instance.kind === 'delay') {
+        const stateMap = ensureNestedMap(instanceDelayChains, trackId)
+        let state = stateMap.get(instance.id)
+        if (!state) {
+          state = createDelayChainState()
+          stateMap.set(instance.id, state)
+        }
+        const result = state.set(ctx, instance.params, currentBpm)
+        requiresRoutingRebuild = (result.changed && result.requiresRoutingRebuild) || requiresRoutingRebuild
+        continue
+      }
+      const stateMap = ensureNestedMap(instanceReverbChains, trackId)
+      let state = stateMap.get(instance.id)
+      if (!state) {
+        state = createReverbChainState()
+        stateMap.set(instance.id, state)
+      }
+      const result = state.set(ctx, instance.params, options.createImpulseResponse)
+      requiresRoutingRebuild = (result.changed && result.requiresRoutingRebuild) || requiresRoutingRebuild
+    }
+    if (requiresRoutingRebuild) rebuildTrackRouting(trackId, ensureTrackNodes(trackId))
+  }
+
+  const setTrackFxInstances = (trackId: string, instances: AudioEffectRuntimeInstance[]) => {
+    const normalized = normalizeRuntimeInstances(instances)
+    void applyTrackFxInstances(trackId, normalized)
+  }
+
   const disposeTrack = (trackId: string) => {
     const gain = gains.get(trackId)
     disconnectAudioNodes([gain])
@@ -273,6 +471,9 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     pendingSaturatorParams.delete(trackId)
     pendingDelayParams.delete(trackId)
     trackFxOrders.delete(trackId)
+    trackFxInstances.delete(trackId)
+    pendingTrackFxInstances.delete(trackId)
+    closeTrackInstanceStates(trackId)
 
     options.disposeSynthTrack(trackId)
     options.disposeTrackMeters(trackId)
@@ -304,6 +505,17 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     delayChains.clear()
     pendingDelayParams.clear()
     trackFxOrders.clear()
+    trackFxInstances.clear()
+    pendingTrackFxInstances.clear()
+    for (const trackId of Array.from(instanceEqChains.keys())) closeTrackInstanceStates(trackId)
+    instanceEqChains.clear()
+    instanceEqNodesByBand.clear()
+    instanceEqSignatures.clear()
+    instanceEqTopologySignatures.clear()
+    instanceCompressorChains.clear()
+    instanceReverbChains.clear()
+    instanceSaturatorChains.clear()
+    instanceDelayChains.clear()
   }
 
   return {
@@ -357,9 +569,22 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     setTrackEq,
     setTrackSaturator,
     setTrackDelay,
+    setTrackFxInstances,
     resolveTrackAutomationBindings: (trackId: string, parameterId: string): AutomationAudioBinding[] => {
       const trackNodes = ensureTrackNodes(trackId)
       if (parameterId === 'volume') return [{ param: trackNodes.gain.gain, valueToAudioValue: (value) => value }]
+      if (trackFxInstances.has(trackId)) {
+        const eqNodes = new Map<string, BiquadFilterNode>()
+        for (const nodesByBand of instanceEqNodesByBand.get(trackId)?.values() ?? []) {
+          for (const [bandId, node] of nodesByBand) eqNodes.set(bandId, node)
+        }
+        return [
+          ...resolveEqAutomationBindings(eqNodes, parameterId),
+          ...Array.from(instanceSaturatorChains.get(trackId)?.values() ?? []).flatMap((state) => resolveSaturatorAutomationBindings(state, parameterId)),
+          ...Array.from(instanceDelayChains.get(trackId)?.values() ?? []).flatMap((state) => resolveDelayAutomationBindings(state, parameterId)),
+          ...Array.from(instanceReverbChains.get(trackId)?.values() ?? []).flatMap((state) => resolveReverbAutomationBindings(state, parameterId)),
+        ]
+      }
       return [
         ...resolveEqAutomationBindings(eqNodesByBand.get(trackId) ?? new Map(), parameterId),
         ...resolveSaturatorAutomationBindings(saturatorChains.get(trackId), parameterId),
@@ -392,6 +617,9 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     setBpm: (bpm: number) => {
       currentBpm = bpm
       for (const state of delayChains.values()) state.setBpm(bpm)
+      for (const states of instanceDelayChains.values()) {
+        for (const state of states.values()) state.setBpm(bpm)
+      }
     },
     disposeTrack,
     clear,

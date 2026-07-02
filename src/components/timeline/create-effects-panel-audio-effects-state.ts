@@ -385,7 +385,13 @@ export function createEffectsPanelAudioDevice(
     index?: number;
     params: AudioEffectParams;
   };
-  const [draftParamsByInstance, setDraftParamsByInstance] = createSignal<Record<string, AudioEffectParams | undefined>>({});
+  type AudioEffectPanelDraft = {
+    targetId: string;
+    instanceId: string;
+    kind: AudioEffectKind;
+    params: AudioEffectParams;
+  };
+  const [draftParamsByInstance, setDraftParamsByInstance] = createSignal<Record<string, AudioEffectPanelDraft | undefined>>({});
   const [optimisticOrder, setOptimisticOrder] = createSignal<{ targetId: string; order: AudioEffectInstance[] }>();
 
   const objectParamInput = (params: unknown): object => (params && typeof params === "object" ? params : {});
@@ -445,13 +451,12 @@ export function createEffectsPanelAudioDevice(
 
   const instanceKey = (targetId: string, instanceId: string) => `${targetId}:${instanceId}`;
 
-  const persistedRowsForTarget = (targetId: string): AudioEffectPanelRow[] => {
+  const normalizedPersistedAudioEffectRows = createMemo<AudioEffectPanelRow[]>(() => {
     if (isLocalProject()) {
       return (localAllEffects() ?? []).flatMap((row) => {
-        if (row.targetId !== targetId) return [];
         const kind = AUDIO_EFFECT_ORDER.find((entry) => row.effect === entry || row.effect === AUDIO_EFFECT_CONTRACTS[entry].masterKind);
         return kind && row.params ? [{
-          targetId,
+          targetId: row.targetId,
           kind,
           instanceId: row.instanceId,
           index: row.index,
@@ -460,9 +465,8 @@ export function createEffectsPanelAudioDevice(
       });
     }
     return (context.roomEffects() ?? []).flatMap((row) => {
-      if (targetId === "master") {
-        if (row.targetType !== "master") return [];
-      } else if (row.targetType !== "track" || row.trackId !== targetId) return [];
+      const targetId = row.targetType === "master" ? "master" : row.trackId;
+      if (!targetId) return [];
       const kind = AUDIO_EFFECT_ORDER.find((entry) => row.type === entry);
       return kind && row.params ? [{
         targetId,
@@ -472,7 +476,60 @@ export function createEffectsPanelAudioDevice(
         params: normalizeParamsForKind(kind, row.params),
       }] : [];
     });
+  });
+
+  const persistedRowsForTarget = (targetId: string): AudioEffectPanelRow[] => (
+    normalizedPersistedAudioEffectRows().filter((row) => row.targetId === targetId)
+  );
+
+  const writeDraftParams = (targetId: string, instanceId: string, kind: AudioEffectKind, params: AudioEffectParams) => {
+    setDraftParamsByInstance((prev) => ({
+      ...prev,
+      [instanceKey(targetId, instanceId)]: { targetId, instanceId, kind, params },
+    }));
   };
+
+  const clearDraftParams = (targetId: string, instanceId: string) => {
+    setDraftParamsByInstance((prev) => {
+      const key = instanceKey(targetId, instanceId);
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const clearDraftParamsForTarget = (targetId: string) => {
+    setDraftParamsByInstance((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const [key, draft] of Object.entries(prev)) {
+        if (draft?.targetId !== targetId) continue;
+        delete next[key];
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  };
+
+  createEffect(() => {
+    const persistedRowsByInstance = new Map(normalizedPersistedAudioEffectRows().map((row) => [
+      instanceKey(row.targetId, row.instanceId ?? row.kind),
+      row,
+    ]));
+    const drafts = draftParamsByInstance();
+    const next = { ...drafts };
+    let changed = false;
+    for (const [key, draft] of Object.entries(drafts)) {
+      if (!draft) continue;
+      const row = persistedRowsByInstance.get(key);
+      if (!row || row.kind !== draft.kind) continue;
+      if (!areParamsForKindEqual(draft.kind, row.params, draft.params)) continue;
+      delete next[key];
+      changed = true;
+    }
+    if (changed) setDraftParamsByInstance(next);
+  });
 
   const orderedInstancesForTarget = (targetId: string): AudioEffectInstance[] => {
     const rows = persistedRowsForTarget(targetId);
@@ -562,7 +619,7 @@ export function createEffectsPanelAudioDevice(
   };
 
   function paramsForInstanceForTarget(targetId: string, instance: AudioEffectInstance) {
-    return draftParamsByInstance()[instanceKey(targetId, instance.id)]
+    return draftParamsByInstance()[instanceKey(targetId, instance.id)]?.params
       ?? persistedRowsForTarget(targetId).find((row) => (row.instanceId ?? row.kind) === instance.id && row.kind === instance.kind)?.params;
   }
 
@@ -688,7 +745,7 @@ export function createEffectsPanelAudioDevice(
     const next = normalizeParamsForKind(kind, updater(current));
     if (areParamsForKindEqual(kind, current, next)) return;
     const persistedInstanceId = persistedInstanceIdForTarget(targetId, { id: instanceId, kind });
-    setDraftParamsByInstance((prev) => ({ ...prev, [instanceKey(targetId, instanceId)]: next }));
+    writeDraftParams(targetId, instanceId, kind, next);
     commitInstanceParams(targetId, persistedInstanceId, kind, current, next);
     void persistInstanceParams(targetId, persistedInstanceId, kind, next).catch(() => undefined);
   };
@@ -743,13 +800,9 @@ export function createEffectsPanelAudioDevice(
       params: normalizePresetStepParams(effect),
     }));
     const instances = entries.map((entry) => entry.instance);
-    setDraftParamsByInstance((prev) => {
-      let next = prev;
-      for (const entry of entries) {
-        next = { ...next, [instanceKey(targetId, entry.instance.id)]: entry.params };
-      }
-      return next;
-    });
+    for (const entry of entries) {
+      writeDraftParams(targetId, entry.instance.id, entry.instance.kind, entry.params);
+    }
     const currentOrder = targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(targetId);
     const nextOrder = [...currentOrder];
     nextOrder.splice(index === undefined ? nextOrder.length : Math.max(0, Math.min(index, nextOrder.length)), 0, ...instances);
@@ -789,6 +842,7 @@ export function createEffectsPanelAudioDevice(
     const projectId = context.projectId();
     if (!projectId) return false;
     if (!(await deleteInstanceFromTarget(targetId, instance, projectId))) return false;
+    clearDraftParams(targetId, instance.id);
     const nextOrder = currentOrder.filter((entry) => entry.id !== instance.id);
     setOptimisticOrder({ targetId, order: nextOrder });
     applyInstancesToEngine(targetId, nextOrder);
@@ -801,7 +855,7 @@ export function createEffectsPanelAudioDevice(
     const order = payload.targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(payload.targetId);
     if (!order.some((entry) => entry.id === payload.instanceId && entry.kind === kind)) return false;
     const params = normalizeParamsForKind(kind, payload.params);
-    setDraftParamsByInstance((prev) => ({ ...prev, [instanceKey(payload.targetId, payload.instanceId)]: params }));
+    writeDraftParams(payload.targetId, payload.instanceId, kind, params);
     applyInstancesToEngine(payload.targetId, order);
     return true;
   };
@@ -813,6 +867,7 @@ export function createEffectsPanelAudioDevice(
     if (!projectId) return false;
     const deleted = await Promise.all(currentOrder.map((instance) => deleteInstanceFromTarget(targetId, instance, projectId)));
     if (!deleted.every(Boolean)) return false;
+    clearDraftParamsForTarget(targetId);
     setOptimisticOrder({ targetId, order: [] });
     applyInstancesToEngine(targetId, []);
     await persistReorder(targetId, []);

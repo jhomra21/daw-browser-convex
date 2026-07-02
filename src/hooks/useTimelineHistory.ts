@@ -38,6 +38,7 @@ type UseTimelineHistoryOptions = {
   convexClient: typeof import('~/lib/convex').convexClient
   convexApi: typeof import('~/lib/convex').convexApi
   audioEngine: AudioEngine
+  replayInstanceEffectParams?: Parameters<typeof execUndo>[1]['replayInstanceEffectParams']
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
   grantTrackWrite: (trackId: Track['id'] | null | undefined, scope?: OptimisticGrantScope | null) => void
   grantClipWrite: (clipId: string | null | undefined, scope?: OptimisticGrantScope | null) => void
@@ -282,6 +283,7 @@ export function useTimelineHistory(
           userId: scope.userId,
           persistLocalMix: options.persistLocalMix,
           audioEngine: options.audioEngine,
+          replayInstanceEffectParams: options.replayInstanceEffectParams,
           drumRackBufferSync,
           ensureClipBuffer: options.ensureClipBuffer,
           grantTrackWrite: options.grantTrackWrite,

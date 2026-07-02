@@ -13,6 +13,7 @@ import type { BpmDetectionService } from '~/lib/bpm-detection-service'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { TimelineBottomPanelShellControls } from '~/components/timeline/TimelineBottomPanelShell'
 import type { TimelineDeviceInsertActions } from '~/components/timeline/timeline-device-insert-actions'
+import type { EffectsPanelAudioEffects } from '~/components/timeline/create-effects-panel-controller'
 
 const AgentChat = lazy(() => import('~/components/AgentChat'))
 const SharedChat = lazy(() => import('~/components/SharedChat'))
@@ -52,6 +53,7 @@ export type TimelinePanelsProps = {
     onClose: () => void
     onOpen: () => void
     onEffectParamsCommitted: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void
+    onEffectInstanceParamsReplayChange?: (replay: EffectsPanelAudioEffects['replayInstanceParams'] | undefined) => void
     onLocalSaveFailed?: (message: string) => void
     onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void
     onEffectChainElementChange?: (element: HTMLElement | undefined) => void
@@ -177,6 +179,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         onSelectClip={props.effectsPanel.onSelectClip}
         insertLocalClip={props.effectsPanel.insertLocalClip}
         onEffectParamsCommitted={props.effectsPanel.onEffectParamsCommitted}
+        onEffectInstanceParamsReplayChange={props.effectsPanel.onEffectInstanceParamsReplayChange}
         onLocalSaveFailed={props.effectsPanel.onLocalSaveFailed}
         onDeviceInsertActionsChange={props.effectsPanel.onDeviceInsertActionsChange}
         onEffectChainElementChange={props.effectsPanel.onEffectChainElementChange}

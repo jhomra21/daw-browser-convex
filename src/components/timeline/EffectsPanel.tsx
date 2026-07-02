@@ -59,6 +59,7 @@ type EffectsPanelProps = {
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
+  onEffectInstanceParamsReplayChange?: Parameters<typeof createEffectsPanelController>[0]["onEffectInstanceParamsReplayChange"];
   onLocalSaveFailed?: (message: string) => void;
   onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
   onEffectChainElementChange?: (element: HTMLElement | undefined) => void;
@@ -571,6 +572,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     onSelectClip: props.onSelectClip,
     insertLocalClip: props.insertLocalClip,
     onEffectParamsCommitted: props.onEffectParamsCommitted,
+    onEffectInstanceParamsReplayChange: props.onEffectInstanceParamsReplayChange,
     onLocalSaveFailed: props.onLocalSaveFailed,
     onDeviceInsertActionsChange: props.onDeviceInsertActionsChange,
   });

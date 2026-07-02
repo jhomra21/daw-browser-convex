@@ -35,7 +35,7 @@ import { createAudioEffectInstanceId, deleteLocalEffectInstance, listLocalEffect
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
-import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
+import type { EffectParamsByEffect, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import type { AudioEffectChainPresetStep } from "~/lib/audio-effect-chain-presets";
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
@@ -112,6 +112,12 @@ type EffectsPanelAudioDevice = {
   orderedEffects: Accessor<AudioEffectInstance[]>;
   removeAllFromTarget: (targetId: Track["id"] | "master") => Promise<boolean>;
   removeByInstanceFromTarget: (targetId: Track["id"] | "master", instance: AudioEffectInstance) => Promise<boolean>;
+  replayInstanceParams: <Effect extends EffectType>(payload: {
+    targetId: string;
+    effect: Effect;
+    instanceId: string;
+    params: EffectParamsByEffect[Effect];
+  }) => boolean;
   reorder: (instance: AudioEffectInstance, targetIndex: number) => void;
   reverb: {
     add: () => void;
@@ -391,6 +397,14 @@ export function createEffectsPanelAudioDevice(
     if (kind === "saturator") return AUDIO_EFFECT_CONTRACTS.saturator.normalizeParams(input);
     if (kind === "delay") return AUDIO_EFFECT_CONTRACTS.delay.normalizeParams(input);
     return AUDIO_EFFECT_CONTRACTS.reverb.normalizeParams(input);
+  };
+  const audioEffectKindForHistoryEffect = (effect: EffectType): AudioEffectKind | undefined => {
+    if (effect === "eq" || effect === "master-eq") return "eq";
+    if (effect === "compressor" || effect === "master-compressor") return "compressor";
+    if (effect === "saturator" || effect === "master-saturator") return "saturator";
+    if (effect === "delay" || effect === "master-delay") return "delay";
+    if (effect === "reverb" || effect === "master-reverb") return "reverb";
+    return undefined;
   };
 
   const createDefaultParamsForKind = (kind: AudioEffectKind): AudioEffectParams => {
@@ -732,18 +746,18 @@ export function createEffectsPanelAudioDevice(
   const deleteInstanceFromTarget = async (targetId: Track["id"] | "master", instance: AudioEffectInstance, projectId: string) => {
     const row = persistedRowsForTarget(targetId).find((entry) => (entry.instanceId ?? entry.kind) === instance.id && entry.kind === instance.kind);
     if (isLocalId("project", projectId)) {
-      await deleteLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, instance.kind), row?.instanceId);
+      await deleteLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, instance.kind), row?.instanceId ?? instance.id);
       return true;
     }
     const userId = context.userId();
     if (!userId) return false;
     if (targetId === "master") {
-      await publishEffectOperation(projectId, userId, { kind: "effects.removeAudioEffect", payload: { targetType: "master", effect: instance.kind, instanceId: row?.instanceId } });
+      await publishEffectOperation(projectId, userId, { kind: "effects.removeAudioEffect", payload: { targetType: "master", effect: instance.kind, instanceId: row?.instanceId ?? instance.id } });
       return true;
     }
     const track = resolveTrackByTargetId(targetId);
     if (!track) return false;
-    await publishEffectOperation(projectId, userId, { kind: "effects.removeAudioEffect", payload: { targetType: "track", trackId: track.id, effect: instance.kind, instanceId: row?.instanceId } });
+    await publishEffectOperation(projectId, userId, { kind: "effects.removeAudioEffect", payload: { targetType: "track", trackId: track.id, effect: instance.kind, instanceId: row?.instanceId ?? instance.id } });
     return true;
   };
   const removeByInstanceFromTarget = async (targetId: Track["id"] | "master", instance: AudioEffectInstance) => {
@@ -757,6 +771,16 @@ export function createEffectsPanelAudioDevice(
     setOptimisticOrder({ targetId, order: nextOrder });
     applyInstancesToEngine(targetId, nextOrder);
     await persistReorder(targetId, nextOrder);
+    return true;
+  };
+  const replayInstanceParams: EffectsPanelAudioDevice["replayInstanceParams"] = (payload) => {
+    const kind = audioEffectKindForHistoryEffect(payload.effect);
+    if (!kind) return false;
+    const order = payload.targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(payload.targetId);
+    if (!order.some((entry) => entry.id === payload.instanceId && entry.kind === kind)) return false;
+    const params = normalizeParamsForKind(kind, payload.params);
+    setDraftParamsByInstance((prev) => ({ ...prev, [instanceKey(payload.targetId, payload.instanceId)]: params }));
+    applyInstancesToEngine(payload.targetId, order);
     return true;
   };
   const removeAllFromTarget = async (targetId: Track["id"] | "master") => {
@@ -803,6 +827,7 @@ export function createEffectsPanelAudioDevice(
     paramsForInstance,
     removeAllFromTarget,
     removeByInstanceFromTarget,
+    replayInstanceParams,
     reorder,
     compressor: {
       add: addCompressor,

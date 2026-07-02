@@ -28,6 +28,7 @@ export const projectManifestValidator = v.object({
     mimeType: v.string(),
     sizeBytes: v.number(),
     storagePath: v.string(),
+    folderId: v.optional(v.string()),
     missing: v.optional(v.boolean()),
     originalFileName: v.optional(v.string()),
     originalLastModified: v.optional(v.number()),

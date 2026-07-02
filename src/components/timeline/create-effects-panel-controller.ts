@@ -10,7 +10,7 @@ import { useEffectsPanelAudioSync } from "~/hooks/useEffectsPanelAudioSync";
 import { useEffectsPanelTarget } from "~/hooks/useEffectsPanelTarget";
 import { convexApi, useConvexQuery } from "~/lib/convex";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
-import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
+import type { EffectParamsByEffect, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import type { AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
 
 type EffectsPanelControllerOptions = {
@@ -27,6 +27,7 @@ type EffectsPanelControllerOptions = {
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
+  onEffectInstanceParamsReplayChange?: (replay: EffectsPanelAudioEffects["replayInstanceParams"] | undefined) => void;
   onLocalSaveFailed?: (message: string) => void;
   onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
 };
@@ -285,7 +286,18 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
   });
 
   onCleanup(() => {
+    options.onEffectInstanceParamsReplayChange?.(undefined);
     void flushPending();
+  });
+
+  createEffect(() => {
+    const replay = <Effect extends EffectType>(payload: {
+      targetId: string;
+      effect: Effect;
+      instanceId: string;
+      params: EffectParamsByEffect[Effect];
+    }) => audioEffects.replayInstanceParams(payload);
+    options.onEffectInstanceParamsReplayChange?.(replay);
   });
 
   return {

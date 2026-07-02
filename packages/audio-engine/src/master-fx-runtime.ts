@@ -160,6 +160,11 @@ export function createMasterFxRuntime() {
     const revision = ++fxInstanceRevision
     const wasInstanceMode = masterFxInstances !== null
     const normalized = normalizeAudioEffectRuntimeInstances(instances)
+    const previous = masterFxInstances
+    const orderChanged = Boolean(previous && (
+      previous.length !== normalized.length ||
+      previous.some((instance, index) => instance.id !== normalized[index]?.id || instance.kind !== normalized[index]?.kind)
+    ))
     if (normalized.length === 0) {
       masterFxInstances = null
       pendingFxInstances = null
@@ -177,7 +182,7 @@ export function createMasterFxRuntime() {
     for (const id of instanceDelayChains.keys()) if (!activeIds.has(id)) staleIds.add(id)
     for (const id of staleIds) closeInstanceState(id)
 
-    let requiresRoutingRebuild = !wasInstanceMode || staleIds.size > 0
+    let requiresRoutingRebuild = !wasInstanceMode || staleIds.size > 0 || orderChanged
     for (const instance of normalized) {
       if (instance.kind === 'eq') {
         requiresRoutingRebuild = applyInstanceEq(ctx, instance.id, instance.params) || requiresRoutingRebuild

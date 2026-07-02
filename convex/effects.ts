@@ -229,7 +229,7 @@ const upsertTrackEffect = async (
     )))
   }
   const row = input.instanceId
-    ? existing.find((entry: EffectOrderRow) => entry.instanceId === input.instanceId && entry.targetType === 'track') ?? null
+    ? existing.find((entry: EffectOrderRow) => entry.instanceId === input.instanceId && entry.type === input.type && entry.targetType === 'track') ?? null
     : existing.find((entry: EffectOrderRow) => entry.type === input.type && entry.targetType === 'track' && !entry.instanceId) ?? null
   if (row) {
     const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
@@ -277,7 +277,7 @@ const upsertMasterEffect = async (
   await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
   const existing = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
   const row = input.instanceId
-    ? existing.find((entry: EffectOrderRow) => entry.instanceId === input.instanceId) ?? null
+    ? existing.find((entry: EffectOrderRow) => entry.instanceId === input.instanceId && entry.type === input.type && entry.targetType === 'master') ?? null
     : existing.find((entry: EffectOrderRow) => entry.type === input.type && !entry.instanceId) ?? null
   if (row) {
     const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)

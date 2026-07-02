@@ -27,6 +27,7 @@ import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
 import { useTrackRecording } from "~/hooks/useTrackRecording";
 import { buildEffectParamsHistoryEntry } from "~/lib/undo/builders";
 import type { EffectParamsCommitPayload } from "~/lib/undo/types";
+import type { EffectsPanelAudioEffects } from "~/components/timeline/create-effects-panel-controller";
 import { useTimelinePreferences } from "~/hooks/useTimelinePreferences";
 import { useTimelineMidiOverlay } from "~/hooks/useTimelineMidiOverlay";
 import { useTimelineMixerController } from "~/hooks/useTimelineMixerController";
@@ -216,6 +217,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     audioEngine,
     projectMix,
   });
+  const [replayEffectInstanceParams, setReplayEffectInstanceParams] = createSignal<EffectsPanelAudioEffects["replayInstanceParams"]>();
   const { pushHistory, handleUndo, handleRedo } = useTimelineHistory({
     projectId,
     userId,
@@ -223,6 +225,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     convexClient,
     convexApi,
     audioEngine,
+    replayInstanceEffectParams: (payload) => replayEffectInstanceParams()?.(payload) ?? false,
     ensureClipBuffer: clipBuffers.preload,
     grantTrackWrite,
     grantClipWrite,
@@ -1112,6 +1115,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         bottomPanel.setOpen(true);
       },
       onEffectParamsCommitted: pushEffectParamsHistory,
+      onEffectInstanceParamsReplayChange: (replay: EffectsPanelAudioEffects["replayInstanceParams"] | undefined) => setReplayEffectInstanceParams(() => replay),
       onLocalSaveFailed: localProject.setLocalSaveFailure,
       onDeviceInsertActionsChange: setDeviceInsertActions,
       automationEnvelopes: automation.envelopes(),

@@ -351,6 +351,11 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     trackFxInstanceRevisions.set(trackId, revision)
     const wasInstanceMode = trackFxInstances.has(trackId)
     const normalized = normalizeAudioEffectRuntimeInstances(instances)
+    const previous = trackFxInstances.get(trackId)
+    const orderChanged = Boolean(previous && (
+      previous.length !== normalized.length ||
+      previous.some((instance, index) => instance.id !== normalized[index]?.id || instance.kind !== normalized[index]?.kind)
+    ))
     if (normalized.length === 0) {
       trackFxInstances.delete(trackId)
       pendingTrackFxInstances.delete(trackId)
@@ -381,7 +386,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     }
     for (const id of staleIds) closeInstanceState(trackId, id)
 
-    let requiresRoutingRebuild = !wasInstanceMode || staleIds.size > 0
+    let requiresRoutingRebuild = !wasInstanceMode || staleIds.size > 0 || orderChanged
     for (const instance of normalized) {
       if (instance.kind === 'eq') {
         requiresRoutingRebuild = applyTrackInstanceEq(ctx, trackId, instance.id, instance.params) || requiresRoutingRebuild

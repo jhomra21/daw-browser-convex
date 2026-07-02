@@ -195,10 +195,22 @@ const assetFolderContextItems = (
   browser: TimelineLeftBrowserModel,
   folder: BrowserFolderRow,
 ): TimelineContextMenuItem[] => {
-  if (folder.source !== "project" || !folder.folderId) return [];
+  if (folder.source !== "project") return [];
+  if (!folder.folderId) {
+    return [{
+      kind: "item",
+      label: "New folder",
+      onSelect: browser.assets.onCreateFolder,
+    }];
+  }
   const folderId = folder.folderId;
   return [
     { kind: "label", label: folder.label },
+    {
+      kind: "item",
+      label: "New folder",
+      onSelect: browser.assets.onCreateFolder,
+    },
     {
       kind: "item",
       label: "Rename folder",
@@ -242,6 +254,22 @@ const deviceContextActionLabel = (activeTab: TimelineBrowserTab, item: BrowserIt
   if (item.category === "audio-effect-chain") return "Add chain";
   if (item.category === "instrument-preset") return "Add preset";
   return activeTab === "effects" ? "Add effect" : "Add instrument";
+};
+
+const emptySpaceContextItems = (
+  browser: TimelineLeftBrowserModel,
+): TimelineContextMenuItem[] => {
+  if (browser.activeTab === "assets") {
+    return [{
+      kind: "item",
+      label: "New folder",
+      onSelect: browser.assets.onCreateFolder,
+    }];
+  }
+  return [
+    { kind: "label", label: timelineBrowserTabLabels[browser.activeTab] },
+    { kind: "item", label: "No actions available", disabled: true },
+  ];
 };
 
 export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel }> = (props) => {
@@ -320,46 +348,50 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
         class="min-h-0 flex-1 overflow-y-auto p-1.5"
         onScroll={(event) => props.browser.onScrollTopChange(props.browser.activeTab, event.currentTarget.scrollTop)}
       >
-        <Show
-          when={props.browser.activeTab === "assets"}
-          fallback={(
-            <BrowserTree
-              sections={visibleDeviceTree().sections}
-              emptyText={visibleDeviceTree().emptyText}
-              expandedRows={activeTreeExpansion()}
-              searchActive={searchActive()}
-              onRowExpandedChange={setTreeRowExpanded}
-              renderItem={(item) => (
-                <BrowserItemRow
-                  item={item}
-                  contextActionLabel={deviceContextActionLabel(props.browser.activeTab, item)}
-                  onClick={() => visibleDeviceTree().onAdd(item.id)}
-                  onPointerDown={(event) => props.browser.devices.onDevicePointerDown(event, item.id)}
+        <TimelineContextMenu items={() => emptySpaceContextItems(props.browser)}>
+          <div class="min-h-full">
+            <Show
+              when={props.browser.activeTab === "assets"}
+              fallback={(
+                <BrowserTree
+                  sections={visibleDeviceTree().sections}
+                  emptyText={visibleDeviceTree().emptyText}
+                  expandedRows={activeTreeExpansion()}
+                  searchActive={searchActive()}
+                  onRowExpandedChange={setTreeRowExpanded}
+                  renderItem={(item) => (
+                    <BrowserItemRow
+                      item={item}
+                      contextActionLabel={deviceContextActionLabel(props.browser.activeTab, item)}
+                      onClick={() => visibleDeviceTree().onAdd(item.id)}
+                      onPointerDown={(event) => props.browser.devices.onDevicePointerDown(event, item.id)}
+                    />
+                  )}
                 />
               )}
-            />
-          )}
-        >
-          <BrowserTree
-            sections={props.browser.assets.sections()}
-            emptyText="No samples match this search."
-            expandedRows={activeTreeExpansion()}
-            searchActive={searchActive()}
-            onRowExpandedChange={setTreeRowExpanded}
-            sectionContextItems={(section) => assetSectionContextItems(props.browser, section)}
-            folderContextItems={(folder) => assetFolderContextItems(props.browser, folder)}
-            renderItem={(item) => (
-              <BrowserItemRow
-                item={item}
-                contextActionLabel="Insert sample"
-                extraContextItems={() => assetItemContextItems(props.browser, item)}
-                draggable={!item.disabled}
-                onClick={() => props.browser.assets.onInsert(item.id)}
-                onDragStart={(event) => props.browser.assets.onDragStart(event, item.id)}
+            >
+              <BrowserTree
+                sections={props.browser.assets.sections()}
+                emptyText="No samples match this search."
+                expandedRows={activeTreeExpansion()}
+                searchActive={searchActive()}
+                onRowExpandedChange={setTreeRowExpanded}
+                sectionContextItems={(section) => assetSectionContextItems(props.browser, section)}
+                folderContextItems={(folder) => assetFolderContextItems(props.browser, folder)}
+                renderItem={(item) => (
+                  <BrowserItemRow
+                    item={item}
+                    contextActionLabel="Insert sample"
+                    extraContextItems={() => assetItemContextItems(props.browser, item)}
+                    draggable={!item.disabled}
+                    onClick={() => props.browser.assets.onInsert(item.id)}
+                    onDragStart={(event) => props.browser.assets.onDragStart(event, item.id)}
+                  />
+                )}
               />
-            )}
-          />
-        </Show>
+            </Show>
+          </div>
+        </TimelineContextMenu>
       </div>
 
       <button

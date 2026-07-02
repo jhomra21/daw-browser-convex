@@ -488,11 +488,19 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     const projectId = currentProjectId();
     return Boolean(projectId && isLocalId("project", projectId));
   };
+  const nextAssetFolderName = () => {
+    const usedNames = new Set(assetFolders.folders().map((folder) => folder.name.toLowerCase()));
+    let suffix = 1;
+    let name = "New Folder";
+    while (usedNames.has(name.toLowerCase())) {
+      suffix += 1;
+      name = `New Folder ${suffix}`;
+    }
+    return name;
+  };
 
   const createAssetFolder = () => {
-    if (typeof window === "undefined") return;
-    const name = window.prompt("Folder name");
-    if (name === null) return;
+    const name = nextAssetFolderName();
     runAssetFolderAction(async () => {
       const projectId = currentProjectId();
       if (!projectId) return;

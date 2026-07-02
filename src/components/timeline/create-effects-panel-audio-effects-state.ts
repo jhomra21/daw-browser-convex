@@ -31,7 +31,7 @@ import {
 } from "~/components/timeline/create-effects-panel-state";
 import { convexApi } from "~/lib/convex";
 import { compareAudioEffectOrderEntries } from "~/lib/audio-effect-order-rows";
-import { createAudioEffectInstanceId, deleteLocalEffectInstance, listLocalEffects, reorderLocalAudioEffects, setLocalEffectInstance, type LocalEffectRow } from "~/lib/local-effects";
+import { createAudioEffectInstanceId, deleteLocalEffectInstance, listLocalEffects, reorderLocalAudioEffects, setLocalEffect, setLocalEffectInstance, type LocalEffectRow } from "~/lib/local-effects";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
@@ -568,6 +568,11 @@ export function createEffectsPanelAudioDevice(
 
   const paramsForInstance = (instance: AudioEffectInstance) => paramsForInstanceForTarget(currentTargetId(), instance);
 
+  function persistedInstanceIdForTarget(targetId: string, instance: AudioEffectInstance) {
+    const row = persistedRowsForTarget(targetId).find((entry) => (entry.instanceId ?? entry.kind) === instance.id && entry.kind === instance.kind);
+    return row?.instanceId ?? (instance.id === instance.kind ? undefined : instance.id);
+  }
+
   function runtimeInstanceForParams(instance: AudioEffectInstance, params: AudioEffectParams): AudioEffectRuntimeInstance {
     if (instance.kind === "eq") return { id: instance.id, kind: instance.kind, params: normalizeEqParams(params) };
     if (instance.kind === "compressor") return { id: instance.id, kind: instance.kind, params: normalizeCompressorParams(params) };
@@ -583,7 +588,7 @@ export function createEffectsPanelAudioDevice(
     });
   }
 
-  function commitInstanceParams(targetId: string, instanceId: string, kind: AudioEffectKind, previous: AudioEffectParams, next: AudioEffectParams) {
+  function commitInstanceParams(targetId: string, instanceId: string | undefined, kind: AudioEffectKind, previous: AudioEffectParams, next: AudioEffectParams) {
     if (kind === "eq") {
       const from = normalizeEqParams(previous);
       const to = normalizeEqParams(next);
@@ -629,35 +634,51 @@ export function createEffectsPanelAudioDevice(
     else context.audioEngine().setTrackFxInstances(targetId, instances);
   }
 
-  const persistInstanceParams = async (targetId: string, instanceId: string, kind: AudioEffectKind, params: unknown) => {
+  const persistInstanceParams = async (targetId: string, instanceId: string | undefined, kind: AudioEffectKind, params: unknown) => {
     const projectId = context.projectId();
     if (!projectId) return;
     const input = objectParamInput(params);
     if (isLocalId("project", projectId)) {
-      if (kind === "eq") await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalizeEqParams(input), { instanceId });
-      else if (kind === "compressor") await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalizeCompressorParams(input), { instanceId });
-      else if (kind === "saturator") await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalizeSaturatorParams(input), { instanceId });
-      else if (kind === "delay") await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalizeDelayParams(input), { instanceId });
-      else await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalizeReverbParams(input), { instanceId });
+      if (kind === "eq") {
+        const normalized = normalizeEqParams(input);
+        if (instanceId) await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
+        else await setLocalEffect(projectId, targetId, localEffectForKind(targetId, kind), normalized);
+      } else if (kind === "compressor") {
+        const normalized = normalizeCompressorParams(input);
+        if (instanceId) await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
+        else await setLocalEffect(projectId, targetId, localEffectForKind(targetId, kind), normalized);
+      } else if (kind === "saturator") {
+        const normalized = normalizeSaturatorParams(input);
+        if (instanceId) await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
+        else await setLocalEffect(projectId, targetId, localEffectForKind(targetId, kind), normalized);
+      } else if (kind === "delay") {
+        const normalized = normalizeDelayParams(input);
+        if (instanceId) await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
+        else await setLocalEffect(projectId, targetId, localEffectForKind(targetId, kind), normalized);
+      } else {
+        const normalized = normalizeReverbParams(input);
+        if (instanceId) await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
+        else await setLocalEffect(projectId, targetId, localEffectForKind(targetId, kind), normalized);
+      }
       return;
     }
     const userId = context.userId();
     if (!userId) return;
     if (targetId === "master") {
-      if (kind === "eq") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterEqParams", payload: { instanceId, params: normalizeEqParams(input) } });
-      else if (kind === "compressor") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterCompressorParams", payload: { instanceId, params: normalizeCompressorParams(input) } });
-      else if (kind === "saturator") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterSaturatorParams", payload: { instanceId, params: normalizeSaturatorParams(input) } });
-      else if (kind === "delay") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterDelayParams", payload: { instanceId, params: normalizeDelayParams(input) } });
-      else await publishEffectOperation(projectId, userId, { kind: "effects.setMasterReverbParams", payload: { instanceId, params: normalizeReverbParams(input) } });
+      if (kind === "eq") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterEqParams", payload: { params: normalizeEqParams(input), ...(instanceId ? { instanceId } : {}) } });
+      else if (kind === "compressor") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterCompressorParams", payload: { params: normalizeCompressorParams(input), ...(instanceId ? { instanceId } : {}) } });
+      else if (kind === "saturator") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterSaturatorParams", payload: { params: normalizeSaturatorParams(input), ...(instanceId ? { instanceId } : {}) } });
+      else if (kind === "delay") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterDelayParams", payload: { params: normalizeDelayParams(input), ...(instanceId ? { instanceId } : {}) } });
+      else await publishEffectOperation(projectId, userId, { kind: "effects.setMasterReverbParams", payload: { params: normalizeReverbParams(input), ...(instanceId ? { instanceId } : {}) } });
       return;
     }
     const track = resolveTrackByTargetId(targetId);
     if (!track) return;
-    if (kind === "eq") await publishEffectOperation(projectId, userId, { kind: "effects.setEqParams", payload: { trackId: track.id, instanceId, params: normalizeEqParams(input) } });
-    else if (kind === "compressor") await publishEffectOperation(projectId, userId, { kind: "effects.setCompressorParams", payload: { trackId: track.id, instanceId, params: normalizeCompressorParams(input) } });
-    else if (kind === "saturator") await publishEffectOperation(projectId, userId, { kind: "effects.setSaturatorParams", payload: { trackId: track.id, instanceId, params: normalizeSaturatorParams(input) } });
-    else if (kind === "delay") await publishEffectOperation(projectId, userId, { kind: "effects.setDelayParams", payload: { trackId: track.id, instanceId, params: normalizeDelayParams(input) } });
-    else await publishEffectOperation(projectId, userId, { kind: "effects.setReverbParams", payload: { trackId: track.id, instanceId, params: normalizeReverbParams(input) } });
+    if (kind === "eq") await publishEffectOperation(projectId, userId, { kind: "effects.setEqParams", payload: { trackId: track.id, params: normalizeEqParams(input), ...(instanceId ? { instanceId } : {}) } });
+    else if (kind === "compressor") await publishEffectOperation(projectId, userId, { kind: "effects.setCompressorParams", payload: { trackId: track.id, params: normalizeCompressorParams(input), ...(instanceId ? { instanceId } : {}) } });
+    else if (kind === "saturator") await publishEffectOperation(projectId, userId, { kind: "effects.setSaturatorParams", payload: { trackId: track.id, params: normalizeSaturatorParams(input), ...(instanceId ? { instanceId } : {}) } });
+    else if (kind === "delay") await publishEffectOperation(projectId, userId, { kind: "effects.setDelayParams", payload: { trackId: track.id, params: normalizeDelayParams(input), ...(instanceId ? { instanceId } : {}) } });
+    else await publishEffectOperation(projectId, userId, { kind: "effects.setReverbParams", payload: { trackId: track.id, params: normalizeReverbParams(input), ...(instanceId ? { instanceId } : {}) } });
   };
 
   const updateInstance = (instanceId: string, kind: AudioEffectKind, updater: (prev: AudioEffectParams) => AudioEffectParams) => {
@@ -666,9 +687,10 @@ export function createEffectsPanelAudioDevice(
     const current = paramsForInstance({ id: instanceId, kind }) ?? createDefaultParamsForKind(kind);
     const next = normalizeParamsForKind(kind, updater(current));
     if (areParamsForKindEqual(kind, current, next)) return;
+    const persistedInstanceId = persistedInstanceIdForTarget(targetId, { id: instanceId, kind });
     setDraftParamsByInstance((prev) => ({ ...prev, [instanceKey(targetId, instanceId)]: next }));
-    commitInstanceParams(targetId, instanceId, kind, current, next);
-    void persistInstanceParams(targetId, instanceId, kind, next).catch(() => undefined);
+    commitInstanceParams(targetId, persistedInstanceId, kind, current, next);
+    void persistInstanceParams(targetId, persistedInstanceId, kind, next).catch(() => undefined);
   };
   const updateEq = (updater: (prev: EqParams) => EqParams) => {
     const instance = orderedEffects().find((entry) => entry.kind === "eq");
@@ -744,20 +766,20 @@ export function createEffectsPanelAudioDevice(
   );
   const canAddByKindToTarget = (_targetId: Track["id"] | "master", _effect: AudioEffectKind) => true;
   const deleteInstanceFromTarget = async (targetId: Track["id"] | "master", instance: AudioEffectInstance, projectId: string) => {
-    const row = persistedRowsForTarget(targetId).find((entry) => (entry.instanceId ?? entry.kind) === instance.id && entry.kind === instance.kind);
+    const instanceId = persistedInstanceIdForTarget(targetId, instance);
     if (isLocalId("project", projectId)) {
-      await deleteLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, instance.kind), row?.instanceId ?? instance.id);
+      await deleteLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, instance.kind), instanceId);
       return true;
     }
     const userId = context.userId();
     if (!userId) return false;
     if (targetId === "master") {
-      await publishEffectOperation(projectId, userId, { kind: "effects.removeAudioEffect", payload: { targetType: "master", effect: instance.kind, instanceId: row?.instanceId ?? instance.id } });
+      await publishEffectOperation(projectId, userId, { kind: "effects.removeAudioEffect", payload: { targetType: "master", effect: instance.kind, ...(instanceId ? { instanceId } : {}) } });
       return true;
     }
     const track = resolveTrackByTargetId(targetId);
     if (!track) return false;
-    await publishEffectOperation(projectId, userId, { kind: "effects.removeAudioEffect", payload: { targetType: "track", trackId: track.id, effect: instance.kind, instanceId: row?.instanceId ?? instance.id } });
+    await publishEffectOperation(projectId, userId, { kind: "effects.removeAudioEffect", payload: { targetType: "track", trackId: track.id, effect: instance.kind, ...(instanceId ? { instanceId } : {}) } });
     return true;
   };
   const removeByInstanceFromTarget = async (targetId: Track["id"] | "master", instance: AudioEffectInstance) => {

@@ -350,6 +350,8 @@ export function createMasterFxRuntime() {
     ) => {
       const normalized = normalizeAudioEffectRuntimeInstances(instances)
       if (normalized.length === 0) {
+        const wasInstanceMode = masterFxInstances !== null || pendingFxInstances !== null
+        if (!wasInstanceMode) return
         fxInstanceRevision += 1
         masterFxInstances = null
         pendingFxInstances = null

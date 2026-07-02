@@ -76,12 +76,10 @@ const syncLocalAudioEffect = <Params,>(
   descriptor: SyncedAudioEffectDescriptor<Params>,
   state: SyncedAudioEffectState<Params>,
   activeTargetId: string,
-  audioEngine: AudioEngine,
 ) => {
   if (row.effect === AUDIO_EFFECT_CONTRACTS[descriptor.kind].masterKind) {
     if (activeTargetId !== "master") {
       state.hasMaster = true;
-      descriptor.setMaster(audioEngine, descriptor.normalize(row.params));
     }
     return true;
   }
@@ -99,13 +97,11 @@ const syncRemoteAudioEffect = <Params,>(
   descriptor: SyncedAudioEffectDescriptor<Params>,
   state: SyncedAudioEffectState<Params>,
   activeTargetId: string,
-  audioEngine: AudioEngine,
 ) => {
   if (row.type !== descriptor.kind || !row.params) return false;
   if (row.targetType === "master") {
     if (activeTargetId !== "master") {
       state.hasMaster = true;
-      descriptor.setMaster(audioEngine, descriptor.normalize(row.params));
     }
     return true;
   }
@@ -342,11 +338,11 @@ export function useEffectsPanelAudioSync(
 
     for (const row of effects) {
       if ("effect" in row) {
-        if (syncLocalAudioEffect(row, eqSyncDescriptor, eqState, activeTargetId, audioEngine)) continue;
-        if (syncLocalAudioEffect(row, compressorSyncDescriptor, compressorState, activeTargetId, audioEngine)) continue;
-        if (syncLocalAudioEffect(row, saturatorSyncDescriptor, saturatorState, activeTargetId, audioEngine)) continue;
-        if (syncLocalAudioEffect(row, delaySyncDescriptor, delayState, activeTargetId, audioEngine)) continue;
-        if (syncLocalAudioEffect(row, reverbSyncDescriptor, reverbState, activeTargetId, audioEngine)) continue;
+        if (syncLocalAudioEffect(row, eqSyncDescriptor, eqState, activeTargetId)) continue;
+        if (syncLocalAudioEffect(row, compressorSyncDescriptor, compressorState, activeTargetId)) continue;
+        if (syncLocalAudioEffect(row, saturatorSyncDescriptor, saturatorState, activeTargetId)) continue;
+        if (syncLocalAudioEffect(row, delaySyncDescriptor, delayState, activeTargetId)) continue;
+        if (syncLocalAudioEffect(row, reverbSyncDescriptor, reverbState, activeTargetId)) continue;
         if (row.effect === "instrument" || (row.effect === "synth" && !instrumentByTrackId.has(row.targetId))) {
           const instrument = readInstrumentParamsFromEffectRow(row);
           if (row.targetId !== activeTargetId && instrument) instrumentByTrackId.set(row.targetId, instrument);
@@ -358,11 +354,11 @@ export function useEffectsPanelAudioSync(
         }
         continue;
       }
-      if (syncRemoteAudioEffect(row, eqSyncDescriptor, eqState, activeTargetId, audioEngine)) continue;
-      if (syncRemoteAudioEffect(row, compressorSyncDescriptor, compressorState, activeTargetId, audioEngine)) continue;
-      if (syncRemoteAudioEffect(row, saturatorSyncDescriptor, saturatorState, activeTargetId, audioEngine)) continue;
-      if (syncRemoteAudioEffect(row, delaySyncDescriptor, delayState, activeTargetId, audioEngine)) continue;
-      if (syncRemoteAudioEffect(row, reverbSyncDescriptor, reverbState, activeTargetId, audioEngine)) continue;
+      if (syncRemoteAudioEffect(row, eqSyncDescriptor, eqState, activeTargetId)) continue;
+      if (syncRemoteAudioEffect(row, compressorSyncDescriptor, compressorState, activeTargetId)) continue;
+      if (syncRemoteAudioEffect(row, saturatorSyncDescriptor, saturatorState, activeTargetId)) continue;
+      if (syncRemoteAudioEffect(row, delaySyncDescriptor, delayState, activeTargetId)) continue;
+      if (syncRemoteAudioEffect(row, reverbSyncDescriptor, reverbState, activeTargetId)) continue;
 
       const trackId = row.trackId;
       if (!trackId || trackId === activeTargetId) continue;
@@ -373,19 +369,23 @@ export function useEffectsPanelAudioSync(
       if (row.type === "arpeggiator" && row.params) arpByTrackId.set(trackId, row.params);
     }
 
-    applyMasterAudioDraft(eqSyncDescriptor, eqState, activeTargetId, audioEngine, options.localDraftEffects);
-    applyMasterAudioDraft(compressorSyncDescriptor, compressorState, activeTargetId, audioEngine, options.localDraftEffects);
-    applyMasterAudioDraft(saturatorSyncDescriptor, saturatorState, activeTargetId, audioEngine, options.localDraftEffects);
-    applyMasterAudioDraft(delaySyncDescriptor, delayState, activeTargetId, audioEngine, options.localDraftEffects);
-    applyMasterAudioDraft(reverbSyncDescriptor, reverbState, activeTargetId, audioEngine, options.localDraftEffects);
+    if (effectInstances.master.length === 0) {
+      applyMasterAudioDraft(eqSyncDescriptor, eqState, activeTargetId, audioEngine, options.localDraftEffects);
+      applyMasterAudioDraft(compressorSyncDescriptor, compressorState, activeTargetId, audioEngine, options.localDraftEffects);
+      applyMasterAudioDraft(saturatorSyncDescriptor, saturatorState, activeTargetId, audioEngine, options.localDraftEffects);
+      applyMasterAudioDraft(delaySyncDescriptor, delayState, activeTargetId, audioEngine, options.localDraftEffects);
+      applyMasterAudioDraft(reverbSyncDescriptor, reverbState, activeTargetId, audioEngine, options.localDraftEffects);
+    }
 
     if (activeTargetId !== "master") {
       audioEngine.setMasterFxInstances(effectInstances.master);
-      if (!eqState.hasMaster) audioEngine.setMasterEq(disabledEq);
-      if (!compressorState.hasMaster) audioEngine.setMasterCompressor(disabledCompressor);
-      if (!saturatorState.hasMaster) audioEngine.setMasterSaturator(disabledSaturator);
-      if (!delayState.hasMaster) audioEngine.setMasterDelay(disabledDelay);
-      if (!reverbState.hasMaster) audioEngine.setMasterReverb(disabledReverb);
+      if (effectInstances.master.length === 0) {
+        if (!eqState.hasMaster) audioEngine.setMasterEq(disabledEq);
+        if (!compressorState.hasMaster) audioEngine.setMasterCompressor(disabledCompressor);
+        if (!saturatorState.hasMaster) audioEngine.setMasterSaturator(disabledSaturator);
+        if (!delayState.hasMaster) audioEngine.setMasterDelay(disabledDelay);
+        if (!reverbState.hasMaster) audioEngine.setMasterReverb(disabledReverb);
+      }
     }
 
     const staleTrackIds = new Set<Track["id"]>();
@@ -398,12 +398,15 @@ export function useEffectsPanelAudioSync(
 
     for (const track of tracks) {
       if (track.id === activeTargetId) continue;
-      audioEngine.setTrackFxInstances(track.id, effectInstances.tracks.get(track.id) ?? []);
-      applyTrackAudioEffect(eqSyncDescriptor, eqState, track.id, audioEngine, options.localDraftEffects);
-      applyTrackAudioEffect(compressorSyncDescriptor, compressorState, track.id, audioEngine, options.localDraftEffects);
-      applyTrackAudioEffect(saturatorSyncDescriptor, saturatorState, track.id, audioEngine, options.localDraftEffects);
-      applyTrackAudioEffect(delaySyncDescriptor, delayState, track.id, audioEngine, options.localDraftEffects);
-      applyTrackAudioEffect(reverbSyncDescriptor, reverbState, track.id, audioEngine, options.localDraftEffects);
+      const trackEffectInstances = effectInstances.tracks.get(track.id) ?? [];
+      audioEngine.setTrackFxInstances(track.id, trackEffectInstances);
+      if (trackEffectInstances.length === 0) {
+        applyTrackAudioEffect(eqSyncDescriptor, eqState, track.id, audioEngine, options.localDraftEffects);
+        applyTrackAudioEffect(compressorSyncDescriptor, compressorState, track.id, audioEngine, options.localDraftEffects);
+        applyTrackAudioEffect(saturatorSyncDescriptor, saturatorState, track.id, audioEngine, options.localDraftEffects);
+        applyTrackAudioEffect(delaySyncDescriptor, delayState, track.id, audioEngine, options.localDraftEffects);
+        applyTrackAudioEffect(reverbSyncDescriptor, reverbState, track.id, audioEngine, options.localDraftEffects);
+      }
       if (track.kind === "instrument") {
         const instrument = options.localDraftEffects?.instrument?.(track.id) ?? instrumentByTrackId.get(track.id);
         if (instrument?.kind === "synth") {

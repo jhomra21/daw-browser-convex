@@ -1,7 +1,8 @@
-import { createEffect, createMemo, createSignal, For, on, onMount, Show, type Component, type JSX } from "solid-js";
-import type { BrowserItem, BrowserSection, TimelineBrowserTab, TimelineLeftBrowserModel } from "./browser-types";
+import { createEffect, createMemo, For, on, onMount, Show, type Component, type JSX } from "solid-js";
+import type { BrowserItem, BrowserSection, BrowserTreeExpansionState, BrowserTreeRow, TimelineBrowserTab, TimelineLeftBrowserModel } from "./browser-types";
 import { timelineBrowserTabLabels, timelineBrowserTabs } from "~/lib/timeline-left-browser-preferences";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "../context-menu/timeline-context-menu";
+import { countBrowserTreeLeaves } from "./browser-tree";
 
 const tabPlaceholder: Record<TimelineBrowserTab, string> = {
   assets: "",
@@ -9,20 +10,70 @@ const tabPlaceholder: Record<TimelineBrowserTab, string> = {
   "midi-instruments": "No MIDI instruments match this search.",
 };
 
+const rootRowId = (sectionId: string) => `section:${sectionId}`;
+
+const isExpanded = (expandedRows: BrowserTreeExpansionState, rowId: string) => expandedRows[rowId] !== false;
+
+const BrowserTreeRows: Component<{
+  rows: BrowserTreeRow[];
+  expandedRows: BrowserTreeExpansionState;
+  searchActive: boolean;
+  renderItem: (item: BrowserItem) => JSX.Element;
+  onRowExpandedChange: (rowId: string, expanded: boolean) => void;
+}> = (props) => (
+  <ul class="py-0.5">
+    <For each={props.rows}>
+      {(row) => (
+        <li>
+          <Show
+            when={row.kind === "folder" ? row : undefined}
+            fallback={row.kind === "leaf" ? props.renderItem(row.item) : null}
+          >
+            {(folder) => {
+              const expanded = () => isExpanded(props.expandedRows, folder().id);
+              const visible = () => props.searchActive || expanded();
+              const toggle = () => props.onRowExpandedChange(folder().id, !expanded());
+              return (
+                <>
+                  <button
+                    type="button"
+                    class="flex h-6 w-full items-center gap-1 px-3 text-left text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100"
+                    aria-expanded={visible()}
+                    onClick={toggle}
+                  >
+                    <span class="w-3 text-center text-xs text-neutral-600">{visible() ? "▾" : "▸"}</span>
+                    <span class="min-w-0 flex-1 truncate">{folder().label}</span>
+                    <span class="text-xs text-neutral-600">{countBrowserTreeLeaves(folder().children)}</span>
+                  </button>
+                  <Show when={visible()}>
+                    <div class="pl-3">
+                      <BrowserTreeRows
+                        rows={folder().children}
+                        expandedRows={props.expandedRows}
+                        searchActive={props.searchActive}
+                        renderItem={props.renderItem}
+                        onRowExpandedChange={props.onRowExpandedChange}
+                      />
+                    </div>
+                  </Show>
+                </>
+              );
+            }}
+          </Show>
+        </li>
+      )}
+    </For>
+  </ul>
+);
+
 const BrowserTree: Component<{
   sections: BrowserSection[];
   emptyText: string;
+  expandedRows: BrowserTreeExpansionState;
+  searchActive: boolean;
   renderItem: (item: BrowserItem) => JSX.Element;
+  onRowExpandedChange: (rowId: string, expanded: boolean) => void;
 }> = (props) => {
-  const [collapsedSections, setCollapsedSections] = createSignal<Record<string, boolean>>({});
-  const isCollapsed = (sectionId: string) => collapsedSections()[sectionId] === true;
-  const toggleSection = (sectionId: string) => {
-    setCollapsedSections((sections) => ({
-      ...sections,
-      [sectionId]: sections[sectionId] !== true,
-    }));
-  };
-
   return (
     <Show
       when={props.sections.length > 0}
@@ -35,25 +86,30 @@ const BrowserTree: Component<{
       <div class="space-y-0.5">
         <For each={props.sections}>
           {(section) => {
-            const collapsed = () => isCollapsed(section.id);
+            const rowId = rootRowId(section.id);
+            const expanded = () => isExpanded(props.expandedRows, rowId);
+            const visible = () => props.searchActive || expanded();
+            const toggle = () => props.onRowExpandedChange(rowId, !expanded());
             return (
               <section>
                 <button
                   type="button"
                   class="flex h-6 w-full items-center gap-1 px-1.5 text-left text-xs font-semibold uppercase tracking-widest text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300"
-                  aria-expanded={!collapsed()}
-                  onClick={() => toggleSection(section.id)}
+                  aria-expanded={visible()}
+                  onClick={toggle}
                 >
-                  <span class="w-3 text-center text-xs text-neutral-600">{collapsed() ? "▸" : "▾"}</span>
+                  <span class="w-3 text-center text-xs text-neutral-600">{visible() ? "▾" : "▸"}</span>
                   <span class="min-w-0 flex-1 truncate">{section.label}</span>
-                  <span class="text-xs font-normal tracking-normal text-neutral-600">{section.items.length}</span>
+                  <span class="text-xs font-normal tracking-normal text-neutral-600">{countBrowserTreeLeaves(section.rows)}</span>
                 </button>
-                <Show when={!collapsed()}>
-                  <ul class="py-0.5">
-                    <For each={section.items}>
-                      {(item) => <li>{props.renderItem(item)}</li>}
-                    </For>
-                  </ul>
+                <Show when={visible()}>
+                  <BrowserTreeRows
+                    rows={section.rows}
+                    expandedRows={props.expandedRows}
+                    searchActive={props.searchActive}
+                    renderItem={props.renderItem}
+                    onRowExpandedChange={props.onRowExpandedChange}
+                  />
                 </Show>
               </section>
             );
@@ -121,6 +177,10 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
 
   onMount(restoreScrollTop);
   createEffect(on(() => props.browser.activeTab, restoreScrollTop));
+  const activeTreeExpansion = () => props.browser.treeExpansionByTab[props.browser.activeTab];
+  const searchActive = () => props.browser.searchQueryByTab[props.browser.activeTab].trim().length > 0;
+  const setTreeRowExpanded = (rowId: string, expanded: boolean) =>
+    props.browser.onTreeRowExpandedChange(props.browser.activeTab, rowId, expanded);
 
   return (
     <aside
@@ -175,6 +235,9 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
             <BrowserTree
               sections={visibleDeviceTree().sections}
               emptyText={visibleDeviceTree().emptyText}
+              expandedRows={activeTreeExpansion()}
+              searchActive={searchActive()}
+              onRowExpandedChange={setTreeRowExpanded}
               renderItem={(item) => (
                 <BrowserItemRow
                   item={item}
@@ -189,6 +252,9 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
           <BrowserTree
             sections={props.browser.assets.sections()}
             emptyText="No samples match this search."
+            expandedRows={activeTreeExpansion()}
+            searchActive={searchActive()}
+            onRowExpandedChange={setTreeRowExpanded}
             renderItem={(item) => (
               <BrowserItemRow
                 item={item}

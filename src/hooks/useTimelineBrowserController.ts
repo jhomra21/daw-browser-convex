@@ -7,6 +7,7 @@ import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData, type SampleDragData } f
 import { createBrowserDeviceDrag } from "~/components/timeline/browser/create-browser-device-drag";
 import type { BrowserDragPayload, BrowserDropTarget } from "~/components/timeline/browser/browser-drag-types";
 import type { Track } from "@daw-browser/timeline-core/types";
+import { countBrowserTreeLeaves, createBrowserLeafRow, filterBrowserTreeRows } from "~/components/timeline/browser/browser-tree";
 
 type Options = {
   projectId: Accessor<string>;
@@ -39,7 +40,7 @@ const BROWSER_INSTRUMENT_ITEM_IDS = {
 const visibleBrowserSections = (sections: BrowserSection[]): BrowserSection[] => {
   const visibleSections: BrowserSection[] = [];
   for (const section of sections) {
-    if (section.items.length > 0) visibleSections.push(section);
+    if (countBrowserTreeLeaves(section.rows) > 0) visibleSections.push(section);
   }
   return visibleSections;
 };
@@ -123,8 +124,8 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       if (item.source === "default") defaultItems.push(item);
     }
     return visibleBrowserSections([
-      { id: "project-samples", label: "Project", items: projectItems },
-      { id: "default-samples", label: "Default", items: defaultItems },
+      { id: "project-samples", label: "Project", rows: projectItems.map(createBrowserLeafRow) },
+      { id: "default-samples", label: "Default", rows: defaultItems.map(createBrowserLeafRow) },
     ]);
   });
   const browserAssetSampleById = createMemo(() => {
@@ -192,9 +193,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         disabled: !canDragDevice,
       },
     ];
-    const query = browserDeviceQuery("effects");
-    if (!query) return items;
-    return items.filter((item) => item.searchText.includes(query));
+    return items;
   });
   const browserEffectSections = createMemo(() => {
     const audioEffectItems: BrowserItem[] = [];
@@ -203,9 +202,26 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       if (item.category === "audio-effect") audioEffectItems.push(item);
       if (item.category === "midi-effect") midiEffectItems.push(item);
     }
+    const rows = filterBrowserTreeRows([
+      {
+        kind: "folder",
+        id: "builtin-audio-effects",
+        source: "builtin",
+        label: "Audio Effects",
+        searchText: "audio effects builtin",
+        children: audioEffectItems.map(createBrowserLeafRow),
+      },
+      {
+        kind: "folder",
+        id: "builtin-midi-effects",
+        source: "builtin",
+        label: "MIDI Effects",
+        searchText: "midi effects builtin",
+        children: midiEffectItems.map(createBrowserLeafRow),
+      },
+    ], browserDeviceQuery("effects"));
     return visibleBrowserSections([
-      { id: "audio-effects", label: "Audio Effects", items: audioEffectItems },
-      { id: "midi-effects", label: "MIDI Effects", items: midiEffectItems },
+      { id: "builtin-effects", label: "Builtin", rows },
     ]);
   });
   const browserInstrumentItems = createMemo<BrowserItem[]>(() => {
@@ -230,12 +246,23 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         disabled: actions === undefined,
       },
     ];
-    const query = browserDeviceQuery("midi-instruments");
-    if (!query) return items;
-    return items.filter((item) => item.searchText.includes(query));
+    return items;
   });
   const browserInstrumentSections = createMemo(() => visibleBrowserSections([
-    { id: "midi-instruments", label: "Instruments", items: browserInstrumentItems() },
+    {
+      id: "builtin-midi-instruments",
+      label: "Builtin",
+      rows: filterBrowserTreeRows([
+        {
+          kind: "folder",
+          id: "builtin-instruments",
+          source: "builtin",
+          label: "Instruments",
+          searchText: "instruments builtin",
+          children: browserInstrumentItems().map(createBrowserLeafRow),
+        },
+      ], browserDeviceQuery("midi-instruments")),
+    },
   ]));
 
   const insertBrowserSample = (itemId: string) => {
@@ -325,6 +352,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     activeTab: options.leftBrowser.activeTab(),
     searchQueryByTab: options.leftBrowser.searchQueryByTab(),
     scrollTopByTab: options.leftBrowser.scrollTopByTab(),
+    treeExpansionByTab: options.leftBrowser.treeExpansionByTab(),
     assets: {
       sections: browserAssetSections,
       onInsert: insertBrowserSample,
@@ -342,6 +370,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     onSelectTab: options.leftBrowser.setActiveTab,
     onSearchQueryChange: options.leftBrowser.setSearchQuery,
     onScrollTopChange: options.leftBrowser.setScrollTop,
+    onTreeRowExpandedChange: options.leftBrowser.setTreeRowExpanded,
     onResizePointerDown: options.onResizePointerDown,
   }));
 }

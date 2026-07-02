@@ -21,11 +21,29 @@ export type BrowserItem = {
   disabled?: boolean;
 };
 
+export type BrowserLeafRow = {
+  kind: "leaf";
+  item: BrowserItem;
+};
+
+export type BrowserFolderRow = {
+  kind: "folder";
+  id: string;
+  source: BrowserItemSource;
+  label: string;
+  searchText: string;
+  children: BrowserTreeRow[];
+};
+
+export type BrowserTreeRow = BrowserLeafRow | BrowserFolderRow;
+
 export type BrowserSection = {
   id: string;
   label: string;
-  items: BrowserItem[];
+  rows: BrowserTreeRow[];
 };
+
+export type BrowserTreeExpansionState = Record<string, boolean>;
 
 export type BrowserAssetsModel = {
   sections: Accessor<BrowserSection[]>;
@@ -48,12 +66,14 @@ export type TimelineLeftBrowserModel = {
   activeTab: TimelineBrowserTab;
   searchQueryByTab: Record<TimelineBrowserTab, string>;
   scrollTopByTab: Record<TimelineBrowserTab, number>;
+  treeExpansionByTab: Record<TimelineBrowserTab, BrowserTreeExpansionState>;
   assets: BrowserAssetsModel;
   devices: BrowserDevicesModel;
   onToggle: () => void;
   onSelectTab: (tab: TimelineBrowserTab) => void;
   onSearchQueryChange: (tab: TimelineBrowserTab, query: string) => void;
   onScrollTopChange: (tab: TimelineBrowserTab, scrollTop: number) => void;
+  onTreeRowExpandedChange: (tab: TimelineBrowserTab, rowId: string, expanded: boolean) => void;
   onResizePointerDown: (event: PointerEvent) => void;
 };
 
@@ -63,11 +83,13 @@ export type TimelineLeftBrowserState = {
   activeTab: Accessor<TimelineBrowserTab>;
   searchQueryByTab: Accessor<Record<TimelineBrowserTab, string>>;
   scrollTopByTab: Accessor<Record<TimelineBrowserTab, number>>;
+  treeExpansionByTab: Accessor<Record<TimelineBrowserTab, BrowserTreeExpansionState>>;
   setOpen: (open: boolean) => void;
   toggleOpen: () => void;
   setActiveTab: (tab: TimelineBrowserTab) => void;
   setSearchQuery: (tab: TimelineBrowserTab, query: string) => void;
   setScrollTop: (tab: TimelineBrowserTab, scrollTop: number) => void;
+  setTreeRowExpanded: (tab: TimelineBrowserTab, rowId: string, expanded: boolean) => void;
   previewWidthPx: (widthPx: number) => void;
   commitWidthPx: (widthPx: number) => void;
   clampWidthToLayout: () => void;

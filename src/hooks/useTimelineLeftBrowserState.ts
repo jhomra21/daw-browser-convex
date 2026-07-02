@@ -22,6 +22,7 @@ export const useTimelineLeftBrowserState = (
   const [activeTab, setActiveTabSignal] = createSignal<TimelineBrowserTab>(initial.activeTab);
   const [searchQueryByTab, setSearchQueryByTab] = createSignal(initial.searchQueryByTab);
   const [scrollTopByTab, setScrollTopByTab] = createSignal(initial.scrollTopByTab);
+  const [treeExpansionByTab, setTreeExpansionByTab] = createSignal(initial.treeExpansionByTab);
   const [containerWidthPx, setContainerWidthPx] = createSignal(0);
   const scopeId = () => options.projectId() ?? "default";
 
@@ -33,6 +34,7 @@ export const useTimelineLeftBrowserState = (
     activeTab: activeTab(),
     searchQueryByTab: searchQueryByTab(),
     scrollTopByTab: scrollTopByTab(),
+    treeExpansionByTab: treeExpansionByTab(),
   });
   const saveSnapshot = () => saveTimelineLeftBrowserState(scopeId(), untrack(readSnapshot));
 
@@ -60,6 +62,7 @@ export const useTimelineLeftBrowserState = (
     setActiveTabSignal(loaded.activeTab);
     setSearchQueryByTab(loaded.searchQueryByTab);
     setScrollTopByTab(loaded.scrollTopByTab);
+    setTreeExpansionByTab(loaded.treeExpansionByTab);
   }));
 
   createEffect(() => {
@@ -105,6 +108,16 @@ export const useTimelineLeftBrowserState = (
       return { ...current, [tab]: nextScrollTop };
     });
   };
+  const setTreeRowExpanded = (tab: TimelineBrowserTab, rowId: string, expanded: boolean) => {
+    setTreeExpansionByTab((current) => ({
+      ...current,
+      [tab]: {
+        ...current[tab],
+        [rowId]: expanded,
+      },
+    }));
+    saveSnapshot();
+  };
   const previewWidthPx = (value: number) => setWidthPx(clampWidth(value));
   const commitWidthPx = (value: number) => {
     setWidthPx(clampWidth(value));
@@ -118,11 +131,13 @@ export const useTimelineLeftBrowserState = (
     activeTab,
     searchQueryByTab,
     scrollTopByTab,
+    treeExpansionByTab,
     setOpen,
     toggleOpen,
     setActiveTab,
     setSearchQuery,
     setScrollTop,
+    setTreeRowExpanded,
     previewWidthPx,
     commitWidthPx,
     clampWidthToLayout,

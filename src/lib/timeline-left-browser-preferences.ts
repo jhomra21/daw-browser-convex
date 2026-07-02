@@ -1,4 +1,4 @@
-import type { TimelineBrowserTab } from "~/components/timeline/browser/browser-types";
+import type { BrowserTreeExpansionState, TimelineBrowserTab } from "~/components/timeline/browser/browser-types";
 import { canUseLocalStorage } from "~/lib/timeline-storage";
 import {
   TIMELINE_LEFT_BROWSER_DEFAULT_WIDTH,
@@ -25,6 +25,7 @@ type PersistedTimelineLeftBrowserState = {
   activeTab: TimelineBrowserTab;
   searchQueryByTab: Record<TimelineBrowserTab, string>;
   scrollTopByTab: Record<TimelineBrowserTab, number>;
+  treeExpansionByTab: Record<TimelineBrowserTab, BrowserTreeExpansionState>;
 };
 
 const KEY_PREFIX = "timeline-left-browser:";
@@ -35,12 +36,19 @@ const createEmptyTabRecord = <TValue,>(value: TValue): Record<TimelineBrowserTab
   "midi-instruments": value,
 });
 
+const createEmptyTreeExpansionByTab = (): Record<TimelineBrowserTab, BrowserTreeExpansionState> => ({
+  assets: {},
+  effects: {},
+  "midi-instruments": {},
+});
+
 export const createDefaultTimelineLeftBrowserState = (): PersistedTimelineLeftBrowserState => ({
   open: true,
   widthPx: TIMELINE_LEFT_BROWSER_DEFAULT_WIDTH,
   activeTab: "assets",
   searchQueryByTab: createEmptyTabRecord(""),
   scrollTopByTab: createEmptyTabRecord(0),
+  treeExpansionByTab: createEmptyTreeExpansionByTab(),
 });
 
 export const clampTimelineLeftBrowserWidth = (
@@ -84,6 +92,24 @@ const readNumberRecord = (value: unknown): Record<TimelineBrowserTab, number> =>
   return record;
 };
 
+const readBooleanRecord = (value: unknown): BrowserTreeExpansionState => {
+  const record: BrowserTreeExpansionState = {};
+  if (!value || typeof value !== "object") return record;
+  for (const [key, next] of Object.entries(value)) {
+    if (typeof next === "boolean") record[key] = next;
+  }
+  return record;
+};
+
+const readTreeExpansionByTab = (value: unknown): Record<TimelineBrowserTab, BrowserTreeExpansionState> => {
+  if (!value || typeof value !== "object") return createEmptyTreeExpansionByTab();
+  return {
+    assets: readBooleanRecord(Reflect.get(value, "assets")),
+    effects: readBooleanRecord(Reflect.get(value, "effects")),
+    "midi-instruments": readBooleanRecord(Reflect.get(value, "midi-instruments")),
+  };
+};
+
 export const loadTimelineLeftBrowserState = (
   scopeId: string,
   containerWidthPx: number,
@@ -125,6 +151,7 @@ export const loadTimelineLeftBrowserState = (
       activeTab: isTimelineBrowserTab(activeTab) ? activeTab : fallback.activeTab,
       searchQueryByTab: readStringRecord(Reflect.get(parsed, "searchQueryByTab")),
       scrollTopByTab: readNumberRecord(Reflect.get(parsed, "scrollTopByTab")),
+      treeExpansionByTab: readTreeExpansionByTab(Reflect.get(parsed, "treeExpansionByTab")),
     };
   } catch {
     return {

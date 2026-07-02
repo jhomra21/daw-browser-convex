@@ -6,11 +6,10 @@ import { requireAuthenticatedUserId, requireProjectAccess, requireProjectRole } 
 const normalizeFolderName = (name: string) => name.trim() || 'Folder'
 
 const findFolder = async (ctx: { db: QueryCtx['db'] }, input: { projectId: string; folderId: string }) => {
-  const rows = await ctx.db
-    .query('assetFolders')
-    .withIndex('by_project', q => q.eq('projectId', input.projectId))
-    .collect()
-  return rows.find((row) => String(row._id) === input.folderId) ?? null
+  const folderId = ctx.db.normalizeId('assetFolders', input.folderId)
+  if (!folderId) return null
+  const folder = await ctx.db.get(folderId)
+  return folder?.projectId === input.projectId ? folder : null
 }
 
 export const listByProject = query({
@@ -73,11 +72,11 @@ export const deleteEmpty = mutation({
     await requireProjectRole(ctx, projectId, userId, ['owner', 'editor'])
     const folder = await findFolder(ctx, { projectId, folderId })
     if (!folder) return false
-    const samples = await ctx.db
+    const sample = await ctx.db
       .query('samples')
-      .withIndex('by_room', q => q.eq('projectId', projectId))
-      .collect()
-    if (samples.some((sample) => sample.folderId === folderId)) return false
+      .withIndex('by_room_folder', q => q.eq('projectId', projectId).eq('folderId', folderId))
+      .first()
+    if (sample) return false
     await ctx.db.delete(folder._id)
     return true
   },

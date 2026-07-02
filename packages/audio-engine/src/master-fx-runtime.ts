@@ -1,4 +1,4 @@
-import { areAudioEffectOrdersEqual, normalizeAudioEffectInstanceOrder, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse, type FxChainStageConfig } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState } from './effects/compressor-chain-state'
@@ -9,7 +9,7 @@ import type { CompressorMeterListener } from './effects/compressor-worklet'
 import type { SpectrumFrame } from './metering-runtime'
 import type { AutomationAudioBinding } from './automation'
 import { resolveDelayAutomationBindings, resolveEqAutomationBindings, resolveReverbAutomationBindings, resolveSaturatorAutomationBindings } from './automation-bindings'
-import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
+import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance } from './effects/runtime-instance'
 
 export function createMasterFxRuntime() {
   let eqChain: BiquadFilterNode[] = []
@@ -41,14 +41,6 @@ export function createMasterFxRuntime() {
   const instanceSaturatorChains = new Map<string, ReturnType<typeof createSaturatorChainState>>()
   const instanceDelayChains = new Map<string, ReturnType<typeof createDelayChainState>>()
   let currentBpm = 120
-
-  const normalizeRuntimeInstances = (instances: AudioEffectRuntimeInstance[]): AudioEffectRuntimeInstance[] => {
-    const order = normalizeAudioEffectInstanceOrder(instances, instances)
-    return order.flatMap((entry) => {
-      const instance = instances.find((candidate) => candidate.id === entry.id && candidate.kind === entry.kind)
-      return instance ? [instance] : []
-    })
-  }
 
   const closeInstanceState = (instanceId: string) => {
     const eq = instanceEqChains.get(instanceId)
@@ -165,7 +157,7 @@ export function createMasterFxRuntime() {
     instances: AudioEffectRuntimeInstance[],
   ) => {
     const wasInstanceMode = masterFxInstances !== null
-    const normalized = normalizeRuntimeInstances(instances)
+    const normalized = normalizeAudioEffectRuntimeInstances(instances)
     masterFxInstances = normalized
     const activeIds = new Set(normalized.map((instance) => instance.id))
     const staleIds = new Set<string>()
@@ -341,7 +333,7 @@ export function createMasterFxRuntime() {
       instances: AudioEffectRuntimeInstance[],
       createImpulseResponse: CreateReverbImpulseResponse,
     ) => {
-      const normalized = normalizeRuntimeInstances(instances)
+      const normalized = normalizeAudioEffectRuntimeInstances(instances)
       if (!ctx || !masterGain) {
         masterFxInstances = normalized
         pendingFxInstances = normalized

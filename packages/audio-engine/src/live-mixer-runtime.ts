@@ -1,4 +1,4 @@
-import { areAudioEffectOrdersEqual, assert, normalizeAudioEffectInstanceOrder, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { areAudioEffectOrdersEqual, assert, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse, type FxChainStageConfig } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState, type CompressorChainState } from './effects/compressor-chain-state'
@@ -12,7 +12,7 @@ import { resolveMixerGraph } from './mixer/resolve-routing'
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { AutomationAudioBinding } from './automation'
 import { resolveDelayAutomationBindings, resolveEqAutomationBindings, resolveReverbAutomationBindings, resolveSaturatorAutomationBindings } from './automation-bindings'
-import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
+import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance } from './effects/runtime-instance'
 
 type RuntimeTrack = Track<AudioBuffer>
 
@@ -70,14 +70,6 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     if (!sendMap) return
     disconnectAudioNodes(Array.from(sendMap.values()))
     sendGains.delete(trackId)
-  }
-
-  const normalizeRuntimeInstances = (instances: AudioEffectRuntimeInstance[]): AudioEffectRuntimeInstance[] => {
-    const order = normalizeAudioEffectInstanceOrder(instances, instances)
-    return order.flatMap((entry) => {
-      const instance = instances.find((candidate) => candidate.id === entry.id && candidate.kind === entry.kind)
-      return instance ? [instance] : []
-    })
   }
 
   const ensureNestedMap = <Value,>(map: Map<string, Map<string, Value>>, trackId: string): Map<string, Value> => {
@@ -361,7 +353,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       pendingTrackFxInstances.set(trackId, instances)
       return
     }
-    const normalized = normalizeRuntimeInstances(instances)
+    const normalized = normalizeAudioEffectRuntimeInstances(instances)
     trackFxInstances.set(trackId, normalized)
     const activeIds = new Set(normalized.map((instance) => instance.id))
     const staleIds = new Set<string>()
@@ -431,7 +423,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   }
 
   const setTrackFxInstances = (trackId: string, instances: AudioEffectRuntimeInstance[]) => {
-    const normalized = normalizeRuntimeInstances(instances)
+    const normalized = normalizeAudioEffectRuntimeInstances(instances)
     void applyTrackFxInstances(trackId, normalized)
   }
 

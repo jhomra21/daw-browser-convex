@@ -126,14 +126,17 @@ export const setLocalEffectInstance = async <TParams>(
 ): Promise<LocalEffectRow<TParams>> => {
   const instanceId = input?.instanceId ?? createAudioEffectInstanceId()
   const db = await openLocalProjectDb(projectId)
+  const id = effectInstanceRowId(targetId, instanceId)
+  const existing = await db.get('entities', [EFFECT_KIND, id])
+  const existingRow = isLocalEffectRow<TParams>(existing?.value) ? existing.value : undefined
   const timestamp = now()
   const row: LocalEffectRow<TParams> = {
-    id: effectInstanceRowId(targetId, instanceId),
+    id,
     targetId,
     effect,
     instanceId,
     params,
-    index: input?.index,
+    index: input?.index ?? existingRow?.index,
     updatedAt: timestamp,
   }
   await db.put('entities', createLocalProjectEntityRow(EFFECT_KIND, row.id, row, row.updatedAt))

@@ -69,11 +69,10 @@ export const moveToFolder = mutation({
     if (!row) return null
     await requireProjectRole(ctx, projectId, userId, ['owner', 'editor'])
     if (folderId) {
-      const folders = await ctx.db
-        .query('assetFolders')
-        .withIndex('by_project', q => q.eq('projectId', projectId))
-        .collect()
-      if (!folders.some((folder) => String(folder._id) === folderId)) return null
+      const normalizedFolderId = ctx.db.normalizeId('assetFolders', folderId)
+      if (!normalizedFolderId) return null
+      const folder = await ctx.db.get(normalizedFolderId)
+      if (folder?.projectId !== projectId) return null
     }
     await ctx.db.patch(row._id, { folderId })
     return row._id

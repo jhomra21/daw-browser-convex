@@ -85,7 +85,8 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_room", ["projectId"])
-    .index("by_room_assetKey", ["projectId", "assetKey"]),
+    .index("by_room_assetKey", ["projectId", "assetKey"])
+    .index("by_room_folder", ["projectId", "folderId"]),
 
   assetFolders: defineTable({
     projectId: v.string(),

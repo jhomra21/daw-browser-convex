@@ -12,9 +12,9 @@ type OfflineTrackNodes = {
   gain: GainNode
   output: GainNode
   eqNodesByBand: Map<string, BiquadFilterNode>
-  saturator: SaturatorNodeChain | null
-  delay: DelayNodeChain | null
-  reverb: ReverbNodeChain | null
+  saturators: SaturatorNodeChain[]
+  delays: DelayNodeChain[]
+  reverbs: ReverbNodeChain[]
 }
 
 type OfflineMixerNodes = {
@@ -38,9 +38,9 @@ type OfflineFxChainConfig = {
 
 type OfflineFxChain = {
   eqNodesByBand: Map<string, BiquadFilterNode>
-  saturator: SaturatorNodeChain | null
-  delay: DelayNodeChain | null
-  reverb: ReverbNodeChain | null
+  saturators: SaturatorNodeChain[]
+  delays: DelayNodeChain[]
+  reverbs: ReverbNodeChain[]
 }
 
 async function buildOfflineFxChain(
@@ -52,6 +52,9 @@ async function buildOfflineFxChain(
 ): Promise<OfflineFxChain> {
   if (config.instances) {
     const eqNodesByBand = new Map<string, BiquadFilterNode>()
+    const saturators: SaturatorNodeChain[] = []
+    const delays: DelayNodeChain[] = []
+    const reverbs: ReverbNodeChain[] = []
     const stages = await Promise.all(config.instances.map(async (instance) => {
       if (instance.kind === 'eq') {
         const normalized = normalizeEqParams(instance.params)
@@ -68,15 +71,21 @@ async function buildOfflineFxChain(
         return { id: instance.id, kind: instance.kind, compressorChain: compressor }
       }
       if (instance.kind === 'saturator') {
-        return { id: instance.id, kind: instance.kind, saturatorChain: createSaturatorNodeChain(ctx, normalizeSaturatorParams(instance.params)) }
+        const saturator = createSaturatorNodeChain(ctx, normalizeSaturatorParams(instance.params))
+        saturators.push(saturator)
+        return { id: instance.id, kind: instance.kind, saturatorChain: saturator }
       }
       if (instance.kind === 'delay') {
-        return { id: instance.id, kind: instance.kind, delayChain: createDelayNodeChain(ctx, normalizeDelayParams(instance.params), config.bpm ?? 120) }
+        const delay = createDelayNodeChain(ctx, normalizeDelayParams(instance.params), config.bpm ?? 120)
+        delays.push(delay)
+        return { id: instance.id, kind: instance.kind, delayChain: delay }
       }
-      return { id: instance.id, kind: instance.kind, reverbChain: createReverbNodeChain(ctx, instance.params, createImpulseResponse) }
+      const reverb = createReverbNodeChain(ctx, instance.params, createImpulseResponse)
+      reverbs.push(reverb)
+      return { id: instance.id, kind: instance.kind, reverbChain: reverb }
     }))
     connectFxChain(input, destination, { instances: stages })
-    return { eqNodesByBand, saturator: null, delay: null, reverb: null }
+    return { eqNodesByBand, saturators, delays, reverbs }
   }
   const normalizedEq = config.eq ? normalizeEqParams(config.eq) : undefined
   const eq = createEqNodes(ctx, normalizedEq, ctx.destination.channelCount || 2)
@@ -92,17 +101,22 @@ async function buildOfflineFxChain(
     ? createReverbNodeChain(ctx, config.reverb, createImpulseResponse)
     : null
   connectFxChain(input, destination, { eqNodes: eq, compressorChain: compressor, saturatorChain: saturator, delayChain: delay, reverbChain: reverb, order: config.order })
-  return { eqNodesByBand, saturator, delay, reverb }
+  return {
+    eqNodesByBand,
+    saturators: saturator ? [saturator] : [],
+    delays: delay ? [delay] : [],
+    reverbs: reverb ? [reverb] : [],
+  }
 }
 
 const resolveFxAutomationBindings = (
   parameterId: string,
-  nodes: { saturator: SaturatorNodeChain | null; delay: DelayNodeChain | null; reverb: ReverbNodeChain | null },
+  nodes: { saturators: readonly SaturatorNodeChain[]; delays: readonly DelayNodeChain[]; reverbs: readonly ReverbNodeChain[] },
 ): AutomationAudioBinding[] => {
   return [
-    ...resolveSaturatorAutomationBindings(nodes.saturator, parameterId),
-    ...resolveDelayAutomationBindings(nodes.delay, parameterId),
-    ...resolveReverbAutomationBindings(nodes.reverb, parameterId),
+    ...nodes.saturators.flatMap((saturator) => resolveSaturatorAutomationBindings(saturator, parameterId)),
+    ...nodes.delays.flatMap((delay) => resolveDelayAutomationBindings(delay, parameterId)),
+    ...nodes.reverbs.flatMap((reverb) => resolveReverbAutomationBindings(reverb, parameterId)),
   ]
 }
 
@@ -121,7 +135,7 @@ export async function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: R
     gain.gain.value = resolvedTrack.gain
     output.gain.value = resolvedTrack.outputGain
     const fx = await buildOfflineFxChain(ctx, input, gain, createCachedImpulseResponse, { eq: resolvedTrack.fx?.eq, compressor: resolvedTrack.fx?.compressor, saturator: resolvedTrack.fx?.saturator, delay: resolvedTrack.fx?.delay, reverb: resolvedTrack.fx?.reverb, order: resolvedTrack.fx?.order, instances: resolvedTrack.fx?.instances, bpm })
-    trackNodes.set(resolvedTrack.channel.id, { input, gain, output, eqNodesByBand: fx.eqNodesByBand, saturator: fx.saturator, delay: fx.delay, reverb: fx.reverb })
+    trackNodes.set(resolvedTrack.channel.id, { input, gain, output, eqNodesByBand: fx.eqNodesByBand, saturators: fx.saturators, delays: fx.delays, reverbs: fx.reverbs })
   }
 
   for (const resolvedTrack of graph.channels) {
@@ -164,7 +178,7 @@ export async function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: R
       if (parameterId === 'volume') return [{ param: masterInput.gain, valueToAudioValue: (value) => value }]
       return [
         ...resolveEqAutomationBindings(masterFx.eqNodesByBand, parameterId),
-        ...resolveFxAutomationBindings(parameterId, { saturator: masterFx.saturator, delay: masterFx.delay, reverb: masterFx.reverb }),
+        ...resolveFxAutomationBindings(parameterId, masterFx),
       ]
     },
   }

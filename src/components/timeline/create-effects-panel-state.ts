@@ -86,6 +86,7 @@ type EffectsPanelInstrumentDevice = {
     readDraftForTarget: (targetId: string) => ArpeggiatorParams | undefined;
     readForTarget: (targetId: string) => ArpeggiatorParams | undefined;
     reset: () => void;
+    setForTarget: (targetId: Track["id"], params: ArpeggiatorParams) => boolean;
     syncRemoteForTarget: (targetId: string, params: ArpeggiatorParams | undefined) => void;
     toggle: (enabled: boolean) => void;
   };
@@ -114,6 +115,7 @@ type EffectsPanelInstrumentDevice = {
   readDraftInstrumentForTarget: (targetId: string) => TrackInstrumentParams | undefined;
   readInstrumentForTarget: (targetId: string) => TrackInstrumentParams | undefined;
   syncRemoteInstrumentForTarget: (targetId: string, params: TrackInstrumentParams | undefined) => void;
+  setInstrumentForTarget: (targetId: Track["id"], instrument: TrackInstrumentParams) => boolean;
   switchInstrument: (kind: InstrumentKind) => void;
   switchInstrumentForTarget: (targetId: Track["id"], kind: InstrumentKind) => boolean;
 };
@@ -506,6 +508,20 @@ export function createEffectsPanelInstrumentDevice(
     return true;
   }
 
+  function setArpeggiatorForTarget(targetId: Track["id"], params: ArpeggiatorParams): boolean {
+    const track = getTrackByTargetId(targetId);
+    if (!track || track.kind !== "instrument") return false;
+    arpState.updateForTarget(targetId, () => params);
+    return true;
+  }
+
+  function setInstrumentForTarget(targetId: Track["id"], instrument: TrackInstrumentParams): boolean {
+    const track = getTrackByTargetId(targetId);
+    if (!track || track.kind !== "instrument") return false;
+    instrumentState.updateForTarget(targetId, () => instrument);
+    return true;
+  }
+
   async function handleAddMidiClip(): Promise<void> {
     const track = currentTrack();
     if (!track) return;
@@ -554,6 +570,7 @@ export function createEffectsPanelInstrumentDevice(
       readDraftForTarget: arpState.readDraftForTarget,
       readForTarget: arpState.readForTarget,
       reset: arpState.reset,
+      setForTarget: setArpeggiatorForTarget,
       syncRemoteForTarget: arpState.syncRemoteForTarget,
       toggle: handleArpToggle,
     },
@@ -604,6 +621,7 @@ export function createEffectsPanelInstrumentDevice(
     readDraftInstrumentForTarget: instrumentState.readDraftForTarget,
     readInstrumentForTarget: instrumentState.readForTarget,
     syncRemoteInstrumentForTarget: instrumentState.syncRemoteForTarget,
+    setInstrumentForTarget,
     switchInstrument,
     switchInstrumentForTarget,
   };

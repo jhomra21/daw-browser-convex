@@ -10,7 +10,8 @@ export type BrowserItemCategory =
   | "audio-effect"
   | "audio-effect-chain"
   | "midi-effect"
-  | "midi-instrument";
+  | "midi-instrument"
+  | "instrument-preset";
 
 export type BrowserItem = {
   id: string;

@@ -238,6 +238,12 @@ const assetItemContextItems = (
   return entries;
 };
 
+const deviceContextActionLabel = (activeTab: TimelineBrowserTab, item: BrowserItem) => {
+  if (item.category === "audio-effect-chain") return "Add chain";
+  if (item.category === "instrument-preset") return "Add preset";
+  return activeTab === "effects" ? "Add effect" : "Add instrument";
+};
+
 export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel }> = (props) => {
   let scrollRef: HTMLDivElement | undefined;
   const visibleDeviceTree = createMemo(() => {
@@ -326,7 +332,7 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
               renderItem={(item) => (
                 <BrowserItemRow
                   item={item}
-                  contextActionLabel={item.category === "audio-effect-chain" ? "Add chain" : props.browser.activeTab === "effects" ? "Add effect" : "Add instrument"}
+                  contextActionLabel={deviceContextActionLabel(props.browser.activeTab, item)}
                   onClick={() => visibleDeviceTree().onAdd(item.id)}
                   onPointerDown={(event) => props.browser.devices.onDevicePointerDown(event, item.id)}
                 />

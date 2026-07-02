@@ -11,6 +11,7 @@ import { countBrowserTreeLeaves, createBrowserLeafRow, filterBrowserTreeRows } f
 import { isLocalId } from "@daw-browser/shared";
 import { convexApi, convexClient } from "~/lib/convex";
 import { BUILTIN_AUDIO_EFFECT_CHAIN_PRESETS, type AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
+import { BUILTIN_INSTRUMENT_PRESETS, type InstrumentPreset } from "~/lib/instrument-presets";
 import {
   createLocalAssetFolder,
   deleteEmptyLocalAssetFolder,
@@ -47,6 +48,7 @@ const BROWSER_INSTRUMENT_ITEM_IDS = {
 };
 
 const effectChainItemId = (preset: AudioEffectChainPreset) => `builtin:audio-effect-chain:${preset.id}`;
+const instrumentPresetItemId = (preset: InstrumentPreset) => `builtin:instrument-preset:${preset.id}`;
 
 const visibleBrowserSections = (sections: BrowserSection[]): BrowserSection[] => {
   const visibleSections: BrowserSection[] = [];
@@ -380,6 +382,60 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     ];
     return items;
   });
+  const browserInstrumentPresetItems = createMemo<BrowserItem[]>(() => {
+    const actions = options.deviceInsertActions();
+    return BUILTIN_INSTRUMENT_PRESETS.map((preset) => {
+      const audioEffectCount = preset.audioEffects?.length ?? 0;
+      const midiEffectCount = preset.midiEffects?.length ?? 0;
+      const effectCount = audioEffectCount + midiEffectCount;
+      const subtitle = effectCount > 0
+        ? `${preset.instrument.kind === "synth" ? "Synth" : "Drum Rack"} + ${effectCount} effects`
+        : preset.instrument.kind === "synth" ? "Synth preset" : "Drum Rack preset";
+      return {
+        id: instrumentPresetItemId(preset),
+        source: "builtin",
+        category: "instrument-preset",
+        label: preset.name,
+        subtitle,
+        searchText: `${preset.name} ${preset.folderName ?? ""} instrument preset ${preset.instrument.kind} ${preset.midiEffects?.map((effect) => effect.kind).join(" ") ?? ""} ${preset.audioEffects?.map((effect) => effect.kind).join(" ") ?? ""}`.toLowerCase(),
+        disabled: !actions,
+        folderId: preset.folderId,
+      };
+    });
+  });
+  const browserInstrumentPresetByItemId = createMemo(() => {
+    const map = new Map<string, InstrumentPreset>();
+    for (const preset of BUILTIN_INSTRUMENT_PRESETS) map.set(instrumentPresetItemId(preset), preset);
+    return map;
+  });
+  const browserInstrumentPresetRows = createMemo<BrowserTreeRow[]>(() => {
+    const itemsByFolderId = new Map<string, BrowserItem[]>();
+    const folderNamesById = new Map<string, string>();
+    const unfiled: BrowserItem[] = [];
+    for (const item of browserInstrumentPresetItems()) {
+      const preset = browserInstrumentPresetByItemId().get(item.id);
+      if (!item.folderId || !preset?.folderName) {
+        unfiled.push(item);
+        continue;
+      }
+      folderNamesById.set(item.folderId, preset.folderName);
+      const rows = itemsByFolderId.get(item.folderId);
+      if (rows) rows.push(item); else itemsByFolderId.set(item.folderId, [item]);
+    }
+    const folders: BrowserTreeRow[] = [];
+    for (const [folderId, items] of itemsByFolderId) {
+      folders.push({
+        kind: "folder",
+        id: `builtin-instrument-preset-folder:${folderId}`,
+        source: "builtin",
+        label: folderNamesById.get(folderId) ?? folderId,
+        searchText: `${folderNamesById.get(folderId) ?? folderId} instrument presets builtin`.toLowerCase(),
+        folderId,
+        children: items.map(createBrowserLeafRow),
+      });
+    }
+    return [...folders, ...unfiled.map(createBrowserLeafRow)];
+  });
   const browserInstrumentSections = createMemo(() => visibleBrowserSections([
     {
       id: "builtin-midi-instruments",
@@ -392,6 +448,14 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
           label: "Instruments",
           searchText: "instruments builtin",
           children: browserInstrumentItems().map(createBrowserLeafRow),
+        },
+        {
+          kind: "folder",
+          id: "builtin-instrument-presets",
+          source: "builtin",
+          label: "Instrument Presets",
+          searchText: "instrument presets builtin",
+          children: browserInstrumentPresetRows(),
         },
       ], browserDeviceQuery("midi-instruments")),
     },
@@ -503,6 +567,8 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     if (itemId === BROWSER_EFFECT_ITEM_IDS.arpeggiator) return { kind: "midi-effect", effect: "arpeggiator", label: "Arpeggiator" };
     const chain = browserEffectChainPresetByItemId().get(itemId);
     if (chain) return { kind: "audio-effect-chain", chain, label: chain.name };
+    const preset = browserInstrumentPresetByItemId().get(itemId);
+    if (preset) return { kind: "instrument-preset", preset, label: preset.name };
     if (itemId === BROWSER_INSTRUMENT_ITEM_IDS.synth) return { kind: "midi-instrument", instrument: "synth", label: "Synth" };
     if (itemId === BROWSER_INSTRUMENT_ITEM_IDS.drumRack) return { kind: "midi-instrument", instrument: "drum-rack", label: "Drum Rack" };
     return undefined;
@@ -533,11 +599,13 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   const addBrowserInstrument = (itemId: string) => {
     const payload = resolveBrowserDevicePayload(itemId);
     const actions = options.deviceInsertActions();
-    if (!actions?.canWrite || payload?.kind !== "midi-instrument" || !actions.canAddMidiClip) return;
+    if (!actions?.canWrite || (payload?.kind !== "midi-instrument" && payload?.kind !== "instrument-preset")) return;
     const targetId = options.currentEffectsTargetId();
     if (targetId === "master") return;
     const laneIndex = options.tracks().findIndex((track) => track.id === targetId);
     if (laneIndex < 0) return;
+    if (payload.kind === "midi-instrument" && !actions.canAddMidiClip) return;
+    if (payload.kind === "instrument-preset" && !actions.canSetInstrumentForTarget(targetId)) return;
     void options.onDeviceDrop(payload, { kind: "track", trackId: targetId, laneIndex });
   };
 
@@ -562,6 +630,14 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       }
       if (payload.kind === "midi-effect") {
         if (target.kind === "track") return actions.canAddArpeggiatorToTarget(target.trackId);
+        return target.kind === "new-track" && options.canCreateTrack();
+      }
+      if (payload.kind === "instrument-preset") {
+        if (target.kind === "track") {
+          if (!actions.canSetInstrumentForTarget(target.trackId)) return false;
+          if (payload.preset.audioEffects?.some((effect) => !actions.canAddAudioEffectToTarget(target.trackId, effect.kind))) return false;
+          return true;
+        }
         return target.kind === "new-track" && options.canCreateTrack();
       }
       if (target.kind === "track") return actions.canAddMidiClipToTarget(target.trackId);

@@ -41,6 +41,7 @@ const deviceInsertActionsEqual = (
   a.addArpeggiator === b.addArpeggiator &&
   a.addArpeggiatorToTarget === b.addArpeggiatorToTarget &&
   a.canAddArpeggiatorToTarget === b.canAddArpeggiatorToTarget &&
+  a.setArpeggiatorForTarget === b.setArpeggiatorForTarget &&
   a.addAudioEffectToTarget === b.addAudioEffectToTarget &&
   a.canAddAudioEffectToTarget === b.canAddAudioEffectToTarget &&
   a.addAudioEffectChainToTarget === b.addAudioEffectChainToTarget &&
@@ -52,6 +53,8 @@ const deviceInsertActionsEqual = (
   a.addReverb === b.addReverb &&
   a.openSynthForTarget === b.openSynthForTarget &&
   a.switchInstrumentForTarget === b.switchInstrumentForTarget &&
+  a.setInstrumentForTarget === b.setInstrumentForTarget &&
+  a.canSetInstrumentForTarget === b.canSetInstrumentForTarget &&
   a.canWrite === b.canWrite &&
   a.canAddMidiClip === b.canAddMidiClip &&
   a.canAddArpeggiator === b.canAddArpeggiator &&
@@ -207,6 +210,23 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     return await instrument.addMidiClipToTarget(targetId, insertOptions);
   };
 
+  const canSetInstrumentForTarget = (targetId: Track["id"]) => {
+    const track = resolveTrackByTargetId(targetId);
+    if (!track || track.kind !== "instrument") return false;
+    if (options.canWriteTrackRouting && !options.canWriteTrackRouting(track.id)) return false;
+    return true;
+  };
+
+  const setInstrumentForTarget: TimelineDeviceInsertActions["setInstrumentForTarget"] = (targetId, nextInstrument) => {
+    if (!canSetInstrumentForTarget(targetId)) return false;
+    return instrument.setInstrumentForTarget(targetId, nextInstrument);
+  };
+
+  const setArpeggiatorForTarget: TimelineDeviceInsertActions["setArpeggiatorForTarget"] = (targetId, params) => {
+    if (!canSetInstrumentForTarget(targetId)) return false;
+    return instrument.arp.setForTarget(targetId, params);
+  };
+
   const canAddAudioEffectToTarget = (targetId: Track["id"] | "master", effect: AudioEffectKind) => (
     canWriteEffectsTarget(targetId) && audioEffects.canAddByKindToTarget(targetId, effect)
   );
@@ -236,6 +256,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       addArpeggiator: instrument.arp.add,
       addArpeggiatorToTarget,
       canAddArpeggiatorToTarget,
+      setArpeggiatorForTarget,
       addAudioEffectToTarget,
       canAddAudioEffectToTarget,
       addAudioEffectChainToTarget,
@@ -247,6 +268,8 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       addReverb: audioEffects.reverb.add,
       openSynthForTarget: instrument.synth.openForTarget,
       switchInstrumentForTarget: instrument.switchInstrumentForTarget,
+      setInstrumentForTarget,
+      canSetInstrumentForTarget,
       canWrite: canWriteCurrentTargetEffects(),
       canAddMidiClip: isInstrumentTrack(),
       canAddArpeggiator: isInstrumentTrack() && !instrument.arp.params(),

@@ -50,6 +50,8 @@ import { useTimelineAutomationController } from "~/hooks/useTimelineAutomationCo
 import { BrowserDragOverlay } from "./timeline/browser/browser-drag-overlay";
 import type { BrowserDragPayload, BrowserDropTarget } from "./timeline/browser/browser-drag-types";
 import type { TimelineDeviceInsertActions } from "./timeline/timeline-device-insert-actions";
+import type { AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
+import type { InstrumentPreset } from "~/lib/instrument-presets";
 import { isTimelineSampleDetailClip, useTimelineSampleDetailController } from "~/hooks/useTimelineSampleDetailController";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
@@ -838,6 +840,29 @@ const Timeline: Component<TimelineProps> = (props) => {
     bottomPanel.setMode("effects");
     bottomPanel.setOpen(true);
   };
+  const audioEffectChainFromInstrumentPreset = (preset: InstrumentPreset): AudioEffectChainPreset | undefined => {
+    if (!preset.audioEffects || preset.audioEffects.length === 0) return undefined;
+    return {
+      id: `instrument-preset:${preset.id}:audio-effects`,
+      name: preset.name,
+      effects: preset.audioEffects,
+    };
+  };
+  const applyInstrumentPresetToTarget = async (
+    actions: TimelineDeviceInsertActions,
+    targetId: Track["id"],
+    preset: InstrumentPreset,
+  ) => {
+    const audioEffectChain = audioEffectChainFromInstrumentPreset(preset);
+    if (!actions.canSetInstrumentForTarget(targetId)) return false;
+    if (audioEffectChain && !actions.canAddAudioEffectChainToTarget(targetId, audioEffectChain)) return false;
+    if (!actions.setInstrumentForTarget(targetId, preset.instrument)) return false;
+    for (const effect of preset.midiEffects ?? []) {
+      if (effect.kind === "arpeggiator" && !actions.setArpeggiatorForTarget(targetId, effect.params)) return false;
+    }
+    if (audioEffectChain && !await actions.addAudioEffectChainToTarget(targetId, audioEffectChain)) return false;
+    return true;
+  };
   const handleBrowserDeviceDrop = async (
     payload: BrowserDragPayload,
     target: BrowserDropTarget,
@@ -904,6 +929,19 @@ const Timeline: Component<TimelineProps> = (props) => {
       if (!await actions.addMidiClipToTarget(track.id)) return;
       openEffectsForTarget(track.id, { preserveClipSelection: true });
       if (payload.instrument === "synth") actions.openSynthForTarget(track.id);
+    }
+    if (payload.kind === "instrument-preset" && target.kind === "track") {
+      if (!await applyInstrumentPresetToTarget(actions, target.trackId, payload.preset)) return;
+      openEffectsForTarget(target.trackId);
+      if (payload.preset.instrument.kind === "synth") actions.openSynthForTarget(target.trackId);
+      return;
+    }
+    if (payload.kind === "instrument-preset" && target.kind === "new-track") {
+      const track = await createTimelineTrack({ kind: "instrument" });
+      if (!track) return;
+      if (!await applyInstrumentPresetToTarget(actions, track.id, payload.preset)) return;
+      openEffectsForTarget(track.id);
+      if (payload.preset.instrument.kind === "synth") actions.openSynthForTarget(track.id);
     }
   };
   const timelineBrowser = useTimelineBrowserController({

@@ -436,7 +436,7 @@ export const persistHistoryClipAudioWarpOrThrow = async (
   message: string,
 ) => {
   const normalizedAudioWarp = normalizeAudioWarp(audioWarp);
-  assert(normalizedAudioWarp, message);
+  if (!normalizedAudioWarp) throw new Error(message);
   if (isLocalHistoryProject(deps)) {
     const applied = await createLocalTimelineRepository(deps.projectId).updateClip({
       clipId,

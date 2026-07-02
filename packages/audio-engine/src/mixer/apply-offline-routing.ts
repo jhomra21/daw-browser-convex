@@ -98,9 +98,15 @@ export async function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: R
     const channelId = resolvedTrack.channel.id
     const source = trackNodes.get(channelId)
     assert(source, `Missing offline mixer source for track ${channelId}`)
-    const outputTarget = resolvedTrack.outputTargetId ? trackNodes.get(resolvedTrack.outputTargetId)?.input : undefined
+    const targetNodes = resolvedTrack.outputTargetId
+      ? trackNodes.get(resolvedTrack.outputTargetId)
+      : undefined
+    if (resolvedTrack.outputTargetId) {
+      assert(targetNodes, `Missing offline mixer output target for track ${resolvedTrack.outputTargetId}`)
+    }
+    const outputTarget = targetNodes?.input ?? masterInput
     source.gain.connect(source.output)
-    source.output.connect(outputTarget ?? masterInput)
+    source.output.connect(outputTarget)
     for (const send of resolvedTrack.sends) {
       const target = trackNodes.get(send.targetId)
       assert(target, `Missing offline mixer send target for track ${send.targetId}`)

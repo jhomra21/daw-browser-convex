@@ -7,7 +7,6 @@ import {
   automationTargetKeysForManualOverride,
   filterAutomationEnvelopesForScheduling,
   getAutomationParameterOptions,
-  assert,
   isLocalId,
   type AutomationEnvelope,
 } from "@daw-browser/shared";
@@ -269,7 +268,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
         return;
       }
       const uid = options.userId();
-      assert(uid, "Cannot persist shared automation without a user id.");
+      if (!uid) throw new Error("Cannot persist shared automation without a user id.");
       await publishDurableSharedTimelineOperation({
         projectId: rid,
         userId: uid,
@@ -298,7 +297,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       }
       if (!envelope) return;
       const uid = options.userId();
-      assert(uid, "Cannot persist shared automation without a user id.");
+      if (!uid) throw new Error("Cannot persist shared automation without a user id.");
       await publishDurableSharedTimelineOperation({
         projectId: rid,
         userId: uid,

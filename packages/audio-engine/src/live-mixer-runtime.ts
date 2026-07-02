@@ -55,6 +55,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const trackFxOrders = new Map<string, AudioEffectKind[]>()
   const trackFxInstances = new Map<string, AudioEffectRuntimeInstance[]>()
   const pendingTrackFxInstances = new Map<string, AudioEffectRuntimeInstance[]>()
+  const trackFxInstanceRevisions = new Map<string, number>()
   const instanceEqChains = new Map<string, Map<string, BiquadFilterNode[]>>()
   const instanceEqNodesByBand = new Map<string, Map<string, Map<string, BiquadFilterNode>>>()
   const instanceEqSignatures = new Map<string, Map<string, string>>()
@@ -346,6 +347,8 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   }
 
   const applyTrackFxInstances = async (trackId: string, instances: AudioEffectRuntimeInstance[]) => {
+    const revision = (trackFxInstanceRevisions.get(trackId) ?? 0) + 1
+    trackFxInstanceRevisions.set(trackId, revision)
     const wasInstanceMode = trackFxInstances.has(trackId)
     const normalized = normalizeAudioEffectRuntimeInstances(instances)
     if (normalized.length === 0) {
@@ -392,6 +395,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
           stateMap.set(instance.id, state)
         }
         const result = await state.set(ctx, normalizeCompressorParams(instance.params))
+        if (trackFxInstanceRevisions.get(trackId) !== revision) return
         if (state.isIdle()) stateMap.delete(instance.id)
         requiresRoutingRebuild = (result.changed && result.requiresRoutingRebuild) || requiresRoutingRebuild
         continue
@@ -473,6 +477,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     trackFxOrders.delete(trackId)
     trackFxInstances.delete(trackId)
     pendingTrackFxInstances.delete(trackId)
+    trackFxInstanceRevisions.delete(trackId)
     closeTrackInstanceStates(trackId)
 
     options.disposeSynthTrack(trackId)
@@ -507,6 +512,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     trackFxOrders.clear()
     trackFxInstances.clear()
     pendingTrackFxInstances.clear()
+    trackFxInstanceRevisions.clear()
     for (const trackId of Array.from(instanceEqChains.keys())) closeTrackInstanceStates(trackId)
     instanceEqChains.clear()
     instanceEqNodesByBand.clear()

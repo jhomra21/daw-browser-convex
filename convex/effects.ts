@@ -10,6 +10,8 @@ import {
   normalizeSaturatorParamsForUpdate,
   normalizeSynthParams,
   normalizeTrackInstrumentParams,
+  audioEffectOrderItemId,
+  audioEffectOrderItemKind,
   serializeCompressorParams,
   serializeDelayParams,
   serializeEqParams,
@@ -313,9 +315,6 @@ const getTrackEffect = async (
   rows.sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0));
   return rows.find((row: any) => row.type === input.type && row.targetType === 'track') ?? null;
 }
-
-const audioEffectOrderItemId = (item: AudioEffectOrderItem) => typeof item === 'string' ? item : item.id
-const audioEffectOrderItemKind = (item: AudioEffectOrderItem) => typeof item === 'string' ? item : item.kind
 
 type EffectOrderRow = {
   _id: string

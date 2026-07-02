@@ -32,6 +32,7 @@ export function createMasterFxRuntime() {
   let masterFxOrder: AudioEffectKind[] | undefined
   let masterFxInstances: AudioEffectRuntimeInstance[] | null = null
   let pendingFxInstances: AudioEffectRuntimeInstance[] | null = null
+  let fxInstanceRevision = 0
   const instanceEqChains = new Map<string, BiquadFilterNode[]>()
   const instanceEqNodesByBand = new Map<string, Map<string, BiquadFilterNode>>()
   const instanceEqSignatures = new Map<string, string>()
@@ -156,6 +157,7 @@ export function createMasterFxRuntime() {
     createImpulseResponse: CreateReverbImpulseResponse,
     instances: AudioEffectRuntimeInstance[],
   ) => {
+    const revision = ++fxInstanceRevision
     const wasInstanceMode = masterFxInstances !== null
     const normalized = normalizeAudioEffectRuntimeInstances(instances)
     if (normalized.length === 0) {
@@ -188,6 +190,7 @@ export function createMasterFxRuntime() {
           instanceCompressorChains.set(instance.id, state)
         }
         const result = await state.set(ctx, normalizeCompressorParams(instance.params))
+        if (fxInstanceRevision !== revision) return
         if (state.isIdle()) instanceCompressorChains.delete(instance.id)
         requiresRoutingRebuild = (result.changed && result.requiresRoutingRebuild) || requiresRoutingRebuild
         continue
@@ -342,6 +345,7 @@ export function createMasterFxRuntime() {
     ) => {
       const normalized = normalizeAudioEffectRuntimeInstances(instances)
       if (normalized.length === 0) {
+        fxInstanceRevision += 1
         masterFxInstances = null
         pendingFxInstances = null
         closeAllInstanceStates()
@@ -412,6 +416,7 @@ export function createMasterFxRuntime() {
       masterFxOrder = undefined
       masterFxInstances = null
       pendingFxInstances = null
+      fxInstanceRevision += 1
       closeAllInstanceStates()
       disconnectAudioNodes(eqChain)
       eqChain = []

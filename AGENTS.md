@@ -3,7 +3,7 @@ Web Audio API Docs:
 https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API#web_audio_api_target_audience
 
 ## Philosophy
-Do not make baseless or empty assumptions. Never say if this works like 'x' or 'y'. Always read source code or up to date docs.
+Do not make baseless or empty assumptions. Never say "if this works like 'x' or 'y'". Always read source code or up to date docs.
 This codebase will outlive you. Every shortcut becomes someone else's burden. Every hack compounds into technical debt that slows the whole team down. 
 You are not just writing code, you are shaping the future of this project. The patterns you establish will be copied. The corners you cut will be cut again.
 
@@ -77,10 +77,7 @@ Solid rules: `AGENTS-solid.md`
 
 ### Backend (Hono + Cloudflare Workers)
 - API routes in `api/index.ts` using Hono framework
-- Use Cloudflare Workers AI binding for LLM functionality
-- Handle both streaming and non-streaming responses
-- Proper error handling with JSON responses
-- Type Cloudflare bindings appropriately
+- Use Cloudflare Workers
 
 ### Styling
 - Use TailwindCSS v4 with Vite plugin

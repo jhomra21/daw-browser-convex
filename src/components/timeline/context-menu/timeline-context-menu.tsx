@@ -54,7 +54,10 @@ const TimelineContextMenuEntry: Component<{ item: TimelineContextMenuItem }> = (
         return (
           <ContextMenuItem
             disabled={current.disabled}
-            onSelect={() => current.onSelect?.()}
+            onSelect={() => {
+              const action = current.onSelect;
+              queueMicrotask(() => action?.());
+            }}
           >
             <span class="min-w-0 flex-1 truncate">{current.label}</span>
             <Show when={current.shortcut}>

@@ -1,6 +1,6 @@
 import { Component, JSX, splitProps, createUniqueId } from "solid-js";
 
-type IconName = "google" | "solidjs" | "convex" | "file-audio" | "play" | "pause" | "stop" | "metronome" | "repeat" | "grid" | "user" | "log-out" | "log-in" | "house";
+type IconName = "google" | "solidjs" | "convex" | "file-audio" | "play" | "pause" | "stop" | "metronome" | "repeat" | "grid" | "user" | "log-out" | "log-in" | "house" | "sidebar-open" | "sidebar-closed";
 
 type BaseIconProps = {
   size?: number | string;
@@ -411,6 +411,60 @@ const HouseIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> 
   );
 };
 
+const SidebarOpenIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
+  const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
+  const s = normalizeSize(local.size);
+  return (
+    <svg
+      {...rest}
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      class={local.class}
+      role={local.ariaLabel ? "img" : undefined}
+      aria-label={local.ariaLabel}
+      aria-hidden={local.ariaLabel ? undefined : "true"}
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+    >
+      {local.title ? <title>{local.title}</title> : null}
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M9 3v18" />
+      <path d="M6 8h.01" />
+      <path d="M6 12h.01" />
+      <path d="M6 16h.01" />
+    </svg>
+  );
+};
+
+const SidebarClosedIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
+  const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
+  const s = normalizeSize(local.size);
+  return (
+    <svg
+      {...rest}
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      class={local.class}
+      role={local.ariaLabel ? "img" : undefined}
+      aria-label={local.ariaLabel}
+      aria-hidden={local.ariaLabel ? undefined : "true"}
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+    >
+      {local.title ? <title>{local.title}</title> : null}
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M7 3v18" />
+      <path d="m13 9 3 3-3 3" />
+    </svg>
+  );
+};
+
 const registry: Record<IconName, Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>>> = {
   google: GoogleIcon,
   solidjs: SolidJSIcon,
@@ -426,6 +480,8 @@ const registry: Record<IconName, Component<BaseIconProps & JSX.SvgSVGAttributes<
   "log-out": LogOutIcon,
   "log-in": LogInIcon,
   house: HouseIcon,
+  "sidebar-open": SidebarOpenIcon,
+  "sidebar-closed": SidebarClosedIcon,
 };
 
 const Icon: Component<IconProps> = (allProps) => {

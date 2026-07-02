@@ -342,7 +342,10 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
           )}
           onClick={props.browser.onToggle}
         >
-          Browser
+          <Icon
+            name={props.browser.open ? "sidebar-open" : "sidebar-closed"}
+            class="h-4 w-4"
+          />
         </Button>
         <Menubar class="flex items-center gap-1">
           <FileMenu toolbar={props} />

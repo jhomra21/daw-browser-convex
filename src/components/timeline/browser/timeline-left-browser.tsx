@@ -326,7 +326,7 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
               renderItem={(item) => (
                 <BrowserItemRow
                   item={item}
-                  contextActionLabel={props.browser.activeTab === "effects" ? "Add effect" : "Add instrument"}
+                  contextActionLabel={item.category === "audio-effect-chain" ? "Add chain" : props.browser.activeTab === "effects" ? "Add effect" : "Add instrument"}
                   onClick={() => visibleDeviceTree().onAdd(item.id)}
                   onPointerDown={(event) => props.browser.devices.onDevicePointerDown(event, item.id)}
                 />

@@ -8,6 +8,7 @@ export type BrowserItemSource = "project" | "default" | "builtin";
 export type BrowserItemCategory =
   | "sample"
   | "audio-effect"
+  | "audio-effect-chain"
   | "midi-effect"
   | "midi-instrument";
 

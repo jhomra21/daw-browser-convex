@@ -861,6 +861,23 @@ const Timeline: Component<TimelineProps> = (props) => {
       openEffectsForTarget(track.id);
       return;
     }
+    if (payload.kind === "audio-effect-chain" && target.kind === "effect-chain") {
+      if (!await actions.addAudioEffectChainToTarget(target.targetId, payload.chain, target.index)) return;
+      openEffectsForTarget(target.targetId);
+      return;
+    }
+    if (payload.kind === "audio-effect-chain" && target.kind === "track") {
+      if (!await actions.addAudioEffectChainToTarget(target.trackId, payload.chain)) return;
+      openEffectsForTarget(target.trackId);
+      return;
+    }
+    if (payload.kind === "audio-effect-chain" && target.kind === "new-track") {
+      const track = await createTimelineTrack();
+      if (!track) return;
+      if (!await actions.addAudioEffectChainToTarget(track.id, payload.chain)) return;
+      openEffectsForTarget(track.id);
+      return;
+    }
     if (payload.kind === "midi-effect" && target.kind === "track") {
       if (!await actions.addArpeggiatorToTarget(target.trackId)) return;
       openEffectsForTarget(target.trackId);

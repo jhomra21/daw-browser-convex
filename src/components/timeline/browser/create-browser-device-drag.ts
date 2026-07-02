@@ -75,7 +75,7 @@ const resolveCompatibleTarget = (
   pointer: { x: number; y: number },
   options: BrowserDeviceDragOptions,
 ): Pick<BrowserDragSession, "target" | "effectChainPreview"> => {
-  if (payload.kind === "audio-effect") {
+  if (payload.kind === "audio-effect" || payload.kind === "audio-effect-chain") {
     const chain = resolveEffectChainPreview(pointer, options.effectsChainElement(), options.currentEffectsTargetId());
     if (chain) return options.canDrop(payload, chain.target) ? chain : { target: { kind: "none" } };
   }

@@ -36,6 +36,7 @@ import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
+import type { AudioEffectChainPresetStep } from "~/lib/audio-effect-chain-presets";
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
 type PersistedAudioEffectDescriptor<Params> = {
@@ -104,6 +105,7 @@ type EffectsPanelAudioDevice = {
     toggleEnabled: (enabled: boolean) => void;
   };
   addByKindToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => Promise<boolean>;
+  addChainToTarget: (targetId: Track["id"] | "master", effects: readonly AudioEffectChainPresetStep[], index?: number) => Promise<boolean>;
   canAddByKindToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind) => boolean;
   flushPending: () => Promise<void>;
   paramsForInstance: (instance: AudioEffectInstance) => EqParams | CompressorParams | SaturatorParams | DelayParams | ReverbParams | undefined;
@@ -399,6 +401,22 @@ export function createEffectsPanelAudioDevice(
     return AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams();
   };
 
+  const normalizePresetStepParams = (step: AudioEffectChainPresetStep): AudioEffectParams => {
+    if (step.kind === "eq") return normalizeEqParams(step.params);
+    if (step.kind === "compressor") return normalizeCompressorParams(step.params);
+    if (step.kind === "saturator") return normalizeSaturatorParams(step.params);
+    if (step.kind === "delay") return normalizeDelayParams(step.params);
+    return normalizeReverbParams(step.params);
+  };
+
+  const createDefaultPresetStep = (kind: AudioEffectKind): AudioEffectChainPresetStep => {
+    if (kind === "eq") return { kind, params: AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams() };
+    if (kind === "compressor") return { kind, params: AUDIO_EFFECT_CONTRACTS.compressor.createDefaultParams() };
+    if (kind === "saturator") return { kind, params: AUDIO_EFFECT_CONTRACTS.saturator.createDefaultParams() };
+    if (kind === "delay") return { kind, params: AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams() };
+    return { kind, params: AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams() };
+  };
+
   const localEffectForKind = (targetId: string, kind: AudioEffectKind) => (
     targetId === "master" ? AUDIO_EFFECT_CONTRACTS[kind].masterKind : AUDIO_EFFECT_CONTRACTS[kind].kind
   );
@@ -642,20 +660,38 @@ export function createEffectsPanelAudioDevice(
     if (effect === "delay") return localDelay;
     return localReverb;
   };
-  const addByKindToTarget = async (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => {
-    if (!canAddByKindToTarget(targetId, effect)) return false;
-    const instance = { id: createAudioEffectInstanceId(), kind: effect };
-    const params = createDefaultParamsForKind(effect);
-    setDraftParamsByInstance((prev) => ({ ...prev, [instanceKey(targetId, instance.id)]: params }));
+  const addChainToTarget = async (
+    targetId: Track["id"] | "master",
+    effects: readonly AudioEffectChainPresetStep[],
+    index?: number,
+  ) => {
+    if (effects.length === 0 || !effects.every((effect) => canAddByKindToTarget(targetId, effect.kind))) return false;
+    const entries = effects.map((effect) => ({
+      instance: { id: createAudioEffectInstanceId(), kind: effect.kind },
+      params: normalizePresetStepParams(effect),
+    }));
+    const instances = entries.map((entry) => entry.instance);
+    setDraftParamsByInstance((prev) => {
+      let next = prev;
+      for (const entry of entries) {
+        next = { ...next, [instanceKey(targetId, entry.instance.id)]: entry.params };
+      }
+      return next;
+    });
     const currentOrder = targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(targetId);
     const nextOrder = [...currentOrder];
-    nextOrder.splice(index === undefined ? nextOrder.length : Math.max(0, Math.min(index, nextOrder.length)), 0, instance);
+    nextOrder.splice(index === undefined ? nextOrder.length : Math.max(0, Math.min(index, nextOrder.length)), 0, ...instances);
     setOptimisticOrder({ targetId, order: nextOrder });
     applyInstancesToEngine(targetId, nextOrder);
-    await persistInstanceParams(targetId, instance.id, effect, params);
+    for (const entry of entries) {
+      await persistInstanceParams(targetId, entry.instance.id, entry.instance.kind, entry.params);
+    }
     await persistReorder(targetId, nextOrder);
     return true;
   };
+  const addByKindToTarget = async (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => (
+    await addChainToTarget(targetId, [createDefaultPresetStep(effect)], index)
+  );
   const canAddByKindToTarget = (_targetId: Track["id"] | "master", _effect: AudioEffectKind) => true;
   const removeByInstanceFromTarget = async (targetId: Track["id"] | "master", instance: AudioEffectInstance) => {
     if (!context.canWriteCurrentTargetEffects()) return false;
@@ -696,6 +732,7 @@ export function createEffectsPanelAudioDevice(
 
   return {
     addByKindToTarget,
+    addChainToTarget,
     canAddByKindToTarget,
     eq: {
       add: addEq,

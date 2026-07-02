@@ -10,6 +10,7 @@ import type { Track } from "@daw-browser/timeline-core/types";
 import { countBrowserTreeLeaves, createBrowserLeafRow, filterBrowserTreeRows } from "~/components/timeline/browser/browser-tree";
 import { isLocalId } from "@daw-browser/shared";
 import { convexApi, convexClient } from "~/lib/convex";
+import { BUILTIN_AUDIO_EFFECT_CHAIN_PRESETS, type AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
 import {
   createLocalAssetFolder,
   deleteEmptyLocalAssetFolder,
@@ -44,6 +45,8 @@ const BROWSER_INSTRUMENT_ITEM_IDS = {
   synth: "builtin:midi-instrument:synth",
   drumRack: "builtin:midi-instrument:drum-rack",
 };
+
+const effectChainItemId = (preset: AudioEffectChainPreset) => `builtin:audio-effect-chain:${preset.id}`;
 
 const visibleBrowserSections = (sections: BrowserSection[]): BrowserSection[] => {
   const visibleSections: BrowserSection[] = [];
@@ -270,6 +273,52 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     ];
     return items;
   });
+  const browserEffectChainItems = createMemo<BrowserItem[]>(() => {
+    const actions = options.deviceInsertActions();
+    return BUILTIN_AUDIO_EFFECT_CHAIN_PRESETS.map((preset) => ({
+      id: effectChainItemId(preset),
+      source: "builtin",
+      category: "audio-effect-chain",
+      label: preset.name,
+      subtitle: `${preset.effects.length} audio effects`,
+      searchText: `${preset.name} ${preset.folderName ?? ""} audio effect chain ${preset.effects.map((effect) => effect.kind).join(" ")}`.toLowerCase(),
+      disabled: !actions,
+      folderId: preset.folderId,
+    }));
+  });
+  const browserEffectChainPresetByItemId = createMemo(() => {
+    const map = new Map<string, AudioEffectChainPreset>();
+    for (const preset of BUILTIN_AUDIO_EFFECT_CHAIN_PRESETS) map.set(effectChainItemId(preset), preset);
+    return map;
+  });
+  const browserEffectChainRows = createMemo<BrowserTreeRow[]>(() => {
+    const itemsByFolderId = new Map<string, BrowserItem[]>();
+    const folderNamesById = new Map<string, string>();
+    const unfiled: BrowserItem[] = [];
+    for (const item of browserEffectChainItems()) {
+      const preset = browserEffectChainPresetByItemId().get(item.id);
+      if (!item.folderId || !preset?.folderName) {
+        unfiled.push(item);
+        continue;
+      }
+      folderNamesById.set(item.folderId, preset.folderName);
+      const rows = itemsByFolderId.get(item.folderId);
+      if (rows) rows.push(item); else itemsByFolderId.set(item.folderId, [item]);
+    }
+    const folders: BrowserTreeRow[] = [];
+    for (const [folderId, items] of itemsByFolderId) {
+      folders.push({
+        kind: "folder",
+        id: `builtin-audio-effect-chain-folder:${folderId}`,
+        source: "builtin",
+        label: folderNamesById.get(folderId) ?? folderId,
+        searchText: `${folderNamesById.get(folderId) ?? folderId} audio effect chains builtin`.toLowerCase(),
+        folderId,
+        children: items.map(createBrowserLeafRow),
+      });
+    }
+    return [...folders, ...unfiled.map(createBrowserLeafRow)];
+  });
   const browserEffectSections = createMemo(() => {
     const audioEffectItems: BrowserItem[] = [];
     const midiEffectItems: BrowserItem[] = [];
@@ -285,6 +334,14 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: "Audio Effects",
         searchText: "audio effects builtin",
         children: audioEffectItems.map(createBrowserLeafRow),
+      },
+      {
+        kind: "folder",
+        id: "builtin-audio-effect-chains",
+        source: "builtin",
+        label: "Audio Effect Chains",
+        searchText: "audio effect chains presets builtin",
+        children: browserEffectChainRows(),
       },
       {
         kind: "folder",
@@ -444,6 +501,8 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     if (itemId === BROWSER_EFFECT_ITEM_IDS.delay) return { kind: "audio-effect", effect: "delay", label: "Delay" };
     if (itemId === BROWSER_EFFECT_ITEM_IDS.reverb) return { kind: "audio-effect", effect: "reverb", label: "Reverb" };
     if (itemId === BROWSER_EFFECT_ITEM_IDS.arpeggiator) return { kind: "midi-effect", effect: "arpeggiator", label: "Arpeggiator" };
+    const chain = browserEffectChainPresetByItemId().get(itemId);
+    if (chain) return { kind: "audio-effect-chain", chain, label: chain.name };
     if (itemId === BROWSER_INSTRUMENT_ITEM_IDS.synth) return { kind: "midi-instrument", instrument: "synth", label: "Synth" };
     if (itemId === BROWSER_INSTRUMENT_ITEM_IDS.drumRack) return { kind: "midi-instrument", instrument: "drum-rack", label: "Drum Rack" };
     return undefined;
@@ -459,6 +518,13 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       if (payload.effect === "saturator" && actions.canAddSaturator) actions.addSaturator();
       if (payload.effect === "delay" && actions.canAddDelay) actions.addDelay();
       if (payload.effect === "reverb" && actions.canAddReverb) actions.addReverb();
+      return;
+    }
+    if (payload.kind === "audio-effect-chain") {
+      const targetId = options.currentEffectsTargetId();
+      if (actions.canAddAudioEffectChainToTarget(targetId, payload.chain)) {
+        void actions.addAudioEffectChainToTarget(targetId, payload.chain);
+      }
       return;
     }
     if (payload.kind === "midi-effect" && actions.canAddArpeggiator) actions.addArpeggiator();
@@ -487,6 +553,11 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       if (payload.kind === "audio-effect") {
         if (target.kind === "effect-chain") return actions.canAddAudioEffectToTarget(target.targetId, payload.effect);
         if (target.kind === "track") return actions.canAddAudioEffectToTarget(target.trackId, payload.effect);
+        return target.kind === "new-track" && options.canCreateTrack();
+      }
+      if (payload.kind === "audio-effect-chain") {
+        if (target.kind === "effect-chain") return actions.canAddAudioEffectChainToTarget(target.targetId, payload.chain);
+        if (target.kind === "track") return actions.canAddAudioEffectChainToTarget(target.trackId, payload.chain);
         return target.kind === "new-track" && options.canCreateTrack();
       }
       if (payload.kind === "midi-effect") {

@@ -1,5 +1,6 @@
 import type { AudioEffectKind, InstrumentKind } from "@daw-browser/shared";
 import type { Track } from "@daw-browser/timeline-core/types";
+import type { AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
 
 export type AddMidiClipOptions = {
   durationSec?: number;
@@ -15,6 +16,8 @@ export type TimelineDeviceInsertActions = {
   canAddArpeggiatorToTarget: (targetId: Track["id"]) => boolean;
   addAudioEffectToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => Promise<boolean>;
   canAddAudioEffectToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind) => boolean;
+  addAudioEffectChainToTarget: (targetId: Track["id"] | "master", chain: AudioEffectChainPreset, index?: number) => Promise<boolean>;
+  canAddAudioEffectChainToTarget: (targetId: Track["id"] | "master", chain: AudioEffectChainPreset) => boolean;
   addEq: () => void;
   addCompressor: () => void;
   addSaturator: () => void;

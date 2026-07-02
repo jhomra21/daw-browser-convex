@@ -11,6 +11,7 @@ import { useEffectsPanelTarget } from "~/hooks/useEffectsPanelTarget";
 import { convexApi, useConvexQuery } from "~/lib/convex";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
+import type { AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
 
 type EffectsPanelControllerOptions = {
   isOpen: Accessor<boolean>;
@@ -42,6 +43,8 @@ const deviceInsertActionsEqual = (
   a.canAddArpeggiatorToTarget === b.canAddArpeggiatorToTarget &&
   a.addAudioEffectToTarget === b.addAudioEffectToTarget &&
   a.canAddAudioEffectToTarget === b.canAddAudioEffectToTarget &&
+  a.addAudioEffectChainToTarget === b.addAudioEffectChainToTarget &&
+  a.canAddAudioEffectChainToTarget === b.canAddAudioEffectChainToTarget &&
   a.addEq === b.addEq &&
   a.addCompressor === b.addCompressor &&
   a.addSaturator === b.addSaturator &&
@@ -213,6 +216,17 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     return await audioEffects.addByKindToTarget(targetId, effect, index);
   };
 
+  const canAddAudioEffectChainToTarget = (targetId: Track["id"] | "master", chain: AudioEffectChainPreset) => (
+    chain.effects.length > 0 &&
+    canWriteEffectsTarget(targetId) &&
+    chain.effects.every((effect) => audioEffects.canAddByKindToTarget(targetId, effect.kind))
+  );
+
+  const addAudioEffectChainToTarget = async (targetId: Track["id"] | "master", chain: AudioEffectChainPreset, index?: number) => {
+    if (!canAddAudioEffectChainToTarget(targetId, chain)) return false;
+    return await audioEffects.addChainToTarget(targetId, chain.effects, index);
+  };
+
   let previousDeviceInsertActions: TimelineDeviceInsertActions | undefined;
   createEffect(() => {
     const nextActions = {
@@ -224,6 +238,8 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       canAddArpeggiatorToTarget,
       addAudioEffectToTarget,
       canAddAudioEffectToTarget,
+      addAudioEffectChainToTarget,
+      canAddAudioEffectChainToTarget,
       addEq: audioEffects.eq.add,
       addCompressor: audioEffects.compressor.add,
       addSaturator: audioEffects.saturator.add,

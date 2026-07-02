@@ -1,3 +1,4 @@
+import { assert } from '@daw-browser/shared'
 import { getAudioClipTimeMap, getMarkerWarpTimelineSegments, type AudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 import { stretchAudioWsola } from './audio-stretching'
 import type { Clip } from '@daw-browser/timeline-core/types'
@@ -95,7 +96,7 @@ export const renderStretchedAudio = (
     rangeStartSec: clip.startSec,
     rangeEndSec: clip.startSec + clip.duration,
   })
-  if (!map || map.mode !== 'stretch') throw new Error('Cannot render Stretch warp for a non-stretched clip.')
+  assert(map?.mode === 'stretch', 'Cannot render Stretch warp for a non-stretched clip.')
   if ((clip.audioWarp?.markers?.length ?? 0) >= 2) return renderMappedStretch(sourceBuffer, map, clip, projectBpm, createBuffer)
 
   const marginSec = Math.min(ANALYSIS_MARGIN_SEC, map.sourceStartSec)

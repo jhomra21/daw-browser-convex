@@ -300,9 +300,7 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
 }
 
 async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: HistoryDirection) {
-  if (entry.projectId !== deps.projectId) {
-    throw new Error(`History entry room mismatch: expected ${deps.projectId}, received ${entry.projectId}`)
-  }
+  assert(entry.projectId === deps.projectId, `History entry room mismatch: expected ${deps.projectId}, received ${entry.projectId}`)
   const { projectId, userId } = deps
   const grantScope = { projectId, userId }
 

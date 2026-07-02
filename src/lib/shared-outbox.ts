@@ -1,6 +1,6 @@
 import { openLocalProjectDb, type LocalProjectSyncStateRow } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { isDurableSharedTimelineOperationKind, parseSharedTimelineOperation, readSharedTimelineClipCreatePayload, type SharedTimelineClipCreatePayload } from '@daw-browser/shared'
+import { assert, isDurableSharedTimelineOperationKind, parseSharedTimelineOperation, readSharedTimelineClipCreatePayload, type SharedTimelineClipCreatePayload } from '@daw-browser/shared'
 import {
   publishSharedTimelineOperation,
   SharedTimelineOperationHttpError,
@@ -218,9 +218,7 @@ const publishEntry = async (entry: SharedOutboxEntry) => {
 export const enqueueSharedTimelineOperationOnFailure = async (
   input: { projectId: string; userId: string; operation: SharedTimelineOperation; error?: unknown },
 ) => {
-  if (!isDurableSharedTimelineOperationKind(input.operation.kind)) {
-    throw new Error(`Shared timeline operation ${input.operation.kind} is not durable.`)
-  }
+  assert(isDurableSharedTimelineOperationKind(input.operation.kind), `Shared timeline operation ${input.operation.kind} is not durable.`)
   await enqueueSharedOutboxOperation({
     projectId: input.projectId,
     userId: input.userId,
@@ -239,9 +237,7 @@ export const publishDurableSharedTimelineOperation = async <T = undefined>(
     throwQueued?: boolean
   },
 ): Promise<unknown | T | undefined> => {
-  if (!isDurableSharedTimelineOperationKind(input.operation.kind)) {
-    throw new Error(`Shared timeline operation ${input.operation.kind} is not durable.`)
-  }
+  assert(isDurableSharedTimelineOperationKind(input.operation.kind), `Shared timeline operation ${input.operation.kind} is not durable.`)
   return await publishSharedTimelineOperation(
     input.projectId,
     input.operation,

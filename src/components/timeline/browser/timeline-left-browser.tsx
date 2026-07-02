@@ -1,5 +1,5 @@
 import { createEffect, createMemo, For, on, onMount, Show, type Component, type JSX } from "solid-js";
-import type { BrowserFolderRow, BrowserItem, BrowserSection, BrowserTreeExpansionState, BrowserTreeRow, TimelineBrowserTab, TimelineLeftBrowserModel } from "./browser-types";
+import type { BrowserAssetsModel, BrowserFolderRow, BrowserItem, BrowserSection, BrowserTreeExpansionState, BrowserTreeRow, TimelineBrowserTab, TimelineLeftBrowserModel } from "./browser-types";
 import { timelineBrowserTabLabels, timelineBrowserTabs } from "~/lib/timeline-left-browser-preferences";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "../context-menu/timeline-context-menu";
 import { countBrowserTreeLeaves } from "./browser-tree";
@@ -14,12 +14,53 @@ const rootRowId = (sectionId: string) => `section:${sectionId}`;
 
 const isExpanded = (expandedRows: BrowserTreeExpansionState, rowId: string) => expandedRows[rowId] !== false;
 
+const BrowserFolderRenameInput: Component<{
+  value: string;
+  disabled: boolean;
+  onInput: (value: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}> = (props) => {
+  let inputRef: HTMLInputElement | undefined;
+
+  onMount(() => {
+    inputRef?.focus();
+    inputRef?.select();
+  });
+
+  return (
+    <input
+      ref={(el) => {
+        inputRef = el;
+      }}
+      value={props.value}
+      disabled={props.disabled}
+      class="min-w-0 flex-1 bg-transparent p-0 text-xs text-neutral-100 outline-none selection:bg-sky-500/40 disabled:opacity-60"
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onInput={(event) => props.onInput(event.currentTarget.value)}
+      onBlur={props.onConfirm}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          props.onConfirm();
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          props.onCancel();
+        }
+      }}
+    />
+  );
+};
+
 const BrowserTreeRows: Component<{
   rows: BrowserTreeRow[];
   expandedRows: BrowserTreeExpansionState;
   searchActive: boolean;
   renderItem: (item: BrowserItem) => JSX.Element;
   onRowExpandedChange: (rowId: string, expanded: boolean) => void;
+  renameFolderInline?: BrowserAssetsModel["renameFolderInline"];
   folderContextItems?: (folder: BrowserFolderRow) => TimelineContextMenuItem[];
 }> = (props) => (
   <ul class="py-0.5">
@@ -35,6 +76,10 @@ const BrowserTreeRows: Component<{
               const visible = () => props.searchActive || expanded();
               const toggle = () => props.onRowExpandedChange(folder().id, !expanded());
               const contextItems = () => props.folderContextItems?.(folder()) ?? [];
+              const editing = () => {
+                const folderId = folder().folderId;
+                return Boolean(folderId && props.renameFolderInline?.folderId() === folderId);
+              };
               const button = (
                 <button
                   type="button"
@@ -47,11 +92,27 @@ const BrowserTreeRows: Component<{
                   <span class="text-xs text-neutral-600">{countBrowserTreeLeaves(folder().children)}</span>
                 </button>
               );
+              const editingRow = () => (
+                <div class="flex h-6 w-full items-center gap-1 px-3 text-left text-xs text-neutral-400">
+                  <span class="w-3 text-center text-xs text-neutral-600">{visible() ? "▾" : "▸"}</span>
+                  <BrowserFolderRenameInput
+                    value={props.renameFolderInline?.name() ?? folder().label}
+                    disabled={props.renameFolderInline?.busy() ?? false}
+                    onInput={(value) => props.renameFolderInline?.setName(value)}
+                    onConfirm={() => props.renameFolderInline?.onConfirm()}
+                    onCancel={() => props.renameFolderInline?.onCancel()}
+                  />
+                  <span class="text-xs text-neutral-600">{countBrowserTreeLeaves(folder().children)}</span>
+                </div>
+              );
+              const normalRow = (
+                <Show when={contextItems().length > 0} fallback={button}>
+                  <TimelineContextMenu items={contextItems}>{button}</TimelineContextMenu>
+                </Show>
+              );
               return (
                 <>
-                  <Show when={contextItems().length > 0} fallback={button}>
-                    <TimelineContextMenu items={contextItems}>{button}</TimelineContextMenu>
-                  </Show>
+                  {editing() ? editingRow() : normalRow}
                   <Show when={visible()}>
                     <div class="pl-3">
                       <BrowserTreeRows
@@ -60,6 +121,7 @@ const BrowserTreeRows: Component<{
                         searchActive={props.searchActive}
                         renderItem={props.renderItem}
                         onRowExpandedChange={props.onRowExpandedChange}
+                        renameFolderInline={props.renameFolderInline}
                         folderContextItems={props.folderContextItems}
                       />
                     </div>
@@ -81,6 +143,7 @@ const BrowserTree: Component<{
   searchActive: boolean;
   renderItem: (item: BrowserItem) => JSX.Element;
   onRowExpandedChange: (rowId: string, expanded: boolean) => void;
+  renameFolderInline?: BrowserAssetsModel["renameFolderInline"];
   sectionContextItems?: (section: BrowserSection) => TimelineContextMenuItem[];
   folderContextItems?: (folder: BrowserFolderRow) => TimelineContextMenuItem[];
 }> = (props) => {
@@ -125,6 +188,7 @@ const BrowserTree: Component<{
                     searchActive={props.searchActive}
                     renderItem={props.renderItem}
                     onRowExpandedChange={props.onRowExpandedChange}
+                    renameFolderInline={props.renameFolderInline}
                     folderContextItems={props.folderContextItems}
                   />
                 </Show>
@@ -376,6 +440,7 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
                 expandedRows={activeTreeExpansion()}
                 searchActive={searchActive()}
                 onRowExpandedChange={setTreeRowExpanded}
+                renameFolderInline={props.browser.assets.renameFolderInline}
                 sectionContextItems={(section) => assetSectionContextItems(props.browser, section)}
                 folderContextItems={(folder) => assetFolderContextItems(props.browser, folder)}
                 renderItem={(item) => (

@@ -53,6 +53,14 @@ export type BrowserTreeExpansionState = Record<string, boolean>;
 export type BrowserAssetsModel = {
   sections: Accessor<BrowserSection[]>;
   folderOptions: Accessor<Array<{ id: string; name: string }>>;
+  renameFolderInline: {
+    folderId: Accessor<string | null>;
+    name: Accessor<string>;
+    busy: Accessor<boolean>;
+    setName: (name: string) => void;
+    onConfirm: () => void;
+    onCancel: () => void;
+  };
   onInsert: (itemId: string) => void;
   onDragStart: (event: DragEvent, itemId: string) => void;
   onCreateFolder: () => void;

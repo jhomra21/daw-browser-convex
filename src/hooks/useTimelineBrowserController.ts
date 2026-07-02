@@ -1,4 +1,4 @@
-import { createMemo, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, type Accessor } from "solid-js";
 import { useProjectAssetFolders, useProjectSamples, type ProjectAssetFolder } from "~/hooks/useProjectSamples";
 import type { TimelineLeftBrowserState } from "~/components/timeline/browser/browser-types";
 import type { BrowserFolderRow, BrowserItem, BrowserItemSource, BrowserSection, TimelineLeftBrowserModel, BrowserTreeRow } from "~/components/timeline/browser/browser-types";
@@ -102,7 +102,15 @@ const buildBrowserSampleRow = (
   };
 };
 
+type RenameFolderDraft = {
+  folderId: string;
+  projectId: string;
+  name: string;
+};
+
 export function useTimelineBrowserController(options: Options): Accessor<TimelineLeftBrowserModel> {
+  const [renameFolderDraft, setRenameFolderDraft] = createSignal<RenameFolderDraft | null>(null);
+  const [renameFolderBusy, setRenameFolderBusy] = createSignal(false);
   const browserSamplesEnabled = () => options.leftBrowser.open() && options.leftBrowser.activeTab() === "assets";
   const browserSamples = useProjectSamples({
     projectId: options.projectId,
@@ -484,10 +492,6 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   };
 
   const currentProjectId = () => options.projectId();
-  const currentProjectIsLocal = () => {
-    const projectId = currentProjectId();
-    return Boolean(projectId && isLocalId("project", projectId));
-  };
   const nextAssetFolderName = () => {
     const usedNames = new Set(assetFolders.folders().map((folder) => folder.name.toLowerCase()));
     let suffix = 1;
@@ -498,13 +502,27 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     }
     return name;
   };
+  const normalizeAssetFolderName = (name: string) => name.trim() || "Folder";
+  const renameFolderId = () => renameFolderDraft()?.folderId ?? null;
+  const renameFolderName = () => renameFolderDraft()?.name ?? "";
+  const setRenameFolderName = (name: string) =>
+    setRenameFolderDraft((draft) => draft ? { ...draft, name } : draft);
+  const clearRenameAssetFolder = () => setRenameFolderDraft(null);
+
+  createEffect(() => {
+    const draft = renameFolderDraft();
+    if (!draft || renameFolderBusy()) return;
+    if (draft.projectId !== currentProjectId() || !browserProjectFolderById().has(draft.folderId)) {
+      clearRenameAssetFolder();
+    }
+  });
 
   const createAssetFolder = () => {
     const name = nextAssetFolderName();
     runAssetFolderAction(async () => {
       const projectId = currentProjectId();
       if (!projectId) return;
-      if (currentProjectIsLocal()) {
+      if (isLocalId("project", projectId)) {
         await createLocalAssetFolder(projectId, name);
         assetFolders.refreshFolders();
         return;
@@ -514,20 +532,41 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   };
 
   const renameAssetFolder = (folderId: string) => {
-    if (typeof window === "undefined") return;
+    if (renameFolderBusy()) return;
+    const projectId = currentProjectId();
     const folder = browserProjectFolderById().get(folderId);
-    if (!folder) return;
-    const name = window.prompt("Folder name", folder.name);
-    if (name === null) return;
+    if (!projectId || !folder) return;
+    setRenameFolderDraft({ folderId, projectId, name: folder.name });
+  };
+
+  const cancelRenameAssetFolder = () => {
+    if (!renameFolderBusy()) clearRenameAssetFolder();
+  };
+
+  const confirmRenameAssetFolder = () => {
+    if (renameFolderBusy()) return;
+    const draft = renameFolderDraft();
+    if (!draft) return;
+    const projectId = draft.projectId;
+    const folder = browserProjectFolderById().get(draft.folderId);
+    const name = normalizeAssetFolderName(draft.name);
+    if (!projectId || !folder || folder.name === name) {
+      clearRenameAssetFolder();
+      return;
+    }
+    setRenameFolderBusy(true);
     runAssetFolderAction(async () => {
-      const projectId = currentProjectId();
-      if (!projectId) return;
-      if (currentProjectIsLocal()) {
-        await renameLocalAssetFolder(projectId, folderId, name);
-        assetFolders.refreshFolders();
-        return;
+      try {
+        if (isLocalId("project", projectId)) {
+          await renameLocalAssetFolder(projectId, draft.folderId, name);
+          assetFolders.refreshFolders();
+        } else {
+          await convexClient.mutation(convexApi.assetFolders.rename, { projectId, folderId: draft.folderId, name });
+        }
+        if (renameFolderId() === draft.folderId) clearRenameAssetFolder();
+      } finally {
+        setRenameFolderBusy(false);
       }
-      await convexClient.mutation(convexApi.assetFolders.rename, { projectId, folderId, name });
     });
   };
 
@@ -535,7 +574,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     runAssetFolderAction(async () => {
       const projectId = currentProjectId();
       if (!projectId || folderSampleCountById().get(folderId)) return;
-      if (currentProjectIsLocal()) {
+      if (isLocalId("project", projectId)) {
         await deleteEmptyLocalAssetFolder(projectId, folderId);
         assetFolders.refreshFolders();
         return;
@@ -551,7 +590,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     runAssetFolderAction(async () => {
       const projectId = currentProjectId();
       if (!projectId || !item.assetKey) return;
-      if (currentProjectIsLocal()) {
+      if (isLocalId("project", projectId)) {
         await moveLocalAssetToFolder(projectId, item.assetKey, folderId);
         browserSamples.refreshSamples();
         return;
@@ -665,6 +704,14 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     assets: {
       sections: browserAssetSections,
       folderOptions,
+      renameFolderInline: {
+        folderId: renameFolderId,
+        name: renameFolderName,
+        busy: renameFolderBusy,
+        setName: setRenameFolderName,
+        onConfirm: confirmRenameAssetFolder,
+        onCancel: cancelRenameAssetFolder,
+      },
       onInsert: insertBrowserSample,
       onDragStart: startBrowserSampleDrag,
       onCreateFolder: createAssetFolder,

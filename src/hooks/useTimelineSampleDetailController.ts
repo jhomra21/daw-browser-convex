@@ -7,6 +7,7 @@ import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionSt
 import type { TimelineBottomPanelMode } from "~/hooks/useTimelineBottomPanelState";
 import type { TimelineTrackIndex } from "@daw-browser/timeline-core/track-index";
 import type { HistoryEntry } from "~/lib/undo/types";
+import { isEditableKeyboardTarget } from "~/lib/keyboard-event-target";
 
 type AudioWarpController = {
   changeAudioWarp: (clip: Clip, audioWarp: AudioWarp) => Promise<boolean> | boolean | void;
@@ -63,6 +64,7 @@ export function useTimelineSampleDetailController(options: Options) {
   createEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || options.mode() !== "sample-detail") return;
+      if (isEditableKeyboardTarget(event.target)) return;
       if (markerDragging()) return;
       event.preventDefault();
       close();

@@ -3,6 +3,7 @@ import { RouterProvider, createRouter } from '@tanstack/solid-router'
 import { QueryClientProvider } from '@tanstack/solid-query'
 import { ColorModeProvider, ColorModeScript } from '@kobalte/core'
 import { registerSW } from 'virtual:pwa-register'
+import { assert } from '@daw-browser/shared'
 import { routeTree } from './routeTree.gen'
 import './index.css'
 import { queryClient } from '~/lib/query-client'
@@ -28,11 +29,8 @@ declare module '@tanstack/solid-router' {
   }
 }
 
-const rootElement = document.getElementById('root')!
-
-if (!rootElement) {
-  throw new Error('Root element with id "root" not found in index.html')
-}
+const rootElement = document.getElementById('root')
+assert(rootElement, 'Root element with id "root" not found in index.html')
 
 render(() => (
   <QueryClientProvider client={queryClient}>

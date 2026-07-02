@@ -36,8 +36,9 @@ export function resolveTrackClip<T extends { startSec?: number }>(
 ) {
   const direct = clipAtIndex(clips, input.clipIndex)
   if (direct) return direct
-  if (typeof input.clipAtOrAfterSec === 'number') {
-    return clips.find((clip) => (clip.startSec ?? 0) >= input.clipAtOrAfterSec!)
+  const clipAtOrAfterSec = input.clipAtOrAfterSec
+  if (typeof clipAtOrAfterSec === 'number') {
+    return clips.find((clip) => (clip.startSec ?? 0) >= clipAtOrAfterSec)
   }
   return clips[0]
 }
@@ -54,11 +55,14 @@ export function selectTrackClips<T extends { startSec?: number }>(
 ) {
   const selectedFromIndices = clipsFromIndices(clips, input.clipIndices)
   if (selectedFromIndices.length > 0) return selectedFromIndices
-  if (typeof input.rangeStartSec === 'number' && typeof input.rangeEndSec === 'number') {
-    return clips.filter((clip) => (clip.startSec ?? 0) >= input.rangeStartSec! && (clip.startSec ?? 0) < input.rangeEndSec!)
+  const rangeStartSec = input.rangeStartSec
+  const rangeEndSec = input.rangeEndSec
+  if (typeof rangeStartSec === 'number' && typeof rangeEndSec === 'number') {
+    return clips.filter((clip) => (clip.startSec ?? 0) >= rangeStartSec && (clip.startSec ?? 0) < rangeEndSec)
   }
-  if (typeof input.clipAtOrAfterSec === 'number') {
-    const after = clips.filter((clip) => (clip.startSec ?? 0) >= input.clipAtOrAfterSec!)
+  const clipAtOrAfterSec = input.clipAtOrAfterSec
+  if (typeof clipAtOrAfterSec === 'number') {
+    const after = clips.filter((clip) => (clip.startSec ?? 0) >= clipAtOrAfterSec)
     return typeof input.count === 'number' ? after.slice(0, input.count) : after
   }
   return typeof input.count === 'number' ? clips.slice(0, input.count) : [...clips]

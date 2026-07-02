@@ -1,3 +1,5 @@
+import { assert } from '@daw-browser/shared'
+
 type AudioStretchInput = {
   channels: Float32Array[]
   sampleRate: number
@@ -147,7 +149,7 @@ export function stretchAudioWsola(input: AudioStretchInput, config: WsolaStretch
     return { sampleRate: input.sampleRate, channels: input.channels.map(() => new Float32Array(outputFrameCount)) }
   }
   for (const channel of input.channels) {
-    if (channel.length !== inputFrameCount) throw new Error('WSOLA input channels must have matching frame counts')
+    assert(channel.length === inputFrameCount, 'WSOLA input channels must have matching frame counts')
   }
 
   const stretchRatio = outputFrameCount / inputFrameCount

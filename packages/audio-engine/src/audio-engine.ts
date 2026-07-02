@@ -1,7 +1,7 @@
 import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime } from './audio-runtime'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
-import { getAutomationParameterDescriptor, normalizeMasterVolume, type ArpParams, type AudioEffectKind, type AutomationEnvelope, type CompressorParamsLite, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
+import { assert, getAutomationParameterDescriptor, normalizeMasterVolume, type ArpParams, type AudioEffectKind, type AutomationEnvelope, type CompressorParamsLite, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { createReverbImpulseCache } from './effects/reverb-impulse-cache'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
@@ -226,8 +226,9 @@ export class AudioEngine {
 
   // --- Reverb helpers ---
   private createImpulseResponse(params: ReverbParamsLite) {
-    if (!this.audioCtx) throw new Error('Audio runtime was not initialized')
-    return this.impulseCache.get(this.audioCtx, params)
+    const ctx = this.audioCtx
+    assert(ctx, 'Audio runtime was not initialized')
+    return this.impulseCache.get(ctx, params)
   }
 
   setTrackReverb(trackId: string, params: ReverbParamsLite) {

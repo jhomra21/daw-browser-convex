@@ -1,4 +1,4 @@
-import type { ReverbParamsLite } from '@daw-browser/shared'
+import { assert, type ReverbParamsLite } from '@daw-browser/shared'
 import { createImpulseResponseBuffer, createReverbImpulseRender } from './dsp'
 
 type ReverbImpulseRenderContext = Pick<BaseAudioContext, 'sampleRate'>
@@ -53,9 +53,7 @@ function createRenderedImpulseBuffer(
   ctx: ReverbImpulseBufferContext | ReverbImpulseRenderContext,
   render: ReturnType<typeof createReverbImpulseRender>,
 ) {
-  if (!hasCreateBuffer(ctx)) {
-    throw new Error('Reverb impulse cache requires a buffer factory')
-  }
+  assert(hasCreateBuffer(ctx), 'Reverb impulse cache requires a buffer factory')
   return createImpulseResponseBuffer(ctx, render).buffer
 }
 

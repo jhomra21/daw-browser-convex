@@ -1,4 +1,5 @@
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
+import { assert } from '@daw-browser/shared'
 import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { Track } from '@daw-browser/timeline-core/types'
 
@@ -45,8 +46,8 @@ export function createStopPromise(): {
   reject: (error?: unknown) => void
 } {
   let settled = false
-  let resolvePromise!: () => void
-  let rejectPromise!: (error?: unknown) => void
+  let resolvePromise: (() => void) | undefined
+  let rejectPromise: ((error?: unknown) => void) | undefined
   const promise = new Promise<void>((resolve, reject) => {
     resolvePromise = () => {
       if (settled) return
@@ -59,6 +60,8 @@ export function createStopPromise(): {
       reject(error)
     }
   })
+  assert(resolvePromise, 'Stop promise resolver was not initialized')
+  assert(rejectPromise, 'Stop promise rejecter was not initialized')
   return {
     promise,
     resolve: resolvePromise,

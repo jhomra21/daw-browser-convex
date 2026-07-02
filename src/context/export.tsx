@@ -1,5 +1,6 @@
 import { createContext, createSignal, onCleanup, type Accessor, type JSX, useContext } from 'solid-js'
 
+import { assert } from '@daw-browser/shared'
 import { runStemExport, runTimelineExport, type ExportOutcome, type ExportProgress, type StemExportRequest, type TimelineExportRequest } from '~/lib/export/run-export-job'
 
 type ExportJob = {
@@ -100,7 +101,7 @@ export function ExportProvider(props: ExportProviderProps) {
 
 export function useExportContext(): ExportContextValue {
   const context = useContext(ExportContext)
-  if (!context) throw new Error('ExportProvider is missing')
+  assert(context, 'ExportProvider is missing')
   return context
 }
 

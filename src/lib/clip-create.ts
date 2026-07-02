@@ -1,5 +1,5 @@
 import { getPersistableAudioSourceMetadata, type AudioSourceKind, type AudioSourceMetadata } from '~/lib/audio-source'
-import { normalizeAudioWarp, resolveClipSampleUrl } from '@daw-browser/shared'
+import { assert, normalizeAudioWarp, resolveClipSampleUrl } from '@daw-browser/shared'
 import type { ClipBufferWriter } from '~/lib/clip-buffer-cache'
 import { uploadClipSampleUrl } from '~/lib/clip-sample-url'
 import { primeClipSourceAsset } from '~/lib/clip-source-client'
@@ -204,7 +204,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
   }
   try {
     const createdClipId = await input.createServerClip(payload)
-    if (!createdClipId) throw new Error('Failed to create clip')
+    assert(createdClipId, 'Failed to create clip')
     clipId = createdClipId
   } catch (error) {
     removePendingClip()
@@ -327,18 +327,14 @@ export async function createManyClips(input: {
     clip: item.clip,
   }))
   const clipIds = await input.createMany(payloadItems, operationId)
-  if (clipIds.length !== input.items.length) {
-    throw new Error('Failed to create clips')
-  }
+  assert(clipIds.length === input.items.length, 'Failed to create clips')
 
   const created: BatchClipCreateResult[] = []
   const bufferEntries: Array<readonly [string, AudioBuffer]> = []
   for (let index = 0; index < input.items.length; index++) {
     const item = input.items[index]
     const clipId = clipIds[index]
-    if (!clipId) {
-      throw new Error('Failed to create clips')
-    }
+    assert(clipId, 'Failed to create clips')
     if (item.buffer) bufferEntries.push([clipId, item.buffer])
     created.push({
       trackId: item.trackId,

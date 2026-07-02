@@ -1,3 +1,4 @@
+import { assert } from '@daw-browser/shared'
 import type { ResolvedMixerGraph } from './types'
 
 type LiveTrackNodes = {
@@ -27,15 +28,20 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
 
   for (const resolvedTrack of options.graph.channels) {
     const channelId = resolvedTrack.channel.id
-    const nodes = options.trackNodes.get(channelId)!
+    const nodes = options.trackNodes.get(channelId)
+    assert(nodes, `Missing live mixer nodes for track ${channelId}`)
 
     nodes.gain.gain.value = resolvedTrack.gain
     nodes.output.gain.value = resolvedTrack.outputGain
     const routingSignature = getRoutingSignature(resolvedTrack)
     const shouldReconnect = options.trackRoutingSignatures.get(channelId) !== routingSignature
-    const outputTarget = resolvedTrack.outputTargetId
-      ? options.trackNodes.get(resolvedTrack.outputTargetId)!.input
-      : options.masterInput
+    const targetNodes = resolvedTrack.outputTargetId
+      ? options.trackNodes.get(resolvedTrack.outputTargetId)
+      : undefined
+    if (resolvedTrack.outputTargetId) {
+      assert(targetNodes, `Missing output target nodes for track ${resolvedTrack.outputTargetId}`)
+    }
+    const outputTarget = targetNodes?.input ?? options.masterInput
     if (shouldReconnect) {
       try { nodes.gain.disconnect() } catch {}
       try { nodes.output.disconnect() } catch {}
@@ -49,7 +55,7 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
     const activeSends = new Set<string>()
     for (const send of resolvedTrack.sends) {
       const target = options.trackNodes.get(send.targetId)
-      if (!target) continue
+      assert(target, `Missing send target nodes for track ${send.targetId}`)
       activeSends.add(send.targetId)
       if (!sendMap) {
         sendMap = new Map<string, GainNode>()

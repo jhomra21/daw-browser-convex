@@ -13,6 +13,7 @@ import { createAudioStretchCache } from './audio-stretch-cache'
 import {
   getExportAudioFormatMetadata,
   getAutomationParameterDescriptor,
+  assert,
   type ArpParams,
   type AudioEffectKind,
   type AutomationEnvelope,
@@ -388,10 +389,10 @@ async function renderSourceIsolatedMixdownFromPrepared(
 
   for (const resolvedTrack of graph.channels) {
     const track = prepared.trackById.get(resolvedTrack.channel.id)
-    if (!track) continue
+    assert(track, `Missing prepared export track ${resolvedTrack.channel.id}`)
     if (sourceTrackIds && !sourceTrackIds.has(track.id)) continue
     const trackInput = trackNodes.get(track.id)?.input
-    if (!trackInput) continue
+    assert(trackInput, `Missing offline track input ${track.id}`)
     const fxCfg = resolvedTrack.fx
     const exportFxCfg = prepared.exportTrackFx?.[track.id]
     const instrument = readTrackInstrument(exportFxCfg)
@@ -518,7 +519,7 @@ const createManagedWritable = (
       writer = target.writable.getWriter()
     },
     write(chunk) {
-      if (!writer) throw new Error('Export stream writer was not initialized.')
+      assert(writer, 'Export stream writer was not initialized.')
       return writer.write(chunk)
     },
     close() {

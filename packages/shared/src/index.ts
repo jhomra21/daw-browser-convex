@@ -1,5 +1,6 @@
 export * from './agent-command-targets'
 export * from './agent-commands'
+export * from './assert'
 export * from './automation'
 export * from './automation-parameters'
 export * from './audio-warp'

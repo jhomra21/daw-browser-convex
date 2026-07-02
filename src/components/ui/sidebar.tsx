@@ -17,6 +17,7 @@ import type { PolymorphicProps } from "@kobalte/core"
 import { Polymorphic } from "@kobalte/core"
 import type { VariantProps } from "class-variance-authority"
 import { cva } from "class-variance-authority"
+import { assert } from "@daw-browser/shared"
 
 import { cn } from "~/lib/utils"
 import type { ButtonProps } from "~/components/ui/button"
@@ -50,9 +51,7 @@ const SidebarContext = createContext<SidebarContext | null>(null)
 
 function useSidebar() {
   const context = useContext(SidebarContext)
-  if (!context) {
-    throw new Error("useSidebar must be used within a Sidebar.")
-  }
+  assert(context, "useSidebar must be used within a Sidebar.")
 
   return context
 }

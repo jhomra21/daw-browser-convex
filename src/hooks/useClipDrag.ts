@@ -23,6 +23,7 @@ import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
+import { assert } from '@daw-browser/shared'
 import { PPS } from '~/lib/timeline-utils'
 import type { Track, Clip, TrackId } from '@daw-browser/timeline-core/types'
 import type { HistoryEntry } from '~/lib/undo/types'
@@ -379,6 +380,8 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       resetDragState()
       return
     }
+    const activeDraggingIds = draggingIds
+    assert(activeDraggingIds, 'Missing drag ids while completing clip drag')
     const scroll = getScrollRef()
     if (!scroll) {
       resetDragState()
@@ -432,7 +435,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       const placements = planDuplicatedClipPlacements({
         tracks: base,
         lookup,
-        draggingIds: draggingIds!,
+        draggingIds: activeDraggingIds,
         multiDragging,
         targetTrackId: targetId,
         desiredStart,

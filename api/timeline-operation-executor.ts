@@ -162,6 +162,13 @@ export const executeTimelineOperation = async (
         trackId: operation.payload.trackId,
         order: operation.payload.order,
       })
+    case 'effects.removeAudioEffect':
+      return await context.convex.mutation(convexApi.effects.serverRemoveAudioEffect, {
+        projectId: context.projectId,
+        targetType: operation.payload.targetType,
+        trackId: operation.payload.targetType === 'track' ? operation.payload.trackId : undefined,
+        effect: operation.payload.effect,
+      })
     case 'effects.setSynthParams':
       return await context.convex.mutation(convexApi.effects.serverSetSynthParams, {
         projectId: context.projectId,

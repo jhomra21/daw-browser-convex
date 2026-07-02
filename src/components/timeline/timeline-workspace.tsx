@@ -75,6 +75,8 @@ type Props = {
   onClipPointerDown: (trackId: Track["id"], clipId: string, event: PointerEvent) => void;
   onClipPointerUp: (trackId: Track["id"], clipId: string, event: PointerEvent) => void;
   onClipResizeStart: (trackId: Track["id"], clipId: string, edge: "left" | "right", event: PointerEvent) => void;
+  onAddMidiClipToTrack?: (trackId: Track["id"]) => void;
+  onDeleteTrack: (trackId: Track["id"]) => void;
   clipContextMenu: ClipContextMenuActions;
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>;
   replaceMissingMediaClip: (trackId: Track["id"], clipId: string) => Promise<void>;
@@ -222,6 +224,8 @@ export default function TimelineWorkspace(props: Props) {
                         onClipPointerDown={props.onClipPointerDown}
                         onClipPointerUp={props.onClipPointerUp}
                         onClipResizeStart={props.onClipResizeStart}
+                        onAddMidiClip={props.onAddMidiClipToTrack}
+                        onDeleteTrack={props.onDeleteTrack}
                         clipContextMenu={props.clipContextMenu}
                         onRetryMedia={(clipId) => {
                           void props.ensureClipBuffer(clipId);

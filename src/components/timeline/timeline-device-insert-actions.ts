@@ -1,9 +1,14 @@
 import type { AudioEffectKind, InstrumentKind } from "@daw-browser/shared";
 import type { Track } from "@daw-browser/timeline-core/types";
 
+export type AddMidiClipOptions = {
+  durationSec?: number;
+  startSec?: number;
+};
+
 export type TimelineDeviceInsertActions = {
   addMidiClip: () => Promise<void>;
-  addMidiClipToTarget: (targetId: Track["id"]) => Promise<boolean>;
+  addMidiClipToTarget: (targetId: Track["id"], options?: AddMidiClipOptions) => Promise<boolean>;
   canAddMidiClipToTarget: (targetId: Track["id"]) => boolean;
   addArpeggiator: () => void;
   addArpeggiatorToTarget: (targetId: Track["id"]) => Promise<boolean>;

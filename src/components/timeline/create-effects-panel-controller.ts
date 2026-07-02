@@ -5,7 +5,7 @@ import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { createEffectsPanelAudioDevice } from "~/components/timeline/create-effects-panel-audio-effects-state";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
 import { createEffectsPanelInstrumentDevice } from "~/components/timeline/create-effects-panel-state";
-import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
+import type { AddMidiClipOptions, TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 import { useEffectsPanelAudioSync } from "~/hooks/useEffectsPanelAudioSync";
 import { useEffectsPanelTarget } from "~/hooks/useEffectsPanelTarget";
 import { convexApi, useConvexQuery } from "~/lib/convex";
@@ -199,9 +199,9 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     return true;
   };
 
-  const addMidiClipToTarget = async (targetId: Track["id"]) => {
+  const addMidiClipToTarget = async (targetId: Track["id"], insertOptions?: AddMidiClipOptions) => {
     if (!canAddMidiClipToTarget(targetId)) return false;
-    return await instrument.addMidiClipToTarget(targetId);
+    return await instrument.addMidiClipToTarget(targetId, insertOptions);
   };
 
   const canAddAudioEffectToTarget = (targetId: Track["id"] | "master", effect: AudioEffectKind) => (

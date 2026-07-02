@@ -6,7 +6,7 @@ import {
   createMemo,
   createSignal,
 } from "solid-js";
-import { automationEnvelopeValueRange, automationTargetKey, type AudioEffectKind, type AutomationEnvelope } from "@daw-browser/shared";
+import { AUDIO_EFFECT_ORDER, automationEnvelopeValueRange, automationTargetKey, type AudioEffectKind, type AutomationEnvelope, type InstrumentKind } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Delay from "~/components/effects/Delay";
 import Compressor from "~/components/effects/Compressor";
@@ -71,18 +71,25 @@ const EffectsPanelClosedFooter: Component<{
   onOpen: () => void;
   clipTab: EffectsPanelProps["clipTab"];
 }> = (props) => (
-  <div
-    class="fixed left-0 right-0 bottom-0 z-50 bg-neutral-900"
-    style={{ "padding-bottom": `${BOTTOM_PANEL_EDGE_PADDING_PX}px` }}
+  <TimelineContextMenu
+    items={() => [
+      { kind: "label", label: "Effects Panel" },
+      { kind: "item", label: "Show effects panel", onSelect: props.onOpen },
+    ]}
   >
-    <TimelineBottomPanelFooter
-      activeTab="effects"
-      toggleLabel="Show"
-      onEffectsTabClick={props.onOpen}
-      onClipTabClick={props.clipTab.canOpen ? props.clipTab.onOpen : undefined}
-      onToggle={props.onOpen}
-    />
-  </div>
+    <div
+      class="fixed left-0 right-0 bottom-0 z-50 bg-neutral-900"
+      style={{ "padding-bottom": `${BOTTOM_PANEL_EDGE_PADDING_PX}px` }}
+    >
+      <TimelineBottomPanelFooter
+        activeTab="effects"
+        toggleLabel="Show"
+        onEffectsTabClick={props.onOpen}
+        onClipTabClick={props.clipTab.canOpen ? props.clipTab.onOpen : undefined}
+        onToggle={props.onOpen}
+      />
+    </div>
+  </TimelineContextMenu>
 );
 
 type EffectsPanelInstrumentSectionProps = {
@@ -212,12 +219,19 @@ const audioEffectLabels: Record<AudioEffectKind, string> = {
   reverb: "Reverb",
 };
 
+const instrumentLabels: Record<InstrumentKind, string> = {
+  synth: "Synth",
+  "drum-rack": "Drum Rack",
+};
+const instrumentKinds: InstrumentKind[] = ["synth", "drum-rack"];
+
 const createAudioEffectContextMenuItems = (input: {
   label: string;
   canWrite: boolean;
   enabled: () => boolean;
   toggleEnabled: (enabled: boolean) => void;
   reset: () => void;
+  remove?: () => void;
 }): TimelineContextMenuItem[] => [
   { kind: "label", label: input.label },
   {
@@ -232,18 +246,31 @@ const createAudioEffectContextMenuItems = (input: {
     disabled: !input.canWrite,
     onSelect: input.reset,
   },
+  {
+    kind: "item",
+    label: "Delete device",
+    disabled: !input.canWrite || !input.remove,
+    onSelect: input.remove,
+  },
 ];
 
 const createAudioEffectContextMenuControls = (
   effect: AudioEffectKind,
   audioEffects: EffectsPanelAudioEffects,
+  targetId?: Track["id"] | "master",
 ) => {
+  const remove = targetId
+    ? () => {
+      void audioEffects.removeByKindFromTarget(targetId, effect).catch(() => undefined);
+    }
+    : undefined;
   if (effect === "eq") {
     return {
       label: audioEffectLabels.eq,
       enabled: () => audioEffects.eq.params()?.enabled !== false,
       toggleEnabled: audioEffects.eq.toggleEnabled,
       reset: audioEffects.eq.reset,
+      remove,
     };
   }
   if (effect === "compressor") {
@@ -252,6 +279,7 @@ const createAudioEffectContextMenuControls = (
       enabled: () => audioEffects.compressor.params()?.enabled !== false,
       toggleEnabled: audioEffects.compressor.toggleEnabled,
       reset: audioEffects.compressor.reset,
+      remove,
     };
   }
   if (effect === "saturator") {
@@ -260,6 +288,7 @@ const createAudioEffectContextMenuControls = (
       enabled: () => audioEffects.saturator.params()?.enabled !== false,
       toggleEnabled: audioEffects.saturator.toggleEnabled,
       reset: audioEffects.saturator.reset,
+      remove,
     };
   }
   if (effect === "delay") {
@@ -268,6 +297,7 @@ const createAudioEffectContextMenuControls = (
       enabled: () => audioEffects.delay.params()?.enabled !== false,
       toggleEnabled: audioEffects.delay.toggleEnabled,
       reset: audioEffects.delay.reset,
+      remove,
     };
   }
   return {
@@ -275,6 +305,7 @@ const createAudioEffectContextMenuControls = (
     enabled: () => audioEffects.reverb.params()?.enabled !== false,
     toggleEnabled: audioEffects.reverb.toggleEnabled,
     reset: audioEffects.reverb.reset,
+    remove,
   };
 };
 
@@ -318,7 +349,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
   const [reorderPreview, setReorderPreview] = createSignal<EffectCardReorderPreview>();
   const contextMenuItems = (effect: AudioEffectKind): TimelineContextMenuItem[] => {
     return createAudioEffectContextMenuItems({
-      ...createAudioEffectContextMenuControls(effect, props.audioEffects),
+      ...createAudioEffectContextMenuControls(effect, props.audioEffects, props.targetId),
       canWrite: props.canWrite,
     });
   };
@@ -391,6 +422,92 @@ const EffectsPanelReadOnlyNotice: Component = () => (
   </div>
 );
 
+const createEffectsPanelContextMenuItems = (input: {
+  targetId: Track["id"] | "master";
+  targetTrackId?: Track["id"];
+  canWrite: boolean;
+  audioEffects: EffectsPanelAudioEffects;
+  instrument: EffectsPanelInstrumentDevice;
+  onHide: () => void;
+}): TimelineContextMenuItem[] => {
+  const addAudioEffectItems: TimelineContextMenuItem[] = AUDIO_EFFECT_ORDER.map((effect) => ({
+    kind: "item",
+    label: `Add ${audioEffectLabels[effect]}`,
+    disabled: !input.canWrite || !input.audioEffects.canAddByKindToTarget(input.targetId, effect),
+    onSelect: () => {
+      void input.audioEffects.addByKindToTarget(input.targetId, effect).catch(() => undefined);
+    },
+  }));
+  const resetCurrentDevices = () => {
+    for (const effect of input.audioEffects.orderedEffects()) {
+      createAudioEffectContextMenuControls(effect, input.audioEffects).reset();
+    }
+    if (input.instrument.arp.params()) input.instrument.arp.reset();
+    if (input.instrument.synth.params()) input.instrument.synth.reset();
+    if (input.instrument.drumRack.params()) input.instrument.drumRack.reset();
+  };
+  const hasCurrentDevices = () => (
+    input.audioEffects.orderedEffects().length > 0
+    || Boolean(input.instrument.arp.params())
+    || Boolean(input.instrument.synth.params())
+    || Boolean(input.instrument.drumRack.params())
+  );
+  const hasAudioEffects = () => input.audioEffects.orderedEffects().length > 0;
+
+  const items: TimelineContextMenuItem[] = [
+    { kind: "label", label: input.targetId === "master" ? "Master Effects" : "Track Effects" },
+    ...addAudioEffectItems,
+  ];
+
+  const targetTrackId = input.targetTrackId;
+  if (targetTrackId) {
+    items.push(
+      { kind: "separator" },
+      ...instrumentKinds.map((kind): TimelineContextMenuItem => ({
+        kind: "item",
+        label: `Use ${instrumentLabels[kind]}`,
+        disabled: !input.canWrite || input.instrument.readInstrumentForTarget(targetTrackId)?.kind === kind,
+        onSelect: () => {
+          input.instrument.switchInstrumentForTarget(targetTrackId, kind);
+        },
+      })),
+      {
+        kind: "item",
+        label: "Add Arpeggiator",
+        disabled: !input.canWrite || Boolean(input.instrument.arp.params()),
+        onSelect: () => {
+          void input.instrument.arp.addToTarget(targetTrackId);
+        },
+      },
+    );
+  }
+
+  items.push(
+    { kind: "separator" },
+    {
+      kind: "item",
+      label: input.targetId === "master" ? "Reset master effects" : "Reset track effects",
+      disabled: !input.canWrite || !hasCurrentDevices(),
+      onSelect: resetCurrentDevices,
+    },
+    {
+      kind: "item",
+      label: "Delete all audio effects",
+      disabled: !input.canWrite || !hasAudioEffects(),
+      onSelect: () => {
+        void input.audioEffects.removeAllFromTarget(input.targetId).catch(() => undefined);
+      },
+    },
+    {
+      kind: "item",
+      label: "Hide effects panel",
+      onSelect: input.onHide,
+    },
+  );
+
+  return items;
+};
+
 type EffectsPanelEmptyStateProps = {
   empty: {
     visible: boolean;
@@ -459,6 +576,14 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const saturatorForTarget = audioEffects.saturator.params;
   const delayForTarget = audioEffects.delay.params;
   const reverbForTarget = audioEffects.reverb.params;
+  const panelContextMenuItems = () => createEffectsPanelContextMenuItems({
+    targetId: props.selectedFXTarget,
+    targetTrackId: target.isInstrumentTrack() ? props.selectedFXTarget : undefined,
+    canWrite: canWriteCurrentTargetEffects(),
+    audioEffects,
+    instrument,
+    onHide: controller.close,
+  });
   const automationRangesByParameterId = createMemo(() => {
     const targetKeyFor = (parameterId: string) => props.selectedFXTarget === "master"
       ? automationTargetKey({ kind: "master" }, parameterId)
@@ -493,54 +618,56 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
             />
           }
         >
-          <div class="flex h-full min-h-0 flex-col">
-            <div class="flex flex-1 flex-col overflow-hidden min-h-0">
-              <div
-                class="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-1 py-1"
-              >
-                <div class="flex h-full min-h-0 min-w-min items-stretch gap-3">
-                  <Show when={target.isInstrumentTrack()}>
-                    <EffectsPanelInstrumentSection
-                      instrument={{
-                        state: instrument,
-                        canWrite: canWriteCurrentTargetEffects(),
-                      }}
+          <TimelineContextMenu items={panelContextMenuItems}>
+            <div class="flex h-full min-h-0 flex-col">
+              <div class="flex flex-1 flex-col overflow-hidden min-h-0">
+                <div
+                  class="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-1 py-1"
+                >
+                  <div class="flex h-full min-h-0 min-w-min items-stretch gap-3">
+                    <Show when={target.isInstrumentTrack()}>
+                      <EffectsPanelInstrumentSection
+                        instrument={{
+                          state: instrument,
+                          canWrite: canWriteCurrentTargetEffects(),
+                        }}
+                        audioEngine={props.audioEngine}
+                        targetId={props.selectedFXTarget}
+                      />
+                    </Show>
+                    <EffectsPanelEffectCards
+                      audioEffects={audioEffects}
+                      canWrite={canWriteCurrentTargetEffects()}
+                      onElementChange={props.onEffectChainElementChange}
+                      spectrum={spectrum()}
                       audioEngine={props.audioEngine}
                       targetId={props.selectedFXTarget}
+                      automationRangesByParameterId={automationRangesByParameterId()}
+                      onSelectAutomationParameter={(parameterId) => props.onSelectAutomationParameter?.(props.selectedFXTarget, parameterId)}
+                      onManualAutomationOverride={(parameterId) => props.onManualAutomationOverride?.(props.selectedFXTarget, parameterId)}
                     />
-                  </Show>
-                  <EffectsPanelEffectCards
-                    audioEffects={audioEffects}
-                    canWrite={canWriteCurrentTargetEffects()}
-                    onElementChange={props.onEffectChainElementChange}
-                    spectrum={spectrum()}
-                    audioEngine={props.audioEngine}
-                    targetId={props.selectedFXTarget}
-                    automationRangesByParameterId={automationRangesByParameterId()}
-                    onSelectAutomationParameter={(parameterId) => props.onSelectAutomationParameter?.(props.selectedFXTarget, parameterId)}
-                    onManualAutomationOverride={(parameterId) => props.onManualAutomationOverride?.(props.selectedFXTarget, parameterId)}
-                  />
-                  <Show when={isCurrentTargetReadOnly()}>
-                    <EffectsPanelReadOnlyNotice />
-                  </Show>
-                  <EffectsPanelEmptyState
-                    empty={{
-                      visible:
-                        !eqForTarget() &&
-                        !compressorForTarget() &&
-                        !saturatorForTarget() &&
-                        !delayForTarget() &&
-                        !reverbForTarget() &&
-                        !instrument.arp.params() &&
-                        (!instrument.activeInstrument() ||
-                          !target.isInstrumentTrack()),
-                      currentTargetId: target.currentTargetId(),
-                    }}
-                  />
+                    <Show when={isCurrentTargetReadOnly()}>
+                      <EffectsPanelReadOnlyNotice />
+                    </Show>
+                    <EffectsPanelEmptyState
+                      empty={{
+                        visible:
+                          !eqForTarget() &&
+                          !compressorForTarget() &&
+                          !saturatorForTarget() &&
+                          !delayForTarget() &&
+                          !reverbForTarget() &&
+                          !instrument.arp.params() &&
+                          (!instrument.activeInstrument() ||
+                            !target.isInstrumentTrack()),
+                        currentTargetId: target.currentTargetId(),
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          </TimelineContextMenu>
         </TimelineBottomPanelShell>
       </Show>
 

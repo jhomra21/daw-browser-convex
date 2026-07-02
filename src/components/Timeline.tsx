@@ -801,6 +801,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     bottomPanel.setMode("effects");
     onLanePointerDown(event, scrollRef);
   };
+  const addFourBarMidiClipToTrack = (trackId: Track["id"]) => {
+    const actions = deviceInsertActions();
+    if (!actions?.canAddMidiClipToTarget(trackId)) return;
+    const secondsPerBeat = 60 / Math.max(1e-6, bpm());
+    void actions.addMidiClipToTarget(trackId, {
+      durationSec: secondsPerBeat * 16,
+    });
+  };
 
   const onRulerPointerDown = (event: PointerEvent) => {
     event.preventDefault();
@@ -1180,6 +1188,8 @@ const Timeline: Component<TimelineProps> = (props) => {
         onClipPointerDown={onClipPointerDown}
         onClipPointerUp={onClipPointerUp}
         onClipResizeStart={onClipResizeStart}
+        onAddMidiClipToTrack={addFourBarMidiClipToTrack}
+        onDeleteTrack={requestDeleteTrack}
         clipContextMenu={{
           selectClip: (trackId, clipId) => selection.selectPrimaryClip({ trackId, clipId }),
           duplicateSelectedClips: () => {

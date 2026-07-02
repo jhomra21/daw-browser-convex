@@ -146,6 +146,8 @@ const audioEffectPersistenceDescriptors = {
   },
 }
 type AudioEffectPersistenceType = keyof typeof audioEffectPersistenceDescriptors
+const deletedStatus = () => ({ status: 'deleted' })
+const notFoundStatus = () => ({ status: 'not-found' })
 
 const sanitizeArpParams = (params: {
   enabled: boolean
@@ -337,6 +339,35 @@ const reorderAudioEffectsForUser = async (
   await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
   const rows = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
   await reorderRows(ctx, rows, input.order)
+}
+
+const removeAudioEffectForUser = async (
+  ctx: any,
+  input: {
+    projectId: string
+    userId: string
+    targetType: 'track' | 'master'
+    trackId?: any
+    effect: AudioEffectKind
+  },
+) => {
+  if (input.targetType === 'track') {
+    const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
+    if (!access || access.track.projectId !== input.projectId) return notFoundStatus()
+    const rows = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
+    const row = rows.find((entry: any) => entry.type === input.effect && entry.targetType === 'track') ?? null
+    if (!row) return notFoundStatus()
+    await ctx.db.delete(row._id)
+    await reorderRows(ctx, rows.filter((entry: any) => entry._id !== row._id && entry.targetType === 'track'), [])
+    return deletedStatus()
+  }
+  await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
+  const rows = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
+  const row = rows.find((entry: any) => entry.type === input.effect) ?? null
+  if (!row) return notFoundStatus()
+  await ctx.db.delete(row._id)
+  await reorderRows(ctx, rows.filter((entry: any) => entry._id !== row._id), [])
+  return deletedStatus()
 }
 
 // Return the EQ effect row for a track if it exists (we use a single EQ per track for now)
@@ -658,6 +689,20 @@ export const reorderAudioEffects = mutation({
   },
 })
 
+export const removeAudioEffect = mutation({
+  args: {
+    projectId: v.string(),
+    targetType: v.union(v.literal('track'), v.literal('master')),
+    trackId: v.optional(v.id('tracks')),
+    effect: audioEffectKindValidator,
+  },
+  handler: async (ctx, { projectId, targetType, trackId, effect }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    if (targetType === 'track' && !trackId) return notFoundStatus()
+    return await removeAudioEffectForUser(ctx, { projectId, userId, targetType, trackId, effect })
+  },
+})
+
 export const serverSetSynthParams = mutation({
   args: {
     projectId: v.string(),
@@ -837,5 +882,24 @@ export const serverReorderAudioEffects = mutation({
     }
     await reorderAudioEffectsForUser(ctx, { projectId, userId, targetType, order })
     return { status: 'applied' }
+  },
+})
+
+export const serverRemoveAudioEffect = mutation({
+  args: {
+    projectId: v.string(),
+    targetType: v.union(v.literal('track'), v.literal('master')),
+    trackId: v.optional(v.string()),
+    effect: audioEffectKindValidator,
+  },
+  handler: async (ctx, { projectId, targetType, trackId, effect }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    if (targetType === 'track') {
+      if (!trackId) return notFoundStatus()
+      const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
+      if (!normalizedTrackId) return notFoundStatus()
+      return await removeAudioEffectForUser(ctx, { projectId, userId, targetType, trackId: normalizedTrackId, effect })
+    }
+    return await removeAudioEffectForUser(ctx, { projectId, userId, targetType, effect })
   },
 })

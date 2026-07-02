@@ -109,6 +109,7 @@ export type SharedTimelineOperation =
   | { kind: 'effects.setSaturatorParams'; payload: { trackId: string; params: SaturatorParams } }
   | { kind: 'effects.setDelayParams'; payload: { trackId: string; params: DelayParams } }
   | { kind: 'effects.reorderAudioChain'; payload: { trackId: string; order: AudioEffectKind[] } }
+  | { kind: 'effects.removeAudioEffect'; payload: { targetType: 'track'; trackId: string; effect: AudioEffectKind } | { targetType: 'master'; effect: AudioEffectKind } }
   | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: SharedReverbParams } }
   | { kind: 'effects.setSynthParams'; payload: { trackId: string; params: SharedSynthParams } }
   | { kind: 'instruments.setTrackInstrument'; payload: { trackId: string; instrument: TrackInstrumentParams } }
@@ -567,6 +568,17 @@ const parseTrackAudioChainReorder = (payload: Record<string, unknown>): SharedTi
   return typeof payload.trackId === 'string' && order ? { kind: 'effects.reorderAudioChain', payload: { trackId: payload.trackId, order } } : null
 }
 
+const parseRemoveAudioEffect = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  if (!isAudioEffectKind(payload.effect)) return null
+  if (payload.targetType === 'master') {
+    return { kind: 'effects.removeAudioEffect', payload: { targetType: 'master', effect: payload.effect } }
+  }
+  if (payload.targetType === 'track' && typeof payload.trackId === 'string') {
+    return { kind: 'effects.removeAudioEffect', payload: { targetType: 'track', trackId: payload.trackId, effect: payload.effect } }
+  }
+  return null
+}
+
 const parseTrackSynth = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readSynthParams(payload.params)
   return typeof payload.trackId === 'string' && params ? { kind: 'effects.setSynthParams', payload: { trackId: payload.trackId, params } } : null
@@ -739,6 +751,12 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   { kind: 'effects.setSaturatorParams', parse: parseTrackSaturator, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setDelayParams', parse: parseTrackDelay, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.reorderAudioChain', parse: parseTrackAudioChainReorder, targets: readTrackIdTargets, durableQueue: true },
+  {
+    kind: 'effects.removeAudioEffect',
+    parse: parseRemoveAudioEffect,
+    targets: readTrackIdTargets,
+    durableQueue: true,
+  },
   { kind: 'effects.setReverbParams', parse: parseTrackReverb, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setSynthParams', parse: parseTrackSynth, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'instruments.setTrackInstrument', parse: parseTrackInstrument, targets: readTrackIdTargets, durableQueue: true },

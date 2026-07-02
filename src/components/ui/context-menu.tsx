@@ -24,7 +24,7 @@ const ContextMenuContent: Component<ContextMenuContentProps> = (props) => {
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Content
         class={cn(
-          "z-50 min-w-32 max-h-(--kb-menu-content-available-height) overflow-y-auto overflow-x-hidden border border-neutral-800 bg-neutral-900 p-0.5 text-xs text-neutral-100 shadow-md shadow-black/40 outline-none",
+          "z-50 min-w-32 max-h-(--kb-menu-content-available-height) overflow-y-auto overflow-x-hidden border border-neutral-800 bg-neutral-900 p-0.5 text-xs text-neutral-200 shadow-md shadow-black/40 outline-none",
           local.class,
         )}
         {...rest}
@@ -44,7 +44,7 @@ const ContextMenuItem: Component<ContextMenuItemProps> = (props) => {
   return (
     <ContextMenuPrimitive.Item
       class={cn(
-        "relative flex min-h-6 cursor-default select-none items-center gap-2 px-2 py-0.5 leading-5 outline-none transition-colors focus:bg-neutral-800 focus:text-neutral-50 data-[disabled]:pointer-events-none data-[disabled]:text-neutral-500 [&>svg]:size-3.5 [&>svg]:shrink-0",
+        "relative flex min-h-6 cursor-default select-none items-center gap-2 whitespace-nowrap px-2 py-0.5 leading-5 text-neutral-200 outline-none transition-colors focus:bg-neutral-800 focus:text-neutral-100 data-[highlighted]:bg-neutral-800 data-[highlighted]:text-neutral-100 data-[disabled]:pointer-events-none data-[disabled]:text-neutral-500 data-[disabled]:opacity-50 [&>svg]:size-3.5 [&>svg]:shrink-0",
         local.inset && "pl-6",
         local.class,
       )}
@@ -55,7 +55,7 @@ const ContextMenuItem: Component<ContextMenuItemProps> = (props) => {
 
 const ContextMenuShortcut: Component<ComponentProps<"span">> = (props) => {
   const [local, rest] = splitProps(props, ["class"]);
-  return <span class={cn("ml-auto pl-4 text-[11px] tracking-wide text-neutral-400", local.class)} {...rest} />;
+  return <span class={cn("ml-auto shrink-0 whitespace-nowrap pl-4 text-xxs tracking-wide opacity-60", local.class)} {...rest} />;
 };
 
 type ContextMenuLabelProps = ComponentProps<"div"> & {
@@ -67,7 +67,7 @@ const ContextMenuLabel: Component<ContextMenuLabelProps> = (props) => {
   const [local, rest] = splitProps(props, ["class", "inset"]);
   return (
     <div
-      class={cn("px-2 py-1 text-xs font-semibold leading-5 text-neutral-100", local.inset && "pl-6", local.class)}
+      class={cn("px-2 py-1 text-xs font-semibold leading-5 text-neutral-200", local.inset && "pl-6", local.class)}
       {...rest}
     />
   );
@@ -81,7 +81,7 @@ const ContextMenuSeparator: Component<ContextMenuSeparatorProps> = (props) => {
   const [local, rest] = splitProps(props, ["class"]);
   return (
     <ContextMenuPrimitive.Separator
-      class={cn("-mx-0.5 my-0.5 h-px bg-neutral-800", local.class)}
+      class={cn("-mx-0.5 my-0.5 h-px border-0 bg-neutral-800", local.class)}
       {...rest}
     />
   );
@@ -98,7 +98,7 @@ const ContextMenuSubTrigger: Component<ContextMenuSubTriggerProps> = (props) => 
   return (
     <ContextMenuPrimitive.SubTrigger
       class={cn(
-        "flex min-h-6 cursor-default select-none items-center gap-2 px-2 py-0.5 text-xs leading-5 outline-none focus:bg-neutral-800 data-[expanded]:bg-neutral-800 [&_svg]:pointer-events-none [&_svg]:size-3.5 [&_svg]:shrink-0",
+        "flex min-h-6 cursor-default select-none items-center gap-2 whitespace-nowrap px-2 py-0.5 text-xs leading-5 text-neutral-200 outline-none focus:bg-neutral-800 focus:text-neutral-100 data-[expanded]:bg-neutral-800 data-[expanded]:text-neutral-100 [&_svg]:pointer-events-none [&_svg]:size-3.5 [&_svg]:shrink-0",
         local.inset && "pl-6",
         local.class,
       )}
@@ -121,7 +121,7 @@ const ContextMenuSubContent: Component<ContextMenuSubContentProps> = (props) => 
   return (
     <ContextMenuPrimitive.SubContent
       class={cn(
-        "z-50 min-w-32 overflow-hidden border border-neutral-800 bg-neutral-900 p-0.5 text-xs text-neutral-100 shadow-md shadow-black/40",
+        "z-50 min-w-32 overflow-hidden border border-neutral-800 bg-neutral-900 p-0.5 text-xs text-neutral-200 shadow-md shadow-black/40",
         local.class,
       )}
       {...rest}

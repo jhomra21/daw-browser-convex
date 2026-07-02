@@ -44,6 +44,7 @@ import type { EffectParamsByEffect, EffectParamsCommitPayload, EffectType } from
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
+import type { AddMidiClipOptions } from "~/components/timeline/timeline-device-insert-actions";
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
 type LocalArpRow = LocalEffectRow<ArpeggiatorParams>;
 type LocalInstrumentRow = LocalEffectRow<TrackInstrumentParams>;
@@ -75,7 +76,7 @@ type ExpandedSynthCard = ExpandedSynthBounds & {
 
 type EffectsPanelInstrumentDevice = {
   addMidiClip: () => Promise<void>;
-  addMidiClipToTarget: (targetId: Track["id"]) => Promise<boolean>;
+  addMidiClipToTarget: (targetId: Track["id"], options?: AddMidiClipOptions) => Promise<boolean>;
   flushPending: () => Promise<void>;
   arp: {
     add: () => void;
@@ -432,7 +433,7 @@ export function createEffectsPanelInstrumentDevice(
     switchInstrumentForTarget(targetId, kind);
   }
 
-  async function addMidiClipToTarget(targetId: Track["id"]): Promise<boolean> {
+  async function addMidiClipToTarget(targetId: Track["id"], options?: AddMidiClipOptions): Promise<boolean> {
     const track = getTrackByTargetId(targetId);
     if (!track || track.kind !== "instrument") return false;
 
@@ -443,10 +444,10 @@ export function createEffectsPanelInstrumentDevice(
       userId: context.userId(),
     });
 
-    const start = Math.max(0, Math.round((context.playheadSec() ?? 0) * 1000) / 1000);
+    const start = Math.max(0, Math.round((options?.startSec ?? context.playheadSec() ?? 0) * 1000) / 1000);
     const clip: ClipCreateSnapshot = {
       startSec: start,
-      duration: 1,
+      duration: Math.max(0.001, options?.durationSec ?? 1),
       name: "MIDI Clip",
       midi: {
         wave: "sawtooth",

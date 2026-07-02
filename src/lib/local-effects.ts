@@ -111,6 +111,19 @@ export const setLocalEffect = async <TParams>(
   return row
 }
 
+export const deleteLocalEffect = async (
+  projectId: string,
+  targetId: string,
+  effect: LocalEffectKind,
+): Promise<void> => {
+  const db = await openLocalProjectDb(projectId)
+  const key: [string, string] = [EFFECT_KIND, effectId(targetId, effect)]
+  const row = await db.get('entities', key)
+  if (!isLocalEffectRow(row?.value)) return
+  await db.delete('entities', key)
+  notifyLocalProjectChanged(projectId)
+}
+
 export const audioEffectKindFromLocalEffect = (effect: LocalEffectKind): AudioEffectKind | undefined => {
   for (const kind of AUDIO_EFFECT_ORDER) {
     if (effect === kind || effect === AUDIO_EFFECT_CONTRACTS[kind].masterKind) return kind

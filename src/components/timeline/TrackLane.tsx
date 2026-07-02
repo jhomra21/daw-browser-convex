@@ -1,10 +1,10 @@
 import { type Component, For } from 'solid-js'
-import { cn } from '~/lib/utils'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { LANE_HEIGHT } from '~/lib/timeline-utils'
 import ClipComponent, { type ClipContextMenuActions } from './ClipComponent'
 import AutomationLane from './automation-lane'
 import type { AutomationEnvelope } from '@daw-browser/shared'
+import TimelineContextMenu, { type TimelineContextMenuItem } from './context-menu/timeline-context-menu'
 
 type TrackLaneProps = {
   track: Track
@@ -21,6 +21,8 @@ type TrackLaneProps = {
   onReplaceMedia: (trackId: Track['id'], clipId: string) => void
   onRemoveMissingMedia: (trackId: Track['id'], clipId: string) => void
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
+  onAddMidiClip?: (trackId: Track['id']) => void
+  onDeleteTrack?: (trackId: Track['id']) => void
   bpm: number
   viewportRedrawVersion: number
   automation: {
@@ -37,12 +39,36 @@ type TrackLaneProps = {
 }
 
 const TrackLane: Component<TrackLaneProps> = (props) => {
-  return (
+  const contextMenuItems = (): TimelineContextMenuItem[] => {
+    const items: TimelineContextMenuItem[] = [
+      { kind: 'label', label: props.track.name },
+    ]
+    if (props.track.kind === 'instrument' && props.onAddMidiClip) {
+      items.push({
+        kind: 'item',
+        label: 'Add MIDI clip',
+        onSelect: () => props.onAddMidiClip?.(props.track.id),
+      })
+    }
+    if (props.onDeleteTrack) {
+      if (items.length > 1) items.push({ kind: 'separator' })
+      items.push({
+        kind: 'item',
+        label: 'Delete track',
+        shortcut: '⌫',
+        onSelect: () => props.onDeleteTrack?.(props.track.id),
+      })
+    }
+    return items
+  }
+
+  const laneContainer = () => (
     <div
-      class={cn('absolute left-0 right-0 overflow-hidden bg-neutral-950', props.isDropTarget && 'bg-green-500/10')}
+      class="absolute left-0 right-0 overflow-hidden bg-neutral-950"
+      classList={{ 'bg-green-500/10': props.isDropTarget }}
       style={{ top: `${props.topPx}px`, height: `${LANE_HEIGHT + props.automationHeightPx}px` }}
     >
-      <div class="absolute left-0 right-0 h-[1.5px] bg-neutral-800" style={{ top: `${LANE_HEIGHT - 1}px` }} />
+      <div class="absolute left-0 right-0 h-px bg-neutral-800" style={{ top: `${LANE_HEIGHT - 1}px` }} />
       {props.automation.visible ? (
         <div
           class="absolute inset-x-0 z-30 border-t border-red-500/30 bg-neutral-950/95"
@@ -94,6 +120,16 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
         )}
       </For>
     </div>
+  )
+
+  return (
+    <>
+      {props.onAddMidiClip || props.onDeleteTrack ? (
+        <TimelineContextMenu items={contextMenuItems}>
+          {laneContainer()}
+        </TimelineContextMenu>
+      ) : laneContainer()}
+    </>
   )
 }
 

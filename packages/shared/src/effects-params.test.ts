@@ -258,6 +258,27 @@ describe('Audio effect order', () => {
       payload: { trackId: 'track-1', order: ['delay', 'chorus'] },
     })).toBeNull()
   })
+
+  test('parses shared audio effect removal operations', () => {
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.removeAudioEffect',
+      payload: { targetType: 'track', trackId: 'track-1', effect: 'delay' },
+    })).toEqual({
+      kind: 'effects.removeAudioEffect',
+      payload: { targetType: 'track', trackId: 'track-1', effect: 'delay' },
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.removeAudioEffect',
+      payload: { targetType: 'master', effect: 'reverb' },
+    })).toEqual({
+      kind: 'effects.removeAudioEffect',
+      payload: { targetType: 'master', effect: 'reverb' },
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.removeAudioEffect',
+      payload: { targetType: 'track', trackId: 'track-1', effect: 'chorus' },
+    })).toBeNull()
+  })
 })
 
 describe('Saturator params', () => {

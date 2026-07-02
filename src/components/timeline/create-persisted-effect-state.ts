@@ -23,6 +23,8 @@ type PersistedEffectStateOptions<TRow, TParams> = {
   applyToEngine: (targetId: string, params: TParams) => void
   clearFromEngine?: (targetId: string) => void
   persistParams: (targetId: string, params: TParams, context: PersistedEffectContext) => void | Promise<unknown>
+  persistRemove?: (targetId: string, context: PersistedEffectContext) => void | Promise<unknown>
+  clearAfterPersistRemove?: (context: PersistedEffectContext) => boolean
   createPersistContext?: () => PersistedEffectContext
   onPersistError?: (error: unknown) => void
   onParamsCommitted?: (
@@ -32,6 +34,7 @@ type PersistedEffectStateOptions<TRow, TParams> = {
     context: PersistedEffectContext,
   ) => void
   onQueryRow?: (targetId: string, row: TRow) => void
+  isMissingRowLoaded?: () => boolean
   debounceMs?: number
   remoteOverwriteAfterMs?: number
 }
@@ -43,6 +46,7 @@ type PersistedEffectState<TParams> = {
   params: Accessor<TParams | undefined>
   readDraftForTarget: (targetId: string) => TParams | undefined
   readForTarget: (targetId: string) => TParams | undefined
+  removeForTarget: (targetId: string) => boolean
   reset: () => void
   syncRemoteForTarget: (targetId: string, params: TParams | undefined) => void
   update: (updater: (prev: TParams) => TParams) => void
@@ -61,6 +65,7 @@ export function createPersistedEffectState<TRow, TParams>(
 ): PersistedEffectState<TParams> {
   const [remoteByTarget, setRemoteByTarget] = createSignal<Record<string, TParams | undefined>>({})
   const [draftByTarget, setDraftByTarget] = createSignal<Record<string, TParams | undefined>>({})
+  const [deletedByTarget, setDeletedByTarget] = createSignal<Record<string, true | undefined>>({})
   const saveTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const lastLocalEdit = new Map<string, number>()
   const persistAttemptByTarget = new Map<string, number>()
@@ -94,6 +99,15 @@ export function createPersistedEffectState<TRow, TParams>(
     })
   }
 
+  function clearDeleted(key: string) {
+    setDeletedByTarget((prev) => {
+      if (!(key in prev)) return prev
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+  }
+
   function clearReconciledDraft(targetId: string, key = keyForTarget(targetId)) {
     const timer = saveTimers.get(key)
     if (timer) {
@@ -112,6 +126,7 @@ export function createPersistedEffectState<TRow, TParams>(
 
   function readCurrent(targetId: string) {
     const key = keyForTarget(targetId)
+    if (deletedByTarget()[key]) return undefined
     return draftByTarget()[key]
       ?? remoteByTarget()[key]
       ?? options.readVisibleParams?.(targetId)
@@ -171,6 +186,48 @@ export function createPersistedEffectState<TRow, TParams>(
     void write.catch(() => undefined)
   }
 
+  function persistRemoveNow(targetId: string, key: string, context: PersistedEffectContext) {
+    if (!options.persistRemove) return
+    const attempt = (persistAttemptByTarget.get(key) ?? 0) + 1
+    persistAttemptByTarget.set(key, attempt)
+    const write = Promise.resolve()
+      .then(() => options.persistRemove?.(targetId, context))
+      .then(
+        () => {
+          if (persistAttemptByTarget.get(key) !== attempt) return
+          persistAttemptByTarget.delete(key)
+          persistContextByTarget.delete(key)
+          targetByKey.delete(key)
+          if (options.clearAfterPersistRemove?.(context) ?? true) {
+            syncRemote(targetId, undefined)
+            clearDeleted(key)
+          }
+        },
+        (error) => {
+          if (persistAttemptByTarget.get(key) !== attempt) return
+          options.onPersistError?.(error)
+          persistAttemptByTarget.delete(key)
+          persistContextByTarget.delete(key)
+          targetByKey.delete(key)
+          clearDeleted(key)
+          throw error
+        },
+      )
+      .then(() => undefined)
+      .finally(() => {
+        if (!context.projectId) return
+        const pendingWrites = pendingWritesByProject.get(context.projectId)
+        pendingWrites?.delete(write)
+        if (pendingWrites?.size === 0) pendingWritesByProject.delete(context.projectId)
+      })
+    if (context.projectId) {
+      const pendingWrites = pendingWritesByProject.get(context.projectId) ?? new Set<Promise<void>>()
+      pendingWrites.add(write)
+      pendingWritesByProject.set(context.projectId, pendingWrites)
+    }
+    void write.catch(() => undefined)
+  }
+
   function ensureProjectFlusher(projectId: string) {
     if (registeredFlushers.has(projectId)) return
     registeredFlushers.set(projectId, registerPendingLocalProjectWriteFlusher('effects', projectId, async () => {
@@ -212,6 +269,7 @@ export function createPersistedEffectState<TRow, TParams>(
       ...prev,
       [key]: next,
     }))
+    clearDeleted(key)
     pendingCommitByTarget.set(key, {
       targetId,
       previous: pendingCommit?.previous ?? previous,
@@ -242,6 +300,11 @@ export function createPersistedEffectState<TRow, TParams>(
       return { ...prev, [key]: nextParams }
     })
 
+    if (nextParams === undefined && deletedByTarget()[key]) {
+      clearDeleted(key)
+      return
+    }
+
     const draft = draftByTarget()[key]
     if (!draft) return
 
@@ -265,7 +328,10 @@ export function createPersistedEffectState<TRow, TParams>(
     if (!targetId) return
 
     const row = options.row()
-    if (row === undefined) return
+    if (row === undefined) {
+      if (options.isMissingRowLoaded?.()) syncRemote(targetId, undefined)
+      return
+    }
 
     options.onQueryRow?.(targetId, row)
 
@@ -320,6 +386,35 @@ export function createPersistedEffectState<TRow, TParams>(
     applyUpdate(targetId, () => initial)
   }
 
+  const removeForTarget = (targetId: string) => {
+    const key = keyForTarget(targetId)
+    const previous = readCurrent(targetId)
+    if (!previous) return false
+    const timer = saveTimers.get(key)
+    if (timer) {
+      clearTimeout(timer)
+      saveTimers.delete(key)
+    }
+    setDraftByTarget((prev) => {
+      if (!(key in prev)) return prev
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+    pendingCommitByTarget.delete(key)
+    lastLocalEdit.set(key, Date.now())
+    const context = options.createPersistContext?.() ?? {}
+    if (context.projectId) ensureProjectFlusher(context.projectId)
+    persistContextByTarget.set(key, context)
+    targetByKey.set(key, targetId)
+    setDeletedByTarget((prev) => ({
+      ...prev,
+      [key]: true,
+    }))
+    persistRemoveNow(targetId, key, context)
+    return true
+  }
+
   return {
     add: () => {
       const targetId = options.targetId()
@@ -331,6 +426,7 @@ export function createPersistedEffectState<TRow, TParams>(
     params,
     readDraftForTarget: (targetId) => draftByTarget()[keyForTarget(targetId)],
     readForTarget: readCurrent,
+    removeForTarget,
     reset: () => {
       const targetId = options.targetId()
       if (!targetId) return

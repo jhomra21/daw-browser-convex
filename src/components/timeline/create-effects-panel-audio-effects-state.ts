@@ -44,6 +44,7 @@ type PersistedAudioEffectDescriptor<Params> = {
   setMasterEngineParams: (audioEngine: AudioEngine, params: Params) => void;
   row: (targetId: string) => LocalEffectRow<Params> | undefined;
   persistLocal: (projectId: string, targetId: string, params: Params) => Promise<void>;
+  removeLocal: (projectId: string, targetId: string) => Promise<void>;
   publishTrackParams: (projectId: string, userId: string, trackId: string, params: Params) => Promise<unknown>;
   publishMasterParams: (projectId: string, userId: string, params: Params) => Promise<unknown>;
   commitTrackParams: (trackId: string, previous: Params, next: Params, projectId?: string) => void;
@@ -99,6 +100,8 @@ type EffectsPanelAudioDevice = {
   canAddByKindToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind) => boolean;
   flushPending: () => Promise<void>;
   orderedEffects: Accessor<AudioEffectKind[]>;
+  removeAllFromTarget: (targetId: Track["id"] | "master") => Promise<boolean>;
+  removeByKindFromTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind) => Promise<boolean>;
   reorder: (effect: AudioEffectKind, targetIndex: number) => void;
   reverb: {
     add: () => void;
@@ -189,6 +192,25 @@ export function createEffectsPanelAudioDevice(
       if (!track) return Promise.resolve();
       return descriptor.publishTrackParams(persistContext.projectId, persistContext.userId, track.id, normalizedParams);
     },
+    persistRemove: (targetId, persistContext) => {
+      if (!persistContext.projectId) return Promise.resolve();
+      if (isLocalId("project", persistContext.projectId)) return descriptor.removeLocal(persistContext.projectId, targetId);
+      if (!persistContext.userId) return Promise.resolve();
+      if (targetId === "master") {
+        return publishEffectOperation(persistContext.projectId, persistContext.userId, {
+          kind: "effects.removeAudioEffect",
+          payload: { targetType: "master", effect: descriptor.kind },
+        });
+      }
+      const track = resolveTrackByTargetId(targetId);
+      if (!track) return Promise.resolve();
+      return publishEffectOperation(persistContext.projectId, persistContext.userId, {
+        kind: "effects.removeAudioEffect",
+        payload: { targetType: "track", trackId: track.id, effect: descriptor.kind },
+      });
+    },
+    clearAfterPersistRemove: (persistContext) => Boolean(persistContext.projectId && isLocalId("project", persistContext.projectId)),
+    isMissingRowLoaded: () => !isLocalProject() && context.roomEffects() !== undefined,
     debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
     remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
     onPersistError: (error) => {
@@ -217,6 +239,7 @@ export function createEffectsPanelAudioDevice(
     setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterEq(params),
     row: localEq.row,
     persistLocal: localEq.persist,
+    removeLocal: localEq.remove,
     publishTrackParams: (projectId, userId, trackId, params) => publishEffectOperation(projectId, userId, {
       kind: "effects.setEqParams",
       payload: { trackId, params },
@@ -238,6 +261,7 @@ export function createEffectsPanelAudioDevice(
     setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterReverb(params),
     row: localReverb.row,
     persistLocal: localReverb.persist,
+    removeLocal: localReverb.remove,
     publishTrackParams: (projectId, userId, trackId, params) => publishEffectOperation(projectId, userId, {
       kind: "effects.setReverbParams",
       payload: { trackId, params },
@@ -259,6 +283,7 @@ export function createEffectsPanelAudioDevice(
     setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterCompressor(params),
     row: localCompressor.row,
     persistLocal: localCompressor.persist,
+    removeLocal: localCompressor.remove,
     publishTrackParams: (projectId, userId, trackId, params) => publishEffectOperation(projectId, userId, {
       kind: "effects.setCompressorParams",
       payload: { trackId, params },
@@ -280,6 +305,7 @@ export function createEffectsPanelAudioDevice(
     setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterSaturator(params),
     row: localSaturator.row,
     persistLocal: localSaturator.persist,
+    removeLocal: localSaturator.remove,
     publishTrackParams: (projectId, userId, trackId, params) => publishEffectOperation(projectId, userId, {
       kind: "effects.setSaturatorParams",
       payload: { trackId, params },
@@ -301,6 +327,7 @@ export function createEffectsPanelAudioDevice(
     setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterDelay(params),
     row: localDelay.row,
     persistLocal: localDelay.persist,
+    removeLocal: localDelay.remove,
     publishTrackParams: (projectId, userId, trackId, params) => publishEffectOperation(projectId, userId, {
       kind: "effects.setDelayParams",
       payload: { trackId, params },
@@ -350,7 +377,7 @@ export function createEffectsPanelAudioDevice(
     const persistedOrder = persistedOrderedEffects();
     const optimistic = optimisticOrder();
     if (optimistic?.targetId !== currentTargetId()) return persistedOrder;
-    return normalizeAudioEffectOrder(optimistic.order, persistedOrder);
+    return optimistic.order;
   });
 
   createEffect(() => {
@@ -491,6 +518,52 @@ export function createEffectsPanelAudioDevice(
     const currentOrder = targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(targetId);
     return !currentOrder.includes(effect);
   };
+  const removeByKindFromTarget = async (targetId: Track["id"] | "master", effect: AudioEffectKind) => {
+    if (!context.canWriteCurrentTargetEffects()) return false;
+    const currentOrder = targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(targetId);
+    if (!currentOrder.includes(effect)) return false;
+    const state = stateForKind(effect);
+    if (!state.removeForTarget(targetId)) return false;
+    const nextOrder = currentOrder.filter((kind) => kind !== effect);
+    setOptimisticOrder({ targetId, order: nextOrder });
+    if (targetId === "master") context.audioEngine().setMasterFxOrder(nextOrder);
+    else context.audioEngine().setTrackFxOrder(targetId, nextOrder);
+    try {
+      await state.flushPending();
+    } catch (error) {
+      const optimistic = optimisticOrder();
+      if (optimistic?.targetId === targetId && areAudioEffectOrdersEqual(optimistic.order, nextOrder)) {
+        setOptimisticOrder();
+      }
+      throw error;
+    }
+    return true;
+  };
+  const removeAllFromTarget = async (targetId: Track["id"] | "master") => {
+    if (!context.canWriteCurrentTargetEffects()) return false;
+    const currentOrder = targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(targetId);
+    if (currentOrder.length === 0) return false;
+    setOptimisticOrder({ targetId, order: [] });
+    if (targetId === "master") context.audioEngine().setMasterFxOrder([]);
+    else context.audioEngine().setTrackFxOrder(targetId, []);
+    const removals = currentOrder.map((effect) => stateForKind(effect).removeForTarget(targetId));
+    try {
+      await Promise.all([
+        eqState.flushPending(),
+        compressorState.flushPending(),
+        saturatorState.flushPending(),
+        delayState.flushPending(),
+        reverbState.flushPending(),
+      ]);
+    } catch (error) {
+      const optimistic = optimisticOrder();
+      if (optimistic?.targetId === targetId && optimistic.order.length === 0) {
+        setOptimisticOrder();
+      }
+      throw error;
+    }
+    return removals.some(Boolean);
+  };
 
   return {
     addByKindToTarget,
@@ -517,6 +590,8 @@ export function createEffectsPanelAudioDevice(
       await Promise.all([eqState.flushPending(), compressorState.flushPending(), saturatorState.flushPending(), delayState.flushPending(), reverbState.flushPending()]);
     },
     orderedEffects,
+    removeAllFromTarget,
+    removeByKindFromTarget,
     reorder,
     compressor: {
       add: addCompressor,

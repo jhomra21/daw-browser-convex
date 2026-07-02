@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, type Accessor } from "solid-js";
-import { getLocalEffect, setLocalEffect, type LocalEffectKind, type LocalEffectRow } from "~/lib/local-effects";
+import { deleteLocalEffect, getLocalEffect, setLocalEffect, type LocalEffectKind, type LocalEffectRow } from "~/lib/local-effects";
 import { isLocalId } from "@daw-browser/shared";
 
 type LocalEffectSelector = LocalEffectKind | ((targetId: string) => LocalEffectKind);
@@ -8,6 +8,7 @@ type LocalEffectRows<TParams> = {
   fetchRow: (projectId: string, targetId: string) => Promise<LocalEffectRow<TParams> | undefined>;
   isLocalProject: Accessor<boolean>;
   persist: (projectId: string, targetId: string, params: TParams) => Promise<void>;
+  remove: (projectId: string, targetId: string) => Promise<void>;
   row: (targetId: string | undefined) => LocalEffectRow<TParams> | undefined;
 };
 
@@ -76,10 +77,19 @@ export function createLocalEffectRows<TParams>(input: {
     return row;
   };
 
+  const remove = async (projectId: string, targetId: string) => {
+    if (!isLocalId("project", projectId)) return;
+    const effect = resolveEffect(input.effect, targetId);
+    await deleteLocalEffect(projectId, targetId, effect);
+    if (input.projectId() !== projectId) return;
+    setRows((prev) => ({ ...prev, [scopeKey(projectId, targetId, effect)]: undefined }));
+  };
+
   return {
     fetchRow,
     isLocalProject,
     persist,
+    remove,
     row: (targetId) => {
       const projectId = input.projectId();
       if (!projectId || !targetId || !isLocalId("project", projectId)) return undefined;

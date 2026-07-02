@@ -2,7 +2,6 @@ import { createEffect, createMemo, For, on, onMount, Show, type Component, type 
 import type { BrowserAssetsModel, BrowserFolderRow, BrowserItem, BrowserSection, BrowserTreeExpansionState, BrowserTreeRow, TimelineBrowserTab, TimelineLeftBrowserModel } from "./browser-types";
 import { timelineBrowserTabLabels, timelineBrowserTabs } from "~/lib/timeline-left-browser-preferences";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "../context-menu/timeline-context-menu";
-import { countBrowserTreeLeaves } from "./browser-tree";
 
 const tabPlaceholder: Record<TimelineBrowserTab, string> = {
   assets: "",
@@ -89,7 +88,7 @@ const BrowserTreeRows: Component<{
                 >
                   <span class="w-3 text-center text-xs text-neutral-600">{visible() ? "▾" : "▸"}</span>
                   <span class="min-w-0 flex-1 truncate">{folder().label}</span>
-                  <span class="text-xs text-neutral-600">{countBrowserTreeLeaves(folder().children)}</span>
+                  <span class="text-xs text-neutral-600">{folder().leafCount}</span>
                 </button>
               );
               const editingRow = () => (
@@ -102,7 +101,7 @@ const BrowserTreeRows: Component<{
                     onConfirm={() => props.renameFolderInline?.onConfirm()}
                     onCancel={() => props.renameFolderInline?.onCancel()}
                   />
-                  <span class="text-xs text-neutral-600">{countBrowserTreeLeaves(folder().children)}</span>
+                  <span class="text-xs text-neutral-600">{folder().leafCount}</span>
                 </div>
               );
               const normalRow = (
@@ -173,7 +172,7 @@ const BrowserTree: Component<{
               >
                 <span class="w-3 text-center text-xs text-neutral-600">{visible() ? "▾" : "▸"}</span>
                 <span class="min-w-0 flex-1 truncate">{section.label}</span>
-                <span class="text-xs font-normal tracking-normal text-neutral-600">{countBrowserTreeLeaves(section.rows)}</span>
+                <span class="text-xs font-normal tracking-normal text-neutral-600">{section.leafCount}</span>
               </button>
             );
             return (

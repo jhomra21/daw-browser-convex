@@ -8,7 +8,7 @@ export const createBrowserLeafRow = (item: BrowserItem): BrowserLeafRow => ({
 export const countBrowserTreeLeaves = (rows: BrowserTreeRow[]): number => {
   let count = 0;
   for (const row of rows) {
-    count += row.kind === "leaf" ? 1 : countBrowserTreeLeaves(row.children);
+    count += row.kind === "leaf" ? 1 : row.leafCount;
   }
   return count;
 };
@@ -30,7 +30,7 @@ export const filterBrowserTreeRows = (rows: BrowserTreeRow[], query: string): Br
       continue;
     }
     if (matchingChildren.length > 0) {
-      filteredRows.push({ ...row, children: matchingChildren });
+      filteredRows.push({ ...row, children: matchingChildren, leafCount: countBrowserTreeLeaves(matchingChildren) });
     }
   }
   return filteredRows;

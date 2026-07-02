@@ -576,11 +576,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   });
   const { target, devices, spectrum, canWriteCurrentTargetEffects, isCurrentTargetReadOnly } = controller;
   const { instrument, audioEffects } = devices;
-  const eqForTarget = audioEffects.eq.params;
-  const compressorForTarget = audioEffects.compressor.params;
-  const saturatorForTarget = audioEffects.saturator.params;
-  const delayForTarget = audioEffects.delay.params;
-  const reverbForTarget = audioEffects.reverb.params;
   const panelContextMenuItems = () => createEffectsPanelContextMenuItems({
     targetId: props.selectedFXTarget,
     targetTrackId: target.isInstrumentTrack() ? props.selectedFXTarget : undefined,
@@ -657,11 +652,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     <EffectsPanelEmptyState
                       empty={{
                         visible:
-                          !eqForTarget() &&
-                          !compressorForTarget() &&
-                          !saturatorForTarget() &&
-                          !delayForTarget() &&
-                          !reverbForTarget() &&
+                          audioEffects.orderedEffects().length === 0 &&
                           !instrument.arp.params() &&
                           (!instrument.activeInstrument() ||
                             !target.isInstrumentTrack()),

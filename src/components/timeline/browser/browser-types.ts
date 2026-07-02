@@ -36,6 +36,7 @@ export type BrowserFolderRow = {
   source: BrowserItemSource;
   label: string;
   searchText: string;
+  leafCount: number;
   folderId?: string;
   children: BrowserTreeRow[];
 };
@@ -45,6 +46,7 @@ export type BrowserTreeRow = BrowserLeafRow | BrowserFolderRow;
 export type BrowserSection = {
   id: string;
   label: string;
+  leafCount: number;
   rows: BrowserTreeRow[];
 };
 

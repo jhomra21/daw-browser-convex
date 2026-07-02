@@ -221,9 +221,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
     commitPoints([...points(), point])
   }
 
-  const addPointAtStoredPosition = () => {
-    const position = contextMenuPosition()
-    if (!position) return
+  const addPointAtPosition = (position: { clientX: number; clientY: number }) => {
     root?.focus()
     const point = pointFromClientPosition(position.clientX, position.clientY)
     if (!point) return
@@ -253,25 +251,33 @@ export default function AutomationLane(props: AutomationLaneProps) {
   }
 
   const [contextMenuPosition, setContextMenuPosition] = createSignal<{ clientX: number; clientY: number } | null>(null)
-  const contextMenuItems = (): TimelineContextMenuItem[] => [
-    { kind: 'label', label: descriptor()?.label ?? props.parameterId },
-    { kind: 'item', label: 'Add point', disabled: !contextMenuPosition(), onSelect: addPointAtStoredPosition },
-    { kind: 'separator' },
-    {
-      kind: 'item',
-      label: selectedPoint()?.interpolation === 'hold' ? 'Set interpolation: linear' : 'Set interpolation: hold',
-      shortcut: 'I',
-      disabled: !selectedPoint(),
-      onSelect: toggleSelectedInterpolation,
-    },
-    {
-      kind: 'item',
-      label: 'Delete selected point',
-      shortcut: '⌫',
-      disabled: !selectedPoint(),
-      onSelect: deleteSelectedPoint,
-    },
-  ]
+  const contextMenuItems = (): TimelineContextMenuItem[] => {
+    const position = contextMenuPosition()
+    return [
+      { kind: 'label', label: descriptor()?.label ?? props.parameterId },
+      {
+        kind: 'item',
+        label: 'Add point',
+        disabled: !position,
+        onSelect: position ? () => addPointAtPosition(position) : undefined,
+      },
+      { kind: 'separator' },
+      {
+        kind: 'item',
+        label: selectedPoint()?.interpolation === 'hold' ? 'Set interpolation: linear' : 'Set interpolation: hold',
+        shortcut: 'I',
+        disabled: !selectedPoint(),
+        onSelect: toggleSelectedInterpolation,
+      },
+      {
+        kind: 'item',
+        label: 'Delete selected point',
+        shortcut: '⌫',
+        disabled: !selectedPoint(),
+        onSelect: deleteSelectedPoint,
+      },
+    ]
+  }
 
   const onKeyDown = (event: KeyboardEvent) => {
     const selected = selectedPointId()

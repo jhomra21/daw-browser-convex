@@ -53,14 +53,21 @@ const instrumentPresetItemId = (preset: InstrumentPreset) => `builtin:instrument
 const visibleBrowserSections = (sections: BrowserSection[]): BrowserSection[] => {
   const visibleSections: BrowserSection[] = [];
   for (const section of sections) {
-    if (countBrowserTreeLeaves(section.rows) > 0) visibleSections.push(section);
+    if (section.leafCount > 0) visibleSections.push(section);
   }
   return visibleSections;
 };
 
 const visibleAssetSections = (sections: BrowserSection[]): BrowserSection[] => (
-  sections.filter((section) => section.id === "project-samples" || countBrowserTreeLeaves(section.rows) > 0)
+  sections.filter((section) => section.id === "project-samples" || section.leafCount > 0)
 );
+
+const createBrowserSection = (id: string, label: string, rows: BrowserTreeRow[]): BrowserSection => ({
+  id,
+  label,
+  rows,
+  leafCount: countBrowserTreeLeaves(rows),
+});
 
 const buildBrowserSampleRow = (
   sample: {
@@ -180,6 +187,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: folder.name,
         searchText: folder.name.toLowerCase(),
         folderId: folder.id,
+        leafCount: children.length,
         children: children.map(createBrowserLeafRow),
       };
       projectRows.push(row);
@@ -191,12 +199,15 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         source: "project",
         label: "Unfiled",
         searchText: "unfiled root project samples",
+        leafCount: unfiled.length,
         children: unfiled.map(createBrowserLeafRow),
       });
     }
+    const filteredProjectRows = filterBrowserTreeRows(projectRows, query);
+    const filteredDefaultRows = filterBrowserTreeRows(defaultItems.map(createBrowserLeafRow), query);
     return visibleAssetSections([
-      { id: "project-samples", label: "Project", rows: filterBrowserTreeRows(projectRows, query) },
-      { id: "default-samples", label: "Default", rows: filterBrowserTreeRows(defaultItems.map(createBrowserLeafRow), query) },
+      createBrowserSection("project-samples", "Project", filteredProjectRows),
+      createBrowserSection("default-samples", "Default", filteredDefaultRows),
     ]);
   });
   const browserAssetSampleById = createMemo(() => {
@@ -324,6 +335,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: folderNamesById.get(folderId) ?? folderId,
         searchText: `${folderNamesById.get(folderId) ?? folderId} audio effect chains builtin`.toLowerCase(),
         folderId,
+        leafCount: items.length,
         children: items.map(createBrowserLeafRow),
       });
     }
@@ -336,6 +348,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       if (item.category === "audio-effect") audioEffectItems.push(item);
       if (item.category === "midi-effect") midiEffectItems.push(item);
     }
+    const chainRows = browserEffectChainRows();
     const rows = filterBrowserTreeRows([
       {
         kind: "folder",
@@ -343,6 +356,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         source: "builtin",
         label: "Audio Effects",
         searchText: "audio effects builtin",
+        leafCount: audioEffectItems.length,
         children: audioEffectItems.map(createBrowserLeafRow),
       },
       {
@@ -351,7 +365,8 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         source: "builtin",
         label: "Audio Effect Chains",
         searchText: "audio effect chains presets builtin",
-        children: browserEffectChainRows(),
+        leafCount: countBrowserTreeLeaves(chainRows),
+        children: chainRows,
       },
       {
         kind: "folder",
@@ -359,11 +374,12 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         source: "builtin",
         label: "MIDI Effects",
         searchText: "midi effects builtin",
+        leafCount: midiEffectItems.length,
         children: midiEffectItems.map(createBrowserLeafRow),
       },
     ], browserDeviceQuery("effects"));
     return visibleBrowserSections([
-      { id: "builtin-effects", label: "Builtin", rows },
+      createBrowserSection("builtin-effects", "Builtin", rows),
     ]);
   });
   const browserInstrumentItems = createMemo<BrowserItem[]>(() => {
@@ -439,35 +455,39 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         label: folderNamesById.get(folderId) ?? folderId,
         searchText: `${folderNamesById.get(folderId) ?? folderId} instrument presets builtin`.toLowerCase(),
         folderId,
+        leafCount: items.length,
         children: items.map(createBrowserLeafRow),
       });
     }
     return [...folders, ...unfiled.map(createBrowserLeafRow)];
   });
-  const browserInstrumentSections = createMemo(() => visibleBrowserSections([
-    {
-      id: "builtin-midi-instruments",
-      label: "Builtin",
-      rows: filterBrowserTreeRows([
-        {
-          kind: "folder",
-          id: "builtin-instruments",
-          source: "builtin",
-          label: "Instruments",
-          searchText: "instruments builtin",
-          children: browserInstrumentItems().map(createBrowserLeafRow),
-        },
-        {
-          kind: "folder",
-          id: "builtin-instrument-presets",
-          source: "builtin",
-          label: "Instrument Presets",
-          searchText: "instrument presets builtin",
-          children: browserInstrumentPresetRows(),
-        },
-      ], browserDeviceQuery("midi-instruments")),
-    },
-  ]));
+  const browserInstrumentSections = createMemo(() => {
+    const instrumentItems = browserInstrumentItems();
+    const presetRows = browserInstrumentPresetRows();
+    const rows = filterBrowserTreeRows([
+      {
+        kind: "folder",
+        id: "builtin-instruments",
+        source: "builtin",
+        label: "Instruments",
+        searchText: "instruments builtin",
+        leafCount: instrumentItems.length,
+        children: instrumentItems.map(createBrowserLeafRow),
+      },
+      {
+        kind: "folder",
+        id: "builtin-instrument-presets",
+        source: "builtin",
+        label: "Instrument Presets",
+        searchText: "instrument presets builtin",
+        leafCount: countBrowserTreeLeaves(presetRows),
+        children: presetRows,
+      },
+    ], browserDeviceQuery("midi-instruments"));
+    return visibleBrowserSections([
+      createBrowserSection("builtin-midi-instruments", "Builtin", rows),
+    ]);
+  });
 
   const insertBrowserSample = (itemId: string) => {
     const sample = browserAssetSampleById().get(itemId);

@@ -337,7 +337,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
           aria-label={props.browser.open ? "Hide browser sidebar" : "Show browser sidebar"}
           class={cn(
             nativeMenuTriggerClass,
-            "focus:bg-neutral-800 focus:text-neutral-100 focus:outline-none",
+            "focus:outline-none",
             props.browser.open && "bg-neutral-800 text-neutral-100",
           )}
           onClick={props.browser.onToggle}

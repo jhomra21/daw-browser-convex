@@ -1,4 +1,4 @@
-import { normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { assert, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { createEqNodes } from '../effects/dsp'
 import { connectFxChain, createCompressorNodeChain, createDelayNodeChain, createReverbNodeChain, createSaturatorNodeChain, type CreateReverbImpulseResponse, type DelayNodeChain, type ReverbNodeChain, type SaturatorNodeChain } from '../effects/chain'
 import { createReverbImpulseCache } from '../effects/reverb-impulse-cache'
@@ -97,13 +97,13 @@ export async function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: R
   for (const resolvedTrack of graph.channels) {
     const channelId = resolvedTrack.channel.id
     const source = trackNodes.get(channelId)
-    if (!source) continue
+    assert(source, `Missing offline mixer source for track ${channelId}`)
     const outputTarget = resolvedTrack.outputTargetId ? trackNodes.get(resolvedTrack.outputTargetId)?.input : undefined
     source.gain.connect(source.output)
     source.output.connect(outputTarget ?? masterInput)
     for (const send of resolvedTrack.sends) {
       const target = trackNodes.get(send.targetId)
-      if (!target) continue
+      assert(target, `Missing offline mixer send target for track ${send.targetId}`)
       const sendGain = ctx.createGain()
       sendGain.gain.value = send.amount
       source.gain.connect(sendGain)

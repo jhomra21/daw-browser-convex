@@ -1,6 +1,6 @@
 import { buildCreatedClipSelection, createProjectedClips, createProjectedLocalClips, pushClipCreateHistory, type BatchClipCreateItem } from "~/lib/clip-create";
 import type { ClipBufferWriter } from "~/lib/clip-buffer-cache";
-import { isLocalId } from "@daw-browser/shared";
+import { assert, isLocalId } from "@daw-browser/shared";
 import type { OptimisticGrantScope } from "~/lib/optimistic-grant-scope";
 import { buildClipsMoveHistoryEntry } from "~/lib/undo/builders";
 import { getTrackHistoryRef } from "~/lib/undo/refs";
@@ -74,9 +74,7 @@ export const commitDuplicatedClipDrag = async (input: DuplicateCommitInput) => {
 };
 
 const createProjectedCloudClips = async (input: DuplicateCommitInput) => {
-  if (!input.userId) {
-    throw new Error("Cloud clip duplication requires a user id.");
-  }
+  assert(input.userId, "Cloud clip duplication requires a user id.");
   return await createProjectedClips({
     projectId: input.projectId,
     items: input.items,

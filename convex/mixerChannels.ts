@@ -1,5 +1,6 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "./_generated/server";
+import { assert } from "@daw-browser/shared";
 
 export type MixerSend = {
   targetId: Id<"tracks">;
@@ -132,15 +133,9 @@ function mergeTrackWithMixerState(
   channel: Doc<"mixerChannels"> | null | undefined,
   now = Date.now(),
 ): MergedTrackDoc {
-  if (!channel) {
-    throw new Error(`Missing mixer channel for track ${String(track._id)}.`);
-  }
-  if (channel.channelRole === undefined) {
-    throw new Error(`Missing mixer channel role for track ${String(track._id)}.`);
-  }
-  if (channel.sends === undefined) {
-    throw new Error(`Missing mixer channel sends for track ${String(track._id)}.`);
-  }
+  assert(channel, `Missing mixer channel for track ${String(track._id)}.`);
+  assert(channel.channelRole !== undefined, `Missing mixer channel role for track ${String(track._id)}.`);
+  assert(channel.sends !== undefined, `Missing mixer channel sends for track ${String(track._id)}.`);
   const lockState = normalizeMixerLockState(channel.lockedBy, channel.lockedAt, now);
   return {
     ...track,
@@ -190,10 +185,10 @@ export async function removeTrackRoutingReferences(
 
 export async function ensureMixerChannelForTrack(ctx: MixerReadCtx, track: Doc<"tracks">) {
   const rows = await listMixerChannelsForTrack(ctx, track._id);
-  if (rows.length !== 1) {
-    throw new Error(`Expected exactly one mixer channel for track ${String(track._id)}.`);
-  }
-  return rows[0];
+  assert(rows.length === 1, `Expected exactly one mixer channel for track ${String(track._id)}.`);
+  const channel = rows[0];
+  assert(channel, `Missing mixer channel for track ${String(track._id)}.`);
+  return channel;
 }
 
 export async function listProjectTracksWithMixerChannels(ctx: MixerReadCtx, projectId: string): Promise<MergedTrackDoc[]> {
@@ -204,18 +199,14 @@ export async function listProjectTracksWithMixerChannels(ctx: MixerReadCtx, proj
   const channelByTrackId = new Map<string, Doc<"mixerChannels">>();
   for (const channel of channels) {
     const trackId = String(channel.trackId);
-    if (channelByTrackId.has(trackId)) {
-      throw new Error(`Expected exactly one mixer channel for track ${trackId}.`);
-    }
+    assert(!channelByTrackId.has(trackId), `Expected exactly one mixer channel for track ${trackId}.`);
     channelByTrackId.set(trackId, channel);
   }
   const now = Date.now();
   return tracks
     .map((track) => {
       const channel = channelByTrackId.get(String(track._id));
-      if (!channel) {
-        throw new Error(`Missing mixer channel for track ${String(track._id)}.`);
-      }
+      assert(channel, `Missing mixer channel for track ${String(track._id)}.`);
       return mergeTrackWithMixerState(track, channel, now);
     })
     .sort((a: MergedTrackDoc, b: MergedTrackDoc) => (a.index ?? 0) - (b.index ?? 0));

@@ -1,6 +1,6 @@
 import { buildLocalClip } from '~/lib/clip-create'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
-import { automationTargetKey } from '@daw-browser/shared'
+import { assert, assertDefined, automationTargetKey } from '@daw-browser/shared'
 import { createLocalTrack } from '~/lib/tracks'
 import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 
@@ -27,10 +27,7 @@ type HistoryContext = {
 }
 
 function requireResolved<T>(value: T | null | undefined, message: string): T {
-  if (value === null || value === undefined) {
-    throw new Error(message)
-  }
-  return value
+  return assertDefined(value, message)
 }
 
 function readCurrentTrackRouting(track: Pick<Track, 'sends' | 'outputTargetId'> | null | undefined): TrackRouting {
@@ -82,7 +79,7 @@ export async function applyTrackClipCreateEntry(
     })
     createdTrack = true
   }
-  if (!trackId) throw new Error('Failed to recreate track')
+  assert(trackId, 'Failed to recreate track')
   entry.data.track.currentTrackId = trackId
   deps.grantTrackWrite(trackId, grantScope)
   deps.actions.insertLocalTrack(createLocalTrack({
@@ -96,7 +93,7 @@ export async function applyTrackClipCreateEntry(
   try {
     const clipSnapshot = entry.data.clip
     const clipId = entry.data.clip.currentId || await createHistoryClip(deps, trackId, clipSnapshot)
-    if (!clipId) throw new Error('Failed to recreate clip')
+    assert(clipId, 'Failed to recreate clip')
     entry.data.clip.currentId = clipId
     deps.grantClipWrite(clipId, grantScope)
     if (clipSnapshot.sampleUrl) {
@@ -154,7 +151,7 @@ export async function applyTrackDeleteEntry(
     })
     createdTrack = true
   }
-  if (!newTrackId) throw new Error('Failed to recreate deleted track')
+  assert(newTrackId, 'Failed to recreate deleted track')
   entry.data.recreatedTrackId = newTrackId
   deps.grantTrackWrite(newTrackId, grantScope)
   syncHistoryTrackCreateEntryId(deps.getHistoryEntries(), entry.data.track.trackRef, newTrackId)
@@ -199,7 +196,7 @@ export async function applyTrackDeleteEntry(
       const clipRef = requireResolved(clip.clipRef, 'Missing clip reference for track-delete history entry')
       const clipSnapshot = clip
       const newId = recreatedClipIdsByRef.get(clipRef) || await createHistoryClip(deps, newTrackId, clipSnapshot)
-      if (!newId) throw new Error('Failed to recreate deleted track clip')
+      assert(newId, 'Failed to recreate deleted track clip')
       recreatedClipIdsByRef.set(clipRef, newId)
       deps.grantClipWrite(newId, grantScope)
       if (clipSnapshot.sampleUrl) {

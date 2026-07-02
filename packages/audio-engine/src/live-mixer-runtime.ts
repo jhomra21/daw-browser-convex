@@ -1,4 +1,4 @@
-import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { areAudioEffectOrdersEqual, assert, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState, type CompressorChainState } from './effects/compressor-chain-state'
@@ -76,9 +76,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const ensureTrackNodes = (trackId: string): TrackNodeGroup => {
     options.ensureAudio()
     const ctx = options.getAudioContext()
-    if (!ctx) {
-      throw new Error('Audio runtime was not initialized')
-    }
+    assert(ctx, 'Audio runtime was not initialized')
 
     let input = inputs.get(trackId)
     const createdInput = !input

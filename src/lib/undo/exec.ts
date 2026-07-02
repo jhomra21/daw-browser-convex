@@ -3,7 +3,7 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { normalizeCompressorParams, normalizeReverbParams, type AutomationEnvelope } from '@daw-browser/shared'
+import { assert, assertDefined, normalizeCompressorParams, normalizeReverbParams, type AutomationEnvelope } from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
@@ -73,10 +73,7 @@ function buildRefIndex(deps: Deps) {
 }
 
 function requireResolved<T>(value: T | null | undefined, message: string): T {
-  if (value === null || value === undefined) {
-    throw new Error(message)
-  }
-  return value
+  return assertDefined(value, message)
 }
 
 async function applyTrackVolumeEntry(entry: Extract<HistoryEntry, { type: 'track-volume' }>, deps: Deps, direction: HistoryDirection) {
@@ -256,7 +253,7 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
     if (isLocalHistoryProject(deps)) {
       for (const item of pendingItems) {
         const clipId = await createHistoryClip(deps, item.trackId, item.clip)
-        if (!clipId) throw new Error('Failed to recreate clip')
+        assert(clipId, 'Failed to recreate clip')
         recreatedClipIdsByRef.set(item.clip.clipRef, clipId)
       }
     } else {
@@ -326,7 +323,7 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       const existingId = entry.data.clip.currentId
       const clipSnapshot = entry.data.clip
       const newId = existingId || await createHistoryClip(deps, trackId, clipSnapshot)
-      if (!newId) throw new Error('Failed to recreate clip')
+      assert(newId, 'Failed to recreate clip')
       entry.data.clip.currentId = newId
       deps.grantClipWrite(newId, grantScope)
       if (clipSnapshot.sampleUrl) {
@@ -394,7 +391,7 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
           channelRole: entry.data.channelRole,
         })
       }
-      if (!newId) throw new Error('Failed to recreate track')
+      assert(newId, 'Failed to recreate track')
       entry.data.currentTrackId = newId
       deps.grantTrackWrite(newId, grantScope)
       deps.actions.insertLocalTrack(createLocalTrack({

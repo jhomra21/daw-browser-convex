@@ -1,5 +1,5 @@
 import { buildLocalClip } from "~/lib/clip-create";
-import { buildClipCreatePayload, normalizeAudioWarp, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type ClipCreateSnapshot } from "@daw-browser/shared";
+import { assert, buildClipCreatePayload, normalizeAudioWarp, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
@@ -126,7 +126,7 @@ export const createHistoryTrack = async (
     channelRole: payload.channelRole,
   });
   const result = await publishDurableSharedTimelineOperation({ projectId: deps.projectId, userId: deps.userId, operation });
-  if (typeof result !== "string") throw new Error("Failed to create history track");
+  assert(typeof result === "string", "Failed to create history track");
   return result;
 };
 
@@ -137,7 +137,7 @@ export const createHistoryClip = async (
 ) => {
   if (isLocalHistoryProject(deps)) {
     const clipRef = clip.clipRef ?? clip.currentId;
-    if (!clipRef) throw new Error("Missing clip reference for local history clip creation");
+    assert(clipRef, "Missing clip reference for local history clip creation");
     return (await createLocalTimelineRepository(deps.projectId).createClip(
       toHistoryCreateClipInput(trackId, buildLocalClip({ id: clipRef, clip })),
     )).id;
@@ -363,9 +363,7 @@ export const removeHistoryClipIdsOrThrow = async (deps: Deps, clipIds: string[],
       ? result.removedClipIds.map((clipId: unknown) => String(clipId))
       : [],
   );
-  if (clipIds.some((clipId) => !removedIds.has(String(clipId)))) {
-    throw new Error(message);
-  }
+  assert(clipIds.every((clipId) => removedIds.has(String(clipId))), message);
 };
 
 export const removeHistoryTrackOrThrow = async (deps: Deps, trackId: Track["id"], message: string) => {
@@ -377,9 +375,7 @@ export const removeHistoryTrackOrThrow = async (deps: Deps, trackId: Track["id"]
     deps.convexApi.tracks.remove,
     buildTrackDeleteMutationInput({ trackId }),
   );
-  if (result?.status !== "deleted") {
-    throw new Error(message);
-  }
+  assert(result?.status === "deleted", message);
 };
 
 export const persistHistoryClipTimingOrThrow = async (
@@ -399,7 +395,7 @@ export const persistHistoryClipTimingOrThrow = async (
       audioWarp: timing.audioWarp,
       gain: timing.gain,
     });
-    if (!applied) throw new Error(message);
+    assert(applied, message);
     return;
   }
   const audioWarp = normalizeAudioWarp(timing.audioWarp);
@@ -421,7 +417,7 @@ export const persistHistoryClipTimingOrThrow = async (
       bufferOffsetSec: timing.bufferOffsetSec ?? 0,
       midiOffsetBeats: timing.midiOffsetBeats ?? 0,
     });
-  if (!applied) throw new Error(message);
+  assert(applied, message);
   if (timing.gain !== undefined) {
     const result = await publishDurableSharedTimelineOperation({
       projectId: deps.projectId,
@@ -429,7 +425,7 @@ export const persistHistoryClipTimingOrThrow = async (
       operation: { kind: "clips.setGain", payload: { clipId, gain: timing.gain } },
       queuedResult: { status: "applied" },
     });
-    if (!isAppliedResult(result)) throw new Error(message);
+    assert(isAppliedResult(result), message);
   }
 };
 
@@ -440,20 +436,20 @@ export const persistHistoryClipAudioWarpOrThrow = async (
   message: string,
 ) => {
   const normalizedAudioWarp = normalizeAudioWarp(audioWarp);
-  if (!normalizedAudioWarp) throw new Error(message);
+  assert(normalizedAudioWarp, message);
   if (isLocalHistoryProject(deps)) {
     const applied = await createLocalTimelineRepository(deps.projectId).updateClip({
       clipId,
       audioWarp: normalizedAudioWarp,
     });
-    if (!applied) throw new Error(message);
+    assert(applied, message);
     return;
   }
   const applied = await persistClipAudioWarp(deps.convexClient, deps.convexApi, {
     clipId,
     audioWarp: normalizedAudioWarp,
   });
-  if (!applied) throw new Error(message);
+  assert(applied, message);
 };
 
 export const persistHistoryClipMovesOrThrow = async (
@@ -476,7 +472,7 @@ export const persistHistoryClipMovesOrThrow = async (
       })),
     }),
   );
-  if (result?.status !== "applied") throw new Error(message);
+  assert(result?.status === "applied", message);
 };
 
 export const persistHistoryTrackRouting = async (deps: Deps, trackId: Track["id"], routing: TrackRouting) => {

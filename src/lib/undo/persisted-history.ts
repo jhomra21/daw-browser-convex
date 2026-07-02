@@ -149,6 +149,7 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>) {
       return isString(data.trackRef) && isRoutingSnapshot(data.from) && isRoutingSnapshot(data.to)
     case 'effect-params':
       return (data.trackRef === undefined || isString(data.trackRef))
+        && (data.instanceId === undefined || isString(data.instanceId))
         && isString(data.effect)
         && EFFECT_TYPES.has(data.effect)
         && isRecord(data.from)

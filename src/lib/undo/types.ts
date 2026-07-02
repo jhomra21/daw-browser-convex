@@ -106,6 +106,7 @@ type EffectParamsCommitPayloadMap = {
   [Effect in EffectType]: {
     targetId: EffectTargetId<Effect>
     effect: Effect
+    instanceId?: string
     from: EffectParamsByEffect[Effect]
     to: EffectParamsByEffect[Effect]
   }

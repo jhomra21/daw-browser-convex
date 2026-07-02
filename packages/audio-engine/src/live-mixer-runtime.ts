@@ -347,13 +347,21 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
   const applyTrackFxInstances = async (trackId: string, instances: AudioEffectRuntimeInstance[]) => {
     const wasInstanceMode = trackFxInstances.has(trackId)
-    const ctx = options.getAudioContext()
-    if (!ctx) {
-      trackFxInstances.set(trackId, instances)
-      pendingTrackFxInstances.set(trackId, instances)
+    const normalized = normalizeAudioEffectRuntimeInstances(instances)
+    if (normalized.length === 0) {
+      trackFxInstances.delete(trackId)
+      pendingTrackFxInstances.delete(trackId)
+      closeTrackInstanceStates(trackId)
+      const nodes = inputs.has(trackId) && gains.has(trackId) ? ensureTrackNodes(trackId) : null
+      if (wasInstanceMode && nodes) rebuildTrackRouting(trackId, nodes)
       return
     }
-    const normalized = normalizeAudioEffectRuntimeInstances(instances)
+    const ctx = options.getAudioContext()
+    if (!ctx) {
+      trackFxInstances.set(trackId, normalized)
+      pendingTrackFxInstances.set(trackId, normalized)
+      return
+    }
     trackFxInstances.set(trackId, normalized)
     const activeIds = new Set(normalized.map((instance) => instance.id))
     const staleIds = new Set<string>()

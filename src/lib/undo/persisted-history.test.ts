@@ -71,6 +71,28 @@ describe('persisted undo history', () => {
     })
   })
 
+  test('keeps effect instance ids on parameter entries', () => {
+    const entry: HistoryEntry = {
+      type: 'effect-params',
+      projectId: 'project-1',
+      data: {
+        trackRef: 'track-ref-1',
+        effect: 'compressor',
+        instanceId: 'compressor-instance-1',
+        from: compressorParams,
+        to: { ...compressorParams, thresholdDb: -30 },
+      },
+    }
+
+    expect(normalizePersistedHistory(serializePersistedHistory({
+      undo: [entry],
+      redo: [],
+    }))).toEqual({
+      undo: [entry],
+      redo: [],
+    })
+  })
+
   test('keeps Synth and Drum Rack instrument parameter entries', () => {
     const synthEntry = createInstrumentEntry(synthInstrument, drumRackInstrument)
     const drumRackEntry = createInstrumentEntry(drumRackInstrument, synthInstrument)

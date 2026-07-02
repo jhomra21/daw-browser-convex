@@ -561,6 +561,46 @@ export function createEffectsPanelAudioDevice(
     });
   }
 
+  function commitInstanceParams(targetId: string, instanceId: string, kind: AudioEffectKind, previous: AudioEffectParams, next: AudioEffectParams) {
+    if (kind === "eq") {
+      const from = normalizeEqParams(previous);
+      const to = normalizeEqParams(next);
+      if (AUDIO_EFFECT_CONTRACTS.eq.serializeParams(from) === AUDIO_EFFECT_CONTRACTS.eq.serializeParams(to)) return;
+      if (targetId === "master") context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-eq", instanceId, from, to }, context.projectId());
+      else context.onEffectParamsCommitted?.({ targetId, effect: "eq", instanceId, from, to }, context.projectId());
+      return;
+    }
+    if (kind === "compressor") {
+      const from = normalizeCompressorParams(previous);
+      const to = normalizeCompressorParams(next);
+      if (AUDIO_EFFECT_CONTRACTS.compressor.serializeParams(from) === AUDIO_EFFECT_CONTRACTS.compressor.serializeParams(to)) return;
+      if (targetId === "master") context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-compressor", instanceId, from, to }, context.projectId());
+      else context.onEffectParamsCommitted?.({ targetId, effect: "compressor", instanceId, from, to }, context.projectId());
+      return;
+    }
+    if (kind === "saturator") {
+      const from = normalizeSaturatorParams(previous);
+      const to = normalizeSaturatorParams(next);
+      if (AUDIO_EFFECT_CONTRACTS.saturator.serializeParams(from) === AUDIO_EFFECT_CONTRACTS.saturator.serializeParams(to)) return;
+      if (targetId === "master") context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-saturator", instanceId, from, to }, context.projectId());
+      else context.onEffectParamsCommitted?.({ targetId, effect: "saturator", instanceId, from, to }, context.projectId());
+      return;
+    }
+    if (kind === "delay") {
+      const from = normalizeDelayParams(previous);
+      const to = normalizeDelayParams(next);
+      if (AUDIO_EFFECT_CONTRACTS.delay.serializeParams(from) === AUDIO_EFFECT_CONTRACTS.delay.serializeParams(to)) return;
+      if (targetId === "master") context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-delay", instanceId, from, to }, context.projectId());
+      else context.onEffectParamsCommitted?.({ targetId, effect: "delay", instanceId, from, to }, context.projectId());
+      return;
+    }
+    const from = normalizeReverbParams(previous);
+    const to = normalizeReverbParams(next);
+    if (AUDIO_EFFECT_CONTRACTS.reverb.serializeParams(from) === AUDIO_EFFECT_CONTRACTS.reverb.serializeParams(to)) return;
+    if (targetId === "master") context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-reverb", instanceId, from, to }, context.projectId());
+    else context.onEffectParamsCommitted?.({ targetId, effect: "reverb", instanceId, from, to }, context.projectId());
+  }
+
   function applyInstancesToEngine(targetId: string, order: AudioEffectInstance[]) {
     const instances = buildRuntimeInstancesForTarget(targetId, order);
     if (targetId === "master") context.audioEngine().setMasterFxInstances(instances);
@@ -604,6 +644,7 @@ export function createEffectsPanelAudioDevice(
     const current = paramsForInstance({ id: instanceId, kind }) ?? createDefaultParamsForKind(kind);
     const next = normalizeParamsForKind(kind, updater(current));
     setDraftParamsByInstance((prev) => ({ ...prev, [instanceKey(targetId, instanceId)]: next }));
+    commitInstanceParams(targetId, instanceId, kind, current, next);
     void persistInstanceParams(targetId, instanceId, kind, next).catch(() => undefined);
   };
   const updateEq = (updater: (prev: EqParams) => EqParams) => {

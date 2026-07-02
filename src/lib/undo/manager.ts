@@ -21,19 +21,19 @@ function mergeEntry(prev: HistoryEntry, entry: HistoryEntry): HistoryEntry {
   if (prev.type === 'effect-params' && entry.type === 'effect-params') {
     switch (entry.data.effect) {
       case 'eq':
-        if (prev.data.effect !== 'eq') return entry
+        if (prev.data.effect !== 'eq' || prev.data.instanceId !== entry.data.instanceId) return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'compressor':
-        if (prev.data.effect !== 'compressor') return entry
+        if (prev.data.effect !== 'compressor' || prev.data.instanceId !== entry.data.instanceId) return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'saturator':
-        if (prev.data.effect !== 'saturator') return entry
+        if (prev.data.effect !== 'saturator' || prev.data.instanceId !== entry.data.instanceId) return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'delay':
-        if (prev.data.effect !== 'delay') return entry
+        if (prev.data.effect !== 'delay' || prev.data.instanceId !== entry.data.instanceId) return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'reverb':
-        if (prev.data.effect !== 'reverb') return entry
+        if (prev.data.effect !== 'reverb' || prev.data.instanceId !== entry.data.instanceId) return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'synth':
         if (prev.data.effect !== 'synth') return entry
@@ -42,19 +42,19 @@ function mergeEntry(prev: HistoryEntry, entry: HistoryEntry): HistoryEntry {
         if (prev.data.effect !== 'arp') return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'master-eq':
-        if (prev.data.effect !== 'master-eq') return entry
+        if (prev.data.effect !== 'master-eq' || prev.data.instanceId !== entry.data.instanceId) return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'master-compressor':
-        if (prev.data.effect !== 'master-compressor') return entry
+        if (prev.data.effect !== 'master-compressor' || prev.data.instanceId !== entry.data.instanceId) return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'master-saturator':
-        if (prev.data.effect !== 'master-saturator') return entry
+        if (prev.data.effect !== 'master-saturator' || prev.data.instanceId !== entry.data.instanceId) return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'master-delay':
-        if (prev.data.effect !== 'master-delay') return entry
+        if (prev.data.effect !== 'master-delay' || prev.data.instanceId !== entry.data.instanceId) return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'master-reverb':
-        if (prev.data.effect !== 'master-reverb') return entry
+        if (prev.data.effect !== 'master-reverb' || prev.data.instanceId !== entry.data.instanceId) return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
     }
   }

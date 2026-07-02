@@ -430,7 +430,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         tracks: renderTracks(),
         payload,
       }),
-      `fx:${payload.effect}:${payload.targetId}`,
+      `fx:${payload.effect}:${payload.targetId}:${payload.instanceId ?? ""}`,
       600,
     );
   };

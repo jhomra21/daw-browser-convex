@@ -158,6 +158,13 @@ export function createMasterFxRuntime() {
   ) => {
     const wasInstanceMode = masterFxInstances !== null
     const normalized = normalizeAudioEffectRuntimeInstances(instances)
+    if (normalized.length === 0) {
+      masterFxInstances = null
+      pendingFxInstances = null
+      closeAllInstanceStates()
+      if (wasInstanceMode) rebuildRouting(ctx, masterGain, destination)
+      return
+    }
     masterFxInstances = normalized
     const activeIds = new Set(normalized.map((instance) => instance.id))
     const staleIds = new Set<string>()
@@ -334,6 +341,13 @@ export function createMasterFxRuntime() {
       createImpulseResponse: CreateReverbImpulseResponse,
     ) => {
       const normalized = normalizeAudioEffectRuntimeInstances(instances)
+      if (normalized.length === 0) {
+        masterFxInstances = null
+        pendingFxInstances = null
+        closeAllInstanceStates()
+        if (ctx && masterGain) rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
+        return
+      }
       if (!ctx || !masterGain) {
         masterFxInstances = normalized
         pendingFxInstances = normalized

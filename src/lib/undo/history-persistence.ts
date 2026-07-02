@@ -3,7 +3,7 @@ import { assert, buildClipCreatePayload, normalizeAudioWarp, normalizeCompressor
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
-import { setLocalEffect } from "~/lib/local-effects";
+import { setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects";
 import { deleteLocalAutomationEnvelope, setLocalAutomationEnvelope } from "~/lib/local-automation";
 import { automationTargetKey, isLocalId } from "@daw-browser/shared";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
@@ -228,10 +228,24 @@ export const persistHistoryEffectParams = async (
   if (isLocalHistoryProject(deps)) {
     if (entry.data.effect === "reverb" || entry.data.effect === "master-reverb") {
       const params = normalizeReverbParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
+      if (entry.data.instanceId) {
+        await setLocalEffectInstance(deps.projectId, targetId, entry.data.effect, params, { instanceId: entry.data.instanceId });
+        return;
+      }
       await setLocalEffect(deps.projectId, targetId, entry.data.effect, params);
       return;
     }
     const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+    if (entry.data.instanceId) {
+      await setLocalEffectInstance(
+        deps.projectId,
+        targetId,
+        entry.data.effect,
+        params,
+        { instanceId: entry.data.instanceId },
+      );
+      return;
+    }
     await setLocalEffect(
       deps.projectId,
       targetId,
@@ -243,52 +257,52 @@ export const persistHistoryEffectParams = async (
   switch (entry.data.effect) {
     case "master-eq": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setMasterEqParams", payload: { params } });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterEqParams", payload: { params, instanceId: entry.data.instanceId } });
       return;
     }
     case "master-compressor": {
       const params = normalizeCompressorParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
-      await publishHistoryOperation(deps, { kind: "effects.setMasterCompressorParams", payload: { params } });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterCompressorParams", payload: { params, instanceId: entry.data.instanceId } });
       return;
     }
     case "master-reverb": {
       const params = normalizeReverbParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
-      await publishHistoryOperation(deps, { kind: "effects.setMasterReverbParams", payload: { params } });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterReverbParams", payload: { params, instanceId: entry.data.instanceId } });
       return;
     }
     case "master-saturator": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setMasterSaturatorParams", payload: { params } });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterSaturatorParams", payload: { params, instanceId: entry.data.instanceId } });
       return;
     }
     case "master-delay": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setMasterDelayParams", payload: { params } });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterDelayParams", payload: { params, instanceId: entry.data.instanceId } });
       return;
     }
     case "eq": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setEqParams", payload: { trackId: targetId, params } });
+      await publishHistoryOperation(deps, { kind: "effects.setEqParams", payload: { trackId: targetId, params, instanceId: entry.data.instanceId } });
       return;
     }
     case "compressor": {
       const params = normalizeCompressorParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
-      await publishHistoryOperation(deps, { kind: "effects.setCompressorParams", payload: { trackId: targetId, params } });
+      await publishHistoryOperation(deps, { kind: "effects.setCompressorParams", payload: { trackId: targetId, params, instanceId: entry.data.instanceId } });
       return;
     }
     case "reverb": {
       const params = normalizeReverbParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
-      await publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId: targetId, params } });
+      await publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId: targetId, params, instanceId: entry.data.instanceId } });
       return;
     }
     case "saturator": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setSaturatorParams", payload: { trackId: targetId, params } });
+      await publishHistoryOperation(deps, { kind: "effects.setSaturatorParams", payload: { trackId: targetId, params, instanceId: entry.data.instanceId } });
       return;
     }
     case "delay": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setDelayParams", payload: { trackId: targetId, params } });
+      await publishHistoryOperation(deps, { kind: "effects.setDelayParams", payload: { trackId: targetId, params, instanceId: entry.data.instanceId } });
       return;
     }
     case "synth": {

@@ -5,13 +5,14 @@ import type { HistoryEntry } from './types'
 
 const compressorParams = createDefaultCompressorParams()
 
-function createCompressorEntry(toThresholdDb: number): HistoryEntry {
+function createCompressorEntry(toThresholdDb: number, instanceId?: string): HistoryEntry {
   return {
     type: 'effect-params',
     projectId: 'project-1',
     data: {
       trackRef: 'track-ref-1',
       effect: 'compressor',
+      ...(instanceId ? { instanceId } : {}),
       from: { ...compressorParams, thresholdDb: -24 },
       to: { ...compressorParams, thresholdDb: toThresholdDb },
     },
@@ -42,6 +43,18 @@ describe('createUndoManager', () => {
     expect(undo).toHaveLength(2)
     expect(undo[0]).toEqual(createCompressorEntry(-30))
     expect(undo[1]).toEqual(createCompressorEntry(-42))
+  })
+
+  test('keeps separate effect instance parameter entries', () => {
+    const manager = createUndoManager({})
+
+    manager.push(createCompressorEntry(-30, 'compressor-a'), 'track-1:compressor')
+    manager.push(createCompressorEntry(-36, 'compressor-b'), 'track-1:compressor')
+
+    expect(manager.snapshot().undo).toEqual([
+      createCompressorEntry(-30, 'compressor-a'),
+      createCompressorEntry(-36, 'compressor-b'),
+    ])
   })
 
   test('merges master compressor effect parameter entries', () => {

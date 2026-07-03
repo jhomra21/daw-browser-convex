@@ -7,7 +7,8 @@ import { assert } from '@daw-browser/shared'
 import { routeTree } from './routeTree.gen'
 import './index.css'
 import { queryClient } from '~/lib/query-client'
-import { loadAppSettings } from '~/lib/app-settings-storage'
+import { AppPreferencesProvider } from '~/context/app-preferences'
+import { loadInitialAppPreferences } from '~/lib/preferences/app-preferences'
 
 if (import.meta.env.PROD) {
   registerSW({ immediate: true })
@@ -31,12 +32,16 @@ declare module '@tanstack/solid-router' {
 
 const rootElement = document.getElementById('root')
 assert(rootElement, 'Root element with id "root" not found in index.html')
+const initialAppPreferences = loadInitialAppPreferences()
+const initialColorMode = initialAppPreferences.appearance.theme
 
 render(() => (
   <QueryClientProvider client={queryClient}>
-    <ColorModeScript initialColorMode={loadAppSettings().theme} />
-    <ColorModeProvider initialColorMode={loadAppSettings().theme}>
-      <RouterProvider router={router} />
+    <ColorModeScript initialColorMode={initialColorMode} />
+    <ColorModeProvider initialColorMode={initialColorMode}>
+      <AppPreferencesProvider initialPreferences={initialAppPreferences}>
+        <RouterProvider router={router} />
+      </AppPreferencesProvider>
     </ColorModeProvider>
   </QueryClientProvider>
 ), rootElement)

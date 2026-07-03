@@ -44,6 +44,7 @@
     "@daw-browser/waveforms": "workspace:*",
     "@kobalte/core": "^0.13.11",
     "@openrouter/ai-sdk-provider": "^1.5.4",
+    "@solid-primitives/storage": "^4.3.4",
     "@tanstack/solid-query": "^5.90.23",
     "@tanstack/solid-router": "^1.163.3",
     "ai": "^5.0.142",

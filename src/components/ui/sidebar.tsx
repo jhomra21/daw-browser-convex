@@ -27,10 +27,9 @@ import { Sheet, SheetContent } from "~/components/ui/sheet"
 import { Skeleton } from "~/components/ui/skeleton"
 import { TextField, TextFieldInput } from "~/components/ui/text-field"
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip"
+import { useAppPreferences } from "~/context/app-preferences"
 
 const MOBILE_BREAKPOINT = 768
-const SIDEBAR_COOKIE_NAME = "sidebar:state"
-const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
@@ -80,18 +79,8 @@ type SidebarProviderProps = Omit<ComponentProps<"div">, "style"> & {
 }
 
 const SidebarProvider: Component<SidebarProviderProps> = (rawProps) => {
-  // Read stored state from localStorage or use default
-  const getStoredState = () => {
-    if (typeof window === 'undefined') return true
-    const stored = document.cookie
-      .split('; ')
-      .find(row => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
-      ?.split('=')[1]
-    return stored ? stored === 'true' : true
-  }
-
-  const props = mergeProps({ defaultOpen: getStoredState() }, rawProps)
-  const [local, others] = splitProps(props, [
+  const appPreferences = useAppPreferences()
+  const [local, others] = splitProps(rawProps, [
     "defaultOpen",
     "open",
     "onOpenChange",
@@ -102,21 +91,23 @@ const SidebarProvider: Component<SidebarProviderProps> = (rawProps) => {
 
   const isMobile = useIsMobile()
   const [openMobile, setOpenMobile] = createSignal(false)
+  const [_open, _setOpen] = createSignal(local.defaultOpen ?? appPreferences.sidebar.open())
+
+  createEffect(() => {
+    if (local.open !== undefined || local.defaultOpen !== undefined) return
+    _setOpen(appPreferences.sidebar.open())
+  })
 
   // This is the internal state of the sidebar.
   // We use open and onOpenChange for control from outside the component.
-  const [_open, _setOpen] = createSignal(local.defaultOpen)
   const open = () => local.open ?? _open()
   const setOpen = (value: boolean | ((value: boolean) => boolean)) => {
+    const nextOpen = typeof value === "function" ? value(open()) : value
     if (local.onOpenChange) {
-      return local.onOpenChange?.(typeof value === "function" ? value(open()) : value)
+      return local.onOpenChange(nextOpen)
     }
-    _setOpen(value)
-    
-    // Write cookie in a non-blocking way to prevent UI lag
-    setTimeout(() => {
-      document.cookie = `${SIDEBAR_COOKIE_NAME}=${open()}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
-    }, 0)
+    _setOpen(nextOpen)
+    appPreferences.sidebar.setOpen(nextOpen)
   }
 
   // Optimize state changes by pre-computing values

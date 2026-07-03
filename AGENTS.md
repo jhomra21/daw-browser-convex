@@ -20,6 +20,9 @@ Prefer the most concise and elegant solutions that changes or adds as little cod
 Reference these local codebases when designing apis, code, solutions or other programming things:
 /Documents/monorepo-new (Fullstack Video Editing Platform/app)[Programming Code]
 /Documents/dialkit (Real-time parameter tweaking for React, Solid, Svelte, and Vue) [UI Code]
+/Documents/opencode (OpenCode app reference for Solid persistence, app preferences, and product architecture)[Programming Code]
+/Documents/solid-primitives (Solid Primitives source and docs, especially storage/persistence primitives)[Library Reference]
+/Documents/daw-effect-research (DAW/audio effect implementation reference)[Audio DSP Reference]
 
 If you need to reference external libraries or APIs, use the most up-to-date and reliable sources available with web search or other tools.
 If you want to add a new local codebase, ask user and provide repo url.

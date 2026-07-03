@@ -2,6 +2,7 @@ import { type Component, For, Show, createSignal, createEffect, onCleanup } from
 import { CommandsEnvelopeSchema, type CommandsEnvelope } from '@daw-browser/shared'
 import { convexClient, convexApi } from '~/lib/convex'
 import { cn } from '~/lib/utils'
+import { useAppPreferences } from '~/context/app-preferences'
 
 // Minimal message type for local chat UI
 type Msg = { role: 'user' | 'assistant'; content: string }
@@ -310,7 +311,8 @@ const AgentChat: Component<AgentChatProps> = (props) => {
   const [parsedCommands, setParsedCommands] = createSignal<CommandsEnvelope | null>(null)
   const [executing, setExecuting] = createSignal(false)
   const [executeError, setExecuteError] = createSignal<string | null>(null)
-  const [autoApply, setAutoApply] = createSignal(false)
+  const appPreferences = useAppPreferences()
+  const autoApply = appPreferences.agent.autoApply
   let saveTimer: number | null = null
   const pendingScrollTimers = new Set<number>()
   const pendingScrollFrames = new Set<number>()
@@ -391,17 +393,6 @@ const AgentChat: Component<AgentChatProps> = (props) => {
     const count = messages().length
     if (count <= 0) return
     scrollToBottomSoon()
-  })
-
-  // Load/save auto-apply preference
-  createEffect(() => {
-    try {
-      const v = localStorage.getItem('agent_auto_apply')
-      if (v) setAutoApply(v === '1')
-    } catch {}
-  })
-  createEffect(() => {
-    try { localStorage.setItem('agent_auto_apply', autoApply() ? '1' : '0') } catch {}
   })
 
   // Load history when panel opens or identifiers change
@@ -770,7 +761,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
                 autoApply() ? 'border-green-500 text-green-400' : 'border-neutral-600 text-neutral-300',
               )}
               aria-pressed={autoApply()}
-              onClick={() => setAutoApply(v => !v)}
+              onClick={appPreferences.agent.toggleAutoApply}
               title="Auto-apply detected commands"
             >Auto: {autoApply() ? 'On' : 'Off'}</button>
             <button class="text-neutral-400 hover:text-white" onClick={props.onClose}>✕</button>

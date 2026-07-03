@@ -16,6 +16,7 @@ type AppPreferencesContextValue = {
     themeId: () => DawThemeId
     themeOptions: () => readonly DawThemeOption[]
     resolvedTheme: () => ResolvedAppTheme
+    appliedThemeRevision: () => number
     setTheme: (theme: AppTheme) => void
     setThemeId: (id: DawThemeId) => void
     previewThemeId: (id: DawThemeId) => void
@@ -44,6 +45,7 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
   const [preferences, setPreferences] = createPersistedAppPreferencesWithInitial(props.initialPreferences)
   const [previewThemeId, setPreviewThemeId] = createSignal<DawThemeId | null>(null)
   const [previewTheme, setPreviewTheme] = createSignal<AppTheme | null>(null)
+  const [appliedThemeRevision, setAppliedThemeRevision] = createSignal(0)
 
   const activeThemeId = () => previewThemeId() ?? preferences.appearance.themeId
   const activeTheme = () => previewTheme() ?? preferences.appearance.theme
@@ -54,6 +56,7 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
 
   createEffect(() => {
     applyDawTheme(activeThemeId(), colorMode())
+    setAppliedThemeRevision((revision) => revision + 1)
   })
 
   const setTheme = (theme: AppTheme) => {
@@ -101,6 +104,7 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           themeId: () => activeThemeId(),
           themeOptions: () => themeOptions,
           resolvedTheme: colorMode,
+          appliedThemeRevision,
           setTheme,
           setThemeId,
           previewThemeId: setPreviewThemeId,

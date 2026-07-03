@@ -76,8 +76,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
   const handleWidthPx = () =>
     clipWidthPx() < 18 ? 2 : clipWidthPx() < 28 ? 3 : 6;
   const canvasColors = createMemo(() => {
-    void appPreferences.appearance.resolvedTheme();
-    void appPreferences.appearance.themeId();
+    void appPreferences.appearance.appliedThemeRevision();
     const colors = readCssVariables([
       { name: "--clip-selected", fallback: "rgba(59,130,246,0.95)" },
       { name: "--clip-midi", fallback: "rgba(34,197,94,0.95)" },

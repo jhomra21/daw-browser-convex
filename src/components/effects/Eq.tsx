@@ -198,8 +198,7 @@ export default function Eq(props: EqProps) {
   }
 
   const canvasColors = createMemo(() => {
-    void appPreferences.appearance.resolvedTheme()
-    void appPreferences.appearance.themeId()
+    void appPreferences.appearance.appliedThemeRevision()
     const colors = readCssVariables([
       { name: '--device-graph-background', fallback: '#0b0b0b' },
       { name: '--device-graph-grid', fallback: '#262626' },

@@ -61,8 +61,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     leftPadSec: props.clip.leftPadSec,
   }));
   const canvasColors = createMemo(() => {
-    void appPreferences.appearance.resolvedTheme();
-    void appPreferences.appearance.themeId();
+    void appPreferences.appearance.appliedThemeRevision();
     const colors = readCssVariables([
       { name: "--timeline-background", fallback: "rgb(10, 10, 10)" },
       { name: "--timeline-grid-minor", fallback: "rgba(255,255,255,0.08)" },

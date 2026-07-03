@@ -41,13 +41,13 @@ export function Dashboard(props: DashboardProps) {
       <Dialog open preventScroll={false} onOpenChange={(open) => { if (!open) close(); }}>
         <DialogContent
           showCloseButton={false}
-          class="h-[min(90vh,42rem)] w-[min(94vw,64rem)] max-w-none overflow-hidden border-neutral-800 bg-neutral-950 p-0 text-neutral-100"
+          class="h-[min(90vh,42rem)] w-[min(94vw,64rem)] max-w-none overflow-hidden border-border bg-background p-0 text-foreground"
         >
           <div class="flex h-full min-h-0">
-            <aside class="flex w-60 shrink-0 flex-col gap-1 border-r border-neutral-800 bg-neutral-900/80 p-3">
+            <aside class="flex w-60 shrink-0 flex-col gap-1 border-r border-sidebar-border bg-sidebar p-3">
               <div class="px-3 py-2">
-                <div class="text-sm font-semibold text-neutral-100">DAW Dashboard</div>
-                <div class="text-xs text-neutral-500">Workspace management</div>
+                <div class="text-sm font-semibold text-sidebar-foreground">DAW Dashboard</div>
+                <div class="text-xs text-muted-foreground">Workspace management</div>
               </div>
               <nav class="flex flex-1 flex-col gap-1">
                 <For each={items}>

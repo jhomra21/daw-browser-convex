@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import {
   defaultAppPreferences,
-  normalizeAppPreferences
+  normalizeAppPreferences,
+  parseAppTheme,
+  parseAppThemeSelectValue
 } from "./app-preferences-core"
 
 describe("normalizeAppPreferences", () => {
@@ -29,5 +31,21 @@ describe("normalizeAppPreferences", () => {
       agent: { autoApply: true },
       sidebar: { open: false }
     })
+  })
+})
+
+describe("theme helpers", () => {
+  test("parses stored themes with fallback", () => {
+    expect(parseAppTheme("system")).toBe("system")
+    expect(parseAppTheme("light")).toBe("light")
+    expect(parseAppTheme("dark")).toBe("dark")
+    expect(parseAppTheme("blue")).toBe("system")
+  })
+
+  test("parses select values without fallback mutation", () => {
+    expect(parseAppThemeSelectValue("system")).toBe("system")
+    expect(parseAppThemeSelectValue("light")).toBe("light")
+    expect(parseAppThemeSelectValue("dark")).toBe("dark")
+    expect(parseAppThemeSelectValue("blue")).toBeNull()
   })
 })

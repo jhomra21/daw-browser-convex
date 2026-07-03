@@ -3,6 +3,7 @@ import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import EffectShell from '~/components/effects/EffectShell'
 import EqFilterTypeSelect from '~/components/effects/eq-filter-type-select'
 import Knob from '~/components/ui/knob'
+import { useAppPreferences } from '~/context/app-preferences'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +25,7 @@ import {
   type EqBandParams,
 } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
+import { readCssVariables } from '~/lib/theme/css-variables'
 
 
 // ===== Component =====
@@ -118,6 +120,7 @@ function applyEqResponseBandParams(filter: BiquadFilterNode, band: EqBandParams)
 }
 
 export default function Eq(props: EqProps) {
+  const appPreferences = useAppPreferences()
   const [selectedId, setSelectedId] = createSignal<string>(props.bands[0]?.id ?? '')
   const [draggedId, setDraggedId] = createSignal<string | null>(null)
   const [canvasSize, setCanvasSize] = createSignal({ width: 640, height: 160 })
@@ -272,12 +275,29 @@ export default function Eq(props: EqProps) {
       cvs.height = height
     }
 
+    const colors = readCssVariables([
+      { name: '--device-graph-background', fallback: '#0b0b0b' },
+      { name: '--device-graph-grid', fallback: '#262626' },
+      { name: '--device-graph-accent', fallback: '#22c55e' },
+      { name: '--muted-foreground', fallback: '#6b7280' },
+      { name: '--meter-safe', fallback: '#22c55e' },
+      { name: '--meter-clipping', fallback: '#ef4444' },
+      { name: '--clip-selected', fallback: '#facc15' },
+    ])
+    const graphBackground = colors.get('--device-graph-background') ?? '#0b0b0b'
+    const graphGrid = colors.get('--device-graph-grid') ?? '#262626'
+    const graphAccent = colors.get('--device-graph-accent') ?? '#22c55e'
+    const mutedForeground = colors.get('--muted-foreground') ?? '#6b7280'
+    const meterSafe = colors.get('--meter-safe') ?? '#22c55e'
+    const meterClipping = colors.get('--meter-clipping') ?? '#ef4444'
+    const clipSelected = colors.get('--clip-selected') ?? '#facc15'
+
     // BG
-    ctx.fillStyle = '#0b0b0b'
+    ctx.fillStyle = graphBackground
     ctx.fillRect(0, 0, width, height)
 
     // Grid
-    ctx.strokeStyle = '#262626'
+    ctx.strokeStyle = graphGrid
     ctx.lineWidth = 1
 
     // Horizontal lines at gains
@@ -290,7 +310,7 @@ export default function Eq(props: EqProps) {
 
       // labels
       if (g % 12 === 0) {
-        ctx.fillStyle = '#6b7280'
+        ctx.fillStyle = mutedForeground
         ctx.font = '9px ui-monospace, SFMono-Regular, Menlo, monospace'
         ctx.textAlign = 'left'
         ctx.fillText(`${g >= 0 ? '+' : ''}${g} dB`, 12, y - 2)
@@ -305,14 +325,14 @@ export default function Eq(props: EqProps) {
       ctx.moveTo(x, 0)
       ctx.lineTo(x, height)
       ctx.stroke()
-      ctx.fillStyle = '#6b7280'
+      ctx.fillStyle = mutedForeground
       ctx.font = '9px ui-monospace, SFMono-Regular, Menlo, monospace'
       ctx.textAlign = 'center'
       ctx.fillText(f >= 1000 ? `${(f / 1000).toFixed(0)}k` : `${f}`, x, height - 4)
     }
 
     // Zero line
-    ctx.strokeStyle = '#404040'
+    ctx.strokeStyle = graphGrid
     ctx.lineWidth = 2
     const zy = gainToY(0)
     ctx.beginPath()
@@ -324,8 +344,8 @@ export default function Eq(props: EqProps) {
     const spec = displayedSpectrum
     if (spec && spec.length > 0) {
       const grad = ctx.createLinearGradient(6, 0, width - 6, 0)
-      grad.addColorStop(0, '#22c55e')
-      grad.addColorStop(1, '#ef4444')
+      grad.addColorStop(0, meterSafe)
+      grad.addColorStop(1, meterClipping)
       const L = 6, R = 6
       const inner = Math.max(1, width - (L + R))
       const nyquist = Math.max(1, displayedSpectrumSampleRate / 2)
@@ -397,7 +417,7 @@ export default function Eq(props: EqProps) {
           }
         }
 
-        ctx.strokeStyle = '#22c55e'
+        ctx.strokeStyle = meterSafe
         ctx.lineWidth = 2.5
         ctx.beginPath()
         pointIndex = 0
@@ -422,13 +442,13 @@ export default function Eq(props: EqProps) {
       const isSel = selectedId() === b.id
       ctx.beginPath()
       ctx.arc(x, y, isSel ? 8 : 7, 0, Math.PI * 2)
-      ctx.fillStyle = isSel ? '#facc15' : '#d97706'
-      ctx.strokeStyle = '#0a0a0a'
+      ctx.fillStyle = isSel ? clipSelected : graphAccent
+      ctx.strokeStyle = graphBackground
       ctx.lineWidth = 2
       ctx.fill()
       ctx.stroke()
 
-      ctx.fillStyle = '#111827'
+      ctx.fillStyle = graphBackground
       ctx.fillText(String(index + 1), x, y + 0.5)
     }
   }
@@ -448,6 +468,7 @@ export default function Eq(props: EqProps) {
     void canvasSize()
     void props.spectrumData
     void spectrumTick()
+    void appPreferences.appearance.resolvedTheme()
     draw()
   })
 

@@ -60,7 +60,7 @@ function SaturatorCurveGraph(props: { curve: SaturatorCurve }) {
   const patternId = createUniqueId()
 
   return (
-    <div class="relative h-[118px] w-[220px] shrink-0 self-center overflow-hidden bg-neutral-950">
+    <div class="relative h-[118px] w-[220px] shrink-0 self-center overflow-hidden bg-device-graph-background">
       <svg
         viewBox="0 0 180 100"
         class="absolute inset-0 h-full w-full"
@@ -69,14 +69,14 @@ function SaturatorCurveGraph(props: { curve: SaturatorCurve }) {
       >
         <defs>
           <pattern id={patternId} width="20" height="20" patternUnits="userSpaceOnUse">
-            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#262626" stroke-width="1" />
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="var(--device-graph-grid)" stroke-width="1" />
           </pattern>
         </defs>
         <rect width="180" height="100" fill={`url(#${patternId})`} />
-        <rect x="52" y="0" width="76" height="100" fill="#22d3ee" opacity="0.24" />
-        <line x1="0" y1="50" x2="180" y2="50" stroke="#525252" stroke-width="1" />
-        <line x1="90" y1="0" x2="90" y2="100" stroke="#525252" stroke-width="1" />
-        <polyline points={SATURATOR_CURVE_POINTS[props.curve]} fill="none" stroke="#22d3ee" stroke-width="2.25" vector-effect="non-scaling-stroke" />
+        <rect x="52" y="0" width="76" height="100" fill="var(--device-graph-accent)" opacity="0.24" />
+        <line x1="0" y1="50" x2="180" y2="50" stroke="var(--device-graph-grid)" stroke-width="1" />
+        <line x1="90" y1="0" x2="90" y2="100" stroke="var(--device-graph-grid)" stroke-width="1" />
+        <polyline points={SATURATOR_CURVE_POINTS[props.curve]} fill="none" stroke="var(--device-graph-accent)" stroke-width="2.25" vector-effect="non-scaling-stroke" />
       </svg>
     </div>
   )

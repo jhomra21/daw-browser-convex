@@ -29,6 +29,14 @@
   --accent-foreground: oklch(0.21 0.006 285.885);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
+  --info: oklch(0.94 0.045 230);
+  --info-foreground: oklch(0.48 0.17 250);
+  --success: oklch(0.93 0.07 160);
+  --success-foreground: oklch(0.45 0.15 160);
+  --warning: oklch(0.94 0.09 90);
+  --warning-foreground: oklch(0.55 0.16 55);
+  --error: oklch(0.94 0.06 25);
+  --error-foreground: oklch(0.55 0.22 27);
   --border: oklch(0.92 0.004 286.32);
   --input: oklch(0.92 0.004 286.32);
   --ring: oklch(0.871 0.006 286.286);
@@ -37,8 +45,29 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --clip-audio: 160 84% 39%;
-  --clip-recording: 0 84% 60%;
+  --app-surface: oklch(0.985 0.001 286);
+  --app-surface-muted: oklch(0.96 0.002 286);
+  --timeline-background: oklch(0.975 0.001 286);
+  --timeline-surface: oklch(0.94 0.002 286);
+  --timeline-surface-muted: oklch(0.90 0.004 286);
+  --timeline-grid-minor: oklch(0.35 0.005 286 / 0.10);
+  --timeline-grid-major: oklch(0.35 0.005 286 / 0.20);
+  --timeline-playhead: oklch(0.58 0.22 27);
+  --clip-audio: oklch(0.64 0.15 160);
+  --clip-audio-foreground: oklch(0.985 0 0);
+  --clip-midi: oklch(0.62 0.18 250);
+  --clip-midi-foreground: oklch(0.985 0 0);
+  --clip-selected: oklch(0.72 0.16 85);
+  --clip-selected-foreground: oklch(0.16 0.005 286);
+  --clip-recording: oklch(0.64 0.22 27);
+  --meter-safe: oklch(0.64 0.15 160);
+  --meter-warning: oklch(0.78 0.16 85);
+  --meter-clipping: oklch(0.64 0.22 27);
+  --device-graph-background: oklch(0.985 0.001 286);
+  --device-graph-grid: oklch(0.35 0.005 286 / 0.16);
+  --device-graph-accent: oklch(0.75 0.13 210);
+  --recording: oklch(0.64 0.22 27);
+  --automation: oklch(0.64 0.21 35);
   --sidebar: oklch(0.970 0 0);
   --sidebar-foreground: oklch(0.141 0.005 285.823);
   --sidebar-primary: oklch(0.21 0.006 285.885);
@@ -67,6 +96,14 @@
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.396 0.141 25.723);
   --destructive-foreground: oklch(0.985 0 0);
+  --info: oklch(0.30 0.08 240);
+  --info-foreground: oklch(0.78 0.11 230);
+  --success: oklch(0.30 0.08 160);
+  --success-foreground: oklch(0.80 0.13 160);
+  --warning: oklch(0.34 0.08 80);
+  --warning-foreground: oklch(0.85 0.15 85);
+  --error: oklch(0.32 0.09 27);
+  --error-foreground: oklch(0.78 0.17 27);
   --border: oklch(0.274 0.006 286.033);
   --input: oklch(0.274 0.006 286.033);
   --ring: oklch(0.442 0.017 285.786);
@@ -75,8 +112,29 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --clip-audio: 160 84% 39%;
-  --clip-recording: 0 84% 60%;
+  --app-surface: oklch(0.16 0.005 286);
+  --app-surface-muted: oklch(0.20 0.006 286);
+  --timeline-background: oklch(0.11 0.003 286);
+  --timeline-surface: oklch(0.16 0.005 286);
+  --timeline-surface-muted: oklch(0.22 0.006 286);
+  --timeline-grid-minor: oklch(1 0 0 / 0.08);
+  --timeline-grid-major: oklch(1 0 0 / 0.16);
+  --timeline-playhead: oklch(0.70 0.20 27);
+  --clip-audio: oklch(0.64 0.15 160);
+  --clip-audio-foreground: oklch(0.985 0 0);
+  --clip-midi: oklch(0.62 0.18 250);
+  --clip-midi-foreground: oklch(0.985 0 0);
+  --clip-selected: oklch(0.78 0.16 85);
+  --clip-selected-foreground: oklch(0.16 0.005 286);
+  --clip-recording: oklch(0.64 0.22 27);
+  --meter-safe: oklch(0.64 0.15 160);
+  --meter-warning: oklch(0.78 0.16 85);
+  --meter-clipping: oklch(0.64 0.22 27);
+  --device-graph-background: oklch(0.11 0.003 286);
+  --device-graph-grid: oklch(1 0 0 / 0.16);
+  --device-graph-accent: oklch(0.75 0.13 210);
+  --recording: oklch(0.64 0.22 27);
+  --automation: oklch(0.70 0.20 35);
   --sidebar: oklch(0.21 0.006 285.885);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -104,6 +162,14 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-error: var(--error);
+  --color-error-foreground: var(--error-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -112,8 +178,29 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-app-surface: var(--app-surface);
+  --color-app-surface-muted: var(--app-surface-muted);
+  --color-timeline-background: var(--timeline-background);
+  --color-timeline-surface: var(--timeline-surface);
+  --color-timeline-surface-muted: var(--timeline-surface-muted);
+  --color-timeline-grid-minor: var(--timeline-grid-minor);
+  --color-timeline-grid-major: var(--timeline-grid-major);
+  --color-timeline-playhead: var(--timeline-playhead);
   --color-clip-audio: var(--clip-audio);
+  --color-clip-audio-foreground: var(--clip-audio-foreground);
+  --color-clip-midi: var(--clip-midi);
+  --color-clip-midi-foreground: var(--clip-midi-foreground);
+  --color-clip-selected: var(--clip-selected);
+  --color-clip-selected-foreground: var(--clip-selected-foreground);
   --color-clip-recording: var(--clip-recording);
+  --color-meter-safe: var(--meter-safe);
+  --color-meter-warning: var(--meter-warning);
+  --color-meter-clipping: var(--meter-clipping);
+  --color-device-graph-background: var(--device-graph-background);
+  --color-device-graph-grid: var(--device-graph-grid);
+  --color-device-graph-accent: var(--device-graph-accent);
+  --color-recording: var(--recording);
+  --color-automation: var(--automation);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -156,29 +243,6 @@
 
 
 @layer base {
-  :root {
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-
-  .dark,
-  [data-kb-theme="dark"] {
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-  
   * {
     @apply border-border outline-ring/50;
   }
@@ -191,12 +255,12 @@
   * {
     /* Tailwind v4 may not generate `border-border` if the theme doesn't expose it.
        Set the base border color directly from our CSS variable instead. */
-    border-color: hsl(var(--border));
+    border-color: var(--border);
   }
   body {
     /* Use CSS variables directly to avoid relying on generated utilities */
-    background-color: hsl(var(--background));
-    color: hsl(var(--foreground));
+    background-color: var(--background);
+    color: var(--foreground);
     font-feature-settings:
       "rlig" 1,
       "calt" 1;
@@ -220,7 +284,7 @@
   .step:before {
     @apply absolute w-9 h-9 bg-muted font-mono font-medium text-center text-base inline-flex items-center justify-center -indent-px border-4;
     /* Set border color directly using our token variable */
-    border-color: hsl(var(--background));
+    border-color: var(--background);
     @apply ml-[-50px] mt-[-4px];
     content: counter(step);
   }

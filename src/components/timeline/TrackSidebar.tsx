@@ -356,17 +356,17 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         class="absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize"
         onPointerDown={sidebar().onSidebarPointerDown}
       >
-        <div class="pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-neutral-700" />
+        <div class="pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-muted" />
       </div>
 
       <div
-        class="flex h-full flex-col overflow-x-clip border-l border-neutral-800 bg-neutral-900 p-0"
+        class="flex h-full flex-col overflow-x-clip border-l border-border bg-timeline-surface p-0"
         style={{
           width: `${sidebar().sidebarWidth}px`,
           "min-width": `${TIMELINE_SIDEBAR_MIN_WIDTH}px`,
         }}
       >
-        <div class="sticky top-0 z-40 border-b border-neutral-800 bg-neutral-900" style={{ height: `${RULER_HEIGHT}px` }} />
+        <div class="sticky top-0 z-40 border-b border-border bg-timeline-surface" style={{ height: `${RULER_HEIGHT}px` }} />
         <For each={sidebar().tracks}>
           {(track) => {
             const lockedByOther =
@@ -446,8 +446,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 class={cn(
                   "relative [box-shadow:inset_0_-1px_0_rgb(38_38_38)]",
                   sidebar().selectedTrackId === track.id
-                    ? "bg-neutral-800"
-                    : "bg-neutral-900",
+                    ? "bg-timeline-surface-muted"
+                    : "bg-timeline-surface",
                 )}
                 style={{ height: `${LANE_HEIGHT + automationTotalHeight()}px` }}
                 onClick={() => sidebar().onTrackClick(track.id)}
@@ -461,12 +461,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       class={cn(
                         "flex h-7 w-full items-center justify-center border px-2 text-center text-sm font-semibold",
                         muteDisabled
-                          ? "cursor-not-allowed border-neutral-700 text-neutral-500"
+                          ? "cursor-not-allowed border-border text-muted-foreground"
                           : muted()
-                            ? "border-neutral-700 bg-amber-500 text-black"
+                            ? "border-border bg-amber-500 text-black"
                             : sidebar().selectedTrackId === track.id
-                              ? "border-neutral-700"
-                              : "border-neutral-700 hover:border-neutral-600",
+                              ? "border-border"
+                              : "border-border hover:border-neutral-600",
                       )}
                       style={{ "border-width": "0.5px" }}
                       disabled={muteDisabled}
@@ -486,7 +486,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       <span class="flex min-w-0 flex-col items-center gap-1">
                         <span class="truncate">{displayTrackName(track)}</span>
                         <Show when={isGroupTrack}>
-                          <span class="bg-neutral-700 px-1.5 py-0.5 text-xs uppercase tracking-wide text-neutral-300">
+                          <span class="bg-muted px-1.5 py-0.5 text-xs uppercase tracking-wide text-muted-foreground">
                             Group
                           </span>
                         </Show>
@@ -499,16 +499,16 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       <div class="relative">
                         <div
                           class={cn(
-                            "flex h-7 w-full items-center justify-between border border-neutral-700 bg-neutral-950 px-2 text-xs text-neutral-200",
+                            "flex h-7 w-full items-center justify-between border border-border bg-timeline-background px-2 text-xs text-foreground",
                             !canWriteTrackRouting(track) &&
-                              "text-neutral-500",
+                              "text-muted-foreground",
                           )}
                         >
                           <span class="truncate">
                             {outputTargetName(track)}
                           </span>
                           <svg
-                            class="h-3 w-3 shrink-0 text-neutral-300"
+                            class="h-3 w-3 shrink-0 text-muted-foreground"
                             viewBox="0 0 12 12"
                             fill="none"
                             aria-hidden="true"
@@ -549,17 +549,17 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       <div class="relative">
                         <div
                           class={cn(
-                            "flex h-7 w-full items-center justify-between border border-neutral-700 bg-neutral-950 px-2 text-xs text-neutral-200",
+                            "flex h-7 w-full items-center justify-between border border-border bg-timeline-background px-2 text-xs text-foreground",
                             (!canWriteTrackRouting(track) ||
                               returnTracks().length === 0) &&
-                              "text-neutral-500",
+                              "text-muted-foreground",
                           )}
                         >
                           <span class="truncate">
                             {sendTargetName(track)}
                           </span>
                           <svg
-                            class="h-3 w-3 shrink-0 text-neutral-300"
+                            class="h-3 w-3 shrink-0 text-muted-foreground"
                             viewBox="0 0 12 12"
                             fill="none"
                             aria-hidden="true"
@@ -607,7 +607,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           class={cn(
                             "flex h-7 items-center justify-center border text-xs font-bold transition-colors",
                             recordDisabled
-                              ? "cursor-not-allowed border-red-900 bg-neutral-800 text-red-900"
+                              ? "cursor-not-allowed border-red-900 bg-timeline-surface-muted text-red-900"
                               : isRecordArmed()
                                 ? "border-red-400 bg-red-500 text-black shadow-inner"
                                 : "border-red-500 text-red-400 hover:bg-red-500/20",
@@ -639,10 +639,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           class={cn(
                             "h-7 border text-xs font-semibold",
                             soloDisabled
-                              ? "cursor-not-allowed border-neutral-700 bg-neutral-700/40 text-neutral-500"
+                              ? "cursor-not-allowed border-border bg-muted/40 text-muted-foreground"
                               : soloed()
                                 ? "border-blue-300 bg-blue-500/90 text-black"
-                                : "border-neutral-700 bg-neutral-800 text-neutral-200 hover:bg-neutral-700",
+                                : "border-border bg-timeline-surface-muted text-foreground hover:bg-muted",
                           )}
                           disabled={soloDisabled}
                           onClick={(event) => {
@@ -666,7 +666,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             "h-7 border text-xs font-semibold transition-colors",
                             automationVisible()
                               ? "border-red-400 bg-red-500/90 text-black"
-                              : "border-neutral-700 bg-neutral-800 text-red-300 hover:bg-red-500/20",
+                              : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
                           )}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -680,8 +680,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           class={cn(
                             "h-7 border text-xs font-semibold transition-colors",
                             canAddAutomationLane()
-                              ? "border-neutral-700 bg-neutral-800 text-red-200 hover:bg-red-500/20"
-                              : "cursor-not-allowed border-neutral-800 bg-neutral-900 text-neutral-600",
+                              ? "border-border bg-timeline-surface-muted text-red-200 hover:bg-red-500/20"
+                              : "cursor-not-allowed border-border bg-timeline-surface text-neutral-600",
                           )}
                           disabled={!canAddAutomationLane()}
                           onClick={(event) => {
@@ -815,7 +815,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             right >= 0.98 ? "bg-red-500" : "bg-green-500";
                           return (
                             <>
-                              <div class="relative h-full w-1 overflow-hidden bg-neutral-950/70">
+                              <div class="relative h-full w-1 overflow-hidden bg-timeline-background/70">
                                 <div
                                   class={cn(
                                     "absolute bottom-0 w-full transition-all duration-75",
@@ -824,7 +824,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                                   style={{ height: `${left * 100}%` }}
                                 />
                               </div>
-                              <div class="relative h-full w-1 overflow-hidden bg-neutral-950/70">
+                              <div class="relative h-full w-1 overflow-hidden bg-timeline-background/70">
                                 <div
                                   class={cn(
                                     "absolute bottom-0 w-full transition-all duration-75",
@@ -842,7 +842,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 </div>
                 {automationVisible() ? (
                   <div
-                    class="absolute inset-x-0 z-10 border-t border-red-500/30 bg-neutral-950/95 text-[11px] text-red-100"
+                    class="absolute inset-x-0 z-10 border-t border-automation/30 bg-timeline-background/95 text-[11px] text-error-foreground"
                     style={{ top: `${LANE_HEIGHT}px`, height: `${automationTotalHeight()}px` }}
                     onClick={(event) => event.stopPropagation()}
                   >
@@ -876,7 +876,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                               <span class="truncate">{envelope()?.points.length ?? 0} pts</span>
                               <button
                                 type="button"
-                                class="h-5 w-5 border border-red-500/30 text-red-100 hover:border-red-400"
+                                class="h-5 w-5 border border-automation/30 text-error-foreground hover:border-red-400"
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   props.automation.actions.hideTrackLane(track.id, parameterId);

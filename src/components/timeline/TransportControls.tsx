@@ -52,7 +52,7 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
 ) => {
   const transport = () => props.transport;
   const centerIconButtonClass =
-    "h-7 w-7 text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100";
+    "h-7 w-7 text-muted-foreground hover:bg-timeline-surface-muted hover:text-foreground";
 
   return (
     <div class="justify-self-center flex items-center gap-1">
@@ -106,12 +106,12 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
         <Icon name="stop" class="h-4 w-4 fill-current" />
       </Button>
       <div class="flex items-center">
-        <label class="flex items-center gap-1 text-xs text-neutral-400 pr-1">
+        <label class="flex items-center gap-1 text-xs text-muted-foreground pr-1">
           <input
             type="text"
             value={transport().tempoDraft()}
             size={Math.max(transport().tempoDraft().length + 1, 2)}
-            class="w-auto appearance-none border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 focus:border-neutral-500 focus:outline-none"
+            class="w-auto appearance-none border border-border bg-timeline-surface px-2 py-1 text-xs text-foreground focus:border-neutral-500 focus:outline-none"
             inputmode="numeric"
             pattern="[0-9]*"
             onFocus={() => transport().setTempoEditing(true)}
@@ -145,7 +145,7 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
             onPointerUp={transport().endTempoDrag}
             onPointerCancel={transport().endTempoDrag}
           />
-          <span class="text-xs text-neutral-500">BPM</span>
+          <span class="text-xs text-muted-foreground">BPM</span>
         </label>
         <Button
           variant="ghost"
@@ -190,11 +190,11 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
-            class="w-full border-neutral-800 bg-neutral-900"
+            class="w-full border-border bg-timeline-surface"
             style={{ width: "10rem" }}
           >
             <div class="p-1">
-              <div class="px-2 pb-1 text-xs text-neutral-400">Grid</div>
+              <div class="px-2 pb-1 text-xs text-muted-foreground">Grid</div>
               <For each={gridDenominators}>
                 {(denominator) => (
                   <DropdownMenuItem
@@ -328,7 +328,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
     onChangeBpm: props.onChangeBpm,
   });
   return (
-    <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-neutral-800 bg-neutral-950 p-2">
+    <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-border bg-timeline-background p-2">
       <div class="justify-self-start flex items-center gap-1">
         <Button
           variant="ghost"
@@ -338,7 +338,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
           class={cn(
             nativeMenuTriggerClass,
             "focus:outline-none",
-            props.browser.open && "bg-neutral-800 text-neutral-100",
+            props.browser.open && "bg-timeline-surface-muted text-foreground",
           )}
           onClick={props.browser.onToggle}
         >
@@ -397,8 +397,8 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
         <MidiKeyboardToggle midiKeyboard={props.midiKeyboard} />
         <SaveStatus projectMenu={props.projectMenu} />
         <div class="flex items-center gap-2 text-xs">
-          <span class="text-neutral-500">Playhead</span>
-          <span class="tabular-nums text-neutral-200">
+          <span class="text-muted-foreground">Playhead</span>
+          <span class="tabular-nums text-foreground">
             {props.playheadSec.toFixed(2)}s
           </span>
         </div>

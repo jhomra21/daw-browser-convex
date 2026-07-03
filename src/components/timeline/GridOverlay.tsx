@@ -25,20 +25,20 @@ const GridOverlay: Component<GridOverlayProps> = (props) => {
         /* Minor grid lines */
         repeating-linear-gradient(
           to right,
-          rgba(255,255,255,0.08) 0px,
-          rgba(255,255,255,0.08) 1px,
+          var(--timeline-grid-minor) 0px,
+          var(--timeline-grid-minor) 1px,
           transparent 1px,
           transparent ${minor}px
         ),
         /* Major bar lines anchored at 0 so they align with top verticals */
         repeating-linear-gradient(
           to right,
-          rgba(255,255,255,0.16) 0px,
-          rgba(255,255,255,0.16) 2px,
+          var(--timeline-grid-major) 0px,
+          var(--timeline-grid-major) 2px,
           transparent 2px,
           transparent ${major}px
         )`
-    } as any
+    }
   }
 
   return (

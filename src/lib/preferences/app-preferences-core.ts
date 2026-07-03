@@ -4,6 +4,7 @@ export const APP_PREFERENCES_STORAGE_KEY = "daw-browser.app-preferences.v1"
 export const APP_PREFERENCES_VERSION = 1
 
 export type AppTheme = ConfigColorMode
+export type ResolvedAppTheme = "light" | "dark"
 
 export type AppPreferences = {
   version: typeof APP_PREFERENCES_VERSION
@@ -39,6 +40,9 @@ const isAppTheme = (value: unknown): value is AppTheme =>
 
 export const parseAppTheme = (value: unknown): AppTheme =>
   isAppTheme(value) ? value : defaultAppPreferences.appearance.theme
+
+export const parseAppThemeSelectValue = (value: string): AppTheme | null =>
+  isAppTheme(value) ? value : null
 
 const parseBoolean = (value: unknown, fallback: boolean): boolean =>
   typeof value === "boolean" ? value : fallback

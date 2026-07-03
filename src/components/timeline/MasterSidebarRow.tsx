@@ -102,7 +102,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
     <div
       class={cn(
         "fixed right-0 z-30 [box-shadow:inset_0_1px_0_rgb(38_38_38)]",
-        master().selected ? "bg-neutral-800" : "bg-neutral-900",
+        master().selected ? "bg-timeline-surface-muted" : "bg-timeline-surface",
       )}
       style={{
         bottom: `${props.bottomOffsetPx}px`,
@@ -117,8 +117,8 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
           class={cn(
             "flex h-7 w-full items-center justify-center border px-2 text-center text-sm font-semibold",
             master().selected
-              ? "border-neutral-600 bg-neutral-700"
-              : "border-neutral-700 hover:border-neutral-600",
+              ? "border-neutral-600 bg-muted"
+              : "border-border hover:border-neutral-600",
           )}
           style={{ "border-width": "0.5px" }}
           onClick={(event) => {
@@ -129,7 +129,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
         >
           Master
         </button>
-        <div class="flex h-7 items-center border border-neutral-700 bg-neutral-950 px-2 text-xs text-neutral-200">
+        <div class="flex h-7 items-center border border-border bg-timeline-background px-2 text-xs text-foreground">
           Master Out
         </div>
         <div class="flex w-[92px] items-center gap-2">
@@ -173,7 +173,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
                 "h-7 w-7 shrink-0 border text-xs font-semibold transition-colors",
                 props.automation.visible
                   ? "border-red-400 bg-red-500/90 text-black"
-                  : "border-neutral-700 bg-neutral-800 text-red-300 hover:bg-red-500/20",
+                  : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
               )}
               onClick={(event) => {
                 event.stopPropagation();
@@ -184,12 +184,12 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
               A
             </button>
           </div>
-          <div class="h-8 w-[12px] shrink-0 bg-neutral-950/70" />
+          <div class="h-8 w-[12px] shrink-0 bg-timeline-background/70" />
         </div>
       </div>
       <Show when={props.automation.visible}>
         <div
-          class="relative grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-t border-red-500/30 bg-neutral-950/95 px-2 text-[11px] text-red-100"
+          class="relative grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-t border-automation/30 bg-timeline-background/95 px-2 text-[11px] text-error-foreground"
           style={{ height: `${automationHeight()}px` }}
           onClick={(event) => event.stopPropagation()}
         >

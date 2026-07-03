@@ -2,9 +2,11 @@ import { For, createEffect, createMemo, createSignal, onCleanup, onMount, type C
 import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
 import type { AudioWarp, Clip } from "@daw-browser/timeline-core/types";
 import { mapTimelineBeatToSourceBeat } from "@daw-browser/shared";
+import { useAppPreferences } from "~/context/app-preferences";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { buildNextAudioWarp } from "~/lib/audio-warp-patch";
 import { getSourceBeatOffsetAnchorX, getSourceBeatOffsetFromAnchorX } from "~/lib/audio-waveform-layout";
+import { readCssVariables } from "~/lib/theme/css-variables";
 
 type SampleDetailWaveformProps = {
   clip: Clip<AudioBuffer>;
@@ -32,6 +34,7 @@ const beatFromPointer = (event: Pick<PointerEvent, "clientX" | "altKey">, canvas
 };
 
 const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
+  const appPreferences = useAppPreferences();
   let canvasRef: HTMLCanvasElement | undefined;
   let canvasWrapRef: HTMLDivElement | undefined;
   let markerHandleRef: HTMLButtonElement | undefined;
@@ -140,12 +143,22 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, WAVEFORM_WIDTH_PX, waveformHeight);
-    ctx.fillStyle = "rgb(10, 10, 10)";
+
+    const colors = readCssVariables([
+      { name: "--timeline-background", fallback: "rgb(10, 10, 10)" },
+      { name: "--timeline-grid-minor", fallback: "rgba(255,255,255,0.08)" },
+      { name: "--timeline-grid-major", fallback: "rgba(255,255,255,0.14)" },
+    ]);
+    const timelineBackground = colors.get("--timeline-background") ?? "rgb(10, 10, 10)";
+    const timelineGridMinor = colors.get("--timeline-grid-minor") ?? "rgba(255,255,255,0.08)";
+    const timelineGridMajor = colors.get("--timeline-grid-major") ?? "rgba(255,255,255,0.14)";
+
+    ctx.fillStyle = timelineBackground;
     ctx.fillRect(0, 0, WAVEFORM_WIDTH_PX, waveformHeight);
 
     const layout = waveform.layout();
     const peaks = waveform.peaks();
-    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.strokeStyle = timelineGridMinor;
     ctx.lineWidth = 1;
     const secondsPerBeat = 60 / Math.max(1, props.projectBpm);
     const firstBeat = Math.ceil(props.clip.startSec / secondsPerBeat) * secondsPerBeat;
@@ -162,7 +175,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     }
 
     if (!peaks || layout.drawCols <= 0) {
-      ctx.strokeStyle = "rgba(255,255,255,0.14)";
+      ctx.strokeStyle = timelineGridMajor;
       ctx.beginPath();
       ctx.moveTo(0, Math.floor(waveformHeight / 2) + 0.5);
       ctx.lineTo(WAVEFORM_WIDTH_PX, Math.floor(waveformHeight / 2) + 0.5);
@@ -195,22 +208,23 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     void waveformHeightPx();
     void props.projectBpm;
     void waveform.peaks();
+    void appPreferences.appearance.resolvedTheme();
     draw();
   });
 
   return (
     <div
-      class="flex h-full flex-1 flex-col gap-2 overflow-hidden bg-neutral-950 px-3 py-2"
+      class="flex h-full flex-1 flex-col gap-2 overflow-hidden bg-timeline-background px-3 py-2"
       style={{ "min-width": `${WAVEFORM_PANEL_MIN_WIDTH_PX}px` }}
     >
       <div class="flex items-center justify-between gap-3">
         <div>
-          <div class="text-xs font-semibold uppercase tracking-wide text-neutral-400">Beat Grid</div>
-          <div class="text-xs text-neutral-500">
+          <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Beat Grid</div>
+          <div class="text-xs text-muted-foreground">
             {props.clip.audioWarp?.enabled === true ? "Warp follows source BPM timing" : "Warp off, grid follows project BPM"}
           </div>
         </div>
-        <div class="text-xs text-neutral-500">
+        <div class="text-xs text-muted-foreground">
           {props.clip.mediaStatus === "permission-denied" ? "Permission needed" : props.clip.mediaStatus === "missing" ? "Missing media" : ""}
         </div>
       </div>
@@ -302,7 +316,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
               }}
               type="button"
               aria-label="Drag beat offset marker"
-              class="pointer-events-auto absolute -left-2 top-0 h-4 w-4 border border-sky-300 bg-neutral-950 hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+              class="pointer-events-auto absolute -left-2 top-0 h-4 w-4 border border-sky-300 bg-timeline-background hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
               classList={{ "bg-sky-400": isDraggingMarker() }}
               disabled={!props.canWrite}
               onPointerDown={(event) => {

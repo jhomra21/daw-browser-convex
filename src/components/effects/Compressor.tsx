@@ -86,19 +86,19 @@ function CompressorGraph(props: { params: CompressorParams; viewMode: ViewMode; 
   const thresholdY = () => normalizeDbY(props.history.at(-1)?.thresholdDb ?? props.params.thresholdDb)
 
   return (
-    <div class="relative min-h-0 flex-1 overflow-hidden border border-neutral-800 bg-neutral-950">
+    <div class="relative min-h-0 flex-1 overflow-hidden border border-border bg-device-graph-background">
       <svg viewBox="0 0 180 100" class="absolute inset-0 h-full w-full" preserveAspectRatio="none" aria-label="Compressor transfer curve">
         <defs>
           <pattern id={patternId} width="20" height="20" patternUnits="userSpaceOnUse">
-            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#262626" stroke-width="1" />
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="var(--device-graph-grid)" stroke-width="1" />
           </pattern>
         </defs>
         <rect width="180" height="100" fill={`url(#${patternId})`} />
-        <line x1="0" y1="100" x2="180" y2="0" stroke="#404040" stroke-width="1" />
-        <line x1="0" y1="50" x2="180" y2="50" stroke="#525252" stroke-width="1" />
-        <line x1="0" y1={thresholdY()} x2="180" y2={thresholdY()} stroke="#22d3ee" stroke-width="1" opacity="0.75" vector-effect="non-scaling-stroke" />
+        <line x1="0" y1="100" x2="180" y2="0" stroke="var(--device-graph-grid)" stroke-width="1" />
+        <line x1="0" y1="50" x2="180" y2="50" stroke="var(--device-graph-grid)" stroke-width="1" />
+        <line x1="0" y1={thresholdY()} x2="180" y2={thresholdY()} stroke="var(--device-graph-accent)" stroke-width="1" opacity="0.75" vector-effect="non-scaling-stroke" />
         {props.viewMode === 'transfer' ? (
-          <polyline points={transferPoints()} fill="none" stroke="#22d3ee" stroke-width="2.25" vector-effect="non-scaling-stroke" />
+          <polyline points={transferPoints()} fill="none" stroke="var(--device-graph-accent)" stroke-width="2.25" vector-effect="non-scaling-stroke" />
         ) : (
           <>
             <polyline points={historyPoints((frame) => props.viewMode === 'output' ? frame.outputDb : frame.inputDb, normalizeDbY)} fill="none" stroke="#a3a3a3" stroke-width="1.5" opacity="0.75" vector-effect="non-scaling-stroke" />

@@ -4,12 +4,14 @@ import { assert } from "@daw-browser/shared"
 import {
   createPersistedAppPreferencesWithInitial,
   type AppPreferences,
-  type AppTheme
+  type AppTheme,
+  type ResolvedAppTheme
 } from "~/lib/preferences/app-preferences"
 
 type AppPreferencesContextValue = {
   appearance: {
     theme: () => AppTheme
+    resolvedTheme: () => ResolvedAppTheme
     setTheme: (theme: AppTheme) => void
   }
   agent: {
@@ -29,7 +31,7 @@ type AppPreferencesProviderProps = {
 }
 
 export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps> = (props) => {
-  const { setColorMode } = useColorMode()
+  const { colorMode, setColorMode } = useColorMode()
   const [preferences, setPreferences] = createPersistedAppPreferencesWithInitial(props.initialPreferences)
 
   createEffect(() => {
@@ -55,6 +57,7 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
       value={{
         appearance: {
           theme: () => preferences.appearance.theme,
+          resolvedTheme: colorMode,
           setTheme
         },
         agent: {

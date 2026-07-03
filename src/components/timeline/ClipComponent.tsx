@@ -4,9 +4,11 @@ import {
 } from "solid-js";
 
 import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
+import { useAppPreferences } from "~/context/app-preferences";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { LANE_HEIGHT, PPS } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
+import { readCssVariables } from "~/lib/theme/css-variables";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import type { RuntimeClip } from "~/lib/timeline-runtime-types";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
@@ -62,6 +64,7 @@ let lastClipDoubleOpen:
   | undefined;
 
 const ClipComponent: Component<ClipComponentProps> = (props) => {
+  const appPreferences = useAppPreferences();
   let canvasRef: HTMLCanvasElement | undefined;
   let selectedTapStart:
     | { x: number; y: number; at: number }
@@ -182,6 +185,21 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     (ctx as any).imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, cssW, cssH);
 
+    const colors = readCssVariables([
+      { name: "--clip-selected", fallback: "rgba(59,130,246,0.95)" },
+      { name: "--clip-midi", fallback: "rgba(34,197,94,0.95)" },
+      { name: "--timeline-grid-major", fallback: "rgba(255,255,255,0.15)" },
+      { name: "--timeline-grid-minor", fallback: "rgba(255,255,255,0.08)" },
+      { name: "--timeline-surface", fallback: "rgba(15,23,42,0.34)" },
+      { name: "--timeline-surface-muted", fallback: "rgba(15,23,42,0.42)" },
+    ]);
+    const clipSelected = colors.get("--clip-selected") ?? "rgba(59,130,246,0.95)";
+    const clipMidi = colors.get("--clip-midi") ?? "rgba(34,197,94,0.95)";
+    const timelineGridMajor = colors.get("--timeline-grid-major") ?? "rgba(255,255,255,0.15)";
+    const timelineGridMinor = colors.get("--timeline-grid-minor") ?? "rgba(255,255,255,0.08)";
+    const timelineSurface = colors.get("--timeline-surface") ?? "rgba(15,23,42,0.34)";
+    const timelineSurfaceMuted = colors.get("--timeline-surface-muted") ?? "rgba(15,23,42,0.42)";
+
     const padTop = WAVEFORM_PAD_Y;
     const padBottom = WAVEFORM_PAD_Y;
     const innerH = Math.max(1, cssH - padTop - padBottom);
@@ -194,8 +212,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         (props.clip as any).midiOffsetBeats ?? 0,
       );
       const color = props.isSelected
-        ? "rgba(59,130,246,0.95)"
-        : "rgba(34,197,94,0.95)";
+        ? clipSelected
+        : clipMidi;
       let minP = Infinity;
       let maxP = -Infinity;
       for (const note of midi.notes as Array<{ pitch: number }>) {
@@ -243,7 +261,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         ctx.fillRect(left, yTop, Math.max(1, right - left), barH);
       }
 
-      ctx.strokeStyle = "rgba(255,255,255,0.15)";
+      ctx.strokeStyle = timelineGridMajor;
       ctx.lineWidth = 1;
       const bars = Math.max(1, Math.floor(props.clip.duration / (spb * 4)));
       for (let b = 1; b <= bars; b++) {
@@ -263,9 +281,9 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const { padPx, drawCols, audioStartPx, audioEndPx } = layout;
     const peaks = waveform.peaks();
     if (drawCols <= 0) {
-      ctx.fillStyle = "rgba(15,23,42,0.45)";
+      ctx.fillStyle = timelineSurface;
       ctx.fillRect(0, 0, cssW, cssH);
-      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.strokeStyle = timelineGridMinor;
       ctx.beginPath();
       ctx.moveTo(0, Math.floor(cssH / 2) + 0.5);
       ctx.lineTo(cssW, Math.floor(cssH / 2) + 0.5);
@@ -274,8 +292,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     }
 
     const silentFill = props.isSelected
-      ? "rgba(15,23,42,0.42)"
-      : "rgba(15,23,42,0.34)";
+      ? timelineSurfaceMuted
+      : timelineSurface;
     if (audioStartPx > 0) {
       ctx.fillStyle = silentFill;
       ctx.fillRect(0, 0, Math.min(cssW, audioStartPx), cssH);
@@ -286,7 +304,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     }
 
     if (!peaks) {
-      ctx.strokeStyle = "rgba(255,255,255,0.10)";
+      ctx.strokeStyle = timelineGridMinor;
       for (let x = audioStartPx; x < audioEndPx; x += 6) {
         ctx.beginPath();
         ctx.moveTo(x, cssH);
@@ -342,6 +360,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void props.bpm;
     void waveform.peaks();
     void props.viewportRedrawVersion;
+    void appPreferences.appearance.resolvedTheme();
     drawWaveform();
   });
 

@@ -203,7 +203,7 @@ export default function TimelineWorkspace(props: Props) {
             />
 
             <div
-              class="absolute left-0 right-0 bg-neutral-950"
+              class="absolute left-0 right-0 bg-timeline-background"
               style={{
                 top: `${RULER_HEIGHT}px`,
                 bottom: `${props.bottomPanelOffsetPx}px`,
@@ -287,7 +287,7 @@ export default function TimelineWorkspace(props: Props) {
               />
               <Show when={props.automation.lanes.masterVisible}>
                 <div
-                  class="absolute left-0 right-0 z-30 border-t border-red-500/30 bg-neutral-950/95"
+                  class="absolute left-0 right-0 z-30 border-t border-automation/30 bg-timeline-background/95"
                   style={{
                     bottom: `${MASTER_ROW_HEIGHT}px`,
                     height: `${props.automation.lanes.masterHeight}px`,

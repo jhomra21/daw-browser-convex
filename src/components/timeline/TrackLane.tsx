@@ -64,20 +64,20 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
 
   const laneContainer = () => (
     <div
-      class="absolute left-0 right-0 overflow-hidden bg-neutral-950"
+      class="absolute left-0 right-0 overflow-hidden bg-timeline-background"
       classList={{ 'bg-green-500/10': props.isDropTarget }}
       style={{ top: `${props.topPx}px`, height: `${LANE_HEIGHT + props.automationHeightPx}px` }}
     >
-      <div class="absolute left-0 right-0 h-px bg-neutral-800" style={{ top: `${LANE_HEIGHT - 1}px` }} />
+      <div class="absolute left-0 right-0 h-px bg-timeline-surface-muted" style={{ top: `${LANE_HEIGHT - 1}px` }} />
       {props.automation.visible ? (
         <div
-          class="absolute inset-x-0 z-30 border-t border-red-500/30 bg-neutral-950/95"
+          class="absolute inset-x-0 z-30 border-t border-automation/30 bg-timeline-background/95"
           style={{ top: `${LANE_HEIGHT}px`, height: `${props.automationHeightPx}px` }}
         >
           <For each={props.automation.parameterIds}>
             {(parameterId, index) => (
               <div
-                class="absolute inset-x-0 border-b border-red-500/20"
+                class="absolute inset-x-0 border-b border-automation/20"
                 style={{
                   top: `${index() * props.automation.laneHeightPx}px`,
                   height: `${props.automation.laneHeightPx}px`,

@@ -1,12 +1,17 @@
 import { For } from "solid-js";
 import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard-shared";
 import { useAppPreferences } from "~/context/app-preferences";
-import { parseAppTheme, type AppTheme } from "~/lib/preferences/app-preferences";
+import { parseAppThemeSelectValue, type AppTheme } from "~/lib/preferences/app-preferences";
 
 const themes: readonly AppTheme[] = ["system", "light", "dark"];
 
 export function DashboardGeneralView() {
   const appPreferences = useAppPreferences();
+  const updateTheme = (value: string) => {
+    const theme = parseAppThemeSelectValue(value);
+    if (theme) appPreferences.appearance.setTheme(theme);
+  };
+
   return (
     <DashboardScrollView>
       <DashboardSection title="App preferences" description="Global preferences for this browser.">
@@ -15,9 +20,9 @@ export function DashboardGeneralView() {
           value="Applied to the document root and saved locally."
           action={
             <select
-              class="border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100"
+              class="border border-border bg-background px-2 py-1 text-xs text-foreground"
               value={appPreferences.appearance.theme()}
-              onChange={(event) => appPreferences.appearance.setTheme(parseAppTheme(event.currentTarget.value))}
+              onChange={(event) => updateTheme(event.currentTarget.value)}
             >
               <For each={themes}>{(theme) => <option value={theme}>{theme}</option>}</For>
             </select>

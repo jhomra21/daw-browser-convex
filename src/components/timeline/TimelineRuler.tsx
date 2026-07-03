@@ -176,12 +176,12 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
           /* Major bar lines */
           repeating-linear-gradient(
             to right,
-            rgba(255,255,255,0.24) 0px,
-            rgba(255,255,255,0.24) 2px,
+            var(--timeline-grid-major) 0px,
+            var(--timeline-grid-major) 2px,
             transparent 2px,
             transparent ${major}px
           ),
-          #171717`
+          var(--timeline-surface)`
       } as const
     }
 
@@ -191,12 +191,12 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
         /* 5s lines */
         repeating-linear-gradient(
           to right,
-          rgba(255,255,255,0.20) 0px,
-          rgba(255,255,255,0.20) 2px,
+          var(--timeline-grid-major) 0px,
+          var(--timeline-grid-major) 2px,
           transparent 2px,
           transparent ${fiveSecPx}px
         ),
-        #171717`
+        var(--timeline-surface)`
     } as const
   }
 
@@ -250,7 +250,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
   return (
     <div
       data-timeline-ruler="1"
-      class="sticky top-0 z-30 border-b border-neutral-800 bg-neutral-900"
+      class="sticky top-0 z-30 border-b border-border bg-timeline-surface"
       style={{ width: `${rulerWidthPx()}px`, height: `${RULER_HEIGHT}px`, ...backgroundStyle() }}
       ref={el => { rootEl = el }}
       onPointerDown={onLocalPointerDown}
@@ -266,7 +266,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
       <For each={minorMarkers()}>
         {(marker) => (
           <div
-            class="absolute top-0 w-px bg-neutral-600/60"
+            class="absolute top-0 w-px bg-timeline-grid-minor"
             style={{ left: `${marker.positionPx}px`, height: `${RULER_HEIGHT / 2}px` }}
           />
         )}
@@ -274,8 +274,8 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
       <For each={majorMarkers()}>
         {(marker) => (
           <div class="absolute bottom-0" style={{ left: `${marker.positionPx}px` }}>
-            <div class="w-0.5 bg-neutral-200/80" style={{ height: `${RULER_HEIGHT}px` }} />
-            <div class="absolute -top-5 text-2xs font-medium text-neutral-300 select-none">
+            <div class="w-0.5 bg-timeline-grid-major" style={{ height: `${RULER_HEIGHT}px` }} />
+            <div class="absolute -top-5 text-2xs font-medium text-muted-foreground select-none">
               {marker.label}
             </div>
           </div>

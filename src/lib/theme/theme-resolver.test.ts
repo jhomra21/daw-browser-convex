@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { getTheme, parseThemeId, themeIds, themeOptions } from "./theme-registry"
+import { getTheme, parseThemeId, themeOptions } from "./theme-registry"
 import { resolveDawTheme, resolveDawThemeById, themeTokensToCss } from "./theme-resolver"
 
 describe("theme registry", () => {
@@ -10,13 +10,13 @@ describe("theme registry", () => {
   })
 
   test("exposes options for each built-in theme", () => {
-    expect(themeOptions.map((option) => option.id)).toEqual([...themeIds])
+    expect(themeOptions.map((option) => option.id)).toEqual(["default", "catppuccin", "tokyonight"])
   })
 })
 
 describe("theme resolver", () => {
   test("resolves built-in themes to concrete app tokens", () => {
-    for (const id of themeIds) {
+    for (const { id } of themeOptions) {
       const light = resolveDawThemeById(id, "light")
       const dark = resolveDawThemeById(id, "dark")
 
@@ -31,7 +31,7 @@ describe("theme resolver", () => {
     const base = getTheme("default")
     const tokens = resolveDawTheme(
       {
-        id: "override-test",
+        id: "default",
         name: "Override Test",
         light: {
           palette: base.light.palette,

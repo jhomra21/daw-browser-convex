@@ -19,7 +19,6 @@ type AppPreferencesContextValue = {
     setTheme: (theme: AppTheme) => void
     setThemeId: (id: DawThemeId) => void
     previewThemeId: (id: DawThemeId) => void
-    previewTheme: (id: DawThemeId) => void
     previewColorScheme: (theme: AppTheme) => void
     commitPreview: () => void
     cancelPreview: () => void
@@ -105,7 +104,6 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           setTheme,
           setThemeId,
           previewThemeId: setPreviewThemeId,
-          previewTheme: setPreviewThemeId,
           previewColorScheme: setPreviewTheme,
           commitPreview,
           cancelPreview

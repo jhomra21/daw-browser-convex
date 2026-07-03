@@ -1,13 +1,10 @@
-import type { DawTheme } from "./theme-types"
-
-export type DawThemeId = "default" | "catppuccin" | "tokyonight"
+import type { DawTheme, DawThemeId } from "./theme-types"
+export type { DawThemeId } from "./theme-types"
 
 export type DawThemeOption = {
   id: DawThemeId
   name: string
 }
-
-export const themeIds: readonly DawThemeId[] = ["default", "catppuccin", "tokyonight"]
 
 export const builtInThemes: readonly DawTheme[] = [
   {
@@ -31,15 +28,13 @@ export const builtInThemes: readonly DawTheme[] = [
 ]
 
 export const themeOptions: readonly DawThemeOption[] = [
-  { id: "default", name: "Default" },
-  { id: "catppuccin", name: "Catppuccin" },
-  { id: "tokyonight", name: "Tokyo Night" }
+  ...builtInThemes.map((theme) => ({ id: theme.id, name: theme.name }))
 ]
 
 export const isThemeId = (value: unknown): value is DawThemeId =>
-  value === "default" || value === "catppuccin" || value === "tokyonight"
+  builtInThemes.some((theme) => theme.id === value)
 
 export const parseThemeId = (value: unknown): DawThemeId =>
   isThemeId(value) ? value : "default"
 
-export const getTheme = (id: DawThemeId): DawTheme => builtInThemes[themeIds.indexOf(id)] ?? builtInThemes[0]
+export const getTheme = (id: DawThemeId): DawTheme => builtInThemes.find((theme) => theme.id === id) ?? builtInThemes[0]

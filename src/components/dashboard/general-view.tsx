@@ -1,24 +1,78 @@
 import { For } from "solid-js";
 import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard-shared";
+import { Button } from "~/components/ui/button";
 import { useAppPreferences } from "~/context/app-preferences";
 import { type AppTheme } from "~/lib/preferences/app-preferences";
-import { isThemeId, type DawThemeId } from "~/lib/theme/theme-registry";
+import { isThemeId } from "~/lib/theme/theme-registry";
 
 const themes: readonly AppTheme[] = ["system", "light", "dark"];
 
-export function DashboardGeneralView() {
-  const appPreferences = useAppPreferences();
-  const previewColorScheme = (theme: AppTheme) => appPreferences.appearance.previewColorScheme(theme);
-  const commitColorScheme = (theme: AppTheme) => {
-    appPreferences.appearance.previewColorScheme(theme);
-    appPreferences.appearance.commitPreview();
-  };
-  const handleColorSchemeKey = (event: KeyboardEvent, theme: AppTheme) => {
+type PreviewOption = {
+  id: string;
+  label: string;
+};
+
+type PreviewButtonGroupProps = {
+  options: readonly PreviewOption[];
+  selectedId: string;
+  preview: (id: string) => void;
+  commit: (id: string) => void;
+  cancel: () => void;
+};
+
+function PreviewButtonGroup(props: PreviewButtonGroupProps) {
+  const handleKeyDown = (event: KeyboardEvent, id: string) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      commitColorScheme(theme);
+      props.commit(id);
     }
-    if (event.key === "Escape") appPreferences.appearance.cancelPreview();
+    if (event.key === "Escape") props.cancel();
+  };
+
+  return (
+    <div
+      class="flex flex-wrap gap-1"
+      onMouseLeave={props.cancel}
+      onFocusOut={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+          props.cancel();
+        }
+      }}
+    >
+      <For each={props.options}>
+        {(option) => (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            class="h-auto rounded-none px-2 py-1 text-xs focus:bg-accent focus:text-accent-foreground"
+            classList={{ "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground": props.selectedId === option.id }}
+            aria-pressed={props.selectedId === option.id}
+            onMouseEnter={() => props.preview(option.id)}
+            onFocus={() => props.preview(option.id)}
+            onClick={() => props.commit(option.id)}
+            onKeyDown={(event) => handleKeyDown(event, option.id)}
+          >
+            {option.label}
+          </Button>
+        )}
+      </For>
+    </div>
+  );
+}
+
+export function DashboardGeneralView() {
+  const appPreferences = useAppPreferences();
+  const themeOptions = () => themes.map((theme) => ({ id: theme, label: theme }));
+  const namedThemeOptions = () => appPreferences.appearance.themeOptions().map((theme) => ({ id: theme.id, label: theme.name }));
+  const previewColorScheme = (theme: string) => {
+    if (theme === "system" || theme === "light" || theme === "dark") appPreferences.appearance.previewColorScheme(theme);
+  };
+  const commitColorScheme = (theme: string) => {
+    if (theme !== "system" && theme !== "light" && theme !== "dark") return;
+    appPreferences.appearance.previewColorScheme(theme);
+    appPreferences.appearance.commitPreview();
   };
   const previewThemeId = (value: string) => {
     if (isThemeId(value)) appPreferences.appearance.previewThemeId(value);
@@ -28,13 +82,6 @@ export function DashboardGeneralView() {
     appPreferences.appearance.previewThemeId(value);
     appPreferences.appearance.commitPreview();
   };
-  const handleThemeKey = (event: KeyboardEvent, id: DawThemeId) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      commitThemeId(id);
-    }
-    if (event.key === "Escape") appPreferences.appearance.cancelPreview();
-  };
 
   return (
     <DashboardScrollView>
@@ -43,66 +90,26 @@ export function DashboardGeneralView() {
           label="Color scheme"
           value="Hover or focus previews. Click or press Enter to save."
           action={
-            <div
-              class="flex flex-wrap gap-1"
-              onMouseLeave={appPreferences.appearance.cancelPreview}
-              onFocusOut={(event) => {
-                const nextTarget = event.relatedTarget;
-                if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-                  appPreferences.appearance.cancelPreview();
-                }
-              }}
-            >
-              <For each={themes}>
-                {(theme) => (
-                  <button
-                    type="button"
-                    class="border border-border px-2 py-1 text-xs text-foreground hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none"
-                    classList={{ "bg-primary text-primary-foreground": appPreferences.appearance.theme() === theme }}
-                    aria-pressed={appPreferences.appearance.theme() === theme}
-                    onMouseEnter={() => previewColorScheme(theme)}
-                    onFocus={() => previewColorScheme(theme)}
-                    onClick={() => commitColorScheme(theme)}
-                    onKeyDown={(event) => handleColorSchemeKey(event, theme)}
-                  >
-                    {theme}
-                  </button>
-                )}
-              </For>
-            </div>
+            <PreviewButtonGroup
+              options={themeOptions()}
+              selectedId={appPreferences.appearance.theme()}
+              preview={previewColorScheme}
+              commit={commitColorScheme}
+              cancel={appPreferences.appearance.cancelPreview}
+            />
           }
         />
         <DashboardRow
           label="Theme"
           value="Hover or focus previews. Click or press Enter to save."
           action={
-            <div
-              class="flex flex-wrap gap-1"
-              onMouseLeave={appPreferences.appearance.cancelPreview}
-              onFocusOut={(event) => {
-                const nextTarget = event.relatedTarget;
-                if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-                  appPreferences.appearance.cancelPreview();
-                }
-              }}
-            >
-              <For each={appPreferences.appearance.themeOptions()}>
-                {(theme) => (
-                  <button
-                    type="button"
-                    class="border border-border px-2 py-1 text-xs text-foreground hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none"
-                    classList={{ "bg-primary text-primary-foreground": appPreferences.appearance.themeId() === theme.id }}
-                    aria-pressed={appPreferences.appearance.themeId() === theme.id}
-                    onMouseEnter={() => previewThemeId(theme.id)}
-                    onFocus={() => previewThemeId(theme.id)}
-                    onClick={() => commitThemeId(theme.id)}
-                    onKeyDown={(event) => handleThemeKey(event, theme.id)}
-                  >
-                    {theme.name}
-                  </button>
-                )}
-              </For>
-            </div>
+            <PreviewButtonGroup
+              options={namedThemeOptions()}
+              selectedId={appPreferences.appearance.themeId()}
+              preview={previewThemeId}
+              commit={commitThemeId}
+              cancel={appPreferences.appearance.cancelPreview}
+            />
           }
         />
       </DashboardSection>

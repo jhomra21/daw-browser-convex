@@ -60,6 +60,20 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     projectBpm: props.projectBpm,
     leftPadSec: props.clip.leftPadSec,
   }));
+  const canvasColors = createMemo(() => {
+    void appPreferences.appearance.resolvedTheme();
+    void appPreferences.appearance.themeId();
+    const colors = readCssVariables([
+      { name: "--timeline-background", fallback: "rgb(10, 10, 10)" },
+      { name: "--timeline-grid-minor", fallback: "rgba(255,255,255,0.08)" },
+      { name: "--timeline-grid-major", fallback: "rgba(255,255,255,0.14)" },
+    ]);
+    return {
+      timelineBackground: colors.get("--timeline-background") ?? "rgb(10, 10, 10)",
+      timelineGridMinor: colors.get("--timeline-grid-minor") ?? "rgba(255,255,255,0.08)",
+      timelineGridMajor: colors.get("--timeline-grid-major") ?? "rgba(255,255,255,0.14)",
+    };
+  });
 
   onMount(() => {
     const commitHeight = (heightPx: number) => {
@@ -144,14 +158,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, WAVEFORM_WIDTH_PX, waveformHeight);
 
-    const colors = readCssVariables([
-      { name: "--timeline-background", fallback: "rgb(10, 10, 10)" },
-      { name: "--timeline-grid-minor", fallback: "rgba(255,255,255,0.08)" },
-      { name: "--timeline-grid-major", fallback: "rgba(255,255,255,0.14)" },
-    ]);
-    const timelineBackground = colors.get("--timeline-background") ?? "rgb(10, 10, 10)";
-    const timelineGridMinor = colors.get("--timeline-grid-minor") ?? "rgba(255,255,255,0.08)";
-    const timelineGridMajor = colors.get("--timeline-grid-major") ?? "rgba(255,255,255,0.14)";
+    const { timelineBackground, timelineGridMinor, timelineGridMajor } = canvasColors();
 
     ctx.fillStyle = timelineBackground;
     ctx.fillRect(0, 0, WAVEFORM_WIDTH_PX, waveformHeight);
@@ -208,8 +215,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     void waveformHeightPx();
     void props.projectBpm;
     void waveform.peaks();
-    void appPreferences.appearance.resolvedTheme();
-    void appPreferences.appearance.themeId();
+    void canvasColors();
     draw();
   });
 

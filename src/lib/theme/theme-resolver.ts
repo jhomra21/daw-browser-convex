@@ -1,7 +1,7 @@
 import { getTheme, type DawThemeId } from "./theme-registry"
-import { dawThemeTokenNames, type DawTheme, type DawThemeVariant } from "./theme-types"
+import { dawThemeTokenNames, type DawTheme, type DawThemeTokenName, type DawThemeVariant } from "./theme-types"
 
-type ResolvedThemeTokens = Record<string, string>
+type ResolvedThemeTokens = Record<DawThemeTokenName, string>
 
 const withAlpha = (color: string, alpha: string) => `${color}${alpha}`
 
@@ -77,7 +77,8 @@ const resolveVariantTokens = (variant: DawThemeVariant, mode: "light" | "dark"):
 
   if (!variant.overrides) return tokens
 
-  for (const [name, value] of Object.entries(variant.overrides)) {
+  for (const name of dawThemeTokenNames) {
+    const value = variant.overrides[name]
     if (value) tokens[name] = value
   }
   return tokens

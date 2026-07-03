@@ -1,5 +1,5 @@
 import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
-import type { ArpeggiatorParams, AutomationEnvelope, CompressorParams, DelayParams, EqParams, ReverbParams, SaturatorParams, SynthParams, TrackInstrumentParams } from '@daw-browser/shared'
+import type { ArpeggiatorParams, AudioEffectKind, AutomationEnvelope, CompressorParams, DelayParams, EqParams, ReverbParams, SaturatorParams, SynthParams, TrackInstrumentParams } from '@daw-browser/shared'
 import type { AudioWarp, Track, TrackChannelRole, TrackSend } from '@daw-browser/timeline-core/types'
 
 export type TrackRef = string
@@ -87,6 +87,15 @@ export type EffectParamsByEffect = {
   'master-reverb': ReverbParams
 }
 
+export type TrackAudioEffectSnapshot = {
+  [Effect in AudioEffectKind]: {
+    effect: Effect
+    instanceId?: string
+    index?: number
+    params: EffectParamsByEffect[Effect]
+  }
+}[AudioEffectKind]
+
 type EffectTargetId<Effect extends EffectType> = Effect extends TrackEffect ? Track['id'] : 'master'
 
 export type TrackEffectSnapshot = Partial<{
@@ -95,6 +104,7 @@ export type TrackEffectSnapshot = Partial<{
   saturator: SaturatorParams
   delay: DelayParams
   reverb: ReverbParams
+  audioEffects: TrackAudioEffectSnapshot[]
   synth: SynthParams
   instrument: TrackInstrumentParams
   arp: ArpeggiatorParams

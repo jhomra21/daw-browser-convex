@@ -6,8 +6,8 @@ import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import { getTrackDeleteConflictMessage } from '~/lib/delete-conflict-messages'
 import { buildTrackEffectQueryArgs } from '~/lib/effect-track-args'
 import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
-import { getLocalEffect } from '~/lib/local-effects'
-import { isLocalId, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type AutomationEnvelope } from '@daw-browser/shared'
+import { audioEffectKindFromLocalEffect, getLocalEffect, listLocalEffects } from '~/lib/local-effects'
+import { isAudioEffectKind, isLocalId, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeReverbParams, normalizeSaturatorParams, type AutomationEnvelope } from '@daw-browser/shared'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { isClipCompatibleWithTrack } from '@daw-browser/timeline-core/track-routing'
@@ -17,7 +17,7 @@ import { createTimelineClipWriteAdapter } from '~/lib/timeline-clip-write-adapte
 import { calcNonOverlapStart, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import { buildClipDeleteHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
-import type { HistoryEntry, TrackEffectSnapshot } from '~/lib/undo/types'
+import type { HistoryEntry, TrackAudioEffectSnapshot, TrackEffectSnapshot } from '~/lib/undo/types'
 import type { Clip, SelectedClip, Track } from '@daw-browser/timeline-core/types'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 
@@ -27,6 +27,17 @@ type ConvexClientType = typeof import('~/lib/convex').convexClient
 
 type ConvexApiType = typeof import('~/lib/convex').convexApi
 type TrackDeleteResult = FunctionReturnType<ConvexApiType['tracks']['remove']>
+
+type TrackEffectRowSnapshotInput = {
+  type?: unknown
+  effect?: unknown
+  targetType?: unknown
+  targetId?: unknown
+  trackId?: unknown
+  instanceId?: unknown
+  index?: unknown
+  params?: any
+}
 
 type TimelineClipActionsOptions = {
   tracks: Accessor<RuntimeTrack[]>
@@ -110,6 +121,25 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     notify('Track delete failed', 'This track could not be deleted.')
   }
 
+  const snapshotAudioEffectRow = (row: TrackEffectRowSnapshotInput): TrackAudioEffectSnapshot | null => {
+    const effect = row.type ?? row.effect
+    if (!isAudioEffectKind(effect)) return null
+    const instanceId = typeof row.instanceId === 'string' ? row.instanceId : undefined
+    const index = typeof row.index === 'number' ? row.index : undefined
+    switch (effect) {
+      case 'eq':
+        return { effect, instanceId, index, params: normalizeEqParams(row.params) }
+      case 'compressor':
+        return { effect, instanceId, index, params: normalizeCompressorParams(row.params) }
+      case 'saturator':
+        return { effect, instanceId, index, params: normalizeSaturatorParams(row.params) }
+      case 'delay':
+        return { effect, instanceId, index, params: normalizeDelayParams(row.params) }
+      case 'reverb':
+        return { effect, instanceId, index, params: normalizeReverbParams(row.params) }
+    }
+  }
+
   const loadTrackDeleteEffects = async (trackId: Track['id']) => {
     const rid = projectId()
     const uid = userId()
@@ -136,7 +166,14 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       convexClient.query(convexApi.effects.getSynthForTrack, args),
       convexClient.query(convexApi.effects.getArpeggiatorForTrack, args),
     ])
+    const effectRows = await convexClient.query(convexApi.effects.listByRoom, { projectId: rid })
     const instrument = instrumentRow ? readInstrumentParamsFromEffectRow(instrumentRow) : undefined
+    const audioEffects = effectRows
+      .filter((row) => row.targetType === 'track' && row.trackId === trackId)
+      .flatMap((row) => {
+        const snapshot = snapshotAudioEffectRow(row)
+        return snapshot ? [snapshot] : []
+      })
 
     return {
       eq: eqRow?.params,
@@ -144,6 +181,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       saturator: saturatorRow?.params ? normalizeSaturatorParams(saturatorRow.params) : undefined,
       delay: delayRow?.params ? normalizeDelayParams(delayRow.params) : undefined,
       reverb: rvRow?.params ? normalizeReverbParams(rvRow.params) : undefined,
+      audioEffects,
       instrument,
       synth: synthRow?.params,
       arp: arpRow?.params,
@@ -151,7 +189,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
   }
 
   const loadLocalTrackDeleteEffects = async (projectId: string, trackId: Track['id']): Promise<TrackEffectSnapshot> => {
-    const [eqRow, compressorRow, saturatorRow, delayRow, rvRow, instrumentRow, synthRow, arpRow] = await Promise.all([
+    const [eqRow, compressorRow, saturatorRow, delayRow, rvRow, instrumentRow, synthRow, arpRow, localEffects] = await Promise.all([
       getLocalEffect<TrackEffectSnapshot['eq']>(projectId, trackId, 'eq'),
       getLocalEffect<TrackEffectSnapshot['compressor']>(projectId, trackId, 'compressor'),
       getLocalEffect<TrackEffectSnapshot['saturator']>(projectId, trackId, 'saturator'),
@@ -160,7 +198,16 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       getLocalEffect(projectId, trackId, 'instrument'),
       getLocalEffect<TrackEffectSnapshot['synth']>(projectId, trackId, 'synth'),
       getLocalEffect<TrackEffectSnapshot['arp']>(projectId, trackId, 'arp'),
+      listLocalEffects(projectId),
     ])
+    const audioEffects = localEffects
+      .filter((row) => row.targetId === trackId)
+      .flatMap((row) => {
+        const kind = audioEffectKindFromLocalEffect(row.effect)
+        if (!kind) return []
+        const snapshot = snapshotAudioEffectRow({ ...row, effect: kind })
+        return snapshot ? [snapshot] : []
+      })
 
     return {
       eq: eqRow?.params,
@@ -168,6 +215,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       saturator: saturatorRow?.params ? normalizeSaturatorParams(saturatorRow.params) : undefined,
       delay: delayRow?.params ? normalizeDelayParams(delayRow.params) : undefined,
       reverb: rvRow?.params ? normalizeReverbParams(rvRow.params) : undefined,
+      audioEffects,
       instrument: instrumentRow ? readInstrumentParamsFromEffectRow(instrumentRow) : undefined,
       synth: synthRow?.params,
       arp: arpRow?.params,

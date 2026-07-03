@@ -3,9 +3,11 @@ import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard
 import { Button } from "~/components/ui/button";
 import { useAppPreferences } from "~/context/app-preferences";
 import { type AppTheme } from "~/lib/preferences/app-preferences";
-import { isThemeId } from "~/lib/theme/theme-registry";
+import { isThemeId, type DawThemeId } from "~/lib/theme/theme-registry";
 
-const themes: readonly AppTheme[] = ["system", "light", "dark"];
+const defaultThemeId: DawThemeId = "default";
+
+type ThemeSelectionId = AppTheme | DawThemeId;
 
 type PreviewOption = {
   id: string;
@@ -64,22 +66,36 @@ function PreviewButtonGroup(props: PreviewButtonGroupProps) {
 
 export function DashboardGeneralView() {
   const appPreferences = useAppPreferences();
-  const themeOptions = () => themes.map((theme) => ({ id: theme, label: theme }));
-  const namedThemeOptions = () => appPreferences.appearance.themeOptions().map((theme) => ({ id: theme.id, label: theme.name }));
-  const previewColorScheme = (theme: string) => {
-    if (theme === "system" || theme === "light" || theme === "dark") appPreferences.appearance.previewColorScheme(theme);
+
+  const themeOptions = () => [
+    { id: "system", label: "System" },
+    { id: "light", label: "Light" },
+    { id: "dark", label: "Dark" },
+    ...appPreferences.appearance.themeOptions()
+      .filter((theme) => theme.id !== defaultThemeId)
+      .map((theme) => ({ id: theme.id, label: theme.name }))
+  ];
+
+  const selectedThemeId = (): ThemeSelectionId => {
+    const themeId = appPreferences.appearance.themeId();
+    return themeId === defaultThemeId ? appPreferences.appearance.theme() : themeId;
   };
-  const commitColorScheme = (theme: string) => {
-    if (theme !== "system" && theme !== "light" && theme !== "dark") return;
-    appPreferences.appearance.previewColorScheme(theme);
-    appPreferences.appearance.commitPreview();
+
+  const previewThemeSelection = (value: string) => {
+    if (value === "system" || value === "light" || value === "dark") {
+      appPreferences.appearance.previewThemeId(defaultThemeId);
+      appPreferences.appearance.previewColorScheme(value);
+      return;
+    }
+
+    if (isThemeId(value)) {
+      appPreferences.appearance.previewThemeId(value);
+      appPreferences.appearance.previewColorScheme("dark");
+    }
   };
-  const previewThemeId = (value: string) => {
-    if (isThemeId(value)) appPreferences.appearance.previewThemeId(value);
-  };
-  const commitThemeId = (value: string) => {
-    if (!isThemeId(value)) return;
-    appPreferences.appearance.previewThemeId(value);
+
+  const commitThemeSelection = (value: string) => {
+    previewThemeSelection(value);
     appPreferences.appearance.commitPreview();
   };
 
@@ -87,27 +103,14 @@ export function DashboardGeneralView() {
     <DashboardScrollView>
       <DashboardSection title="App preferences" description="Global preferences for this browser.">
         <DashboardRow
-          label="Color scheme"
-          value="Hover or focus previews. Click or press Enter to save."
-          action={
-            <PreviewButtonGroup
-              options={themeOptions()}
-              selectedId={appPreferences.appearance.theme()}
-              preview={previewColorScheme}
-              commit={commitColorScheme}
-              cancel={appPreferences.appearance.cancelPreview}
-            />
-          }
-        />
-        <DashboardRow
           label="Theme"
           value="Hover or focus previews. Click or press Enter to save."
           action={
             <PreviewButtonGroup
-              options={namedThemeOptions()}
-              selectedId={appPreferences.appearance.themeId()}
-              preview={previewThemeId}
-              commit={commitThemeId}
+              options={themeOptions()}
+              selectedId={selectedThemeId()}
+              preview={previewThemeSelection}
+              commit={commitThemeSelection}
               cancel={appPreferences.appearance.cancelPreview}
             />
           }

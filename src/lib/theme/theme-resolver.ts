@@ -1,7 +1,7 @@
 import { getTheme, type DawThemeId } from "./theme-registry"
 import { dawThemeTokenNames, type DawTheme, type DawThemeTokenName, type DawThemeVariant } from "./theme-types"
 
-type ResolvedThemeTokens = Record<DawThemeTokenName, string>
+export type ResolvedThemeTokens = Record<DawThemeTokenName, string>
 
 const withAlpha = (color: string, alpha: string) => `${color}${alpha}`
 
@@ -92,11 +92,7 @@ export const resolveDawThemeById = (themeId: DawThemeId, mode: "light" | "dark")
 
 export const themeTokensToCss = (tokens: ResolvedThemeTokens): string =>
   dawThemeTokenNames
-    .map((name) => {
-      const value = tokens[name]
-      return value ? `  --${name}: ${value};` : null
-    })
-    .filter((line) => line !== null)
+    .map((name) => `  --${name}: ${tokens[name]};`)
     .join("\n")
 
 const ensureThemeStyleElement = (): HTMLStyleElement => {
@@ -108,9 +104,19 @@ const ensureThemeStyleElement = (): HTMLStyleElement => {
   return element
 }
 
-export const applyDawTheme = (themeId: DawThemeId, mode: "light" | "dark") => {
-  if (typeof document === "undefined") return
+export type ApplyDawThemeResult = {
+  changed: boolean
+  tokens: ResolvedThemeTokens
+}
+
+export const applyDawTheme = (themeId: DawThemeId, mode: "light" | "dark"): ApplyDawThemeResult => {
   const tokens = resolveDawThemeById(themeId, mode)
-  ensureThemeStyleElement().textContent = `:root {\n${themeTokensToCss(tokens)}\n}`
+  if (typeof document === "undefined") return { changed: false, tokens }
+  const css = `:root {\n${themeTokensToCss(tokens)}\n}`
+  const element = ensureThemeStyleElement()
+  const changed = element.textContent !== css || document.documentElement.dataset.dawTheme !== themeId
+  if (!changed) return { changed, tokens }
+  element.textContent = css
   document.documentElement.dataset.dawTheme = themeId
+  return { changed, tokens }
 }

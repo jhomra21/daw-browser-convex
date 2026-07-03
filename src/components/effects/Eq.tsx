@@ -25,7 +25,6 @@ import {
   type EqBandParams,
 } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
-import { readCssVariables } from '~/lib/theme/css-variables'
 
 
 // ===== Component =====
@@ -197,28 +196,6 @@ export default function Eq(props: EqProps) {
     spectrumDecayFrame = requestAnimationFrame(runSpectrumDecay)
   }
 
-  const canvasColors = createMemo(() => {
-    void appPreferences.appearance.appliedThemeRevision()
-    const colors = readCssVariables([
-      { name: '--device-graph-background', fallback: '#0b0b0b' },
-      { name: '--device-graph-grid', fallback: '#262626' },
-      { name: '--device-graph-accent', fallback: '#22c55e' },
-      { name: '--muted-foreground', fallback: '#6b7280' },
-      { name: '--meter-safe', fallback: '#22c55e' },
-      { name: '--meter-clipping', fallback: '#ef4444' },
-      { name: '--clip-selected', fallback: '#facc15' },
-    ])
-    return {
-      graphBackground: colors.get('--device-graph-background') ?? '#0b0b0b',
-      graphGrid: colors.get('--device-graph-grid') ?? '#262626',
-      graphAccent: colors.get('--device-graph-accent') ?? '#22c55e',
-      mutedForeground: colors.get('--muted-foreground') ?? '#6b7280',
-      meterSafe: colors.get('--meter-safe') ?? '#22c55e',
-      meterClipping: colors.get('--meter-clipping') ?? '#ef4444',
-      clipSelected: colors.get('--clip-selected') ?? '#facc15',
-    }
-  })
-
   createEffect(() => {
     const frame = props.spectrumData
     const data = frame?.data
@@ -297,7 +274,14 @@ export default function Eq(props: EqProps) {
       cvs.height = height
     }
 
-    const { graphBackground, graphGrid, graphAccent, mutedForeground, meterSafe, meterClipping, clipSelected } = canvasColors()
+    const canvasColors = appPreferences.appearance.themeTokens()
+    const graphBackground = canvasColors['device-graph-background']
+    const graphGrid = canvasColors['device-graph-grid']
+    const graphAccent = canvasColors['device-graph-accent']
+    const mutedForeground = canvasColors['muted-foreground']
+    const meterSafe = canvasColors['meter-safe']
+    const meterClipping = canvasColors['meter-clipping']
+    const clipSelected = canvasColors['clip-selected']
 
     // BG
     ctx.fillStyle = graphBackground
@@ -475,7 +459,6 @@ export default function Eq(props: EqProps) {
     void canvasSize()
     void props.spectrumData
     void spectrumTick()
-    void canvasColors()
     draw()
   })
 

@@ -7,8 +7,8 @@ import {
   type AppTheme,
   type ResolvedAppTheme
 } from "~/lib/preferences/app-preferences"
-import { applyDawTheme } from "~/lib/theme/theme-resolver"
-import { themeOptions, type DawThemeId, type DawThemeOption } from "~/lib/theme/theme-registry"
+import { applyDawTheme, resolveDawThemeById, type ResolvedThemeTokens } from "~/lib/theme/theme-resolver"
+import { DEFAULT_DAW_THEME_ID, themeOptions, type DawThemeId, type DawThemeOption } from "~/lib/theme/theme-registry"
 
 type AppPreferencesContextValue = {
   appearance: {
@@ -16,13 +16,13 @@ type AppPreferencesContextValue = {
     themeId: () => DawThemeId
     themeOptions: () => readonly DawThemeOption[]
     resolvedTheme: () => ResolvedAppTheme
-    appliedThemeRevision: () => number
+    themeTokens: () => ResolvedThemeTokens
+    activeThemeSelection: () => AppTheme | DawThemeId
     setTheme: (theme: AppTheme) => void
     setThemeId: (id: DawThemeId) => void
-    previewThemeId: (id: DawThemeId) => void
-    previewColorScheme: (theme: AppTheme) => void
-    commitPreview: () => void
-    cancelPreview: () => void
+    previewThemeSelection: (selection: AppTheme | DawThemeId) => void
+    commitThemeSelection: (selection: AppTheme | DawThemeId) => void
+    cancelThemePreview: () => void
   }
   agent: {
     autoApply: () => boolean
@@ -45,18 +45,25 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
   const [preferences, setPreferences] = createPersistedAppPreferencesWithInitial(props.initialPreferences)
   const [previewThemeId, setPreviewThemeId] = createSignal<DawThemeId | null>(null)
   const [previewTheme, setPreviewTheme] = createSignal<AppTheme | null>(null)
-  const [appliedThemeRevision, setAppliedThemeRevision] = createSignal(0)
+  const [themeTokens, setThemeTokens] = createSignal<ResolvedThemeTokens>(
+    resolveDawThemeById(preferences.appearance.themeId, colorMode())
+  )
 
   const activeThemeId = () => previewThemeId() ?? preferences.appearance.themeId
   const activeTheme = () => previewTheme() ?? preferences.appearance.theme
+  const activeThemeSelection = () => {
+    const themeId = activeThemeId()
+    return themeId === DEFAULT_DAW_THEME_ID ? activeTheme() : themeId
+  }
 
   createEffect(() => {
     setColorMode(activeTheme())
   })
 
   createEffect(() => {
-    applyDawTheme(activeThemeId(), colorMode())
-    setAppliedThemeRevision((revision) => revision + 1)
+    const result = applyDawTheme(activeThemeId(), colorMode())
+    if (!result.changed) return
+    setThemeTokens(result.tokens)
   })
 
   const setTheme = (theme: AppTheme) => {
@@ -69,7 +76,22 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
     setPreferences("appearance", "themeId", id)
   }
 
-  const commitPreview = () => {
+  const previewThemeSelection = (selection: AppTheme | DawThemeId) => {
+    if (selection === "system" || selection === "light" || selection === "dark") {
+      batch(() => {
+        setPreviewThemeId(DEFAULT_DAW_THEME_ID)
+        setPreviewTheme(selection)
+      })
+      return
+    }
+
+    batch(() => {
+      setPreviewThemeId(selection)
+      setPreviewTheme(null)
+    })
+  }
+
+  const commitActivePreview = () => {
     const nextThemeId = previewThemeId()
     const nextTheme = previewTheme()
     batch(() => {
@@ -80,7 +102,12 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
     })
   }
 
-  const cancelPreview = () => {
+  const commitThemeSelection = (selection: AppTheme | DawThemeId) => {
+    previewThemeSelection(selection)
+    commitActivePreview()
+  }
+
+  const cancelThemePreview = () => {
     batch(() => {
       setPreviewThemeId(null)
       setPreviewTheme(null)
@@ -104,13 +131,13 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           themeId: () => activeThemeId(),
           themeOptions: () => themeOptions,
           resolvedTheme: colorMode,
-          appliedThemeRevision,
+          themeTokens,
+          activeThemeSelection,
           setTheme,
           setThemeId,
-          previewThemeId: setPreviewThemeId,
-          previewColorScheme: setPreviewTheme,
-          commitPreview,
-          cancelPreview
+          previewThemeSelection,
+          commitThemeSelection,
+          cancelThemePreview
         },
         agent: {
           autoApply: () => preferences.agent.autoApply,

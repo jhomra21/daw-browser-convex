@@ -1,5 +1,5 @@
 import type { ConfigColorMode } from "@kobalte/core"
-import { parseThemeId, type DawThemeId } from "~/lib/theme/theme-registry"
+import { DEFAULT_DAW_THEME_ID, parseThemeId, type DawThemeId } from "~/lib/theme/theme-registry"
 
 export const APP_PREFERENCES_STORAGE_KEY = "daw-browser.app-preferences.v1"
 export const APP_PREFERENCES_VERSION = 1
@@ -25,7 +25,7 @@ export const defaultAppPreferences: AppPreferences = {
   version: APP_PREFERENCES_VERSION,
   appearance: {
     theme: "system",
-    themeId: "default"
+    themeId: DEFAULT_DAW_THEME_ID
   },
   agent: {
     autoApply: false
@@ -43,9 +43,6 @@ const isAppTheme = (value: unknown): value is AppTheme =>
 
 export const parseAppTheme = (value: unknown): AppTheme =>
   isAppTheme(value) ? value : defaultAppPreferences.appearance.theme
-
-export const parseAppThemeSelectValue = (value: string): AppTheme | null =>
-  isAppTheme(value) ? value : null
 
 const parseBoolean = (value: unknown, fallback: boolean): boolean =>
   typeof value === "boolean" ? value : fallback

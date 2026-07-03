@@ -6,7 +6,6 @@ import { useAppPreferences } from "~/context/app-preferences";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { buildNextAudioWarp } from "~/lib/audio-warp-patch";
 import { getSourceBeatOffsetAnchorX, getSourceBeatOffsetFromAnchorX } from "~/lib/audio-waveform-layout";
-import { readCssVariables } from "~/lib/theme/css-variables";
 
 type SampleDetailWaveformProps = {
   clip: Clip<AudioBuffer>;
@@ -60,22 +59,6 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     projectBpm: props.projectBpm,
     leftPadSec: props.clip.leftPadSec,
   }));
-  const canvasColors = createMemo(() => {
-    void appPreferences.appearance.appliedThemeRevision();
-    const colors = readCssVariables([
-      { name: "--timeline-background", fallback: "rgb(10, 10, 10)" },
-      { name: "--timeline-grid-minor", fallback: "rgba(255,255,255,0.08)" },
-      { name: "--timeline-grid-major", fallback: "rgba(255,255,255,0.14)" },
-      { name: "--clip-audio", fallback: "rgba(22,163,74,0.88)" },
-    ]);
-    return {
-      timelineBackground: colors.get("--timeline-background") ?? "rgb(10, 10, 10)",
-      timelineGridMinor: colors.get("--timeline-grid-minor") ?? "rgba(255,255,255,0.08)",
-      timelineGridMajor: colors.get("--timeline-grid-major") ?? "rgba(255,255,255,0.14)",
-      clipAudio: colors.get("--clip-audio") ?? "rgba(22,163,74,0.88)",
-    };
-  });
-
   onMount(() => {
     const commitHeight = (heightPx: number) => {
       const nextHeightPx = Math.max(WAVEFORM_MIN_HEIGHT_PX, Math.floor(heightPx));
@@ -159,7 +142,11 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, WAVEFORM_WIDTH_PX, waveformHeight);
 
-    const { timelineBackground, timelineGridMinor, timelineGridMajor, clipAudio } = canvasColors();
+    const canvasColors = appPreferences.appearance.themeTokens();
+    const timelineBackground = canvasColors["timeline-background"];
+    const timelineGridMinor = canvasColors["timeline-grid-minor"];
+    const timelineGridMajor = canvasColors["timeline-grid-major"];
+    const clipAudio = canvasColors["clip-audio"];
 
     ctx.fillStyle = timelineBackground;
     ctx.fillRect(0, 0, WAVEFORM_WIDTH_PX, waveformHeight);
@@ -218,7 +205,6 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     void waveformHeightPx();
     void props.projectBpm;
     void waveform.peaks();
-    void canvasColors();
     draw();
   });
 

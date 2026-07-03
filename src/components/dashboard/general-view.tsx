@@ -3,27 +3,25 @@ import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard
 import { Button } from "~/components/ui/button";
 import { useAppPreferences } from "~/context/app-preferences";
 import { type AppTheme } from "~/lib/preferences/app-preferences";
-import { isThemeId, type DawThemeId } from "~/lib/theme/theme-registry";
-
-const defaultThemeId: DawThemeId = "default";
+import { DEFAULT_DAW_THEME_ID, type DawThemeId } from "~/lib/theme/theme-registry";
 
 type ThemeSelectionId = AppTheme | DawThemeId;
 
 type PreviewOption = {
-  id: string;
+  id: ThemeSelectionId;
   label: string;
 };
 
 type PreviewButtonGroupProps = {
   options: readonly PreviewOption[];
-  selectedId: string;
-  preview: (id: string) => void;
-  commit: (id: string) => void;
+  selectedId: ThemeSelectionId;
+  preview: (id: ThemeSelectionId) => void;
+  commit: (id: ThemeSelectionId) => void;
   cancel: () => void;
 };
 
 function PreviewButtonGroup(props: PreviewButtonGroupProps) {
-  const handleKeyDown = (event: KeyboardEvent, id: string) => {
+  const handleKeyDown = (event: KeyboardEvent, id: ThemeSelectionId) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       props.commit(id);
@@ -67,37 +65,16 @@ function PreviewButtonGroup(props: PreviewButtonGroupProps) {
 export function DashboardGeneralView() {
   const appPreferences = useAppPreferences();
 
-  const themeOptions = () => [
+  const themeOptions = (): readonly PreviewOption[] => [
     { id: "system", label: "System" },
     { id: "light", label: "Light" },
     { id: "dark", label: "Dark" },
     ...appPreferences.appearance.themeOptions()
-      .filter((theme) => theme.id !== defaultThemeId)
+      .filter((theme) => theme.id !== DEFAULT_DAW_THEME_ID)
       .map((theme) => ({ id: theme.id, label: theme.name }))
   ];
 
-  const selectedThemeId = (): ThemeSelectionId => {
-    const themeId = appPreferences.appearance.themeId();
-    return themeId === defaultThemeId ? appPreferences.appearance.theme() : themeId;
-  };
-
-  const previewThemeSelection = (value: string) => {
-    if (value === "system" || value === "light" || value === "dark") {
-      appPreferences.appearance.previewThemeId(defaultThemeId);
-      appPreferences.appearance.previewColorScheme(value);
-      return;
-    }
-
-    if (isThemeId(value)) {
-      appPreferences.appearance.previewThemeId(value);
-      appPreferences.appearance.previewColorScheme("dark");
-    }
-  };
-
-  const commitThemeSelection = (value: string) => {
-    previewThemeSelection(value);
-    appPreferences.appearance.commitPreview();
-  };
+  const selectedThemeId = (): ThemeSelectionId => appPreferences.appearance.activeThemeSelection();
 
   return (
     <DashboardScrollView>
@@ -109,9 +86,9 @@ export function DashboardGeneralView() {
             <PreviewButtonGroup
               options={themeOptions()}
               selectedId={selectedThemeId()}
-              preview={previewThemeSelection}
-              commit={commitThemeSelection}
-              cancel={appPreferences.appearance.cancelPreview}
+              preview={appPreferences.appearance.previewThemeSelection}
+              commit={appPreferences.appearance.commitThemeSelection}
+              cancel={appPreferences.appearance.cancelThemePreview}
             />
           }
         />

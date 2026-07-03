@@ -13,6 +13,7 @@ import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import EffectShell from "~/components/effects/EffectShell";
 import { DeviceToggleButton } from "~/components/ui/device-control";
 import Knob from "~/components/ui/knob";
+import { useAppPreferences } from "~/context/app-preferences";
 import { drumRackSampleKey } from "~/lib/drum-rack-buffer-sync";
 import { createSampleBufferLoader } from "~/lib/sample-buffer-loader";
 import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE, type SampleDragData } from "~/lib/sample-drag-data";
@@ -90,6 +91,7 @@ const SampleWaveform: Component<{
   sample: DrumRackSampleAssignment;
   buffer: AudioBuffer | undefined;
 }> = (props) => {
+  const appPreferences = useAppPreferences();
   let canvasRef: HTMLCanvasElement | undefined;
   const [peaks, setPeaks] = createSignal<Uint8Array | null>(null);
   const [canvasSize, setCanvasSize] = createSignal({ width: SAMPLE_WAVEFORM_BINS, height: 56 });
@@ -158,9 +160,12 @@ const SampleWaveform: Component<{
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, cssW, cssH);
 
+    const themeTokens = appPreferences.appearance.themeTokens();
+    const gridColor = themeTokens["device-graph-grid"];
+    const waveformColor = themeTokens["clip-audio"];
     const data = peaks();
     if (!data) {
-      ctx.strokeStyle = "rgba(255,255,255,0.10)";
+      ctx.strokeStyle = gridColor;
       for (let x = 0; x < cssW; x += 7) {
         ctx.beginPath();
         ctx.moveTo(x, cssH);
@@ -180,6 +185,8 @@ const SampleWaveform: Component<{
       contentH: cssH,
       cssW,
       cssH,
+      fillStyle: waveformColor,
+      boundaryStyle: gridColor,
     });
   });
 
@@ -243,18 +250,13 @@ const DrumRack: Component<DrumRackProps> = (props) => {
     if (!buffer) return false;
     if (currentPadSampleKey(pad.id) !== key) return false;
     const nextParams = props.params;
-    let nextBuffers: ReadonlyMap<string, AudioBuffer> | undefined;
-    setBufferState((current) => {
-      const pruned = pruneBufferState(current, targetId, nextParams);
-      const buffers = new Map(pruned.buffers);
-      const sampleKeys = new Map(pruned.sampleKeys);
-      buffers.set(pad.id, buffer);
-      sampleKeys.set(pad.id, key);
-      nextBuffers = buffers;
-      return { targetId, buffers, sampleKeys };
-    });
-    if (!nextBuffers) return false;
-    props.audioEngine.setTrackDrumRack(targetId, nextParams, nextBuffers);
+    const pruned = pruneBufferState(bufferState(), targetId, nextParams);
+    const buffers = new Map(pruned.buffers);
+    const sampleKeys = new Map(pruned.sampleKeys);
+    buffers.set(pad.id, buffer);
+    sampleKeys.set(pad.id, key);
+    setBufferState({ targetId, buffers, sampleKeys });
+    props.audioEngine.setTrackDrumRack(targetId, nextParams, buffers);
     return true;
   };
 
@@ -271,25 +273,19 @@ const DrumRack: Component<DrumRackProps> = (props) => {
     props.onAssignSampleToPad(pad.id, assignment);
     const buffer = await loader.load(assignment.url, (data) => props.audioEngine.decodeAudioData(data));
     if (!buffer || props.targetId !== targetId) return;
-    const key = sampleKey(assignment);
-    if (!key) return;
+    const key = drumRackSampleKey(assignment);
     if (currentPadSampleKey(pad.id) !== key) return;
     const nextParams = props.params;
-    let nextBuffers: ReadonlyMap<string, AudioBuffer> | undefined;
-    setBufferState((current) => {
-      const pruned = pruneBufferState(current, targetId, nextParams);
-      const buffers = new Map(pruned.buffers);
-      const sampleKeys = new Map(pruned.sampleKeys);
-      buffers.set(pad.id, buffer);
-      sampleKeys.set(pad.id, key);
-      nextBuffers = buffers;
-      return { targetId, buffers, sampleKeys };
-    });
-    if (!nextBuffers) return;
+    const pruned = pruneBufferState(bufferState(), targetId, nextParams);
+    const buffers = new Map(pruned.buffers);
+    const sampleKeys = new Map(pruned.sampleKeys);
+    buffers.set(pad.id, buffer);
+    sampleKeys.set(pad.id, key);
+    setBufferState({ targetId, buffers, sampleKeys });
     props.audioEngine.setTrackDrumRack(
       targetId,
       nextParams,
-      nextBuffers,
+      buffers,
     );
   };
 

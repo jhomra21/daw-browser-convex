@@ -1,7 +1,6 @@
 import {
   type Component,
   createEffect,
-  createMemo,
 } from "solid-js";
 
 import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
@@ -9,7 +8,6 @@ import { useAppPreferences } from "~/context/app-preferences";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { LANE_HEIGHT, PPS } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
-import { readCssVariables } from "~/lib/theme/css-variables";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import type { RuntimeClip } from "~/lib/timeline-runtime-types";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
@@ -75,27 +73,6 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS));
   const handleWidthPx = () =>
     clipWidthPx() < 18 ? 2 : clipWidthPx() < 28 ? 3 : 6;
-  const canvasColors = createMemo(() => {
-    void appPreferences.appearance.appliedThemeRevision();
-    const colors = readCssVariables([
-      { name: "--clip-selected", fallback: "rgba(59,130,246,0.95)" },
-      { name: "--clip-midi", fallback: "rgba(34,197,94,0.95)" },
-      { name: "--clip-audio", fallback: "rgba(22,163,74,0.88)" },
-      { name: "--timeline-grid-major", fallback: "rgba(255,255,255,0.15)" },
-      { name: "--timeline-grid-minor", fallback: "rgba(255,255,255,0.08)" },
-      { name: "--timeline-surface", fallback: "rgba(15,23,42,0.34)" },
-      { name: "--timeline-surface-muted", fallback: "rgba(15,23,42,0.42)" },
-    ]);
-    return {
-      clipSelected: colors.get("--clip-selected") ?? "rgba(59,130,246,0.95)",
-      clipMidi: colors.get("--clip-midi") ?? "rgba(34,197,94,0.95)",
-      clipAudio: colors.get("--clip-audio") ?? "rgba(22,163,74,0.88)",
-      timelineGridMajor: colors.get("--timeline-grid-major") ?? "rgba(255,255,255,0.15)",
-      timelineGridMinor: colors.get("--timeline-grid-minor") ?? "rgba(255,255,255,0.08)",
-      timelineSurface: colors.get("--timeline-surface") ?? "rgba(15,23,42,0.34)",
-      timelineSurfaceMuted: colors.get("--timeline-surface-muted") ?? "rgba(15,23,42,0.42)",
-    };
-  });
 
   const waveform = useClipWaveformViewModel({
     clip: () => props.clip,
@@ -204,10 +181,17 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    (ctx as any).imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, cssW, cssH);
 
-    const { clipSelected, clipMidi, clipAudio, timelineGridMajor, timelineGridMinor, timelineSurface, timelineSurfaceMuted } = canvasColors();
+    const canvasColors = appPreferences.appearance.themeTokens();
+    const clipSelected = canvasColors["clip-selected"];
+    const clipMidi = canvasColors["clip-midi"];
+    const clipAudio = canvasColors["clip-audio"];
+    const timelineGridMajor = canvasColors["timeline-grid-major"];
+    const timelineGridMinor = canvasColors["timeline-grid-minor"];
+    const timelineSurface = canvasColors["timeline-surface"];
+    const timelineSurfaceMuted = canvasColors["timeline-surface-muted"];
 
     const padTop = WAVEFORM_PAD_Y;
     const padBottom = WAVEFORM_PAD_Y;
@@ -371,7 +355,6 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void props.bpm;
     void waveform.peaks();
     void props.viewportRedrawVersion;
-    void canvasColors();
     drawWaveform();
   });
 

@@ -6,6 +6,8 @@ export type DawThemeOption = {
   name: string
 }
 
+export const DEFAULT_DAW_THEME_ID: DawThemeId = "default"
+
 export const builtInThemes: readonly DawTheme[] = [
   {
     id: "default",
@@ -159,6 +161,7 @@ export const isThemeId = (value: unknown): value is DawThemeId =>
   builtInThemes.some((theme) => theme.id === value)
 
 export const parseThemeId = (value: unknown): DawThemeId =>
-  isThemeId(value) ? value : "default"
+  isThemeId(value) ? value : DEFAULT_DAW_THEME_ID
 
-export const getTheme = (id: DawThemeId): DawTheme => builtInThemes.find((theme) => theme.id === id) ?? builtInThemes[0]
+export const getTheme = (id: DawThemeId): DawTheme =>
+  builtInThemes.find((theme) => theme.id === id) ?? builtInThemes[0]

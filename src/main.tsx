@@ -1,7 +1,7 @@
 import { render } from 'solid-js/web'
 import { RouterProvider, createRouter } from '@tanstack/solid-router'
 import { QueryClientProvider } from '@tanstack/solid-query'
-import { ColorModeProvider, ColorModeScript } from '@kobalte/core'
+import { ColorModeProvider, type ColorModeStorageManager } from '@kobalte/core'
 import { registerSW } from 'virtual:pwa-register'
 import { assert } from '@daw-browser/shared'
 import { routeTree } from './routeTree.gen'
@@ -34,11 +34,15 @@ const rootElement = document.getElementById('root')
 assert(rootElement, 'Root element with id "root" not found in index.html')
 const initialAppPreferences = loadInitialAppPreferences()
 const initialColorMode = initialAppPreferences.appearance.theme
+const appPreferencesColorModeManager: ColorModeStorageManager = {
+  type: 'localStorage',
+  get: () => initialColorMode,
+  set: () => {}
+}
 
 render(() => (
   <QueryClientProvider client={queryClient}>
-    <ColorModeScript initialColorMode={initialColorMode} />
-    <ColorModeProvider initialColorMode={initialColorMode}>
+    <ColorModeProvider initialColorMode={initialColorMode} storageManager={appPreferencesColorModeManager}>
       <AppPreferencesProvider initialPreferences={initialAppPreferences}>
         <RouterProvider router={router} />
       </AppPreferencesProvider>

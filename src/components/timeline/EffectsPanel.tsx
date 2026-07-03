@@ -79,7 +79,7 @@ const EffectsPanelClosedFooter: Component<{
     ]}
   >
     <div
-      class="fixed left-0 right-0 bottom-0 z-50 bg-neutral-900"
+      class="fixed left-0 right-0 bottom-0 z-50 bg-app-surface"
       style={{ "padding-bottom": `${BOTTOM_PANEL_EDGE_PADDING_PX}px` }}
     >
       <TimelineBottomPanelFooter
@@ -176,10 +176,10 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
         props.instrument.state.synth.isExpandedForCurrentTarget()
       }
     >
-      <div class="flex min-w-48 items-center justify-between border border-neutral-800 bg-neutral-900 px-2 py-2 text-neutral-300">
+      <div class="flex min-w-48 items-center justify-between border border-border bg-app-surface px-2 py-2 text-muted-foreground">
         <span class="text-xs">Synth is expanded</span>
         <button
-          class="border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+          class="border border-border bg-muted px-2 py-1 text-xs text-muted-foreground hover:bg-secondary"
           onClick={props.instrument.state.synth.close}
         >
           Restore
@@ -423,7 +423,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
 };
 
 const EffectsPanelReadOnlyNotice: Component = () => (
-  <div class="flex min-w-60 items-center border border-neutral-800 bg-neutral-950/80 px-3 py-2 text-xs text-neutral-500">
+  <div class="flex min-w-60 items-center border border-border bg-background/80 px-3 py-2 text-xs text-muted-foreground">
     Effects are read-only for collaborator-owned tracks.
   </div>
 );
@@ -523,7 +523,7 @@ type EffectsPanelEmptyStateProps = {
 
 const EffectsPanelEmptyState: Component<EffectsPanelEmptyStateProps> = (props) => (
   <Show when={props.empty.visible}>
-    <div class="flex items-center px-4 text-sm text-neutral-400">
+    <div class="flex items-center px-4 text-sm text-muted-foreground">
       No devices on this {props.empty.currentTargetId === "master" ? "master bus" : "track"}.
       Add instruments or effects from the Browser.
     </div>

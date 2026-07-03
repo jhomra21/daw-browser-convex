@@ -93,8 +93,8 @@ function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
     <>
       <div class="flex items-start justify-between gap-4 px-1">
         <div>
-          <h2 class="text-2xl font-semibold tracking-tight text-neutral-100">Open a local project</h2>
-          <p class="mt-2 text-sm text-neutral-400">
+          <h2 class="text-2xl font-semibold tracking-tight text-foreground">Open a local project</h2>
+          <p class="mt-2 text-sm text-muted-foreground">
             Create or reopen a browser-local project. Sign-in is not required for local work.
           </p>
         </div>
@@ -115,7 +115,7 @@ function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
         <Show
           when={props.projects()}
           fallback={
-            <div class="border border-neutral-800 bg-neutral-900/80 p-4 text-sm text-neutral-400">
+            <div class="border border-border bg-app-surface/80 p-4 text-sm text-muted-foreground">
               Loading local projects...
             </div>
           }
@@ -124,22 +124,22 @@ function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
             <Show
               when={projectList().length > 0}
               fallback={
-                <div class="border border-dashed border-neutral-800 p-8 text-center text-sm text-neutral-400">
+                <div class="border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
                   No local projects yet.
                 </div>
               }
             >
               <For each={projectList()}>
                 {(project) => (
-                  <article class="flex items-center justify-between gap-4 border border-neutral-800 bg-neutral-900/80 p-4">
+                  <article class="flex items-center justify-between gap-4 border border-border bg-app-surface/80 p-4">
                     <button
                       class="min-w-0 flex-1 text-left"
                       type="button"
                       onClick={() => props.onOpenProject(project.id)}
                       disabled={busy()}
                     >
-                      <div class="truncate font-medium text-neutral-100">{project.name}</div>
-                      <div class="mt-1 text-xs text-neutral-500">
+                      <div class="truncate font-medium text-foreground">{project.name}</div>
+                      <div class="mt-1 text-xs text-muted-foreground">
                         Last opened {formatUpdatedAt(project.lastOpenedAt)}
                       </div>
                     </button>
@@ -229,8 +229,8 @@ function DashboardProjectSettings(props: { model: DashboardTimelineModel }) {
       <div class="px-1">
         <div class="flex items-center justify-between gap-3">
           <div>
-            <div class="text-xs uppercase tracking-wide text-neutral-500">Save status</div>
-            <div class="mt-1 text-sm font-medium text-neutral-100">{currentSaveStatus().label}</div>
+            <div class="text-xs uppercase tracking-wide text-muted-foreground">Save status</div>
+            <div class="mt-1 text-sm font-medium text-foreground">{currentSaveStatus().label}</div>
           </div>
           <ProjectSaveStatusBadge
             class="shrink-0"
@@ -292,17 +292,17 @@ function DashboardProjectSettings(props: { model: DashboardTimelineModel }) {
           </Show>
         </div>
         <Show when={canShareCurrentProject()}>
-          <div class="mt-4 border-t border-neutral-800 pt-3">
-            <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">Members</div>
-            <Show when={!shareMenu.membersLoading()} fallback={<div class="text-xs text-neutral-500">Loading members...</div>}>
-              <Show when={shareMenu.members().length > 0} fallback={<div class="text-xs text-neutral-500">No accepted members yet.</div>}>
+          <div class="mt-4 border-t border-border pt-3">
+            <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Members</div>
+            <Show when={!shareMenu.membersLoading()} fallback={<div class="text-xs text-muted-foreground">Loading members...</div>}>
+              <Show when={shareMenu.members().length > 0} fallback={<div class="text-xs text-muted-foreground">No accepted members yet.</div>}>
                 <div class="space-y-2">
                   <For each={shareMenu.members()}>
                     {(member) => (
-                      <div class="flex items-center justify-between gap-3 border border-neutral-800 bg-neutral-950/60 px-3 py-2">
+                      <div class="flex items-center justify-between gap-3 border border-border bg-background/60 px-3 py-2">
                         <div class="min-w-0">
-                          <div class="truncate text-xs text-neutral-200">{member.userId}</div>
-                          <div class="text-xs capitalize text-neutral-500">{member.role}</div>
+                          <div class="truncate text-xs text-foreground">{member.userId}</div>
+                          <div class="text-xs capitalize text-muted-foreground">{member.role}</div>
                         </div>
                         <Button
                           variant="ghost"
@@ -397,8 +397,8 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
             </DashboardSection>
             <DashboardProjectSettings model={model} />
             <DashboardSection title="Projects">
-              <div class="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-                <div class="text-xs text-neutral-500">Create, open, rename, or delete projects.</div>
+              <div class="flex items-center justify-between border-b border-border px-4 py-3">
+                <div class="text-xs text-muted-foreground">Create, open, rename, or delete projects.</div>
                 <Button size="sm" onClick={() => void model.projectMenu.onCreateProject()}>
                   New project
                 </Button>

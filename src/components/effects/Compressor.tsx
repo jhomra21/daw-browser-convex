@@ -59,9 +59,9 @@ const normalizeGainReductionY = (value: number) => Math.max(0, Math.min(100, 10 
 
 function MiniStatus(props: { label: string; value: string; tone?: 'cyan' | 'yellow' }) {
   return (
-    <div class="min-w-0 border border-neutral-800 bg-neutral-950/80 px-1.5 py-1">
-      <div class="text-3xs uppercase leading-none text-neutral-500">{props.label}</div>
-      <div class={cn('truncate font-mono text-2xs leading-tight', props.tone === 'yellow' ? 'text-yellow-300' : props.tone === 'cyan' ? 'text-cyan-300' : 'text-neutral-200')}>{props.value}</div>
+    <div class="min-w-0 border border-border bg-background/80 px-1.5 py-1">
+      <div class="text-3xs uppercase leading-none text-muted-foreground">{props.label}</div>
+      <div class={cn('truncate font-mono text-2xs leading-tight', props.tone === 'yellow' ? 'text-yellow-300' : props.tone === 'cyan' ? 'text-cyan-300' : 'text-foreground')}>{props.value}</div>
     </div>
   )
 }

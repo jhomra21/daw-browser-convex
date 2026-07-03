@@ -221,7 +221,7 @@ export default function Delay(props: DelayProps) {
             </Show>
           </div>
 
-          <div class="flex min-w-0 flex-col gap-2 rounded-sm border border-neutral-800 bg-neutral-900/70 p-2">
+          <div class="flex min-w-0 flex-col gap-2 rounded-sm border border-border bg-app-surface/70 p-2">
             <DelayFilterGraph
               params={props.params}
               disabled={!props.params.enabled}

@@ -12,7 +12,7 @@ export const TracksMenu: Component<{ tracksMenu: TransportControlsProps["tracksM
   return (
     <MenubarMenu value="tracks">
       <NativeMenuTrigger label="Tracks" />
-      <MenubarContent class="border-neutral-800 bg-neutral-900">
+      <MenubarContent class="border-border bg-popover">
         <MenubarItem
           class={cn(nativeMenuItemClass, "flex w-full items-center gap-2", tracksMenu().syncMix && "text-blue-300")}
           onSelect={tracksMenu().onToggleSyncMix}

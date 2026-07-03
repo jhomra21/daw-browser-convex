@@ -21,7 +21,7 @@ type DeleteTrackDialogProps = {
 
 const DeleteTrackDialog: Component<DeleteTrackDialogProps> = (props) => (
   <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-    <DialogContent class="bg-neutral-900 text-neutral-100 border border-neutral-800">
+    <DialogContent class="bg-app-surface text-foreground border border-border">
       <DialogHeader>
         <DialogTitle>Delete this track?</DialogTitle>
         <DialogDescription>

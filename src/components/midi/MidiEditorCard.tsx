@@ -234,19 +234,19 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
 
   const renderHeader = () => (
     <div
-      class="flex items-center justify-between px-3 py-2 bg-neutral-800 border-b border-neutral-700 cursor-move select-none"
+      class="flex items-center justify-between px-3 py-2 bg-muted border-b border-border cursor-move select-none"
       onPointerDown={onHeaderPointerDown}
     >
-      <div class="flex items-center gap-3 text-sm font-semibold text-neutral-200">
+      <div class="flex items-center gap-3 text-sm font-semibold text-foreground">
         <div class="flex items-center gap-2">
           <span>MIDI Editor</span>
         </div>
-        <span class="text-neutral-400">•</span>
-        <span class="text-neutral-300 text-xs">Clip: {props.clipId.slice(0, 8)}</span>
-        <span class="text-neutral-500 text-xs">BPM: {props.bpm}</span>
+        <span class="text-muted-foreground">•</span>
+        <span class="text-muted-foreground text-xs">Clip: {props.clipId.slice(0, 8)}</span>
+        <span class="text-muted-foreground text-xs">BPM: {props.bpm}</span>
       </div>
       <button
-        class="text-neutral-300 hover:text-white px-2 py-0.5 text-sm"
+        class="text-muted-foreground hover:text-foreground px-2 py-0.5 text-sm"
         onPointerDown={stopEditorEvent}
         onClick={props.onClose}
         aria-label="Close MIDI editor"
@@ -257,7 +257,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
   )
 
   const renderPianoGutter = () => (
-    <div class="bg-neutral-900 border-r border-neutral-800 select-none">
+    <div class="bg-app-surface border-r border-border select-none">
       <div class="grid w-full" style={{ 'grid-template-rows': grid().rowTemplate }}>
         <For each={grid().rows}>
           {(row) => {
@@ -266,12 +266,12 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
             return (
               <div
                 class={cn(
-                  'relative flex cursor-pointer items-center justify-center border-b border-neutral-800 font-mono text-2xs',
+                  'relative flex cursor-pointer items-center justify-center border-b border-border font-mono text-2xs',
                   props.midiKeyboard.isActive(pitch)
                     ? 'border-green-400 bg-green-600/50 text-white'
                     : isBlackKey
-                      ? 'bg-neutral-700/70 text-neutral-100'
-                      : 'bg-neutral-800/70 text-neutral-200',
+                      ? 'bg-secondary/70 text-foreground'
+                      : 'bg-muted/70 text-foreground',
                 )}
                 onPointerDown={(event) => {
                   stopEditorEvent(event)
@@ -292,7 +292,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     <div class="w-full grid" style={{ 'grid-template-rows': grid().rowTemplate, 'grid-template-columns': grid().columnTemplate }}>
       <For each={grid().cells}>
         {(major) => (
-          <div class={cn('border', major ? 'border-neutral-700' : 'border-neutral-800')} />
+          <div class={cn('border', major ? 'border-border' : 'border-border')} />
         )}
       </For>
     </div>
@@ -330,13 +330,13 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     <div class="relative w-full" style={{ height: 'calc(100% - 36px)' }}>
       <div class="absolute inset-0 grid overflow-y-auto" style={{ 'grid-template-columns': '44px 1fr' }}>
         {renderPianoGutter()}
-        <div class="relative bg-neutral-900" ref={(el) => (gridRef = el)} onPointerDown={onGridClick}>
+        <div class="relative bg-app-surface" ref={(el) => (gridRef = el)} onPointerDown={onGridClick}>
           {renderGridCells()}
           {renderNotes()}
         </div>
       </div>
       <div
-        class="absolute right-1 bottom-1 w-4 h-4 cursor-se-resize bg-neutral-700/60 hover:bg-neutral-600/70"
+        class="absolute right-1 bottom-1 w-4 h-4 cursor-se-resize bg-secondary/60 hover:bg-secondary/70"
         onPointerDown={onResizerPointerDown}
         title="Resize"
       />
@@ -345,7 +345,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
 
   return (
     <div
-      class="absolute z-50 border border-neutral-700 bg-neutral-900 shadow-xl overflow-hidden"
+      class="absolute z-50 border border-border bg-app-surface shadow-xl overflow-hidden"
       style={{ left: `${props.bounds.x}px`, top: `${props.bounds.y}px`, width: `${props.bounds.w}px`, height: `${props.bounds.h}px` }}
       onPointerDown={stopEditorEvent}
       onClick={stopEditorEvent}

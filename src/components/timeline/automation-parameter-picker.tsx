@@ -63,7 +63,7 @@ export default function AutomationParameterPicker(props: AutomationParameterPick
     >
       <button
         type="button"
-        class="flex h-7 w-full items-center justify-between gap-2 rounded border border-red-500/40 bg-neutral-950/90 px-2 py-1 text-left text-red-100 outline-none hover:border-red-400/70"
+        class="flex h-7 w-full items-center justify-between gap-2 rounded border border-red-500/40 bg-background/90 px-2 py-1 text-left text-red-100 outline-none hover:border-red-400/70"
         aria-haspopup="listbox"
         aria-expanded={open()}
         onClick={toggle}
@@ -72,15 +72,15 @@ export default function AutomationParameterPicker(props: AutomationParameterPick
         <span class="shrink-0 text-red-200/70">{open() ? '▴' : '▾'}</span>
       </button>
       <Show when={open()}>
-        <div class="absolute left-0 top-full z-50 mt-1 max-h-80 w-72 overflow-auto rounded border border-neutral-700 bg-neutral-950 p-1 shadow-xl shadow-black/50" role="listbox">
+        <div class="absolute left-0 top-full z-50 mt-1 max-h-80 w-72 overflow-auto rounded border border-border bg-background p-1 shadow-xl shadow-black/50" role="listbox">
           <For each={groupedParameterOptions}>
             {(group) => (
               <div class="py-1">
-                <div class="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">{group.group}</div>
+                <div class="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{group.group}</div>
                 <For each={group.devices}>
                   {(device) => (
-                    <div class="mb-1 rounded border border-neutral-800/80 bg-neutral-900/50 p-1">
-                      <div class="px-1 pb-1 text-[10px] text-neutral-400">{device.device}</div>
+                    <div class="mb-1 rounded border border-border/80 bg-app-surface/50 p-1">
+                      <div class="px-1 pb-1 text-[10px] text-muted-foreground">{device.device}</div>
                       <For each={device.options}>
                         {(option) => {
                           const automated = () => props.automatedParameterIds?.has(option.id) ?? false
@@ -90,7 +90,7 @@ export default function AutomationParameterPicker(props: AutomationParameterPick
                               role="option"
                               aria-selected={option.id === props.value}
                               class={cn(
-                                'flex h-6 w-full items-center gap-2 rounded px-2 text-left text-neutral-200 hover:bg-red-500/20 hover:text-red-50',
+                                'flex h-6 w-full items-center gap-2 rounded px-2 text-left text-foreground hover:bg-red-500/20 hover:text-red-50',
                                 option.id === props.value && 'bg-red-500/20 text-red-50',
                               )}
                               onClick={() => {

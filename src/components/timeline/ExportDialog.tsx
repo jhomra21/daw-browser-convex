@@ -161,39 +161,39 @@ const ExportDialog: Component<Props> = (props) => {
 
   return (
     <Dialog open={props.isOpen} onOpenChange={(v) => { if (!v) props.onClose() }}>
-      <DialogContent class="bg-neutral-900 text-neutral-100 border border-neutral-800">
+      <DialogContent class="bg-app-surface text-foreground border border-border">
         <DialogHeader>
           <DialogTitle>Export timeline</DialogTitle>
           <DialogDescription>Choose range. Export runs in your browser.</DialogDescription>
         </DialogHeader>
         <div class="flex flex-col gap-3 py-2">
           <div class="flex items-center gap-3">
-            <label class="text-sm w-24 text-neutral-300">Source</label>
-            <select class="bg-neutral-900 text-neutral-100 border border-neutral-700 px-2 py-1 text-sm" value={source()} onChange={(e) => setSource(readExportSource(e.currentTarget.value))}>
+            <label class="text-sm w-24 text-muted-foreground">Source</label>
+            <select class="bg-app-surface text-foreground border border-border px-2 py-1 text-sm" value={source()} onChange={(e) => setSource(readExportSource(e.currentTarget.value))}>
               <option value="mixdown">Mixdown</option>
               <option value="all-stems">All track stems</option>
               <option value="selected-stems" disabled={!selectedStemAvailable()}>Selected track stem</option>
             </select>
           </div>
           <div class="flex items-center gap-3">
-            <label class="text-sm w-24 text-neutral-300">Range</label>
-            <select class="bg-neutral-900 text-neutral-100 border border-neutral-700 px-2 py-1 text-sm" value={mode()} onChange={(e) => setMode(readExportMode(e.currentTarget.value))}>
+            <label class="text-sm w-24 text-muted-foreground">Range</label>
+            <select class="bg-app-surface text-foreground border border-border px-2 py-1 text-sm" value={mode()} onChange={(e) => setMode(readExportMode(e.currentTarget.value))}>
               <option value="whole">Whole timeline</option>
               <option value="loop" disabled={!props.loopEnabled}>Loop region</option>
               <option value="custom">Custom</option>
             </select>
           </div>
           <div class="flex items-center gap-3">
-            <label class="text-sm w-24 text-neutral-300">Formats</label>
+            <label class="text-sm w-24 text-muted-foreground">Formats</label>
             <div class="flex flex-wrap gap-2">
-              <Show when={supportedFormats() !== null} fallback={<span class="text-sm text-neutral-300">WAV</span>}>
+              <Show when={supportedFormats() !== null} fallback={<span class="text-sm text-muted-foreground">WAV</span>}>
                 <For each={exportAudioFormats}>
                   {(item) => {
                     const itemMetadata = getExportAudioFormatMetadata(item)
                     const supported = formatSupported(item)
                     const selected = () => selectedFormats().includes(item)
                     return (
-                      <label class="flex items-center gap-1 border border-neutral-700 px-2 py-1 text-sm text-neutral-200">
+                      <label class="flex items-center gap-1 border border-border px-2 py-1 text-sm text-foreground">
                         <input
                           type="checkbox"
                           checked={selected()}
@@ -210,10 +210,10 @@ const ExportDialog: Component<Props> = (props) => {
           </div>
           <Show when={mode() === 'custom'}>
             <div class="flex items-center gap-3">
-              <label class="text-sm w-24 text-neutral-300">Start (s)</label>
-              <input type="number" step="0.01" class="w-28 bg-neutral-900 text-neutral-100 border border-neutral-700 px-2 py-1 text-sm" value={startSec()} onInput={(e) => setStartSec(parseFloat(e.currentTarget.value) || 0)} />
-              <label class="text-sm text-neutral-300">End (s)</label>
-              <input type="number" step="0.01" class="w-28 bg-neutral-900 text-neutral-100 border border-neutral-700 px-2 py-1 text-sm" value={endSec()} onInput={(e) => setEndSec(parseFloat(e.currentTarget.value) || 0)} />
+              <label class="text-sm w-24 text-muted-foreground">Start (s)</label>
+              <input type="number" step="0.01" class="w-28 bg-app-surface text-foreground border border-border px-2 py-1 text-sm" value={startSec()} onInput={(e) => setStartSec(parseFloat(e.currentTarget.value) || 0)} />
+              <label class="text-sm text-muted-foreground">End (s)</label>
+              <input type="number" step="0.01" class="w-28 bg-app-surface text-foreground border border-border px-2 py-1 text-sm" value={endSec()} onInput={(e) => setEndSec(parseFloat(e.currentTarget.value) || 0)} />
             </div>
           </Show>
           <Show when={error()}>
@@ -237,18 +237,18 @@ const ExportDialog: Component<Props> = (props) => {
           </Show>
           <Show when={activeExportJob()}>
             {(job) => (
-              <div class="flex items-center gap-3 px-1 py-1 text-sm text-neutral-100">
+              <div class="flex items-center gap-3 px-1 py-1 text-sm text-foreground">
                 <ExportProgressStatus job={job()} onCancel={exportContext.cancelExport} />
               </div>
             )}
           </Show>
           <Show when={busy() && !activeExportJob()}>
-            <div class="px-1 py-1 text-sm text-neutral-100">
+            <div class="px-1 py-1 text-sm text-foreground">
               Preparing export...
             </div>
           </Show>
           <Show when={source() !== 'mixdown'}>
-            <div class="text-xs text-neutral-400">Stems are local-only and save into a stems folder inside the folder you choose.</div>
+            <div class="text-xs text-muted-foreground">Stems are local-only and save into a stems folder inside the folder you choose.</div>
           </Show>
         </div>
         <DialogFooter>

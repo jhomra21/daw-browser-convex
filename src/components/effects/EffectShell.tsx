@@ -18,22 +18,22 @@ export default function EffectShell(props: EffectShellProps) {
   const hasActions = () => props.actionsBeforeReset || props.onReset || props.onToggleEnabled
 
   return (
-    <div class={cn('flex h-full flex-col border border-neutral-800 bg-neutral-900 text-neutral-100', props.class)}>
-      <div data-effect-shell-header="true" class="flex items-stretch justify-between border-b border-neutral-800 px-2 py-1">
+    <div class={cn('flex h-full flex-col border border-border bg-app-surface text-foreground', props.class)}>
+      <div data-effect-shell-header="true" class="flex items-stretch justify-between border-b border-border px-2 py-1">
         <div class="flex min-w-0 items-center gap-2">
           <span class="truncate text-xs font-semibold">{props.title}</span>
           <Show when={props.typeLabel}>
-            <span class="shrink-0 text-[10px] text-neutral-500">{props.typeLabel}</span>
+            <span class="shrink-0 text-[10px] text-muted-foreground">{props.typeLabel}</span>
           </Show>
           {props.titleActions}
         </div>
         <Show when={hasActions()}>
-          <div class="-my-1 -mr-2 flex shrink-0 items-stretch border-l border-neutral-800">
+          <div class="-my-1 -mr-2 flex shrink-0 items-stretch border-l border-border">
             {props.actionsBeforeReset}
             <Show when={props.onReset} keyed>
               {(onReset) => (
                 <button
-                  class="bg-transparent px-2 text-xs text-neutral-300 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  class="bg-transparent px-2 text-xs text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={props.disabled}
                   onClick={() => onReset()}
                 >
@@ -45,10 +45,10 @@ export default function EffectShell(props: EffectShellProps) {
               {(onToggleEnabled) => (
                 <button
                   class={cn(
-                    'flex w-9 items-center justify-center border-l border-neutral-800 text-xs disabled:cursor-not-allowed disabled:opacity-50',
+                    'flex w-9 items-center justify-center border-l border-border text-xs disabled:cursor-not-allowed disabled:opacity-50',
                     props.enabled
                       ? 'bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/15'
-                      : 'bg-transparent text-neutral-400 hover:bg-neutral-800',
+                      : 'bg-transparent text-muted-foreground hover:bg-muted',
                   )}
                   disabled={props.disabled}
                   onClick={() => onToggleEnabled(!props.enabled)}

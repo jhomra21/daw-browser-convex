@@ -126,24 +126,24 @@ const SharedChat: Component<SharedChatProps> = (props) => {
   return (
     <Show when={props.isOpen}>
       <div
-        class="pointer-events-auto fixed bottom-0 left-[25.25rem] z-50 flex h-[28.75rem] w-[23.75rem] flex-col border-l border-t border-neutral-800 bg-neutral-900"
+        class="pointer-events-auto fixed bottom-0 left-[25.25rem] z-50 flex h-[28.75rem] w-[23.75rem] flex-col border-l border-t border-border bg-popover"
         style={{ bottom: `${props.bottomOffsetPx ?? 0}px` }}
       >
-        <div class="flex items-center justify-between px-3 py-2 border-b border-neutral-800">
-          <div class="text-sm font-semibold text-neutral-200">Room Chat</div>
+        <div class="flex items-center justify-between border-b border-border px-3 py-2">
+          <div class="text-sm font-semibold text-popover-foreground">Room Chat</div>
           <div class="flex items-center gap-2">
             <Show when={rateError()}>
-              <div class="text-xs text-amber-400">{rateError()}</div>
+              <div class="text-xs text-warning-foreground">{rateError()}</div>
             </Show>
-            <button class="text-neutral-400 hover:text-white" onClick={props.onClose}>✕</button>
+            <button class="text-muted-foreground hover:text-foreground" onClick={props.onClose}>✕</button>
           </div>
         </div>
         <div class="flex-1 overflow-y-auto px-3 py-2" ref={() => { try { if (props.isOpen) requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom())) } catch {} }}>
           <div class="min-h-full flex flex-col justify-end space-y-2">
             <For each={messages()}>{(m) => (
               <div class="text-left">
-                <div class="inline-block max-w-[90%] bg-neutral-800 px-2 py-1 text-sm text-neutral-100">
-                  <div class="text-2xs text-neutral-400 mb-0.5">{m.senderName || m.senderUserId}</div>
+                <div class="inline-block max-w-[90%] bg-muted px-2 py-1 text-sm text-foreground">
+                  <div class="mb-0.5 text-2xs text-muted-foreground">{m.senderName || m.senderUserId}</div>
                   <div>{m.content}</div>
                 </div>
               </div>
@@ -151,9 +151,9 @@ const SharedChat: Component<SharedChatProps> = (props) => {
             <div ref={el => (bottomAnchorRef = el)} />
           </div>
         </div>
-        <div class="border-t border-neutral-800 p-2">
+        <div class="border-t border-border p-2">
           <textarea
-            class="h-[4.5rem] w-full resize-none bg-neutral-800 p-2 text-sm text-neutral-100 outline-none"
+            class="h-[4.5rem] w-full resize-none bg-muted p-2 text-sm text-foreground outline-none placeholder:text-muted-foreground"
             placeholder={props.userId ? 'Type a message…' : 'Sign in to chat'}
             disabled={!props.userId}
             value={input()}
@@ -165,7 +165,7 @@ const SharedChat: Component<SharedChatProps> = (props) => {
             <button
               disabled={!props.userId}
               class={cn(
-                'border border-neutral-600 bg-neutral-700 px-3 py-1 text-sm text-white hover:bg-neutral-600',
+                'border border-border bg-primary px-3 py-1 text-sm text-primary-foreground hover:bg-primary/90',
                 !props.userId && 'opacity-50',
               )}
               onClick={() => void send()}

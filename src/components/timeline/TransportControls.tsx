@@ -111,7 +111,7 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
             type="text"
             value={transport().tempoDraft()}
             size={Math.max(transport().tempoDraft().length + 1, 2)}
-            class="w-auto appearance-none border border-border bg-timeline-surface px-2 py-1 text-xs text-foreground focus:border-neutral-500 focus:outline-none"
+            class="w-auto appearance-none border border-border bg-timeline-surface px-2 py-1 text-xs text-foreground focus:border-border focus:outline-none"
             inputmode="numeric"
             pattern="[0-9]*"
             onFocus={() => transport().setTempoEditing(true)}
@@ -198,7 +198,7 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
               <For each={gridDenominators}>
                 {(denominator) => (
                   <DropdownMenuItem
-                    class="cursor-pointer text-neutral-50"
+                    class="cursor-pointer text-foreground"
                     onSelect={() =>
                       transport().onChangeGridDenominator(denominator)
                     }

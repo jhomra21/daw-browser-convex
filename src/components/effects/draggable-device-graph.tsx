@@ -79,7 +79,7 @@ export function DraggableDeviceGraph(props: {
   return (
     <div
       ref={(element) => (graphRef = element)}
-      class={cn('relative h-[116px] shrink-0 touch-none overflow-hidden bg-neutral-950', props.class)}
+      class={cn('relative h-[116px] shrink-0 touch-none overflow-hidden bg-background', props.class)}
       onPointerMove={dragActiveHandle}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
@@ -105,7 +105,7 @@ export function DraggableDeviceGraph(props: {
             type="button"
             aria-label={handle.label}
             class={cn(
-              'absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-cyan-300 bg-neutral-950',
+              'absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-cyan-300 bg-background',
               props.disabled ? 'cursor-not-allowed opacity-60' : 'cursor-grab active:cursor-grabbing',
             )}
             style={{

@@ -113,7 +113,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         <Button
           variant="outline"
           size="sm"
-          class="fixed left-4 z-40 bg-neutral-800 text-neutral-100 hover:bg-neutral-700"
+          class="fixed left-4 z-40 bg-muted text-foreground hover:bg-secondary"
           style={{ bottom: floatingButtonOffset() }}
           aria-label="Toggle AI Chat"
           onClick={props.chat.toggleAgentPanel}
@@ -126,7 +126,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         <Button
           variant="outline"
           size="sm"
-          class="fixed left-24 z-40 bg-neutral-800 text-neutral-100 hover:bg-neutral-700"
+          class="fixed left-24 z-40 bg-muted text-foreground hover:bg-secondary"
           style={{ bottom: floatingButtonOffset() }}
           aria-label="Toggle Room Chat"
           onClick={props.chat.toggleSharedChat}

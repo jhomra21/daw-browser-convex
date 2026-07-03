@@ -36,7 +36,7 @@ export default function ProjectDeleteDialog(props: ProjectDeleteDialogProps) {
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent class="border border-neutral-800 bg-neutral-900 text-neutral-100">
+      <DialogContent class="border border-border bg-app-surface text-foreground">
         <form
           onSubmit={(event) => {
             event.preventDefault()
@@ -49,7 +49,7 @@ export default function ProjectDeleteDialog(props: ProjectDeleteDialogProps) {
               <Show when={props.project}>
                 {(project) => (
                   <>
-                    Type <span class="font-medium text-neutral-100">{project().name}</span> to permanently delete this project.
+                    Type <span class="font-medium text-foreground">{project().name}</span> to permanently delete this project.
                   </>
                 )}
               </Show>

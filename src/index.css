@@ -371,11 +371,11 @@ html {
   height: 1.25rem;
   appearance: none;
   touch-action: none;
-  border: 2px solid rgb(64 64 64);
+  border: 2px solid var(--border);
   background: linear-gradient(
     to right,
-    rgb(251 191 36) 0 var(--track-volume-percent),
-    rgb(163 163 163) var(--track-volume-percent) 100%
+    var(--warning-foreground) 0 var(--track-volume-percent),
+    var(--muted-foreground) var(--track-volume-percent) 100%
   );
 }
 
@@ -384,13 +384,13 @@ html {
     linear-gradient(
       to right,
       transparent 0 var(--track-volume-automation-start),
-      rgb(239 68 68) var(--track-volume-automation-start) var(--track-volume-automation-end),
+      var(--automation) var(--track-volume-automation-start) var(--track-volume-automation-end),
       transparent var(--track-volume-automation-end) 100%
     ),
     linear-gradient(
       to right,
-      rgb(251 191 36) 0 var(--track-volume-percent),
-      rgb(163 163 163) var(--track-volume-percent) 100%
+      var(--warning-foreground) 0 var(--track-volume-percent),
+      var(--muted-foreground) var(--track-volume-percent) 100%
     );
   background-position: 0 0, 0 0;
   background-repeat: no-repeat;
@@ -410,12 +410,12 @@ html {
 
 .track-volume-slider::-moz-range-track {
   height: 100%;
-  background: rgb(163 163 163);
+  background: var(--muted-foreground);
 }
 
 .track-volume-slider::-moz-range-progress {
   height: 100%;
-  background: rgb(251 191 36);
+  background: var(--warning-foreground);
 }
 
 .track-volume-slider::-moz-range-thumb {

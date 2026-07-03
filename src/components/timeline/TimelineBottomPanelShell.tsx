@@ -49,7 +49,7 @@ const TimelineBottomPanelShell: Component<TimelineBottomPanelShellProps> = (prop
 
   return (
     <div
-      class="fixed left-0 right-0 bottom-0 z-50 border-t border-neutral-800 bg-neutral-900"
+      class="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-app-surface"
       style={{ "padding-bottom": `${BOTTOM_PANEL_EDGE_PADDING_PX}px` }}
     >
       <button
@@ -63,7 +63,7 @@ const TimelineBottomPanelShell: Component<TimelineBottomPanelShellProps> = (prop
           setDragStart({ y: event.clientY, height: props.controls.heightPx });
         }}
       >
-        <div class="pointer-events-none absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2 bg-neutral-700" />
+        <div class="pointer-events-none absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2 bg-border" />
       </button>
       <div style={{ height: `${props.controls.heightPx}px` }}>
         {props.children}

@@ -466,7 +466,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             ? "border-border bg-amber-500 text-black"
                             : sidebar().selectedTrackId === track.id
                               ? "border-border"
-                              : "border-border hover:border-neutral-600",
+                              : "border-border hover:border-border",
                       )}
                       style={{ "border-width": "0.5px" }}
                       disabled={muteDisabled}
@@ -681,7 +681,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             "h-7 border text-xs font-semibold transition-colors",
                             canAddAutomationLane()
                               ? "border-border bg-timeline-surface-muted text-red-200 hover:bg-red-500/20"
-                              : "cursor-not-allowed border-border bg-timeline-surface text-neutral-600",
+                              : "cursor-not-allowed border-border bg-timeline-surface text-muted-foreground",
                           )}
                           disabled={!canAddAutomationLane()}
                           onClick={(event) => {

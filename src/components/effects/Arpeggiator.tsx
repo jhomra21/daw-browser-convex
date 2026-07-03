@@ -43,10 +43,10 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
       titleActions={
         <button
           class={cn(
-            'border border-neutral-700 px-1.5 py-0.5 text-2xs transition-colors',
+            'border border-border px-1.5 py-0.5 text-2xs transition-colors',
             props.params.hold
               ? 'border-blue-400/30 bg-blue-500/20 text-blue-300'
-              : 'bg-neutral-800 text-neutral-400',
+              : 'bg-muted text-muted-foreground',
           )}
           onClick={() => props.onChange({ hold: !props.params.hold })}
           disabled={props.disabled || !props.params.enabled}
@@ -57,17 +57,17 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
       }
     >
       {/* Pattern Selector */}
-      <div class="px-2 py-2 border-b border-neutral-800/50">
-        <div class="text-2xs text-neutral-400 mb-1 text-center">Pattern</div>
+      <div class="px-2 py-2 border-b border-border/50">
+        <div class="text-2xs text-muted-foreground mb-1 text-center">Pattern</div>
         <div class="flex items-center justify-center gap-1">
           <For each={PATTERNS}>
             {(pat) => (
               <button
                 class={cn(
-                  'border border-neutral-700 px-2 py-1 text-xs transition-colors',
+                  'border border-border px-2 py-1 text-xs transition-colors',
                   props.params.pattern === pat.value
                     ? 'border-blue-400/30 bg-blue-500/20 text-blue-300'
-                    : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
+                    : 'bg-muted text-muted-foreground hover:bg-secondary',
                 )}
                 onClick={() => props.onChange({ pattern: pat.value })}
                 disabled={props.disabled || !props.params.enabled}
@@ -80,17 +80,17 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
       </div>
 
       {/* Rate Selector */}
-      <div class="px-2 py-2 border-b border-neutral-800/50">
-        <div class="text-2xs text-neutral-400 mb-1 text-center">Rate</div>
+      <div class="px-2 py-2 border-b border-border/50">
+        <div class="text-2xs text-muted-foreground mb-1 text-center">Rate</div>
         <div class="flex items-center justify-center gap-1">
           <For each={RATES}>
             {(r) => (
               <button
                 class={cn(
-                  'border border-neutral-700 px-2 py-1 font-mono text-xs transition-colors',
+                  'border border-border px-2 py-1 font-mono text-xs transition-colors',
                   props.params.rate === r.value
                     ? 'border-blue-400/30 bg-blue-500/20 text-blue-300'
-                    : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
+                    : 'bg-muted text-muted-foreground hover:bg-secondary',
                 )}
                 onClick={() => props.onChange({ rate: r.value })}
                 disabled={props.disabled || !props.params.enabled}

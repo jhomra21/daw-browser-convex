@@ -431,7 +431,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       title={`${props.clip.name}`}
     >
       <div
-        class="absolute inset-y-0 left-0 z-20 flex cursor-ew-resize items-center justify-center select-none text-xs text-neutral-200/80"
+        class="absolute inset-y-0 left-0 z-20 flex cursor-ew-resize items-center justify-center select-none text-xs text-foreground/80"
         style={{ width: `${handleWidthPx()}px` }}
         onPointerDown={(e) => {
           e.stopPropagation();
@@ -444,7 +444,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         </span>
       </div>
       <div
-        class="absolute inset-y-0 right-0 z-20 flex cursor-ew-resize items-center justify-center select-none text-xs text-neutral-200/80"
+        class="absolute inset-y-0 right-0 z-20 flex cursor-ew-resize items-center justify-center select-none text-xs text-foreground/80"
         style={{ width: `${handleWidthPx()}px` }}
         onPointerDown={(e) => {
           e.stopPropagation();
@@ -500,11 +500,11 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       <div
         class={cn(
           "absolute left-0 right-0 top-0 z-20 pointer-events-none",
-          isGhost() ? "bg-black/20" : "bg-black/35",
+          isGhost() ? "bg-background/20" : "bg-background/35",
         )}
       >
         <div
-          class="truncate p-1 text-xs leading-none text-white"
+          class="truncate p-1 text-xs leading-none text-foreground"
           style={{ "text-shadow": "0 1px 2px rgba(0,0,0,0.75)" }}
         >
           {props.clip.name}

@@ -598,7 +598,7 @@ export default function Eq(props: EqProps) {
           'grid-template-rows': 'minmax(0, 1fr) 52px',
         }}
       >
-        <div class="row-span-2 flex flex-col border-r border-neutral-800 bg-neutral-950/30 px-1 py-1">
+        <div class="row-span-2 flex flex-col border-r border-border bg-background/30 px-1 py-1">
           <Knob
             class="min-h-0 flex-1 justify-center px-1 py-1"
             label="Freq"
@@ -676,7 +676,7 @@ export default function Eq(props: EqProps) {
           />
         </div>
 
-        <div ref={containerRef} class="relative min-w-0 overflow-hidden bg-neutral-950">
+        <div ref={containerRef} class="relative min-w-0 overflow-hidden bg-background">
           <canvas
             ref={(el) => (canvasRef = el || undefined)}
             width={canvasSize().width}
@@ -689,28 +689,28 @@ export default function Eq(props: EqProps) {
           />
         </div>
 
-        <div class="row-span-2 flex flex-col border-l border-neutral-800 bg-neutral-950/40 px-1 py-2 text-[10px]">
-          <div class="mb-1 text-neutral-500">Mode</div>
+        <div class="row-span-2 flex flex-col border-l border-border bg-background/40 px-1 py-2 text-[10px]">
+          <div class="mb-1 text-muted-foreground">Mode</div>
           <DropdownMenu>
             <DropdownMenuTrigger
               class={cn(
-                'mb-3 flex h-5 w-full items-center justify-between border border-neutral-700 bg-neutral-900 px-1 text-left text-neutral-300 hover:bg-neutral-800',
+                'mb-3 flex h-5 w-full items-center justify-between border border-border bg-app-surface px-1 text-left text-muted-foreground hover:bg-muted',
                 !props.enabled && 'cursor-not-allowed opacity-60',
               )}
               disabled={!props.enabled}
               title="EQ channel mode"
             >
               <span class="min-w-0 truncate">{formatChannelMode(props.channelMode)}</span>
-              <svg viewBox="0 0 8 8" class="h-1.5 w-1.5 shrink-0 text-neutral-400" aria-hidden="true">
+              <svg viewBox="0 0 8 8" class="h-1.5 w-1.5 shrink-0 text-muted-foreground" aria-hidden="true">
                 <path d="M1 3 L4 6 L7 3 Z" fill="currentColor" />
               </svg>
             </DropdownMenuTrigger>
-            <DropdownMenuContent class="w-20 min-w-20 border-neutral-700 bg-neutral-900 p-1">
+            <DropdownMenuContent class="w-20 min-w-20 border-border bg-app-surface p-1">
               <For each={EQ_CHANNEL_MODE_OPTIONS}>
                 {(option) => (
                   <DropdownMenuItem
                     class={cn(
-                      'h-6 cursor-pointer px-2 py-1 text-xs text-neutral-200 focus:bg-neutral-800 focus:text-neutral-50',
+                      'h-6 cursor-pointer px-2 py-1 text-xs text-foreground focus:bg-muted focus:text-foreground',
                       option.value === props.channelMode && 'bg-cyan-500/20 text-cyan-100',
                     )}
                     disabled={!props.enabled}
@@ -724,14 +724,14 @@ export default function Eq(props: EqProps) {
               </For>
             </DropdownMenuContent>
           </DropdownMenu>
-          <div class="mb-1 text-neutral-500">Edit</div>
-          <div class="mb-3 border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-neutral-300">A</div>
+          <div class="mb-1 text-muted-foreground">Edit</div>
+          <div class="mb-3 border border-border bg-app-surface px-1 py-0.5 text-muted-foreground">A</div>
         </div>
 
-        <div class="relative z-10 flex min-w-0 border-t border-neutral-800 bg-neutral-950">
+        <div class="relative z-10 flex min-w-0 border-t border-border bg-background">
           <For each={props.bands}>
             {(band, index) => (
-              <div class="flex min-w-0 flex-1 flex-col items-center justify-center gap-1 border-r border-neutral-800 p-1 last:border-r-0">
+              <div class="flex min-w-0 flex-1 flex-col items-center justify-center gap-1 border-r border-border p-1 last:border-r-0">
                 <EqFilterTypeSelect
                   band={band}
                   enabled={props.enabled}
@@ -749,8 +749,8 @@ export default function Eq(props: EqProps) {
                     aria-pressed={band.enabled}
                     aria-label={band.enabled ? `Disable EQ band ${index() + 1}` : `Enable EQ band ${index() + 1}`}
                     class={cn(
-                      'h-3.5 w-3.5 border border-neutral-600',
-                      band.enabled ? 'bg-cyan-400' : 'bg-neutral-900',
+                      'h-3.5 w-3.5 border border-border',
+                      band.enabled ? 'bg-cyan-400' : 'bg-app-surface',
                     )}
                     disabled={!props.enabled || !props.onBandToggle}
                     onClick={() => props.onBandToggle?.(band.id)}
@@ -759,8 +759,8 @@ export default function Eq(props: EqProps) {
                   <span
                     class={cn(
                       'w-3 text-center text-[11px] font-semibold leading-none',
-                      selectedId() === band.id ? 'text-amber-300' : 'text-neutral-300',
-                      !band.enabled && 'text-neutral-500',
+                      selectedId() === band.id ? 'text-amber-300' : 'text-muted-foreground',
+                      !band.enabled && 'text-muted-foreground',
                     )}
                   >
                     {index() + 1}

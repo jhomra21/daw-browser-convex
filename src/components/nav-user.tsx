@@ -45,8 +45,8 @@ export const NavUser: Component = () => {
     >
       <DropdownMenu>
         <DropdownMenuTrigger>
-          <Button variant="ghost" size="icon" aria-label="User menu" class="hover:bg-neutral-800">
-            <Avatar class="h-8 w-8 shrink-0 border border-neutral-800">
+          <Button variant="ghost" size="icon" aria-label="User menu" class="hover:bg-muted">
+            <Avatar class="h-8 w-8 shrink-0 border border-border">
               <Show when={user()?.image}>
                 <AvatarImage src={(user()?.image as string) || ''} alt={(user()?.name as string) || ''} crossorigin="anonymous" referrerpolicy="no-referrer" />
               </Show>
@@ -56,7 +56,7 @@ export const NavUser: Component = () => {
             </Avatar>
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent class="w-56 bg-neutral-900">
+        <DropdownMenuContent class="w-56 bg-app-surface">
           <DropdownMenuLabel class="p-0">
             <div class="flex items-center gap-2 px-2 py-2 text-left text-sm">
               <Avatar class="h-8 w-8">
@@ -66,29 +66,29 @@ export const NavUser: Component = () => {
                 <AvatarFallback class="text-xs">{getInitials((user()?.name as string) || (user()?.email as string) || "")}</AvatarFallback>
               </Avatar>
               <div class="grid flex-1 text-left text-sm leading-tight min-w-0">
-                <span class="truncate font-semibold text-neutral-300">{user()?.name || user()?.email}</span>
+                <span class="truncate font-semibold text-muted-foreground">{user()?.name || user()?.email}</span>
                 <Show when={user()?.name && user()?.email}>
-                  <span class="truncate text-xs text-neutral-400">{user()?.email}</span>
+                  <span class="truncate text-xs text-muted-foreground">{user()?.email}</span>
                 </Show>
               </div>
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem class="cursor-pointer text-neutral-200" onSelect={() => setDashboardParam("account")}>
+          <DropdownMenuItem class="cursor-pointer text-foreground" onSelect={() => setDashboardParam("account")}>
             <Icon name="user" class="mr-2 h-4 w-4" />
             Account
           </DropdownMenuItem>
-          <DropdownMenuItem class="cursor-pointer text-neutral-200" onSelect={() => setDashboardParam("general")}>
+          <DropdownMenuItem class="cursor-pointer text-foreground" onSelect={() => setDashboardParam("general")}>
             <Icon name="grid" class="mr-2 h-4 w-4" />
             Settings
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem class="cursor-pointer text-neutral-200" as={Link} to="/about">
+          <DropdownMenuItem class="cursor-pointer text-foreground" as={Link} to="/about">
             <Icon name="house" class="mr-2 h-4 w-4" />
             About
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem class="cursor-pointer text-neutral-200" onSelect={handleSignOut}>
+          <DropdownMenuItem class="cursor-pointer text-foreground" onSelect={handleSignOut}>
             <Icon name="log-out" class="mr-2 h-4 w-4" />
             Logout
           </DropdownMenuItem>

@@ -41,7 +41,7 @@ export default function CloudBackupDialog(props: CloudBackupDialogProps) {
 
   return (
     <Dialog open={Boolean(props.state)} onOpenChange={props.onOpenChange}>
-      <DialogContent class="border border-neutral-800 bg-neutral-900 text-neutral-100">
+      <DialogContent class="border border-border bg-app-surface text-foreground">
         <DialogHeader>
           <DialogTitle>{title()}</DialogTitle>
           <DialogDescription>{message()}</DialogDescription>

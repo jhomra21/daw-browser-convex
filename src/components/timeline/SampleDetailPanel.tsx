@@ -39,9 +39,9 @@ const SampleDetailPanel: Component<SampleDetailPanelProps> = (props) => {
       }
     >
       <div class="flex h-full gap-3 overflow-x-auto px-3 py-3">
-        <div class="flex w-20 shrink-0 flex-col items-center justify-center border-r border-neutral-800 pr-2">
+        <div class="flex w-20 shrink-0 flex-col items-center justify-center border-r border-border pr-2">
           <span
-            class="inline-flex text-sm font-semibold uppercase tracking-widest text-neutral-300"
+            class="inline-flex text-sm font-semibold uppercase tracking-widest text-muted-foreground"
             style={{ transform: "rotate(-90deg)", "white-space": "nowrap" }}
           >
             Sample Detail

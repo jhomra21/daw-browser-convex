@@ -371,7 +371,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
       </svg>
       <Show when={readout()}>
         {(label) => (
-          <div class="pointer-events-none absolute right-2 top-1 rounded border border-red-500/40 bg-neutral-950/90 px-2 py-1 text-[10px] text-red-100 shadow-lg shadow-black/30">
+          <div class="pointer-events-none absolute right-2 top-1 rounded border border-red-500/40 bg-background/90 px-2 py-1 text-[10px] text-red-100 shadow-lg shadow-black/30">
             {label()}
           </div>
         )}
@@ -380,7 +380,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
         {(point) => (
           <button
             type="button"
-            class="absolute bottom-1 right-2 rounded border border-red-500/40 bg-neutral-950/90 px-2 py-1 text-[10px] uppercase tracking-wide text-red-100 hover:border-red-400"
+            class="absolute bottom-1 right-2 rounded border border-red-500/40 bg-background/90 px-2 py-1 text-[10px] uppercase tracking-wide text-red-100 hover:border-red-400"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation()

@@ -37,7 +37,7 @@ const TooltipContent = (props: TooltipContentProps) => {
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content
         class={cn(
-          "z-50 flex w-fit items-center rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-200 shadow-md",
+          "z-50 flex w-fit items-center rounded border border-border bg-background px-2 py-1 text-xs text-foreground shadow-md",
           local.class,
         )}
         {...rest}

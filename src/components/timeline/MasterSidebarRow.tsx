@@ -117,8 +117,8 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
           class={cn(
             "flex h-7 w-full items-center justify-center border px-2 text-center text-sm font-semibold",
             master().selected
-              ? "border-neutral-600 bg-muted"
-              : "border-border hover:border-neutral-600",
+              ? "border-border bg-muted"
+              : "border-border hover:border-border",
           )}
           style={{ "border-width": "0.5px" }}
           onClick={(event) => {

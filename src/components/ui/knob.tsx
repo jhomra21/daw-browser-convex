@@ -120,7 +120,7 @@ export default function Knob(props: KnobProps) {
   return (
     <div class={cn('flex flex-col items-center gap-0.5', props.class)}>
       <Show when={props.label}>
-        <div class="text-xs font-medium leading-none text-neutral-400">{props.label}</div>
+        <div class="text-xs font-medium leading-none text-muted-foreground">{props.label}</div>
       </Show>
       
       <div
@@ -164,7 +164,7 @@ export default function Knob(props: KnobProps) {
           aria-hidden="true"
         >
           <path
-            class="stroke-neutral-700"
+            class="stroke-border"
             d={KNOB_ARC_PATH}
             fill="none"
             stroke-width="4"
@@ -204,7 +204,7 @@ export default function Knob(props: KnobProps) {
             y2={KNOB_POINTER_END_Y}
             classList={{
               'stroke-sky-100': control.isDragging(),
-              'stroke-neutral-100': !control.isDragging(),
+              'stroke-foreground': !control.isDragging(),
             }}
             stroke-width="5"
             stroke-linecap="round"
@@ -215,12 +215,10 @@ export default function Knob(props: KnobProps) {
       
       {props.showValue !== false && (
         <div
-          class="max-w-full w-full whitespace-nowrap text-center font-mono leading-none transition-colors duration-150"
+          class="max-w-full w-full whitespace-nowrap text-center font-mono leading-none text-foreground transition-colors duration-150"
           classList={{
             'text-[11px]': displayValue().length > 6,
             'text-xs': displayValue().length <= 6,
-            'text-neutral-50': control.isDragging(),
-            'text-neutral-200': !control.isDragging(),
           }}
           style={{ 'word-spacing': '-0.18em' }}
         >

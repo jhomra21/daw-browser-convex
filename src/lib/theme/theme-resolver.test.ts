@@ -27,6 +27,17 @@ describe("theme resolver", () => {
     }
   })
 
+  test("keeps default dark theme aligned with legacy dark tokens", () => {
+    const dark = resolveDawThemeById("default", "dark")
+
+    expect(dark.background).toBe("oklch(0.141 0.005 285.823)")
+    expect(dark.foreground).toBe("oklch(0.985 0 0)")
+    expect(dark.border).toBe("oklch(0.274 0.006 286.033)")
+    expect(dark["timeline-background"]).toBe("oklch(0.11 0.003 286)")
+    expect(dark["timeline-surface"]).toBe("oklch(0.16 0.005 286)")
+    expect(dark["device-graph-background"]).toBe("oklch(0.11 0.003 286)")
+  })
+
   test("applies DAW token overrides", () => {
     const base = getTheme("default")
     const tokens = resolveDawTheme(

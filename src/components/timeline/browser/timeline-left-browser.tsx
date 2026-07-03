@@ -34,7 +34,7 @@ const BrowserFolderRenameInput: Component<{
       }}
       value={props.value}
       disabled={props.disabled}
-      class="min-w-0 flex-1 bg-transparent p-0 text-xs text-neutral-100 outline-none selection:bg-sky-500/40 disabled:opacity-60"
+      class="min-w-0 flex-1 bg-transparent p-0 text-xs text-foreground outline-none selection:bg-primary/40 disabled:opacity-60"
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
       onInput={(event) => props.onInput(event.currentTarget.value)}
@@ -82,18 +82,18 @@ const BrowserTreeRows: Component<{
               const button = (
                 <button
                   type="button"
-                  class="flex h-6 w-full items-center gap-1 px-3 text-left text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100"
+                  class="flex h-6 w-full items-center gap-1 px-3 text-left text-xs text-muted-foreground hover:bg-app-surface hover:text-foreground"
                   aria-expanded={visible()}
                   onClick={toggle}
                 >
-                  <span class="w-3 text-center text-xs text-neutral-600">{visible() ? "▾" : "▸"}</span>
+                  <span class="w-3 text-center text-xs text-muted-foreground">{visible() ? "▾" : "▸"}</span>
                   <span class="min-w-0 flex-1 truncate">{folder().label}</span>
-                  <span class="text-xs text-neutral-600">{folder().leafCount}</span>
+                  <span class="text-xs text-muted-foreground">{folder().leafCount}</span>
                 </button>
               );
               const editingRow = () => (
-                <div class="flex h-6 w-full items-center gap-1 px-3 text-left text-xs text-neutral-400">
-                  <span class="w-3 text-center text-xs text-neutral-600">{visible() ? "▾" : "▸"}</span>
+                <div class="flex h-6 w-full items-center gap-1 px-3 text-left text-xs text-muted-foreground">
+                  <span class="w-3 text-center text-xs text-muted-foreground">{visible() ? "▾" : "▸"}</span>
                   <BrowserFolderRenameInput
                     value={props.renameFolderInline?.name() ?? folder().label}
                     disabled={props.renameFolderInline?.busy() ?? false}
@@ -101,7 +101,7 @@ const BrowserTreeRows: Component<{
                     onConfirm={() => props.renameFolderInline?.onConfirm()}
                     onCancel={() => props.renameFolderInline?.onCancel()}
                   />
-                  <span class="text-xs text-neutral-600">{folder().leafCount}</span>
+                  <span class="text-xs text-muted-foreground">{folder().leafCount}</span>
                 </div>
               );
               const normalRow = (
@@ -150,7 +150,7 @@ const BrowserTree: Component<{
     <Show
       when={props.sections.length > 0}
       fallback={(
-        <div class="border border-dashed border-neutral-800 bg-neutral-900/40 px-2 py-2 text-xs leading-5 text-neutral-500">
+        <div class="border border-dashed border-border bg-app-surface/40 px-2 py-2 text-xs leading-5 text-muted-foreground">
           {props.emptyText}
         </div>
       )}
@@ -166,13 +166,13 @@ const BrowserTree: Component<{
             const button = (
               <button
                 type="button"
-                class="flex h-6 w-full items-center gap-1 px-1.5 text-left text-xs font-semibold uppercase tracking-widest text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300"
+                class="flex h-6 w-full items-center gap-1 px-1.5 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground hover:bg-app-surface hover:text-muted-foreground"
                 aria-expanded={visible()}
                 onClick={toggle}
               >
-                <span class="w-3 text-center text-xs text-neutral-600">{visible() ? "▾" : "▸"}</span>
+                <span class="w-3 text-center text-xs text-muted-foreground">{visible() ? "▾" : "▸"}</span>
                 <span class="min-w-0 flex-1 truncate">{section.label}</span>
-                <span class="text-xs font-normal tracking-normal text-neutral-600">{section.leafCount}</span>
+                <span class="text-xs font-normal tracking-normal text-muted-foreground">{section.leafCount}</span>
               </button>
             );
             return (
@@ -231,12 +231,12 @@ const BrowserItemRow: Component<{
       type="button"
       draggable={props.draggable}
       disabled={props.item.disabled}
-      class="group flex h-6 w-full items-center px-5 text-left text-xs hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
+      class="group flex h-6 w-full items-center px-5 text-left text-xs hover:bg-app-surface disabled:cursor-not-allowed disabled:opacity-50"
       onClick={props.onClick}
       onDragStart={props.onDragStart}
       onPointerDown={props.onPointerDown}
     >
-      <span class="min-w-0 flex-1 truncate text-neutral-200 group-hover:text-neutral-50">{props.item.label}</span>
+      <span class="min-w-0 flex-1 truncate text-foreground group-hover:text-foreground">{props.item.label}</span>
     </button>
   );
   return <TimelineContextMenu items={items}>{row}</TimelineContextMenu>;
@@ -366,23 +366,23 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
 
   return (
     <aside
-      class="relative flex h-full shrink-0 flex-col border-r border-neutral-800 bg-neutral-950 text-neutral-200"
+      class="relative flex h-full shrink-0 flex-col border-r border-border bg-background text-foreground"
       data-timeline-left-browser="1"
       style={{
         width: `${props.browser.widthPx}px`,
         display: props.browser.open ? undefined : "none",
       }}
     >
-      <div class="border-b border-neutral-800 p-2">
+      <div class="border-b border-border p-2">
         <div class="grid grid-cols-1 gap-1">
           <For each={timelineBrowserTabs}>
             {(tab) => (
               <button
                 type="button"
-                class="px-2 py-1 text-left text-xs hover:bg-neutral-900 hover:text-neutral-100"
+                class="px-2 py-1 text-left text-xs hover:bg-app-surface hover:text-foreground"
                 classList={{
-                  "bg-neutral-900 text-neutral-100": props.browser.activeTab === tab,
-                  "text-neutral-400": props.browser.activeTab !== tab,
+                  "bg-app-surface text-foreground": props.browser.activeTab === tab,
+                  "text-muted-foreground": props.browser.activeTab !== tab,
                 }}
                 aria-pressed={props.browser.activeTab === tab}
                 onClick={() => props.browser.onSelectTab(tab)}
@@ -394,12 +394,12 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
         </div>
       </div>
 
-      <div class="border-b border-neutral-800">
+      <div class="border-b border-border">
         <input
           type="search"
           value={props.browser.searchQueryByTab[props.browser.activeTab]}
           placeholder={`Search ${timelineBrowserTabLabels[props.browser.activeTab].toLowerCase()}`}
-          class="h-9 w-full bg-transparent px-3 text-xs text-neutral-100 outline-none placeholder:text-neutral-600 focus:bg-neutral-900/60"
+          class="h-9 w-full bg-transparent px-3 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:bg-app-surface/60"
           onInput={(event) => props.browser.onSearchQueryChange(props.browser.activeTab, event.currentTarget.value)}
         />
       </div>

@@ -77,7 +77,7 @@ function DeviceSection(props: {
   return (
     <div class={cn('flex min-h-0 min-w-0 flex-col bg-transparent', props.class)}>
       <div
-        class="mb-1 shrink-0 overflow-hidden whitespace-nowrap pt-1 text-xs font-semibold tracking-wide text-neutral-400"
+        class="mb-1 shrink-0 overflow-hidden whitespace-nowrap pt-1 text-xs font-semibold tracking-wide text-muted-foreground"
         style={{ height: '20px' }}
       >
         {props.title}
@@ -114,7 +114,7 @@ function ReverbGraphSection(props: {
 function DiffusionNetworkReadout(props: { label: string, value: string }) {
   return (
     <div class="flex flex-col gap-1 text-[11px] leading-none">
-      <span class="text-neutral-400">{props.label}</span>
+      <span class="text-muted-foreground">{props.label}</span>
       <span class="font-mono text-amber-300">{props.value}</span>
     </div>
   )

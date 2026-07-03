@@ -24,7 +24,7 @@ export const ViewMenu: Component<ViewMenuProps> = (props) => {
   return (
     <MenubarMenu value="view">
       <NativeMenuTrigger label="View" />
-      <MenubarContent class="border-neutral-800 bg-neutral-900">
+      <MenubarContent class="border-border bg-popover">
         <For each={timelineBrowserTabs}>
           {(tab) => (
             <MenubarItem class={viewMenuItemClass} onSelect={() => selectBrowserTab(tab)}>
@@ -47,7 +47,7 @@ export const ViewMenu: Component<ViewMenuProps> = (props) => {
           <span>Grid</span>
         </MenubarItem>
         <MenubarSeparator />
-        <div class="px-2 pb-1 pt-1 text-xs text-neutral-500">
+        <div class="px-2 pb-1 pt-1 text-xs text-muted-foreground">
           Grid Resolution
         </div>
         <For each={gridDenominators}>

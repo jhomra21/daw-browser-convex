@@ -42,7 +42,7 @@ export default function Synth(props: SynthProps) {
       actionsBeforeReset={
         props.onExpand ? (
           <button
-            class="bg-transparent px-2 text-xs text-neutral-300 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+            class="bg-transparent px-2 text-xs text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
             disabled={props.disabled}
             onClick={() => props.onExpand?.()}
           >
@@ -52,19 +52,19 @@ export default function Synth(props: SynthProps) {
       }
     >
       {/* Oscillator controls */}
-      <div class="px-2 py-2 border-b border-neutral-800/50">
+      <div class="px-2 py-2 border-b border-border/50">
         <div class="grid gap-3" style={{ 'grid-template-columns': '1fr 1fr' }}>
           {/* Osc 1 */}
           <div class="flex flex-col gap-1">
-            <div class="text-2xs text-neutral-400">Osc 1</div>
+            <div class="text-2xs text-muted-foreground">Osc 1</div>
             <div class="flex items-center gap-1 flex-wrap">
               <For each={WAVEFORMS}>{(wf) => (
                 <button
                   class={cn(
-                    'border border-neutral-700 px-2 py-0.5 text-2xs transition-colors',
+                    'border border-border px-2 py-0.5 text-2xs transition-colors',
                     props.params.wave1 === wf.value
                       ? 'border-blue-400/30 bg-blue-500/20 text-blue-300'
-                      : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
+                      : 'bg-muted text-muted-foreground hover:bg-secondary',
                   )}
                   onClick={() => props.onChange({ wave1: wf.value })}
                   disabled={props.disabled}
@@ -75,22 +75,22 @@ export default function Synth(props: SynthProps) {
               )}</For>
             </div>
             <div class="mt-1 flex items-center">
-              <div class="bg-neutral-800/70 border border-neutral-700/70 flex items-center justify-center" style={{ width: `${wvW()}px`, height: `${wvH()}px` }}>
+              <div class="bg-muted/70 border border-border/70 flex items-center justify-center" style={{ width: `${wvW()}px`, height: `${wvH()}px` }}>
                 <WavePreview wave={props.params.wave1} width={wvW()} height={wvH()} />
               </div>
             </div>
           </div>
           {/* Osc 2 */}
           <div class="flex flex-col gap-1">
-            <div class="text-2xs text-neutral-400">Osc 2</div>
+            <div class="text-2xs text-muted-foreground">Osc 2</div>
             <div class="flex items-center gap-1 flex-wrap">
               <For each={WAVEFORMS}>{(wf) => (
                 <button
                   class={cn(
-                    'border border-neutral-700 px-2 py-0.5 text-2xs transition-colors',
+                    'border border-border px-2 py-0.5 text-2xs transition-colors',
                     props.params.wave2 === wf.value
                       ? 'border-green-400/30 bg-green-500/20 text-green-300'
-                      : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
+                      : 'bg-muted text-muted-foreground hover:bg-secondary',
                   )}
                   onClick={() => props.onChange({ wave2: wf.value })}
                   disabled={props.disabled}
@@ -101,7 +101,7 @@ export default function Synth(props: SynthProps) {
               )}</For>
             </div>
             <div class="mt-1 flex items-center">
-              <div class="bg-neutral-800/70 border border-neutral-700/70 flex items-center justify-center" style={{ width: `${wvW()}px`, height: `${wvH()}px` }}>
+              <div class="bg-muted/70 border border-border/70 flex items-center justify-center" style={{ width: `${wvW()}px`, height: `${wvH()}px` }}>
                 <WavePreview wave={props.params.wave2} width={wvW()} height={wvH()} />
               </div>
             </div>
@@ -148,7 +148,7 @@ export default function Synth(props: SynthProps) {
       {/* Envelope preview */}
       <div class="px-2 pb-2">
         <div class="flex items-center justify-center">
-          <div class="bg-neutral-800/70 border border-neutral-700/70" style={{ width: `${envW()}px`, height: `${envH()}px` }}>
+          <div class="bg-muted/70 border border-border/70" style={{ width: `${envW()}px`, height: `${envH()}px` }}>
             <EnvelopePreview attackMs={props.params.attackMs} releaseMs={props.params.releaseMs} width={envW()} height={envH()} />
           </div>
         </div>

@@ -1177,7 +1177,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       ref={(el) => {
         rootRef = el;
       }}
-      class="h-full w-full flex flex-col bg-neutral-950 text-neutral-200"
+      class="h-full w-full flex flex-col bg-background text-foreground"
       onDragOver={handleRootDragOver}
       onDrop={handleRootDrop}
       onDragLeave={handleRootDragLeave}

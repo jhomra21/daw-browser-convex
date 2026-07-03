@@ -28,7 +28,7 @@ export const BrowserDragOverlay: Component<{ session: Accessor<BrowserDragSessio
           }}
         >
           <div
-            class="border bg-neutral-900 px-2 py-1 text-xs text-neutral-100"
+            class="border bg-app-surface px-2 py-1 text-xs text-foreground"
             classList={{
               "border-cyan-300": session().target.kind !== "none",
               "border-red-400": session().target.kind === "none",

@@ -39,7 +39,7 @@ export default function ProjectRenameDialog(props: ProjectRenameDialogProps) {
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent class="border border-neutral-800 bg-neutral-900 text-neutral-100">
+      <DialogContent class="border border-border bg-app-surface text-foreground">
         <form
           onSubmit={(event) => {
             event.preventDefault()

@@ -54,7 +54,7 @@ export default function EqFilterTypeSelect(props: EqFilterTypeSelectProps) {
     <DropdownMenu>
       <DropdownMenuTrigger
         class={cn(
-          'flex h-4 w-full items-center justify-between border border-neutral-700 bg-neutral-800 px-1 text-neutral-300',
+          'flex h-4 w-full items-center justify-between border border-border bg-muted px-1 text-muted-foreground',
           props.selected && 'border-cyan-400 bg-cyan-500/15 text-cyan-200',
           !props.enabled && 'cursor-not-allowed opacity-60',
           props.enabled && !props.band.enabled && 'opacity-60',
@@ -64,16 +64,16 @@ export default function EqFilterTypeSelect(props: EqFilterTypeSelectProps) {
         title={`${eqFilterTypeOption(props.band.type).label} filter`}
       >
         <EqFilterTypeIcon type={props.band.type} active={props.band.enabled} class="h-2.5 w-6" />
-        <svg viewBox="0 0 8 8" class="h-1.5 w-1.5 shrink-0 text-neutral-400" aria-hidden="true">
+        <svg viewBox="0 0 8 8" class="h-1.5 w-1.5 shrink-0 text-muted-foreground" aria-hidden="true">
           <path d="M1 3 L4 6 L7 3 Z" fill="currentColor" />
         </svg>
       </DropdownMenuTrigger>
-      <DropdownMenuContent class="w-max min-w-28 border-neutral-700 bg-neutral-900 p-1">
+      <DropdownMenuContent class="w-max min-w-28 border-border bg-app-surface p-1">
         <For each={EQ_FILTER_TYPE_OPTIONS}>
           {(option) => (
             <DropdownMenuItem
               class={cn(
-                'h-7 cursor-pointer gap-2 px-2 py-1 text-xs text-neutral-200 focus:bg-neutral-800 focus:text-neutral-50',
+                'h-7 cursor-pointer gap-2 px-2 py-1 text-xs text-foreground focus:bg-muted focus:text-foreground',
                 option.value === props.band.type && 'bg-cyan-500/20 text-cyan-100',
               )}
               disabled={!props.enabled || !props.band.enabled}

@@ -14,12 +14,12 @@ type TimelineBottomPanelFooterProps = {
 const TimelineBottomPanelFooter: Component<TimelineBottomPanelFooterProps> = (props) => {
   const tabClass = (active: boolean) => cn(
     "h-full border-x px-3 text-[11px] font-semibold uppercase tracking-wide",
-    active ? "border-neutral-700 bg-neutral-800 text-neutral-100" : "border-neutral-800 text-neutral-500",
+    active ? "border-border bg-muted text-foreground" : "border-border text-muted-foreground",
   );
 
   return (
     <div
-      class="flex shrink-0 items-center justify-between border-t border-neutral-800 bg-neutral-950"
+      class="flex shrink-0 items-center justify-between border-t border-border bg-background"
       style={{ height: `${BOTTOM_PANEL_FOOTER_HEIGHT_PX}px` }}
     >
       <div class="flex h-full items-center gap-1">
@@ -47,7 +47,7 @@ const TimelineBottomPanelFooter: Component<TimelineBottomPanelFooterProps> = (pr
         variant="ghost"
         size="sm"
         type="button"
-        class="h-full border-x border-neutral-700 bg-neutral-900 px-3 text-[11px] font-semibold uppercase tracking-wide text-neutral-200 hover:bg-neutral-800"
+        class="h-full border-x border-border bg-app-surface px-3 text-[11px] font-semibold uppercase tracking-wide text-foreground hover:bg-muted"
         onClick={props.onToggle}
       >
         {props.toggleLabel}

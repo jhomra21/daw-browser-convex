@@ -11,7 +11,7 @@ describe("normalizeAppPreferences", () => {
     expect(normalizeAppPreferences(null)).toEqual(defaultAppPreferences)
     expect(normalizeAppPreferences({ appearance: { theme: "blue" }, sidebar: { open: "yes" } })).toEqual({
       ...defaultAppPreferences,
-      appearance: { theme: "system" },
+      appearance: { theme: "system", themeId: "default" },
       sidebar: { open: true }
     })
     expect(normalizeAppPreferences({ version: 99, appearance: { theme: "dark" } })).toEqual(defaultAppPreferences)
@@ -21,13 +21,43 @@ describe("normalizeAppPreferences", () => {
     expect(
       normalizeAppPreferences({
         version: 1,
-        appearance: { theme: "dark" },
+        appearance: { theme: "dark", themeId: "catppuccin" },
         agent: { autoApply: true },
         sidebar: { open: false }
       })
     ).toEqual({
       version: 1,
-      appearance: { theme: "dark" },
+      appearance: { theme: "dark", themeId: "catppuccin" },
+      agent: { autoApply: true },
+      sidebar: { open: false }
+    })
+  })
+
+  test("normalizes missing and unknown theme ids without dropping valid fields", () => {
+    expect(
+      normalizeAppPreferences({
+        version: 1,
+        appearance: { theme: "light" },
+        agent: { autoApply: true },
+        sidebar: { open: false }
+      })
+    ).toEqual({
+      version: 1,
+      appearance: { theme: "light", themeId: "default" },
+      agent: { autoApply: true },
+      sidebar: { open: false }
+    })
+
+    expect(
+      normalizeAppPreferences({
+        version: 1,
+        appearance: { theme: "dark", themeId: "unknown" },
+        agent: { autoApply: true },
+        sidebar: { open: false }
+      })
+    ).toEqual({
+      version: 1,
+      appearance: { theme: "dark", themeId: "default" },
       agent: { autoApply: true },
       sidebar: { open: false }
     })

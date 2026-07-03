@@ -361,6 +361,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void waveform.peaks();
     void props.viewportRedrawVersion;
     void appPreferences.appearance.resolvedTheme();
+    void appPreferences.appearance.themeId();
     drawWaveform();
   });
 

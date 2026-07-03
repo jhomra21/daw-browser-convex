@@ -1,5 +1,32 @@
 # Themes Implementation Tracker
 
+## Named Themes Plan
+
+### Goal
+
+Add named theme support while keeping app preferences as the only persistence source and preserving the existing `system | light | dark` color scheme behavior.
+
+### Acceptance Criteria
+
+- Persist `appearance.themeId` with fallback to `default`; missing or invalid ids normalize without dropping other valid v1 preferences.
+- Keep `appearance.theme`, `appearance.resolvedTheme()`, and `appearance.setTheme()` working.
+- Add built-in `default`, `catppuccin`, and `tokyonight` themes using a compact OpenCode-compatible palette shape.
+- Resolve named themes into concrete CSS variable values and apply them through one `#daw-theme` style element.
+- Support temporary preview for named theme and color scheme, commit on selection, and cancel on leave/blur/Escape without persistence.
+- Redraw canvas/SVG theme consumers when either color scheme or theme id changes.
+- Cover preference fallback and resolver behavior with tests.
+- Pass `bun run typecheck`, `bun test`, `git diff --check`, and `bun run build`.
+
+### Implementation Steps
+
+1. Extend app preferences with `appearance.themeId` and parse unknown ids to `default`.
+2. Add theme types, registry, resolver, and DOM application helper.
+3. Extend the app preferences context with active theme id, options, preview, commit, and cancel APIs.
+4. Replace dashboard settings with separate color scheme and named theme controls.
+5. Add redraw dependencies where canvas/SVG reads CSS variables.
+6. Add tests for normalization, registry fallback, resolver output, overrides, and CSS generation.
+7. Run validators, review the final diff, and commit if clean.
+
 ## Goal
 
 Complete theme support for `system | light | dark` using app preferences as the single persistence source, Kobalte for document color mode, Tailwind v4/CSS semantic tokens for UI, and a small resolved theme API for JS, canvas, and SVG code.

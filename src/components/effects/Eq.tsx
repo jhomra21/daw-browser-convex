@@ -469,6 +469,7 @@ export default function Eq(props: EqProps) {
     void props.spectrumData
     void spectrumTick()
     void appPreferences.appearance.resolvedTheme()
+    void appPreferences.appearance.themeId()
     draw()
   })
 

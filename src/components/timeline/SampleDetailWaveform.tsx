@@ -209,6 +209,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     void props.projectBpm;
     void waveform.peaks();
     void appPreferences.appearance.resolvedTheme();
+    void appPreferences.appearance.themeId();
     draw();
   });
 

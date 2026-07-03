@@ -80,6 +80,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const colors = readCssVariables([
       { name: "--clip-selected", fallback: "rgba(59,130,246,0.95)" },
       { name: "--clip-midi", fallback: "rgba(34,197,94,0.95)" },
+      { name: "--clip-audio", fallback: "rgba(22,163,74,0.88)" },
       { name: "--timeline-grid-major", fallback: "rgba(255,255,255,0.15)" },
       { name: "--timeline-grid-minor", fallback: "rgba(255,255,255,0.08)" },
       { name: "--timeline-surface", fallback: "rgba(15,23,42,0.34)" },
@@ -88,6 +89,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     return {
       clipSelected: colors.get("--clip-selected") ?? "rgba(59,130,246,0.95)",
       clipMidi: colors.get("--clip-midi") ?? "rgba(34,197,94,0.95)",
+      clipAudio: colors.get("--clip-audio") ?? "rgba(22,163,74,0.88)",
       timelineGridMajor: colors.get("--timeline-grid-major") ?? "rgba(255,255,255,0.15)",
       timelineGridMinor: colors.get("--timeline-grid-minor") ?? "rgba(255,255,255,0.08)",
       timelineSurface: colors.get("--timeline-surface") ?? "rgba(15,23,42,0.34)",
@@ -205,7 +207,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     (ctx as any).imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, cssW, cssH);
 
-    const { clipSelected, clipMidi, timelineGridMajor, timelineGridMinor, timelineSurface, timelineSurfaceMuted } = canvasColors();
+    const { clipSelected, clipMidi, clipAudio, timelineGridMajor, timelineGridMinor, timelineSurface, timelineSurfaceMuted } = canvasColors();
 
     const padTop = WAVEFORM_PAD_Y;
     const padBottom = WAVEFORM_PAD_Y;
@@ -339,6 +341,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       contentH: waveformBoxH,
       cssW,
       cssH,
+      fillStyle: clipAudio,
+      boundaryStyle: timelineGridMajor,
     });
   }
 
@@ -502,10 +506,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
           isGhost() ? "bg-background/20" : "bg-background/35",
         )}
       >
-        <div
-          class="truncate p-1 text-xs leading-none text-foreground"
-          style={{ "text-shadow": "0 1px 2px rgba(0,0,0,0.75)" }}
-        >
+        <div class="truncate p-1 text-xs leading-none text-foreground">
           {props.clip.name}
         </div>
       </div>

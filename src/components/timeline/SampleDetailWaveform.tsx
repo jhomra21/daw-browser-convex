@@ -66,11 +66,13 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
       { name: "--timeline-background", fallback: "rgb(10, 10, 10)" },
       { name: "--timeline-grid-minor", fallback: "rgba(255,255,255,0.08)" },
       { name: "--timeline-grid-major", fallback: "rgba(255,255,255,0.14)" },
+      { name: "--clip-audio", fallback: "rgba(22,163,74,0.88)" },
     ]);
     return {
       timelineBackground: colors.get("--timeline-background") ?? "rgb(10, 10, 10)",
       timelineGridMinor: colors.get("--timeline-grid-minor") ?? "rgba(255,255,255,0.08)",
       timelineGridMajor: colors.get("--timeline-grid-major") ?? "rgba(255,255,255,0.14)",
+      clipAudio: colors.get("--clip-audio") ?? "rgba(22,163,74,0.88)",
     };
   });
 
@@ -157,7 +159,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, WAVEFORM_WIDTH_PX, waveformHeight);
 
-    const { timelineBackground, timelineGridMinor, timelineGridMajor } = canvasColors();
+    const { timelineBackground, timelineGridMinor, timelineGridMajor, clipAudio } = canvasColors();
 
     ctx.fillStyle = timelineBackground;
     ctx.fillRect(0, 0, WAVEFORM_WIDTH_PX, waveformHeight);
@@ -198,6 +200,8 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
       contentH: waveformHeight - 32,
       cssW: WAVEFORM_WIDTH_PX,
       cssH: waveformHeight,
+      fillStyle: clipAudio,
+      boundaryStyle: timelineGridMajor,
     });
   };
 

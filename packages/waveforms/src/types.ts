@@ -49,4 +49,6 @@ export type WaveformDrawOptions = {
   contentH: number
   cssW: number
   cssH: number
+  fillStyle?: string
+  boundaryStyle?: string
 }

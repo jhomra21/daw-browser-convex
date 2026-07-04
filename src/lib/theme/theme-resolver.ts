@@ -104,7 +104,7 @@ const ensureThemeStyleElement = (): HTMLStyleElement => {
   return element
 }
 
-export type ApplyDawThemeResult = {
+type ApplyDawThemeResult = {
   changed: boolean
   tokens: ResolvedThemeTokens
 }

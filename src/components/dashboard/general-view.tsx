@@ -21,11 +21,7 @@ type PreviewButtonGroupProps = {
 };
 
 function PreviewButtonGroup(props: PreviewButtonGroupProps) {
-  const handleKeyDown = (event: KeyboardEvent, id: ThemeSelectionId) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      props.commit(id);
-    }
+  const handleKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Escape") props.cancel();
   };
 
@@ -52,7 +48,7 @@ function PreviewButtonGroup(props: PreviewButtonGroupProps) {
             onMouseEnter={() => props.preview(option.id)}
             onFocus={() => props.preview(option.id)}
             onClick={() => props.commit(option.id)}
-            onKeyDown={(event) => handleKeyDown(event, option.id)}
+            onKeyDown={handleKeyDown}
           >
             {option.label}
           </Button>

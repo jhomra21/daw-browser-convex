@@ -91,20 +91,17 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
     })
   }
 
-  const commitActivePreview = () => {
-    const nextThemeId = previewThemeId()
-    const nextTheme = previewTheme()
+  const commitThemeSelection = (selection: AppTheme | DawThemeId) => {
     batch(() => {
-      if (nextThemeId) setThemeId(nextThemeId)
-      if (nextTheme) setTheme(nextTheme)
+      if (selection === "system" || selection === "light" || selection === "dark") {
+        setThemeId(DEFAULT_DAW_THEME_ID)
+        setTheme(selection)
+      } else {
+        setThemeId(selection)
+      }
       setPreviewThemeId(null)
       setPreviewTheme(null)
     })
-  }
-
-  const commitThemeSelection = (selection: AppTheme | DawThemeId) => {
-    previewThemeSelection(selection)
-    commitActivePreview()
   }
 
   const cancelThemePreview = () => {

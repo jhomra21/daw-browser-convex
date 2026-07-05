@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, Show, onCleanup, onMount, type JSX } from "solid-js";
+import { createSignal, For, Show, onCleanup, onMount, type JSX } from "solid-js";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
 import type { ClipContextMenuActions } from "~/components/timeline/ClipComponent";
@@ -18,7 +18,7 @@ import type { RuntimeTrack } from "~/lib/timeline-runtime-types";
 import { automationTargetKey } from "@daw-browser/shared";
 import type { TimelineWorkspaceAutomationModel } from "~/hooks/useTimelineAutomationController";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
-import { buildTimelineTrackLayoutRows } from "~/lib/timeline-track-layout";
+import type { TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
 
 const createViewportRedrawVersion = () => {
   const [version, setVersion] = createSignal(0);
@@ -123,18 +123,13 @@ type Props = {
     onDeleteTrack: (trackId: Track["id"]) => void;
   };
   automation: TimelineWorkspaceAutomationModel;
+  trackLayout: TimelineTrackLayoutRow[];
 };
 
 export default function TimelineWorkspace(props: Props) {
   const viewportRedrawVersion = createViewportRedrawVersion();
-  const trackLayout = createMemo(() => buildTimelineTrackLayoutRows({
-    tracks: props.tracks,
-    visibleByTrackId: props.automation.lanes.visibleByTrackId,
-    heightsByLaneOwnerKey: props.automation.lanes.heightsByLaneOwnerKey,
-    visibleParameterIdsByTrackId: props.automation.lanes.visibleParameterIdsByTrackId,
-  }));
   const trackAreaHeight = () => {
-    const layout = trackLayout();
+    const layout = props.trackLayout;
     const tracksHeight = layout.length === 0 ? 0 : layout[layout.length - 1].topPx + layout[layout.length - 1].heightPx;
     return tracksHeight + (props.dropAtNewTrack ? LANE_HEIGHT : 0);
   };
@@ -208,8 +203,8 @@ export default function TimelineWorkspace(props: Props) {
                     return (
                       <TrackLane
                         track={track}
-                        topPx={trackLayout()[i()].topPx}
-                        automationHeightPx={trackLayout()[i()].automationHeightPx}
+                        topPx={props.trackLayout[i()].topPx}
+                        automationHeightPx={props.trackLayout[i()].automationHeightPx}
                         isDropTarget={props.dropTargetLane === i()}
                         selectedClipIds={props.selection.selectedClipIds()}
                         onClipPointerDown={props.onClipPointerDown}
@@ -270,8 +265,8 @@ export default function TimelineWorkspace(props: Props) {
                   playheadSec: props.playheadSec,
                   dropAtNewTrack: props.dropAtNewTrack,
                   marqueeRect: props.marqueeRect,
-                  rowTops: trackLayout().map((row) => row.topPx),
-                  rowLayouts: trackLayout(),
+                  rowTops: props.trackLayout.map((row) => row.topPx),
+                  rowLayouts: props.trackLayout,
                   trackAreaHeight: trackAreaHeight(),
                   range: props.selection.rangeSelection(),
                 }}

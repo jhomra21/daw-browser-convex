@@ -321,6 +321,14 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
   const grantScope = { projectId, userId }
 
   switch (entry.type) {
+    case 'section-edit': {
+      const entries = direction === 'undo' ? [...entry.data.entries].reverse() : entry.data.entries
+      for (const child of entries) {
+        await execHistoryEntry(child, deps, direction)
+      }
+      return
+    }
+
     case 'clip-create': {
       const index = buildRefIndex(deps)
       if (direction === 'undo') {

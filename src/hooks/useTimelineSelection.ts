@@ -1,7 +1,7 @@
 import { createSignal, onCleanup, type Accessor } from 'solid-js'
 
 import { PPS, RULER_HEIGHT } from '~/lib/timeline-utils'
-import { ceilSecToBar, floorSecToBar, normalizeTimelineRangeSelection } from '~/lib/timeline-range-selection'
+import { normalizeTimelineRangeSelection, snapTimeRangeToGridColumns } from '~/lib/timeline-range-selection'
 import { trackIdsInYRange, trackIndexAtY, type TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import type { Track } from '@daw-browser/timeline-core/types'
 
@@ -13,6 +13,7 @@ type TimelineSelectionOptions = {
   trackLayout: Accessor<TimelineTrackLayoutRow[]>
   selection: TimelineSelectionController
   bpm: Accessor<number>
+  gridDenominator: Accessor<number>
   startScrub: (clientX: number, options?: { listen?: boolean }) => void
   moveScrub: (clientX: number) => void
   stopScrub: () => void
@@ -29,6 +30,7 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
     trackLayout,
     selection,
     bpm,
+    gridDenominator,
     startScrub,
     moveScrub,
     stopScrub,
@@ -113,9 +115,17 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
     const rangeTrackIds = trackIdsInYRange(trackLayout(), normY, normY + height)
     const primaryIndex = trackIndexAtY(trackLayout(), startY - RULER_HEIGHT)
     const primaryTrackId = primaryIndex >= 0 ? trackLayout()[primaryIndex]?.trackId ?? null : rangeTrackIds[0] ?? null
+    const snappedRange = snapTimeRangeToGridColumns({
+      startSec: x / PPS,
+      endSec: (x + width) / PPS,
+    }, bpm(), gridDenominator())
+    if (!snappedRange) {
+      if (!event.shiftKey) selection.selectMasterTarget()
+      return
+    }
     const range = normalizeTimelineRangeSelection({
-      startSec: floorSecToBar(x / PPS, bpm()),
-      endSec: ceilSecToBar((x + width) / PPS, bpm()),
+      startSec: snappedRange.startSec,
+      endSec: snappedRange.endSec,
       trackIds: rangeTrackIds,
       primaryTrackId,
     })

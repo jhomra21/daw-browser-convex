@@ -162,6 +162,21 @@ export const buildClipRangeDeletePatch = (input: {
   return { deleteClipIds, updateClips, createClips }
 }
 
+export const intersectingSectionClipIds = (input: {
+  tracks: Track<AudioBuffer>[]
+  section: TimelineSection
+}): string[] => {
+  const selectedTrackIds = new Set(input.section.trackIds)
+  return input.tracks.flatMap((track) => {
+    if (!selectedTrackIds.has(track.id)) return []
+    return track.clips.flatMap((clip) => (
+      intersectsRange({ startSec: clip.startSec, endSec: clipEndSec(clip) }, input.section.range)
+        ? [clip.id]
+        : []
+    ))
+  })
+}
+
 const valueAtTime = (envelope: AutomationEnvelope, timeSec: number) => (
   valueAtAutomationTime(envelope.points, timeSec, envelope.points[0]?.value ?? 0)
 )

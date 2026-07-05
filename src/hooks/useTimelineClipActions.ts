@@ -21,11 +21,12 @@ import {
   buildClipRangeDeletePatch,
   buildSectionClipFragments,
   deleteAutomationRange,
+  intersectingSectionClipIds,
   pasteAutomationFragment,
   type SectionAutomationFragment,
 } from '~/lib/timeline-section-edit'
 import { calcNonOverlapStart, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
-import { buildClipDeleteHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
+import { buildAutomationEnvelopeHistoryEntry, buildClipDeleteHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry, TrackAudioEffectSnapshot, TrackEffectSnapshot } from '~/lib/undo/types'
 import type { Clip, SelectedClip, Track } from '@daw-browser/timeline-core/types'
@@ -87,6 +88,10 @@ type TimelineClipActionsHandlers = {
   requestDeleteTrack: (trackId: Track['id']) => void
   handleKeyboardAction: () => void
 }
+
+const buildSectionHistoryEntry = (projectId: string, entries: HistoryEntry[]): HistoryEntry | null => (
+  entries.length > 0 ? { type: 'section-edit', projectId, data: { entries } } : null
+)
 
 export function useTimelineClipActions(options: TimelineClipActionsOptions): TimelineClipActionsHandlers {
   const {
@@ -413,6 +418,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     const clipboard = sectionClipboard.read()
     const rid = projectId()
     if (!clipboard || !rid) return
+    const historyEntries: HistoryEntry[] = []
     const pending: BatchClipCreateItem[] = clipboard.clips.map((fragment) => ({
       trackId: fragment.targetTrackId,
       buffer: fragment.buffer,
@@ -421,9 +427,11 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         startSec: destinationStartSec + fragment.startOffsetSec,
       },
     }))
+    const tsSnapshot = tracks()
+    let created: Array<{ trackId: Track['id']; clipId: string; clip: BatchClipCreateItem['clip'] }> = []
     const uid = userId()
     if (isLocalId('project', rid)) {
-      await createProjectedLocalClips({
+      created = await createProjectedLocalClips({
         projectId: rid,
         items: pending,
         insertLocalClip,
@@ -432,7 +440,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         canProject: () => projectId() === rid,
       })
     } else if (uid) {
-      await createProjectedClips({
+      created = await createProjectedClips({
         projectId: rid,
         items: pending,
         createMany: async (items, operationId) => {
@@ -443,6 +451,21 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         audioBufferCache: audioBufferCache.writer,
         grantClipWrites,
         grantScope: { projectId: rid, userId: uid },
+      })
+    }
+    for (const item of created) {
+      const trackRef = getTrackHistoryRef(tsSnapshot.find((entry) => entry.id === item.trackId))
+      historyEntries.push({
+        type: 'clip-create',
+        projectId: rid,
+        data: {
+          trackRef,
+          clip: {
+            clipRef: String(item.clip.historyRef ?? item.clipId),
+            currentId: item.clipId,
+            ...item.clip,
+          },
+        },
       })
     }
 
@@ -458,8 +481,13 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         destinationStartSec,
         updatedAt,
       })
-      if (await automationWriter.setEnvelope(next)) applyAutomationEnvelope(next, next.targetKey)
+      if (await automationWriter.setEnvelope(next)) {
+        historyEntries.push(buildAutomationEnvelopeHistoryEntry({ projectId: rid, before: existing ?? null, after: next }))
+        applyAutomationEnvelope(next, next.targetKey)
+      }
     }
+    const historyEntry = buildSectionHistoryEntry(rid, historyEntries)
+    if (historyEntry) historyPush(historyEntry)
     const destinationRange = {
       startSec: destinationStartSec,
       endSec: destinationStartSec + clipboard.durationSec,
@@ -493,11 +521,44 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     const rid = projectId()
     const uid = userId()
     if (!rid || (!isLocalId('project', rid) && !uid)) return
+    const intersectingClipIds = intersectingSectionClipIds({
+      tracks: tracks(),
+      section: { range, trackIds: range.trackIds },
+    })
+    const blockedClipId = intersectingClipIds.find((clipId) => !canWriteClip(clipId))
+    if (blockedClipId) {
+      notify('Section delete blocked', 'You do not have permission to edit every clip in this selected range.')
+      return
+    }
     const patch = buildClipRangeDeletePatch({
       tracks: tracks(),
       section: { range, trackIds: range.trackIds },
       bpm: bpm(),
     })
+    const historyEntries: HistoryEntry[] = []
+    const tsSnapshot = tracks()
+    const deleteEntry = buildClipDeleteHistoryEntry({ projectId: rid, tracks: tsSnapshot, clipIds: patch.deleteClipIds })
+    if (deleteEntry.data.items.length > 0) historyEntries.push(deleteEntry)
+    for (const update of patch.updateClips) {
+      const match = tsSnapshot.flatMap((track) => track.clips).find((clip) => clip.id === update.clipId)
+      if (match) {
+        historyEntries.push({
+          type: 'clip-timing',
+          projectId: rid,
+          data: {
+            clipRef: String(match.historyRef ?? match.id),
+            from: {
+              startSec: match.startSec,
+              duration: match.duration,
+              leftPadSec: match.leftPadSec,
+              bufferOffsetSec: match.bufferOffsetSec,
+              midiOffsetBeats: match.midiOffsetBeats,
+            },
+            to: update.timing,
+          },
+        })
+      }
+    }
     const clipWriter = createTimelineClipWriteAdapter({ projectId: rid, userId: uid, convexClient, convexApi })
     const removedIds = await clipWriter.deleteClips(patch.deleteClipIds)
     if (removedIds.size > 0) removeLocalClips(removedIds)
@@ -507,8 +568,9 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       }
     }
     if (patch.createClips.length > 0) {
+      let created: Array<{ trackId: Track['id']; clipId: string; clip: BatchClipCreateItem['clip'] }> = []
       if (isLocalId('project', rid)) {
-        await createProjectedLocalClips({
+        created = await createProjectedLocalClips({
           projectId: rid,
           items: patch.createClips,
           insertLocalClip,
@@ -517,7 +579,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
           canProject: () => projectId() === rid,
         })
       } else if (uid) {
-        await createProjectedClips({
+        created = await createProjectedClips({
           projectId: rid,
           items: patch.createClips,
           createMany: async (items, operationId) => {
@@ -530,6 +592,20 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
           grantScope: { projectId: rid, userId: uid },
         })
       }
+      for (const item of created) {
+        historyEntries.push({
+          type: 'clip-create',
+          projectId: rid,
+          data: {
+            trackRef: getTrackHistoryRef(tsSnapshot.find((entry) => entry.id === item.trackId)),
+            clip: {
+              clipRef: String(item.clip.historyRef ?? item.clipId),
+              currentId: item.clipId,
+              ...item.clip,
+            },
+          },
+        })
+      }
     }
     const automationWriter = createTimelineAutomationWriteAdapter({ projectId: rid, userId: uid })
     const selectedTrackIds = new Set(range.trackIds)
@@ -538,11 +614,17 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       if (envelope.target.kind !== 'track' || !selectedTrackIds.has(envelope.target.trackId)) continue
       const next = deleteAutomationRange({ envelope, range, updatedAt })
       if (next) {
-        if (await automationWriter.setEnvelope(next)) applyAutomationEnvelope(next, next.targetKey)
+        if (await automationWriter.setEnvelope(next)) {
+          historyEntries.push(buildAutomationEnvelopeHistoryEntry({ projectId: rid, before: envelope, after: next }))
+          applyAutomationEnvelope(next, next.targetKey)
+        }
       } else if (await automationWriter.deleteEnvelope(envelope)) {
+        historyEntries.push(buildAutomationEnvelopeHistoryEntry({ projectId: rid, before: envelope, after: null }))
         applyAutomationEnvelope(undefined, envelope.targetKey)
       }
     }
+    const historyEntry = buildSectionHistoryEntry(rid, historyEntries)
+    if (historyEntry) historyPush(historyEntry)
     selection.selectTimeRange(range)
   }
 

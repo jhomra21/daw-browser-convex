@@ -67,3 +67,27 @@ export const ceilSecToBar = (timeSec: number, bpm: number) => {
   const bar = barDurationSec(bpm)
   return Math.ceil(timeSec / bar) * bar
 }
+
+export const gridColumnDurationSec = (bpm: number, gridDenominator: number) => (
+  beatsToSeconds(4 / Math.max(1, gridDenominator || 4), bpm)
+)
+
+export const snapTimeRangeToGridColumns = (
+  range: TimelineTimeRange,
+  bpm: number,
+  gridDenominator: number,
+): TimelineTimeRange | null => {
+  const step = gridColumnDurationSec(bpm, gridDenominator)
+  if (!Number.isFinite(step) || step <= 0) {
+    const startSec = Math.min(range.startSec, range.endSec)
+    const endSec = Math.max(range.startSec, range.endSec)
+    return endSec - startSec <= 1e-6 ? null : { startSec, endSec }
+  }
+
+  const startSec = Math.min(range.startSec, range.endSec)
+  const endSec = Math.max(range.startSec, range.endSec)
+  const snappedStartSec = Math.floor(startSec / step) * step
+  const snappedEndSec = Math.ceil(endSec / step) * step
+  if (snappedEndSec - snappedStartSec <= 1e-6) return null
+  return { startSec: snappedStartSec, endSec: snappedEndSec }
+}

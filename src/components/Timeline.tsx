@@ -702,6 +702,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     trackLayout,
     selection,
     bpm,
+    gridDenominator,
     startScrub,
     moveScrub,
     stopScrub,
@@ -1371,6 +1372,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           onDeleteTrack: requestDeleteTrack,
         }}
         automation={automation.workspace()}
+        trackLayout={trackLayout()}
       />
 
       <BrowserDragOverlay session={timelineBrowser().devices.dragSession} />

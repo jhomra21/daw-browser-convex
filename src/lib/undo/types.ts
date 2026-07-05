@@ -146,6 +146,11 @@ export type AutomationEnvelopeHistoryEntry = {
 
 export type HistoryEntry =
   | {
+      type: 'section-edit'
+      projectId: string
+      data: { entries: HistoryEntry[] }
+    }
+  | {
       type: 'clip-create'
       projectId: string
       data: {

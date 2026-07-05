@@ -6,9 +6,10 @@ import {
   buildClipRangeDeletePatch,
   buildSectionClipFragments,
   deleteAutomationRange,
+  intersectingSectionClipIds,
   pasteAutomationFragment,
 } from './timeline-section-edit'
-import { ceilSecToBar, floorSecToBar, normalizeTimelineRangeSelection } from './timeline-range-selection'
+import { ceilSecToBar, floorSecToBar, normalizeTimelineRangeSelection, snapTimeRangeToGridColumns } from './timeline-range-selection'
 import { trackIdsInYRange, trackIndexAtY } from './timeline-track-layout'
 
 const clip = (input: Partial<Clip> & { id: string; startSec: number; duration: number }): Clip<AudioBuffer> => ({
@@ -62,6 +63,13 @@ describe('timeline range selection helpers', () => {
   test('snaps seconds to 4/4 bars', () => {
     expect(floorSecToBar(3.9, 120)).toBe(2)
     expect(ceilSecToBar(2.1, 120)).toBe(4)
+  })
+
+  test('snaps sub-bar drag ranges to the covered grid column', () => {
+    expect(snapTimeRangeToGridColumns({ startSec: 1.25, endSec: 1.3 }, 120, 16)).toEqual({
+      startSec: 1.25,
+      endSec: 1.375,
+    })
   })
 
   test('hit tests expanded track rows', () => {
@@ -132,6 +140,19 @@ describe('timeline section edit helpers', () => {
       bpm: 120,
     })
     expect(patch.deleteClipIds).toEqual(['clip-1'])
+  })
+
+  test('finds every clip intersecting a selected section before delete', () => {
+    const ids = intersectingSectionClipIds({
+      tracks: [track([
+        clip({ id: 'left', startSec: 0, duration: 2 }),
+        clip({ id: 'inside', startSec: 3, duration: 1 }),
+        clip({ id: 'right', startSec: 7, duration: 2 }),
+        clip({ id: 'outside', startSec: 10, duration: 1 }),
+      ])],
+      section: { range: { startSec: 1, endSec: 8 }, trackIds: ['track-1'] },
+    })
+    expect(ids).toEqual(['left', 'inside', 'right'])
   })
 
   test('delete left overlap shortens clip', () => {

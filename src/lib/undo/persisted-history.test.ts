@@ -172,4 +172,51 @@ describe('persisted undo history', () => {
       redo: [],
     })
   })
+
+  test('keeps section edit entries with valid child history entries', () => {
+    const sectionEntry: HistoryEntry = {
+      type: 'section-edit',
+      projectId: 'project-1',
+      data: { entries: [compressorEntry, automationEntry] },
+    }
+
+    expect(normalizePersistedHistory(serializePersistedHistory({
+      undo: [sectionEntry],
+      redo: [],
+    }))).toEqual({
+      undo: [sectionEntry],
+      redo: [],
+    })
+  })
+
+  test('rejects malformed section edit entries safely', () => {
+    const validSectionEntry: HistoryEntry = {
+      type: 'section-edit',
+      projectId: 'project-1',
+      data: { entries: [compressorEntry] },
+    }
+
+    expect(normalizePersistedHistory({
+      version: 3,
+      undo: [
+        { type: 'section-edit', projectId: 'project-1', data: { entries: 'invalid' } },
+        {
+          type: 'section-edit',
+          projectId: 'project-1',
+          data: {
+            entries: [{
+              type: 'section-edit',
+              projectId: 'project-1',
+              data: { entries: [compressorEntry] },
+            }],
+          },
+        },
+        validSectionEntry,
+      ],
+      redo: [],
+    })).toEqual({
+      undo: [validSectionEntry],
+      redo: [],
+    })
+  })
 })

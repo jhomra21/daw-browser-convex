@@ -73,6 +73,13 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
     }
   })
 
+  const rangeOverlayRows = createMemo(() => {
+    const range = props.timeline.range
+    if (!range) return []
+    const selectedTrackIds = new Set(range.trackIds)
+    return props.timeline.rowLayouts.filter((row) => selectedTrackIds.has(row.trackId))
+  })
+
   return (
     <>
       <Show when={recordingPreview()}>
@@ -99,7 +106,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
       />
       <Show when={props.timeline.range}>
         {(range) => (
-          <For each={props.timeline.rowLayouts.filter((row) => range().trackIds.includes(row.trackId))}>
+          <For each={rangeOverlayRows()}>
             {(row) => (
               <div
                 class="absolute z-10 pointer-events-none bg-blue-400/12 border-x border-blue-300/30"

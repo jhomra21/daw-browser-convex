@@ -11,6 +11,7 @@ import { isAudioEffectKind, isLocalId, normalizeCompressorParams, normalizeDelay
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { isClipCompatibleWithTrack } from '@daw-browser/timeline-core/track-routing'
+import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { createTimelineClipWriteAdapter } from '~/lib/timeline-clip-write-adapter'
@@ -26,7 +27,7 @@ import {
   type SectionAutomationFragment,
 } from '~/lib/timeline-section-edit'
 import { calcNonOverlapStart, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
-import { buildAutomationEnvelopeHistoryEntry, buildClipDeleteHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
+import { buildAutomationEnvelopeHistoryEntry, buildClipDeleteHistoryEntry, buildClipTimingHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry, TrackAudioEffectSnapshot, TrackEffectSnapshot } from '~/lib/undo/types'
 import type { Clip, SelectedClip, Track } from '@daw-browser/timeline-core/types'
@@ -521,8 +522,10 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     const rid = projectId()
     const uid = userId()
     if (!rid || (!isLocalId('project', rid) && !uid)) return
+    const tsSnapshot = tracks()
+    const trackIndex = createTimelineTrackIndex(tsSnapshot)
     const intersectingClipIds = intersectingSectionClipIds({
-      tracks: tracks(),
+      tracks: tsSnapshot,
       section: { range, trackIds: range.trackIds },
     })
     const blockedClipId = intersectingClipIds.find((clipId) => !canWriteClip(clipId))
@@ -531,22 +534,20 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       return
     }
     const patch = buildClipRangeDeletePatch({
-      tracks: tracks(),
+      tracks: tsSnapshot,
       section: { range, trackIds: range.trackIds },
       bpm: bpm(),
     })
     const historyEntries: HistoryEntry[] = []
-    const tsSnapshot = tracks()
     const deleteEntry = buildClipDeleteHistoryEntry({ projectId: rid, tracks: tsSnapshot, clipIds: patch.deleteClipIds })
     if (deleteEntry.data.items.length > 0) historyEntries.push(deleteEntry)
     for (const update of patch.updateClips) {
-      const match = tsSnapshot.flatMap((track) => track.clips).find((clip) => clip.id === update.clipId)
+      const match = trackIndex.clipById.get(update.clipId)
       if (match) {
-        historyEntries.push({
-          type: 'clip-timing',
-          projectId: rid,
-          data: {
-            clipRef: String(match.historyRef ?? match.id),
+        historyEntries.push(
+          buildClipTimingHistoryEntry({
+            projectId: rid,
+            clip: match,
             from: {
               startSec: match.startSec,
               duration: match.duration,
@@ -555,8 +556,8 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
               midiOffsetBeats: match.midiOffsetBeats,
             },
             to: update.timing,
-          },
-        })
+          }),
+        )
       }
     }
     const clipWriter = createTimelineClipWriteAdapter({ projectId: rid, userId: uid, convexClient, convexApi })
@@ -597,7 +598,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
           type: 'clip-create',
           projectId: rid,
           data: {
-            trackRef: getTrackHistoryRef(tsSnapshot.find((entry) => entry.id === item.trackId)),
+            trackRef: getTrackHistoryRef(trackIndex.trackById.get(item.trackId)),
             clip: {
               clipRef: String(item.clip.historyRef ?? item.clipId),
               currentId: item.clipId,

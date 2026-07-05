@@ -64,6 +64,7 @@ import DeleteTrackDialog from "./timeline/delete-track-dialog";
 import TimelineWorkspace from "./timeline/timeline-workspace";
 import { Dashboard } from "~/components/dashboard/dashboard";
 import type { DashboardTimelineModel, DashboardView } from "~/components/dashboard/types";
+import { buildTimelineTrackLayoutRows } from "~/lib/timeline-track-layout";
 
 type AgentMixOp = {
   type: "setMute" | "setSolo";
@@ -653,6 +654,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     onClipPointerUp,
     deleteSelectedClips,
     duplicateSelectedClips,
+    duplicateTimelineSelection,
+    deleteTimelineSelection,
+    copyTimelineSelection,
+    pasteTimelineSelection,
     performDeleteTrack,
     requestDeleteTrack,
     handleKeyboardAction,
@@ -660,6 +665,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     tracks: () => renderTracks(),
     insertLocalClip: projection.insertLocalClip,
     removeLocalClips: projection.removeLocalClips,
+    commitClipTiming: projection.commitClipTiming,
     removeLocalTrack: projection.removeLocalTrack,
     canWriteClip,
     selection,
@@ -671,6 +677,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     convexApi,
     audioBufferCache: clipBuffers,
     bpm,
+    playheadSec,
     gridEnabled,
     gridDenominator,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
@@ -680,9 +687,21 @@ const Timeline: Component<TimelineProps> = (props) => {
     notify,
   });
 
+  const trackLayout = createMemo(() => {
+    const lanes = automation.workspace().lanes;
+    return buildTimelineTrackLayoutRows({
+      tracks: renderTracks(),
+      visibleByTrackId: lanes.visibleByTrackId,
+      heightsByLaneOwnerKey: lanes.heightsByLaneOwnerKey,
+      visibleParameterIdsByTrackId: lanes.visibleParameterIdsByTrackId,
+    });
+  });
+
   const { marqueeRect, onLanePointerDown } = useTimelineSelection({
     tracks: () => renderTracks(),
+    trackLayout,
     selection,
+    bpm,
     startScrub,
     moveScrub,
     stopScrub,
@@ -761,9 +780,15 @@ const Timeline: Component<TimelineProps> = (props) => {
         isPlaying() ? handlePause() : requestPlay();
       }
     },
-    onDelete: handleKeyboardAction,
+    onDelete: () => {
+      void deleteTimelineSelection();
+    },
     onDuplicate: () => {
-      void duplicateSelectedClips();
+      void duplicateTimelineSelection();
+    },
+    onCopy: copyTimelineSelection,
+    onPaste: () => {
+      void pasteTimelineSelection();
     },
     onAddAudioTrack: () => {
       void addAudioTrack().catch(() => {});
@@ -1043,9 +1068,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     onRedo: handleRedo,
     automationOverrideCount: automation.overrideCount(),
     onReEnableAutomation: automation.reEnable,
-    onDeleteSelection: handleKeyboardAction,
+    onDeleteSelection: () => {
+      void deleteTimelineSelection();
+    },
     onDuplicateSelection: () => {
-      void duplicateSelectedClips();
+      void duplicateTimelineSelection();
     },
     onJumpToClip: (clipId: string, trackId: string, startSec: number) => jumpToClip(trackId, clipId, startSec),
     onInsertSample: (payload: Parameters<typeof handleInsertSample>[0]) => {

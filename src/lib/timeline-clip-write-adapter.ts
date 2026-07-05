@@ -1,4 +1,5 @@
 import { isLocalId, normalizeAudioWarp, normalizeClipGain } from '@daw-browser/shared'
+import { persistClipTiming } from '~/lib/clip-mutations'
 import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { MoveClipInput } from '~/lib/timeline-repository/types'
@@ -7,6 +8,8 @@ import type { AudioWarp } from '@daw-browser/timeline-core/types'
 type ClipWriteContext = {
   projectId: string
   userId: string | undefined
+  convexClient?: typeof import('~/lib/convex').convexClient
+  convexApi?: typeof import('~/lib/convex').convexApi
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -82,5 +85,20 @@ export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
       queuedResult: { status: 'applied' },
     })
     return isRecord(result) && result.status === 'applied'
+  },
+  updateClipTiming: async (input: {
+    clipId: string
+    startSec: number
+    duration: number
+    leftPadSec?: number
+    bufferOffsetSec?: number
+    midiOffsetBeats?: number
+  }) => {
+    if (isLocalId('project', context.projectId)) {
+      const row = await createLocalTimelineRepository(context.projectId).updateClip(input)
+      return Boolean(row)
+    }
+    if (!context.userId || !context.convexClient || !context.convexApi) return false
+    return await persistClipTiming(context.convexClient, context.convexApi, input)
   },
 })

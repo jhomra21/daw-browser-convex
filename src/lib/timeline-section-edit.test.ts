@@ -273,6 +273,12 @@ describe('timeline section edit helpers', () => {
     expect(deleted?.points.some((point) => point.timeSec === 5)).toBe(true)
   })
 
+  test('automation delete boundary ids include range time to avoid repeated delete collisions', () => {
+    const deleted = deleteAutomationRange({ envelope: envelope(), range: { startSec: 1, endSec: 5 }, updatedAt: 2 })
+    expect(deleted?.points.some((point) => point.id === 'env-1:delete-start:1')).toBe(true)
+    expect(deleted?.points.some((point) => point.id === 'env-1:delete-end:5')).toBe(true)
+  })
+
   test('automation delete skips ranges with no points to remove', () => {
     const deleted = deleteAutomationRange({ envelope: envelope(), range: { startSec: 5, endSec: 7 }, updatedAt: 2 })
     expect(deleted).toBeNull()

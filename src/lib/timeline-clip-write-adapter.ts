@@ -1,5 +1,4 @@
-import { isLocalId, normalizeAudioWarp, normalizeClipGain } from '@daw-browser/shared'
-import { persistClipTiming, persistClipTimingAndAudioWarp } from '~/lib/clip-mutations'
+import { isLocalId, normalizeAudioWarp, normalizeClipGain, normalizeClipTimingPatch } from '@daw-browser/shared'
 import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { MoveClipInput } from '~/lib/timeline-repository/types'
@@ -8,8 +7,6 @@ import type { AudioWarp } from '@daw-browser/timeline-core/types'
 type ClipWriteContext = {
   projectId: string
   userId: string | undefined
-  convexClient?: typeof import('~/lib/convex').convexClient
-  convexApi?: typeof import('~/lib/convex').convexApi
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -99,10 +96,30 @@ export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
       const row = await createLocalTimelineRepository(context.projectId).updateClip(input)
       return Boolean(row)
     }
-    if (!context.userId || !context.convexClient || !context.convexApi) return false
+    if (!context.userId) return false
     if (input.audioWarp !== undefined) {
-      return await persistClipTimingAndAudioWarp(context.convexClient, context.convexApi, input)
+      const normalizedAudioWarp = normalizeAudioWarp(input.audioWarp)
+      const result = await publishDurableSharedTimelineOperation({
+        projectId: context.projectId,
+        userId: context.userId,
+        operation: {
+          kind: 'clips.setTimingAndAudioWarp',
+          payload: {
+            clipId: input.clipId,
+            ...normalizeClipTimingPatch(input),
+            ...(normalizedAudioWarp ? { audioWarp: normalizedAudioWarp } : {}),
+          },
+        },
+        queuedResult: { status: 'applied' },
+      })
+      return isRecord(result) && result.status === 'applied'
     }
-    return await persistClipTiming(context.convexClient, context.convexApi, input)
+    const result = await publishDurableSharedTimelineOperation({
+      projectId: context.projectId,
+      userId: context.userId,
+      operation: { kind: 'clips.setTiming', payload: { clipId: input.clipId, ...normalizeClipTimingPatch(input) } },
+      queuedResult: { status: 'applied' },
+    })
+    return isRecord(result) && result.status === 'applied'
   },
 })

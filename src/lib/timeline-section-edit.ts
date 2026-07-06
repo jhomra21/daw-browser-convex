@@ -285,13 +285,13 @@ export const deleteAutomationRange = (input: {
     point.timeSec < input.range.startSec || point.timeSec > input.range.endSec
   ))
   const startBoundary: AutomationEnvelope['points'][number] = {
-    id: `${input.envelope.id}:delete-start`,
+    id: `${input.envelope.id}:delete-start:${input.range.startSec}`,
     timeSec: input.range.startSec,
     value: startValue,
     interpolation: 'linear',
   }
   const endBoundary: AutomationEnvelope['points'][number] = {
-    id: `${input.envelope.id}:delete-end`,
+    id: `${input.envelope.id}:delete-end:${input.range.endSec}`,
     timeSec: input.range.endSec,
     value: endValue,
     interpolation: 'linear',

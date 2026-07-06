@@ -278,7 +278,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       })
     }
 
-    const removedIds = await createTimelineClipWriteAdapter({ projectId: rid, userId: uid, convexClient, convexApi }).deleteClips(Array.from(writableSelectedIds))
+    const removedIds = await createTimelineClipWriteAdapter({ projectId: rid, userId: uid }).deleteClips(Array.from(writableSelectedIds))
     if (removedIds.size === 0) return
 
     try {
@@ -550,40 +550,19 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       section: { range, trackIds: range.trackIds },
       bpm: bpm(),
     })
-    const historyEntries: HistoryEntry[] = []
-    const deleteEntry = buildClipDeleteHistoryEntry({ projectId: rid, tracks: tsSnapshot, clipIds: patch.deleteClipIds })
-    if (deleteEntry.data.items.length > 0) historyEntries.push(deleteEntry)
-    for (const update of patch.updateClips) {
-      const match = trackIndex.clipById.get(update.clipId)
-      if (match) {
-        historyEntries.push(
-          buildClipTimingHistoryEntry({
-            projectId: rid,
-            clip: match,
-            from: {
-              startSec: match.startSec,
-              duration: match.duration,
-              leftPadSec: match.leftPadSec,
-              bufferOffsetSec: match.bufferOffsetSec,
-              midiOffsetBeats: match.midiOffsetBeats,
-              audioWarp: match.audioWarp,
-            },
-            to: update.timing,
-          }),
-        )
-      }
-    }
-    const clipWriter = createTimelineClipWriteAdapter({ projectId: rid, userId: uid, convexClient, convexApi })
+    const clipWriter = createTimelineClipWriteAdapter({ projectId: rid, userId: uid })
     const removedIds = await clipWriter.deleteClips(patch.deleteClipIds)
-    if (removedIds.size > 0) removeLocalClips(removedIds)
+    if (removedIds.size !== patch.deleteClipIds.length) return
+    const appliedUpdates: typeof patch.updateClips = []
     for (const update of patch.updateClips) {
       if (await clipWriter.updateClipTiming({ clipId: update.clipId, ...update.timing })) {
-        commitClipTiming(update.clipId, update.timing)
-        if (update.timing.audioWarp) commitClipAudioWarp(update.clipId, update.timing.audioWarp)
+        appliedUpdates.push(update)
+      } else {
+        return
       }
     }
+    let created: Array<{ trackId: Track['id']; clipId: string; clip: BatchClipCreateItem['clip'] }> = []
     if (patch.createClips.length > 0) {
-      let created: Array<{ trackId: Track['id']; clipId: string; clip: BatchClipCreateItem['clip'] }> = []
       if (isLocalId('project', rid)) {
         created = await createProjectedLocalClips({
           projectId: rid,
@@ -607,6 +586,35 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
           grantScope: { projectId: rid, userId: uid },
         })
       }
+      if (created.length !== patch.createClips.length) return
+    }
+    const historyEntries: HistoryEntry[] = []
+    if (removedIds.size > 0) removeLocalClips(removedIds)
+    const deleteEntry = buildClipDeleteHistoryEntry({ projectId: rid, tracks: tsSnapshot, clipIds: removedIds })
+    if (deleteEntry.data.items.length > 0) historyEntries.push(deleteEntry)
+    for (const update of appliedUpdates) {
+      commitClipTiming(update.clipId, update.timing)
+      if (update.timing.audioWarp) commitClipAudioWarp(update.clipId, update.timing.audioWarp)
+      const match = trackIndex.clipById.get(update.clipId)
+      if (match) {
+        historyEntries.push(
+          buildClipTimingHistoryEntry({
+            projectId: rid,
+            clip: match,
+            from: {
+              startSec: match.startSec,
+              duration: match.duration,
+              leftPadSec: match.leftPadSec,
+              bufferOffsetSec: match.bufferOffsetSec,
+              midiOffsetBeats: match.midiOffsetBeats,
+              audioWarp: match.audioWarp,
+            },
+            to: update.timing,
+          }),
+        )
+      }
+    }
+    if (created.length > 0) {
       for (const item of created) {
         historyEntries.push({
           type: 'clip-create',

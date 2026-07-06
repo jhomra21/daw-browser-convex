@@ -1,5 +1,6 @@
 import { automationTargetKey, valueAtAutomationTime, type AutomationEnvelope, type AutomationInterpolation, type AutomationTarget, type ClipCreateSnapshot } from '@daw-browser/shared'
-import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import type { AudioWarp, Clip, Track } from '@daw-browser/timeline-core/types'
+import { calculateAudioTimelineTrimOffsets } from '~/lib/audio-left-resize-timing'
 import { buildClipCreateSnapshot, type BatchClipCreateItem } from '~/lib/clip-create'
 import { secondsToBeats, type TimelineTimeRange } from '~/lib/timeline-range-selection'
 
@@ -41,6 +42,7 @@ export type ClipRangeDeletePatch = {
       leftPadSec?: number
       bufferOffsetSec?: number
       midiOffsetBeats?: number
+      audioWarp?: AudioWarp
     }
   }>
   createClips: BatchClipCreateItem[]
@@ -54,14 +56,42 @@ export const intersectsRange = (
 ) => item.startSec < range.endSec && item.endSec > range.startSec
 
 const shiftClipOffsets = (
-  clip: Pick<Clip, 'leftPadSec' | 'bufferOffsetSec' | 'midiOffsetBeats'>,
+  clip: Pick<Clip<AudioBuffer>, 'startSec' | 'duration' | 'buffer' | 'leftPadSec' | 'bufferOffsetSec' | 'midiOffsetBeats' | 'midi' | 'sourceDurationSec' | 'audioWarp'>,
   shiftSec: number,
   bpm: number,
-) => ({
-    leftPadSec: clip.leftPadSec == null ? undefined : clip.leftPadSec + shiftSec,
-    bufferOffsetSec: clip.bufferOffsetSec == null ? undefined : clip.bufferOffsetSec + shiftSec,
-    midiOffsetBeats: clip.midiOffsetBeats == null ? undefined : clip.midiOffsetBeats + secondsToBeats(shiftSec, bpm),
+) => {
+  if (shiftSec <= 0) {
+    return {
+      leftPadSec: clip.leftPadSec,
+      bufferOffsetSec: clip.bufferOffsetSec,
+      midiOffsetBeats: clip.midiOffsetBeats,
+      audioWarp: clip.audioWarp,
+    }
+  }
+  if (clip.midi) {
+    return {
+      leftPadSec: clip.leftPadSec,
+      bufferOffsetSec: clip.bufferOffsetSec,
+      midiOffsetBeats: (clip.midiOffsetBeats ?? 0) + secondsToBeats(shiftSec, bpm),
+      audioWarp: clip.audioWarp,
+    }
+  }
+  const bufferDurationSec = clip.buffer?.duration
+    ?? clip.sourceDurationSec
+    ?? Math.max(0, (clip.bufferOffsetSec ?? 0) + Math.max(0, clip.duration - (clip.leftPadSec ?? 0)))
+  const offsets = calculateAudioTimelineTrimOffsets({
+    clip,
+    bufferDurationSec,
+    timelineTrimSec: shiftSec,
+    projectBpm: bpm,
   })
+  return {
+    leftPadSec: offsets.leftPadSec,
+    bufferOffsetSec: offsets.bufferOffsetSec,
+    midiOffsetBeats: clip.midiOffsetBeats == null ? undefined : clip.midiOffsetBeats + secondsToBeats(shiftSec, bpm),
+    audioWarp: offsets.audioWarp ?? clip.audioWarp,
+  }
+}
 
 export const buildTrimmedClipCreateSnapshot = (
   clip: Clip,
@@ -80,6 +110,7 @@ export const buildTrimmedClipCreateSnapshot = (
       bufferOffsetSec: offsets.bufferOffsetSec,
       midiOffsetBeats: offsets.midiOffsetBeats,
     },
+    audioWarp: offsets.audioWarp,
   }
 }
 
@@ -155,6 +186,7 @@ export const buildClipRangeDeletePatch = (input: {
           leftPadSec: offsets.leftPadSec,
           bufferOffsetSec: offsets.bufferOffsetSec,
           midiOffsetBeats: offsets.midiOffsetBeats,
+          audioWarp: offsets.audioWarp,
         },
       })
     }
@@ -244,6 +276,9 @@ export const deleteAutomationRange = (input: {
   range: TimelineTimeRange
   updatedAt: number
 }): AutomationEnvelope | null => {
+  if (!input.envelope.points.some((point) => point.timeSec >= input.range.startSec && point.timeSec <= input.range.endSec)) {
+    return null
+  }
   const startValue = valueAtTime(input.envelope, input.range.startSec)
   const endValue = valueAtTime(input.envelope, input.range.endSec)
   const kept = input.envelope.points.filter((point) => (
@@ -266,6 +301,5 @@ export const deleteAutomationRange = (input: {
     startBoundary,
     endBoundary,
   ].sort((left, right) => left.timeSec - right.timeSec)
-  if (points.length === 0) return null
   return { ...input.envelope, points, updatedAt: input.updatedAt }
 }

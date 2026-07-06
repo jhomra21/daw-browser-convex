@@ -16,7 +16,7 @@ import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { createTimelineClipWriteAdapter } from '~/lib/timeline-clip-write-adapter'
 import { createTimelineAutomationWriteAdapter } from '~/lib/timeline-automation-write-adapter'
-import { createTimelineSectionClipboard } from '~/lib/timeline-section-clipboard'
+import { createTimelineSectionClipboard, type TimelineSectionClipboard } from '~/lib/timeline-section-clipboard'
 import {
   buildAutomationFragment,
   buildClipRangeDeletePatch,
@@ -56,6 +56,7 @@ type TimelineClipActionsOptions = {
   insertLocalClip: (trackId: Track['id'], clip: RuntimeClip) => void
   removeLocalClips: (clipIds: Iterable<string>) => void
   commitClipTiming: (clipId: string, patch: { startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number }) => void
+  commitClipAudioWarp: (clipId: string, audioWarp: Clip['audioWarp']) => void
   removeLocalTrack: (trackId: Track['id']) => void
   canWriteClip: (clipId: string) => boolean
   selection: TimelineSelectionController
@@ -83,11 +84,10 @@ type TimelineClipActionsHandlers = {
   duplicateSelectedClips: () => Promise<void>
   duplicateTimelineSelection: () => Promise<void>
   deleteTimelineSelection: () => Promise<void>
-  copyTimelineSelection: () => void
-  pasteTimelineSelection: () => Promise<void>
+  copyTimelineSelection: () => boolean
+  pasteTimelineSelection: () => boolean
   performDeleteTrack: (trackId: Track['id']) => Promise<void>
   requestDeleteTrack: (trackId: Track['id']) => void
-  handleKeyboardAction: () => void
 }
 
 const buildSectionHistoryEntry = (projectId: string, entries: HistoryEntry[]): HistoryEntry | null => (
@@ -100,6 +100,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     insertLocalClip,
     removeLocalClips,
     commitClipTiming,
+    commitClipAudioWarp,
     removeLocalTrack,
     canWriteClip,
     selection,
@@ -135,7 +136,6 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     Array.from(selectedIds).filter((clipId) => canWriteClip(clipId)),
   )
 
-  const selectedTrackId = selection.selectedTrackId
   const selectedClipIds = selection.selectedClipIds
 
   const showTrackDeleteFailure = (result: TrackDeleteResult | null) => {
@@ -400,23 +400,25 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     })
   }
 
+  const buildTimelineSectionClipboard = (range: NonNullable<ReturnType<TimelineSelectionController['rangeSelection']>>) => ({
+    durationSec: range.endSec - range.startSec,
+    trackIds: range.trackIds,
+    clips: buildSectionClipFragments({
+      tracks: tracks(),
+      section: { range, trackIds: range.trackIds },
+      bpm: bpm(),
+    }),
+    automation: rangeAutomationFragments(range.trackIds, range),
+  })
+
   const copyTimelineSelection = () => {
     const range = selection.rangeSelection()
-    if (!range) return
-    sectionClipboard.write({
-      durationSec: range.endSec - range.startSec,
-      trackIds: range.trackIds,
-      clips: buildSectionClipFragments({
-        tracks: tracks(),
-        section: { range, trackIds: range.trackIds },
-        bpm: bpm(),
-      }),
-      automation: rangeAutomationFragments(range.trackIds, range),
-    })
+    if (!range) return false
+    sectionClipboard.write(buildTimelineSectionClipboard(range))
+    return true
   }
 
-  const pasteTimelineSelectionAt = async (destinationStartSec: number) => {
-    const clipboard = sectionClipboard.read()
+  const pasteTimelineSectionAt = async (clipboard: TimelineSectionClipboard | null, destinationStartSec: number) => {
     const rid = projectId()
     if (!clipboard || !rid) return
     const historyEntries: HistoryEntry[] = []
@@ -498,25 +500,35 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     selection.selectTimeRange(destinationRange)
   }
 
+  const pasteTimelineSelectionAt = async (destinationStartSec: number) => {
+    await pasteTimelineSectionAt(sectionClipboard.read(), destinationStartSec)
+  }
+
   const duplicateTimelineSelection = async () => {
     const range = selection.rangeSelection()
     if (!range) {
       await duplicateSelectedClips()
       return
     }
-    copyTimelineSelection()
-    await pasteTimelineSelectionAt(range.endSec)
+    await pasteTimelineSectionAt(buildTimelineSectionClipboard(range), range.endSec)
   }
 
-  const pasteTimelineSelection = async () => {
+  const pasteTimelineSelection = () => {
+    if (!sectionClipboard.read() || !projectId()) return false
     const range = selection.rangeSelection()
-    await pasteTimelineSelectionAt(range?.startSec ?? playheadSec())
+    void pasteTimelineSelectionAt(range?.startSec ?? playheadSec())
+    return true
   }
 
   const deleteTimelineSelection = async () => {
     const range = selection.rangeSelection()
     if (!range) {
-      await deleteSelectedClips()
+      if (selectedClipIds().size > 0) {
+        await deleteSelectedClips()
+        return
+      }
+      const trackId = selection.selectedTrackId()
+      if (trackId) requestDeleteTrack(trackId)
       return
     }
     const rid = projectId()
@@ -554,6 +566,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
               leftPadSec: match.leftPadSec,
               bufferOffsetSec: match.bufferOffsetSec,
               midiOffsetBeats: match.midiOffsetBeats,
+              audioWarp: match.audioWarp,
             },
             to: update.timing,
           }),
@@ -566,6 +579,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     for (const update of patch.updateClips) {
       if (await clipWriter.updateClipTiming({ clipId: update.clipId, ...update.timing })) {
         commitClipTiming(update.clipId, update.timing)
+        if (update.timing.audioWarp) commitClipAudioWarp(update.clipId, update.timing.audioWarp)
       }
     }
     if (patch.createClips.length > 0) {
@@ -614,14 +628,10 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     for (const envelope of automationEnvelopes()) {
       if (envelope.target.kind !== 'track' || !selectedTrackIds.has(envelope.target.trackId)) continue
       const next = deleteAutomationRange({ envelope, range, updatedAt })
-      if (next) {
-        if (await automationWriter.setEnvelope(next)) {
-          historyEntries.push(buildAutomationEnvelopeHistoryEntry({ projectId: rid, before: envelope, after: next }))
-          applyAutomationEnvelope(next, next.targetKey)
-        }
-      } else if (await automationWriter.deleteEnvelope(envelope)) {
-        historyEntries.push(buildAutomationEnvelopeHistoryEntry({ projectId: rid, before: envelope, after: null }))
-        applyAutomationEnvelope(undefined, envelope.targetKey)
+      if (!next) continue
+      if (await automationWriter.setEnvelope(next)) {
+        historyEntries.push(buildAutomationEnvelopeHistoryEntry({ projectId: rid, before: envelope, after: next }))
+        applyAutomationEnvelope(next, next.targetKey)
       }
     }
     const historyEntry = buildSectionHistoryEntry(rid, historyEntries)
@@ -713,24 +723,6 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     void performDeleteTrack(trackId)
   }
 
-  const requestDeleteSelectedTrack = () => {
-    const id = selectedTrackId()
-    if (!id) return
-    requestDeleteTrack(id)
-  }
-
-  const handleKeyboardAction = () => {
-    if (selection.rangeSelection()) {
-      void deleteTimelineSelection()
-      return
-    }
-    if (selectedClipIds().size > 0) {
-      void deleteSelectedClips()
-      return
-    }
-    requestDeleteSelectedTrack()
-  }
-
   return {
     onClipPointerUp,
     deleteSelectedClips,
@@ -741,6 +733,5 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     pasteTimelineSelection,
     performDeleteTrack,
     requestDeleteTrack,
-    handleKeyboardAction,
   }
 }

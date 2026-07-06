@@ -7,8 +7,8 @@ type KeyboardHandlers = {
   onSpace: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
-  onCopy: () => void;
-  onPaste: () => void;
+  onCopy: () => boolean;
+  onPaste: () => boolean;
   onAddAudioTrack: () => void;
   onAddReturnTrack: () => void;
   onAddGroupTrack: () => void;
@@ -97,16 +97,18 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
     }
 
     if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
-      e.preventDefault();
-      e.stopPropagation();
-      handlers.onCopy();
+      if (handlers.onCopy()) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
       return;
     }
 
     if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) {
-      e.preventDefault();
-      e.stopPropagation();
-      handlers.onPaste();
+      if (handlers.onPaste()) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
       return;
     }
 

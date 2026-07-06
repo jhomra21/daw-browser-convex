@@ -112,9 +112,10 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
 
     setMarqueeRect({ x, y: normY, width, height })
 
-    const rangeTrackIds = trackIdsInYRange(trackLayout(), normY, normY + height)
-    const primaryIndex = trackIndexAtY(trackLayout(), startY - RULER_HEIGHT)
-    const primaryTrackId = primaryIndex >= 0 ? trackLayout()[primaryIndex]?.trackId ?? null : rangeTrackIds[0] ?? null
+    const rows = trackLayout()
+    const rangeTrackIds = trackIdsInYRange(rows, normY, normY + height)
+    const primaryIndex = trackIndexAtY(rows, startY - RULER_HEIGHT)
+    const primaryTrackId = primaryIndex >= 0 ? rows[primaryIndex].trackId : rangeTrackIds[0] ?? null
     const snappedRange = snapTimeRangeToGridColumns({
       startSec: x / PPS,
       endSec: (x + width) / PPS,

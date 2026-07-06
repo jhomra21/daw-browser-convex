@@ -1,5 +1,5 @@
 import { isLocalId, normalizeAudioWarp, normalizeClipGain } from '@daw-browser/shared'
-import { persistClipTiming } from '~/lib/clip-mutations'
+import { persistClipTiming, persistClipTimingAndAudioWarp } from '~/lib/clip-mutations'
 import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { MoveClipInput } from '~/lib/timeline-repository/types'
@@ -93,12 +93,16 @@ export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
     leftPadSec?: number
     bufferOffsetSec?: number
     midiOffsetBeats?: number
+    audioWarp?: AudioWarp
   }) => {
     if (isLocalId('project', context.projectId)) {
       const row = await createLocalTimelineRepository(context.projectId).updateClip(input)
       return Boolean(row)
     }
     if (!context.userId || !context.convexClient || !context.convexApi) return false
+    if (input.audioWarp !== undefined) {
+      return await persistClipTimingAndAudioWarp(context.convexClient, context.convexApi, input)
+    }
     return await persistClipTiming(context.convexClient, context.convexApi, input)
   },
 })

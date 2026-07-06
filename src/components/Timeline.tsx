@@ -660,12 +660,12 @@ const Timeline: Component<TimelineProps> = (props) => {
     pasteTimelineSelection,
     performDeleteTrack,
     requestDeleteTrack,
-    handleKeyboardAction,
   } = useTimelineClipActions({
     tracks: () => renderTracks(),
     insertLocalClip: projection.insertLocalClip,
     removeLocalClips: projection.removeLocalClips,
     commitClipTiming: projection.commitClipTiming,
+    commitClipAudioWarp: projection.commitClipAudioWarp,
     removeLocalTrack: projection.removeLocalTrack,
     canWriteClip,
     selection,
@@ -788,9 +788,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       void duplicateTimelineSelection();
     },
     onCopy: copyTimelineSelection,
-    onPaste: () => {
-      void pasteTimelineSelection();
-    },
+    onPaste: pasteTimelineSelection,
     onAddAudioTrack: () => {
       void addAudioTrack().catch(() => {});
     },

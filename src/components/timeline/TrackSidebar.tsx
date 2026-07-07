@@ -15,6 +15,7 @@ import {
   getTrackChannelRole,
 } from "@daw-browser/timeline-core/track-routing";
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
+import { normalizeDragMoveSet, resolveTrackDropZone, type TrackDropTarget } from "~/lib/track-group-ops";
 import { DEFAULT_AUTOMATION_LANE_HEIGHT, GROUP_INDENT_PX, GROUP_RAIL_WIDTH, LANE_HEIGHT, RULER_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Track, TrackSend } from "@daw-browser/timeline-core/types";
@@ -55,7 +56,10 @@ type TrackSidebarProps = {
     onGroupTracks: (trackIds: Track["id"][]) => void;
     onUngroupTrack: (groupId: Track["id"]) => void;
     onMoveTrackToGroup: (trackId: Track["id"], groupId: Track["id"] | undefined) => void;
+    onReorderTracks: (trackIds: Track["id"][], target: TrackDropTarget) => void;
     onSetTrackColor: (trackId: Track["id"], color: string | undefined) => void;
+    onAssignGroupColorToContents: (groupId: Track["id"]) => void;
+    onSelectAllClipsInGroup: (groupId: Track["id"]) => void;
     currentUserId: string;
     subscribeTrackLevels: (
       listener: (levels: ReadonlyMap<string, TrackStereoLevels>) => void,
@@ -89,6 +93,14 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const [selectedSendTargets, setSelectedSendTargets] = createSignal<
     Map<Track["id"], string>
   >(new Map());
+  const [trackDrag, setTrackDrag] = createSignal<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    trackId: Track["id"];
+    dragging: boolean;
+    target?: TrackDropTarget;
+  }>();
   let cleanupAutomationResize: (() => void) | undefined;
 
   createEffect(() => {
@@ -239,6 +251,49 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const canWriteTrackRouting = (track: Track) =>
     sidebar().canWriteTrackRouting(track.id);
 
+  const dropTargetAt = (clientY: number): TrackDropTarget | undefined => {
+    const localY = clientY - RULER_HEIGHT;
+    const row = sidebar().trackLayout.find((row) => localY >= row.topPx && localY < row.topPx + row.heightPx);
+    if (!row) return undefined;
+    const track = sidebar().trackById.get(row.trackId);
+    if (!track) return undefined;
+    return {
+      trackId: row.trackId,
+      zone: resolveTrackDropZone({
+        localY: localY - row.topPx,
+        rowHeightPx: row.heightPx,
+        targetIsGroup: getTrackChannelRole(track) === "group",
+      }),
+    };
+  };
+
+  const startTrackDrag = (trackId: Track["id"], event: PointerEvent) => {
+    if (event.button !== 0) return;
+    setTrackDrag({
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      trackId,
+      dragging: false,
+    });
+  };
+
+  const updateTrackDrag = (event: PointerEvent) => {
+    const drag = trackDrag();
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dragging = drag.dragging || Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4;
+    setTrackDrag({ ...drag, dragging, target: dragging ? dropTargetAt(event.clientY) : undefined });
+  };
+
+  const finishTrackDrag = (event: PointerEvent) => {
+    const drag = trackDrag();
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setTrackDrag(undefined);
+    if (!drag.dragging || !drag.target) return;
+    const selectedIds = new Set(sidebar().selectedTrackId ? [sidebar().selectedTrackId, drag.trackId] : [drag.trackId]);
+    sidebar().onReorderTracks(normalizeDragMoveSet(sidebar().tracks, selectedIds), drag.target);
+  };
+
   const handleOutputTargetChange = (track: Track, value: string) => {
     if (!canWriteTrackRouting(track)) return;
     setSelectedOutputTargets((current) =>
@@ -368,13 +423,39 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       </div>
 
       <div
-        class="flex h-full flex-col overflow-x-clip border-l border-border bg-timeline-surface p-0"
+        class="relative flex h-full flex-col overflow-x-clip border-l border-border bg-timeline-surface p-0"
         style={{
           width: `${sidebar().sidebarWidth}px`,
           "min-width": `${TIMELINE_SIDEBAR_MIN_WIDTH}px`,
         }}
       >
         <div class="sticky top-0 z-40 border-b border-border bg-timeline-surface" style={{ height: `${RULER_HEIGHT}px` }} />
+        <Show when={trackDrag()?.dragging && trackDrag()?.target}>
+          {(target) => {
+            const row = () => sidebar().trackLayout.find((entry) => entry.trackId === target().trackId);
+            const top = () => {
+              const current = row();
+              if (!current) return RULER_HEIGHT;
+              if (target().zone === "below") return RULER_HEIGHT + current.topPx + current.heightPx;
+              return RULER_HEIGHT + current.topPx;
+            };
+            return (
+              <div
+                class={cn(
+                  "pointer-events-none absolute z-50 border-primary",
+                  target().zone === "inside"
+                    ? "h-8 rounded border"
+                    : "h-0 border-t-2",
+                )}
+                style={{
+                  top: target().zone === "inside" ? `${top() + 12}px` : `${top()}px`,
+                  left: `${8 + (row()?.depth ?? 0) * GROUP_INDENT_PX}px`,
+                  right: "8px",
+                }}
+              />
+            );
+          }}
+        </Show>
         <For each={sidebar().tracks}>
           {(track) => {
             const lockedByOther =
@@ -434,6 +515,24 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               },
               {
                 kind: "item",
+                label: "Assign color to grouped tracks and clips",
+                disabled: !isGroupTrack || !track.color,
+                onSelect: () => sidebar().onAssignGroupColorToContents(track.id),
+              },
+              {
+                kind: "item",
+                label: "Unfold group",
+                disabled: !isGroupTrack || !track.collapsed,
+                onSelect: () => sidebar().onToggleTrackCollapsed(track.id),
+              },
+              {
+                kind: "item",
+                label: "Select all clips in group",
+                disabled: !isGroupTrack,
+                onSelect: () => sidebar().onSelectAllClipsInGroup(track.id),
+              },
+              {
+                kind: "item",
                 label: track.color ? "Clear track color" : "Set track color",
                 onSelect: () => sidebar().onSetTrackColor(track.id, track.color ? undefined : trackColor()),
               },
@@ -487,6 +586,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 )}
                 style={{ height: `${LANE_HEIGHT + automationTotalHeight()}px` }}
                 onClick={() => sidebar().onTrackClick(track.id)}
+                onPointerMove={updateTrackDrag}
+                onPointerUp={finishTrackDrag}
               >
                 <Show when={isGroupTrack}>
                   <div
@@ -525,6 +626,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       )}
                       style={{ "border-width": "0.5px" }}
                       disabled={muteDisabled}
+                      onPointerDown={(event) => startTrackDrag(track.id, event)}
+                      onDblClick={(event) => {
+                        if (!isGroupTrack || !track.collapsed) return;
+                        event.stopPropagation();
+                        sidebar().onToggleTrackCollapsed(track.id);
+                      }}
                       onClick={(event) => {
                         event.stopPropagation();
                         if (muteDisabled) return;

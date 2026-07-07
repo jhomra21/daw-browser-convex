@@ -17,6 +17,7 @@ import {
   persistHistoryEffectParams,
   persistHistoryAutomationEnvelope,
   persistHistoryClipAudioWarpOrThrow,
+  persistHistoryClipColorOrThrow,
   persistHistoryClipMovesOrThrow,
   persistHistoryClipTimingOrThrow,
   createHistoryClip,
@@ -24,6 +25,7 @@ import {
   persistHistoryTrackMix,
   persistHistoryTrackGroup,
   persistHistoryTrackColor,
+  persistHistoryTrackReorder,
   persistHistoryTrackRouting,
   persistHistoryTrackVolume,
   removeHistoryClipIdsOrThrow,
@@ -55,6 +57,7 @@ export type Deps = {
     insertLocalTrack: (track: Track, index: number) => void
     removeLocalTrack: (trackId: Track['id']) => void
     insertLocalClip: (trackId: Track['id'], clip: Track['clips'][number]) => void
+    replaceLocalClip: (trackId: Track['id'], clip: Track['clips'][number]) => void
     removeLocalClips: (clipIds: Iterable<string>) => void
     commitClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
     commitClipTiming: (clipId: string, patch: Omit<Extract<HistoryEntry, { type: 'clip-timing' }>['data']['to'], 'audioWarp'>) => void
@@ -66,7 +69,7 @@ export type Deps = {
     applyTrackVolume: (trackId: Track['id'], volume: number, scope?: 'local' | 'shared') => void
     applyTrackMixState: (trackId: Track['id'], patch: { muted?: boolean; soloed?: boolean }, scope?: 'local' | 'shared') => void
     applyTrackRouting: (trackId: Track['id'], routing: TrackRouting) => void
-    applyTrackPatch: (trackId: Track['id'], patch: Pick<Track, 'groupId' | 'outputTargetId' | 'color'>) => void
+    applyTrackPatch: (trackId: Track['id'], patch: Partial<Pick<Track, 'groupId' | 'outputTargetId' | 'color'>> & { index?: number }) => void
     applyAutomationEnvelope: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
   }
 }
@@ -189,6 +192,38 @@ async function applyTrackColorEntry(entry: Extract<HistoryEntry, { type: 'track-
   const color = pickDirectionalValue(direction, entry.data.from, entry.data.to)
   await persistHistoryTrackColor(deps, trackId, color)
   deps.actions.applyTrackPatch(trackId, { color })
+}
+
+async function applyTrackReorderEntry(entry: Extract<HistoryEntry, { type: 'track-reorder' }>, deps: Deps, direction: HistoryDirection) {
+  const index = buildRefIndex(deps)
+  const currentTracks = deps.getTracks()
+  const patches = entry.data.patches.map((patch) => {
+    const trackId = requireResolved(resolveTrackId(index, patch.trackRef), 'Track not found for track-reorder history entry')
+    return {
+      trackId,
+      index: pickDirectionalValue(direction, patch.fromIndex, patch.toIndex),
+      groupId: resolveTrackId(index, pickDirectionalValue(direction, patch.fromGroupRef, patch.toGroupRef)) ?? null,
+      outputTargetId: resolveTrackId(index, pickDirectionalValue(direction, patch.fromOutputTargetRef, patch.toOutputTargetRef)) ?? null,
+    }
+  })
+  const patchById = new Map(patches.map((patch) => [patch.trackId, patch]))
+  const updates = currentTracks.map((track, trackIndex) => {
+    const patch = patchById.get(track.id)
+    return {
+      trackId: track.id,
+      index: patch?.index ?? trackIndex,
+      groupId: patch ? patch.groupId : track.groupId ?? null,
+      outputTargetId: patch ? patch.outputTargetId : track.outputTargetId ?? null,
+    }
+  })
+  await persistHistoryTrackReorder(deps, updates)
+  for (const patch of patches) {
+    deps.actions.applyTrackPatch(patch.trackId, {
+      index: patch.index,
+      groupId: patch.groupId ?? undefined,
+      outputTargetId: patch.outputTargetId ?? undefined,
+    })
+  }
 }
 
 type EffectParamsEntry = Extract<HistoryEntry, { type: 'effect-params' }>
@@ -322,6 +357,16 @@ async function applyClipAudioWarpEntry(entry: Extract<HistoryEntry, { type: 'cli
   await persistHistoryClipAudioWarpOrThrow(deps, clipId, snapshot.audioWarp, 'Failed to apply clip warp during history replay')
   deps.actions.commitClipAudioWarp(clipId, snapshot.audioWarp)
   deps.actions.rescheduleChangedClips([clipId])
+}
+
+async function applyClipColorEntry(entry: Extract<HistoryEntry, { type: 'clip-color' }>, deps: Deps, direction: HistoryDirection) {
+  const index = buildRefIndex(deps)
+  const clipId = requireResolved(resolveClipId(index, entry.data.clipRef), 'Clip not found for clip-color history entry')
+  const color = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+  await persistHistoryClipColorOrThrow(deps, clipId, color, 'Failed to apply clip color during history replay')
+  const track = deps.getTracks().find((track) => track.clips.some((clip) => clip.id === clipId))
+  const clip = track?.clips.find((clip) => clip.id === clipId)
+  if (track && clip && color) deps.actions.replaceLocalClip(track.id, { ...clip, color })
 }
 
 async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-delete' }>, deps: Deps) {
@@ -465,6 +510,10 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       await applyClipAudioWarpEntry(entry, deps, direction)
       return
 
+    case 'clip-color':
+      await applyClipColorEntry(entry, deps, direction)
+      return
+
     case 'track-create': {
       if (direction === 'undo') {
         const index = buildRefIndex(deps)
@@ -535,6 +584,10 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
 
     case 'track-color':
       await applyTrackColorEntry(entry, deps, direction)
+      return
+
+    case 'track-reorder':
+      await applyTrackReorderEntry(entry, deps, direction)
       return
 
     case 'effect-params':

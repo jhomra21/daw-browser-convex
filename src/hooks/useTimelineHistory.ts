@@ -226,6 +226,10 @@ export function useTimelineHistory(
           insertClipIntoHistoryModel(workingTracks, trackId, clip)
           runVisibleAction(scopeKey, () => sourceActions.insertLocalClip(trackId, clip))
         },
+        replaceLocalClip: (trackId, clip) => {
+          insertClipIntoHistoryModel(workingTracks, trackId, clip)
+          runVisibleAction(scopeKey, () => sourceActions.replaceLocalClip(trackId, clip))
+        },
         removeLocalClips: (clipIds) => {
           removeClipsFromHistoryModel(workingTracks, clipIds)
           runVisibleAction(scopeKey, () => sourceActions.removeLocalClips(clipIds))

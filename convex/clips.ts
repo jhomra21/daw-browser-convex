@@ -613,6 +613,23 @@ export const serverSetGain = mutation({
   },
 })
 
+export const serverSetColor = mutation({
+  args: {
+    clipId: v.string(),
+    color: v.string(),
+  },
+  handler: async (ctx, { clipId, color }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const normalizedClipId = ctx.db.normalizeId('clips', clipId)
+    if (!normalizedClipId) return { status: 'rejected' as const }
+    const access = await getClipWriteAccess(ctx, normalizedClipId, userId)
+    if (!access) return { status: 'rejected' as const }
+    if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
+    await ctx.db.patch(normalizedClipId, { color })
+    return { status: 'applied' as const }
+  },
+})
+
 export const serverSetTiming = mutation({
   args: {
     clipId: v.string(),

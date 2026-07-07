@@ -57,6 +57,7 @@ export default defineSchema({
     bufferOffsetSec: v.optional(v.number()),
     audioWarp: v.optional(audioWarpValidator),
     gain: v.optional(v.number()),
+    color: v.optional(v.string()),
     name: v.optional(v.string()),
     sampleUrl: v.optional(v.string()),
     midi: v.optional(v.object({

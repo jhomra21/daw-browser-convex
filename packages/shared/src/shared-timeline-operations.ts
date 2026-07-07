@@ -107,8 +107,10 @@ export type SharedTimelineOperation =
   | { kind: 'clips.setTimingAndAudioWarp'; payload: { clipId: string; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number; audioWarp?: AudioWarpPayload } }
   | { kind: 'clips.setAudioWarp'; payload: { clipId: string; audioWarp: AudioWarpPayload } }
   | { kind: 'clips.setGain'; payload: { clipId: string; gain: number } }
+  | { kind: 'clips.setColor'; payload: { clipId: string; color: string } }
   | { kind: 'tracks.setRouting'; payload: { trackId: string; routing: TrackRouting } }
   | { kind: 'tracks.setGroup'; payload: { trackId: string; groupId?: string } }
+  | { kind: 'tracks.reorderAndGroup'; payload: { updates: Array<{ trackId: string; index: number; groupId?: string | null; outputTargetId?: string | null }> } }
   | { kind: 'tracks.setCollapsed'; payload: { trackId: string; collapsed: boolean } }
   | { kind: 'tracks.setColor'; payload: { trackId: string; color?: string } }
   | { kind: 'tracks.setVolume'; payload: { trackId: string; volume: number } }
@@ -153,6 +155,17 @@ const clipTargets = (clipIds: string[]): SharedTimelineOperationTargets => ({ tr
 const readClipIdTargets = (payload: unknown): SharedTimelineOperationTargets => (
   isRecord(payload) && typeof payload.clipId === 'string' ? clipTargets([payload.clipId]) : emptyTargets()
 )
+const readReorderAndGroupTargets = (payload: unknown): SharedTimelineOperationTargets => {
+  if (!isRecord(payload) || !Array.isArray(payload.updates)) return emptyTargets()
+  const trackIds = new Set<string>()
+  for (const update of payload.updates) {
+    if (!isRecord(update)) continue
+    if (typeof update.trackId === 'string') trackIds.add(update.trackId)
+    if (typeof update.groupId === 'string') trackIds.add(update.groupId)
+    if (typeof update.outputTargetId === 'string') trackIds.add(update.outputTargetId)
+  }
+  return { trackIds, clipIds: new Set() }
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -565,6 +578,12 @@ const parseClipGain = (payload: Record<string, unknown>): SharedTimelineOperatio
     : null
 )
 
+const parseClipColor = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
+  typeof payload.clipId === 'string' && typeof payload.color === 'string'
+    ? { kind: 'clips.setColor', payload: { clipId: payload.clipId, color: payload.color } }
+    : null
+)
+
 const parseTrackRouting = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   if (typeof payload.trackId !== 'string' || !isRecord(payload.routing)) return null
   return {
@@ -584,6 +603,22 @@ const parseTrackGroup = (payload: Record<string, unknown>): SharedTimelineOperat
     ? { kind: 'tracks.setGroup', payload: { trackId: payload.trackId, groupId: readOptionalString(payload.groupId) } }
     : null
 )
+
+const parseTrackReorderAndGroup = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  if (!Array.isArray(payload.updates)) return null
+  const updates = payload.updates.flatMap((update) => {
+    if (!isRecord(update) || typeof update.trackId !== 'string' || typeof update.index !== 'number') return []
+    return [{
+      trackId: update.trackId,
+      index: update.index,
+      groupId: typeof update.groupId === 'string' || update.groupId === null ? update.groupId : undefined,
+      outputTargetId: typeof update.outputTargetId === 'string' || update.outputTargetId === null ? update.outputTargetId : undefined,
+    }]
+  })
+  return updates.length === payload.updates.length
+    ? { kind: 'tracks.reorderAndGroup', payload: { updates } }
+    : null
+}
 
 const parseTrackCollapsed = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
   typeof payload.trackId === 'string' && typeof payload.collapsed === 'boolean'
@@ -839,8 +874,10 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
     targets: readClipIdTargets,
     durableQueue: true,
   },
+  { kind: 'clips.setColor', parse: parseClipColor, targets: readClipIdTargets, durableQueue: true },
   { kind: 'tracks.setRouting', parse: parseTrackRouting, targets: readRoutingTargets, durableQueue: true },
   { kind: 'tracks.setGroup', parse: parseTrackGroup, targets: readTrackGroupTargets, durableQueue: true },
+  { kind: 'tracks.reorderAndGroup', parse: parseTrackReorderAndGroup, targets: readReorderAndGroupTargets, durableQueue: true },
   { kind: 'tracks.setCollapsed', parse: parseTrackCollapsed, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'tracks.setColor', parse: parseTrackColor, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'tracks.setVolume', parse: parseTrackVolume, targets: readTrackIdTargets, durableQueue: true },

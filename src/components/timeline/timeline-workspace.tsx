@@ -19,6 +19,7 @@ import { automationTargetKey } from "@daw-browser/shared";
 import type { TimelineWorkspaceAutomationModel } from "~/hooks/useTimelineAutomationController";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
 import { buildGroupClipOverview, type TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
+import type { TrackDropTarget } from "~/lib/track-group-ops";
 
 const createViewportRedrawVersion = () => {
   const [version, setVersion] = createSignal(0);
@@ -125,7 +126,10 @@ type Props = {
     onGroupTracks: (trackIds: Track["id"][]) => void;
     onUngroupTrack: (groupId: Track["id"]) => void;
     onMoveTrackToGroup: (trackId: Track["id"], groupId: Track["id"] | undefined) => void;
+    onReorderTracks: (trackIds: Track["id"][], target: TrackDropTarget) => void;
     onSetTrackColor: (trackId: Track["id"], color: string | undefined) => void;
+    onAssignGroupColorToContents: (groupId: Track["id"]) => void;
+    onSelectAllClipsInGroup: (groupId: Track["id"]) => void;
   };
   automation: TimelineWorkspaceAutomationModel;
   trackLayout: TimelineTrackLayoutRow[];
@@ -342,7 +346,10 @@ export default function TimelineWorkspace(props: Props) {
                 onGroupTracks: props.sidebar.onGroupTracks,
                 onUngroupTrack: props.sidebar.onUngroupTrack,
                 onMoveTrackToGroup: props.sidebar.onMoveTrackToGroup,
+                onReorderTracks: props.sidebar.onReorderTracks,
                 onSetTrackColor: props.sidebar.onSetTrackColor,
+                onAssignGroupColorToContents: props.sidebar.onAssignGroupColorToContents,
+                onSelectAllClipsInGroup: props.sidebar.onSelectAllClipsInGroup,
               }}
               automation={props.automation}
             />

@@ -182,6 +182,50 @@ export function buildTrackColorHistoryEntry(input: {
   }
 }
 
+export function buildClipColorHistoryEntry(input: {
+  projectId: string
+  clip: Track['clips'][number]
+  from: string | undefined
+  to: string | undefined
+}): Extract<HistoryEntry, { type: 'clip-color' }> {
+  return {
+    type: 'clip-color',
+    projectId: input.projectId,
+    data: {
+      clipRef: getClipHistoryRef(input.clip),
+      from: input.from,
+      to: input.to,
+    },
+  }
+}
+
+export function buildTrackReorderHistoryEntry(input: {
+  projectId: string
+  tracks: Track[]
+  patches: Array<{ trackId: Track['id']; index: number; groupId: Track['id'] | undefined; outputTargetId: Track['id'] | undefined }>
+}): Extract<HistoryEntry, { type: 'track-reorder' }> {
+  const trackById = new Map(input.tracks.map((track, index) => [track.id, { track, index }]))
+  return {
+    type: 'track-reorder',
+    projectId: input.projectId,
+    data: {
+      patches: input.patches.flatMap((patch) => {
+        const entry = trackById.get(patch.trackId)
+        if (!entry) return []
+        return [{
+          trackRef: getTrackHistoryRef(entry.track),
+          fromIndex: entry.index,
+          toIndex: patch.index,
+          fromGroupRef: entry.track.groupId ? getTrackHistoryRef(trackById.get(entry.track.groupId)?.track) : undefined,
+          toGroupRef: patch.groupId ? getTrackHistoryRef(trackById.get(patch.groupId)?.track) : undefined,
+          fromOutputTargetRef: entry.track.outputTargetId ? getTrackHistoryRef(trackById.get(entry.track.outputTargetId)?.track) : undefined,
+          toOutputTargetRef: patch.outputTargetId ? getTrackHistoryRef(trackById.get(patch.outputTargetId)?.track) : undefined,
+        }]
+      }),
+    },
+  }
+}
+
 export function buildTrackVolumeHistoryEntry(input: {
   projectId: string
   track: Track

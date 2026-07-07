@@ -14,6 +14,7 @@ import type {
   TimelineSnapshot,
   TimelineClipId,
   MoveClipInput,
+  ReorderAndGroupTrackInput,
   TimelineTrackId,
   TimelineTrackRow,
 } from '~/lib/timeline-repository/types'
@@ -90,6 +91,7 @@ const trackPersistenceFieldsEqual = (left: TimelineTrackRow, right: TimelineTrac
   && left.muted === right.muted
   && left.soloed === right.soloed
   && left.groupId === right.groupId
+  && left.index === right.index
   && left.collapsed === right.collapsed
   && left.color === right.color
   && left.outputTargetId === right.outputTargetId
@@ -112,6 +114,7 @@ const clipPersistenceFieldsEqual = (left: TimelineClipRow, right: TimelineClipRo
   && left.bufferOffsetSec === right.bufferOffsetSec
   && audioWarpEqual(left.audioWarp, right.audioWarp)
   && left.gain === right.gain
+  && left.color === right.color
   && left.midi === right.midi
   && left.midiOffsetBeats === right.midiOffsetBeats
 )
@@ -336,6 +339,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     const track: TimelineTrackRow = {
       ...row.value,
       volume: input.volume ?? row.value.volume,
+      index: input.index ?? row.value.index,
       muted: input.muted ?? row.value.muted,
       soloed: input.soloed ?? row.value.soloed,
       groupId: patchOptionalString(row.value.groupId, input.groupId),
@@ -470,6 +474,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       bufferOffsetSec: input.bufferOffsetSec ?? row.value.bufferOffsetSec,
       audioWarp: input.audioWarp === undefined ? row.value.audioWarp : normalizeAudioWarp(input.audioWarp),
       gain: input.gain ?? row.value.gain,
+      color: input.color ?? row.value.color,
       midi: input.midi ?? row.value.midi,
       midiOffsetBeats: input.midiOffsetBeats ?? row.value.midiOffsetBeats,
       updatedAt: timestamp,
@@ -481,6 +486,40 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     return clip
   }
 
+  const reorderAndGroup = async (updates: ReorderAndGroupTrackInput[]): Promise<void> => {
+    if (updates.length === 0) return
+    await flushScheduledLocalTimelineWrites(projectId)
+    const db = await openLocalProjectDb(projectId)
+    const tx = db.transaction('entities', 'readwrite')
+    const rows = await tx.store.index('by-kind').getAll(TRACK_KIND)
+    const tracks = trackValues(rows)
+    const trackById = new Map(tracks.map((track) => [track.id, track]))
+    const updateById = new Map(updates.map((update) => [update.trackId, update]))
+    requireTrackIds(updates.map((update) => update.trackId), tracks)
+    requireTrackIds(updates.flatMap((update) => update.groupId ? [update.groupId] : []), tracks)
+    requireTrackIds(updates.flatMap((update) => update.outputTargetId ? [update.outputTargetId] : []), tracks)
+    const timestamp = now()
+    const nextTracks = tracks.map((track) => {
+      const update = updateById.get(track.id)
+      return update
+        ? {
+            ...track,
+            index: update.index,
+            groupId: patchOptionalString(track.groupId, update.groupId),
+            outputTargetId: patchOptionalString(track.outputTargetId, update.outputTargetId),
+            updatedAt: timestamp,
+          }
+        : track
+    })
+    await Promise.all(nextTracks.flatMap((track) => {
+      const previous = trackById.get(track.id)
+      if (!previous || trackPersistenceFieldsEqual(previous, track)) return []
+      return [tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))]
+    }))
+    await tx.done
+    markChanged()
+  }
+
   return {
     loadSnapshot,
     createTrack: (input) => trackRepositoryWrite(projectId, createTrack(input)),
@@ -488,6 +527,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     createClip: (input) => trackRepositoryWrite(projectId, createClip(input)),
     updateClip: (input) => trackRepositoryWrite(projectId, updateClip(input)),
     moveClips: (moves) => trackRepositoryWrite(projectId, moveClips(moves)),
+    reorderAndGroup: (updates) => trackRepositoryWrite(projectId, reorderAndGroup(updates)),
     deleteTrack: (trackId) => trackRepositoryWrite(projectId, deleteTrack(trackId)),
     deleteClip: (clipId) => trackRepositoryWrite(projectId, deleteClip(clipId)),
     deleteClips: (clipIds) => trackRepositoryWrite(projectId, deleteClips(clipIds)),

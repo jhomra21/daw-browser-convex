@@ -105,6 +105,8 @@ export const executeTimelineOperation = async (
         clipId: operation.payload.clipId,
         gain: operation.payload.gain,
       })
+    case 'clips.setColor':
+      return await context.convex.mutation(convexApi.clips.serverSetColor, operation.payload)
     case 'tracks.setRouting':
       await context.convex.mutation(convexApi.tracks.serverSetRouting, {
         trackId: operation.payload.trackId,
@@ -118,6 +120,8 @@ export const executeTimelineOperation = async (
         groupId: operation.payload.groupId ?? null,
       })
       return { status: 'applied' }
+    case 'tracks.reorderAndGroup':
+      return await context.convex.mutation(convexApi.tracks.serverReorderAndGroup, operation.payload)
     case 'tracks.setCollapsed':
       await context.convex.mutation(convexApi.tracks.serverSetCollapsed, operation.payload)
       return { status: 'applied' }

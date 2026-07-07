@@ -111,6 +111,7 @@ export type UpdateClipInput = {
   bufferOffsetSec?: number
   audioWarp?: AudioWarp
   gain?: number
+  color?: string
   sourceAssetId?: TimelineAssetId
   sourceAssetKey?: string
   sourceKind?: AudioSourceKind
@@ -130,6 +131,7 @@ export type MoveClipInput = {
 
 export type UpdateTrackInput = {
   trackId: TimelineTrackId
+  index?: number
   volume?: number
   muted?: boolean
   soloed?: boolean
@@ -140,6 +142,13 @@ export type UpdateTrackInput = {
   sends?: { targetId: TimelineTrackId; amount: number }[]
 }
 
+export type ReorderAndGroupTrackInput = {
+  trackId: TimelineTrackId
+  index: number
+  groupId?: TimelineTrackId | null
+  outputTargetId?: TimelineTrackId | null
+}
+
 export type TimelineRepository = {
   loadSnapshot: () => Promise<TimelineSnapshot>
   createTrack: (input: CreateTrackInput) => Promise<TimelineTrackRow>
@@ -147,6 +156,7 @@ export type TimelineRepository = {
   createClip: (input: CreateClipInput) => Promise<TimelineClipRow>
   updateClip: (input: UpdateClipInput) => Promise<TimelineClipRow | null>
   moveClips: (moves: MoveClipInput[]) => Promise<void>
+  reorderAndGroup: (updates: ReorderAndGroupTrackInput[]) => Promise<void>
   deleteTrack: (trackId: TimelineTrackId) => Promise<void>
   deleteClip: (clipId: TimelineClipId) => Promise<void>
   deleteClips: (clipIds: TimelineClipId[]) => Promise<void>

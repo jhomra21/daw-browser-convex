@@ -516,6 +516,75 @@ export const serverSetGroup = mutation({
   },
 });
 
+export const serverReorderAndGroup = mutation({
+  args: {
+    updates: v.array(v.object({
+      trackId: v.string(),
+      index: v.number(),
+      groupId: v.optional(v.union(v.string(), v.null())),
+      outputTargetId: v.optional(v.union(v.string(), v.null())),
+    })),
+  },
+  handler: async (ctx, { updates }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    if (updates.length === 0) return { status: "applied" };
+    const normalizedUpdates = [];
+    for (const update of updates) {
+      const trackId = ctx.db.normalizeId("tracks", update.trackId);
+      if (!trackId) return { status: "rejected" };
+      const groupId = typeof update.groupId === "string" ? ctx.db.normalizeId("tracks", update.groupId) : update.groupId;
+      const outputTargetId = typeof update.outputTargetId === "string" ? ctx.db.normalizeId("tracks", update.outputTargetId) : update.outputTargetId;
+      if (typeof update.groupId === "string" && !groupId) return { status: "rejected" };
+      if (typeof update.outputTargetId === "string" && !outputTargetId) return { status: "rejected" };
+      normalizedUpdates.push({ ...update, trackId, groupId, outputTargetId });
+    }
+
+    const accesses = await Promise.all(normalizedUpdates.map((update) => getTrackWriteAccess(ctx, update.trackId, userId)));
+    if (accesses.some((access) => !access)) return { status: "rejected" };
+    const firstAccess = accesses[0];
+    if (!firstAccess) return { status: "rejected" };
+    const projectId = firstAccess.track.projectId;
+    if (accesses.some((access) => access?.track.projectId !== projectId)) return { status: "rejected" };
+
+    const tracks = await listProjectTracksWithMixerChannels(ctx, projectId);
+    if (updates.length !== tracks.length) return { status: "rejected" };
+    const trackById = new Map(tracks.map((track) => [String(track._id), track]));
+    if (normalizedUpdates.some((update) => !trackById.has(String(update.trackId)))) return { status: "rejected" };
+    const sortedIndexes = normalizedUpdates.map((update) => update.index).sort((left, right) => left - right);
+    if (sortedIndexes.some((index, offset) => index !== offset)) return { status: "rejected" };
+
+    const parentByTrackId = new Map(tracks.map((track) => [String(track._id), track.groupId ? String(track.groupId) : undefined]));
+    for (const update of normalizedUpdates) {
+      parentByTrackId.set(String(update.trackId), update.groupId ? String(update.groupId) : undefined);
+      if (update.groupId) {
+        const groupTrack = trackById.get(String(update.groupId));
+        if (!groupTrack || groupTrack.channelRole !== "group") return { status: "rejected" };
+      }
+    }
+    for (const track of tracks) {
+      const seen = new Set<string>();
+      let cursor = parentByTrackId.get(String(track._id));
+      while (cursor) {
+        if (seen.has(cursor) || cursor === String(track._id)) return { status: "rejected" };
+        seen.add(cursor);
+        cursor = parentByTrackId.get(cursor);
+      }
+    }
+
+    await Promise.all(normalizedUpdates.map(async (update) => {
+      const track = trackById.get(String(update.trackId));
+      if (!track) return;
+      await ctx.db.patch(update.trackId, {
+        index: update.index,
+        groupId: update.groupId ?? undefined,
+      });
+      const channel = await ensureMixerChannelForTrack(ctx, track);
+      await ctx.db.patch(channel._id, { outputTargetId: update.outputTargetId ?? undefined });
+    }));
+    return { status: "applied" };
+  },
+});
+
 export const setCollapsed = mutation({
   args: { trackId: v.id("tracks"), collapsed: v.boolean() },
   handler: async (ctx, { trackId, collapsed }) => {

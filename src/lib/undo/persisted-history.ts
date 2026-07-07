@@ -134,6 +134,10 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSe
         && isAudioWarp(data.from.audioWarp)
         && isRecord(data.to)
         && isAudioWarp(data.to.audioWarp)
+    case 'clip-color':
+      return isString(data.clipRef)
+        && (data.from === undefined || isString(data.from))
+        && (data.to === undefined || isString(data.to))
     case 'track-create':
       return isTrackCreateData(data)
     case 'track-clip-create':
@@ -151,6 +155,20 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSe
       return isString(data.trackRef) && isScope(data.scope) && isBoolean(data.from) && isBoolean(data.to)
     case 'track-routing':
       return isString(data.trackRef) && isRoutingSnapshot(data.from) && isRoutingSnapshot(data.to)
+    case 'track-color':
+      return isString(data.trackRef)
+        && (data.from === undefined || isString(data.from))
+        && (data.to === undefined || isString(data.to))
+    case 'track-reorder':
+      return Array.isArray(data.patches)
+        && data.patches.every((patch) => isRecord(patch)
+          && isString(patch.trackRef)
+          && isNumber(patch.fromIndex)
+          && isNumber(patch.toIndex)
+          && (patch.fromGroupRef === undefined || isString(patch.fromGroupRef))
+          && (patch.toGroupRef === undefined || isString(patch.toGroupRef))
+          && (patch.fromOutputTargetRef === undefined || isString(patch.fromOutputTargetRef))
+          && (patch.toOutputTargetRef === undefined || isString(patch.toOutputTargetRef)))
     case 'effect-params':
       return (data.trackRef === undefined || isString(data.trackRef))
         && (data.instanceId === undefined || isString(data.instanceId))

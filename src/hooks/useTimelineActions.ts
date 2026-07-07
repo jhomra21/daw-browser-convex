@@ -7,9 +7,9 @@ import { PPS } from '~/lib/timeline-utils'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
 import { createOptimisticTrack, pushTrackCreateHistory } from '~/lib/tracks'
-import { planGroupTracks, planMoveTrackToGroup, planUngroupTracks } from '~/lib/track-group-ops'
+import { planAssignGroupColor, planGroupTracks, planMoveTrackToGroup, planTrackReorder, planUngroupTracks } from '~/lib/track-group-ops'
 import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
-import { buildTrackColorHistoryEntry, buildTrackGroupHistoryEntry, buildTrackUngroupHistoryEntry } from '~/lib/undo/builders'
+import { buildClipColorHistoryEntry, buildTrackColorHistoryEntry, buildTrackGroupHistoryEntry, buildTrackReorderHistoryEntry, buildTrackUngroupHistoryEntry } from '~/lib/undo/builders'
 import type { TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -39,7 +39,8 @@ type UseTimelineActionsOptions = {
   creation: {
     selection: TimelineSelectionController
     insertLocalTrack: (track: Track, index: number) => void
-    updateLocalTrack: (track: Track, index: number, patch: Pick<Track, 'groupId' | 'outputTargetId' | 'collapsed' | 'color'>) => void
+    replaceLocalClip: (trackId: Track['id'], clip: Track['clips'][number]) => void
+    updateLocalTrack: (track: Track, index: number, patch: Partial<Pick<Track, 'groupId' | 'outputTargetId' | 'collapsed' | 'color'>> & { index?: number }) => void
     removeCloudTrack: (track: Track) => Promise<void>
     grantTrackWrite: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
     pushHistory: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
@@ -61,8 +62,10 @@ type UseTimelineActionsReturn = {
   groupSelectedTracks: (trackIds: Track['id'][]) => Promise<void>
   ungroupTrack: (groupId: Track['id']) => Promise<void>
   moveTrackToGroup: (trackId: Track['id'], groupId: Track['id'] | undefined) => Promise<void>
+  reorderTracks: (moveRootIds: Track['id'][], target: Parameters<typeof planTrackReorder>[0]['target']) => Promise<void>
   toggleTrackCollapsed: (trackId: Track['id']) => Promise<void>
   setTrackColor: (trackId: Track['id'], color: string | undefined) => Promise<void>
+  assignGroupColorToContents: (groupId: Track['id']) => Promise<void>
 }
 
 export function useTimelineActions(
@@ -192,6 +195,48 @@ export function useTimelineActions(
     options.creation.updateLocalTrack(track, index, patch)
   }
 
+  async function reorderTracks(moveRootIds: Track['id'][], target: Parameters<typeof planTrackReorder>[0]['target']): Promise<void> {
+    const projectId = options.room.projectId()
+    const tracks = options.tracks()
+    if (!projectId) return
+    const tracksForReorder = tracks.map((track, index) => ({ ...track, index }))
+    const plan = planTrackReorder({ tracks: tracksForReorder, moveRootIds, target })
+    if (!plan) return
+    const trackById = new Map(tracks.map((track) => [track.id, track]))
+    const patchByTrackId = new Map(plan.patches.map((patch) => [patch.trackId, patch]))
+    const updates = tracksForReorder.map((track) => {
+      const patch = patchByTrackId.get(track.id)
+      return {
+        trackId: track.id,
+        index: patch?.index ?? track.index,
+        groupId: (patch ? patch.groupId : track.groupId) ?? null,
+        outputTargetId: (patch ? patch.outputTargetId : track.outputTargetId) ?? null,
+      }
+    })
+    if (isLocalId('project', projectId)) {
+      await createLocalTimelineRepository(projectId).reorderAndGroup(updates)
+    } else {
+      await publishSharedTimelineOperation(projectId, {
+        kind: 'tracks.reorderAndGroup',
+        payload: { updates },
+      })
+    }
+    for (const patch of plan.patches) {
+      const track = trackById.get(patch.trackId)
+      if (!track) continue
+      options.creation.updateLocalTrack(track, tracks.findIndex((entry) => entry.id === track.id), patch)
+    }
+    if (plan.patches.length > 0) {
+      options.creation.pushHistory(buildTrackReorderHistoryEntry({ projectId, tracks, patches: plan.patches }))
+    }
+    for (const groupId of plan.expandGroupIds) {
+      const track = trackById.get(groupId)
+      if (!track) continue
+      await persistTrackPatch(projectId, groupId, { collapsed: false })
+      options.creation.updateLocalTrack(track, tracks.findIndex((entry) => entry.id === groupId), { collapsed: false })
+    }
+  }
+
   async function groupSelectedTracks(trackIds: Track['id'][]): Promise<void> {
     const projectId = options.room.projectId()
     if (!projectId) return
@@ -283,6 +328,47 @@ export function useTimelineActions(
     options.creation.pushHistory(buildTrackColorHistoryEntry({ projectId, track, from: track.color, to: color }))
   }
 
+  async function assignGroupColorToContents(groupId: Track['id']): Promise<void> {
+    const projectId = options.room.projectId()
+    if (!projectId) return
+    const tracks = options.tracks()
+    const plan = planAssignGroupColor(tracks, groupId)
+    if (!plan || (plan.trackUpdates.length === 0 && plan.clipUpdates.length === 0)) return
+    const trackById = new Map(tracks.map((track) => [track.id, track]))
+    await Promise.all([
+      ...plan.trackUpdates.map((update) => persistTrackPatch(projectId, update.trackId, { color: update.to })),
+      ...plan.clipUpdates.map((update) => isLocalId('project', projectId)
+        ? createLocalTimelineRepository(projectId).updateClip({ clipId: update.clipId, color: update.to })
+        : publishSharedTimelineOperation(projectId, { kind: 'clips.setColor', payload: { clipId: update.clipId, color: update.to } })),
+    ])
+    for (const update of plan.trackUpdates) {
+      const track = trackById.get(update.trackId)
+      if (track) applyTrackPatch(track, { color: update.to })
+    }
+    for (const update of plan.clipUpdates) {
+      const track = trackById.get(update.trackId)
+      const clip = track?.clips.find((clip) => clip.id === update.clipId)
+      if (track && clip) options.creation.replaceLocalClip(track.id, { ...clip, color: update.to })
+    }
+    options.creation.pushHistory({
+      type: 'section-edit',
+      projectId,
+      data: {
+        entries: [
+          ...plan.trackUpdates.flatMap((update) => {
+          const track = trackById.get(update.trackId)
+          return track ? [buildTrackColorHistoryEntry({ projectId, track, from: update.from, to: update.to })] : []
+          }),
+          ...plan.clipUpdates.flatMap((update) => {
+            const track = trackById.get(update.trackId)
+            const clip = track?.clips.find((clip) => clip.id === update.clipId)
+            return clip ? [buildClipColorHistoryEntry({ projectId, clip, from: update.from, to: update.to })] : []
+          }),
+        ],
+      },
+    })
+  }
+
   function jumpToClip(trackId: Track['id'], clipId: string, startSec: number): void {
     options.navigation.selection.selectPrimaryClip({ trackId, clipId })
     options.navigation.setPlayhead(Math.max(0, startSec), options.tracks())
@@ -310,7 +396,9 @@ export function useTimelineActions(
     groupSelectedTracks,
     ungroupTrack,
     moveTrackToGroup,
+    reorderTracks,
     toggleTrackCollapsed,
     setTrackColor,
+    assignGroupColorToContents,
   }
 }

@@ -134,11 +134,17 @@ export const applyTrackRoutingInHistoryModel = (tracks: Track[], trackId: string
 export const applyTrackPatchInHistoryModel = (
   tracks: Track[],
   trackId: string,
-  patch: Pick<Track, 'groupId' | 'outputTargetId' | 'color'>,
+  patch: Partial<Pick<Track, 'groupId' | 'outputTargetId' | 'color'>> & { index?: number },
 ) => {
   const track = tracks.find((entry) => entry.id === trackId)
   if (!track) return
   if (Object.hasOwn(patch, 'groupId')) track.groupId = patch.groupId
   if (Object.hasOwn(patch, 'outputTargetId')) track.outputTargetId = patch.outputTargetId
   if (Object.hasOwn(patch, 'color')) track.color = patch.color
+  if (Object.hasOwn(patch, 'index') && patch.index !== undefined) {
+    const currentIndex = tracks.findIndex((entry) => entry.id === trackId)
+    if (currentIndex < 0) return
+    tracks.splice(currentIndex, 1)
+    tracks.splice(Math.max(0, Math.min(patch.index, tracks.length)), 0, track)
+  }
 }

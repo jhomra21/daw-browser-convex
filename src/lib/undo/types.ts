@@ -301,6 +301,26 @@ export type HistoryEntry =
       projectId: string
       data: { trackRef: TrackRef; from: string | undefined; to: string | undefined }
     }
+  | {
+      type: 'track-reorder'
+      projectId: string
+      data: {
+        patches: Array<{
+          trackRef: TrackRef
+          fromIndex: number
+          toIndex: number
+          fromGroupRef?: TrackRef
+          toGroupRef?: TrackRef
+          fromOutputTargetRef?: TrackRef
+          toOutputTargetRef?: TrackRef
+        }>
+      }
+    }
+  | {
+      type: 'clip-color'
+      projectId: string
+      data: { clipRef: ClipRef; from: string | undefined; to: string | undefined }
+    }
   | AutomationEnvelopeHistoryEntry
   | EffectParamsHistoryEntry
 

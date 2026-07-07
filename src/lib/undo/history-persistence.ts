@@ -167,6 +167,17 @@ export const persistHistoryTrackColor = async (
   await publishHistoryOperation(deps, { kind: "tracks.setColor", payload: { trackId, color } });
 };
 
+export const persistHistoryTrackReorder = async (
+  deps: Deps,
+  updates: Array<{ trackId: Track["id"]; index: number; groupId?: Track["id"] | null; outputTargetId?: Track["id"] | null }>,
+) => {
+  if (isLocalHistoryProject(deps)) {
+    await createLocalTimelineRepository(deps.projectId).reorderAndGroup(updates);
+    return;
+  }
+  await publishHistoryOperation(deps, { kind: "tracks.reorderAndGroup", payload: { updates } });
+};
+
 export const createHistoryClip = async (
   deps: Deps,
   trackId: Track["id"],
@@ -540,6 +551,27 @@ export const persistHistoryClipAudioWarpOrThrow = async (
     audioWarp: normalizedAudioWarp,
   });
   assert(applied, message);
+};
+
+export const persistHistoryClipColorOrThrow = async (
+  deps: Deps,
+  clipId: string,
+  color: string | undefined,
+  message: string,
+) => {
+  if (!color) throw new Error(message);
+  if (isLocalHistoryProject(deps)) {
+    const applied = await createLocalTimelineRepository(deps.projectId).updateClip({ clipId, color });
+    assert(applied, message);
+    return;
+  }
+  const result = await publishDurableSharedTimelineOperation({
+    projectId: deps.projectId,
+    userId: deps.userId,
+    operation: { kind: "clips.setColor", payload: { clipId, color } },
+    queuedResult: { status: "applied" },
+  });
+  assert(isAppliedResult(result), message);
 };
 
 export const persistHistoryClipMovesOrThrow = async (

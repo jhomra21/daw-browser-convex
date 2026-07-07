@@ -64,7 +64,7 @@ import DeleteTrackDialog from "./timeline/delete-track-dialog";
 import TimelineWorkspace from "./timeline/timeline-workspace";
 import { Dashboard } from "~/components/dashboard/dashboard";
 import type { DashboardTimelineModel, DashboardView } from "~/components/dashboard/types";
-import { buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks } from "~/lib/timeline-track-layout";
+import { buildTimelineTrackLayoutRows, buildTrackTree, collectTrackDescendantIds, computeDepthMap, flattenVisibleTracks } from "~/lib/timeline-track-layout";
 
 type AgentMixOp = {
   type: "setMute" | "setSolo";
@@ -239,6 +239,8 @@ const Timeline: Component<TimelineProps> = (props) => {
       removeLocalTrack: (trackId) => projection.removeLocalTrack(trackId),
       insertLocalClip: (trackId, clip) =>
         projection.insertLocalClip(trackId, clip),
+      replaceLocalClip: (trackId, clip) =>
+        projection.replaceLocalClip(trackId, clip),
       removeLocalClips: (clipIds) => projection.removeLocalClips(clipIds),
       commitClipMoves: (moves) => projection.commitClipMoves(moves),
       commitClipTiming: (clipId, patch) =>
@@ -540,8 +542,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     groupSelectedTracks,
     ungroupTrack,
     moveTrackToGroup,
+    reorderTracks,
     toggleTrackCollapsed,
     setTrackColor,
+    assignGroupColorToContents,
   } = useTimelineActions({
     tracks: renderTracks,
     room: {
@@ -552,6 +556,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     creation: {
       selection,
       insertLocalTrack: projection.insertLocalTrack,
+      replaceLocalClip: projection.replaceLocalClip,
       updateLocalTrack: projection.updateLocalTrack,
       removeCloudTrack: removeCreatedCloudTrack,
       grantTrackWrite,
@@ -582,6 +587,20 @@ const Timeline: Component<TimelineProps> = (props) => {
       visibleParameterIdsByTrackId: lanes.visibleParameterIdsByTrackId,
     });
   });
+
+  const selectAllClipsInGroup = (groupId: Track["id"]) => {
+    const descendantIds = collectTrackDescendantIds(renderTracks(), groupId);
+    const clips = renderTracks()
+      .filter((track) => descendantIds.has(track.id))
+      .flatMap((track) => track.clips.map((clip) => ({ trackId: track.id, clipId: clip.id })));
+    const first = clips[0];
+    if (!first) return;
+    selection.selectClipGroup({
+      trackId: first.trackId,
+      clipIds: clips.map((clip) => clip.clipId),
+      primaryClipId: first.clipId,
+    });
+  };
 
   const {
     handleDrop: onDrop,
@@ -1410,7 +1429,10 @@ const Timeline: Component<TimelineProps> = (props) => {
           onGroupTracks: groupSelectedTracks,
           onUngroupTrack: ungroupTrack,
           onMoveTrackToGroup: moveTrackToGroup,
+          onReorderTracks: reorderTracks,
           onSetTrackColor: setTrackColor,
+          onAssignGroupColorToContents: assignGroupColorToContents,
+          onSelectAllClipsInGroup: selectAllClipsInGroup,
         }}
         automation={automation.workspace()}
         trackLayout={trackLayout()}

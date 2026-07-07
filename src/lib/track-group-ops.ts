@@ -36,9 +36,9 @@ type TrackForReorder = Pick<Track, 'id' | 'groupId' | 'channelRole' | 'outputTar
   index: number
 }
 
-type TrackDropZone = 'above' | 'below' | 'inside'
+export type TrackDropZone = 'above' | 'below' | 'inside'
 
-type TrackDropTarget = {
+export type TrackDropTarget = {
   trackId: TrackId
   zone: TrackDropZone
 }

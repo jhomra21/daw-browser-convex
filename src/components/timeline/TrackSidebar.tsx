@@ -35,6 +35,7 @@ type TrackSidebarProps = {
     tracks: Track[];
     trackById: ReadonlyMap<string, Track>;
     trackLayout: TimelineTrackLayoutRow[];
+    scrollElement: () => HTMLDivElement | undefined;
     selectedTrackId: Track["id"] | "";
     sidebarWidth: number;
     bottomOffsetPx: number;
@@ -253,7 +254,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     sidebar().canWriteTrackRouting(track.id);
 
   const dropTargetAt = (clientY: number): TrackDropTarget | undefined => {
-    const localY = clientY - RULER_HEIGHT;
+    const scrollElement = sidebar().scrollElement();
+    if (!scrollElement) return undefined;
+    const rect = scrollElement.getBoundingClientRect();
+    const localY = clientY - rect.top + (scrollElement.scrollTop || 0) - RULER_HEIGHT;
     const row = sidebar().trackLayout.find((row) => localY >= row.topPx && localY < row.topPx + row.heightPx);
     if (!row) return undefined;
     const track = sidebar().trackById.get(row.trackId);

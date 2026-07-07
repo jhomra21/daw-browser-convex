@@ -252,12 +252,41 @@ export function useTimelineActions(
     }, { pushHistory: false, select: false })
     if (!groupTrack) return
     const trackById = new Map(tracks.map((track) => [track.id, track]))
-    await Promise.all(plan.childUpdates.map(async (update) => {
-      const track = trackById.get(update.trackId)
-      const outputTargetId = update.outputTargetId === pendingGroupTrackId ? groupTrack.id : update.outputTargetId
-      if (!track) return
-      await persistTrackPatch(projectId, track.id, { groupId: groupTrack.id, outputTargetId }, track.sends)
-    }))
+    if (isLocalId('project', projectId)) {
+      await Promise.all(plan.childUpdates.map(async (update) => {
+        const track = trackById.get(update.trackId)
+        const outputTargetId = update.outputTargetId === pendingGroupTrackId ? groupTrack.id : update.outputTargetId
+        if (!track) return
+        await persistTrackPatch(projectId, track.id, { groupId: groupTrack.id, outputTargetId }, track.sends)
+      }))
+    } else {
+      const childUpdateByTrackId = new Map(plan.childUpdates.map((update) => [update.trackId, update]))
+      await publishSharedTimelineOperation(projectId, {
+        kind: 'tracks.reorderAndGroup',
+        payload: {
+          updates: [
+            {
+              trackId: groupTrack.id,
+              index: plan.groupTrack.index,
+              groupId: groupTrack.groupId ?? null,
+              outputTargetId: groupTrack.outputTargetId ?? null,
+            },
+            ...tracks.map((track, index) => {
+              const update = childUpdateByTrackId.get(track.id)
+              const outputTargetId = update?.outputTargetId === pendingGroupTrackId
+                ? groupTrack.id
+                : update?.outputTargetId ?? track.outputTargetId
+              return {
+                trackId: track.id,
+                index: index >= plan.groupTrack.index ? index + 1 : index,
+                groupId: update ? groupTrack.id : track.groupId ?? null,
+                outputTargetId: outputTargetId ?? null,
+              }
+            }),
+          ],
+        },
+      })
+    }
     for (const update of plan.childUpdates) {
       const track = trackById.get(update.trackId)
       const outputTargetId = update.outputTargetId === pendingGroupTrackId ? groupTrack.id : update.outputTargetId

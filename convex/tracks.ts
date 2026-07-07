@@ -169,8 +169,11 @@ async function deleteTrackFromPreflight(
     .withIndex("by_room_index", (q: any) => q.eq("projectId", track.projectId))
     .collect();
   for (const remainingTrack of remaining) {
-    if (remainingTrack.index <= track.index) continue;
-    await ctx.db.patch(remainingTrack._id, { index: remainingTrack.index - 1 });
+    const patch: { index?: number; groupId?: undefined } = {};
+    if (remainingTrack.index > track.index) patch.index = remainingTrack.index - 1;
+    if (String(remainingTrack.groupId) === String(track._id)) patch.groupId = undefined;
+    if (Object.keys(patch).length === 0) continue;
+    await ctx.db.patch(remainingTrack._id, patch);
   }
   return true;
 }

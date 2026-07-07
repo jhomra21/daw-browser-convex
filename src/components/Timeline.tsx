@@ -845,8 +845,10 @@ const Timeline: Component<TimelineProps> = (props) => {
       void addGroupTrack().catch(() => {});
     },
     onGroupSelectedTracks: () => {
-      const trackId = selection.selectedTrackId();
-      if (trackId) void groupSelectedTracks([trackId]);
+      const rangeTrackIds = selection.rangeSelection()?.trackIds ?? [];
+      const selectedTrackId = selection.selectedTrackId();
+      const trackIds = rangeTrackIds.length > 0 ? rangeTrackIds : selectedTrackId ? [selectedTrackId] : [];
+      if (trackIds.length > 0) void groupSelectedTracks(trackIds);
     },
     onUngroupSelectedTrack: () => {
       const trackId = selection.selectedTrackId();

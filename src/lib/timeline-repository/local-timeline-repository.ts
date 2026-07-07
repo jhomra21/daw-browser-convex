@@ -387,12 +387,14 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
         const track: TimelineTrackRow = {
           ...row,
           index: deletedIndex !== null && row.index > deletedIndex ? row.index - 1 : row.index,
+          groupId: row.groupId === trackId ? undefined : row.groupId,
           sends: routing.sends,
           outputTargetId: routing.outputTargetId,
           updatedAt: timestamp,
         }
         if (
           track.index === row.index
+          && track.groupId === row.groupId
           && track.outputTargetId === row.outputTargetId
           && sendsEqual(track.sends, row.sends)
         ) {

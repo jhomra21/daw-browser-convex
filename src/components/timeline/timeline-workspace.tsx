@@ -136,6 +136,7 @@ type Props = {
 };
 
 export default function TimelineWorkspace(props: Props) {
+  let scrollElement: HTMLDivElement | undefined;
   const viewportRedrawVersion = createViewportRedrawVersion();
   const trackById = createMemo(() => props.trackLookup.trackById);
   const visibleTracks = createMemo(() => props.trackLayout.flatMap((row) => {
@@ -180,7 +181,10 @@ export default function TimelineWorkspace(props: Props) {
       <TimelineContextMenu items={fallbackMenuItems}>
         <div
           class="flex-1 relative overflow-auto"
-          ref={props.scrollRef}
+          ref={(element) => {
+            scrollElement = element;
+            props.scrollRef(element);
+          }}
         >
         <div
           class="relative flex select-none"
@@ -332,6 +336,7 @@ export default function TimelineWorkspace(props: Props) {
                 tracks: visibleTracks(),
                 trackById: trackById(),
                 trackLayout: props.trackLayout,
+                scrollElement: () => scrollElement,
                 selectedTrackId: props.selection.selectedTrackId(),
                 sidebarWidth: props.sidebarWidth,
                 bottomOffsetPx: props.bottomPanelOffsetPx,

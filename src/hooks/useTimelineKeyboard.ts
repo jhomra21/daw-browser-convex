@@ -12,6 +12,8 @@ type KeyboardHandlers = {
   onAddAudioTrack: () => void;
   onAddReturnTrack: () => void;
   onAddGroupTrack: () => void;
+  onGroupSelectedTracks: () => void;
+  onUngroupSelectedTrack: () => void;
   onAddInstrumentTrack: () => void;
   onOpenExport: () => void;
   onToggleBrowser: () => void;
@@ -27,6 +29,13 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
 
     if (isEditableKeyboardTarget(e.target)) return;
 
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "g" || e.key === "G")) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.shiftKey) handlers.onUngroupSelectedTrack();
+      else handlers.onGroupSelectedTracks();
+      return;
+    }
 
     if (
       (e.ctrlKey || e.metaKey) &&

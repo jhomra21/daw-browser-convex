@@ -27,9 +27,9 @@ export function canTrackReceiveAudioClip(track: Pick<Track, 'channelRole' | 'kin
 }
 
 export function normalizeTrackRouting(
-  track: Pick<Track, 'id' | 'channelRole'> | null | undefined,
+  track: Pick<Track, 'id' | 'channelRole' | 'groupId'> | null | undefined,
   routing: TrackRouting,
-  tracks: Array<Pick<Track, 'id' | 'channelRole'>>,
+  tracks: Array<Pick<Track, 'id' | 'channelRole' | 'groupId'>>,
 ) {
   return normalizeTrackRoutingCore({
     track,

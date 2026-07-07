@@ -825,6 +825,15 @@ const Timeline: Component<TimelineProps> = (props) => {
     onAddGroupTrack: () => {
       void addGroupTrack().catch(() => {});
     },
+    onGroupSelectedTracks: () => {
+      const trackId = selection.selectedTrackId();
+      if (trackId) void groupSelectedTracks([trackId]);
+    },
+    onUngroupSelectedTrack: () => {
+      const trackId = selection.selectedTrackId();
+      const track = renderTracks().find((candidate) => candidate.id === trackId);
+      if (track?.channelRole === "group") void ungroupTrack(track.id);
+    },
     onUndo: () => {
       handleUndo();
     },

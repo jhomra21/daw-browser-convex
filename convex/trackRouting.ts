@@ -8,6 +8,7 @@ type TrackLike = {
   _id: string
   channelRole?: string
   kind?: string
+  groupId?: string
 }
 
 type SendLike<TTrackId extends string> = {
@@ -27,7 +28,7 @@ const sanitizeTrackRouting = <TTrackId extends string>(
     track: sourceTrack ? { id: sourceTrack._id, channelRole: sourceTrack.channelRole } : null,
     sends: routing.sends,
     outputTargetId: routing.outputTargetId,
-    tracks: tracks.map((track) => ({ id: track._id, channelRole: track.channelRole })),
+    tracks: tracks.map((track) => ({ id: track._id, channelRole: track.channelRole, groupId: track.groupId })),
   })
 }
 

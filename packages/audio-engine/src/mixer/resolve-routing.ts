@@ -16,10 +16,10 @@ type SoloRoutingState = {
 
 function resolveChannelRouting(
   channel: MixerChannel,
-  routingTracks: Array<{ id: Track['id']; channelRole?: string }>,
+  routingTracks: Array<{ id: Track['id']; channelRole?: string; groupId?: Track['id'] }>,
 ): ResolvedChannelRouting {
   const normalized = normalizeTrackRouting({
-    track: { id: channel.id, channelRole: channel.role },
+    track: { id: channel.id, channelRole: channel.role, groupId: channel.groupId },
     sends: channel.sends,
     outputTargetId: channel.outputTargetId,
     tracks: routingTracks,
@@ -124,7 +124,7 @@ function resolveActiveSends(
 
 export function resolveMixerGraph(options: ResolveMixerGraphOptions): ResolvedMixerGraph {
   const channels = options.channels.filter((channel) => getMixerChannelRole(channel) !== 'master')
-  const routingTracks = channels.map((channel) => ({ id: channel.id, channelRole: channel.role }))
+  const routingTracks = channels.map((channel) => ({ id: channel.id, channelRole: channel.role, groupId: channel.groupId }))
   const resolvedChannels: ResolvedChannelRouting[] = channels.map((channel) => resolveChannelRouting(channel, routingTracks))
   const soloRoutingState = resolveSoloRoutingState(resolvedChannels)
 

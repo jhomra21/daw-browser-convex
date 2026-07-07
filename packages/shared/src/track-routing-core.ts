@@ -4,6 +4,7 @@ type RoutingTrackLike<TTrackId extends string = string> = {
   id: TTrackId
   channelRole?: string
   kind?: string
+  groupId?: TTrackId
 }
 
 type RoutingSendLike<TTrackId extends string = string> = {
@@ -14,10 +15,10 @@ type RoutingSendLike<TTrackId extends string = string> = {
 type RoutingTrackChannelRole = 'track' | 'group' | 'return'
 
 type NormalizeRoutingInput<TTrackId extends string = string> = {
-  track: Pick<RoutingTrackLike<TTrackId>, 'id' | 'channelRole'> | null | undefined
+  track: Pick<RoutingTrackLike<TTrackId>, 'id' | 'channelRole' | 'groupId'> | null | undefined
   sends?: Array<RoutingSendLike<TTrackId>>
   outputTargetId?: TTrackId
-  tracks: Array<Pick<RoutingTrackLike<TTrackId>, 'id' | 'channelRole'>>
+  tracks: Array<Pick<RoutingTrackLike<TTrackId>, 'id' | 'channelRole' | 'groupId'>>
 }
 
 type NormalizedRouting<TTrackId extends string = string> = {
@@ -69,6 +70,23 @@ function buildRoutingIndex<TTrackId extends string>(
   return { groupIds, returnIds }
 }
 
+function isAncestorGroup<TTrackId extends string>(
+  tracksById: ReadonlyMap<string, Pick<RoutingTrackLike<TTrackId>, 'id' | 'groupId' | 'channelRole'>>,
+  sourceId: string,
+  candidateAncestorId: string,
+): boolean {
+  let cursor = tracksById.get(sourceId)?.groupId
+  while (cursor) {
+    const cursorId = String(cursor)
+    const cursorTrack = tracksById.get(cursorId)
+    if (cursorId === candidateAncestorId) {
+      return normalizeTrackChannelRole(cursorTrack?.channelRole) === 'group'
+    }
+    cursor = cursorTrack?.groupId
+  }
+  return false
+}
+
 export function normalizeTrackRouting<TTrackId extends string>(
   input: NormalizeRoutingInput<TTrackId>,
 ): NormalizedRouting<TTrackId> {
@@ -76,6 +94,7 @@ export function normalizeTrackRouting<TTrackId extends string>(
   const sourceRole = normalizeTrackChannelRole(track?.channelRole)
   const sourceId = track ? String(track.id) : undefined
   const { groupIds, returnIds } = buildRoutingIndex(tracks)
+  const tracksById = new Map(tracks.map((candidate) => [String(candidate.id), candidate]))
 
   const normalizedSends = new Map<string, RoutingSendLike<TTrackId>>()
   if (track && sourceRole === 'track' && Array.isArray(sends)) {
@@ -92,13 +111,13 @@ export function normalizeTrackRouting<TTrackId extends string>(
     }
   }
 
-  const normalizedOutputTargetId = !track
-    || !outputTargetId
-    || sourceRole === 'group'
-    || String(outputTargetId) === sourceId
-    || !groupIds.has(String(outputTargetId))
-      ? undefined
-      : outputTargetId
+  const normalizedOutputTargetId = (() => {
+    if (!track || !outputTargetId || String(outputTargetId) === sourceId) return undefined
+    const targetId = String(outputTargetId)
+    if (sourceRole === 'track') return groupIds.has(targetId) ? outputTargetId : undefined
+    if (sourceRole === 'group') return sourceId && isAncestorGroup(tracksById, sourceId, targetId) ? outputTargetId : undefined
+    return undefined
+  })()
 
   return {
     sends: Array.from(normalizedSends.values()).sort((left, right) => String(left.targetId).localeCompare(String(right.targetId))),

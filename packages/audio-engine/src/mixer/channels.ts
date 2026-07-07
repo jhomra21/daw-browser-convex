@@ -12,6 +12,7 @@ export type MixerChannel = {
   soloed: boolean
   sends: TrackSend[]
   outputTargetId?: Track['id']
+  groupId?: Track['id']
   kind?: 'audio' | 'instrument'
 }
 
@@ -32,6 +33,7 @@ function createMixerChannel(track: Track): MixerChannel {
     soloed: !!track.soloed,
     sends: Array.isArray(track.sends) ? track.sends : [],
     outputTargetId: track.outputTargetId,
+    groupId: track.groupId,
     kind: track.kind,
   }
 }

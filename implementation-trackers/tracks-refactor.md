@@ -451,124 +451,258 @@ Plan:
 V2 should build on the v1 grouping foundation without replacing it. The important v1 boundaries are:
 
 - `groupId`, `collapsed`, and `color` already live on `Track`.
-- Tree derivation and visible-row layout live in `src/lib/timeline-track-layout.ts`.
+- Tree derivation, visible-row layout, descendant collection, and group overview generation live in `src/lib/timeline-track-layout.ts`.
 - Group operations live in `src/lib/track-group-ops.ts`.
 - Sidebar and lane rendering already consume visible layout rows.
 - Collapse is persisted but not undoable.
-- Structural changes and color changes are undoable.
+- Structural group changes and track color changes are undoable.
+- Basic track header drag reorder does not exist yet. V2.1 must introduce reorder as the base case, then layer group-aware reparenting on top.
 
-### V2.1 Drag-to-Reparent with Above, Below, and Inside Zones
+Opus review conclusion: the original V2.1 and V2.5 describe one interaction and should be implemented together. Folded overview editing should be intentionally minimal, color propagation should match Ableton's single command, and nested routing can be implemented first because it has no UI dependency.
 
-Goal: let users drag track headers to reorder tracks and move tracks/groups into or out of groups using explicit drop zones.
+### V2.0 Keyboard Shortcut Backfill
+
+Goal: match Ableton's grouping shortcut while keeping existing context menu actions.
+
+Behavior:
+
+- `Cmd+G` on macOS and `Ctrl+G` elsewhere groups the selected tracks when at least two reorderable tracks are selected.
+- `Shift+Cmd+G` on macOS and `Shift+Ctrl+G` elsewhere ungroups the selected group or selected children when the existing ungroup action is available.
+- Shortcuts should use the existing `groupTracks` and `ungroupTracks` actions so history, persistence, and validation stay centralized.
+- Shortcuts must be ignored while text inputs, menus, dialogs, or editable controls are focused.
+
+Tests:
+
+- Shortcut invokes the same action path as the context menu.
+- Shortcut is disabled for invalid selections.
+- Shortcut does not fire while typing in editable UI.
+
+### V2.1 Track Drag Reorder and Reparent
+
+Goal: let users drag track sidebar headers to reorder tracks and move tracks or groups into and out of groups. This is one unified drag system, not separate reorder and reparent features.
 
 Ableton behavior to approximate:
 
-- Dropping above or below another track reorders.
-- Dropping into a group nests the dragged track/group under that group.
-- Dragging a child out of a group removes `groupId`.
-- Dropping a group into one of its descendants is invalid.
+- Dragging a track above or below another track reorders it.
+- Dragging into a group header nests the track under that group.
+- Dragging a child out of a group's visual region clears its `groupId`.
+- Dragging a group moves its entire subtree as a contiguous block.
+- Dragging a group into one of its own descendants is rejected.
+- Dropping into a collapsed group auto-expands it so the result is visible.
+- Multi-selection preserves relative order.
+- If selection includes a parent group and its child, the move set collapses to the parent group only.
 
-Core model:
+Types in `src/lib/track-group-ops.ts`:
 
 ```ts
 export type TrackDropZone = 'above' | 'below' | 'inside'
 
-export type TrackReparentDropTarget = {
+export type TrackDropTarget = {
   trackId: TrackId
   zone: TrackDropZone
 }
 
-export type TrackReparentPlan = {
-  movedTrackIds: TrackId[]
-  parentGroupId?: TrackId
-  insertIndex: number
-  trackUpdates: Array<{
-    trackId: TrackId
-    groupId?: TrackId
-    index: number
-    outputTargetId?: TrackId
-  }>
+export type TrackReorderPatch = {
+  trackId: TrackId
+  index: number
+  groupId: TrackId | undefined
+  outputTargetId: TrackId | undefined
+}
+
+export type TrackReorderPlan = {
+  patches: TrackReorderPatch[]
+  expandGroupIds: TrackId[]
 }
 ```
 
-Drop-zone helper in `src/lib/track-group-ops.ts`:
+Drop-zone resolution:
 
 ```ts
 export function resolveTrackDropZone(input: {
-  pointerY: number
-  rowTopPx: number
+  localY: number
   rowHeightPx: number
   targetIsGroup: boolean
 }): TrackDropZone {
-  const localY = input.pointerY - input.rowTopPx
-  const edgeSize = Math.min(10, input.rowHeightPx / 3)
-  if (localY <= edgeSize) return 'above'
-  if (localY >= input.rowHeightPx - edgeSize) return 'below'
-  return input.targetIsGroup ? 'inside' : 'below'
+  const edgeBand = Math.min(12, input.rowHeightPx * 0.25)
+  if (input.localY <= edgeBand) return 'above'
+  if (input.localY >= input.rowHeightPx - edgeBand) return 'below'
+  return input.targetIsGroup
+    ? 'inside'
+    : input.localY < input.rowHeightPx / 2
+      ? 'above'
+      : 'below'
 }
 ```
 
-Planning helper:
+Move-set normalization should avoid repeated linear parent lookups:
 
 ```ts
-export function planTrackReparentDrop(input: {
-  tracks: readonly Track[]
-  draggedTrackIds: readonly TrackId[]
-  target: TrackReparentDropTarget
-}): TrackReparentPlan | null {
-  const dragged = new Set(input.draggedTrackIds)
-  const targetTrack = input.tracks.find((track) => track.id === input.target.trackId)
-  if (!targetTrack || dragged.has(targetTrack.id)) return null
-
-  const draggedWithDescendants = new Set<TrackId>()
-  for (const trackId of dragged) {
-    draggedWithDescendants.add(trackId)
-    for (const childId of collectTrackDescendantIds(input.tracks, trackId)) {
-      draggedWithDescendants.add(childId)
-    }
-  }
-  if (draggedWithDescendants.has(targetTrack.id)) return null
-
-  const parentGroupId = input.target.zone === 'inside'
-    ? targetTrack.id
-    : targetTrack.groupId
-  if (parentGroupId) {
-    for (const trackId of dragged) {
-      if (wouldCreateCycle(input.tracks, trackId, parentGroupId)) return null
-    }
+export function normalizeDragMoveSet(
+  tracks: readonly Pick<Track, 'id' | 'groupId'>[],
+  selectedIds: ReadonlySet<TrackId>,
+): TrackId[] {
+  const parentOf = new Map<TrackId, TrackId>()
+  for (const track of tracks) {
+    if (track.groupId) parentOf.set(track.id, track.groupId)
   }
 
-  // Compute final flat order by removing dragged subtree blocks, then inserting them
-  // before/after/inside the target block. Return contiguous indexes for persistence.
-  return buildTrackOrderPatch({ tracks: input.tracks, dragged, target: input.target, parentGroupId })
+  return tracks
+    .filter((track) => selectedIds.has(track.id))
+    .filter((track) => {
+      let cursor = parentOf.get(track.id)
+      while (cursor) {
+        if (selectedIds.has(cursor)) return false
+        cursor = parentOf.get(cursor)
+      }
+      return true
+    })
+    .map((track) => track.id)
 }
 ```
 
-UI phases:
+Reorder planner, the core algorithm that replaces the undefined `buildTrackOrderPatch` placeholder:
 
-1. Add `useTrackHeaderDrag` or sidebar-local pointer handling in `TrackSidebar.tsx`.
-2. Track active drag state:
-   ```ts
-   type ActiveTrackDrag = {
-     pointerId: number
-     draggedTrackIds: TrackId[]
-     target: TrackReparentDropTarget | null
-   }
-   ```
-3. Compute target row from `trackLayout` and `trackIndexAtY`.
-4. Render a `TrackDropIndicator` overlay:
-   - horizontal line above/below rows
-   - inset highlight for `inside`
-   - invalid drop style for cycles or return-track parent targets
-5. On pointer up, call `planTrackReparentDrop`, persist track patches, update local projection, and push undo history.
+```ts
+export function planTrackReorder(input: {
+  tracks: readonly Pick<Track, 'id' | 'index' | 'groupId' | 'channelRole' | 'outputTargetId' | 'collapsed'>[]
+  moveRootIds: readonly TrackId[]
+  target: TrackDropTarget
+}): TrackReorderPlan | null {
+  const { tracks, moveRootIds, target } = input
+  const moveRoots = new Set(moveRootIds)
+  const trackById = new Map(tracks.map((track) => [track.id, track]))
+  const targetTrack = trackById.get(target.trackId)
+  if (!targetTrack) return null
+  if (target.zone === 'inside' && targetTrack.channelRole !== 'group') return null
 
-Validation:
+  const movedSubtree = new Set<TrackId>()
+  for (const rootId of moveRoots) {
+    movedSubtree.add(rootId)
+    for (const descendantId of collectTrackDescendantIds(tracks, rootId)) {
+      movedSubtree.add(descendantId)
+    }
+  }
+  if (movedSubtree.has(target.trackId)) return null
 
-- `planTrackReparentDrop` rejects cycles.
-- Dragging a group moves its whole subtree as a contiguous block.
-- Dropping inside a non-group falls back to below or is invalid.
-- Dropping above/below a child preserves the target child’s parent group.
-- Dropping above/below a root track removes parent group.
+  const newParentGroupId = target.zone === 'inside' ? targetTrack.id : targetTrack.groupId
+  if (newParentGroupId) {
+    for (const rootId of moveRoots) {
+      if (wouldCreateCycle(tracks, rootId, newParentGroupId)) return null
+    }
+  }
+
+  const displayOrder = [...tracks].sort((a, b) => a.index - b.index).map((track) => track.id)
+  const rest = displayOrder.filter((id) => !movedSubtree.has(id))
+  const targetIndex = rest.indexOf(target.trackId)
+  if (targetIndex === -1) return null
+
+  const insertAt = (() => {
+    if (target.zone === 'above') return targetIndex
+    if (target.zone === 'inside') return targetIndex + 1
+    const targetDescendants = collectTrackDescendantIds(tracks, target.trackId)
+    let lastIndex = targetIndex
+    for (let index = targetIndex + 1; index < rest.length; index++) {
+      if (!targetDescendants.has(rest[index])) break
+      lastIndex = index
+    }
+    return lastIndex + 1
+  })()
+
+  const movedInOrder = displayOrder.filter((id) => movedSubtree.has(id))
+  const finalOrder = [
+    ...rest.slice(0, insertAt),
+    ...movedInOrder,
+    ...rest.slice(insertAt),
+  ]
+
+  const patches: TrackReorderPatch[] = []
+  for (let index = 0; index < finalOrder.length; index++) {
+    const trackId = finalOrder[index]
+    const track = trackById.get(trackId)
+    if (!track) continue
+    const groupId = moveRoots.has(trackId) ? newParentGroupId : track.groupId
+    const outputTargetId = moveRoots.has(trackId) && groupId ? (track.outputTargetId ?? groupId) : track.outputTargetId
+    if (track.index !== index || track.groupId !== groupId || track.outputTargetId !== outputTargetId) {
+      patches.push({ trackId, index, groupId, outputTargetId })
+    }
+  }
+
+  const expandGroupIds = target.zone === 'inside' && targetTrack.collapsed ? [targetTrack.id] : []
+  return patches.length > 0 || expandGroupIds.length > 0 ? { patches, expandGroupIds } : null
+}
+```
+
+Implementation notes:
+
+- Use `trackLayout` for hit testing, row top, row height, and depth. Do not map visible row indexes back into the flat track array.
+- Keep pointer state component-local in `TrackSidebar.tsx` unless a second consumer appears.
+- Pointer flow:
+  1. `pointerdown` on the track name button records start position and captures the pointer.
+  2. `pointermove` beyond a 4px threshold enters drag mode.
+  3. Drag mode computes `TrackDropTarget` from layout rows and `resolveTrackDropZone`.
+  4. Sidebar renders an absolute drop indicator.
+  5. `pointerup` calls `planTrackReorder`, persists patches, pushes undo, expands any target groups, and clears drag state.
+- Drop indicator can be rendered directly from JSX. A separate `TrackDropIndicator` type is unnecessary unless a second consumer needs it.
+- For `above` and `below`, render a horizontal line at the row edge indented to the target parent depth.
+- For `inside`, render an inset rounded rectangle inside the group row.
+- For invalid targets, render the same target in the destructive color and do not persist on drop.
+
+Shared operation and persistence:
+
+```ts
+| {
+    kind: 'tracks.reorderAndGroup'
+    payload: {
+      updates: Array<{
+        trackId: string
+        index: number
+        groupId?: string | null
+        outputTargetId?: string | null
+      }>
+    }
+  }
+```
+
+- Use one atomic shared operation for collaboration rather than a sequence of index and group updates.
+- Convex mutation validates all track IDs belong to the same project.
+- Convex mutation validates each `groupId` points to a same-project group track or is null.
+- Convex mutation validates no cycles in the resulting parent graph.
+- Convex mutation validates indexes are contiguous from 0.
+- Local repository mirrors the operation as a single transaction.
+
+Undo entry:
+
+```ts
+| {
+    type: 'track-reorder'
+    projectId: string
+    data: {
+      patches: Array<{
+        trackRef: TrackRef
+        fromIndex: number
+        toIndex: number
+        fromGroupRef?: TrackRef
+        toGroupRef?: TrackRef
+        fromOutputTargetRef?: TrackRef
+        toOutputTargetRef?: TrackRef
+      }>
+    }
+  }
+```
+
+Tests:
+
+- Drag track above another track and indexes update correctly.
+- Drag track below the last track and it moves to the end.
+- Drag track inside a group and it gets `groupId` plus auto-route output.
+- Drag track out of a group by dropping above a root track and `groupId` clears.
+- Drag group and all descendants move as one contiguous block.
+- Drag group into its child and planner returns null.
+- Multi-select parent plus child collapses to parent only.
+- Drop inside collapsed group expands the group.
+- Reordering a collapsed group preserves hidden descendant order.
+- Basic reorder works in projects with zero groups.
+- Convex mutation rejects stale, partial, cross-project, or non-contiguous patches.
 
 ### V2.2 Nested Group Audio Routing
 
@@ -582,7 +716,7 @@ Current v1 limitation:
 V2 routing rule:
 
 - Normal tracks may route to group tracks.
-- Group tracks may route to ancestor group tracks only.
+- Group tracks may route only to ancestor group tracks by walking up the `groupId` chain from the source track's parent.
 - Group tracks must not route to themselves, descendants, siblings, returns, or normal tracks.
 - Return tracks keep current behavior.
 
@@ -599,12 +733,14 @@ type RoutingTrackLike<TTrackId extends string = string> = {
 function isAncestorGroup<TTrackId extends string>(
   tracksById: ReadonlyMap<string, Pick<RoutingTrackLike<TTrackId>, 'id' | 'groupId' | 'channelRole'>>,
   sourceId: string,
-  targetId: string,
-) {
-  let parentId = tracksById.get(sourceId)?.groupId
-  while (parentId) {
-    if (String(parentId) === targetId) return normalizeTrackChannelRole(tracksById.get(String(parentId))?.channelRole) === 'group'
-    parentId = tracksById.get(String(parentId))?.groupId
+  candidateAncestorId: string,
+): boolean {
+  let cursor = tracksById.get(sourceId)?.groupId
+  while (cursor) {
+    if (String(cursor) === candidateAncestorId) {
+      return normalizeTrackChannelRole(tracksById.get(String(cursor))?.channelRole) === 'group'
+    }
+    cursor = tracksById.get(String(cursor))?.groupId
   }
   return false
 }
@@ -613,261 +749,144 @@ function isAncestorGroup<TTrackId extends string>(
 `normalizeTrackRouting` should permit:
 
 ```ts
-const canUseOutputTarget = sourceRole === 'track'
-  ? groupIds.has(targetId)
-  : sourceRole === 'group'
-    ? isAncestorGroup(tracksById, sourceId, targetId)
-    : false
+const tracksById = new Map(tracks.map((track) => [String(track.id), track]))
+const normalizedOutputTargetId = (() => {
+  if (!track || !outputTargetId || String(outputTargetId) === sourceId) return undefined
+  const targetId = String(outputTargetId)
+  if (sourceRole === 'track') return groupIds.has(targetId) ? outputTargetId : undefined
+  if (sourceRole === 'group') return isAncestorGroup(tracksById, sourceId, targetId) ? outputTargetId : undefined
+  return undefined
+})()
 ```
 
-Persistence phases:
+Audit required call sites because `RoutingTrackLike` now needs `groupId`:
 
-1. Add `groupId` to every routing normalization call site that passes track lists.
-2. Update Convex `sanitizeTrackRouting` inputs to include `groupId`.
-3. Update local repository routing normalization to include `groupId`.
-4. Update audio engine mixer graph routing tests for nested group sums.
+- `packages/shared/src/track-routing-core.ts`
+- `packages/timeline-core/src/track-routing.ts`
+- Local repository routing normalization.
+- Convex `sanitizeTrackRouting` and any tracks-table input projection.
+- Audio engine mixer graph construction.
+
+Auto-routing behavior:
+
+- When V2.1 creates a nested group inside an outer group, the inner group's `outputTargetId` should auto-route to the outer group using the same rule as normal tracks.
+- When a group is ungrouped or moved outside its parent, invalid nested group routing resets to Master.
 
 Tests:
 
 - Inner group can route to its outer group.
-- Inner group cannot route to child/descendant group.
 - Inner group cannot route to sibling group.
-- Normal track routing remains unchanged.
-- Removing a group resets invalid nested group output targets.
+- Inner group cannot route to descendant group.
+- Inner group cannot route to normal track.
+- Removing or ungrouping the outer group resets the inner group output to Master.
+- Audio engine mixer graph verifies nested group sum reaches Master through the outer group.
 
-### V2.3 Direct Editing of Clips from Folded Group Overview
+### V2.3 Assign Group Color to Grouped Tracks and Clips
 
-Goal: make folded group overview segments editable enough to support common arrangement actions without unfolding.
+Goal: match Ableton’s single “Assign Track Color to Grouped Tracks and Clips” command.
+
+Scope:
+
+- Changing a group color still changes only the group.
+- One context menu command applies the group color to all descendant tracks and all clips inside those descendants.
+- Do not add separate direct-child, descendants-only, track-only, or clip-only menu variants unless product feedback proves they are needed.
+
+Planner in `src/lib/track-group-ops.ts`:
+
+```ts
+export type AssignGroupColorPlan = {
+  trackUpdates: Array<{ trackId: TrackId; from: string | undefined; to: string }>
+  clipUpdates: Array<{ clipId: string; trackId: TrackId; from: string | undefined; to: string }>
+}
+
+export function planAssignGroupColor(
+  tracks: readonly Track[],
+  groupId: TrackId,
+): AssignGroupColorPlan | null {
+  const group = tracks.find((track) => track.id === groupId)
+  if (!group?.color) return null
+
+  const descendantIds = collectTrackDescendantIds(tracks, groupId)
+  const descendants = tracks.filter((track) => descendantIds.has(track.id))
+
+  return {
+    trackUpdates: descendants
+      .filter((track) => track.color !== group.color)
+      .map((track) => ({ trackId: track.id, from: track.color, to: group.color })),
+    clipUpdates: descendants.flatMap((track) =>
+      track.clips
+        .filter((clip) => clip.color !== group.color)
+        .map((clip) => ({ clipId: clip.id, trackId: track.id, from: clip.color, to: group.color })),
+    ),
+  }
+}
+```
+
+Persistence:
+
+- Track colors reuse the existing `tracks.setColor` shared operation.
+- Clip colors add or reuse `clips.setColor`, depending on the existing clip color persistence surface.
+- If the batch is too large, for example more than 20 operations, add batch operations for track and clip colors instead of dispatching many individual writes.
+- Undo should be a compound entry that restores all previous track and clip colors together.
+
+UI:
+
+- Add one group-row context menu item: “Assign color to grouped tracks and clips”.
+- Disable the item when the group has no color.
+
+Tests:
+
+- Planner returns null when group has no color.
+- Command updates all descendant tracks and their clips.
+- Command skips tracks and clips that already have the target color.
+- Undo restores all previous colors.
+
+### V2.4 Folded Group Overview Interaction, Minimal Scope
+
+Goal: make folded group overview useful without introducing synthetic clip editing.
 
 V1 state:
 
 - `buildGroupClipOverview` merges child clip ranges into read-only overview segments.
-- `TrackLane` renders these segments without interaction.
+- `TrackLane` renders these overview segments for collapsed groups.
 
-V2 design:
+Scope decision:
 
-- Keep overview segments read-only by default until the pointer hits a specific descendant clip.
-- Use a richer overview model that preserves source clip IDs where segments do not overlap.
-- If multiple descendant clips overlap into one segment, select the group range rather than a single clip.
+- Do not implement direct clip editing in the folded state.
+- Do not add `clipRefs`, overview segment dragging, or overview segment resizing in V2.
+- If users need to edit child clips, they should unfold the group first.
 
-Model:
+Interactions:
 
-```ts
-export type GroupClipOverviewSegment = {
-  startSec: number
-  endSec: number
-  clipRefs: Array<{
-    trackId: TrackId
-    clipId: string
-  }>
-}
-```
+1. Click a folded group overview segment to unfold the group and select the corresponding time range across child tracks.
+2. Double-click a folded group row to unfold the group.
+3. Context menu on folded group row includes “Unfold group” and “Select all clips in group”.
 
-Helper:
+Implementation notes:
 
-```ts
-export function buildEditableGroupClipOverview(
-  groupId: TrackId,
-  tracks: readonly Track[],
-): GroupClipOverviewSegment[] {
-  const descendantIds = collectTrackDescendantIds(tracks, groupId)
-  const segments = tracks
-    .filter((track) => descendantIds.has(track.id))
-    .flatMap((track) => track.clips.map((clip) => ({
-      startSec: clip.startSec,
-      endSec: clip.startSec + clip.duration,
-      clipRefs: [{ trackId: track.id, clipId: clip.id }],
-    })))
-
-  // Merge overlaps, concatenating clipRefs.
-  return mergeGroupOverviewSegments(segments)
-}
-```
-
-Interaction phases:
-
-1. Render `GroupOverviewClipComponent` instead of plain rectangles.
-2. Pointer down on a segment:
-   - one `clipRef`: select that real clip and allow drag/resize through existing clip handlers.
-   - multiple `clipRefs`: select a time range across descendant tracks.
-3. Double click:
-   - one MIDI clip: open MIDI editor.
-   - one audio clip: open sample detail.
-   - multiple clips: unfold group and select range.
-4. Context menu:
-   - “Select contained clips”
-   - “Unfold group”
-   - “Delete contained clips in segment”
-
-Risk controls:
-
+- Keep the existing overview data model unless the time-range selection needs segment identity.
+- Route clicks through existing selection state where possible.
 - Do not create synthetic clips.
-- Always commit edits against real descendant clip IDs.
-- When dragging an overview segment with multiple clips, use section/range edit operations, not individual clip drag.
+- Do not bypass existing clip edit actions.
 
 Tests:
 
-- Non-overlapping descendant clips keep separate segment refs.
-- Overlapping descendant clips merge and preserve all refs.
-- Single-segment drag delegates to existing clip move path.
-- Multi-segment range delete affects only descendant tracks in the group.
-
-### V2.4 Explicit “Assign Group Color to Children and Clips” Command
-
-Goal: match Ableton’s explicit color propagation behavior without making color edits surprising.
-
-Product behavior:
-
-- Changing a group color changes only the group.
-- A context menu command applies group color to:
-  - direct children only, or
-  - all descendants, depending on menu choice.
-- A second option applies color to clips too.
-
-Operation model:
-
-```ts
-export type AssignGroupColorScope = 'direct-children' | 'all-descendants'
-
-export type AssignGroupColorPlan = {
-  trackUpdates: Array<{ trackId: TrackId; from?: string; to: string }>
-  clipUpdates: Array<{ clipId: string; trackId: TrackId; from?: string; to: string }>
-}
-```
-
-Planner:
-
-```ts
-export function planAssignGroupColor(input: {
-  tracks: readonly Track[]
-  groupId: TrackId
-  scope: AssignGroupColorScope
-  includeClips: boolean
-}): AssignGroupColorPlan | null {
-  const group = input.tracks.find((track) => track.id === input.groupId)
-  if (!group?.color) return null
-  const childIds = input.scope === 'direct-children'
-    ? new Set(input.tracks.filter((track) => track.groupId === group.id).map((track) => track.id))
-    : collectTrackDescendantIds(input.tracks, group.id)
-
-  const targetTracks = input.tracks.filter((track) => childIds.has(track.id))
-  return {
-    trackUpdates: targetTracks.map((track) => ({ trackId: track.id, from: track.color, to: group.color })),
-    clipUpdates: input.includeClips
-      ? targetTracks.flatMap((track) => track.clips.map((clip) => ({ clipId: clip.id, trackId: track.id, from: clip.color, to: group.color })))
-      : [],
-  }
-}
-```
-
-Persistence phases:
-
-1. Reuse `tracks.setColor` for track colors.
-2. Add clip color support if clip color is not currently persisted through shared/local operations.
-3. Add a batch shared operation if per-clip writes become too chatty.
-4. Add undo entry that stores all previous track and clip colors.
-
-UI:
-
-- Group context menu:
-  - “Assign color to direct child tracks”
-  - “Assign color to all descendant tracks”
-  - “Assign color to child tracks and clips”
-  - “Assign color to descendant tracks and clips”
-
-Tests:
-
-- Command is disabled when group has no color.
-- Direct-child scope excludes nested descendants.
-- Descendant scope includes nested children.
-- Undo restores previous track and clip colors.
-
-### V2.5 Reorder-Aware Group Dragging and Drop Indicators
-
-Goal: make drag-to-reparent predictable for nested groups, collapsed groups, and multi-selection.
-
-Rules:
-
-- A group drag includes its visible or hidden descendants.
-- Dragging selected tracks preserves their relative order.
-- If selection includes both a parent group and its child, collapse the move set to the parent group only.
-- Collapsed group drops treat the group as a single block.
-- Expanded group drops can target children or the group’s inside zone.
-
-Move-set helper:
-
-```ts
-export function normalizeDraggedTrackIds(input: {
-  tracks: readonly Track[]
-  selectedTrackIds: readonly TrackId[]
-  primaryTrackId: TrackId
-}): TrackId[] {
-  const selected = input.selectedTrackIds.length > 0
-    ? new Set(input.selectedTrackIds)
-    : new Set([input.primaryTrackId])
-
-  return input.tracks.filter((track) => {
-    if (!selected.has(track.id)) return false
-    let parentId = track.groupId
-    while (parentId) {
-      if (selected.has(parentId)) return false
-      parentId = input.tracks.find((candidate) => candidate.id === parentId)?.groupId
-    }
-    return true
-  }).map((track) => track.id)
-}
-```
-
-Indicator model:
-
-```ts
-export type TrackDropIndicator = {
-  kind: 'line' | 'inside' | 'invalid'
-  topPx: number
-  leftIndentPx: number
-  widthPx: number
-  label?: string
-}
-```
-
-Rendering:
-
-- Use `trackLayout` for row top/height/depth.
-- For `above`/`below`, render a horizontal line at the row edge, indented to the target parent depth.
-- For `inside`, render an inset rounded rectangle inside the group row.
-- For invalid drops, render the same target in red with reason text.
-
-Persistence:
-
-- Add `tracks.reorderAndGroup` shared operation if individual `setGroup`/index patches cause inconsistent collaborative intermediate states.
-- Convex mutation should accept a complete ordered patch:
-  ```ts
-  {
-    projectId: string
-    updates: Array<{ trackId: Id<'tracks'>; index: number; groupId?: Id<'tracks'> | null }>
-  }
-  ```
-- Local repository should mirror the same atomic operation or queue patches under one local write transaction.
-
-Tests:
-
-- Dragging parent group excludes selected children from duplicate moves.
-- Reordering a collapsed group preserves hidden descendant order.
-- Dropping below the last child of a group keeps or removes parent based on indicator depth.
-- Multi-track drag preserves relative order and contiguous indexes.
-- Collaborative mutation rejects partial/cross-project patches.
+- Double-clicking a folded group row unfolds it.
+- Context menu unfold uses the same collapse action path.
+- Selecting overview range affects only descendants of the group.
+- No direct drag or resize affordance appears for overview segments.
 
 ### V2 Suggested Implementation Order
 
-1. Add pure drop-zone and reorder planning helpers in `track-group-ops.ts`.
-2. Add tests for move-set normalization, drop-zone resolution, cycle rejection, and reorder patches.
-3. Add sidebar track drag state and non-persistent visual indicators.
-4. Wire reorder/reparent persistence and undo for local projects.
-5. Add shared `tracks.reorderAndGroup` operation and Convex mutation for cloud projects.
-6. Enable nested group routing in shared routing normalization and audio graph tests.
-7. Replace read-only overview segments with editable overview refs.
-8. Add explicit group color propagation commands and undo.
-9. Run full validators and simplify pass.
+1. Backfill grouping keyboard shortcuts because they reuse existing V1 actions and are low risk.
+2. Enable nested group routing in shared routing normalization, Convex sanitization, local repository normalization, and audio graph tests.
+3. Add pure V2.1 helpers and tests for drop-zone resolution, move-set normalization, cycle rejection, contiguous subtree movement, and reorder patches.
+4. Add `tracks.reorderAndGroup` shared operation, Convex mutation, and local transaction.
+5. Add sidebar track drag state and visual indicators without persistence side effects.
+6. Wire drag persistence, target group auto-expansion, and undo for reorder/reparent.
+7. Add the single Ableton-style group color propagation command and compound undo.
+8. Add minimal folded overview interactions.
+9. Run full validators and a simplify pass before merging V2.
 
 ### V2 Validation
 
@@ -883,14 +902,20 @@ git diff --check
 
 Manual validation checklist:
 
+- `Cmd+G` or `Ctrl+G` groups selected tracks through the same path as the context menu.
+- Basic track reorder works in projects with zero groups.
 - Drag a track above, below, and inside a group.
+- Drag a track out of a group by dropping into the root level.
 - Drag an expanded group and verify descendants move with it.
 - Drag a collapsed group and verify hidden descendants remain attached.
-- Try to drag a group into its child and confirm invalid indicator.
-- Route inner group to outer group and verify audio still reaches Master.
-- Edit a single folded overview clip and confirm the real child clip updates.
+- Try to drag a group into its child and confirm the invalid indicator.
+- Drop inside a collapsed group and confirm it expands.
+- Route an inner group to an outer group and verify audio still reaches Master.
+- Ungroup or move an inner group out and verify invalid nested routing resets to Master.
 - Use group color propagation and undo it.
+- Double-click a folded group overview row and confirm it unfolds.
 - Verify collaboration sees reorder/reparent as one coherent update.
+- Verify reorder undo and redo produce a clean round trip.
 
 ## Tests
 

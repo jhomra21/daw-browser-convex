@@ -1,4 +1,4 @@
-import type { Track } from '@daw-browser/timeline-core/types'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import { quantizeSecToGrid } from '~/lib/timeline-utils'
 
 export type TimelineTimeRange = {
@@ -9,6 +9,13 @@ export type TimelineTimeRange = {
 export type TimelineRangeSelection = TimelineTimeRange & {
   trackIds: Track['id'][]
   primaryTrackId: Track['id'] | null
+}
+
+export type ClipRangeOverlap = {
+  startSec: number
+  endSec: number
+  offsetSec: number
+  durationSec: number
 }
 
 export const normalizeTimelineRangeSelection = (
@@ -73,4 +80,37 @@ export const snapTimeRangeToGridColumns = (
   const snappedEndSec = quantizeSecToGrid(endSec, bpm, gridDenominator, 'ceil')
   if (snappedEndSec - snappedStartSec <= 1e-6) return null
   return { startSec: snappedStartSec, endSec: snappedEndSec }
+}
+
+export const clipRangeOverlap = (
+  clip: Pick<Clip, 'startSec' | 'duration'>,
+  range: TimelineRangeSelection | null,
+): ClipRangeOverlap | null => {
+  if (!range) return null
+  const clipEndSec = clip.startSec + clip.duration
+  const startSec = Math.max(clip.startSec, range.startSec)
+  const endSec = Math.min(clipEndSec, range.endSec)
+  if (endSec - startSec <= 1e-6) return null
+  return {
+    startSec,
+    endSec,
+    offsetSec: startSec - clip.startSec,
+    durationSec: endSec - startSec,
+  }
+}
+
+export const extendTimelineRangeSelectionToPoint = (
+  range: TimelineRangeSelection,
+  input: { timeSec: number; trackIds?: readonly Track['id'][]; primaryTrackId?: Track['id'] | null },
+): TimelineRangeSelection | null => {
+  const midpointSec = (range.startSec + range.endSec) / 2
+  const nextRange = input.timeSec <= midpointSec
+    ? { startSec: input.timeSec, endSec: range.endSec }
+    : { startSec: range.startSec, endSec: input.timeSec }
+  return normalizeTimelineRangeSelection({
+    startSec: nextRange.startSec,
+    endSec: nextRange.endSec,
+    trackIds: [...(input.trackIds ?? range.trackIds)],
+    primaryTrackId: input.primaryTrackId ?? range.primaryTrackId,
+  })
 }

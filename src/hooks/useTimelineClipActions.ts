@@ -125,6 +125,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
   const onClipPointerUp = (trackId: Track['id'], clipId: string, event: PointerEvent) => {
     event.stopPropagation()
+    if (event.shiftKey && selection.rangeSelection()) return
     if (!event.shiftKey) {
       selection.selectPrimaryClip({ trackId, clipId })
       return

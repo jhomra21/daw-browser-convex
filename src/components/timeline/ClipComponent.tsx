@@ -10,6 +10,7 @@ import { LANE_HEIGHT, PPS } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import type { RuntimeClip } from "~/lib/timeline-runtime-types";
+import type { ClipRangeOverlap } from "~/lib/timeline-range-selection";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
 
 export type ClipContextMenuActions = {
@@ -42,6 +43,7 @@ type ClipComponentProps = {
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>;
   bpm: number;
   viewportRedrawVersion: number;
+  rangeOverlap: ClipRangeOverlap | null;
 };
 
 // these values center waveform in clips container
@@ -445,8 +447,28 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
 
       <canvas
         ref={(el) => (canvasRef = el || undefined)}
-        class="absolute inset-0 pointer-events-none z-0"
+        class="absolute inset-0 pointer-events-none z-10"
       />
+      {!props.isSelected && props.rangeOverlap && (
+        <>
+          <div
+            class="absolute inset-y-0 z-0 pointer-events-none bg-timeline-background"
+            style={{
+              left: `${props.rangeOverlap.offsetSec * PPS}px`,
+              width: `${Math.max(1, props.rangeOverlap.durationSec * PPS)}px`,
+            }}
+          >
+            <div class="absolute inset-0 bg-blue-500/25" />
+          </div>
+          <div
+            class="absolute inset-y-0 z-20 pointer-events-none border-x border-blue-400"
+            style={{
+              left: `${props.rangeOverlap.offsetSec * PPS}px`,
+              width: `${Math.max(1, props.rangeOverlap.durationSec * PPS)}px`,
+            }}
+          />
+        </>
+      )}
       {mediaStatusLabel() && (
         <div
           class="absolute inset-0 z-30 flex items-center justify-center gap-1 bg-red-950/75 px-2 text-[10px] font-semibold uppercase tracking-wide text-red-100"

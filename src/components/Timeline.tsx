@@ -602,6 +602,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     onDrop,
   });
 
+  let extendRangeSelectionToPointer: (event: PointerEvent, scrollEl: HTMLDivElement | undefined, trackId?: Track["id"]) => boolean = () => false;
+
   const { onClipPointerDown } = useClipDrag({
     placementTracks: () => placementTracks(),
     resolvedTracks: () => resolvedTracks(),
@@ -630,6 +632,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
     grantWrite: grantTrackWrite,
     grantClipWrites,
+    onRangeSelectionPointerDown: (trackId, event) => extendRangeSelectionToPointer(event, scrollRef, trackId),
   });
 
   const { onClipResizeStart } = useClipResize({
@@ -697,7 +700,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     });
   });
 
-  const { marqueeRect, onLanePointerDown } = useTimelineSelection({
+  const timelineSelection = useTimelineSelection({
     tracks: () => renderTracks(),
     trackLayout,
     selection,
@@ -707,6 +710,9 @@ const Timeline: Component<TimelineProps> = (props) => {
     moveScrub,
     stopScrub,
   });
+  const marqueeRect = timelineSelection.marqueeRect;
+  const onLanePointerDown = timelineSelection.onLanePointerDown;
+  extendRangeSelectionToPointer = timelineSelection.extendRangeSelectionToPointer;
 
   const recordingControls = useTrackRecording({
     audioEngine,

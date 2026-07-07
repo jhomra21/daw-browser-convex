@@ -9,7 +9,7 @@ import {
   intersectingSectionClipIds,
   pasteAutomationFragment,
 } from './timeline-section-edit'
-import { ceilSecToBar, floorSecToBar, normalizeTimelineRangeSelection, snapTimeRangeToGridColumns } from './timeline-range-selection'
+import { ceilSecToBar, clipRangeOverlap, extendTimelineRangeSelectionToPoint, floorSecToBar, normalizeTimelineRangeSelection, snapTimeRangeToGridColumns } from './timeline-range-selection'
 import { trackIdsInYRange, trackIndexAtY } from './timeline-track-layout'
 
 const clip = (input: Partial<Clip> & { id: string; startSec: number; duration: number }): Clip<AudioBuffer> => ({
@@ -81,6 +81,43 @@ describe('timeline range selection helpers', () => {
     ]
     expect(trackIndexAtY(rows, 90)).toBe(0)
     expect(trackIdsInYRange(rows, 90, 120)).toEqual(['a', 'b'])
+  })
+
+  test('computes selected clip overlap in clip-local seconds', () => {
+    expect(clipRangeOverlap(
+      { startSec: 2, duration: 4 },
+      { startSec: 1, endSec: 4, trackIds: ['track-1'], primaryTrackId: 'track-1' },
+    )).toEqual({
+      startSec: 2,
+      endSec: 4,
+      offsetSec: 0,
+      durationSec: 2,
+    })
+    expect(clipRangeOverlap(
+      { startSec: 2, duration: 4 },
+      null,
+    )).toBeNull()
+  })
+
+  test('extends range selection to clicked time and provided tracks', () => {
+    expect(extendTimelineRangeSelectionToPoint(
+      { startSec: 2, endSec: 6, trackIds: ['track-1'], primaryTrackId: 'track-1' },
+      { timeSec: 8, trackIds: ['track-1', 'track-2'], primaryTrackId: 'track-2' },
+    )).toEqual({
+      startSec: 2,
+      endSec: 8,
+      trackIds: ['track-1', 'track-2'],
+      primaryTrackId: 'track-2',
+    })
+    expect(extendTimelineRangeSelectionToPoint(
+      { startSec: 2, endSec: 6, trackIds: ['track-1'], primaryTrackId: 'track-1' },
+      { timeSec: 1 },
+    )).toEqual({
+      startSec: 1,
+      endSec: 6,
+      trackIds: ['track-1'],
+      primaryTrackId: 'track-1',
+    })
   })
 })
 

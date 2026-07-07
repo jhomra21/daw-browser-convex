@@ -64,6 +64,7 @@ type ClipDragOptions = {
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   grantWrite?: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
   grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void
+  onRangeSelectionPointerDown?: (trackId: Track['id'], event: PointerEvent) => boolean
 }
 
 function teardownClipDragSession(input: {
@@ -100,6 +101,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     getScrollElement,
     grantWrite,
     grantClipWrites,
+    onRangeSelectionPointerDown,
   } = options
   const persistence = createClipDragPersistence({
     projectId,
@@ -202,6 +204,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     if (!track || !clip) return
 
     if (event.shiftKey) {
+      if (onRangeSelectionPointerDown?.(trackId, event)) return
       selection.appendClipToSelection({ trackId, clipId })
       return
     }

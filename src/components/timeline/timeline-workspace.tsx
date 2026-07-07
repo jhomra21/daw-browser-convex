@@ -207,6 +207,7 @@ export default function TimelineWorkspace(props: Props) {
                         automationHeightPx={props.trackLayout[i()].automationHeightPx}
                         isDropTarget={props.dropTargetLane === i()}
                         selectedClipIds={props.selection.selectedClipIds()}
+                        rangeSelection={props.selection.rangeSelection()}
                         onClipPointerDown={props.onClipPointerDown}
                         onClipPointerUp={props.onClipPointerUp}
                         onClipResizeStart={props.onClipResizeStart}

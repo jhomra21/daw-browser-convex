@@ -64,6 +64,7 @@ import DeleteTrackDialog from "./timeline/delete-track-dialog";
 import TimelineWorkspace from "./timeline/timeline-workspace";
 import { Dashboard } from "~/components/dashboard/dashboard";
 import type { DashboardTimelineModel, DashboardView } from "~/components/dashboard/types";
+import { buildTimelineTrackLayoutRows } from "~/lib/timeline-track-layout";
 
 type AgentMixOp = {
   type: "setMute" | "setSolo";
@@ -601,6 +602,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     onDrop,
   });
 
+  let extendRangeSelectionToPointer: (event: PointerEvent, scrollEl: HTMLDivElement | undefined, trackId?: Track["id"]) => boolean = () => false;
+
   const { onClipPointerDown } = useClipDrag({
     placementTracks: () => placementTracks(),
     resolvedTracks: () => resolvedTracks(),
@@ -629,6 +632,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
     grantWrite: grantTrackWrite,
     grantClipWrites,
+    onRangeSelectionPointerDown: (trackId, event) => extendRangeSelectionToPointer(event, scrollRef, trackId),
   });
 
   const { onClipResizeStart } = useClipResize({
@@ -653,13 +657,18 @@ const Timeline: Component<TimelineProps> = (props) => {
     onClipPointerUp,
     deleteSelectedClips,
     duplicateSelectedClips,
+    duplicateTimelineSelection,
+    deleteTimelineSelection,
+    copyTimelineSelection,
+    pasteTimelineSelection,
     performDeleteTrack,
     requestDeleteTrack,
-    handleKeyboardAction,
   } = useTimelineClipActions({
     tracks: () => renderTracks(),
     insertLocalClip: projection.insertLocalClip,
     removeLocalClips: projection.removeLocalClips,
+    commitClipTiming: projection.commitClipTiming,
+    commitClipAudioWarp: projection.commitClipAudioWarp,
     removeLocalTrack: projection.removeLocalTrack,
     canWriteClip,
     selection,
@@ -671,6 +680,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     convexApi,
     audioBufferCache: clipBuffers,
     bpm,
+    playheadSec,
     gridEnabled,
     gridDenominator,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
@@ -680,13 +690,29 @@ const Timeline: Component<TimelineProps> = (props) => {
     notify,
   });
 
-  const { marqueeRect, onLanePointerDown } = useTimelineSelection({
+  const trackLayout = createMemo(() => {
+    const lanes = automation.workspace().lanes;
+    return buildTimelineTrackLayoutRows({
+      tracks: renderTracks(),
+      visibleByTrackId: lanes.visibleByTrackId,
+      heightsByLaneOwnerKey: lanes.heightsByLaneOwnerKey,
+      visibleParameterIdsByTrackId: lanes.visibleParameterIdsByTrackId,
+    });
+  });
+
+  const timelineSelection = useTimelineSelection({
     tracks: () => renderTracks(),
+    trackLayout,
     selection,
+    bpm,
+    gridDenominator,
     startScrub,
     moveScrub,
     stopScrub,
   });
+  const marqueeRect = timelineSelection.marqueeRect;
+  const onLanePointerDown = timelineSelection.onLanePointerDown;
+  extendRangeSelectionToPointer = timelineSelection.extendRangeSelectionToPointer;
 
   const recordingControls = useTrackRecording({
     audioEngine,
@@ -761,10 +787,14 @@ const Timeline: Component<TimelineProps> = (props) => {
         isPlaying() ? handlePause() : requestPlay();
       }
     },
-    onDelete: handleKeyboardAction,
-    onDuplicate: () => {
-      void duplicateSelectedClips();
+    onDelete: () => {
+      void deleteTimelineSelection();
     },
+    onDuplicate: () => {
+      void duplicateTimelineSelection();
+    },
+    onCopy: copyTimelineSelection,
+    onPaste: pasteTimelineSelection,
     onAddAudioTrack: () => {
       void addAudioTrack().catch(() => {});
     },
@@ -1043,9 +1073,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     onRedo: handleRedo,
     automationOverrideCount: automation.overrideCount(),
     onReEnableAutomation: automation.reEnable,
-    onDeleteSelection: handleKeyboardAction,
+    onDeleteSelection: () => {
+      void deleteTimelineSelection();
+    },
     onDuplicateSelection: () => {
-      void duplicateSelectedClips();
+      void duplicateTimelineSelection();
     },
     onJumpToClip: (clipId: string, trackId: string, startSec: number) => jumpToClip(trackId, clipId, startSec),
     onInsertSample: (payload: Parameters<typeof handleInsertSample>[0]) => {
@@ -1344,6 +1376,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           onDeleteTrack: requestDeleteTrack,
         }}
         automation={automation.workspace()}
+        trackLayout={trackLayout()}
       />
 
       <BrowserDragOverlay session={timelineBrowser().devices.dragSession} />

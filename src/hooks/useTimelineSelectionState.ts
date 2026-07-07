@@ -7,21 +7,26 @@ import {
   selectClipGroup,
   selectMasterTarget,
   selectPrimaryClip,
+  selectTimeRange,
   selectTrackTarget,
   type TimelineSelectionState,
 } from '~/lib/timeline-selection'
 import type { SelectedClip, Track } from '@daw-browser/timeline-core/types'
+import { isTimelineRangeSelectionEqual, type TimelineRangeSelection } from '~/lib/timeline-range-selection'
 
 export type TimelineSelectionController = {
   selectedTrackId: Accessor<Track['id'] | ''>
   selectedClip: Accessor<SelectedClip>
   selectedClipIds: Accessor<Set<string>>
   selectedFXTarget: Accessor<Track['id'] | 'master'>
+  rangeSelection: Accessor<TimelineRangeSelection | null>
   selectPrimaryClip: (input: { trackId: Track['id']; clipId: string }, options?: { preserveClipIds?: boolean }) => void
   appendClipToSelection: (input: { trackId: Track['id']; clipId: string }) => void
   selectClipGroup: (input: { trackId: Track['id']; clipIds: string[]; primaryClipId?: string }) => void
   selectTrackTarget: (trackId: Track['id'], options?: { clearClipSelection?: boolean; clearPrimaryClip?: boolean }) => void
   selectMasterTarget: () => void
+  selectTimeRange: (selection: TimelineRangeSelection) => void
+  clearTimeRange: () => void
   setSelectedClipIds: (value: Set<string> | ((current: Set<string>) => Set<string>)) => void
   setSelectedClip: (value: SelectedClip | ((current: SelectedClip) => SelectedClip)) => void
   setSelectedTrackId: (value: Track['id'] | '' | ((current: Track['id'] | '') => Track['id'] | '')) => void
@@ -44,8 +49,9 @@ export function useTimelineSelectionState(
   const [selectedClip, setSelectedClip] = createSignal<SelectedClip>(null)
   const [selectedClipIds, setSelectedClipIds] = createSignal<Set<string>>(new Set<string>(), { equals: false })
   const [selectedFXTarget, setSelectedFXTarget] = createSignal<Track['id'] | 'master'>('master')
+  const [rangeSelection, setRangeSelection] = createSignal<TimelineRangeSelection | null>(null)
 
-  const setters = { setSelectedTrackId, setSelectedClip, setSelectedClipIds, setSelectedFXTarget }
+  const setters = { setSelectedTrackId, setSelectedClip, setSelectedClipIds, setSelectedFXTarget, setRangeSelection }
 
   createEffect(on(options.projectId, () => {
     selectMasterTarget(setters)
@@ -58,6 +64,7 @@ export function useTimelineSelectionState(
       selectedClip: selectedClip(),
       selectedClipIds: selectedClipIds(),
       selectedFXTarget: selectedFXTarget(),
+      rangeSelection: rangeSelection(),
     }
     const reconciledSelection = reconcileTimelineSelection(nextTracks, currentSelection)
     const nextSelection = !reconciledSelection.selectedTrackId && reconciledSelection.selectedFXTarget !== 'master' && nextTracks.length > 0
@@ -69,6 +76,7 @@ export function useTimelineSelectionState(
       setSelectedClip(nextSelection.selectedClip)
       setSelectedClipIds(nextSelection.selectedClipIds)
       setSelectedFXTarget(nextSelection.selectedFXTarget)
+      setRangeSelection(nextSelection.rangeSelection)
     })
   })
 
@@ -93,11 +101,17 @@ export function useTimelineSelectionState(
     selectedClip,
     selectedClipIds,
     selectedFXTarget,
+    rangeSelection,
     selectPrimaryClip: (input, selectOptions) => selectPrimaryClip(setters, input, selectOptions),
     appendClipToSelection: (input) => appendClipToSelection(setters, input),
     selectClipGroup: (input) => selectClipGroup(setters, input),
     selectTrackTarget: (trackId, selectOptions) => selectTrackTarget(setters, trackId, selectOptions),
     selectMasterTarget: () => selectMasterTarget(setters),
+    selectTimeRange: (nextSelection) => {
+      if (isTimelineRangeSelectionEqual(rangeSelection(), nextSelection)) return
+      selectTimeRange(setters, nextSelection)
+    },
+    clearTimeRange: () => setRangeSelection(null),
     setSelectedClipIds,
     setSelectedClip,
     setSelectedTrackId,

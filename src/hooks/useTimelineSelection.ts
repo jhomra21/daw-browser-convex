@@ -1,6 +1,8 @@
 import { createSignal, onCleanup, type Accessor } from 'solid-js'
 
-import { PPS, RULER_HEIGHT, LANE_HEIGHT, yToLaneIndex } from '~/lib/timeline-utils'
+import { PPS, quantizeSecToGrid, RULER_HEIGHT } from '~/lib/timeline-utils'
+import { extendTimelineRangeSelectionToPoint, normalizeTimelineRangeSelection, snapTimeRangeToGridColumns } from '~/lib/timeline-range-selection'
+import { trackIdsInYRange, trackIndexAtY, type TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import type { Track } from '@daw-browser/timeline-core/types'
 
 import { useDrag } from './useDrag'
@@ -8,7 +10,10 @@ import type { TimelineSelectionController } from './useTimelineSelectionState'
 
 type TimelineSelectionOptions = {
   tracks: Accessor<Track[]>
+  trackLayout: Accessor<TimelineTrackLayoutRow[]>
   selection: TimelineSelectionController
+  bpm: Accessor<number>
+  gridDenominator: Accessor<number>
   startScrub: (clientX: number, options?: { listen?: boolean }) => void
   moveScrub: (clientX: number) => void
   stopScrub: () => void
@@ -17,12 +22,16 @@ type TimelineSelectionOptions = {
 type TimelineSelection = {
   marqueeRect: Accessor<{ x: number; y: number; width: number; height: number } | null>
   onLanePointerDown: (event: PointerEvent, scrollEl: HTMLDivElement | undefined) => void
+  extendRangeSelectionToPointer: (event: PointerEvent, scrollEl: HTMLDivElement | undefined, trackId?: Track['id']) => boolean
 }
 
 export function useTimelineSelection(options: TimelineSelectionOptions): TimelineSelection {
   const {
     tracks,
+    trackLayout,
     selection,
+    bpm,
+    gridDenominator,
     startScrub,
     moveScrub,
     stopScrub,
@@ -31,38 +40,47 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
   const [marqueeRect, setMarqueeRect] = createSignal<{ x: number; y: number; width: number; height: number } | null>(null)
 
   let marqueeActive = false
-  let marqueeAdditive = false
-  let marqueeBaseClipIds = new Set<string>()
   let startX = 0
   let startY = 0
 
-  const findPrimarySelectedClip = (selectedClipIds: Set<string>) => {
-    for (const track of tracks()) {
-      for (const clip of track.clips) {
-        if (selectedClipIds.has(clip.id)) {
-          return { trackId: track.id, clipId: clip.id }
-        }
-      }
-    }
-    return null
+  const rangeTrackIdsThroughRow = (
+    rows: readonly TimelineTrackLayoutRow[],
+    rangeTrackIds: readonly Track['id'][],
+    targetTrackId: Track['id'] | undefined,
+  ) => {
+    if (!targetTrackId) return rangeTrackIds
+    const indexes = rangeTrackIds
+      .map((trackId) => rows.findIndex((row) => row.trackId === trackId))
+      .filter((index) => index >= 0)
+    const targetIndex = rows.findIndex((row) => row.trackId === targetTrackId)
+    if (targetIndex < 0) return rangeTrackIds
+    const startIndex = Math.min(targetIndex, ...indexes)
+    const endIndex = Math.max(targetIndex, ...indexes)
+    return rows.slice(startIndex, endIndex + 1).map((row) => row.trackId)
   }
 
-  const selectMarqueeClips = (selected: Set<string>) => {
-    const clipIds = marqueeAdditive
-      ? new Set([...marqueeBaseClipIds, ...selected])
-      : selected
-    const primaryClip = findPrimarySelectedClip(clipIds)
-    if (primaryClip) {
-      selection.selectClipGroup({
-        trackId: primaryClip.trackId,
-        clipIds: [...clipIds],
-        primaryClipId: primaryClip.clipId,
-      })
-      return
-    }
-    if (!marqueeAdditive) {
-      selection.selectMasterTarget()
-    }
+  const extendRangeSelectionToPointer = (
+    event: PointerEvent,
+    scrollEl: HTMLDivElement | undefined,
+    clickedTrackId?: Track['id'],
+  ) => {
+    const currentRange = selection.rangeSelection()
+    if (!event.shiftKey || !currentRange || !scrollEl) return false
+    const rect = scrollEl.getBoundingClientRect()
+    const x = event.clientX - rect.left + (scrollEl.scrollLeft || 0)
+    const y = event.clientY - rect.top + (scrollEl.scrollTop || 0) - RULER_HEIGHT
+    const rows = trackLayout()
+    const trackIndex = clickedTrackId ? -1 : trackIndexAtY(rows, y)
+    const trackId = clickedTrackId ?? (trackIndex >= 0 ? rows[trackIndex]?.trackId : undefined)
+    const nextRange = extendTimelineRangeSelectionToPoint(currentRange, {
+      timeSec: quantizeSecToGrid(x / PPS, bpm(), gridDenominator()),
+      trackIds: rangeTrackIdsThroughRow(rows, currentRange.trackIds, trackId),
+      primaryTrackId: trackId ?? currentRange.primaryTrackId,
+    })
+    if (nextRange) selection.selectTimeRange(nextRange)
+    event.stopPropagation()
+    event.preventDefault()
+    return true
   }
 
   const startLaneDrag = (event: PointerEvent, scrollEl: HTMLDivElement | undefined) => {
@@ -71,18 +89,17 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
 
     currentScrollEl = scrollEl
 
-    marqueeAdditive = !!event.shiftKey
-    marqueeBaseClipIds = marqueeAdditive ? new Set(selection.selectedClipIds()) : new Set<string>()
     const rect = scrollEl.getBoundingClientRect()
     startX = event.clientX - rect.left + (scrollEl.scrollLeft || 0)
     startY = event.clientY - rect.top + (scrollEl.scrollTop || 0)
     if (!event.shiftKey) {
-      const laneIndex = yToLaneIndex(event.clientY, scrollEl)
+      const laneIndex = trackIndexAtY(trackLayout(), startY - RULER_HEIGHT)
       const track = ts[laneIndex]
       if (track) {
         if (
           selection.selectedTrackId() !== track.id ||
           selection.selectedFXTarget() !== track.id ||
+          selection.rangeSelection() ||
           selection.selectedClip() ||
           selection.selectedClipIds().size > 0
         ) {
@@ -92,6 +109,7 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
         if (
           selection.selectedTrackId() ||
           selection.selectedFXTarget() !== 'master' ||
+          selection.rangeSelection() ||
           selection.selectedClip() ||
           selection.selectedClipIds().size > 0
         ) {
@@ -105,6 +123,9 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
   }
 
   const onLanePointerDown = (event: PointerEvent, scrollEl: HTMLDivElement | undefined) => {
+    if (extendRangeSelectionToPointer(event, scrollEl)) {
+      return
+    }
     if (!startLaneDrag(event, scrollEl)) return
     laneDrag.onPointerDown(event)
   }
@@ -137,34 +158,36 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
 
     setMarqueeRect({ x, y: normY, width, height })
 
-    const selected = new Set<string>()
-    const ts = tracks()
-    for (let i = 0; i < ts.length; i++) {
-      const laneTop = i * LANE_HEIGHT
-      const laneBottom = laneTop + LANE_HEIGHT
-      const rTop = normY
-      const rBottom = normY + height
-      const verticalOverlap = !(laneBottom <= rTop || laneTop >= rBottom)
-      if (!verticalOverlap) continue
-      const track = ts[i]
-      for (const clip of track.clips) {
-        const cx1 = clip.startSec * PPS
-        const cx2 = cx1 + clip.duration * PPS
-        const rx1 = x
-        const rx2 = x + width
-        const horizontalOverlap = !(cx2 <= rx1 || cx1 >= rx2)
-        if (horizontalOverlap) selected.add(clip.id)
-      }
+    const rows = trackLayout()
+    const rangeTrackIds = trackIdsInYRange(rows, normY, normY + height)
+    const primaryIndex = trackIndexAtY(rows, startY - RULER_HEIGHT)
+    const primaryTrackId = primaryIndex >= 0 ? rows[primaryIndex].trackId : rangeTrackIds[0] ?? null
+    const snappedRange = snapTimeRangeToGridColumns({
+      startSec: x / PPS,
+      endSec: (x + width) / PPS,
+    }, bpm(), gridDenominator())
+    if (!snappedRange) {
+      if (!event.shiftKey) selection.selectMasterTarget()
+      return
+    }
+    const range = normalizeTimelineRangeSelection({
+      startSec: snappedRange.startSec,
+      endSec: snappedRange.endSec,
+      trackIds: rangeTrackIds,
+      primaryTrackId,
+    })
+    if (range) {
+      selection.selectTimeRange(range)
+      return
     }
 
-    selectMarqueeClips(selected)
+    if (!event.shiftKey) selection.selectMasterTarget()
   }
 
   const onLaneDragUp = () => {
     stopScrub()
     setMarqueeRect(null)
     marqueeActive = false
-    marqueeBaseClipIds = new Set<string>()
   }
 
   const laneDrag = useDrag({
@@ -182,5 +205,6 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
   return {
     marqueeRect,
     onLanePointerDown,
+    extendRangeSelectionToPointer,
   }
 }

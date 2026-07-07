@@ -35,7 +35,7 @@ const consumeWarpLeadingSilence = (input: {
 }) => {
   const audioWarp = input.audioWarp
   const sourceBeatOffset = audioWarp?.enabled === true ? Math.max(0, audioWarp.sourceBeatOffset ?? 0) : 0
-  if (!audioWarp || sourceBeatOffset <= 0 || input.timelineTrimSec <= 0) {
+  if (!audioWarp || sourceBeatOffset <= 0) {
     return {
       audioWarp,
       consumedTimelineSec: 0,
@@ -52,6 +52,53 @@ const consumeWarpLeadingSilence = (input: {
     },
     consumedTimelineSec: consumedBeats * projectSecondsPerBeat,
     changed: consumedBeats > 0,
+  }
+}
+
+export const calculateAudioTimelineTrimOffsets = (input: {
+  clip: Pick<Clip, 'startSec' | 'duration' | 'leftPadSec' | 'bufferOffsetSec' | 'sourceDurationSec' | 'audioWarp'>
+  bufferDurationSec: number
+  timelineTrimSec: number
+  projectBpm: number
+}): { leftPadSec: number; bufferOffsetSec: number; audioWarp?: AudioWarp } => {
+  let nextLeftPad = Math.max(0, input.clip.leftPadSec ?? 0)
+  let nextBufOffset = Math.max(0, input.clip.bufferOffsetSec ?? 0)
+  let nextAudioWarp: AudioWarp | undefined
+  const consumePad = Math.min(nextLeftPad, input.timelineTrimSec)
+  nextLeftPad -= consumePad
+  const remaining = input.timelineTrimSec - consumePad
+  if (remaining > 0) {
+    const warpTrim = consumeWarpLeadingSilence({
+      audioWarp: input.clip.audioWarp,
+      projectBpm: input.projectBpm,
+      timelineTrimSec: remaining,
+    })
+    const sourceTrimSec = remaining - warpTrim.consumedTimelineSec
+    if (warpTrim.changed) nextAudioWarp = warpTrim.audioWarp
+    if (sourceTrimSec > 0) {
+      const sourceTrimBaseline = {
+        ...input.clip,
+        startSec: input.clip.startSec + warpTrim.consumedTimelineSec,
+        leftPadSec: 0,
+        audioWarp: warpTrim.audioWarp,
+      }
+      const sourceTrimMap = getResizeAudioClipTimeMap({
+        clip: sourceTrimBaseline,
+        bufferDurationSec: input.bufferDurationSec,
+        projectBpm: input.projectBpm,
+      })
+      nextBufOffset = getSourceOffsetAfterTimelineTrim({
+        clip: sourceTrimBaseline,
+        bufferDurationSec: input.bufferDurationSec,
+        timelineTrimSec: sourceTrimSec,
+        map: sourceTrimMap,
+      })
+    }
+  }
+  return {
+    leftPadSec: nextLeftPad,
+    bufferOffsetSec: nextBufOffset,
+    audioWarp: nextAudioWarp,
   }
 }
 
@@ -102,44 +149,15 @@ export function calculateAudioLeftResizeTiming(input: {
     projectBpm: input.projectBpm,
   })
   if (delta >= 0) {
-    const consumePad = Math.min(nextLeftPad, delta)
-    nextLeftPad = Math.max(0, nextLeftPad - consumePad)
-    const remaining = delta - consumePad
-    if (remaining > 0) {
-      const warpTrim = consumeWarpLeadingSilence({
-        audioWarp: input.baselineClip.audioWarp,
-        projectBpm: input.projectBpm,
-        timelineTrimSec: remaining,
-      })
-      const sourceTrimSec = remaining - warpTrim.consumedTimelineSec
-      if (warpTrim.changed) nextAudioWarp = warpTrim.audioWarp
-      if (sourceTrimSec <= 0) {
-        return {
-          startSec: input.newStartSec,
-          duration: Math.max(0, input.fixedRightSec - input.newStartSec),
-          leftPadSec: nextLeftPad,
-          bufferOffsetSec: nextBufOffset,
-          audioWarp: nextAudioWarp,
-        }
-      }
-      const sourceTrimBaseline = {
-        ...input.baselineClip,
-        startSec: input.baselineClip.startSec + warpTrim.consumedTimelineSec,
-        leftPadSec: 0,
-        audioWarp: warpTrim.audioWarp,
-      }
-      const sourceTrimMap = getResizeAudioClipTimeMap({
-        clip: sourceTrimBaseline,
-        bufferDurationSec: input.bufferDurationSec,
-        projectBpm: input.projectBpm,
-      })
-      nextBufOffset = getSourceOffsetAfterTimelineTrim({
-        clip: sourceTrimBaseline,
-        bufferDurationSec: input.bufferDurationSec,
-        timelineTrimSec: sourceTrimSec,
-        map: sourceTrimMap,
-      })
-    }
+    const trim = calculateAudioTimelineTrimOffsets({
+      clip: input.baselineClip,
+      bufferDurationSec: input.bufferDurationSec,
+      timelineTrimSec: delta,
+      projectBpm: input.projectBpm,
+    })
+    nextLeftPad = trim.leftPadSec
+    nextBufOffset = trim.bufferOffsetSec
+    nextAudioWarp = trim.audioWarp
   } else {
     const supply = -delta
     const restoredOffset = getSourceOffsetBeforeTimelineTrim({

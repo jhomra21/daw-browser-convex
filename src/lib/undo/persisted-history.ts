@@ -105,8 +105,12 @@ const isAutomationEnvelope = (value: unknown) => isRecord(value)
   && value.points.every(isAutomationPoint)
   && isNumber(value.updatedAt)
 
-function isHistoryEntryData(type: string, data: Record<string, unknown>) {
+function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSectionEdit: boolean) {
   switch (type) {
+    case 'section-edit':
+      return allowSectionEdit
+        && Array.isArray(data.entries)
+        && data.entries.every((entry) => isHistoryEntryValue(entry, false))
     case 'clip-create':
       return isString(data.trackRef) && isClipSnapshot(data.clip)
     case 'clip-delete':
@@ -162,12 +166,16 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>) {
   }
 }
 
-function isHistoryEntry(value: unknown): value is HistoryEntry {
+function isHistoryEntryValue(value: unknown, allowSectionEdit: boolean): value is HistoryEntry {
   return isRecord(value)
     && typeof value.type === 'string'
     && typeof value.projectId === 'string'
     && isRecord(value.data)
-    && isHistoryEntryData(value.type, value.data)
+    && isHistoryEntryData(value.type, value.data, allowSectionEdit)
+}
+
+function isHistoryEntry(value: unknown): value is HistoryEntry {
+  return isHistoryEntryValue(value, true)
 }
 
 function readHistoryEntries(entries: unknown[]) {

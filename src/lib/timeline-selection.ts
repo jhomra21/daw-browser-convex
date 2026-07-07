@@ -1,12 +1,14 @@
 import { batch, type Setter } from 'solid-js'
 
 import type { SelectedClip, Track } from '@daw-browser/timeline-core/types'
+import { isTimelineRangeSelectionEqual, type TimelineRangeSelection } from '~/lib/timeline-range-selection'
 
 type TimelineSelectionSetters = {
   setSelectedTrackId: Setter<Track['id'] | ''>
   setSelectedClip: Setter<SelectedClip>
   setSelectedClipIds: Setter<Set<string>>
   setSelectedFXTarget: Setter<Track['id'] | 'master'>
+  setRangeSelection: Setter<TimelineRangeSelection | null>
 }
 
 export type TimelineSelectionState = {
@@ -14,6 +16,7 @@ export type TimelineSelectionState = {
   selectedClip: SelectedClip
   selectedClipIds: Set<string>
   selectedFXTarget: Track['id'] | 'master'
+  rangeSelection: TimelineRangeSelection | null
 }
 
 const findFirstSelectedClip = (tracks: Track[], selectedClipIds: Set<string>): SelectedClip => {
@@ -45,6 +48,7 @@ export function isTimelineSelectionEqual(
     && left.selectedFXTarget === right.selectedFXTarget
     && left.selectedClip?.trackId === right.selectedClip?.trackId
     && left.selectedClip?.clipId === right.selectedClip?.clipId
+    && isTimelineRangeSelectionEqual(left.rangeSelection, right.rangeSelection)
     && setsEqual(left.selectedClipIds, right.selectedClipIds)
   )
 }
@@ -84,12 +88,23 @@ export function reconcileTimelineSelection(
     : trackIds.has(selection.selectedFXTarget)
       ? selection.selectedFXTarget
       : nextSelectedTrackId || 'master'
+  const nextRangeTrackIds = selection.rangeSelection?.trackIds.filter((trackId) => trackIds.has(trackId)) ?? []
+  const nextRangeSelection = selection.rangeSelection && nextRangeTrackIds.length > 0
+    ? {
+        ...selection.rangeSelection,
+        trackIds: nextRangeTrackIds,
+        primaryTrackId: selection.rangeSelection.primaryTrackId && trackIds.has(selection.rangeSelection.primaryTrackId)
+          ? selection.rangeSelection.primaryTrackId
+          : nextRangeTrackIds[0] ?? null,
+      }
+    : null
 
   return {
     selectedTrackId: nextSelectedTrackId,
     selectedClip: nextSelectedClip,
     selectedClipIds: nextSelectedClipIds,
     selectedFXTarget: nextSelectedFXTarget,
+    rangeSelection: nextRangeSelection,
   }
 }
 
@@ -101,6 +116,7 @@ export function selectPrimaryClip(
   batch(() => {
     setters.setSelectedTrackId(input.trackId)
     setters.setSelectedClip(input)
+    setters.setRangeSelection(null)
     if (!options?.preserveClipIds) {
       setters.setSelectedClipIds(new Set([input.clipId]))
     }
@@ -115,6 +131,7 @@ export function appendClipToSelection(
   batch(() => {
     setters.setSelectedTrackId(input.trackId)
     setters.setSelectedClip(input)
+    setters.setRangeSelection(null)
     setters.setSelectedClipIds((prev) => {
       const next = new Set(prev)
       next.add(input.clipId)
@@ -132,6 +149,7 @@ export function selectClipGroup(
   batch(() => {
     setters.setSelectedTrackId(input.trackId)
     setters.setSelectedClip(primaryClipId ? { trackId: input.trackId, clipId: primaryClipId } : null)
+    setters.setRangeSelection(null)
     setters.setSelectedClipIds(new Set(input.clipIds))
     setters.setSelectedFXTarget(input.trackId)
   })
@@ -145,6 +163,7 @@ export function selectTrackTarget(
   batch(() => {
     setters.setSelectedTrackId(trackId)
     setters.setSelectedFXTarget(trackId)
+    setters.setRangeSelection(null)
     if (options?.clearClipSelection) {
       setters.setSelectedClip(null)
       setters.setSelectedClipIds(new Set<string>())
@@ -162,5 +181,19 @@ export function selectMasterTarget(setters: TimelineSelectionSetters) {
     setters.setSelectedFXTarget('master')
     setters.setSelectedClip(null)
     setters.setSelectedClipIds(new Set<string>())
+    setters.setRangeSelection(null)
+  })
+}
+
+export function selectTimeRange(
+  setters: TimelineSelectionSetters,
+  selection: TimelineRangeSelection,
+) {
+  batch(() => {
+    setters.setRangeSelection(selection)
+    setters.setSelectedClip(null)
+    setters.setSelectedClipIds(new Set<string>())
+    setters.setSelectedTrackId(selection.primaryTrackId ?? selection.trackIds[0] ?? '')
+    setters.setSelectedFXTarget(selection.primaryTrackId ?? selection.trackIds[0] ?? 'master')
   })
 }

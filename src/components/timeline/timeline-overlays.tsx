@@ -1,9 +1,11 @@
-import { type Component, Show, createMemo } from 'solid-js'
+import { type Component, For, Show, createMemo } from 'solid-js'
 import type { TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { LANE_HEIGHT, PPS } from '~/lib/timeline-utils'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { TimelineMidiBounds } from '~/lib/timeline-midi-bounds'
+import type { TimelineRangeSelection } from '~/lib/timeline-range-selection'
+import type { TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import RecordingPreview from '~/components/timeline/RecordingPreview'
 import GridOverlay from '~/components/timeline/GridOverlay'
 import MidiEditorCard from '~/components/midi/MidiEditorCard'
@@ -25,7 +27,9 @@ type TimelineOverlaysProps = {
     dropAtNewTrack: boolean
     marqueeRect: MarqueeRect
     rowTops: number[]
+    rowLayouts: TimelineTrackLayoutRow[]
     trackAreaHeight: number
+    range: TimelineRangeSelection | null
   }
   recording: {
     isRecording: boolean
@@ -69,6 +73,13 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
     }
   })
 
+  const rangeOverlayRows = createMemo(() => {
+    const range = props.timeline.range
+    if (!range) return []
+    const selectedTrackIds = new Set(range.trackIds)
+    return props.timeline.rowLayouts.filter((row) => selectedTrackIds.has(row.trackId))
+  })
+
   return (
     <>
       <Show when={recordingPreview()}>
@@ -93,6 +104,23 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
         denom={props.timeline.gridDenominator}
         enabled={props.timeline.gridEnabled}
       />
+      <Show when={props.timeline.range}>
+        {(range) => (
+          <For each={rangeOverlayRows()}>
+            {(row) => (
+              <div
+                class="absolute z-10 pointer-events-none bg-blue-400/12 border-x border-blue-300/30"
+                style={{
+                  left: `${range().startSec * PPS}px`,
+                  top: `${row.topPx}px`,
+                  width: `${(range().endSec - range().startSec) * PPS}px`,
+                  height: `${row.heightPx}px`,
+                }}
+              />
+            )}
+          </For>
+        )}
+      </Show>
       {props.timeline.loopEnabled && props.timeline.loopEndSec - props.timeline.loopStartSec > 0.05 && (
         <>
           <div

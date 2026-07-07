@@ -1,6 +1,7 @@
-import { type Component, For } from 'solid-js'
+import { createMemo, type Component, For } from 'solid-js'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { LANE_HEIGHT } from '~/lib/timeline-utils'
+import { clipRangeOverlap, type TimelineRangeSelection } from '~/lib/timeline-range-selection'
 import ClipComponent, { type ClipContextMenuActions } from './ClipComponent'
 import AutomationLane from './automation-lane'
 import type { AutomationEnvelope } from '@daw-browser/shared'
@@ -11,6 +12,7 @@ type TrackLaneProps = {
   topPx: number
   automationHeightPx: number
   selectedClipIds: Set<string>
+  rangeSelection: TimelineRangeSelection | null
   onClipPointerDown: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
   onClipPointerUp: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
   onClipResizeStart: (trackId: Track['id'], clipId: string, edge: 'left' | 'right', e: PointerEvent) => void
@@ -62,6 +64,12 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
     return items
   }
 
+  const rangeForLane = createMemo(() => {
+    const range = props.rangeSelection
+    if (!range?.trackIds.includes(props.track.id)) return null
+    return range
+  })
+
   const laneContainer = () => (
     <div
       class="absolute left-0 right-0 overflow-hidden bg-timeline-background"
@@ -105,6 +113,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
             clip={clip}
             trackId={props.track.id}
             isSelected={props.selectedClipIds.has(clip.id)}
+            rangeOverlap={clipRangeOverlap(clip, rangeForLane())}
             onPointerDown={props.onClipPointerDown}
             onPointerUp={props.onClipPointerUp}
             onResizeStart={props.onClipResizeStart}

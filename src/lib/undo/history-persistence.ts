@@ -96,6 +96,9 @@ export const createHistoryTrack = async (
     soloed?: boolean;
     kind?: Track["kind"];
     channelRole?: Track["channelRole"];
+    groupId?: Track["id"];
+    collapsed?: boolean;
+    color?: string;
     sends?: TrackRouting["sends"];
   },
 ) => {
@@ -110,6 +113,9 @@ export const createHistoryTrack = async (
       soloed: track.soloed,
       kind: track.kind,
       channelRole: track.channelRole,
+      groupId: track.groupId,
+      collapsed: track.collapsed,
+      color: track.color,
       sends: track.sends,
     });
     return row.id;
@@ -128,6 +134,37 @@ export const createHistoryTrack = async (
   const result = await publishDurableSharedTimelineOperation({ projectId: deps.projectId, userId: deps.userId, operation });
   assert(typeof result === "string", "Failed to create history track");
   return result;
+};
+
+export const persistHistoryTrackGroup = async (
+  deps: Deps,
+  trackId: Track["id"],
+  groupId: Track["id"] | undefined,
+  outputTargetId?: Track["id"],
+) => {
+  if (isLocalHistoryProject(deps)) {
+    await createLocalTimelineRepository(deps.projectId).updateTrack({
+      trackId,
+      groupId: groupId ?? null,
+      outputTargetId: outputTargetId ?? null,
+    });
+    return;
+  }
+  await publishHistoryOperation(deps, { kind: "tracks.setGroup", payload: { trackId, groupId } });
+  const track = deps.getTracks().find((entry) => entry.id === trackId);
+  await publishHistoryOperation(deps, { kind: "tracks.setRouting", payload: { trackId, routing: { outputTargetId, sends: track?.sends ?? [] } } });
+};
+
+export const persistHistoryTrackColor = async (
+  deps: Deps,
+  trackId: Track["id"],
+  color: string | undefined,
+) => {
+  if (isLocalHistoryProject(deps)) {
+    await createLocalTimelineRepository(deps.projectId).updateTrack({ trackId, color: color ?? null });
+    return;
+  }
+  await publishHistoryOperation(deps, { kind: "tracks.setColor", payload: { trackId, color } });
 };
 
 export const createHistoryClip = async (

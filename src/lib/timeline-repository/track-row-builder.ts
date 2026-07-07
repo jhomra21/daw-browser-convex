@@ -11,6 +11,9 @@ type BuildTimelineTrackRowInput = {
   soloed?: boolean;
   kind?: TimelineTrackRow["kind"];
   channelRole?: TimelineTrackRow["channelRole"];
+  groupId?: string;
+  collapsed?: boolean;
+  color?: string;
   outputTargetId?: string;
   sends?: TimelineTrackRow["sends"];
 };
@@ -25,6 +28,9 @@ export const buildTimelineTrackRow = (input: BuildTimelineTrackRowInput): Timeli
   soloed: input.soloed ?? false,
   kind: input.kind ?? "audio",
   channelRole: input.channelRole ?? "track",
+  groupId: input.groupId,
+  collapsed: input.collapsed,
+  color: input.color,
   outputTargetId: input.outputTargetId,
   sends: input.sends ?? [],
   createdAt: input.timestamp,

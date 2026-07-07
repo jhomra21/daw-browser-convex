@@ -35,6 +35,9 @@ export const toLocalTimelineTrack = (row: TimelineTrackRow): Track => ({
   soloed: row.soloed,
   kind: row.kind,
   channelRole: row.channelRole,
+  groupId: row.groupId,
+  collapsed: row.collapsed,
+  color: row.color,
   outputTargetId: row.outputTargetId,
   sends: row.sends.map((send) => ({
     targetId: send.targetId,

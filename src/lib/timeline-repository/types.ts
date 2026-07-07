@@ -17,6 +17,9 @@ export type TimelineTrackRow = {
   soloed: boolean
   kind: 'audio' | 'instrument'
   channelRole: TrackChannelRole
+  groupId?: TimelineTrackId
+  collapsed?: boolean
+  color?: string
   outputTargetId?: TimelineTrackId
   sends: { targetId: TimelineTrackId; amount: number }[]
   createdAt: number
@@ -68,6 +71,9 @@ export type CreateTrackInput = {
   soloed?: boolean
   kind?: 'audio' | 'instrument'
   channelRole?: TrackChannelRole
+  groupId?: TimelineTrackId
+  collapsed?: boolean
+  color?: string
   outputTargetId?: TimelineTrackId
   sends?: { targetId: TimelineTrackId; amount: number }[]
 }
@@ -128,6 +134,9 @@ export type UpdateTrackInput = {
   muted?: boolean
   soloed?: boolean
   outputTargetId?: TimelineTrackId | null
+  groupId?: TimelineTrackId | null
+  collapsed?: boolean
+  color?: string | null
   sends?: { targetId: TimelineTrackId; amount: number }[]
 }
 

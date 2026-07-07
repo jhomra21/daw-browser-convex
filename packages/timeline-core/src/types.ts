@@ -59,6 +59,9 @@ export type Track<TBuffer = never> = {
   lockedAt?: number | null
   kind?: 'audio' | 'instrument'
   channelRole?: TrackChannelRole
+  groupId?: TrackId
+  collapsed?: boolean
+  color?: string
   outputTargetId?: TrackId
   sends?: TrackSend[]
 }

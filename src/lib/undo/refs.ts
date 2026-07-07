@@ -109,6 +109,12 @@ export function buildHistoryRefIndex(entries: HistoryEntry[] | undefined, tracks
           if (clipId) clipIdByRef.set(recreated.clipRef, clipId)
         }
         break
+      case 'track-group':
+        {
+          const trackId = resolveStoredTrackId(tracks, entry.data.currentGroupTrackId)
+          if (trackId) trackIdByRef.set(entry.data.groupTrackRef, trackId)
+        }
+        break
       case 'clip-create':
         {
           const clipId = resolveStoredClipId(tracks, entry.data.clip.currentId)

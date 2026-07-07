@@ -17,6 +17,7 @@ Implement Ableton-style track grouping and collapse UX for the timeline while pr
   - `ableton-live12-track-headers-circled.png`
   - `ableton-live12-group-track-session.png`
   - `patches-arrangement-layout-reference.jpg`
+  - `ableton-live-12-track-groups.png`
 
 ## Ableton Behavior to Model
 
@@ -499,11 +500,11 @@ git diff --check
 - [x] Collect reference images.
 - [x] Inspect current timeline, routing, sidebar, repository, Convex, and undo architecture.
 - [x] Synthesize combined implementation plan.
-- [ ] Implement data model fields.
-- [ ] Implement tree-aware layout.
-- [ ] Implement pure group operations.
-- [ ] Implement sidebar and workspace UI.
-- [ ] Implement collapsed overview.
-- [ ] Implement action, persistence, and undo wiring.
-- [ ] Implement Master collapse.
-- [ ] Run validators.
+- [x] Implement data model fields.
+- [x] Implement tree-aware layout.
+- [x] Implement pure group operations.
+- [x] Implement sidebar and workspace UI.
+- [x] Implement collapsed overview.
+- [x] Implement action, persistence, and undo wiring.
+- [x] Implement Master collapse.
+- [x] Run validators.

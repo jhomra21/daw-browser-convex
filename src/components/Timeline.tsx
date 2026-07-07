@@ -64,7 +64,7 @@ import DeleteTrackDialog from "./timeline/delete-track-dialog";
 import TimelineWorkspace from "./timeline/timeline-workspace";
 import { Dashboard } from "~/components/dashboard/dashboard";
 import type { DashboardTimelineModel, DashboardView } from "~/components/dashboard/types";
-import { buildTimelineTrackLayoutRows } from "~/lib/timeline-track-layout";
+import { buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks } from "~/lib/timeline-track-layout";
 
 type AgentMixOp = {
   type: "setMute" | "setSolo";
@@ -87,6 +87,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<
     Track["id"] | null
   >(null);
+  const [masterCollapsed, setMasterCollapsed] = createSignal(false);
   // Transport tempo & metronome
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
@@ -257,6 +258,13 @@ const Timeline: Component<TimelineProps> = (props) => {
           sends: routing.sends ?? [],
           outputTargetId: routing.outputTargetId,
         }),
+      applyTrackPatch: (trackId, patch) => {
+        const currentTracks = renderTracks()
+        const track = currentTracks.find((entry) => entry.id === trackId)
+        const index = currentTracks.findIndex((entry) => entry.id === trackId)
+        if (!track || index < 0) return
+        projection.updateLocalTrack(track, index, patch)
+      },
       applyAutomationEnvelope: (envelope, targetKey) =>
         automation.applyEnvelope(envelope, targetKey),
     }),
@@ -529,6 +537,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     createTimelineTrack,
     handleShare,
     jumpToClip,
+    groupSelectedTracks,
+    ungroupTrack,
+    moveTrackToGroup,
+    toggleTrackCollapsed,
+    setTrackColor,
   } = useTimelineActions({
     tracks: renderTracks,
     room: {
@@ -539,6 +552,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     creation: {
       selection,
       insertLocalTrack: projection.insertLocalTrack,
+      updateLocalTrack: projection.updateLocalTrack,
       removeCloudTrack: removeCreatedCloudTrack,
       grantTrackWrite,
       pushHistory,
@@ -692,8 +706,14 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   const trackLayout = createMemo(() => {
     const lanes = automation.workspace().lanes;
+    const tracks = renderTracks();
+    const tree = buildTrackTree(tracks);
+    const collapsedById = new Map(tracks.map((track) => [track.id, track.collapsed === true]));
+    const visibleTrackIds = flattenVisibleTracks(tree, collapsedById);
     return buildTimelineTrackLayoutRows({
-      tracks: renderTracks(),
+      tracks,
+      visibleTrackIds,
+      depthByTrackId: computeDepthMap(tree),
       visibleByTrackId: lanes.visibleByTrackId,
       heightsByLaneOwnerKey: lanes.heightsByLaneOwnerKey,
       visibleParameterIdsByTrackId: lanes.visibleParameterIdsByTrackId,
@@ -1337,11 +1357,13 @@ const Timeline: Component<TimelineProps> = (props) => {
             ready: masterVolume.ready(),
             canEditVolume: masterVolume.canEdit(),
             volume: masterVolume.volume(),
+            collapsed: masterCollapsed(),
             onClick: () => {
               bottomPanel.setMode("effects");
               bottomPanel.setOpen(true);
               selection.selectMasterTarget();
             },
+            onToggleCollapsed: () => setMasterCollapsed((collapsed) => !collapsed),
             onVolumePreview: (volume) => {
               automation.overrideTarget(automationTargetKey({ kind: "master" }, "volume"));
               masterVolume.previewVolume(volume);
@@ -1374,6 +1396,11 @@ const Timeline: Component<TimelineProps> = (props) => {
           onSidebarPointerDown,
           onToggleRecordArm: handleToggleRecordArm,
           onDeleteTrack: requestDeleteTrack,
+          onToggleTrackCollapsed: toggleTrackCollapsed,
+          onGroupTracks: groupSelectedTracks,
+          onUngroupTrack: ungroupTrack,
+          onMoveTrackToGroup: moveTrackToGroup,
+          onSetTrackColor: setTrackColor,
         }}
         automation={automation.workspace()}
         trackLayout={trackLayout()}

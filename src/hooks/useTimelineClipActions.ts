@@ -653,14 +653,29 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     const track = snapshot.find(entry => entry.id === trackId)
     if (!track) return
     const rid = projectId()
+    if (!rid) return
+    const collectDeletedTrackIds = (rootTrackId: Track['id']) => {
+      const deletedIds = new Set<Track['id']>()
+      const collect = (currentTrackId: Track['id']) => {
+        if (deletedIds.has(currentTrackId)) return
+        deletedIds.add(currentTrackId)
+        for (const child of snapshot) {
+          if (child.groupId === currentTrackId) collect(child.id)
+        }
+      }
+      collect(rootTrackId)
+      return deletedIds
+    }
+    const deletedTrackIds = collectDeletedTrackIds(trackId)
     const trackAutomation = automationEnvelopes().filter((envelope) => (
-      envelope.target.kind === 'track' && envelope.target.trackId === trackId
+      envelope.target.kind === 'track' && deletedTrackIds.has(envelope.target.trackId)
     ))
-    const completeDeletedTrack = (historyEntry: ReturnType<typeof buildTrackDeleteHistoryEntry> | null) => {
-      if (historyEntry) historyPush(historyEntry)
+    const completeDeletedTrack = (historyEntries: ReturnType<typeof buildTrackDeleteHistoryEntry>[]) => {
+      const sectionEntry = buildSectionHistoryEntry(rid, historyEntries)
+      if (sectionEntry) historyPush(sectionEntry)
       for (const envelope of trackAutomation) applyAutomationEnvelope(undefined, envelope.targetKey)
-      removeLocalTrack(trackId)
-      const next = snapshot.filter(entry => entry.id !== trackId)
+      for (const deletedTrackId of deletedTrackIds) removeLocalTrack(deletedTrackId)
+      const next = snapshot.filter(entry => !deletedTrackIds.has(entry.id))
       batch(() => {
         if (next.length > 0) {
           selection.selectTrackTarget(next[0].id, { clearClipSelection: true })
@@ -671,37 +686,43 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     }
 
     if (rid && isLocalId('project', rid)) {
-      let historyEntry: ReturnType<typeof buildTrackDeleteHistoryEntry> | null = null
+      let historyEntries: ReturnType<typeof buildTrackDeleteHistoryEntry>[] = []
       try {
-        historyEntry = buildTrackDeleteHistoryEntry({
-          projectId: rid,
-          track,
-          tracks: snapshot,
-          effects: await loadLocalTrackDeleteEffects(rid, trackId),
-          automation: trackAutomation,
-        })
+        for (const deletedTrack of snapshot.filter((entry) => deletedTrackIds.has(entry.id))) {
+          historyEntries.push(buildTrackDeleteHistoryEntry({
+            projectId: rid,
+            track: deletedTrack,
+            tracks: snapshot,
+            effects: await loadLocalTrackDeleteEffects(rid, deletedTrack.id),
+            automation: trackAutomation.filter((envelope) => envelope.target.kind === 'track' && envelope.target.trackId === deletedTrack.id),
+          }))
+        }
       } catch {
         showTrackDeleteFailure(null)
         return
       }
-      await createLocalTimelineRepository(rid).deleteTrack(trackId)
-      completeDeletedTrack(historyEntry)
+      for (const deletedTrackId of deletedTrackIds) {
+        await createLocalTimelineRepository(rid).deleteTrack(deletedTrackId)
+      }
+      completeDeletedTrack(historyEntries)
       return
     }
 
     const uid = userId()
     if (!uid) return
 
-    let historyEntry: ReturnType<typeof buildTrackDeleteHistoryEntry> | null = null
+    let historyEntries: ReturnType<typeof buildTrackDeleteHistoryEntry>[] = []
     try {
       if (rid) {
-        historyEntry = buildTrackDeleteHistoryEntry({
-          projectId: rid,
-          track,
-          tracks: snapshot,
-          effects: await loadTrackDeleteEffects(trackId),
-          automation: trackAutomation,
-        })
+        for (const deletedTrack of snapshot.filter((entry) => deletedTrackIds.has(entry.id))) {
+          historyEntries.push(buildTrackDeleteHistoryEntry({
+            projectId: rid,
+            track: deletedTrack,
+            tracks: snapshot,
+            effects: await loadTrackDeleteEffects(deletedTrack.id),
+            automation: trackAutomation.filter((envelope) => envelope.target.kind === 'track' && envelope.target.trackId === deletedTrack.id),
+          }))
+        }
       }
     } catch {
       showTrackDeleteFailure(null)
@@ -716,7 +737,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       showTrackDeleteFailure(result)
       return
     }
-    completeDeletedTrack(historyEntry)
+    completeDeletedTrack(historyEntries)
   }
 
   const requestDeleteTrack = (trackId: Track['id']) => {

@@ -22,6 +22,8 @@ import {
   createHistoryClip,
   createHistoryTrack,
   persistHistoryTrackMix,
+  persistHistoryTrackGroup,
+  persistHistoryTrackColor,
   persistHistoryTrackRouting,
   persistHistoryTrackVolume,
   removeHistoryClipIdsOrThrow,
@@ -64,6 +66,7 @@ export type Deps = {
     applyTrackVolume: (trackId: Track['id'], volume: number, scope?: 'local' | 'shared') => void
     applyTrackMixState: (trackId: Track['id'], patch: { muted?: boolean; soloed?: boolean }, scope?: 'local' | 'shared') => void
     applyTrackRouting: (trackId: Track['id'], routing: TrackRouting) => void
+    applyTrackPatch: (trackId: Track['id'], patch: Pick<Track, 'groupId' | 'outputTargetId' | 'color'>) => void
     applyAutomationEnvelope: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
   }
 }
@@ -115,6 +118,77 @@ async function applyTrackRoutingEntry(entry: Extract<HistoryEntry, { type: 'trac
   deps.actions.cancelTrackRoutingWrite(trackId)
   await persistHistoryTrackRouting(deps, trackId, normalizedRouting)
   deps.actions.applyTrackRouting(trackId, normalizedRouting)
+}
+
+async function applyTrackGroupEntry(entry: Extract<HistoryEntry, { type: 'track-group' }>, deps: Deps, direction: HistoryDirection) {
+  const index = buildRefIndex(deps)
+  if (direction === 'undo') {
+    const groupTrackId = requireResolved(
+      resolveTrackId(index, entry.data.groupTrackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.currentGroupTrackId),
+      'Group track not found for track-group undo',
+    )
+    for (const child of entry.data.childUpdates) {
+      const trackId = requireResolved(resolveTrackId(index, child.trackRef), 'Child track not found for track-group undo')
+      const previousGroupId = resolveTrackId(index, child.previousGroupRef)
+      const previousOutputTargetId = resolveTrackId(index, child.previousOutputTargetRef)
+      await persistHistoryTrackGroup(deps, trackId, previousGroupId, previousOutputTargetId)
+      deps.actions.applyTrackPatch(trackId, { groupId: previousGroupId, outputTargetId: previousOutputTargetId })
+    }
+    await removeHistoryTrackOrThrow(deps, groupTrackId, 'Failed to remove group track during track-group undo')
+    deps.actions.removeLocalTrack(groupTrackId)
+    entry.data.currentGroupTrackId = undefined
+    return
+  }
+
+  let groupTrackId = resolveTrackId(index, entry.data.groupTrackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.currentGroupTrackId)
+  if (!groupTrackId) {
+    groupTrackId = await createHistoryTrack(deps, {
+      trackRef: entry.data.groupTrackRef,
+      index: entry.data.groupTrack.index,
+      name: entry.data.groupTrack.name,
+      channelRole: 'group',
+      color: entry.data.groupTrack.color,
+    })
+  }
+  assert(groupTrackId, 'Failed to recreate group track')
+  entry.data.currentGroupTrackId = groupTrackId
+  deps.grantTrackWrite(groupTrackId, { projectId: deps.projectId, userId: deps.userId })
+  deps.actions.insertLocalTrack(createLocalTrack({
+    id: groupTrackId,
+    historyRef: entry.data.groupTrackRef,
+    index: entry.data.groupTrack.index,
+    name: entry.data.groupTrack.name,
+    channelRole: 'group',
+    color: entry.data.groupTrack.color,
+  }), entry.data.groupTrack.index)
+  for (const child of entry.data.childUpdates) {
+    const trackId = requireResolved(resolveTrackId(buildRefIndex(deps), child.trackRef), 'Child track not found for track-group redo')
+    const outputTargetId = resolveTrackId(buildRefIndex(deps), child.nextOutputTargetRef) ?? groupTrackId
+    await persistHistoryTrackGroup(deps, trackId, groupTrackId, outputTargetId)
+    deps.actions.applyTrackPatch(trackId, { groupId: groupTrackId, outputTargetId })
+  }
+}
+
+async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'track-ungroup' }>, deps: Deps, direction: HistoryDirection) {
+  const index = buildRefIndex(deps)
+  const groupTrackId = requireResolved(resolveTrackId(index, entry.data.groupTrackRef), 'Group track not found for track-ungroup history entry')
+  for (const child of entry.data.childSnapshots) {
+    const trackId = requireResolved(resolveTrackId(index, child.trackRef), 'Child track not found for track-ungroup history entry')
+    const nextGroupId = direction === 'undo' ? groupTrackId : undefined
+    const nextOutputTargetId = direction === 'undo'
+      ? resolveTrackId(index, child.previousOutputTargetRef)
+      : undefined
+    await persistHistoryTrackGroup(deps, trackId, nextGroupId, nextOutputTargetId)
+    deps.actions.applyTrackPatch(trackId, { groupId: nextGroupId, outputTargetId: nextOutputTargetId })
+  }
+}
+
+async function applyTrackColorEntry(entry: Extract<HistoryEntry, { type: 'track-color' }>, deps: Deps, direction: HistoryDirection) {
+  const index = buildRefIndex(deps)
+  const trackId = requireResolved(resolveTrackId(index, entry.data.trackRef), 'Track not found for track-color history entry')
+  const color = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+  await persistHistoryTrackColor(deps, trackId, color)
+  deps.actions.applyTrackPatch(trackId, { color })
 }
 
 type EffectParamsEntry = Extract<HistoryEntry, { type: 'effect-params' }>
@@ -449,6 +523,18 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
 
     case 'track-routing':
       await applyTrackRoutingEntry(entry, deps, direction)
+      return
+
+    case 'track-group':
+      await applyTrackGroupEntry(entry, deps, direction)
+      return
+
+    case 'track-ungroup':
+      await applyTrackUngroupEntry(entry, deps, direction)
+      return
+
+    case 'track-color':
+      await applyTrackColorEntry(entry, deps, direction)
       return
 
     case 'effect-params':

@@ -15,6 +15,7 @@ import type { HistoryEntry, PersistedHistory } from '~/lib/undo/types'
 import { execRedo, execUndo } from '~/lib/undo/exec'
 import {
   applyTrackMixStateInHistoryModel,
+  applyTrackPatchInHistoryModel,
   applyTrackRoutingInHistoryModel,
   applyTrackVolumeInHistoryModel,
   cloneHistoryTracks,
@@ -264,6 +265,10 @@ export function useTimelineHistory(
         applyTrackRouting: (trackId, routing) => {
           applyTrackRoutingInHistoryModel(workingTracks, trackId, routing)
           runVisibleAction(scopeKey, () => sourceActions.applyTrackRouting(trackId, routing))
+        },
+        applyTrackPatch: (trackId, patch) => {
+          applyTrackPatchInHistoryModel(workingTracks, trackId, patch)
+          runVisibleAction(scopeKey, () => sourceActions.applyTrackPatch(trackId, patch))
         },
         applyAutomationEnvelope: (envelope, targetKey) => {
           runVisibleAction(scopeKey, () => sourceActions.applyAutomationEnvelope(envelope, targetKey))

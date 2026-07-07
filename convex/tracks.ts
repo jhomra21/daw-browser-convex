@@ -311,6 +311,53 @@ const setTrackRoutingForUser = async (
   });
 }
 
+const wouldCreateGroupCycle = async (ctx: any, trackId: any, proposedGroupId: any) => {
+  let current = proposedGroupId;
+  while (current) {
+    if (String(current) === String(trackId)) return true;
+    const parent = await ctx.db.get(current);
+    current = parent?.groupId;
+  }
+  return false;
+}
+
+const setTrackGroupForUser = async (
+  ctx: any,
+  input: { trackId: any; userId: string; groupId?: any | null },
+) => {
+  const { track } = await requireTrackOwnerForWrite(ctx, input.trackId, input.userId);
+  if (input.groupId === undefined) return;
+  const groupId = input.groupId ?? undefined;
+  if (groupId) {
+    const group = await ctx.db.get(groupId);
+    if (!group || group.projectId !== track.projectId) throw new Error("Group track not found.");
+    const groupChannel = await ensureMixerChannelForTrack(ctx, group);
+    if (groupChannel.channelRole !== "group") throw new Error("Parent track must be a group.");
+    if (await wouldCreateGroupCycle(ctx, input.trackId, groupId)) throw new Error("Track group cycle rejected.");
+  }
+  if (track.groupId === groupId) return;
+  await ctx.db.patch(input.trackId, { groupId });
+}
+
+const setTrackCollapsedForUser = async (
+  ctx: any,
+  input: { trackId: any; userId: string; collapsed: boolean },
+) => {
+  const { track } = await requireTrackOwnerForWrite(ctx, input.trackId, input.userId);
+  if (track.collapsed === input.collapsed) return;
+  await ctx.db.patch(input.trackId, { collapsed: input.collapsed });
+}
+
+const setTrackColorForUser = async (
+  ctx: any,
+  input: { trackId: any; userId: string; color?: string | null },
+) => {
+  const { track } = await requireTrackOwnerForWrite(ctx, input.trackId, input.userId);
+  const color = input.color ?? undefined;
+  if (track.color === color) return;
+  await ctx.db.patch(input.trackId, { color });
+}
+
 const lockTrackForUser = async (ctx: any, trackId: any, userId: string) => {
   const access = await getTrackWriteAccess(ctx, trackId, userId);
   if (!access) return { ok: false, reason: "Track not found" };
@@ -446,6 +493,62 @@ export const serverSetRouting = mutation({
       outputTargetId: normalizedOutputTargetId,
       sends: normalizedSends,
     });
+  },
+});
+
+export const setGroup = mutation({
+  args: { trackId: v.id("tracks"), groupId: v.optional(v.union(v.id("tracks"), v.null())) },
+  handler: async (ctx, { trackId, groupId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    await setTrackGroupForUser(ctx, { trackId, userId, groupId });
+  },
+});
+
+export const serverSetGroup = mutation({
+  args: { trackId: v.string(), groupId: v.optional(v.union(v.string(), v.null())) },
+  handler: async (ctx, { trackId, groupId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
+    if (!normalizedTrackId) throw new Error("Track not found.");
+    const normalizedGroupId = typeof groupId === "string" ? ctx.db.normalizeId("tracks", groupId) : groupId;
+    if (typeof groupId === "string" && !normalizedGroupId) throw new Error("Group track not found.");
+    await setTrackGroupForUser(ctx, { trackId: normalizedTrackId, userId, groupId: normalizedGroupId });
+  },
+});
+
+export const setCollapsed = mutation({
+  args: { trackId: v.id("tracks"), collapsed: v.boolean() },
+  handler: async (ctx, { trackId, collapsed }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    await setTrackCollapsedForUser(ctx, { trackId, userId, collapsed });
+  },
+});
+
+export const serverSetCollapsed = mutation({
+  args: { trackId: v.string(), collapsed: v.boolean() },
+  handler: async (ctx, { trackId, collapsed }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
+    if (!normalizedTrackId) throw new Error("Track not found.");
+    await setTrackCollapsedForUser(ctx, { trackId: normalizedTrackId, userId, collapsed });
+  },
+});
+
+export const setColor = mutation({
+  args: { trackId: v.id("tracks"), color: v.optional(v.union(v.string(), v.null())) },
+  handler: async (ctx, { trackId, color }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    await setTrackColorForUser(ctx, { trackId, userId, color });
+  },
+});
+
+export const serverSetColor = mutation({
+  args: { trackId: v.string(), color: v.optional(v.union(v.string(), v.null())) },
+  handler: async (ctx, { trackId, color }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
+    if (!normalizedTrackId) throw new Error("Track not found.");
+    await setTrackColorForUser(ctx, { trackId: normalizedTrackId, userId, color });
   },
 });
 

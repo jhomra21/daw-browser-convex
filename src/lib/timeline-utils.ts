@@ -5,6 +5,8 @@ import type { Clip, Track } from '@daw-browser/timeline-core/types'
 export const PPS = 100 // pixels per second
 export const RULER_HEIGHT = 32 // px
 export const LANE_HEIGHT = 96 // px per track lane
+export const GROUP_INDENT_PX = 16
+export const GROUP_RAIL_WIDTH = 4
 export const DEFAULT_AUTOMATION_LANE_HEIGHT = 48
 const MIN_AUTOMATION_LANE_HEIGHT = 32
 const MAX_AUTOMATION_LANE_HEIGHT = 160

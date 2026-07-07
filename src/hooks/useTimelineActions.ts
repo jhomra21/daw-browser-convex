@@ -7,6 +7,9 @@ import { PPS } from '~/lib/timeline-utils'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
 import { createOptimisticTrack, pushTrackCreateHistory } from '~/lib/tracks'
+import { planGroupTracks, planMoveTrackToGroup, planUngroupTracks } from '~/lib/track-group-ops'
+import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
+import { buildTrackColorHistoryEntry, buildTrackGroupHistoryEntry, buildTrackUngroupHistoryEntry } from '~/lib/undo/builders'
 import type { TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -17,6 +20,8 @@ import type { TimelineSelectionController } from './useTimelineSelectionState'
 type TimelineTrackCreateOptions = {
   kind?: 'audio' | 'instrument'
   channelRole?: 'track' | 'return' | 'group'
+  color?: string
+  index?: number
 }
 
 type TimelineTrackCreateBehavior = {
@@ -34,6 +39,7 @@ type UseTimelineActionsOptions = {
   creation: {
     selection: TimelineSelectionController
     insertLocalTrack: (track: Track, index: number) => void
+    updateLocalTrack: (track: Track, index: number, patch: Pick<Track, 'groupId' | 'outputTargetId' | 'collapsed' | 'color'>) => void
     removeCloudTrack: (track: Track) => Promise<void>
     grantTrackWrite: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
     pushHistory: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
@@ -52,6 +58,11 @@ type UseTimelineActionsReturn = {
   createTimelineTrack: (options?: TimelineTrackCreateOptions, behavior?: TimelineTrackCreateBehavior) => Promise<Track | null>
   handleShare: () => Promise<string | undefined>
   jumpToClip: (trackId: Track['id'], clipId: string, startSec: number) => void
+  groupSelectedTracks: (trackIds: Track['id'][]) => Promise<void>
+  ungroupTrack: (groupId: Track['id']) => Promise<void>
+  moveTrackToGroup: (trackId: Track['id'], groupId: Track['id'] | undefined) => Promise<void>
+  toggleTrackCollapsed: (trackId: Track['id']) => Promise<void>
+  setTrackColor: (trackId: Track['id'], color: string | undefined) => Promise<void>
 }
 
 export function useTimelineActions(
@@ -65,12 +76,13 @@ export function useTimelineActions(
     if (!projectId) return null
 
     const channelRole = trackOptions.channelRole ?? 'track'
-    const index = options.tracks().length
+    const index = trackOptions.index ?? options.tracks().length
     if (isLocalId('project', projectId)) {
       const row = await createLocalTimelineRepository(projectId).createTrack({
         index,
         kind: trackOptions.kind,
         channelRole,
+        color: trackOptions.color,
       })
       if (options.room.projectId() !== projectId) {
         await createLocalTimelineRepository(projectId).deleteTrack(row.id)
@@ -106,6 +118,7 @@ export function useTimelineActions(
       grantScope: { projectId, userId },
       kind: trackOptions.kind,
       channelRole,
+      color: trackOptions.color,
     })
     if (!track) return null
     if (!inserted) {
@@ -139,6 +152,124 @@ export function useTimelineActions(
     return typeof result?.token === 'string' ? getInviteShareUrl(projectId, result.token) : undefined
   }
 
+  const persistTrackPatch = async (
+    projectId: string,
+    trackId: Track['id'],
+    patch: Pick<Track, 'groupId' | 'outputTargetId' | 'collapsed' | 'color'>,
+    currentSends: Track['sends'] = [],
+  ) => {
+    const hasGroup = Object.hasOwn(patch, 'groupId')
+    const hasOutput = Object.hasOwn(patch, 'outputTargetId')
+    const hasCollapsed = Object.hasOwn(patch, 'collapsed')
+    const hasColor = Object.hasOwn(patch, 'color')
+    if (isLocalId('project', projectId)) {
+      await createLocalTimelineRepository(projectId).updateTrack({
+        trackId,
+        groupId: hasGroup ? patch.groupId ?? null : undefined,
+        outputTargetId: hasOutput ? patch.outputTargetId ?? null : undefined,
+        collapsed: hasCollapsed ? patch.collapsed : undefined,
+        color: hasColor ? patch.color ?? null : undefined,
+      })
+      return
+    }
+    if (hasGroup) {
+      await publishSharedTimelineOperation(projectId, { kind: 'tracks.setGroup', payload: { trackId, groupId: patch.groupId } })
+    }
+    if (hasOutput) {
+      await publishSharedTimelineOperation(projectId, { kind: 'tracks.setRouting', payload: { trackId, routing: { outputTargetId: patch.outputTargetId, sends: currentSends ?? [] } } })
+    }
+    if (hasCollapsed && patch.collapsed !== undefined) {
+      await publishSharedTimelineOperation(projectId, { kind: 'tracks.setCollapsed', payload: { trackId, collapsed: patch.collapsed } })
+    }
+    if (hasColor) {
+      await publishSharedTimelineOperation(projectId, { kind: 'tracks.setColor', payload: { trackId, color: patch.color } })
+    }
+  }
+
+  const applyTrackPatch = (track: Track, patch: Pick<Track, 'groupId' | 'outputTargetId' | 'collapsed' | 'color'>) => {
+    const index = options.tracks().findIndex((entry) => entry.id === track.id)
+    if (index < 0) return
+    options.creation.updateLocalTrack(track, index, patch)
+  }
+
+  async function groupSelectedTracks(trackIds: Track['id'][]): Promise<void> {
+    const projectId = options.room.projectId()
+    if (!projectId) return
+    const tracks = options.tracks()
+    const groupTrackId = crypto.randomUUID()
+    const plan = planGroupTracks({ tracks, selectedTrackIds: trackIds, groupTrackId })
+    if (!plan) return
+    const groupTrack = await createTimelineTrack({
+      channelRole: 'group',
+      color: plan.groupTrack.color,
+      index: plan.groupTrack.index,
+    }, { pushHistory: false, select: false })
+    if (!groupTrack) return
+    for (const update of plan.childUpdates) {
+      const track = tracks.find((entry) => entry.id === update.trackId)
+      if (!track) continue
+      await persistTrackPatch(projectId, track.id, { groupId: groupTrack.id, outputTargetId: update.outputTargetId }, track.sends)
+      applyTrackPatch(track, { groupId: groupTrack.id, outputTargetId: update.outputTargetId })
+    }
+    options.creation.pushHistory(buildTrackGroupHistoryEntry({
+      projectId,
+      tracks,
+      groupTrack,
+      childTrackIds: plan.childUpdates.map((update) => update.trackId),
+    }))
+  }
+
+  async function ungroupTrack(groupId: Track['id']): Promise<void> {
+    const projectId = options.room.projectId()
+    if (!projectId) return
+    const tracks = options.tracks()
+    const groupTrack = tracks.find((track) => track.id === groupId)
+    if (!groupTrack) return
+    const plan = planUngroupTracks({ tracks, groupId })
+    if (plan.childUpdates.length === 0) return
+    options.creation.pushHistory(buildTrackUngroupHistoryEntry({
+      projectId,
+      tracks,
+      groupTrack,
+      childTrackIds: plan.childUpdates.map((update) => update.trackId),
+    }))
+    for (const update of plan.childUpdates) {
+      const track = tracks.find((entry) => entry.id === update.trackId)
+      if (!track) continue
+      await persistTrackPatch(projectId, track.id, { groupId: undefined, outputTargetId: update.outputTargetId }, track.sends)
+      applyTrackPatch(track, { groupId: undefined, outputTargetId: update.outputTargetId })
+    }
+  }
+
+  async function moveTrackToGroup(trackId: Track['id'], groupId: Track['id'] | undefined): Promise<void> {
+    const projectId = options.room.projectId()
+    if (!projectId) return
+    const tracks = options.tracks()
+    const plan = planMoveTrackToGroup({ tracks, trackId, groupId })
+    const track = tracks.find((entry) => entry.id === trackId)
+    if (!plan || !track) return
+    await persistTrackPatch(projectId, trackId, { groupId: plan.groupId, outputTargetId: track.outputTargetId }, track.sends)
+    applyTrackPatch(track, { groupId: plan.groupId, outputTargetId: track.outputTargetId })
+  }
+
+  async function toggleTrackCollapsed(trackId: Track['id']): Promise<void> {
+    const projectId = options.room.projectId()
+    const track = options.tracks().find((entry) => entry.id === trackId)
+    if (!projectId || !track) return
+    const collapsed = track.collapsed !== true
+    await persistTrackPatch(projectId, trackId, { collapsed })
+    applyTrackPatch(track, { collapsed })
+  }
+
+  async function setTrackColor(trackId: Track['id'], color: string | undefined): Promise<void> {
+    const projectId = options.room.projectId()
+    const track = options.tracks().find((entry) => entry.id === trackId)
+    if (!projectId || !track || track.color === color) return
+    await persistTrackPatch(projectId, trackId, { color })
+    applyTrackPatch(track, { color })
+    options.creation.pushHistory(buildTrackColorHistoryEntry({ projectId, track, from: track.color, to: color }))
+  }
+
   function jumpToClip(trackId: Track['id'], clipId: string, startSec: number): void {
     options.navigation.selection.selectPrimaryClip({ trackId, clipId })
     options.navigation.setPlayhead(Math.max(0, startSec), options.tracks())
@@ -163,5 +294,10 @@ export function useTimelineActions(
     createTimelineTrack,
     handleShare,
     jumpToClip,
+    groupSelectedTracks,
+    ungroupTrack,
+    moveTrackToGroup,
+    toggleTrackCollapsed,
+    setTrackColor,
   }
 }

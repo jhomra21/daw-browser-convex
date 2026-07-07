@@ -98,12 +98,85 @@ export function buildTrackDeleteHistoryEntry(input: {
         soloed: track.soloed,
         kind: track.kind,
         channelRole: track.channelRole,
+        groupRef: track.groupId ? getTrackHistoryRef(tracks.find((entry) => entry.id === track.groupId)) : undefined,
+        collapsed: track.collapsed,
+        color: track.color,
         routing: buildTrackRoutingHistorySnapshot(track, tracks),
       },
       clips: track.clips.map((clip) => buildClipHistorySnapshot(clip)),
       effects,
       automation,
       inboundRouting,
+    },
+  }
+}
+
+export function buildTrackGroupHistoryEntry(input: {
+  projectId: string
+  tracks: Track[]
+  groupTrack: Track
+  childTrackIds: Track['id'][]
+}): Extract<HistoryEntry, { type: 'track-group' }> {
+  const childIds = new Set(input.childTrackIds)
+  return {
+    type: 'track-group',
+    projectId: input.projectId,
+    data: {
+      groupTrackRef: getTrackHistoryRef(input.groupTrack),
+      currentGroupTrackId: input.groupTrack.id,
+      groupTrack: {
+        index: input.tracks.findIndex((track) => track.id === input.groupTrack.id),
+        name: input.groupTrack.name,
+        color: input.groupTrack.color,
+      },
+      childUpdates: input.tracks
+        .filter((track) => childIds.has(track.id))
+        .map((track) => ({
+          trackRef: getTrackHistoryRef(track),
+          previousGroupRef: track.groupId ? getTrackHistoryRef(input.tracks.find((entry) => entry.id === track.groupId)) : undefined,
+          previousOutputTargetRef: track.outputTargetId ? getTrackHistoryRef(input.tracks.find((entry) => entry.id === track.outputTargetId)) : undefined,
+          nextOutputTargetRef: getTrackHistoryRef(input.groupTrack),
+        })),
+    },
+  }
+}
+
+export function buildTrackUngroupHistoryEntry(input: {
+  projectId: string
+  tracks: Track[]
+  groupTrack: Track
+  childTrackIds: Track['id'][]
+}): Extract<HistoryEntry, { type: 'track-ungroup' }> {
+  const childIds = new Set(input.childTrackIds)
+  return {
+    type: 'track-ungroup',
+    projectId: input.projectId,
+    data: {
+      groupTrackRef: getTrackHistoryRef(input.groupTrack),
+      childSnapshots: input.tracks
+        .filter((track) => childIds.has(track.id))
+        .map((track) => ({
+          trackRef: getTrackHistoryRef(track),
+          previousGroupRef: getTrackHistoryRef(input.groupTrack),
+          previousOutputTargetRef: track.outputTargetId ? getTrackHistoryRef(input.tracks.find((entry) => entry.id === track.outputTargetId)) : undefined,
+        })),
+    },
+  }
+}
+
+export function buildTrackColorHistoryEntry(input: {
+  projectId: string
+  track: Track
+  from: string | undefined
+  to: string | undefined
+}): Extract<HistoryEntry, { type: 'track-color' }> {
+  return {
+    type: 'track-color',
+    projectId: input.projectId,
+    data: {
+      trackRef: getTrackHistoryRef(input.track),
+      from: input.from,
+      to: input.to,
     },
   }
 }

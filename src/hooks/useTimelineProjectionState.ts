@@ -49,6 +49,7 @@ type UseTimelineProjectionStateReturn = {
   replaceLocalClip: (trackId: Track['id'], clip: Track['clips'][number]) => void
   removeLocalClips: (clipIds: Iterable<string>) => void
   removeLocalTrack: (trackId: Track['id']) => void
+  updateLocalTrack: (track: Track, index: number, patch: Pick<Track, 'groupId' | 'outputTargetId' | 'collapsed' | 'color'>) => void
   setDraftClipTiming: (clipId: string, patch: ClipTimelinePatch | null) => void
   commitClipTiming: (clipId: string, patch: ClipTimelinePatch) => void
   commitClipAudioWarp: (clipId: string, audioWarp: Track['clips'][number]['audioWarp']) => void
@@ -365,6 +366,22 @@ export function useTimelineProjectionState(
       if (clipIds.size > 0) {
         removeLocalClips(clipIds)
       }
+    },
+    updateLocalTrack: (track, index, patch) => {
+      const trackId = track.id
+      setPendingTrackEntriesById((current) => {
+        const previous = current.get(trackId)
+        const base = previous?.track ?? track
+        const next = new Map(current)
+        next.set(trackId, {
+          index: previous?.index ?? index,
+          track: {
+            ...base,
+            ...patch,
+          },
+        })
+        return next
+      })
     },
     setDraftClipTiming: (clipId, patch) => {
       setDraftClipEditsById((current) => {

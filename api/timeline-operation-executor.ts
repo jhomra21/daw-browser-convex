@@ -112,6 +112,21 @@ export const executeTimelineOperation = async (
         sends: operation.payload.routing.sends,
       })
       return { status: 'applied' }
+    case 'tracks.setGroup':
+      await context.convex.mutation(convexApi.tracks.serverSetGroup, {
+        trackId: operation.payload.trackId,
+        groupId: operation.payload.groupId ?? null,
+      })
+      return { status: 'applied' }
+    case 'tracks.setCollapsed':
+      await context.convex.mutation(convexApi.tracks.serverSetCollapsed, operation.payload)
+      return { status: 'applied' }
+    case 'tracks.setColor':
+      await context.convex.mutation(convexApi.tracks.serverSetColor, {
+        trackId: operation.payload.trackId,
+        color: operation.payload.color ?? null,
+      })
+      return { status: 'applied' }
     case 'tracks.setVolume':
       await context.convex.mutation(convexApi.tracks.serverSetVolume, {
         trackId: operation.payload.trackId,

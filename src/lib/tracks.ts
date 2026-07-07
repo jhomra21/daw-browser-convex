@@ -14,6 +14,9 @@ type CreateLocalTrackOptions = {
   name?: string
   kind?: Track['kind']
   channelRole?: Track['channelRole']
+  groupId?: Track['id']
+  collapsed?: boolean
+  color?: string
   volume?: number
   muted?: boolean
   soloed?: boolean
@@ -36,6 +39,7 @@ type CreateOptimisticTrackOptions = {
   grantScope?: OptimisticGrantScope
   kind?: Track['kind']
   channelRole?: Track['channelRole']
+  color?: string
 }
 
 type HistoryPush = (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
@@ -51,6 +55,9 @@ export function createLocalTrack(options: CreateLocalTrackOptions): Track {
     soloed: options.soloed ?? false,
     kind: options.kind ?? 'audio',
     channelRole: options.channelRole ?? 'track',
+    groupId: options.groupId,
+    collapsed: options.collapsed,
+    color: options.color,
     sends: options.sends ?? [],
     outputTargetId: options.outputTargetId,
   }
@@ -69,6 +76,9 @@ function ensureLocalTrack(options: EnsureLocalTrackOptions): Track {
     name: options.name,
     kind: options.kind,
     channelRole: options.channelRole,
+    groupId: options.groupId,
+    collapsed: options.collapsed,
+    color: options.color,
     volume: options.volume,
     muted: options.muted,
     soloed: options.soloed,
@@ -98,6 +108,7 @@ export async function createOptimisticTrack(options: CreateOptimisticTrackOption
     index: options.index,
     kind: options.kind,
     channelRole: options.channelRole,
+    color: options.color,
     insertLocalTrack: options.insertLocalTrack,
   })
 }

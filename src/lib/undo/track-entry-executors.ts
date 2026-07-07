@@ -14,6 +14,8 @@ import {
   persistHistoryTrackEffects,
   persistHistoryTrackAutomation,
   persistHistoryTrackMixState,
+  persistHistoryTrackColor,
+  persistHistoryTrackGroup,
   persistHistoryTrackRouting,
   persistHistoryTrackVolume,
   removeHistoryTrackOrThrow,
@@ -147,6 +149,9 @@ export async function applyTrackDeleteEntry(
       soloed: entry.data.track.soloed,
       kind: entry.data.track.kind,
       channelRole: entry.data.track.channelRole,
+      groupId: resolveTrackId(historyContext.refIndex, entry.data.track.groupRef),
+      collapsed: entry.data.track.collapsed,
+      color: entry.data.track.color,
       sends: [],
     })
     createdTrack = true
@@ -161,6 +166,13 @@ export async function applyTrackDeleteEntry(
   }
   if (!isLocalHistoryProject(deps)) {
     await persistHistoryTrackMixState(deps, newTrackId, { muted: entry.data.track.muted, soloed: entry.data.track.soloed })
+    if (entry.data.track.color !== undefined) {
+      await persistHistoryTrackColor(deps, newTrackId, entry.data.track.color)
+    }
+    const restoredGroupId = resolveTrackId(historyContext.refIndex, entry.data.track.groupRef)
+    if (restoredGroupId) {
+      await persistHistoryTrackGroup(deps, newTrackId, restoredGroupId, undefined)
+    }
   }
 
   deps.actions.insertLocalTrack(createLocalTrack({
@@ -174,6 +186,9 @@ export async function applyTrackDeleteEntry(
     soloed: entry.data.track.soloed ?? false,
     kind: entry.data.track.kind ?? 'audio',
     channelRole: entry.data.track.channelRole ?? 'track',
+    groupId: resolveTrackId(historyContext.refIndex, entry.data.track.groupRef),
+    collapsed: entry.data.track.collapsed,
+    color: entry.data.track.color,
     sends: [],
     outputTargetId: undefined,
   }), entry.data.track.index)

@@ -11,6 +11,9 @@ export default defineSchema({
     projectId: v.string(),
     index: v.number(),
     kind: v.optional(v.string()), // 'audio' | 'instrument'
+    groupId: v.optional(v.id("tracks")),
+    collapsed: v.optional(v.boolean()),
+    color: v.optional(v.string()),
   })
     .index("by_room", ["projectId"])
     .index("by_room_index", ["projectId", "index"]),

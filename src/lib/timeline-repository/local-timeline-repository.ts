@@ -89,6 +89,9 @@ const trackPersistenceFieldsEqual = (left: TimelineTrackRow, right: TimelineTrac
   left.volume === right.volume
   && left.muted === right.muted
   && left.soloed === right.soloed
+  && left.groupId === right.groupId
+  && left.collapsed === right.collapsed
+  && left.color === right.color
   && left.outputTargetId === right.outputTargetId
   && sendsEqual(left.sends, right.sends)
 )
@@ -251,6 +254,9 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       soloed: input.soloed,
       kind: input.kind,
       channelRole: input.channelRole,
+      groupId: input.groupId,
+      collapsed: input.collapsed,
+      color: input.color,
       outputTargetId: input.outputTargetId,
       sends: input.sends,
       timestamp,
@@ -312,7 +318,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
   const updateTrack = async (input: UpdateTrackInput): Promise<TimelineTrackRow | null> => {
     const [row, trackRows] = await Promise.all([
       readEntityRow(projectId, TRACK_KIND, input.trackId),
-      input.sends !== undefined || input.outputTargetId !== undefined
+      input.sends !== undefined || input.outputTargetId !== undefined || input.groupId !== undefined
         ? readEntityRowsByKind(projectId, TRACK_KIND)
           .then(trackValues)
         : Promise.resolve([]),
@@ -332,6 +338,9 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       volume: input.volume ?? row.value.volume,
       muted: input.muted ?? row.value.muted,
       soloed: input.soloed ?? row.value.soloed,
+      groupId: patchOptionalString(row.value.groupId, input.groupId),
+      collapsed: input.collapsed ?? row.value.collapsed,
+      color: patchOptionalString(row.value.color, input.color),
       outputTargetId: routing ? routing.outputTargetId : row.value.outputTargetId,
       sends: routing ? routing.sends : row.value.sends,
       updatedAt: timestamp,

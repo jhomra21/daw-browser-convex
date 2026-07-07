@@ -130,3 +130,15 @@ export const applyTrackRoutingInHistoryModel = (tracks: Track[], trackId: string
   track.sends = routing.sends?.map((send) => ({ ...send })) ?? []
   track.outputTargetId = routing.outputTargetId
 }
+
+export const applyTrackPatchInHistoryModel = (
+  tracks: Track[],
+  trackId: string,
+  patch: Pick<Track, 'groupId' | 'outputTargetId' | 'color'>,
+) => {
+  const track = tracks.find((entry) => entry.id === trackId)
+  if (!track) return
+  if (Object.hasOwn(patch, 'groupId')) track.groupId = patch.groupId
+  if (Object.hasOwn(patch, 'outputTargetId')) track.outputTargetId = patch.outputTargetId
+  if (Object.hasOwn(patch, 'color')) track.color = patch.color
+}

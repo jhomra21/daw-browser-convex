@@ -108,6 +108,9 @@ export type SharedTimelineOperation =
   | { kind: 'clips.setAudioWarp'; payload: { clipId: string; audioWarp: AudioWarpPayload } }
   | { kind: 'clips.setGain'; payload: { clipId: string; gain: number } }
   | { kind: 'tracks.setRouting'; payload: { trackId: string; routing: TrackRouting } }
+  | { kind: 'tracks.setGroup'; payload: { trackId: string; groupId?: string } }
+  | { kind: 'tracks.setCollapsed'; payload: { trackId: string; collapsed: boolean } }
+  | { kind: 'tracks.setColor'; payload: { trackId: string; color?: string } }
   | { kind: 'tracks.setVolume'; payload: { trackId: string; volume: number } }
   | { kind: 'tracks.setMix'; payload: { trackId: string; muted?: boolean; soloed?: boolean } }
   | { kind: 'mixer.setMasterVolume'; payload: { volume: number } }
@@ -465,6 +468,13 @@ const readRoutingTargets = (payload: unknown) => {
   return targets
 }
 
+const readTrackGroupTargets = (payload: unknown) => {
+  if (!isRecord(payload) || typeof payload.trackId !== 'string') return emptyTargets()
+  const targets = trackTargets(payload.trackId)
+  if (typeof payload.groupId === 'string') targets.trackIds.add(payload.groupId)
+  return targets
+}
+
 const parseTrackCreate = (payload: Record<string, unknown>): SharedTimelineOperation => ({
   kind: 'tracks.create',
   payload: {
@@ -568,6 +578,24 @@ const parseTrackRouting = (payload: Record<string, unknown>): SharedTimelineOper
     },
   }
 }
+
+const parseTrackGroup = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
+  typeof payload.trackId === 'string'
+    ? { kind: 'tracks.setGroup', payload: { trackId: payload.trackId, groupId: readOptionalString(payload.groupId) } }
+    : null
+)
+
+const parseTrackCollapsed = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
+  typeof payload.trackId === 'string' && typeof payload.collapsed === 'boolean'
+    ? { kind: 'tracks.setCollapsed', payload: { trackId: payload.trackId, collapsed: payload.collapsed } }
+    : null
+)
+
+const parseTrackColor = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
+  typeof payload.trackId === 'string'
+    ? { kind: 'tracks.setColor', payload: { trackId: payload.trackId, color: readOptionalString(payload.color) } }
+    : null
+)
 
 const parseTrackVolume = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
   typeof payload.trackId === 'string' && typeof payload.volume === 'number'
@@ -812,6 +840,9 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
     durableQueue: true,
   },
   { kind: 'tracks.setRouting', parse: parseTrackRouting, targets: readRoutingTargets, durableQueue: true },
+  { kind: 'tracks.setGroup', parse: parseTrackGroup, targets: readTrackGroupTargets, durableQueue: true },
+  { kind: 'tracks.setCollapsed', parse: parseTrackCollapsed, targets: readTrackIdTargets, durableQueue: true },
+  { kind: 'tracks.setColor', parse: parseTrackColor, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'tracks.setVolume', parse: parseTrackVolume, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'tracks.setMix', parse: parseTrackMix, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'mixer.setMasterVolume', parse: parseMasterVolume, targets: emptyTargets, durableQueue: true },

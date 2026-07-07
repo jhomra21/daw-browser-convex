@@ -15,7 +15,7 @@ import {
   getTrackChannelRole,
 } from "@daw-browser/timeline-core/track-routing";
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
-import { DEFAULT_AUTOMATION_LANE_HEIGHT, LANE_HEIGHT, RULER_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
+import { DEFAULT_AUTOMATION_LANE_HEIGHT, GROUP_INDENT_PX, GROUP_RAIL_WIDTH, LANE_HEIGHT, RULER_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Track, TrackSend } from "@daw-browser/timeline-core/types";
 import type { TimelineWorkspaceAutomationModel } from "~/hooks/useTimelineAutomationController";
@@ -48,6 +48,11 @@ type TrackSidebarProps = {
     onToggleSolo: (trackId: Track["id"]) => void;
     recordArmTrackId: Track["id"] | null;
     onToggleRecordArm: (trackId: Track["id"]) => void;
+    onToggleTrackCollapsed: (trackId: Track["id"]) => void;
+    onGroupTracks: (trackIds: Track["id"][]) => void;
+    onUngroupTrack: (groupId: Track["id"]) => void;
+    onMoveTrackToGroup: (trackId: Track["id"], groupId: Track["id"] | undefined) => void;
+    onSetTrackColor: (trackId: Track["id"], color: string | undefined) => void;
     currentUserId: string;
     subscribeTrackLevels: (
       listener: (levels: ReadonlyMap<string, TrackStereoLevels>) => void,
@@ -118,6 +123,16 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         groupTracks().map((track) => [track.id, track.name]),
       ),
   );
+  const trackById = createMemo(() => new Map(sidebar().tracks.map((track) => [track.id, track])));
+  const trackDepth = (track: Track) => {
+    let depth = 0;
+    let parentId = track.groupId;
+    while (parentId && trackById().has(parentId)) {
+      depth += 1;
+      parentId = trackById().get(parentId)?.groupId;
+    }
+    return depth;
+  };
   const returnTracks = createMemo(() =>
     sidebar().tracks.filter((track) => getTrackChannelRole(track) === "return"),
   );
@@ -176,7 +191,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     return meta;
   });
   const masterRowReservedHeight = () => (
-    MASTER_ROW_HEIGHT + (props.automation.lanes.masterVisible ? props.automation.lanes.masterHeight : 0)
+    MASTER_ROW_HEIGHT + (!sidebar().master.collapsed && props.automation.lanes.masterVisible ? props.automation.lanes.masterHeight : 0)
   );
   const actualOutputTargetId = (track: Track) => track.outputTargetId ?? "";
   const selectedOutputTargetId = (track: Track) =>
@@ -375,6 +390,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const channelRole = getTrackChannelRole(track);
             const isReturnTrack = channelRole === "return";
             const isGroupTrack = channelRole === "group";
+            const depth = () => trackDepth(track);
+            const trackColor = () => track.color ?? (isGroupTrack ? "rgb(34 197 94)" : "rgb(75 85 99)");
             const muteDisabled = lockedByOther;
             const soloDisabled = lockedByOther;
             const volumeDisabled = lockedByOther;
@@ -401,6 +418,32 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const trackContextMenuItems = (): TimelineContextMenuItem[] => [
               { kind: "label", label: displayTrackName(track) },
               { kind: "item", label: "Open effects", onSelect: () => sidebar().onTrackClick(track.id) },
+              {
+                kind: "item",
+                label: isGroupTrack ? (track.collapsed ? "Expand group" : "Collapse group") : "Group track",
+                disabled: isReturnTrack,
+                onSelect: () => {
+                  if (isGroupTrack) sidebar().onToggleTrackCollapsed(track.id);
+                  else sidebar().onGroupTracks([track.id]);
+                },
+              },
+              {
+                kind: "item",
+                label: track.groupId ? "Remove from group" : "No group",
+                disabled: !track.groupId,
+                onSelect: () => sidebar().onMoveTrackToGroup(track.id, undefined),
+              },
+              {
+                kind: "item",
+                label: "Ungroup tracks",
+                disabled: !isGroupTrack,
+                onSelect: () => sidebar().onUngroupTrack(track.id),
+              },
+              {
+                kind: "item",
+                label: track.color ? "Clear track color" : "Set track color",
+                onSelect: () => sidebar().onSetTrackColor(track.id, track.color ? undefined : trackColor()),
+              },
               { kind: "separator" },
               {
                 kind: "item",
@@ -452,9 +495,28 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 style={{ height: `${LANE_HEIGHT + automationTotalHeight()}px` }}
                 onClick={() => sidebar().onTrackClick(track.id)}
               >
+                <Show when={isGroupTrack}>
+                  <div
+                    class="absolute left-0 right-0 top-0 h-1"
+                    style={{ background: trackColor() }}
+                  />
+                </Show>
+                <Show when={track.groupId}>
+                  <div
+                    class="absolute bottom-0 top-0"
+                    style={{
+                      left: `${Math.max(0, depth() - 1) * GROUP_INDENT_PX}px`,
+                      width: `${GROUP_RAIL_WIDTH}px`,
+                      background: trackColor(),
+                    }}
+                  />
+                </Show>
                 <div
                   class="grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 p-2"
-                  style={{ height: `${LANE_HEIGHT}px` }}
+                  style={{
+                    height: `${LANE_HEIGHT}px`,
+                    "padding-left": `${8 + depth() * GROUP_INDENT_PX}px`,
+                  }}
                 >
                   <div class="min-w-0 overflow-hidden">
                     <button
@@ -486,8 +548,15 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       <span class="flex min-w-0 flex-col items-center gap-1">
                         <span class="truncate">{displayTrackName(track)}</span>
                         <Show when={isGroupTrack}>
-                          <span class="bg-muted px-1.5 py-0.5 text-xs uppercase tracking-wide text-muted-foreground">
-                            Group
+                          <span
+                            class="bg-muted px-1.5 py-0.5 text-xs uppercase tracking-wide text-muted-foreground"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              sidebar().onToggleTrackCollapsed(track.id);
+                            }}
+                            title={track.collapsed ? "Expand group" : "Collapse group"}
+                          >
+                            {track.collapsed ? "Group ▸" : "Group ▾"}
                           </span>
                         </Show>
                       </span>

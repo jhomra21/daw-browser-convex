@@ -65,6 +65,9 @@ export type TrackSnapshot = {
   soloed?: boolean
   kind?: 'audio' | 'instrument'
   channelRole?: TrackChannelRole
+  groupRef?: TrackRef
+  collapsed?: boolean
+  color?: string
   routing: TrackRoutingHistorySnapshot
 }
 
@@ -265,6 +268,38 @@ export type HistoryEntry =
       type: 'track-routing'
       projectId: string
       data: { trackRef: TrackRef; from: TrackRoutingHistorySnapshot; to: TrackRoutingHistorySnapshot }
+    }
+  | {
+      type: 'track-group'
+      projectId: string
+      data: {
+        groupTrackRef: TrackRef
+        currentGroupTrackId?: string
+        groupTrack: { index: number; name: string; color?: string }
+        childUpdates: Array<{
+          trackRef: TrackRef
+          previousGroupRef?: TrackRef
+          previousOutputTargetRef?: TrackRef
+          nextOutputTargetRef?: TrackRef
+        }>
+      }
+    }
+  | {
+      type: 'track-ungroup'
+      projectId: string
+      data: {
+        groupTrackRef: TrackRef
+        childSnapshots: Array<{
+          trackRef: TrackRef
+          previousGroupRef: TrackRef
+          previousOutputTargetRef?: TrackRef
+        }>
+      }
+    }
+  | {
+      type: 'track-color'
+      projectId: string
+      data: { trackRef: TrackRef; from: string | undefined; to: string | undefined }
     }
   | AutomationEnvelopeHistoryEntry
   | EffectParamsHistoryEntry

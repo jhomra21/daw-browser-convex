@@ -1,4 +1,4 @@
-import { createSignal, For, Show, onCleanup, onMount, type JSX } from "solid-js";
+import { createMemo, createSignal, For, Show, onCleanup, onMount, type JSX } from "solid-js";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
 import type { ClipContextMenuActions } from "~/components/timeline/ClipComponent";
@@ -121,6 +121,11 @@ type Props = {
     onSidebarPointerDown: (event: PointerEvent) => void;
     onToggleRecordArm: (trackId: Track["id"]) => void;
     onDeleteTrack: (trackId: Track["id"]) => void;
+    onToggleTrackCollapsed: (trackId: Track["id"]) => void;
+    onGroupTracks: (trackIds: Track["id"][]) => void;
+    onUngroupTrack: (groupId: Track["id"]) => void;
+    onMoveTrackToGroup: (trackId: Track["id"], groupId: Track["id"] | undefined) => void;
+    onSetTrackColor: (trackId: Track["id"], color: string | undefined) => void;
   };
   automation: TimelineWorkspaceAutomationModel;
   trackLayout: TimelineTrackLayoutRow[];
@@ -128,12 +133,17 @@ type Props = {
 
 export default function TimelineWorkspace(props: Props) {
   const viewportRedrawVersion = createViewportRedrawVersion();
+  const trackById = createMemo(() => new Map(props.tracks.map((track) => [track.id, track])));
+  const visibleTracks = createMemo(() => props.trackLayout.flatMap((row) => {
+    const track = trackById().get(row.trackId);
+    return track ? [track] : [];
+  }));
   const trackAreaHeight = () => {
     const layout = props.trackLayout;
     const tracksHeight = layout.length === 0 ? 0 : layout[layout.length - 1].topPx + layout[layout.length - 1].heightPx;
     return tracksHeight + (props.dropAtNewTrack ? LANE_HEIGHT : 0);
   };
-  const masterAreaHeight = () => MASTER_ROW_HEIGHT + (props.automation.lanes.masterVisible ? props.automation.lanes.masterHeight : 0);
+  const masterAreaHeight = () => MASTER_ROW_HEIGHT + (!props.sidebar.master.collapsed && props.automation.lanes.masterVisible ? props.automation.lanes.masterHeight : 0);
   const fullHeight = () => RULER_HEIGHT + trackAreaHeight() + masterAreaHeight();
   const scrollContentHeight = () => fullHeight() + props.bottomPanelOffsetPx;
   const masterParameterId = () => props.automation.lanes.selectedParametersByTargetKey.master ?? "volume";
@@ -195,59 +205,64 @@ export default function TimelineWorkspace(props: Props) {
                 bottom: `${props.bottomPanelOffsetPx}px`,
               }}
             >
-              <For each={props.tracks}>
-                {(track, i) => (
+              <For each={props.trackLayout}>
+                {(row, i) => (
                   (() => {
-                    const visibleParameterIds = () => props.automation.lanes.visibleParameterIdsByTrackId[track.id] ?? [];
-                    const laneHeight = () => props.automation.lanes.heightsByLaneOwnerKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
+                    const track = () => trackById().get(row.trackId);
+                    const visibleParameterIds = () => props.automation.lanes.visibleParameterIdsByTrackId[row.trackId] ?? [];
+                    const laneHeight = () => props.automation.lanes.heightsByLaneOwnerKey[row.trackId] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
                     return (
-                      <TrackLane
-                        track={track}
-                        topPx={props.trackLayout[i()].topPx}
-                        automationHeightPx={props.trackLayout[i()].automationHeightPx}
-                        isDropTarget={props.dropTargetLane === i()}
-                        selectedClipIds={props.selection.selectedClipIds()}
-                        rangeSelection={props.selection.rangeSelection()}
-                        onClipPointerDown={props.onClipPointerDown}
-                        onClipPointerUp={props.onClipPointerUp}
-                        onClipResizeStart={props.onClipResizeStart}
-                        onAddMidiClip={props.onAddMidiClipToTrack}
-                        onDeleteTrack={props.onDeleteTrack}
-                        clipContextMenu={props.clipContextMenu}
-                        onRetryMedia={(clipId) => {
-                          void props.ensureClipBuffer(clipId);
-                        }}
-                        onReplaceMedia={(trackId, clipId) => {
-                          void props.replaceMissingMediaClip(trackId, clipId);
-                        }}
-                        onRemoveMissingMedia={(trackId, clipId) => {
-                          void props.removeMissingMediaClip(trackId, clipId);
-                        }}
-                        ensureClipBuffer={props.ensureClipBuffer}
-                        bpm={props.bpm}
-                        viewportRedrawVersion={viewportRedrawVersion()}
-                        automation={{
-                          projectId: props.automation.projectId,
-                          visible: props.automation.lanes.visibleByTrackId[track.id] === true,
-                          parameterIds: visibleParameterIds(),
-                          laneHeightPx: laneHeight(),
-                          envelopeForParameter: (parameterId) => props.automation.envelopes.byTargetKey.get(
-                            automationTargetKey({ kind: "track", trackId: track.id }, parameterId),
-                          ),
-                          durationSec: props.durationSec,
-                          onPreview: props.automation.envelopes.preview,
-                          onCommit: props.automation.envelopes.commit,
-                          onCancelPreview: props.automation.envelopes.cancelPreview,
-                        }}
-                        onClipDblClick={(_, clipId) => {
-                          const match = props.trackLookup.clipEntryById.get(clipId);
-                          if (match?.clip.midi) {
-                            props.openMidiEditorFor(clipId);
-                            return;
-                          }
-                          props.openSampleDetailFor(clipId);
-                        }}
-                      />
+                      <Show when={track()}>
+                        {(visibleTrack) => (
+                          <TrackLane
+                            track={visibleTrack()}
+                            topPx={row.topPx}
+                            automationHeightPx={row.automationHeightPx}
+                            isDropTarget={props.dropTargetLane === i()}
+                            selectedClipIds={props.selection.selectedClipIds()}
+                            rangeSelection={props.selection.rangeSelection()}
+                            onClipPointerDown={props.onClipPointerDown}
+                            onClipPointerUp={props.onClipPointerUp}
+                            onClipResizeStart={props.onClipResizeStart}
+                            onAddMidiClip={props.onAddMidiClipToTrack}
+                            onDeleteTrack={props.onDeleteTrack}
+                            clipContextMenu={props.clipContextMenu}
+                            onRetryMedia={(clipId) => {
+                              void props.ensureClipBuffer(clipId);
+                            }}
+                            onReplaceMedia={(trackId, clipId) => {
+                              void props.replaceMissingMediaClip(trackId, clipId);
+                            }}
+                            onRemoveMissingMedia={(trackId, clipId) => {
+                              void props.removeMissingMediaClip(trackId, clipId);
+                            }}
+                            ensureClipBuffer={props.ensureClipBuffer}
+                            bpm={props.bpm}
+                            viewportRedrawVersion={viewportRedrawVersion()}
+                            automation={{
+                              projectId: props.automation.projectId,
+                              visible: props.automation.lanes.visibleByTrackId[row.trackId] === true,
+                              parameterIds: visibleParameterIds(),
+                              laneHeightPx: laneHeight(),
+                              envelopeForParameter: (parameterId) => props.automation.envelopes.byTargetKey.get(
+                                automationTargetKey({ kind: "track", trackId: row.trackId }, parameterId),
+                              ),
+                              durationSec: props.durationSec,
+                              onPreview: props.automation.envelopes.preview,
+                              onCommit: props.automation.envelopes.commit,
+                              onCancelPreview: props.automation.envelopes.cancelPreview,
+                            }}
+                            onClipDblClick={(_, clipId) => {
+                              const match = props.trackLookup.clipEntryById.get(clipId);
+                              if (match?.clip.midi) {
+                                props.openMidiEditorFor(clipId);
+                                return;
+                              }
+                              props.openSampleDetailFor(clipId);
+                            }}
+                          />
+                        )}
+                      </Show>
                     );
                   })()
                 )}
@@ -301,7 +316,7 @@ export default function TimelineWorkspace(props: Props) {
           <div class="sticky right-0 z-40 flex h-full shrink-0" style={{ width: `${props.sidebarWidth}px` }}>
             <TrackSidebar
               sidebar={{
-                tracks: props.tracks,
+                tracks: visibleTracks(),
                 selectedTrackId: props.selection.selectedTrackId(),
                 sidebarWidth: props.sidebarWidth,
                 bottomOffsetPx: props.bottomPanelOffsetPx,
@@ -320,6 +335,11 @@ export default function TimelineWorkspace(props: Props) {
                 onSidebarPointerDown: props.sidebar.onSidebarPointerDown,
                 onToggleRecordArm: props.sidebar.onToggleRecordArm,
                 onDeleteTrack: props.sidebar.onDeleteTrack,
+                onToggleTrackCollapsed: props.sidebar.onToggleTrackCollapsed,
+                onGroupTracks: props.sidebar.onGroupTracks,
+                onUngroupTrack: props.sidebar.onUngroupTrack,
+                onMoveTrackToGroup: props.sidebar.onMoveTrackToGroup,
+                onSetTrackColor: props.sidebar.onSetTrackColor,
               }}
               automation={props.automation}
             />

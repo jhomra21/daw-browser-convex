@@ -12,7 +12,9 @@ export type MasterSidebarModel = {
   ready: boolean;
   canEditVolume: boolean;
   volume: number;
+  collapsed: boolean;
   onClick: () => void;
+  onToggleCollapsed: () => void;
   onVolumePreview: (volume: number) => void;
   onVolumeChange: (volume: number) => void;
 };
@@ -59,7 +61,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
     master().onVolumePreview(committedVolume());
   };
   const automationHeight = () => props.automation.heightPx;
-  const rowHeight = () => MASTER_ROW_HEIGHT + (props.automation.visible ? automationHeight() : 0);
+  const rowHeight = () => MASTER_ROW_HEIGHT + (!master().collapsed && props.automation.visible ? automationHeight() : 0);
   const volumeAutomated = () => props.automation.automatedParameterIds.has("volume");
   const volumeEnvelope = createMemo(() => (
     props.automation.selectedParameterId === "volume" ? props.automation.selectedEnvelope : undefined
@@ -91,9 +93,11 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   const contextMenuItems = (): TimelineContextMenuItem[] => [
     { kind: "label", label: "Master" },
     { kind: "item", label: "Open effects", onSelect: master().onClick },
+    { kind: "item", label: master().collapsed ? "Expand master" : "Collapse master", onSelect: master().onToggleCollapsed },
     {
       kind: "item",
       label: props.automation.visible ? "Hide master automation lane" : "Show master automation lane",
+      disabled: master().collapsed,
       onSelect: props.automation.onToggleVisibility,
     },
   ];
@@ -129,12 +133,14 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
         >
           Master
         </button>
-        <div class="flex h-7 items-center border border-border bg-timeline-background px-2 text-xs text-foreground">
-          Master Out
-        </div>
+        <Show when={!master().collapsed} fallback={<div class="flex h-7 items-center border border-border bg-timeline-background px-2 text-xs text-muted-foreground">Collapsed</div>}>
+          <div class="flex h-7 items-center border border-border bg-timeline-background px-2 text-xs text-foreground">
+            Master Out
+          </div>
+        </Show>
         <div class="flex w-[92px] items-center gap-2">
           <div class="flex h-7 w-[72px] shrink-0 items-center gap-1 px-0.5">
-            <Show when={master().ready}>
+            <Show when={master().ready && !master().collapsed}>
               <div class="relative flex flex-1 items-center">
                 <Show when={volumeAutomated()}>
                   <span class="absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.75)]" />
@@ -175,19 +181,31 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
                   ? "border-red-400 bg-red-500/90 text-black"
                   : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
               )}
+              disabled={master().collapsed}
               onClick={(event) => {
                 event.stopPropagation();
+                if (master().collapsed) return;
                 props.automation.onToggleVisibility();
               }}
               title={props.automation.visible ? "Hide master automation lane" : "Show master automation lane"}
             >
               A
             </button>
+            <button
+              class="h-7 w-7 shrink-0 border border-border bg-timeline-surface-muted text-xs font-semibold text-foreground hover:bg-muted"
+              onClick={(event) => {
+                event.stopPropagation();
+                master().onToggleCollapsed();
+              }}
+              title={master().collapsed ? "Expand master" : "Collapse master"}
+            >
+              {master().collapsed ? "▸" : "▾"}
+            </button>
           </div>
           <div class="h-8 w-[12px] shrink-0 bg-timeline-background/70" />
         </div>
       </div>
-      <Show when={props.automation.visible}>
+      <Show when={!master().collapsed && props.automation.visible}>
         <div
           class="relative grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-t border-automation/30 bg-timeline-background/95 px-2 text-[11px] text-error-foreground"
           style={{ height: `${automationHeight()}px` }}

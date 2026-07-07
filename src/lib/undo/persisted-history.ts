@@ -87,6 +87,17 @@ const isTrackSnapshot = (value: unknown) => isRecord(value)
   && (value.channelRole === undefined || value.channelRole === 'track' || value.channelRole === 'group' || value.channelRole === 'return')
   && isRoutingSnapshot(value.routing)
 
+const isTrackGroupChildUpdate = (value: unknown) => isRecord(value)
+  && isString(value.trackRef)
+  && (value.previousGroupRef === undefined || isString(value.previousGroupRef))
+  && (value.previousOutputTargetRef === undefined || isString(value.previousOutputTargetRef))
+  && (value.nextOutputTargetRef === undefined || isString(value.nextOutputTargetRef))
+
+const isTrackUngroupChildSnapshot = (value: unknown) => isRecord(value)
+  && isString(value.trackRef)
+  && isString(value.previousGroupRef)
+  && (value.previousOutputTargetRef === undefined || isString(value.previousOutputTargetRef))
+
 const isAutomationPoint = (value: unknown) => isRecord(value)
   && isString(value.id)
   && isNumber(value.timeSec)
@@ -155,6 +166,19 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSe
       return isString(data.trackRef) && isScope(data.scope) && isBoolean(data.from) && isBoolean(data.to)
     case 'track-routing':
       return isString(data.trackRef) && isRoutingSnapshot(data.from) && isRoutingSnapshot(data.to)
+    case 'track-group':
+      return isString(data.groupTrackRef)
+        && (data.currentGroupTrackId === undefined || isString(data.currentGroupTrackId))
+        && isRecord(data.groupTrack)
+        && isNumber(data.groupTrack.index)
+        && isString(data.groupTrack.name)
+        && (data.groupTrack.color === undefined || isString(data.groupTrack.color))
+        && Array.isArray(data.childUpdates)
+        && data.childUpdates.every(isTrackGroupChildUpdate)
+    case 'track-ungroup':
+      return isString(data.groupTrackRef)
+        && Array.isArray(data.childSnapshots)
+        && data.childSnapshots.every(isTrackUngroupChildSnapshot)
     case 'track-color':
       return isString(data.trackRef)
         && (data.from === undefined || isString(data.from))

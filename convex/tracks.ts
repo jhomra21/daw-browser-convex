@@ -574,12 +574,17 @@ export const serverReorderAndGroup = mutation({
     await Promise.all(normalizedUpdates.map(async (update) => {
       const track = trackById.get(String(update.trackId));
       if (!track) return;
-      await ctx.db.patch(update.trackId, {
-        index: update.index,
-        groupId: update.groupId ?? undefined,
-      });
+      const nextGroupId = update.groupId ?? undefined;
+      if (track.index !== update.index || String(track.groupId) !== String(nextGroupId)) {
+        await ctx.db.patch(update.trackId, {
+          index: update.index,
+          groupId: nextGroupId,
+        });
+      }
+      const nextOutputTargetId = update.outputTargetId ?? undefined;
+      if (String(track.outputTargetId) === String(nextOutputTargetId)) return;
       const channel = await ensureMixerChannelForTrack(ctx, track);
-      await ctx.db.patch(channel._id, { outputTargetId: update.outputTargetId ?? undefined });
+      await ctx.db.patch(channel._id, { outputTargetId: nextOutputTargetId });
     }));
     return { status: "applied" };
   },

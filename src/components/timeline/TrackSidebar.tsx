@@ -101,6 +101,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     dragging: boolean;
     target?: TrackDropTarget;
   }>();
+  const [suppressTrackClickId, setSuppressTrackClickId] = createSignal<Track["id"]>();
   let cleanupAutomationResize: (() => void) | undefined;
 
   createEffect(() => {
@@ -290,6 +291,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     if (!drag || drag.pointerId !== event.pointerId) return;
     setTrackDrag(undefined);
     if (!drag.dragging || !drag.target) return;
+    setSuppressTrackClickId(drag.trackId);
     const selectedIds = new Set(sidebar().selectedTrackId ? [sidebar().selectedTrackId, drag.trackId] : [drag.trackId]);
     sidebar().onReorderTracks(normalizeDragMoveSet(sidebar().tracks, selectedIds), drag.target);
   };
@@ -634,6 +636,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       }}
                       onClick={(event) => {
                         event.stopPropagation();
+                        if (suppressTrackClickId() === track.id) {
+                          setSuppressTrackClickId(undefined);
+                          return;
+                        }
                         if (muteDisabled) return;
                         sidebar().onToggleMute(track.id);
                       }}

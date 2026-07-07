@@ -30,6 +30,7 @@ type UngroupTracksPlan = {
 type MoveTrackToGroupPlan = {
   trackId: TrackId
   groupId?: TrackId
+  outputTargetId?: TrackId
 }
 
 type TrackForReorder = Pick<Track, 'id' | 'groupId' | 'channelRole' | 'outputTargetId' | 'collapsed'> & {
@@ -58,6 +59,14 @@ type TrackReorderPlan = {
 type AssignGroupColorPlan = {
   trackUpdates: Array<{ trackId: TrackId; from: string | undefined; to: string }>
   clipUpdates: Array<{ clipId: string; trackId: TrackId; from: string | undefined; to: string }>
+}
+
+const outputTargetForGroupChange = (
+  track: Pick<Track, 'groupId' | 'outputTargetId'>,
+  groupId: TrackId | undefined,
+) => {
+  if (groupId) return track.outputTargetId ?? groupId
+  return track.outputTargetId === track.groupId ? undefined : track.outputTargetId
 }
 
 export const planGroupTracks = (input: {
@@ -99,7 +108,7 @@ export const planUngroupTracks = (input: {
     .map((track) => ({
       trackId: track.id,
       groupId: undefined,
-      outputTargetId: track.outputTargetId === input.groupId ? undefined : track.outputTargetId,
+      outputTargetId: outputTargetForGroupChange(track, undefined),
     })),
 })
 
@@ -110,12 +119,12 @@ export const planMoveTrackToGroup = (input: {
 }): MoveTrackToGroupPlan | null => {
   const track = input.tracks.find((candidate) => candidate.id === input.trackId)
   if (!track || track.channelRole === 'return') return null
-  if (!input.groupId) return { trackId: input.trackId, groupId: undefined }
+  if (!input.groupId) return { trackId: input.trackId, groupId: undefined, outputTargetId: outputTargetForGroupChange(track, undefined) }
 
   const group = input.tracks.find((candidate) => candidate.id === input.groupId)
   if (!group || group.channelRole !== 'group') return null
   if (wouldCreateCycle(input.tracks, input.trackId, input.groupId)) return null
-  return { trackId: input.trackId, groupId: input.groupId }
+  return { trackId: input.trackId, groupId: input.groupId, outputTargetId: outputTargetForGroupChange(track, input.groupId) }
 }
 
 export const resolveTrackDropZone = (input: {
@@ -214,7 +223,9 @@ export const planTrackReorder = (input: {
     const track = trackById.get(trackId)
     if (!track) continue
     const groupId = moveRoots.has(trackId) ? newParentGroupId : track.groupId
-    const outputTargetId = moveRoots.has(trackId) && groupId ? (track.outputTargetId ?? groupId) : track.outputTargetId
+    const outputTargetId = moveRoots.has(trackId)
+      ? outputTargetForGroupChange(track, groupId)
+      : track.outputTargetId
     if (track.index !== index || track.groupId !== groupId || track.outputTargetId !== outputTargetId) {
       patches.push({ trackId, index, groupId, outputTargetId })
     }

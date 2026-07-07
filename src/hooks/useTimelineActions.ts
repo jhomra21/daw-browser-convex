@@ -9,6 +9,7 @@ import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapte
 import { createOptimisticTrack, pushTrackCreateHistory } from '~/lib/tracks'
 import { planAssignGroupColor, planGroupTracks, planMoveTrackToGroup, planTrackReorder, planUngroupTracks } from '~/lib/track-group-ops'
 import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
+import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import { buildClipColorHistoryEntry, buildTrackColorHistoryEntry, buildTrackGroupHistoryEntry, buildTrackReorderHistoryEntry, buildTrackUngroupHistoryEntry } from '~/lib/undo/builders'
 import type { TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { HistoryEntry } from '~/lib/undo/types'
@@ -306,8 +307,8 @@ export function useTimelineActions(
     const plan = planMoveTrackToGroup({ tracks, trackId, groupId })
     const track = tracks.find((entry) => entry.id === trackId)
     if (!plan || !track) return
-    await persistTrackPatch(projectId, trackId, { groupId: plan.groupId, outputTargetId: track.outputTargetId }, track.sends)
-    applyTrackPatch(track, { groupId: plan.groupId, outputTargetId: track.outputTargetId })
+    await persistTrackPatch(projectId, trackId, { groupId: plan.groupId, outputTargetId: plan.outputTargetId }, track.sends)
+    applyTrackPatch(track, { groupId: plan.groupId, outputTargetId: plan.outputTargetId })
   }
 
   async function toggleTrackCollapsed(trackId: Track['id']): Promise<void> {
@@ -335,12 +336,20 @@ export function useTimelineActions(
     const plan = planAssignGroupColor(tracks, groupId)
     if (!plan || (plan.trackUpdates.length === 0 && plan.clipUpdates.length === 0)) return
     const trackById = new Map(tracks.map((track) => [track.id, track]))
-    await Promise.all([
-      ...plan.trackUpdates.map((update) => persistTrackPatch(projectId, update.trackId, { color: update.to })),
-      ...plan.clipUpdates.map((update) => isLocalId('project', projectId)
-        ? createLocalTimelineRepository(projectId).updateClip({ clipId: update.clipId, color: update.to })
-        : publishSharedTimelineOperation(projectId, { kind: 'clips.setColor', payload: { clipId: update.clipId, color: update.to } })),
-    ])
+    await runWithConcurrency([
+      ...plan.trackUpdates.map((update) => ({ kind: 'track' as const, update })),
+      ...plan.clipUpdates.map((update) => ({ kind: 'clip' as const, update })),
+    ], 8, async (item) => {
+      if (item.kind === 'track') {
+        await persistTrackPatch(projectId, item.update.trackId, { color: item.update.to })
+        return
+      }
+      if (isLocalId('project', projectId)) {
+        await createLocalTimelineRepository(projectId).updateClip({ clipId: item.update.clipId, color: item.update.to })
+        return
+      }
+      await publishSharedTimelineOperation(projectId, { kind: 'clips.setColor', payload: { clipId: item.update.clipId, color: item.update.to } })
+    })
     for (const update of plan.trackUpdates) {
       const track = trackById.get(update.trackId)
       if (track) applyTrackPatch(track, { color: update.to })
@@ -356,8 +365,8 @@ export function useTimelineActions(
       data: {
         entries: [
           ...plan.trackUpdates.flatMap((update) => {
-          const track = trackById.get(update.trackId)
-          return track ? [buildTrackColorHistoryEntry({ projectId, track, from: update.from, to: update.to })] : []
+            const track = trackById.get(update.trackId)
+            return track ? [buildTrackColorHistoryEntry({ projectId, track, from: update.from, to: update.to })] : []
           }),
           ...plan.clipUpdates.flatMap((update) => {
             const track = trackById.get(update.trackId)

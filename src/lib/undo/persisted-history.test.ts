@@ -173,6 +173,44 @@ describe('persisted undo history', () => {
     })
   })
 
+  test('keeps track group and ungroup entries', () => {
+    const groupEntry: HistoryEntry = {
+      type: 'track-group',
+      projectId: 'project-1',
+      data: {
+        groupTrackRef: 'group-ref',
+        currentGroupTrackId: 'group-1',
+        groupTrack: { index: 0, name: 'Group', color: 'green' },
+        childUpdates: [{
+          trackRef: 'track-ref-1',
+          previousGroupRef: 'old-group-ref',
+          previousOutputTargetRef: 'old-output-ref',
+          nextOutputTargetRef: 'group-ref',
+        }],
+      },
+    }
+    const ungroupEntry: HistoryEntry = {
+      type: 'track-ungroup',
+      projectId: 'project-1',
+      data: {
+        groupTrackRef: 'group-ref',
+        childSnapshots: [{
+          trackRef: 'track-ref-1',
+          previousGroupRef: 'group-ref',
+          previousOutputTargetRef: 'group-ref',
+        }],
+      },
+    }
+
+    expect(normalizePersistedHistory(serializePersistedHistory({
+      undo: [groupEntry],
+      redo: [ungroupEntry],
+    }))).toEqual({
+      undo: [groupEntry],
+      redo: [ungroupEntry],
+    })
+  })
+
   test('keeps section edit entries with valid child history entries', () => {
     const sectionEntry: HistoryEntry = {
       type: 'section-edit',

@@ -142,6 +142,14 @@ export default function TimelineWorkspace(props: Props) {
     const track = trackById().get(row.trackId);
     return track ? [track] : [];
   }));
+  const groupClipOverviewByTrackId = createMemo(() => {
+    const overviews = new Map<Track["id"], ReturnType<typeof buildGroupClipOverview>>();
+    for (const track of props.tracks) {
+      if (track.channelRole !== "group" || track.collapsed !== true) continue;
+      overviews.set(track.id, buildGroupClipOverview(track.id, props.tracks));
+    }
+    return overviews;
+  });
   const trackAreaHeight = () => {
     const layout = props.trackLayout;
     const tracksHeight = layout.length === 0 ? 0 : layout[layout.length - 1].topPx + layout[layout.length - 1].heightPx;
@@ -220,7 +228,7 @@ export default function TimelineWorkspace(props: Props) {
                         {(visibleTrack) => (
                           <TrackLane
                             track={visibleTrack()}
-                            groupClipOverview={visibleTrack().collapsed === true ? buildGroupClipOverview(visibleTrack().id, props.tracks) : []}
+                            groupClipOverview={groupClipOverviewByTrackId().get(visibleTrack().id) ?? []}
                             topPx={row.topPx}
                             automationHeightPx={row.automationHeightPx}
                             isDropTarget={props.dropTargetLane === i()}

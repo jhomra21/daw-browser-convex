@@ -4,7 +4,7 @@ import { calculateAudioTimelineTrimOffsets } from '~/lib/audio-left-resize-timin
 import { buildClipCreateSnapshot, type BatchClipCreateItem } from '~/lib/clip-create'
 import { secondsToBeats, type TimelineTimeRange } from '~/lib/timeline-range-selection'
 
-export type TimelineSection = {
+type TimelineSection = {
   range: TimelineTimeRange
   trackIds: Track['id'][]
 }
@@ -32,7 +32,7 @@ export type SectionAutomationFragment = {
   }>
 }
 
-export type ClipRangeDeletePatch = {
+type ClipRangeDeletePatch = {
   deleteClipIds: string[]
   updateClips: Array<{
     clipId: string
@@ -48,9 +48,9 @@ export type ClipRangeDeletePatch = {
   createClips: BatchClipCreateItem[]
 }
 
-export const clipEndSec = (clip: Pick<Clip, 'startSec' | 'duration'>) => clip.startSec + clip.duration
+const clipEndSec = (clip: Pick<Clip, 'startSec' | 'duration'>) => clip.startSec + clip.duration
 
-export const intersectsRange = (
+const intersectsRange = (
   item: { startSec: number; endSec: number },
   range: TimelineTimeRange,
 ) => item.startSec < range.endSec && item.endSec > range.startSec
@@ -93,7 +93,7 @@ const shiftClipOffsets = (
   }
 }
 
-export const buildTrimmedClipCreateSnapshot = (
+const buildTrimmedClipCreateSnapshot = (
   clip: Clip,
   input: { startSec: number; endSec: number; bpm: number; preserveHistoryRef?: boolean },
 ): ClipCreateSnapshot => {

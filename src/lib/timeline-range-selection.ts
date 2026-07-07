@@ -49,7 +49,7 @@ export const isTimelineRangeSelectionEqual = (
   return left.trackIds.every((trackId, index) => trackId === right.trackIds[index])
 }
 
-export const beatsToSeconds = (beats: number, bpm: number) => (
+const beatsToSeconds = (beats: number, bpm: number) => (
   beats * 60 / Math.max(1e-6, bpm)
 )
 
@@ -57,7 +57,7 @@ export const secondsToBeats = (seconds: number, bpm: number) => (
   seconds * Math.max(1e-6, bpm) / 60
 )
 
-export const barDurationSec = (bpm: number) => beatsToSeconds(4, bpm)
+const barDurationSec = (bpm: number) => beatsToSeconds(4, bpm)
 
 export const floorSecToBar = (timeSec: number, bpm: number) => {
   const bar = barDurationSec(bpm)

@@ -1,7 +1,7 @@
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { openLocalProjectDb, type LocalProjectAssetRow } from '~/lib/local-project-db'
 
-export type LocalAssetFolderRow = {
+type LocalAssetFolderRow = {
   id: string
   name: string
   createdAt: number

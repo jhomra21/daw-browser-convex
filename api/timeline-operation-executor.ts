@@ -56,6 +56,7 @@ export const executeTimelineOperation = async (
         index: operation.payload.index,
         kind: operation.payload.kind,
         channelRole: operation.payload.channelRole,
+        color: operation.payload.color,
         operationId: operation.payload.operationId,
       })
     case 'tracks.lock':

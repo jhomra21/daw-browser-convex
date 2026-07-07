@@ -23,8 +23,21 @@ type TimelineTrackLike<TTrackId extends string = Track['id']> = Omit<Track, 'id'
   sends?: Array<Omit<TrackSend, 'targetId'> & { targetId: TTrackId }>
 }
 
-type TimelineViewLike<TTrackId extends string = Track['id']> = {
-  tracks: Array<{ _id: TTrackId; lockedBy?: string | null }>
+export type TimelineViewTrackLike<TTrackId extends string = Track['id']> = {
+  _id: TTrackId
+  index: number
+  kind?: string
+  groupId?: TTrackId
+  collapsed?: boolean
+  color?: string
+  lockedBy?: string | null
+  channelRole?: string
+  outputTargetId?: TTrackId
+  sends?: Array<Omit<TrackSend, 'targetId'> & { targetId: TTrackId }>
+}
+
+export type TimelineViewLike<TTrackId extends string = Track['id']> = {
+  tracks: Array<TimelineViewTrackLike<TTrackId>>
   clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number; audioWarp?: Clip['audioWarp']; gain?: number }>
 }
 
@@ -88,6 +101,7 @@ type ResolveTimelineTracksOptions = {
 
 type ServerTimelineIndex<TTrackId extends string = Track['id']> = {
   trackIds: Set<TTrackId>
+  trackRowsById: Map<TTrackId, TimelineViewTrackLike<TTrackId>>
   clipIds: Set<string>
   clipRowsById: Map<string, { trackId: TTrackId; startSec: number; duration: number; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; gain?: number; midiOffsetBeats: number }>
   trackLocksById: Map<TTrackId, string | null>
@@ -98,6 +112,25 @@ const MIDI_WAVES = ['sine', 'square', 'sawtooth', 'triangle'] as const
 const nearlyEqual = (left: number | undefined, right: number | undefined) => {
   if (left === undefined || right === undefined) return left === right
   return Math.abs(left - right) < 1e-6
+}
+
+const optionalIdEqual = (left: string | undefined, right: string | undefined) => (
+  left === undefined || right === undefined
+    ? left === right
+    : String(left) === String(right)
+)
+
+const trackSendsEqual = (
+  left: readonly TrackSend[] | undefined,
+  right: readonly TrackSend[] | undefined,
+) => {
+  const leftSends = left ?? []
+  const rightSends = right ?? []
+  if (leftSends.length !== rightSends.length) return false
+  return leftSends.every((send, index) => {
+    const other = rightSends[index]
+    return !!other && optionalIdEqual(send.targetId, other.targetId) && nearlyEqual(send.amount, other.amount)
+  })
 }
 
 const normalizeTrackKind = (value: string | undefined): Track['kind'] => {
@@ -193,11 +226,18 @@ const applyTrackMix = (
   const serverVolume = serverState?.serverVolumes.get(track.id)
   const pendingRouting = options.client.mix.pendingSharedTrackRouting.get(track.id)
   const pendingMix = options.client.mix.pendingSharedMixByTrackId.get(track.id)
+  const pendingTrack = options.client.tracks.pendingEntriesById.get(track.id)?.track
   const serverRouting = serverState?.serverRouting.get(track.id)
   const localRouting = localMixState?.sends !== undefined || localMixState?.outputTargetId !== undefined
     ? {
         sends: localMixState.sends ?? track.sends ?? [],
         outputTargetId: localMixState.outputTargetId ?? undefined,
+      }
+    : undefined
+  const pendingTrackRouting = pendingTrack
+    ? {
+        sends: pendingTrack.sends ?? track.sends ?? [],
+        outputTargetId: pendingTrack.outputTargetId,
       }
     : undefined
   const resolvedMix = resolveTrackMixView({
@@ -227,7 +267,7 @@ const applyTrackMix = (
 
   const routingSource = localRouting ?? (canWriteSharedMix && pendingRouting
     ? pendingRouting
-    : serverRouting ?? { sends: track.sends ?? [], outputTargetId: track.outputTargetId })
+    : pendingTrackRouting ?? serverRouting ?? { sends: track.sends ?? [], outputTargetId: track.outputTargetId })
   const normalizedRouting = normalizeTrackRouting(track, routingSource, tracks)
   track.sends = normalizedRouting.sends
   track.outputTargetId = normalizedRouting.outputTargetId
@@ -235,6 +275,7 @@ const applyTrackMix = (
 
 export function buildServerTimelineIndex<TTrackId extends string>(data: TimelineViewLike<TTrackId>): ServerTimelineIndex<TTrackId> {
   const trackIds = new Set<TTrackId>()
+  const trackRowsById = new Map<TTrackId, TimelineViewTrackLike<TTrackId>>()
   const clipIds = new Set<string>()
   const clipRowsById = new Map<string, { trackId: TTrackId; startSec: number; duration: number; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; gain?: number; midiOffsetBeats: number }>()
   const trackLocksById = new Map<TTrackId, string | null>()
@@ -242,6 +283,7 @@ export function buildServerTimelineIndex<TTrackId extends string>(data: Timeline
   for (const track of data.tracks) {
     const trackId = track._id
     trackIds.add(trackId)
+    trackRowsById.set(trackId, track)
     trackLocksById.set(trackId, typeof track.lockedBy === 'string' ? track.lockedBy : null)
   }
 
@@ -262,10 +304,26 @@ export function buildServerTimelineIndex<TTrackId extends string>(data: Timeline
 
   return {
     trackIds,
+    trackRowsById,
     clipIds,
     clipRowsById,
     trackLocksById,
   }
+}
+
+export function isTrackEntryReflected<TTrackId extends string>(
+  entry: PendingTrackEntry<TTrackId>,
+  serverTrack: TimelineViewTrackLike<TTrackId>,
+): boolean {
+  if (entry.index !== serverTrack.index) return false
+  if (normalizeTrackKind(serverTrack.kind) !== normalizeTrackKind(entry.track.kind)) return false
+  if (normalizeTrackChannelRole(serverTrack.channelRole) !== normalizeTrackChannelRole(entry.track.channelRole)) return false
+  if (!optionalIdEqual(entry.track.groupId, serverTrack.groupId)) return false
+  if (entry.track.collapsed !== serverTrack.collapsed) return false
+  if (entry.track.color !== serverTrack.color) return false
+  if (!optionalIdEqual(entry.track.outputTargetId, serverTrack.outputTargetId)) return false
+  if (!trackSendsEqual(entry.track.sends, serverTrack.sends)) return false
+  return true
 }
 
 export function isClipPatchReflected<TTrackId extends string>(
@@ -300,6 +358,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
         _id: clip.id,
       }))
     : options.server.data?.clips ?? []
+  const projectedTrackOrderById = new Map<Track['id'], number>()
 
   for (let index = 0; index < serverTracks.length; index++) {
     const trackRow = serverTracks[index]
@@ -309,6 +368,9 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
     const localTrackRow = localSnapshot ? localSnapshot.tracks[index] : undefined
     const historyRef = options.client.tracks.historyRefsById.get(trackId) ?? localTrackRow?.historyRef ?? trackId
     const serverVolume = options.server.trackState?.serverVolumes.get(trackId)
+    const pendingTrack = options.client.tracks.pendingEntriesById.get(trackId)
+    const pendingTrackValue = pendingTrack?.track
+    projectedTrackOrderById.set(trackId, pendingTrack?.index ?? index)
 
     projectedTracks.push({
       id: trackId,
@@ -326,11 +388,20 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
       lockedBy: typeof trackRow.lockedBy === 'string' ? trackRow.lockedBy : null,
       kind: normalizeTrackKind(trackRow.kind) ?? 'audio',
       channelRole: normalizeTrackChannelRole(trackRow.channelRole),
-      sends: localTrackRow?.sends ?? [],
-      outputTargetId: localTrackRow?.outputTargetId,
+      groupId: pendingTrackValue ? pendingTrackValue.groupId : localTrackRow?.groupId ?? trackRow.groupId,
+      collapsed: pendingTrackValue ? pendingTrackValue.collapsed : typeof trackRow.collapsed === 'boolean' ? trackRow.collapsed : localTrackRow?.collapsed,
+      color: pendingTrackValue ? pendingTrackValue.color : typeof trackRow.color === 'string' ? trackRow.color : localTrackRow?.color,
+      sends: pendingTrackValue?.sends ?? localTrackRow?.sends ?? trackRow.sends ?? [],
+      outputTargetId: pendingTrackValue ? pendingTrackValue.outputTargetId : localTrackRow?.outputTargetId ?? trackRow.outputTargetId,
     })
     projectedTrackIds.add(trackId)
   }
+
+  projectedTracks.sort((left, right) => {
+    const leftIndex = projectedTrackOrderById.get(left.id) ?? 0
+    const rightIndex = projectedTrackOrderById.get(right.id) ?? 0
+    return leftIndex - rightIndex
+  })
 
   const pendingTrackEntries = Array.from(options.client.tracks.pendingEntriesById.values())
     .filter((entry) => !options.client.tracks.removedIds.has(entry.track.id))

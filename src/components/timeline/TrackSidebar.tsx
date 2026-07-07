@@ -137,7 +137,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const groupTrackNames = createMemo(
     () =>
       new Map<string, string>(
-        groupTracks().map((track) => [track.id, track.name]),
+        groupTracks().map((track, index) => [track.id, `Group ${index + 1}`]),
       ),
   );
   const depthByTrackId = createMemo(() => new Map(sidebar().trackLayout.map((row) => [row.trackId, row.depth])));
@@ -151,7 +151,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       ),
   );
   const displayTrackName = (track: Track) =>
-    returnTrackNames().get(track.id) ?? track.name;
+    groupTrackNames().get(track.id) ?? returnTrackNames().get(track.id) ?? track.name;
   const automationMetaByTrackId = createMemo(() => {
     const byTrackId = new Map<string, {
       automatedParameterIds: ReadonlySet<string>;
@@ -274,6 +274,9 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   const startTrackDrag = (trackId: Track["id"], event: PointerEvent) => {
     if (event.button !== 0) return;
+    if (event.currentTarget instanceof HTMLElement) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
     setTrackDrag({
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -287,17 +290,27 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     const drag = trackDrag();
     if (!drag || drag.pointerId !== event.pointerId) return;
     const dragging = drag.dragging || Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4;
-    setTrackDrag({ ...drag, dragging, target: dragging ? dropTargetAt(event.clientY) : undefined });
+    const target = dragging ? dropTargetAt(event.clientY) : undefined;
+    if (drag.dragging === dragging && drag.target?.trackId === target?.trackId && drag.target?.zone === target?.zone) return;
+    setTrackDrag({ ...drag, dragging, target });
   };
 
   const finishTrackDrag = (event: PointerEvent) => {
     const drag = trackDrag();
     if (!drag || drag.pointerId !== event.pointerId) return;
     setTrackDrag(undefined);
+    if (event.currentTarget instanceof HTMLElement && event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
     if (!drag.dragging || !drag.target) return;
     setSuppressTrackClickId(drag.trackId);
     const selectedIds = new Set(sidebar().selectedTrackId ? [sidebar().selectedTrackId, drag.trackId] : [drag.trackId]);
     sidebar().onReorderTracks(normalizeDragMoveSet(sidebar().tracks, selectedIds), drag.target);
+  };
+
+  const cancelTrackDrag = (event: PointerEvent) => {
+    const drag = trackDrag();
+    if (drag?.pointerId === event.pointerId) setTrackDrag(undefined);
   };
 
   const handleOutputTargetChange = (track: Track, value: string) => {
@@ -472,6 +485,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const isGroupTrack = channelRole === "group";
             const depth = () => depthByTrackId().get(track.id) ?? 0;
             const trackColor = () => track.color ?? (isGroupTrack ? "rgb(34 197 94)" : "rgb(75 85 99)");
+            const parentGroupColor = () => {
+              if (!track.groupId) return undefined;
+              const parent = sidebar().trackById.get(track.groupId);
+              return parent?.color ?? "rgb(34 197 94)";
+            };
             const muteDisabled = lockedByOther;
             const soloDisabled = lockedByOther;
             const volumeDisabled = lockedByOther;
@@ -586,19 +604,30 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               <div
                 class={cn(
                   "relative [box-shadow:inset_0_-1px_0_rgb(38_38_38)]",
-                  sidebar().selectedTrackId === track.id
+                  isGroupTrack
+                    ? "text-black"
+                    : sidebar().selectedTrackId === track.id
                     ? "bg-timeline-surface-muted"
                     : "bg-timeline-surface",
                 )}
-                style={{ height: `${LANE_HEIGHT + automationTotalHeight()}px` }}
+                style={{
+                  height: `${LANE_HEIGHT + automationTotalHeight()}px`,
+                  ...(isGroupTrack ? { background: trackColor() } : {}),
+                }}
                 onClick={() => sidebar().onTrackClick(track.id)}
                 onPointerMove={updateTrackDrag}
                 onPointerUp={finishTrackDrag}
+                onPointerCancel={cancelTrackDrag}
+                onLostPointerCapture={cancelTrackDrag}
               >
                 <Show when={isGroupTrack}>
                   <div
-                    class="absolute left-0 right-0 top-0 h-1"
-                    style={{ background: trackColor() }}
+                    class="absolute bottom-0 top-0"
+                    style={{
+                      left: `${depth() * GROUP_INDENT_PX}px`,
+                      width: `${GROUP_RAIL_WIDTH}px`,
+                      background: trackColor(),
+                    }}
                   />
                 </Show>
                 <Show when={track.groupId}>
@@ -607,7 +636,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     style={{
                       left: `${Math.max(0, depth() - 1) * GROUP_INDENT_PX}px`,
                       width: `${GROUP_RAIL_WIDTH}px`,
-                      background: trackColor(),
+                      background: parentGroupColor(),
                     }}
                   />
                 </Show>
@@ -618,11 +647,25 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     "padding-left": `${8 + depth() * GROUP_INDENT_PX}px`,
                   }}
                 >
-                  <div class="min-w-0 overflow-hidden">
+                  <div class="flex min-w-0 items-center gap-1 overflow-hidden">
+                    <Show when={isGroupTrack}>
+                      <button
+                        class="flex h-7 w-4 shrink-0 items-center justify-center text-xs text-muted-foreground hover:text-foreground"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          sidebar().onToggleTrackCollapsed(track.id);
+                        }}
+                        title={track.collapsed ? "Expand group" : "Collapse group"}
+                      >
+                        {track.collapsed ? "▶" : "▼"}
+                      </button>
+                    </Show>
                     <button
                       class={cn(
-                        "flex h-7 w-full items-center justify-center border px-2 text-center text-sm font-semibold",
-                        muteDisabled
+                        "flex h-7 flex-1 items-center justify-center border px-2 text-center text-sm font-semibold",
+                        isGroupTrack
+                          ? "border-transparent bg-timeline-background text-foreground hover:bg-timeline-surface-muted"
+                          : muteDisabled
                           ? "cursor-not-allowed border-border text-muted-foreground"
                           : muted()
                             ? "border-border bg-amber-500 text-black"
@@ -630,7 +673,9 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                               ? "border-border"
                               : "border-border hover:border-border",
                       )}
-                      style={{ "border-width": "0.5px" }}
+                      style={{
+                        "border-width": "0.5px",
+                      }}
                       disabled={muteDisabled}
                       onPointerDown={(event) => startTrackDrag(track.id, event)}
                       onDblClick={(event) => {
@@ -655,21 +700,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             : "Mute track"
                       }
                     >
-                      <span class="flex min-w-0 flex-col items-center gap-1">
-                        <span class="truncate">{displayTrackName(track)}</span>
-                        <Show when={isGroupTrack}>
-                          <span
-                            class="bg-muted px-1.5 py-0.5 text-xs uppercase tracking-wide text-muted-foreground"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              sidebar().onToggleTrackCollapsed(track.id);
-                            }}
-                            title={track.collapsed ? "Expand group" : "Collapse group"}
-                          >
-                            {track.collapsed ? "Group ▸" : "Group ▾"}
-                          </span>
-                        </Show>
-                      </span>
+                      <span class="truncate">{displayTrackName(track)}</span>
                     </button>
                   </div>
 
@@ -716,7 +747,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           <For each={groupTracks()}>
                             {(groupTrack) => (
                               <option value={groupTrack.id}>
-                                {groupTrack.name}
+                                {displayTrackName(groupTrack)}
                               </option>
                             )}
                           </For>

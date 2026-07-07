@@ -96,6 +96,7 @@ export async function createOptimisticTrack(options: CreateOptimisticTrackOption
     index: options.index,
     kind: options.kind,
     channelRole: options.channelRole,
+    color: options.color,
   })
   const result = await publishSharedTimelineOperation(options.projectId, operation)
   const trackId = typeof result === 'string' ? result : null

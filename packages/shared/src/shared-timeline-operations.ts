@@ -96,7 +96,7 @@ type SharedSynthParams = {
 type SharedReverbParams = Required<Pick<ReverbParamsInput, 'enabled' | 'wet' | 'decaySec' | 'preDelayMs'>> & Omit<ReverbParamsInput, 'enabled' | 'wet' | 'decaySec' | 'preDelayMs'>
 
 export type SharedTimelineOperation =
-  | { kind: 'tracks.create'; payload: { index?: number; kind?: string; channelRole?: string; operationId?: string } }
+  | { kind: 'tracks.create'; payload: { index?: number; kind?: string; channelRole?: string; color?: string; operationId?: string } }
   | { kind: 'tracks.lock'; payload: { trackId: string } }
   | { kind: 'tracks.unlock'; payload: { trackId: string } }
   | { kind: 'clips.create'; payload: SharedTimelineClipCreatePayload }
@@ -109,7 +109,7 @@ export type SharedTimelineOperation =
   | { kind: 'clips.setGain'; payload: { clipId: string; gain: number } }
   | { kind: 'clips.setColor'; payload: { clipId: string; color: string } }
   | { kind: 'tracks.setRouting'; payload: { trackId: string; routing: TrackRouting } }
-  | { kind: 'tracks.setGroup'; payload: { trackId: string; groupId?: string } }
+  | { kind: 'tracks.setGroup'; payload: { trackId: string; groupId?: string | null } }
   | { kind: 'tracks.reorderAndGroup'; payload: { updates: Array<{ trackId: string; index: number; groupId?: string | null; outputTargetId?: string | null }> } }
   | { kind: 'tracks.setCollapsed'; payload: { trackId: string; collapsed: boolean } }
   | { kind: 'tracks.setColor'; payload: { trackId: string; color?: string } }
@@ -174,6 +174,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
 const readOptionalNumber = (value: unknown) => typeof value === 'number' ? value : undefined
 const readOptionalBoolean = (value: unknown) => typeof value === 'boolean' ? value : undefined
 const readOptionalString = (value: unknown) => typeof value === 'string' ? value : undefined
+const readOptionalNullableString = (value: unknown) => typeof value === 'string' || value === null ? value : undefined
 
 const readAudioWarp = (value: unknown) => normalizeAudioWarp(value)
 
@@ -494,6 +495,7 @@ const parseTrackCreate = (payload: Record<string, unknown>): SharedTimelineOpera
     index: readOptionalNumber(payload.index),
     kind: readOptionalString(payload.kind),
     channelRole: readOptionalString(payload.channelRole),
+    color: readOptionalString(payload.color),
     operationId: readOptionalString(payload.operationId),
   },
 })
@@ -600,7 +602,7 @@ const parseTrackRouting = (payload: Record<string, unknown>): SharedTimelineOper
 
 const parseTrackGroup = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
   typeof payload.trackId === 'string'
-    ? { kind: 'tracks.setGroup', payload: { trackId: payload.trackId, groupId: readOptionalString(payload.groupId) } }
+    ? { kind: 'tracks.setGroup', payload: { trackId: payload.trackId, groupId: readOptionalNullableString(payload.groupId) } }
     : null
 )
 

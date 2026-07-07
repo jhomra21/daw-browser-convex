@@ -5,17 +5,14 @@ import { convexApi } from '~/lib/convex'
 import {
   buildServerTimelineIndex,
   isClipPatchReflected,
+  isTrackEntryReflected,
   type ClipTimelinePatch,
   type PendingTrackEntry,
+  type TimelineViewLike,
 } from '~/lib/resolve-timeline-tracks'
 import type { Track } from '@daw-browser/timeline-core/types'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
-
-type FullTimelineViewLike<TTrackId extends string = Track['id']> = {
-  tracks: Array<{ _id: TTrackId; lockedBy?: string | null }>
-  clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; audioWarp?: Track['clips'][number]['audioWarp']; gain?: number; midiOffsetBeats?: number }>
-}
 
 type PendingClipCreate<TTrackId extends string = Track['id']> = { trackId: TTrackId; clip: Track['clips'][number] }
 
@@ -64,7 +61,7 @@ type UseTimelineProjectionStateReturn = {
 
 function reconcileTimelineProjectionSnapshot<TTrackId extends string>(
   current: TimelineProjectionSnapshot<TTrackId>,
-  data: FullTimelineViewLike<TTrackId>,
+  data: TimelineViewLike<TTrackId>,
 ): TimelineProjectionSnapshot<TTrackId> {
   const serverIndex = buildServerTimelineIndex(data)
 
@@ -82,8 +79,9 @@ function reconcileTimelineProjectionSnapshot<TTrackId extends string>(
 
   const pendingTrackEntriesById = (() => {
     let next: Map<TTrackId, PendingTrackEntry<TTrackId>> | null = null
-    for (const [trackId] of current.pendingTrackEntriesById) {
-      if (!serverIndex.trackIds.has(trackId)) continue
+    for (const [trackId, entry] of current.pendingTrackEntriesById) {
+      const serverTrack = serverIndex.trackRowsById.get(trackId)
+      if (!serverTrack || !isTrackEntryReflected(entry, serverTrack)) continue
       if (!next) next = new Map(current.pendingTrackEntriesById)
       next.delete(trackId)
     }

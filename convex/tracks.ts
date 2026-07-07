@@ -206,6 +206,7 @@ const createTrackForUser = async (
     index?: number
     kind?: string
     channelRole?: string
+    color?: string
     operationId?: string
   },
 ) => {
@@ -233,6 +234,7 @@ const createTrackForUser = async (
         projectId: input.projectId,
         index: nextIndex,
         kind: input.kind,
+        color: input.color,
       });
       await ctx.db.insert(
         "mixerChannels",
@@ -389,10 +391,10 @@ const unlockTrackForUser = async (ctx: any, trackId: any, userId: string) => {
 }
 
 export const create = mutation({
-  args: { projectId: v.string(), index: v.optional(v.number()), kind: v.optional(v.string()), channelRole: v.optional(v.string()), operationId: v.optional(v.string()) },
-  handler: async (ctx, { projectId, index, kind, channelRole, operationId }) => {
+  args: { projectId: v.string(), index: v.optional(v.number()), kind: v.optional(v.string()), channelRole: v.optional(v.string()), color: v.optional(v.string()), operationId: v.optional(v.string()) },
+  handler: async (ctx, { projectId, index, kind, channelRole, color, operationId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    return await createTrackForUser(ctx, { projectId, userId, index, kind, channelRole, operationId });
+    return await createTrackForUser(ctx, { projectId, userId, index, kind, channelRole, color, operationId });
   },
 });
 
@@ -402,11 +404,12 @@ export const serverCreate = mutation({
     index: v.optional(v.number()),
     kind: v.optional(v.string()),
     channelRole: v.optional(v.string()),
+    color: v.optional(v.string()),
     operationId: v.optional(v.string()),
   },
-  handler: async (ctx, { projectId, index, kind, channelRole, operationId }) => {
+  handler: async (ctx, { projectId, index, kind, channelRole, color, operationId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    return await createTrackForUser(ctx, { projectId, userId, index, kind, channelRole, operationId });
+    return await createTrackForUser(ctx, { projectId, userId, index, kind, channelRole, color, operationId });
   },
 });
 
@@ -574,6 +577,12 @@ export const serverReorderAndGroup = mutation({
       }
     }
 
+    const normalizedUpdateById = new Map(normalizedUpdates.map((update) => [String(update.trackId), update]));
+    const proposedTracks = tracks.map((track) => {
+      const update = normalizedUpdateById.get(String(track._id));
+      return update ? { ...track, groupId: update.groupId ?? undefined } : track;
+    });
+
     await Promise.all(normalizedUpdates.map(async (update) => {
       const track = trackById.get(String(update.trackId));
       if (!track) return;
@@ -584,10 +593,22 @@ export const serverReorderAndGroup = mutation({
           groupId: nextGroupId,
         });
       }
-      const nextOutputTargetId = update.outputTargetId ?? undefined;
-      if (String(track.outputTargetId) === String(nextOutputTargetId)) return;
       const channel = await ensureMixerChannelForTrack(ctx, track);
-      await ctx.db.patch(channel._id, { outputTargetId: nextOutputTargetId });
+      const routing = sanitizeTrackRouting(
+        { _id: update.trackId, channelRole: track.channelRole },
+        { sends: channel.sends, outputTargetId: update.outputTargetId ?? undefined },
+        proposedTracks,
+      );
+      const nextOutputTargetId = routing.outputTargetId;
+      if (!nextOutputTargetId) {
+        if (channel.outputTargetId === undefined) return;
+        await ctx.db.patch(channel._id, { outputTargetId: undefined });
+        return;
+      }
+      const normalizedNextOutputTargetId = ctx.db.normalizeId("tracks", nextOutputTargetId);
+      if (!normalizedNextOutputTargetId) return;
+      if (String(channel.outputTargetId) === String(normalizedNextOutputTargetId)) return;
+      await ctx.db.patch(channel._id, { outputTargetId: normalizedNextOutputTargetId });
     }));
     return { status: "applied" };
   },

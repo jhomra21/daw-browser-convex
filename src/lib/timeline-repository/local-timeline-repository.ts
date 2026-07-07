@@ -501,7 +501,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     requireTrackIds(updates.flatMap((update) => update.groupId ? [update.groupId] : []), tracks)
     requireTrackIds(updates.flatMap((update) => update.outputTargetId ? [update.outputTargetId] : []), tracks)
     const timestamp = now()
-    const nextTracks = tracks.map((track) => {
+    const patchedTracks = tracks.map((track) => {
       const update = updateById.get(track.id)
       return update
         ? {
@@ -512,6 +512,17 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
             updatedAt: timestamp,
           }
         : track
+    })
+    const nextTracks = patchedTracks.map((track) => {
+      const routing = normalizeTrackRouting({
+        track,
+        sends: track.sends,
+        outputTargetId: track.outputTargetId,
+        tracks: patchedTracks,
+      })
+      return routing.outputTargetId === track.outputTargetId && sendsEqual(routing.sends, track.sends)
+        ? track
+        : { ...track, outputTargetId: routing.outputTargetId, sends: routing.sends }
     })
     await Promise.all(nextTracks.flatMap((track) => {
       const previous = trackById.get(track.id)

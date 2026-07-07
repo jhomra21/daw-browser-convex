@@ -86,27 +86,42 @@ export const wouldCreateCycle = (
   return false
 }
 
+const buildChildrenByParentTrackId = (
+  tracks: readonly Pick<Track, 'id' | 'groupId'>[],
+): Map<Track['id'], Track['id'][]> => {
+  const childrenByParent = new Map<Track['id'], Track['id'][]>()
+  for (const track of tracks) {
+    if (!track.groupId) continue
+    const children = childrenByParent.get(track.groupId) ?? []
+    children.push(track.id)
+    childrenByParent.set(track.groupId, children)
+  }
+  return childrenByParent
+}
+
+export const collectTrackDescendantIds = (
+  tracks: readonly Pick<Track, 'id' | 'groupId'>[],
+  rootTrackId: Track['id'],
+): Set<Track['id']> => {
+  const childrenByParent = buildChildrenByParentTrackId(tracks)
+  const descendants = new Set<Track['id']>()
+  const collect = (trackId: Track['id']) => {
+    for (const childId of childrenByParent.get(trackId) ?? []) {
+      if (descendants.has(childId)) continue
+      descendants.add(childId)
+      collect(childId)
+    }
+  }
+  collect(rootTrackId)
+  return descendants
+}
+
 export const buildGroupClipOverview = (
   groupId: Track['id'],
   tracks: readonly Track[],
 ): Array<{ startSec: number; endSec: number }> => {
-  const childrenByParent = new Map<string, Track[]>()
-  for (const track of tracks) {
-    if (!track.groupId) continue
-    const children = childrenByParent.get(track.groupId) ?? []
-    children.push(track)
-    childrenByParent.set(track.groupId, children)
-  }
-  const descendants: Track[] = []
-  const walk = (trackId: string) => {
-    for (const child of childrenByParent.get(trackId) ?? []) {
-      descendants.push(child)
-      walk(child.id)
-    }
-  }
-  walk(groupId)
-
-  const segments = descendants.flatMap((track) => (
+  const descendantIds = collectTrackDescendantIds(tracks, groupId)
+  const segments = tracks.filter((track) => descendantIds.has(track.id)).flatMap((track) => (
     track.clips.map((clip) => ({
       startSec: clip.startSec,
       endSec: clip.startSec + clip.duration,

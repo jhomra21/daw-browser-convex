@@ -26,6 +26,7 @@ import {
   pasteAutomationFragment,
   type SectionAutomationFragment,
 } from '~/lib/timeline-section-edit'
+import { collectTrackDescendantIds } from '~/lib/timeline-track-layout'
 import { calcNonOverlapStart, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import { buildAutomationEnvelopeHistoryEntry, buildClipDeleteHistoryEntry, buildClipTimingHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
@@ -654,19 +655,8 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     if (!track) return
     const rid = projectId()
     if (!rid) return
-    const collectDeletedTrackIds = (rootTrackId: Track['id']) => {
-      const deletedIds = new Set<Track['id']>()
-      const collect = (currentTrackId: Track['id']) => {
-        if (deletedIds.has(currentTrackId)) return
-        deletedIds.add(currentTrackId)
-        for (const child of snapshot) {
-          if (child.groupId === currentTrackId) collect(child.id)
-        }
-      }
-      collect(rootTrackId)
-      return deletedIds
-    }
-    const deletedTrackIds = collectDeletedTrackIds(trackId)
+    const deletedTrackIds = collectTrackDescendantIds(snapshot, trackId)
+    deletedTrackIds.add(trackId)
     const trackAutomation = automationEnvelopes().filter((envelope) => (
       envelope.target.kind === 'track' && deletedTrackIds.has(envelope.target.trackId)
     ))

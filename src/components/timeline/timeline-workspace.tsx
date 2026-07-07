@@ -18,7 +18,7 @@ import type { RuntimeTrack } from "~/lib/timeline-runtime-types";
 import { automationTargetKey } from "@daw-browser/shared";
 import type { TimelineWorkspaceAutomationModel } from "~/hooks/useTimelineAutomationController";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
-import type { TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
+import { buildGroupClipOverview, type TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
 
 const createViewportRedrawVersion = () => {
   const [version, setVersion] = createSignal(0);
@@ -133,7 +133,7 @@ type Props = {
 
 export default function TimelineWorkspace(props: Props) {
   const viewportRedrawVersion = createViewportRedrawVersion();
-  const trackById = createMemo(() => new Map(props.tracks.map((track) => [track.id, track])));
+  const trackById = createMemo(() => props.trackLookup.trackById);
   const visibleTracks = createMemo(() => props.trackLayout.flatMap((row) => {
     const track = trackById().get(row.trackId);
     return track ? [track] : [];
@@ -216,6 +216,7 @@ export default function TimelineWorkspace(props: Props) {
                         {(visibleTrack) => (
                           <TrackLane
                             track={visibleTrack()}
+                            groupClipOverview={visibleTrack().collapsed === true ? buildGroupClipOverview(visibleTrack().id, props.tracks) : []}
                             topPx={row.topPx}
                             automationHeightPx={row.automationHeightPx}
                             isDropTarget={props.dropTargetLane === i()}
@@ -317,6 +318,8 @@ export default function TimelineWorkspace(props: Props) {
             <TrackSidebar
               sidebar={{
                 tracks: visibleTracks(),
+                trackById: trackById(),
+                trackLayout: props.trackLayout,
                 selectedTrackId: props.selection.selectedTrackId(),
                 sidebarWidth: props.sidebarWidth,
                 bottomOffsetPx: props.bottomPanelOffsetPx,

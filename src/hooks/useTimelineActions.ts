@@ -196,8 +196,8 @@ export function useTimelineActions(
     const projectId = options.room.projectId()
     if (!projectId) return
     const tracks = options.tracks()
-    const groupTrackId = crypto.randomUUID()
-    const plan = planGroupTracks({ tracks, selectedTrackIds: trackIds, groupTrackId })
+    const pendingGroupTrackId = '__pending_group_track__'
+    const plan = planGroupTracks({ tracks, selectedTrackIds: trackIds, groupTrackId: pendingGroupTrackId })
     if (!plan) return
     const groupTrack = await createTimelineTrack({
       channelRole: 'group',
@@ -205,16 +205,24 @@ export function useTimelineActions(
       index: plan.groupTrack.index,
     }, { pushHistory: false, select: false })
     if (!groupTrack) return
+    const trackById = new Map(tracks.map((track) => [track.id, track]))
+    await Promise.all(plan.childUpdates.map(async (update) => {
+      const track = trackById.get(update.trackId)
+      const outputTargetId = update.outputTargetId === pendingGroupTrackId ? groupTrack.id : update.outputTargetId
+      if (!track) return
+      await persistTrackPatch(projectId, track.id, { groupId: groupTrack.id, outputTargetId }, track.sends)
+    }))
     for (const update of plan.childUpdates) {
-      const track = tracks.find((entry) => entry.id === update.trackId)
+      const track = trackById.get(update.trackId)
+      const outputTargetId = update.outputTargetId === pendingGroupTrackId ? groupTrack.id : update.outputTargetId
       if (!track) continue
-      await persistTrackPatch(projectId, track.id, { groupId: groupTrack.id, outputTargetId: update.outputTargetId }, track.sends)
-      applyTrackPatch(track, { groupId: groupTrack.id, outputTargetId: update.outputTargetId })
+      applyTrackPatch(track, { groupId: groupTrack.id, outputTargetId })
     }
     options.creation.pushHistory(buildTrackGroupHistoryEntry({
       projectId,
       tracks,
       groupTrack,
+      groupTrackIndex: plan.groupTrack.index,
       childTrackIds: plan.childUpdates.map((update) => update.trackId),
     }))
   }
@@ -227,16 +235,21 @@ export function useTimelineActions(
     if (!groupTrack) return
     const plan = planUngroupTracks({ tracks, groupId })
     if (plan.childUpdates.length === 0) return
+    const trackById = new Map(tracks.map((track) => [track.id, track]))
     options.creation.pushHistory(buildTrackUngroupHistoryEntry({
       projectId,
       tracks,
       groupTrack,
       childTrackIds: plan.childUpdates.map((update) => update.trackId),
     }))
-    for (const update of plan.childUpdates) {
-      const track = tracks.find((entry) => entry.id === update.trackId)
-      if (!track) continue
+    await Promise.all(plan.childUpdates.map(async (update) => {
+      const track = trackById.get(update.trackId)
+      if (!track) return
       await persistTrackPatch(projectId, track.id, { groupId: undefined, outputTargetId: update.outputTargetId }, track.sends)
+    }))
+    for (const update of plan.childUpdates) {
+      const track = trackById.get(update.trackId)
+      if (!track) continue
       applyTrackPatch(track, { groupId: undefined, outputTargetId: update.outputTargetId })
     }
   }

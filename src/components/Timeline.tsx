@@ -567,6 +567,22 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
   });
 
+  const trackLayout = createMemo(() => {
+    const lanes = automation.workspace().lanes;
+    const tracks = renderTracks();
+    const tree = buildTrackTree(tracks);
+    const collapsedById = new Map(tracks.map((track) => [track.id, track.collapsed === true]));
+    const visibleTrackIds = flattenVisibleTracks(tree, collapsedById);
+    return buildTimelineTrackLayoutRows({
+      tracks,
+      visibleTrackIds,
+      depthByTrackId: computeDepthMap(tree),
+      visibleByTrackId: lanes.visibleByTrackId,
+      heightsByLaneOwnerKey: lanes.heightsByLaneOwnerKey,
+      visibleParameterIdsByTrackId: lanes.visibleParameterIdsByTrackId,
+    });
+  });
+
   const {
     handleDrop: onDrop,
     handleFiles,
@@ -575,6 +591,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   } = useTimelineClipImport({
     audioEngine,
     tracks: () => renderTracks(),
+    trackLayout,
     removeLocalTrack: projection.removeLocalTrack,
     insertLocalClip: projection.insertLocalClip,
     removeLocalClips: projection.removeLocalClips,
@@ -610,7 +627,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     handleRootDrop,
     handleRootDragLeave,
   } = useTimelineDragDrop({
-    tracks: () => renderTracks(),
+    trackLayout,
     rootElement: () => rootRef,
     scrollElement: () => scrollRef,
     onDrop,
@@ -702,22 +719,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     applyAutomationEnvelope: automation.applyEnvelope,
     grantClipWrites,
     notify,
-  });
-
-  const trackLayout = createMemo(() => {
-    const lanes = automation.workspace().lanes;
-    const tracks = renderTracks();
-    const tree = buildTrackTree(tracks);
-    const collapsedById = new Map(tracks.map((track) => [track.id, track.collapsed === true]));
-    const visibleTrackIds = flattenVisibleTracks(tree, collapsedById);
-    return buildTimelineTrackLayoutRows({
-      tracks,
-      visibleTrackIds,
-      depthByTrackId: computeDepthMap(tree),
-      visibleByTrackId: lanes.visibleByTrackId,
-      heightsByLaneOwnerKey: lanes.heightsByLaneOwnerKey,
-      visibleParameterIdsByTrackId: lanes.visibleParameterIdsByTrackId,
-    });
   });
 
   const timelineSelection = useTimelineSelection({

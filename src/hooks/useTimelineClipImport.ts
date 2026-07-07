@@ -7,7 +7,8 @@ import { isLocalId } from '@daw-browser/shared'
 import { canTrackReceiveAudioClip, getTrackChannelRole } from '@daw-browser/timeline-core/track-routing'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE, type SampleDragData } from '~/lib/sample-drag-data'
-import { clientXToSec, yToLaneIndex, calcNonOverlapStart, quantizeSecToGrid, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
+import { clientXToSec, calcNonOverlapStart, quantizeSecToGrid, calcNonOverlapStartGridAligned, RULER_HEIGHT } from '~/lib/timeline-utils'
+import { trackIndexAtY, type TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { createAudioImportTransaction } from '~/lib/timeline-audio-import'
 import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
@@ -28,6 +29,7 @@ type CreateTimelineTrack = (
 type TimelineClipImportOptions = {
   audioEngine: AudioEngine
   tracks: Accessor<Track[]>
+  trackLayout: Accessor<TimelineTrackLayoutRow[]>
   removeLocalTrack: (trackId: Track['id']) => void
   insertLocalClip: (trackId: Track['id'], clip: Clip) => void
   removeLocalClips: (clipIds: Iterable<string>) => void
@@ -66,6 +68,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
   const {
     audioEngine,
     tracks,
+    trackLayout,
     removeLocalTrack,
     insertLocalClip,
     removeLocalClips,
@@ -144,13 +147,16 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     const scroll = getScrollElement()
     if (!scroll) return null
 
-    const laneIdx = yToLaneIndex(clientY, scroll)
+    const rect = scroll.getBoundingClientRect()
+    const y = clientY - rect.top + (scroll.scrollTop || 0) - RULER_HEIGHT
+    const laneIdx = trackIndexAtY(trackLayout(), y)
     const snapshot = tracks()
-    if (snapshot.length === 0 || laneIdx >= snapshot.length || laneIdx < 0) {
+    const row = laneIdx >= 0 ? trackLayout()[laneIdx] : undefined
+    if (snapshot.length === 0 || !row) {
       const created = await createAudioTrack()
       return created ? { track: created, autoCreated: true } : null
     }
-    const track = requireAudioTrack(snapshot[laneIdx])
+    const track = requireAudioTrack(snapshot.find((entry) => entry.id === row.trackId))
     return track ? { track, autoCreated: false } : null
   }
 

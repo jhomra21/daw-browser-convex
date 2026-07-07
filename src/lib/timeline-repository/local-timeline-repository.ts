@@ -318,7 +318,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
   const updateTrack = async (input: UpdateTrackInput): Promise<TimelineTrackRow | null> => {
     const [row, trackRows] = await Promise.all([
       readEntityRow(projectId, TRACK_KIND, input.trackId),
-      input.sends !== undefined || input.outputTargetId !== undefined || input.groupId !== undefined
+      input.sends !== undefined || input.outputTargetId !== undefined
         ? readEntityRowsByKind(projectId, TRACK_KIND)
           .then(trackValues)
         : Promise.resolve([]),

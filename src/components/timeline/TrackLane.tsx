@@ -1,6 +1,6 @@
 import { createMemo, type Component, For } from 'solid-js'
 import type { Track } from '@daw-browser/timeline-core/types'
-import { LANE_HEIGHT } from '~/lib/timeline-utils'
+import { LANE_HEIGHT, PPS } from '~/lib/timeline-utils'
 import { clipRangeOverlap, type TimelineRangeSelection } from '~/lib/timeline-range-selection'
 import ClipComponent, { type ClipContextMenuActions } from './ClipComponent'
 import AutomationLane from './automation-lane'
@@ -9,6 +9,7 @@ import TimelineContextMenu, { type TimelineContextMenuItem } from './context-men
 
 type TrackLaneProps = {
   track: Track
+  groupClipOverview?: Array<{ startSec: number; endSec: number }>
   topPx: number
   automationHeightPx: number
   selectedClipIds: Set<string>
@@ -107,27 +108,41 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
           </For>
         </div>
       ) : null}
-      <For each={props.track.clips}>
-        {(clip) => (
-          <ClipComponent
-            clip={clip}
-            trackId={props.track.id}
-            isSelected={props.selectedClipIds.has(clip.id)}
-            rangeOverlap={clipRangeOverlap(clip, rangeForLane())}
-            onPointerDown={props.onClipPointerDown}
-            onPointerUp={props.onClipPointerUp}
-            onResizeStart={props.onClipResizeStart}
-            onDblClick={props.onClipDblClick}
-            contextMenu={props.clipContextMenu}
-            onRetryMedia={props.onRetryMedia}
-            onReplaceMedia={props.onReplaceMedia}
-            onRemoveMissingMedia={props.onRemoveMissingMedia}
-            ensureClipBuffer={props.ensureClipBuffer}
-            bpm={props.bpm}
-            viewportRedrawVersion={props.viewportRedrawVersion}
-          />
-        )}
-      </For>
+      {props.track.collapsed && props.groupClipOverview ? (
+        <For each={props.groupClipOverview}>
+          {(segment) => (
+            <div
+              class="absolute top-3 h-10 rounded-sm border border-white/10 bg-green-400/35"
+              style={{
+                left: `${segment.startSec * PPS}px`,
+                width: `${Math.max(2, (segment.endSec - segment.startSec) * PPS)}px`,
+              }}
+            />
+          )}
+        </For>
+      ) : (
+        <For each={props.track.clips}>
+          {(clip) => (
+            <ClipComponent
+              clip={clip}
+              trackId={props.track.id}
+              isSelected={props.selectedClipIds.has(clip.id)}
+              rangeOverlap={clipRangeOverlap(clip, rangeForLane())}
+              onPointerDown={props.onClipPointerDown}
+              onPointerUp={props.onClipPointerUp}
+              onResizeStart={props.onClipResizeStart}
+              onDblClick={props.onClipDblClick}
+              contextMenu={props.clipContextMenu}
+              onRetryMedia={props.onRetryMedia}
+              onReplaceMedia={props.onReplaceMedia}
+              onRemoveMissingMedia={props.onRemoveMissingMedia}
+              ensureClipBuffer={props.ensureClipBuffer}
+              bpm={props.bpm}
+              viewportRedrawVersion={props.viewportRedrawVersion}
+            />
+          )}
+        </For>
+      )}
     </div>
   )
 

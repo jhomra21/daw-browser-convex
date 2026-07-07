@@ -19,6 +19,7 @@ import { DEFAULT_AUTOMATION_LANE_HEIGHT, GROUP_INDENT_PX, GROUP_RAIL_WIDTH, LANE
 import { cn } from "~/lib/utils";
 import type { Track, TrackSend } from "@daw-browser/timeline-core/types";
 import type { TimelineWorkspaceAutomationModel } from "~/hooks/useTimelineAutomationController";
+import type { TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
 import MasterSidebarRow, {
   MASTER_ROW_HEIGHT,
   type MasterSidebarModel,
@@ -31,6 +32,8 @@ const automationParameterOptions = getAutomationParameterOptions();
 type TrackSidebarProps = {
   sidebar: {
     tracks: Track[];
+    trackById: ReadonlyMap<string, Track>;
+    trackLayout: TimelineTrackLayoutRow[];
     selectedTrackId: Track["id"] | "";
     sidebarWidth: number;
     bottomOffsetPx: number;
@@ -123,16 +126,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         groupTracks().map((track) => [track.id, track.name]),
       ),
   );
-  const trackById = createMemo(() => new Map(sidebar().tracks.map((track) => [track.id, track])));
-  const trackDepth = (track: Track) => {
-    let depth = 0;
-    let parentId = track.groupId;
-    while (parentId && trackById().has(parentId)) {
-      depth += 1;
-      parentId = trackById().get(parentId)?.groupId;
-    }
-    return depth;
-  };
+  const depthByTrackId = createMemo(() => new Map(sidebar().trackLayout.map((row) => [row.trackId, row.depth])));
   const returnTracks = createMemo(() =>
     sidebar().tracks.filter((track) => getTrackChannelRole(track) === "return"),
   );
@@ -210,11 +204,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   };
 
   createEffect(() => {
-    const trackById = new Map(sidebar().tracks.map((track) => [track.id, track]));
     setSelectedOutputTargets((current) => {
       let next: Map<Track["id"], string> | null = null;
       for (const [trackId, targetId] of current) {
-        const track = trackById.get(trackId);
+        const track = sidebar().trackById.get(trackId);
         if (
           !track ||
           actualOutputTargetId(track) === targetId ||
@@ -229,7 +222,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     setSelectedSendTargets((current) => {
       let next: Map<Track["id"], string> | null = null;
       for (const [trackId, targetId] of current) {
-        const track = trackById.get(trackId);
+        const track = sidebar().trackById.get(trackId);
         if (
           !track ||
           actualSendTargetId(track) === targetId ||
@@ -390,7 +383,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const channelRole = getTrackChannelRole(track);
             const isReturnTrack = channelRole === "return";
             const isGroupTrack = channelRole === "group";
-            const depth = () => trackDepth(track);
+            const depth = () => depthByTrackId().get(track.id) ?? 0;
             const trackColor = () => track.color ?? (isGroupTrack ? "rgb(34 197 94)" : "rgb(75 85 99)");
             const muteDisabled = lockedByOther;
             const soloDisabled = lockedByOther;

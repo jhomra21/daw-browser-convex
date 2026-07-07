@@ -2,11 +2,11 @@ import { createSignal, onCleanup, onMount } from 'solid-js'
 import type { Accessor } from 'solid-js'
 
 import { SAMPLE_DRAG_DATA_TYPE } from '~/lib/sample-drag-data'
-import { yToLaneIndex } from '~/lib/timeline-utils'
-import type { Track } from '@daw-browser/timeline-core/types'
+import { RULER_HEIGHT } from '~/lib/timeline-utils'
+import { trackIndexAtY, type TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 
 type UseTimelineDragDropOptions = {
-  tracks: Accessor<Track[]>
+  trackLayout: Accessor<TimelineTrackLayoutRow[]>
   rootElement: () => HTMLDivElement | undefined
   scrollElement: () => HTMLDivElement | undefined
   onDrop: (event: DragEvent) => Promise<void> | void
@@ -36,14 +36,17 @@ export function useTimelineDragDrop(
   const updateDropTarget = (clientY: number) => {
     const scrollElement = options.scrollElement()
     if (!scrollElement) return
-    const laneIndex = yToLaneIndex(clientY, scrollElement)
-    const trackCount = options.tracks().length
-    if (laneIndex >= 0 && laneIndex < trackCount) {
+    const rect = scrollElement.getBoundingClientRect()
+    const y = clientY - rect.top + (scrollElement.scrollTop || 0) - RULER_HEIGHT
+    const laneIndex = trackIndexAtY(options.trackLayout(), y)
+    if (laneIndex >= 0) {
       setDropTargetLane(laneIndex)
       setDropAtNewTrack(false)
       return
     }
-    if (laneIndex >= trackCount) {
+    const layout = options.trackLayout()
+    const trackAreaBottom = layout.length === 0 ? 0 : layout[layout.length - 1].topPx + layout[layout.length - 1].heightPx
+    if (y >= trackAreaBottom) {
       setDropTargetLane(null)
       setDropAtNewTrack(true)
       return

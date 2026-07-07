@@ -115,6 +115,7 @@ export function buildTrackGroupHistoryEntry(input: {
   projectId: string
   tracks: Track[]
   groupTrack: Track
+  groupTrackIndex: number
   childTrackIds: Track['id'][]
 }): Extract<HistoryEntry, { type: 'track-group' }> {
   const childIds = new Set(input.childTrackIds)
@@ -125,7 +126,7 @@ export function buildTrackGroupHistoryEntry(input: {
       groupTrackRef: getTrackHistoryRef(input.groupTrack),
       currentGroupTrackId: input.groupTrack.id,
       groupTrack: {
-        index: input.tracks.findIndex((track) => track.id === input.groupTrack.id),
+        index: input.groupTrackIndex,
         name: input.groupTrack.name,
         color: input.groupTrack.color,
       },

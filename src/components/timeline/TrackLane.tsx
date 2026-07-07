@@ -1,4 +1,4 @@
-import { type Component, For } from 'solid-js'
+import { createMemo, type Component, For } from 'solid-js'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { LANE_HEIGHT } from '~/lib/timeline-utils'
 import { clipRangeOverlap, type TimelineRangeSelection } from '~/lib/timeline-range-selection'
@@ -64,7 +64,11 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
     return items
   }
 
-  const isInRangeSelection = () => props.rangeSelection?.trackIds.includes(props.track.id) === true
+  const rangeForLane = createMemo(() => {
+    const range = props.rangeSelection
+    if (!range?.trackIds.includes(props.track.id)) return null
+    return range
+  })
 
   const laneContainer = () => (
     <div
@@ -109,7 +113,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
             clip={clip}
             trackId={props.track.id}
             isSelected={props.selectedClipIds.has(clip.id)}
-            rangeOverlap={isInRangeSelection() ? clipRangeOverlap(clip, props.rangeSelection) : null}
+            rangeOverlap={clipRangeOverlap(clip, rangeForLane())}
             onPointerDown={props.onClipPointerDown}
             onPointerUp={props.onClipPointerUp}
             onResizeStart={props.onClipResizeStart}

@@ -106,6 +106,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     startX: number;
     startY: number;
     trackId: Track["id"];
+    moveTrackIds: Track["id"][];
     dragging: boolean;
     target?: TrackDropTarget;
   }>();
@@ -149,6 +150,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   );
   const depthByTrackId = createMemo(() => new Map(sidebar().trackLayout.map((row) => [row.trackId, row.depth])));
   const layoutByTrackId = createMemo(() => new Map(sidebar().trackLayout.map((row) => [row.trackId, row])));
+  const visibleTrackIds = createMemo(() => new Set(sidebar().trackLayout.map((row) => row.trackId)));
   const returnTracks = createMemo(() =>
     sidebar().allTracks.filter((track) => getTrackChannelRole(track) === "return"),
   );
@@ -292,8 +294,20 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     };
   };
 
+  const isTrackDragBlockedTarget = (target: EventTarget | null) =>
+    target instanceof Element &&
+    Boolean(target.closest("button, input, select, textarea, [role='button'], [data-track-drag-block]"));
+
   const startTrackDrag = (trackId: Track["id"], event: PointerEvent) => {
     if (event.button !== 0) return;
+    const selectedTrackIds = sidebar().selectedTrackIds;
+    const trackAlreadySelected = selectedTrackIds.includes(trackId);
+    const activeSelection = trackAlreadySelected
+      ? selectedTrackIds.filter((selectedTrackId) => visibleTrackIds().has(selectedTrackId))
+      : [trackId];
+    if (!trackAlreadySelected) {
+      sidebar().onTrackClick(trackId);
+    }
     if (event.currentTarget instanceof HTMLElement) {
       event.currentTarget.setPointerCapture(event.pointerId);
     }
@@ -302,6 +316,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       startX: event.clientX,
       startY: event.clientY,
       trackId,
+      moveTrackIds: normalizeDragMoveSet(sidebar().allTracks, new Set([...activeSelection, trackId])),
       dragging: false,
     });
   };
@@ -324,10 +339,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     }
     if (!drag.dragging || !drag.target) return;
     setSuppressTrackClickId(drag.trackId);
-    const activeSelection = sidebar().selectedTrackIds.includes(drag.trackId)
-      ? sidebar().selectedTrackIds
-      : [drag.trackId];
-    sidebar().onReorderTracks(normalizeDragMoveSet(sidebar().allTracks, new Set(activeSelection)), drag.target);
+    sidebar().onReorderTracks(drag.moveTrackIds, drag.target);
   };
 
   const cancelTrackDrag = (event: PointerEvent) => {
@@ -654,7 +666,17 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   height: `${rowHeightPx()}px`,
                   ...(track.color ? { background: track.color } : {}),
                 }}
-                onClick={() => sidebar().onTrackClick(track.id)}
+                onClick={() => {
+                  if (suppressTrackClickId() === track.id) {
+                    setSuppressTrackClickId(undefined);
+                    return;
+                  }
+                  sidebar().onTrackClick(track.id);
+                }}
+                onPointerDown={(event) => {
+                  if (isTrackDragBlockedTarget(event.target)) return;
+                  startTrackDrag(track.id, event);
+                }}
                 onPointerMove={updateTrackDrag}
                 onPointerUp={finishTrackDrag}
                 onPointerCancel={cancelTrackDrag}
@@ -727,7 +749,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                         "border-width": "0.5px",
                       }}
                       disabled={muteDisabled}
-                      onPointerDown={(event) => startTrackDrag(track.id, event)}
                       onDblClick={(event) => {
                         if (!isGroupTrack || !track.collapsed) return;
                         event.stopPropagation();

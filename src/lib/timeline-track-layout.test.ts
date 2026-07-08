@@ -49,6 +49,26 @@ describe('timeline track layout grouping', () => {
     expect(trackIdsInYRange(rows, 0, 160)).toEqual(['g', 'b'])
   })
 
+  test('buildTimelineTrackLayoutRows preserves reordered visible row order and excludes collapsed descendants from hit testing', () => {
+    const tracks = [track('b'), track('g', undefined, true), track('a', 'g'), track('c')]
+    const tree = buildTrackTree(tracks)
+    const visibleTrackIds = flattenVisibleTracks(tree, { g: true })
+    const rows = buildTimelineTrackLayoutRows({
+      tracks,
+      visibleTrackIds,
+      depthByTrackId: computeDepthMap(tree),
+      visibleByTrackId: {},
+      heightsByLaneOwnerKey: {},
+      visibleParameterIdsByTrackId: {},
+    })
+
+    expect(rows.map((row) => row.trackId)).toEqual(['b', 'g', 'c'])
+    expect(trackLayoutRowAtY(rows, 0)?.trackId).toBe('b')
+    expect(trackLayoutRowAtY(rows, LANE_HEIGHT)?.trackId).toBe('g')
+    expect(trackLayoutRowAtY(rows, LANE_HEIGHT + COLLAPSED_LANE_HEIGHT)?.trackId).toBe('c')
+    expect(rows.some((row) => row.trackId === 'a')).toBe(false)
+  })
+
   test('collapsed track uses slim row and suppresses automation height', () => {
     const rows = buildTimelineTrackLayoutRows({
       tracks: [track('a', undefined, true), track('b')],

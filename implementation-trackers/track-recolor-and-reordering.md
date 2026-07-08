@@ -48,6 +48,12 @@ Already present:
 - Group collapse exists:
   - `flattenVisibleTracks` hides descendants when a group has `collapsed === true`.
   - `TrackLane` renders a group clip overview for collapsed groups.
+- Core track reordering is now present:
+  - `planTrackReorder`, `resolveTrackDropZone`, and `normalizeDragMoveSet` live in `src/lib/track-group-ops.ts`.
+  - `TrackSidebar` starts a pointer-captured drag from empty sidebar row space, maps pointer Y through `TimelineTrackLayoutRow`, and calls `onReorderTracks`.
+  - `useTimelineActions.reorderTracks` persists through local `reorderAndGroup` or shared `tracks.reorderAndGroup`, asserts shared results, updates local projection, and pushes reorder history.
+  - `TimelineWorkspace` derives visible tracks from `trackLayout`, so sidebar rows and timeline lanes move together.
+  - The master row is separate from `tracks`/`trackLayout`, so it is intentionally not reorderable.
 
 Missing:
 
@@ -57,6 +63,78 @@ Missing:
 - Group recolor is manual, but the requested behavior is automatic cascading on group color change.
 - No modifier-click collapse-all action exists.
 - No visible per-track color picker exists, only clear color via context menu.
+- Track reordering still needs explicit verification:
+  - Reordering intentionally has no visible drag-handle icon. Empty sidebar row space should select the track on pointer-down and allow the same hold-drag to reorder it, not from buttons or form controls.
+  - There is no component-level coverage for the sidebar drag gesture.
+  - Multi-selection with hidden collapsed descendants needs an explicit audit.
+
+## Track Reordering Status and Follow-up Plan
+
+The original branch plan mentioned reordering through the requirement to preserve "drag-to-reorder through a stable compact-row drag target", but it did not include a standalone reordering phase. The implementation has since grown the core reorder path, so the remaining work is not a fresh architecture. It is verification and UX hardening.
+
+### Current user behavior
+
+- Users can click-hold empty sidebar row space to select that track and drag after a small pointer movement threshold.
+- Dropping above or below another visible row changes track order.
+- Dropping inside a group reparents the moved track or moved subtree into that group.
+- Dragging a group moves its descendants with it.
+- Multi-selected tracks can move together after `normalizeDragMoveSet` removes selected descendants of selected parents.
+- Timeline rows move with sidebar rows because both are derived from `TimelineTrackLayoutRow`.
+- Master cannot be moved because it is rendered as a separate master row, not as a normal track row.
+
+### Reorder UX hardening plan
+
+1. Audit the current `TrackSidebar` drag source:
+   - `startTrackDrag`
+   - `updateTrackDrag`
+   - `finishTrackDrag`
+   - row pointer bindings and interactive-control guards
+2. Keep drag behavior handle-free:
+   - Keep the existing pointer-capture drag state and 4px threshold.
+   - Select an unselected track on pointer-down from empty row space, then allow that same pointer hold to become a reorder drag.
+   - Preserve multi-track movement when the pointer-down starts on an already selected track.
+   - Do not start drag from selects, color inputs, volume controls, automation controls, record/solo buttons, delete controls, or context menus.
+   - Do not render a drag-handle icon.
+   - Keep the empty-space row drag source usable in expanded and collapsed rows.
+3. Audit hidden-selection behavior:
+   - Build a visible track id set from `trackLayout`.
+   - If hidden descendants can remain in `selectedTrackIds` after a group collapses, filter active drag selection to visible ids and always include the dragged track before calling `normalizeDragMoveSet`.
+   - Stop and reassess if selection range semantics already guarantee hidden descendants are cleared.
+4. Keep persistence and history contracts unchanged:
+   - `onReorderTracks(trackIds, target)` remains the component boundary.
+   - `tracks.reorderAndGroup` remains the shared operation.
+   - Local `TimelineRepository.reorderAndGroup` remains the local persistence path.
+   - `buildTrackReorderHistoryEntry` remains the undo model.
+   - Expanding a collapsed group after an inside drop remains outside reorder history, matching existing collapse behavior.
+5. Strengthen tests:
+   - Add pure planner coverage for multi-root movement, below-group insertion after the full subtree, non-group inside rejection, return-track reorder intent, and moved-subtree target rejection where not already covered.
+   - Add layout/order coverage showing reordered tracks produce matching visible row order and hidden collapsed descendants cannot be drop targets through row layout.
+   - Add component-level sidebar drag coverage only if the current test setup can exercise pointer events without a broad new test harness.
+
+### Manual reorder QA checklist
+
+- Drag one normal track above another.
+- Drag one normal track below another.
+- Drag a group above/below another row and verify descendants move with it.
+- Drag a normal track into an expanded group.
+- Drag a normal track into a collapsed group and verify the group expands.
+- Select multiple visible tracks and drag them together.
+- Collapse a group, then verify hidden descendants cannot be targeted.
+- Verify timeline lanes and clips move with the sidebar rows.
+- Verify master cannot be dragged or targeted.
+- Verify undo/redo restores the previous order.
+- In a shared project, verify a rejected `tracks.reorderAndGroup` does not leave stale local projection.
+
+### Reorder validation commands
+
+```sh
+bun test src/lib/track-group-ops.test.ts src/lib/timeline-track-layout.test.ts
+bun run typecheck
+bun test
+bun run knip
+git diff --check
+bun run build
+```
 
 ## Design Decisions
 

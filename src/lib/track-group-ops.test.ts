@@ -124,6 +124,76 @@ describe('track group operations', () => {
     ])
   })
 
+  test('planTrackReorder moves multiple root tracks together', () => {
+    expect(planTrackReorder({
+      tracks: [
+        reorderTrack({ id: 'a', index: 0 }),
+        reorderTrack({ id: 'b', index: 1 }),
+        reorderTrack({ id: 'c', index: 2 }),
+        reorderTrack({ id: 'd', index: 3 }),
+      ],
+      moveRootIds: ['b', 'd'],
+      target: { trackId: 'a', zone: 'above' },
+    })?.patches.map((patch) => [patch.trackId, patch.index])).toEqual([
+      ['b', 0],
+      ['d', 1],
+      ['a', 2],
+      ['c', 3],
+    ])
+  })
+
+  test('planTrackReorder inserts below a group after its descendants', () => {
+    expect(planTrackReorder({
+      tracks: [
+        reorderTrack({ id: 'c', index: 0 }),
+        reorderTrack({ id: 'g', index: 1, channelRole: 'group' }),
+        reorderTrack({ id: 'a', index: 2, groupId: 'g' }),
+        reorderTrack({ id: 'b', index: 3, groupId: 'g' }),
+      ],
+      moveRootIds: ['c'],
+      target: { trackId: 'g', zone: 'below' },
+    })?.patches.map((patch) => [patch.trackId, patch.index])).toEqual([
+      ['g', 0],
+      ['a', 1],
+      ['b', 2],
+      ['c', 3],
+    ])
+  })
+
+  test('planTrackReorder rejects inside drops on non-group tracks', () => {
+    expect(planTrackReorder({
+      tracks: [reorderTrack({ id: 'a', index: 0 }), reorderTrack({ id: 'b', index: 1 })],
+      moveRootIds: ['a'],
+      target: { trackId: 'b', zone: 'inside' },
+    })).toBeNull()
+  })
+
+  test('planTrackReorder allows return tracks to be reordered', () => {
+    expect(planTrackReorder({
+      tracks: [
+        reorderTrack({ id: 'a', index: 0 }),
+        reorderTrack({ id: 'r', index: 1, channelRole: 'return' }),
+      ],
+      moveRootIds: ['r'],
+      target: { trackId: 'a', zone: 'above' },
+    })?.patches).toEqual([
+      { trackId: 'r', index: 0, groupId: undefined, outputTargetId: undefined },
+      { trackId: 'a', index: 1, groupId: undefined, outputTargetId: undefined },
+    ])
+  })
+
+  test('planTrackReorder rejects drops targeting moved subtree descendants', () => {
+    expect(planTrackReorder({
+      tracks: [
+        reorderTrack({ id: 'g', index: 0, channelRole: 'group' }),
+        reorderTrack({ id: 'a', index: 1, groupId: 'g' }),
+        reorderTrack({ id: 'b', index: 2 }),
+      ],
+      moveRootIds: ['g'],
+      target: { trackId: 'a', zone: 'below' },
+    })).toBeNull()
+  })
+
   test('planTrackReorder moves subtrees and rejects cycles', () => {
     expect(planTrackReorder({
       tracks: [

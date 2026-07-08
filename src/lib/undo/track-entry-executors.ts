@@ -2,6 +2,7 @@ import { buildLocalClip } from '~/lib/clip-create'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { assert, assertDefined, automationTargetKey } from '@daw-browser/shared'
 import { createLocalTrack } from '~/lib/tracks'
+import { collectTrackDescendantIds } from '~/lib/timeline-track-layout'
 import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 
 import { buildHistoryRefIndex, resolveStoredTrackId, resolveTrackId, resolveTrackRoutingSnapshot } from './refs'
@@ -26,6 +27,7 @@ import {
 type HistoryDirection = 'undo' | 'redo'
 type HistoryContext = {
   refIndex: ReturnType<typeof buildHistoryRefIndex>
+  deletedTrackIds?: Set<Track['id']>
 }
 
 function requireResolved<T>(value: T | null | undefined, message: string): T {
@@ -123,11 +125,19 @@ export async function applyTrackDeleteEntry(
   const grantScope = { projectId, userId }
 
   if (direction === 'redo') {
-    const trackId = requireResolved(
-      resolveTrackId(historyContext.refIndex, entry.data.track.trackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.recreatedTrackId),
-      'Track not found for track-delete redo',
-    )
-    await removeHistoryTrackOrThrow(deps, trackId, 'Failed to remove track during track-delete redo')
+    const trackId = resolveTrackId(historyContext.refIndex, entry.data.track.trackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.recreatedTrackId)
+    if (!trackId) return
+    const alreadyDeleted = historyContext.deletedTrackIds?.has(trackId)
+    const currentTracks = deps.getTracks()
+    if (!alreadyDeleted) {
+      await removeHistoryTrackOrThrow(deps, trackId, 'Failed to remove track during track-delete redo')
+      if (!isLocalHistoryProject(deps)) {
+        historyContext.deletedTrackIds?.add(trackId)
+        for (const descendantId of collectTrackDescendantIds(currentTracks, trackId)) {
+          historyContext.deletedTrackIds?.add(descendantId)
+        }
+      }
+    }
     for (const envelope of entry.data.automation ?? []) {
       deps.actions.applyAutomationEnvelope(undefined, automationTargetKey({ kind: 'track', trackId }, envelope.parameterId))
     }

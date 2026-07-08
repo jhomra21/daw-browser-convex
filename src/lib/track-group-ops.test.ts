@@ -58,6 +58,20 @@ describe('track group operations', () => {
     })).toBeNull()
   })
 
+  test('planGroupTracks reroutes old automatic group outputs to the new group', () => {
+    const plan = planGroupTracks({
+      tracks: [
+        track({ id: 'a', groupId: 'old-g', outputTargetId: 'old-g' }),
+        track({ id: 'old-g', channelRole: 'group' }),
+      ],
+      selectedTrackIds: ['a'],
+      groupTrackId: 'new-g',
+    })
+    expect(plan?.childUpdates).toEqual([
+      { trackId: 'a', groupId: 'new-g', outputTargetId: 'new-g' },
+    ])
+  })
+
   test('planUngroupTracks resets output only when output targets the group', () => {
     expect(planUngroupTracks({
       tracks: [

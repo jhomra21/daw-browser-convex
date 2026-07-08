@@ -143,6 +143,12 @@ export default function TimelineWorkspace(props: Props) {
     const track = trackById().get(row.trackId);
     return track ? [track] : [];
   }));
+  const selectedTrackIds = createMemo(() => {
+    const range = props.selection.rangeSelection();
+    if (range) return range.trackIds;
+    const selectedTrackId = props.selection.selectedTrackId();
+    return selectedTrackId ? [selectedTrackId] : [];
+  });
   const groupClipOverviewByTrackId = createMemo(() => {
     const overviews = new Map<Track["id"], ReturnType<typeof buildGroupClipOverview>>();
     for (const track of props.tracks) {
@@ -335,10 +341,12 @@ export default function TimelineWorkspace(props: Props) {
             <TrackSidebar
               sidebar={{
                 tracks: visibleTracks(),
+                allTracks: props.tracks,
                 trackById: trackById(),
                 trackLayout: props.trackLayout,
                 scrollElement: () => scrollElement,
                 selectedTrackId: props.selection.selectedTrackId(),
+                selectedTrackIds: selectedTrackIds(),
                 sidebarWidth: props.sidebarWidth,
                 bottomOffsetPx: props.bottomPanelOffsetPx,
                 master: props.sidebar.master,

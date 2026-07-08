@@ -97,6 +97,7 @@ const isTrackUngroupChildSnapshot = (value: unknown) => isRecord(value)
   && isString(value.trackRef)
   && isString(value.previousGroupRef)
   && (value.previousOutputTargetRef === undefined || isString(value.previousOutputTargetRef))
+  && (value.nextOutputTargetRef === undefined || isString(value.nextOutputTargetRef))
 
 const isAutomationPoint = (value: unknown) => isRecord(value)
   && isString(value.id)

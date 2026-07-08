@@ -289,12 +289,17 @@ export function useTimelineActions(
       if (!track) continue
       applyTrackPatch(track, { groupId: groupTrack.id, outputTargetId })
     }
+    const nextOutputTargetIdsByTrackId = new Map(plan.childUpdates.map((update) => [
+      update.trackId,
+      update.outputTargetId === pendingGroupTrackId ? groupTrack.id : update.outputTargetId,
+    ]))
     options.creation.pushHistory(buildTrackGroupHistoryEntry({
       projectId,
       tracks,
       groupTrack,
       groupTrackIndex: plan.groupTrack.index,
       childTrackIds: plan.childUpdates.map((update) => update.trackId),
+      nextOutputTargetIdsByTrackId,
     }))
   }
 
@@ -331,6 +336,7 @@ export function useTimelineActions(
       tracks,
       groupTrack,
       childTrackIds: plan.childUpdates.map((update) => update.trackId),
+      nextOutputTargetIdsByTrackId: new Map(plan.childUpdates.map((update) => [update.trackId, update.outputTargetId])),
     }))
     for (const update of plan.childUpdates) {
       const track = trackById.get(update.trackId)

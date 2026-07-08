@@ -38,7 +38,7 @@ export type TimelineViewTrackLike<TTrackId extends string = Track['id']> = {
 
 export type TimelineViewLike<TTrackId extends string = Track['id']> = {
   tracks: Array<TimelineViewTrackLike<TTrackId>>
-  clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number; audioWarp?: Clip['audioWarp']; gain?: number }>
+  clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; color?: string; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number; audioWarp?: Clip['audioWarp']; gain?: number }>
 }
 
 export type ClipTimelinePatch<TTrackId extends string = Track['id']> = {
@@ -103,7 +103,7 @@ type ServerTimelineIndex<TTrackId extends string = Track['id']> = {
   trackIds: Set<TTrackId>
   trackRowsById: Map<TTrackId, TimelineViewTrackLike<TTrackId>>
   clipIds: Set<string>
-  clipRowsById: Map<string, { trackId: TTrackId; startSec: number; duration: number; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; gain?: number; midiOffsetBeats: number }>
+  clipRowsById: Map<string, { trackId: TTrackId; startSec: number; duration: number; color?: string; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; gain?: number; midiOffsetBeats: number }>
   trackLocksById: Map<TTrackId, string | null>
 }
 
@@ -277,7 +277,7 @@ export function buildServerTimelineIndex<TTrackId extends string>(data: Timeline
   const trackIds = new Set<TTrackId>()
   const trackRowsById = new Map<TTrackId, TimelineViewTrackLike<TTrackId>>()
   const clipIds = new Set<string>()
-  const clipRowsById = new Map<string, { trackId: TTrackId; startSec: number; duration: number; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; gain?: number; midiOffsetBeats: number }>()
+  const clipRowsById = new Map<string, { trackId: TTrackId; startSec: number; duration: number; color?: string; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; gain?: number; midiOffsetBeats: number }>()
   const trackLocksById = new Map<TTrackId, string | null>()
 
   for (const track of data.tracks) {
@@ -294,6 +294,7 @@ export function buildServerTimelineIndex<TTrackId extends string>(data: Timeline
       trackId: clip.trackId,
       startSec: clip.startSec,
       duration: clip.duration,
+      color: clip.color,
       leftPadSec: clip.leftPadSec ?? 0,
       bufferOffsetSec: clip.bufferOffsetSec ?? 0,
       audioWarp: normalizeAudioWarp(clip.audioWarp),
@@ -451,7 +452,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
       bufferOffsetSec: clipRow.bufferOffsetSec ?? 0,
       audioWarp: normalizeAudioWarp(clipRow.audioWarp),
       gain: clipRow.gain,
-      color: '#22c55e',
+      color: clipRow.color ?? '#22c55e',
       sampleUrl: clipRow.sampleUrl,
       midi: normalizeMidi(clipRow.midi),
       midiOffsetBeats: clipRow.midiOffsetBeats ?? 0,

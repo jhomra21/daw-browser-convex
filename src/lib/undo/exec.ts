@@ -181,7 +181,7 @@ async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'trac
     const nextGroupId = direction === 'undo' ? groupTrackId : undefined
     const nextOutputTargetId = direction === 'undo'
       ? resolveTrackId(index, child.previousOutputTargetRef)
-      : undefined
+      : resolveTrackId(index, child.nextOutputTargetRef)
     await persistHistoryTrackGroup(deps, trackId, nextGroupId, nextOutputTargetId)
     deps.actions.applyTrackPatch(trackId, { groupId: nextGroupId, outputTargetId: nextOutputTargetId })
   }
@@ -443,7 +443,14 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
   switch (entry.type) {
     case 'section-edit': {
       const entries = direction === 'undo' ? [...entry.data.entries].reverse() : entry.data.entries
+      const trackDeleteContext = direction === 'redo'
+        ? { refIndex: buildRefIndex(deps), deletedTrackIds: new Set<Track['id']>() }
+        : null
       for (const child of entries) {
+        if (trackDeleteContext && child.type === 'track-delete') {
+          await applyTrackDeleteEntry(child, deps, direction, trackDeleteContext)
+          continue
+        }
         await execHistoryEntry(child, deps, direction)
       }
       return

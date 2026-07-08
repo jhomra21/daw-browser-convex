@@ -93,6 +93,62 @@ describe('resolveTimelineTracks', () => {
     expect(flattenVisibleTracks(buildTrackTree(tracks), { g: true })).toEqual(['g', 'b'])
   })
 
+  test('preserves persisted clip colors during resolution', () => {
+    const snapshot: TimelineSnapshot = {
+      projectId: 'project:local',
+      tracks: [trackRow({ id: 'a', index: 0 })],
+      clips: [{
+        id: 'clip-1',
+        trackId: 'a',
+        historyRef: 'clip-1',
+        name: 'Clip',
+        startSec: 0,
+        duration: 1,
+        color: '#f97316',
+        createdAt: 0,
+        updatedAt: 0,
+      }],
+    }
+
+    const tracks = resolveTimelineTracks({
+      projectId: snapshot.projectId,
+      server: {
+        localSnapshot: snapshot,
+      },
+      client: {
+        mix: {
+          syncMix: true,
+          writableTrackIds: new Set(),
+          localByTrackId: {},
+          pendingSharedTrackVolumes: new Map(),
+          pendingSharedTrackRouting: new Map(),
+          pendingSharedMixByTrackId: new Map(),
+        },
+        tracks: {
+          pendingEntriesById: new Map(),
+          removedIds: new Set(),
+          pendingLocksById: new Map(),
+          historyRefsById: new Map(),
+          namesByHistoryRef: new Map(),
+        },
+        clips: {
+          pendingCreatesById: new Map(),
+          removedIds: new Set(),
+          committedEditsById: new Map(),
+          draftEditsById: new Map(),
+          previewByTrackId: new Map(),
+          historyRefsById: new Map(),
+        },
+      },
+      buffers: {
+        getBuffer: () => undefined,
+        getMediaStatus: () => undefined,
+      },
+    })
+
+    expect(tracks[0]?.clips[0]?.color).toBe('#f97316')
+  })
+
   test('applies pending grouping fields for existing tracks before server echo', () => {
     const snapshot: TimelineSnapshot = {
       projectId: 'project:local',

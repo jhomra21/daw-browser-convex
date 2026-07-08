@@ -198,6 +198,7 @@ describe('persisted undo history', () => {
           trackRef: 'track-ref-1',
           previousGroupRef: 'group-ref',
           previousOutputTargetRef: 'group-ref',
+          nextOutputTargetRef: 'custom-output-ref',
         }],
       },
     }

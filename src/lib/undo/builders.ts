@@ -117,8 +117,11 @@ export function buildTrackGroupHistoryEntry(input: {
   groupTrack: Track
   groupTrackIndex: number
   childTrackIds: Track['id'][]
+  nextOutputTargetIdsByTrackId?: ReadonlyMap<Track['id'], Track['id'] | undefined>
 }): Extract<HistoryEntry, { type: 'track-group' }> {
   const childIds = new Set(input.childTrackIds)
+  const trackRefById = new Map(input.tracks.map((track) => [track.id, getTrackHistoryRef(track)]))
+  trackRefById.set(input.groupTrack.id, getTrackHistoryRef(input.groupTrack))
   return {
     type: 'track-group',
     projectId: input.projectId,
@@ -132,12 +135,17 @@ export function buildTrackGroupHistoryEntry(input: {
       },
       childUpdates: input.tracks
         .filter((track) => childIds.has(track.id))
-        .map((track) => ({
-          trackRef: getTrackHistoryRef(track),
-          previousGroupRef: track.groupId ? getTrackHistoryRef(input.tracks.find((entry) => entry.id === track.groupId)) : undefined,
-          previousOutputTargetRef: track.outputTargetId ? getTrackHistoryRef(input.tracks.find((entry) => entry.id === track.outputTargetId)) : undefined,
-          nextOutputTargetRef: getTrackHistoryRef(input.groupTrack),
-        })),
+        .map((track) => {
+          const nextOutputTargetId = input.nextOutputTargetIdsByTrackId?.has(track.id)
+            ? input.nextOutputTargetIdsByTrackId.get(track.id)
+            : input.groupTrack.id
+          return {
+            trackRef: getTrackHistoryRef(track),
+            previousGroupRef: track.groupId ? trackRefById.get(track.groupId) : undefined,
+            previousOutputTargetRef: track.outputTargetId ? trackRefById.get(track.outputTargetId) : undefined,
+            nextOutputTargetRef: nextOutputTargetId ? trackRefById.get(nextOutputTargetId) : undefined,
+          }
+        }),
     },
   }
 }
@@ -147,8 +155,10 @@ export function buildTrackUngroupHistoryEntry(input: {
   tracks: Track[]
   groupTrack: Track
   childTrackIds: Track['id'][]
+  nextOutputTargetIdsByTrackId?: ReadonlyMap<Track['id'], Track['id'] | undefined>
 }): Extract<HistoryEntry, { type: 'track-ungroup' }> {
   const childIds = new Set(input.childTrackIds)
+  const trackRefById = new Map(input.tracks.map((track) => [track.id, getTrackHistoryRef(track)]))
   return {
     type: 'track-ungroup',
     projectId: input.projectId,
@@ -156,11 +166,15 @@ export function buildTrackUngroupHistoryEntry(input: {
       groupTrackRef: getTrackHistoryRef(input.groupTrack),
       childSnapshots: input.tracks
         .filter((track) => childIds.has(track.id))
-        .map((track) => ({
-          trackRef: getTrackHistoryRef(track),
-          previousGroupRef: getTrackHistoryRef(input.groupTrack),
-          previousOutputTargetRef: track.outputTargetId ? getTrackHistoryRef(input.tracks.find((entry) => entry.id === track.outputTargetId)) : undefined,
-        })),
+        .map((track) => {
+          const nextOutputTargetId = input.nextOutputTargetIdsByTrackId?.get(track.id)
+          return {
+            trackRef: getTrackHistoryRef(track),
+            previousGroupRef: getTrackHistoryRef(input.groupTrack),
+            previousOutputTargetRef: track.outputTargetId ? trackRefById.get(track.outputTargetId) : undefined,
+            nextOutputTargetRef: nextOutputTargetId ? trackRefById.get(nextOutputTargetId) : undefined,
+          }
+        }),
     },
   }
 }

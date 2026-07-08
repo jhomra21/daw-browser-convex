@@ -293,6 +293,7 @@ export type HistoryEntry =
           trackRef: TrackRef
           previousGroupRef: TrackRef
           previousOutputTargetRef?: TrackRef
+          nextOutputTargetRef?: TrackRef
         }>
       }
     }

@@ -58,14 +58,14 @@ type TrackReorderPlan = {
 
 type AssignGroupColorPlan = {
   trackUpdates: Array<{ trackId: TrackId; from: string | undefined; to: string }>
-  clipUpdates: Array<{ clipId: string; trackId: TrackId; from: string | undefined; to: string }>
+  clipUpdates: Array<{ clipId: string; trackId: TrackId; from: string; to: string }>
 }
 
 const outputTargetForGroupChange = (
   track: Pick<Track, 'groupId' | 'outputTargetId'>,
   groupId: TrackId | undefined,
 ) => {
-  if (groupId) return track.outputTargetId ?? groupId
+  if (groupId) return !track.outputTargetId || track.outputTargetId === track.groupId ? groupId : track.outputTargetId
   return track.outputTargetId === track.groupId ? undefined : track.outputTargetId
 }
 
@@ -94,7 +94,7 @@ export const planGroupTracks = (input: {
     childUpdates: selectedTracks.map(({ track }) => ({
       trackId: track.id,
       groupId: input.groupTrackId,
-      outputTargetId: track.outputTargetId ?? input.groupTrackId,
+      outputTargetId: outputTargetForGroupChange(track, input.groupTrackId),
     })),
   }
 }

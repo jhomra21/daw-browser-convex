@@ -86,6 +86,7 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
   const startLaneDrag = (event: PointerEvent, scrollEl: HTMLDivElement | undefined) => {
     const ts = tracks()
     if (ts.length === 0 || !scrollEl) return false
+    const trackById = new Map(ts.map((track) => [track.id, track]))
 
     currentScrollEl = scrollEl
 
@@ -94,7 +95,8 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
     startY = event.clientY - rect.top + (scrollEl.scrollTop || 0)
     if (!event.shiftKey) {
       const laneIndex = trackIndexAtY(trackLayout(), startY - RULER_HEIGHT)
-      const track = ts[laneIndex]
+      const row = laneIndex >= 0 ? trackLayout()[laneIndex] : undefined
+      const track = row ? trackById.get(row.trackId) : undefined
       if (track) {
         if (
           selection.selectedTrackId() !== track.id ||

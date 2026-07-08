@@ -33,10 +33,12 @@ const automationParameterOptions = getAutomationParameterOptions();
 type TrackSidebarProps = {
   sidebar: {
     tracks: Track[];
+    allTracks: Track[];
     trackById: ReadonlyMap<string, Track>;
     trackLayout: TimelineTrackLayoutRow[];
     scrollElement: () => HTMLDivElement | undefined;
     selectedTrackId: Track["id"] | "";
+    selectedTrackIds: readonly Track["id"][];
     sidebarWidth: number;
     bottomOffsetPx: number;
     master: MasterSidebarModel;
@@ -125,7 +127,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   });
 
   createEffect(() => {
-    const trackIds = new Set<string>(sidebar().tracks.map((track) => track.id));
+    const trackIds = new Set<string>(sidebar().allTracks.map((track) => track.id));
     setMeters(produce((current) => {
       for (const trackId of Object.keys(current)) {
         if (!trackIds.has(trackId)) delete current[trackId];
@@ -134,23 +136,23 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   });
 
   const groupTracks = createMemo(() =>
-    sidebar().tracks.filter((track) => getTrackChannelRole(track) === "group"),
+    sidebar().allTracks.filter((track) => getTrackChannelRole(track) === "group"),
   );
   const groupTrackNames = createMemo(
     () =>
       new Map<string, string>(
-        groupTracks().map((track, index) => [track.id, `Group ${index + 1}`]),
+        groupTracks().map((track, index) => [track.id, track.name || `Group ${index + 1}`]),
       ),
   );
   const depthByTrackId = createMemo(() => new Map(sidebar().trackLayout.map((row) => [row.trackId, row.depth])));
   const layoutByTrackId = createMemo(() => new Map(sidebar().trackLayout.map((row) => [row.trackId, row])));
   const returnTracks = createMemo(() =>
-    sidebar().tracks.filter((track) => getTrackChannelRole(track) === "return"),
+    sidebar().allTracks.filter((track) => getTrackChannelRole(track) === "return"),
   );
   const returnTrackNames = createMemo(
     () =>
       new Map<string, string>(
-        returnTracks().map((track, index) => [track.id, `Return ${index + 1}`]),
+        returnTracks().map((track, index) => [track.id, track.name || `Return ${index + 1}`]),
       ),
   );
   const displayTrackName = (track: Track) =>
@@ -307,8 +309,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     }
     if (!drag.dragging || !drag.target) return;
     setSuppressTrackClickId(drag.trackId);
-    const selectedIds = new Set([drag.trackId]);
-    sidebar().onReorderTracks(normalizeDragMoveSet(sidebar().tracks, selectedIds), drag.target);
+    const activeSelection = sidebar().selectedTrackIds.includes(drag.trackId)
+      ? sidebar().selectedTrackIds
+      : [drag.trackId];
+    sidebar().onReorderTracks(normalizeDragMoveSet(sidebar().allTracks, new Set(activeSelection)), drag.target);
   };
 
   const cancelTrackDrag = (event: PointerEvent) => {
@@ -554,7 +558,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               },
               {
                 kind: "item",
-                label: track.color ? "Clear track color" : "Set track color",
+                label: "Clear track color",
                 disabled: !track.color,
                 onSelect: () => sidebar().onSetTrackColor(track.id, undefined),
               },

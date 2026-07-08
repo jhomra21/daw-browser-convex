@@ -133,6 +133,41 @@ const requireTrackIds = (trackIds: Iterable<TimelineTrackId>, tracks: readonly T
   }
 }
 
+const requireValidReorderAndGroupUpdates = (
+  updates: readonly ReorderAndGroupTrackInput[],
+  tracks: readonly TimelineTrackRow[],
+) => {
+  const trackById = new Map(tracks.map((track) => [track.id, track]))
+  const updatedTrackIds = new Set(updates.map((update) => update.trackId))
+  if (updates.length !== tracks.length || updatedTrackIds.size !== tracks.length) {
+    throw new Error('Failed to reorder local timeline because updates must cover every track exactly once.')
+  }
+  const indexes = new Set(updates.map((update) => update.index))
+  for (let index = 0; index < tracks.length; index += 1) {
+    if (!indexes.has(index)) {
+      throw new Error('Failed to reorder local timeline because track indexes are not contiguous.')
+    }
+  }
+  const parentByTrackId = new Map<TimelineTrackId, TimelineTrackId>()
+  for (const update of updates) {
+    if (!update.groupId) continue
+    const parent = trackById.get(update.groupId)
+    if (parent?.channelRole !== 'group') {
+      throw new Error('Failed to reorder local timeline because a parent track is not a group.')
+    }
+    parentByTrackId.set(update.trackId, update.groupId)
+  }
+  for (const update of updates) {
+    let cursor = parentByTrackId.get(update.trackId)
+    while (cursor) {
+      if (cursor === update.trackId) {
+        throw new Error('Failed to reorder local timeline because track groups cannot contain cycles.')
+      }
+      cursor = parentByTrackId.get(cursor)
+    }
+  }
+}
+
 const getEntityWriteQueue = (projectId: string) => {
   const existing = entityWriteQueuesByProject.get(projectId)
   if (existing) return existing
@@ -500,6 +535,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     requireTrackIds(updates.map((update) => update.trackId), tracks)
     requireTrackIds(updates.flatMap((update) => update.groupId ? [update.groupId] : []), tracks)
     requireTrackIds(updates.flatMap((update) => update.outputTargetId ? [update.outputTargetId] : []), tracks)
+    requireValidReorderAndGroupUpdates(updates, tracks)
     const timestamp = now()
     const patchedTracks = tracks.map((track) => {
       const update = updateById.get(track.id)
@@ -524,11 +560,16 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
         ? track
         : { ...track, outputTargetId: routing.outputTargetId, sends: routing.sends }
     })
-    await Promise.all(nextTracks.flatMap((track) => {
+    const changedTracks = nextTracks.flatMap((track) => {
       const previous = trackById.get(track.id)
       if (!previous || trackPersistenceFieldsEqual(previous, track)) return []
-      return [tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))]
-    }))
+      return [track]
+    })
+    if (changedTracks.length === 0) {
+      await tx.done
+      return
+    }
+    await Promise.all(changedTracks.map((track) => tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))))
     await tx.done
     markChanged()
   }

@@ -659,7 +659,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       class="absolute bottom-0 top-0"
                       style={{
                         left: `${band.leftPx}px`,
-                        width: `${GROUP_INDENT_PX}px`,
+                        width: `${GROUP_RAIL_WIDTH}px`,
                         background: band.color,
                       }}
                     />
@@ -670,7 +670,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     class="absolute bottom-0 top-0"
                     style={{
                       left: `${depth() * GROUP_INDENT_PX}px`,
-                      width: `${track.groupId ? GROUP_INDENT_PX : GROUP_RAIL_WIDTH}px`,
+                      width: `${GROUP_RAIL_WIDTH}px`,
                       background: trackColor(),
                     }}
                   />
@@ -684,7 +684,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   )}
                   style={{
                     height: `${clipLaneHeightPx()}px`,
-                    "padding-left": `${8 + depth() * GROUP_INDENT_PX + (track.groupId ? GROUP_INDENT_PX : 0)}px`,
+                    "padding-left": `${8 + depth() * GROUP_INDENT_PX}px`,
                   }}
                 >
                   <div class="flex min-w-0 items-center gap-1 overflow-hidden">

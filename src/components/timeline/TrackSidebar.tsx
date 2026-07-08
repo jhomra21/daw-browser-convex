@@ -684,7 +684,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   )}
                   style={{
                     height: `${clipLaneHeightPx()}px`,
-                    "padding-left": `${8 + depth() * GROUP_INDENT_PX}px`,
+                    "padding-left": `${8 + depth() * GROUP_INDENT_PX + (track.groupId ? GROUP_INDENT_PX : 0)}px`,
                   }}
                 >
                   <div class="flex min-w-0 items-center gap-1 overflow-hidden">

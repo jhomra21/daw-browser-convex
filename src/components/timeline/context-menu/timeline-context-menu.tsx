@@ -18,6 +18,13 @@ export type TimelineContextMenuAction = {
   onSelect?: () => void;
 };
 
+export type TimelineContextMenuColor = {
+  kind: "color";
+  label: string;
+  value: string;
+  onChange: (color: string) => void;
+};
+
 export type TimelineContextMenuLabel = {
   kind: "label";
   label: string;
@@ -29,6 +36,7 @@ export type TimelineContextMenuSeparator = {
 
 export type TimelineContextMenuItem =
   | TimelineContextMenuAction
+  | TimelineContextMenuColor
   | TimelineContextMenuLabel
   | TimelineContextMenuSeparator;
 
@@ -51,6 +59,21 @@ const TimelineContextMenuEntry: Component<{ item: TimelineContextMenuItem }> = (
         const current = item();
         if (current.kind === "label") return <ContextMenuLabel>{current.label}</ContextMenuLabel>;
         if (current.kind === "separator") return <ContextMenuSeparator />;
+        if (current.kind === "color") {
+          return (
+            <div class="flex min-h-6 items-center gap-2 px-2 py-0.5 leading-5 text-foreground">
+              <span class="min-w-0 flex-1 truncate">{current.label}</span>
+              <input
+                type="color"
+                value={current.value}
+                class="h-5 w-8 cursor-pointer border border-border bg-app-surface p-0"
+                onClick={(event) => event.stopPropagation()}
+                onContextMenu={(event) => event.stopPropagation()}
+                onChange={(event) => current.onChange(event.currentTarget.value)}
+              />
+            </div>
+          );
+        }
         return (
           <ContextMenuItem
             disabled={current.disabled}

@@ -3,6 +3,7 @@ import { useColorMode } from "@kobalte/core"
 import { assert } from "@daw-browser/shared"
 import {
   createPersistedAppPreferencesWithInitial,
+  parseHexColor,
   type AppPreferences,
   type AppTheme,
   type ResolvedAppTheme
@@ -31,6 +32,12 @@ type AppPreferencesContextValue = {
   sidebar: {
     open: () => boolean
     setOpen: (open: boolean) => void
+  }
+  timeline: {
+    defaultTrackColor: () => string
+    defaultGroupColor: () => string
+    setDefaultTrackColor: (color: string) => void
+    setDefaultGroupColor: (color: string) => void
   }
 }
 
@@ -120,6 +127,18 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
     setPreferences("sidebar", "open", open)
   }
 
+  const setDefaultTrackColor = (color: string) => {
+    const nextColor = parseHexColor(color, preferences.timeline.defaultTrackColor)
+    if (preferences.timeline.defaultTrackColor === nextColor) return
+    setPreferences("timeline", "defaultTrackColor", nextColor)
+  }
+
+  const setDefaultGroupColor = (color: string) => {
+    const nextColor = parseHexColor(color, preferences.timeline.defaultGroupColor)
+    if (preferences.timeline.defaultGroupColor === nextColor) return
+    setPreferences("timeline", "defaultGroupColor", nextColor)
+  }
+
   return (
     <AppPreferencesContext.Provider
       value={{
@@ -143,6 +162,12 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
         sidebar: {
           open: () => preferences.sidebar.open,
           setOpen: setSidebarOpen
+        },
+        timeline: {
+          defaultTrackColor: () => preferences.timeline.defaultTrackColor,
+          defaultGroupColor: () => preferences.timeline.defaultGroupColor,
+          setDefaultTrackColor,
+          setDefaultGroupColor
         }
       }}
     >

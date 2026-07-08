@@ -27,6 +27,8 @@ import MasterSidebarRow, {
 } from "~/components/timeline/MasterSidebarRow";
 import AutomationParameterPicker from "./automation-parameter-picker";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
+import { useAppPreferences } from "~/context/app-preferences";
+import { parseHexColor } from "~/lib/preferences/app-preferences";
 
 const automationParameterOptions = getAutomationParameterOptions();
 
@@ -86,11 +88,10 @@ const displayMeterLevel = (value: number | undefined) => {
 const clampVolume = (volume: number) => clampUnit(volume);
 const quantizeVolume = (volume: number) =>
   Math.round(clampVolume(volume) * 100) / 100;
-const fallbackTrackColor = "var(--muted-foreground)";
-const fallbackGroupColor = "var(--timeline-surface-muted)";
 const isBulkCollapseModifier = (event: MouseEvent | PointerEvent) => event.metaKey || event.altKey;
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const sidebar = () => props.sidebar;
+  const appPreferences = useAppPreferences();
 
   const [meters, setMeters] = createStore<Record<string, TrackStereoLevels>>({});
   const [selectedOutputTargets, setSelectedOutputTargets] = createSignal<
@@ -504,11 +505,13 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const isReturnTrack = channelRole === "return";
             const isGroupTrack = channelRole === "group";
             const depth = () => depthByTrackId().get(track.id) ?? 0;
-            const trackColor = () => track.color ?? (isGroupTrack ? fallbackGroupColor : fallbackTrackColor);
+            const defaultTrackColor = () => appPreferences.timeline.defaultTrackColor();
+            const defaultGroupColor = () => appPreferences.timeline.defaultGroupColor();
+            const trackColor = () => track.color ?? (isGroupTrack ? defaultGroupColor() : defaultTrackColor());
             const parentGroupColor = () => {
               if (!track.groupId) return undefined;
               const parent = sidebar().trackById.get(track.groupId);
-              return parent?.color ?? fallbackGroupColor;
+              return parent?.color ?? defaultGroupColor();
             };
             const muteDisabled = lockedByOther;
             const soloDisabled = lockedByOther;
@@ -525,6 +528,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const automationMeta = () => automationMetaByTrackId().get(track.id);
             const automationVisible = () => props.automation.lanes.visibleByTrackId[track.id] === true;
             const displayedAutomationVisible = () => track.collapsed !== true && automationVisible();
+            const automationButtonActive = () => track.collapsed ? automationVisible() : displayedAutomationVisible();
             const visibleAutomationParameterIds = () => props.automation.lanes.visibleParameterIdsByTrackId[track.id] ?? [];
             const automationHeight = () => props.automation.lanes.heightsByLaneOwnerKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
             const rowLayout = () => layoutByTrackId().get(track.id);
@@ -537,6 +541,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               if (!visible.has(selectedAutomationParameter())) return true;
               return automationParameterOptions.some((option) => !visible.has(option.id));
             };
+            const contextMenuColor = () => parseHexColor(track.color, isGroupTrack ? defaultGroupColor() : defaultTrackColor());
             const trackContextMenuItems = (): TimelineContextMenuItem[] => [
               { kind: "label", label: displayTrackName(track) },
               { kind: "item", label: "Open effects", onSelect: () => sidebar().onTrackClick(track.id) },
@@ -566,6 +571,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 label: "Select all clips in group",
                 disabled: !isGroupTrack,
                 onSelect: () => sidebar().onSelectAllClipsInGroup(track.id),
+              },
+              {
+                kind: "color",
+                label: "Track color",
+                value: contextMenuColor(),
+                onChange: (color) => sidebar().onSetTrackColor(track.id, parseHexColor(color, contextMenuColor())),
               },
               {
                 kind: "item",
@@ -643,6 +654,16 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     }}
                   />
                 </Show>
+                <Show when={!isGroupTrack}>
+                  <div
+                    class="absolute bottom-0 top-0"
+                    style={{
+                      left: `${depth() * GROUP_INDENT_PX}px`,
+                      width: `${GROUP_RAIL_WIDTH}px`,
+                      background: trackColor(),
+                    }}
+                  />
+                </Show>
                 <Show when={track.groupId}>
                   <div
                     class="absolute bottom-0 top-0"
@@ -654,7 +675,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   />
                 </Show>
                 <div
-                  class="grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 p-2"
+                  class={cn(
+                    "grid items-center gap-x-4",
+                    track.collapsed
+                      ? "grid-cols-[minmax(0,1fr)_auto] px-2 py-0.5"
+                      : "grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] p-2",
+                  )}
                   style={{
                     height: `${clipLaneHeightPx()}px`,
                     "padding-left": `${8 + depth() * GROUP_INDENT_PX}px`,
@@ -662,7 +688,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 >
                   <div class="flex min-w-0 items-center gap-1 overflow-hidden">
                     <button
-                      class="flex h-7 w-4 shrink-0 items-center justify-center text-xs text-muted-foreground hover:text-foreground"
+                      class={cn(
+                        "flex w-4 shrink-0 items-center justify-center text-xs text-muted-foreground hover:text-foreground",
+                        track.collapsed ? "h-6" : "h-7",
+                      )}
                       onClick={(event) => {
                         event.stopPropagation();
                         handleTrackCollapseClick(track, event);
@@ -671,26 +700,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     >
                       {track.collapsed ? "▶" : "▼"}
                     </button>
-                    <label
-                      class="relative size-4 shrink-0 overflow-hidden rounded-sm border border-border"
-                      style={{ background: trackColor() }}
-                      title="Set track color"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <input
-                        type="color"
-                        value={track.color ?? "#22c55e"}
-                        class="absolute inset-0 cursor-pointer opacity-0"
-                        onChange={(event) => {
-                          const color = event.currentTarget.value;
-                          if (!/^#[0-9a-fA-F]{6}$/.test(color)) return;
-                          sidebar().onSetTrackColor(track.id, color);
-                        }}
-                      />
-                    </label>
                     <button
                       class={cn(
-                        "flex h-7 flex-1 items-center justify-center border px-2 text-center text-sm font-semibold",
+                        "flex flex-1 items-center justify-center border px-2 text-center text-sm font-semibold",
+                        track.collapsed ? "h-6" : "h-7",
                         isGroupTrack
                           ? "border-transparent bg-timeline-background text-foreground hover:bg-timeline-surface-muted"
                           : muteDisabled
@@ -840,7 +853,78 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   </div>
                   </Show>
 
-                  <Show when={!track.collapsed}>
+                  <Show
+                    when={!track.collapsed}
+                    fallback={
+                      <div class="grid grid-cols-3 gap-1">
+                        <button
+                          class={cn(
+                            "h-6 w-6 border text-xs font-bold transition-colors",
+                            recordDisabled
+                              ? "cursor-not-allowed border-red-900 bg-timeline-surface-muted text-red-900"
+                              : isRecordArmed()
+                                ? "border-red-400 bg-red-500 text-black shadow-inner"
+                                : "border-red-500 text-red-400 hover:bg-red-500/20",
+                          )}
+                          title={
+                            lockedByOther
+                              ? "Track locked by another user"
+                              : isReturnTrack
+                                ? "Return tracks cannot be armed for recording"
+                                : isGroupTrack
+                                  ? "Group tracks cannot be armed for recording"
+                                  : track.kind === "instrument"
+                                    ? "Instrument tracks cannot be armed for audio recording"
+                                    : isRecordArmed()
+                                      ? "Disarm recording"
+                                      : "Arm for recording"
+                          }
+                          disabled={recordDisabled}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (recordDisabled) return;
+                            sidebar().onToggleRecordArm(track.id);
+                          }}
+                        >
+                          R
+                        </button>
+                        <button
+                          class={cn(
+                            "h-6 w-6 border text-xs font-semibold",
+                            soloDisabled
+                              ? "cursor-not-allowed border-border bg-muted/40 text-muted-foreground"
+                              : soloed()
+                                ? "border-blue-300 bg-blue-500/90 text-black"
+                                : "border-border bg-timeline-surface-muted text-foreground hover:bg-muted",
+                          )}
+                          disabled={soloDisabled}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (soloDisabled) return;
+                            sidebar().onToggleSolo(track.id);
+                          }}
+                          title={lockedByOther ? "Track locked by another user" : soloed() ? "Unsolo" : "Solo"}
+                        >
+                          S
+                        </button>
+                        <button
+                          class={cn(
+                            "h-6 w-6 border text-xs font-semibold transition-colors",
+                            automationButtonActive()
+                              ? "border-red-400 bg-red-500/90 text-black"
+                              : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
+                          )}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            props.automation.actions.toggleTrackVisibility(track.id);
+                          }}
+                          title={automationVisible() ? "Hide automation lane" : "Show automation lane when expanded"}
+                        >
+                          A
+                        </button>
+                      </div>
+                    }
+                  >
                   <div class="flex w-[92px] items-center gap-2">
                     <div class="flex w-[72px] shrink-0 flex-col gap-1">
                       <div class="grid grid-cols-4 gap-1">

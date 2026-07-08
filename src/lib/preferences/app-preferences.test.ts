@@ -11,7 +11,8 @@ describe("normalizeAppPreferences", () => {
     expect(normalizeAppPreferences({ appearance: { theme: "blue" }, sidebar: { open: "yes" } })).toEqual({
       ...defaultAppPreferences,
       appearance: { theme: "system", themeId: "default" },
-      sidebar: { open: true }
+      sidebar: { open: true },
+      timeline: defaultAppPreferences.timeline
     })
     expect(normalizeAppPreferences({ version: 99, appearance: { theme: "dark" } })).toEqual(defaultAppPreferences)
   })
@@ -22,13 +23,15 @@ describe("normalizeAppPreferences", () => {
         version: 1,
         appearance: { theme: "dark", themeId: "catppuccin" },
         agent: { autoApply: true },
-        sidebar: { open: false }
+        sidebar: { open: false },
+        timeline: { defaultTrackColor: "#123456", defaultGroupColor: "#abcdef" }
       })
     ).toEqual({
       version: 1,
       appearance: { theme: "dark", themeId: "catppuccin" },
       agent: { autoApply: true },
-      sidebar: { open: false }
+      sidebar: { open: false },
+      timeline: { defaultTrackColor: "#123456", defaultGroupColor: "#abcdef" }
     })
   })
 
@@ -44,7 +47,8 @@ describe("normalizeAppPreferences", () => {
       version: 1,
       appearance: { theme: "light", themeId: "default" },
       agent: { autoApply: true },
-      sidebar: { open: false }
+      sidebar: { open: false },
+      timeline: defaultAppPreferences.timeline
     })
 
     expect(
@@ -52,13 +56,15 @@ describe("normalizeAppPreferences", () => {
         version: 1,
         appearance: { theme: "dark", themeId: "unknown" },
         agent: { autoApply: true },
-        sidebar: { open: false }
+        sidebar: { open: false },
+        timeline: { defaultTrackColor: "red", defaultGroupColor: "#fedcba" }
       })
     ).toEqual({
       version: 1,
       appearance: { theme: "dark", themeId: "default" },
       agent: { autoApply: true },
-      sidebar: { open: false }
+      sidebar: { open: false },
+      timeline: { defaultTrackColor: defaultAppPreferences.timeline.defaultTrackColor, defaultGroupColor: "#fedcba" }
     })
   })
 })

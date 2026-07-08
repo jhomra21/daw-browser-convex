@@ -678,13 +678,14 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 <div
                   class={cn(
                     "grid items-center gap-x-4",
-                    track.collapsed
-                      ? "grid-cols-[minmax(0,1fr)_auto] px-2 py-0.5"
-                      : "grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] p-2",
+                    track.collapsed ? "px-2 py-0.5" : "p-2",
                   )}
                   style={{
                     height: `${clipLaneHeightPx()}px`,
                     "padding-left": `${8 + depth() * GROUP_INDENT_PX}px`,
+                    "grid-template-columns": track.collapsed
+                      ? "minmax(0, 1fr) auto"
+                      : "minmax(72px, 96px) minmax(96px, 1fr) 92px",
                   }}
                 >
                   <div class="flex min-w-0 items-center gap-1 overflow-hidden">

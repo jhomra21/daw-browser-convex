@@ -508,10 +508,19 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const defaultTrackColor = () => appPreferences.timeline.defaultTrackColor();
             const defaultGroupColor = () => appPreferences.timeline.defaultGroupColor();
             const trackColor = () => track.color ?? (isGroupTrack ? defaultGroupColor() : defaultTrackColor());
-            const parentGroupColor = () => {
-              if (!track.groupId) return undefined;
-              const parent = sidebar().trackById.get(track.groupId);
-              return parent?.color ?? defaultGroupColor();
+            const ancestorGroupColorBands = () => {
+              const bands: Array<{ leftPx: number; color: string }> = [];
+              let groupId = track.groupId;
+              while (groupId) {
+                const group = sidebar().trackById.get(groupId);
+                if (!group) break;
+                bands.push({
+                  leftPx: (depthByTrackId().get(group.id) ?? 0) * GROUP_INDENT_PX,
+                  color: group.color ?? defaultGroupColor(),
+                });
+                groupId = group.groupId;
+              }
+              return bands;
             };
             const muteDisabled = lockedByOther;
             const soloDisabled = lockedByOther;
@@ -644,33 +653,25 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 onPointerCancel={cancelTrackDrag}
                 onLostPointerCapture={cancelTrackDrag}
               >
-                <Show when={isGroupTrack}>
+                <For each={ancestorGroupColorBands()}>
+                  {(band) => (
+                    <div
+                      class="absolute bottom-0 top-0"
+                      style={{
+                        left: `${band.leftPx}px`,
+                        width: `${GROUP_INDENT_PX}px`,
+                        background: band.color,
+                      }}
+                    />
+                  )}
+                </For>
+                <Show when={!isGroupTrack || depth() > 0}>
                   <div
                     class="absolute bottom-0 top-0"
                     style={{
                       left: `${depth() * GROUP_INDENT_PX}px`,
-                      width: `${GROUP_RAIL_WIDTH}px`,
+                      width: `${track.groupId ? GROUP_INDENT_PX : GROUP_RAIL_WIDTH}px`,
                       background: trackColor(),
-                    }}
-                  />
-                </Show>
-                <Show when={!isGroupTrack}>
-                  <div
-                    class="absolute bottom-0 top-0"
-                    style={{
-                      left: `${depth() * GROUP_INDENT_PX}px`,
-                      width: `${GROUP_RAIL_WIDTH}px`,
-                      background: trackColor(),
-                    }}
-                  />
-                </Show>
-                <Show when={track.groupId}>
-                  <div
-                    class="absolute bottom-0 top-0"
-                    style={{
-                      left: `${Math.max(0, depth() - 1) * GROUP_INDENT_PX}px`,
-                      width: `${GROUP_RAIL_WIDTH}px`,
-                      background: parentGroupColor(),
                     }}
                   />
                 </Show>

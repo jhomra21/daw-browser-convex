@@ -32,10 +32,9 @@ export function clientXToSec(clientX: number, scrollRef: HTMLDivElement) {
   return Math.max(0, x / PPS)
 }
 
-export function yToLaneIndex(clientY: number, scrollRef: HTMLDivElement) {
+export function clientYToTimelineTrackY(clientY: number, scrollRef: HTMLDivElement) {
   const rect = scrollRef.getBoundingClientRect()
-  const y = clientY - rect.top + (scrollRef.scrollTop || 0)
-  return Math.floor((y - RULER_HEIGHT) / LANE_HEIGHT)
+  return clientY - rect.top + (scrollRef.scrollTop || 0) - RULER_HEIGHT
 }
 
 export function willOverlap(clips: Clip[], excludeId: string | null, start: number, duration: number) {

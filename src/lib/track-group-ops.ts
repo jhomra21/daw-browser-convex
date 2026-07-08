@@ -244,11 +244,12 @@ export const planSetTrackColor = (
     ? new Set([track.id, ...collectTrackDescendantIds(tracks, track.id)])
     : new Set([track.id])
   const targetTracks = tracks.filter((candidate) => targetTrackIds.has(candidate.id))
+  const shouldUpdateClipColors = track.channelRole === 'group' && !!color
   return {
     trackUpdates: targetTracks
       .filter((track) => track.color !== color)
       .map((track) => ({ trackId: track.id, from: track.color, to: color })),
-    clipUpdates: color
+    clipUpdates: shouldUpdateClipColors
       ? targetTracks.flatMap((track) =>
           track.clips
             .filter((clip) => clip.color !== color)

@@ -680,7 +680,6 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
 
   const browserDeviceDrag = createBrowserDeviceDrag({
     resolvePayload: resolveBrowserDevicePayload,
-    tracks: options.tracks,
     trackLayout: options.trackLayout,
     scrollElement: options.scrollElement,
     effectsChainElement: options.effectsChainElement,

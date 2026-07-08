@@ -537,7 +537,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const automationMeta = () => automationMetaByTrackId().get(track.id);
             const automationVisible = () => props.automation.lanes.visibleByTrackId[track.id] === true;
             const displayedAutomationVisible = () => track.collapsed !== true && automationVisible();
-            const automationButtonActive = () => track.collapsed ? automationVisible() : displayedAutomationVisible();
             const visibleAutomationParameterIds = () => props.automation.lanes.visibleParameterIdsByTrackId[track.id] ?? [];
             const automationHeight = () => props.automation.lanes.heightsByLaneOwnerKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
             const rowLayout = () => layoutByTrackId().get(track.id);
@@ -912,7 +911,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                         <button
                           class={cn(
                             "h-6 w-6 border text-xs font-semibold transition-colors",
-                            automationButtonActive()
+                            automationVisible()
                               ? "border-red-400 bg-red-500/90 text-black"
                               : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
                           )}

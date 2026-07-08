@@ -1,5 +1,5 @@
 import type { Track } from '@daw-browser/timeline-core/types'
-import { COLLAPSED_LANE_HEIGHT, DEFAULT_AUTOMATION_LANE_HEIGHT, LANE_HEIGHT, RULER_HEIGHT } from '~/lib/timeline-utils'
+import { clientYToTimelineTrackY, COLLAPSED_LANE_HEIGHT, DEFAULT_AUTOMATION_LANE_HEIGHT, LANE_HEIGHT } from '~/lib/timeline-utils'
 
 export type TimelineTrackLayoutRow = {
   trackId: Track['id']
@@ -211,18 +211,11 @@ const trackLayoutRowIndexAtY = (
   return -1
 }
 
-const timelineTrackYAtClientY = (
-  clientY: number,
-  scrollElement: HTMLDivElement,
-): number => {
-  const rect = scrollElement.getBoundingClientRect()
-  return clientY - rect.top + (scrollElement.scrollTop || 0) - RULER_HEIGHT
-}
-
 const trackLayoutDropIndexAtY = (
   rows: readonly Pick<TimelineTrackLayoutRow, 'topPx' | 'heightPx'>[],
   y: number,
 ): number => {
+  if (rows.length === 0) return y >= 0 ? 0 : -1
   const rowIndex = trackLayoutRowIndexAtY(rows, y)
   if (rowIndex >= 0) return rowIndex
   const lastRow = rows[rows.length - 1]
@@ -234,7 +227,7 @@ export const trackLayoutDropIndexAtClientY = (
   clientY: number,
   scrollElement: HTMLDivElement,
 ): number => {
-  return trackLayoutDropIndexAtY(rows, timelineTrackYAtClientY(clientY, scrollElement))
+  return trackLayoutDropIndexAtY(rows, clientYToTimelineTrackY(clientY, scrollElement))
 }
 
 export const trackLayoutRowAtY = <Row extends Pick<TimelineTrackLayoutRow, 'topPx' | 'heightPx'>>(

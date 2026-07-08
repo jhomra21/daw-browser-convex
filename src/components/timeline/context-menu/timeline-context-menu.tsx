@@ -52,11 +52,10 @@ const shouldPreserveNativeContextMenu = (target: EventTarget | null) => (
 );
 
 const TimelineContextMenuEntry: Component<{ item: TimelineContextMenuItem }> = (props) => {
-  const item = () => props.item;
   return (
     <>
       {(() => {
-        const current = item();
+        const current = props.item;
         if (current.kind === "label") return <ContextMenuLabel>{current.label}</ContextMenuLabel>;
         if (current.kind === "separator") return <ContextMenuSeparator />;
         if (current.kind === "color") {

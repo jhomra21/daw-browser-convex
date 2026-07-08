@@ -392,6 +392,9 @@ export function useTimelineActions(
     const plan = planSetTrackColor(tracks, trackId, color)
     if (!plan || (plan.trackUpdates.length === 0 && plan.clipUpdates.length === 0)) return
     const trackById = new Map(tracks.map((track) => [track.id, track]))
+    const localTimelineRepository = isLocalId('project', projectId)
+      ? createLocalTimelineRepository(projectId)
+      : null
     await runWithConcurrency([
       ...plan.trackUpdates.map((update) => ({ kind: 'track' as const, update })),
       ...plan.clipUpdates.map((update) => ({ kind: 'clip' as const, update })),
@@ -400,8 +403,8 @@ export function useTimelineActions(
         await persistTrackPatch(projectId, item.update.trackId, { color: item.update.to })
         return
       }
-      if (isLocalId('project', projectId)) {
-        await createLocalTimelineRepository(projectId).updateClip({ clipId: item.update.clipId, color: item.update.to })
+      if (localTimelineRepository) {
+        await localTimelineRepository.updateClip({ clipId: item.update.clipId, color: item.update.to })
         return
       }
       await publishSharedTimelineOperation(projectId, { kind: 'clips.setColor', payload: { clipId: item.update.clipId, color: item.update.to } })

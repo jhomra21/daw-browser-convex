@@ -2,7 +2,7 @@ import { For } from "solid-js";
 import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard-shared";
 import { Button } from "~/components/ui/button";
 import { useAppPreferences } from "~/context/app-preferences";
-import { parseHexColor, type AppTheme } from "~/lib/preferences/app-preferences";
+import { type AppTheme } from "~/lib/preferences/app-preferences";
 import { DEFAULT_DAW_THEME_ID, type DawThemeId } from "~/lib/theme/theme-registry";
 
 type ThemeSelectionId = AppTheme | DawThemeId;
@@ -71,14 +71,6 @@ export function DashboardGeneralView() {
   ];
 
   const selectedThemeId = (): ThemeSelectionId => appPreferences.appearance.activeThemeSelection();
-  const commitDefaultTrackColor = (color: string) => {
-    const nextColor = parseHexColor(color, appPreferences.timeline.defaultTrackColor());
-    appPreferences.timeline.setDefaultTrackColor(nextColor);
-  };
-  const commitDefaultGroupColor = (color: string) => {
-    const nextColor = parseHexColor(color, appPreferences.timeline.defaultGroupColor());
-    appPreferences.timeline.setDefaultGroupColor(nextColor);
-  };
 
   return (
     <DashboardScrollView>
@@ -104,7 +96,7 @@ export function DashboardGeneralView() {
               type="color"
               value={appPreferences.timeline.defaultTrackColor()}
               class="h-8 w-12 cursor-pointer border border-border bg-app-surface p-0.5"
-              onChange={(event) => commitDefaultTrackColor(event.currentTarget.value)}
+              onChange={(event) => appPreferences.timeline.setDefaultTrackColor(event.currentTarget.value)}
             />
           }
         />
@@ -116,7 +108,7 @@ export function DashboardGeneralView() {
               type="color"
               value={appPreferences.timeline.defaultGroupColor()}
               class="h-8 w-12 cursor-pointer border border-border bg-app-surface p-0.5"
-              onChange={(event) => commitDefaultGroupColor(event.currentTarget.value)}
+              onChange={(event) => appPreferences.timeline.setDefaultGroupColor(event.currentTarget.value)}
             />
           }
         />

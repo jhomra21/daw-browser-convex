@@ -173,6 +173,12 @@ describe('track group operations', () => {
       trackUpdates: [{ trackId: 'g', from: '#f00', to: undefined }],
       clipUpdates: [],
     })
+    expect(planSetTrackColor([
+      track({ id: 'a', color: '#0f0', clips: [clip({ id: 'c', startSec: 0, duration: 1, color: '#00f' })] }),
+    ], 'a', '#f00')).toEqual({
+      trackUpdates: [{ trackId: 'a', from: '#0f0', to: '#f00' }],
+      clipUpdates: [],
+    })
     expect(planSetTrackColor([track({ id: 'g', channelRole: 'group' })], 'missing', '#f00')).toBeNull()
   })
 })

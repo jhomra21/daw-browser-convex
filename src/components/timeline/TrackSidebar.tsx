@@ -645,7 +645,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 )}
                 style={{
                   height: `${rowHeightPx()}px`,
-                  ...(isGroupTrack ? { background: trackColor() } : {}),
+                  ...(isGroupTrack || track.groupId ? { background: trackColor() } : {}),
                 }}
                 onClick={() => sidebar().onTrackClick(track.id)}
                 onPointerMove={updateTrackDrag}

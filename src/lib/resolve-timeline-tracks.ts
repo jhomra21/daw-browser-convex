@@ -142,6 +142,14 @@ const normalizeSourceKind = (value: string | undefined): Clip['sourceKind'] => {
   return sanitizeAudioSourceKind(value)
 }
 
+const defaultClipColor = (clip: {
+  sourceKind?: Clip['sourceKind']
+  midi?: Clip['midi']
+}) => {
+  if (clip.sourceKind === 'recording') return 'clip-recording'
+  return clip.midi ? 'clip-midi' : 'clip-audio'
+}
+
 const normalizeMidi = (value: FullTimelineView['clips'][number]['midi']): Clip['midi'] => {
   const wave = MIDI_WAVES.find((entry) => entry === value?.wave)
   if (!value || !wave) return undefined
@@ -452,7 +460,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
       bufferOffsetSec: clipRow.bufferOffsetSec ?? 0,
       audioWarp: normalizeAudioWarp(clipRow.audioWarp),
       gain: clipRow.gain,
-      color: clipRow.color ?? '#22c55e',
+      color: clipRow.color ?? defaultClipColor({ sourceKind: normalizeSourceKind(clipRow.sourceKind), midi: normalizeMidi(clipRow.midi) }),
       sampleUrl: clipRow.sampleUrl,
       midi: normalizeMidi(clipRow.midi),
       midiOffsetBeats: clipRow.midiOffsetBeats ?? 0,

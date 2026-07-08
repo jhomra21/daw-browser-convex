@@ -1,13 +1,13 @@
 import type { Accessor } from 'solid-js'
 
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
-import { isLocalId } from '@daw-browser/shared'
+import { assert, isLocalId } from '@daw-browser/shared'
 import { ensureRoomShareLink, getInviteShareUrl } from '~/lib/timeline-share'
 import { PPS } from '~/lib/timeline-utils'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
 import { createOptimisticTrack, pushTrackCreateHistory } from '~/lib/tracks'
-import { planGroupTracks, planMoveTrackToGroup, planSetTrackColor, planTrackReorder, planUngroupTracks } from '~/lib/track-group-ops'
+import { planAssignTrackColorToClips, planGroupTracks, planMoveTrackToGroup, planSetTrackColor, planTrackReorder, planUngroupTracks } from '~/lib/track-group-ops'
 import { assertAppliedSharedTimelineOperationResult, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import { buildClipColorHistoryEntry, buildTrackColorHistoryEntry, buildTrackGroupHistoryEntry, buildTrackReorderHistoryEntry, buildTrackUngroupHistoryEntry } from '~/lib/undo/builders'
@@ -67,6 +67,7 @@ type UseTimelineActionsReturn = {
   toggleTrackCollapsed: (trackId: Track['id']) => Promise<void>
   setTracksCollapsed: (updates: Array<{ trackId: Track['id']; collapsed: boolean }>) => Promise<void>
   setTrackColor: (trackId: Track['id'], color: string | undefined) => Promise<void>
+  assignTrackColorToClips: (trackId: Track['id']) => Promise<void>
 }
 
 export function useTimelineActions(
@@ -390,35 +391,16 @@ export function useTimelineActions(
     if (!projectId) return
     const tracks = options.tracks()
     const plan = planSetTrackColor(tracks, trackId, color)
-    if (!plan || (plan.trackUpdates.length === 0 && plan.clipUpdates.length === 0)) return
+    if (!plan || plan.trackUpdates.length === 0) return
     const trackById = new Map(tracks.map((track) => [track.id, track]))
-    const localTimelineRepository = isLocalId('project', projectId)
-      ? createLocalTimelineRepository(projectId)
-      : null
-    await runWithConcurrency([
-      ...plan.trackUpdates.map((update) => ({ kind: 'track' as const, update })),
-      ...plan.clipUpdates.map((update) => ({ kind: 'clip' as const, update })),
-    ], 8, async (item) => {
-      if (item.kind === 'track') {
-        await persistTrackPatch(projectId, item.update.trackId, { color: item.update.to })
-        return
-      }
-      if (localTimelineRepository) {
-        await localTimelineRepository.updateClip({ clipId: item.update.clipId, color: item.update.to })
-        return
-      }
-      await publishSharedTimelineOperation(projectId, { kind: 'clips.setColor', payload: { clipId: item.update.clipId, color: item.update.to } })
+    await runWithConcurrency(plan.trackUpdates, 8, async (update) => {
+      await persistTrackPatch(projectId, update.trackId, { color: update.to })
     })
     for (const update of plan.trackUpdates) {
       const track = trackById.get(update.trackId)
       if (track) applyTrackPatch(track, { color: update.to })
     }
-    for (const update of plan.clipUpdates) {
-      const track = trackById.get(update.trackId)
-      const clip = track?.clips.find((clip) => clip.id === update.clipId)
-      if (track && clip) options.creation.replaceLocalClip(track.id, { ...clip, color: update.to })
-    }
-    if (plan.trackUpdates.length === 1 && plan.clipUpdates.length === 0) {
+    if (plan.trackUpdates.length === 1) {
       const update = plan.trackUpdates[0]
       const track = trackById.get(update.trackId)
       if (track) options.creation.pushHistory(buildTrackColorHistoryEntry({ projectId, track, from: update.from, to: update.to }))
@@ -433,14 +415,39 @@ export function useTimelineActions(
             const track = trackById.get(update.trackId)
             return track ? [buildTrackColorHistoryEntry({ projectId, track, from: update.from, to: update.to })] : []
           }),
-          ...plan.clipUpdates.flatMap((update) => {
-            const track = trackById.get(update.trackId)
-            const clip = track?.clips.find((clip) => clip.id === update.clipId)
-            return clip ? [buildClipColorHistoryEntry({ projectId, clip, from: update.from, to: update.to })] : []
-          }),
         ],
       },
     })
+  }
+
+  async function assignTrackColorToClips(trackId: Track['id']): Promise<void> {
+    const projectId = options.room.projectId()
+    if (!projectId) return
+    const tracks = options.tracks()
+    const plan = planAssignTrackColorToClips(tracks, trackId)
+    if (!plan) return
+    const trackById = new Map(tracks.map((track) => [track.id, track]))
+    const localTimelineRepository = isLocalId('project', projectId)
+      ? createLocalTimelineRepository(projectId)
+      : null
+    await runWithConcurrency(plan.clipUpdates, 8, async (update) => {
+      if (localTimelineRepository) {
+        const row = await localTimelineRepository.updateClip({ clipId: update.clipId, color: update.to })
+        assert(row, 'Failed to assign track color to clip')
+        return
+      }
+      const result = await publishSharedTimelineOperation(projectId, { kind: 'clips.setColor', payload: { clipId: update.clipId, color: update.to } })
+      assertAppliedSharedTimelineOperationResult(result)
+    })
+    const historyEntries = plan.clipUpdates.flatMap((update) => {
+      const track = trackById.get(update.trackId)
+      const clip = track?.clips.find((clip) => clip.id === update.clipId)
+      if (track && clip) options.creation.replaceLocalClip(track.id, { ...clip, color: update.to })
+      return clip ? [buildClipColorHistoryEntry({ projectId, clip, from: update.from, to: update.to })] : []
+    })
+    if (historyEntries.length > 0) {
+      options.creation.pushHistory({ type: 'section-edit', projectId, data: { entries: historyEntries } })
+    }
   }
 
   function jumpToClip(trackId: Track['id'], clipId: string, startSec: number): void {
@@ -474,5 +481,6 @@ export function useTimelineActions(
     toggleTrackCollapsed,
     setTracksCollapsed,
     setTrackColor,
+    assignTrackColorToClips,
   }
 }

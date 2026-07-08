@@ -451,6 +451,7 @@ export function createEffectsPanelInstrumentDevice(
       startSec: start,
       duration: Math.max(0.001, options?.durationSec ?? 1),
       name: "MIDI Clip",
+      color: track.color ?? "clip-midi",
       midi: {
         wave: "sawtooth",
         gain: 0.8,

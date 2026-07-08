@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  APP_PREFERENCES_VERSION,
   defaultAppPreferences,
   normalizeAppPreferences,
   parseAppTheme
@@ -66,6 +67,15 @@ describe("normalizeAppPreferences", () => {
       sidebar: { open: false },
       timeline: { defaultTrackColor: defaultAppPreferences.timeline.defaultTrackColor, defaultGroupColor: "#fedcba" }
     })
+  })
+
+  test("normalizes branch-introduced row color defaults back to timeline surface", () => {
+    expect(
+      normalizeAppPreferences({
+        version: APP_PREFERENCES_VERSION,
+        timeline: { defaultTrackColor: "#64748b", defaultGroupColor: "#475569" }
+      }).timeline
+    ).toEqual(defaultAppPreferences.timeline)
   })
 })
 

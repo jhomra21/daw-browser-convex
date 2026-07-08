@@ -546,6 +546,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     toggleTrackCollapsed,
     setTracksCollapsed,
     setTrackColor,
+    assignTrackColorToClips,
   } = useTimelineActions({
     tracks: renderTracks,
     room: {
@@ -1436,6 +1437,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           onMoveTrackToGroup: moveTrackToGroup,
           onReorderTracks: reorderTracks,
           onSetTrackColor: setTrackColor,
+          onAssignTrackColorToClips: assignTrackColorToClips,
           onSelectAllClipsInGroup: selectAllClipsInGroup,
         }}
         automation={automation.workspace()}

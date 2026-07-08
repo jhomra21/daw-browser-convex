@@ -64,6 +64,7 @@ type TrackSidebarProps = {
     onMoveTrackToGroup: (trackId: Track["id"], groupId: Track["id"] | undefined) => void;
     onReorderTracks: (trackIds: Track["id"][], target: TrackDropTarget) => void;
     onSetTrackColor: (trackId: Track["id"], color: string | undefined) => void;
+    onAssignTrackColorToClips: (trackId: Track["id"]) => void;
     onSelectAllClipsInGroup: (groupId: Track["id"]) => void;
     currentUserId: string;
     subscribeTrackLevels: (
@@ -507,17 +508,18 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const depth = () => depthByTrackId().get(track.id) ?? 0;
             const defaultTrackColor = () => appPreferences.timeline.defaultTrackColor();
             const defaultGroupColor = () => appPreferences.timeline.defaultGroupColor();
-            const trackColor = () => track.color ?? (isGroupTrack ? defaultGroupColor() : defaultTrackColor());
             const ancestorGroupColorBands = () => {
               const bands: Array<{ leftPx: number; color: string }> = [];
               let groupId = track.groupId;
               while (groupId) {
                 const group = sidebar().trackById.get(groupId);
                 if (!group) break;
-                bands.push({
-                  leftPx: (depthByTrackId().get(group.id) ?? 0) * GROUP_INDENT_PX,
-                  color: group.color ?? defaultGroupColor(),
-                });
+                if (group.color) {
+                  bands.push({
+                    leftPx: (depthByTrackId().get(group.id) ?? 0) * GROUP_INDENT_PX,
+                    color: group.color,
+                  });
+                }
                 groupId = group.groupId;
               }
               return bands;
@@ -592,6 +594,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 disabled: !track.color,
                 onSelect: () => sidebar().onSetTrackColor(track.id, undefined),
               },
+              {
+                kind: "item",
+                label: isGroupTrack ? "Assign group colors to clips" : "Assign track color to clips",
+                disabled: !track.color,
+                onSelect: () => sidebar().onAssignTrackColorToClips(track.id),
+              },
               { kind: "separator" },
               {
                 kind: "item",
@@ -636,7 +644,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               <div
                 class={cn(
                   "relative [box-shadow:inset_0_-1px_0_rgb(38_38_38)]",
-                  isGroupTrack
+                  isGroupTrack && track.color
                     ? "text-black"
                     : sidebar().selectedTrackId === track.id
                     ? "bg-timeline-surface-muted"
@@ -644,7 +652,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 )}
                 style={{
                   height: `${rowHeightPx()}px`,
-                  ...(isGroupTrack || track.groupId ? { background: trackColor() } : {}),
+                  ...(track.color ? { background: track.color } : {}),
                 }}
                 onClick={() => sidebar().onTrackClick(track.id)}
                 onPointerMove={updateTrackDrag}
@@ -664,13 +672,13 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     />
                   )}
                 </For>
-                <Show when={!isGroupTrack || depth() > 0}>
+                <Show when={track.color && (!isGroupTrack || depth() > 0)}>
                   <div
                     class="absolute bottom-0 top-0"
                     style={{
                       left: `${depth() * GROUP_INDENT_PX}px`,
                       width: `${GROUP_RAIL_WIDTH}px`,
-                      background: trackColor(),
+                      background: track.color,
                     }}
                   />
                 </Show>

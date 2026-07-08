@@ -71,6 +71,7 @@ export type SharedTimelineClipCreatePayload = {
   audioWarp?: AudioWarpPayload
   gain?: number
   midiOffsetBeats?: number
+  color?: string
   midi?: {
     wave: string
     gain?: number
@@ -278,6 +279,7 @@ export const readSharedTimelineClipCreatePayload = (
     audioWarp: readAudioWarp(value.audioWarp),
     gain: readOptionalNumber(value.gain),
     midiOffsetBeats: readOptionalNumber(value.midiOffsetBeats),
+    color: readOptionalString(value.color),
     midi,
     clipKind: readOptionalString(value.clipKind),
     operationId: readOptionalString(value.operationId),

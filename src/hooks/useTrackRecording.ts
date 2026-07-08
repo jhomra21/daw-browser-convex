@@ -314,7 +314,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
           historyPush,
           skipHistory: Boolean(ctx.createdTrack),
           audioBufferCache,
-          color: 'clip-recording',
+          color: targetTrack.color ?? 'clip-recording',
           canProject: () => projectId() === rid && tracks().some((entry) => entry.id === ctx.trackId),
         })
         await cleanupRecording()
@@ -363,7 +363,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         audioBufferCache,
         grantClipWrite,
         grantScope: uid ? { projectId: rid, userId: uid } : undefined,
-        color: 'clip-recording',
+        color: targetTrack.color ?? 'clip-recording',
         pushHistory: false,
         canProject: () => projectId() === rid && tracks().some((entry) => entry.id === ctx.trackId),
       })

@@ -61,6 +61,7 @@ type ClipCreateInput = {
   }
   gain?: number
   midiOffsetBeats?: number
+  color?: string
   midi?: {
     wave: string
     gain?: number
@@ -95,6 +96,7 @@ type ClipCreatePatch = {
   audioWarp?: ClipCreateInput['audioWarp']
   gain?: number
   midiOffsetBeats?: number
+  color?: string
 }
 
 const sanitizeClipKind = (value: string | undefined): ClipKind => {
@@ -158,6 +160,7 @@ const buildClipCreatePatch = (
     audioWarp: item.audioWarp,
     gain: item.gain,
     midiOffsetBeats: item.midiOffsetBeats,
+    color: item.color,
   }
   Object.assign(patch, buildClipAudioSourceFields(metadata))
 
@@ -314,6 +317,7 @@ export const create = mutation({
     audioWarp: v.optional(audioWarpValidator),
     gain: v.optional(v.number()),
     midiOffsetBeats: v.optional(v.number()),
+    color: v.optional(v.string()),
     midi: v.optional(v.object({
       wave: v.string(),
       gain: v.optional(v.number()),
@@ -357,6 +361,7 @@ export const serverCreate = mutation({
     audioWarp: v.optional(audioWarpValidator),
     gain: v.optional(v.number()),
     midiOffsetBeats: v.optional(v.number()),
+    color: v.optional(v.string()),
     midi: v.optional(v.object({
       wave: v.string(),
       gain: v.optional(v.number()),
@@ -731,6 +736,7 @@ export const createMany = mutation({
       audioWarp: v.optional(audioWarpValidator),
       gain: v.optional(v.number()),
       midiOffsetBeats: v.optional(v.number()),
+      color: v.optional(v.string()),
       clipKind: v.optional(v.string()),
     })),
     operationId: v.optional(v.string()),
@@ -784,6 +790,7 @@ export const serverCreateMany = mutation({
       audioWarp: v.optional(audioWarpValidator),
       gain: v.optional(v.number()),
       midiOffsetBeats: v.optional(v.number()),
+      color: v.optional(v.string()),
       clipKind: v.optional(v.string()),
     })),
     operationId: v.optional(v.string()),

@@ -190,10 +190,18 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const clipSelected = canvasColors["clip-selected"];
     const clipMidi = canvasColors["clip-midi"];
     const clipAudio = canvasColors["clip-audio"];
+    const clipRecording = canvasColors["clip-recording"];
     const timelineGridMajor = canvasColors["timeline-grid-major"];
     const timelineGridMinor = canvasColors["timeline-grid-minor"];
     const timelineSurface = canvasColors["timeline-surface"];
     const timelineSurfaceMuted = canvasColors["timeline-surface-muted"];
+    const clipContentColor = props.clip.color === "clip-audio"
+      ? clipAudio
+      : props.clip.color === "clip-midi"
+        ? clipMidi
+        : props.clip.color === "clip-recording"
+          ? clipRecording
+          : props.clip.color;
 
     const padTop = WAVEFORM_PAD_Y;
     const padBottom = WAVEFORM_PAD_Y;
@@ -208,7 +216,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       );
       const color = props.isSelected
         ? clipSelected
-        : clipMidi;
+        : clipContentColor;
       let minP = Infinity;
       let maxP = -Infinity;
       for (const note of midi.notes as Array<{ pitch: number }>) {
@@ -327,7 +335,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       contentH: waveformBoxH,
       cssW,
       cssH,
-      fillStyle: clipAudio,
+      fillStyle: clipContentColor,
       boundaryStyle: timelineGridMajor,
     });
   }
@@ -343,6 +351,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void props.clip.sourceSampleRate;
     void props.clip.sourceChannelCount;
     void props.clip.audioWarp;
+    void props.clip.color;
     void props.isSelected;
     const midi: any = (props.clip as any).midi;
     const midiSignature = Array.isArray(midi?.notes)

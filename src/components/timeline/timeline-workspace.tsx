@@ -129,6 +129,7 @@ type Props = {
     onMoveTrackToGroup: (trackId: Track["id"], groupId: Track["id"] | undefined) => void;
     onReorderTracks: (trackIds: Track["id"][], target: TrackDropTarget) => void;
     onSetTrackColor: (trackId: Track["id"], color: string | undefined) => void;
+    onAssignTrackColorToClips: (trackId: Track["id"]) => void;
     onSelectAllClipsInGroup: (groupId: Track["id"]) => void;
   };
   automation: TimelineWorkspaceAutomationModel;
@@ -370,6 +371,7 @@ export default function TimelineWorkspace(props: Props) {
                 onMoveTrackToGroup: props.sidebar.onMoveTrackToGroup,
                 onReorderTracks: props.sidebar.onReorderTracks,
                 onSetTrackColor: props.sidebar.onSetTrackColor,
+                onAssignTrackColorToClips: props.sidebar.onAssignTrackColorToClips,
                 onSelectAllClipsInGroup: props.sidebar.onSelectAllClipsInGroup,
               }}
               automation={props.automation}

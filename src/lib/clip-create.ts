@@ -85,6 +85,7 @@ type BatchClipCreateResult = {
 
 function getDefaultClipColor(clip: ClipCreateSnapshot) {
   if (clip.sourceKind === 'recording') return 'clip-recording'
+  if (clip.midi) return 'clip-midi'
   return 'clip-audio'
 }
 
@@ -102,6 +103,7 @@ function buildClipSnapshotFields(clip: Clip) {
     }),
     sourceAssetKey: clip.sourceAssetKey,
     sourceKind: clip.sourceKind,
+    color: clip.color,
     midi: clip.midi,
     audioWarp: normalizeAudioWarp(clip.audioWarp),
     timing: {
@@ -121,7 +123,7 @@ export function buildLocalClip(input: BuildLocalClipInput): RuntimeClip {
     buffer,
     startSec: clip.startSec,
     duration: clip.duration,
-    color: color ?? getDefaultClipColor(clip),
+    color: color ?? clip.color ?? getDefaultClipColor(clip),
     sampleUrl: clip.sampleUrl,
     sourceAssetKey: clip.sourceAssetKey,
     sourceKind: clip.sourceKind,
@@ -146,6 +148,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
     source: input.source,
     sourceAssetKey: input.sourceAssetKey,
     sourceKind: input.sourceKind,
+    color: input.color,
   }
   const pendingClipId = `pending:${crypto.randomUUID()}`
   const canProjectPending = input.canProject?.() !== false
@@ -266,13 +269,14 @@ export async function createLocalAudioClip(input: LocalAudioClipInput): Promise<
     source: input.source,
     sourceAssetKey: input.sourceAssetKey,
     sourceKind: input.sourceKind,
+    color: input.color,
   }
   const row = await createLocalTimelineRepository(input.projectId).createClip({
     trackId: input.trackId,
     name: input.fileName,
     startSec: input.startSec,
     duration: input.decoded.duration,
-    color: input.color ?? getDefaultClipColor(clip),
+    color: input.color ?? clip.color ?? getDefaultClipColor(clip),
     sourceAssetId: input.sourceAssetKey,
     sourceAssetKey: input.sourceAssetKey,
     sourceKind: input.sourceKind,
@@ -397,7 +401,7 @@ export async function createProjectedLocalClips(input: {
         name: item.clip.name,
         startSec: item.clip.startSec,
         duration: item.clip.duration,
-        color: item.clip.midi ? 'clip-midi' : 'clip-audio',
+        color: item.clip.color ?? getDefaultClipColor(item.clip),
         sourceAssetKey: item.clip.sourceAssetKey,
         sourceKind: item.clip.sourceKind,
         sourceDurationSec: item.clip.source?.durationSec,

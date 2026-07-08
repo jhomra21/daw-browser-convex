@@ -58,6 +58,9 @@ type TrackReorderPlan = {
 
 type SetTrackColorPlan = {
   trackUpdates: Array<{ trackId: TrackId; from: string | undefined; to: string | undefined }>
+}
+
+type AssignTrackColorToClipsPlan = {
   clipUpdates: Array<{ clipId: string; trackId: TrackId; from: string; to: string }>
 }
 
@@ -244,17 +247,30 @@ export const planSetTrackColor = (
     ? new Set([track.id, ...collectTrackDescendantIds(tracks, track.id)])
     : new Set([track.id])
   const targetTracks = tracks.filter((candidate) => targetTrackIds.has(candidate.id))
-  const shouldUpdateClipColors = track.channelRole === 'group' && !!color
   return {
     trackUpdates: targetTracks
       .filter((track) => track.color !== color)
       .map((track) => ({ trackId: track.id, from: track.color, to: color })),
-    clipUpdates: shouldUpdateClipColors
-      ? targetTracks.flatMap((track) =>
-          track.clips
-            .filter((clip) => clip.color !== color)
-            .map((clip) => ({ clipId: clip.id, trackId: track.id, from: clip.color, to: color })),
-        )
-      : [],
   }
+}
+
+export const planAssignTrackColorToClips = (
+  tracks: readonly Track[],
+  trackId: TrackId,
+): AssignTrackColorToClipsPlan | null => {
+  const track = tracks.find((candidate) => candidate.id === trackId)
+  if (!track?.color) return null
+  const targetTrackIds = track.channelRole === 'group'
+    ? new Set([track.id, ...collectTrackDescendantIds(tracks, track.id)])
+    : new Set([track.id])
+  const clipUpdates = tracks
+    .filter((candidate) => targetTrackIds.has(candidate.id))
+    .flatMap((track) => {
+      const color = track.color
+      if (!color) return []
+      return track.clips
+        .filter((clip) => clip.color !== track.color)
+        .map((clip) => ({ clipId: clip.id, trackId: track.id, from: clip.color, to: color }))
+    })
+  return clipUpdates.length > 0 ? { clipUpdates } : null
 }

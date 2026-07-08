@@ -240,6 +240,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
           historyPush: context.clips.historyPush,
           skipHistory: Boolean(input.autoCreatedTrack),
           audioBufferCache: context.clips.buffers.writer,
+          color: input.track.color,
           canProject: () => context.project.isActiveProjectTrack(projectId, input.track.id),
           onClipCreated: context.clips.onClipCreated,
         })
@@ -283,6 +284,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         historyPush: context.clips.historyPush,
         uploadToR2: context.cloud.uploadToR2,
         audioBufferCache: context.clips.buffers.writer,
+        color: input.track.color,
         grantClipWrite: context.clips.grantClipWrite,
         grantScope: { projectId, userId },
         pushHistory: !input.autoCreatedTrack,

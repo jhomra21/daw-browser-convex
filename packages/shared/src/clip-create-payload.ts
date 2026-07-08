@@ -28,6 +28,7 @@ export type ClipCreateSnapshot = {
   }
   timing?: ClipTimingSnapshot
   audioWarp?: AudioWarpPayload
+  color?: string
 }
 
 type BuildClipCreatePayloadInput<TTrackId extends string = string> = {
@@ -87,6 +88,7 @@ const buildAudioClipMetadataPayloadFields = <TTrackId extends string>(
     audioWarp: normalizeAudioWarp(clip.audioWarp),
     gain: clip.gain,
     midiOffsetBeats: clip.timing?.midiOffsetBeats,
+    color: clip.color,
   }
 }
 
@@ -135,5 +137,6 @@ export function buildClipCreatePayload<TTrackId extends string>(
     bufferOffsetSec: clip.timing?.bufferOffsetSec,
     audioWarp: normalizeAudioWarp(clip.audioWarp),
     midiOffsetBeats: clip.timing?.midiOffsetBeats,
+    color: clip.color,
   }
 }

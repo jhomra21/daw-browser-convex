@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildGroupClipOverview, buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks, trackIdsInYRange, trackIndexAtY, wouldCreateCycle } from './timeline-track-layout'
+import { buildGroupClipOverview, buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks, trackIdsInYRange, trackIndexAtY, trackLayoutRowAtY, wouldCreateCycle } from './timeline-track-layout'
 import type { Track } from '@daw-browser/timeline-core/types'
 
 const track = (id: string, groupId?: string, collapsed?: boolean): Track => ({
@@ -46,6 +46,23 @@ describe('timeline track layout grouping', () => {
     expect(rows.map((row) => row.trackId)).toEqual(['g', 'b'])
     expect(trackIndexAtY(rows, 1)).toBe(0)
     expect(trackIdsInYRange(rows, 0, 160)).toEqual(['g', 'b'])
+  })
+
+  test('trackLayoutRowAtY finds rows by y position', () => {
+    const rows = buildTimelineTrackLayoutRows({
+      tracks: [track('a'), track('b'), track('c')],
+      visibleByTrackId: { b: true },
+      heightsByLaneOwnerKey: { b: 48 },
+      visibleParameterIdsByTrackId: {},
+    })
+
+    expect(trackLayoutRowAtY(rows, 0)?.trackId).toBe('a')
+    expect(trackLayoutRowAtY(rows, 95)?.trackId).toBe('a')
+    expect(trackLayoutRowAtY(rows, 96)?.trackId).toBe('b')
+    expect(trackLayoutRowAtY(rows, 239)?.trackId).toBe('b')
+    expect(trackLayoutRowAtY(rows, 240)?.trackId).toBe('c')
+    expect(trackLayoutRowAtY(rows, -1)).toBeUndefined()
+    expect(trackLayoutRowAtY(rows, 336)).toBeUndefined()
   })
 
   test('buildGroupClipOverview merges descendant clip ranges', () => {

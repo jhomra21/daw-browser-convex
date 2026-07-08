@@ -20,7 +20,7 @@ import { DEFAULT_AUTOMATION_LANE_HEIGHT, GROUP_INDENT_PX, GROUP_RAIL_WIDTH, LANE
 import { cn } from "~/lib/utils";
 import type { Track, TrackSend } from "@daw-browser/timeline-core/types";
 import type { TimelineWorkspaceAutomationModel } from "~/hooks/useTimelineAutomationController";
-import type { TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
+import { trackLayoutRowAtY, type TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
 import MasterSidebarRow, {
   MASTER_ROW_HEIGHT,
   type MasterSidebarModel,
@@ -84,6 +84,8 @@ const displayMeterLevel = (value: number | undefined) => {
 const clampVolume = (volume: number) => clampUnit(volume);
 const quantizeVolume = (volume: number) =>
   Math.round(clampVolume(volume) * 100) / 100;
+const fallbackTrackColor = "var(--muted-foreground)";
+const fallbackGroupColor = "var(--timeline-surface-muted)";
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const sidebar = () => props.sidebar;
 
@@ -141,6 +143,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       ),
   );
   const depthByTrackId = createMemo(() => new Map(sidebar().trackLayout.map((row) => [row.trackId, row.depth])));
+  const layoutByTrackId = createMemo(() => new Map(sidebar().trackLayout.map((row) => [row.trackId, row])));
   const returnTracks = createMemo(() =>
     sidebar().tracks.filter((track) => getTrackChannelRole(track) === "return"),
   );
@@ -258,7 +261,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     if (!scrollElement) return undefined;
     const rect = scrollElement.getBoundingClientRect();
     const localY = clientY - rect.top + (scrollElement.scrollTop || 0) - RULER_HEIGHT;
-    const row = sidebar().trackLayout.find((row) => localY >= row.topPx && localY < row.topPx + row.heightPx);
+    const row = trackLayoutRowAtY(sidebar().trackLayout, localY);
     if (!row) return undefined;
     const track = sidebar().trackById.get(row.trackId);
     if (!track) return undefined;
@@ -304,7 +307,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     }
     if (!drag.dragging || !drag.target) return;
     setSuppressTrackClickId(drag.trackId);
-    const selectedIds = new Set(sidebar().selectedTrackId ? [sidebar().selectedTrackId, drag.trackId] : [drag.trackId]);
+    const selectedIds = new Set([drag.trackId]);
     sidebar().onReorderTracks(normalizeDragMoveSet(sidebar().tracks, selectedIds), drag.target);
   };
 
@@ -451,7 +454,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         <div class="sticky top-0 z-40 border-b border-border bg-timeline-surface" style={{ height: `${RULER_HEIGHT}px` }} />
         <Show when={trackDrag()?.dragging && trackDrag()?.target}>
           {(target) => {
-            const row = () => sidebar().trackLayout.find((entry) => entry.trackId === target().trackId);
+            const row = () => layoutByTrackId().get(target().trackId);
             const top = () => {
               const current = row();
               if (!current) return RULER_HEIGHT;
@@ -484,11 +487,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const isReturnTrack = channelRole === "return";
             const isGroupTrack = channelRole === "group";
             const depth = () => depthByTrackId().get(track.id) ?? 0;
-            const trackColor = () => track.color ?? (isGroupTrack ? "rgb(34 197 94)" : "rgb(75 85 99)");
+            const trackColor = () => track.color ?? (isGroupTrack ? fallbackGroupColor : fallbackTrackColor);
             const parentGroupColor = () => {
               if (!track.groupId) return undefined;
               const parent = sidebar().trackById.get(track.groupId);
-              return parent?.color ?? "rgb(34 197 94)";
+              return parent?.color ?? fallbackGroupColor;
             };
             const muteDisabled = lockedByOther;
             const soloDisabled = lockedByOther;
@@ -558,7 +561,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               {
                 kind: "item",
                 label: track.color ? "Clear track color" : "Set track color",
-                onSelect: () => sidebar().onSetTrackColor(track.id, track.color ? undefined : trackColor()),
+                disabled: !track.color,
+                onSelect: () => sidebar().onSetTrackColor(track.id, undefined),
               },
               { kind: "separator" },
               {

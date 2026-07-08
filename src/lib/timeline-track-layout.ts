@@ -179,7 +179,31 @@ export const buildTimelineTrackLayoutRows = (input: {
 export const trackIndexAtY = (
   rows: readonly Pick<TimelineTrackLayoutRow, 'topPx' | 'heightPx'>[],
   y: number,
-) => rows.findIndex((row) => y >= row.topPx && y < row.topPx + row.heightPx)
+) => {
+  const row = trackLayoutRowAtY(rows, y)
+  return row ? rows.indexOf(row) : -1
+}
+
+export const trackLayoutRowAtY = <Row extends Pick<TimelineTrackLayoutRow, 'topPx' | 'heightPx'>>(
+  rows: readonly Row[],
+  y: number,
+): Row | undefined => {
+  let low = 0
+  let high = rows.length - 1
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2)
+    const row = rows[mid]
+    if (!row) return undefined
+    if (y < row.topPx) {
+      high = mid - 1
+    } else if (y >= row.topPx + row.heightPx) {
+      low = mid + 1
+    } else {
+      return row
+    }
+  }
+  return undefined
+}
 
 export const trackIdsInYRange = (
   rows: readonly Pick<TimelineTrackLayoutRow, 'trackId' | 'topPx' | 'heightPx'>[],

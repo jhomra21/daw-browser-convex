@@ -156,7 +156,8 @@ export default function TimelineWorkspace(props: Props) {
     const tracksHeight = layout.length === 0 ? 0 : layout[layout.length - 1].topPx + layout[layout.length - 1].heightPx;
     return tracksHeight + (props.dropAtNewTrack ? LANE_HEIGHT : 0);
   };
-  const masterAreaHeight = () => MASTER_ROW_HEIGHT + (!props.sidebar.master.collapsed && props.automation.lanes.masterVisible ? props.automation.lanes.masterHeight : 0);
+  const masterAutomationVisible = () => !props.sidebar.master.collapsed && props.automation.lanes.masterVisible;
+  const masterAreaHeight = () => MASTER_ROW_HEIGHT + (masterAutomationVisible() ? props.automation.lanes.masterHeight : 0);
   const fullHeight = () => RULER_HEIGHT + trackAreaHeight() + masterAreaHeight();
   const scrollContentHeight = () => fullHeight() + props.bottomPanelOffsetPx;
   const masterParameterId = () => props.automation.lanes.selectedParametersByTargetKey.master ?? "volume";
@@ -306,7 +307,7 @@ export default function TimelineWorkspace(props: Props) {
                 recording={props.recording}
                 midi={props.midi}
               />
-              <Show when={props.automation.lanes.masterVisible}>
+              <Show when={masterAutomationVisible()}>
                 <div
                   class="absolute left-0 right-0 z-30 border-t border-automation/30 bg-timeline-background/95"
                   style={{

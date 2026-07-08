@@ -2,6 +2,7 @@ import { createSignal, onCleanup, type Accessor } from "solid-js";
 import type { Track } from "@daw-browser/timeline-core/types";
 import { useDrag } from "~/hooks/useDrag";
 import { yToLaneIndex } from "~/lib/timeline-utils";
+import { trackLayoutDropIndexAtClientY, type TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
 import type { BrowserDragPayload, BrowserDragSession, BrowserDropTarget } from "./browser-drag-types";
 
 const DRAG_THRESHOLD_PX = 4;
@@ -9,6 +10,7 @@ const DRAG_THRESHOLD_PX = 4;
 type BrowserDeviceDragOptions = {
   resolvePayload: (itemId: string) => BrowserDragPayload | undefined;
   tracks: Accessor<Track[]>;
+  trackLayout: Accessor<TimelineTrackLayoutRow[]>;
   scrollElement: () => HTMLDivElement | undefined;
   effectsChainElement: () => HTMLElement | undefined;
   currentEffectsTargetId: Accessor<Track["id"] | "master">;
@@ -35,12 +37,20 @@ const resolveTimelineTrackTarget = (
   pointer: { x: number; y: number },
   scrollElement: HTMLDivElement | undefined,
   tracks: Track[],
+  trackLayout: TimelineTrackLayoutRow[],
 ): BrowserDropTarget => {
   if (!scrollElement) return { kind: "none" };
   if (!isInsideRect(pointer, scrollElement.getBoundingClientRect())) return { kind: "none" };
-  const laneIndex = yToLaneIndex(pointer.y, scrollElement);
-  if (laneIndex >= 0 && laneIndex < tracks.length) return { kind: "track", trackId: tracks[laneIndex].id, laneIndex };
-  if (laneIndex >= tracks.length) return { kind: "new-track" };
+  const laneIndex = trackLayout.length > 0
+    ? trackLayoutDropIndexAtClientY(trackLayout, pointer.y, scrollElement)
+    : yToLaneIndex(pointer.y, scrollElement);
+  const row = laneIndex >= 0 ? trackLayout[laneIndex] : undefined;
+  if (row) return { kind: "track", trackId: row.trackId, laneIndex };
+  if (trackLayout.length === 0 && laneIndex >= 0 && laneIndex < tracks.length) {
+    const track = tracks[laneIndex];
+    if (track) return { kind: "track", trackId: track.id, laneIndex };
+  }
+  if (laneIndex >= (trackLayout.length || tracks.length)) return { kind: "new-track" };
   return { kind: "none" };
 };
 
@@ -80,7 +90,7 @@ const resolveCompatibleTarget = (
     if (chain) return options.canDrop(payload, chain.target) ? chain : { target: { kind: "none" } };
   }
   const tracks = options.tracks();
-  const target = resolveTimelineTrackTarget(pointer, options.scrollElement(), tracks);
+  const target = resolveTimelineTrackTarget(pointer, options.scrollElement(), tracks, options.trackLayout());
   if (target.kind === "track") {
     return { target: options.canDrop(payload, target) ? target : { kind: "none" } };
   }

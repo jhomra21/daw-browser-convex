@@ -123,12 +123,12 @@ type Props = {
     onToggleRecordArm: (trackId: Track["id"]) => void;
     onDeleteTrack: (trackId: Track["id"]) => void;
     onToggleTrackCollapsed: (trackId: Track["id"]) => void;
+    onSetTracksCollapsed: (updates: Array<{ trackId: Track["id"]; collapsed: boolean }>) => void;
     onGroupTracks: (trackIds: Track["id"][]) => void;
     onUngroupTrack: (groupId: Track["id"]) => void;
     onMoveTrackToGroup: (trackId: Track["id"], groupId: Track["id"] | undefined) => void;
     onReorderTracks: (trackIds: Track["id"][], target: TrackDropTarget) => void;
     onSetTrackColor: (trackId: Track["id"], color: string | undefined) => void;
-    onAssignGroupColorToContents: (groupId: Track["id"]) => void;
     onSelectAllClipsInGroup: (groupId: Track["id"]) => void;
   };
   automation: TimelineWorkspaceAutomationModel;
@@ -240,8 +240,7 @@ export default function TimelineWorkspace(props: Props) {
                           <TrackLane
                             track={visibleTrack()}
                             groupClipOverview={groupClipOverviewByTrackId().get(visibleTrack().id) ?? []}
-                            topPx={row.topPx}
-                            automationHeightPx={row.automationHeightPx}
+                            layout={row}
                             isDropTarget={props.dropTargetLane === i()}
                             selectedClipIds={props.selection.selectedClipIds()}
                             rangeSelection={props.selection.rangeSelection()}
@@ -365,12 +364,12 @@ export default function TimelineWorkspace(props: Props) {
                 onToggleRecordArm: props.sidebar.onToggleRecordArm,
                 onDeleteTrack: props.sidebar.onDeleteTrack,
                 onToggleTrackCollapsed: props.sidebar.onToggleTrackCollapsed,
+                onSetTracksCollapsed: props.sidebar.onSetTracksCollapsed,
                 onGroupTracks: props.sidebar.onGroupTracks,
                 onUngroupTrack: props.sidebar.onUngroupTrack,
                 onMoveTrackToGroup: props.sidebar.onMoveTrackToGroup,
                 onReorderTracks: props.sidebar.onReorderTracks,
                 onSetTrackColor: props.sidebar.onSetTrackColor,
-                onAssignGroupColorToContents: props.sidebar.onAssignGroupColorToContents,
                 onSelectAllClipsInGroup: props.sidebar.onSelectAllClipsInGroup,
               }}
               automation={props.automation}

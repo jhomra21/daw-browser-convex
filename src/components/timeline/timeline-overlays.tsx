@@ -58,18 +58,22 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
     if (!id) return undefined
     return props.timeline.trackLookup.clipById.get(id)
   })
+  const layoutByTrackId = createMemo(() => new Map(
+    props.timeline.rowLayouts.map((row) => [row.trackId, row]),
+  ))
 
   const recordingPreview = createMemo(() => {
     const start = props.recording.previewStartSec
     const points = props.recording.previewPoints
     const trackId = props.recording.recordingTrackId
     if (!props.recording.isRecording || start == null || points.length === 0 || !trackId) return null
-    const trackIndexValue = props.timeline.trackLookup.trackIndexById.get(trackId)
-    if (trackIndexValue == null) return null
+    const row = layoutByTrackId().get(trackId)
+    if (!row) return null
     return {
       start,
       points,
-      topPx: props.timeline.rowTops[trackIndexValue] ?? trackIndexValue * LANE_HEIGHT,
+      topPx: row.topPx,
+      heightPx: row.clipLaneHeightPx,
     }
   })
 
@@ -86,7 +90,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
         {(preview) => (
           <div
             class="absolute left-0 right-0 pointer-events-none"
-            style={{ top: `${preview().topPx}px`, height: `${LANE_HEIGHT}px` }}
+            style={{ top: `${preview().topPx}px`, height: `${preview().heightPx}px` }}
           >
             <RecordingPreview startSec={preview().start} points={preview().points} />
           </div>

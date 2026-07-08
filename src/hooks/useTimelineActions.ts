@@ -7,7 +7,7 @@ import { PPS } from '~/lib/timeline-utils'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
 import { createOptimisticTrack, pushTrackCreateHistory } from '~/lib/tracks'
-import { planAssignGroupColor, planGroupTracks, planMoveTrackToGroup, planTrackReorder, planUngroupTracks } from '~/lib/track-group-ops'
+import { planGroupTracks, planMoveTrackToGroup, planSetTrackColor, planTrackReorder, planUngroupTracks } from '~/lib/track-group-ops'
 import { assertAppliedSharedTimelineOperationResult, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import { buildClipColorHistoryEntry, buildTrackColorHistoryEntry, buildTrackGroupHistoryEntry, buildTrackReorderHistoryEntry, buildTrackUngroupHistoryEntry } from '~/lib/undo/builders'
@@ -65,8 +65,8 @@ type UseTimelineActionsReturn = {
   moveTrackToGroup: (trackId: Track['id'], groupId: Track['id'] | undefined) => Promise<void>
   reorderTracks: (moveRootIds: Track['id'][], target: Parameters<typeof planTrackReorder>[0]['target']) => Promise<void>
   toggleTrackCollapsed: (trackId: Track['id']) => Promise<void>
+  setTracksCollapsed: (updates: Array<{ trackId: Track['id']; collapsed: boolean }>) => Promise<void>
   setTrackColor: (trackId: Track['id'], color: string | undefined) => Promise<void>
-  assignGroupColorToContents: (groupId: Track['id']) => Promise<void>
 }
 
 export function useTimelineActions(
@@ -365,20 +365,31 @@ export function useTimelineActions(
     applyTrackPatch(track, { collapsed })
   }
 
-  async function setTrackColor(trackId: Track['id'], color: string | undefined): Promise<void> {
+  async function setTracksCollapsed(updates: Array<{ trackId: Track['id']; collapsed: boolean }>): Promise<void> {
     const projectId = options.room.projectId()
-    const track = options.tracks().find((entry) => entry.id === trackId)
-    if (!projectId || !track || track.color === color) return
-    await persistTrackPatch(projectId, trackId, { color })
-    applyTrackPatch(track, { color })
-    options.creation.pushHistory(buildTrackColorHistoryEntry({ projectId, track, from: track.color, to: color }))
+    if (!projectId || updates.length === 0) return
+    const tracks = options.tracks()
+    const trackById = new Map(tracks.map((track) => [track.id, track]))
+    const changed = updates.flatMap((update) => {
+      const track = trackById.get(update.trackId)
+      return track && track.collapsed !== update.collapsed
+        ? [{ track, collapsed: update.collapsed }]
+        : []
+    })
+    if (changed.length === 0) return
+    await runWithConcurrency(changed, 8, async (update) => {
+      await persistTrackPatch(projectId, update.track.id, { collapsed: update.collapsed })
+    })
+    for (const update of changed) {
+      applyTrackPatch(update.track, { collapsed: update.collapsed })
+    }
   }
 
-  async function assignGroupColorToContents(groupId: Track['id']): Promise<void> {
+  async function setTrackColor(trackId: Track['id'], color: string | undefined): Promise<void> {
     const projectId = options.room.projectId()
     if (!projectId) return
     const tracks = options.tracks()
-    const plan = planAssignGroupColor(tracks, groupId)
+    const plan = planSetTrackColor(tracks, trackId, color)
     if (!plan || (plan.trackUpdates.length === 0 && plan.clipUpdates.length === 0)) return
     const trackById = new Map(tracks.map((track) => [track.id, track]))
     await runWithConcurrency([
@@ -403,6 +414,12 @@ export function useTimelineActions(
       const track = trackById.get(update.trackId)
       const clip = track?.clips.find((clip) => clip.id === update.clipId)
       if (track && clip) options.creation.replaceLocalClip(track.id, { ...clip, color: update.to })
+    }
+    if (plan.trackUpdates.length === 1 && plan.clipUpdates.length === 0) {
+      const update = plan.trackUpdates[0]
+      const track = trackById.get(update.trackId)
+      if (track) options.creation.pushHistory(buildTrackColorHistoryEntry({ projectId, track, from: update.from, to: update.to }))
+      return
     }
     options.creation.pushHistory({
       type: 'section-edit',
@@ -452,7 +469,7 @@ export function useTimelineActions(
     moveTrackToGroup,
     reorderTracks,
     toggleTrackCollapsed,
+    setTracksCollapsed,
     setTrackColor,
-    assignGroupColorToContents,
   }
 }

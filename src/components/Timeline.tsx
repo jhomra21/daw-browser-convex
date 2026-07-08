@@ -544,8 +544,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     moveTrackToGroup,
     reorderTracks,
     toggleTrackCollapsed,
+    setTracksCollapsed,
     setTrackColor,
-    assignGroupColorToContents,
   } = useTimelineActions({
     tracks: renderTracks,
     room: {
@@ -656,6 +656,7 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   const { onClipPointerDown } = useClipDrag({
     placementTracks: () => placementTracks(),
+    trackLayout,
     resolvedTracks: () => resolvedTracks(),
     insertLocalTrack: projection.insertLocalTrack,
     insertLocalClip: projection.insertLocalClip,
@@ -1036,6 +1037,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     deviceInsertActions,
     canCreateTrack,
     tracks: () => renderTracks(),
+    trackLayout,
     scrollElement: () => scrollRef,
     effectsChainElement: () => effectsChainElement,
     currentEffectsTargetId: () => selection.selectedFXTarget(),
@@ -1428,12 +1430,12 @@ const Timeline: Component<TimelineProps> = (props) => {
           onToggleRecordArm: handleToggleRecordArm,
           onDeleteTrack: requestDeleteTrack,
           onToggleTrackCollapsed: toggleTrackCollapsed,
+          onSetTracksCollapsed: setTracksCollapsed,
           onGroupTracks: groupSelectedTracks,
           onUngroupTrack: ungroupTrack,
           onMoveTrackToGroup: moveTrackToGroup,
           onReorderTracks: reorderTracks,
           onSetTrackColor: setTrackColor,
-          onAssignGroupColorToContents: assignGroupColorToContents,
           onSelectAllClipsInGroup: selectAllClipsInGroup,
         }}
         automation={automation.workspace()}

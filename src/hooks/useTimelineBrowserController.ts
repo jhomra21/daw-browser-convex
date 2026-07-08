@@ -7,6 +7,7 @@ import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData, type SampleDragData } f
 import { createBrowserDeviceDrag } from "~/components/timeline/browser/create-browser-device-drag";
 import type { BrowserDragPayload, BrowserDropTarget } from "~/components/timeline/browser/browser-drag-types";
 import type { Track } from "@daw-browser/timeline-core/types";
+import type { TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
 import { countBrowserTreeLeaves, createBrowserLeafRow, filterBrowserTreeRows } from "~/components/timeline/browser/browser-tree";
 import { isLocalId } from "@daw-browser/shared";
 import { convexApi, convexClient } from "~/lib/convex";
@@ -27,6 +28,7 @@ type Options = {
   deviceInsertActions: Accessor<TimelineDeviceInsertActions | undefined>;
   canCreateTrack: Accessor<boolean>;
   tracks: Accessor<Track[]>;
+  trackLayout: Accessor<TimelineTrackLayoutRow[]>;
   scrollElement: () => HTMLDivElement | undefined;
   effectsChainElement: () => HTMLElement | undefined;
   currentEffectsTargetId: Accessor<Track["id"] | "master">;
@@ -679,6 +681,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   const browserDeviceDrag = createBrowserDeviceDrag({
     resolvePayload: resolveBrowserDevicePayload,
     tracks: options.tracks,
+    trackLayout: options.trackLayout,
     scrollElement: options.scrollElement,
     effectsChainElement: options.effectsChainElement,
     currentEffectsTargetId: options.currentEffectsTargetId,

@@ -56,8 +56,8 @@ type TrackReorderPlan = {
   expandGroupIds: TrackId[]
 }
 
-type AssignGroupColorPlan = {
-  trackUpdates: Array<{ trackId: TrackId; from: string | undefined; to: string }>
+type SetTrackColorPlan = {
+  trackUpdates: Array<{ trackId: TrackId; from: string | undefined; to: string | undefined }>
   clipUpdates: Array<{ clipId: string; trackId: TrackId; from: string; to: string }>
 }
 
@@ -233,24 +233,27 @@ export const planTrackReorder = (input: {
   return patches.length > 0 || expandGroupIds.length > 0 ? { patches, expandGroupIds } : null
 }
 
-export const planAssignGroupColor = (
+export const planSetTrackColor = (
   tracks: readonly Track[],
-  groupId: TrackId,
-): AssignGroupColorPlan | null => {
-  const group = tracks.find((track) => track.id === groupId)
-  if (!group?.color) return null
-  const color = group.color
-
-  const descendantIds = collectTrackDescendantIds(tracks, groupId)
-  const descendants = tracks.filter((track) => descendantIds.has(track.id))
+  trackId: TrackId,
+  color: string | undefined,
+): SetTrackColorPlan | null => {
+  const track = tracks.find((candidate) => candidate.id === trackId)
+  if (!track) return null
+  const targetTrackIds = track.channelRole === 'group'
+    ? new Set([track.id, ...collectTrackDescendantIds(tracks, track.id)])
+    : new Set([track.id])
+  const targetTracks = tracks.filter((candidate) => targetTrackIds.has(candidate.id))
   return {
-    trackUpdates: descendants
+    trackUpdates: targetTracks
       .filter((track) => track.color !== color)
       .map((track) => ({ trackId: track.id, from: track.color, to: color })),
-    clipUpdates: descendants.flatMap((track) =>
-      track.clips
-        .filter((clip) => clip.color !== color)
-        .map((clip) => ({ clipId: clip.id, trackId: track.id, from: clip.color, to: color })),
-    ),
+    clipUpdates: color
+      ? targetTracks.flatMap((track) =>
+          track.clips
+            .filter((clip) => clip.color !== color)
+            .map((clip) => ({ clipId: clip.id, trackId: track.id, from: clip.color, to: color })),
+        )
+      : [],
   }
 }

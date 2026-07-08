@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import type { Track } from '@daw-browser/timeline-core/types'
 import {
   normalizeDragMoveSet,
-  planAssignGroupColor,
   planGroupTracks,
   planMoveTrackToGroup,
+  planSetTrackColor,
   planTrackReorder,
   planUngroupTracks,
   resolveTrackDropZone,
@@ -160,15 +160,19 @@ describe('track group operations', () => {
     })
   })
 
-  test('planAssignGroupColor updates descendants and clips', () => {
-    expect(planAssignGroupColor([
+  test('planSetTrackColor updates group, descendants, and clips', () => {
+    expect(planSetTrackColor([
       track({ id: 'g', channelRole: 'group', color: '#f00' }),
       track({ id: 'a', groupId: 'g', color: '#0f0', clips: [clip({ id: 'c', startSec: 0, duration: 1, color: '#00f' })] }),
       track({ id: 'b', groupId: 'g', color: '#f00', clips: [clip({ id: 'd', startSec: 0, duration: 1, color: '#f00' })] }),
-    ], 'g')).toEqual({
+    ], 'g', '#f00')).toEqual({
       trackUpdates: [{ trackId: 'a', from: '#0f0', to: '#f00' }],
       clipUpdates: [{ clipId: 'c', trackId: 'a', from: '#00f', to: '#f00' }],
     })
-    expect(planAssignGroupColor([track({ id: 'g', channelRole: 'group' })], 'g')).toBeNull()
+    expect(planSetTrackColor([track({ id: 'g', channelRole: 'group', color: '#f00' })], 'g', undefined)).toEqual({
+      trackUpdates: [{ trackId: 'g', from: '#f00', to: undefined }],
+      clipUpdates: [],
+    })
+    expect(planSetTrackColor([track({ id: 'g', channelRole: 'group' })], 'missing', '#f00')).toBeNull()
   })
 })

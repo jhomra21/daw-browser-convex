@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { buildGroupClipOverview, buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks, trackIdsInYRange, trackIndexAtY, trackLayoutRowAtY, wouldCreateCycle } from './timeline-track-layout'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { COLLAPSED_LANE_HEIGHT, LANE_HEIGHT } from '~/lib/timeline-utils'
 
 const track = (id: string, groupId?: string, collapsed?: boolean): Track => ({
   id,
@@ -46,6 +47,20 @@ describe('timeline track layout grouping', () => {
     expect(rows.map((row) => row.trackId)).toEqual(['g', 'b'])
     expect(trackIndexAtY(rows, 1)).toBe(0)
     expect(trackIdsInYRange(rows, 0, 160)).toEqual(['g', 'b'])
+  })
+
+  test('collapsed track uses slim row and suppresses automation height', () => {
+    const rows = buildTimelineTrackLayoutRows({
+      tracks: [track('a', undefined, true), track('b')],
+      visibleByTrackId: { a: true, b: true },
+      heightsByLaneOwnerKey: { a: 48, b: 48 },
+      visibleParameterIdsByTrackId: { a: ['volume'], b: ['volume'] },
+    })
+    expect(rows[0]?.heightPx).toBe(COLLAPSED_LANE_HEIGHT)
+    expect(rows[0]?.clipLaneHeightPx).toBe(COLLAPSED_LANE_HEIGHT)
+    expect(rows[0]?.automationHeightPx).toBe(0)
+    expect(rows[1]?.topPx).toBe(COLLAPSED_LANE_HEIGHT)
+    expect(rows[1]?.heightPx).toBe(LANE_HEIGHT + 48)
   })
 
   test('trackLayoutRowAtY finds rows by y position', () => {

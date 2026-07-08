@@ -23,8 +23,8 @@ import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
-import { assert } from '@daw-browser/shared'
 import { PPS } from '~/lib/timeline-utils'
+import type { TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import type { Track, Clip, TrackId } from '@daw-browser/timeline-core/types'
 import type { HistoryEntry } from '~/lib/undo/types'
 
@@ -36,6 +36,7 @@ type ClipDragHandlers = {
 
 type ClipDragOptions = {
   placementTracks: Accessor<Track[]>
+  trackLayout: Accessor<TimelineTrackLayoutRow[]>
   resolvedTracks: Accessor<Track[]>
   insertLocalTrack: (track: Track, index: number) => void
   insertLocalClip: (trackId: Track['id'], clip: Clip) => void
@@ -83,6 +84,7 @@ function teardownClipDragSession(input: {
 export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
   const {
     placementTracks,
+    trackLayout,
     resolvedTracks,
     insertLocalTrack,
     insertLocalClip,
@@ -126,9 +128,45 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
   let addedTrackDuringDragScope: { projectId: string; userId: string } | null = null
   let lastDraftMoves: Array<{ clipId: string; trackId: Track['id']; startSec: number }> | null = null
   const dragLookupCache = createDragTrackLookupCache()
+  let visiblePlacementTracksCache: {
+    placementTracks: Track[]
+    trackLayout: TimelineTrackLayoutRow[]
+    addedTrackId: Track['id'] | null
+    result: Track[]
+  } | null = null
 
   const PREVIEW_PREFIX = '__dup_preview:'
   const getScrollRef = () => getScrollElement()
+  const visiblePlacementTracks = () => {
+    const tracks = placementTracks()
+    const layout = trackLayout()
+    const cached = visiblePlacementTracksCache
+    if (
+      cached &&
+      cached.placementTracks === tracks &&
+      cached.trackLayout === layout &&
+      cached.addedTrackId === addedTrackDuringDrag
+    ) {
+      return cached.result
+    }
+    const trackById = new Map(tracks.map((track) => [track.id, track]))
+    const visible = layout.flatMap((row) => {
+      const track = trackById.get(row.trackId)
+      return track ? [track] : []
+    })
+    let result = visible
+    if (addedTrackDuringDrag) {
+      const addedTrack = trackById.get(addedTrackDuringDrag)
+      if (addedTrack && !visible.some((track) => track.id === addedTrack.id)) result = [...visible, addedTrack]
+    }
+    visiblePlacementTracksCache = {
+      placementTracks: tracks,
+      trackLayout: layout,
+      addedTrackId: addedTrackDuringDrag,
+      result,
+    }
+    return result
+  }
   const getDraggedTrackKind = (ts: Track[], lookup = createTimelineTrackIndex(ts)) => {
     const ids = multiDragging ? multiDragging.items.map((item) => item.clipId) : draggingIds ? [draggingIds.clipId] : []
     if (ids.length === 0) return 'audio'
@@ -197,7 +235,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     if (event.button !== 0) return
     event.preventDefault()
     event.stopPropagation()
-    const currentTracks = placementTracks()
+    const currentTracks = visiblePlacementTracks()
     const currentLookup = createTimelineTrackIndex(currentTracks)
     const track = currentLookup.trackById.get(trackId)
     const clip = currentLookup.clipById.get(clipId)
@@ -268,11 +306,12 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     const scroll = getScrollRef()
     if (!scroll) return
 
-    let snapshot = placementTracks()
+    let snapshot = visiblePlacementTracks()
     const { desiredStart, laneIdx } = readDragPointer({
       event,
       scroll,
       dragDeltaX,
+      trackLayout: trackLayout(),
       gridEnabled: options.gridEnabled(),
       bpm: options.bpm(),
       gridDenominator: options.gridDenominator(),
@@ -287,7 +326,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     if (laneIdx >= snapshot.length) {
       if (!addedTrackDuringDrag && !creatingTrackDuringDrag) {
         await ensureAddedTrackDuringDrag(snapshot, dragLookupCache.get(snapshot))
-        snapshot = placementTracks()
+        snapshot = visiblePlacementTracks()
         dragLookupCache.clear()
       }
     }
@@ -384,7 +423,6 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       return
     }
     const activeDraggingIds = draggingIds
-    assert(activeDraggingIds, 'Missing drag ids while completing clip drag')
     const scroll = getScrollRef()
     if (!scroll) {
       resetDragState()
@@ -395,6 +433,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       event,
       scroll,
       dragDeltaX,
+      trackLayout: trackLayout(),
       gridEnabled: options.gridEnabled(),
       bpm: options.bpm(),
       gridDenominator: options.gridDenominator(),
@@ -403,13 +442,13 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     // If we are in duplication mode, handle commit or cancel here and exit.
     if (duplicationActive) {
       // Work against a base without previews
-      let base = placementTracks()
+      let base = visiblePlacementTracks()
 
       // If dropping beyond last lane and no track was created during move, create one now
       if (laneIdx >= base.length && !addedTrackDuringDrag) {
         try {
           await ensureAddedTrackDuringDrag(placementTracks())
-          base = placementTracks()
+          base = visiblePlacementTracks()
         } catch {
           // if failed to create new track, cancel duplication cleanly
           cancelDuplicationDrag()
@@ -493,7 +532,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       }
     }
 
-    const currentTracks = placementTracks()
+    const currentTracks = visiblePlacementTracks()
     let currentLookup = createTimelineTrackIndex(currentTracks)
     let plannedPlacement = resolveNonDupClipDragPlacement({
       tracks: currentTracks,
@@ -515,7 +554,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
         resetDragState()
         return
       }
-      finalTracks = placementTracks()
+      finalTracks = visiblePlacementTracks()
       currentLookup = createTimelineTrackIndex(finalTracks)
       plannedPlacement = resolveNonDupClipDragPlacement({
         tracks: finalTracks,

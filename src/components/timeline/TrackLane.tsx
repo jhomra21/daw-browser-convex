@@ -1,17 +1,17 @@
 import { createMemo, type Component, For } from 'solid-js'
 import type { Track } from '@daw-browser/timeline-core/types'
-import { LANE_HEIGHT, PPS } from '~/lib/timeline-utils'
+import { PPS } from '~/lib/timeline-utils'
 import { clipRangeOverlap, type TimelineRangeSelection } from '~/lib/timeline-range-selection'
 import ClipComponent, { type ClipContextMenuActions } from './ClipComponent'
 import AutomationLane from './automation-lane'
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import TimelineContextMenu, { type TimelineContextMenuItem } from './context-menu/timeline-context-menu'
+import type { TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 
 type TrackLaneProps = {
   track: Track
+  layout: Pick<TimelineTrackLayoutRow, 'topPx' | 'heightPx' | 'clipLaneHeightPx' | 'automationHeightPx'>
   groupClipOverview: Array<{ startSec: number; endSec: number }>
-  topPx: number
-  automationHeightPx: number
   selectedClipIds: Set<string>
   rangeSelection: TimelineRangeSelection | null
   onClipPointerDown: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
@@ -70,18 +70,25 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
     if (!range?.trackIds.includes(props.track.id)) return null
     return range
   })
+  const collapsedSegments = createMemo(() => {
+    if (props.track.channelRole === 'group') return props.groupClipOverview
+    return props.track.clips.map((clip) => ({
+      startSec: clip.startSec,
+      endSec: clip.startSec + clip.duration,
+    }))
+  })
 
   const laneContainer = () => (
     <div
       class="absolute left-0 right-0 overflow-hidden bg-timeline-background"
       classList={{ 'bg-green-500/10': props.isDropTarget }}
-      style={{ top: `${props.topPx}px`, height: `${LANE_HEIGHT + props.automationHeightPx}px` }}
+      style={{ top: `${props.layout.topPx}px`, height: `${props.layout.heightPx}px` }}
     >
-      <div class="absolute left-0 right-0 h-px bg-timeline-surface-muted" style={{ top: `${LANE_HEIGHT - 1}px` }} />
-      {props.automation.visible ? (
+      <div class="absolute left-0 right-0 h-px bg-timeline-surface-muted" style={{ top: `${props.layout.clipLaneHeightPx - 1}px` }} />
+      {props.automation.visible && props.layout.automationHeightPx > 0 ? (
         <div
           class="absolute inset-x-0 z-30 border-t border-automation/30 bg-timeline-background/95"
-          style={{ top: `${LANE_HEIGHT}px`, height: `${props.automationHeightPx}px` }}
+          style={{ top: `${props.layout.clipLaneHeightPx}px`, height: `${props.layout.automationHeightPx}px` }}
         >
           <For each={props.automation.parameterIds}>
             {(parameterId, index) => (
@@ -109,10 +116,10 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
         </div>
       ) : null}
       {props.track.collapsed ? (
-        <For each={props.groupClipOverview}>
+        <For each={collapsedSegments()}>
           {(segment) => (
             <div
-              class="absolute top-3 h-10 rounded-sm border border-white/10 bg-green-400/35"
+              class="absolute top-1 bottom-1 rounded-sm border border-white/10 bg-green-400/35"
               style={{
                 left: `${segment.startSec * PPS}px`,
                 width: `${Math.max(2, (segment.endSec - segment.startSec) * PPS)}px`,

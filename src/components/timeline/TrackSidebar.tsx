@@ -56,12 +56,12 @@ type TrackSidebarProps = {
     recordArmTrackId: Track["id"] | null;
     onToggleRecordArm: (trackId: Track["id"]) => void;
     onToggleTrackCollapsed: (trackId: Track["id"]) => void;
+    onSetTracksCollapsed: (updates: Array<{ trackId: Track["id"]; collapsed: boolean }>) => void;
     onGroupTracks: (trackIds: Track["id"][]) => void;
     onUngroupTrack: (groupId: Track["id"]) => void;
     onMoveTrackToGroup: (trackId: Track["id"], groupId: Track["id"] | undefined) => void;
     onReorderTracks: (trackIds: Track["id"][], target: TrackDropTarget) => void;
     onSetTrackColor: (trackId: Track["id"], color: string | undefined) => void;
-    onAssignGroupColorToContents: (groupId: Track["id"]) => void;
     onSelectAllClipsInGroup: (groupId: Track["id"]) => void;
     currentUserId: string;
     subscribeTrackLevels: (
@@ -88,6 +88,7 @@ const quantizeVolume = (volume: number) =>
   Math.round(clampVolume(volume) * 100) / 100;
 const fallbackTrackColor = "var(--muted-foreground)";
 const fallbackGroupColor = "var(--timeline-surface-muted)";
+const isBulkCollapseModifier = (event: MouseEvent | PointerEvent) => event.metaKey || event.altKey;
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const sidebar = () => props.sidebar;
 
@@ -257,6 +258,18 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   const canWriteTrackRouting = (track: Track) =>
     sidebar().canWriteTrackRouting(track.id);
+  const handleTrackCollapseClick = (track: Track, event: MouseEvent) => {
+    const collapsed = track.collapsed !== true;
+    if (!isBulkCollapseModifier(event)) {
+      sidebar().onToggleTrackCollapsed(track.id);
+      return;
+    }
+    sidebar().onSetTracksCollapsed(
+      sidebar().allTracks
+        .filter((candidate) => candidate.collapsed !== collapsed)
+        .map((candidate) => ({ trackId: candidate.id, collapsed })),
+    );
+  };
 
   const dropTargetAt = (clientY: number): TrackDropTarget | undefined => {
     const scrollElement = sidebar().scrollElement();
@@ -511,11 +524,15 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const selectedAutomationEnvelope = () => props.automation.envelopes.byTargetKey.get(selectedAutomationTargetKey());
             const automationMeta = () => automationMetaByTrackId().get(track.id);
             const automationVisible = () => props.automation.lanes.visibleByTrackId[track.id] === true;
+            const displayedAutomationVisible = () => track.collapsed !== true && automationVisible();
             const visibleAutomationParameterIds = () => props.automation.lanes.visibleParameterIdsByTrackId[track.id] ?? [];
             const automationHeight = () => props.automation.lanes.heightsByLaneOwnerKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
-            const automationTotalHeight = () => automationVisible() ? automationHeight() * Math.max(1, visibleAutomationParameterIds().length) : 0;
+            const rowLayout = () => layoutByTrackId().get(track.id);
+            const rowHeightPx = () => rowLayout()?.heightPx ?? LANE_HEIGHT;
+            const clipLaneHeightPx = () => rowLayout()?.clipLaneHeightPx ?? LANE_HEIGHT;
+            const automationTotalHeight = () => rowLayout()?.automationHeightPx ?? (displayedAutomationVisible() ? automationHeight() * Math.max(1, visibleAutomationParameterIds().length) : 0);
             const canAddAutomationLane = () => {
-              if (!automationVisible()) return false;
+              if (!displayedAutomationVisible()) return false;
               const visible = new Set(visibleAutomationParameterIds());
               if (!visible.has(selectedAutomationParameter())) return true;
               return automationParameterOptions.some((option) => !visible.has(option.id));
@@ -543,12 +560,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 label: "Ungroup tracks",
                 disabled: !isGroupTrack,
                 onSelect: () => sidebar().onUngroupTrack(track.id),
-              },
-              {
-                kind: "item",
-                label: "Assign color to grouped tracks and clips",
-                disabled: !isGroupTrack || !track.color,
-                onSelect: () => sidebar().onAssignGroupColorToContents(track.id),
               },
               {
                 kind: "item",
@@ -584,7 +595,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               { kind: "separator" },
               {
                 kind: "item",
-                label: automationVisible() ? "Hide automation lane" : "Show automation lane",
+                label: displayedAutomationVisible() ? "Hide automation lane" : "Show automation lane",
                 onSelect: () => props.automation.actions.toggleTrackVisibility(track.id),
               },
               {
@@ -613,7 +624,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     : "bg-timeline-surface",
                 )}
                 style={{
-                  height: `${LANE_HEIGHT + automationTotalHeight()}px`,
+                  height: `${rowHeightPx()}px`,
                   ...(isGroupTrack ? { background: trackColor() } : {}),
                 }}
                 onClick={() => sidebar().onTrackClick(track.id)}
@@ -645,23 +656,38 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 <div
                   class="grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 p-2"
                   style={{
-                    height: `${LANE_HEIGHT}px`,
+                    height: `${clipLaneHeightPx()}px`,
                     "padding-left": `${8 + depth() * GROUP_INDENT_PX}px`,
                   }}
                 >
                   <div class="flex min-w-0 items-center gap-1 overflow-hidden">
-                    <Show when={isGroupTrack}>
-                      <button
-                        class="flex h-7 w-4 shrink-0 items-center justify-center text-xs text-muted-foreground hover:text-foreground"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          sidebar().onToggleTrackCollapsed(track.id);
+                    <button
+                      class="flex h-7 w-4 shrink-0 items-center justify-center text-xs text-muted-foreground hover:text-foreground"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleTrackCollapseClick(track, event);
+                      }}
+                      title={track.collapsed ? "Expand track" : "Collapse track"}
+                    >
+                      {track.collapsed ? "▶" : "▼"}
+                    </button>
+                    <label
+                      class="relative size-4 shrink-0 overflow-hidden rounded-sm border border-border"
+                      style={{ background: trackColor() }}
+                      title="Set track color"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <input
+                        type="color"
+                        value={track.color ?? "#22c55e"}
+                        class="absolute inset-0 cursor-pointer opacity-0"
+                        onChange={(event) => {
+                          const color = event.currentTarget.value;
+                          if (!/^#[0-9a-fA-F]{6}$/.test(color)) return;
+                          sidebar().onSetTrackColor(track.id, color);
                         }}
-                        title={track.collapsed ? "Expand group" : "Collapse group"}
-                      >
-                        {track.collapsed ? "▶" : "▼"}
-                      </button>
-                    </Show>
+                      />
+                    </label>
                     <button
                       class={cn(
                         "flex h-7 flex-1 items-center justify-center border px-2 text-center text-sm font-semibold",
@@ -706,6 +732,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     </button>
                   </div>
 
+                  <Show when={!track.collapsed}>
                   <div class="flex min-w-0 flex-col gap-1">
                     <Show when={!isGroupTrack}>
                       <div class="relative">
@@ -811,7 +838,9 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       </div>
                     </Show>
                   </div>
+                  </Show>
 
+                  <Show when={!track.collapsed}>
                   <div class="flex w-[92px] items-center gap-2">
                     <div class="flex w-[72px] shrink-0 flex-col gap-1">
                       <div class="grid grid-cols-4 gap-1">
@@ -876,7 +905,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                         <button
                           class={cn(
                             "h-7 border text-xs font-semibold transition-colors",
-                            automationVisible()
+                            displayedAutomationVisible()
                               ? "border-red-400 bg-red-500/90 text-black"
                               : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
                           )}
@@ -884,7 +913,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             event.stopPropagation();
                             props.automation.actions.toggleTrackVisibility(track.id);
                           }}
-                          title={automationVisible() ? "Hide automation lane" : "Show automation lane"}
+                          title={displayedAutomationVisible() ? "Hide automation lane" : "Show automation lane"}
                         >
                           A
                         </button>
@@ -901,7 +930,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             if (!canAddAutomationLane()) return;
                             props.automation.actions.addTrackLane(track.id);
                           }}
-                          title={automationVisible() ? "Add another automation lane" : "Show automation with A before adding lanes"}
+                          title={displayedAutomationVisible() ? "Add another automation lane" : "Show automation with A before adding lanes"}
                         >
                           +
                         </button>
@@ -1051,11 +1080,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       </div>
                     </div>
                   </div>
+                  </Show>
                 </div>
-                {automationVisible() ? (
+                {displayedAutomationVisible() ? (
                   <div
                     class="absolute inset-x-0 z-10 border-t border-automation/30 bg-timeline-background/95 text-[11px] text-error-foreground"
-                    style={{ top: `${LANE_HEIGHT}px`, height: `${automationTotalHeight()}px` }}
+                    style={{ top: `${clipLaneHeightPx()}px`, height: `${automationTotalHeight()}px` }}
                     onClick={(event) => event.stopPropagation()}
                   >
                     <div

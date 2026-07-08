@@ -307,16 +307,30 @@ export function useTimelineActions(
     const plan = planUngroupTracks({ tracks, groupId })
     if (plan.childUpdates.length === 0) return
     const trackById = new Map(tracks.map((track) => [track.id, track]))
+    const childUpdateByTrackId = new Map(plan.childUpdates.map((update) => [update.trackId, update]))
+    const updates = tracks.map((track, index) => {
+      const update = childUpdateByTrackId.get(track.id)
+      return {
+        trackId: track.id,
+        index,
+        groupId: update ? null : track.groupId ?? null,
+        outputTargetId: (update ? update.outputTargetId : track.outputTargetId) ?? null,
+      }
+    })
+    if (isLocalId('project', projectId)) {
+      await createLocalTimelineRepository(projectId).reorderAndGroup(updates)
+    } else {
+      const result = await publishSharedTimelineOperation(projectId, {
+        kind: 'tracks.reorderAndGroup',
+        payload: { updates },
+      })
+      assertAppliedSharedTimelineOperationResult(result)
+    }
     options.creation.pushHistory(buildTrackUngroupHistoryEntry({
       projectId,
       tracks,
       groupTrack,
       childTrackIds: plan.childUpdates.map((update) => update.trackId),
-    }))
-    await Promise.all(plan.childUpdates.map(async (update) => {
-      const track = trackById.get(update.trackId)
-      if (!track) return
-      await persistTrackPatch(projectId, track.id, { groupId: undefined, outputTargetId: update.outputTargetId }, track.sends)
     }))
     for (const update of plan.childUpdates) {
       const track = trackById.get(update.trackId)

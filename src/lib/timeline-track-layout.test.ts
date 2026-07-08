@@ -63,6 +63,8 @@ describe('timeline track layout grouping', () => {
     expect(trackLayoutRowAtY(rows, 240)?.trackId).toBe('c')
     expect(trackLayoutRowAtY(rows, -1)).toBeUndefined()
     expect(trackLayoutRowAtY(rows, 336)).toBeUndefined()
+    expect(trackIndexAtY(rows, 96)).toBe(1)
+    expect(trackIndexAtY(rows, 336)).toBe(-1)
   })
 
   test('buildGroupClipOverview merges descendant clip ranges', () => {

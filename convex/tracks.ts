@@ -194,7 +194,7 @@ async function deleteTrackSubtreeFromPreflights(
   preflights: Array<Extract<TrackDeletePreflight, { ok: true }>>,
 ) {
   if (preflights.length === 0) return;
-  const projectId = preflights[0]?.track.projectId;
+  const projectId = preflights[0].track.projectId;
   const deletedTrackIds = new Set(preflights.map((preflight) => String(preflight.track._id)));
 
   await removeTracksRoutingReferences(ctx, projectId, deletedTrackIds);

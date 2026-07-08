@@ -217,9 +217,7 @@ export const planTrackReorder = (input: {
   ]
 
   const patches: TrackReorderPatch[] = []
-  for (let index = 0; index < finalOrder.length; index++) {
-    const trackId = finalOrder[index]
-    if (!trackId) continue
+  for (const [index, trackId] of finalOrder.entries()) {
     const track = trackById.get(trackId)
     if (!track) continue
     const groupId = moveRoots.has(trackId) ? newParentGroupId : track.groupId

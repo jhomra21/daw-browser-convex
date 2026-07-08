@@ -92,7 +92,7 @@ export function normalizeTrackRouting<TTrackId extends string>(
 ): NormalizedRouting<TTrackId> {
   const { track, sends, outputTargetId, tracks } = input
   const sourceRole = normalizeTrackChannelRole(track?.channelRole)
-  const sourceId = track ? String(track.id) : undefined
+  const sourceId = track ? String(track.id) : ''
   const { groupIds, returnIds } = buildRoutingIndex(tracks)
   const tracksById = new Map(tracks.map((candidate) => [String(candidate.id), candidate]))
 
@@ -115,7 +115,7 @@ export function normalizeTrackRouting<TTrackId extends string>(
     if (!track || !outputTargetId || String(outputTargetId) === sourceId) return undefined
     const targetId = String(outputTargetId)
     if (sourceRole === 'track') return groupIds.has(targetId) ? outputTargetId : undefined
-    if (sourceRole === 'group') return sourceId && isAncestorGroup(tracksById, sourceId, targetId) ? outputTargetId : undefined
+    if (sourceRole === 'group') return isAncestorGroup(tracksById, sourceId, targetId) ? outputTargetId : undefined
     return undefined
   })()
 

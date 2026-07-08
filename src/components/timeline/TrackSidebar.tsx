@@ -548,12 +548,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               },
               {
                 kind: "item",
-                label: "Unfold group",
-                disabled: !isGroupTrack || !track.collapsed,
-                onSelect: () => sidebar().onToggleTrackCollapsed(track.id),
-              },
-              {
-                kind: "item",
                 label: "Select all clips in group",
                 disabled: !isGroupTrack,
                 onSelect: () => sidebar().onSelectAllClipsInGroup(track.id),

@@ -164,9 +164,10 @@ async function applyTrackGroupEntry(entry: Extract<HistoryEntry, { type: 'track-
     channelRole: 'group',
     color: entry.data.groupTrack.color,
   }), entry.data.groupTrack.index)
+  const childRefIndex = buildRefIndex(deps)
   for (const child of entry.data.childUpdates) {
-    const trackId = requireResolved(resolveTrackId(buildRefIndex(deps), child.trackRef), 'Child track not found for track-group redo')
-    const outputTargetId = resolveTrackId(buildRefIndex(deps), child.nextOutputTargetRef) ?? groupTrackId
+    const trackId = requireResolved(resolveTrackId(childRefIndex, child.trackRef), 'Child track not found for track-group redo')
+    const outputTargetId = resolveTrackId(childRefIndex, child.nextOutputTargetRef) ?? groupTrackId
     await persistHistoryTrackGroup(deps, trackId, groupTrackId, outputTargetId)
     deps.actions.applyTrackPatch(trackId, { groupId: groupTrackId, outputTargetId })
   }

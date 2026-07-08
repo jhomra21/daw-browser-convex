@@ -9,7 +9,7 @@ import TimelineContextMenu, { type TimelineContextMenuItem } from './context-men
 
 type TrackLaneProps = {
   track: Track
-  groupClipOverview?: Array<{ startSec: number; endSec: number }>
+  groupClipOverview: Array<{ startSec: number; endSec: number }>
   topPx: number
   automationHeightPx: number
   selectedClipIds: Set<string>
@@ -108,7 +108,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
           </For>
         </div>
       ) : null}
-      {props.track.collapsed && props.groupClipOverview ? (
+      {props.track.collapsed ? (
         <For each={props.groupClipOverview}>
           {(segment) => (
             <div

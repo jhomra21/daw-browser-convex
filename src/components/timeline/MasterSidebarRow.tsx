@@ -184,7 +184,6 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
               disabled={master().collapsed}
               onClick={(event) => {
                 event.stopPropagation();
-                if (master().collapsed) return;
                 props.automation.onToggleVisibility();
               }}
               title={props.automation.visible ? "Hide master automation lane" : "Show master automation lane"}

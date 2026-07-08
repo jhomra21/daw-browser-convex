@@ -14,6 +14,16 @@ export class SharedTimelineOperationHttpError extends Error {
   }
 }
 
+export const isAppliedSharedTimelineOperationResult = (value: unknown) => (
+  typeof value === 'object' && value !== null && 'status' in value && value.status === 'applied'
+)
+
+export const assertAppliedSharedTimelineOperationResult = (result: unknown) => {
+  if (!isAppliedSharedTimelineOperationResult(result)) {
+    throw new Error('Shared timeline operation was not applied.')
+  }
+}
+
 export const publishSharedTimelineOperation = async (
   projectId: string,
   operation: SharedTimelineOperation,

@@ -98,24 +98,24 @@ export function buildMixerChannelInsert(
   };
 }
 
-function removeRoutingReferencesFromFields(
+function removeRoutingReferencesToTracksFromFields(
   fields: {
     outputTargetId?: Id<"tracks">;
     sends?: MixerSend[];
   },
-  trackId: Id<"tracks">,
+  trackIds: ReadonlySet<string>,
 ) {
   const nextSends: MixerSend[] = [];
   let sendsChanged = false;
   for (const send of Array.isArray(fields.sends) ? fields.sends : []) {
-    if (String(send?.targetId) === String(trackId)) {
+    if (trackIds.has(String(send?.targetId))) {
       sendsChanged = true;
       continue;
     }
     nextSends.push(send);
   }
 
-  const nextOutputTargetId = String(fields.outputTargetId) === String(trackId)
+  const nextOutputTargetId = trackIds.has(String(fields.outputTargetId))
     ? undefined
     : fields.outputTargetId;
   const outputChanged = nextOutputTargetId !== fields.outputTargetId;
@@ -169,15 +169,23 @@ export async function removeTrackRoutingReferences(
   projectId: string,
   trackId: Id<"tracks">,
 ) {
+  await removeTracksRoutingReferences(ctx, projectId, new Set([String(trackId)]));
+}
+
+export async function removeTracksRoutingReferences(
+  ctx: MutationCtx,
+  projectId: string,
+  trackIds: ReadonlySet<string>,
+) {
   const roomChannels = await ctx.db
     .query("mixerChannels")
     .withIndex("by_room", (q) => q.eq("projectId", projectId))
     .collect();
 
   for (const roomChannel of roomChannels) {
-    if (String(roomChannel.trackId) === String(trackId)) continue;
+    if (trackIds.has(String(roomChannel.trackId))) continue;
 
-    const patch = removeRoutingReferencesFromFields(roomChannel, trackId);
+    const patch = removeRoutingReferencesToTracksFromFields(roomChannel, trackIds);
     if (!patch) continue;
     await ctx.db.patch(roomChannel._id, patch);
   }

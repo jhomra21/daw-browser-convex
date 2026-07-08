@@ -7,7 +7,7 @@ import { reorderLocalAudioEffects, setLocalEffect, setLocalEffectInstance } from
 import { deleteLocalAutomationEnvelope, setLocalAutomationEnvelope } from "~/lib/local-automation";
 import { automationTargetKey, isLocalId } from "@daw-browser/shared";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
-import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
+import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, isAppliedSharedTimelineOperationResult, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { buildTrackCreateMutationInput, buildTrackDeleteMutationInput, buildTrackMixMutationInput, buildTrackVolumeMutationInput } from "~/lib/track-mutation-args";
 import { buildTrackRoutingMutationInput } from "~/lib/track-routing-state";
@@ -27,10 +27,6 @@ type ClipTimingPatch = {
   audioWarp?: Track["clips"][number]["audioWarp"];
   gain?: number;
 };
-
-const isAppliedResult = (value: unknown) => (
-  typeof value === "object" && value !== null && "status" in value && value.status === "applied"
-);
 
 export const isLocalHistoryProject = (deps: Pick<Deps, "projectId">) => (
   isLocalId("project", deps.projectId)
@@ -150,7 +146,7 @@ export const persistHistoryTrackGroup = async (
     });
     return;
   }
-  await publishHistoryOperation(deps, { kind: "tracks.setGroup", payload: { trackId, groupId } });
+  await publishHistoryOperation(deps, { kind: "tracks.setGroup", payload: { trackId, groupId: groupId ?? null } });
   const track = deps.getTracks().find((entry) => entry.id === trackId);
   await publishHistoryOperation(deps, { kind: "tracks.setRouting", payload: { trackId, routing: { outputTargetId, sends: track?.sends ?? [] } } });
 };
@@ -526,7 +522,7 @@ export const persistHistoryClipTimingOrThrow = async (
       operation: { kind: "clips.setGain", payload: { clipId, gain: timing.gain } },
       queuedResult: { status: "applied" },
     });
-    assert(isAppliedResult(result), message);
+    assert(isAppliedSharedTimelineOperationResult(result), message);
   }
 };
 
@@ -571,7 +567,7 @@ export const persistHistoryClipColorOrThrow = async (
     operation: { kind: "clips.setColor", payload: { clipId, color } },
     queuedResult: { status: "applied" },
   });
-  assert(isAppliedResult(result), message);
+  assert(isAppliedSharedTimelineOperationResult(result), message);
 };
 
 export const persistHistoryClipMovesOrThrow = async (

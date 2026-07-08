@@ -7,6 +7,7 @@ import {
   listProjectTracksWithMixerChannels,
   normalizeMixerLockState,
   removeTrackRoutingReferences,
+  removeTracksRoutingReferences,
 } from "./mixerChannels";
 import {
   sanitizeChannelRole,
@@ -136,7 +137,7 @@ export async function getTrackDeletePreflight(
   };
 }
 
-async function deleteTrackFromPreflight(
+async function deleteTrackEntitiesFromPreflight(
   ctx: any,
   preflight: Extract<TrackDeletePreflight, { ok: true }>,
   options?: DeleteOwnedTrackOptions,
@@ -153,7 +154,6 @@ async function deleteTrackFromPreflight(
     }
   }
 
-  await removeTrackRoutingReferences(ctx, track.projectId, track._id);
   const automationEnvelopes = await ctx.db
     .query("automationEnvelopes")
     .withIndex("by_project_track", (q: any) => q.eq("projectId", track.projectId).eq("trackId", track._id))
@@ -164,6 +164,17 @@ async function deleteTrackFromPreflight(
   await deleteMixerStateForTrack(ctx, track._id);
   await ctx.db.delete(owner._id);
   await ctx.db.delete(track._id);
+  return true;
+}
+
+async function deleteTrackFromPreflight(
+  ctx: any,
+  preflight: Extract<TrackDeletePreflight, { ok: true }>,
+  options?: DeleteOwnedTrackOptions,
+) {
+  const { track } = preflight;
+  if (!await deleteTrackEntitiesFromPreflight(ctx, preflight, options)) return false;
+  await removeTrackRoutingReferences(ctx, track.projectId, track._id);
   const remaining = await ctx.db
     .query("tracks")
     .withIndex("by_room_index", (q: any) => q.eq("projectId", track.projectId))
@@ -176,6 +187,61 @@ async function deleteTrackFromPreflight(
     await ctx.db.patch(remainingTrack._id, patch);
   }
   return true;
+}
+
+async function deleteTrackSubtreeFromPreflights(
+  ctx: any,
+  preflights: Array<Extract<TrackDeletePreflight, { ok: true }>>,
+) {
+  if (preflights.length === 0) return;
+  const projectId = preflights[0]?.track.projectId;
+  const deletedTrackIds = new Set(preflights.map((preflight) => String(preflight.track._id)));
+
+  await removeTracksRoutingReferences(ctx, projectId, deletedTrackIds);
+  for (const preflight of preflights) {
+    await deleteTrackEntitiesFromPreflight(ctx, preflight);
+  }
+
+  const remaining = await ctx.db
+    .query("tracks")
+    .withIndex("by_room_index", (q: any) => q.eq("projectId", projectId))
+    .collect();
+  const orderedRemaining = remaining.sort((left: any, right: any) => left.index - right.index);
+  for (let index = 0; index < orderedRemaining.length; index += 1) {
+    const track = orderedRemaining[index];
+    const nextGroupId = deletedTrackIds.has(String(track.groupId)) ? undefined : track.groupId;
+    const patch: { index?: number; groupId?: any } = {};
+    if (track.index !== index) patch.index = index;
+    if (track.groupId !== nextGroupId) patch.groupId = nextGroupId;
+    if (Object.keys(patch).length === 0) continue;
+    await ctx.db.patch(track._id, patch);
+  }
+}
+
+function collectTrackSubtreeIds(
+  tracks: any[],
+  rootTrackId: any,
+) {
+  const childrenByParent = new Map<string, any[]>();
+  for (const track of tracks) {
+    if (!track.groupId) continue;
+    const parentId = String(track.groupId);
+    const children = childrenByParent.get(parentId) ?? [];
+    children.push(track._id);
+    childrenByParent.set(parentId, children);
+  }
+  const subtreeIds: any[] = [rootTrackId];
+  const seen = new Set([String(rootTrackId)]);
+  for (let index = 0; index < subtreeIds.length; index += 1) {
+    const trackId = subtreeIds[index];
+    for (const childId of childrenByParent.get(String(trackId)) ?? []) {
+      const childKey = String(childId);
+      if (seen.has(childKey)) continue;
+      seen.add(childKey);
+      subtreeIds.push(childId);
+    }
+  }
+  return subtreeIds;
 }
 
 export async function deleteOwnedTrack(
@@ -302,7 +368,7 @@ const setTrackRoutingForUser = async (
     ? channel.outputTargetId
     : input.outputTargetId ?? undefined;
   const normalizedRouting = sanitizeTrackRouting(
-    { _id: input.trackId, channelRole: channel.channelRole },
+    { _id: input.trackId, channelRole: channel.channelRole, groupId: track.groupId },
     { sends: nextSends, outputTargetId: nextOutputTargetId },
     tracksInRoom as any,
   );
@@ -595,7 +661,7 @@ export const serverReorderAndGroup = mutation({
       }
       const channel = await ensureMixerChannelForTrack(ctx, track);
       const routing = sanitizeTrackRouting(
-        { _id: update.trackId, channelRole: track.channelRole },
+        { _id: update.trackId, channelRole: track.channelRole, groupId: update.groupId ?? undefined },
         { sends: channel.sends, outputTargetId: update.outputTargetId ?? undefined },
         proposedTracks,
       );
@@ -691,18 +757,40 @@ export const remove = mutation({
   returns: trackDeleteResult,
   handler: async (ctx, { trackId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    const preflight = await getTrackDeletePreflight(ctx, trackId, userId);
-    if (!preflight.ok) {
-      if (preflight.reason === "access-denied") {
+    const rootPreflight = await getTrackDeletePreflight(ctx, trackId, userId);
+    if (!rootPreflight.ok) {
+      if (rootPreflight.reason === "access-denied") {
         return { status: "access-denied" as const };
       }
       return {
         status: "conflict" as const,
-        reason: preflight.reason,
+        reason: rootPreflight.reason,
       };
     }
 
-    await deleteTrackFromPreflight(ctx, preflight);
+    const projectTracks = await ctx.db
+      .query("tracks")
+      .withIndex("by_room_index", (q: any) => q.eq("projectId", rootPreflight.track.projectId))
+      .collect();
+    const subtreeIds = collectTrackSubtreeIds(projectTracks, trackId);
+    const descendantPreflights = await Promise.all(
+      subtreeIds.slice(1).map((subtreeTrackId) => getTrackDeletePreflight(ctx, subtreeTrackId, userId)),
+    );
+    const preflights = [rootPreflight];
+    for (const preflight of descendantPreflights) {
+      if (!preflight.ok) {
+        if (preflight.reason === "access-denied") {
+          return { status: "access-denied" as const };
+        }
+        return {
+          status: "conflict" as const,
+          reason: preflight.reason,
+        };
+      }
+      preflights.push(preflight);
+    }
+
+    await deleteTrackSubtreeFromPreflights(ctx, preflights);
     return { status: "deleted" as const };
   },
 });

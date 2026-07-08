@@ -8,7 +8,7 @@ import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-t
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
 import { createOptimisticTrack, pushTrackCreateHistory } from '~/lib/tracks'
 import { planAssignGroupColor, planGroupTracks, planMoveTrackToGroup, planTrackReorder, planUngroupTracks } from '~/lib/track-group-ops'
-import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
+import { assertAppliedSharedTimelineOperationResult, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import { buildClipColorHistoryEntry, buildTrackColorHistoryEntry, buildTrackGroupHistoryEntry, buildTrackReorderHistoryEntry, buildTrackUngroupHistoryEntry } from '~/lib/undo/builders'
 import type { TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
@@ -177,7 +177,7 @@ export function useTimelineActions(
       return
     }
     if (hasGroup) {
-      await publishSharedTimelineOperation(projectId, { kind: 'tracks.setGroup', payload: { trackId, groupId: patch.groupId } })
+      await publishSharedTimelineOperation(projectId, { kind: 'tracks.setGroup', payload: { trackId, groupId: patch.groupId ?? null } })
     }
     if (hasOutput) {
       await publishSharedTimelineOperation(projectId, { kind: 'tracks.setRouting', payload: { trackId, routing: { outputTargetId: patch.outputTargetId, sends: currentSends ?? [] } } })
@@ -217,10 +217,11 @@ export function useTimelineActions(
     if (isLocalId('project', projectId)) {
       await createLocalTimelineRepository(projectId).reorderAndGroup(updates)
     } else {
-      await publishSharedTimelineOperation(projectId, {
+      const result = await publishSharedTimelineOperation(projectId, {
         kind: 'tracks.reorderAndGroup',
         payload: { updates },
       })
+      assertAppliedSharedTimelineOperationResult(result)
     }
     for (const patch of plan.patches) {
       const track = trackById.get(patch.trackId)
@@ -276,10 +277,11 @@ export function useTimelineActions(
     if (isLocalId('project', projectId)) {
       await createLocalTimelineRepository(projectId).reorderAndGroup(reorderUpdates)
     } else {
-      await publishSharedTimelineOperation(projectId, {
+      const result = await publishSharedTimelineOperation(projectId, {
         kind: 'tracks.reorderAndGroup',
         payload: { updates: reorderUpdates },
       })
+      assertAppliedSharedTimelineOperationResult(result)
     }
     for (const update of plan.childUpdates) {
       const track = trackById.get(update.trackId)

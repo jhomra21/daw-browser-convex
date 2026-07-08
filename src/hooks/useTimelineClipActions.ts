@@ -148,6 +148,12 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     notify('Track delete failed', 'This track could not be deleted.')
   }
 
+  const collectTrackDeleteIds = (snapshot: readonly RuntimeTrack[], trackId: Track['id']) => {
+    const deletedTrackIds = collectTrackDescendantIds(snapshot, trackId)
+    deletedTrackIds.add(trackId)
+    return deletedTrackIds
+  }
+
   const snapshotAudioEffectRow = (row: TrackEffectRowSnapshotInput): TrackAudioEffectSnapshot | null => {
     const effect = row.type ?? row.effect
     if (!isAudioEffectKind(effect)) return null
@@ -655,8 +661,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     if (!track) return
     const rid = projectId()
     if (!rid) return
-    const deletedTrackIds = collectTrackDescendantIds(snapshot, trackId)
-    deletedTrackIds.add(trackId)
+    const deletedTrackIds = collectTrackDeleteIds(snapshot, trackId)
     const trackAutomation = automationEnvelopes().filter((envelope) => (
       envelope.target.kind === 'track' && deletedTrackIds.has(envelope.target.trackId)
     ))
@@ -731,10 +736,13 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
   }
 
   const requestDeleteTrack = (trackId: Track['id']) => {
-    const track = tracks().find(entry => entry.id === trackId)
+    const snapshot = tracks()
+    const track = snapshot.find(entry => entry.id === trackId)
     if (!track) return
 
-    if (track.clips.length > 0) {
+    const deletedTrackIds = collectTrackDeleteIds(snapshot, trackId)
+    const hasDeletedClips = snapshot.some((entry) => deletedTrackIds.has(entry.id) && entry.clips.length > 0)
+    if (hasDeletedClips) {
       setPendingDeleteTrackId(trackId)
       setConfirmOpen(true)
       return

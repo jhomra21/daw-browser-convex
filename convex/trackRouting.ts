@@ -17,7 +17,7 @@ type SendLike<TTrackId extends string> = {
 }
 
 const sanitizeTrackRouting = <TTrackId extends string>(
-  sourceTrack: { _id: TTrackId; channelRole?: string } | null | undefined,
+  sourceTrack: { _id: TTrackId; channelRole?: string; groupId?: TTrackId } | null | undefined,
   routing: {
     sends?: Array<SendLike<TTrackId>>
     outputTargetId?: TTrackId
@@ -25,7 +25,7 @@ const sanitizeTrackRouting = <TTrackId extends string>(
   tracks: TrackLike[],
 ) => {
   return normalizeTrackRoutingCore({
-    track: sourceTrack ? { id: sourceTrack._id, channelRole: sourceTrack.channelRole } : null,
+    track: sourceTrack ? { id: sourceTrack._id, channelRole: sourceTrack.channelRole, groupId: sourceTrack.groupId } : null,
     sends: routing.sends,
     outputTargetId: routing.outputTargetId,
     tracks: tracks.map((track) => ({ id: track._id, channelRole: track.channelRole, groupId: track.groupId })),

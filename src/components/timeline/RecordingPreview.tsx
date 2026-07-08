@@ -1,5 +1,5 @@
 import { type Component, createMemo } from 'solid-js'
-import { PPS, LANE_HEIGHT } from '~/lib/timeline-utils'
+import { PPS } from '~/lib/timeline-utils'
 
 const INNER_PADDING_TOP = 6
 const INNER_PADDING_BOTTOM = 6
@@ -12,6 +12,7 @@ type RecordingPoint = {
 type RecordingPreviewProps = {
   startSec: number
   points: RecordingPoint[]
+  heightPx: number
 }
 
 const RecordingPreview: Component<RecordingPreviewProps> = (props) => {
@@ -19,7 +20,7 @@ const RecordingPreview: Component<RecordingPreviewProps> = (props) => {
     const pts = props.points
     const last = pts[pts.length - 1]
     const widthPx = Math.max(6, Math.ceil(last.offset * PPS) + 4)
-    const heightPx = Math.max(12, LANE_HEIGHT - 12)
+    const heightPx = Math.max(12, props.heightPx - 4)
     const innerHeight = Math.max(1, heightPx - INNER_PADDING_TOP - INNER_PADDING_BOTTOM)
     return { widthPx, heightPx, innerHeight }
   })

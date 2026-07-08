@@ -92,7 +92,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
             class="absolute left-0 right-0 pointer-events-none"
             style={{ top: `${preview().topPx}px`, height: `${preview().heightPx}px` }}
           >
-            <RecordingPreview startSec={preview().start} points={preview().points} />
+            <RecordingPreview startSec={preview().start} points={preview().points} heightPx={preview().heightPx} />
           </div>
         )}
       </Show>

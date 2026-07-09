@@ -690,6 +690,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               sidebar().selectedTrackIds.includes(track.id);
             const ancestorGroupColorBands = () =>
               ancestorGroupColorBandsByTrackId().get(track.id) ?? [];
+            const railHeightPx = () => Math.max(0, clipLaneHeightPx() - 1);
             const muteDisabled = lockedByOther;
             const soloDisabled = lockedByOther;
             const volumeDisabled = lockedByOther;
@@ -900,11 +901,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 <For each={ancestorGroupColorBands()}>
                   {(band) => (
                     <div
-                      class="absolute top-0 z-10 cursor-pointer border-r border-black/40"
+                      class="absolute top-0 z-10 cursor-pointer border-r border-border"
                       style={{
                         left: `${band.leftPx}px`,
                         width: `${GROUP_RAIL_WIDTH}px`,
-                        height: `${clipLaneHeightPx()}px`,
+                        height: `${railHeightPx()}px`,
                         background: band.color,
                       }}
                       onPointerDown={(event) => {
@@ -917,11 +918,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 </For>
                 <Show when={isGroupTrack && depth() > 0}>
                   <div
-                    class="absolute top-0 z-10 cursor-pointer border-r border-black/40"
+                    class="absolute top-0 z-10 cursor-pointer border-r border-border"
                     style={{
                       left: `${depth() * GROUP_INDENT_PX}px`,
                       width: `${GROUP_RAIL_WIDTH}px`,
-                      height: `${clipLaneHeightPx()}px`,
+                      height: `${railHeightPx()}px`,
                       background: resolveGroupColor(track.color),
                     }}
                     onPointerDown={(event) => {
@@ -933,10 +934,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 </Show>
                 <Show when={isGroupTrack && !track.collapsed}>
                   <div
-                    class="pointer-events-none absolute z-10 h-px bg-black/40"
+                    class="pointer-events-none absolute z-10 h-px bg-border"
                     style={{
                       top: `${clipLaneHeightPx() - 1}px`,
-                      left: `${depth() * GROUP_INDENT_PX + GROUP_RAIL_WIDTH - 1}px`,
+                      left: `${depth() * GROUP_INDENT_PX + GROUP_RAIL_WIDTH}px`,
                       right: "0",
                     }}
                   />

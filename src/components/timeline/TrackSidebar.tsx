@@ -518,16 +518,17 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const isReturnTrack = channelRole === "return";
             const isGroupTrack = channelRole === "group";
             const depth = () => depthByTrackId().get(track.id) ?? 0;
-            const defaultTrackColor = () => appPreferences.timeline.defaultTrackColor();
-            const defaultGroupColor = () => appPreferences.timeline.defaultGroupColor();
+            const defaultTrackColorInput = () => appPreferences.timeline.defaultTrackColorInput();
+            const defaultGroupColorInput = () => appPreferences.timeline.defaultGroupColorInput();
             const ancestorGroupColorBands = () => {
-              const bands: Array<{ leftPx: number; color: string }> = [];
+              const bands: Array<{ trackId: Track["id"]; leftPx: number; color: string }> = [];
               let groupId = track.groupId;
               while (groupId) {
                 const group = sidebar().trackById.get(groupId);
                 if (!group) break;
                 if (group.color) {
                   bands.push({
+                    trackId: group.id,
                     leftPx: (depthByTrackId().get(group.id) ?? 0) * GROUP_INDENT_PX,
                     color: group.color,
                   });
@@ -563,7 +564,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               if (!visible.has(selectedAutomationParameter())) return true;
               return automationParameterOptions.some((option) => !visible.has(option.id));
             };
-            const contextMenuColor = () => parseHexColor(track.color, isGroupTrack ? defaultGroupColor() : defaultTrackColor());
+            const contextMenuColor = () => parseHexColor(track.color, isGroupTrack ? defaultGroupColorInput() : defaultTrackColorInput());
             const trackContextMenuItems = (): TimelineContextMenuItem[] => [
               { kind: "label", label: displayTrackName(track) },
               { kind: "item", label: "Open effects", onSelect: () => sidebar().onTrackClick(track.id) },
@@ -664,7 +665,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 )}
                 style={{
                   height: `${rowHeightPx()}px`,
-                  ...(track.color ? { background: track.color } : {}),
                 }}
                 onClick={() => {
                   if (suppressTrackClickId() === track.id) {
@@ -685,22 +685,44 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 <For each={ancestorGroupColorBands()}>
                   {(band) => (
                     <div
-                      class="absolute bottom-0 top-0"
+                      class="absolute top-0 z-10 cursor-pointer border-r border-black/40"
                       style={{
                         left: `${band.leftPx}px`,
                         width: `${GROUP_RAIL_WIDTH}px`,
+                        height: `${clipLaneHeightPx()}px`,
                         background: band.color,
                       }}
+                      onPointerDown={(event) => {
+                        event.stopPropagation();
+                        sidebar().onTrackClick(band.trackId);
+                      }}
+                      onClick={(event) => event.stopPropagation()}
                     />
                   )}
                 </For>
-                <Show when={track.color && (!isGroupTrack || depth() > 0)}>
+                <Show when={track.color && isGroupTrack && depth() > 0}>
                   <div
-                    class="absolute bottom-0 top-0"
+                    class="absolute top-0 z-10 cursor-pointer border-r border-black/40"
                     style={{
                       left: `${depth() * GROUP_INDENT_PX}px`,
                       width: `${GROUP_RAIL_WIDTH}px`,
+                      height: `${clipLaneHeightPx()}px`,
                       background: track.color,
+                    }}
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      sidebar().onTrackClick(track.id);
+                    }}
+                    onClick={(event) => event.stopPropagation()}
+                  />
+                </Show>
+                <Show when={isGroupTrack && !track.collapsed}>
+                  <div
+                    class="pointer-events-none absolute z-10 h-px bg-black/40"
+                    style={{
+                      top: `${clipLaneHeightPx() - 1}px`,
+                      left: `${depth() * GROUP_INDENT_PX + GROUP_RAIL_WIDTH - 1}px`,
+                      right: "0",
                     }}
                   />
                 </Show>
@@ -711,6 +733,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   )}
                   style={{
                     height: `${clipLaneHeightPx()}px`,
+                    ...(track.color ? { background: track.color } : {}),
                     "padding-left": `${8 + depth() * GROUP_INDENT_PX}px`,
                     "grid-template-columns": track.collapsed
                       ? "minmax(0, 1fr) auto"

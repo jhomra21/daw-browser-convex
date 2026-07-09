@@ -94,7 +94,7 @@ export function DashboardGeneralView() {
           action={
             <input
               type="color"
-              value={appPreferences.timeline.defaultTrackColor()}
+              value={appPreferences.timeline.defaultTrackColorInput()}
               class="h-8 w-12 cursor-pointer border border-border bg-app-surface p-0.5"
               onChange={(event) => appPreferences.timeline.setDefaultTrackColor(event.currentTarget.value)}
             />
@@ -106,7 +106,7 @@ export function DashboardGeneralView() {
           action={
             <input
               type="color"
-              value={appPreferences.timeline.defaultGroupColor()}
+              value={appPreferences.timeline.defaultGroupColorInput()}
               class="h-8 w-12 cursor-pointer border border-border bg-app-surface p-0.5"
               onChange={(event) => appPreferences.timeline.setDefaultGroupColor(event.currentTarget.value)}
             />

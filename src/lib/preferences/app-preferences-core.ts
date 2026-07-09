@@ -3,8 +3,9 @@ import { DEFAULT_DAW_THEME_ID, parseThemeId, type DawThemeId } from "~/lib/theme
 
 export const APP_PREFERENCES_STORAGE_KEY = "daw-browser.app-preferences.v1"
 export const APP_PREFERENCES_VERSION = 1
-const DEFAULT_TRACK_ROW_COLOR = "#181824"
-const DEFAULT_GROUP_ROW_COLOR = "#181824"
+export const TIMELINE_DEFAULT_TRACK_COLOR = "timeline-surface"
+export const TIMELINE_DEFAULT_GROUP_COLOR = "timeline-surface"
+const LEGACY_DARK_TIMELINE_SURFACE_COLOR = "#181824"
 const LEGACY_BRANCH_TRACK_ROW_COLOR = "#64748b"
 const LEGACY_BRANCH_GROUP_ROW_COLOR = "#475569"
 
@@ -43,8 +44,8 @@ export const defaultAppPreferences: AppPreferences = {
     open: true
   },
   timeline: {
-    defaultTrackColor: DEFAULT_TRACK_ROW_COLOR,
-    defaultGroupColor: DEFAULT_GROUP_ROW_COLOR
+    defaultTrackColor: TIMELINE_DEFAULT_TRACK_COLOR,
+    defaultGroupColor: TIMELINE_DEFAULT_GROUP_COLOR
   }
 }
 
@@ -63,9 +64,14 @@ const parseBoolean = (value: unknown, fallback: boolean): boolean =>
 export const parseHexColor = (value: unknown, fallback: string): string =>
   typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback
 
+const isTimelineDefaultColorToken = (value: unknown): value is typeof TIMELINE_DEFAULT_TRACK_COLOR | typeof TIMELINE_DEFAULT_GROUP_COLOR =>
+  value === TIMELINE_DEFAULT_TRACK_COLOR || value === TIMELINE_DEFAULT_GROUP_COLOR
+
 const normalizeTimelineDefaultColor = (value: unknown, fallback: string, legacyBranchDefault: string): string => {
+  if (isTimelineDefaultColorToken(value)) return value
   const color = parseHexColor(value, fallback)
-  return color.toLowerCase() === legacyBranchDefault ? fallback : color
+  const normalized = color.toLowerCase()
+  return normalized === legacyBranchDefault || normalized === LEGACY_DARK_TIMELINE_SURFACE_COLOR ? fallback : color
 }
 
 export const normalizeAppPreferences = (value: unknown): AppPreferences => {

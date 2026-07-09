@@ -4,10 +4,13 @@ import { assert } from "@daw-browser/shared"
 import {
   createPersistedAppPreferencesWithInitial,
   parseHexColor,
+  TIMELINE_DEFAULT_GROUP_COLOR,
+  TIMELINE_DEFAULT_TRACK_COLOR,
   type AppPreferences,
   type AppTheme,
   type ResolvedAppTheme
 } from "~/lib/preferences/app-preferences"
+import { themeColorInputValue } from "~/lib/preferences/theme-color-input"
 import { applyDawTheme, resolveDawThemeById, type ResolvedThemeTokens } from "~/lib/theme/theme-resolver"
 import { DEFAULT_DAW_THEME_ID, themeOptions, type DawThemeId, type DawThemeOption } from "~/lib/theme/theme-registry"
 
@@ -36,6 +39,8 @@ type AppPreferencesContextValue = {
   timeline: {
     defaultTrackColor: () => string
     defaultGroupColor: () => string
+    defaultTrackColorInput: () => string
+    defaultGroupColorInput: () => string
     setDefaultTrackColor: (color: string) => void
     setDefaultGroupColor: (color: string) => void
   }
@@ -139,6 +144,16 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
     setPreferences("timeline", "defaultGroupColor", nextColor)
   }
 
+  const resolveDefaultTimelineColor = (color: string) => {
+    if (color === TIMELINE_DEFAULT_TRACK_COLOR) return `var(--${TIMELINE_DEFAULT_TRACK_COLOR})`
+    if (color === TIMELINE_DEFAULT_GROUP_COLOR) return `var(--${TIMELINE_DEFAULT_GROUP_COLOR})`
+    return color
+  }
+
+  const resolveDefaultTimelineColorInput = (color: string) => {
+    return themeColorInputValue(color, themeTokens(), activeThemeId(), colorMode())
+  }
+
   return (
     <AppPreferencesContext.Provider
       value={{
@@ -164,8 +179,10 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           setOpen: setSidebarOpen
         },
         timeline: {
-          defaultTrackColor: () => preferences.timeline.defaultTrackColor,
-          defaultGroupColor: () => preferences.timeline.defaultGroupColor,
+          defaultTrackColor: () => resolveDefaultTimelineColor(preferences.timeline.defaultTrackColor),
+          defaultGroupColor: () => resolveDefaultTimelineColor(preferences.timeline.defaultGroupColor),
+          defaultTrackColorInput: () => resolveDefaultTimelineColorInput(preferences.timeline.defaultTrackColor),
+          defaultGroupColorInput: () => resolveDefaultTimelineColorInput(preferences.timeline.defaultGroupColor),
           setDefaultTrackColor,
           setDefaultGroupColor
         }

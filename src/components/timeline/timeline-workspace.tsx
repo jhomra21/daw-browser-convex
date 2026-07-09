@@ -1,4 +1,5 @@
 import { createMemo, createSignal, For, Show, onCleanup, onMount, type JSX } from "solid-js";
+import GridOverlay from "~/components/timeline/GridOverlay";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
 import type { ClipContextMenuActions } from "~/components/timeline/ClipComponent";
@@ -315,16 +316,26 @@ export default function TimelineWorkspace(props: Props) {
                 midi={props.midi}
               />
               <div
-                class="sticky left-0 right-0 z-30 border-t border-neutral-800 bg-timeline-surface"
+                class="fixed z-30 border-t border-neutral-800 bg-timeline-background"
                 style={{
+                  left: `${props.leftBrowser.open ? props.leftBrowser.widthPx : 0}px`,
+                  right: `${props.sidebarWidth}px`,
                   bottom: `${props.bottomPanelOffsetPx}px`,
                   height: `${masterAreaHeight()}px`,
-                  "margin-top": `${trackAreaHeight()}px`,
                 }}
               >
+                <div class="relative overflow-hidden bg-timeline-background" style={{ height: `${MASTER_ROW_HEIGHT}px` }}>
+                  <GridOverlay
+                    durationSec={props.durationSec}
+                    bpm={props.bpm}
+                    denom={props.gridDenominator}
+                    enabled={props.gridEnabled}
+                  />
+                  <div class="absolute left-0 right-0 bottom-0 h-px bg-timeline-surface-muted" />
+                </div>
                 <Show when={masterAutomationVisible()}>
                   <div
-                    class="border-b border-automation/30 bg-timeline-background/95"
+                    class="border-t border-automation/30 bg-timeline-background/95"
                     style={{ height: `${props.automation.lanes.masterHeight}px` }}
                   >
                     <AutomationLane

@@ -20,6 +20,7 @@ export function buildTrackCreateHistoryEntry(input: {
   index: number
   kind?: 'audio' | 'instrument'
   channelRole?: Track['channelRole']
+  color?: string
 }): Extract<HistoryEntry, { type: 'track-create' }> {
   return {
     type: 'track-create',
@@ -30,6 +31,7 @@ export function buildTrackCreateHistoryEntry(input: {
       index: input.index,
       kind: input.kind,
       channelRole: input.channelRole,
+      color: input.color,
     },
   }
 }

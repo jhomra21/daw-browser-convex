@@ -67,6 +67,9 @@ export const parseHexColor = (value: unknown, fallback: string): string =>
 const isTimelineDefaultColorToken = (value: unknown): value is typeof TIMELINE_DEFAULT_TRACK_COLOR | typeof TIMELINE_DEFAULT_GROUP_COLOR =>
   value === TIMELINE_DEFAULT_TRACK_COLOR || value === TIMELINE_DEFAULT_GROUP_COLOR
 
+export const timelineDefaultCreateColor = (color: string): string | undefined =>
+  isTimelineDefaultColorToken(color) ? undefined : color
+
 const normalizeTimelineDefaultColor = (value: unknown, fallback: string, legacyBranchDefault: string): string => {
   if (isTimelineDefaultColorToken(value)) return value
   const color = parseHexColor(value, fallback)

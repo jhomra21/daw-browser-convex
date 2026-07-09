@@ -6,6 +6,7 @@ import {
   parseHexColor,
   TIMELINE_DEFAULT_GROUP_COLOR,
   TIMELINE_DEFAULT_TRACK_COLOR,
+  timelineDefaultCreateColor,
   type AppPreferences,
   type AppTheme,
   type ResolvedAppTheme
@@ -41,6 +42,8 @@ type AppPreferencesContextValue = {
     defaultGroupColor: () => string
     defaultTrackColorInput: () => string
     defaultGroupColorInput: () => string
+    defaultTrackCreateColor: () => string | undefined
+    defaultGroupCreateColor: () => string | undefined
     setDefaultTrackColor: (color: string) => void
     setDefaultGroupColor: (color: string) => void
   }
@@ -183,6 +186,8 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           defaultGroupColor: () => resolveDefaultTimelineColor(preferences.timeline.defaultGroupColor),
           defaultTrackColorInput: () => resolveDefaultTimelineColorInput(preferences.timeline.defaultTrackColor),
           defaultGroupColorInput: () => resolveDefaultTimelineColorInput(preferences.timeline.defaultGroupColor),
+          defaultTrackCreateColor: () => timelineDefaultCreateColor(preferences.timeline.defaultTrackColor),
+          defaultGroupCreateColor: () => timelineDefaultCreateColor(preferences.timeline.defaultGroupColor),
           setDefaultTrackColor,
           setDefaultGroupColor
         }

@@ -65,6 +65,7 @@ import TimelineWorkspace from "./timeline/timeline-workspace";
 import { Dashboard } from "~/components/dashboard/dashboard";
 import type { DashboardTimelineModel, DashboardView } from "~/components/dashboard/types";
 import { buildTimelineTrackLayoutRows, buildTrackTree, collectTrackDescendantIds, computeDepthMap, flattenVisibleTracks } from "~/lib/timeline-track-layout";
+import { useAppPreferences } from "~/context/app-preferences";
 
 type AgentMixOp = {
   type: "setMute" | "setSolo";
@@ -507,6 +508,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     rightSidebarWidthPx: sidebarWidth,
   });
   const [deviceInsertActions, setDeviceInsertActions] = createSignal<TimelineDeviceInsertActions>();
+  const appPreferences = useAppPreferences();
 
   createEffect(() => {
     sidebarWidth();
@@ -562,6 +564,10 @@ const Timeline: Component<TimelineProps> = (props) => {
       removeCloudTrack: removeCreatedCloudTrack,
       grantTrackWrite,
       pushHistory,
+    },
+    defaultColors: {
+      track: appPreferences.timeline.defaultTrackCreateColor,
+      group: appPreferences.timeline.defaultGroupCreateColor,
     },
     navigation: {
       trackLookup,

@@ -518,8 +518,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const isReturnTrack = channelRole === "return";
             const isGroupTrack = channelRole === "group";
             const depth = () => depthByTrackId().get(track.id) ?? 0;
+            const defaultTrackColor = () => appPreferences.timeline.defaultTrackColor();
+            const defaultGroupColor = () => appPreferences.timeline.defaultGroupColor();
             const defaultTrackColorInput = () => appPreferences.timeline.defaultTrackColorInput();
             const defaultGroupColorInput = () => appPreferences.timeline.defaultGroupColorInput();
+            const displayedTrackColor = () => track.color ?? (isGroupTrack ? defaultGroupColor() : defaultTrackColor());
             const ancestorGroupColorBands = () => {
               const bands: Array<{ trackId: Track["id"]; leftPx: number; color: string }> = [];
               let groupId = track.groupId;
@@ -733,7 +736,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   )}
                   style={{
                     height: `${clipLaneHeightPx()}px`,
-                    ...(track.color ? { background: track.color } : {}),
+                    background: displayedTrackColor(),
                     "padding-left": `${8 + depth() * GROUP_INDENT_PX}px`,
                     "grid-template-columns": track.collapsed
                       ? "minmax(0, 1fr) auto"

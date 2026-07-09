@@ -542,6 +542,7 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
           index: entry.data.index,
           kind: entry.data.kind,
           channelRole: entry.data.channelRole,
+          color: entry.data.color,
         })
       }
       assert(newId, 'Failed to recreate track')
@@ -553,6 +554,7 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
         index: entry.data.index,
         kind: entry.data.kind ?? 'audio',
         channelRole: entry.data.channelRole ?? 'track',
+        color: entry.data.color,
       }), entry.data.index)
       return
     }

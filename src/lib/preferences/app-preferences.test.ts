@@ -3,7 +3,8 @@ import {
   APP_PREFERENCES_VERSION,
   defaultAppPreferences,
   normalizeAppPreferences,
-  parseAppTheme
+  parseAppTheme,
+  timelineDefaultCreateColor
 } from "./app-preferences-core"
 import { themeColorInputValue } from "./theme-color-input"
 import { DEFAULT_DAW_THEME_ID } from "~/lib/theme/theme-registry"
@@ -99,6 +100,11 @@ describe("theme helpers", () => {
   test("maps default timeline surface tokens to color input values", () => {
     expect(themeColorInputValue("timeline-surface", resolveDawThemeById(DEFAULT_DAW_THEME_ID, "light"), DEFAULT_DAW_THEME_ID, "light")).toBe("#e2e8f0")
     expect(themeColorInputValue("timeline-surface", resolveDawThemeById(DEFAULT_DAW_THEME_ID, "dark"), DEFAULT_DAW_THEME_ID, "dark")).toBe("#181824")
+  })
+
+  test("keeps token-backed row defaults out of persisted track colors", () => {
+    expect(timelineDefaultCreateColor("timeline-surface")).toBeUndefined()
+    expect(timelineDefaultCreateColor("#123456")).toBe("#123456")
   })
 
   test("preserves custom hex colors and hex theme token values for color inputs", () => {

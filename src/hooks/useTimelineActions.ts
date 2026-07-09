@@ -25,6 +25,11 @@ type TimelineTrackCreateOptions = {
   index?: number
 }
 
+type TimelineTrackDefaultColors = {
+  track: () => string | undefined
+  group: () => string | undefined
+}
+
 type TimelineTrackCreateBehavior = {
   pushHistory?: boolean
   select?: boolean
@@ -46,6 +51,7 @@ type UseTimelineActionsOptions = {
     grantTrackWrite: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
     pushHistory: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   }
+  defaultColors?: TimelineTrackDefaultColors
   navigation: {
     trackLookup: Accessor<TimelineTrackIndex<AudioBuffer>>
     selection: TimelineSelectionController
@@ -81,13 +87,14 @@ export function useTimelineActions(
     if (!projectId) return null
 
     const channelRole = trackOptions.channelRole ?? 'track'
+    const color = trackOptions.color ?? (channelRole === 'group' ? options.defaultColors?.group() : options.defaultColors?.track())
     const index = trackOptions.index ?? options.tracks().length
     if (isLocalId('project', projectId)) {
       const row = await createLocalTimelineRepository(projectId).createTrack({
         index,
         kind: trackOptions.kind,
         channelRole,
-        color: trackOptions.color,
+        color,
       })
       if (options.room.projectId() !== projectId) {
         await createLocalTimelineRepository(projectId).deleteTrack(row.id)
@@ -123,7 +130,7 @@ export function useTimelineActions(
       grantScope: { projectId, userId },
       kind: trackOptions.kind,
       channelRole,
-      color: trackOptions.color,
+      color,
     })
     if (!track) return null
     if (!inserted) {

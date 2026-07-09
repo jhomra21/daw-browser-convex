@@ -75,6 +75,7 @@ const isTrackCreateData = (value: unknown) => isRecord(value)
   && (value.currentTrackId === undefined || isString(value.currentTrackId))
   && (value.kind === undefined || value.kind === 'audio' || value.kind === 'instrument')
   && (value.channelRole === undefined || value.channelRole === 'track' || value.channelRole === 'group' || value.channelRole === 'return')
+  && (value.color === undefined || isString(value.color))
 
 const isTrackSnapshot = (value: unknown) => isRecord(value)
   && (value.trackRef === undefined || isString(value.trackRef))

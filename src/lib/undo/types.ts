@@ -213,7 +213,7 @@ export type HistoryEntry =
   | {
       type: 'track-create'
       projectId: string
-      data: { trackRef: TrackRef; currentTrackId?: string; index: number; kind?: 'audio' | 'instrument'; channelRole?: TrackChannelRole }
+      data: { trackRef: TrackRef; currentTrackId?: string; index: number; kind?: 'audio' | 'instrument'; channelRole?: TrackChannelRole; color?: string }
     }
   | {
       type: 'track-clip-create'

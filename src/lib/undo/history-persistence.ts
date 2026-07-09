@@ -126,6 +126,7 @@ export const createHistoryTrack = async (
     index: payload.index,
     kind: payload.kind,
     channelRole: payload.channelRole,
+    color: track.color,
   });
   const result = await publishDurableSharedTimelineOperation({ projectId: deps.projectId, userId: deps.userId, operation });
   assert(typeof result === "string", "Failed to create history track");

@@ -128,6 +128,7 @@ export const buildDuplicateClipCreateItems = (
     startSec: placement.startSec,
     duration: placement.originalClip.duration,
     name: placement.originalClip.name,
+    color: placement.originalClip.color,
     sampleUrl: placement.originalClip.sampleUrl,
     source: getPersistableAudioSourceMetadata(placement.originalClip),
     sourceAssetKey: placement.originalClip.sourceAssetKey,

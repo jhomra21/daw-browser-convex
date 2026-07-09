@@ -88,7 +88,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<
     Track["id"] | null
   >(null);
-  const [masterCollapsed, setMasterCollapsed] = createSignal(false);
+  const [masterCollapsed, setMasterCollapsed] = createSignal(true);
   // Transport tempo & metronome
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);

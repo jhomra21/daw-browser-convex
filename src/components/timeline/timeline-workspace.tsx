@@ -314,27 +314,33 @@ export default function TimelineWorkspace(props: Props) {
                 recording={props.recording}
                 midi={props.midi}
               />
-              <Show when={masterAutomationVisible()}>
-                <div
-                  class="absolute left-0 right-0 z-30 border-t border-automation/30 bg-timeline-background/95"
-                  style={{
-                    bottom: `${MASTER_ROW_HEIGHT}px`,
-                    height: `${props.automation.lanes.masterHeight}px`,
-                  }}
-                >
-                  <AutomationLane
-                    projectId={props.automation.projectId}
-                    target={{ kind: "master" }}
-                    parameterId={masterParameterId()}
-                    envelope={props.automation.envelopes.byTargetKey.get(masterTargetKey())}
-                    durationSec={props.durationSec}
-                    heightPx={props.automation.lanes.masterHeight}
-                    onPreview={props.automation.envelopes.preview}
-                    onCommit={props.automation.envelopes.commit}
-                    onCancelPreview={props.automation.envelopes.cancelPreview}
-                  />
-                </div>
-              </Show>
+              <div
+                class="sticky left-0 right-0 z-30 border-t border-neutral-800 bg-timeline-surface"
+                style={{
+                  bottom: `${props.bottomPanelOffsetPx}px`,
+                  height: `${masterAreaHeight()}px`,
+                  "margin-top": `${trackAreaHeight()}px`,
+                }}
+              >
+                <Show when={masterAutomationVisible()}>
+                  <div
+                    class="border-b border-automation/30 bg-timeline-background/95"
+                    style={{ height: `${props.automation.lanes.masterHeight}px` }}
+                  >
+                    <AutomationLane
+                      projectId={props.automation.projectId}
+                      target={{ kind: "master" }}
+                      parameterId={masterParameterId()}
+                      envelope={props.automation.envelopes.byTargetKey.get(masterTargetKey())}
+                      durationSec={props.durationSec}
+                      heightPx={props.automation.lanes.masterHeight}
+                      onPreview={props.automation.envelopes.preview}
+                      onCommit={props.automation.envelopes.commit}
+                      onCancelPreview={props.automation.envelopes.cancelPreview}
+                    />
+                  </div>
+                </Show>
+              </div>
             </div>
           </div>
 

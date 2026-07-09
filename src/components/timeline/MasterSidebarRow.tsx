@@ -116,93 +116,111 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
       }}
       onClick={master().onClick}
     >
-      <div class="grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 p-2" style={{ height: `${MASTER_ROW_HEIGHT}px` }}>
-        <button
-          class={cn(
-            "flex h-7 w-full items-center justify-center border px-2 text-center text-sm font-semibold",
-            master().selected
-              ? "border-border bg-muted"
-              : "border-border hover:border-border",
-          )}
-          style={{ "border-width": "0.5px" }}
-          onClick={(event) => {
-            event.stopPropagation();
-            master().onClick();
-          }}
-          title="Show master effects"
-        >
-          Master
-        </button>
-        <Show when={!master().collapsed} fallback={<div class="flex h-7 items-center border border-border bg-timeline-background px-2 text-xs text-muted-foreground">Collapsed</div>}>
+      <div
+        class={cn(
+          "grid items-center gap-x-4",
+          master().collapsed ? "px-2 py-0.5" : "p-2",
+        )}
+        style={{
+          height: `${MASTER_ROW_HEIGHT}px`,
+          "grid-template-columns": master().collapsed
+            ? "minmax(0,1fr)"
+            : "minmax(72px,96px) minmax(96px,1fr) 92px",
+        }}
+      >
+        <div class="flex min-w-0 items-center gap-1 overflow-hidden">
+          <button
+            class={cn(
+              "flex w-4 shrink-0 items-center justify-center text-xs text-muted-foreground hover:text-foreground",
+              master().collapsed ? "h-6" : "h-7",
+            )}
+            onClick={(event) => {
+              event.stopPropagation();
+              master().onToggleCollapsed();
+            }}
+            title={master().collapsed ? "Expand master" : "Collapse master"}
+          >
+            {master().collapsed ? "▶" : "▼"}
+          </button>
+          <button
+            class={cn(
+              "flex flex-1 items-center justify-center border px-2 text-center text-sm font-semibold",
+              master().collapsed ? "h-6" : "h-7",
+              master().selected
+                ? "border-border bg-muted"
+                : "border-border hover:border-border",
+            )}
+            style={{ "border-width": "0.5px" }}
+            onClick={(event) => {
+              event.stopPropagation();
+              master().onClick();
+            }}
+            title="Show master effects"
+          >
+            Master
+          </button>
+        </div>
+        <Show when={!master().collapsed}>
           <div class="flex h-7 items-center border border-border bg-timeline-background px-2 text-xs text-foreground">
             Master Out
           </div>
         </Show>
-        <div class="flex w-[92px] items-center gap-2">
-          <div class="flex h-7 w-[72px] shrink-0 items-center gap-1 px-0.5">
-            <Show when={master().ready && !master().collapsed}>
-              <div class="relative flex flex-1 items-center">
-                <Show when={volumeAutomated()}>
-                  <span class="absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.75)]" />
-                </Show>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={displayMasterVolume()}
-                  disabled={!master().canEditVolume}
-                  style={{
-                    "--track-volume-percent": `${displayMasterVolume() * 100}%`,
-                    "--track-volume-automation-start": `${(volumeRange()?.min ?? 0) * 100}%`,
-                    "--track-volume-automation-end": `${(volumeRange()?.max ?? 0) * 100}%`,
-                  }}
-                  onClick={(event) => event.stopPropagation()}
-                  onPointerDown={() => props.automation.onSelectParameter("volume")}
-                  onInput={(event) => {
-                    event.stopPropagation();
-                    previewVolume(parseFloat(event.currentTarget.value));
-                  }}
-                  onChange={commitVolume}
-                  onPointerUp={commitVolume}
-                  onPointerCancel={cancelVolume}
-                  class={cn(
-                    "track-volume-slider w-full cursor-pointer disabled:cursor-not-allowed",
-                    volumeEnvelope() && "track-volume-slider-automated",
-                  )}
-                  title="Master volume"
-                />
-              </div>
-            </Show>
-            <button
-              class={cn(
-                "h-7 w-7 shrink-0 border text-xs font-semibold transition-colors",
-                props.automation.visible
-                  ? "border-red-400 bg-red-500/90 text-black"
-                  : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
-              )}
-              disabled={master().collapsed}
-              onClick={(event) => {
-                event.stopPropagation();
-                props.automation.onToggleVisibility();
-              }}
-              title={props.automation.visible ? "Hide master automation lane" : "Show master automation lane"}
-            >
-              A
-            </button>
-            <button
-              class="h-7 w-7 shrink-0 border border-border bg-timeline-surface-muted text-xs font-semibold text-foreground hover:bg-muted"
-              onClick={(event) => {
-                event.stopPropagation();
-                master().onToggleCollapsed();
-              }}
-              title={master().collapsed ? "Expand master" : "Collapse master"}
-            >
-              {master().collapsed ? "▸" : "▾"}
-            </button>
+        <Show when={!master().collapsed}>
+          <div class="flex w-[92px] items-center gap-2">
+            <div class="flex h-7 w-[72px] shrink-0 items-center gap-1 px-0.5">
+              <Show when={master().ready}>
+                <div class="relative flex flex-1 items-center">
+                  <Show when={volumeAutomated()}>
+                    <span class="absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.75)]" />
+                  </Show>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={displayMasterVolume()}
+                    disabled={!master().canEditVolume}
+                    style={{
+                      "--track-volume-percent": `${displayMasterVolume() * 100}%`,
+                      "--track-volume-automation-start": `${(volumeRange()?.min ?? 0) * 100}%`,
+                      "--track-volume-automation-end": `${(volumeRange()?.max ?? 0) * 100}%`,
+                    }}
+                    onClick={(event) => event.stopPropagation()}
+                    onPointerDown={() => props.automation.onSelectParameter("volume")}
+                    onInput={(event) => {
+                      event.stopPropagation();
+                      previewVolume(parseFloat(event.currentTarget.value));
+                    }}
+                    onChange={commitVolume}
+                    onPointerUp={commitVolume}
+                    onPointerCancel={cancelVolume}
+                    class={cn(
+                      "track-volume-slider w-full cursor-pointer disabled:cursor-not-allowed",
+                      volumeEnvelope() && "track-volume-slider-automated",
+                    )}
+                    title="Master volume"
+                  />
+                </div>
+              </Show>
+              <button
+                class={cn(
+                  "h-7 w-7 shrink-0 border text-xs font-semibold transition-colors",
+                  props.automation.visible
+                    ? "border-red-400 bg-red-500/90 text-black"
+                    : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
+                )}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  props.automation.onToggleVisibility();
+                }}
+                title={props.automation.visible ? "Hide master automation lane" : "Show master automation lane"}
+              >
+                A
+              </button>
+            </div>
+            <div class="h-8 w-[12px] shrink-0 bg-timeline-background/70" />
           </div>
-          <div class="h-8 w-[12px] shrink-0 bg-timeline-background/70" />
-        </div>
+        </Show>
       </div>
       <Show when={!master().collapsed && props.automation.visible}>
         <div

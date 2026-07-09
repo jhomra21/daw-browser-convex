@@ -19,6 +19,7 @@ type Input = {
   insertLocalTrack: (track: Track, index: number) => void;
   removeLocalTrack: (trackId: Track["id"]) => void;
   placementTrackCount: () => number;
+  defaultTrackColor?: () => string | undefined;
   grantWrite?: (trackId: Track["id"], scope?: OptimisticGrantScope | null) => void;
 };
 
@@ -46,9 +47,10 @@ export const createClipDragPersistence = (input: Input) => {
     const projectId = input.projectId();
     const userId = input.userId();
     const index = input.placementTrackCount();
+    const color = input.defaultTrackColor?.();
     if (isLocalId("project", projectId)) {
       const repository = createLocalTimelineRepository(projectId);
-      const row = await repository.createTrack({ index, kind });
+      const row = await repository.createTrack({ index, kind, color });
       if (input.projectId() !== projectId) {
         await repository.deleteTrack(row.id).catch(() => null);
         return null;
@@ -69,6 +71,7 @@ export const createClipDragPersistence = (input: Input) => {
       grantWrite: input.grantWrite,
       grantScope: { projectId, userId },
       kind,
+      color,
     });
     if (track && !inserted) {
       await input.convexClient.mutation(

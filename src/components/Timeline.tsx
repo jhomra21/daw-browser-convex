@@ -665,6 +665,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     placementTracks: () => placementTracks(),
     trackLayout,
     resolvedTracks: () => resolvedTracks(),
+    defaultTrackCreateColor: appPreferences.timeline.defaultTrackCreateColor,
     insertLocalTrack: projection.insertLocalTrack,
     insertLocalClip: projection.insertLocalClip,
     removeLocalClips: projection.removeLocalClips,

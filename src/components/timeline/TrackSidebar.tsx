@@ -151,6 +151,29 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const depthByTrackId = createMemo(() => new Map(sidebar().trackLayout.map((row) => [row.trackId, row.depth])));
   const layoutByTrackId = createMemo(() => new Map(sidebar().trackLayout.map((row) => [row.trackId, row])));
   const visibleTrackIds = createMemo(() => new Set(sidebar().trackLayout.map((row) => row.trackId)));
+  const defaultGroupColor = () => appPreferences.timeline.defaultGroupColor();
+  const ancestorGroupColorBandsByTrackId = createMemo(() => {
+    const bandsByTrackId = new Map<Track["id"], Array<{ trackId: Track["id"]; leftPx: number; color: string }>>();
+    const trackById = sidebar().trackById;
+    const depths = depthByTrackId();
+    const groupDefault = defaultGroupColor();
+    for (const track of sidebar().tracks) {
+      const bands: Array<{ trackId: Track["id"]; leftPx: number; color: string }> = [];
+      let groupId = track.groupId;
+      while (groupId) {
+        const group = trackById.get(groupId);
+        if (!group) break;
+        bands.push({
+          trackId: group.id,
+          leftPx: (depths.get(group.id) ?? 0) * GROUP_INDENT_PX,
+          color: group.color ?? groupDefault,
+        });
+        groupId = group.groupId;
+      }
+      bandsByTrackId.set(track.id, bands);
+    }
+    return bandsByTrackId;
+  });
   const returnTracks = createMemo(() =>
     sidebar().allTracks.filter((track) => getTrackChannelRole(track) === "return"),
   );
@@ -519,27 +542,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const isGroupTrack = channelRole === "group";
             const depth = () => depthByTrackId().get(track.id) ?? 0;
             const defaultTrackColor = () => appPreferences.timeline.defaultTrackColor();
-            const defaultGroupColor = () => appPreferences.timeline.defaultGroupColor();
             const defaultTrackColorInput = () => appPreferences.timeline.defaultTrackColorInput();
             const defaultGroupColorInput = () => appPreferences.timeline.defaultGroupColorInput();
             const displayedTrackColor = () => track.color ?? (isGroupTrack ? defaultGroupColor() : defaultTrackColor());
-            const ancestorGroupColorBands = () => {
-              const bands: Array<{ trackId: Track["id"]; leftPx: number; color: string }> = [];
-              let groupId = track.groupId;
-              while (groupId) {
-                const group = sidebar().trackById.get(groupId);
-                if (!group) break;
-                if (group.color) {
-                  bands.push({
-                    trackId: group.id,
-                    leftPx: (depthByTrackId().get(group.id) ?? 0) * GROUP_INDENT_PX,
-                    color: group.color,
-                  });
-                }
-                groupId = group.groupId;
-              }
-              return bands;
-            };
+            const ancestorGroupColorBands = () => ancestorGroupColorBandsByTrackId().get(track.id) ?? [];
             const muteDisabled = lockedByOther;
             const soloDisabled = lockedByOther;
             const volumeDisabled = lockedByOther;
@@ -703,14 +709,14 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     />
                   )}
                 </For>
-                <Show when={track.color && isGroupTrack && depth() > 0}>
+                <Show when={isGroupTrack && depth() > 0}>
                   <div
                     class="absolute top-0 z-10 cursor-pointer border-r border-black/40"
                     style={{
                       left: `${depth() * GROUP_INDENT_PX}px`,
                       width: `${GROUP_RAIL_WIDTH}px`,
                       height: `${clipLaneHeightPx()}px`,
-                      background: track.color,
+                      background: displayedTrackColor(),
                     }}
                     onPointerDown={(event) => {
                       event.stopPropagation();

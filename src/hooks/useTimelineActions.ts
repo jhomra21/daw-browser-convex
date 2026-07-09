@@ -446,9 +446,15 @@ export function useTimelineActions(
       const result = await publishSharedTimelineOperation(projectId, { kind: 'clips.setColor', payload: { clipId: update.clipId, color: update.to } })
       assertAppliedSharedTimelineOperationResult(result)
     })
+    const clipById = new Map<string, Track['clips'][number]>()
+    for (const track of tracks) {
+      for (const clip of track.clips) {
+        clipById.set(clip.id, clip)
+      }
+    }
     const historyEntries = plan.clipUpdates.flatMap((update) => {
       const track = trackById.get(update.trackId)
-      const clip = track?.clips.find((clip) => clip.id === update.clipId)
+      const clip = clipById.get(update.clipId)
       if (track && clip) options.creation.replaceLocalClip(track.id, { ...clip, color: update.to })
       return clip ? [buildClipColorHistoryEntry({ projectId, clip, from: update.from, to: update.to })] : []
     })

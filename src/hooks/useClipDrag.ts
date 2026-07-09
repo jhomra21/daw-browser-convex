@@ -38,6 +38,7 @@ type ClipDragOptions = {
   placementTracks: Accessor<Track[]>
   trackLayout: Accessor<TimelineTrackLayoutRow[]>
   resolvedTracks: Accessor<Track[]>
+  defaultTrackCreateColor?: () => string | undefined
   insertLocalTrack: (track: Track, index: number) => void
   insertLocalClip: (trackId: Track['id'], clip: Clip) => void
   removeLocalClips: (clipIds: Iterable<string>) => void
@@ -113,6 +114,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     insertLocalTrack,
     removeLocalTrack,
     placementTrackCount: () => placementTracks().length,
+    defaultTrackColor: options.defaultTrackCreateColor,
     grantWrite,
   })
 

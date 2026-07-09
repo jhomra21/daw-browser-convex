@@ -7,6 +7,7 @@ import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { normalizeTrackChannelRole } from '@daw-browser/shared'
 import { normalizeProjectMixState } from '~/lib/project-mix-state'
 import type { TimelineClipRow, TimelineTrackRow } from '~/lib/timeline-repository/types'
+import { getDefaultClipColor } from '~/lib/clip-color'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 
@@ -59,6 +60,7 @@ const toTrackRow = (track: FullTimelineView['tracks'][number], index: number, up
     soloed: track.soloed ?? false,
     kind: normalizeTrackKind(track.kind),
     channelRole: normalizeTrackChannelRole(track.channelRole),
+    color: track.color,
     outputTargetId: track.outputTargetId ? String(track.outputTargetId) : undefined,
     sends: track.sends.map((send) => ({
       targetId: String(send.targetId),
@@ -71,6 +73,8 @@ const toTrackRow = (track: FullTimelineView['tracks'][number], index: number, up
 
 const toClipRow = (clip: FullTimelineView['clips'][number], updatedAt: number): TimelineClipRow => {
   const clipId = String(clip._id)
+  const sourceKind = sanitizeAudioSourceKind(clip.sourceKind)
+  const midi = normalizeMidi(clip.midi)
   return {
     id: clipId,
     trackId: String(clip.trackId),
@@ -78,9 +82,9 @@ const toClipRow = (clip: FullTimelineView['clips'][number], updatedAt: number): 
     name: clip.name ?? 'Clip',
     startSec: clip.startSec,
     duration: clip.duration,
-    color: 'clip-audio',
+    color: clip.color ?? getDefaultClipColor({ sourceKind, midi }),
     sourceAssetKey: clip.sourceAssetKey,
-    sourceKind: sanitizeAudioSourceKind(clip.sourceKind),
+    sourceKind,
     sourceDurationSec: clip.sourceDurationSec,
     sourceSampleRate: clip.sourceSampleRate,
     sourceChannelCount: clip.sourceChannelCount,
@@ -89,7 +93,7 @@ const toClipRow = (clip: FullTimelineView['clips'][number], updatedAt: number): 
     audioWarp: normalizeAudioWarp(clip.audioWarp),
     gain: clip.gain,
     sampleUrl: clip.sampleUrl,
-    midi: normalizeMidi(clip.midi),
+    midi,
     midiOffsetBeats: clip.midiOffsetBeats ?? 0,
     createdAt: updatedAt,
     updatedAt,

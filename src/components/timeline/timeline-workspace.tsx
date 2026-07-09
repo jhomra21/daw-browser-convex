@@ -305,7 +305,6 @@ export default function TimelineWorkspace(props: Props) {
                   playheadSec: props.playheadSec,
                   dropAtNewTrack: props.dropAtNewTrack,
                   marqueeRect: props.marqueeRect,
-                  rowTops: props.trackLayout.map((row) => row.topPx),
                   rowLayouts: props.trackLayout,
                   trackAreaHeight: trackAreaHeight(),
                   range: props.selection.rangeSelection(),

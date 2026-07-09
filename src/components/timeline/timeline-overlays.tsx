@@ -26,7 +26,6 @@ type TimelineOverlaysProps = {
     playheadSec: number
     dropAtNewTrack: boolean
     marqueeRect: MarqueeRect
-    rowTops: number[]
     rowLayouts: TimelineTrackLayoutRow[]
     trackAreaHeight: number
     range: TimelineRangeSelection | null

@@ -8,6 +8,7 @@ import { resolveTrackMixView } from '~/lib/timeline-mix-authority'
 import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
 import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
 import { cloneTimelineClip, cloneTimelineTrack } from '~/lib/timeline-clone'
+import { getDefaultClipColor } from '~/lib/clip-color'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { LocalMixMap } from '~/lib/timeline-storage'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
@@ -140,14 +141,6 @@ const normalizeTrackKind = (value: string | undefined): Track['kind'] => {
 
 const normalizeSourceKind = (value: string | undefined): Clip['sourceKind'] => {
   return sanitizeAudioSourceKind(value)
-}
-
-const defaultClipColor = (clip: {
-  sourceKind?: Clip['sourceKind']
-  midi?: Clip['midi']
-}) => {
-  if (clip.sourceKind === 'recording') return 'clip-recording'
-  return clip.midi ? 'clip-midi' : 'clip-audio'
 }
 
 const normalizeMidi = (value: FullTimelineView['clips'][number]['midi']): Clip['midi'] => {
@@ -442,6 +435,8 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
     const track = trackById.get(trackId)
     const clipId = String(clipRow._id)
     if (!track || options.client.clips.removedIds.has(clipId)) continue
+    const sourceKind = normalizeSourceKind(clipRow.sourceKind)
+    const midi = normalizeMidi(clipRow.midi)
     const clip: RuntimeClip = {
       id: clipId,
       historyRef: options.client.clips.historyRefsById.get(clipId) ?? clipId,
@@ -452,7 +447,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
       duration: clipRow.duration,
       sourceAssetKey: clipRow.sourceAssetKey,
       waveformAssetKey: getWaveformAssetKey(options.projectId, clipRow.sourceAssetKey),
-      sourceKind: normalizeSourceKind(clipRow.sourceKind),
+      sourceKind,
       sourceDurationSec: clipRow.sourceDurationSec,
       sourceSampleRate: clipRow.sourceSampleRate,
       sourceChannelCount: clipRow.sourceChannelCount,
@@ -460,9 +455,9 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
       bufferOffsetSec: clipRow.bufferOffsetSec ?? 0,
       audioWarp: normalizeAudioWarp(clipRow.audioWarp),
       gain: clipRow.gain,
-      color: clipRow.color ?? defaultClipColor({ sourceKind: normalizeSourceKind(clipRow.sourceKind), midi: normalizeMidi(clipRow.midi) }),
+      color: clipRow.color ?? getDefaultClipColor({ sourceKind, midi }),
       sampleUrl: clipRow.sampleUrl,
-      midi: normalizeMidi(clipRow.midi),
+      midi,
       midiOffsetBeats: clipRow.midiOffsetBeats ?? 0,
     }
     pushClipToTrack(track, clip)

@@ -12,6 +12,7 @@ import type { HistoryClipSnapshot, HistoryEntry } from '~/lib/undo/types'
 import type { Clip, TrackId } from '@daw-browser/timeline-core/types'
 import type { RuntimeClip } from '~/lib/timeline-runtime-types'
 import { buildClipCreatePayload, buildQueuedAudioClipCreatePayload, type ClipCreateSnapshot } from '@daw-browser/shared'
+import { getDefaultClipColor } from '~/lib/clip-color'
 
 type BuildLocalClipInput = {
   id: string
@@ -81,12 +82,6 @@ type BatchClipCreateResult = {
   trackId: TrackId
   clipId: string
   clip: ClipCreateSnapshot
-}
-
-function getDefaultClipColor(clip: ClipCreateSnapshot) {
-  if (clip.sourceKind === 'recording') return 'clip-recording'
-  if (clip.midi) return 'clip-midi'
-  return 'clip-audio'
 }
 
 function buildClipSnapshotFields(clip: Clip) {

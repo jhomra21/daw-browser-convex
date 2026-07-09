@@ -1,17 +1,19 @@
 import { createMemo, type Component, For } from 'solid-js'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { useAppPreferences } from '~/context/app-preferences'
+import { createClipVisualColors, resolveClipColor } from '~/lib/clip-color'
 import { PPS } from '~/lib/timeline-utils'
 import { clipRangeOverlap, type TimelineRangeSelection } from '~/lib/timeline-range-selection'
 import ClipComponent, { type ClipContextMenuActions } from './ClipComponent'
 import AutomationLane from './automation-lane'
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import TimelineContextMenu, { type TimelineContextMenuItem } from './context-menu/timeline-context-menu'
-import type { TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
+import type { GroupClipOverviewSegment, TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 
 type TrackLaneProps = {
   track: Track
   layout: Pick<TimelineTrackLayoutRow, 'topPx' | 'heightPx' | 'clipLaneHeightPx' | 'automationHeightPx'>
-  groupClipOverview: Array<{ startSec: number; endSec: number }>
+  groupClipOverview: GroupClipOverviewSegment[]
   selectedClipIds: Set<string>
   rangeSelection: TimelineRangeSelection | null
   onClipPointerDown: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
@@ -42,6 +44,7 @@ type TrackLaneProps = {
 }
 
 const TrackLane: Component<TrackLaneProps> = (props) => {
+  const appPreferences = useAppPreferences()
   const contextMenuItems = (): TimelineContextMenuItem[] => {
     const items: TimelineContextMenuItem[] = [
       { kind: 'label', label: props.track.name },
@@ -75,8 +78,14 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
     return props.track.clips.map((clip) => ({
       startSec: clip.startSec,
       endSec: clip.startSec + clip.duration,
+      color: clip.color,
     }))
   })
+  const segmentVisualColors = (color: string) => createClipVisualColors(
+    resolveClipColor(color, appPreferences.appearance.themeTokens()),
+    false,
+    false,
+  )
 
   const laneContainer = () => (
     <div
@@ -119,10 +128,11 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
         <For each={collapsedSegments()}>
           {(segment) => (
             <div
-              class="absolute top-1 bottom-1 rounded-sm border border-white/10 bg-green-400/35"
+              class="absolute top-1 bottom-1 rounded-sm border"
               style={{
                 left: `${segment.startSec * PPS}px`,
                 width: `${Math.max(2, (segment.endSec - segment.startSec) * PPS)}px`,
+                ...segmentVisualColors(segment.color),
               }}
             />
           )}

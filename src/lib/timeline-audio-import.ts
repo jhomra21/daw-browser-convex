@@ -1,6 +1,7 @@
 import { buildLocalClip, createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory } from '~/lib/clip-create'
 import { buildClipCreatePayload, type ClipCreateSnapshot } from '@daw-browser/shared'
 import { createAudioAssetKey, getAudioSourceMetadata, type AudioSourceKind } from '~/lib/audio-source'
+import { getDefaultClipColor, trackColorForClip } from '~/lib/clip-color'
 import { isLocalProjectAssetKey } from '@daw-browser/shared'
 import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError } from '~/lib/local-assets'
@@ -146,10 +147,12 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
     const sampleUrl = projectId && isLocalId('project', projectId) && isLocalProjectAssetKey(input.assetKey)
       ? undefined
       : input.url
+    const targetTrack = context.project.tracks().find((track) => track.id === input.trackId)
     const clipSnapshot: ClipCreateSnapshot = {
       startSec: input.startSec,
       duration: input.duration,
       name: clipName,
+      color: trackColorForClip(targetTrack?.color) ?? getDefaultClipColor({ sourceKind: input.sourceKind }),
       sampleUrl,
       source: input.source,
       sourceAssetKey: input.assetKey,
@@ -163,7 +166,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
           name: clipName,
           startSec: input.startSec,
           duration: input.duration,
-          color: 'clip-audio',
+          color: clipSnapshot.color,
           sourceAssetId: isLocalProjectAssetKey(input.assetKey) ? input.assetKey : undefined,
           sourceAssetKey: input.assetKey,
           sourceKind: input.sourceKind,

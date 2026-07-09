@@ -9,26 +9,52 @@ import {
 } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
-import { automationEnvelopeValueRange, automationTargetKey, getAutomationParameterOptions, type AutomationEnvelope } from "@daw-browser/shared";
+import {
+  automationEnvelopeValueRange,
+  automationTargetKey,
+  getAutomationParameterOptions,
+  type AutomationEnvelope,
+} from "@daw-browser/shared";
 import {
   canTrackReceiveAudioClip,
   getTrackChannelRole,
 } from "@daw-browser/timeline-core/track-routing";
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
-import { normalizeDragMoveSet, resolveTrackDropZone, type TrackDropTarget } from "~/lib/track-group-ops";
-import { DEFAULT_AUTOMATION_LANE_HEIGHT, GROUP_INDENT_PX, GROUP_RAIL_WIDTH, LANE_HEIGHT, RULER_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
+import {
+  normalizeDragMoveSet,
+  resolveTrackDropZone,
+  type TrackDropTarget,
+} from "~/lib/track-group-ops";
+import {
+  DEFAULT_AUTOMATION_LANE_HEIGHT,
+  GROUP_INDENT_PX,
+  GROUP_RAIL_WIDTH,
+  LANE_HEIGHT,
+  RULER_HEIGHT,
+  clampAutomationLaneHeight,
+} from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Track, TrackSend } from "@daw-browser/timeline-core/types";
 import type { TimelineWorkspaceAutomationModel } from "~/hooks/useTimelineAutomationController";
-import { trackLayoutRowAtY, type TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
+import {
+  trackLayoutRowAtY,
+  type TimelineTrackLayoutRow,
+} from "~/lib/timeline-track-layout";
 import MasterSidebarRow, {
   MASTER_ROW_HEIGHT,
   type MasterSidebarModel,
 } from "~/components/timeline/MasterSidebarRow";
 import AutomationParameterPicker from "./automation-parameter-picker";
-import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
+import TimelineContextMenu, {
+  type TimelineContextMenuItem,
+} from "./context-menu/timeline-context-menu";
 import { useAppPreferences } from "~/context/app-preferences";
-import { parseHexColor } from "~/lib/preferences/app-preferences";
+import { parseHexColor } from "~/lib/color";
+import {
+  TIMELINE_DEFAULT_GROUP_COLOR,
+  TIMELINE_DEFAULT_TRACK_COLOR,
+} from "~/lib/preferences/app-preferences";
+import { trackColorForClip } from "~/lib/clip-color";
 
 const automationParameterOptions = getAutomationParameterOptions();
 
@@ -58,13 +84,20 @@ type TrackSidebarProps = {
     recordArmTrackId: Track["id"] | null;
     onToggleRecordArm: (trackId: Track["id"]) => void;
     onToggleTrackCollapsed: (trackId: Track["id"]) => void;
-    onSetTracksCollapsed: (updates: Array<{ trackId: Track["id"]; collapsed: boolean }>) => void;
+    onSetTracksCollapsed: (
+      updates: Array<{ trackId: Track["id"]; collapsed: boolean }>,
+    ) => void;
     onGroupTracks: (trackIds: Track["id"][]) => void;
     onUngroupTrack: (groupId: Track["id"]) => void;
-    onMoveTrackToGroup: (trackId: Track["id"], groupId: Track["id"] | undefined) => void;
+    onMoveTrackToGroup: (
+      trackId: Track["id"],
+      groupId: Track["id"] | undefined,
+    ) => void;
     onReorderTracks: (trackIds: Track["id"][], target: TrackDropTarget) => void;
     onSetTrackColor: (trackId: Track["id"], color: string | undefined) => void;
+    onResetTrackColor: (trackId: Track["id"]) => void;
     onAssignTrackColorToClips: (trackId: Track["id"]) => void;
+    onResetClipColors: (trackId: Track["id"]) => void;
     onSelectAllClipsInGroup: (groupId: Track["id"]) => void;
     currentUserId: string;
     subscribeTrackLevels: (
@@ -89,12 +122,15 @@ const displayMeterLevel = (value: number | undefined) => {
 const clampVolume = (volume: number) => clampUnit(volume);
 const quantizeVolume = (volume: number) =>
   Math.round(clampVolume(volume) * 100) / 100;
-const isBulkCollapseModifier = (event: MouseEvent | PointerEvent) => event.metaKey || event.altKey;
+const isBulkCollapseModifier = (event: MouseEvent | PointerEvent) =>
+  event.metaKey || event.altKey;
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const sidebar = () => props.sidebar;
   const appPreferences = useAppPreferences();
 
-  const [meters, setMeters] = createStore<Record<string, TrackStereoLevels>>({});
+  const [meters, setMeters] = createStore<Record<string, TrackStereoLevels>>(
+    {},
+  );
   const [selectedOutputTargets, setSelectedOutputTargets] = createSignal<
     Map<Track["id"], string>
   >(new Map());
@@ -110,55 +146,88 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     dragging: boolean;
     target?: TrackDropTarget;
   }>();
-  const [suppressTrackClickId, setSuppressTrackClickId] = createSignal<Track["id"]>();
+  const [suppressTrackClickId, setSuppressTrackClickId] =
+    createSignal<Track["id"]>();
   let cleanupAutomationResize: (() => void) | undefined;
 
   createEffect(() => {
     const unsubscribe = sidebar().subscribeTrackLevels((levelsByTrackId) => {
-      setMeters(produce((current) => {
-        for (const [trackId, levels] of levelsByTrackId) {
-          const next = {
-            left: clampUnit(levels.left),
-            right: clampUnit(levels.right),
-          };
-          const previous = current[trackId];
-          if (previous?.left === next.left && previous.right === next.right) continue;
-          current[trackId] = next;
-        }
-      }));
+      setMeters(
+        produce((current) => {
+          for (const [trackId, levels] of levelsByTrackId) {
+            const next = {
+              left: clampUnit(levels.left),
+              right: clampUnit(levels.right),
+            };
+            const previous = current[trackId];
+            if (previous?.left === next.left && previous.right === next.right)
+              continue;
+            current[trackId] = next;
+          }
+        }),
+      );
     });
     onCleanup(unsubscribe);
   });
 
   createEffect(() => {
-    const trackIds = new Set<string>(sidebar().allTracks.map((track) => track.id));
-    setMeters(produce((current) => {
-      for (const trackId of Object.keys(current)) {
-        if (!trackIds.has(trackId)) delete current[trackId];
-      }
-    }));
+    const trackIds = new Set<string>(
+      sidebar().allTracks.map((track) => track.id),
+    );
+    setMeters(
+      produce((current) => {
+        for (const trackId of Object.keys(current)) {
+          if (!trackIds.has(trackId)) delete current[trackId];
+        }
+      }),
+    );
   });
 
   const groupTracks = createMemo(() =>
-    sidebar().allTracks.filter((track) => getTrackChannelRole(track) === "group"),
+    sidebar().allTracks.filter(
+      (track) => getTrackChannelRole(track) === "group",
+    ),
   );
   const groupTrackNames = createMemo(
     () =>
       new Map<string, string>(
-        groupTracks().map((track, index) => [track.id, track.name || `Group ${index + 1}`]),
+        groupTracks().map((track, index) => [
+          track.id,
+          track.name || `Group ${index + 1}`,
+        ]),
       ),
   );
-  const depthByTrackId = createMemo(() => new Map(sidebar().trackLayout.map((row) => [row.trackId, row.depth])));
-  const layoutByTrackId = createMemo(() => new Map(sidebar().trackLayout.map((row) => [row.trackId, row])));
-  const visibleTrackIds = createMemo(() => new Set(sidebar().trackLayout.map((row) => row.trackId)));
+  const depthByTrackId = createMemo(
+    () => new Map(sidebar().trackLayout.map((row) => [row.trackId, row.depth])),
+  );
+  const layoutByTrackId = createMemo(
+    () => new Map(sidebar().trackLayout.map((row) => [row.trackId, row])),
+  );
+  const visibleTrackIds = createMemo(
+    () => new Set(sidebar().trackLayout.map((row) => row.trackId)),
+  );
   const defaultGroupColor = () => appPreferences.timeline.defaultGroupColor();
+  const resolveGroupColor = (color: string | undefined) => {
+    if (
+      color === TIMELINE_DEFAULT_GROUP_COLOR ||
+      color === TIMELINE_DEFAULT_TRACK_COLOR
+    )
+      return defaultGroupColor();
+    return color ?? defaultGroupColor();
+  };
   const ancestorGroupColorBandsByTrackId = createMemo(() => {
-    const bandsByTrackId = new Map<Track["id"], Array<{ trackId: Track["id"]; leftPx: number; color: string }>>();
+    const bandsByTrackId = new Map<
+      Track["id"],
+      Array<{ trackId: Track["id"]; leftPx: number; color: string }>
+    >();
     const trackById = sidebar().trackById;
     const depths = depthByTrackId();
-    const groupDefault = defaultGroupColor();
     for (const track of sidebar().tracks) {
-      const bands: Array<{ trackId: Track["id"]; leftPx: number; color: string }> = [];
+      const bands: Array<{
+        trackId: Track["id"];
+        leftPx: number;
+        color: string;
+      }> = [];
       let groupId = track.groupId;
       while (groupId) {
         const group = trackById.get(groupId);
@@ -166,7 +235,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         bands.push({
           trackId: group.id,
           leftPx: (depths.get(group.id) ?? 0) * GROUP_INDENT_PX,
-          color: group.color ?? groupDefault,
+          color: resolveGroupColor(group.color),
         });
         groupId = group.groupId;
       }
@@ -175,34 +244,52 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     return bandsByTrackId;
   });
   const returnTracks = createMemo(() =>
-    sidebar().allTracks.filter((track) => getTrackChannelRole(track) === "return"),
+    sidebar().allTracks.filter(
+      (track) => getTrackChannelRole(track) === "return",
+    ),
   );
   const returnTrackNames = createMemo(
     () =>
       new Map<string, string>(
-        returnTracks().map((track, index) => [track.id, track.name || `Return ${index + 1}`]),
+        returnTracks().map((track, index) => [
+          track.id,
+          track.name || `Return ${index + 1}`,
+        ]),
       ),
   );
   const displayTrackName = (track: Track) =>
-    groupTrackNames().get(track.id) ?? returnTrackNames().get(track.id) ?? track.name;
+    groupTrackNames().get(track.id) ??
+    returnTrackNames().get(track.id) ??
+    track.name;
   const automationMetaByTrackId = createMemo(() => {
-    const byTrackId = new Map<string, {
-      automatedParameterIds: ReadonlySet<string>;
-      volumeRange?: { min: number; max: number };
-      volumeEnvelope?: AutomationEnvelope;
-    }>();
-    const mutable = new Map<string, {
-      automatedParameterIds: Set<string>;
-      volumeRange?: { min: number; max: number };
-      volumeEnvelope?: AutomationEnvelope;
-    }>();
+    const byTrackId = new Map<
+      string,
+      {
+        automatedParameterIds: ReadonlySet<string>;
+        volumeRange?: { min: number; max: number };
+        volumeEnvelope?: AutomationEnvelope;
+      }
+    >();
+    const mutable = new Map<
+      string,
+      {
+        automatedParameterIds: Set<string>;
+        volumeRange?: { min: number; max: number };
+        volumeEnvelope?: AutomationEnvelope;
+      }
+    >();
     for (const envelope of props.automation.envelopes.byTargetKey.values()) {
       if (envelope.target.kind !== "track") continue;
-      const existing = mutable.get(envelope.target.trackId) ?? { automatedParameterIds: new Set<string>() };
+      const existing = mutable.get(envelope.target.trackId) ?? {
+        automatedParameterIds: new Set<string>(),
+      };
       existing.automatedParameterIds.add(envelope.parameterId);
       if (envelope.parameterId === "volume") {
         existing.volumeEnvelope = envelope;
-        existing.volumeRange = automationEnvelopeValueRange(envelope, { min: 0, max: 1 });
+        existing.volumeRange = automationEnvelopeValueRange(envelope, {
+          min: 0,
+          max: 1,
+        });
       }
       mutable.set(envelope.target.trackId, existing);
     }
@@ -222,26 +309,32 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       automatedParameterIds: new Set<string>(),
       selectedEnvelope: undefined,
     };
-    const selectedParameter = props.automation.lanes.selectedParametersByTargetKey.master ?? "volume";
-    const selectedTargetKey = automationTargetKey({ kind: "master" }, selectedParameter);
+    const selectedParameter =
+      props.automation.lanes.selectedParametersByTargetKey.master ?? "volume";
+    const selectedTargetKey = automationTargetKey(
+      { kind: "master" },
+      selectedParameter,
+    );
     for (const envelope of props.automation.envelopes.byTargetKey.values()) {
       if (envelope.target.kind !== "master") continue;
       meta.automatedParameterIds.add(envelope.parameterId);
-      if (envelope.targetKey === selectedTargetKey) meta.selectedEnvelope = envelope;
+      if (envelope.targetKey === selectedTargetKey)
+        meta.selectedEnvelope = envelope;
     }
     return meta;
   });
-  const masterRowReservedHeight = () => (
-    MASTER_ROW_HEIGHT + (!sidebar().master.collapsed && props.automation.lanes.masterVisible ? props.automation.lanes.masterHeight : 0)
-  );
+  const masterRowReservedHeight = () =>
+    MASTER_ROW_HEIGHT +
+    (!sidebar().master.collapsed && props.automation.lanes.masterVisible
+      ? props.automation.lanes.masterHeight
+      : 0);
   const actualOutputTargetId = (track: Track) => track.outputTargetId ?? "";
   const selectedOutputTargetId = (track: Track) =>
     selectedOutputTargets().get(track.id) ?? actualOutputTargetId(track);
   const outputTargetName = (track: Track) =>
     groupTrackNames().get(selectedOutputTargetId(track)) ?? "Master";
   const actualSendTargetId = (track: Track) =>
-    track.sends?.find((send) => send.amount > 0.0001)?.targetId ??
-    "";
+    track.sends?.find((send) => send.amount > 0.0001)?.targetId ?? "";
   const selectedSendTargetId = (track: Track) =>
     selectedSendTargets().get(track.id) ?? actualSendTargetId(track);
   const sendTargetName = (track: Track) => {
@@ -292,8 +385,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       return;
     }
     sidebar().onSetTracksCollapsed(
-      sidebar().allTracks
-        .filter((candidate) => candidate.collapsed !== collapsed)
+      sidebar()
+        .allTracks.filter((candidate) => candidate.collapsed !== collapsed)
         .map((candidate) => ({ trackId: candidate.id, collapsed })),
     );
   };
@@ -302,7 +395,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     const scrollElement = sidebar().scrollElement();
     if (!scrollElement) return undefined;
     const rect = scrollElement.getBoundingClientRect();
-    const localY = clientY - rect.top + (scrollElement.scrollTop || 0) - RULER_HEIGHT;
+    const localY =
+      clientY - rect.top + (scrollElement.scrollTop || 0) - RULER_HEIGHT;
     const row = trackLayoutRowAtY(sidebar().trackLayout, localY);
     if (!row) return undefined;
     const track = sidebar().trackById.get(row.trackId);
@@ -319,14 +413,20 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   const isTrackDragBlockedTarget = (target: EventTarget | null) =>
     target instanceof Element &&
-    Boolean(target.closest("button, input, select, textarea, [role='button'], [data-track-drag-block]"));
+    Boolean(
+      target.closest(
+        "button, input, select, textarea, [role='button'], [data-track-drag-block]",
+      ),
+    );
 
   const startTrackDrag = (trackId: Track["id"], event: PointerEvent) => {
     if (event.button !== 0) return;
     const selectedTrackIds = sidebar().selectedTrackIds;
     const trackAlreadySelected = selectedTrackIds.includes(trackId);
     const activeSelection = trackAlreadySelected
-      ? selectedTrackIds.filter((selectedTrackId) => visibleTrackIds().has(selectedTrackId))
+      ? selectedTrackIds.filter((selectedTrackId) =>
+          visibleTrackIds().has(selectedTrackId),
+        )
       : [trackId];
     if (!trackAlreadySelected) {
       sidebar().onTrackClick(trackId);
@@ -339,7 +439,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       startX: event.clientX,
       startY: event.clientY,
       trackId,
-      moveTrackIds: normalizeDragMoveSet(sidebar().allTracks, new Set([...activeSelection, trackId])),
+      moveTrackIds: normalizeDragMoveSet(
+        sidebar().allTracks,
+        new Set([...activeSelection, trackId]),
+      ),
       dragging: false,
     });
   };
@@ -347,9 +450,16 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const updateTrackDrag = (event: PointerEvent) => {
     const drag = trackDrag();
     if (!drag || drag.pointerId !== event.pointerId) return;
-    const dragging = drag.dragging || Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4;
+    const dragging =
+      drag.dragging ||
+      Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4;
     const target = dragging ? dropTargetAt(event.clientY) : undefined;
-    if (drag.dragging === dragging && drag.target?.trackId === target?.trackId && drag.target?.zone === target?.zone) return;
+    if (
+      drag.dragging === dragging &&
+      drag.target?.trackId === target?.trackId &&
+      drag.target?.zone === target?.zone
+    )
+      return;
     setTrackDrag({ ...drag, dragging, target });
   };
 
@@ -357,7 +467,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     const drag = trackDrag();
     if (!drag || drag.pointerId !== event.pointerId) return;
     setTrackDrag(undefined);
-    if (event.currentTarget instanceof HTMLElement && event.currentTarget.hasPointerCapture(event.pointerId)) {
+    if (
+      event.currentTarget instanceof HTMLElement &&
+      event.currentTarget.hasPointerCapture(event.pointerId)
+    ) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     if (!drag.dragging || !drag.target) return;
@@ -430,24 +543,33 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   const displayVolume = (track: Track) => {
     const active = activeVolumeDrag();
-    return active?.trackId === track.id ? active.value : track.volume ?? 0.8;
+    return active?.trackId === track.id ? active.value : (track.volume ?? 0.8);
   };
 
   const previewTrackVolume = (track: Track, volume: number) => {
     const nextVolume = quantizeVolume(volume);
     setActiveVolumeDrag((active) => {
-      if (!active || active.trackId !== track.id || active.value === nextVolume) return active;
+      if (!active || active.trackId !== track.id || active.value === nextVolume)
+        return active;
       return { ...active, value: nextVolume };
     });
     sidebar().onVolumePreview(track.id, nextVolume, !!track.muted);
   };
 
-  const commitTrackVolume = (trackId: Track["id"], volume: number, previousVolume: number) => {
+  const commitTrackVolume = (
+    trackId: Track["id"],
+    volume: number,
+    previousVolume: number,
+  ) => {
     if (volume === previousVolume) return;
     sidebar().onVolumeChange(trackId, volume);
   };
 
-  const startAutomationResize = (trackId: Track["id"], startHeight: number, event: PointerEvent) => {
+  const startAutomationResize = (
+    trackId: Track["id"],
+    startHeight: number,
+    event: PointerEvent,
+  ) => {
     event.preventDefault();
     event.stopPropagation();
     const startY = event.clientY;
@@ -461,7 +583,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", cleanup);
       window.removeEventListener("pointercancel", cleanup);
-      if (cleanupAutomationResize === cleanup) cleanupAutomationResize = undefined;
+      if (cleanupAutomationResize === cleanup)
+        cleanupAutomationResize = undefined;
     };
     cleanupAutomationResize?.();
     cleanupAutomationResize = cleanup;
@@ -505,14 +628,18 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
           "min-width": `${TIMELINE_SIDEBAR_MIN_WIDTH}px`,
         }}
       >
-        <div class="sticky top-0 z-40 border-b border-border bg-timeline-surface" style={{ height: `${RULER_HEIGHT}px` }} />
+        <div
+          class="sticky top-0 z-40 border-b border-border bg-timeline-surface"
+          style={{ height: `${RULER_HEIGHT}px` }}
+        />
         <Show when={trackDrag()?.dragging && trackDrag()?.target}>
           {(target) => {
             const row = () => layoutByTrackId().get(target().trackId);
             const top = () => {
               const current = row();
               if (!current) return RULER_HEIGHT;
-              if (target().zone === "below") return RULER_HEIGHT + current.topPx + current.heightPx;
+              if (target().zone === "below")
+                return RULER_HEIGHT + current.topPx + current.heightPx;
               return RULER_HEIGHT + current.topPx;
             };
             return (
@@ -524,7 +651,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     : "h-0 border-t-2",
                 )}
                 style={{
-                  top: target().zone === "inside" ? `${top() + 12}px` : `${top()}px`,
+                  top:
+                    target().zone === "inside"
+                      ? `${top() + 12}px`
+                      : `${top()}px`,
                   left: `${8 + (row()?.depth ?? 0) * GROUP_INDENT_PX}px`,
                   right: "8px",
                 }}
@@ -541,11 +671,24 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const isReturnTrack = channelRole === "return";
             const isGroupTrack = channelRole === "group";
             const depth = () => depthByTrackId().get(track.id) ?? 0;
-            const defaultTrackColor = () => appPreferences.timeline.defaultTrackColor();
-            const defaultTrackColorInput = () => appPreferences.timeline.defaultTrackColorInput();
-            const defaultGroupColorInput = () => appPreferences.timeline.defaultGroupColorInput();
-            const displayedTrackColor = () => track.color ?? (isGroupTrack ? defaultGroupColor() : defaultTrackColor());
-            const ancestorGroupColorBands = () => ancestorGroupColorBandsByTrackId().get(track.id) ?? [];
+            const defaultTrackColor = () =>
+              appPreferences.timeline.defaultTrackColor();
+            const defaultTrackColorInput = () =>
+              appPreferences.timeline.defaultTrackColorInput();
+            const defaultGroupColorInput = () =>
+              appPreferences.timeline.defaultGroupColorInput();
+            const configuredDefaultColor = () =>
+              isGroupTrack ? defaultGroupColor() : defaultTrackColor();
+            const customDefaultColor = () =>
+              parseHexColor(configuredDefaultColor(), "");
+            const explicitTrackColor = () => parseHexColor(track.color, "");
+            const rowBackgroundColor = () =>
+              explicitTrackColor() || customDefaultColor() || undefined;
+            const isSelected = () =>
+              sidebar().selectedTrackId === track.id ||
+              sidebar().selectedTrackIds.includes(track.id);
+            const ancestorGroupColorBands = () =>
+              ancestorGroupColorBandsByTrackId().get(track.id) ?? [];
             const muteDisabled = lockedByOther;
             const soloDisabled = lockedByOther;
             const volumeDisabled = lockedByOther;
@@ -555,31 +698,69 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const muted = () => !!track.muted;
             const soloed = () => !!track.soloed;
             const currentSendTargetId = () => selectedSendTargetId(track);
-            const selectedAutomationParameter = () => props.automation.lanes.selectedParametersByTargetKey[track.id] ?? "volume";
-            const selectedAutomationTargetKey = () => automationTargetKey({ kind: "track", trackId: track.id }, selectedAutomationParameter());
-            const selectedAutomationEnvelope = () => props.automation.envelopes.byTargetKey.get(selectedAutomationTargetKey());
-            const automationMeta = () => automationMetaByTrackId().get(track.id);
-            const automationVisible = () => props.automation.lanes.visibleByTrackId[track.id] === true;
-            const displayedAutomationVisible = () => track.collapsed !== true && automationVisible();
-            const visibleAutomationParameterIds = () => props.automation.lanes.visibleParameterIdsByTrackId[track.id] ?? [];
-            const automationHeight = () => props.automation.lanes.heightsByLaneOwnerKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
+            const selectedAutomationParameter = () =>
+              props.automation.lanes.selectedParametersByTargetKey[track.id] ??
+              "volume";
+            const selectedAutomationTargetKey = () =>
+              automationTargetKey(
+                { kind: "track", trackId: track.id },
+                selectedAutomationParameter(),
+              );
+            const selectedAutomationEnvelope = () =>
+              props.automation.envelopes.byTargetKey.get(
+                selectedAutomationTargetKey(),
+              );
+            const automationMeta = () =>
+              automationMetaByTrackId().get(track.id);
+            const automationVisible = () =>
+              props.automation.lanes.visibleByTrackId[track.id] === true;
+            const displayedAutomationVisible = () =>
+              track.collapsed !== true && automationVisible();
+            const visibleAutomationParameterIds = () =>
+              props.automation.lanes.visibleParameterIdsByTrackId[track.id] ??
+              [];
+            const automationHeight = () =>
+              props.automation.lanes.heightsByLaneOwnerKey[track.id] ??
+              DEFAULT_AUTOMATION_LANE_HEIGHT;
             const rowLayout = () => layoutByTrackId().get(track.id);
             const rowHeightPx = () => rowLayout()?.heightPx ?? LANE_HEIGHT;
-            const clipLaneHeightPx = () => rowLayout()?.clipLaneHeightPx ?? LANE_HEIGHT;
-            const automationTotalHeight = () => rowLayout()?.automationHeightPx ?? (displayedAutomationVisible() ? automationHeight() * Math.max(1, visibleAutomationParameterIds().length) : 0);
+            const clipLaneHeightPx = () =>
+              rowLayout()?.clipLaneHeightPx ?? LANE_HEIGHT;
+            const automationTotalHeight = () =>
+              rowLayout()?.automationHeightPx ??
+              (displayedAutomationVisible()
+                ? automationHeight() *
+                  Math.max(1, visibleAutomationParameterIds().length)
+                : 0);
             const canAddAutomationLane = () => {
               if (!displayedAutomationVisible()) return false;
               const visible = new Set(visibleAutomationParameterIds());
               if (!visible.has(selectedAutomationParameter())) return true;
-              return automationParameterOptions.some((option) => !visible.has(option.id));
+              return automationParameterOptions.some(
+                (option) => !visible.has(option.id),
+              );
             };
-            const contextMenuColor = () => parseHexColor(track.color, isGroupTrack ? defaultGroupColorInput() : defaultTrackColorInput());
+            const contextMenuColor = () =>
+              parseHexColor(
+                track.color,
+                isGroupTrack
+                  ? defaultGroupColorInput()
+                  : defaultTrackColorInput(),
+              );
             const trackContextMenuItems = (): TimelineContextMenuItem[] => [
               { kind: "label", label: displayTrackName(track) },
-              { kind: "item", label: "Open effects", onSelect: () => sidebar().onTrackClick(track.id) },
               {
                 kind: "item",
-                label: isGroupTrack ? (track.collapsed ? "Expand group" : "Collapse group") : "Group track",
+                label: "Open effects",
+                onSelect: () => sidebar().onTrackClick(track.id),
+              },
+              {
+                kind: "item",
+                label: isGroupTrack
+                  ? track.collapsed
+                    ? "Expand group"
+                    : "Collapse group"
+                  : "Group track",
                 disabled: isReturnTrack,
                 onSelect: () => {
                   if (isGroupTrack) sidebar().onToggleTrackCollapsed(track.id);
@@ -590,7 +771,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 kind: "item",
                 label: track.groupId ? "Remove from group" : "No group",
                 disabled: !track.groupId,
-                onSelect: () => sidebar().onMoveTrackToGroup(track.id, undefined),
+                onSelect: () =>
+                  sidebar().onMoveTrackToGroup(track.id, undefined),
               },
               {
                 kind: "item",
@@ -608,19 +790,31 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 kind: "color",
                 label: "Track color",
                 value: contextMenuColor(),
-                onChange: (color) => sidebar().onSetTrackColor(track.id, parseHexColor(color, contextMenuColor())),
+                onChange: (color) =>
+                  sidebar().onSetTrackColor(
+                    track.id,
+                    parseHexColor(color, contextMenuColor()),
+                  ),
               },
               {
                 kind: "item",
-                label: "Clear track color",
-                disabled: !track.color,
-                onSelect: () => sidebar().onSetTrackColor(track.id, undefined),
+                label: "Reset track color",
+                onSelect: () => sidebar().onResetTrackColor(track.id),
               },
               {
                 kind: "item",
-                label: isGroupTrack ? "Assign group colors to clips" : "Assign track color to clips",
-                disabled: !track.color,
+                label: isGroupTrack
+                  ? "Assign group colors to clips"
+                  : "Assign track color to clips",
+                disabled: !trackColorForClip(track.color),
                 onSelect: () => sidebar().onAssignTrackColorToClips(track.id),
+              },
+              {
+                kind: "item",
+                label: isGroupTrack
+                  ? "Reset group clip colors"
+                  : "Reset clip colors",
+                onSelect: () => sidebar().onResetClipColors(track.id),
               },
               { kind: "separator" },
               {
@@ -637,15 +831,20 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               },
               {
                 kind: "item",
-                label: isRecordArmed() ? "Disarm recording" : "Arm for recording",
+                label: isRecordArmed()
+                  ? "Disarm recording"
+                  : "Arm for recording",
                 disabled: recordDisabled,
                 onSelect: () => sidebar().onToggleRecordArm(track.id),
               },
               { kind: "separator" },
               {
                 kind: "item",
-                label: displayedAutomationVisible() ? "Hide automation lane" : "Show automation lane",
-                onSelect: () => props.automation.actions.toggleTrackVisibility(track.id),
+                label: displayedAutomationVisible()
+                  ? "Hide automation lane"
+                  : "Show automation lane",
+                onSelect: () =>
+                  props.automation.actions.toggleTrackVisibility(track.id),
               },
               {
                 kind: "item",
@@ -665,15 +864,21 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const row = (
               <div
                 class={cn(
-                  "relative [box-shadow:inset_0_-1px_0_rgb(38_38_38)]",
-                  isGroupTrack && track.color
+                  "track-row-divider relative",
+                  isSelected() &&
+                    rowBackgroundColor() &&
+                    "track-row-selected-wash",
+                  isGroupTrack && rowBackgroundColor()
                     ? "text-black"
-                    : sidebar().selectedTrackId === track.id
+                    : isSelected()
                     ? "bg-timeline-surface-muted"
                     : "bg-timeline-surface",
                 )}
                 style={{
                   height: `${rowHeightPx()}px`,
+                  ...(rowBackgroundColor()
+                    ? { background: rowBackgroundColor() }
+                    : {}),
                 }}
                 onClick={() => {
                   if (suppressTrackClickId() === track.id) {
@@ -716,7 +921,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                       left: `${depth() * GROUP_INDENT_PX}px`,
                       width: `${GROUP_RAIL_WIDTH}px`,
                       height: `${clipLaneHeightPx()}px`,
-                      background: displayedTrackColor(),
+                      background: resolveGroupColor(track.color),
                     }}
                     onPointerDown={(event) => {
                       event.stopPropagation();
@@ -742,8 +947,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   )}
                   style={{
                     height: `${clipLaneHeightPx()}px`,
-                    background: displayedTrackColor(),
-                    "padding-left": `${8 + depth() * GROUP_INDENT_PX}px`,
+                    "padding-left": `${4 + depth() * GROUP_INDENT_PX}px`,
                     "grid-template-columns": track.collapsed
                       ? "minmax(0, 1fr) auto"
                       : "minmax(72px, 96px) minmax(96px, 1fr) 92px",
@@ -759,7 +963,9 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                         event.stopPropagation();
                         handleTrackCollapseClick(track, event);
                       }}
-                      title={track.collapsed ? "Expand track" : "Collapse track"}
+                      title={
+                        track.collapsed ? "Expand track" : "Collapse track"
+                      }
                     >
                       {track.collapsed ? "▶" : "▼"}
                     </button>
@@ -770,12 +976,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                         isGroupTrack
                           ? "border-transparent bg-timeline-background text-foreground hover:bg-timeline-surface-muted"
                           : muteDisabled
-                          ? "cursor-not-allowed border-border text-muted-foreground"
-                          : muted()
-                            ? "border-border bg-amber-500 text-black"
-                            : sidebar().selectedTrackId === track.id
-                              ? "border-border"
-                              : "border-border hover:border-border",
+                            ? "cursor-not-allowed border-border text-muted-foreground"
+                            : muted()
+                              ? "border-border bg-amber-500 text-black"
+                              : isSelected()
+                                ? "border-border"
+                                : "border-border hover:border-border",
                       )}
                       style={{
                         "border-width": "0.5px",
@@ -808,111 +1014,111 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   </div>
 
                   <Show when={!track.collapsed}>
-                  <div class="flex min-w-0 flex-col gap-1">
-                    <Show when={!isGroupTrack}>
-                      <div class="relative">
-                        <div
-                          class={cn(
-                            "flex h-7 w-full items-center justify-between border border-border bg-timeline-background px-2 text-xs text-foreground",
-                            !canWriteTrackRouting(track) &&
-                              "text-muted-foreground",
-                          )}
-                        >
-                          <span class="truncate">
-                            {outputTargetName(track)}
-                          </span>
-                          <svg
-                            class="h-3 w-3 shrink-0 text-muted-foreground"
-                            viewBox="0 0 12 12"
-                            fill="none"
-                            aria-hidden="true"
-                          >
-                            <path
-                              d="M2.5 4.5 6 8l3.5-3.5"
-                              stroke="currentColor"
-                              stroke-width="1.5"
-                            />
-                          </svg>
-                        </div>
-                        <select
-                          value={selectedOutputTargetId(track)}
-                          disabled={!canWriteTrackRouting(track)}
-                          onClick={(event) => event.stopPropagation()}
-                          onChange={(event) =>
-                            handleOutputTargetChange(
-                              track,
-                              event.currentTarget.value,
-                            )
-                          }
-                          class="absolute inset-0 h-7 w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
-                          title="Track output"
-                        >
-                          <option value="">Master</option>
-                          <For each={groupTracks()}>
-                            {(groupTrack) => (
-                              <option value={groupTrack.id}>
-                                {displayTrackName(groupTrack)}
-                              </option>
+                    <div class="flex min-w-0 flex-col gap-1">
+                      <Show when={!isGroupTrack}>
+                        <div class="relative">
+                          <div
+                            class={cn(
+                              "flex h-7 w-full items-center justify-between border border-border bg-timeline-background px-2 text-xs text-foreground",
+                              !canWriteTrackRouting(track) &&
+                                "text-muted-foreground",
                             )}
-                          </For>
-                        </select>
-                      </div>
-                    </Show>
+                          >
+                            <span class="truncate">
+                              {outputTargetName(track)}
+                            </span>
+                            <svg
+                              class="h-3 w-3 shrink-0 text-muted-foreground"
+                              viewBox="0 0 12 12"
+                              fill="none"
+                              aria-hidden="true"
+                            >
+                              <path
+                                d="M2.5 4.5 6 8l3.5-3.5"
+                                stroke="currentColor"
+                                stroke-width="1.5"
+                              />
+                            </svg>
+                          </div>
+                          <select
+                            value={selectedOutputTargetId(track)}
+                            disabled={!canWriteTrackRouting(track)}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) =>
+                              handleOutputTargetChange(
+                                track,
+                                event.currentTarget.value,
+                              )
+                            }
+                            class="absolute inset-0 h-7 w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                            title="Track output"
+                          >
+                            <option value="">Master</option>
+                            <For each={groupTracks()}>
+                              {(groupTrack) => (
+                                <option value={groupTrack.id}>
+                                  {displayTrackName(groupTrack)}
+                                </option>
+                              )}
+                            </For>
+                          </select>
+                        </div>
+                      </Show>
 
-                    <Show when={channelRole === "track"}>
-                      <div class="relative">
-                        <div
-                          class={cn(
-                            "flex h-7 w-full items-center justify-between border border-border bg-timeline-background px-2 text-xs text-foreground",
-                            (!canWriteTrackRouting(track) ||
-                              returnTracks().length === 0) &&
-                              "text-muted-foreground",
-                          )}
-                        >
-                          <span class="truncate">
-                            {sendTargetName(track)}
-                          </span>
-                          <svg
-                            class="h-3 w-3 shrink-0 text-muted-foreground"
-                            viewBox="0 0 12 12"
-                            fill="none"
-                            aria-hidden="true"
-                          >
-                            <path
-                              d="M2.5 4.5 6 8l3.5-3.5"
-                              stroke="currentColor"
-                              stroke-width="1.5"
-                            />
-                          </svg>
-                        </div>
-                        <select
-                          value={currentSendTargetId()}
-                          disabled={
-                            !canWriteTrackRouting(track) ||
-                            returnTracks().length === 0
-                          }
-                          onClick={(event) => event.stopPropagation()}
-                          onChange={(event) =>
-                            handleSendTargetChange(
-                              track,
-                              event.currentTarget.value,
-                            )
-                          }
-                          class="absolute inset-0 h-7 w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
-                          title="Track send"
-                        >
-                          <option value="">None</option>
-                          <For each={returnTracks()}>
-                            {(returnTrack) => (
-                              <option value={returnTrack.id}>
-                                {displayTrackName(returnTrack)}
-                              </option>
+                      <Show when={channelRole === "track"}>
+                        <div class="relative">
+                          <div
+                            class={cn(
+                              "flex h-7 w-full items-center justify-between border border-border bg-timeline-background px-2 text-xs text-foreground",
+                              (!canWriteTrackRouting(track) ||
+                                returnTracks().length === 0) &&
+                                "text-muted-foreground",
                             )}
-                          </For>
-                        </select>
-                      </div>
-                    </Show>
-                  </div>
+                          >
+                            <span class="truncate">
+                              {sendTargetName(track)}
+                            </span>
+                            <svg
+                              class="h-3 w-3 shrink-0 text-muted-foreground"
+                              viewBox="0 0 12 12"
+                              fill="none"
+                              aria-hidden="true"
+                            >
+                              <path
+                                d="M2.5 4.5 6 8l3.5-3.5"
+                                stroke="currentColor"
+                                stroke-width="1.5"
+                              />
+                            </svg>
+                          </div>
+                          <select
+                            value={currentSendTargetId()}
+                            disabled={
+                              !canWriteTrackRouting(track) ||
+                              returnTracks().length === 0
+                            }
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) =>
+                              handleSendTargetChange(
+                                track,
+                                event.currentTarget.value,
+                              )
+                            }
+                            class="absolute inset-0 h-7 w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                            title="Track send"
+                          >
+                            <option value="">None</option>
+                            <For each={returnTracks()}>
+                              {(returnTrack) => (
+                                <option value={returnTrack.id}>
+                                  {displayTrackName(returnTrack)}
+                                </option>
+                              )}
+                            </For>
+                          </select>
+                        </div>
+                      </Show>
+                    </div>
                   </Show>
 
                   <Show
@@ -965,7 +1171,13 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             if (soloDisabled) return;
                             sidebar().onToggleSolo(track.id);
                           }}
-                          title={lockedByOther ? "Track locked by another user" : soloed() ? "Unsolo" : "Solo"}
+                          title={
+                            lockedByOther
+                              ? "Track locked by another user"
+                              : soloed()
+                                ? "Unsolo"
+                                : "Solo"
+                          }
                         >
                           S
                         </button>
@@ -978,296 +1190,353 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           )}
                           onClick={(event) => {
                             event.stopPropagation();
-                            props.automation.actions.toggleTrackVisibility(track.id);
+                            props.automation.actions.toggleTrackVisibility(
+                              track.id,
+                            );
                           }}
-                          title={automationVisible() ? "Hide automation lane" : "Show automation lane when expanded"}
+                          title={
+                            automationVisible()
+                              ? "Hide automation lane"
+                              : "Show automation lane when expanded"
+                          }
                         >
                           A
                         </button>
                       </div>
                     }
                   >
-                  <div class="flex w-[92px] items-center gap-2">
-                    <div class="flex w-[72px] shrink-0 flex-col gap-1">
-                      <div class="grid grid-cols-4 gap-1">
-                        <button
-                          class={cn(
-                            "flex h-7 items-center justify-center border text-xs font-bold transition-colors",
-                            recordDisabled
-                              ? "cursor-not-allowed border-red-900 bg-timeline-surface-muted text-red-900"
-                              : isRecordArmed()
-                                ? "border-red-400 bg-red-500 text-black shadow-inner"
-                                : "border-red-500 text-red-400 hover:bg-red-500/20",
-                          )}
-                          title={
-                            lockedByOther
-                              ? "Track locked by another user"
-                              : isReturnTrack
-                                ? "Return tracks cannot be armed for recording"
-                                : isGroupTrack
-                                  ? "Group tracks cannot be armed for recording"
-                                  : track.kind === "instrument"
-                                    ? "Instrument tracks cannot be armed for audio recording"
-                                    : isRecordArmed()
-                                      ? "Disarm recording"
-                                      : "Arm for recording"
-                          }
-                          disabled={recordDisabled}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (recordDisabled) return;
-                            sidebar().onToggleRecordArm(track.id);
-                          }}
-                        >
-                          R
-                        </button>
-
-                        <button
-                          class={cn(
-                            "h-7 border text-xs font-semibold",
-                            soloDisabled
-                              ? "cursor-not-allowed border-border bg-muted/40 text-muted-foreground"
-                              : soloed()
-                                ? "border-blue-300 bg-blue-500/90 text-black"
-                                : "border-border bg-timeline-surface-muted text-foreground hover:bg-muted",
-                          )}
-                          disabled={soloDisabled}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (soloDisabled) return;
-                            sidebar().onToggleSolo(track.id);
-                          }}
-                          title={
-                            lockedByOther
-                              ? "Track locked by another user"
-                              : soloed()
-                                ? "Unsolo"
-                                : "Solo"
-                          }
-                        >
-                          S
-                        </button>
-
-                        <button
-                          class={cn(
-                            "h-7 border text-xs font-semibold transition-colors",
-                            displayedAutomationVisible()
-                              ? "border-red-400 bg-red-500/90 text-black"
-                              : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
-                          )}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            props.automation.actions.toggleTrackVisibility(track.id);
-                          }}
-                          title={displayedAutomationVisible() ? "Hide automation lane" : "Show automation lane"}
-                        >
-                          A
-                        </button>
-                        <button
-                          class={cn(
-                            "h-7 border text-xs font-semibold transition-colors",
-                            canAddAutomationLane()
-                              ? "border-border bg-timeline-surface-muted text-red-200 hover:bg-red-500/20"
-                              : "cursor-not-allowed border-border bg-timeline-surface text-muted-foreground",
-                          )}
-                          disabled={!canAddAutomationLane()}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (!canAddAutomationLane()) return;
-                            props.automation.actions.addTrackLane(track.id);
-                          }}
-                          title={displayedAutomationVisible() ? "Add another automation lane" : "Show automation with A before adding lanes"}
-                        >
-                          +
-                        </button>
-                      </div>
-
-                      <div class="relative flex h-7 items-center px-0.5">
-                        <Show when={automationMeta()?.volumeEnvelope}>
-                          <span class="absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.75)]" />
-                        </Show>
-                        <input
-                          type="range"
-                          min="0"
-                          max="1"
-                          step="0.01"
-                          value={volume()}
-                          disabled={volumeDisabled}
-                          style={{
-                            "--track-volume-percent": `${volume() * 100}%`,
-                            "--track-volume-automation-start": `${(automationMeta()?.volumeRange?.min ?? 0) * 100}%`,
-                            "--track-volume-automation-end": `${(automationMeta()?.volumeRange?.max ?? 0) * 100}%`,
-                          }}
-                          onClick={(event) => event.stopPropagation()}
-                          onPointerDown={(event) => {
-                            event.stopPropagation();
-                            props.automation.actions.selectParameter(track.id, "volume");
-                            if (volumeDisabled) return;
-                            event.preventDefault();
-                            const startValue = quantizeVolume(track.volume ?? 0.8);
-                            setActiveVolumeDrag({
-                              pointerId: event.pointerId,
-                              trackId: track.id,
-                              startValue,
-                              value: startValue,
-                            });
-                            event.currentTarget.setPointerCapture(
-                              event.pointerId,
-                            );
-                            updateVolumeFromPointer(
-                              track,
-                              event.currentTarget,
-                              event.clientX,
-                            );
-                          }}
-                          onPointerMove={(event) => {
-                            const active = activeVolumeDrag();
-                            if (active?.pointerId !== event.pointerId) return;
-                            event.stopPropagation();
-                            updateVolumeFromPointer(
-                              track,
-                              event.currentTarget,
-                              event.clientX,
-                            );
-                          }}
-                          onPointerUp={(event) => {
-                            const active = activeVolumeDrag();
-                            if (active?.pointerId !== event.pointerId) return;
-                            event.stopPropagation();
-                            commitTrackVolume(
-                              active.trackId,
-                              active.value,
-                              active.startValue,
-                            );
-                            setActiveVolumeDrag(null);
-                            releaseVolumePointerCapture(
-                              event.currentTarget,
-                              event.pointerId,
-                            );
-                          }}
-                          onPointerCancel={(event) => {
-                            const active = activeVolumeDrag();
-                            if (active?.pointerId !== event.pointerId) return;
-                            sidebar().onVolumePreview(
-                              active.trackId,
-                              active.startValue,
-                              !!track.muted,
-                            );
-                            setActiveVolumeDrag(null);
-                            releaseVolumePointerCapture(
-                              event.currentTarget,
-                              event.pointerId,
-                            );
-                          }}
-                          onInput={(event) => {
-                            event.stopPropagation();
-                            if (volumeDisabled) return;
-                            const nextVolume = quantizeVolume(
-                              parseFloat(event.currentTarget.value),
-                            );
-                            const active = activeVolumeDrag();
-                            if (active?.trackId === track.id) {
-                              previewTrackVolume(track, nextVolume);
-                              return;
+                    <div class="flex w-[92px] items-center gap-2">
+                      <div class="flex w-[72px] shrink-0 flex-col gap-1">
+                        <div class="grid grid-cols-4 gap-1">
+                          <button
+                            class={cn(
+                              "flex h-7 items-center justify-center border text-xs font-bold transition-colors",
+                              recordDisabled
+                                ? "cursor-not-allowed border-red-900 bg-timeline-surface-muted text-red-900"
+                                : isRecordArmed()
+                                  ? "border-red-400 bg-red-500 text-black shadow-inner"
+                                  : "border-red-500 text-red-400 hover:bg-red-500/20",
+                            )}
+                            title={
+                              lockedByOther
+                                ? "Track locked by another user"
+                                : isReturnTrack
+                                  ? "Return tracks cannot be armed for recording"
+                                  : isGroupTrack
+                                    ? "Group tracks cannot be armed for recording"
+                                    : track.kind === "instrument"
+                                      ? "Instrument tracks cannot be armed for audio recording"
+                                      : isRecordArmed()
+                                        ? "Disarm recording"
+                                        : "Arm for recording"
                             }
-                            commitTrackVolume(
-                              track.id,
-                              nextVolume,
-                              quantizeVolume(track.volume ?? 0.8),
-                            );
-                          }}
-                          class={cn(
-                            "track-volume-slider w-full cursor-pointer",
-                            automationMeta()?.volumeEnvelope && "track-volume-slider-automated",
-                            volumeDisabled && "cursor-not-allowed opacity-60",
-                          )}
-                          title={
-                            lockedByOther
-                              ? "Track locked by another user"
-                              : "Track volume"
-                          }
-                        />
-                      </div>
-                    </div>
+                            disabled={recordDisabled}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (recordDisabled) return;
+                              sidebar().onToggleRecordArm(track.id);
+                            }}
+                          >
+                            R
+                          </button>
 
-                    <div class="relative h-16 w-[12px] shrink-0">
-                      <div class="absolute inset-0 flex items-end justify-center gap-1">
-                        {(() => {
-                          const meter = meters[track.id];
-                          const left = displayMeterLevel(meter?.left);
-                          const right = displayMeterLevel(meter?.right);
-                          const leftColor =
-                            left >= 0.98 ? "bg-red-500" : "bg-green-500";
-                          const rightColor =
-                            right >= 0.98 ? "bg-red-500" : "bg-green-500";
-                          return (
-                            <>
-                              <div class="relative h-full w-1 overflow-hidden bg-timeline-background/70">
-                                <div
-                                  class={cn(
-                                    "absolute bottom-0 w-full transition-all duration-75",
-                                    leftColor,
-                                  )}
-                                  style={{ height: `${left * 100}%` }}
-                                />
-                              </div>
-                              <div class="relative h-full w-1 overflow-hidden bg-timeline-background/70">
-                                <div
-                                  class={cn(
-                                    "absolute bottom-0 w-full transition-all duration-75",
-                                    rightColor,
-                                  )}
-                                  style={{ height: `${right * 100}%` }}
-                                />
-                              </div>
-                            </>
-                          );
-                        })()}
+                          <button
+                            class={cn(
+                              "h-7 border text-xs font-semibold",
+                              soloDisabled
+                                ? "cursor-not-allowed border-border bg-muted/40 text-muted-foreground"
+                                : soloed()
+                                  ? "border-blue-300 bg-blue-500/90 text-black"
+                                  : "border-border bg-timeline-surface-muted text-foreground hover:bg-muted",
+                            )}
+                            disabled={soloDisabled}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (soloDisabled) return;
+                              sidebar().onToggleSolo(track.id);
+                            }}
+                            title={
+                              lockedByOther
+                                ? "Track locked by another user"
+                                : soloed()
+                                  ? "Unsolo"
+                                  : "Solo"
+                            }
+                          >
+                            S
+                          </button>
+
+                          <button
+                            class={cn(
+                              "h-7 border text-xs font-semibold transition-colors",
+                              displayedAutomationVisible()
+                                ? "border-red-400 bg-red-500/90 text-black"
+                                : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
+                            )}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              props.automation.actions.toggleTrackVisibility(
+                                track.id,
+                              );
+                            }}
+                            title={
+                              displayedAutomationVisible()
+                                ? "Hide automation lane"
+                                : "Show automation lane"
+                            }
+                          >
+                            A
+                          </button>
+                          <button
+                            class={cn(
+                              "h-7 border text-xs font-semibold transition-colors",
+                              canAddAutomationLane()
+                                ? "border-border bg-timeline-surface-muted text-red-200 hover:bg-red-500/20"
+                                : "cursor-not-allowed border-border bg-timeline-surface text-muted-foreground",
+                            )}
+                            disabled={!canAddAutomationLane()}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (!canAddAutomationLane()) return;
+                              props.automation.actions.addTrackLane(track.id);
+                            }}
+                            title={
+                              displayedAutomationVisible()
+                                ? "Add another automation lane"
+                                : "Show automation with A before adding lanes"
+                            }
+                          >
+                            +
+                          </button>
+                        </div>
+
+                        <div class="relative flex h-7 items-center px-0.5">
+                          <Show when={automationMeta()?.volumeEnvelope}>
+                            <span class="absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.75)]" />
+                          </Show>
+                          <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.01"
+                            value={volume()}
+                            disabled={volumeDisabled}
+                            style={{
+                              "--track-volume-percent": `${volume() * 100}%`,
+                              "--track-volume-automation-start": `${(automationMeta()?.volumeRange?.min ?? 0) * 100}%`,
+                              "--track-volume-automation-end": `${(automationMeta()?.volumeRange?.max ?? 0) * 100}%`,
+                            }}
+                            onClick={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => {
+                              event.stopPropagation();
+                              props.automation.actions.selectParameter(
+                                track.id,
+                                "volume",
+                              );
+                              if (volumeDisabled) return;
+                              event.preventDefault();
+                              const startValue = quantizeVolume(
+                                track.volume ?? 0.8,
+                              );
+                              setActiveVolumeDrag({
+                                pointerId: event.pointerId,
+                                trackId: track.id,
+                                startValue,
+                                value: startValue,
+                              });
+                              event.currentTarget.setPointerCapture(
+                                event.pointerId,
+                              );
+                              updateVolumeFromPointer(
+                                track,
+                                event.currentTarget,
+                                event.clientX,
+                              );
+                            }}
+                            onPointerMove={(event) => {
+                              const active = activeVolumeDrag();
+                              if (active?.pointerId !== event.pointerId) return;
+                              event.stopPropagation();
+                              updateVolumeFromPointer(
+                                track,
+                                event.currentTarget,
+                                event.clientX,
+                              );
+                            }}
+                            onPointerUp={(event) => {
+                              const active = activeVolumeDrag();
+                              if (active?.pointerId !== event.pointerId) return;
+                              event.stopPropagation();
+                              commitTrackVolume(
+                                active.trackId,
+                                active.value,
+                                active.startValue,
+                              );
+                              setActiveVolumeDrag(null);
+                              releaseVolumePointerCapture(
+                                event.currentTarget,
+                                event.pointerId,
+                              );
+                            }}
+                            onPointerCancel={(event) => {
+                              const active = activeVolumeDrag();
+                              if (active?.pointerId !== event.pointerId) return;
+                              sidebar().onVolumePreview(
+                                active.trackId,
+                                active.startValue,
+                                !!track.muted,
+                              );
+                              setActiveVolumeDrag(null);
+                              releaseVolumePointerCapture(
+                                event.currentTarget,
+                                event.pointerId,
+                              );
+                            }}
+                            onInput={(event) => {
+                              event.stopPropagation();
+                              if (volumeDisabled) return;
+                              const nextVolume = quantizeVolume(
+                                parseFloat(event.currentTarget.value),
+                              );
+                              const active = activeVolumeDrag();
+                              if (active?.trackId === track.id) {
+                                previewTrackVolume(track, nextVolume);
+                                return;
+                              }
+                              commitTrackVolume(
+                                track.id,
+                                nextVolume,
+                                quantizeVolume(track.volume ?? 0.8),
+                              );
+                            }}
+                            class={cn(
+                              "track-volume-slider w-full cursor-pointer",
+                              automationMeta()?.volumeEnvelope &&
+                                "track-volume-slider-automated",
+                              volumeDisabled && "cursor-not-allowed opacity-60",
+                            )}
+                            title={
+                              lockedByOther
+                                ? "Track locked by another user"
+                                : "Track volume"
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      <div class="relative h-16 w-[12px] shrink-0">
+                        <div class="absolute inset-0 flex items-end justify-center gap-1">
+                          {(() => {
+                            const meter = meters[track.id];
+                            const left = displayMeterLevel(meter?.left);
+                            const right = displayMeterLevel(meter?.right);
+                            const leftColor =
+                              left >= 0.98 ? "bg-red-500" : "bg-green-500";
+                            const rightColor =
+                              right >= 0.98 ? "bg-red-500" : "bg-green-500";
+                            return (
+                              <>
+                                <div class="relative h-full w-1 overflow-hidden bg-border/60">
+                                  <div
+                                    class={cn(
+                                      "absolute bottom-0 w-full transition-all duration-75",
+                                      leftColor,
+                                    )}
+                                    style={{ height: `${left * 100}%` }}
+                                  />
+                                </div>
+                                <div class="relative h-full w-1 overflow-hidden bg-border/60">
+                                  <div
+                                    class={cn(
+                                      "absolute bottom-0 w-full transition-all duration-75",
+                                      rightColor,
+                                    )}
+                                    style={{ height: `${right * 100}%` }}
+                                  />
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </div>
                       </div>
                     </div>
-                  </div>
                   </Show>
                 </div>
                 {displayedAutomationVisible() ? (
                   <div
                     class="absolute inset-x-0 z-10 border-t border-automation/30 bg-timeline-background/95 text-[11px] text-error-foreground"
-                    style={{ top: `${clipLaneHeightPx()}px`, height: `${automationTotalHeight()}px` }}
+                    style={{
+                      top: `${clipLaneHeightPx()}px`,
+                      height: `${automationTotalHeight()}px`,
+                    }}
                     onClick={(event) => event.stopPropagation()}
                   >
                     <div
                       class="absolute inset-x-0 top-0 h-2 -translate-y-1/2 cursor-row-resize"
-                      onPointerDown={(event) => startAutomationResize(track.id, automationHeight(), event)}
+                      onPointerDown={(event) =>
+                        startAutomationResize(
+                          track.id,
+                          automationHeight(),
+                          event,
+                        )
+                      }
                     />
                     <For each={visibleAutomationParameterIds()}>
                       {(parameterId) => {
-                        const targetKey = () => automationTargetKey({ kind: "track", trackId: track.id }, parameterId);
-                        const envelope = () => props.automation.envelopes.byTargetKey.get(targetKey());
+                        const targetKey = () =>
+                          automationTargetKey(
+                            { kind: "track", trackId: track.id },
+                            parameterId,
+                          );
+                        const envelope = () =>
+                          props.automation.envelopes.byTargetKey.get(
+                            targetKey(),
+                          );
                         return (
                           <div
                             class="grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-b border-red-500/20 px-2"
                             style={{ height: `${automationHeight()}px` }}
                           >
                             <div class="flex items-center gap-1 overflow-hidden">
-                              <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" classList={{ "opacity-30": !envelope() }} />
+                              <span
+                                class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
+                                classList={{ "opacity-30": !envelope() }}
+                              />
                               <span class="truncate">Automation</span>
                             </div>
                             <AutomationParameterPicker
                               value={parameterId}
-                              automatedParameterIds={automationMeta()?.automatedParameterIds}
+                              automatedParameterIds={
+                                automationMeta()?.automatedParameterIds
+                              }
                               onChange={(nextParameterId) => {
-                                props.automation.actions.hideTrackLane(track.id, parameterId);
-                                props.automation.actions.showTrackLane(track.id, nextParameterId);
-                                props.automation.actions.selectParameter(track.id, nextParameterId);
+                                props.automation.actions.hideTrackLane(
+                                  track.id,
+                                  parameterId,
+                                );
+                                props.automation.actions.showTrackLane(
+                                  track.id,
+                                  nextParameterId,
+                                );
+                                props.automation.actions.selectParameter(
+                                  track.id,
+                                  nextParameterId,
+                                );
                               }}
                             />
                             <div class="flex items-center justify-end gap-2 text-red-200/70">
-                              <span class="truncate">{envelope()?.points.length ?? 0} pts</span>
+                              <span class="truncate">
+                                {envelope()?.points.length ?? 0} pts
+                              </span>
                               <button
                                 type="button"
                                 class="h-5 w-5 border border-automation/30 text-error-foreground hover:border-red-400"
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  props.automation.actions.hideTrackLane(track.id, parameterId);
+                                  props.automation.actions.hideTrackLane(
+                                    track.id,
+                                    parameterId,
+                                  );
                                 }}
                                 title="Hide automation lane"
                               >
@@ -1300,12 +1569,15 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
           automation={{
             visible: props.automation.lanes.masterVisible,
             heightPx: props.automation.lanes.masterHeight,
-            selectedParameterId: props.automation.lanes.selectedParametersByTargetKey.master ?? "volume",
+            selectedParameterId:
+              props.automation.lanes.selectedParametersByTargetKey.master ??
+              "volume",
             automatedParameterIds: masterAutomationMeta().automatedParameterIds,
             selectedEnvelope: masterAutomationMeta().selectedEnvelope,
             onToggleVisibility: props.automation.actions.toggleMasterVisibility,
             onResizeLane: props.automation.actions.resizeMasterLane,
-            onSelectParameter: (parameterId) => props.automation.actions.selectParameter("master", parameterId),
+            onSelectParameter: (parameterId) =>
+              props.automation.actions.selectParameter("master", parameterId),
           }}
         />
       </div>

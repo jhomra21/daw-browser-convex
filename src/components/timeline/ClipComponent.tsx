@@ -1,11 +1,13 @@
 import {
   type Component,
   createEffect,
+  createMemo,
 } from "solid-js";
 
 import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
 import { useAppPreferences } from "~/context/app-preferences";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
+import { createClipVisualColors, resolveClipColor } from "~/lib/clip-color";
 import { LANE_HEIGHT, PPS } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
@@ -75,6 +77,16 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS));
   const handleWidthPx = () =>
     clipWidthPx() < 18 ? 2 : clipWidthPx() < 28 ? 3 : 6;
+  const isGhost = () => props.clip.id.startsWith("__dup_preview:");
+  const clipContentColor = createMemo(() => resolveClipColor(
+    props.clip.color,
+    appPreferences.appearance.themeTokens(),
+  ));
+  const clipVisualColors = createMemo(() => createClipVisualColors(
+    clipContentColor(),
+    props.isSelected,
+    isGhost(),
+  ));
 
   const waveform = useClipWaveformViewModel({
     clip: () => props.clip,
@@ -82,7 +94,6 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     projectBpm: () => props.bpm,
     ensureClipBuffer: props.ensureClipBuffer,
   });
-  const isGhost = () => props.clip.id.startsWith("__dup_preview:");
   const openClip = () => props.onDblClick?.(props.trackId, props.clip.id);
   const selectClipForMenu = () => props.contextMenu.selectClip(props.trackId, props.clip.id);
   const contextMenuItems = (): TimelineContextMenuItem[] => {
@@ -188,20 +199,11 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
 
     const canvasColors = appPreferences.appearance.themeTokens();
     const clipSelected = canvasColors["clip-selected"];
-    const clipMidi = canvasColors["clip-midi"];
-    const clipAudio = canvasColors["clip-audio"];
-    const clipRecording = canvasColors["clip-recording"];
     const timelineGridMajor = canvasColors["timeline-grid-major"];
     const timelineGridMinor = canvasColors["timeline-grid-minor"];
     const timelineSurface = canvasColors["timeline-surface"];
     const timelineSurfaceMuted = canvasColors["timeline-surface-muted"];
-    const clipContentColor = props.clip.color === "clip-audio"
-      ? clipAudio
-      : props.clip.color === "clip-midi"
-        ? clipMidi
-        : props.clip.color === "clip-recording"
-          ? clipRecording
-          : props.clip.color;
+    const contentColor = clipContentColor();
 
     const padTop = WAVEFORM_PAD_Y;
     const padBottom = WAVEFORM_PAD_Y;
@@ -216,7 +218,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       );
       const color = props.isSelected
         ? clipSelected
-        : clipContentColor;
+        : contentColor;
       let minP = Infinity;
       let maxP = -Infinity;
       for (const note of midi.notes as Array<{ pitch: number }>) {
@@ -335,7 +337,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       contentH: waveformBoxH,
       cssW,
       cssH,
-      fillStyle: clipContentColor,
+      fillStyle: contentColor,
       boundaryStyle: timelineGridMajor,
     });
   }
@@ -374,16 +376,17 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       class={cn(
         "group absolute overflow-hidden border z-20 select-none",
         isGhost()
-          ? "border-green-400/60 border-dashed bg-green-500/20 opacity-60 pointer-events-none"
+          ? "border-dashed opacity-60 pointer-events-none"
           : props.isSelected
-            ? "border-blue-400 bg-blue-500/25"
-            : "border-green-500/60 bg-green-500/20 hover:bg-green-500/25 cursor-grab",
+            ? "ring-1 ring-blue-400/80"
+            : "hover:brightness-110 cursor-grab",
       )}
       style={{
         top: "0px",
         left: `${props.clip.startSec * PPS}px`,
         width: `${Math.max(MIN_CLIP_PX, props.clip.duration * PPS)}px`,
         height: `${LANE_HEIGHT - 1}px`,
+        ...clipVisualColors(),
       }}
       onPointerDown={(e) => {
         if (e.button !== 0) {

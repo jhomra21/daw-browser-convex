@@ -1,5 +1,8 @@
 import type { ConfigColorMode } from "@kobalte/core"
+import { parseHexColor } from "~/lib/color"
 import { DEFAULT_DAW_THEME_ID, parseThemeId, type DawThemeId } from "~/lib/theme/theme-registry"
+
+export { parseHexColor } from "~/lib/color"
 
 export const APP_PREFERENCES_STORAGE_KEY = "daw-browser.app-preferences.v1"
 export const APP_PREFERENCES_VERSION = 1
@@ -60,9 +63,6 @@ export const parseAppTheme = (value: unknown): AppTheme =>
 
 const parseBoolean = (value: unknown, fallback: boolean): boolean =>
   typeof value === "boolean" ? value : fallback
-
-export const parseHexColor = (value: unknown, fallback: string): string =>
-  typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback
 
 const isTimelineDefaultColorToken = (value: unknown): value is typeof TIMELINE_DEFAULT_TRACK_COLOR | typeof TIMELINE_DEFAULT_GROUP_COLOR =>
   value === TIMELINE_DEFAULT_TRACK_COLOR || value === TIMELINE_DEFAULT_GROUP_COLOR

@@ -46,6 +46,8 @@ type AppPreferencesContextValue = {
     defaultGroupCreateColor: () => string | undefined
     setDefaultTrackColor: (color: string) => void
     setDefaultGroupColor: (color: string) => void
+    resetDefaultTrackColor: () => void
+    resetDefaultGroupColor: () => void
   }
 }
 
@@ -147,6 +149,16 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
     setPreferences("timeline", "defaultGroupColor", nextColor)
   }
 
+  const resetDefaultTrackColor = () => {
+    if (preferences.timeline.defaultTrackColor === TIMELINE_DEFAULT_TRACK_COLOR) return
+    setPreferences("timeline", "defaultTrackColor", TIMELINE_DEFAULT_TRACK_COLOR)
+  }
+
+  const resetDefaultGroupColor = () => {
+    if (preferences.timeline.defaultGroupColor === TIMELINE_DEFAULT_GROUP_COLOR) return
+    setPreferences("timeline", "defaultGroupColor", TIMELINE_DEFAULT_GROUP_COLOR)
+  }
+
   const resolveDefaultTimelineColor = (color: string) => {
     if (color === TIMELINE_DEFAULT_TRACK_COLOR) return `var(--${TIMELINE_DEFAULT_TRACK_COLOR})`
     if (color === TIMELINE_DEFAULT_GROUP_COLOR) return `var(--${TIMELINE_DEFAULT_GROUP_COLOR})`
@@ -189,7 +201,9 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           defaultTrackCreateColor: () => timelineDefaultCreateColor(preferences.timeline.defaultTrackColor),
           defaultGroupCreateColor: () => timelineDefaultCreateColor(preferences.timeline.defaultGroupColor),
           setDefaultTrackColor,
-          setDefaultGroupColor
+          setDefaultGroupColor,
+          resetDefaultTrackColor,
+          resetDefaultGroupColor
         }
       }}
     >

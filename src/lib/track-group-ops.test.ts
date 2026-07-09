@@ -5,6 +5,7 @@ import {
   planAssignTrackColorToClips,
   planGroupTracks,
   planMoveTrackToGroup,
+  planResetClipColors,
   planSetTrackColor,
   planTrackReorder,
   planUngroupTracks,
@@ -29,7 +30,7 @@ const reorderTrack = (input: Pick<Track, 'id'> & Partial<Track> & { index: numbe
   ...input,
 })
 
-const clip = (input: Pick<Track['clips'][number], 'id' | 'startSec' | 'duration' | 'color'>): Track['clips'][number] => ({
+const clip = (input: Pick<Track['clips'][number], 'id' | 'startSec' | 'duration' | 'color'> & Partial<Track['clips'][number]>): Track['clips'][number] => ({
   name: input.id,
   ...input,
 })
@@ -231,21 +232,34 @@ describe('track group operations', () => {
     })
   })
 
-  test('planSetTrackColor updates only group and descendant track colors', () => {
+  test('planSetTrackColor cascades group colors to descendant tracks and clips', () => {
     expect(planSetTrackColor([
       track({ id: 'g', channelRole: 'group', color: '#f00' }),
       track({ id: 'a', groupId: 'g', color: '#0f0', clips: [clip({ id: 'c', startSec: 0, duration: 1, color: '#00f' })] }),
       track({ id: 'b', groupId: 'g', color: '#f00', clips: [clip({ id: 'd', startSec: 0, duration: 1, color: '#f00' })] }),
     ], 'g', '#f00')).toEqual({
       trackUpdates: [{ trackId: 'a', from: '#0f0', to: '#f00' }],
+      clipUpdates: [{ clipId: 'c', trackId: 'a', from: '#00f', to: '#f00' }],
     })
     expect(planSetTrackColor([track({ id: 'g', channelRole: 'group', color: '#f00' })], 'g', undefined)).toEqual({
       trackUpdates: [{ trackId: 'g', from: '#f00', to: undefined }],
+      clipUpdates: [],
     })
     expect(planSetTrackColor([
       track({ id: 'a', color: '#0f0', clips: [clip({ id: 'c', startSec: 0, duration: 1, color: '#00f' })] }),
     ], 'a', '#f00')).toEqual({
       trackUpdates: [{ trackId: 'a', from: '#0f0', to: '#f00' }],
+      clipUpdates: [],
+    })
+    expect(planSetTrackColor([
+      track({ id: 'g', channelRole: 'group', color: '#0f0' }),
+      track({ id: 'a', groupId: 'g', color: '#0f0', clips: [clip({ id: 'c', startSec: 0, duration: 1, color: '#00f' })] }),
+    ], 'g', 'timeline-surface')).toEqual({
+      trackUpdates: [
+        { trackId: 'g', from: '#0f0', to: 'timeline-surface' },
+        { trackId: 'a', from: '#0f0', to: 'timeline-surface' },
+      ],
+      clipUpdates: [],
     })
     expect(planSetTrackColor([track({ id: 'g', channelRole: 'group' })], 'missing', '#f00')).toBeNull()
   })
@@ -259,6 +273,23 @@ describe('track group operations', () => {
       clipUpdates: [{ clipId: 'c', trackId: 'a', from: '#00f', to: '#0f0' }],
     })
     expect(planAssignTrackColorToClips([track({ id: 'a', clips: [clip({ id: 'c', startSec: 0, duration: 1, color: 'clip-audio' })] })], 'a')).toBeNull()
+    expect(planAssignTrackColorToClips([track({ id: 'a', color: 'timeline-surface', clips: [clip({ id: 'c', startSec: 0, duration: 1, color: '#00f' })] })], 'a')).toBeNull()
     expect(planAssignTrackColorToClips([track({ id: 'a', color: '#f00', clips: [clip({ id: 'c', startSec: 0, duration: 1, color: '#f00' })] })], 'a')).toBeNull()
+  })
+
+  test('planResetClipColors restores source-kind default clip colors', () => {
+    expect(planResetClipColors([
+      track({ id: 'g', channelRole: 'group' }),
+      track({ id: 'a', groupId: 'g', clips: [clip({ id: 'c', startSec: 0, duration: 1, color: '#00f' })] }),
+      track({ id: 'b', groupId: 'g', clips: [clip({ id: 'd', startSec: 0, duration: 1, color: 'clip-audio' })] }),
+    ], 'g')).toEqual({
+      clipUpdates: [{ clipId: 'c', trackId: 'a', from: '#00f', to: 'clip-audio' }],
+    })
+    expect(planResetClipColors([
+      track({ id: 'a', clips: [clip({ id: 'c', startSec: 0, duration: 1, color: '#f00', sourceKind: 'recording' })] }),
+    ], 'a')).toEqual({
+      clipUpdates: [{ clipId: 'c', trackId: 'a', from: '#f00', to: 'clip-recording' }],
+    })
+    expect(planResetClipColors([track({ id: 'a', clips: [clip({ id: 'c', startSec: 0, duration: 1, color: 'clip-audio' })] })], 'a')).toBeNull()
   })
 })

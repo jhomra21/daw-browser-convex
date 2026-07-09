@@ -108,6 +108,6 @@ describe('timeline track layout grouping', () => {
       { id: 'c1', name: 'c1', startSec: 0, duration: 2, color: 'clip-audio' },
       { id: 'c2', name: 'c2', startSec: 1, duration: 2, color: 'clip-audio' },
     ]
-    expect(buildGroupClipOverview('g', [track('g'), child])).toEqual([{ startSec: 0, endSec: 3 }])
+    expect(buildGroupClipOverview('g', [track('g'), child])).toEqual([{ startSec: 0, endSec: 3, color: 'clip-audio' }])
   })
 })

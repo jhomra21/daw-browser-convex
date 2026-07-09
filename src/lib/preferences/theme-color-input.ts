@@ -1,9 +1,9 @@
 import {
-  parseHexColor,
   TIMELINE_DEFAULT_GROUP_COLOR,
   TIMELINE_DEFAULT_TRACK_COLOR,
   type ResolvedAppTheme
 } from "./app-preferences-core"
+import { colorInputValue } from "~/lib/color"
 import { DEFAULT_DAW_THEME_ID, type DawThemeId } from "~/lib/theme/theme-registry"
 import type { ResolvedThemeTokens } from "~/lib/theme/theme-resolver"
 
@@ -21,7 +21,7 @@ export const themeColorInputValue = (
     if (themeId === DEFAULT_DAW_THEME_ID) {
       return mode === "dark" ? DEFAULT_DARK_TIMELINE_SURFACE_INPUT_VALUE : DEFAULT_LIGHT_TIMELINE_SURFACE_INPUT_VALUE
     }
-    return parseHexColor(tokens[TIMELINE_DEFAULT_TRACK_COLOR], FALLBACK_COLOR_INPUT_VALUE)
+    return colorInputValue(tokens[TIMELINE_DEFAULT_TRACK_COLOR], FALLBACK_COLOR_INPUT_VALUE)
   }
-  return parseHexColor(color, FALLBACK_COLOR_INPUT_VALUE)
+  return colorInputValue(color, FALLBACK_COLOR_INPUT_VALUE)
 }

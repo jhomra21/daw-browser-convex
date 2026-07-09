@@ -1,5 +1,6 @@
 import { For, Show, type Component, type JSX } from "solid-js";
 
+import { colorInputValue } from "~/lib/color";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -64,7 +65,7 @@ const TimelineContextMenuEntry: Component<{ item: TimelineContextMenuItem }> = (
               <span class="min-w-0 flex-1 truncate">{current.label}</span>
               <input
                 type="color"
-                value={current.value}
+                value={colorInputValue(current.value, "#000000")}
                 class="h-5 w-8 cursor-pointer border border-border bg-app-surface p-0"
                 onClick={(event) => event.stopPropagation()}
                 onContextMenu={(event) => event.stopPropagation()}

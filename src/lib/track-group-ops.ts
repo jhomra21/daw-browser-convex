@@ -1,4 +1,5 @@
 import type { Track, TrackChannelRole, TrackId } from '@daw-browser/timeline-core/types'
+import { getDefaultClipColor, trackColorForClip } from '~/lib/clip-color'
 import { collectTrackDescendantIds, wouldCreateCycle } from '~/lib/timeline-track-layout'
 
 type TrackForGroupOps = Pick<Track, 'id' | 'groupId' | 'outputTargetId' | 'channelRole' | 'color'>
@@ -58,11 +59,18 @@ type TrackReorderPlan = {
 
 type SetTrackColorPlan = {
   trackUpdates: Array<{ trackId: TrackId; from: string | undefined; to: string | undefined }>
+  clipUpdates: ClipColorUpdate[]
 }
 
 type AssignTrackColorToClipsPlan = {
-  clipUpdates: Array<{ clipId: string; trackId: TrackId; from: string; to: string }>
+  clipUpdates: ClipColorUpdate[]
 }
+
+type ResetClipColorsPlan = {
+  clipUpdates: ClipColorUpdate[]
+}
+
+export type ClipColorUpdate = { clipId: string; trackId: TrackId; from: string; to: string }
 
 const resolveTrackColorTargets = (tracks: readonly Track[], track: Track): Track[] => {
   const targetTrackIds = track.channelRole === 'group'
@@ -247,14 +255,23 @@ export const planSetTrackColor = (
   tracks: readonly Track[],
   trackId: TrackId,
   color: string | undefined,
+  options?: { cascadeClipColors?: boolean },
 ): SetTrackColorPlan | null => {
   const track = tracks.find((candidate) => candidate.id === trackId)
   if (!track) return null
-  return {
-    trackUpdates: resolveTrackColorTargets(tracks, track)
-      .filter((track) => track.color !== color)
-      .map((track) => ({ trackId: track.id, from: track.color, to: color })),
-  }
+  const targets = resolveTrackColorTargets(tracks, track)
+  const clipColor = trackColorForClip(color)
+  const trackUpdates = targets
+    .filter((track) => track.color !== color)
+    .map((track) => ({ trackId: track.id, from: track.color, to: color }))
+  const clipUpdates = track.channelRole === 'group' && clipColor && options?.cascadeClipColors !== false
+    ? targets.flatMap((track) => (
+        track.clips
+          .filter((clip) => clip.color !== clipColor)
+          .map((clip) => ({ clipId: clip.id, trackId: track.id, from: clip.color, to: clipColor }))
+      ))
+    : []
+  return trackUpdates.length > 0 || clipUpdates.length > 0 ? { trackUpdates, clipUpdates } : null
 }
 
 export const planAssignTrackColorToClips = (
@@ -264,12 +281,28 @@ export const planAssignTrackColorToClips = (
   const track = tracks.find((candidate) => candidate.id === trackId)
   if (!track?.color) return null
   const clipUpdates = resolveTrackColorTargets(tracks, track)
-    .flatMap((track) => {
-      const color = track.color
+    .flatMap((target) => {
+      const color = trackColorForClip(target.color)
       if (!color) return []
-      return track.clips
-        .filter((clip) => clip.color !== track.color)
-        .map((clip) => ({ clipId: clip.id, trackId: track.id, from: clip.color, to: color }))
+      return target.clips
+        .filter((clip) => clip.color !== color)
+        .map((clip) => ({ clipId: clip.id, trackId: target.id, from: clip.color, to: color }))
     })
+  return clipUpdates.length > 0 ? { clipUpdates } : null
+}
+
+export const planResetClipColors = (
+  tracks: readonly Track[],
+  trackId: TrackId,
+): ResetClipColorsPlan | null => {
+  const track = tracks.find((candidate) => candidate.id === trackId)
+  if (!track) return null
+  const clipUpdates = resolveTrackColorTargets(tracks, track)
+    .flatMap((track) => (
+      track.clips
+        .map((clip) => ({ clip, color: getDefaultClipColor(clip) }))
+        .filter(({ clip, color }) => clip.color !== color)
+        .map(({ clip, color }) => ({ clipId: clip.id, trackId: track.id, from: clip.color, to: color }))
+    ))
   return clipUpdates.length > 0 ? { clipUpdates } : null
 }

@@ -116,23 +116,26 @@ export const collectTrackDescendantIds = (
   return descendants
 }
 
+export type GroupClipOverviewSegment = { startSec: number; endSec: number; color: string }
+
 export const buildGroupClipOverview = (
   groupId: Track['id'],
   tracks: readonly Track[],
-): Array<{ startSec: number; endSec: number }> => {
+): GroupClipOverviewSegment[] => {
   const descendantIds = collectTrackDescendantIds(tracks, groupId)
   const segments = tracks.filter((track) => descendantIds.has(track.id)).flatMap((track) => (
     track.clips.map((clip) => ({
       startSec: clip.startSec,
       endSec: clip.startSec + clip.duration,
+      color: clip.color,
     }))
   ))
 
   segments.sort((left, right) => left.startSec - right.startSec)
-  const merged: Array<{ startSec: number; endSec: number }> = []
+  const merged: GroupClipOverviewSegment[] = []
   for (const segment of segments) {
     const last = merged[merged.length - 1]
-    if (last && segment.startSec <= last.endSec) {
+    if (last && last.color === segment.color && segment.startSec <= last.endSec) {
       last.endSec = Math.max(last.endSec, segment.endSec)
     } else {
       merged.push({ ...segment })

@@ -92,24 +92,46 @@ export function DashboardGeneralView() {
           label="Default track row color"
           value={appPreferences.timeline.defaultTrackColor()}
           action={
-            <input
-              type="color"
-              value={appPreferences.timeline.defaultTrackColorInput()}
-              class="h-8 w-12 cursor-pointer border border-border bg-app-surface p-0.5"
-              onChange={(event) => appPreferences.timeline.setDefaultTrackColor(event.currentTarget.value)}
-            />
+            <div class="flex items-center gap-2">
+              <input
+                type="color"
+                value={appPreferences.timeline.defaultTrackColorInput()}
+                class="h-8 w-12 cursor-pointer border border-border bg-app-surface p-0.5"
+                onChange={(event) => appPreferences.timeline.setDefaultTrackColor(event.currentTarget.value)}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                class="h-8 rounded-none px-2 text-xs"
+                onClick={appPreferences.timeline.resetDefaultTrackColor}
+              >
+                Reset
+              </Button>
+            </div>
           }
         />
         <DashboardRow
           label="Default group row color"
           value={appPreferences.timeline.defaultGroupColor()}
           action={
-            <input
-              type="color"
-              value={appPreferences.timeline.defaultGroupColorInput()}
-              class="h-8 w-12 cursor-pointer border border-border bg-app-surface p-0.5"
-              onChange={(event) => appPreferences.timeline.setDefaultGroupColor(event.currentTarget.value)}
-            />
+            <div class="flex items-center gap-2">
+              <input
+                type="color"
+                value={appPreferences.timeline.defaultGroupColorInput()}
+                class="h-8 w-12 cursor-pointer border border-border bg-app-surface p-0.5"
+                onChange={(event) => appPreferences.timeline.setDefaultGroupColor(event.currentTarget.value)}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                class="h-8 rounded-none px-2 text-xs"
+                onClick={appPreferences.timeline.resetDefaultGroupColor}
+              >
+                Reset
+              </Button>
+            </div>
           }
         />
       </DashboardSection>

@@ -109,6 +109,7 @@ describe("theme helpers", () => {
 
   test("preserves custom hex colors and hex theme token values for color inputs", () => {
     expect(themeColorInputValue("#123456", resolveDawThemeById(DEFAULT_DAW_THEME_ID, "light"), DEFAULT_DAW_THEME_ID, "light")).toBe("#123456")
+    expect(themeColorInputValue("#123", resolveDawThemeById(DEFAULT_DAW_THEME_ID, "light"), DEFAULT_DAW_THEME_ID, "light")).toBe("#112233")
     expect(themeColorInputValue("timeline-surface", resolveDawThemeById("catppuccin", "light"), "catppuccin", "light")).toBe("#e2e8f0")
     expect(themeColorInputValue("red", resolveDawThemeById(DEFAULT_DAW_THEME_ID, "light"), DEFAULT_DAW_THEME_ID, "light")).toBe("#181824")
   })

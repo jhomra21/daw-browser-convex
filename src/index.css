@@ -287,6 +287,26 @@
       inset 0 -1px 0 rgb(38 38 38);
   }
 
+  .track-expanded-row-grid {
+    grid-template-columns: minmax(72px, 96px) minmax(96px, 1fr) 92px;
+  }
+
+  .track-row-control-panel {
+    width: 92px;
+  }
+
+  .track-row-control-stack {
+    width: 72px;
+  }
+
+  .track-meter-strip {
+    width: 12px;
+  }
+
+  .track-automation-indicator {
+    box-shadow: 0 0 6px rgb(239 68 68 / 75%);
+  }
+
   .step {
     counter-increment: step;
   }

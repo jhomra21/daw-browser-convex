@@ -8,7 +8,7 @@ import { canWriteProject, getProjectRole, requireAuthenticatedUserId, requirePro
 import { upsertSampleRow } from './sampleRows'
 import { isClipKindCompatibleWithTrack } from './trackRouting'
 import { getTrackWriteAccess } from './trackWrites'
-import { normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch, type AudioWarpPayload } from '@daw-browser/shared'
+import { normalizeClipColor, normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch, type AudioWarpPayload } from '@daw-browser/shared'
 import { buildClipAudioSourceFields, normalizeAudioSourceMetadataPatch, sanitizePositiveNumber, type AudioSourceKind } from '@daw-browser/shared'
 import { runSharedOperationOnce } from './sharedOperationResults'
 import { audioWarpValidator } from './audioWarpValidator'
@@ -160,7 +160,7 @@ const buildClipCreatePatch = (
     audioWarp: item.audioWarp,
     gain: item.gain,
     midiOffsetBeats: item.midiOffsetBeats,
-    color: item.color,
+    color: normalizeClipColor(item.color),
   }
   Object.assign(patch, buildClipAudioSourceFields(metadata))
 
@@ -630,7 +630,9 @@ export const serverSetColor = mutation({
     const access = await getClipWriteAccess(ctx, normalizedClipId, userId)
     if (!access) return { status: 'rejected' as const }
     if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
-    await ctx.db.patch(normalizedClipId, { color })
+    const normalizedColor = normalizeClipColor(color)
+    if (!normalizedColor) return { status: 'rejected' as const }
+    await ctx.db.patch(normalizedClipId, { color: normalizedColor })
     return { status: 'applied' as const }
   },
 })

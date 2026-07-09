@@ -21,4 +21,25 @@ describe('shared timeline operations', () => {
       payload: { index: 2, kind: 'audio', channelRole: 'group', color: '#22c55e', operationId: 'op-1' },
     })
   })
+
+  test('accepts only valid clip colors', () => {
+    expect(parseSharedTimelineOperation({
+      kind: 'clips.setColor',
+      payload: { clipId: 'clip-1', color: '#22c55e' },
+    })).toEqual({
+      kind: 'clips.setColor',
+      payload: { clipId: 'clip-1', color: '#22c55e' },
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'clips.setColor',
+      payload: { clipId: 'clip-1', color: 'clip-midi' },
+    })).toEqual({
+      kind: 'clips.setColor',
+      payload: { clipId: 'clip-1', color: 'clip-midi' },
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'clips.setColor',
+      payload: { clipId: 'clip-1', color: 'timeline-surface' },
+    })).toBeNull()
+  })
 })

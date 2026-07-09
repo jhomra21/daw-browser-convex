@@ -1,4 +1,5 @@
 import { onCleanup, type Accessor } from 'solid-js'
+import { assert } from '@daw-browser/shared'
 
 import { commitDuplicatedClipDrag, commitMovedClipDrag } from '~/lib/clip-drag-commit'
 import { createClipDragPersistence } from '~/lib/clip-drag-persistence'
@@ -152,9 +153,10 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       return cached.result
     }
     const trackById = new Map(tracks.map((track) => [track.id, track]))
-    const visible = layout.flatMap((row) => {
+    const visible = layout.map((row) => {
       const track = trackById.get(row.trackId)
-      return track ? [track] : []
+      assert(track, `Timeline layout row references missing track ${row.trackId}`)
+      return track
     })
     let result = visible
     if (addedTrackDuringDrag) {

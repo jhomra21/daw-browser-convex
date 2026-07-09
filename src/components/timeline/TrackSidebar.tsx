@@ -10,6 +10,7 @@ import {
 import { createStore, produce } from "solid-js/store";
 import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
 import {
+  assert,
   automationEnvelopeValueRange,
   automationTargetKey,
   getAutomationParameterOptions,
@@ -400,7 +401,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     const row = trackLayoutRowAtY(sidebar().trackLayout, localY);
     if (!row) return undefined;
     const track = sidebar().trackById.get(row.trackId);
-    if (!track) return undefined;
+    assert(track, `Timeline layout row references missing track ${row.trackId}`);
     return {
       trackId: row.trackId,
       zone: resolveTrackDropZone({
@@ -1124,7 +1125,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   <Show
                     when={!track.collapsed}
                     fallback={
-                      <div class="grid grid-cols-3 gap-1">
+                      <div class="grid grid-cols-2 gap-1">
                         <button
                           class={cn(
                             "h-6 w-6 border text-xs font-bold transition-colors",
@@ -1181,32 +1182,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                         >
                           S
                         </button>
-                        <button
-                          class={cn(
-                            "h-6 w-6 border text-xs font-semibold transition-colors",
-                            automationVisible()
-                              ? "border-red-400 bg-red-500/90 text-black"
-                              : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
-                          )}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            props.automation.actions.toggleTrackVisibility(
-                              track.id,
-                            );
-                          }}
-                          title={
-                            automationVisible()
-                              ? "Hide automation lane"
-                              : "Show automation lane when expanded"
-                          }
-                        >
-                          A
-                        </button>
                       </div>
                     }
                   >
-                    <div class="flex w-[92px] items-center gap-2">
-                      <div class="flex w-[72px] shrink-0 flex-col gap-1">
+                    <div class="track-row-control-panel flex items-center gap-2">
+                      <div class="track-row-control-stack flex shrink-0 flex-col gap-1">
                         <div class="grid grid-cols-4 gap-1">
                           <button
                             class={cn(
@@ -1312,7 +1292,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
                         <div class="relative flex h-7 items-center px-0.5">
                           <Show when={automationMeta()?.volumeEnvelope}>
-                            <span class="absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.75)]" />
+                            <span class="track-automation-indicator absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500" />
                           </Show>
                           <input
                             type="range"
@@ -1424,7 +1404,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                         </div>
                       </div>
 
-                      <div class="relative h-16 w-[12px] shrink-0">
+                      <div class="track-meter-strip relative h-16 shrink-0">
                         <div class="absolute inset-0 flex items-end justify-center gap-1">
                           {(() => {
                             const meter = meters[track.id];
@@ -1464,7 +1444,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 </div>
                 {displayedAutomationVisible() ? (
                   <div
-                    class="absolute inset-x-0 z-10 border-t border-automation/30 bg-timeline-background/95 text-[11px] text-error-foreground"
+                    class="absolute inset-x-0 z-10 border-t border-automation/30 bg-timeline-background/95 text-xxs text-error-foreground"
                     style={{
                       top: `${clipLaneHeightPx()}px`,
                       height: `${automationTotalHeight()}px`,
@@ -1494,7 +1474,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           );
                         return (
                           <div
-                            class="grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-b border-red-500/20 px-2"
+                            class="track-expanded-row-grid grid items-center gap-x-4 border-b border-red-500/20 px-2"
                             style={{ height: `${automationHeight()}px` }}
                           >
                             <div class="flex items-center gap-1 overflow-hidden">

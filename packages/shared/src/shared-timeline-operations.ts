@@ -31,6 +31,7 @@ import {
   normalizeSaturatorParams,
 } from './effects-params'
 import { normalizeAudioWarp, normalizeClipGain, type AudioWarpPayload } from './audio-warp'
+import { normalizeClipColor } from './clip-color'
 import { normalizeClipTimingPatch } from './clip-timing'
 import { normalizeMasterVolume } from './master-volume'
 import {
@@ -279,7 +280,7 @@ export const readSharedTimelineClipCreatePayload = (
     audioWarp: readAudioWarp(value.audioWarp),
     gain: readOptionalNumber(value.gain),
     midiOffsetBeats: readOptionalNumber(value.midiOffsetBeats),
-    color: readOptionalString(value.color),
+    color: normalizeClipColor(readOptionalString(value.color)),
     midi,
     clipKind: readOptionalString(value.clipKind),
     operationId: readOptionalString(value.operationId),
@@ -582,11 +583,12 @@ const parseClipGain = (payload: Record<string, unknown>): SharedTimelineOperatio
     : null
 )
 
-const parseClipColor = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
-  typeof payload.clipId === 'string' && typeof payload.color === 'string'
-    ? { kind: 'clips.setColor', payload: { clipId: payload.clipId, color: payload.color } }
+const parseClipColor = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  const color = normalizeClipColor(readOptionalString(payload.color))
+  return typeof payload.clipId === 'string' && color
+    ? { kind: 'clips.setColor', payload: { clipId: payload.clipId, color } }
     : null
-)
+}
 
 const parseTrackRouting = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   if (typeof payload.trackId !== 'string' || !isRecord(payload.routing)) return null

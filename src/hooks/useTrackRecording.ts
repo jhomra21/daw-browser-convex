@@ -6,6 +6,7 @@ import type { ClipBufferWriter } from '~/lib/clip-buffer-cache'
 import { createAudioAssetKey, getAudioSourceMetadata } from '~/lib/audio-source'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError } from '~/lib/local-assets'
+import { trackColorForClip } from '~/lib/clip-color'
 import { isLocalId } from '@daw-browser/shared'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { isSharedOutboxQueuedError } from '~/lib/shared-outbox'
@@ -314,7 +315,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
           historyPush,
           skipHistory: Boolean(ctx.createdTrack),
           audioBufferCache,
-          color: targetTrack.color ?? 'clip-recording',
+          color: trackColorForClip(targetTrack.color) ?? 'clip-recording',
           canProject: () => projectId() === rid && tracks().some((entry) => entry.id === ctx.trackId),
         })
         await cleanupRecording()
@@ -363,7 +364,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         audioBufferCache,
         grantClipWrite,
         grantScope: uid ? { projectId: rid, userId: uid } : undefined,
-        color: targetTrack.color ?? 'clip-recording',
+        color: trackColorForClip(targetTrack.color) ?? 'clip-recording',
         pushHistory: false,
         canProject: () => projectId() === rid && tracks().some((entry) => entry.id === ctx.trackId),
       })

@@ -1,5 +1,7 @@
+import { isHexColor } from '@daw-browser/shared'
+
 export const parseHexColor = (value: unknown, fallback: string): string =>
-  typeof value === "string" && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value) ? value : fallback
+  typeof value === "string" && isHexColor(value) ? value : fallback
 
 export const colorInputValue = (color: string, fallback: string): string => {
   const parsed = parseHexColor(color, fallback)

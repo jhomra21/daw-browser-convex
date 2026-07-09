@@ -13,6 +13,7 @@ describe('clip color helpers', () => {
     expect(resolveClipColor('clip-midi', tokens)).toBe('#3b82f6')
     expect(resolveClipColor('clip-recording', tokens)).toBe('#ef4444')
     expect(resolveClipColor('#f2994a', tokens)).toBe('#f2994a')
+    expect(resolveClipColor('timeline-surface', tokens)).toBe('#22c55e')
   })
 
   test('uses only custom hex track colors for clips', () => {

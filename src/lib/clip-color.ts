@@ -16,7 +16,7 @@ export const resolveClipColor = (color: string | undefined, tokens: ClipThemeTok
   if (color === 'clip-audio') return tokens['clip-audio']
   if (color === 'clip-midi') return tokens['clip-midi']
   if (color === 'clip-recording') return tokens['clip-recording']
-  return color ?? tokens['clip-audio']
+  return parseHexColor(color, tokens['clip-audio'])
 }
 
 export const createClipVisualColors = (color: string, selected: boolean, ghost: boolean) => {

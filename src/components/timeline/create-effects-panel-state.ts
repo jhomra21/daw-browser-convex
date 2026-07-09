@@ -22,6 +22,7 @@ import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import { buildSharedClipCreateOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { toLocalTimelineClip } from "~/lib/timeline-repository/track-row-adapter";
+import { trackColorForClip } from "~/lib/clip-color";
 import {
   createDefaultArpeggiatorParams,
   createDefaultDrumRackParams,
@@ -451,7 +452,7 @@ export function createEffectsPanelInstrumentDevice(
       startSec: start,
       duration: Math.max(0.001, options?.durationSec ?? 1),
       name: "MIDI Clip",
-      color: track.color ?? "clip-midi",
+      color: trackColorForClip(track.color) ?? "clip-midi",
       midi: {
         wave: "sawtooth",
         gain: 0.8,

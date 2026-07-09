@@ -2,6 +2,7 @@ import type { AudioSourceKind } from './audio-source-rules'
 import { resolveClipSampleUrl } from './audio-source-rules'
 import type { AudioSourceMetadata } from './audio-source-metadata'
 import { normalizeAudioWarp, type AudioWarpPayload } from './audio-warp'
+import { normalizeClipColor } from './clip-color'
 import type { SharedTimelineClipCreatePayload } from './shared-timeline-operations'
 import type { SynthWave } from './effects-params'
 
@@ -88,7 +89,7 @@ const buildAudioClipMetadataPayloadFields = <TTrackId extends string>(
     audioWarp: normalizeAudioWarp(clip.audioWarp),
     gain: clip.gain,
     midiOffsetBeats: clip.timing?.midiOffsetBeats,
-    color: clip.color,
+    color: normalizeClipColor(clip.color),
   }
 }
 
@@ -137,6 +138,6 @@ export function buildClipCreatePayload<TTrackId extends string>(
     bufferOffsetSec: clip.timing?.bufferOffsetSec,
     audioWarp: normalizeAudioWarp(clip.audioWarp),
     midiOffsetBeats: clip.timing?.midiOffsetBeats,
-    color: clip.color,
+    color: normalizeClipColor(clip.color),
   }
 }

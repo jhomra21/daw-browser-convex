@@ -1,8 +1,7 @@
-import { AudioEngine } from "@daw-browser/audio-engine/audio-engine"
-import type { AudioRuntimeConfiguration } from "./audio-settings-core"
+import { AudioEngine, type AudioRuntimeOptions } from "@daw-browser/audio-engine/audio-engine"
 
 let audioEngineSingleton: AudioEngine | null = null
-let desiredConfiguration: AudioRuntimeConfiguration = { latencyHint: "interactive" }
+let desiredConfiguration: AudioRuntimeOptions = { latencyHint: "interactive" }
 let desiredOutputDeviceId = ""
 let sinkRequestId = 0
 let sinkStatus: AudioSinkStatus = { state: "idle" }
@@ -24,12 +23,20 @@ const publishSinkStatus = (status: AudioSinkStatus) => {
 export const getAudioEngine = () => {
   if (!audioEngineSingleton) {
     audioEngineSingleton = new AudioEngine(desiredConfiguration)
+    let runtimeInitialized = false
+    audioEngineSingleton.subscribeRuntimeSnapshot(() => {
+      const initialized = audioEngineSingleton?.getRuntimeSnapshot().state !== "uninitialized"
+      if (initialized && !runtimeInitialized) {
+        void applyAudioOutputDevice(desiredOutputDeviceId)
+      }
+      runtimeInitialized = initialized
+    })
     if (desiredOutputDeviceId) void applyAudioOutputDevice(desiredOutputDeviceId)
   }
   return audioEngineSingleton
 }
 
-export const configureAudioEngine = (configuration: AudioRuntimeConfiguration) => {
+export const configureAudioEngine = (configuration: AudioRuntimeOptions) => {
   desiredConfiguration = configuration
   audioEngineSingleton?.configureNextRuntime(configuration)
 }

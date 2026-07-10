@@ -85,9 +85,9 @@ export const parseAppTheme = (value: unknown): AppTheme =>
 const parseBoolean = (value: unknown, fallback: boolean): boolean =>
   typeof value === "boolean" ? value : fallback
 const parseDeviceId = (value: unknown): string => typeof value === "string" ? value : ""
-const parseSampleRate = (value: unknown): AudioSampleRatePreference =>
+export const parseAudioSampleRate = (value: unknown): AudioSampleRatePreference =>
   value === 44100 || value === 48000 || value === 96000 ? value : "default"
-const parseLatencyMode = (value: unknown): AudioLatencyMode =>
+export const parseAudioLatencyMode = (value: unknown): AudioLatencyMode =>
   value === "balanced" || value === "playback" ? value : "interactive"
 
 const isTimelineDefaultColorToken = (value: unknown): value is typeof TIMELINE_DEFAULT_TRACK_COLOR | typeof TIMELINE_DEFAULT_GROUP_COLOR =>
@@ -140,8 +140,8 @@ export const normalizeAppPreferences = (value: unknown): AppPreferences => {
     audio: {
       inputDeviceId: parseDeviceId(audio.inputDeviceId),
       outputDeviceId: parseDeviceId(audio.outputDeviceId),
-      sampleRate: parseSampleRate(audio.sampleRate),
-      latencyMode: parseLatencyMode(audio.latencyMode),
+      sampleRate: parseAudioSampleRate(audio.sampleRate),
+      latencyMode: parseAudioLatencyMode(audio.latencyMode),
       echoCancellation: parseBoolean(audio.echoCancellation, defaultAppPreferences.audio.echoCancellation),
       noiseSuppression: parseBoolean(audio.noiseSuppression, defaultAppPreferences.audio.noiseSuppression),
       autoGainControl: parseBoolean(audio.autoGainControl, defaultAppPreferences.audio.autoGainControl)

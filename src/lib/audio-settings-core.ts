@@ -1,13 +1,9 @@
 import type { AudioPreferences } from "./preferences/app-preferences-core"
-
-export type AudioRuntimeConfiguration = {
-  sampleRate?: number
-  latencyHint: AudioContextLatencyCategory
-}
+import type { AudioRuntimeOptions } from "@daw-browser/audio-engine/audio-engine"
 
 export const resolveAudioRuntimeConfiguration = (
   preferences: Pick<AudioPreferences, "sampleRate" | "latencyMode">
-): AudioRuntimeConfiguration => ({
+): AudioRuntimeOptions => ({
   ...(preferences.sampleRate === "default" ? {} : { sampleRate: preferences.sampleRate }),
   latencyHint: preferences.latencyMode
 })

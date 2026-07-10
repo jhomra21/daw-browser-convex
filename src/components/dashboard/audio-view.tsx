@@ -1,7 +1,8 @@
-import { For, Show, createSignal, onCleanup, onMount } from "solid-js"
+import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { useAppPreferences } from "~/context/app-preferences"
 import { filterAudioDevices, isSelectedDeviceAvailable, resolveAudioRuntimeConfiguration } from "~/lib/audio-settings-core"
 import { getAudioEngine, getAudioSinkStatus, subscribeAudioSinkStatus } from "~/lib/audio-engine-singleton"
+import { parseAudioLatencyMode, parseAudioSampleRate } from "~/lib/preferences/app-preferences"
 import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard-shared"
 
 const formatLatency = (seconds: number | null) => seconds === null ? "Unavailable" : `${(seconds * 1000).toFixed(1)} ms`
@@ -18,11 +19,12 @@ export function DashboardAudioView() {
   const [sinkStatus, setSinkStatus] = createSignal(getAudioSinkStatus())
   const [runtimeRevision, setRuntimeRevision] = createSignal(0)
   const supportedConstraints = navigator.mediaDevices.getSupportedConstraints()
-  const audioDevices = () => filterAudioDevices(devices())
-  const runtime = () => {
+  const audioEngine = getAudioEngine()
+  const audioDevices = createMemo(() => filterAudioDevices(devices()))
+  const runtime = createMemo(() => {
     runtimeRevision()
-    return getAudioEngine().getRuntimeSnapshot()
-  }
+    return audioEngine.getRuntimeSnapshot()
+  })
   const hasPendingRuntimeChange = () => {
     const snapshot = runtime()
     if (snapshot.state === "uninitialized") return false
@@ -77,12 +79,10 @@ export function DashboardAudioView() {
 
   const playTestTone = async () => {
     try {
-      await getAudioEngine().playOutputTestTone()
+      await audioEngine.playOutputTestTone()
       setDeviceError("")
     } catch (error) {
       setDeviceError(error instanceof Error ? error.message : "Unable to play the output test tone.")
-    } finally {
-      setRuntimeRevision((revision) => revision + 1)
     }
   }
 
@@ -91,9 +91,13 @@ export function DashboardAudioView() {
     const onDeviceChange = () => void refreshDevices()
     navigator.mediaDevices.addEventListener("devicechange", onDeviceChange)
     const unsubscribe = subscribeAudioSinkStatus(() => setSinkStatus(getAudioSinkStatus()))
+    const unsubscribeRuntime = audioEngine.subscribeRuntimeSnapshot(() => {
+      setRuntimeRevision((revision) => revision + 1)
+    })
     onCleanup(() => {
       navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange)
       unsubscribe()
+      unsubscribeRuntime()
     })
   })
 
@@ -124,16 +128,15 @@ export function DashboardAudioView() {
         </Show>
         <DashboardRow label="Requested sample rate" action={
           <select class="h-8 border border-border bg-background px-2 text-sm" value={preferences.audio.preferences().sampleRate} onChange={(event) => {
-            const value = event.currentTarget.value
-            preferences.audio.setSampleRate(value === "default" ? "default" : value === "44100" ? 44100 : value === "48000" ? 48000 : 96000)
+            const value = Number(event.currentTarget.value)
+            preferences.audio.setSampleRate(parseAudioSampleRate(Number.isFinite(value) ? value : event.currentTarget.value))
           }}>
             <option value="default">System default</option><option value="44100">44.1 kHz</option><option value="48000">48 kHz</option><option value="96000">96 kHz</option>
           </select>
         } />
         <DashboardRow label="Latency mode" action={
           <select class="h-8 border border-border bg-background px-2 text-sm" value={preferences.audio.preferences().latencyMode} onChange={(event) => {
-            const value = event.currentTarget.value
-            preferences.audio.setLatencyMode(value === "balanced" || value === "playback" ? value : "interactive")
+            preferences.audio.setLatencyMode(parseAudioLatencyMode(event.currentTarget.value))
           }}>
             <option value="interactive">Interactive</option><option value="balanced">Balanced</option><option value="playback">Playback</option>
           </select>

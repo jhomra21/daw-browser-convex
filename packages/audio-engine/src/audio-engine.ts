@@ -26,7 +26,7 @@ const MASTER_STOP_DELAY_SEC = 0.004
 export const LIVE_SCHEDULE_HORIZON_SEC = 30
 
 export { canFallbackToRepitchStretch, isStretchQualityWarning }
-export type { AudioEffectRuntimeInstance, AudioStretchRenderState, CompressorMeterFrame, DeferredStretchWindow, SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch }
+export type { AudioEffectRuntimeInstance, AudioRuntimeOptions, AudioStretchRenderState, CompressorMeterFrame, DeferredStretchWindow, SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch }
 export type AudioRuntimeSnapshot = {
   state: AudioContextState | 'uninitialized'
   sampleRate: number | null
@@ -45,7 +45,7 @@ const supportsSinkSelection = (context: AudioContext): context is SinkSelectable
 export class AudioEngine {
   private runtimeOptions: AudioRuntimeOptions
   private activeRuntimeOptions: AudioRuntimeOptions | null = null
-  private desiredOutputDeviceId = ''
+  private runtimeListeners = new Set<() => void>()
   private runtime: AudioRuntime | null = null
   private audioCtx: AudioContext | null = null
   private masterGain: GainNode | null = null
@@ -132,8 +132,16 @@ export class AudioEngine {
     }
   }
 
+  subscribeRuntimeSnapshot(listener: () => void) {
+    this.runtimeListeners.add(listener)
+    return () => this.runtimeListeners.delete(listener)
+  }
+
+  private publishRuntimeSnapshot() {
+    for (const listener of this.runtimeListeners) listener()
+  }
+
   async setOutputDevice(deviceId: string): Promise<'applied' | 'unsupported' | 'uninitialized'> {
-    this.desiredOutputDeviceId = deviceId
     if (!this.audioCtx) return 'uninitialized'
     if (!supportsSinkSelection(this.audioCtx)) return 'unsupported'
     await this.audioCtx.setSinkId(deviceId)
@@ -143,7 +151,7 @@ export class AudioEngine {
   async playOutputTestTone(durationSec = 0.35) {
     this.ensureAudio()
     if (!this.audioCtx || !this.masterGain) return
-    await this.audioCtx.resume()
+    await this.resume()
     const oscillator = this.audioCtx.createOscillator()
     const gain = this.audioCtx.createGain()
     const now = this.audioCtx.currentTime
@@ -206,11 +214,11 @@ export class AudioEngine {
       this.masterGain = this.runtime.masterGain
       this.masterGain.gain.value = this.masterVolume
       this.destination = this.runtime.destination
-      if (this.desiredOutputDeviceId) void this.setOutputDevice(this.desiredOutputDeviceId).catch(() => undefined)
       this.masterFx.applyPending(this.audioCtx, this.masterGain, this.destination, (params) => this.createImpulseResponse(params))
       if (opts?.applyCachedTrackGains !== false) {
         this.updateTrackGains(this.tracksSnapshot)
       }
+      this.publishRuntimeSnapshot()
     }
   }
 
@@ -509,6 +517,7 @@ export class AudioEngine {
   async resume() {
     if (this.audioCtx) {
       await this.audioCtx.resume()
+      this.publishRuntimeSnapshot()
     }
   }
 
@@ -545,6 +554,7 @@ export class AudioEngine {
     this.audioCtx = null
     this.runtime = null
     this.activeRuntimeOptions = null
+    this.publishRuntimeSnapshot()
   }
 
   setMasterEq(params: EqParamsLite) {

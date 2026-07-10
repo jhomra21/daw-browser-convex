@@ -128,8 +128,7 @@ export function DashboardAudioView() {
         </Show>
         <DashboardRow label="Requested sample rate" action={
           <select class="h-8 border border-border bg-background px-2 text-sm" value={preferences.audio.preferences().sampleRate} onChange={(event) => {
-            const value = Number(event.currentTarget.value)
-            preferences.audio.setSampleRate(parseAudioSampleRate(Number.isFinite(value) ? value : event.currentTarget.value))
+            preferences.audio.setSampleRate(parseAudioSampleRate(Number(event.currentTarget.value)))
           }}>
             <option value="default">System default</option><option value="44100">44.1 kHz</option><option value="48000">48 kHz</option><option value="96000">96 kHz</option>
           </select>

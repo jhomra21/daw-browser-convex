@@ -146,12 +146,13 @@ export class AudioEngine {
     if (!this.audioCtx) return 'uninitialized'
     if (!supportsSinkSelection(this.audioCtx)) return 'unsupported'
     await this.audioCtx.setSinkId(deviceId)
+    this.publishRuntimeSnapshot()
     return 'applied'
   }
 
   async playOutputTestTone(durationSec = 0.35) {
     this.ensureAudio()
-    if (!this.audioCtx || !this.masterGain) return
+    if (!this.audioCtx) return
     await this.resume()
     const oscillator = this.audioCtx.createOscillator()
     const gain = this.audioCtx.createGain()
@@ -160,7 +161,7 @@ export class AudioEngine {
     gain.gain.linearRampToValueAtTime(0, now + durationSec)
     oscillator.frequency.value = 440
     oscillator.connect(gain)
-    gain.connect(this.masterGain)
+    gain.connect(this.audioCtx.destination)
     oscillator.addEventListener('ended', () => {
       oscillator.disconnect()
       gain.disconnect()
@@ -519,7 +520,6 @@ export class AudioEngine {
   async resume() {
     if (this.audioCtx) {
       await this.audioCtx.resume()
-      this.publishRuntimeSnapshot()
     }
   }
 

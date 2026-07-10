@@ -12,7 +12,13 @@ export type AudioRuntimeOptions = {
 }
 
 export function createAudioRuntime(options: AudioRuntimeOptions): AudioRuntime {
-  const ctx = new AudioContext(options)
+  let ctx: AudioContext
+  try {
+    ctx = new AudioContext(options)
+  } catch (error) {
+    if (options.sampleRate === undefined || !(error instanceof Error) || error.name !== "NotSupportedError") throw error
+    ctx = new AudioContext({ latencyHint: options.latencyHint })
+  }
   const masterGain = ctx.createGain()
   masterGain.gain.value = 1.0
 

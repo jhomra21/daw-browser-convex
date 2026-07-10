@@ -5,6 +5,11 @@ let desiredConfiguration: AudioRuntimeOptions = { latencyHint: "interactive" }
 let desiredOutputDeviceId = ""
 let sinkRequestId = 0
 let sinkStatus: AudioSinkStatus = { state: "idle" }
+let activeSinkRequest: {
+  engine: AudioEngine
+  deviceId: string
+  promise: Promise<boolean>
+} | null = null
 const sinkListeners = new Set<() => void>()
 
 type AudioSinkStatus =
@@ -48,24 +53,35 @@ export const configureDesiredAudioOutputDevice = (deviceId: string) => {
 
 const applyAudioOutputDevice = async (deviceId: string) => {
   desiredOutputDeviceId = deviceId
+  const engine = getAudioEngine()
+  if (activeSinkRequest?.engine === engine && activeSinkRequest.deviceId === deviceId) {
+    return activeSinkRequest.promise
+  }
   const requestId = ++sinkRequestId
   publishSinkStatus({ state: "pending", deviceId })
-  try {
-    const result = await getAudioEngine().setOutputDevice(deviceId)
-    if (requestId !== sinkRequestId) return false
-    if (result === "unsupported") publishSinkStatus({ state: "unsupported" })
-    else if (result === "uninitialized") publishSinkStatus({ state: "uninitialized", deviceId })
-    else publishSinkStatus({ state: "applied", deviceId })
-    return result === "applied"
-  } catch (error) {
-    if (requestId !== sinkRequestId) return false
-    publishSinkStatus({
-      state: "error",
-      deviceId,
-      message: error instanceof Error ? error.message : "Unable to select audio output."
-    })
-    return false
-  }
+  const promise = (async () => {
+    try {
+      const result = await engine.setOutputDevice(deviceId)
+      if (requestId !== sinkRequestId) return false
+      if (result === "unsupported") publishSinkStatus({ state: "unsupported" })
+      else if (result === "uninitialized") publishSinkStatus({ state: "uninitialized", deviceId })
+      else publishSinkStatus({ state: "applied", deviceId })
+      return result === "applied"
+    } catch (error) {
+      if (requestId !== sinkRequestId) return false
+      publishSinkStatus({
+        state: "error",
+        deviceId,
+        message: error instanceof Error ? error.message : "Unable to select audio output."
+      })
+      return false
+    }
+  })()
+  activeSinkRequest = { engine, deviceId, promise }
+  void promise.finally(() => {
+    if (activeSinkRequest?.promise === promise) activeSinkRequest = null
+  })
+  return promise
 }
 
 export const playAudioOutputTestTone = async () => {
@@ -85,6 +101,7 @@ export const subscribeAudioSinkStatus = (listener: () => void) => {
 
 export const resetAudioEngine = () => {
   audioEngineSingleton = null
+  activeSinkRequest = null
   sinkRequestId += 1
   publishSinkStatus({ state: "idle" })
 }

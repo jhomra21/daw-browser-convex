@@ -29,9 +29,9 @@ type Props = {
 }
 
 const ExportSection: Component<{ title: string; children: JSX.Element }> = (props) => (
-  <section class="border border-border bg-background/40">
-    <div class="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{props.title}</div>
-    <div class="grid gap-3 p-3">{props.children}</div>
+  <section class="grid gap-3">
+    <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{props.title}</div>
+    <div class="grid gap-3">{props.children}</div>
   </section>
 )
 
@@ -50,7 +50,10 @@ const ExportFormatOption: Component<{
 }> = (props) => {
   const metadata = () => getExportAudioFormatMetadata(props.format)
   return (
-    <label class="flex items-center gap-2 border border-border px-2 py-1 text-sm">
+    <label
+      class="flex min-h-8 items-center gap-2 px-1 text-sm"
+      classList={{ "text-muted-foreground": !props.supported }}
+    >
       <input
         type="checkbox"
         checked={props.selected}
@@ -61,6 +64,8 @@ const ExportFormatOption: Component<{
     </label>
   )
 }
+
+const roundExportTime = (value: number): number => Math.round(value * 100) / 100
 
 const ExportDialog: Component<Props> = (props) => {
   const initialDuration = () => getExportRangeDuration(props.getTracks(), { mode: 'whole' })
@@ -221,7 +226,7 @@ const ExportDialog: Component<Props> = (props) => {
           <DialogTitle>Export Audio</DialogTitle>
           <DialogDescription>Configure the selection, rendering, and audio encoding.</DialogDescription>
         </DialogHeader>
-        <div class="grid gap-3 py-2">
+        <div class="grid gap-6 py-2">
           <ExportSection title="Selection Options">
             <ExportField label="Rendered Track">
               <select class="w-full border border-border bg-app-surface px-2 py-1 text-sm text-foreground disabled:opacity-50" value={source()} onChange={(event) => {
@@ -240,10 +245,10 @@ const ExportDialog: Component<Props> = (props) => {
               </div>
             </ExportField>
             <ExportField label="Render Start">
-              <input type="number" min="0" step="0.01" class="w-full border border-border bg-app-surface px-2 py-1 text-sm text-foreground" value={renderStartSec()} onInput={(event) => updateCustomStart(event.currentTarget.valueAsNumber)} />
+              <input type="number" min="0" step="0.01" class="w-full border border-border bg-app-surface px-2 py-1 text-sm text-foreground" value={roundExportTime(renderStartSec())} onInput={(event) => updateCustomStart(event.currentTarget.valueAsNumber)} />
             </ExportField>
             <ExportField label="Render Length">
-              <input type="number" min="0.001" step="0.01" class="w-full border border-border bg-app-surface px-2 py-1 text-sm text-foreground" value={renderLengthSec()} onInput={(event) => updateCustomLength(event.currentTarget.valueAsNumber)} />
+              <input type="number" min="0.001" step="0.01" class="w-full border border-border bg-app-surface px-2 py-1 text-sm text-foreground" value={roundExportTime(renderLengthSec())} onInput={(event) => updateCustomLength(event.currentTarget.valueAsNumber)} />
             </ExportField>
           </ExportSection>
 
@@ -273,35 +278,39 @@ const ExportDialog: Component<Props> = (props) => {
           </ExportSection>
 
           <ExportSection title="Encoding Options">
-            <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Lossless</div>
-            <div class="grid grid-cols-2 gap-2">
-              <ExportFormatOption
-                format="wav"
-                selected={selectedFormats().includes('wav')}
-                supported={formatSupported('wav')}
-                onChange={(checked) => toggleFormat('wav', checked)}
-              />
-              <ExportFormatOption
-                format="flac"
-                selected={selectedFormats().includes('flac')}
-                supported={formatSupported('flac')}
-                onChange={(checked) => toggleFormat('flac', checked)}
-              />
+            <div class="grid gap-2">
+              <div class="text-xs font-medium uppercase tracking-wide text-muted-foreground">Lossless</div>
+              <div class="grid grid-cols-2 gap-x-6">
+                <ExportFormatOption
+                  format="wav"
+                  selected={selectedFormats().includes('wav')}
+                  supported={formatSupported('wav')}
+                  onChange={(checked) => toggleFormat('wav', checked)}
+                />
+                <ExportFormatOption
+                  format="flac"
+                  selected={selectedFormats().includes('flac')}
+                  supported={formatSupported('flac')}
+                  onChange={(checked) => toggleFormat('flac', checked)}
+                />
+              </div>
             </div>
-            <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Compressed</div>
-            <div class="grid grid-cols-2 gap-2">
-              <ExportFormatOption
-                format="mp3"
-                selected={selectedFormats().includes('mp3')}
-                supported={formatSupported('mp3')}
-                onChange={(checked) => toggleFormat('mp3', checked)}
-              />
-              <ExportFormatOption
-                format="ogg-opus"
-                selected={selectedFormats().includes('ogg-opus')}
-                supported={formatSupported('ogg-opus')}
-                onChange={(checked) => toggleFormat('ogg-opus', checked)}
-              />
+            <div class="grid gap-2">
+              <div class="text-xs font-medium uppercase tracking-wide text-muted-foreground">Compressed</div>
+              <div class="grid grid-cols-2 gap-x-6">
+                <ExportFormatOption
+                  format="mp3"
+                  selected={selectedFormats().includes('mp3')}
+                  supported={formatSupported('mp3')}
+                  onChange={(checked) => toggleFormat('mp3', checked)}
+                />
+                <ExportFormatOption
+                  format="ogg-opus"
+                  selected={selectedFormats().includes('ogg-opus')}
+                  supported={formatSupported('ogg-opus')}
+                  onChange={(checked) => toggleFormat('ogg-opus', checked)}
+                />
+              </div>
             </div>
             <Show when={selectedFormats().includes('mp3') && formatSupported('mp3')}>
               <ExportField label="MP3 Bitrate">
@@ -319,7 +328,7 @@ const ExportDialog: Component<Props> = (props) => {
             </Show>
           </ExportSection>
 
-          <div class="border border-border bg-background/40 p-3 text-sm">
+          <div class="text-sm">
             <div class="font-medium">Export Configuration</div>
             <div class="mt-1 text-muted-foreground">
               {sourceLabel()}{source() === 'selected-stems' ? ` (${props.selectedTrackIds.length} tracks)` : ''}, {durationSec().toFixed(2)} s, {numberOfChannels() === 1 ? 'Mono' : 'Stereo'}, {sampleRate() / 1000} kHz, {normalize() ? 'Normalized' : 'Not normalized'}, {selectedFormatLabels() || 'No format selected'}

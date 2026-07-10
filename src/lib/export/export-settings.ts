@@ -1,5 +1,5 @@
 import { getExportRangeBounds, type ExportRange } from '@daw-browser/audio-engine/export-range'
-import type { ExportAudioFormat } from '@daw-browser/shared'
+import type { LossyExportAudioFormat } from '@daw-browser/shared'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { TimelineRangeSelection } from '~/lib/timeline-range-selection'
 
@@ -12,13 +12,8 @@ export type ExportRenderSettings = {
 }
 
 export type ExportEncodingSettings = {
-  bitrateByFormat: Partial<Record<'mp3' | 'ogg-opus', number>>
+  bitrateByFormat: Partial<Record<LossyExportAudioFormat, number>>
 }
-
-export const getExportRenderOptions = (settings: ExportRenderSettings) => ({
-  sampleRate: settings.sampleRate,
-  numberOfChannels: settings.numberOfChannels,
-})
 
 export const createCustomExportRange = (startSec: number, lengthSec: number): ExportRange => {
   const start = Math.max(0, Number.isFinite(startSec) ? startSec : 0)
@@ -62,10 +57,3 @@ export const deriveSelectedExportTrackIds = (input: {
     .filter((track) => candidates.has(track.id) && isRenderableExportTrack(track))
     .map((track) => track.id)
 }
-
-export const getEncodingBitrate = (
-  settings: ExportEncodingSettings,
-  format: ExportAudioFormat,
-): number | undefined => format === 'mp3' || format === 'ogg-opus'
-  ? settings.bitrateByFormat[format]
-  : undefined

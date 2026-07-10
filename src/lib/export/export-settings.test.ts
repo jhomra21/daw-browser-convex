@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { getExportRangeBounds } from '@daw-browser/audio-engine/export-range'
-import { createCustomExportRange, deriveSelectedExportTrackIds, getEncodingBitrate, getExportRangeDuration, getExportRenderOptions, isRenderableExportTrack } from './export-settings'
+import { createCustomExportRange, deriveSelectedExportTrackIds, getExportRangeDuration, isRenderableExportTrack } from './export-settings'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 
 const track = (
@@ -35,17 +35,6 @@ describe('export range helpers', () => {
     tracks[0].clips[0].duration = 3
     expect(getExportRangeBounds(tracks, { mode: 'whole' })).toEqual({ startSec: 0, endSec: 5 })
     expect(getExportRangeDuration(tracks, { mode: 'custom', startSec: 4, endSec: 4 })).toBeCloseTo(0.001)
-  })
-})
-
-describe('export request settings', () => {
-  test('propagates render and per-format encoding options', () => {
-    const render = { sampleRate: 96000, numberOfChannels: 1, normalize: true } satisfies Parameters<typeof getExportRenderOptions>[0]
-    const encoding = { bitrateByFormat: { mp3: 320000, 'ogg-opus': 160000 } }
-    expect(getExportRenderOptions(render)).toEqual({ sampleRate: 96000, numberOfChannels: 1 })
-    expect(getEncodingBitrate(encoding, 'mp3')).toBe(320000)
-    expect(getEncodingBitrate(encoding, 'ogg-opus')).toBe(160000)
-    expect(getEncodingBitrate(encoding, 'flac')).toBeUndefined()
   })
 })
 

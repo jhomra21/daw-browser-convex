@@ -1,4 +1,5 @@
 export type ExportAudioFormat = 'wav' | 'mp3' | 'ogg-opus' | 'flac'
+export type LossyExportAudioFormat = 'mp3' | 'ogg-opus'
 
 type ExportAudioFormatMetadata = {
   id: ExportAudioFormat
@@ -46,8 +47,14 @@ export const getExportAudioFormatMetadata = (format: ExportAudioFormat): ExportA
   return exportAudioFormatMetadata[format]
 }
 
-export const getExportAudioBitrate = (format: ExportAudioFormat): number | undefined => (
-  exportAudioFormatMetadata[format].defaultBitrate
+export function getExportAudioBitrate(format: LossyExportAudioFormat): number
+export function getExportAudioBitrate(format: ExportAudioFormat): number | undefined
+export function getExportAudioBitrate(format: ExportAudioFormat): number | undefined {
+  return exportAudioFormatMetadata[format].defaultBitrate
+}
+
+export const isLossyExportAudioFormat = (format: ExportAudioFormat): format is LossyExportAudioFormat => (
+  format === 'mp3' || format === 'ogg-opus'
 )
 
 export const formatExportFileTimestamp = (date: Date): string => (

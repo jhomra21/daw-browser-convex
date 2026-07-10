@@ -1,4 +1,4 @@
-import { exportAudioFormats, getExportAudioBitrate, type ExportAudioFormat } from '@daw-browser/shared'
+import { getExportAudioBitrate, type ExportAudioFormat } from '@daw-browser/shared'
 import type { ExportAudioSupportRequest } from '@daw-browser/audio-engine/export-audio-support'
 
 const supportedFormatsByConfiguration = new Map<string, ExportAudioFormat[]>()
@@ -7,7 +7,8 @@ const supportPromisesByConfiguration = new Map<string, Promise<ExportAudioFormat
 const getSupportKey = (request: ExportAudioSupportRequest): string => JSON.stringify([
   request.sampleRate ?? 44100,
   request.numberOfChannels ?? 2,
-  ...exportAudioFormats.map((format) => request.bitrateByFormat?.[format] ?? getExportAudioBitrate(format)),
+  request.bitrateByFormat?.mp3 ?? getExportAudioBitrate('mp3'),
+  request.bitrateByFormat?.['ogg-opus'] ?? getExportAudioBitrate('ogg-opus'),
 ])
 
 export const getCachedSupportedExportAudioFormats = (

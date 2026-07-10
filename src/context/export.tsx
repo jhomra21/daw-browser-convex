@@ -1,7 +1,7 @@
 import { createContext, createSignal, onCleanup, type Accessor, type JSX, useContext } from 'solid-js'
 
 import { assert } from '@daw-browser/shared'
-import { runStemExport, runTimelineExport, type ExportOutcome, type ExportProgress, type StemExportRequest, type TimelineExportRequest } from '~/lib/export/run-export-job'
+import { runStemExport, runTimelineExport, type ExportOutcome, type ExportProgress, type StemExportSelection, type TimelineExportRequest } from '~/lib/export/run-export-job'
 
 type ExportJob = {
   id: string
@@ -13,7 +13,7 @@ type EnqueueTimelineExportRequest = Omit<TimelineExportRequest, 'signal' | 'onPr
   name?: string
 }
 
-type EnqueueStemExportRequest = Omit<StemExportRequest, 'signal' | 'onProgress'> & {
+type EnqueueStemExportRequest = Omit<TimelineExportRequest, 'signal' | 'onProgress'> & StemExportSelection & {
   name?: string
 }
 

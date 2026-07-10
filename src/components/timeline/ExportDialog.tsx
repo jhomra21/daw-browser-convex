@@ -121,8 +121,8 @@ const ExportDialog: Component<Props> = (props) => {
   const [sampleRate, setSampleRate] = createSignal<ExportSampleRate>(44100)
   const [numberOfChannels, setNumberOfChannels] = createSignal<1 | 2>(2)
   const [normalize, setNormalize] = createSignal(false)
-  const [mp3Bitrate, setMp3Bitrate] = createSignal(getExportAudioBitrate('mp3') ?? 192000)
-  const [opusBitrate, setOpusBitrate] = createSignal(getExportAudioBitrate('ogg-opus') ?? 128000)
+  const [mp3Bitrate, setMp3Bitrate] = createSignal(getExportAudioBitrate('mp3'))
+  const [opusBitrate, setOpusBitrate] = createSignal(getExportAudioBitrate('ogg-opus'))
   const [busy, setBusy] = createSignal(false)
   const [selectedFormats, setSelectedFormats] = createSignal<ExportAudioFormat[]>(['wav'])
   const [supportedFormats, setSupportedFormats] = createSignal<ExportAudioFormat[] | null>(null)
@@ -251,11 +251,13 @@ const ExportDialog: Component<Props> = (props) => {
       }
       const outcome = currentSource === 'mixdown'
         ? await exportContext.enqueueTimelineExport(baseRequest)
-        : await exportContext.enqueueStemExport({
-          ...baseRequest,
-          stemMode: currentSource === 'all-stems' ? 'all-tracks' : 'selected-tracks',
-          selectedTrackIds: props.selectedTrackIds,
-        })
+        : currentSource === 'all-stems'
+          ? await exportContext.enqueueStemExport({ ...baseRequest, stemMode: 'all-tracks' })
+          : await exportContext.enqueueStemExport({
+            ...baseRequest,
+            stemMode: 'selected-tracks',
+            selectedTrackIds: props.selectedTrackIds,
+          })
       setOutputs(outcome.outputs)
       if (outcome.type === 'error') setError(outcome.message)
       else if (outcome.type === 'canceled') setError(outcome.outputs.length > 0 ? 'Export canceled after saving completed outputs.' : 'Export canceled.')

@@ -1,7 +1,7 @@
 import type { AudioEffectRuntimeInstance, ExportFx } from '@daw-browser/audio-engine/export-mixdown'
 import { getExportRangeBounds, type ExportRange } from '@daw-browser/audio-engine/export-range'
 import type { ExportAudioFormat } from '@daw-browser/shared'
-import { formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectKind, isLocalId, normalizeCompressorParams,
+import { formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectKind, isLocalId, isLossyExportAudioFormat, normalizeCompressorParams,
   normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams } from '@daw-browser/shared'
 import type { FunctionReturnType } from 'convex/server'
 
@@ -19,7 +19,7 @@ import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { AutomationEnvelope } from '@daw-browser/shared'
-import { getEncodingBitrate, getExportRenderOptions, isRenderableExportTrack, type ExportEncodingSettings, type ExportRenderSettings } from '~/lib/export/export-settings'
+import { isRenderableExportTrack, type ExportEncodingSettings, type ExportRenderSettings } from '~/lib/export/export-settings'
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number]
 
@@ -51,12 +51,11 @@ export type TimelineExportRequest = {
   onProgress?: (progress: ExportProgress) => void
 }
 
-export type StemExportMode = 'all-tracks' | 'selected-tracks'
+export type StemExportSelection =
+  | { stemMode: 'all-tracks' }
+  | { stemMode: 'selected-tracks'; selectedTrackIds: readonly string[] }
 
-export type StemExportRequest = TimelineExportRequest & {
-  stemMode: StemExportMode
-  selectedTrackIds: readonly string[]
-}
+type StemExportRequest = TimelineExportRequest & StemExportSelection
 
 export type ExportOutput =
   | { destination: 'local'; name: string }
@@ -371,7 +370,7 @@ async function loadExportFxWithDrumRackBuffers(
   return fx
 }
 
-const collectStemTracks = (input: Pick<StemExportRequest, 'stemMode' | 'selectedTrackIds'> & { tracks: RuntimeTrack[] }): RuntimeTrack[] => {
+const collectStemTracks = (input: StemExportSelection & { tracks: RuntimeTrack[] }): RuntimeTrack[] => {
   if (input.stemMode === 'all-tracks') return input.tracks.filter(isRenderableExportTrack)
   const selectedIds = new Set(input.selectedTrackIds)
   return input.tracks.filter((track) => selectedIds.has(track.id) && isRenderableExportTrack(track))
@@ -482,7 +481,8 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       tracks,
       bpm: input.bpm,
       range: input.range,
-      ...getExportRenderOptions(input.render),
+      sampleRate: input.render.sampleRate,
+      numberOfChannels: input.render.numberOfChannels,
       fx,
       automationEnvelopes,
       signal: input.signal,
@@ -503,7 +503,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       })
       const enc = await exportMixdown.encodeAudioBuffer(rendered, {
         format,
-        bitrate: getEncodingBitrate(input.encoding, format),
+        bitrate: isLossyExportAudioFormat(format) ? input.encoding.bitrateByFormat[format] : undefined,
         target: localWritable ? createLocalExportTarget(localWritable) : { mode: 'buffer' },
         signal: input.signal,
         onWrite: reportEncodingProgress,
@@ -584,7 +584,8 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
       tracks,
       bpm: input.bpm,
       range: input.range,
-      ...getExportRenderOptions(input.render),
+      sampleRate: input.render.sampleRate,
+      numberOfChannels: input.render.numberOfChannels,
       fx,
       automationEnvelopes,
       signal: input.signal,
@@ -610,7 +611,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
         })
         await exportMixdown.encodeAudioBuffer(stemBuffer, {
           format,
-          bitrate: getEncodingBitrate(input.encoding, format),
+          bitrate: isLossyExportAudioFormat(format) ? input.encoding.bitrateByFormat[format] : undefined,
           target: createLocalExportTarget(localWritable),
           signal: input.signal,
           onWrite: reportEncodingProgress,

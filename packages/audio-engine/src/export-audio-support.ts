@@ -7,12 +7,18 @@ import {
   type AudioCodec,
   type OutputFormat,
 } from 'mediabunny'
-import { exportAudioFormats, getExportAudioBitrate, type ExportAudioFormat } from '@daw-browser/shared'
+import {
+  exportAudioFormats,
+  getExportAudioBitrate,
+  isLossyExportAudioFormat,
+  type ExportAudioFormat,
+  type LossyExportAudioFormat,
+} from '@daw-browser/shared'
 
 export type ExportAudioSupportRequest = {
   sampleRate?: number
   numberOfChannels?: number
-  bitrateByFormat?: Partial<Record<ExportAudioFormat, number>>
+  bitrateByFormat?: Partial<Record<LossyExportAudioFormat, number>>
 }
 
 type ExportAudioEncodingDescriptor = {
@@ -55,7 +61,8 @@ export const getExportAudioEncodingConfig = (
 ) => ({
   sampleRate: request.sampleRate ?? 44100,
   numberOfChannels: request.numberOfChannels ?? 2,
-  bitrate: request.bitrateByFormat?.[format] ?? getExportAudioDefaultBitrate(format),
+  bitrate: (isLossyExportAudioFormat(format) ? request.bitrateByFormat?.[format] : undefined)
+    ?? getExportAudioDefaultBitrate(format),
 })
 
 export const createExportAudioOutputFormat = (format: ExportAudioFormat): OutputFormat => {

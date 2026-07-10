@@ -54,7 +54,7 @@ export type StemExportMode = 'all-tracks' | 'selected-tracks'
 
 export type StemExportRequest = TimelineExportRequest & {
   stemMode: StemExportMode
-  selectedTrackIds?: readonly string[]
+  selectedTrackIds: readonly string[]
 }
 
 export type ExportOutput =
@@ -372,7 +372,7 @@ async function loadExportFxWithDrumRackBuffers(
 
 const collectStemTracks = (input: Pick<StemExportRequest, 'stemMode' | 'selectedTrackIds'> & { tracks: RuntimeTrack[] }): RuntimeTrack[] => {
   if (input.stemMode === 'all-tracks') return input.tracks.filter(isRenderableExportTrack)
-  const selectedIds = new Set(input.selectedTrackIds ?? [])
+  const selectedIds = new Set(input.selectedTrackIds)
   return input.tracks.filter((track) => selectedIds.has(track.id) && isRenderableExportTrack(track))
 }
 

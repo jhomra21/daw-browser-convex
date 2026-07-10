@@ -169,7 +169,7 @@ export const getAudioBufferPeak = (buffer: AudioSampleBuffer): number => {
 
 export const normalizeAudioBufferInPlace = (buffer: AudioSampleBuffer): number => {
   const peak = getAudioBufferPeak(buffer)
-  if (peak === 0 || peak >= 1 || !Number.isFinite(peak)) return 1
+  if (peak === 0 || peak >= 1) return 1
   const gain = 1 / peak
   for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
     const data = buffer.getChannelData(channel)

@@ -53,7 +53,6 @@ const ExportField: Component<{ label: string; labelFor?: string; children: JSX.E
 type ExportSelectProps = {
   id: string
   value: string | number
-  disabled?: boolean
   onChange: JSX.EventHandlerUnion<HTMLSelectElement, Event>
   children: JSX.Element
 }
@@ -64,7 +63,6 @@ const ExportSelect: Component<ExportSelectProps> = (props) => (
       id={props.id}
       class="h-7 w-full appearance-none border border-border bg-app-surface pl-2 pr-7 text-xs text-foreground focus:border-foreground/50 focus:outline-none disabled:opacity-50"
       value={props.value}
-      disabled={props.disabled}
       onChange={props.onChange}
     >
       {props.children}
@@ -141,12 +139,12 @@ const ExportDialog: Component<Props> = (props) => {
     bitrateByFormat: { mp3: mp3Bitrate(), 'ogg-opus': opusBitrate() },
   })
   const supportRequest = createMemo(() => ({
-    ...renderSettings(),
+    sampleRate: sampleRate(),
+    numberOfChannels: numberOfChannels(),
     ...encodingSettings(),
   }))
 
   createEffect(() => {
-    if (!props.isOpen) return
     const request = supportRequest()
     let canceled = false
     const applySupportedFormats = (formats: ExportAudioFormat[]) => {
@@ -156,7 +154,7 @@ const ExportDialog: Component<Props> = (props) => {
         const supportedSelected = selected.filter((format) => formats.includes(format))
         if (supportedSelected.length === selected.length) return selected
         if (supportedSelected.length > 0) return supportedSelected
-        return formats.includes('wav') ? ['wav'] : formats.slice(0, 1)
+        return ['wav']
       })
     }
     const cached = getCachedSupportedExportAudioFormats(request)
@@ -200,7 +198,6 @@ const ExportDialog: Component<Props> = (props) => {
     setRenderLengthSec(initialDuration())
   }
   const setLoopRegion = () => {
-    if (!props.loopEnabled) return
     setRangeMode('loop')
     setRenderStartSec(props.loopStartSec)
     setRenderLengthSec(Math.max(0.001, props.loopEndSec - props.loopStartSec))
@@ -216,7 +213,7 @@ const ExportDialog: Component<Props> = (props) => {
   const toggleFormat = (format: ExportAudioFormat, checked: boolean) => {
     if (!formatSupported(format)) return
     setSelectedFormats((formats) => checked
-      ? formats.includes(format) ? formats : [...formats, format]
+      ? [...formats, format]
       : formats.filter((item) => item !== format))
   }
 

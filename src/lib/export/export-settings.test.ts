@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { createCustomExportRange, deriveSelectedExportTrackIds, getEncodingBitrate, getExportRangeBounds, getExportRangeDuration, getExportRenderOptions, isRenderableExportTrack } from './export-settings'
+import { getExportRangeBounds } from '@daw-browser/audio-engine/export-range'
+import { createCustomExportRange, deriveSelectedExportTrackIds, getEncodingBitrate, getExportRangeDuration, getExportRenderOptions, isRenderableExportTrack } from './export-settings'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 
 const track = (

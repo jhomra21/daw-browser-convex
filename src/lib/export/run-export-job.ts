@@ -1,4 +1,5 @@
-import type { AudioEffectRuntimeInstance, ExportRange, ExportFx } from '@daw-browser/audio-engine/export-mixdown'
+import type { AudioEffectRuntimeInstance, ExportFx } from '@daw-browser/audio-engine/export-mixdown'
+import { getExportRangeBounds, type ExportRange } from '@daw-browser/audio-engine/export-range'
 import type { ExportAudioFormat } from '@daw-browser/shared'
 import { formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectKind, isLocalId, normalizeCompressorParams,
   normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams } from '@daw-browser/shared'
@@ -18,7 +19,7 @@ import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { AutomationEnvelope } from '@daw-browser/shared'
-import { getEncodingBitrate, getExportRangeBounds, getExportRenderOptions, isRenderableExportTrack, type ExportEncodingSettings, type ExportRenderSettings } from '~/lib/export/export-settings'
+import { getEncodingBitrate, getExportRenderOptions, isRenderableExportTrack, type ExportEncodingSettings, type ExportRenderSettings } from '~/lib/export/export-settings'
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number]
 

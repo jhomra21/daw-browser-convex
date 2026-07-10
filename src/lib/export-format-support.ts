@@ -26,13 +26,11 @@ export const probeSupportedExportAudioFormats = (
     exportAudioSupport.getSupportedExportAudioFormats(request)
   )).then((formats) => {
     supportedFormatsByConfiguration.set(key, formats)
-    supportPromisesByConfiguration.delete(key)
     return formats
-  }).catch(() => {
-    const fallbackFormats = ['wav'] satisfies ExportAudioFormat[]
-    supportedFormatsByConfiguration.set(key, fallbackFormats)
+  }).catch(() => (
+    ['wav'] satisfies ExportAudioFormat[]
+  )).finally(() => {
     supportPromisesByConfiguration.delete(key)
-    return fallbackFormats
   })
   supportPromisesByConfiguration.set(key, supportPromise)
   return supportPromise

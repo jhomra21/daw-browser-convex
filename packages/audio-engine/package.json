@@ -9,6 +9,7 @@
     "./bpm-detection": "./src/bpm-detection.ts",
     "./audio-scheduling": "./src/audio-scheduling.ts",
     "./export-audio-support": "./src/export-audio-support.ts",
+    "./export-range": "./src/export-range.ts",
     "./export-mixdown": "./src/export-mixdown.ts"
   },
   "scripts": {

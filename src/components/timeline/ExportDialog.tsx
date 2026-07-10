@@ -2,7 +2,7 @@ import { type Component, createEffect, createMemo, createSignal, For, onCleanup,
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '~/components/ui/dialog'
 import { Button } from '~/components/ui/button'
-import type { ExportRange } from '@daw-browser/audio-engine/export-mixdown'
+import type { ExportRange } from '@daw-browser/audio-engine/export-range'
 import { getExportAudioBitrate, getExportAudioFormatMetadata, type ExportAudioFormat } from '@daw-browser/shared'
 import { getCachedSupportedExportAudioFormats, probeSupportedExportAudioFormats } from '~/lib/export-format-support'
 import { useExportContext } from '~/context/export'
@@ -168,6 +168,10 @@ const ExportDialog: Component<Props> = (props) => {
   })
 
   const formatSupported = (format: ExportAudioFormat) => supportedFormats()?.includes(format) ?? format === 'wav'
+  const bitrateControlVisible = (format: 'mp3' | 'ogg-opus') => (
+    selectedFormats().includes(format)
+    || (supportedFormats() !== null && !formatSupported(format))
+  )
   const selectedStemAvailable = () => props.selectedTrackIds.length > 0
   const currentRange = (): ExportRange => {
     const mode = rangeMode()
@@ -370,14 +374,14 @@ const ExportDialog: Component<Props> = (props) => {
                 />
               </div>
             </ExportField>
-            <Show when={selectedFormats().includes('mp3') && formatSupported('mp3')}>
+            <Show when={bitrateControlVisible('mp3')}>
               <ExportField label="MP3 Bitrate" labelFor="export-mp3-bitrate">
                 <ExportSelect id="export-mp3-bitrate" value={mp3Bitrate()} onChange={(event) => setMp3Bitrate(Number(event.currentTarget.value))}>
                   <For each={getExportAudioFormatMetadata('mp3').bitratePresets}>{(bitrate) => <option value={bitrate}>{bitrate / 1000} kbps</option>}</For>
                 </ExportSelect>
               </ExportField>
             </Show>
-            <Show when={selectedFormats().includes('ogg-opus') && formatSupported('ogg-opus')}>
+            <Show when={bitrateControlVisible('ogg-opus')}>
               <ExportField label="Opus Bitrate" labelFor="export-opus-bitrate">
                 <ExportSelect id="export-opus-bitrate" value={opusBitrate()} onChange={(event) => setOpusBitrate(Number(event.currentTarget.value))}>
                   <For each={getExportAudioFormatMetadata('ogg-opus').bitratePresets}>{(bitrate) => <option value={bitrate}>{bitrate / 1000} kbps</option>}</For>

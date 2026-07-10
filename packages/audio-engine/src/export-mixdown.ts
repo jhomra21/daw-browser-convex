@@ -41,13 +41,10 @@ import type { Track } from '@daw-browser/timeline-core/types'
 import type { ResolvedMixerGraph } from './mixer/types'
 import { scheduleAutomationEnvelope } from './automation'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
+import { getExportRangeBounds, type ExportRange } from './export-range'
 
 export type { AudioEffectRuntimeInstance }
-
-export type ExportRange =
-  | { mode: 'whole' }
-  | { mode: 'loop'; startSec: number; endSec: number }
-  | { mode: 'custom'; startSec: number; endSec: number }
+export type { ExportRange } from './export-range'
 
 export type ExportFx = {
   masterVolume?: number
@@ -169,7 +166,7 @@ export const getAudioBufferPeak = (buffer: AudioSampleBuffer): number => {
 
 export const normalizeAudioBufferInPlace = (buffer: AudioSampleBuffer): number => {
   const peak = getAudioBufferPeak(buffer)
-  if (peak === 0 || peak >= 1) return 1
+  if (peak === 0 || peak === 1) return 1
   const gain = 1 / peak
   for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
     const data = buffer.getChannelData(channel)
@@ -273,25 +270,6 @@ function renderOfflineDrumRackEvents(input: {
   }
 }
 
-function lastClipEndSec(tracks: Track<AudioBuffer>[]): number {
-  let maxEnd = 0
-  for (const track of tracks) {
-    for (const clip of track.clips) {
-      maxEnd = Math.max(maxEnd, clip.startSec + clip.duration)
-    }
-  }
-  return Math.max(0.001, maxEnd)
-}
-
-function computeRangeSec(tracks: Track<AudioBuffer>[], range: ExportRange): { start: number; end: number } {
-  if (range.mode === 'whole') {
-    return { start: 0, end: lastClipEndSec(tracks) }
-  }
-  const start = Math.max(0, range.startSec)
-  const end = Math.max(start, range.endSec)
-  return { start, end }
-}
-
 function createTrackById(tracks: Track<AudioBuffer>[]): Map<string, Track<AudioBuffer>> {
   const trackById = new Map<string, Track<AudioBuffer>>()
   for (const track of tracks) trackById.set(track.id, track)
@@ -301,11 +279,11 @@ function createTrackById(tracks: Track<AudioBuffer>[]): Map<string, Track<AudioB
 function prepareExportRender(req: ExportRequest): PreparedExportRender {
   const { tracks, bpm, range, sampleRate = 44100, numberOfChannels = 2, fx, signal } = req
   throwIfAborted(signal)
-  const { start, end } = computeRangeSec(tracks, range)
-  const durationSec = Math.max(0.001, end - start)
+  const { startSec, endSec } = getExportRangeBounds(tracks, range)
+  const durationSec = endSec - startSec
   return {
     bpm,
-    range: { startSec: start, endSec: end, durationSec },
+    range: { startSec, endSec, durationSec },
     sampleRate,
     numberOfChannels,
     trackById: createTrackById(tracks),

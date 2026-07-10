@@ -124,11 +124,12 @@ describe('normalizeAudioBufferInPlace', () => {
     expect(Array.from(buffer.getChannelData(1))).toEqual([0.20000000298023224, 0.800000011920929])
   })
 
-  test('does not amplify silence, clipped audio, or non-finite samples', () => {
+  test('attenuates clipped audio and ignores silence and non-finite samples', () => {
     const silence = createBuffer([[0, 0]])
     expect(normalizeAudioBufferInPlace(silence)).toBe(1)
     const clipped = createBuffer([[1.2, -0.5]])
-    expect(normalizeAudioBufferInPlace(clipped)).toBe(1)
+    expect(normalizeAudioBufferInPlace(clipped)).toBeCloseTo(1 / 1.2)
+    expect(getAudioBufferPeak(clipped)).toBe(1)
     const nonFinite = createBuffer([[Number.NaN, Number.POSITIVE_INFINITY]])
     expect(normalizeAudioBufferInPlace(nonFinite)).toBe(1)
     expect(Number.isNaN(nonFinite.getChannelData(0)[0])).toBe(true)

@@ -1,4 +1,4 @@
-import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime } from './audio-runtime'
+import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime, type AudioRuntimeOptions } from './audio-runtime'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
 import { assert, getAutomationParameterDescriptor, normalizeMasterVolume, type ArpParams, type AudioEffectKind, type AutomationEnvelope, type CompressorParamsLite, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
@@ -27,8 +27,25 @@ export const LIVE_SCHEDULE_HORIZON_SEC = 30
 
 export { canFallbackToRepitchStretch, isStretchQualityWarning }
 export type { AudioEffectRuntimeInstance, AudioStretchRenderState, CompressorMeterFrame, DeferredStretchWindow, SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch }
+export type AudioRuntimeSnapshot = {
+  state: AudioContextState | 'uninitialized'
+  sampleRate: number | null
+  requestedSampleRate: number | null
+  latencyHint: AudioContextLatencyCategory | null
+  baseLatencySec: number | null
+  outputLatencySec: number | null
+  totalOutputLatencySec: number | null
+}
+type SinkSelectableAudioContext = AudioContext & {
+  setSinkId: (sinkId: string) => Promise<void>
+}
+const supportsSinkSelection = (context: AudioContext): context is SinkSelectableAudioContext =>
+  "setSinkId" in context && typeof context.setSinkId === "function"
 
 export class AudioEngine {
+  private runtimeOptions: AudioRuntimeOptions
+  private activeRuntimeOptions: AudioRuntimeOptions | null = null
+  private desiredOutputDeviceId = ''
   private runtime: AudioRuntime | null = null
   private audioCtx: AudioContext | null = null
   private masterGain: GainNode | null = null
@@ -82,6 +99,67 @@ export class AudioEngine {
     persist: true,
   })
 
+  constructor(options: AudioRuntimeOptions = { latencyHint: 'interactive' }) {
+    this.runtimeOptions = options
+  }
+
+  configureNextRuntime(options: AudioRuntimeOptions) {
+    this.runtimeOptions = options
+  }
+
+  getRuntimeSnapshot(): AudioRuntimeSnapshot {
+    if (!this.audioCtx) {
+      return {
+        state: 'uninitialized',
+        sampleRate: null,
+        requestedSampleRate: null,
+        latencyHint: null,
+        baseLatencySec: null,
+        outputLatencySec: null,
+        totalOutputLatencySec: null,
+      }
+    }
+    const baseLatencySec = Number.isFinite(this.audioCtx.baseLatency) ? this.audioCtx.baseLatency : null
+    const outputLatencySec = Number.isFinite(this.audioCtx.outputLatency) ? this.audioCtx.outputLatency : null
+    return {
+      state: this.audioCtx.state,
+      sampleRate: this.audioCtx.sampleRate,
+      requestedSampleRate: this.activeRuntimeOptions?.sampleRate ?? null,
+      latencyHint: this.activeRuntimeOptions?.latencyHint ?? null,
+      baseLatencySec,
+      outputLatencySec,
+      totalOutputLatencySec: baseLatencySec !== null && outputLatencySec !== null ? baseLatencySec + outputLatencySec : null,
+    }
+  }
+
+  async setOutputDevice(deviceId: string): Promise<'applied' | 'unsupported' | 'uninitialized'> {
+    this.desiredOutputDeviceId = deviceId
+    if (!this.audioCtx) return 'uninitialized'
+    if (!supportsSinkSelection(this.audioCtx)) return 'unsupported'
+    await this.audioCtx.setSinkId(deviceId)
+    return 'applied'
+  }
+
+  async playOutputTestTone(durationSec = 0.35) {
+    this.ensureAudio()
+    if (!this.audioCtx || !this.masterGain) return
+    await this.audioCtx.resume()
+    const oscillator = this.audioCtx.createOscillator()
+    const gain = this.audioCtx.createGain()
+    const now = this.audioCtx.currentTime
+    gain.gain.setValueAtTime(0.08, now)
+    gain.gain.linearRampToValueAtTime(0, now + durationSec)
+    oscillator.frequency.value = 440
+    oscillator.connect(gain)
+    gain.connect(this.masterGain)
+    oscillator.addEventListener('ended', () => {
+      oscillator.disconnect()
+      gain.disconnect()
+    }, { once: true })
+    oscillator.start(now)
+    oscillator.stop(now + durationSec)
+  }
+
   ensureStretchRender(clip: RuntimeClip) {
     this.stretchCache.ensure(clip, this.clock.getBpm())
   }
@@ -122,11 +200,13 @@ export class AudioEngine {
 
   ensureAudio(opts?: { applyCachedTrackGains?: boolean }) {
     if (!this.audioCtx) {
-      this.runtime = createAudioRuntime()
+      this.runtime = createAudioRuntime(this.runtimeOptions)
+      this.activeRuntimeOptions = this.runtimeOptions
       this.audioCtx = this.runtime.ctx
       this.masterGain = this.runtime.masterGain
       this.masterGain.gain.value = this.masterVolume
       this.destination = this.runtime.destination
+      if (this.desiredOutputDeviceId) void this.setOutputDevice(this.desiredOutputDeviceId).catch(() => undefined)
       this.masterFx.applyPending(this.audioCtx, this.masterGain, this.destination, (params) => this.createImpulseResponse(params))
       if (opts?.applyCachedTrackGains !== false) {
         this.updateTrackGains(this.tracksSnapshot)
@@ -464,6 +544,7 @@ export class AudioEngine {
     this.destination = null
     this.audioCtx = null
     this.runtime = null
+    this.activeRuntimeOptions = null
   }
 
   setMasterEq(params: EqParamsLite) {

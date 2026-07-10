@@ -5,7 +5,7 @@ import { DEFAULT_DAW_THEME_ID, parseThemeId, type DawThemeId } from "~/lib/theme
 export { parseHexColor } from "~/lib/color"
 
 export const APP_PREFERENCES_STORAGE_KEY = "daw-browser.app-preferences.v1"
-export const APP_PREFERENCES_VERSION = 1
+export const APP_PREFERENCES_VERSION = 2
 export const TIMELINE_DEFAULT_TRACK_COLOR = "timeline-surface"
 export const TIMELINE_DEFAULT_GROUP_COLOR = "timeline-surface"
 const LEGACY_DARK_TIMELINE_SURFACE_COLOR = "#181824"
@@ -14,6 +14,17 @@ const LEGACY_BRANCH_GROUP_ROW_COLOR = "#475569"
 
 export type AppTheme = ConfigColorMode
 export type ResolvedAppTheme = "light" | "dark"
+export type AudioSampleRatePreference = "default" | 44100 | 48000 | 96000
+export type AudioLatencyMode = "interactive" | "balanced" | "playback"
+export type AudioPreferences = {
+  inputDeviceId: string
+  outputDeviceId: string
+  sampleRate: AudioSampleRatePreference
+  latencyMode: AudioLatencyMode
+  echoCancellation: boolean
+  noiseSuppression: boolean
+  autoGainControl: boolean
+}
 
 export type AppPreferences = {
   version: typeof APP_PREFERENCES_VERSION
@@ -31,6 +42,7 @@ export type AppPreferences = {
     defaultTrackColor: string
     defaultGroupColor: string
   }
+  audio: AudioPreferences
 }
 
 
@@ -49,6 +61,15 @@ export const defaultAppPreferences: AppPreferences = {
   timeline: {
     defaultTrackColor: TIMELINE_DEFAULT_TRACK_COLOR,
     defaultGroupColor: TIMELINE_DEFAULT_GROUP_COLOR
+  },
+  audio: {
+    inputDeviceId: "",
+    outputDeviceId: "",
+    sampleRate: "default",
+    latencyMode: "interactive",
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false
   }
 }
 
@@ -63,6 +84,11 @@ export const parseAppTheme = (value: unknown): AppTheme =>
 
 const parseBoolean = (value: unknown, fallback: boolean): boolean =>
   typeof value === "boolean" ? value : fallback
+const parseDeviceId = (value: unknown): string => typeof value === "string" ? value : ""
+const parseSampleRate = (value: unknown): AudioSampleRatePreference =>
+  value === 44100 || value === 48000 || value === 96000 ? value : "default"
+const parseLatencyMode = (value: unknown): AudioLatencyMode =>
+  value === "balanced" || value === "playback" ? value : "interactive"
 
 const isTimelineDefaultColorToken = (value: unknown): value is typeof TIMELINE_DEFAULT_TRACK_COLOR | typeof TIMELINE_DEFAULT_GROUP_COLOR =>
   value === TIMELINE_DEFAULT_TRACK_COLOR || value === TIMELINE_DEFAULT_GROUP_COLOR
@@ -79,12 +105,13 @@ const normalizeTimelineDefaultColor = (value: unknown, fallback: string, legacyB
 
 export const normalizeAppPreferences = (value: unknown): AppPreferences => {
   if (!isRecord(value)) return defaultAppPreferences
-  if (value.version !== APP_PREFERENCES_VERSION) return defaultAppPreferences
+  if (value.version !== 1 && value.version !== APP_PREFERENCES_VERSION) return defaultAppPreferences
 
   const appearance = isRecord(value.appearance) ? value.appearance : {}
   const agent = isRecord(value.agent) ? value.agent : {}
   const sidebar = isRecord(value.sidebar) ? value.sidebar : {}
   const timeline = isRecord(value.timeline) ? value.timeline : {}
+  const audio = value.version === APP_PREFERENCES_VERSION && isRecord(value.audio) ? value.audio : {}
 
   return {
     version: APP_PREFERENCES_VERSION,
@@ -109,6 +136,15 @@ export const normalizeAppPreferences = (value: unknown): AppPreferences => {
         defaultAppPreferences.timeline.defaultGroupColor,
         LEGACY_BRANCH_GROUP_ROW_COLOR,
       )
+    },
+    audio: {
+      inputDeviceId: parseDeviceId(audio.inputDeviceId),
+      outputDeviceId: parseDeviceId(audio.outputDeviceId),
+      sampleRate: parseSampleRate(audio.sampleRate),
+      latencyMode: parseLatencyMode(audio.latencyMode),
+      echoCancellation: parseBoolean(audio.echoCancellation, defaultAppPreferences.audio.echoCancellation),
+      noiseSuppression: parseBoolean(audio.noiseSuppression, defaultAppPreferences.audio.noiseSuppression),
+      autoGainControl: parseBoolean(audio.autoGainControl, defaultAppPreferences.audio.autoGainControl)
     }
   }
 }

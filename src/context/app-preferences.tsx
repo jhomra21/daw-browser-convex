@@ -9,11 +9,16 @@ import {
   timelineDefaultCreateColor,
   type AppPreferences,
   type AppTheme,
+  type AudioLatencyMode,
+  type AudioPreferences,
+  type AudioSampleRatePreference,
   type ResolvedAppTheme
 } from "~/lib/preferences/app-preferences"
 import { themeColorInputValue } from "~/lib/preferences/theme-color-input"
 import { applyDawTheme, resolveDawThemeById, type ResolvedThemeTokens } from "~/lib/theme/theme-resolver"
 import { DEFAULT_DAW_THEME_ID, themeOptions, type DawThemeId, type DawThemeOption } from "~/lib/theme/theme-registry"
+import { resolveAudioRuntimeConfiguration } from "~/lib/audio-settings-core"
+import { configureAudioEngine, configureDesiredAudioOutputDevice } from "~/lib/audio-engine-singleton"
 
 type AppPreferencesContextValue = {
   appearance: {
@@ -49,6 +54,16 @@ type AppPreferencesContextValue = {
     resetDefaultTrackColor: () => void
     resetDefaultGroupColor: () => void
   }
+  audio: {
+    preferences: () => AudioPreferences
+    setInputDeviceId: (deviceId: string) => void
+    setOutputDeviceId: (deviceId: string) => void
+    setSampleRate: (sampleRate: AudioSampleRatePreference) => void
+    setLatencyMode: (latencyMode: AudioLatencyMode) => void
+    setEchoCancellation: (enabled: boolean) => void
+    setNoiseSuppression: (enabled: boolean) => void
+    setAutoGainControl: (enabled: boolean) => void
+  }
 }
 
 const AppPreferencesContext = createContext<AppPreferencesContextValue | null>(null)
@@ -81,6 +96,14 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
     const result = applyDawTheme(activeThemeId(), colorMode())
     if (!result.changed) return
     setThemeTokens(result.tokens)
+  })
+
+  createEffect(() => {
+    configureAudioEngine(resolveAudioRuntimeConfiguration(preferences.audio))
+  })
+
+  createEffect(() => {
+    configureDesiredAudioOutputDevice(preferences.audio.outputDeviceId)
   })
 
   const setTheme = (theme: AppTheme) => {
@@ -204,6 +227,16 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           setDefaultGroupColor,
           resetDefaultTrackColor,
           resetDefaultGroupColor
+        },
+        audio: {
+          preferences: () => preferences.audio,
+          setInputDeviceId: (deviceId) => setPreferences("audio", "inputDeviceId", deviceId),
+          setOutputDeviceId: (deviceId) => setPreferences("audio", "outputDeviceId", deviceId),
+          setSampleRate: (sampleRate) => setPreferences("audio", "sampleRate", sampleRate),
+          setLatencyMode: (latencyMode) => setPreferences("audio", "latencyMode", latencyMode),
+          setEchoCancellation: (enabled) => setPreferences("audio", "echoCancellation", enabled),
+          setNoiseSuppression: (enabled) => setPreferences("audio", "noiseSuppression", enabled),
+          setAutoGainControl: (enabled) => setPreferences("audio", "autoGainControl", enabled)
         }
       }}
     >

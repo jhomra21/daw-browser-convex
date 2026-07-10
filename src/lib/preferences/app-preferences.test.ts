@@ -32,11 +32,12 @@ describe("normalizeAppPreferences", () => {
         timeline: { defaultTrackColor: "#123456", defaultGroupColor: "#abcdef" }
       })
     ).toEqual({
-      version: 1,
+      version: 2,
       appearance: { theme: "dark", themeId: "catppuccin" },
       agent: { autoApply: true },
       sidebar: { open: false },
-      timeline: { defaultTrackColor: "#123456", defaultGroupColor: "#abcdef" }
+      timeline: { defaultTrackColor: "#123456", defaultGroupColor: "#abcdef" },
+      audio: defaultAppPreferences.audio
     })
   })
 
@@ -49,11 +50,12 @@ describe("normalizeAppPreferences", () => {
         sidebar: { open: false }
       })
     ).toEqual({
-      version: 1,
+      version: 2,
       appearance: { theme: "light", themeId: "default" },
       agent: { autoApply: true },
       sidebar: { open: false },
-      timeline: defaultAppPreferences.timeline
+      timeline: defaultAppPreferences.timeline,
+      audio: defaultAppPreferences.audio
     })
 
     expect(
@@ -65,11 +67,35 @@ describe("normalizeAppPreferences", () => {
         timeline: { defaultTrackColor: "red", defaultGroupColor: "#fedcba" }
       })
     ).toEqual({
-      version: 1,
+      version: 2,
       appearance: { theme: "dark", themeId: "default" },
       agent: { autoApply: true },
       sidebar: { open: false },
-      timeline: { defaultTrackColor: defaultAppPreferences.timeline.defaultTrackColor, defaultGroupColor: "#fedcba" }
+      timeline: { defaultTrackColor: defaultAppPreferences.timeline.defaultTrackColor, defaultGroupColor: "#fedcba" },
+      audio: defaultAppPreferences.audio
+    })
+  })
+
+  test("normalizes malformed version 2 audio fields independently", () => {
+    expect(normalizeAppPreferences({
+      ...defaultAppPreferences,
+      audio: {
+        inputDeviceId: 4,
+        outputDeviceId: "speaker",
+        sampleRate: 12345,
+        latencyMode: "fast",
+        echoCancellation: false,
+        noiseSuppression: "yes",
+        autoGainControl: true
+      }
+    }).audio).toEqual({
+      inputDeviceId: "",
+      outputDeviceId: "speaker",
+      sampleRate: "default",
+      latencyMode: "interactive",
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: true
     })
   })
 

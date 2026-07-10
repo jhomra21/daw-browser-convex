@@ -6,8 +6,13 @@ export type AudioRuntime = {
   destination: AudioDestinationNode
 }
 
-export function createAudioRuntime(): AudioRuntime {
-  const ctx = new AudioContext()
+export type AudioRuntimeOptions = {
+  sampleRate?: number
+  latencyHint: AudioContextLatencyCategory
+}
+
+export function createAudioRuntime(options: AudioRuntimeOptions): AudioRuntime {
+  const ctx = new AudioContext(options)
   const masterGain = ctx.createGain()
   masterGain.gain.value = 1.0
 

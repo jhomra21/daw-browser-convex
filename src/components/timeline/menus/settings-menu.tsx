@@ -18,6 +18,9 @@ export const SettingsMenu: Component<{ toolbar: TransportControlsProps }> = (pro
         <MenubarItem class={nativeMenuItemClass} onSelect={() => toolbar().projectMenu.onOpenDashboard("timeline")}>
           Timeline / DAW dashboard
         </MenubarItem>
+        <MenubarItem class={nativeMenuItemClass} onSelect={() => toolbar().projectMenu.onOpenDashboard("audio")}>
+          Audio settings
+        </MenubarItem>
         <MenubarSeparator />
         <MenubarItem as={Link} to="/about" class={nativeMenuItemClass}>
           About

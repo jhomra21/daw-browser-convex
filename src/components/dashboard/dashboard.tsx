@@ -10,9 +10,11 @@ import { DashboardSamplesView } from "./samples-view";
 import { DashboardTimelineView } from "./timeline-view";
 import { DashboardKeyboardView } from "./keyboard-view";
 import { DashboardExportView } from "./export-view";
+import { DashboardAudioView } from "./audio-view";
 
 const items: readonly { view: DashboardView; label: string }[] = [
   { view: "general", label: "General" },
+  { view: "audio", label: "Audio" },
   { view: "projects", label: "Projects" },
   { view: "files", label: "Local Files" },
   { view: "samples", label: "Samples" },
@@ -75,6 +77,9 @@ export function Dashboard(props: DashboardProps) {
                 </Match>
                 <Match when={selectedView() === "account"}>
                   <DashboardAccountView />
+                </Match>
+                <Match when={selectedView() === "audio"}>
+                  <DashboardAudioView />
                 </Match>
                 <Match when={selectedView() === "projects"}>
                   <DashboardProjectsView model={props.model} onOpenProject={props.onOpenProject} />

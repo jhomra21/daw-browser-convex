@@ -35,6 +35,8 @@ import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { UploadToR2 } from '~/hooks/useClipBuffers'
 import type { Track } from '@daw-browser/timeline-core/types'
+import type { AudioPreferences } from '~/lib/preferences/app-preferences'
+import { buildRecordingConstraints } from '~/lib/audio-settings-core'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 
@@ -63,6 +65,7 @@ type UseTrackRecordingOptions = {
   notify: (message: string) => void
   historyPush: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
+  recordingPreferences: Accessor<AudioPreferences>
 }
 
 type StartRecordingResult = {
@@ -108,6 +111,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     notify,
     historyPush,
     grantClipWrite,
+    recordingPreferences,
   } = options
 
   const [isRecordingInternal, setIsRecordingInternal] = createSignal(false)
@@ -447,11 +451,15 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
     let stream: MediaStream
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    } catch {
-      emit('Microphone access denied.')
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: buildRecordingConstraints(recordingPreferences(), navigator.mediaDevices.getSupportedConstraints())
+      })
+    } catch (error) {
+      const missingDevice = error instanceof DOMException && (error.name === 'NotFoundError' || error.name === 'OverconstrainedError')
+      const permissionDenied = error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'SecurityError')
+      emit(missingDevice ? 'The selected microphone is unavailable.' : permissionDenied ? 'Microphone access denied.' : 'Unable to capture microphone audio.')
       await releaseTrackLock(trackId, uid, isLocalProject)
-      return { ok: false, reason: 'Permission denied' }
+      return { ok: false, reason: missingDevice ? 'Device unavailable' : permissionDenied ? 'Permission denied' : 'Capture failed' }
     }
 
     const mimeType = recordingSupport.mimeType

@@ -22,8 +22,11 @@ describe("audio settings policy", () => {
   test("deduplicates devices and preserves missing selections", () => {
     const input: MediaDeviceInfo = { deviceId: "mic", groupId: "g", kind: "audioinput", label: "Mic", toJSON: () => ({}) }
     const output: MediaDeviceInfo = { deviceId: "speaker", groupId: "g", kind: "audiooutput", label: "Speaker", toJSON: () => ({}) }
-    const result = filterAudioDevices([input, input, output])
+    const defaultInput: MediaDeviceInfo = { ...input, deviceId: "default", label: "Default - Mic" }
+    const communicationsInput: MediaDeviceInfo = { ...input, deviceId: "communications", label: "Communications - Mic" }
+    const result = filterAudioDevices([defaultInput, communicationsInput, input, input, output])
     expect(result.inputs).toHaveLength(1)
+    expect(result.inputs[0]?.deviceId).toBe("mic")
     expect(result.outputs).toHaveLength(1)
     expect(isSelectedDeviceAvailable("missing", result.inputs)).toBe(false)
     expect(isSelectedDeviceAvailable("", result.inputs)).toBe(true)

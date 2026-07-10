@@ -16,8 +16,11 @@ export type LocalEffectRow<TParams = any> = {
 }
 
 const EFFECT_KIND = 'effect'
-const effectId = (targetId: string, effect: LocalEffectKind) => `${targetId}:${effect}`
-const effectInstanceRowId = (targetId: string, instanceId: string) => `${targetId}:effect:${instanceId}`
+export const localEffectRowId = (
+  targetId: string,
+  effect: LocalEffectKind,
+  instanceId?: string,
+) => instanceId ? `${targetId}:effect:${instanceId}` : `${targetId}:${effect}`
 export const createAudioEffectInstanceId = () => `audio-effect:${crypto.randomUUID()}`
 const now = () => Date.now()
 
@@ -39,7 +42,7 @@ const getExactLocalEffect = async <TParams>(
   effect: LocalEffectKind,
 ): Promise<LocalEffectRow<TParams> | undefined> => {
   const db = await openLocalProjectDb(projectId)
-  const row = await db.get('entities', [EFFECT_KIND, effectId(targetId, effect)])
+  const row = await db.get('entities', [EFFECT_KIND, localEffectRowId(targetId, effect)])
   return isLocalEffectRow<TParams>(row?.value) ? row.value : undefined
 }
 
@@ -59,14 +62,14 @@ export async function getLocalEffect<TParams>(
   effect: LocalEffectKind,
 ) {
   const db = await openLocalProjectDb(projectId)
-  const row = await db.get('entities', [EFFECT_KIND, effectId(targetId, effect)])
+  const row = await db.get('entities', [EFFECT_KIND, localEffectRowId(targetId, effect)])
   if (isLocalEffectRow(row?.value)) {
     if (effect !== 'instrument') return row.value
     const params = normalizeTrackInstrumentParams(row.value.params)
     return params ? { ...row.value, params } : undefined
   }
   if (effect !== 'instrument') return undefined
-  const synthRow = await db.get('entities', [EFFECT_KIND, effectId(targetId, 'synth')])
+  const synthRow = await db.get('entities', [EFFECT_KIND, localEffectRowId(targetId, 'synth')])
   return isLocalEffectRow<SynthParamsInput>(synthRow?.value)
     ? {
       ...synthRow.value,
@@ -97,7 +100,7 @@ export const setLocalEffect = async <TParams>(
   const timestamp = now()
   const rowIndex = index ?? existingRow?.index
   const row: LocalEffectRow<TParams> = {
-    id: effectId(targetId, effect),
+    id: localEffectRowId(targetId, effect),
     targetId,
     effect,
     params,
@@ -107,7 +110,7 @@ export const setLocalEffect = async <TParams>(
   const tx = db.transaction('entities', 'readwrite')
   await tx.store.put(createLocalProjectEntityRow(EFFECT_KIND, row.id, row, row.updatedAt))
   if (effect === 'instrument') {
-    await tx.store.delete([EFFECT_KIND, effectId(targetId, 'synth')])
+    await tx.store.delete([EFFECT_KIND, localEffectRowId(targetId, 'synth')])
   }
   await tx.done
   notifyLocalProjectChanged(projectId)
@@ -126,7 +129,7 @@ export const setLocalEffectInstance = async <TParams>(
 ): Promise<LocalEffectRow<TParams>> => {
   const instanceId = input?.instanceId ?? createAudioEffectInstanceId()
   const db = await openLocalProjectDb(projectId)
-  const id = effectInstanceRowId(targetId, instanceId)
+  const id = localEffectRowId(targetId, effect, instanceId)
   const existing = await db.get('entities', [EFFECT_KIND, id])
   const existingRow = isLocalEffectRow<TParams>(existing?.value) ? existing.value : undefined
   const timestamp = now()
@@ -150,7 +153,7 @@ export const deleteLocalEffect = async (
   effect: LocalEffectKind,
 ): Promise<void> => {
   const db = await openLocalProjectDb(projectId)
-  const key: [string, string] = [EFFECT_KIND, effectId(targetId, effect)]
+  const key: [string, string] = [EFFECT_KIND, localEffectRowId(targetId, effect)]
   const row = await db.get('entities', key)
   if (!isLocalEffectRow(row?.value)) return
   await db.delete('entities', key)
@@ -168,7 +171,7 @@ export const deleteLocalEffectInstance = async (
     return
   }
   const db = await openLocalProjectDb(projectId)
-  const key: [string, string] = [EFFECT_KIND, effectInstanceRowId(targetId, instanceId)]
+  const key: [string, string] = [EFFECT_KIND, localEffectRowId(targetId, effect, instanceId)]
   const row = await db.get('entities', key)
   if (!isLocalEffectRow(row?.value)) return
   await db.delete('entities', key)

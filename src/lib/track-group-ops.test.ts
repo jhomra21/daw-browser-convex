@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { hasTrackGroupCycle } from '@daw-browser/shared'
 import type { Track } from '@daw-browser/timeline-core/types'
 import {
   normalizeDragMoveSet,
@@ -77,14 +78,33 @@ describe('track group operations', () => {
   test('planUngroupTracks resets output only when output targets the group', () => {
     expect(planUngroupTracks({
       tracks: [
+        track({ id: 'g', channelRole: 'group' }),
         track({ id: 'a', groupId: 'g', outputTargetId: 'g' }),
         track({ id: 'b', groupId: 'g', outputTargetId: 'custom' }),
       ],
       groupId: 'g',
-    }).childUpdates).toEqual([
+    })?.childUpdates).toEqual([
       { trackId: 'a', groupId: undefined, outputTargetId: undefined },
       { trackId: 'b', groupId: undefined, outputTargetId: 'custom' },
     ])
+  })
+
+  test('planUngroupTracks rejects groups with clips or external routing', () => {
+    expect(planUngroupTracks({
+      tracks: [
+        track({ id: 'g', channelRole: 'group', clips: [clip({ id: 'group-clip', startSec: 0, duration: 1, color: 'clip-audio' })] }),
+        track({ id: 'a', groupId: 'g' }),
+      ],
+      groupId: 'g',
+    })).toBeNull()
+    expect(planUngroupTracks({
+      tracks: [
+        track({ id: 'g', channelRole: 'group' }),
+        track({ id: 'a', groupId: 'g' }),
+        track({ id: 'external', outputTargetId: 'g' }),
+      ],
+      groupId: 'g',
+    })).toBeNull()
   })
 
   test('planMoveTrackToGroup rejects cycles and non-group parents', () => {
@@ -98,6 +118,18 @@ describe('track group operations', () => {
       trackId: 'a',
       groupId: 'b',
     })).toBeNull()
+  })
+
+  test('hasTrackGroupCycle detects only circular group hierarchies', () => {
+    expect(hasTrackGroupCycle([
+      { id: 'g', groupId: undefined },
+      { id: 'a', groupId: 'g' },
+      { id: 'b', groupId: 'a' },
+    ])).toBeFalse()
+    expect(hasTrackGroupCycle([
+      { id: 'g', groupId: 'a' },
+      { id: 'a', groupId: 'g' },
+    ])).toBeTrue()
   })
 
   test('resolveTrackDropZone resolves edges and group interior', () => {
@@ -247,7 +279,7 @@ describe('track group operations', () => {
     })
     expect(planSetTrackColor([
       track({ id: 'a', color: '#0f0', clips: [clip({ id: 'c', startSec: 0, duration: 1, color: '#00f' })] }),
-    ], 'a', '#f00')).toEqual({
+    ], 'a', '#f00', { cascadeClipColors: true })).toEqual({
       trackUpdates: [{ trackId: 'a', from: '#0f0', to: '#f00' }],
       clipUpdates: [],
     })

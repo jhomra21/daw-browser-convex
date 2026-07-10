@@ -1,3 +1,4 @@
+import { collectTrackDescendantIds } from '@daw-browser/shared'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { clientYToTimelineTrackY, COLLAPSED_LANE_HEIGHT, DEFAULT_AUTOMATION_LANE_HEIGHT, LANE_HEIGHT } from '~/lib/timeline-utils'
 
@@ -84,36 +85,6 @@ export const wouldCreateCycle = (
     current = parentOf.get(current)
   }
   return false
-}
-
-const buildChildrenByParentTrackId = (
-  tracks: readonly Pick<Track, 'id' | 'groupId'>[],
-): Map<Track['id'], Track['id'][]> => {
-  const childrenByParent = new Map<Track['id'], Track['id'][]>()
-  for (const track of tracks) {
-    if (!track.groupId) continue
-    const children = childrenByParent.get(track.groupId) ?? []
-    children.push(track.id)
-    childrenByParent.set(track.groupId, children)
-  }
-  return childrenByParent
-}
-
-export const collectTrackDescendantIds = (
-  tracks: readonly Pick<Track, 'id' | 'groupId'>[],
-  rootTrackId: Track['id'],
-): Set<Track['id']> => {
-  const childrenByParent = buildChildrenByParentTrackId(tracks)
-  const descendants = new Set<Track['id']>()
-  const collect = (trackId: Track['id']) => {
-    for (const childId of childrenByParent.get(trackId) ?? []) {
-      if (descendants.has(childId)) continue
-      descendants.add(childId)
-      collect(childId)
-    }
-  }
-  collect(rootTrackId)
-  return descendants
 }
 
 export type GroupClipOverviewSegment = { startSec: number; endSec: number; color: string }

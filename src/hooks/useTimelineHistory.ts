@@ -29,6 +29,7 @@ import {
 } from '~/lib/undo/history-model'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { createDrumRackBufferSync } from '~/lib/drum-rack-buffer-sync'
+import { registerSharedOutboxHistoryHandler } from '~/lib/shared-outbox'
 
 type TimelineHistoryActions = Parameters<typeof execUndo>[1]['actions']
 
@@ -192,6 +193,13 @@ export function useTimelineHistory(
     if (!scope || scope.projectId !== entry.projectId) return
     getScopeContext(scope).manager.push(entry, mergeKey, mergeWindowMs)
   }
+
+  const unregisterSharedOutboxHistory = registerSharedOutboxHistoryHandler((entry) => {
+    if (entry.projectId !== options.projectId()) return false
+    pushHistory(entry)
+    return true
+  })
+  onCleanup(unregisterSharedOutboxHistory)
 
   const runHistoryAction = (
     mode: 'undo' | 'redo',

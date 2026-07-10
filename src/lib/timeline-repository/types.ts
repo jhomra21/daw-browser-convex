@@ -1,4 +1,5 @@
 import type { AudioSourceKind } from '~/lib/audio-source'
+import type { AutomationEnvelope } from '@daw-browser/shared'
 import type { AudioWarp, TrackChannelRole, TrackId } from '@daw-browser/timeline-core/types'
 
 export type TimelineEntityKind = 'track' | 'clip' | 'effect' | 'mixerChannel'
@@ -149,6 +150,31 @@ export type ReorderAndGroupTrackInput = {
   outputTargetId?: TimelineTrackId | null
 }
 
+export type TrackColorBatchUpdate = {
+  trackId: TimelineTrackId
+  color?: string | null
+}
+
+export type ClipColorBatchUpdate = {
+  clipId: TimelineClipId
+  color: string
+}
+
+export type RestoreUngroupInput = {
+  group: TimelineTrackRow
+  children: Array<{ trackId: TimelineTrackId; outputTargetId?: TimelineTrackId; outputToGroup: boolean }>
+  effects: Array<{
+    id: string
+    targetId: TimelineTrackId
+    effect: string
+    instanceId?: string
+    params: unknown
+    index?: number
+    updatedAt: number
+  }>
+  automation: AutomationEnvelope[]
+}
+
 export type TimelineRepository = {
   loadSnapshot: () => Promise<TimelineSnapshot>
   createTrack: (input: CreateTrackInput) => Promise<TimelineTrackRow>
@@ -157,6 +183,9 @@ export type TimelineRepository = {
   updateClip: (input: UpdateClipInput) => Promise<TimelineClipRow | null>
   moveClips: (moves: MoveClipInput[]) => Promise<void>
   reorderAndGroup: (updates: ReorderAndGroupTrackInput[]) => Promise<void>
+  ungroupTrack: (groupId: TimelineTrackId) => Promise<void>
+  restoreUngroup: (input: RestoreUngroupInput) => Promise<void>
+  applyColorBatch: (updates: { tracks: TrackColorBatchUpdate[]; clips: ClipColorBatchUpdate[] }) => Promise<void>
   deleteTrack: (trackId: TimelineTrackId) => Promise<void>
   deleteClip: (clipId: TimelineClipId) => Promise<void>
   deleteClips: (clipIds: TimelineClipId[]) => Promise<void>

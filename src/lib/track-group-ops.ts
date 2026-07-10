@@ -1,8 +1,9 @@
 import type { Track, TrackChannelRole, TrackId } from '@daw-browser/timeline-core/types'
 import { getDefaultClipColor, trackColorForClip } from '~/lib/clip-color'
-import { collectTrackDescendantIds, wouldCreateCycle } from '~/lib/timeline-track-layout'
+import { collectTrackDescendantIds } from '@daw-browser/shared'
+import { wouldCreateCycle } from '~/lib/timeline-track-layout'
 
-type TrackForGroupOps = Pick<Track, 'id' | 'groupId' | 'outputTargetId' | 'channelRole' | 'color'>
+type TrackForGroupOps = Pick<Track, 'id' | 'groupId' | 'outputTargetId' | 'channelRole' | 'color' | 'clips' | 'sends'>
 
 type PlannedTrackGroupChildUpdate = {
   trackId: TrackId
@@ -120,15 +121,32 @@ export const planGroupTracks = (input: {
 export const planUngroupTracks = (input: {
   tracks: readonly TrackForGroupOps[]
   groupId: TrackId
-}): UngroupTracksPlan => ({
-  childUpdates: input.tracks
-    .filter((track) => track.groupId === input.groupId)
-    .map((track) => ({
-      trackId: track.id,
-      groupId: undefined,
-      outputTargetId: outputTargetForGroupChange(track, undefined),
-    })),
-})
+}): UngroupTracksPlan | null => {
+  const group = input.tracks.find((track) => track.id === input.groupId)
+  if (!group || group.channelRole !== 'group') return null
+  if (group.clips.length > 0) return null
+  const directChildIds = new Set(
+    input.tracks.filter((track) => track.groupId === input.groupId).map((track) => track.id),
+  )
+  const hasExternalReference = input.tracks.some((track) => (
+    track.id !== input.groupId
+    && !directChildIds.has(track.id)
+    && (
+      track.outputTargetId === input.groupId
+      || (track.sends ?? []).some((send) => send.targetId === input.groupId)
+    )
+  ))
+  if (hasExternalReference) return null
+  return {
+    childUpdates: input.tracks
+      .filter((track) => track.groupId === input.groupId)
+      .map((track) => ({
+        trackId: track.id,
+        groupId: group.groupId,
+        outputTargetId: track.outputTargetId === input.groupId ? group.groupId : track.outputTargetId,
+      })),
+  }
+}
 
 export const planMoveTrackToGroup = (input: {
   tracks: readonly TrackForGroupOps[]

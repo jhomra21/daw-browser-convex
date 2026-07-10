@@ -3,18 +3,17 @@ import { assert, buildClipCreatePayload, normalizeAudioWarp, normalizeCompressor
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
-import { reorderLocalAudioEffects, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects";
+import { localEffectRowId, reorderLocalAudioEffects, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects";
 import { deleteLocalAutomationEnvelope, setLocalAutomationEnvelope } from "~/lib/local-automation";
 import { automationTargetKey, isLocalId } from "@daw-browser/shared";
-import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
-import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, isAppliedSharedTimelineOperationResult, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
+import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, isAppliedSharedTimelineOperationResult, publishSharedTimelineOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { buildTrackCreateMutationInput, buildTrackDeleteMutationInput, buildTrackMixMutationInput, buildTrackVolumeMutationInput } from "~/lib/track-mutation-args";
 import { buildTrackRoutingMutationInput } from "~/lib/track-routing-state";
 import type { LocalMixPatch } from "~/lib/timeline-storage";
 import type { Track, TrackRouting } from "@daw-browser/timeline-core/types";
 import type { Deps } from "./exec";
-import type { HistoryEntry } from "./types";
+import type { HistoryEntry, TrackAudioEffectSnapshot, TrackAutomationSnapshot, TrackEffectSnapshot } from "./types";
 
 type ClipMove = { clipId: string; trackId: Track["id"]; startSec: number };
 
@@ -128,7 +127,7 @@ export const createHistoryTrack = async (
     channelRole: payload.channelRole,
     color: track.color,
   });
-  const result = await publishDurableSharedTimelineOperation({ projectId: deps.projectId, userId: deps.userId, operation });
+  const result = await publishSharedTimelineOperation(deps.projectId, operation);
   assert(typeof result === "string", "Failed to create history track");
   return result;
 };
@@ -164,6 +163,29 @@ export const persistHistoryTrackColor = async (
   await publishHistoryOperation(deps, { kind: "tracks.setColor", payload: { trackId, color } });
 };
 
+export const persistHistoryColorBatch = async (
+  deps: Deps,
+  updates: {
+    tracks: Array<{ trackId: Track["id"]; color: string | undefined }>
+    clips: Array<{ clipId: string; color: string }>
+  },
+) => {
+  if (isLocalHistoryProject(deps)) {
+    await createLocalTimelineRepository(deps.projectId).applyColorBatch({
+      tracks: updates.tracks.map((update) => ({ trackId: update.trackId, color: update.color ?? null })),
+      clips: updates.clips,
+    });
+    return;
+  }
+  await publishHistoryOperation(deps, {
+    kind: "tracks.applyColorBatch",
+    payload: {
+      trackUpdates: updates.tracks.map((update) => ({ trackId: update.trackId, color: update.color ?? null })),
+      clipUpdates: updates.clips,
+    },
+  });
+};
+
 export const persistHistoryTrackReorder = async (
   deps: Deps,
   updates: Array<{ trackId: Track["id"]; index: number; groupId?: Track["id"] | null; outputTargetId?: Track["id"] | null }>,
@@ -174,6 +196,157 @@ export const persistHistoryTrackReorder = async (
   }
   await publishHistoryOperation(deps, { kind: "tracks.reorderAndGroup", payload: { updates } });
 };
+
+export const persistHistoryUngroup = async (deps: Deps, groupId: Track["id"]) => {
+  if (isLocalHistoryProject(deps)) {
+    await createLocalTimelineRepository(deps.projectId).ungroupTrack(groupId);
+    return;
+  }
+  await publishHistoryOperation(deps, {
+    kind: "tracks.ungroup",
+    payload: { groupId, operationId: crypto.randomUUID() },
+  });
+};
+
+type RestoreUngroupInput = {
+  groupId: Track["id"]
+  operationId?: string
+  group: {
+    trackRef?: string
+    name: string
+    index: number
+    volume: number
+    muted?: boolean
+    soloed?: boolean
+    kind?: Track["kind"]
+    channelRole?: Track["channelRole"]
+    parentGroupId?: Track["id"]
+    collapsed?: boolean
+    color?: string
+    routing: { outputTargetId?: Track["id"]; sends: TrackRouting["sends"] }
+  }
+  children: Array<{ trackId: Track["id"]; outputTargetId?: Track["id"]; outputToGroup: boolean }>
+  effects?: TrackEffectSnapshot
+  automation?: TrackAutomationSnapshot
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === "object" && value !== null && !Array.isArray(value)
+)
+
+const snapshotAudioEffects = (effects: TrackEffectSnapshot): TrackAudioEffectSnapshot[] => {
+  if (effects.audioEffects?.length) return effects.audioEffects
+  const audioEffects: TrackAudioEffectSnapshot[] = []
+  if (effects.eq) audioEffects.push({ effect: "eq", params: effects.eq })
+  if (effects.compressor) audioEffects.push({ effect: "compressor", params: effects.compressor })
+  if (effects.saturator) audioEffects.push({ effect: "saturator", params: effects.saturator })
+  if (effects.delay) audioEffects.push({ effect: "delay", params: effects.delay })
+  if (effects.reverb) audioEffects.push({ effect: "reverb", params: effects.reverb })
+  return audioEffects
+}
+
+const localRestoreEffectRows = (trackId: Track["id"], effects: TrackEffectSnapshot | undefined) => {
+  if (!effects) return []
+  const timestamp = Date.now()
+  const audioEffects = snapshotAudioEffects(effects)
+  return [
+    ...audioEffects.map((effect) => ({
+      id: localEffectRowId(trackId, effect.effect, effect.instanceId),
+      targetId: trackId,
+      effect: effect.effect,
+      instanceId: effect.instanceId,
+      params: effect.params,
+      index: effect.index,
+      updatedAt: timestamp,
+    })),
+    ...(effects.instrument ? [{ id: localEffectRowId(trackId, "instrument"), targetId: trackId, effect: "instrument", params: effects.instrument, updatedAt: timestamp }] : []),
+    ...(!effects.instrument && effects.synth ? [{ id: localEffectRowId(trackId, "synth"), targetId: trackId, effect: "synth", params: effects.synth, updatedAt: timestamp }] : []),
+    ...(effects.arp ? [{ id: localEffectRowId(trackId, "arp"), targetId: trackId, effect: "arp", params: effects.arp, updatedAt: timestamp }] : []),
+  ]
+}
+
+type SharedRestoreEffects = Extract<SharedTimelineOperation, { kind: 'tracks.restoreUngroup' }>['payload']['effects']
+
+const sharedRestoreEffects = (effects: TrackEffectSnapshot | undefined): SharedRestoreEffects => {
+  if (!effects) return []
+  const audioEffects = snapshotAudioEffects(effects)
+  const restored: SharedRestoreEffects = []
+  for (const effect of audioEffects) {
+    restored.push({ type: effect.effect, instanceId: effect.instanceId, index: effect.index, params: effect.params })
+  }
+  if (effects.instrument) restored.push({ type: 'instrument', params: effects.instrument })
+  if (!effects.instrument && effects.synth) restored.push({ type: 'synth', params: effects.synth })
+  if (effects.arp) restored.push({ type: 'arpeggiator', params: effects.arp })
+  return restored
+}
+
+export const persistHistoryRestoreUngroup = async (deps: Deps, input: RestoreUngroupInput): Promise<Track["id"]> => {
+  const groupId = input.groupId
+  if (isLocalHistoryProject(deps)) {
+    await createLocalTimelineRepository(deps.projectId).restoreUngroup({
+      group: {
+        id: groupId,
+        historyRef: input.group.trackRef ?? groupId,
+        name: input.group.name,
+        index: input.group.index,
+        volume: input.group.volume,
+        muted: input.group.muted ?? false,
+        soloed: input.group.soloed ?? false,
+        kind: input.group.kind ?? "audio",
+        channelRole: input.group.channelRole ?? "group",
+        collapsed: input.group.collapsed,
+        color: input.group.color,
+        groupId: input.group.parentGroupId,
+        outputTargetId: input.group.routing.outputTargetId,
+        sends: input.group.routing.sends ?? [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+      children: input.children,
+      effects: localRestoreEffectRows(groupId, input.effects),
+      automation: (input.automation ?? []).map((envelope) => ({
+        ...envelope,
+        target: { kind: "track", trackId: groupId },
+        targetKey: automationTargetKey({ kind: "track", trackId: groupId }, envelope.parameterId),
+      })),
+    })
+    return groupId
+  }
+  const result = await publishSharedTimelineOperation(
+    deps.projectId,
+    {
+      kind: "tracks.restoreUngroup",
+      payload: {
+        group: {
+          index: input.group.index,
+          kind: input.group.kind,
+          historyRef: input.group.trackRef,
+          parentGroupId: input.group.parentGroupId,
+          collapsed: input.group.collapsed,
+          color: input.group.color,
+          volume: input.group.volume,
+          muted: input.group.muted,
+          soloed: input.group.soloed,
+          outputTargetId: input.group.routing.outputTargetId,
+          sends: input.group.routing.sends ?? [],
+        },
+        children: input.children,
+        effects: sharedRestoreEffects(input.effects),
+        automation: (input.automation ?? []).map((envelope) => ({
+          parameterId: envelope.parameterId,
+          enabled: envelope.enabled,
+          points: envelope.points,
+          updatedAt: envelope.updatedAt,
+        })),
+        operationId: input.operationId ?? crypto.randomUUID(),
+      },
+    },
+  )
+  if (!isRecord(result) || result.status !== "applied" || typeof result.groupId !== "string") {
+    throw new Error("Failed to restore dissolved group.")
+  }
+  return result.groupId
+}
 
 export const createHistoryClip = async (
   deps: Deps,
@@ -188,7 +361,7 @@ export const createHistoryClip = async (
     )).id;
   }
   const operation = buildSharedClipCreateOperation(buildClipCreatePayload({ projectId: deps.projectId, trackId, clip }));
-  const result = await publishDurableSharedTimelineOperation({ projectId: deps.projectId, userId: deps.userId, operation });
+  const result = await publishSharedTimelineOperation(deps.projectId, operation);
   return typeof result === "string" ? result : null;
 };
 
@@ -203,7 +376,8 @@ function pickDirectionalValue<T>(direction: HistoryDirection, from: T, to: T) {
 }
 
 const publishHistoryOperation = async (deps: Deps, operation: SharedTimelineOperation) => {
-  await publishDurableSharedTimelineOperation({ projectId: deps.projectId, userId: deps.userId, operation });
+  const result = await publishSharedTimelineOperation(deps.projectId, operation);
+  assert(isAppliedSharedTimelineOperationResult(result), "Shared timeline operation was not applied.");
 };
 
 export const persistHistoryTrackEffects = async (
@@ -517,12 +691,10 @@ export const persistHistoryClipTimingOrThrow = async (
     });
   assert(applied, message);
   if (timing.gain !== undefined) {
-    const result = await publishDurableSharedTimelineOperation({
-      projectId: deps.projectId,
-      userId: deps.userId,
-      operation: { kind: "clips.setGain", payload: { clipId, gain: timing.gain } },
-      queuedResult: { status: "applied" },
-    });
+    const result = await publishSharedTimelineOperation(
+      deps.projectId,
+      { kind: "clips.setGain", payload: { clipId, gain: timing.gain } },
+    );
     assert(isAppliedSharedTimelineOperationResult(result), message);
   }
 };
@@ -562,12 +734,10 @@ export const persistHistoryClipColorOrThrow = async (
     assert(applied, message);
     return;
   }
-  const result = await publishDurableSharedTimelineOperation({
-    projectId: deps.projectId,
-    userId: deps.userId,
-    operation: { kind: "clips.setColor", payload: { clipId, color } },
-    queuedResult: { status: "applied" },
-  });
+  const result = await publishSharedTimelineOperation(
+    deps.projectId,
+    { kind: "clips.setColor", payload: { clipId, color } },
+  );
   assert(isAppliedSharedTimelineOperationResult(result), message);
 };
 

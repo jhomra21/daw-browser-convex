@@ -3,7 +3,7 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { assert, assertDefined, normalizeCompressorParams, normalizeReverbParams, type AutomationEnvelope } from '@daw-browser/shared'
+import { assert, assertDefined, automationTargetKey, normalizeCompressorParams, normalizeReverbParams, type AutomationEnvelope } from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
@@ -25,7 +25,10 @@ import {
   persistHistoryTrackMix,
   persistHistoryTrackGroup,
   persistHistoryTrackColor,
+  persistHistoryColorBatch,
   persistHistoryTrackReorder,
+  persistHistoryUngroup,
+  persistHistoryRestoreUngroup,
   persistHistoryTrackRouting,
   persistHistoryTrackVolume,
   removeHistoryClipIdsOrThrow,
@@ -175,16 +178,92 @@ async function applyTrackGroupEntry(entry: Extract<HistoryEntry, { type: 'track-
 
 async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'track-ungroup' }>, deps: Deps, direction: HistoryDirection) {
   const index = buildRefIndex(deps)
-  const groupTrackId = requireResolved(resolveTrackId(index, entry.data.groupTrackRef), 'Group track not found for track-ungroup history entry')
-  for (const child of entry.data.childSnapshots) {
-    const trackId = requireResolved(resolveTrackId(index, child.trackRef), 'Child track not found for track-ungroup history entry')
-    const nextGroupId = direction === 'undo' ? groupTrackId : undefined
-    const nextOutputTargetId = direction === 'undo'
-      ? resolveTrackId(index, child.previousOutputTargetRef)
-      : resolveTrackId(index, child.nextOutputTargetRef)
-    await persistHistoryTrackGroup(deps, trackId, nextGroupId, nextOutputTargetId)
-    deps.actions.applyTrackPatch(trackId, { groupId: nextGroupId, outputTargetId: nextOutputTargetId })
+  if (direction === 'undo') {
+    const groupSnapshot = requireResolved(entry.data.groupTrack, 'Cannot restore legacy track-ungroup history entry')
+    const sourceGroupTrackId = requireResolved(entry.data.sourceGroupTrackId, 'Cannot restore legacy track-ungroup history entry')
+    const parentGroupId = resolveTrackId(index, groupSnapshot.groupRef)
+    const routing = resolveTrackRoutingSnapshot(index, groupSnapshot.routing)
+    const children = entry.data.childSnapshots.map((child) => ({
+      trackId: requireResolved(resolveTrackId(index, child.trackRef), 'Child track not found for track-ungroup undo'),
+      outputTargetId: resolveTrackId(index, child.previousOutputTargetRef),
+      outputToGroup: child.previousOutputTargetRef === entry.data.groupTrackRef,
+    }))
+    const groupTrackId = await persistHistoryRestoreUngroup(deps, {
+      groupId: sourceGroupTrackId,
+      operationId: entry.data.restoreOperationId,
+      group: {
+        trackRef: groupSnapshot.trackRef,
+        name: groupSnapshot.name,
+        index: groupSnapshot.index,
+        volume: groupSnapshot.volume,
+        muted: groupSnapshot.muted,
+        soloed: groupSnapshot.soloed,
+        kind: groupSnapshot.kind,
+        channelRole: groupSnapshot.channelRole,
+        parentGroupId,
+        collapsed: groupSnapshot.collapsed,
+        color: groupSnapshot.color,
+        routing: { outputTargetId: routing.outputTargetId, sends: routing.sends ?? [] },
+      },
+      children,
+      effects: entry.data.effects,
+      automation: entry.data.automation,
+    })
+    entry.data.currentGroupTrackId = groupTrackId
+    deps.grantTrackWrite(groupTrackId, { projectId: deps.projectId, userId: deps.userId })
+    deps.actions.insertLocalTrack(createLocalTrack({
+      id: groupTrackId,
+      historyRef: entry.data.groupTrackRef,
+      index: groupSnapshot.index,
+      name: groupSnapshot.name,
+      volume: groupSnapshot.volume,
+      muted: groupSnapshot.muted,
+      soloed: groupSnapshot.soloed,
+      kind: groupSnapshot.kind,
+      channelRole: 'group',
+      groupId: parentGroupId,
+      collapsed: groupSnapshot.collapsed,
+      color: groupSnapshot.color,
+      sends: routing.sends,
+      outputTargetId: routing.outputTargetId,
+    }), groupSnapshot.index)
+    for (const child of children) {
+      deps.actions.applyTrackPatch(child.trackId, {
+        groupId: groupTrackId,
+        outputTargetId: child.outputToGroup ? groupTrackId : child.outputTargetId,
+      })
+    }
+    for (const envelope of entry.data.automation ?? []) {
+      const targetKey = automationTargetKey({ kind: 'track', trackId: groupTrackId }, envelope.parameterId)
+      deps.actions.applyAutomationEnvelope({
+        ...envelope,
+        target: { kind: 'track', trackId: groupTrackId },
+        targetKey,
+      }, targetKey)
+    }
+    return
   }
+
+  const groupTrackId = requireResolved(
+    resolveTrackId(index, entry.data.groupTrackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.currentGroupTrackId),
+    'Group track not found for track-ungroup redo',
+  )
+  await persistHistoryUngroup(deps, groupTrackId)
+  entry.data.restoreOperationId = crypto.randomUUID()
+  for (const envelope of entry.data.automation ?? []) {
+    deps.actions.applyAutomationEnvelope(
+      undefined,
+      automationTargetKey({ kind: 'track', trackId: groupTrackId }, envelope.parameterId),
+    )
+  }
+  const parentGroupId = resolveTrackId(index, entry.data.groupTrack?.groupRef)
+  for (const child of entry.data.childSnapshots) {
+    const trackId = requireResolved(resolveTrackId(index, child.trackRef), 'Child track not found for track-ungroup redo')
+    const outputTargetId = resolveTrackId(index, child.nextOutputTargetRef)
+    deps.actions.applyTrackPatch(trackId, { groupId: parentGroupId, outputTargetId })
+  }
+  deps.actions.removeLocalTrack(groupTrackId)
+  entry.data.currentGroupTrackId = undefined
 }
 
 async function applyTrackColorEntry(entry: Extract<HistoryEntry, { type: 'track-color' }>, deps: Deps, direction: HistoryDirection) {
@@ -193,6 +272,27 @@ async function applyTrackColorEntry(entry: Extract<HistoryEntry, { type: 'track-
   const color = pickDirectionalValue(direction, entry.data.from, entry.data.to)
   await persistHistoryTrackColor(deps, trackId, color)
   deps.actions.applyTrackPatch(trackId, { color })
+}
+
+async function applyTrackColorCascadeEntry(entry: Extract<HistoryEntry, { type: 'track-color-cascade' }>, deps: Deps, direction: HistoryDirection) {
+  const index = buildRefIndex(deps)
+  const tracks = entry.data.tracks.map((update) => ({
+    trackId: requireResolved(resolveTrackId(index, update.trackRef), 'Track not found for track-color-cascade history entry'),
+    color: pickDirectionalValue(direction, update.from, update.to),
+  }))
+  const clips = entry.data.clips.map((update) => ({
+    clipId: requireResolved(resolveClipId(index, update.clipRef), 'Clip not found for track-color-cascade history entry'),
+    color: requireResolved(pickDirectionalValue(direction, update.from, update.to), 'Missing clip color for track-color-cascade history entry'),
+  }))
+  await persistHistoryColorBatch(deps, { tracks, clips })
+  const trackIndex = createTimelineTrackIndex(deps.getTracks())
+  for (const update of tracks) {
+    deps.actions.applyTrackPatch(update.trackId, { color: update.color })
+  }
+  for (const update of clips) {
+    const entry = trackIndex.clipEntryById.get(update.clipId)
+    if (entry) deps.actions.replaceLocalClip(entry.trackId, { ...entry.clip, color: update.color })
+  }
 }
 
 async function applyTrackReorderEntry(entry: Extract<HistoryEntry, { type: 'track-reorder' }>, deps: Deps, direction: HistoryDirection) {
@@ -594,6 +694,10 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
 
     case 'track-color':
       await applyTrackColorEntry(entry, deps, direction)
+      return
+
+    case 'track-color-cascade':
+      await applyTrackColorCascadeEntry(entry, deps, direction)
       return
 
     case 'track-reorder':

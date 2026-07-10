@@ -56,15 +56,6 @@ export function resolveStoredTrackId(tracks: Track[], trackId: string | undefine
   return tracks.find((track) => track.id === trackId)?.id
 }
 
-function resolveStoredClipId(tracks: Track[], clipId: string | undefined): string | undefined {
-  if (!clipId) return undefined
-  for (const track of tracks) {
-    const currentClipId = track.clips.find((clip) => clip.id === clipId)?.id
-    if (currentClipId) return currentClipId
-  }
-  return undefined
-}
-
 export function resolveClipId(index: HistoryRefIndex, clipRef: ClipRef | undefined): string | undefined {
   if (!clipRef) return undefined
   return index.clipIdByRef.get(clipRef)
@@ -73,11 +64,15 @@ export function resolveClipId(index: HistoryRefIndex, clipRef: ClipRef | undefin
 export function buildHistoryRefIndex(entries: HistoryEntry[] | undefined, tracks: Track[] = []): HistoryRefIndex {
   const trackIdByRef = new Map<TrackRef, Track['id']>()
   const clipIdByRef = new Map<ClipRef, string>()
+  const currentTrackIdById = new Map<Track['id'], Track['id']>()
+  const currentClipIdById = new Map<string, string>()
 
   for (const track of tracks) {
     trackIdByRef.set(getTrackHistoryRef(track), track.id)
+    currentTrackIdById.set(track.id, track.id)
     for (const clip of track.clips) {
       clipIdByRef.set(getClipHistoryRef(clip), clip.id)
+      currentClipIdById.set(clip.id, clip.id)
     }
   }
 
@@ -85,39 +80,59 @@ export function buildHistoryRefIndex(entries: HistoryEntry[] | undefined, tracks
     switch (entry.type) {
       case 'track-create':
         {
-          const trackId = resolveStoredTrackId(tracks, entry.data.currentTrackId)
+          const trackId = entry.data.currentTrackId
+            ? currentTrackIdById.get(entry.data.currentTrackId)
+            : undefined
           if (trackId) trackIdByRef.set(entry.data.trackRef, trackId)
         }
         break
       case 'track-clip-create':
         {
-          const trackId = resolveStoredTrackId(tracks, entry.data.track.currentTrackId)
+          const trackId = entry.data.track.currentTrackId
+            ? currentTrackIdById.get(entry.data.track.currentTrackId)
+            : undefined
           if (trackId) trackIdByRef.set(entry.data.track.trackRef, trackId)
-          const clipId = resolveStoredClipId(tracks, entry.data.clip.currentId)
+          const clipId = entry.data.clip.currentId
+            ? currentClipIdById.get(entry.data.clip.currentId)
+            : undefined
           if (clipId) clipIdByRef.set(entry.data.clip.clipRef, clipId)
         }
         break
       case 'track-delete':
         {
-          const recreatedTrackId = resolveStoredTrackId(tracks, entry.data.recreatedTrackId)
+          const recreatedTrackId = entry.data.recreatedTrackId
+            ? currentTrackIdById.get(entry.data.recreatedTrackId)
+            : undefined
           if (entry.data.track.trackRef && recreatedTrackId) {
             trackIdByRef.set(entry.data.track.trackRef, recreatedTrackId)
           }
         }
         for (const recreated of entry.data.recreatedClips ?? []) {
-          const clipId = resolveStoredClipId(tracks, recreated.clipId)
+          const clipId = currentClipIdById.get(recreated.clipId)
           if (clipId) clipIdByRef.set(recreated.clipRef, clipId)
         }
         break
       case 'track-group':
         {
-          const trackId = resolveStoredTrackId(tracks, entry.data.currentGroupTrackId)
+          const trackId = entry.data.currentGroupTrackId
+            ? currentTrackIdById.get(entry.data.currentGroupTrackId)
+            : undefined
+          if (trackId) trackIdByRef.set(entry.data.groupTrackRef, trackId)
+        }
+        break
+      case 'track-ungroup':
+        {
+          const trackId = entry.data.currentGroupTrackId
+            ? currentTrackIdById.get(entry.data.currentGroupTrackId)
+            : undefined
           if (trackId) trackIdByRef.set(entry.data.groupTrackRef, trackId)
         }
         break
       case 'clip-create':
         {
-          const clipId = resolveStoredClipId(tracks, entry.data.clip.currentId)
+          const clipId = entry.data.clip.currentId
+            ? currentClipIdById.get(entry.data.clip.currentId)
+            : undefined
           if (clipId) {
             clipIdByRef.set(entry.data.clip.clipRef, clipId)
           }
@@ -125,7 +140,7 @@ export function buildHistoryRefIndex(entries: HistoryEntry[] | undefined, tracks
         break
       case 'clip-delete':
         for (const recreated of entry.data.recreatedClips ?? []) {
-          const clipId = resolveStoredClipId(tracks, recreated.clipId)
+          const clipId = currentClipIdById.get(recreated.clipId)
           if (clipId) clipIdByRef.set(recreated.clipRef, clipId)
         }
         break

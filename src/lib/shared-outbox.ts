@@ -7,6 +7,10 @@ import {
   type SharedTimelineOperation,
   type SharedTimelineOperationKind,
 } from '~/lib/shared-timeline-operations-api'
+import type { Track } from '@daw-browser/timeline-core/types'
+import { loadHistory, saveHistory } from '~/lib/timeline-storage'
+import { buildCommittedSharedUngroupHistoryEntry, readSharedUngroupResult } from '~/lib/undo/shared-ungroup-history'
+import type { HistoryEntry, TrackAutomationSnapshot, TrackEffectSnapshot } from '~/lib/undo/types'
 
 type SharedOutboxStatus = 'pending' | 'failed'
 type SharedOutboxKind = SharedTimelineOperationKind | 'clips.createUploadedAudio'
@@ -25,12 +29,54 @@ type SharedOutboxEntry = {
   projectId: string
   userId: string
   payload: unknown
+  completion?: SharedOutboxCompletion
   status: SharedOutboxStatus
   attempts: number
   nextAttemptAt: number
   lastError?: string
   createdAt: number
   updatedAt: number
+}
+
+type SharedOutboxCompletion = {
+  kind: 'tracks.ungroup'
+  tracks: Track[]
+  groupTrack: Track
+  effects: TrackEffectSnapshot
+  automation: TrackAutomationSnapshot
+}
+
+const isSharedOutboxCompletion = (value: unknown): value is SharedOutboxCompletion => (
+  isRecord(value)
+  && value.kind === 'tracks.ungroup'
+  && Array.isArray(value.tracks)
+  && isRecord(value.groupTrack)
+  && isRecord(value.effects)
+  && Array.isArray(value.automation)
+)
+
+let sharedOutboxHistoryHandler: ((entry: HistoryEntry) => boolean) | undefined
+
+export const registerSharedOutboxHistoryHandler = (handler: (entry: HistoryEntry) => boolean) => {
+  sharedOutboxHistoryHandler = handler
+  return () => {
+    if (sharedOutboxHistoryHandler === handler) sharedOutboxHistoryHandler = undefined
+  }
+}
+
+const completeUngroup = (entry: SharedOutboxEntry, result: unknown) => {
+  if (entry.completion?.kind !== 'tracks.ungroup') return
+  const committed = readSharedUngroupResult(result)
+  if (!committed) throw new Error('Queued shared ungroup was not applied.')
+  const historyEntry = buildCommittedSharedUngroupHistoryEntry({
+    projectId: entry.projectId,
+    ...entry.completion,
+    result: committed,
+  })
+  if (sharedOutboxHistoryHandler?.(historyEntry)) return
+  const scope = { projectId: entry.projectId, userId: entry.userId }
+  const history = loadHistory(scope)
+  saveHistory(scope, { undo: [...history.undo, historyEntry].slice(-50), redo: [] })
 }
 
 type SharedOutboxSummary = {
@@ -95,6 +141,7 @@ const readEntry = (value: unknown): SharedOutboxEntry | null => {
     projectId: value.projectId,
     userId: value.userId,
     payload: value.payload,
+    completion: isSharedOutboxCompletion(value.completion) ? value.completion : undefined,
     status: value.status,
     attempts: value.attempts,
     nextAttemptAt: value.nextAttemptAt,
@@ -176,6 +223,7 @@ const enqueueSharedOutboxOperation = async (
     kind: SharedOutboxKind
     payload: unknown
     error?: unknown
+    completion?: SharedOutboxCompletion
   },
 ) => {
   const timestamp = now()
@@ -185,6 +233,7 @@ const enqueueSharedOutboxOperation = async (
     projectId: input.projectId,
     userId: input.userId,
     payload: input.payload,
+    completion: input.completion,
     status: 'pending',
     attempts: 0,
     nextAttemptAt: timestamp,
@@ -212,11 +261,12 @@ const publishEntry = async (entry: SharedOutboxEntry) => {
   }
   const operation = parseSharedTimelineOperation({ kind: entry.kind, payload: entry.payload })
   if (!operation) throw new Error('Invalid queued shared timeline operation.')
-  await publishSharedTimelineOperation(entry.projectId, operation)
+  const result = await publishSharedTimelineOperation(entry.projectId, operation)
+  completeUngroup(entry, result)
 }
 
 export const enqueueSharedTimelineOperationOnFailure = async (
-  input: { projectId: string; userId: string; operation: SharedTimelineOperation; error?: unknown },
+  input: { projectId: string; userId: string; operation: SharedTimelineOperation; error?: unknown; completion?: SharedOutboxCompletion },
 ) => {
   assert(isDurableSharedTimelineOperationKind(input.operation.kind), `Shared timeline operation ${input.operation.kind} is not durable.`)
   await enqueueSharedOutboxOperation({
@@ -225,6 +275,7 @@ export const enqueueSharedTimelineOperationOnFailure = async (
     kind: input.operation.kind,
     payload: input.operation.payload,
     error: input.error,
+    completion: input.completion,
   })
 }
 
@@ -235,6 +286,7 @@ export const publishDurableSharedTimelineOperation = async <T = undefined>(
     operation: SharedTimelineOperation
     queuedResult?: T
     throwQueued?: boolean
+    completion?: SharedOutboxCompletion
   },
 ): Promise<unknown | T | undefined> => {
   assert(isDurableSharedTimelineOperationKind(input.operation.kind), `Shared timeline operation ${input.operation.kind} is not durable.`)

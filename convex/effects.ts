@@ -427,6 +427,21 @@ export const listByRoom = query({
   },
 });
 
+export const listByTrack = query({
+  args: { projectId: v.string(), trackId: v.id("tracks") },
+  handler: async (ctx, { projectId, trackId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    await requireProjectAccess(ctx, projectId, userId);
+    const rows = await ctx.db
+      .query("effects")
+      .withIndex("by_track", (q) => q.eq("trackId", trackId))
+      .collect();
+    return rows
+      .filter((row) => row.projectId === projectId && row.targetType === 'track')
+      .sort((left, right) => (left.index ?? 0) - (right.index ?? 0));
+  },
+});
+
 export const getEqForTrack = query({
   args: { projectId: v.string(), trackId: v.id("tracks") },
   handler: async (ctx, { projectId, trackId }) => {

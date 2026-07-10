@@ -368,7 +368,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
     if (options.client.tracks.removedIds.has(trackId)) continue
 
     const localTrackRow = localSnapshot ? localSnapshot.tracks[index] : undefined
-    const historyRef = options.client.tracks.historyRefsById.get(trackId) ?? localTrackRow?.historyRef ?? trackId
+    const historyRef = options.client.tracks.historyRefsById.get(trackId) ?? localTrackRow?.historyRef ?? trackRow.historyRef ?? trackId
     const serverVolume = options.server.trackState?.serverVolumes.get(trackId)
     const pendingTrack = options.client.tracks.pendingEntriesById.get(trackId)
     const pendingTrackValue = pendingTrack?.track

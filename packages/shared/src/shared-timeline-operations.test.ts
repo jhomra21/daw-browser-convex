@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { parseSharedTimelineOperation } from './shared-timeline-operations'
+import { parseSharedTimelineOperation, readSharedTimelineOperationTargets, type SharedTimelineOperation } from './shared-timeline-operations'
 
 describe('shared timeline operations', () => {
   test('preserves null group ids for clear-group operations', () => {
@@ -41,5 +41,75 @@ describe('shared timeline operations', () => {
       kind: 'clips.setColor',
       payload: { clipId: 'clip-1', color: 'timeline-surface' },
     })).toBeNull()
+  })
+
+  test('rejects invalid clip colors in batch color operations', () => {
+    expect(parseSharedTimelineOperation({
+      kind: 'tracks.applyColorBatch',
+      payload: {
+        trackUpdates: [],
+        clipUpdates: [{ clipId: 'clip-1', color: '#22c55e' }],
+      },
+    })).toEqual({
+      kind: 'tracks.applyColorBatch',
+      payload: {
+        trackUpdates: [],
+        clipUpdates: [{ clipId: 'clip-1', color: '#22c55e' }],
+      },
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'tracks.applyColorBatch',
+      payload: {
+        trackUpdates: [],
+        clipUpdates: [{ clipId: 'clip-1', color: 'timeline-surface' }],
+      },
+    })).toBeNull()
+  })
+
+  test('rejects malformed effect metadata when restoring a dissolved group', () => {
+    const payload: Extract<SharedTimelineOperation, { kind: 'tracks.restoreUngroup' }>['payload'] = {
+      group: { index: 1, volume: 0.8, sends: [] },
+      children: [{ trackId: 'track-1', outputToGroup: true }],
+      effects: [{
+        type: 'arpeggiator',
+        params: { enabled: true, pattern: 'up', rate: '1/4', octaves: 1, gate: 0.8, hold: false },
+      }],
+      automation: [],
+    }
+    expect(parseSharedTimelineOperation({
+      kind: 'tracks.restoreUngroup',
+      payload,
+    })).toEqual({ kind: 'tracks.restoreUngroup', payload })
+    expect(parseSharedTimelineOperation({
+      kind: 'tracks.restoreUngroup',
+      payload: {
+        ...payload,
+        effects: [{
+          type: 'arpeggiator',
+          index: '0',
+          params: { enabled: true, pattern: 'up', rate: '1/4', octaves: 1, gate: 0.8, hold: false },
+        }],
+      },
+    })).toBeNull()
+    expect(parseSharedTimelineOperation({
+      kind: 'tracks.restoreUngroup',
+      payload: {
+        ...payload,
+        effects: [{ type: 'arpeggiator', params: {} }],
+      },
+    })).toBeNull()
+  })
+
+  test('preserves ungroup operation identities for durable retries', () => {
+    const operation = parseSharedTimelineOperation({
+      kind: 'tracks.ungroup',
+      payload: { groupId: 'group-1', operationId: 'operation-1' },
+    })
+    expect(operation).toEqual({
+      kind: 'tracks.ungroup',
+      payload: { groupId: 'group-1', operationId: 'operation-1' },
+    })
+    if (!operation) throw new Error('Expected tracks.ungroup operation to parse')
+    expect(readSharedTimelineOperationTargets(operation).trackIds.size).toBe(0)
   })
 })

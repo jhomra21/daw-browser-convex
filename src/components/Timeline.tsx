@@ -19,7 +19,7 @@ import { useClipDrag } from "~/hooks/useClipDrag";
 import { useClipResize } from "~/hooks/useClipResize";
 import { useTimelineSelection } from "~/hooks/useTimelineSelection";
 import { useClipBuffers } from "~/hooks/useClipBuffers";
-import { isLocalId, normalizeCommandTrackIndices } from "@daw-browser/shared";
+import { collectTrackDescendantIds, isLocalId, normalizeCommandTrackIndices } from "@daw-browser/shared";
 import { automationTargetKey } from "@daw-browser/shared";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
@@ -64,7 +64,7 @@ import DeleteTrackDialog from "./timeline/delete-track-dialog";
 import TimelineWorkspace from "./timeline/timeline-workspace";
 import { Dashboard } from "~/components/dashboard/dashboard";
 import type { DashboardTimelineModel, DashboardView } from "~/components/dashboard/types";
-import { buildTimelineTrackLayoutRows, buildTrackTree, collectTrackDescendantIds, computeDepthMap, flattenVisibleTracks } from "~/lib/timeline-track-layout";
+import { buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks } from "~/lib/timeline-track-layout";
 import { useAppPreferences } from "~/context/app-preferences";
 
 type AgentMixOp = {
@@ -561,6 +561,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     creation: {
       selection,
       insertLocalTrack: projection.insertLocalTrack,
+      removeLocalTrack: projection.removeLocalTrack,
       replaceLocalClip: projection.replaceLocalClip,
       updateLocalTrack: projection.updateLocalTrack,
       removeCloudTrack: removeCreatedCloudTrack,
@@ -571,6 +572,8 @@ const Timeline: Component<TimelineProps> = (props) => {
       track: appPreferences.timeline.defaultTrackCreateColor,
       group: appPreferences.timeline.defaultGroupCreateColor,
     },
+    automationEnvelopes: automation.envelopes,
+    applyAutomationEnvelope: automation.applyEnvelope,
     navigation: {
       trackLookup,
       selection,

@@ -316,12 +316,12 @@ export default function TimelineWorkspace(props: Props) {
                 midi={props.midi}
               />
               <div
-                class="fixed z-30 border-t border-neutral-800 bg-timeline-background"
+                class="sticky z-30 border-t border-neutral-800 bg-timeline-background"
                 style={{
-                  left: `${props.leftBrowser.open ? props.leftBrowser.widthPx : 0}px`,
-                  right: `${props.sidebarWidth}px`,
-                  bottom: `${props.bottomPanelOffsetPx}px`,
+                  width: `${props.durationSec * PPS}px`,
                   height: `${masterAreaHeight()}px`,
+                  bottom: `${props.bottomPanelOffsetPx}px`,
+                  "margin-top": `${RULER_HEIGHT + trackAreaHeight()}px`,
                 }}
               >
                 <div class="relative overflow-hidden bg-timeline-background" style={{ height: `${MASTER_ROW_HEIGHT}px` }}>

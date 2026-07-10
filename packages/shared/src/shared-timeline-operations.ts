@@ -97,6 +97,20 @@ type SharedSynthParams = {
 
 type SharedReverbParams = Required<Pick<ReverbParamsInput, 'enabled' | 'wet' | 'decaySec' | 'preDelayMs'>> & Omit<ReverbParamsInput, 'enabled' | 'wet' | 'decaySec' | 'preDelayMs'>
 
+export type SharedUngroupRestoreEffect = {
+  type: 'eq' | 'compressor' | 'saturator' | 'delay' | 'reverb' | 'instrument' | 'synth' | 'arpeggiator'
+  instanceId?: string
+  index?: number
+  params: unknown
+}
+
+export type SharedUngroupRestoreAutomation = {
+  parameterId: string
+  enabled: boolean
+  points: AutomationPoint[]
+  updatedAt: number
+}
+
 export type SharedTimelineOperation =
   | { kind: 'tracks.create'; payload: { index?: number; kind?: string; channelRole?: string; color?: string; operationId?: string } }
   | { kind: 'tracks.lock'; payload: { trackId: string } }
@@ -113,8 +127,33 @@ export type SharedTimelineOperation =
   | { kind: 'tracks.setRouting'; payload: { trackId: string; routing: TrackRouting } }
   | { kind: 'tracks.setGroup'; payload: { trackId: string; groupId?: string | null } }
   | { kind: 'tracks.reorderAndGroup'; payload: { updates: Array<{ trackId: string; index: number; groupId?: string | null; outputTargetId?: string | null }> } }
+  | { kind: 'tracks.ungroup'; payload: { groupId: string; operationId?: string } }
+  | {
+      kind: 'tracks.restoreUngroup'
+      payload: {
+        group: {
+          index: number
+          kind?: string
+          historyRef?: string
+          parentGroupId?: string
+          collapsed?: boolean
+          color?: string
+          volume: number
+          muted?: boolean
+          soloed?: boolean
+          outputTargetId?: string
+          sends: Array<{ targetId: string; amount: number }>
+        }
+        children: Array<{ trackId: string; outputTargetId?: string; outputToGroup: boolean }>
+        effects: SharedUngroupRestoreEffect[]
+        automation: SharedUngroupRestoreAutomation[]
+        operationId?: string
+      }
+    }
   | { kind: 'tracks.setCollapsed'; payload: { trackId: string; collapsed: boolean } }
   | { kind: 'tracks.setColor'; payload: { trackId: string; color?: string } }
+  | { kind: 'tracks.setColorCascade'; payload: { rootTrackId: string; color?: string | null; cascadeClipColors: boolean } }
+  | { kind: 'tracks.applyColorBatch'; payload: { trackUpdates: Array<{ trackId: string; color?: string | null }>; clipUpdates: Array<{ clipId: string; color: string }> } }
   | { kind: 'tracks.setVolume'; payload: { trackId: string; volume: number } }
   | { kind: 'tracks.setMix'; payload: { trackId: string; muted?: boolean; soloed?: boolean } }
   | { kind: 'mixer.setMasterVolume'; payload: { volume: number } }
@@ -626,6 +665,157 @@ const parseTrackReorderAndGroup = (payload: Record<string, unknown>): SharedTime
     : null
 }
 
+const isUngroupRestoreEffectType = (value: unknown): value is SharedUngroupRestoreEffect['type'] => (
+  value === 'eq'
+  || value === 'compressor'
+  || value === 'saturator'
+  || value === 'delay'
+  || value === 'reverb'
+  || value === 'instrument'
+  || value === 'synth'
+  || value === 'arpeggiator'
+)
+
+const readAutomationPoints = (parameterId: string, value: unknown): AutomationPoint[] | null => {
+  const descriptor = getAutomationParameterDescriptor(parameterId)
+  if (!descriptor || !Array.isArray(value)) return null
+  const points: AutomationPoint[] = []
+  for (const point of value) {
+    if (
+      isRecord(point)
+      && typeof point.id === 'string'
+      && typeof point.timeSec === 'number'
+      && typeof point.value === 'number'
+    ) {
+      points.push({
+        id: point.id,
+        timeSec: point.timeSec,
+        value: point.value,
+        interpolation: point.interpolation === 'hold' ? 'hold' : 'linear',
+      })
+    }
+  }
+  return normalizeAutomationPoints(points, descriptor)
+}
+
+export const normalizeSharedUngroupRestoreEffects = (value: unknown): SharedUngroupRestoreEffect[] | null => {
+  if (!Array.isArray(value)) return null
+  const effects: SharedUngroupRestoreEffect[] = []
+  const effectKeys = new Set<string>()
+  for (const effect of value) {
+    if (!isRecord(effect) || !isUngroupRestoreEffectType(effect.type) || !('params' in effect)) return null
+    if (effect.instanceId !== undefined && (typeof effect.instanceId !== 'string' || effect.instanceId.length === 0)) return null
+    if (effect.index !== undefined && (typeof effect.index !== 'number' || !Number.isInteger(effect.index) || effect.index < 0)) return null
+    const instanceId = typeof effect.instanceId === 'string' ? effect.instanceId : undefined
+    const index = typeof effect.index === 'number' ? effect.index : undefined
+    if (!isAudioEffectKind(effect.type) && (instanceId !== undefined || index !== undefined)) return null
+    const params = (() => {
+      switch (effect.type) {
+        case 'eq':
+          return readEqParams(effect.params)
+        case 'compressor':
+          return readCompressorParams(effect.params)
+        case 'saturator':
+          return readSaturatorParams(effect.params)
+        case 'delay':
+          return readDelayParams(effect.params)
+        case 'reverb':
+          return readReverbParams(effect.params)
+        case 'instrument':
+          return readTrackInstrumentParams(effect.params)
+        case 'synth':
+          return readSynthParams(effect.params)
+        case 'arpeggiator':
+          return readArpeggiatorParams(effect.params)
+      }
+    })()
+    if (!params) return null
+    const effectKey = `${effect.type}:${instanceId ?? ''}`
+    if (effectKeys.has(effectKey)) return null
+    effectKeys.add(effectKey)
+    effects.push({
+      type: effect.type,
+      instanceId,
+      index,
+      params,
+    })
+  }
+  return effects
+}
+
+export const normalizeSharedUngroupRestoreAutomation = (value: unknown): SharedUngroupRestoreAutomation[] | null => {
+  if (!Array.isArray(value)) return null
+  const automation: SharedUngroupRestoreAutomation[] = []
+  const parameterIds = new Set<string>()
+  for (const envelope of value) {
+    if (!isRecord(envelope) || typeof envelope.parameterId !== 'string' || typeof envelope.enabled !== 'boolean' || typeof envelope.updatedAt !== 'number' || !Array.isArray(envelope.points)) return null
+    if (!isAutomationParameterSupportedForTarget(envelope.parameterId, 'track')) return null
+    const points = readAutomationPoints(envelope.parameterId, envelope.points)
+    if (!points) return null
+    if (parameterIds.has(envelope.parameterId)) return null
+    parameterIds.add(envelope.parameterId)
+    automation.push({ parameterId: envelope.parameterId, enabled: envelope.enabled, points, updatedAt: envelope.updatedAt })
+  }
+  return automation
+}
+
+const parseTrackUngroup = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
+  typeof payload.groupId === 'string'
+    ? { kind: 'tracks.ungroup', payload: { groupId: payload.groupId, operationId: readOptionalString(payload.operationId) } }
+    : null
+)
+
+const parseTrackRestoreUngroup = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  if (!isRecord(payload.group) || !Array.isArray(payload.children)) return null
+  const group = payload.group
+  if (typeof group.index !== 'number' || typeof group.volume !== 'number' || !Array.isArray(group.sends)) return null
+  if (group.kind !== undefined && typeof group.kind !== 'string') return null
+  if (group.historyRef !== undefined && typeof group.historyRef !== 'string') return null
+  if (group.parentGroupId !== undefined && typeof group.parentGroupId !== 'string') return null
+  if (group.collapsed !== undefined && typeof group.collapsed !== 'boolean') return null
+  if (group.color !== undefined && typeof group.color !== 'string') return null
+  if (group.muted !== undefined && typeof group.muted !== 'boolean') return null
+  if (group.soloed !== undefined && typeof group.soloed !== 'boolean') return null
+  if (group.outputTargetId !== undefined && typeof group.outputTargetId !== 'string') return null
+  const sends = group.sends.flatMap((send) => (
+    isRecord(send) && typeof send.targetId === 'string' && typeof send.amount === 'number'
+      ? [{ targetId: send.targetId, amount: send.amount }]
+      : []
+  ))
+  if (sends.length !== group.sends.length) return null
+  const children = payload.children.flatMap((child) => (
+    isRecord(child) && typeof child.trackId === 'string' && typeof child.outputToGroup === 'boolean' && (child.outputTargetId === undefined || typeof child.outputTargetId === 'string')
+      ? [{ trackId: child.trackId, outputTargetId: typeof child.outputTargetId === 'string' ? child.outputTargetId : undefined, outputToGroup: child.outputToGroup }]
+      : []
+  ))
+  if (children.length !== payload.children.length) return null
+  const effects = normalizeSharedUngroupRestoreEffects(payload.effects)
+  const automation = normalizeSharedUngroupRestoreAutomation(payload.automation)
+  if (!effects || !automation) return null
+  return {
+    kind: 'tracks.restoreUngroup',
+    payload: {
+      group: {
+        index: group.index,
+        kind: typeof group.kind === 'string' ? group.kind : undefined,
+        historyRef: typeof group.historyRef === 'string' ? group.historyRef : undefined,
+        parentGroupId: typeof group.parentGroupId === 'string' ? group.parentGroupId : undefined,
+        collapsed: typeof group.collapsed === 'boolean' ? group.collapsed : undefined,
+        color: typeof group.color === 'string' ? group.color : undefined,
+        volume: group.volume,
+        muted: typeof group.muted === 'boolean' ? group.muted : undefined,
+        soloed: typeof group.soloed === 'boolean' ? group.soloed : undefined,
+        outputTargetId: typeof group.outputTargetId === 'string' ? group.outputTargetId : undefined,
+        sends,
+      },
+      children,
+      effects,
+      automation,
+      operationId: readOptionalString(payload.operationId),
+    },
+  }
+}
+
 const parseTrackCollapsed = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
   typeof payload.trackId === 'string' && typeof payload.collapsed === 'boolean'
     ? { kind: 'tracks.setCollapsed', payload: { trackId: payload.trackId, collapsed: payload.collapsed } }
@@ -637,6 +827,36 @@ const parseTrackColor = (payload: Record<string, unknown>): SharedTimelineOperat
     ? { kind: 'tracks.setColor', payload: { trackId: payload.trackId, color: readOptionalString(payload.color) } }
     : null
 )
+
+const parseTrackColorCascade = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
+  typeof payload.rootTrackId === 'string' && typeof payload.cascadeClipColors === 'boolean'
+    ? {
+        kind: 'tracks.setColorCascade',
+        payload: {
+          rootTrackId: payload.rootTrackId,
+          color: readOptionalNullableString(payload.color),
+          cascadeClipColors: payload.cascadeClipColors,
+        },
+      }
+    : null
+)
+
+const parseTrackColorBatch = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  if (!Array.isArray(payload.trackUpdates) || !Array.isArray(payload.clipUpdates)) return null
+  const trackUpdates = payload.trackUpdates.flatMap((update) => (
+    isRecord(update) && typeof update.trackId === 'string'
+      ? [{ trackId: update.trackId, color: readOptionalNullableString(update.color) }]
+      : []
+  ))
+  const clipUpdates = payload.clipUpdates.flatMap((update) => (
+    isRecord(update) && typeof update.clipId === 'string' && typeof update.color === 'string' && normalizeClipColor(update.color)
+      ? [{ clipId: update.clipId, color: update.color }]
+      : []
+  ))
+  return trackUpdates.length === payload.trackUpdates.length && clipUpdates.length === payload.clipUpdates.length
+    ? { kind: 'tracks.applyColorBatch', payload: { trackUpdates, clipUpdates } }
+    : null
+}
 
 const parseTrackVolume = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
   typeof payload.trackId === 'string' && typeof payload.volume === 'number'
@@ -760,28 +980,6 @@ const readAutomationTargetKind = (value: unknown): 'track' | 'master' | null => 
   value === 'track' || value === 'master' ? value : null
 )
 
-const readAutomationPoints = (parameterId: string, value: unknown): AutomationPoint[] | null => {
-  const descriptor = getAutomationParameterDescriptor(parameterId)
-  if (!descriptor || !Array.isArray(value)) return null
-  const points: AutomationPoint[] = []
-  for (const point of value) {
-    if (
-      isRecord(point)
-      && typeof point.id === 'string'
-      && typeof point.timeSec === 'number'
-      && typeof point.value === 'number'
-    ) {
-      points.push({
-          id: point.id,
-          timeSec: point.timeSec,
-          value: point.value,
-          interpolation: point.interpolation === 'hold' ? 'hold' : 'linear',
-        })
-    }
-  }
-  return normalizeAutomationPoints(points, descriptor)
-}
-
 const parseAutomationSetEnvelope = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const targetKind = readAutomationTargetKind(payload.targetKind)
   if (!targetKind || typeof payload.parameterId !== 'string' || typeof payload.enabled !== 'boolean' || typeof payload.updatedAt !== 'number') return null
@@ -884,8 +1082,31 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   { kind: 'tracks.setRouting', parse: parseTrackRouting, targets: readRoutingTargets, durableQueue: true },
   { kind: 'tracks.setGroup', parse: parseTrackGroup, targets: readTrackGroupTargets, durableQueue: true },
   { kind: 'tracks.reorderAndGroup', parse: parseTrackReorderAndGroup, targets: readReorderAndGroupTargets, durableQueue: true },
+  { kind: 'tracks.ungroup', parse: parseTrackUngroup, targets: emptyTargets, durableQueue: true },
+  { kind: 'tracks.restoreUngroup', parse: parseTrackRestoreUngroup, targets: (payload) => {
+    if (!isRecord(payload) || !isRecord(payload.group) || !Array.isArray(payload.children)) return emptyTargets()
+    const targets = emptyTargets()
+    const group = payload.group
+    if (typeof group.parentGroupId === 'string') targets.trackIds.add(group.parentGroupId)
+    if (typeof group.outputTargetId === 'string') targets.trackIds.add(group.outputTargetId)
+    if (Array.isArray(group.sends)) for (const send of group.sends) if (isRecord(send) && typeof send.targetId === 'string') targets.trackIds.add(send.targetId)
+    for (const child of payload.children) {
+      if (!isRecord(child)) continue
+      if (typeof child.trackId === 'string') targets.trackIds.add(child.trackId)
+      if (typeof child.outputTargetId === 'string') targets.trackIds.add(child.outputTargetId)
+    }
+    return targets
+  }, durableQueue: true },
   { kind: 'tracks.setCollapsed', parse: parseTrackCollapsed, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'tracks.setColor', parse: parseTrackColor, targets: readTrackIdTargets, durableQueue: true },
+  { kind: 'tracks.setColorCascade', parse: parseTrackColorCascade, targets: (payload) => isRecord(payload) && typeof payload.rootTrackId === 'string' ? trackTargets(payload.rootTrackId) : emptyTargets(), durableQueue: true },
+  { kind: 'tracks.applyColorBatch', parse: parseTrackColorBatch, targets: (payload) => {
+    if (!isRecord(payload) || !Array.isArray(payload.trackUpdates) || !Array.isArray(payload.clipUpdates)) return emptyTargets()
+    const targets = emptyTargets()
+    for (const update of payload.trackUpdates) if (isRecord(update) && typeof update.trackId === 'string') targets.trackIds.add(update.trackId)
+    for (const update of payload.clipUpdates) if (isRecord(update) && typeof update.clipId === 'string') targets.clipIds.add(update.clipId)
+    return targets
+  }, durableQueue: true },
   { kind: 'tracks.setVolume', parse: parseTrackVolume, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'tracks.setMix', parse: parseTrackMix, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'mixer.setMasterVolume', parse: parseMasterVolume, targets: emptyTargets, durableQueue: true },

@@ -118,12 +118,28 @@ const isAutomationEnvelope = (value: unknown) => isRecord(value)
   && value.points.every(isAutomationPoint)
   && isNumber(value.updatedAt)
 
-function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSectionEdit: boolean) {
+const isTrackAutomationSnapshot = (value: unknown) => (
+  Array.isArray(value) && value.every(isAutomationEnvelope)
+)
+
+const isTrackEffectSnapshot = (value: unknown) => {
+  if (!isRecord(value)) return false
+  const audioEffects = value.audioEffects
+  return (audioEffects === undefined || (Array.isArray(audioEffects) && audioEffects.every((effect) => (
+    isRecord(effect)
+    && (effect.effect === 'eq' || effect.effect === 'compressor' || effect.effect === 'saturator' || effect.effect === 'delay' || effect.effect === 'reverb')
+    && effect.params !== undefined
+    && (effect.instanceId === undefined || isString(effect.instanceId))
+    && (effect.index === undefined || isNumber(effect.index))
+  ))))
+}
+
+function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSectionEdit: boolean, version: number) {
   switch (type) {
     case 'section-edit':
       return allowSectionEdit
         && Array.isArray(data.entries)
-        && data.entries.every((entry) => isHistoryEntryValue(entry, false))
+        && data.entries.every((entry) => isHistoryEntryValue(entry, false, version))
     case 'clip-create':
       return isString(data.trackRef) && isClipSnapshot(data.clip)
     case 'clip-delete':
@@ -179,12 +195,29 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSe
         && data.childUpdates.every(isTrackGroupChildUpdate)
     case 'track-ungroup':
       return isString(data.groupTrackRef)
+        && (data.sourceGroupTrackId === undefined || isString(data.sourceGroupTrackId))
+        && (data.currentGroupTrackId === undefined || isString(data.currentGroupTrackId))
+        && (data.restoreOperationId === undefined || isString(data.restoreOperationId))
+        && (isTrackSnapshot(data.groupTrack) || (version === PERSISTED_HISTORY_VERSION && data.groupTrack === undefined))
+        && (data.effects === undefined || isTrackEffectSnapshot(data.effects))
+        && (data.automation === undefined || isTrackAutomationSnapshot(data.automation))
         && Array.isArray(data.childSnapshots)
         && data.childSnapshots.every(isTrackUngroupChildSnapshot)
     case 'track-color':
       return isString(data.trackRef)
         && (data.from === undefined || isString(data.from))
         && (data.to === undefined || isString(data.to))
+    case 'track-color-cascade':
+      return Array.isArray(data.tracks)
+        && data.tracks.every((update) => isRecord(update)
+          && isString(update.trackRef)
+          && (update.from === undefined || isString(update.from))
+          && (update.to === undefined || isString(update.to)))
+        && Array.isArray(data.clips)
+        && data.clips.every((update) => isRecord(update)
+          && isString(update.clipRef)
+          && (update.from === undefined || isString(update.from))
+          && isString(update.to))
     case 'track-reorder':
       return Array.isArray(data.patches)
         && data.patches.every((patch) => isRecord(patch)
@@ -210,27 +243,27 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSe
   }
 }
 
-function isHistoryEntryValue(value: unknown, allowSectionEdit: boolean): value is HistoryEntry {
+function isHistoryEntryValue(value: unknown, allowSectionEdit: boolean, version: number): value is HistoryEntry {
   return isRecord(value)
     && typeof value.type === 'string'
     && typeof value.projectId === 'string'
     && isRecord(value.data)
-    && isHistoryEntryData(value.type, value.data, allowSectionEdit)
+    && isHistoryEntryData(value.type, value.data, allowSectionEdit, version)
 }
 
-function isHistoryEntry(value: unknown): value is HistoryEntry {
-  return isHistoryEntryValue(value, true)
+function isHistoryEntry(value: unknown, version: number): value is HistoryEntry {
+  return isHistoryEntryValue(value, true, version)
 }
 
-function readHistoryEntries(entries: unknown[]) {
-  return entries.filter(isHistoryEntry)
+function readHistoryEntries(entries: unknown[], version: number) {
+  return entries.filter((entry) => isHistoryEntry(entry, version))
 }
 
 export function normalizePersistedHistory(value: unknown): PersistedHistory {
   if (isPersistedHistoryEnvelope(value)) {
     return {
-      undo: readHistoryEntries(value.undo),
-      redo: readHistoryEntries(value.redo),
+      undo: readHistoryEntries(value.undo, value.version),
+      redo: readHistoryEntries(value.redo, value.version),
     }
   }
   return { undo: [], redo: [] }

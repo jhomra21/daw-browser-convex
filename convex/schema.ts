@@ -11,6 +11,7 @@ export default defineSchema({
     projectId: v.string(),
     index: v.number(),
     kind: v.optional(v.string()), // 'audio' | 'instrument'
+    historyRef: v.optional(v.string()),
     groupId: v.optional(v.id("tracks")),
     collapsed: v.optional(v.boolean()),
     color: v.optional(v.string()),

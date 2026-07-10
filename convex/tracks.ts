@@ -1,4 +1,5 @@
 import { mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import {
   buildMixerChannelInsert,
@@ -14,8 +15,10 @@ import {
   sanitizeTrackRouting,
 } from "./trackRouting";
 import { getTrackWriteAccess, requireTrackOwnerForWrite } from "./trackWrites";
+import { getClipWriteAccess } from "./clipWrites";
 import { requireAuthenticatedUserId, requireProjectAccess, requireProjectRole } from "./projectAccess";
 import { runSharedOperationOnce } from "./sharedOperationResults";
+import { automationTargetKey, collectTrackDescendantIds, hasTrackGroupCycle, isHexColor, normalizeClipColor, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects } from "@daw-browser/shared";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -713,6 +716,496 @@ export const serverSetColor = mutation({
     const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
     if (!normalizedTrackId) throw new Error("Track not found.");
     await setTrackColorForUser(ctx, { trackId: normalizedTrackId, userId, color });
+  },
+});
+
+const isTrackLockedByOther = async (ctx: any, track: any, userId: string) => {
+  const channel = await ensureMixerChannelForTrack(ctx, track);
+  const lockState = normalizeMixerLockState(channel.lockedBy, channel.lockedAt);
+  return lockState.isLocked && lockState.lockedBy !== userId;
+};
+
+const hasRoutingReferenceTo = (track: any, targetTrackId: string) => (
+  String(track.outputTargetId) === targetTrackId
+  || (track.sends ?? []).some((send: { targetId: any }) => String(send.targetId) === targetTrackId)
+);
+
+const restoreGroupPlaceholderId = "restored-group";
+
+const routingMatches = (
+  left: { outputTargetId?: string; sends: Array<{ targetId: string; amount: number }> },
+  right: { outputTargetId?: string; sends: Array<{ targetId: string; amount: number }> },
+) => (
+  left.outputTargetId === right.outputTargetId
+  && left.sends.length === right.sends.length
+  && left.sends.every((send, index) => (
+    send.targetId === right.sends[index]?.targetId
+    && send.amount === right.sends[index]?.amount
+  ))
+);
+
+const validateRestoreUngroupRouting = (
+  input: {
+    group: {
+      parentGroupId?: string;
+      outputTargetId?: string;
+      sends: Array<{ targetId: string; amount: number }>;
+    };
+    children: Array<{ trackId: string; outputTargetId?: string; outputToGroup: boolean }>;
+  },
+  tracks: any[],
+) => {
+  const childIds = new Set(input.children.map((child) => child.trackId));
+  if (input.group.parentGroupId && childIds.has(input.group.parentGroupId)) return false;
+  const trackById = new Map(tracks.map((track) => [String(track._id), track]));
+  const childrenByTrackId = new Map(input.children.map((child) => [child.trackId, child]));
+  const restoredGroupTrack = {
+    _id: restoreGroupPlaceholderId,
+    channelRole: "group",
+    groupId: input.group.parentGroupId,
+  };
+  const routingTracks = [
+    ...tracks.map((track) => ({
+      _id: String(track._id),
+      channelRole: track.channelRole,
+      groupId: childrenByTrackId.has(String(track._id))
+        ? restoreGroupPlaceholderId
+        : (track.groupId ? String(track.groupId) : undefined),
+    })),
+    restoredGroupTrack,
+  ];
+  const routingTrackById = new Map(routingTracks.map((track) => [track._id, track]));
+  if (hasTrackGroupCycle(routingTracks.map((track) => ({ id: track._id, groupId: track.groupId })))) return false;
+
+  const groupRouting = sanitizeTrackRouting(restoredGroupTrack, {
+    sends: input.group.sends,
+    outputTargetId: input.group.outputTargetId,
+  }, routingTracks);
+  if (!routingMatches(groupRouting, {
+    sends: input.group.sends,
+    outputTargetId: input.group.outputTargetId,
+  })) return false;
+
+  for (const child of input.children) {
+    const existingTrack = trackById.get(child.trackId);
+    const projectedTrack = routingTrackById.get(child.trackId);
+    if (!existingTrack || !projectedTrack) return false;
+    const outputTargetId = child.outputToGroup ? restoreGroupPlaceholderId : child.outputTargetId;
+    const sends = existingTrack.sends.map((send: { targetId: any; amount: number }) => ({
+      targetId: String(send.targetId),
+      amount: send.amount,
+    }));
+    const routing = sanitizeTrackRouting(projectedTrack, { sends, outputTargetId }, routingTracks);
+    if (!routingMatches(routing, { sends, outputTargetId })) return false;
+  }
+  return true;
+};
+
+const normalizeColorBatch = (
+  ctx: any,
+  input: {
+    trackUpdates: Array<{ trackId: string; color?: string | null }>;
+    clipUpdates: Array<{ clipId: string; color: string }>;
+  },
+) => {
+  const trackUpdates: Array<{ trackId: Id<"tracks">; color?: string }> = [];
+  for (const update of input.trackUpdates) {
+    const trackId = ctx.db.normalizeId("tracks", update.trackId);
+    if (!trackId) return null;
+    trackUpdates.push({ trackId, color: update.color ?? undefined });
+  }
+  const clipUpdates: Array<{ clipId: Id<"clips">; color: string }> = [];
+  for (const update of input.clipUpdates) {
+    const clipId = ctx.db.normalizeId("clips", update.clipId);
+    const color = normalizeClipColor(update.color);
+    if (!clipId || !color) return null;
+    clipUpdates.push({ clipId, color });
+  }
+  if (new Set(trackUpdates.map((update) => update.trackId)).size !== trackUpdates.length) return null;
+  if (new Set(clipUpdates.map((update) => update.clipId)).size !== clipUpdates.length) return null;
+  return { trackUpdates, clipUpdates };
+};
+
+const preflightColorBatch = async (
+  ctx: any,
+  userId: string,
+  updates: NonNullable<ReturnType<typeof normalizeColorBatch>>,
+) => {
+  const trackAccesses = await Promise.all(updates.trackUpdates.map((update) => getTrackWriteAccess(ctx, update.trackId, userId)));
+  const clipAccesses = await Promise.all(updates.clipUpdates.map((update) => getClipWriteAccess(ctx, update.clipId, userId)));
+  if (trackAccesses.some((access) => !access) || clipAccesses.some((access) => !access)) return null;
+  const tracks = trackAccesses.flatMap((access) => access ? [access.track] : []);
+  const clips = clipAccesses.flatMap((access) => access ? [access.clip] : []);
+  const projectId = tracks[0]?.projectId ?? clips[0]?.projectId;
+  if (!projectId || tracks.some((track) => track.projectId !== projectId) || clips.some((clip) => clip.projectId !== projectId)) return null;
+  const locked = await Promise.all(tracks.map((track) => isTrackLockedByOther(ctx, track, userId)));
+  if (locked.some(Boolean)) return null;
+  const clipTrackIds = new Set(clips.map((clip) => String(clip.trackId)));
+  const clipTracks = await Promise.all(Array.from(clipTrackIds, async (trackId) => {
+    const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
+    return normalizedTrackId ? await ctx.db.get(normalizedTrackId) : null;
+  }));
+  if (clipTracks.some((track) => !track)) return null;
+  const clipLocks = await Promise.all(clipTracks.flatMap((track) => track ? [isTrackLockedByOther(ctx, track, userId)] : []));
+  return clipLocks.some(Boolean) ? null : { tracks, clips, projectId };
+};
+
+const applyColorBatchForUser = async (
+  ctx: any,
+  userId: string,
+  input: {
+    trackUpdates: Array<{ trackId: string; color?: string | null }>;
+    clipUpdates: Array<{ clipId: string; color: string }>;
+  },
+) => {
+  const normalized = normalizeColorBatch(ctx, input);
+  if (!normalized) return null;
+  const preflight = await preflightColorBatch(ctx, userId, normalized);
+  if (!preflight) return null;
+  const tracksById = new Map(preflight.tracks.map((track) => [String(track._id), track]));
+  const clipsById = new Map(preflight.clips.map((clip) => [String(clip._id), clip]));
+  const trackUpdates = normalized.trackUpdates.filter((update) => (
+    tracksById.get(String(update.trackId))?.color !== update.color
+  ));
+  const clipUpdates = normalized.clipUpdates.filter((update) => (
+    clipsById.get(String(update.clipId))?.color !== update.color
+  ));
+  const result = {
+    trackUpdates: normalized.trackUpdates.map((update) => ({
+      trackId: String(update.trackId),
+      from: tracksById.get(String(update.trackId))?.color,
+      to: update.color,
+    })),
+    clipUpdates: normalized.clipUpdates.map((update) => ({
+      clipId: String(update.clipId),
+      from: clipsById.get(String(update.clipId))?.color,
+      to: update.color,
+    })),
+  };
+  if (trackUpdates.length === 0 && clipUpdates.length === 0) return result;
+  await Promise.all([
+    ...trackUpdates.map((update) => ctx.db.patch(update.trackId, { color: update.color })),
+    ...clipUpdates.map((update) => ctx.db.patch(update.clipId, { color: update.color })),
+  ]);
+  return result;
+};
+
+const ungroupTrackForUser = async (ctx: any, userId: string, projectId: string, groupId: string) => {
+  const normalizedGroupId = ctx.db.normalizeId("tracks", groupId);
+  if (!normalizedGroupId) return { status: "rejected" as const };
+  const groupAccess = await getTrackWriteAccess(ctx, normalizedGroupId, userId);
+  if (!groupAccess || groupAccess.track.projectId !== projectId) {
+    return { status: "rejected" as const };
+  }
+
+  const tracks = await listProjectTracksWithMixerChannels(ctx, groupAccess.track.projectId);
+  const group = tracks.find((track) => String(track._id) === String(normalizedGroupId));
+  if (!group || group.channelRole !== "group" || await isTrackLockedByOther(ctx, group, userId)) return { status: "rejected" as const };
+  const directChildren = tracks.filter((track) => String(track.groupId) === String(normalizedGroupId));
+  const childAccesses = await Promise.all(directChildren.map((track) => getTrackWriteAccess(ctx, track._id, userId)));
+  if (childAccesses.some((access) => !access)) return { status: "rejected" as const };
+  const childLocks = await Promise.all(directChildren.map((track) => isTrackLockedByOther(ctx, track, userId)));
+  if (childLocks.some(Boolean)) return { status: "rejected" as const };
+
+  const groupClips = await ctx.db.query("clips").withIndex("by_track", (q: any) => q.eq("trackId", normalizedGroupId)).collect();
+  if (groupClips.length > 0) return { status: "rejected" as const };
+  const directChildIds = new Set(directChildren.map((track) => String(track._id)));
+  const hasExternalReference = tracks.some((track) => (
+    String(track._id) !== String(normalizedGroupId)
+    && !directChildIds.has(String(track._id))
+    && hasRoutingReferenceTo(track, String(normalizedGroupId))
+  ));
+  if (hasExternalReference) return { status: "rejected" as const };
+
+  for (const child of directChildren) {
+    const groupIdForChild = group.groupId;
+    if (String(child.groupId) !== String(groupIdForChild)) {
+      await ctx.db.patch(child._id, { groupId: groupIdForChild });
+    }
+    const channel = await ensureMixerChannelForTrack(ctx, child);
+    if (String(channel.outputTargetId) === String(normalizedGroupId)) {
+      await ctx.db.patch(channel._id, { outputTargetId: groupIdForChild });
+    }
+  }
+  const automation = await ctx.db
+    .query("automationEnvelopes")
+    .withIndex("by_project_track", (q: any) => q.eq("projectId", group.projectId).eq("trackId", normalizedGroupId))
+    .collect();
+  const effects = await ctx.db.query("effects").withIndex("by_track", (q: any) => q.eq("trackId", normalizedGroupId)).collect();
+  const result = {
+    status: "applied" as const,
+    group: {
+      trackId: String(group._id),
+      historyRef: group.historyRef,
+      index: group.index,
+      kind: group.kind,
+      parentGroupId: group.groupId ? String(group.groupId) : undefined,
+      collapsed: group.collapsed,
+      color: group.color,
+      volume: group.volume,
+      muted: group.muted,
+      soloed: group.soloed,
+      outputTargetId: group.outputTargetId ? String(group.outputTargetId) : undefined,
+      sends: group.sends.map((send: { targetId: Id<"tracks">; amount: number }) => ({
+        targetId: String(send.targetId),
+        amount: send.amount,
+      })),
+    },
+    children: directChildren.map((child) => ({
+      trackId: String(child._id),
+      previousOutputTargetId: child.outputTargetId ? String(child.outputTargetId) : undefined,
+      nextOutputTargetId: String(child.outputTargetId) === String(normalizedGroupId)
+        ? (group.groupId ? String(group.groupId) : undefined)
+        : (child.outputTargetId ? String(child.outputTargetId) : undefined),
+    })),
+    effects: effects.map((effect: { type: string; instanceId?: string; index?: number; params: unknown }) => ({
+      type: effect.type,
+      instanceId: effect.instanceId,
+      index: effect.index,
+      params: effect.params,
+    })),
+    automation: automation.map((envelope: { parameterId: string; enabled: boolean; points: unknown[]; updatedAt: number }) => ({
+      parameterId: envelope.parameterId,
+      enabled: envelope.enabled,
+      points: envelope.points,
+      updatedAt: envelope.updatedAt,
+    })),
+  };
+  for (const envelope of automation) await ctx.db.delete(envelope._id);
+  for (const effect of effects) await ctx.db.delete(effect._id);
+  await deleteMixerStateForTrack(ctx, normalizedGroupId);
+  await ctx.db.delete(groupAccess.owner._id);
+  await ctx.db.delete(normalizedGroupId);
+  const remaining = tracks.filter((track) => String(track._id) !== String(normalizedGroupId));
+  for (const track of remaining) {
+    if (track.index > group.index) await ctx.db.patch(track._id, { index: track.index - 1 });
+  }
+  return result;
+};
+
+export const serverUngroup = mutation({
+  args: { projectId: v.string(), groupId: v.string(), operationId: v.optional(v.string()) },
+  handler: async (ctx, { projectId, groupId, operationId }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    return await runSharedOperationOnce(ctx, {
+      projectId,
+      userId,
+      operationId,
+      isResult: (value): value is Awaited<ReturnType<typeof ungroupTrackForUser>> => (
+        typeof value === "object"
+        && value !== null
+        && "status" in value
+        && (value.status === "applied" || value.status === "rejected")
+      ),
+      run: async () => await ungroupTrackForUser(ctx, userId, projectId, groupId),
+    });
+  },
+});
+
+export const serverRestoreUngroup = mutation({
+  args: {
+    projectId: v.string(),
+    group: v.object({
+      index: v.number(),
+      kind: v.optional(v.string()),
+      historyRef: v.optional(v.string()),
+      parentGroupId: v.optional(v.string()),
+      collapsed: v.optional(v.boolean()),
+      color: v.optional(v.string()),
+      volume: v.number(),
+      muted: v.optional(v.boolean()),
+      soloed: v.optional(v.boolean()),
+      outputTargetId: v.optional(v.string()),
+      sends: v.array(v.object({ targetId: v.string(), amount: v.number() })),
+    }),
+    children: v.array(v.object({ trackId: v.string(), outputTargetId: v.optional(v.string()), outputToGroup: v.boolean() })),
+    effects: v.array(v.object({
+      type: v.union(
+        v.literal("eq"),
+        v.literal("compressor"),
+        v.literal("saturator"),
+        v.literal("delay"),
+        v.literal("reverb"),
+        v.literal("instrument"),
+        v.literal("synth"),
+        v.literal("arpeggiator"),
+      ),
+      instanceId: v.optional(v.string()),
+      index: v.optional(v.number()),
+      params: v.any(),
+    })),
+    automation: v.array(v.object({
+      parameterId: v.string(),
+      enabled: v.boolean(),
+      points: v.array(v.object({
+        id: v.string(),
+        timeSec: v.number(),
+        value: v.number(),
+        interpolation: v.union(v.literal("linear"), v.literal("hold")),
+      })),
+      updatedAt: v.number(),
+    })),
+    operationId: v.optional(v.string()),
+  },
+  handler: async (ctx, input) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    return await runSharedOperationOnce(ctx, {
+      projectId: input.projectId,
+      userId,
+      operationId: input.operationId,
+      isResult: (value): value is { status: "applied"; groupId: string } | { status: "rejected" } => (
+        typeof value === "object"
+        && value !== null
+        && "status" in value
+        && (
+          value.status === "rejected"
+          || (value.status === "applied" && "groupId" in value && typeof value.groupId === "string")
+        )
+      ),
+      run: async () => {
+        await requireProjectRole(ctx, input.projectId, userId, ["owner", "editor"]);
+        const effects = normalizeSharedUngroupRestoreEffects(input.effects);
+        const automation = normalizeSharedUngroupRestoreAutomation(input.automation);
+        if (!effects || !automation) return { status: "rejected" as const };
+        const tracks = await listProjectTracksWithMixerChannels(ctx, input.projectId);
+        const trackById = new Map(tracks.map((track) => [String(track._id), track]));
+        const requiredTrackIds = new Set<string>(input.children.map((child) => child.trackId));
+        if (input.group.parentGroupId) requiredTrackIds.add(input.group.parentGroupId);
+        if (input.group.outputTargetId) requiredTrackIds.add(input.group.outputTargetId);
+        for (const send of input.group.sends) requiredTrackIds.add(send.targetId);
+        for (const child of input.children) if (!child.outputToGroup && child.outputTargetId) requiredTrackIds.add(child.outputTargetId);
+        if (Array.from(requiredTrackIds).some((trackId) => !trackById.has(trackId))) return { status: "rejected" as const };
+        const parent = input.group.parentGroupId ? trackById.get(input.group.parentGroupId) : undefined;
+        if (parent && parent.channelRole !== "group") return { status: "rejected" as const };
+        const childIds = new Set(input.children.map((child) => child.trackId));
+        if (childIds.size !== input.children.length) return { status: "rejected" as const };
+        const childAccesses = await Promise.all(input.children.map((child) => {
+          const track = trackById.get(child.trackId);
+          return track ? getTrackWriteAccess(ctx, track._id, userId) : null;
+        }));
+        if (childAccesses.some((access) => !access)) return { status: "rejected" as const };
+        const childLocks = await Promise.all(input.children.map((child) => {
+          const track = trackById.get(child.trackId);
+          return track ? isTrackLockedByOther(ctx, track, userId) : true;
+        }));
+        if (childLocks.some(Boolean)) return { status: "rejected" as const };
+        if (!validateRestoreUngroupRouting(input, tracks)) return { status: "rejected" as const };
+
+        const index = Math.max(0, Math.min(Math.round(input.group.index), tracks.length));
+        for (const track of tracks) {
+          if (track.index >= index) await ctx.db.patch(track._id, { index: track.index + 1 });
+        }
+        const parentGroupId = parent?._id;
+        const outputTargetId = input.group.outputTargetId ? trackById.get(input.group.outputTargetId)?._id : undefined;
+        const sends = input.group.sends.flatMap((send) => {
+          const target = trackById.get(send.targetId);
+          return target ? [{ targetId: target._id, amount: send.amount }] : [];
+        });
+        const groupId = await ctx.db.insert("tracks", {
+          projectId: input.projectId,
+          index,
+          kind: input.group.kind,
+          historyRef: input.group.historyRef,
+          groupId: parentGroupId,
+          collapsed: input.group.collapsed,
+          color: input.group.color,
+        });
+        await ctx.db.insert("mixerChannels", buildMixerChannelInsert(input.projectId, groupId, {
+          volume: input.group.volume,
+          muted: input.group.muted,
+          soloed: input.group.soloed,
+          channelRole: "group",
+          outputTargetId,
+          sends,
+        }));
+        await ctx.db.insert("ownerships", { projectId: input.projectId, ownerUserId: userId, trackId: groupId });
+        for (const child of input.children) {
+          const track = trackById.get(child.trackId);
+          if (!track) throw new Error("Restore group preflight became invalid.");
+          await ctx.db.patch(track._id, { groupId });
+          const channel = await ensureMixerChannelForTrack(ctx, track);
+          const childOutputTargetId = child.outputToGroup
+            ? groupId
+            : (child.outputTargetId ? trackById.get(child.outputTargetId)?._id : undefined);
+          await ctx.db.patch(channel._id, { outputTargetId: childOutputTargetId });
+        }
+        for (const effect of effects) {
+          await ctx.db.insert("effects", {
+            projectId: input.projectId,
+            targetType: "track",
+            trackId: groupId,
+            index: effect.index ?? 0,
+            type: effect.type,
+            instanceId: effect.instanceId,
+            params: effect.params,
+            createdAt: Date.now(),
+          });
+        }
+        for (const envelope of automation) {
+          await ctx.db.insert("automationEnvelopes", {
+            projectId: input.projectId,
+            targetKind: "track",
+            trackId: groupId,
+            targetKey: automationTargetKey({ kind: "track", trackId: String(groupId) }, envelope.parameterId),
+            parameterId: envelope.parameterId,
+            enabled: envelope.enabled,
+            points: envelope.points,
+            updatedAt: envelope.updatedAt,
+          });
+        }
+        return { status: "applied" as const, groupId: String(groupId) };
+      },
+    });
+  },
+});
+
+export const serverSetColorCascade = mutation({
+  args: {
+    rootTrackId: v.string(),
+    color: v.optional(v.union(v.string(), v.null())),
+    cascadeClipColors: v.boolean(),
+  },
+  handler: async (ctx, { rootTrackId, color, cascadeClipColors }) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    const normalizedRootTrackId = ctx.db.normalizeId("tracks", rootTrackId);
+    if (!normalizedRootTrackId) return { status: "rejected" as const };
+    const rootAccess = await getTrackWriteAccess(ctx, normalizedRootTrackId, userId);
+    if (!rootAccess) return { status: "rejected" as const };
+    const tracks = await listProjectTracksWithMixerChannels(ctx, rootAccess.track.projectId);
+    const root = tracks.find((track) => String(track._id) === String(normalizedRootTrackId));
+    if (!root) return { status: "rejected" as const };
+    const targetTrackIds = root.channelRole === "group"
+      ? new Set([String(root._id), ...collectTrackDescendantIds(tracks.map((track) => ({ id: String(track._id), groupId: track.groupId ? String(track.groupId) : undefined })), String(root._id))])
+      : new Set([String(root._id)]);
+    const targetTracks = tracks.filter((track) => targetTrackIds.has(String(track._id)));
+    const clipColor = color && isHexColor(color) ? color : undefined;
+    const targetClips = root.channelRole === "group" && cascadeClipColors && clipColor
+      ? (await Promise.all(targetTracks.map((track) => (
+        ctx.db.query("clips").withIndex("by_track", (q: any) => q.eq("trackId", track._id)).collect()
+      )))).flat()
+      : [];
+    const colorUpdates = {
+      trackUpdates: targetTracks.map((track) => ({ trackId: String(track._id), color })),
+      clipUpdates: targetClips.map((clip) => ({ clipId: String(clip._id), color: clipColor ?? clip.color ?? "" })),
+    };
+    const updates = await applyColorBatchForUser(ctx, userId, colorUpdates);
+    return updates
+      ? { status: "applied" as const, ...updates }
+      : { status: "rejected" as const };
+  },
+});
+
+export const serverApplyColorBatch = mutation({
+  args: {
+    trackUpdates: v.array(v.object({ trackId: v.string(), color: v.optional(v.union(v.string(), v.null())) })),
+    clipUpdates: v.array(v.object({ clipId: v.string(), color: v.string() })),
+  },
+  handler: async (ctx, input) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    const updates = await applyColorBatchForUser(ctx, userId, input);
+    return updates
+      ? { status: "applied" as const, ...updates }
+      : { status: "rejected" as const };
   },
 });
 

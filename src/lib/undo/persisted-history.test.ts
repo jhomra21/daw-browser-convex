@@ -194,6 +194,16 @@ describe('persisted undo history', () => {
       projectId: 'project-1',
       data: {
         groupTrackRef: 'group-ref',
+        sourceGroupTrackId: 'group-1',
+        restoreOperationId: 'restore-op-1',
+        groupTrack: {
+          trackRef: 'group-ref',
+          index: 0,
+          name: 'Group',
+          volume: 0.8,
+          channelRole: 'group',
+          routing: { sends: [] },
+        },
         childSnapshots: [{
           trackRef: 'track-ref-1',
           previousGroupRef: 'group-ref',
@@ -210,6 +220,26 @@ describe('persisted undo history', () => {
       undo: [groupEntry],
       redo: [ungroupEntry],
     })
+  })
+
+  test('keeps legacy version 3 ungroup entries without restore snapshots', () => {
+    const entry: HistoryEntry = {
+      type: 'track-ungroup',
+      projectId: 'project-1',
+      data: {
+        groupTrackRef: 'group-ref',
+        childSnapshots: [{
+          trackRef: 'track-ref-1',
+          previousGroupRef: 'group-ref',
+        }],
+      },
+    }
+
+    expect(normalizePersistedHistory({
+      version: 3,
+      undo: [entry],
+      redo: [],
+    })).toEqual({ undo: [entry], redo: [] })
   })
 
   test('keeps section edit entries with valid child history entries', () => {

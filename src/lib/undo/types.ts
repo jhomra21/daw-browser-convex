@@ -289,6 +289,12 @@ export type HistoryEntry =
       projectId: string
       data: {
         groupTrackRef: TrackRef
+        sourceGroupTrackId?: string
+        currentGroupTrackId?: string
+        restoreOperationId?: string
+        groupTrack?: TrackSnapshot
+        effects?: TrackEffectSnapshot
+        automation?: TrackAutomationSnapshot
         childSnapshots: Array<{
           trackRef: TrackRef
           previousGroupRef: TrackRef
@@ -301,6 +307,14 @@ export type HistoryEntry =
       type: 'track-color'
       projectId: string
       data: { trackRef: TrackRef; from: string | undefined; to: string | undefined }
+    }
+  | {
+      type: 'track-color-cascade'
+      projectId: string
+      data: {
+        tracks: Array<{ trackRef: TrackRef; from: string | undefined; to: string | undefined }>
+        clips: Array<{ clipRef: ClipRef; from: string | undefined; to: string }>
+      }
     }
   | {
       type: 'track-reorder'

@@ -123,6 +123,16 @@ export const executeTimelineOperation = async (
       return { status: 'applied' }
     case 'tracks.reorderAndGroup':
       return await context.convex.mutation(convexApi.tracks.serverReorderAndGroup, operation.payload)
+    case 'tracks.ungroup':
+      return await context.convex.mutation(convexApi.tracks.serverUngroup, {
+        projectId: context.projectId,
+        ...operation.payload,
+      })
+    case 'tracks.restoreUngroup':
+      return await context.convex.mutation(convexApi.tracks.serverRestoreUngroup, {
+        projectId: context.projectId,
+        ...operation.payload,
+      })
     case 'tracks.setCollapsed':
       await context.convex.mutation(convexApi.tracks.serverSetCollapsed, operation.payload)
       return { status: 'applied' }
@@ -132,6 +142,10 @@ export const executeTimelineOperation = async (
         color: operation.payload.color ?? null,
       })
       return { status: 'applied' }
+    case 'tracks.setColorCascade':
+      return await context.convex.mutation(convexApi.tracks.serverSetColorCascade, operation.payload)
+    case 'tracks.applyColorBatch':
+      return await context.convex.mutation(convexApi.tracks.serverApplyColorBatch, operation.payload)
     case 'tracks.setVolume':
       await context.convex.mutation(convexApi.tracks.serverSetVolume, {
         trackId: operation.payload.trackId,

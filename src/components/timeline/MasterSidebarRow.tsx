@@ -105,7 +105,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   const row = (
     <div
       class={cn(
-        "fixed right-0 z-30 [box-shadow:inset_0_1px_0_rgb(38_38_38)]",
+        "sticky z-30 [box-shadow:inset_0_1px_0_rgb(38_38_38)]",
         master().selected ? "bg-timeline-surface-muted" : "bg-timeline-surface",
       )}
       style={{

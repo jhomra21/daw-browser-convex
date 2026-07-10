@@ -1,8 +1,7 @@
 import { buildLocalClip } from '~/lib/clip-create'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
-import { assert, assertDefined, automationTargetKey } from '@daw-browser/shared'
+import { assert, assertDefined, automationTargetKey, collectTrackDescendantIds } from '@daw-browser/shared'
 import { createLocalTrack } from '~/lib/tracks'
-import { collectTrackDescendantIds } from '~/lib/timeline-track-layout'
 import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 
 import { buildHistoryRefIndex, resolveStoredTrackId, resolveTrackId, resolveTrackRoutingSnapshot } from './refs'

@@ -158,6 +158,8 @@ export function buildTrackUngroupHistoryEntry(input: {
   groupTrack: Track
   childTrackIds: Track['id'][]
   nextOutputTargetIdsByTrackId?: ReadonlyMap<Track['id'], Track['id'] | undefined>
+  effects?: TrackEffectSnapshot
+  automation?: TrackAutomationSnapshot
 }): Extract<HistoryEntry, { type: 'track-ungroup' }> {
   const childIds = new Set(input.childTrackIds)
   const trackRefById = new Map(input.tracks.map((track) => [track.id, getTrackHistoryRef(track)]))
@@ -166,6 +168,24 @@ export function buildTrackUngroupHistoryEntry(input: {
     projectId: input.projectId,
     data: {
       groupTrackRef: getTrackHistoryRef(input.groupTrack),
+      sourceGroupTrackId: input.groupTrack.id,
+      restoreOperationId: crypto.randomUUID(),
+      groupTrack: {
+        trackRef: getTrackHistoryRef(input.groupTrack),
+        index: input.tracks.findIndex((track) => track.id === input.groupTrack.id),
+        name: input.groupTrack.name,
+        volume: input.groupTrack.volume,
+        muted: input.groupTrack.muted,
+        soloed: input.groupTrack.soloed,
+        kind: input.groupTrack.kind,
+        channelRole: input.groupTrack.channelRole,
+        groupRef: input.groupTrack.groupId ? trackRefById.get(input.groupTrack.groupId) : undefined,
+        collapsed: input.groupTrack.collapsed,
+        color: input.groupTrack.color,
+        routing: buildTrackRoutingHistorySnapshot(input.groupTrack, input.tracks),
+      },
+      effects: input.effects,
+      automation: input.automation,
       childSnapshots: input.tracks
         .filter((track) => childIds.has(track.id))
         .map((track) => {
@@ -181,19 +201,26 @@ export function buildTrackUngroupHistoryEntry(input: {
   }
 }
 
-export function buildTrackColorHistoryEntry(input: {
+export function buildTrackColorCascadeHistoryEntry(input: {
   projectId: string
-  track: Track
-  from: string | undefined
-  to: string | undefined
-}): Extract<HistoryEntry, { type: 'track-color' }> {
+  tracks: Track[]
+  trackUpdates: Array<{ trackId: Track['id']; from: string | undefined; to: string | undefined }>
+  clipUpdates: Array<{ clipId: string; from: string; to: string }>
+}): Extract<HistoryEntry, { type: 'track-color-cascade' }> {
+  const trackById = new Map(input.tracks.map((track) => [track.id, track]))
+  const clipById = new Map(input.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, clip] as const)))
   return {
-    type: 'track-color',
+    type: 'track-color-cascade',
     projectId: input.projectId,
     data: {
-      trackRef: getTrackHistoryRef(input.track),
-      from: input.from,
-      to: input.to,
+      tracks: input.trackUpdates.flatMap((update) => {
+        const track = trackById.get(update.trackId)
+        return track ? [{ trackRef: getTrackHistoryRef(track), from: update.from, to: update.to }] : []
+      }),
+      clips: input.clipUpdates.flatMap((update) => {
+        const clip = clipById.get(update.clipId)
+        return clip ? [{ clipRef: getClipHistoryRef(clip), from: update.from, to: update.to }] : []
+      }),
     },
   }
 }

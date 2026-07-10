@@ -18,6 +18,7 @@ import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { AutomationEnvelope } from '@daw-browser/shared'
+import { getEncodingBitrate, getExportRangeBounds, getExportRenderOptions, isRenderableExportTrack, type ExportEncodingSettings, type ExportRenderSettings } from '~/lib/export/export-settings'
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number]
 
@@ -40,6 +41,8 @@ export type TimelineExportRequest = {
   masterVolume: number
   range: ExportRange
   formats: readonly ExportAudioFormat[]
+  render: ExportRenderSettings
+  encoding: ExportEncodingSettings
   projectId?: string
   userId?: string
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
@@ -237,18 +240,7 @@ type ExportTrackSnapshotInput = Pick<TimelineExportRequest, 'ensureClipBuffer' |
 }
 
 async function ensureBuffersForRange(input: ExportTrackSnapshotInput) {
-  let rangeStart = 0
-  let rangeEnd = 0
-  if (input.range.mode === 'whole') {
-    for (const track of input.tracks) {
-      for (const clip of track.clips) {
-        rangeEnd = Math.max(rangeEnd, clip.startSec + clip.duration)
-      }
-    }
-  } else {
-    rangeStart = input.range.startSec
-    rangeEnd = input.range.endSec
-  }
+  const { startSec: rangeStart, endSec: rangeEnd } = getExportRangeBounds(input.tracks, input.range)
   const intersects = (clip: RuntimeClip) => {
     const clipStart = clip.startSec
     const clipEnd = clip.startSec + clip.duration
@@ -378,14 +370,10 @@ async function loadExportFxWithDrumRackBuffers(
   return fx
 }
 
-const isRenderableStemTrack = (track: RuntimeTrack): boolean => (
-  (track.channelRole ?? 'track') === 'track' && track.clips.length > 0
-)
-
 const collectStemTracks = (input: Pick<StemExportRequest, 'stemMode' | 'selectedTrackIds'> & { tracks: RuntimeTrack[] }): RuntimeTrack[] => {
-  if (input.stemMode === 'all-tracks') return input.tracks.filter(isRenderableStemTrack)
+  if (input.stemMode === 'all-tracks') return input.tracks.filter(isRenderableExportTrack)
   const selectedIds = new Set(input.selectedTrackIds ?? [])
-  return input.tracks.filter((track) => selectedIds.has(track.id) && isRenderableStemTrack(track))
+  return input.tracks.filter((track) => selectedIds.has(track.id) && isRenderableExportTrack(track))
 }
 
 const createUniqueStemFileName = (
@@ -493,11 +481,13 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       tracks,
       bpm: input.bpm,
       range: input.range,
+      ...getExportRenderOptions(input.render),
       fx,
       automationEnvelopes,
       signal: input.signal,
     })
     throwIfExportAborted(input.signal)
+    if (input.render.normalize) exportMixdown.normalizeAudioBufferInPlace(rendered)
     let completedFormats = 0
     for (const format of formats) {
       const fileName = createMixdownFileName(exportDate, format)
@@ -512,6 +502,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       })
       const enc = await exportMixdown.encodeAudioBuffer(rendered, {
         format,
+        bitrate: getEncodingBitrate(input.encoding, format),
         target: localWritable ? createLocalExportTarget(localWritable) : { mode: 'buffer' },
         signal: input.signal,
         onWrite: reportEncodingProgress,
@@ -592,6 +583,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
       tracks,
       bpm: input.bpm,
       range: input.range,
+      ...getExportRenderOptions(input.render),
       fx,
       automationEnvelopes,
       signal: input.signal,
@@ -605,6 +597,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
       })
       const stemBuffer = await stemRenderSession.renderTrackStem(track)
       throwIfExportAborted(input.signal)
+      if (input.render.normalize) exportMixdown.normalizeAudioBufferInPlace(stemBuffer)
       let completedFormats = 0
       for (const format of formats) {
         const metadata = getExportAudioFormatMetadata(format)
@@ -616,6 +609,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
         })
         await exportMixdown.encodeAudioBuffer(stemBuffer, {
           format,
+          bitrate: getEncodingBitrate(input.encoding, format),
           target: createLocalExportTarget(localWritable),
           signal: input.signal,
           onWrite: reportEncodingProgress,

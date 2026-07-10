@@ -5,6 +5,8 @@ type ExportAudioFormatMetadata = {
   label: string
   fileExtension: string
   mimeType: string
+  bitratePresets?: readonly number[]
+  defaultBitrate?: number
 }
 
 export const exportAudioFormats: readonly ExportAudioFormat[] = ['wav', 'mp3', 'ogg-opus', 'flac']
@@ -21,12 +23,16 @@ const exportAudioFormatMetadata: Record<ExportAudioFormat, ExportAudioFormatMeta
     label: 'MP3',
     fileExtension: '.mp3',
     mimeType: 'audio/mpeg',
+    bitratePresets: [128000, 192000, 256000, 320000],
+    defaultBitrate: 192000,
   },
   'ogg-opus': {
     id: 'ogg-opus',
     label: 'Ogg Opus',
     fileExtension: '.ogg',
     mimeType: 'audio/ogg',
+    bitratePresets: [64000, 96000, 128000, 160000, 192000],
+    defaultBitrate: 128000,
   },
   flac: {
     id: 'flac',
@@ -39,6 +45,10 @@ const exportAudioFormatMetadata: Record<ExportAudioFormat, ExportAudioFormatMeta
 export const getExportAudioFormatMetadata = (format: ExportAudioFormat): ExportAudioFormatMetadata => {
   return exportAudioFormatMetadata[format]
 }
+
+export const getExportAudioBitrate = (format: ExportAudioFormat): number | undefined => (
+  exportAudioFormatMetadata[format].defaultBitrate
+)
 
 export const formatExportFileTimestamp = (date: Date): string => (
   date.toISOString().replace(/[-:TZ.]/g, '')

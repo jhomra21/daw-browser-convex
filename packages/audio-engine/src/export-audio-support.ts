@@ -7,17 +7,18 @@ import {
   type AudioCodec,
   type OutputFormat,
 } from 'mediabunny'
-import { exportAudioFormats, type ExportAudioFormat } from '@daw-browser/shared'
+import { exportAudioFormats, getExportAudioBitrate, type ExportAudioFormat } from '@daw-browser/shared'
 
-type ExportAudioSupportRequest = {
+export type ExportAudioSupportRequest = {
   sampleRate?: number
   numberOfChannels?: number
+  bitrateByFormat?: Partial<Record<ExportAudioFormat, number>>
 }
 
 type ExportAudioEncodingDescriptor = {
   codec: AudioCodec
   createOutputFormat: () => OutputFormat
-  defaultBitrate?: number
+  requiredBitrate?: number
 }
 
 const exportAudioEncodingDescriptors: Record<ExportAudioFormat, ExportAudioEncodingDescriptor> = {
@@ -28,16 +29,15 @@ const exportAudioEncodingDescriptors: Record<ExportAudioFormat, ExportAudioEncod
   mp3: {
     codec: 'mp3',
     createOutputFormat: () => new Mp3OutputFormat(),
-    defaultBitrate: 192000,
   },
   'ogg-opus': {
     codec: 'opus',
     createOutputFormat: () => new OggOutputFormat(),
-    defaultBitrate: 128000,
   },
   flac: {
     codec: 'flac',
     createOutputFormat: () => new FlacOutputFormat(),
+    requiredBitrate: 1411200,
   },
 }
 
@@ -46,24 +46,27 @@ export const getExportAudioCodec = (format: ExportAudioFormat): AudioCodec => {
 }
 
 export const getExportAudioDefaultBitrate = (format: ExportAudioFormat): number | undefined => {
-  return exportAudioEncodingDescriptors[format].defaultBitrate
+  return getExportAudioBitrate(format) ?? exportAudioEncodingDescriptors[format].requiredBitrate
 }
+
+export const getExportAudioEncodingConfig = (
+  format: ExportAudioFormat,
+  request: ExportAudioSupportRequest = {},
+) => ({
+  sampleRate: request.sampleRate ?? 44100,
+  numberOfChannels: request.numberOfChannels ?? 2,
+  bitrate: request.bitrateByFormat?.[format] ?? getExportAudioDefaultBitrate(format),
+})
 
 export const createExportAudioOutputFormat = (format: ExportAudioFormat): OutputFormat => {
   return exportAudioEncodingDescriptors[format].createOutputFormat()
 }
 
 export async function getSupportedExportAudioFormats(req: ExportAudioSupportRequest = {}): Promise<ExportAudioFormat[]> {
-  const sampleRate = req.sampleRate ?? 44100
-  const numberOfChannels = req.numberOfChannels ?? 2
   const supportChecks = exportAudioFormats.map(async (format): Promise<ExportAudioFormat | undefined> => {
     const codec = getExportAudioCodec(format)
     if (format === 'wav') return format
-    const canEncode = await canEncodeAudio(codec, {
-      sampleRate,
-      numberOfChannels,
-      bitrate: getExportAudioDefaultBitrate(format),
-    })
+    const canEncode = await canEncodeAudio(codec, getExportAudioEncodingConfig(format, req))
     return canEncode ? format : undefined
   })
   const checkedFormats = await Promise.all(supportChecks)

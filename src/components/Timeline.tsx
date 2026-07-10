@@ -66,6 +66,7 @@ import { Dashboard } from "~/components/dashboard/dashboard";
 import type { DashboardTimelineModel, DashboardView } from "~/components/dashboard/types";
 import { buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks } from "~/lib/timeline-track-layout";
 import { useAppPreferences } from "~/context/app-preferences";
+import { deriveSelectedExportTrackIds } from "~/lib/export/export-settings";
 
 type AgentMixOp = {
   type: "setMute" | "setSolo";
@@ -1167,6 +1168,13 @@ const Timeline: Component<TimelineProps> = (props) => {
     toggleLoop: () => setLoopEnabled((prev) => !prev),
   }));
 
+  const selectedExportTrackIds = createMemo(() => deriveSelectedExportTrackIds({
+    tracks: renderTracks(),
+    rangeSelection: selection.rangeSelection(),
+    selectedClipIds: selection.selectedClipIds(),
+    primaryTrackId: selection.selectedTrackId() || undefined,
+  }));
+
   const panelsProps = () => ({
     chat: {
       bottomOffsetPx: bottomPanel.chatBottomOffsetPx(),
@@ -1255,9 +1263,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
     exportDialog: {
       isOpen: exportOpen(),
-      tracks: renderTracks(),
       getTracks: () => renderTracks(),
-      selectedTrackId: selection.selectedTrackId() || undefined,
+      selectedTrackIds: selectedExportTrackIds(),
       bpm: bpm(),
       masterVolume: masterVolume.volume(),
       loopEnabled: loopEnabled(),

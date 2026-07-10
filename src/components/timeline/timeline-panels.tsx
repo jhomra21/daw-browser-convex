@@ -78,9 +78,8 @@ export type TimelinePanelsProps = {
   }
   exportDialog: {
     isOpen: boolean
-    tracks: Track[]
     getTracks: () => Track[]
-    selectedTrackId?: string
+    selectedTrackIds: readonly string[]
     bpm: number
     masterVolume: number
     loopEnabled: boolean
@@ -211,9 +210,8 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         <ExportDialog
           isOpen={props.exportDialog.isOpen}
           onClose={props.exportDialog.onClose}
-          tracks={props.exportDialog.tracks}
           getTracks={props.exportDialog.getTracks}
-          selectedTrackId={props.exportDialog.selectedTrackId}
+          selectedTrackIds={props.exportDialog.selectedTrackIds}
           bpm={props.exportDialog.bpm}
           masterVolume={props.exportDialog.masterVolume}
           loopEnabled={props.exportDialog.loopEnabled}

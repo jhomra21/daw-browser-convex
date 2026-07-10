@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { createSourceAutomationScope, isAutomationEnvelopeInSourceScope } from './export-mixdown'
+import { createSourceAutomationScope, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace } from './export-mixdown'
 import { automationTargetKey, type AutomationEnvelope } from '@daw-browser/shared'
 import type { ResolvedMixerChannel, ResolvedMixerGraph } from './mixer/types'
 
@@ -101,5 +101,36 @@ describe('isAutomationEnvelopeInSourceScope', () => {
     expect(isAutomationEnvelopeInSourceScope(scope, envelope({ kind: 'master' }, 'reverb:mix'))).toBe(false)
     expect(isAutomationEnvelopeInSourceScope(scope, envelope({ kind: 'track', trackId: 'source' }, 'volume'))).toBe(true)
     expect(isAutomationEnvelopeInSourceScope(scope, envelope({ kind: 'track', trackId: 'unrelated' }, 'volume'))).toBe(false)
+  })
+})
+
+describe('normalizeAudioBufferInPlace', () => {
+  const createBuffer = (channels: number[][]) => {
+    const data = channels.map((channelData) => new Float32Array(channelData))
+    return {
+      numberOfChannels: data.length,
+      getChannelData(channel: number) {
+        const channelData = data[channel]
+        if (!channelData) throw new Error('Missing channel')
+        return channelData
+      },
+    }
+  }
+
+  test('normalizes all channels once to full scale', () => {
+    const buffer = createBuffer([[0.25, -0.5], [0.1, 0.4]])
+    expect(normalizeAudioBufferInPlace(buffer)).toBe(2)
+    expect(getAudioBufferPeak(buffer)).toBe(1)
+    expect(Array.from(buffer.getChannelData(1))).toEqual([0.20000000298023224, 0.800000011920929])
+  })
+
+  test('does not amplify silence, clipped audio, or non-finite samples', () => {
+    const silence = createBuffer([[0, 0]])
+    expect(normalizeAudioBufferInPlace(silence)).toBe(1)
+    const clipped = createBuffer([[1.2, -0.5]])
+    expect(normalizeAudioBufferInPlace(clipped)).toBe(1)
+    const nonFinite = createBuffer([[Number.NaN, Number.POSITIVE_INFINITY]])
+    expect(normalizeAudioBufferInPlace(nonFinite)).toBe(1)
+    expect(Number.isNaN(nonFinite.getChannelData(0)[0])).toBe(true)
   })
 })

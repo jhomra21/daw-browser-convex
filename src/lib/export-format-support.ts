@@ -1,32 +1,39 @@
-import type { ExportAudioFormat } from '@daw-browser/shared'
+import { exportAudioFormats, getExportAudioBitrate, type ExportAudioFormat } from '@daw-browser/shared'
+import type { ExportAudioSupportRequest } from '@daw-browser/audio-engine/export-audio-support'
 
-let cachedSupportedExportAudioFormats: ExportAudioFormat[] | undefined
-let supportedExportAudioFormatsPromise: Promise<ExportAudioFormat[]> | undefined
+const supportedFormatsByConfiguration = new Map<string, ExportAudioFormat[]>()
+const supportPromisesByConfiguration = new Map<string, Promise<ExportAudioFormat[]>>()
 
-export const getCachedSupportedExportAudioFormats = (): ExportAudioFormat[] | undefined => (
-  cachedSupportedExportAudioFormats
-)
+const getSupportKey = (request: ExportAudioSupportRequest): string => JSON.stringify([
+  request.sampleRate ?? 44100,
+  request.numberOfChannels ?? 2,
+  ...exportAudioFormats.map((format) => request.bitrateByFormat?.[format] ?? getExportAudioBitrate(format)),
+])
 
-export const probeSupportedExportAudioFormats = (): Promise<ExportAudioFormat[]> => {
-  if (cachedSupportedExportAudioFormats) return Promise.resolve(cachedSupportedExportAudioFormats)
-  if (supportedExportAudioFormatsPromise) return supportedExportAudioFormatsPromise
+export const getCachedSupportedExportAudioFormats = (
+  request: ExportAudioSupportRequest,
+): ExportAudioFormat[] | undefined => supportedFormatsByConfiguration.get(getSupportKey(request))
+
+export const probeSupportedExportAudioFormats = (
+  request: ExportAudioSupportRequest,
+): Promise<ExportAudioFormat[]> => {
+  const key = getSupportKey(request)
+  const cached = supportedFormatsByConfiguration.get(key)
+  if (cached) return Promise.resolve(cached)
+  const pending = supportPromisesByConfiguration.get(key)
+  if (pending) return pending
   const supportPromise = import('@daw-browser/audio-engine/export-audio-support').then((exportAudioSupport) => (
-    exportAudioSupport.getSupportedExportAudioFormats()
+    exportAudioSupport.getSupportedExportAudioFormats(request)
   )).then((formats) => {
-    cachedSupportedExportAudioFormats = formats
+    supportedFormatsByConfiguration.set(key, formats)
+    supportPromisesByConfiguration.delete(key)
     return formats
   }).catch(() => {
     const fallbackFormats = ['wav'] satisfies ExportAudioFormat[]
-    cachedSupportedExportAudioFormats = fallbackFormats
-    supportedExportAudioFormatsPromise = undefined
+    supportedFormatsByConfiguration.set(key, fallbackFormats)
+    supportPromisesByConfiguration.delete(key)
     return fallbackFormats
   })
-  supportedExportAudioFormatsPromise = supportPromise
+  supportPromisesByConfiguration.set(key, supportPromise)
   return supportPromise
-}
-
-export const retrySupportedExportAudioFormats = (): Promise<ExportAudioFormat[]> => {
-  supportedExportAudioFormatsPromise = undefined
-  cachedSupportedExportAudioFormats = undefined
-  return probeSupportedExportAudioFormats()
 }

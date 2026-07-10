@@ -153,6 +153,33 @@ type EncodeAudioBufferOptions = {
   onWrite?: (sizeBytes: number) => void
 }
 
+type AudioSampleBuffer = Pick<AudioBuffer, 'numberOfChannels' | 'getChannelData'>
+
+export const getAudioBufferPeak = (buffer: AudioSampleBuffer): number => {
+  let peak = 0
+  for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+    const data = buffer.getChannelData(channel)
+    for (let index = 0; index < data.length; index += 1) {
+      const sample = Math.abs(data[index])
+      if (Number.isFinite(sample)) peak = Math.max(peak, sample)
+    }
+  }
+  return peak
+}
+
+export const normalizeAudioBufferInPlace = (buffer: AudioSampleBuffer): number => {
+  const peak = getAudioBufferPeak(buffer)
+  if (peak === 0 || peak >= 1 || !Number.isFinite(peak)) return 1
+  const gain = 1 / peak
+  for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+    const data = buffer.getChannelData(channel)
+    for (let index = 0; index < data.length; index += 1) {
+      data[index] *= gain
+    }
+  }
+  return gain
+}
+
 const throwIfAborted = (signal: AbortSignal | undefined): void => {
   signal?.throwIfAborted()
 }

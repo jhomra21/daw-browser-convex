@@ -1,23 +1,23 @@
-import { type Component, createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
+import { type Component, createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from 'solid-js'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '~/components/ui/dialog'
 import { Button } from '~/components/ui/button'
 import type { ExportRange } from '@daw-browser/audio-engine/export-mixdown'
-import { exportAudioFormats, getExportAudioFormatMetadata, type ExportAudioFormat } from '@daw-browser/shared'
-import { getCachedSupportedExportAudioFormats, probeSupportedExportAudioFormats, retrySupportedExportAudioFormats } from '~/lib/export-format-support'
+import { getExportAudioBitrate, getExportAudioFormatMetadata, type ExportAudioFormat } from '@daw-browser/shared'
+import { getCachedSupportedExportAudioFormats, probeSupportedExportAudioFormats } from '~/lib/export-format-support'
 import { useExportContext } from '~/context/export'
 import type { ExportOutput } from '~/lib/export/run-export-job'
 import ExportProgressStatus from '~/components/export/ExportProgressStatus'
+import { createCustomExportRange, getExportRangeDuration, type ExportSampleRate } from '~/lib/export/export-settings'
 
-type ExportMode = ExportRange['mode']
 type ExportSource = 'mixdown' | 'all-stems' | 'selected-stems'
+type ExportRangeMode = ExportRange['mode']
 
 type Props = {
   isOpen: boolean
   onClose: () => void
-  tracks: RuntimeTrack[]
   getTracks: () => RuntimeTrack[]
-  selectedTrackId?: string
+  selectedTrackIds: readonly string[]
   bpm: number
   masterVolume: number
   loopEnabled: boolean
@@ -28,11 +28,54 @@ type Props = {
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
 }
 
+const ExportSection: Component<{ title: string; children: JSX.Element }> = (props) => (
+  <section class="border border-border bg-background/40">
+    <div class="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{props.title}</div>
+    <div class="grid gap-3 p-3">{props.children}</div>
+  </section>
+)
+
+const ExportField: Component<{ label: string; children: JSX.Element }> = (props) => (
+  <div class="grid grid-cols-3 items-center gap-3">
+    <div class="text-sm text-muted-foreground">{props.label}</div>
+    <div class="col-span-2 min-w-0">{props.children}</div>
+  </div>
+)
+
+const ExportFormatOption: Component<{
+  format: ExportAudioFormat
+  selected: boolean
+  supported: boolean
+  onChange: (checked: boolean) => void
+}> = (props) => {
+  const metadata = () => getExportAudioFormatMetadata(props.format)
+  return (
+    <label class="flex items-center gap-2 border border-border px-2 py-1 text-sm">
+      <input
+        type="checkbox"
+        checked={props.selected}
+        disabled={!props.supported}
+        onChange={(event) => props.onChange(event.currentTarget.checked)}
+      />
+      {props.supported ? metadata().label : `${metadata().label} unavailable`}
+    </label>
+  )
+}
+
 const ExportDialog: Component<Props> = (props) => {
-  const [mode, setMode] = createSignal<ExportMode>(props.loopEnabled ? 'loop' : 'whole')
+  const initialDuration = () => getExportRangeDuration(props.getTracks(), { mode: 'whole' })
+  const initialRangeMode: ExportRangeMode = props.loopEnabled ? 'loop' : 'whole'
+  const [rangeMode, setRangeMode] = createSignal<ExportRangeMode>(initialRangeMode)
   const [source, setSource] = createSignal<ExportSource>('mixdown')
-  const [startSec, setStartSec] = createSignal(0)
-  const [endSec, setEndSec] = createSignal(10)
+  const [renderStartSec, setRenderStartSec] = createSignal(props.loopEnabled ? props.loopStartSec : 0)
+  const [renderLengthSec, setRenderLengthSec] = createSignal(props.loopEnabled
+    ? Math.max(0.001, props.loopEndSec - props.loopStartSec)
+    : initialDuration())
+  const [sampleRate, setSampleRate] = createSignal<ExportSampleRate>(44100)
+  const [numberOfChannels, setNumberOfChannels] = createSignal<1 | 2>(2)
+  const [normalize, setNormalize] = createSignal(false)
+  const [mp3Bitrate, setMp3Bitrate] = createSignal(getExportAudioBitrate('mp3') ?? 192000)
+  const [opusBitrate, setOpusBitrate] = createSignal(getExportAudioBitrate('ogg-opus') ?? 128000)
   const [busy, setBusy] = createSignal(false)
   const [selectedFormats, setSelectedFormats] = createSignal<ExportAudioFormat[]>(['wav'])
   const [supportedFormats, setSupportedFormats] = createSignal<ExportAudioFormat[] | null>(null)
@@ -40,90 +83,103 @@ const ExportDialog: Component<Props> = (props) => {
   const [outputs, setOutputs] = createSignal<readonly ExportOutput[]>([])
   const exportContext = useExportContext()
 
+  const renderSettings = () => ({
+    sampleRate: sampleRate(),
+    numberOfChannels: numberOfChannels(),
+    normalize: normalize(),
+  })
+  const encodingSettings = () => ({
+    bitrateByFormat: { mp3: mp3Bitrate(), 'ogg-opus': opusBitrate() },
+  })
+  const supportRequest = createMemo(() => ({
+    ...renderSettings(),
+    ...encodingSettings(),
+  }))
+
   createEffect(() => {
     if (!props.isOpen) return
+    const request = supportRequest()
     let canceled = false
     const applySupportedFormats = (formats: ExportAudioFormat[]) => {
       if (canceled) return
       setSupportedFormats(formats)
       setSelectedFormats((selected) => {
-        const supportedSelected = selected.filter((item) => formats.includes(item))
+        const supportedSelected = selected.filter((format) => formats.includes(format))
         if (supportedSelected.length === selected.length) return selected
         if (supportedSelected.length > 0) return supportedSelected
         return formats.includes('wav') ? ['wav'] : formats.slice(0, 1)
       })
     }
-    const probeSupportedFormats = (retry = false) => (
-      retry ? retrySupportedExportAudioFormats() : probeSupportedExportAudioFormats()
-    ).then((formats) => {
-      applySupportedFormats(formats)
-      return formats
-    })
-    const cachedSupportedFormats = getCachedSupportedExportAudioFormats()
-    const hadCachedSupportedFormats = cachedSupportedFormats !== undefined
-    if (cachedSupportedFormats) {
-      applySupportedFormats(cachedSupportedFormats)
-    } else {
-      setSupportedFormats(null)
+    const cached = getCachedSupportedExportAudioFormats(request)
+    if (cached) {
+      applySupportedFormats(cached)
+      return
     }
-    let supportProbeTimer: number | undefined
-    void probeSupportedFormats().then((formats) => {
-      if (canceled) return
-      if (hadCachedSupportedFormats || formats.length > 1) return
-      // WebCodecs support checks can settle after the dialog chunk mounts; retry once and clean it up.
-      supportProbeTimer = window.setTimeout(() => {
-        if (canceled) return
-        void probeSupportedFormats(true)
-      }, 250)
-    })
-    onCleanup(() => {
-      canceled = true
-      if (supportProbeTimer !== undefined) window.clearTimeout(supportProbeTimer)
-    })
+    setSupportedFormats(null)
+    void probeSupportedExportAudioFormats(request).then(applySupportedFormats)
+    onCleanup(() => { canceled = true })
   })
 
-  const readExportMode = (value: string): ExportMode => (
-    value === 'loop' || value === 'custom' ? value : 'whole'
-  )
+  const formatSupported = (format: ExportAudioFormat) => supportedFormats()?.includes(format) ?? format === 'wav'
+  const selectedStemAvailable = () => props.selectedTrackIds.length > 0
+  const currentRange = (): ExportRange => {
+    const mode = rangeMode()
+    if (mode === 'whole') return { mode }
+    if (mode === 'loop') {
+      return {
+        mode,
+        startSec: props.loopStartSec,
+        endSec: props.loopEndSec,
+      }
+    }
+    return createCustomExportRange(renderStartSec(), renderLengthSec())
+  }
+  const durationSec = () => getExportRangeDuration(props.getTracks(), currentRange())
+  const selectedFormatLabels = () => selectedFormats().map((format) => {
+    const label = getExportAudioFormatMetadata(format).label
+    if (format === 'mp3') return `${label} ${mp3Bitrate() / 1000} kbps`
+    if (format === 'ogg-opus') return `${label} ${opusBitrate() / 1000} kbps`
+    return label
+  }).join(', ')
+  const sourceLabel = () => source() === 'mixdown'
+    ? 'Main'
+    : source() === 'all-stems' ? 'All Individual Tracks' : 'Selected Tracks Only'
 
-  const readExportSource = (value: string): ExportSource => (
-    value === 'all-stems' || value === 'selected-stems' ? value : 'mixdown'
-  )
-
-  const formatSupported = (format: ExportAudioFormat): boolean => (
-    supportedFormats()?.includes(format) ?? format === 'wav'
-  )
-
+  const setWholeTimeline = () => {
+    setRangeMode('whole')
+    setRenderStartSec(0)
+    setRenderLengthSec(initialDuration())
+  }
+  const setLoopRegion = () => {
+    if (!props.loopEnabled) return
+    setRangeMode('loop')
+    setRenderStartSec(props.loopStartSec)
+    setRenderLengthSec(Math.max(0.001, props.loopEndSec - props.loopStartSec))
+  }
+  const updateCustomStart = (value: number) => {
+    setRenderStartSec(value)
+    setRangeMode('custom')
+  }
+  const updateCustomLength = (value: number) => {
+    setRenderLengthSec(value)
+    setRangeMode('custom')
+  }
   const toggleFormat = (format: ExportAudioFormat, checked: boolean) => {
     if (!formatSupported(format)) return
-    setSelectedFormats((formats) => {
-      if (checked) return formats.includes(format) ? formats : [...formats, format]
-      if (!formats.includes(format)) return formats
-      return formats.filter((item) => item !== format)
-    })
+    setSelectedFormats((formats) => checked
+      ? formats.includes(format) ? formats : [...formats, format]
+      : formats.filter((item) => item !== format))
   }
 
-  const exportDisabled = () => busy() || selectedFormats().length === 0
   const cloudOutputs = createMemo(() => outputs().filter((output) => output.destination === 'cloud'))
   const localOutputs = createMemo(() => outputs().filter((output) => output.destination === 'local'))
   const activeExportJob = () => exportContext.activeJob()
-
-  const selectedStemAvailable = () => {
-    const selectedTrack = props.tracks.find((track) => track.id === props.selectedTrackId)
-    return selectedTrack !== undefined && (selectedTrack.channelRole ?? 'track') === 'track' && selectedTrack.clips.length > 0
-  }
-
-  const computeRange = (): ExportRange => {
-    const m = mode()
-    if (m === 'loop') {
-      return { mode: 'loop', startSec: props.loopStartSec, endSec: props.loopEndSec }
-    } else if (m === 'whole') {
-      return { mode: 'whole' }
-    }
-    const s = Math.max(0, Number(startSec()) || 0)
-    const e = Math.max(s + 0.001, Number(endSec()) || (s + 1))
-    return { mode: 'custom', startSec: s, endSec: e }
-  }
+  const exportDisabled = () => (
+    busy()
+    || selectedFormats().length === 0
+    || selectedFormats().some((format) => !formatSupported(format))
+    || (source() === 'selected-stems' && !selectedStemAvailable())
+  )
 
   async function handleExport() {
     setError(null)
@@ -135,8 +191,10 @@ const ExportDialog: Component<Props> = (props) => {
         getTracks: props.getTracks,
         bpm: props.bpm,
         masterVolume: props.masterVolume,
-        range: computeRange(),
+        range: currentRange(),
         formats: selectedFormats(),
+        render: renderSettings(),
+        encoding: encodingSettings(),
         projectId: props.projectId,
         userId: props.userId,
         ensureClipBuffer: props.ensureClipBuffer,
@@ -146,116 +204,140 @@ const ExportDialog: Component<Props> = (props) => {
         : await exportContext.enqueueStemExport({
           ...baseRequest,
           stemMode: currentSource === 'all-stems' ? 'all-tracks' : 'selected-tracks',
-          selectedTrackIds: props.selectedTrackId ? [props.selectedTrackId] : [],
+          selectedTrackIds: props.selectedTrackIds,
         })
       setOutputs(outcome.outputs)
-      if (outcome.type === 'error') {
-        setError(outcome.message)
-      } else if (outcome.type === 'canceled') {
-        setError(outcome.outputs.length > 0 ? 'Export canceled after saving completed outputs.' : 'Export canceled.')
-      }
+      if (outcome.type === 'error') setError(outcome.message)
+      else if (outcome.type === 'canceled') setError(outcome.outputs.length > 0 ? 'Export canceled after saving completed outputs.' : 'Export canceled.')
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <Dialog open={props.isOpen} onOpenChange={(v) => { if (!v) props.onClose() }}>
-      <DialogContent class="bg-app-surface text-foreground border border-border">
+    <Dialog open={props.isOpen} onOpenChange={(open) => { if (!open) props.onClose() }}>
+      <DialogContent class="max-w-3xl border border-border bg-app-surface text-foreground">
         <DialogHeader>
-          <DialogTitle>Export timeline</DialogTitle>
-          <DialogDescription>Choose range. Export runs in your browser.</DialogDescription>
+          <DialogTitle>Export Audio</DialogTitle>
+          <DialogDescription>Configure the selection, rendering, and audio encoding.</DialogDescription>
         </DialogHeader>
-        <div class="flex flex-col gap-3 py-2">
-          <div class="flex items-center gap-3">
-            <label class="text-sm w-24 text-muted-foreground">Source</label>
-            <select class="bg-app-surface text-foreground border border-border px-2 py-1 text-sm" value={source()} onChange={(e) => setSource(readExportSource(e.currentTarget.value))}>
-              <option value="mixdown">Mixdown</option>
-              <option value="all-stems">All track stems</option>
-              <option value="selected-stems" disabled={!selectedStemAvailable()}>Selected track stem</option>
-            </select>
-          </div>
-          <div class="flex items-center gap-3">
-            <label class="text-sm w-24 text-muted-foreground">Range</label>
-            <select class="bg-app-surface text-foreground border border-border px-2 py-1 text-sm" value={mode()} onChange={(e) => setMode(readExportMode(e.currentTarget.value))}>
-              <option value="whole">Whole timeline</option>
-              <option value="loop" disabled={!props.loopEnabled}>Loop region</option>
-              <option value="custom">Custom</option>
-            </select>
-          </div>
-          <div class="flex items-center gap-3">
-            <label class="text-sm w-24 text-muted-foreground">Formats</label>
-            <div class="flex flex-wrap gap-2">
-              <Show when={supportedFormats() !== null} fallback={<span class="text-sm text-muted-foreground">WAV</span>}>
-                <For each={exportAudioFormats}>
-                  {(item) => {
-                    const itemMetadata = getExportAudioFormatMetadata(item)
-                    const supported = formatSupported(item)
-                    const selected = () => selectedFormats().includes(item)
-                    return (
-                      <label class="flex items-center gap-1 border border-border px-2 py-1 text-sm text-foreground">
-                        <input
-                          type="checkbox"
-                          checked={selected()}
-                          disabled={!supported}
-                          onChange={(event) => toggleFormat(item, event.currentTarget.checked)}
-                        />
-                        <span>{supported ? itemMetadata.label : `${itemMetadata.label} unavailable`}</span>
-                      </label>
-                    )
-                  }}
-                </For>
-              </Show>
-            </div>
-          </div>
-          <Show when={mode() === 'custom'}>
-            <div class="flex items-center gap-3">
-              <label class="text-sm w-24 text-muted-foreground">Start (s)</label>
-              <input type="number" step="0.01" class="w-28 bg-app-surface text-foreground border border-border px-2 py-1 text-sm" value={startSec()} onInput={(e) => setStartSec(parseFloat(e.currentTarget.value) || 0)} />
-              <label class="text-sm text-muted-foreground">End (s)</label>
-              <input type="number" step="0.01" class="w-28 bg-app-surface text-foreground border border-border px-2 py-1 text-sm" value={endSec()} onInput={(e) => setEndSec(parseFloat(e.currentTarget.value) || 0)} />
-            </div>
-          </Show>
-          <Show when={error()}>
-            <div class="text-sm text-red-400">{error()}</div>
-          </Show>
-          <Show when={cloudOutputs().length === 1 ? cloudOutputs()[0] : undefined}>
-            {(output) => (
-              <div class="text-sm">
-                Saved export: <a class="text-green-400 underline" href={output().url} target="_blank">Open</a>
+        <div class="grid gap-3 py-2">
+          <ExportSection title="Selection Options">
+            <ExportField label="Rendered Track">
+              <select class="w-full border border-border bg-app-surface px-2 py-1 text-sm text-foreground disabled:opacity-50" value={source()} onChange={(event) => {
+                const value = event.currentTarget.value
+                setSource(value === 'all-stems' || value === 'selected-stems' ? value : 'mixdown')
+              }}>
+                <option value="mixdown">Main</option>
+                <option value="all-stems">All Individual Tracks</option>
+                <option value="selected-stems" disabled={!selectedStemAvailable()}>Selected Tracks Only</option>
+              </select>
+            </ExportField>
+            <ExportField label="Range Shortcuts">
+              <div class="flex gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={setWholeTimeline}>Whole Timeline</Button>
+                <Button type="button" variant="outline" size="sm" disabled={!props.loopEnabled} onClick={setLoopRegion}>Loop Region</Button>
               </div>
-            )}
-          </Show>
-          <Show when={cloudOutputs().length > 1}>
-            <div class="text-sm text-green-400">Saved {cloudOutputs().length} exports to cloud.</div>
-          </Show>
-          <Show when={localOutputs().length === 1}>
-            <div class="text-sm text-green-400">Saved export locally: {localOutputs()[0].name}</div>
-          </Show>
-          <Show when={localOutputs().length > 1}>
-            <div class="text-sm text-green-400">Saved {localOutputs().length} exports locally.</div>
-          </Show>
-          <Show when={activeExportJob()}>
-            {(job) => (
-              <div class="flex items-center gap-3 px-1 py-1 text-sm text-foreground">
-                <ExportProgressStatus job={job()} onCancel={exportContext.cancelExport} />
-              </div>
-            )}
-          </Show>
-          <Show when={busy() && !activeExportJob()}>
-            <div class="px-1 py-1 text-sm text-foreground">
-              Preparing export...
+            </ExportField>
+            <ExportField label="Render Start">
+              <input type="number" min="0" step="0.01" class="w-full border border-border bg-app-surface px-2 py-1 text-sm text-foreground" value={renderStartSec()} onInput={(event) => updateCustomStart(event.currentTarget.valueAsNumber)} />
+            </ExportField>
+            <ExportField label="Render Length">
+              <input type="number" min="0.001" step="0.01" class="w-full border border-border bg-app-surface px-2 py-1 text-sm text-foreground" value={renderLengthSec()} onInput={(event) => updateCustomLength(event.currentTarget.valueAsNumber)} />
+            </ExportField>
+          </ExportSection>
+
+          <ExportSection title="Rendering Options">
+            <ExportField label="Sample Rate">
+              <select class="w-full border border-border bg-app-surface px-2 py-1 text-sm text-foreground disabled:opacity-50" value={sampleRate()} onChange={(event) => {
+                const value = Number(event.currentTarget.value)
+                setSampleRate(value === 48000 || value === 96000 ? value : 44100)
+              }}>
+                <option value="44100">44.1 kHz</option>
+                <option value="48000">48 kHz</option>
+                <option value="96000">96 kHz</option>
+              </select>
+            </ExportField>
+            <ExportField label="Channel Mode">
+              <select class="w-full border border-border bg-app-surface px-2 py-1 text-sm text-foreground disabled:opacity-50" value={numberOfChannels()} onChange={(event) => setNumberOfChannels(event.currentTarget.value === '1' ? 1 : 2)}>
+                <option value="2">Stereo</option>
+                <option value="1">Convert to Mono</option>
+              </select>
+            </ExportField>
+            <ExportField label="Normalize">
+              <label class="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={normalize()} onChange={(event) => setNormalize(event.currentTarget.checked)} />
+                Normalize peak level to 0 dBFS
+              </label>
+            </ExportField>
+          </ExportSection>
+
+          <ExportSection title="Encoding Options">
+            <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Lossless</div>
+            <div class="grid grid-cols-2 gap-2">
+              <ExportFormatOption
+                format="wav"
+                selected={selectedFormats().includes('wav')}
+                supported={formatSupported('wav')}
+                onChange={(checked) => toggleFormat('wav', checked)}
+              />
+              <ExportFormatOption
+                format="flac"
+                selected={selectedFormats().includes('flac')}
+                supported={formatSupported('flac')}
+                onChange={(checked) => toggleFormat('flac', checked)}
+              />
             </div>
-          </Show>
-          <Show when={source() !== 'mixdown'}>
-            <div class="text-xs text-muted-foreground">Stems are local-only and save into a stems folder inside the folder you choose.</div>
-          </Show>
+            <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Compressed</div>
+            <div class="grid grid-cols-2 gap-2">
+              <ExportFormatOption
+                format="mp3"
+                selected={selectedFormats().includes('mp3')}
+                supported={formatSupported('mp3')}
+                onChange={(checked) => toggleFormat('mp3', checked)}
+              />
+              <ExportFormatOption
+                format="ogg-opus"
+                selected={selectedFormats().includes('ogg-opus')}
+                supported={formatSupported('ogg-opus')}
+                onChange={(checked) => toggleFormat('ogg-opus', checked)}
+              />
+            </div>
+            <Show when={selectedFormats().includes('mp3') && formatSupported('mp3')}>
+              <ExportField label="MP3 Bitrate">
+                <select class="w-full border border-border bg-app-surface px-2 py-1 text-sm text-foreground disabled:opacity-50" value={mp3Bitrate()} onChange={(event) => setMp3Bitrate(Number(event.currentTarget.value))}>
+                  <For each={getExportAudioFormatMetadata('mp3').bitratePresets}>{(bitrate) => <option value={bitrate}>{bitrate / 1000} kbps</option>}</For>
+                </select>
+              </ExportField>
+            </Show>
+            <Show when={selectedFormats().includes('ogg-opus') && formatSupported('ogg-opus')}>
+              <ExportField label="Opus Bitrate">
+                <select class="w-full border border-border bg-app-surface px-2 py-1 text-sm text-foreground disabled:opacity-50" value={opusBitrate()} onChange={(event) => setOpusBitrate(Number(event.currentTarget.value))}>
+                  <For each={getExportAudioFormatMetadata('ogg-opus').bitratePresets}>{(bitrate) => <option value={bitrate}>{bitrate / 1000} kbps</option>}</For>
+                </select>
+              </ExportField>
+            </Show>
+          </ExportSection>
+
+          <div class="border border-border bg-background/40 p-3 text-sm">
+            <div class="font-medium">Export Configuration</div>
+            <div class="mt-1 text-muted-foreground">
+              {sourceLabel()}{source() === 'selected-stems' ? ` (${props.selectedTrackIds.length} tracks)` : ''}, {durationSec().toFixed(2)} s, {numberOfChannels() === 1 ? 'Mono' : 'Stereo'}, {sampleRate() / 1000} kHz, {normalize() ? 'Normalized' : 'Not normalized'}, {selectedFormatLabels() || 'No format selected'}
+            </div>
+          </div>
+
+          <Show when={error()}><div aria-live="polite" class="text-sm text-red-400">{error()}</div></Show>
+          <Show when={cloudOutputs().length === 1 ? cloudOutputs()[0] : undefined}>{(output) => <div aria-live="polite" class="text-sm">Saved export: <a class="text-green-400 underline" href={output().url} target="_blank">Open</a></div>}</Show>
+          <Show when={cloudOutputs().length > 1}><div aria-live="polite" class="text-sm text-green-400">Saved {cloudOutputs().length} exports to cloud.</div></Show>
+          <Show when={localOutputs().length === 1}><div aria-live="polite" class="text-sm text-green-400">Saved export locally: {localOutputs()[0].name}</div></Show>
+          <Show when={localOutputs().length > 1}><div aria-live="polite" class="text-sm text-green-400">Saved {localOutputs().length} exports locally.</div></Show>
+          <Show when={activeExportJob()}>{(job) => <div aria-live="polite" class="flex items-center gap-3 px-1 py-1 text-sm"><ExportProgressStatus job={job()} onCancel={exportContext.cancelExport} /></div>}</Show>
+          <Show when={busy() && !activeExportJob()}><div aria-live="polite" class="px-1 py-1 text-sm">Preparing export...</div></Show>
+          <Show when={source() !== 'mixdown'}><div class="text-xs text-muted-foreground">Stems are local-only and save into a stems folder inside the folder you choose.</div></Show>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => props.onClose()} disabled={busy()}>Close</Button>
-          <Button onClick={() => { void handleExport() }} disabled={exportDisabled()}>
-            {busy() ? 'Queued…' : 'Render & Save'}
-          </Button>
+          <Button variant="outline" onClick={props.onClose} disabled={busy()}>Close</Button>
+          <Button onClick={() => { void handleExport() }} disabled={exportDisabled()}>{busy() ? 'Queued…' : 'Render & Save'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

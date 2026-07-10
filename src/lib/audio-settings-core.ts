@@ -23,6 +23,17 @@ type AudioDeviceLists = {
   outputs: MediaDeviceInfo[]
 }
 
+export const areAudioDeviceListsEqual = (
+  previous: readonly MediaDeviceInfo[],
+  next: readonly MediaDeviceInfo[]
+): boolean => previous.length === next.length && previous.every((device, index) => {
+  const candidate = next[index]
+  return candidate?.kind === device.kind
+    && candidate.deviceId === device.deviceId
+    && candidate.groupId === device.groupId
+    && candidate.label === device.label
+})
+
 export const filterAudioDevices = (devices: readonly MediaDeviceInfo[]): AudioDeviceLists => {
   const seen = new Set<string>()
   const unique = devices.filter((device) => {

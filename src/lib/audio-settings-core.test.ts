@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { buildRecordingConstraints, filterAudioDevices, isSelectedDeviceAvailable, resolveAudioRuntimeConfiguration } from "./audio-settings-core"
+import { areAudioDeviceListsEqual, buildRecordingConstraints, filterAudioDevices, isSelectedDeviceAvailable, resolveAudioRuntimeConfiguration } from "./audio-settings-core"
 import { defaultAppPreferences } from "./preferences/app-preferences-core"
 
 describe("audio settings policy", () => {
@@ -27,5 +27,17 @@ describe("audio settings policy", () => {
     expect(result.outputs).toHaveLength(1)
     expect(isSelectedDeviceAvailable("missing", result.inputs)).toBe(false)
     expect(isSelectedDeviceAvailable("", result.inputs)).toBe(true)
+  })
+
+  test("compares device lists by observable identity", () => {
+    const device = (label: string): MediaDeviceInfo => ({
+      deviceId: "mic",
+      groupId: "group",
+      kind: "audioinput",
+      label,
+      toJSON: () => ({})
+    })
+    expect(areAudioDeviceListsEqual([device("Microphone")], [device("Microphone")])).toBe(true)
+    expect(areAudioDeviceListsEqual([device("")], [device("Microphone")])).toBe(false)
   })
 })

@@ -46,6 +46,7 @@ export class AudioEngine {
   private runtimeOptions: AudioRuntimeOptions
   private activeRuntimeOptions: AudioRuntimeOptions | null = null
   private runtimeListeners = new Set<() => void>()
+  private runtimeStateChangeListener = () => this.publishRuntimeSnapshot()
   private runtime: AudioRuntime | null = null
   private audioCtx: AudioContext | null = null
   private masterGain: GainNode | null = null
@@ -211,6 +212,7 @@ export class AudioEngine {
       this.runtime = createAudioRuntime(this.runtimeOptions)
       this.activeRuntimeOptions = this.runtimeOptions
       this.audioCtx = this.runtime.ctx
+      this.audioCtx.addEventListener('statechange', this.runtimeStateChangeListener)
       this.masterGain = this.runtime.masterGain
       this.masterGain.gain.value = this.masterVolume
       this.destination = this.runtime.destination
@@ -548,6 +550,7 @@ export class AudioEngine {
     this.instrumentRuntime.clear()
     this.automationEnvelopes = []
     this.masterFx.close()
+    this.audioCtx?.removeEventListener('statechange', this.runtimeStateChangeListener)
     closeAudioRuntime(this.runtime)
     this.masterGain = null
     this.destination = null

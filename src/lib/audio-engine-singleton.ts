@@ -26,7 +26,7 @@ export const getAudioEngine = () => {
     let runtimeInitialized = false
     audioEngineSingleton.subscribeRuntimeSnapshot(() => {
       const initialized = audioEngineSingleton?.getRuntimeSnapshot().state !== "uninitialized"
-      if (initialized && !runtimeInitialized) {
+      if (initialized && !runtimeInitialized && desiredOutputDeviceId) {
         void applyAudioOutputDevice(desiredOutputDeviceId)
       }
       runtimeInitialized = initialized
@@ -52,18 +52,29 @@ const applyAudioOutputDevice = async (deviceId: string) => {
   publishSinkStatus({ state: "pending", deviceId })
   try {
     const result = await getAudioEngine().setOutputDevice(deviceId)
-    if (requestId !== sinkRequestId) return
+    if (requestId !== sinkRequestId) return false
     if (result === "unsupported") publishSinkStatus({ state: "unsupported" })
     else if (result === "uninitialized") publishSinkStatus({ state: "uninitialized", deviceId })
     else publishSinkStatus({ state: "applied", deviceId })
+    return result === "applied"
   } catch (error) {
-    if (requestId !== sinkRequestId) return
+    if (requestId !== sinkRequestId) return false
     publishSinkStatus({
       state: "error",
       deviceId,
       message: error instanceof Error ? error.message : "Unable to select audio output."
     })
+    return false
   }
+}
+
+export const playAudioOutputTestTone = async () => {
+  const engine = getAudioEngine()
+  engine.ensureAudio()
+  if (desiredOutputDeviceId && !await applyAudioOutputDevice(desiredOutputDeviceId)) {
+    throw new Error("Unable to apply the selected audio output.")
+  }
+  await engine.playOutputTestTone()
 }
 
 export const getAudioSinkStatus = () => sinkStatus
@@ -74,4 +85,6 @@ export const subscribeAudioSinkStatus = (listener: () => void) => {
 
 export const resetAudioEngine = () => {
   audioEngineSingleton = null
+  sinkRequestId += 1
+  publishSinkStatus({ state: "idle" })
 }

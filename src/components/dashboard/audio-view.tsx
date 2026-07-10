@@ -1,7 +1,7 @@
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { useAppPreferences } from "~/context/app-preferences"
-import { filterAudioDevices, isSelectedDeviceAvailable, resolveAudioRuntimeConfiguration } from "~/lib/audio-settings-core"
-import { getAudioEngine, getAudioSinkStatus, subscribeAudioSinkStatus } from "~/lib/audio-engine-singleton"
+import { areAudioDeviceListsEqual, filterAudioDevices, isSelectedDeviceAvailable, resolveAudioRuntimeConfiguration } from "~/lib/audio-settings-core"
+import { getAudioEngine, getAudioSinkStatus, playAudioOutputTestTone, subscribeAudioSinkStatus } from "~/lib/audio-engine-singleton"
 import { parseAudioLatencyMode, parseAudioSampleRate } from "~/lib/preferences/app-preferences"
 import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard-shared"
 
@@ -17,14 +17,11 @@ export function DashboardAudioView() {
   const [devices, setDevices] = createSignal<MediaDeviceInfo[]>([])
   const [deviceError, setDeviceError] = createSignal("")
   const [sinkStatus, setSinkStatus] = createSignal(getAudioSinkStatus())
-  const [runtimeRevision, setRuntimeRevision] = createSignal(0)
+  let deviceRequestId = 0
   const supportedConstraints = navigator.mediaDevices.getSupportedConstraints()
   const audioEngine = getAudioEngine()
   const audioDevices = createMemo(() => filterAudioDevices(devices()))
-  const runtime = createMemo(() => {
-    runtimeRevision()
-    return audioEngine.getRuntimeSnapshot()
-  })
+  const [runtime, setRuntime] = createSignal(audioEngine.getRuntimeSnapshot())
   const hasPendingRuntimeChange = () => {
     const snapshot = runtime()
     if (snapshot.state === "uninitialized") return false
@@ -41,10 +38,14 @@ export function DashboardAudioView() {
   }
 
   const refreshDevices = async () => {
+    const requestId = ++deviceRequestId
     try {
-      setDevices(await navigator.mediaDevices.enumerateDevices())
+      const nextDevices = await navigator.mediaDevices.enumerateDevices()
+      if (requestId !== deviceRequestId) return
+      setDevices((current) => areAudioDeviceListsEqual(current, nextDevices) ? current : nextDevices)
       setDeviceError("")
     } catch (error) {
+      if (requestId !== deviceRequestId) return
       setDeviceError(error instanceof Error ? error.message : "Unable to enumerate audio devices.")
     }
   }
@@ -79,7 +80,7 @@ export function DashboardAudioView() {
 
   const playTestTone = async () => {
     try {
-      await audioEngine.playOutputTestTone()
+      await playAudioOutputTestTone()
       setDeviceError("")
     } catch (error) {
       setDeviceError(error instanceof Error ? error.message : "Unable to play the output test tone.")
@@ -91,10 +92,9 @@ export function DashboardAudioView() {
     const onDeviceChange = () => void refreshDevices()
     navigator.mediaDevices.addEventListener("devicechange", onDeviceChange)
     const unsubscribe = subscribeAudioSinkStatus(() => setSinkStatus(getAudioSinkStatus()))
-    const unsubscribeRuntime = audioEngine.subscribeRuntimeSnapshot(() => {
-      setRuntimeRevision((revision) => revision + 1)
-    })
+    const unsubscribeRuntime = audioEngine.subscribeRuntimeSnapshot(() => setRuntime(audioEngine.getRuntimeSnapshot()))
     onCleanup(() => {
+      deviceRequestId += 1
       navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange)
       unsubscribe()
       unsubscribeRuntime()

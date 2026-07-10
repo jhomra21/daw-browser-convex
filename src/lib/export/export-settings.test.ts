@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { getExportRangeBounds } from '@daw-browser/audio-engine/export-range'
-import { createCustomExportRange, deriveSelectedExportTrackIds, getExportRangeDuration, isRenderableExportTrack } from './export-settings'
+import { getExportRangeBounds, getExportRangeDuration } from '@daw-browser/audio-engine/export-range'
+import { createCustomExportRange, deriveSelectedExportTrackIds, isRenderableExportTrack } from './export-settings'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 
 const track = (
@@ -45,10 +45,15 @@ describe('deriveSelectedExportTrackIds', () => {
     track('b', ['clip-b']),
     track('empty', []),
   ]
+  const clipTrackIdById = new Map<string, string>()
+  for (const item of tracks) {
+    for (const clip of item.clips) clipTrackIdById.set(clip.id, item.id)
+  }
 
   test('uses range selection first and returns timeline order', () => {
     expect(deriveSelectedExportTrackIds({
       tracks,
+      clipTrackIdById,
       rangeSelection: {
         startSec: 0,
         endSec: 1,
@@ -63,12 +68,14 @@ describe('deriveSelectedExportTrackIds', () => {
   test('falls back to selected clips, then the primary track', () => {
     expect(deriveSelectedExportTrackIds({
       tracks,
+      clipTrackIdById,
       rangeSelection: null,
       selectedClipIds: new Set(['clip-b', 'clip-a']),
       primaryTrackId: 'empty',
     })).toEqual(['a', 'b'])
     expect(deriveSelectedExportTrackIds({
       tracks,
+      clipTrackIdById,
       rangeSelection: null,
       selectedClipIds: new Set(),
       primaryTrackId: 'b',
@@ -78,6 +85,7 @@ describe('deriveSelectedExportTrackIds', () => {
   test('filters groups, returns, missing tracks, and empty tracks', () => {
     expect(deriveSelectedExportTrackIds({
       tracks,
+      clipTrackIdById,
       rangeSelection: null,
       selectedClipIds: new Set(),
       primaryTrackId: 'group',

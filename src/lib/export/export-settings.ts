@@ -1,4 +1,4 @@
-import { getExportRangeBounds, type ExportRange } from '@daw-browser/audio-engine/export-range'
+import type { ExportRange } from '@daw-browser/audio-engine/export-range'
 import type { LossyExportAudioFormat } from '@daw-browser/shared'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { TimelineRangeSelection } from '~/lib/timeline-range-selection'
@@ -21,20 +21,13 @@ export const createCustomExportRange = (startSec: number, lengthSec: number): Ex
   return { mode: 'custom', startSec: start, endSec: start + length }
 }
 
-export const getExportRangeDuration = (
-  tracks: readonly RuntimeTrack[],
-  range: ExportRange,
-): number => {
-  const bounds = getExportRangeBounds(tracks, range)
-  return bounds.endSec - bounds.startSec
-}
-
 export const isRenderableExportTrack = (track: RuntimeTrack): boolean => (
   (track.channelRole ?? 'track') === 'track' && track.clips.length > 0
 )
 
 export const deriveSelectedExportTrackIds = (input: {
   tracks: readonly RuntimeTrack[]
+  clipTrackIdById: ReadonlyMap<string, string>
   rangeSelection: TimelineRangeSelection | null
   selectedClipIds: ReadonlySet<string>
   primaryTrackId?: string
@@ -43,11 +36,9 @@ export const deriveSelectedExportTrackIds = (input: {
   if (input.rangeSelection?.trackIds.length) {
     candidateIds = input.rangeSelection.trackIds
   } else if (input.selectedClipIds.size > 0) {
-    const selectedTrackIds = new Set<string>()
-    for (const track of input.tracks) {
-      if (track.clips.some((clip) => input.selectedClipIds.has(clip.id))) selectedTrackIds.add(track.id)
-    }
-    candidateIds = [...selectedTrackIds]
+    candidateIds = [...input.selectedClipIds]
+      .map((clipId) => input.clipTrackIdById.get(clipId))
+      .filter((trackId): trackId is string => trackId !== undefined)
   } else {
     candidateIds = input.primaryTrackId ? [input.primaryTrackId] : []
   }

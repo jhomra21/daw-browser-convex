@@ -2,13 +2,13 @@ import { type Component, createEffect, createMemo, createSignal, For, onCleanup,
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '~/components/ui/dialog'
 import { Button } from '~/components/ui/button'
-import type { ExportRange } from '@daw-browser/audio-engine/export-range'
+import { getExportRangeDuration, type ExportRange } from '@daw-browser/audio-engine/export-range'
 import { getExportAudioBitrate, getExportAudioFormatMetadata, type ExportAudioFormat } from '@daw-browser/shared'
 import { getCachedSupportedExportAudioFormats, probeSupportedExportAudioFormats } from '~/lib/export-format-support'
 import { useExportContext } from '~/context/export'
 import type { ExportOutput } from '~/lib/export/run-export-job'
 import ExportProgressStatus from '~/components/export/ExportProgressStatus'
-import { createCustomExportRange, getExportRangeDuration, type ExportSampleRate } from '~/lib/export/export-settings'
+import { createCustomExportRange, type ExportSampleRate } from '~/lib/export/export-settings'
 
 type ExportSource = 'mixdown' | 'all-stems' | 'selected-stems'
 type ExportRangeMode = ExportRange['mode']
@@ -31,7 +31,7 @@ type Props = {
 const ExportSection: Component<{ title: string; children: JSX.Element }> = (props) => (
   <section class="grid gap-2.5">
     <div class="flex items-center gap-2">
-      <div class="shrink-0 text-[11px] font-semibold uppercase text-muted-foreground">{props.title}</div>
+      <div class="shrink-0 text-xs font-semibold uppercase text-muted-foreground">{props.title}</div>
       <div class="h-px flex-1 bg-border" />
     </div>
     <div class="grid gap-2">{props.children}</div>
@@ -39,7 +39,7 @@ const ExportSection: Component<{ title: string; children: JSX.Element }> = (prop
 )
 
 const ExportField: Component<{ label: string; labelFor?: string; children: JSX.Element }> = (props) => (
-  <div class="grid gap-1.5 sm:grid-cols-[minmax(0,1fr)_320px] sm:items-center sm:gap-3">
+  <div class="grid gap-1.5 sm:grid-cols-2 sm:items-center sm:gap-3">
     <Show
       when={props.labelFor}
       fallback={<div class="text-xs text-muted-foreground">{props.label}</div>}
@@ -185,7 +185,7 @@ const ExportDialog: Component<Props> = (props) => {
     }
     return createCustomExportRange(renderStartSec(), renderLengthSec())
   }
-  const durationSec = () => getExportRangeDuration(props.getTracks(), currentRange())
+  const durationSec = createMemo(() => getExportRangeDuration(props.getTracks(), currentRange()))
   const selectedFormatLabels = () => selectedFormats().map((format) => {
     const label = getExportAudioFormatMetadata(format).label
     if (format === 'mp3') return `${label} ${mp3Bitrate() / 1000} kbps`
@@ -207,11 +207,11 @@ const ExportDialog: Component<Props> = (props) => {
     setRenderLengthSec(Math.max(0.001, props.loopEndSec - props.loopStartSec))
   }
   const updateCustomStart = (value: number) => {
-    setRenderStartSec(value)
+    setRenderStartSec(Number.isFinite(value) ? value : 0)
     setRangeMode('custom')
   }
   const updateCustomLength = (value: number) => {
-    setRenderLengthSec(value)
+    setRenderLengthSec(Number.isFinite(value) ? value : 0.001)
     setRangeMode('custom')
   }
   const toggleFormat = (format: ExportAudioFormat, checked: boolean) => {
@@ -268,7 +268,7 @@ const ExportDialog: Component<Props> = (props) => {
 
   return (
     <Dialog open={props.isOpen} onOpenChange={(open) => { if (!open) props.onClose() }}>
-      <DialogContent class="w-[calc(100%-2rem)] max-w-[640px] gap-3 border border-border bg-app-surface p-5 text-foreground">
+      <DialogContent class="w-11/12 max-w-2xl gap-3 border border-border bg-app-surface p-5 text-foreground">
         <DialogHeader class="pr-8">
           <DialogTitle class="text-base">Export Audio</DialogTitle>
           <DialogDescription class="sr-only">Configure the selection, rendering, and audio encoding.</DialogDescription>

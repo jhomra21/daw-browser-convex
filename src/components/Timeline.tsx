@@ -1170,6 +1170,7 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   const selectedExportTrackIds = createMemo(() => deriveSelectedExportTrackIds({
     tracks: renderTracks(),
+    clipTrackIdById: trackLookup().clipTrackIdById,
     rangeSelection: selection.rangeSelection(),
     selectedClipIds: selection.selectedClipIds(),
     primaryTrackId: selection.selectedTrackId() || undefined,

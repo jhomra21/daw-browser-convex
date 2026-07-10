@@ -26,3 +26,11 @@ export const getExportRangeBounds = (
   }
   return { startSec: 0, endSec }
 }
+
+export const getExportRangeDuration = (
+  tracks: readonly ExportRangeTrack[],
+  range: ExportRange,
+): number => {
+  const bounds = getExportRangeBounds(tracks, range)
+  return bounds.endSec - bounds.startSec
+}

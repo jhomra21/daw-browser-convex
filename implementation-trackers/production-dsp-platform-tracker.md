@@ -98,6 +98,112 @@ Build a production-grade browser audio platform that supports serious music prod
 - `/Users/juan/Documents/dialkit`
 - `/Users/juan/Documents/daw-effect-research`
 
+## Opus-Validated Initial Implementation Map
+
+### Preconditions
+
+- [ ] Merge current `master` into `production-dsp-platform`.
+- [ ] Run the existing test, typecheck, Knip, diff, and build validators after the merge.
+- [ ] Reinspect this plan if the merge changes audio runtime, mixer, automation, worklet, or manifest contracts.
+- [ ] Record baseline behavior before changing graph topology.
+
+Branch synchronization is a repository precondition, not a product milestone.
+
+### Corrected implementation sequence
+
+1. Establish migration boundaries, terminology, pure fixtures, metrics, and browser-harness feasibility.
+2. Characterize unchanged routing and effect behavior before modifying production graph code.
+3. Move compressor and meter worklets to static modules with a shared context-keyed loader.
+4. Add distinct live and offline processor-failure policies.
+5. Expand browser-backed numerical characterization after static worklets are proven.
+6. Introduce backward-compatible effect-instance automation readers before emitting new writes.
+7. Update live, offline, persistence, backend, history, and UI automation ownership.
+8. Introduce derived/runtime mono and stereo semantics before adding persisted track intent.
+9. Persist channel-layout overrides only after runtime propagation is proven and a real product control requires them.
+
+### Initial user playback contract
+
+For a mono vocal track containing EQ, Compressor A, saturator, Compressor B, stereo delay, and reverb:
+
+```text
+Play
+  -> create or resume AudioContext
+  -> resolve track, group, send, mute, solo, gain, and effect order
+  -> schedule the clip into the track input
+  -> preserve mono through EQ, compression, and saturation
+  -> bind separate automation envelopes to Compressor A and Compressor B
+  -> expand to stereo at the stereo delay
+  -> preserve stereo through reverb, groups, sends, and master
+  -> route to the selected browser output
+```
+
+Required failure behavior:
+
+- A live processor load or runtime failure keeps playback audible through a prewired dry path and reports one bounded fault transition.
+- An offline processor load, construction, protocol, or runtime failure rejects export with processor and effect-instance context.
+- Offline export must never silently bypass failed DSP and produce an apparently successful but altered file.
+
+### First milestone boundaries
+
+The first milestone contains only:
+
+- migration/version-boundary inventory and a canonical manifest/entity migration entry point;
+- requested, active, measured, calibrated, and inferred terminology;
+- deterministic fixture generation;
+- pure numerical metrics with hand-computable tests;
+- a minimal browser characterization page validated through the Codex in-app browser;
+- baseline characterization of dry gain, stereo isolation, one EQ case, and compressor module registration/rendering;
+- graph-contract tests proving live and offline adapters consume equivalent resolved routing data.
+
+The first milestone does not contain:
+
+- full live sample capture;
+- all-effect characterization;
+- THD+N, phase-response, or broad aliasing analysis;
+- automation schema writes;
+- persisted track channel layout;
+- recording, PDC, new processors, or export-format changes.
+
+### Browser characterization feasibility gate
+
+- [ ] Add a minimal browser characterization page that reports machine-readable results in the UI.
+- [ ] Serve the page and worklet assets through the normal application or production preview origin rather than `file:`.
+- [ ] Use the Codex in-app browser to execute the page and capture its result report.
+- [ ] Prove `OfflineAudioContext` rendering and result extraction.
+- [ ] Prove static `audioWorklet.addModule()` loading from a production build.
+- [ ] Prove 44.1, 48, and 96 kHz context construction or report unsupported rates explicitly.
+- [ ] Start with dry gain, stereo isolation, one EQ case, and compressor registration/rendering.
+- [ ] Keep pure fixture and metric assertions in `bun test`; use the browser page only for behavior that requires real Web Audio APIs.
+
+Deterministic real-time `AudioContext` sample capture is not required for the first parity gate. Initial live validation covers topology, lifecycle, failure containment, and bounded invariants.
+
+### Automation identity corrections
+
+- Structured target fields are the source of truth; target keys are derived storage/index identities.
+- Existing effect instance IDs may contain `:`, so new keys must not use parseable delimiter concatenation.
+- New v2 keys use an unambiguous canonical tuple encoding, such as a fixed prefix plus JSON serialization of `[targetKind, trackIdOrNull, effectInstanceIdOrNull, parameterId]`.
+- Legacy colon keys are accepted as opaque stored identities and are never parsed to recover target fields.
+- All readers must accept legacy and v2 envelopes before any writer emits v2.
+- Legacy effect automation binds only when exactly one compatible effect instance exists.
+- Zero or multiple compatible instances leave the envelope persisted and unresolved.
+- Effect order is never identity.
+- Local IndexedDB key migration must transactionally prevent duplicate logical envelopes.
+- Convex writes must validate that an effect instance belongs to the project and target track or master.
+
+### Channel-semantics corrections
+
+- Introduce `ChannelLayout = "mono" | "stereo"` first as a runtime and resolved-graph contract.
+- Derive source layout from validated source channel count where unambiguous.
+- Keep existing project tracks effectively stereo during the initial runtime phase.
+- Do not persist mono track intent merely because current clips happen to be mono.
+- Add pure layout propagation over `ResolvedMixerGraph`.
+- Gain, EQ, compressor, and saturator preserve layout.
+- Stereo delay and width-producing reverb may expand mono to stereo.
+- Mono to stereo duplicates the mono sample to left and right without per-channel attenuation.
+- Stereo to mono uses `0.5L + 0.5R`.
+- Mono export performs one explicit final-master downmix after the complete stereo graph.
+- Persist `channelLayout?: "mono" | "stereo"` only after runtime behavior is proven and the product exposes user intent.
+
 ## Wave A: Compatibility and DSP Foundations
 
 ### A1. Capability and project-version policy
@@ -112,8 +218,11 @@ Build a production-grade browser audio platform that supports serious music prod
 - [ ] Add active media-track-settings reporting.
 - [ ] Audit authentication, R2 assets, Workers, OAuth, and third-party resources before enabling COOP/COEP.
 - [ ] Define the selected COOP/COEP policy or explicitly defer isolation.
-- [ ] Add a project format version and canonical migration entry point.
-- [ ] Add migration fixtures for every existing project version.
+- [ ] Inventory `LOCAL_PROJECT_SCHEMA_VERSION`, `PROJECT_MANIFEST_SCHEMA_VERSION`, and durable entity payload versions.
+- [ ] Add one canonical manifest/entity migration entry point before increasing any writer version.
+- [ ] Keep the manifest version as the archive/backup format boundary rather than adding a disconnected project-format field.
+- [ ] Add fixtures for the actual supported manifest version 1 before creating version 2 fixtures.
+- [ ] Keep migrations idempotent and add fixtures whenever a new supported version is introduced.
 - [ ] Define requested, active, measured, calibrated, and inferred terminology.
 - [ ] Define numerical tolerances separately for browser nodes and owned DSP.
 
@@ -148,14 +257,19 @@ export type AudioPlatformCapabilities = {
 - [ ] Add THD+N and aliasing-energy metrics.
 - [ ] Add channel-leakage and crosstalk metrics.
 - [ ] Add declared-versus-measured latency metrics.
-- [ ] Add browser-backed Web Audio integration execution.
+- [ ] Add pure metric tests before adding browser execution.
+- [ ] Prove a minimal browser characterization page through the Codex in-app browser before expanding browser coverage.
+- [ ] Serve browser harness assets over HTTP or HTTPS.
+- [ ] Prove production-build static worklet loading.
 - [ ] Characterize EQ at 44.1, 48, and 96 kHz.
 - [ ] Characterize compressor at all supported rates and layouts.
 - [ ] Characterize saturator aliasing and gain behavior.
 - [ ] Characterize delay timing and feedback behavior.
 - [ ] Characterize reverb impulse and tail behavior.
 - [ ] Characterize complete track, group, send, and master paths.
-- [ ] Add live/offline topology and numerical parity reports.
+- [ ] Add live/offline resolved-graph contract tests.
+- [ ] Use deterministic offline numerical rendering as the first browser-backed target.
+- [ ] Defer deterministic real-time sample capture until an explicit capture seam exists.
 
 ```ts
 export type AudioComparison = {
@@ -183,7 +297,10 @@ export type AudioComparison = {
 - [ ] Validate worklet messages from `unknown`.
 - [ ] Add processor registration failure status.
 - [ ] Add `processorerror` handling.
-- [ ] Define click-free recoverable bypass behavior.
+- [ ] Prewire live dry and processed branches before processor activation.
+- [ ] Define click-free live recovery by scheduling a short dry/processed AudioParam crossfade.
+- [ ] Reject offline render on processor registration, construction, protocol, or runtime failure.
+- [ ] Never silently bypass failed DSP during normal export.
 - [ ] Bound processor diagnostics and prevent message storms.
 - [ ] Define parameter smoothing per automatable parameter.
 - [ ] Verify no owned processor allocates per sample or render quantum.
@@ -206,6 +323,8 @@ export type ProcessorTelemetry = {
 - [ ] No runtime-generated worklet source remains.
 - [ ] Registration is once per context.
 - [ ] Processor failures cannot indefinitely mute the full graph.
+- [ ] Live recoverable processor failures transition to dry playback.
+- [ ] Offline processor failures reject export with processor, target, instance, and phase context.
 - [ ] Worklet teardown is deterministic.
 
 ## Wave B: Automation Identity and Channel Semantics
@@ -215,7 +334,13 @@ export type ProcessorTelemetry = {
 - [ ] Extend track automation targets with optional `effectInstanceId`.
 - [ ] Extend master automation targets with optional `effectInstanceId`.
 - [ ] Keep `parameterId` processor-local.
-- [ ] Version target-key generation.
+- [ ] Add explicit parameter ownership metadata for mixer parameters and each `AudioEffectKind`.
+- [ ] Generate v2 target keys from an unambiguous canonical tuple encoding.
+- [ ] Treat legacy target keys as opaque identities and never parse their delimiters.
+- [ ] Update all readers to accept legacy and v2 envelopes before changing writers.
+- [ ] Preserve legacy envelopes when zero or multiple compatible instances exist.
+- [ ] Bind legacy effect envelopes only when exactly one compatible instance exists.
+- [ ] Transactionally prevent duplicate logical rows during local key migration.
 - [ ] Update local automation persistence.
 - [ ] Update Convex automation schemas and operations.
 - [ ] Update project snapshots and archive import/export.
@@ -224,7 +349,7 @@ export type ProcessorTelemetry = {
 - [ ] Update live binding lookup to be instance-keyed.
 - [ ] Update offline binding lookup to be instance-keyed.
 - [ ] Preserve unresolved legacy envelopes without arbitrary retargeting.
-- [ ] Bind a legacy effect envelope only when one compatible instance exists.
+- [ ] Validate Convex effect ownership against project and target before writes.
 - [ ] Add migration tests for duplicate, deleted, reordered, missing, local, and cloud instances.
 - [ ] Convert suitable compressor scalar parameters to AudioParams.
 - [ ] Retain structured compressor configuration as validated messages.
@@ -244,10 +369,12 @@ export type AutomationTarget =
 - [ ] Live and offline automation target the same instance.
 - [ ] Compressor automation does not depend on MessagePort timing.
 
-### B2. Mono and stereo channel semantics
+### B2. Runtime mono and stereo channel semantics
 
-- [ ] Add `ChannelLayout = "mono" | "stereo"`.
-- [ ] Define source-layout persistence where user intent matters.
+- [ ] Add `ChannelLayout = "mono" | "stereo"` to runtime and resolved-graph contracts first.
+- [ ] Derive initial source layout from validated source channel count.
+- [ ] Add a pure layout-propagation pass over `ResolvedMixerGraph`.
+- [ ] Keep existing project tracks effectively stereo during the initial runtime phase.
 - [ ] Define mono-to-stereo gain behavior.
 - [ ] Define stereo-to-mono downmix behavior.
 - [ ] Configure custom worklet channel behavior explicitly.
@@ -256,6 +383,10 @@ export type AutomationTarget =
 - [ ] Handle zero, one, two, and unexpected extra worklet channels safely.
 - [ ] Add mono/stereo live and offline parity tests.
 - [ ] Preserve current stereo behavior for migrated tracks and effects.
+- [ ] Prove runtime propagation before adding persisted track layout intent.
+- [ ] Add optional persisted track layout only when a real product control requires it.
+- [ ] Keep source channel count separate from track processing intent.
+- [ ] Downmix mono export once at the final master boundary.
 
 #### Acceptance
 
@@ -809,49 +940,69 @@ These items begin only after the platform contracts and validation gates above a
 
 ## Delivery Milestones
 
-### Milestone 1: Foundation
+### Milestone 1: Contracts and baseline
 
-- [ ] Complete Wave A.
-- [ ] Complete browser-backed numerical characterization.
-- [ ] Complete worklet module migration and fault handling.
+- [ ] Complete format-boundary inventory and migration readers.
+- [ ] Complete pure fixtures and numerical metrics.
+- [ ] Prove the Chrome browser harness.
+- [ ] Characterize unchanged dry gain, stereo isolation, one EQ case, and compressor registration/rendering.
+- [ ] Prove live/offline resolved-graph contract equivalence.
 
-### Milestone 2: Identity and channels
+### Milestone 2: Worklet reliability
 
-- [ ] Complete Wave B.
-- [ ] Ship versioned automation migration.
-- [ ] Prove mono/stereo live/offline parity.
+- [ ] Complete static compressor and meter worklet migration.
+- [ ] Ship the shared once-per-context loader.
+- [ ] Ship bounded processor state and telemetry.
+- [ ] Prove live fault transition to dry playback.
+- [ ] Prove offline processor failure rejects export.
 
-### Milestone 3: Recording
+### Milestone 3: Automation identity
+
+- [ ] Ship backward-compatible automation readers.
+- [ ] Ship canonical tuple-encoded v2 target keys.
+- [ ] Ship instance-specific live and offline binding.
+- [ ] Ship local, Convex, archive, history, and UI migration.
+- [ ] Prove duplicate effects automate independently through reorder, deletion, and recovery.
+
+### Milestone 4: Runtime channel semantics
+
+- [ ] Ship runtime and resolved-graph channel-layout contracts.
+- [ ] Prove mono/stereo propagation across sources, processors, sends, groups, and master.
+- [ ] Prove worklet channel behavior.
+- [ ] Prove explicit final-master mono export downmix.
+- [ ] Decide whether persisted track layout is justified by a real product control.
+
+### Milestone 5: Recording
 
 - [ ] Complete Wave C transferable-buffer recording.
 - [ ] Ship monitoring and active capture diagnostics.
 - [ ] Ship calibration and sample-domain punch.
 - [ ] Keep compressed fallback available.
 
-### Milestone 4: Timing and routing
+### Milestone 6: Timing and routing
 
 - [ ] Complete Wave D.
 - [ ] Ship PDC and send tap selection.
 - [ ] Ship cue and external sidechain routing.
 
-### Milestone 5: Essential production DSP
+### Milestone 7: Essential production DSP
 
 - [ ] Complete processor release standards.
 - [ ] Ship utility, gate/expander, limiter, filter, modulation, and lo-fi processors.
 - [ ] Ship IR/cabinet tools.
 
-### Milestone 6: Metering and export
+### Milestone 8: Metering and export
 
 - [ ] Complete Wave F.
 - [ ] Ship loudness and true-peak analysis.
 - [ ] Ship PCM16/24/float, dither, tails, loudness normalization, and documented stems.
 
-### Milestone 7: Hardening
+### Milestone 9: Hardening
 
 - [ ] Complete Wave G.
 - [ ] Publish performance, overrun, numerical parity, and resource-leak reports.
 
-### Milestone 8: Advanced sound design
+### Milestone 10: Advanced sound design
 
 - [ ] Begin Wave H only after prior release gates remain stable.
 
@@ -865,7 +1016,7 @@ For every implementation phase:
 - [ ] Run `bun run knip`.
 - [ ] Run `git diff --check`.
 - [ ] Run `bun run build` at milestone completion.
-- [ ] Run browser-backed Web Audio integration tests.
+- [ ] Run browser-backed Web Audio integration tests after the Chrome harness gate is established.
 - [ ] Test 44.1, 48, and 96 kHz.
 - [ ] Test mono and stereo.
 - [ ] Test project migrations.
@@ -874,8 +1025,13 @@ For every implementation phase:
 ## Stop Conditions
 
 - [ ] Stop COOP/COEP rollout if required authenticated or cross-origin resources break.
+- [ ] Stop browser-harness rollout if Chrome cannot load static worklets from the production build.
 - [ ] Stop SAB work until overflow and recovery semantics work without SAB.
-- [ ] Stop automation migration if ambiguous envelopes cannot be preserved.
+- [ ] Stop automation migration if ambiguous envelopes cannot remain persisted and unresolved.
+- [ ] Stop automation migration if IndexedDB key rewrites or Convex uniqueness can create duplicate logical envelopes.
+- [ ] Stop v2 automation writes until every reader accepts legacy and v2 targets.
+- [ ] Stop worklet rollout if live failure cannot remain audible or offline failure cannot reject explicitly.
+- [ ] Stop channel persistence until runtime propagation is deterministic for mixed sources, groups, and returns.
 - [ ] Stop PDC if cycles are not rejected or latency can change without a rebuild policy.
 - [ ] Stop any processor release if live/offline state, timing, and parameter identity diverge.
 - [ ] Stop loudness release if reference fixtures miss tolerance.
@@ -886,7 +1042,12 @@ For every implementation phase:
 ## Expected Proof Artifacts
 
 - [ ] Browser capability matrix.
-- [ ] Project migration fixture report.
+- [ ] Supported-version and migration fixture report.
+- [ ] Chrome harness capability report by sample rate and worklet support.
+- [ ] Baseline numerical report for dry gain, EQ, compressor, routing, and stereo isolation.
+- [ ] Worklet load and fault-transition report.
+- [ ] Automation migration matrix covering local, Convex, archive, history, reorder, duplicate, and deletion cases.
+- [ ] Runtime channel-propagation and mono/stereo parity report.
 - [ ] Numerical parity report by browser, processor, sample rate, layout, and metric.
 - [ ] Processor timing and PDC impulse-alignment report.
 - [ ] Recording memory and overrun report.

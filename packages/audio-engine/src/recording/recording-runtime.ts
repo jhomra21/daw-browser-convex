@@ -39,6 +39,7 @@ type RecordingSession = {
   monitorFadeTimer: ReturnType<typeof setTimeout> | null
   monitorFadePromise: Promise<void> | null
   terminal: boolean
+  transport: RecordingCaptureTransport | null
 }
 
 type RecordingRuntimeOptions = {
@@ -46,6 +47,18 @@ type RecordingRuntimeOptions = {
   connectMonitor: (trackId: string, source: AudioNode) => () => void
   loadWorklet?: (context: AudioContext) => Promise<void>
   createWorkletNode?: (context: AudioContext, channelCount: number) => RecordingWorkletNode
+}
+
+export type RecordingCaptureTransport = {
+  ready: Promise<void>
+  finalize: () => Promise<{ capturedFrames: number }>
+  abort: () => Promise<void>
+  terminate: () => void
+}
+
+export type RecordingMessageEndpoint = {
+  postMessage: (message: unknown, transfer?: readonly ArrayBuffer[]) => void
+  setMessageHandler: (handler: (message: unknown) => void) => void
 }
 
 export type StartRecordingCaptureOptions = {
@@ -61,6 +74,13 @@ export type StartRecordingCaptureOptions = {
   epoch: RecordingEpoch
   punchInContextFrame: number
   punchOutContextFrame?: number
+  createTransport?: (input: {
+    generation: number
+    sessionId: string
+    sampleRate: number
+    channelCount: number
+    worklet: RecordingMessageEndpoint
+  }) => RecordingCaptureTransport
 }
 
 const MONITOR_FADE_SEC = 0.005
@@ -119,7 +139,15 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
   }
 
   const fail = (session: RecordingSession, reason: string) => {
-    void finishTerminal(session, { state: 'failed', sessionId: session.sessionId, reason })
+    const transport = session.transport
+    if (!transport) {
+      void finishTerminal(session, { state: 'failed', sessionId: session.sessionId, reason })
+      return
+    }
+    void (async () => {
+      await transport.abort().catch(() => undefined)
+      await finishTerminal(session, { state: 'failed', sessionId: session.sessionId, reason })
+    })()
   }
 
   const start = async (input: StartRecordingCaptureOptions) => {
@@ -209,6 +237,7 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
       monitorFadeTimer: null,
       monitorFadePromise: null,
       terminal: false,
+      transport: null,
     }
     session = establishedSession
     active = establishedSession
@@ -216,6 +245,20 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
     captureTrack.addEventListener('mute', onMute)
     captureTrack.addEventListener('unmute', onUnmute)
     captureContext.addEventListener('statechange', onContextStateChange)
+    let transportMessageHandler: ((message: unknown) => void) | null = null
+    establishedSession.transport = input.createTransport?.({
+      generation: currentGeneration,
+      sessionId: input.sessionId,
+      sampleRate: captureContext.sampleRate,
+      channelCount: inputChannels.length,
+      worklet: {
+        postMessage: (message, transfer = []) => captureWorklet.port.postMessage(message, [...transfer]),
+        setMessageHandler: (handler) => {
+          transportMessageHandler = handler
+        },
+      },
+    }) ?? null
+    if (establishedSession.transport) await establishedSession.transport.ready
     captureWorklet.port.onmessage = (event) => {
       const message = readRecorderOutboundMessage(event.data)
       if (!message || message.generation !== currentGeneration || message.sessionId !== input.sessionId) return
@@ -240,18 +283,27 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
           peak,
           contextFrame: frameAtCurrentTime(captureContext),
         })
-        const returned: RecorderReturnMessage = {
-          type: 'return',
-          generation: currentGeneration,
-          sessionId: input.sessionId,
-          blockId: message.blockId,
-          buffer: message.buffer,
+        if (transportMessageHandler) {
+          transportMessageHandler(event.data)
+        } else {
+          const returned: RecorderReturnMessage = {
+            type: 'return',
+            generation: currentGeneration,
+            sessionId: input.sessionId,
+            blockId: message.blockId,
+            buffer: message.buffer,
+          }
+          captureWorklet.port.postMessage(returned, [message.buffer])
         }
-        captureWorklet.port.postMessage(returned, [message.buffer])
         return
       }
       if (message.type === 'failure') {
+        transportMessageHandler?.(event.data)
         fail(establishedSession, message.reason)
+        return
+      }
+      if (transportMessageHandler) {
+        transportMessageHandler(event.data)
         return
       }
       const stopContextFrame = establishedSession.stopContextFrame ?? frameAtCurrentTime(captureContext)
@@ -296,6 +348,7 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
       contextFrame: frameAtCurrentTime(captureContext),
     })
     } catch (error) {
+      await session?.transport?.abort().catch(() => undefined)
       if (track && onEnded) track.removeEventListener('ended', onEnded)
       if (track && onMute) track.removeEventListener('mute', onMute)
       if (track && onUnmute) track.removeEventListener('unmute', onUnmute)
@@ -334,6 +387,18 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
     session.stopPromise = new Promise<void>((resolve) => {
       session.resolveStop = resolve
     })
+    if (session.transport) {
+      void session.transport.finalize().then((descriptor) => finishTerminal(session, {
+        state: 'complete',
+        sessionId: session.sessionId,
+        stopContextFrame,
+        capturedFrames: descriptor.capturedFrames,
+      }, true)).catch((error: unknown) => fail(
+        session,
+        error instanceof Error ? error.message : 'recording-transport-failed',
+      ))
+      return session.stopPromise
+    }
     session.worklet.port.postMessage({
       type: 'finalize',
       generation: session.generation,
@@ -346,6 +411,7 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
   const cancel = () => {
     const session = active
     if (!session || session.terminal) return
+    if (session.transport) void session.transport.abort().catch(() => undefined)
     void finishTerminal(session, { state: 'cancelled', sessionId: session.sessionId })
   }
 

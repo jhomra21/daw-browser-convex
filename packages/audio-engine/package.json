@@ -11,7 +11,8 @@
     "./audio-scheduling": "./src/audio-scheduling.ts",
     "./export-audio-support": "./src/export-audio-support.ts",
     "./export-range": "./src/export-range.ts",
-    "./export-mixdown": "./src/export-mixdown.ts"
+    "./export-mixdown": "./src/export-mixdown.ts",
+    "./recording-encode-wav": "./src/recording/encode-wav.ts"
   },
   "scripts": {
     "check": "bun --bun tsc --noEmit"

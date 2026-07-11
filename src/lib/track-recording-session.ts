@@ -2,6 +2,7 @@ import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { assert } from '@daw-browser/shared'
 import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { supportsPlanarFloat32WavEncoding } from '@daw-browser/audio-engine/recording-encode-wav'
 
 const RECORDING_MIME_TYPES = [
   'audio/webm;codecs=opus',
@@ -26,12 +27,15 @@ export type RecordingContext = {
   createdTrack: Track | null
   startSec: number
   stream: MediaStream
-  recorder: MediaRecorder
+  recorder: MediaRecorder | null
   chunks: BlobPart[]
   mimeType: string
   lockedByUserId: string
   engineCaptureActive: boolean
   engineCaptureSessionId: string
+  savedAudioSource: 'worklet-pcm-f32' | 'media-recorder-compressed'
+  sampleRate: number
+  manualOffsetFrames: number
   onDataAvailable: (event: BlobEvent) => void
   onStop: () => void
   stopPromise: Promise<void>
@@ -108,6 +112,15 @@ export function getRecordingSupport(): {
     }
   }
   return { supported: true, mimeType: '' }
+}
+
+export function getProductionRecordingSupport(): boolean {
+  return typeof window !== 'undefined'
+    && typeof AudioWorkletNode === 'function'
+    && typeof Worker === 'function'
+    && typeof navigator !== 'undefined'
+    && typeof navigator.storage?.getDirectory === 'function'
+    && supportsPlanarFloat32WavEncoding()
 }
 
 export function ensureRecordingAudioContext(audioEngine: AudioEngine): void {
@@ -205,12 +218,12 @@ export async function cleanupRecordingSession(options: {
   options.clearLockHeartbeat()
 
   try {
-    ctx.recorder.removeEventListener('dataavailable', ctx.onDataAvailable)
-    ctx.recorder.removeEventListener('stop', ctx.onStop)
+    ctx.recorder?.removeEventListener('dataavailable', ctx.onDataAvailable)
+    ctx.recorder?.removeEventListener('stop', ctx.onStop)
   } catch {}
 
   try {
-    if (ctx.recorder.state !== 'inactive') ctx.recorder.stop()
+    if (ctx.recorder && ctx.recorder.state !== 'inactive') ctx.recorder.stop()
   } catch {}
   try { ctx.stream.getTracks().forEach((track) => track.stop()) } catch {}
 

@@ -23,16 +23,16 @@ type RecordingTransferTransportOptions = {
   worker?: WorkerEndpoint
 }
 
-type Deferred = {
-  promise: Promise<void>
-  resolve: () => void
+type Deferred<T = void> = {
+  promise: Promise<T>
+  resolve: (value: T) => void
   reject: (error: Error) => void
 }
 
-const deferred = (): Deferred => {
-  let resolve = () => {}
+const deferred = <T = void>(): Deferred<T> => {
+  let resolve = (_value: T) => {}
   let reject = (_error: Error) => {}
-  const promise = new Promise<void>((onResolve, onReject) => {
+  const promise = new Promise<T>((onResolve, onReject) => {
     resolve = onResolve
     reject = onReject
   })
@@ -44,10 +44,11 @@ export const createRecordingTransferTransport = (options: RecordingTransferTrans
   let queuedBlocks = 0
   let state: 'starting' | 'open' | 'closing' | 'closed' | 'failed' = 'starting'
   const ready = deferred()
-  let completion: Deferred | null = null
+  let completion: Deferred<{ capturedFrames: number }> | null = null
   let workletComplete = false
   let writerTerminal = false
   let requestedTerminal: 'finalized' | 'aborted' | null = null
+  let finalizedDescriptor: { capturedFrames: number } | null = null
 
   const settleCompletion = () => {
     if (
@@ -56,10 +57,19 @@ export const createRecordingTransferTransport = (options: RecordingTransferTrans
       !writerTerminal ||
       (requestedTerminal === 'finalized' && (!workletComplete || queuedBlocks !== 0))
     ) return
+    const descriptor = finalizedDescriptor
+    if (requestedTerminal === 'finalized' && !descriptor) {
+      fail('Recording writer finalized without a descriptor.')
+      return
+    }
     const pending = completion
     completion = null
     state = 'closed'
-    pending.resolve()
+    if (descriptor) {
+      pending.resolve(descriptor)
+    } else {
+      pending.resolve({ capturedFrames: 0 })
+    }
     worker.terminate()
   }
 
@@ -171,6 +181,7 @@ export const createRecordingTransferTransport = (options: RecordingTransferTrans
       fail('Recording writer completed with queued blocks.')
       return
     }
+    if (message.type === 'finalized') finalizedDescriptor = { capturedFrames: message.capturedFrames }
     writerTerminal = true
     settleCompletion()
   })
@@ -188,7 +199,7 @@ export const createRecordingTransferTransport = (options: RecordingTransferTrans
     if (state === 'starting') await ready.promise
     if (state !== 'open') throw new Error('Recording transport is not open.')
     state = 'closing'
-    completion = deferred()
+    completion = deferred<{ capturedFrames: number }>()
     requestedTerminal = type === 'finalize' ? 'finalized' : 'aborted'
     if (type === 'finalize') {
       options.worklet.postMessage({
@@ -203,13 +214,15 @@ export const createRecordingTransferTransport = (options: RecordingTransferTrans
         sessionId: options.sessionId,
       })
     }
-    await completion.promise
+    return completion.promise
   }
 
   return {
     ready: ready.promise,
     finalize: () => finish('finalize'),
-    abort: () => finish('abort'),
+    abort: async () => {
+      await finish('abort')
+    },
     terminate,
   }
 }

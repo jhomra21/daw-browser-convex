@@ -28,7 +28,8 @@ type UploadedAudioClipInput = {
   trackRef?: string
   startSec: number
   file: File
-  decoded: AudioBuffer
+  decoded?: AudioBuffer
+  durationSec?: number
   source: AudioSourceMetadata
   sourceAssetKey: string
   sourceKind: AudioSourceKind
@@ -58,7 +59,8 @@ type LocalAudioClipInput = {
   trackRef?: string
   startSec: number
   fileName: string
-  decoded: AudioBuffer
+  decoded?: AudioBuffer
+  durationSec?: number
   source: AudioSourceMetadata
   sourceAssetKey: string
   sourceKind: AudioSourceKind
@@ -135,9 +137,11 @@ export function buildLocalClip(input: BuildLocalClipInput): RuntimeClip {
 }
 
 export async function createUploadedAudioClip(input: UploadedAudioClipInput): Promise<UploadedAudioClipResult> {
+  const duration = input.decoded?.duration ?? input.durationSec
+  assert(duration !== undefined, 'Audio clip duration is required')
   const clip: ClipCreateSnapshot = {
     startSec: input.startSec,
-    duration: input.decoded.duration,
+    duration,
     name: input.file.name,
     sampleUrl: undefined,
     source: input.source,
@@ -157,7 +161,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
       buffer: input.decoded,
       color: input.color,
     }))
-    input.audioBufferCache.storeBuffer(pendingClipId, input.decoded)
+    if (input.decoded) input.audioBufferCache.storeBuffer(pendingClipId, input.decoded)
     input.selectClip?.(input.trackId, pendingClipId)
   }
   const removePendingClip = () => {
@@ -178,7 +182,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
     projectId: input.projectId,
     assetKey: input.sourceAssetKey,
     file: input.file,
-    duration: input.decoded.duration,
+    duration,
     uploadToR2: input.uploadToR2,
   }).catch(async (error) => {
     removePendingClip()
@@ -187,7 +191,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
       userId: input.userId,
       assetKey: input.sourceAssetKey,
       file: input.file,
-      duration: input.decoded.duration,
+      duration,
       clipPayload: queuedClipPayload,
       error,
     })
@@ -233,7 +237,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
     color: input.color,
   })
   input.insertLocalClip(input.trackId, localClip)
-  input.audioBufferCache.storeBuffer(clipId, input.decoded)
+  if (input.decoded) input.audioBufferCache.storeBuffer(clipId, input.decoded)
   input.onClipCreated?.(localClip)
   void primeClipSourceAsset({
     sourceAssetKey: input.sourceAssetKey,
@@ -257,9 +261,11 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
 }
 
 export async function createLocalAudioClip(input: LocalAudioClipInput): Promise<UploadedAudioClipResult> {
+  const duration = input.decoded?.duration ?? input.durationSec
+  assert(duration !== undefined, 'Audio clip duration is required')
   const clip: ClipCreateSnapshot = {
     startSec: input.startSec,
-    duration: input.decoded.duration,
+    duration,
     name: input.fileName,
     source: input.source,
     sourceAssetKey: input.sourceAssetKey,
@@ -270,7 +276,7 @@ export async function createLocalAudioClip(input: LocalAudioClipInput): Promise<
     trackId: input.trackId,
     name: input.fileName,
     startSec: input.startSec,
-    duration: input.decoded.duration,
+    duration,
     color: input.color ?? clip.color ?? getDefaultClipColor(clip),
     sourceAssetId: input.sourceAssetKey,
     sourceAssetKey: input.sourceAssetKey,
@@ -290,7 +296,7 @@ export async function createLocalAudioClip(input: LocalAudioClipInput): Promise<
     return { clipId: row.id, clip }
   }
   input.insertLocalClip(input.trackId, localClip)
-  input.audioBufferCache.storeBuffer(row.id, input.decoded)
+  if (input.decoded) input.audioBufferCache.storeBuffer(row.id, input.decoded)
   input.onClipCreated?.(localClip)
   input.selectClip?.(input.trackId, row.id)
   if (!input.skipHistory) {

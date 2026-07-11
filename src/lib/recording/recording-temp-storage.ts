@@ -452,5 +452,12 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
     return removed
   }
 
-  return { createSession, open, cleanupStale }
+  const remove = async (sessionId: string): Promise<void> => {
+    if (!isSafeName(sessionId)) return
+    const sessions = await sessionsDirectory()
+    await sessions.remove(sessionId, true)
+    ownedSessionIds.delete(sessionId)
+  }
+
+  return { createSession, open, remove, cleanupStale }
 }

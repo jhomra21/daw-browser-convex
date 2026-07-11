@@ -260,4 +260,99 @@ describe('recording runtime', () => {
       runtime.cancel()
     }
   })
+
+  test('uses transport frame totals and handles startup, finalize, cancel, and returned block routing', async () => {
+    const success = graph()
+    const routed: unknown[] = []
+    const runtime = createRecordingRuntime({
+      getContext: () => success.context,
+      loadWorklet: async () => undefined,
+      createWorkletNode: () => success.worklet,
+      connectMonitor: () => () => undefined,
+    })
+    await runtime.start({
+      ...startOptions(success.stream),
+      createTransport: ({ worklet }) => {
+        worklet.setMessageHandler((message) => routed.push(message))
+        return {
+          ready: Promise.resolve(),
+          finalize: async () => ({ capturedFrames: 321 }),
+          abort: async () => undefined,
+          terminate: () => undefined,
+        }
+      },
+    })
+    const blockMessage = {
+      type: 'block',
+      generation: 0,
+      sessionId: 'take-1',
+      blockId: 0,
+      sequence: 0,
+      frameCount: 1,
+      channelCount: 1,
+      buffer: new ArrayBuffer(2048 * Float32Array.BYTES_PER_ELEMENT),
+    }
+    success.port.onmessage?.({ data: blockMessage })
+    expect(routed).toEqual([blockMessage])
+    await runtime.stop()
+    expect(runtime.getStatus()).toMatchObject({ state: 'complete', capturedFrames: 321 })
+    const startup = graph()
+    const startupRuntime = createRecordingRuntime({
+      getContext: () => startup.context,
+      loadWorklet: async () => undefined,
+      createWorkletNode: () => startup.worklet,
+      connectMonitor: () => () => undefined,
+    })
+    await expect(startupRuntime.start({
+      ...startOptions(startup.stream),
+      createTransport: () => ({
+        ready: Promise.reject(new Error('startup-failed')),
+        finalize: async () => ({ capturedFrames: 0 }),
+        abort: async () => undefined,
+        terminate: () => undefined,
+      }),
+    })).rejects.toThrow('startup-failed')
+    expect(startup.disconnections).toContain(startup.worklet)
+
+    const finalize = graph()
+    const finalizeRuntime = createRecordingRuntime({
+      getContext: () => finalize.context,
+      loadWorklet: async () => undefined,
+      createWorkletNode: () => finalize.worklet,
+      connectMonitor: () => () => undefined,
+    })
+    await finalizeRuntime.start({
+      ...startOptions(finalize.stream),
+      createTransport: () => ({
+        ready: Promise.resolve(),
+        finalize: async () => { throw new Error('finalize-failed') },
+        abort: async () => undefined,
+        terminate: () => undefined,
+      }),
+    })
+    await finalizeRuntime.stop()
+    expect(finalizeRuntime.getStatus()).toMatchObject({ state: 'failed', reason: 'finalize-failed' })
+
+    const cancelled = graph()
+    let aborts = 0
+    const cancelRuntime = createRecordingRuntime({
+      getContext: () => cancelled.context,
+      loadWorklet: async () => undefined,
+      createWorkletNode: () => cancelled.worklet,
+      connectMonitor: () => () => undefined,
+    })
+    await cancelRuntime.start({
+      ...startOptions(cancelled.stream),
+      createTransport: () => ({
+        ready: Promise.resolve(),
+        finalize: async () => ({ capturedFrames: 0 }),
+        abort: async () => { aborts += 1 },
+        terminate: () => undefined,
+      }),
+    })
+    cancelRuntime.cancel()
+    await Promise.resolve()
+    expect(aborts).toBe(1)
+    expect(cancelRuntime.getStatus()).toMatchObject({ state: 'cancelled' })
+  })
 })

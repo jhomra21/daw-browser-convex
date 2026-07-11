@@ -68,7 +68,7 @@ describe('recording transfer transport', () => {
     expect(transferredBlock.buffer.byteLength).toBe(0)
     expect(worker.messages.at(-1)).toMatchObject({ type: 'finalize' })
     worker.receive({ type: 'finalized', generation: 2, sessionId: 'take', capturedFrames: 1 })
-    await finishing
+    await expect(finishing).resolves.toEqual({ capturedFrames: 1 })
     expect(terminations).toBe(1)
     expect(worklet.messages.at(-1)).toMatchObject({ type: 'return', blockId: 0 })
   })

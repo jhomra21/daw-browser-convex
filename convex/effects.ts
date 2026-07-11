@@ -385,6 +385,12 @@ const removeAudioEffectForUser = async (
     instanceId?: string
   },
 ) => {
+  const deleteEffectAutomation = async (instanceId: string) => {
+    const automationRows = await ctx.db.query('automationEnvelopes').withIndex('by_project', (q: any) => q.eq('projectId', input.projectId)).collect()
+    for (const envelope of automationRows) {
+      if (envelope.effectInstanceId === instanceId) await ctx.db.delete(envelope._id)
+    }
+  }
   if (input.targetType === 'track') {
     const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
     if (!access || access.track.projectId !== input.projectId) return notFoundStatus()
@@ -394,6 +400,7 @@ const removeAudioEffectForUser = async (
       : rows.find((entry: EffectOrderRow) => entry.type === input.effect && entry.targetType === 'track' && !entry.instanceId) ?? null
     if (!row) return notFoundStatus()
     await ctx.db.delete(row._id)
+    if (row.instanceId) await deleteEffectAutomation(row.instanceId)
     await reorderRows(ctx, rows.filter((entry: EffectOrderRow) => entry._id !== row._id && entry.targetType === 'track'), [])
     return deletedStatus()
   }
@@ -404,6 +411,7 @@ const removeAudioEffectForUser = async (
     : rows.find((entry: EffectOrderRow) => entry.type === input.effect && !entry.instanceId) ?? null
   if (!row) return notFoundStatus()
   await ctx.db.delete(row._id)
+  if (row.instanceId) await deleteEffectAutomation(row.instanceId)
   await reorderRows(ctx, rows.filter((entry: EffectOrderRow) => entry._id !== row._id), [])
   return deletedStatus()
 }

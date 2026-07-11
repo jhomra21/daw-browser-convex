@@ -277,6 +277,16 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     userId,
     remoteRows: () => fullView.data?.automationEnvelopes,
+    remoteEffects: () => fullView.data?.effects.flatMap((effect) => {
+      if (effect.targetType !== "track" && effect.targetType !== "master") return [];
+      return [{
+        targetType: effect.targetType,
+        trackId: effect.trackId,
+        type: effect.type,
+        instanceId: effect.instanceId,
+        index: effect.index,
+      }];
+    }),
     audioEngine,
     isPlaying: () => isPlaying(),
     playheadSec: () => playheadSec(),
@@ -597,7 +607,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       depthByTrackId: computeDepthMap(tree),
       visibleByTrackId: lanes.visibleByTrackId,
       heightsByLaneOwnerKey: lanes.heightsByLaneOwnerKey,
-      visibleParameterIdsByTrackId: lanes.visibleParameterIdsByTrackId,
+      visibleParameterIdsByTrackId: lanes.visibleTargetKeysByTrackId,
     });
   });
 
@@ -1227,14 +1237,14 @@ const Timeline: Component<TimelineProps> = (props) => {
       onLocalSaveFailed: localProject.setLocalSaveFailure,
       onDeviceInsertActionsChange: setDeviceInsertActions,
       automationEnvelopes: automation.envelopes(),
-      onSelectAutomationParameter: (targetKey: Track["id"] | "master", parameterId: string) => {
-        automation.effectsPanel.selectParameter(targetKey, parameterId);
+      onSelectAutomationParameter: (targetKey: Track["id"] | "master", parameterId: string, effectInstanceId?: string) => {
+        automation.effectsPanel.selectParameter(targetKey, { parameterId, effectInstanceId });
       },
-      onManualAutomationOverride: (targetKey: Track["id"] | "master", parameterId: string) => {
+      onManualAutomationOverride: (targetKey: Track["id"] | "master", parameterId: string, effectInstanceId?: string) => {
         automation.overrideTarget(
           targetKey === "master"
-            ? automationTargetKey({ kind: "master" }, parameterId)
-            : automationTargetKey({ kind: "track", trackId: targetKey }, parameterId),
+            ? automationTargetKey({ kind: "master", effectInstanceId }, parameterId)
+            : automationTargetKey({ kind: "track", trackId: targetKey, effectInstanceId }, parameterId),
         );
       },
       onEffectChainElementChange: (element: HTMLElement | undefined) => {

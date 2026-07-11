@@ -383,8 +383,8 @@ async function renderSourceIsolatedMixdownFromPrepared(
       const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
       const fallback = descriptor?.defaultValue ?? 0
       const bindings = envelope.target.kind === 'master'
-        ? mixerNodes.resolveMasterAutomationBindings(envelope.parameterId)
-        : mixerNodes.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId)
+        ? mixerNodes.resolveMasterAutomationBindings(envelope.target, envelope.parameterId)
+        : mixerNodes.resolveTrackAutomationBindings(envelope.target, envelope.parameterId)
       scheduleAutomationEnvelope(
         bindings,
         envelope,

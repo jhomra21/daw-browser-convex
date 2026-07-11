@@ -430,8 +430,8 @@ export class AudioEngine {
       const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
       const fallback = descriptor?.defaultValue ?? 0
       const bindings = envelope.target.kind === 'master'
-        ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain)
-        : this.mixerRuntime.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId)
+        ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain, envelope.target.effectInstanceId)
+        : this.mixerRuntime.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId, envelope.target.effectInstanceId)
       scheduleAutomationEnvelope(bindings, envelope, window, (timeSec) => this.timelineToCtxTime(timeSec), fallback)
     }
   }
@@ -444,8 +444,8 @@ export class AudioEngine {
       const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
       const fallback = descriptor?.defaultValue ?? 0
       const bindings = envelope.target.kind === 'master'
-        ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain)
-        : this.mixerRuntime.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId)
+        ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain, envelope.target.effectInstanceId)
+        : this.mixerRuntime.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId, envelope.target.effectInstanceId)
       applyAutomationEnvelopeAtTime(bindings, envelope, timeSec, now, fallback)
     }
   }
@@ -455,8 +455,8 @@ export class AudioEngine {
     for (const envelope of envelopes) {
       if (targetKeys && !targetKeys.has(envelope.targetKey)) continue
       const bindings = envelope.target.kind === 'master'
-        ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain)
-        : this.mixerRuntime.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId)
+        ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain, envelope.target.effectInstanceId)
+        : this.mixerRuntime.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId, envelope.target.effectInstanceId)
       for (const binding of bindings) binding.param.cancelScheduledValues(now)
     }
   }

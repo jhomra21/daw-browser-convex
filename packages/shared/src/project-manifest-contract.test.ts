@@ -39,4 +39,28 @@ describe('project format boundaries', () => {
       'Unsupported project manifest schema version 0.',
     )
   })
+
+  test('roundtrips structured automation targets and opaque keys in generic entities', () => {
+    const targetKey = 'automation:v2:["track","track:colon","delay:instance:colon","delay.feedback"]'
+    const manifest: ProjectManifest = {
+      ...manifestV1,
+      entities: [{
+        kind: 'automation-envelope',
+        id: targetKey,
+        value: {
+          target: {
+            kind: 'track',
+            trackId: 'track:colon',
+            effectInstanceId: 'delay:instance:colon',
+          },
+          targetKey,
+          parameterId: 'delay.feedback',
+        },
+        updatedAt: 100,
+      }],
+    }
+
+    const roundtripped = migrateProjectManifest(JSON.parse(JSON.stringify(manifest)))
+    expect(roundtripped.entities[0]).toEqual(manifest.entities[0])
+  })
 })

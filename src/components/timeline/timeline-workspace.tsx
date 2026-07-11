@@ -170,8 +170,9 @@ export default function TimelineWorkspace(props: Props) {
   const masterAreaHeight = () => MASTER_ROW_HEIGHT + (masterAutomationVisible() ? props.automation.lanes.masterHeight : 0);
   const fullHeight = () => RULER_HEIGHT + trackAreaHeight() + masterAreaHeight();
   const scrollContentHeight = () => fullHeight() + props.bottomPanelOffsetPx;
-  const masterParameterId = () => props.automation.lanes.selectedParametersByTargetKey.master ?? "volume";
-  const masterTargetKey = () => automationTargetKey({ kind: "master" }, masterParameterId());
+  const masterSelection = () => props.automation.lanes.selectedTargetsByOwnerKey.master ?? { parameterId: "volume" };
+  const masterTarget = () => ({ kind: "master" as const, effectInstanceId: masterSelection().effectInstanceId });
+  const masterTargetKey = () => automationTargetKey(masterTarget(), masterSelection().parameterId);
   const fallbackMenuItems = (): TimelineContextMenuItem[] => [
     { kind: "label", label: "Timeline" },
     {
@@ -236,7 +237,7 @@ export default function TimelineWorkspace(props: Props) {
                 {(row, i) => (
                   (() => {
                     const track = () => trackById().get(row.trackId);
-                    const visibleParameterIds = () => props.automation.lanes.visibleParameterIdsByTrackId[row.trackId] ?? [];
+                    const visibleTargetKeys = () => props.automation.lanes.visibleTargetKeysByTrackId[row.trackId] ?? [];
                     const laneHeight = () => props.automation.lanes.heightsByLaneOwnerKey[row.trackId] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
                     return (
                       <Show when={track()}>
@@ -269,10 +270,13 @@ export default function TimelineWorkspace(props: Props) {
                             automation={{
                               projectId: props.automation.projectId,
                               visible: props.automation.lanes.visibleByTrackId[row.trackId] === true,
-                              parameterIds: visibleParameterIds(),
+                              selections: visibleTargetKeys().flatMap((targetKey) => {
+                                const selection = props.automation.lanes.selectionByTargetKey.get(targetKey);
+                                return selection ? [selection] : [];
+                              }),
                               laneHeightPx: laneHeight(),
-                              envelopeForParameter: (parameterId) => props.automation.envelopes.byTargetKey.get(
-                                automationTargetKey({ kind: "track", trackId: row.trackId }, parameterId),
+                              envelopeForSelection: (selection) => props.automation.envelopes.byTargetKey.get(
+                                automationTargetKey({ kind: "track", trackId: row.trackId, effectInstanceId: selection.effectInstanceId }, selection.parameterId),
                               ),
                               durationSec: props.durationSec,
                               onPreview: props.automation.envelopes.preview,
@@ -340,8 +344,8 @@ export default function TimelineWorkspace(props: Props) {
                   >
                     <AutomationLane
                       projectId={props.automation.projectId}
-                      target={{ kind: "master" }}
-                      parameterId={masterParameterId()}
+                      target={masterTarget()}
+                      parameterId={masterSelection().parameterId}
                       envelope={props.automation.envelopes.byTargetKey.get(masterTargetKey())}
                       durationSec={props.durationSec}
                       heightPx={props.automation.lanes.masterHeight}

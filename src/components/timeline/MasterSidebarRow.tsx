@@ -1,5 +1,5 @@
 import { type Component, Show, createMemo, createSignal, onCleanup } from "solid-js";
-import { automationEnvelopeValueRange, type AutomationEnvelope } from "@daw-browser/shared";
+import { automationEnvelopeValueRange, automationTargetKey, type AutomationEffectInstance, type AutomationEnvelope, type AutomationParameterSelection } from "@daw-browser/shared";
 import { normalizeMasterVolume } from "@daw-browser/shared";
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
 import { LANE_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
@@ -28,12 +28,13 @@ type MasterSidebarRowProps = {
   automation: {
     visible: boolean;
     heightPx: number;
-    selectedParameterId: string;
-    automatedParameterIds: ReadonlySet<string>;
+    selected: AutomationParameterSelection;
+    effects: readonly AutomationEffectInstance[];
+    automatedTargetKeys: ReadonlySet<string>;
     selectedEnvelope: AutomationEnvelope | undefined;
     onToggleVisibility: () => void;
     onResizeLane: (heightPx: number) => void;
-    onSelectParameter: (parameterId: string) => void;
+    onSelectParameter: (selection: AutomationParameterSelection) => void;
   };
 };
 
@@ -62,9 +63,13 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   };
   const automationHeight = () => props.automation.heightPx;
   const rowHeight = () => MASTER_ROW_HEIGHT + (!master().collapsed && props.automation.visible ? automationHeight() : 0);
-  const volumeAutomated = () => props.automation.automatedParameterIds.has("volume");
+  const volumeAutomated = () => props.automation.automatedTargetKeys.has(
+    automationTargetKey({ kind: "master" }, "volume"),
+  );
   const volumeEnvelope = createMemo(() => (
-    props.automation.selectedParameterId === "volume" ? props.automation.selectedEnvelope : undefined
+    props.automation.selected.parameterId === "volume" && props.automation.selected.effectInstanceId === undefined
+      ? props.automation.selectedEnvelope
+      : undefined
   ));
   const volumeRange = () => volumeEnvelope() ? automationEnvelopeValueRange(volumeEnvelope(), { min: 0, max: 1 }) : undefined;
   let cleanupAutomationResize: (() => void) | undefined;
@@ -186,7 +191,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
                       "--track-volume-automation-end": `${(volumeRange()?.max ?? 0) * 100}%`,
                     }}
                     onClick={(event) => event.stopPropagation()}
-                    onPointerDown={() => props.automation.onSelectParameter("volume")}
+                    onPointerDown={() => props.automation.onSelectParameter({ parameterId: "volume" })}
                     onInput={(event) => {
                       event.stopPropagation();
                       previewVolume(parseFloat(event.currentTarget.value));
@@ -237,8 +242,10 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
             <span class="truncate">Automation</span>
           </div>
           <AutomationParameterPicker
-            value={props.automation.selectedParameterId}
-            automatedParameterIds={props.automation.automatedParameterIds}
+            target={{ kind: "master" }}
+            effects={props.automation.effects}
+            value={props.automation.selected}
+            automatedTargetKeys={props.automation.automatedTargetKeys}
             onChange={props.automation.onSelectParameter}
           />
           <div class="truncate text-right text-red-200/70">

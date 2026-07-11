@@ -6,8 +6,12 @@ import {
   automationTargetKeysAfterReEnable,
   automationTargetKeysForManualOverride,
   filterAutomationEnvelopesForScheduling,
-  getAutomationParameterOptions,
+  getAutomationParameterOptionsForTarget,
+  isAudioEffectKind,
   isLocalId,
+  isV2AutomationTargetKey,
+  type AudioEffectInstance,
+  type AutomationParameterSelection,
   type AutomationEnvelope,
 } from "@daw-browser/shared";
 import { createPersistedAutomationState } from "~/components/timeline/create-persisted-automation-state";
@@ -17,12 +21,15 @@ import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import { buildAutomationEnvelopeHistoryEntry } from "~/lib/undo/builders";
 import type { HistoryEntry } from "~/lib/undo/types";
 import { useProjectPersistedState } from "~/hooks/useProjectPersistedState";
+import { listLocalEffects } from "~/lib/local-effects";
+import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 
 type RemoteAutomationRow = {
   _id: string;
   projectId: string;
   targetKind: "master" | "track";
   trackId?: string;
+  effectInstanceId?: string;
   targetKey: string;
   parameterId: string;
   enabled: boolean;
@@ -34,6 +41,13 @@ type TimelineAutomationControllerOptions = {
   projectId: Accessor<string>;
   userId: Accessor<string>;
   remoteRows: Accessor<RemoteAutomationRow[] | undefined>;
+  remoteEffects: Accessor<Array<{
+    targetType: "track" | "master";
+    trackId?: string;
+    type: string;
+    instanceId?: string;
+    index?: number;
+  }> | undefined>;
   audioEngine: AudioEngine;
   isPlaying: Accessor<boolean>;
   playheadSec: Accessor<number>;
@@ -45,11 +59,13 @@ export type TimelineWorkspaceAutomationModel = {
   projectId: string;
   lanes: {
     visibleByTrackId: Record<string, boolean>;
-    visibleParameterIdsByTrackId: Record<string, string[]>;
+    visibleTargetKeysByTrackId: Record<string, string[]>;
     heightsByLaneOwnerKey: Record<string, number>;
     masterVisible: boolean;
     masterHeight: number;
-    selectedParametersByTargetKey: Record<string, string>;
+    selectedTargetsByOwnerKey: Record<string, AutomationParameterSelection>;
+    selectionByTargetKey: Map<string, AutomationParameterSelection>;
+    effectInstancesByOwnerKey: Record<string, AudioEffectInstance[]>;
   };
   envelopes: {
     byTargetKey: Map<string, AutomationEnvelope>;
@@ -61,11 +77,11 @@ export type TimelineWorkspaceAutomationModel = {
     toggleMasterVisibility: () => void;
     toggleTrackVisibility: (trackId: Track["id"]) => void;
     addTrackLane: (trackId: Track["id"]) => void;
-    showTrackLane: (trackId: Track["id"], parameterId: string) => void;
-    hideTrackLane: (trackId: Track["id"], parameterId: string) => void;
+    showTrackLane: (trackId: Track["id"], selection: AutomationParameterSelection) => void;
+    hideTrackLane: (trackId: Track["id"], targetKey: string) => void;
     resizeMasterLane: (height: number) => void;
     resizeTrackLane: (trackId: Track["id"], height: number) => void;
-    selectParameter: (targetKey: string, parameterId: string) => void;
+    selectParameter: (targetKey: string, selection: AutomationParameterSelection) => void;
   };
 };
 
@@ -84,10 +100,9 @@ const replaceAutomationEnvelope = (
   return next;
 };
 
-const automationParameterOptions = getAutomationParameterOptions();
-
 export function useTimelineAutomationController(options: TimelineAutomationControllerOptions) {
   const [automationEnvelopes, setAutomationEnvelopes] = createSignal<AutomationEnvelope[]>([]);
+  const [effectInstancesByOwnerKey, setEffectInstancesByOwnerKey] = createSignal<Record<string, AudioEffectInstance[]>>({});
   const [overriddenAutomationTargetKeys, setOverriddenAutomationTargetKeys] = createSignal<Set<string>>(new Set());
   const visibleAutomationTracks = useProjectPersistedState<Record<string, boolean>>({
     projectId: options.projectId,
@@ -135,7 +150,9 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
           const next: Record<string, string[]> = {};
           for (const [key, value] of Object.entries(parsed)) {
             if (key === "master" || value !== true) continue;
-            next[key] = [legacySelected[key] ?? "volume"];
+            if ((legacySelected[key] ?? "volume") === "volume") {
+              next[key] = [automationTargetKey({ kind: "track", trackId: key }, "volume")];
+            }
           }
           return next;
         } catch {
@@ -149,8 +166,8 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
         const next: Record<string, string[]> = {};
         for (const [key, value] of Object.entries(parsed)) {
           if (!Array.isArray(value)) continue;
-          const parameterIds = value.filter((entry): entry is string => typeof entry === "string");
-          if (parameterIds.length > 0) next[key] = Array.from(new Set(parameterIds));
+          const targetKeys = value.filter((entry): entry is string => typeof entry === "string" && entry.startsWith("automation:v2:"));
+          if (targetKeys.length > 0) next[key] = Array.from(new Set(targetKeys));
         }
         return next;
       } catch {
@@ -179,7 +196,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     },
     save: (rid, value) => localStorage.setItem(`timeline:${rid}:automation-lane-heights`, JSON.stringify(value)),
   });
-  const selectedAutomationParameters = useProjectPersistedState<Record<string, string>>({
+  const selectedAutomationParameters = useProjectPersistedState<Record<string, AutomationParameterSelection>>({
     projectId: options.projectId,
     createInitial: () => ({}),
     load: (rid) => {
@@ -188,9 +205,16 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       try {
         const parsed = JSON.parse(raw);
         if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-        const next: Record<string, string> = {};
+        const next: Record<string, AutomationParameterSelection> = {};
         for (const [key, value] of Object.entries(parsed)) {
-          if (typeof value === "string") next[key] = value;
+          if (value === "volume") next[key] = { parameterId: "volume" };
+          if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+            const parameterId = Reflect.get(value, "parameterId");
+            const effectInstanceId = Reflect.get(value, "effectInstanceId");
+            if (typeof parameterId === "string" && (effectInstanceId === undefined || typeof effectInstanceId === "string")) {
+              next[key] = { parameterId, effectInstanceId };
+            }
+          }
         }
         return next;
       } catch {
@@ -202,8 +226,8 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   const automationTargetKeyAccessor = createMemo(() => {
     const trackId = options.selectedTrackId();
     if (!trackId) return undefined;
-    const parameterId = selectedAutomationParameters.value()[trackId] ?? "volume";
-    return automationTargetKey({ kind: "track", trackId }, parameterId);
+    const selection = selectedAutomationParameters.value()[trackId] ?? { parameterId: "volume" };
+    return automationTargetKey({ kind: "track", trackId, effectInstanceId: selection.effectInstanceId }, selection.parameterId);
   });
   const applyAutomationEnvelopeState = (envelope: AutomationEnvelope | undefined, targetKey: string) => {
     setAutomationEnvelopes((current) => {
@@ -263,8 +287,8 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       const rid = options.projectId();
       if (!rid) return;
       if (isLocalId("project", rid)) {
-        await setLocalAutomationEnvelope(rid, envelope);
-        setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, envelope.targetKey, envelope));
+        const persisted = await setLocalAutomationEnvelope(rid, envelope);
+        setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, envelope.targetKey, persisted));
         return;
       }
       const uid = options.userId();
@@ -277,6 +301,9 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
           payload: {
             targetKind: envelope.target.kind,
             trackId: envelope.target.kind === "track" ? envelope.target.trackId : undefined,
+            effectInstanceId: envelope.target.effectInstanceId,
+            existingEnvelopeId: isV2AutomationTargetKey(envelope.targetKey) ? undefined : envelope.id,
+            existingOpaqueIdentity: isV2AutomationTargetKey(envelope.targetKey) ? undefined : envelope.targetKey,
             parameterId: envelope.parameterId,
             enabled: envelope.enabled,
             points: envelope.points,
@@ -306,6 +333,9 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
           payload: {
             targetKind: envelope.target.kind,
             trackId: envelope.target.kind === "track" ? envelope.target.trackId : undefined,
+            effectInstanceId: envelope.target.effectInstanceId,
+            existingEnvelopeId: isV2AutomationTargetKey(envelope.targetKey) ? undefined : envelope.id,
+            existingOpaqueIdentity: isV2AutomationTargetKey(envelope.targetKey) ? undefined : envelope.targetKey,
             parameterId: envelope.parameterId,
           },
         },
@@ -350,7 +380,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
         next.push({
           id: row._id,
           projectId: row.projectId,
-          target: { kind: "master" },
+          target: { kind: "master", effectInstanceId: row.effectInstanceId },
           targetKey: row.targetKey,
           parameterId: row.parameterId,
           enabled: row.enabled,
@@ -363,7 +393,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       next.push({
         id: row._id,
         projectId: row.projectId,
-        target: { kind: "track", trackId: row.trackId },
+        target: { kind: "track", trackId: row.trackId, effectInstanceId: row.effectInstanceId },
         targetKey: row.targetKey,
         parameterId: row.parameterId,
         enabled: row.enabled,
@@ -374,24 +404,72 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     setAutomationEnvelopes(next);
     untrack(persistedAutomation.syncRemote);
   });
+  createEffect(() => {
+    const rid = options.projectId();
+    if (!rid) {
+      setEffectInstancesByOwnerKey({});
+      return;
+    }
+    const collect = (rows: Array<{ targetId: string; kind: string; instanceId?: string; index?: number }>) => {
+      const grouped = new Map<string, Array<AudioEffectInstance & { index: number }>>();
+      for (const row of rows) {
+        const normalizedKind = row.kind.startsWith("master-") ? row.kind.slice("master-".length) : row.kind;
+        if (!isAudioEffectKind(normalizedKind)) continue;
+        const entries = grouped.get(row.targetId) ?? [];
+        entries.push({ id: row.instanceId ?? normalizedKind, kind: normalizedKind, index: row.index ?? entries.length });
+        grouped.set(row.targetId, entries);
+      }
+      const next: Record<string, AudioEffectInstance[]> = {};
+      for (const [targetId, entries] of grouped) {
+        next[targetId] = entries
+          .sort((left, right) => left.index - right.index || left.id.localeCompare(right.id))
+          .map(({ id, kind }) => ({ id, kind }));
+      }
+      setEffectInstancesByOwnerKey(next);
+    };
+    if (isLocalId("project", rid)) {
+      const reload = () => void listLocalEffects(rid).then((rows) => {
+        if (options.projectId() !== rid) return;
+        collect(rows.map((row) => ({
+          targetId: row.targetId,
+          kind: row.effect,
+          instanceId: row.instanceId,
+          index: row.index,
+        })));
+      });
+      reload();
+      const unsubscribe = subscribeToLocalProjectChanges(rid, reload);
+      return unsubscribe;
+    }
+    collect((options.remoteEffects() ?? []).map((row) => ({
+      targetId: row.targetType === "master" ? "master" : row.trackId ?? "",
+      kind: row.type,
+      instanceId: row.instanceId,
+      index: row.index,
+    })).filter((row) => row.targetId.length > 0));
+  });
   const automationEnvelopesByTargetKey = createMemo(() => (
     new Map(persistedAutomation.envelopes().map((envelope) => [envelope.targetKey, envelope]))
   ));
-  const showAutomationLane = (trackId: Track["id"], parameterId: string) => {
+  const targetKeyForTrackSelection = (trackId: Track["id"], selection: AutomationParameterSelection) => (
+    automationTargetKey({ kind: "track", trackId, effectInstanceId: selection.effectInstanceId }, selection.parameterId)
+  );
+  const showAutomationLane = (trackId: Track["id"], selection: AutomationParameterSelection) => {
+    const targetKey = targetKeyForTrackSelection(trackId, selection);
     visibleAutomationLanes.setValue((current) => {
       const lanes = current[trackId] ?? [];
-      if (lanes.includes(parameterId)) return current;
-      return { ...current, [trackId]: [...lanes, parameterId] };
+      if (lanes.includes(targetKey)) return current;
+      return { ...current, [trackId]: [...lanes, targetKey] };
     });
     visibleAutomationTracks.setValue((current) => (
       current[trackId] === true ? current : { ...current, [trackId]: true }
     ));
   };
-  const hideAutomationLane = (trackId: Track["id"], parameterId: string) => {
+  const hideAutomationLane = (trackId: Track["id"], targetKey: string) => {
     let hiddenLastLane = false;
     visibleAutomationLanes.setValue((current) => {
       const lanes = current[trackId] ?? [];
-      const nextLanes = lanes.filter((entry) => entry !== parameterId);
+      const nextLanes = lanes.filter((entry) => entry !== targetKey);
       if (nextLanes.length === lanes.length) return current;
       const next = { ...current };
       if (nextLanes.length > 0) next[trackId] = nextLanes;
@@ -406,9 +484,10 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     }
   };
   const handleTogglePrimaryAutomationLane = (trackId: Track["id"]) => {
-    const parameterId = selectedAutomationParameters.value()[trackId] ?? "volume";
+    const selection = selectedAutomationParameters.value()[trackId] ?? { parameterId: "volume" };
+    const targetKey = targetKeyForTrackSelection(trackId, selection);
     const lanes = visibleAutomationLanes.value()[trackId] ?? (
-      visibleAutomationTracks.value()[trackId] === true ? [parameterId] : []
+      visibleAutomationTracks.value()[trackId] === true ? [targetKey] : []
     );
     if (lanes.length > 0) {
       visibleAutomationLanes.setValue((current) => {
@@ -419,30 +498,34 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       visibleAutomationTracks.setValue((current) => ({ ...current, [trackId]: false }));
       return;
     }
-    showAutomationLane(trackId, parameterId);
+    showAutomationLane(trackId, selection);
   };
   const handleAddAutomationLane = (trackId: Track["id"]) => {
     const visible = new Set(visibleAutomationLanes.value()[trackId] ?? []);
     if (visible.size === 0) return;
-    const selectedParameter = selectedAutomationParameters.value()[trackId] ?? "volume";
-    if (!visible.has(selectedParameter)) {
-      showAutomationLane(trackId, selectedParameter);
+    const selected = selectedAutomationParameters.value()[trackId] ?? { parameterId: "volume" };
+    const selectedTargetKey = targetKeyForTrackSelection(trackId, selected);
+    if (!visible.has(selectedTargetKey)) {
+      showAutomationLane(trackId, selected);
       return;
     }
-    const nextOption = automationParameterOptions.find((option) => !visible.has(option.id));
+    const nextOption = getAutomationParameterOptionsForTarget(effectInstancesByOwnerKey()[trackId] ?? [])
+      .find((option) => !visible.has(targetKeyForTrackSelection(trackId, option)));
     if (nextOption) {
-      showAutomationLane(trackId, nextOption.id);
+      const selection = { parameterId: nextOption.parameterId, effectInstanceId: nextOption.effectInstanceId };
+      showAutomationLane(trackId, selection);
       selectedAutomationParameters.setValue((current) => (
-        current[trackId] === nextOption.id ? current : { ...current, [trackId]: nextOption.id }
+        { ...current, [trackId]: selection }
       ));
       return;
     }
     for (const envelope of persistedAutomation.envelopes()) {
       if (envelope.target.kind !== "track" || envelope.target.trackId !== trackId) continue;
-      if (visible.has(envelope.parameterId)) continue;
-      showAutomationLane(trackId, envelope.parameterId);
+      if (visible.has(envelope.targetKey)) continue;
+      const selection = { parameterId: envelope.parameterId, effectInstanceId: envelope.target.effectInstanceId };
+      showAutomationLane(trackId, selection);
       selectedAutomationParameters.setValue((current) => (
-        current[trackId] === envelope.parameterId ? current : { ...current, [trackId]: envelope.parameterId }
+        { ...current, [trackId]: selection }
       ));
       return;
     }
@@ -457,11 +540,33 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     projectId: options.projectId(),
     lanes: {
       visibleByTrackId: visibleAutomationTracks.value(),
-      visibleParameterIdsByTrackId: visibleAutomationLanes.value(),
+      visibleTargetKeysByTrackId: visibleAutomationLanes.value(),
       heightsByLaneOwnerKey: automationLaneHeights.value(),
       masterVisible: visibleAutomationTracks.value().master === true,
       masterHeight: automationLaneHeights.value().master ?? DEFAULT_AUTOMATION_LANE_HEIGHT,
-      selectedParametersByTargetKey: selectedAutomationParameters.value(),
+      selectedTargetsByOwnerKey: selectedAutomationParameters.value(),
+      selectionByTargetKey: (() => {
+        const selections = new Map<string, AutomationParameterSelection>();
+        for (const [ownerKey, effects] of Object.entries(effectInstancesByOwnerKey())) {
+          const target = ownerKey === "master"
+            ? { kind: "master" as const }
+            : { kind: "track" as const, trackId: ownerKey };
+          for (const option of getAutomationParameterOptionsForTarget(effects)) {
+            selections.set(
+              automationTargetKey({ ...target, effectInstanceId: option.effectInstanceId }, option.parameterId),
+              { parameterId: option.parameterId, effectInstanceId: option.effectInstanceId },
+            );
+          }
+        }
+        for (const envelope of persistedAutomation.envelopes()) {
+          selections.set(envelope.targetKey, {
+            parameterId: envelope.parameterId,
+            effectInstanceId: envelope.target.effectInstanceId,
+          });
+        }
+        return selections;
+      })(),
+      effectInstancesByOwnerKey: effectInstancesByOwnerKey(),
     },
     envelopes: {
       byTargetKey: automationEnvelopesByTargetKey(),
@@ -481,9 +586,9 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       hideTrackLane: hideAutomationLane,
       resizeMasterLane: (height) => resizeLane("master", height),
       resizeTrackLane: resizeLane,
-      selectParameter: (targetKey, parameterId) => {
+      selectParameter: (targetKey, selection) => {
         selectedAutomationParameters.setValue((current) => (
-          current[targetKey] === parameterId ? current : { ...current, [targetKey]: parameterId }
+          { ...current, [targetKey]: selection }
         ));
       },
     },

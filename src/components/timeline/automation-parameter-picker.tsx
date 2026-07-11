@@ -1,20 +1,27 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
-import { getAutomationParameterOptions } from '@daw-browser/shared'
+import {
+  automationTargetKey,
+  getAutomationParameterOptionsForTarget,
+  type AutomationEffectInstance,
+  type AutomationParameterSelection,
+  type AutomationTarget,
+} from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
 
 type AutomationParameterPickerProps = {
-  value: string
-  automatedParameterIds?: ReadonlySet<string>
-  onChange: (parameterId: string) => void
+  target: AutomationTarget
+  effects: readonly AutomationEffectInstance[]
+  value: AutomationParameterSelection
+  automatedTargetKeys?: ReadonlySet<string>
+  onChange: (selection: AutomationParameterSelection) => void
 }
 
-const optionLabel = (label: string, parameterId: string, automatedParameterIds: ReadonlySet<string> | undefined) => (
-  automatedParameterIds?.has(parameterId) ? `● ${label}` : label
+const selectionKey = (target: AutomationTarget, selection: AutomationParameterSelection) => automationTargetKey(
+  { ...target, effectInstanceId: selection.effectInstanceId },
+  selection.parameterId,
 )
 
-const parameterOptions = getAutomationParameterOptions()
-
-const groupedParameterOptions = (() => {
+const groupParameterOptions = (parameterOptions: ReturnType<typeof getAutomationParameterOptionsForTarget>) => {
   const groups: Array<{ group: string; devices: Array<{ device: string; options: typeof parameterOptions }> }> = []
   for (const option of parameterOptions) {
     let group = groups.find((entry) => entry.group === option.group)
@@ -30,14 +37,17 @@ const groupedParameterOptions = (() => {
     device.options.push(option)
   }
   return groups
-})()
-
-const optionById = new Map(parameterOptions.map((option) => [option.id, option]))
+}
 
 export default function AutomationParameterPicker(props: AutomationParameterPickerProps) {
   const [open, setOpen] = createSignal(false)
   let rootRef: HTMLDivElement | undefined
-  const selectedOption = createMemo(() => optionById.get(props.value) ?? parameterOptions[0])
+  const parameterOptions = createMemo(() => getAutomationParameterOptionsForTarget(props.effects))
+  const groupedParameterOptions = createMemo(() => groupParameterOptions(parameterOptions()))
+  const selectedTargetKey = createMemo(() => selectionKey(props.target, props.value))
+  const selectedOption = createMemo(() => parameterOptions().find(
+    (option) => selectionKey(props.target, option) === selectedTargetKey(),
+  ))
 
   const close = () => setOpen(false)
   const toggle = () => setOpen((current) => !current)
@@ -68,12 +78,15 @@ export default function AutomationParameterPicker(props: AutomationParameterPick
         aria-expanded={open()}
         onClick={toggle}
       >
-        <span class="min-w-0 truncate">{optionLabel(selectedOption()?.label ?? props.value, props.value, props.automatedParameterIds)}</span>
+        <span class="min-w-0 truncate">
+          {props.automatedTargetKeys?.has(selectedTargetKey()) ? '● ' : ''}
+          {selectedOption()?.label ?? 'Unresolved automation target'}
+        </span>
         <span class="shrink-0 text-red-200/70">{open() ? '▴' : '▾'}</span>
       </button>
       <Show when={open()}>
         <div class="absolute left-0 top-full z-50 mt-1 max-h-80 w-72 overflow-auto rounded border border-border bg-background p-1 shadow-xl shadow-black/50" role="listbox">
-          <For each={groupedParameterOptions}>
+          <For each={groupedParameterOptions()}>
             {(group) => (
               <div class="py-1">
                 <div class="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{group.group}</div>
@@ -83,18 +96,22 @@ export default function AutomationParameterPicker(props: AutomationParameterPick
                       <div class="px-1 pb-1 text-[10px] text-muted-foreground">{device.device}</div>
                       <For each={device.options}>
                         {(option) => {
-                          const automated = () => props.automatedParameterIds?.has(option.id) ?? false
+                          const targetKey = () => selectionKey(props.target, option)
+                          const automated = () => props.automatedTargetKeys?.has(targetKey()) ?? false
                           return (
                             <button
                               type="button"
                               role="option"
-                              aria-selected={option.id === props.value}
+                              aria-selected={targetKey() === selectedTargetKey()}
                               class={cn(
                                 'flex h-6 w-full items-center gap-2 rounded px-2 text-left text-foreground hover:bg-red-500/20 hover:text-red-50',
-                                option.id === props.value && 'bg-red-500/20 text-red-50',
+                                targetKey() === selectedTargetKey() && 'bg-red-500/20 text-red-50',
                               )}
                               onClick={() => {
-                                props.onChange(option.id)
+                                props.onChange({
+                                  parameterId: option.parameterId,
+                                  effectInstanceId: option.effectInstanceId,
+                                })
                                 close()
                               }}
                             >

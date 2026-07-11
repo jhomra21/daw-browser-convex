@@ -173,8 +173,8 @@ export type SharedTimelineOperation =
   | { kind: 'effects.setMasterDelayParams'; payload: { params: DelayParams; instanceId?: string } }
   | { kind: 'effects.setMasterReverbParams'; payload: { params: SharedReverbParams; instanceId?: string } }
   | { kind: 'effects.reorderMasterAudioChain'; payload: { order: AudioEffectOrderItem[] } }
-  | { kind: 'automation.setEnvelope'; payload: { targetKind: 'track' | 'master'; trackId?: string; parameterId: string; enabled: boolean; points: AutomationPoint[]; updatedAt: number } }
-  | { kind: 'automation.deleteEnvelope'; payload: { targetKind: 'track' | 'master'; trackId?: string; parameterId: string } }
+  | { kind: 'automation.setEnvelope'; payload: { targetKind: 'track' | 'master'; trackId?: string; effectInstanceId?: string; existingEnvelopeId?: string; existingOpaqueIdentity?: string; parameterId: string; enabled: boolean; points: AutomationPoint[]; updatedAt: number } }
+  | { kind: 'automation.deleteEnvelope'; payload: { targetKind: 'track' | 'master'; trackId?: string; effectInstanceId?: string; existingEnvelopeId?: string; existingOpaqueIdentity?: string; parameterId: string } }
 
 export type SharedTimelineOperationKind = SharedTimelineOperation['kind']
 
@@ -985,6 +985,9 @@ const parseAutomationSetEnvelope = (payload: Record<string, unknown>): SharedTim
   if (!targetKind || typeof payload.parameterId !== 'string' || typeof payload.enabled !== 'boolean' || typeof payload.updatedAt !== 'number') return null
   if (targetKind === 'track' && typeof payload.trackId !== 'string') return null
   const trackId = targetKind === 'track' && typeof payload.trackId === 'string' ? payload.trackId : undefined
+  const effectInstanceId = typeof payload.effectInstanceId === 'string' ? payload.effectInstanceId : undefined
+  const existingEnvelopeId = typeof payload.existingEnvelopeId === 'string' ? payload.existingEnvelopeId : undefined
+  const existingOpaqueIdentity = typeof payload.existingOpaqueIdentity === 'string' ? payload.existingOpaqueIdentity : undefined
   if (!isAutomationParameterSupportedForTarget(payload.parameterId, targetKind)) return null
   const points = readAutomationPoints(payload.parameterId, payload.points)
   return points ? {
@@ -992,6 +995,9 @@ const parseAutomationSetEnvelope = (payload: Record<string, unknown>): SharedTim
     payload: {
       targetKind,
       trackId,
+      effectInstanceId,
+      existingEnvelopeId,
+      existingOpaqueIdentity,
       parameterId: payload.parameterId,
       enabled: payload.enabled,
       points,
@@ -1005,12 +1011,18 @@ const parseAutomationDeleteEnvelope = (payload: Record<string, unknown>): Shared
   if (!targetKind || typeof payload.parameterId !== 'string') return null
   if (targetKind === 'track' && typeof payload.trackId !== 'string') return null
   const trackId = targetKind === 'track' && typeof payload.trackId === 'string' ? payload.trackId : undefined
+  const effectInstanceId = typeof payload.effectInstanceId === 'string' ? payload.effectInstanceId : undefined
+  const existingEnvelopeId = typeof payload.existingEnvelopeId === 'string' ? payload.existingEnvelopeId : undefined
+  const existingOpaqueIdentity = typeof payload.existingOpaqueIdentity === 'string' ? payload.existingOpaqueIdentity : undefined
   if (!isAutomationParameterSupportedForTarget(payload.parameterId, targetKind)) return null
   return {
     kind: 'automation.deleteEnvelope',
     payload: {
       targetKind,
       trackId,
+      effectInstanceId,
+      existingEnvelopeId,
+      existingOpaqueIdentity,
       parameterId: payload.parameterId,
     },
   }

@@ -581,19 +581,31 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     setTrackSaturator,
     setTrackDelay,
     setTrackFxInstances,
-    resolveTrackAutomationBindings: (trackId: string, parameterId: string): AutomationAudioBinding[] => {
+    resolveTrackAutomationBindings: (trackId: string, parameterId: string, effectInstanceId?: string): AutomationAudioBinding[] => {
       const trackNodes = ensureTrackNodes(trackId)
       if (parameterId === 'volume') return [{ param: trackNodes.gain.gain, valueToAudioValue: (value) => value }]
       if (trackFxInstances.has(trackId)) {
+        if (effectInstanceId) {
+          return [
+            ...resolveEqAutomationBindings(instanceEqNodesByBand.get(trackId)?.get(effectInstanceId) ?? new Map(), parameterId),
+            ...resolveSaturatorAutomationBindings(instanceSaturatorChains.get(trackId)?.get(effectInstanceId), parameterId),
+            ...resolveDelayAutomationBindings(instanceDelayChains.get(trackId)?.get(effectInstanceId), parameterId),
+            ...resolveReverbAutomationBindings(instanceReverbChains.get(trackId)?.get(effectInstanceId), parameterId),
+          ]
+        }
+        const eqInstances = instanceEqNodesByBand.get(trackId) ?? new Map()
+        const saturatorInstances = instanceSaturatorChains.get(trackId) ?? new Map()
+        const delayInstances = instanceDelayChains.get(trackId) ?? new Map()
+        const reverbInstances = instanceReverbChains.get(trackId) ?? new Map()
         const eqNodes = new Map<string, BiquadFilterNode>()
-        for (const nodesByBand of instanceEqNodesByBand.get(trackId)?.values() ?? []) {
+        for (const nodesByBand of eqInstances.size === 1 ? eqInstances.values() : []) {
           for (const [bandId, node] of nodesByBand) eqNodes.set(bandId, node)
         }
         return [
           ...resolveEqAutomationBindings(eqNodes, parameterId),
-          ...Array.from(instanceSaturatorChains.get(trackId)?.values() ?? []).flatMap((state) => resolveSaturatorAutomationBindings(state, parameterId)),
-          ...Array.from(instanceDelayChains.get(trackId)?.values() ?? []).flatMap((state) => resolveDelayAutomationBindings(state, parameterId)),
-          ...Array.from(instanceReverbChains.get(trackId)?.values() ?? []).flatMap((state) => resolveReverbAutomationBindings(state, parameterId)),
+          ...Array.from(saturatorInstances.size === 1 ? saturatorInstances.values() : []).flatMap((state) => resolveSaturatorAutomationBindings(state, parameterId)),
+          ...Array.from(delayInstances.size === 1 ? delayInstances.values() : []).flatMap((state) => resolveDelayAutomationBindings(state, parameterId)),
+          ...Array.from(reverbInstances.size === 1 ? reverbInstances.values() : []).flatMap((state) => resolveReverbAutomationBindings(state, parameterId)),
         ]
       }
       return [

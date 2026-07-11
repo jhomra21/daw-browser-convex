@@ -1,11 +1,27 @@
 import { describe, expect, test } from 'bun:test'
-import { automationEnvelopeValueRange, automationTargetKey, automationTargetKeysAfterReEnable, automationTargetKeysForManualOverride, filterAutomationEnvelopesForScheduling, type AutomationEnvelope } from './automation'
-import { automationRatioToValue, automationValueToRatio, createEqBandParameterId, getAutomationParameterDescriptor, getAutomationParameterOptions, normalizeAutomationPoints, valueAtAutomationTime } from './automation-parameters'
+import { automationEnvelopeValueRange, automationTargetKey, automationTargetKeysAfterReEnable, automationTargetKeysForManualOverride, automationTargetMatchesEffectInstance, filterAutomationEnvelopesForScheduling, type AutomationEnvelope } from './automation'
+import { automationRatioToValue, automationValueToRatio, createEqBandParameterId, getAutomationParameterDescriptor, getAutomationParameterOptions, getAutomationParameterOptionsForTarget, normalizeAutomationPoints, valueAtAutomationTime, type AutomationEffectInstance } from './automation-parameters'
 
 describe('automation helpers', () => {
   test('builds stable target keys', () => {
-    expect(automationTargetKey({ kind: 'master' }, 'volume')).toBe('master:volume')
-    expect(automationTargetKey({ kind: 'track', trackId: 'track-1' }, 'volume')).toBe('track:track-1:volume')
+    expect(automationTargetKey({ kind: 'master' }, 'volume')).toBe('automation:v2:["master",null,null,"volume"]')
+    expect(automationTargetKey({ kind: 'track', trackId: 'track-1' }, 'volume')).toBe('automation:v2:["track","track-1",null,"volume"]')
+    expect(automationTargetKey(
+      { kind: 'track', trackId: 'track:1', effectInstanceId: 'compressor:a:b' },
+      'compressor.thresholdDb',
+    )).toBe('automation:v2:["track","track:1","compressor:a:b","compressor.thresholdDb"]')
+  })
+
+  test('matches effect cleanup from structured identity without parsing target keys', () => {
+    expect(automationTargetMatchesEffectInstance(
+      { kind: 'track', trackId: 'track:one', effectInstanceId: 'delay:one:colon' },
+      'delay:one:colon',
+    )).toBe(true)
+    expect(automationTargetMatchesEffectInstance(
+      { kind: 'track', trackId: 'track:one', effectInstanceId: 'delay:two' },
+      'delay:one:colon',
+    )).toBe(false)
+    expect(automationTargetMatchesEffectInstance('track:track:one:delay:one:colon', 'delay:one:colon')).toBe(false)
   })
 
   test('normalizes point ordering, duplicate times, and values', () => {
@@ -59,6 +75,36 @@ describe('automation helpers', () => {
     const options = getAutomationParameterOptions()
     expect(options.some((option) => option.id === createEqBandParameterId('b1', 'frequencyHz'))).toBe(true)
     expect(options.some((option) => option.id === createEqBandParameterId('low', 'frequencyHz'))).toBe(false)
+  })
+
+  test('builds instance-specific picker options that survive effect reorder', () => {
+    const effects: AutomationEffectInstance[] = [
+      { id: 'delay:first:colon', kind: 'delay' },
+      { id: 'delay-second', kind: 'delay' },
+      { id: 'compressor-only', kind: 'compressor' },
+    ]
+    const options = getAutomationParameterOptionsForTarget(effects)
+    const firstDelay = options.find((option) => (
+      option.effectInstanceId === 'delay:first:colon' && option.parameterId === 'delay.feedback'
+    ))
+    const secondDelay = options.find((option) => (
+      option.effectInstanceId === 'delay-second' && option.parameterId === 'delay.feedback'
+    ))
+
+    expect(options.filter((option) => option.parameterId === 'volume')).toHaveLength(1)
+    expect(firstDelay?.device).toBe('Delay 1')
+    expect(secondDelay?.device).toBe('Delay 2')
+    expect(options.some((option) => option.effectInstanceId === 'compressor-only')).toBe(false)
+
+    const reordered = getAutomationParameterOptionsForTarget([...effects].reverse())
+    expect(reordered.some((option) => (
+      option.effectInstanceId === firstDelay?.effectInstanceId
+      && option.parameterId === firstDelay?.parameterId
+    ))).toBe(true)
+    expect(automationTargetKey(
+      { kind: 'track', trackId: 'track:colon', effectInstanceId: firstDelay?.effectInstanceId },
+      firstDelay?.parameterId ?? '',
+    )).toBe('automation:v2:["track","track:colon","delay:first:colon","delay.feedback"]')
   })
 
   test('exposes only effect parameters with supported automation bindings and UI controls', () => {

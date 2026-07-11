@@ -10,8 +10,8 @@ export type AutomationPoint = {
 }
 
 export type AutomationTarget =
-  | { kind: 'track'; trackId: string }
-  | { kind: 'master' }
+  | { kind: 'track'; trackId: string; effectInstanceId?: string }
+  | { kind: 'master'; effectInstanceId?: string }
 
 export type AutomationEnvelope = {
   id: string
@@ -24,8 +24,29 @@ export type AutomationEnvelope = {
   updatedAt: number
 }
 
+export const AUTOMATION_TARGET_KEY_V2_PREFIX = 'automation:v2:'
+
 export const automationTargetKey = (target: AutomationTarget, parameterId: string): string => (
-  target.kind === 'master' ? `master:${parameterId}` : `track:${target.trackId}:${parameterId}`
+  `${AUTOMATION_TARGET_KEY_V2_PREFIX}${JSON.stringify([
+    target.kind,
+    target.kind === 'track' ? target.trackId : null,
+    target.effectInstanceId ?? null,
+    parameterId,
+  ])}`
+)
+
+export const isV2AutomationTargetKey = (targetKey: string): boolean => (
+  targetKey.startsWith(AUTOMATION_TARGET_KEY_V2_PREFIX)
+)
+
+export const automationTargetMatchesEffectInstance = (
+  target: unknown,
+  effectInstanceId: string,
+): boolean => (
+  typeof target === 'object'
+  && target !== null
+  && !Array.isArray(target)
+  && Reflect.get(target, 'effectInstanceId') === effectInstanceId
 )
 
 export const isAutomationInterpolation = (value: unknown): value is AutomationInterpolation => (

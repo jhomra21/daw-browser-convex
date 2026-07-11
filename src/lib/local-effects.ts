@@ -1,6 +1,6 @@
 import { createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_ORDER, INSTRUMENT_CONTRACTS, audioEffectOrderItemId, audioEffectOrderItemKind, normalizeTrackInstrumentParams, type AudioEffectKind, type AudioEffectOrderItem, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
+import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_ORDER, INSTRUMENT_CONTRACTS, audioEffectOrderItemId, audioEffectOrderItemKind, automationTargetMatchesEffectInstance, normalizeTrackInstrumentParams, type AudioEffectKind, type AudioEffectOrderItem, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { compareAudioEffectOrderEntries } from '~/lib/audio-effect-order-rows'
 
 export type LocalEffectKind = 'eq' | 'compressor' | 'saturator' | 'delay' | 'reverb' | 'instrument' | 'synth' | 'arp' | 'master-eq' | 'master-compressor' | 'master-saturator' | 'master-delay' | 'master-reverb'
@@ -171,10 +171,27 @@ export const deleteLocalEffectInstance = async (
     return
   }
   const db = await openLocalProjectDb(projectId)
+  const tx = db.transaction('entities', 'readwrite')
   const key: [string, string] = [EFFECT_KIND, localEffectRowId(targetId, effect, instanceId)]
-  const row = await db.get('entities', key)
-  if (!isLocalEffectRow(row?.value)) return
-  await db.delete('entities', key)
+  const row = await tx.store.get(key)
+  if (!isLocalEffectRow(row?.value)) {
+    await tx.done
+    return
+  }
+  const automationRows = await tx.store.index('by-kind').getAll('automation-envelope')
+  await tx.store.delete(key)
+  for (const automationRow of automationRows) {
+    const value = automationRow.value
+    if (
+      typeof value === 'object'
+      && value !== null
+      && !Array.isArray(value)
+      && automationTargetMatchesEffectInstance(Reflect.get(value, 'target'), instanceId)
+    ) {
+      await tx.store.delete(['automation-envelope', automationRow.id])
+    }
+  }
+  await tx.done
   notifyLocalProjectChanged(projectId)
 }
 

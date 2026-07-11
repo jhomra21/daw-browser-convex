@@ -13,7 +13,7 @@ import {
   assert,
   automationEnvelopeValueRange,
   automationTargetKey,
-  getAutomationParameterOptions,
+  getAutomationParameterOptionsForTarget,
   type AutomationEnvelope,
 } from "@daw-browser/shared";
 import {
@@ -56,8 +56,6 @@ import {
   TIMELINE_DEFAULT_TRACK_COLOR,
 } from "~/lib/preferences/app-preferences";
 import { trackColorForClip } from "~/lib/clip-color";
-
-const automationParameterOptions = getAutomationParameterOptions();
 
 type TrackSidebarProps = {
   sidebar: {
@@ -266,7 +264,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     const byTrackId = new Map<
       string,
       {
-        automatedParameterIds: ReadonlySet<string>;
+        automatedTargetKeys: ReadonlySet<string>;
         volumeRange?: { min: number; max: number };
         volumeEnvelope?: AutomationEnvelope;
       }
@@ -274,7 +272,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     const mutable = new Map<
       string,
       {
-        automatedParameterIds: Set<string>;
+        automatedTargetKeys: Set<string>;
         volumeRange?: { min: number; max: number };
         volumeEnvelope?: AutomationEnvelope;
       }
@@ -282,10 +280,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     for (const envelope of props.automation.envelopes.byTargetKey.values()) {
       if (envelope.target.kind !== "track") continue;
       const existing = mutable.get(envelope.target.trackId) ?? {
-        automatedParameterIds: new Set<string>(),
+        automatedTargetKeys: new Set<string>(),
       };
-      existing.automatedParameterIds.add(envelope.parameterId);
-      if (envelope.parameterId === "volume") {
+      existing.automatedTargetKeys.add(envelope.targetKey);
+      if (envelope.parameterId === "volume" && envelope.target.effectInstanceId === undefined) {
         existing.volumeEnvelope = envelope;
         existing.volumeRange = automationEnvelopeValueRange(envelope, {
           min: 0,
@@ -300,25 +298,25 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     return byTrackId;
   });
   const masterAutomationMeta = createMemo<{
-    automatedParameterIds: Set<string>;
+    automatedTargetKeys: Set<string>;
     selectedEnvelope: AutomationEnvelope | undefined;
   }>(() => {
     const meta: {
-      automatedParameterIds: Set<string>;
+      automatedTargetKeys: Set<string>;
       selectedEnvelope: AutomationEnvelope | undefined;
     } = {
-      automatedParameterIds: new Set<string>(),
+      automatedTargetKeys: new Set<string>(),
       selectedEnvelope: undefined,
     };
-    const selectedParameter =
-      props.automation.lanes.selectedParametersByTargetKey.master ?? "volume";
+    const selected =
+      props.automation.lanes.selectedTargetsByOwnerKey.master ?? { parameterId: "volume" };
     const selectedTargetKey = automationTargetKey(
-      { kind: "master" },
-      selectedParameter,
+      { kind: "master", effectInstanceId: selected.effectInstanceId },
+      selected.parameterId,
     );
     for (const envelope of props.automation.envelopes.byTargetKey.values()) {
       if (envelope.target.kind !== "master") continue;
-      meta.automatedParameterIds.add(envelope.parameterId);
+      meta.automatedTargetKeys.add(envelope.targetKey);
       if (envelope.targetKey === selectedTargetKey)
         meta.selectedEnvelope = envelope;
     }
@@ -700,13 +698,13 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             const muted = () => !!track.muted;
             const soloed = () => !!track.soloed;
             const currentSendTargetId = () => selectedSendTargetId(track);
-            const selectedAutomationParameter = () =>
-              props.automation.lanes.selectedParametersByTargetKey[track.id] ??
-              "volume";
+            const selectedAutomationSelection = () =>
+              props.automation.lanes.selectedTargetsByOwnerKey[track.id] ??
+              { parameterId: "volume" };
             const selectedAutomationTargetKey = () =>
               automationTargetKey(
-                { kind: "track", trackId: track.id },
-                selectedAutomationParameter(),
+                { kind: "track", trackId: track.id, effectInstanceId: selectedAutomationSelection().effectInstanceId },
+                selectedAutomationSelection().parameterId,
               );
             const selectedAutomationEnvelope = () =>
               props.automation.envelopes.byTargetKey.get(
@@ -718,8 +716,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               props.automation.lanes.visibleByTrackId[track.id] === true;
             const displayedAutomationVisible = () =>
               track.collapsed !== true && automationVisible();
-            const visibleAutomationParameterIds = () =>
-              props.automation.lanes.visibleParameterIdsByTrackId[track.id] ??
+            const visibleAutomationTargetKeys = () =>
+              props.automation.lanes.visibleTargetKeysByTrackId[track.id] ??
               [];
             const automationHeight = () =>
               props.automation.lanes.heightsByLaneOwnerKey[track.id] ??
@@ -732,14 +730,19 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               rowLayout()?.automationHeightPx ??
               (displayedAutomationVisible()
                 ? automationHeight() *
-                  Math.max(1, visibleAutomationParameterIds().length)
+                  Math.max(1, visibleAutomationTargetKeys().length)
                 : 0);
             const canAddAutomationLane = () => {
               if (!displayedAutomationVisible()) return false;
-              const visible = new Set(visibleAutomationParameterIds());
-              if (!visible.has(selectedAutomationParameter())) return true;
-              return automationParameterOptions.some(
-                (option) => !visible.has(option.id),
+              const visible = new Set(visibleAutomationTargetKeys());
+              if (!visible.has(selectedAutomationTargetKey())) return true;
+              return getAutomationParameterOptionsForTarget(
+                props.automation.lanes.effectInstancesByOwnerKey[track.id] ?? [],
+              ).some(
+                (option) => !visible.has(automationTargetKey(
+                  { kind: "track", trackId: track.id, effectInstanceId: option.effectInstanceId },
+                  option.parameterId,
+                )),
               );
             };
             const contextMenuColor = () =>
@@ -1312,7 +1315,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                               event.stopPropagation();
                               props.automation.actions.selectParameter(
                                 track.id,
-                                "volume",
+                                { parameterId: "volume" },
                               );
                               if (volumeDisabled) return;
                               event.preventDefault();
@@ -1462,17 +1465,25 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                         )
                       }
                     />
-                    <For each={visibleAutomationParameterIds()}>
-                      {(parameterId) => {
-                        const targetKey = () =>
-                          automationTargetKey(
-                            { kind: "track", trackId: track.id },
-                            parameterId,
-                          );
+                    <For each={visibleAutomationTargetKeys()}>
+                      {(targetKey) => {
                         const envelope = () =>
                           props.automation.envelopes.byTargetKey.get(
-                            targetKey(),
+                            targetKey,
                           );
+                        const selection = () => {
+                          const currentEnvelope = envelope();
+                          if (currentEnvelope) return {
+                            parameterId: currentEnvelope.parameterId,
+                            effectInstanceId: currentEnvelope.target.effectInstanceId,
+                          };
+                          return getAutomationParameterOptionsForTarget(
+                            props.automation.lanes.effectInstancesByOwnerKey[track.id] ?? [],
+                          ).find((option) => automationTargetKey(
+                            { kind: "track", trackId: track.id, effectInstanceId: option.effectInstanceId },
+                            option.parameterId,
+                          ) === targetKey) ?? { parameterId: "volume" };
+                        };
                         return (
                           <div
                             class="track-expanded-row-grid grid items-center gap-x-4 border-b border-red-500/20 px-2"
@@ -1486,22 +1497,22 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                               <span class="truncate">Automation</span>
                             </div>
                             <AutomationParameterPicker
-                              value={parameterId}
-                              automatedParameterIds={
-                                automationMeta()?.automatedParameterIds
-                              }
-                              onChange={(nextParameterId) => {
+                              target={{ kind: "track", trackId: track.id }}
+                              effects={props.automation.lanes.effectInstancesByOwnerKey[track.id] ?? []}
+                              value={selection()}
+                              automatedTargetKeys={automationMeta()?.automatedTargetKeys}
+                              onChange={(nextSelection) => {
                                 props.automation.actions.hideTrackLane(
                                   track.id,
-                                  parameterId,
+                                  targetKey,
                                 );
                                 props.automation.actions.showTrackLane(
                                   track.id,
-                                  nextParameterId,
+                                  nextSelection,
                                 );
                                 props.automation.actions.selectParameter(
                                   track.id,
-                                  nextParameterId,
+                                  nextSelection,
                                 );
                               }}
                             />
@@ -1516,7 +1527,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                                   event.stopPropagation();
                                   props.automation.actions.hideTrackLane(
                                     track.id,
-                                    parameterId,
+                                    targetKey,
                                   );
                                 }}
                                 title="Hide automation lane"
@@ -1550,15 +1561,14 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
           automation={{
             visible: props.automation.lanes.masterVisible,
             heightPx: props.automation.lanes.masterHeight,
-            selectedParameterId:
-              props.automation.lanes.selectedParametersByTargetKey.master ??
-              "volume",
-            automatedParameterIds: masterAutomationMeta().automatedParameterIds,
+            selected: props.automation.lanes.selectedTargetsByOwnerKey.master ?? { parameterId: "volume" },
+            effects: props.automation.lanes.effectInstancesByOwnerKey.master ?? [],
+            automatedTargetKeys: masterAutomationMeta().automatedTargetKeys,
             selectedEnvelope: masterAutomationMeta().selectedEnvelope,
             onToggleVisibility: props.automation.actions.toggleMasterVisibility,
             onResizeLane: props.automation.actions.resizeMasterLane,
-            onSelectParameter: (parameterId) =>
-              props.automation.actions.selectParameter("master", parameterId),
+            onSelectParameter: (selection) =>
+              props.automation.actions.selectParameter("master", selection),
           }}
         />
       </div>

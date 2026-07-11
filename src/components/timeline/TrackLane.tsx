@@ -6,7 +6,7 @@ import { PPS } from '~/lib/timeline-utils'
 import { clipRangeOverlap, type TimelineRangeSelection } from '~/lib/timeline-range-selection'
 import ClipComponent, { type ClipContextMenuActions } from './ClipComponent'
 import AutomationLane from './automation-lane'
-import type { AutomationEnvelope } from '@daw-browser/shared'
+import type { AutomationEnvelope, AutomationParameterSelection } from '@daw-browser/shared'
 import TimelineContextMenu, { type TimelineContextMenuItem } from './context-menu/timeline-context-menu'
 import type { GroupClipOverviewSegment, TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 
@@ -33,9 +33,9 @@ type TrackLaneProps = {
   automation: {
     projectId: string
     visible: boolean
-    parameterIds: string[]
+    selections: AutomationParameterSelection[]
     laneHeightPx: number
-    envelopeForParameter: (parameterId: string) => AutomationEnvelope | undefined
+    envelopeForSelection: (selection: AutomationParameterSelection) => AutomationEnvelope | undefined
     durationSec: number
     onPreview: (envelope: AutomationEnvelope | undefined) => void
     onCommit: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
@@ -99,8 +99,8 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
           class="absolute inset-x-0 z-30 border-t border-automation/30 bg-timeline-background/95"
           style={{ top: `${props.layout.clipLaneHeightPx}px`, height: `${props.layout.automationHeightPx}px` }}
         >
-          <For each={props.automation.parameterIds}>
-            {(parameterId, index) => (
+          <For each={props.automation.selections}>
+            {(selection, index) => (
               <div
                 class="absolute inset-x-0 border-b border-automation/20"
                 style={{
@@ -110,9 +110,9 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
               >
                 <AutomationLane
                   projectId={props.automation.projectId}
-                  target={{ kind: 'track', trackId: props.track.id }}
-                  parameterId={parameterId}
-                  envelope={props.automation.envelopeForParameter(parameterId)}
+                  target={{ kind: 'track', trackId: props.track.id, effectInstanceId: selection.effectInstanceId }}
+                  parameterId={selection.parameterId}
+                  envelope={props.automation.envelopeForSelection(selection)}
                   durationSec={props.automation.durationSec}
                   heightPx={props.automation.laneHeightPx}
                   onPreview={props.automation.onPreview}

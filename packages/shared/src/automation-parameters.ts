@@ -1,4 +1,4 @@
-import type { AutomationPoint, AutomationTargetKind } from './automation'
+import type { AutomationPoint, AutomationTarget, AutomationTargetKind } from './automation'
 import { isAutomationInterpolation } from './automation'
 import {
   createDefaultDelayParams,
@@ -21,6 +21,7 @@ import {
   REVERB_STEREO_WIDTH_MIN,
   REVERB_WET_MAX,
   REVERB_WET_MIN,
+  type AudioEffectKind,
   SATURATOR_COLOR_FREQUENCY_HZ_MAX,
   SATURATOR_COLOR_FREQUENCY_HZ_MIN,
   SATURATOR_DRIVE_DB_MAX,
@@ -36,6 +37,7 @@ export type AutomationParameterDescriptor = {
   label: string
   group: string
   device: string
+  owner: 'mixer' | AudioEffectKind
   targetKinds: AutomationTargetKind[]
   min: number
   max: number
@@ -51,26 +53,46 @@ export type AutomationParameterOption = {
   device: string
 }
 
+export type AutomationParameterSelection = {
+  parameterId: string
+  effectInstanceId?: string
+}
+
+export type AutomationEffectInstance = {
+  id: string
+  kind: AudioEffectKind
+}
+
+export type AutomationTargetParameterOption = AutomationParameterOption & AutomationParameterSelection
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
 const staticDescriptors: AutomationParameterDescriptor[] = [
-  { id: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer', targetKinds: ['track', 'master'], min: 0, max: 1.5, defaultValue: 1, scale: 'linear', unit: 'percent' },
+  { id: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer', owner: 'mixer', targetKinds: ['track', 'master'], min: 0, max: 1.5, defaultValue: 1, scale: 'linear', unit: 'percent' },
 ]
 
 const effectDescriptors: AutomationParameterDescriptor[] = [
-  { id: 'saturator.driveDb', label: 'Saturator Drive', group: 'Audio Effects', device: 'Saturator', targetKinds: ['track', 'master'], min: SATURATOR_DRIVE_DB_MIN, max: SATURATOR_DRIVE_DB_MAX, defaultValue: createDefaultSaturatorParams().driveDb, scale: 'linear', unit: 'db' },
-  { id: 'saturator.outputDb', label: 'Saturator Output', group: 'Audio Effects', device: 'Saturator', targetKinds: ['track', 'master'], min: SATURATOR_OUTPUT_DB_MIN, max: SATURATOR_OUTPUT_DB_MAX, defaultValue: createDefaultSaturatorParams().outputDb, scale: 'linear', unit: 'db' },
-  { id: 'saturator.dryWet', label: 'Saturator Dry/Wet', group: 'Audio Effects', device: 'Saturator', targetKinds: ['track', 'master'], min: SATURATOR_DRY_WET_MIN, max: SATURATOR_DRY_WET_MAX, defaultValue: createDefaultSaturatorParams().dryWet, scale: 'linear', unit: 'percent' },
-  { id: 'saturator.colorFrequencyHz', label: 'Saturator Color Frequency', group: 'Audio Effects', device: 'Saturator', targetKinds: ['track', 'master'], min: SATURATOR_COLOR_FREQUENCY_HZ_MIN, max: SATURATOR_COLOR_FREQUENCY_HZ_MAX, defaultValue: createDefaultSaturatorParams().colorFrequencyHz, scale: 'log', unit: 'hz' },
-  { id: 'delay.timeMs', label: 'Delay Time', group: 'Audio Effects', device: 'Delay', targetKinds: ['track', 'master'], min: DELAY_TIME_MS_MIN, max: DELAY_TIME_MS_MAX, defaultValue: createDefaultDelayParams().timeMs, scale: 'linear' },
-  { id: 'delay.feedback', label: 'Delay Feedback', group: 'Audio Effects', device: 'Delay', targetKinds: ['track', 'master'], min: DELAY_FEEDBACK_MIN, max: DELAY_FEEDBACK_MAX, defaultValue: createDefaultDelayParams().feedback, scale: 'linear', unit: 'percent' },
-  { id: 'delay.dryWet', label: 'Delay Dry/Wet', group: 'Audio Effects', device: 'Delay', targetKinds: ['track', 'master'], min: DELAY_DRY_WET_MIN, max: DELAY_DRY_WET_MAX, defaultValue: createDefaultDelayParams().dryWet, scale: 'linear', unit: 'percent' },
-  { id: 'delay.lowCutHz', label: 'Delay Low Cut', group: 'Audio Effects', device: 'Delay', targetKinds: ['track', 'master'], min: DELAY_LOW_CUT_HZ_MIN, max: DELAY_LOW_CUT_HZ_MAX, defaultValue: createDefaultDelayParams().lowCutHz, scale: 'log', unit: 'hz' },
-  { id: 'delay.highCutHz', label: 'Delay High Cut', group: 'Audio Effects', device: 'Delay', targetKinds: ['track', 'master'], min: DELAY_HIGH_CUT_HZ_MIN, max: DELAY_HIGH_CUT_HZ_MAX, defaultValue: createDefaultDelayParams().highCutHz, scale: 'log', unit: 'hz' },
-  { id: 'reverb.wet', label: 'Reverb Dry/Wet', group: 'Audio Effects', device: 'Reverb', targetKinds: ['track', 'master'], min: REVERB_WET_MIN, max: REVERB_WET_MAX, defaultValue: createDefaultReverbParams().wet, scale: 'linear', unit: 'percent' },
-  { id: 'reverb.preDelayMs', label: 'Reverb Predelay', group: 'Audio Effects', device: 'Reverb', targetKinds: ['track', 'master'], min: REVERB_PRE_DELAY_MS_MIN, max: REVERB_PRE_DELAY_MS_MAX, defaultValue: createDefaultReverbParams().preDelayMs, scale: 'linear' },
-  { id: 'reverb.stereoWidth', label: 'Reverb Width', group: 'Audio Effects', device: 'Reverb', targetKinds: ['track', 'master'], min: REVERB_STEREO_WIDTH_MIN, max: REVERB_STEREO_WIDTH_MAX, defaultValue: createDefaultReverbParams().stereoWidth, scale: 'linear' },
+  { id: 'saturator.driveDb', label: 'Saturator Drive', group: 'Audio Effects', device: 'Saturator', owner: 'saturator', targetKinds: ['track', 'master'], min: SATURATOR_DRIVE_DB_MIN, max: SATURATOR_DRIVE_DB_MAX, defaultValue: createDefaultSaturatorParams().driveDb, scale: 'linear', unit: 'db' },
+  { id: 'saturator.outputDb', label: 'Saturator Output', group: 'Audio Effects', device: 'Saturator', owner: 'saturator', targetKinds: ['track', 'master'], min: SATURATOR_OUTPUT_DB_MIN, max: SATURATOR_OUTPUT_DB_MAX, defaultValue: createDefaultSaturatorParams().outputDb, scale: 'linear', unit: 'db' },
+  { id: 'saturator.dryWet', label: 'Saturator Dry/Wet', group: 'Audio Effects', device: 'Saturator', owner: 'saturator', targetKinds: ['track', 'master'], min: SATURATOR_DRY_WET_MIN, max: SATURATOR_DRY_WET_MAX, defaultValue: createDefaultSaturatorParams().dryWet, scale: 'linear', unit: 'percent' },
+  { id: 'saturator.colorFrequencyHz', label: 'Saturator Color Frequency', group: 'Audio Effects', device: 'Saturator', owner: 'saturator', targetKinds: ['track', 'master'], min: SATURATOR_COLOR_FREQUENCY_HZ_MIN, max: SATURATOR_COLOR_FREQUENCY_HZ_MAX, defaultValue: createDefaultSaturatorParams().colorFrequencyHz, scale: 'log', unit: 'hz' },
+  { id: 'delay.timeMs', label: 'Delay Time', group: 'Audio Effects', device: 'Delay', owner: 'delay', targetKinds: ['track', 'master'], min: DELAY_TIME_MS_MIN, max: DELAY_TIME_MS_MAX, defaultValue: createDefaultDelayParams().timeMs, scale: 'linear' },
+  { id: 'delay.feedback', label: 'Delay Feedback', group: 'Audio Effects', device: 'Delay', owner: 'delay', targetKinds: ['track', 'master'], min: DELAY_FEEDBACK_MIN, max: DELAY_FEEDBACK_MAX, defaultValue: createDefaultDelayParams().feedback, scale: 'linear', unit: 'percent' },
+  { id: 'delay.dryWet', label: 'Delay Dry/Wet', group: 'Audio Effects', device: 'Delay', owner: 'delay', targetKinds: ['track', 'master'], min: DELAY_DRY_WET_MIN, max: DELAY_DRY_WET_MAX, defaultValue: createDefaultDelayParams().dryWet, scale: 'linear', unit: 'percent' },
+  { id: 'delay.lowCutHz', label: 'Delay Low Cut', group: 'Audio Effects', device: 'Delay', owner: 'delay', targetKinds: ['track', 'master'], min: DELAY_LOW_CUT_HZ_MIN, max: DELAY_LOW_CUT_HZ_MAX, defaultValue: createDefaultDelayParams().lowCutHz, scale: 'log', unit: 'hz' },
+  { id: 'delay.highCutHz', label: 'Delay High Cut', group: 'Audio Effects', device: 'Delay', owner: 'delay', targetKinds: ['track', 'master'], min: DELAY_HIGH_CUT_HZ_MIN, max: DELAY_HIGH_CUT_HZ_MAX, defaultValue: createDefaultDelayParams().highCutHz, scale: 'log', unit: 'hz' },
+  { id: 'reverb.wet', label: 'Reverb Dry/Wet', group: 'Audio Effects', device: 'Reverb', owner: 'reverb', targetKinds: ['track', 'master'], min: REVERB_WET_MIN, max: REVERB_WET_MAX, defaultValue: createDefaultReverbParams().wet, scale: 'linear', unit: 'percent' },
+  { id: 'reverb.preDelayMs', label: 'Reverb Predelay', group: 'Audio Effects', device: 'Reverb', owner: 'reverb', targetKinds: ['track', 'master'], min: REVERB_PRE_DELAY_MS_MIN, max: REVERB_PRE_DELAY_MS_MAX, defaultValue: createDefaultReverbParams().preDelayMs, scale: 'linear' },
+  { id: 'reverb.stereoWidth', label: 'Reverb Width', group: 'Audio Effects', device: 'Reverb', owner: 'reverb', targetKinds: ['track', 'master'], min: REVERB_STEREO_WIDTH_MIN, max: REVERB_STEREO_WIDTH_MAX, defaultValue: createDefaultReverbParams().stereoWidth, scale: 'linear' },
 ]
+
+const descriptorsByEffectKind: Record<AudioEffectKind, AutomationParameterDescriptor[]> = {
+  eq: [],
+  compressor: [],
+  saturator: effectDescriptors.filter((descriptor) => descriptor.owner === 'saturator'),
+  delay: effectDescriptors.filter((descriptor) => descriptor.owner === 'delay'),
+  reverb: effectDescriptors.filter((descriptor) => descriptor.owner === 'reverb'),
+}
 
 export const getAutomationParameterOptions = (): AutomationParameterOption[] => [
   { id: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer' },
@@ -84,6 +106,39 @@ export const getAutomationParameterOptions = (): AutomationParameterOption[] => 
     ]
   }),
 ]
+
+const eqParameterOptions = (): AutomationParameterOption[] => (
+  createDefaultEqParams().bands.flatMap((band, index) => {
+    const label = `EQ ${index + 1}`
+    return [
+      { id: createEqBandParameterId(band.id, 'frequencyHz'), label: `${label} Frequency`, group: 'Audio Effects', device: 'EQ Eight' },
+      { id: createEqBandParameterId(band.id, 'gainDb'), label: `${label} Gain`, group: 'Audio Effects', device: 'EQ Eight' },
+      { id: createEqBandParameterId(band.id, 'q'), label: `${label} Q`, group: 'Audio Effects', device: 'EQ Eight' },
+    ]
+  })
+)
+
+export const getAutomationParameterOptionsForTarget = (
+  effects: readonly AutomationEffectInstance[],
+): AutomationTargetParameterOption[] => {
+  const kindCounts = new Map<AudioEffectKind, number>()
+  return [
+    { id: 'volume', parameterId: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer' },
+    ...effects.flatMap((effect) => {
+      const ordinal = (kindCounts.get(effect.kind) ?? 0) + 1
+      kindCounts.set(effect.kind, ordinal)
+      const options = effect.kind === 'eq'
+        ? eqParameterOptions()
+        : descriptorsByEffectKind[effect.kind].map(({ id, label, group, device }) => ({ id, label, group, device }))
+      return options.map((option) => ({
+        ...option,
+        parameterId: option.id,
+        effectInstanceId: effect.id,
+        device: `${option.device} ${ordinal}`,
+      }))
+    }),
+  ]
+}
 
 export const createEqBandParameterId = (
   bandId: string,
@@ -108,18 +163,29 @@ export const getAutomationParameterDescriptor = (
   const eq = parseEqBandParameterId(parameterId)
   if (!eq) return undefined
   if (eq.property === 'frequencyHz') {
-    return { id: parameterId, label: 'EQ Frequency', group: 'Audio Effects', device: 'EQ Eight', targetKinds: ['track', 'master'], min: 20, max: 20000, defaultValue: 1000, scale: 'log', unit: 'hz' }
+    return { id: parameterId, label: 'EQ Frequency', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: 20, max: 20000, defaultValue: 1000, scale: 'log', unit: 'hz' }
   }
   if (eq.property === 'gainDb') {
-    return { id: parameterId, label: 'EQ Gain', group: 'Audio Effects', device: 'EQ Eight', targetKinds: ['track', 'master'], min: -24, max: 24, defaultValue: 0, scale: 'linear', unit: 'db' }
+    return { id: parameterId, label: 'EQ Gain', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: -24, max: 24, defaultValue: 0, scale: 'linear', unit: 'db' }
   }
-  return { id: parameterId, label: 'EQ Q', group: 'Audio Effects', device: 'EQ Eight', targetKinds: ['track', 'master'], min: 0.1, max: 18, defaultValue: 1, scale: 'linear' }
+  return { id: parameterId, label: 'EQ Q', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: 0.1, max: 18, defaultValue: 1, scale: 'linear' }
 }
 
 export const isAutomationParameterSupportedForTarget = (
   parameterId: string,
   targetKind: AutomationTargetKind,
 ) => getAutomationParameterDescriptor(parameterId)?.targetKinds.includes(targetKind) ?? false
+
+export const isAutomationParameterOwnedByTarget = (
+  parameterId: string,
+  target: AutomationTarget,
+): boolean => {
+  const descriptor = getAutomationParameterDescriptor(parameterId)
+  if (!descriptor || !descriptor.targetKinds.includes(target.kind)) return false
+  return descriptor.owner === 'mixer'
+    ? target.effectInstanceId === undefined
+    : target.effectInstanceId !== undefined
+}
 
 export const automationValueToRatio = (
   descriptor: AutomationParameterDescriptor,

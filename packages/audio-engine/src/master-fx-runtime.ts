@@ -371,18 +371,26 @@ export function createMasterFxRuntime() {
       delayState.setBpm(bpm)
       for (const state of instanceDelayChains.values()) state.setBpm(bpm)
     },
-    resolveMasterAutomationBindings: (parameterId: string, masterGain: GainNode | null): AutomationAudioBinding[] => {
+    resolveMasterAutomationBindings: (parameterId: string, masterGain: GainNode | null, effectInstanceId?: string): AutomationAudioBinding[] => {
       if (parameterId === 'volume') return masterGain ? [{ param: masterGain.gain, valueToAudioValue: (value) => value }] : []
       if (masterFxInstances) {
+        if (effectInstanceId) {
+          return [
+            ...resolveEqAutomationBindings(instanceEqNodesByBand.get(effectInstanceId) ?? new Map(), parameterId),
+            ...resolveSaturatorAutomationBindings(instanceSaturatorChains.get(effectInstanceId), parameterId),
+            ...resolveDelayAutomationBindings(instanceDelayChains.get(effectInstanceId), parameterId),
+            ...resolveReverbAutomationBindings(instanceReverbChains.get(effectInstanceId), parameterId),
+          ]
+        }
         const eqNodes = new Map<string, BiquadFilterNode>()
-        for (const nodesByBand of instanceEqNodesByBand.values()) {
+        for (const nodesByBand of instanceEqNodesByBand.size === 1 ? instanceEqNodesByBand.values() : []) {
           for (const [bandId, node] of nodesByBand) eqNodes.set(bandId, node)
         }
         return [
           ...resolveEqAutomationBindings(eqNodes, parameterId),
-          ...Array.from(instanceSaturatorChains.values()).flatMap((state) => resolveSaturatorAutomationBindings(state, parameterId)),
-          ...Array.from(instanceDelayChains.values()).flatMap((state) => resolveDelayAutomationBindings(state, parameterId)),
-          ...Array.from(instanceReverbChains.values()).flatMap((state) => resolveReverbAutomationBindings(state, parameterId)),
+          ...Array.from(instanceSaturatorChains.size === 1 ? instanceSaturatorChains.values() : []).flatMap((state) => resolveSaturatorAutomationBindings(state, parameterId)),
+          ...Array.from(instanceDelayChains.size === 1 ? instanceDelayChains.values() : []).flatMap((state) => resolveDelayAutomationBindings(state, parameterId)),
+          ...Array.from(instanceReverbChains.size === 1 ? instanceReverbChains.values() : []).flatMap((state) => resolveReverbAutomationBindings(state, parameterId)),
         ]
       }
       return [

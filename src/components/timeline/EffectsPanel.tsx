@@ -6,7 +6,7 @@ import {
   createMemo,
   createSignal,
 } from "solid-js";
-import { AUDIO_EFFECT_ORDER, automationEnvelopeValueRange, automationTargetKey, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeReverbParams, normalizeSaturatorParams, type AudioEffectInstance, type AudioEffectKind, type AutomationEnvelope, type InstrumentKind } from "@daw-browser/shared";
+import { AUDIO_EFFECT_ORDER, automationEnvelopeValueRange, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeReverbParams, normalizeSaturatorParams, type AudioEffectInstance, type AudioEffectKind, type AutomationEnvelope, type InstrumentKind } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Delay from "~/components/effects/Delay";
 import Compressor from "~/components/effects/Compressor";
@@ -64,8 +64,8 @@ type EffectsPanelProps = {
   onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
   onEffectChainElementChange?: (element: HTMLElement | undefined) => void;
   automationEnvelopes?: AutomationEnvelope[];
-  onSelectAutomationParameter?: (targetKey: Track["id"] | "master", parameterId: string) => void;
-  onManualAutomationOverride?: (targetKey: Track["id"] | "master", parameterId: string) => void;
+  onSelectAutomationParameter?: (targetKey: Track["id"] | "master", parameterId: string, effectInstanceId?: string) => void;
+  onManualAutomationOverride?: (targetKey: Track["id"] | "master", parameterId: string, effectInstanceId?: string) => void;
 };
 
 const EffectsPanelClosedFooter: Component<{
@@ -196,9 +196,9 @@ type EffectsPanelEffectCardsProps = {
   spectrum: SpectrumFrame | null;
   audioEngine: AudioEngine;
   targetId: Track["id"] | "master";
-  automationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>;
-  onSelectAutomationParameter?: (parameterId: string) => void;
-  onManualAutomationOverride?: (parameterId: string) => void;
+  automationRangesByInstanceId?: ReadonlyMap<string, ReadonlyMap<string, { min: number; max: number }>>;
+  onSelectAutomationParameter?: (parameterId: string, effectInstanceId: string) => void;
+  onManualAutomationOverride?: (parameterId: string, effectInstanceId: string) => void;
 };
 
 type EffectsPanelAudioEffectCardProps = {
@@ -384,7 +384,16 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                 onPointerDown={drag.onPointerDown}
               >
                 <TimelineContextMenu items={() => contextMenuItems(effect)}>
-                  <EffectsPanelAudioEffectCard effect={effect} audioEffects={props.audioEffects} spectrum={props.spectrum} audioEngine={props.audioEngine} targetId={props.targetId} automationRangesByParameterId={props.automationRangesByParameterId} onSelectAutomationParameter={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />
+                  <EffectsPanelAudioEffectCard
+                    effect={effect}
+                    audioEffects={props.audioEffects}
+                    spectrum={props.spectrum}
+                    audioEngine={props.audioEngine}
+                    targetId={props.targetId}
+                    automationRangesByParameterId={props.automationRangesByInstanceId?.get(effect.id)}
+                    onSelectAutomationParameter={(parameterId) => props.onSelectAutomationParameter?.(parameterId, effect.id)}
+                    onManualAutomationOverride={(parameterId) => props.onManualAutomationOverride?.(parameterId, effect.id)}
+                  />
                 </TimelineContextMenu>
               </div>
             );
@@ -586,15 +595,19 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     instrument,
     onHide: controller.close,
   });
-  const automationRangesByParameterId = createMemo(() => {
-    const targetKeyFor = (parameterId: string) => props.selectedFXTarget === "master"
-      ? automationTargetKey({ kind: "master" }, parameterId)
-      : automationTargetKey({ kind: "track", trackId: props.selectedFXTarget }, parameterId);
-    const ranges = new Map<string, { min: number; max: number }>();
+  const automationRangesByInstanceId = createMemo(() => {
+    const ranges = new Map<string, Map<string, { min: number; max: number }>>();
     for (const envelope of props.automationEnvelopes ?? []) {
-      if (envelope.targetKey !== targetKeyFor(envelope.parameterId) || envelope.points.length === 0) continue;
+      const targetMatches = envelope.target.kind === "master"
+        ? props.selectedFXTarget === "master"
+        : envelope.target.trackId === props.selectedFXTarget;
+      const instanceId = envelope.target.effectInstanceId;
+      if (!targetMatches || !instanceId || envelope.points.length === 0) continue;
       const range = automationEnvelopeValueRange(envelope);
-      if (range) ranges.set(envelope.parameterId, range);
+      if (!range) continue;
+      const instanceRanges = ranges.get(instanceId) ?? new Map<string, { min: number; max: number }>();
+      instanceRanges.set(envelope.parameterId, range);
+      ranges.set(instanceId, instanceRanges);
     }
     return ranges;
   });
@@ -644,9 +657,9 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       spectrum={spectrum()}
                       audioEngine={props.audioEngine}
                       targetId={props.selectedFXTarget}
-                      automationRangesByParameterId={automationRangesByParameterId()}
-                      onSelectAutomationParameter={(parameterId) => props.onSelectAutomationParameter?.(props.selectedFXTarget, parameterId)}
-                      onManualAutomationOverride={(parameterId) => props.onManualAutomationOverride?.(props.selectedFXTarget, parameterId)}
+                      automationRangesByInstanceId={automationRangesByInstanceId()}
+                      onSelectAutomationParameter={(parameterId, effectInstanceId) => props.onSelectAutomationParameter?.(props.selectedFXTarget, parameterId, effectInstanceId)}
+                      onManualAutomationOverride={(parameterId, effectInstanceId) => props.onManualAutomationOverride?.(props.selectedFXTarget, parameterId, effectInstanceId)}
                     />
                     <Show when={isCurrentTargetReadOnly()}>
                       <EffectsPanelReadOnlyNotice />

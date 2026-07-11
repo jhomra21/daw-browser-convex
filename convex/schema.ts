@@ -196,6 +196,7 @@ export default defineSchema({
     projectId: v.string(),
     targetKind: v.union(v.literal("track"), v.literal("master")),
     trackId: v.optional(v.id("tracks")),
+    effectInstanceId: v.optional(v.string()),
     targetKey: v.string(),
     parameterId: v.string(),
     enabled: v.boolean(),

@@ -5,7 +5,7 @@ import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp 
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
 import { localEffectRowId, reorderLocalAudioEffects, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects";
 import { deleteLocalAutomationEnvelope, setLocalAutomationEnvelope } from "~/lib/local-automation";
-import { automationTargetKey, isLocalId } from "@daw-browser/shared";
+import { automationTargetKey, isLocalId, isV2AutomationTargetKey } from "@daw-browser/shared";
 import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, isAppliedSharedTimelineOperationResult, publishSharedTimelineOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { buildTrackCreateMutationInput, buildTrackDeleteMutationInput, buildTrackMixMutationInput, buildTrackVolumeMutationInput } from "~/lib/track-mutation-args";
@@ -600,6 +600,9 @@ export const persistHistoryAutomationEnvelope = async (
       payload: {
         targetKind: envelope.target.kind,
         trackId: envelope.target.kind === "track" ? envelope.target.trackId : undefined,
+        effectInstanceId: envelope.target.effectInstanceId,
+        existingEnvelopeId: isV2AutomationTargetKey(envelope.targetKey) ? undefined : envelope.id,
+        existingOpaqueIdentity: isV2AutomationTargetKey(envelope.targetKey) ? undefined : envelope.targetKey,
         parameterId: envelope.parameterId,
         enabled: envelope.enabled,
         points: envelope.points,
@@ -615,6 +618,9 @@ export const persistHistoryAutomationEnvelope = async (
     payload: {
       targetKind: before.target.kind,
       trackId: before.target.kind === "track" ? before.target.trackId : undefined,
+      effectInstanceId: before.target.effectInstanceId,
+      existingEnvelopeId: isV2AutomationTargetKey(before.targetKey) ? undefined : before.id,
+      existingOpaqueIdentity: isV2AutomationTargetKey(before.targetKey) ? undefined : before.targetKey,
       parameterId: before.parameterId,
     },
   });

@@ -58,8 +58,8 @@ export type TimelinePanelsProps = {
     onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void
     onEffectChainElementChange?: (element: HTMLElement | undefined) => void
     automationEnvelopes?: AutomationEnvelope[]
-    onSelectAutomationParameter?: (targetKey: Track['id'] | 'master', parameterId: string) => void
-    onManualAutomationOverride?: (targetKey: Track['id'] | 'master', parameterId: string) => void
+    onSelectAutomationParameter?: (targetKey: Track['id'] | 'master', parameterId: string, effectInstanceId?: string) => void
+    onManualAutomationOverride?: (targetKey: Track['id'] | 'master', parameterId: string, effectInstanceId?: string) => void
   }
   sampleDetailPanel: {
     isOpen: boolean

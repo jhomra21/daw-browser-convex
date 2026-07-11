@@ -1,5 +1,6 @@
 import { assert } from '@daw-browser/shared'
 import type { ResolvedMixerGraph } from './types'
+import { createMixerRoutingPlan, type MixerRoutingPlan } from './graph-contract'
 
 type LiveTrackNodes = {
   input: GainNode
@@ -17,29 +18,31 @@ type ApplyLiveMixerGraphOptions = {
   reconnectTrackMeters: (trackId: string, output: GainNode) => void
 }
 
-const getRoutingSignature = (resolvedTrack: ResolvedMixerGraph['channels'][number]) =>
+const getRoutingSignature = (channel: MixerRoutingPlan['channels'][number]) =>
   [
-    resolvedTrack.outputTargetId ?? '',
-    ...resolvedTrack.sends.map((send) => send.targetId).sort(),
+    channel.outputTargetId ?? '',
+    ...channel.sends.map((send) => send.targetId).sort(),
   ].join('|')
 
 export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
-  const activeTrackIds = new Set<string>(options.graph.channels.map((entry) => entry.channel.id))
+  const plan = createMixerRoutingPlan(options.graph)
+  options.masterInput.gain.value = plan.masterVolume
+  const activeTrackIds = new Set<string>(plan.channels.map((channel) => channel.channelId))
 
-  for (const resolvedTrack of options.graph.channels) {
-    const channelId = resolvedTrack.channel.id
+  for (const channel of plan.channels) {
+    const channelId = channel.channelId
     const nodes = options.trackNodes.get(channelId)
     assert(nodes, `Missing live mixer nodes for track ${channelId}`)
 
-    nodes.gain.gain.value = resolvedTrack.gain
-    nodes.output.gain.value = resolvedTrack.outputGain
-    const routingSignature = getRoutingSignature(resolvedTrack)
+    nodes.gain.gain.value = channel.gain
+    nodes.output.gain.value = channel.outputGain
+    const routingSignature = getRoutingSignature(channel)
     const shouldReconnect = options.trackRoutingSignatures.get(channelId) !== routingSignature
-    const targetNodes = resolvedTrack.outputTargetId
-      ? options.trackNodes.get(resolvedTrack.outputTargetId)
+    const targetNodes = channel.outputTargetId
+      ? options.trackNodes.get(channel.outputTargetId)
       : undefined
-    if (resolvedTrack.outputTargetId) {
-      assert(targetNodes, `Missing output target nodes for track ${resolvedTrack.outputTargetId}`)
+    if (channel.outputTargetId) {
+      assert(targetNodes, `Missing output target nodes for track ${channel.outputTargetId}`)
     }
     const outputTarget = targetNodes?.input ?? options.masterInput
     if (shouldReconnect) {
@@ -53,7 +56,7 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
     let sendMap = options.trackSendGains.get(channelId)
 
     const activeSends = new Set<string>()
-    for (const send of resolvedTrack.sends) {
+    for (const send of channel.sends) {
       const target = options.trackNodes.get(send.targetId)
       assert(target, `Missing send target nodes for track ${send.targetId}`)
       activeSends.add(send.targetId)

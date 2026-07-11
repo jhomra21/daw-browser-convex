@@ -44,6 +44,9 @@ export type ProjectManifest = {
 };
 
 export const PROJECT_MANIFEST_SCHEMA_VERSION = 1;
+export const SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS: readonly number[] = [
+  PROJECT_MANIFEST_SCHEMA_VERSION,
+];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -140,12 +143,8 @@ export const assertProjectManifestPublishIntegrity = (manifest: ProjectManifest)
   }
 };
 
-export const normalizeProjectManifest = (raw: unknown): ProjectManifest => {
-  if (!isRecord(raw)) throw new Error("Project manifest must be an object.");
+const readProjectManifestV1 = (raw: Record<string, unknown>): ProjectManifest => {
   const schemaVersion = readNumber(raw.schemaVersion, "schemaVersion");
-  if (schemaVersion !== PROJECT_MANIFEST_SCHEMA_VERSION) {
-    throw new Error(`Unsupported project manifest schema version ${schemaVersion}.`);
-  }
   if (raw.mode !== "backup" && raw.mode !== "shared") {
     throw new Error("Project manifest has invalid mode.");
   }
@@ -188,7 +187,16 @@ export const normalizeProjectManifest = (raw: unknown): ProjectManifest => {
   return manifest;
 };
 
-export const parseProjectManifest = (json: string) => normalizeProjectManifest(JSON.parse(json));
+export const migrateProjectManifest = (raw: unknown): ProjectManifest => {
+  if (!isRecord(raw)) throw new Error("Project manifest must be an object.");
+  const schemaVersion = readNumber(raw.schemaVersion, "schemaVersion");
+  if (schemaVersion === 1) return readProjectManifestV1(raw);
+  throw new Error(`Unsupported project manifest schema version ${schemaVersion}.`);
+};
+
+export const normalizeProjectManifest = (raw: unknown) => migrateProjectManifest(raw);
+
+export const parseProjectManifest = (json: string) => migrateProjectManifest(JSON.parse(json));
 
 export const readProjectManifestCloudKeys = (
   projectId: string,

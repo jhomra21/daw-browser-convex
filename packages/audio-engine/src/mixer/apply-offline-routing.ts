@@ -6,6 +6,7 @@ import type { ResolvedMixerGraph } from './types'
 import type { AutomationAudioBinding } from '../automation'
 import { resolveDelayAutomationBindings, resolveEqAutomationBindings, resolveReverbAutomationBindings, resolveSaturatorAutomationBindings } from '../automation-bindings'
 import type { AudioEffectRuntimeInstance } from '../effects/runtime-instance'
+import { createMixerRoutingPlan } from './graph-contract'
 
 type OfflineTrackNodes = {
   input: GainNode
@@ -121,10 +122,11 @@ const resolveFxAutomationBindings = (
 }
 
 export async function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: ResolvedMixerGraph, bpm = 120): Promise<OfflineMixerNodes> {
+  const routingPlan = createMixerRoutingPlan(graph)
   const impulseCache = createReverbImpulseCache()
   const createCachedImpulseResponse = (params: ReverbParamsLite) => impulseCache.get(ctx, params)
   const masterInput = ctx.createGain()
-  masterInput.gain.value = graph.master.volume
+  masterInput.gain.value = routingPlan.masterVolume
   const masterFx = await buildOfflineFxChain(ctx, masterInput, ctx.destination, createCachedImpulseResponse, { eq: graph.master.eq, compressor: graph.master.compressor, saturator: graph.master.saturator, delay: graph.master.delay, reverb: graph.master.reverb, order: graph.master.order, instances: graph.master.instances, bpm })
 
   const trackNodes = new Map<string, OfflineTrackNodes>()
@@ -132,26 +134,26 @@ export async function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: R
     const input = ctx.createGain()
     const gain = ctx.createGain()
     const output = ctx.createGain()
-    gain.gain.value = resolvedTrack.gain
-    output.gain.value = resolvedTrack.outputGain
     const fx = await buildOfflineFxChain(ctx, input, gain, createCachedImpulseResponse, { eq: resolvedTrack.fx?.eq, compressor: resolvedTrack.fx?.compressor, saturator: resolvedTrack.fx?.saturator, delay: resolvedTrack.fx?.delay, reverb: resolvedTrack.fx?.reverb, order: resolvedTrack.fx?.order, instances: resolvedTrack.fx?.instances, bpm })
     trackNodes.set(resolvedTrack.channel.id, { input, gain, output, eqNodesByBand: fx.eqNodesByBand, saturators: fx.saturators, delays: fx.delays, reverbs: fx.reverbs })
   }
 
-  for (const resolvedTrack of graph.channels) {
-    const channelId = resolvedTrack.channel.id
+  for (const channel of routingPlan.channels) {
+    const channelId = channel.channelId
     const source = trackNodes.get(channelId)
     assert(source, `Missing offline mixer source for track ${channelId}`)
-    const targetNodes = resolvedTrack.outputTargetId
-      ? trackNodes.get(resolvedTrack.outputTargetId)
+    source.gain.gain.value = channel.gain
+    source.output.gain.value = channel.outputGain
+    const targetNodes = channel.outputTargetId
+      ? trackNodes.get(channel.outputTargetId)
       : undefined
-    if (resolvedTrack.outputTargetId) {
-      assert(targetNodes, `Missing offline mixer output target for track ${resolvedTrack.outputTargetId}`)
+    if (channel.outputTargetId) {
+      assert(targetNodes, `Missing offline mixer output target for track ${channel.outputTargetId}`)
     }
     const outputTarget = targetNodes?.input ?? masterInput
     source.gain.connect(source.output)
     source.output.connect(outputTarget)
-    for (const send of resolvedTrack.sends) {
+    for (const send of channel.sends) {
       const target = trackNodes.get(send.targetId)
       assert(target, `Missing offline mixer send target for track ${send.targetId}`)
       const sendGain = ctx.createGain()

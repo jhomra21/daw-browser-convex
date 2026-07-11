@@ -9,10 +9,16 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as DspCharacterizationRouteImport } from './routes/dsp-characterization'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as LoginRouteImport } from './routes/Login'
 import { Route as IndexRouteImport } from './routes/index'
 
+const DspCharacterizationRoute = DspCharacterizationRouteImport.update({
+  id: '/dsp-characterization',
+  path: '/dsp-characterization',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AboutRoute = AboutRouteImport.update({
   id: '/about',
   path: '/about',
@@ -33,34 +39,45 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/Login': typeof LoginRoute
   '/about': typeof AboutRoute
+  '/dsp-characterization': typeof DspCharacterizationRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/Login': typeof LoginRoute
   '/about': typeof AboutRoute
+  '/dsp-characterization': typeof DspCharacterizationRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/Login': typeof LoginRoute
   '/about': typeof AboutRoute
+  '/dsp-characterization': typeof DspCharacterizationRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/Login' | '/about'
+  fullPaths: '/' | '/Login' | '/about' | '/dsp-characterization'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/Login' | '/about'
-  id: '__root__' | '/' | '/Login' | '/about'
+  to: '/' | '/Login' | '/about' | '/dsp-characterization'
+  id: '__root__' | '/' | '/Login' | '/about' | '/dsp-characterization'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   AboutRoute: typeof AboutRoute
+  DspCharacterizationRoute: typeof DspCharacterizationRoute
 }
 
 declare module '@tanstack/solid-router' {
   interface FileRoutesByPath {
+    '/dsp-characterization': {
+      id: '/dsp-characterization'
+      path: '/dsp-characterization'
+      fullPath: '/dsp-characterization'
+      preLoaderRoute: typeof DspCharacterizationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/about': {
       id: '/about'
       path: '/about'
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   AboutRoute: AboutRoute,
+  DspCharacterizationRoute: DspCharacterizationRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

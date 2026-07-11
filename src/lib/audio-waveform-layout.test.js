@@ -6,6 +6,8 @@ import {
   getSourceBeatOffsetFromAnchorX,
 } from '~/lib/audio-waveform-layout'
 import { PPS } from '~/lib/timeline-utils'
+import { getAudioBufferPlaybackParams } from '@daw-browser/audio-engine/audio-scheduling'
+import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 
 const createClip = (input) => ({
   id: 'clip',
@@ -79,6 +81,33 @@ describe('source beat offset marker helpers', () => {
       cssWidthPx: 960,
       projectBpm: 120,
     })).toBe(120)
+  })
+})
+
+describe('canonical clip timing integration', () => {
+  test('waveform layout and audio scheduling consume the same clip time map', () => {
+    const clip = createClip({
+      duration: 3,
+      sourceDurationSec: 8,
+      leftPadSec: 0.5,
+      bufferOffsetSec: 1.25,
+    })
+    const map = getAudioClipTimeMap({
+      clip,
+      bufferDurationSec: 8,
+      projectBpm: 120,
+      rangeStartSec: clip.startSec,
+      rangeEndSec: clip.startSec + clip.duration,
+    })
+    expect(map).not.toBeNull()
+    const layout = getAudioWaveformLayout(clip, 300, 8, 120)
+    const playback = getAudioBufferPlaybackParams({
+      sourceBuffer: 'buffer',
+      map,
+    })
+
+    expect(layout.sourceStartSec).toBe(playback.offsetSec)
+    expect(layout.sourceEndSec - layout.sourceStartSec).toBe(playback.durationSec)
   })
 })
 

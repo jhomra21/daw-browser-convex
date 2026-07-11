@@ -42,6 +42,7 @@ import type { ResolvedMixerGraph } from './mixer/types'
 import { scheduleAutomationEnvelope } from './automation'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { getExportRangeBounds, type ExportRange } from './export-range'
+import { convertStereoToMonoSample } from './mixer/channel-layout'
 
 export type { AudioEffectRuntimeInstance }
 export type { ExportRange } from './export-range'
@@ -151,6 +152,7 @@ type EncodeAudioBufferOptions = {
 }
 
 type AudioSampleBuffer = Pick<AudioBuffer, 'numberOfChannels' | 'getChannelData'>
+type StereoSampleBuffer = Pick<AudioBuffer, 'numberOfChannels' | 'length' | 'sampleRate' | 'getChannelData'>
 
 export const getAudioBufferPeak = (buffer: AudioSampleBuffer): number => {
   let peak = 0
@@ -175,6 +177,25 @@ export const normalizeAudioBufferInPlace = (buffer: AudioSampleBuffer): number =
     }
   }
   return gain
+}
+
+export const downmixStereoBufferToMono = <Buffer extends StereoSampleBuffer>(
+  buffer: StereoSampleBuffer,
+  createBuffer: (channels: number, length: number, sampleRate: number) => Buffer,
+): Buffer => {
+  if (buffer.numberOfChannels === 1) {
+    const mono = createBuffer(1, buffer.length, buffer.sampleRate)
+    mono.getChannelData(0).set(buffer.getChannelData(0))
+    return mono
+  }
+  const mono = createBuffer(1, buffer.length, buffer.sampleRate)
+  const left = buffer.getChannelData(0)
+  const right = buffer.getChannelData(1)
+  const output = mono.getChannelData(0)
+  for (let index = 0; index < output.length; index += 1) {
+    output[index] = convertStereoToMonoSample(left[index], right[index])
+  }
+  return mono
 }
 
 const throwIfAborted = (signal: AbortSignal | undefined): void => {
@@ -276,6 +297,26 @@ function createTrackById(tracks: Track<AudioBuffer>[]): Map<string, Track<AudioB
   return trackById
 }
 
+export function resolveExportMixerGraph(req: Pick<ExportRequest, 'tracks' | 'fx'>): ResolvedMixerGraph {
+  const { tracks, fx } = req
+  return resolveMixerGraph({
+    channels: createMixerChannels(tracks),
+    sourceChannelCounts: Object.fromEntries(tracks.map((track) => [
+      track.id,
+      track.clips.flatMap((clip) => clip.buffer ? [clip.buffer.numberOfChannels] : []),
+    ])),
+    masterEq: fx?.masterEq,
+    masterCompressor: fx?.masterCompressor,
+    masterSaturator: fx?.masterSaturator,
+    masterDelay: fx?.masterDelay,
+    masterReverb: fx?.masterReverb,
+    masterVolume: fx?.masterVolume,
+    masterFxOrder: fx?.masterFxOrder,
+    masterFxInstances: fx?.masterFxInstances,
+    trackFx: fx?.trackFx,
+  })
+}
+
 function prepareExportRender(req: ExportRequest): PreparedExportRender {
   const { tracks, bpm, range, sampleRate = 44100, numberOfChannels = 2, fx, signal } = req
   throwIfAborted(signal)
@@ -287,18 +328,7 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
     sampleRate,
     numberOfChannels,
     trackById: createTrackById(tracks),
-    mixerGraph: resolveMixerGraph({
-      channels: createMixerChannels(tracks),
-      masterEq: fx?.masterEq,
-      masterCompressor: fx?.masterCompressor,
-      masterSaturator: fx?.masterSaturator,
-      masterDelay: fx?.masterDelay,
-      masterReverb: fx?.masterReverb,
-      masterVolume: fx?.masterVolume,
-      masterFxOrder: fx?.masterFxOrder,
-      masterFxInstances: fx?.masterFxInstances,
-      trackFx: fx?.trackFx,
-    }),
+    mixerGraph: resolveExportMixerGraph({ tracks, fx }),
     exportTrackFx: fx?.trackFx,
     automationEnvelopes: req.automationEnvelopes ?? [],
     signal,
@@ -367,11 +397,19 @@ async function renderSourceIsolatedMixdownFromPrepared(
   const { sourceTrackIds, includeMasterFx = true } = options
   throwIfAborted(prepared.signal)
   const length = Math.ceil(prepared.range.durationSec * prepared.sampleRate)
-  const ctx = new OfflineAudioContext(prepared.numberOfChannels, length, prepared.sampleRate)
+  const renderChannelCount = prepared.numberOfChannels === 1 ? 2 : prepared.numberOfChannels
+  const ctx = new OfflineAudioContext(renderChannelCount, length, prepared.sampleRate)
   const stretchCache = createAudioStretchCache({
     createBuffer: (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
   })
-  const graph = includeMasterFx ? prepared.mixerGraph : { ...prepared.mixerGraph, master: { volume: prepared.mixerGraph.master.volume } }
+  const graph = includeMasterFx ? prepared.mixerGraph : {
+    ...prepared.mixerGraph,
+    master: {
+      volume: prepared.mixerGraph.master.volume,
+      inputLayout: prepared.mixerGraph.master.inputLayout,
+      outputLayout: prepared.mixerGraph.master.inputLayout,
+    },
+  }
   const automationScope = createSourceAutomationScope(graph, options)
   const mixerNodes = await createOfflineMixerNodes(ctx, graph, prepared.bpm)
   const { trackNodes } = mixerNodes
@@ -485,7 +523,11 @@ async function renderSourceIsolatedMixdownFromPrepared(
     const rendered = await ctx.startRendering()
     mixerNodes.assertCompressorProcessorsHealthy()
     throwIfAborted(prepared.signal)
-    return rendered
+    if (prepared.numberOfChannels !== 1 || rendered.numberOfChannels === 1) return rendered
+    return downmixStereoBufferToMono(
+      rendered,
+      (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
+    )
   } finally {
     mixerNodes.dispose()
   }

@@ -2,6 +2,7 @@ import { getMixerChannelRole, type MixerChannel } from './channels'
 import { normalizeMasterVolume, normalizeTrackRouting } from '@daw-browser/shared'
 import type { ResolveMixerGraphOptions, ResolvedMixerGraph, ResolvedMixerSend } from './types'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { getSourceChannelLayout, propagateMixerGraphLayouts } from './channel-layout'
 
 type ResolvedChannelRouting = {
   channel: MixerChannel
@@ -128,7 +129,7 @@ export function resolveMixerGraph(options: ResolveMixerGraphOptions): ResolvedMi
   const resolvedChannels: ResolvedChannelRouting[] = channels.map((channel) => resolveChannelRouting(channel, routingTracks))
   const soloRoutingState = resolveSoloRoutingState(resolvedChannels)
 
-  return {
+  return propagateMixerGraphLayouts({
     channels: resolvedChannels
       .map(({ channel, outputTargetId, sends }) => {
         const gain = !channel.muted && Number.isFinite(channel.volume) ? channel.volume : 0
@@ -141,6 +142,9 @@ export function resolveMixerGraph(options: ResolveMixerGraphOptions): ResolvedMi
           outputTargetId,
           sends: activeSends,
           fx: options.trackFx?.[channel.id],
+          sourceLayout: getSourceChannelLayout(options.sourceChannelCounts?.[channel.id]),
+          inputLayout: 'stereo',
+          outputLayout: 'stereo',
         }
       }),
     master: {
@@ -152,6 +156,8 @@ export function resolveMixerGraph(options: ResolveMixerGraphOptions): ResolvedMi
       reverb: options.masterReverb,
       order: options.masterFxOrder,
       instances: options.masterFxInstances,
+      inputLayout: 'stereo',
+      outputLayout: 'stereo',
     },
-  }
+  })
 }

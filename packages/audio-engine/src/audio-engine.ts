@@ -75,6 +75,7 @@ export class AudioEngine {
     },
     disposeTrackMeters: (trackId) => this.metering.disposeTrack(trackId),
     disposeSynthTrack: (trackId) => this.disposeSynthTrack(trackId),
+    getMasterFx: () => this.masterFx.getMixerFx(),
   })
   private scheduler = createClipScheduler({
     getAudioContext: () => this.audioCtx,

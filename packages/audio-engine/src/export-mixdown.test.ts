@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { createSourceAutomationScope, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace } from './export-mixdown'
-import { automationTargetKey, type AutomationEnvelope } from '@daw-browser/shared'
+import { createSourceAutomationScope, downmixStereoBufferToMono, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
+import { automationTargetKey, createDefaultDelayParams, type AutomationEnvelope } from '@daw-browser/shared'
 import type { ResolvedMixerChannel, ResolvedMixerGraph } from './mixer/types'
+import { resolveLiveMixerGraph } from './live-mixer-runtime'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 const channel = (
   id: string,
@@ -25,7 +27,11 @@ const channel = (
   outputGain: 1,
   outputTargetId: options.outputTargetId,
   sends: options.sends ?? [],
+  inputLayout: 'stereo',
+  outputLayout: 'stereo',
 })
+
+const master: ResolvedMixerGraph['master'] = { volume: 1, inputLayout: 'stereo', outputLayout: 'stereo' }
 
 describe('createSourceAutomationScope', () => {
   test('includes sends reachable through output ancestors', () => {
@@ -38,7 +44,7 @@ describe('createSourceAutomationScope', () => {
         channel('return'),
         channel('unrelated'),
       ],
-      master: { volume: 1 },
+      master,
     }
 
     const scope = createSourceAutomationScope(graph, {
@@ -63,7 +69,7 @@ describe('createSourceAutomationScope', () => {
         channel('group'),
         channel('return-b'),
       ],
-      master: { volume: 1 },
+      master,
     }
 
     const scope = createSourceAutomationScope(graph, {
@@ -90,7 +96,7 @@ describe('isAutomationEnvelopeInSourceScope', () => {
   test('keeps master volume automation for source-isolated stems without master FX', () => {
     const graph: ResolvedMixerGraph = {
       channels: [channel('source'), channel('unrelated')],
-      master: { volume: 1 },
+      master,
     }
     const scope = createSourceAutomationScope(graph, {
       sourceTrackIds: new Set(['source']),
@@ -133,5 +139,95 @@ describe('normalizeAudioBufferInPlace', () => {
     const nonFinite = createBuffer([[Number.NaN, Number.POSITIVE_INFINITY]])
     expect(normalizeAudioBufferInPlace(nonFinite)).toBe(1)
     expect(Number.isNaN(nonFinite.getChannelData(0)[0])).toBe(true)
+  })
+})
+
+describe('final master channel conversion', () => {
+  const createBuffer = (channels: number, length: number, sampleRate: number) => {
+    const data = Array.from({ length: channels }, () => new Float32Array(length))
+    return {
+      numberOfChannels: channels,
+      length,
+      sampleRate,
+      duration: length / sampleRate,
+      getChannelData(channel: number) {
+        const channelData = data[channel]
+        if (!channelData) throw new Error('Missing channel')
+        return channelData
+      },
+    }
+  }
+
+  test('preserves duplicated mono samples and render metadata', () => {
+    const stereo = createBuffer(2, 4, 48_000)
+    stereo.getChannelData(0).set([0.25, -0.5, 0.75, 1])
+    stereo.getChannelData(1).set([0.25, -0.5, 0.75, 1])
+    const mono = downmixStereoBufferToMono(stereo, createBuffer)
+
+    expect(Array.from(mono.getChannelData(0))).toEqual([0.25, -0.5, 0.75, 1])
+    expect(mono.numberOfChannels).toBe(1)
+    expect(mono.length).toBe(stereo.length)
+    expect(mono.sampleRate).toBe(stereo.sampleRate)
+    expect(mono.duration).toBe(stereo.duration)
+  })
+
+  test('downmixes opposite-polarity stereo samples to zero', () => {
+    const stereo = createBuffer(2, 3, 44_100)
+    stereo.getChannelData(0).set([1, -0.5, 0.25])
+    stereo.getChannelData(1).set([-1, 0.5, -0.25])
+    const mono = downmixStereoBufferToMono(stereo, createBuffer)
+    expect(Array.from(mono.getChannelData(0))).toEqual([0, 0, 0])
+  })
+})
+
+describe('live and offline channel layout parity', () => {
+  const audioBuffer = (numberOfChannels: number) => Object.assign(Object.create(null), {
+    numberOfChannels,
+    duration: 1,
+  })
+  const clip = (id: string, numberOfChannels: number): Clip<AudioBuffer> => ({
+    id,
+    name: id,
+    startSec: 2,
+    duration: 1,
+    color: '#fff',
+    buffer: audioBuffer(numberOfChannels),
+  })
+  const track = (id: string, clips: Clip<AudioBuffer>[]): Track<AudioBuffer> => ({
+    id,
+    name: id,
+    volume: 1,
+    clips,
+  })
+
+  test('resolves identical mixed source counts and active FX', () => {
+    const tracks = [
+      track('mono', [clip('mono-a', 1), clip('mono-b', 1)]),
+      track('mixed', [clip('mixed-a', 1), clip('mixed-b', 2)]),
+    ]
+    const trackFx: NonNullable<ExportFx['trackFx']> = {
+      mono: {
+        instances: [
+          { id: 'delay', kind: 'delay', params: { ...createDefaultDelayParams(), enabled: true, pingPong: true } },
+        ],
+      },
+    }
+    const masterDelay = { ...createDefaultDelayParams(), enabled: true, pingPong: true }
+    const offline = resolveExportMixerGraph({ tracks, fx: { trackFx, masterDelay } })
+    const live = resolveLiveMixerGraph(tracks, trackFx, { masterDelay })
+
+    expect(live.channels.map((entry) => ({
+      id: entry.channel.id,
+      source: entry.sourceLayout,
+      input: entry.inputLayout,
+      output: entry.outputLayout,
+    }))).toEqual(offline.channels.map((entry) => ({
+      id: entry.channel.id,
+      source: entry.sourceLayout,
+      input: entry.inputLayout,
+      output: entry.outputLayout,
+    })))
+    expect(live.master.inputLayout).toBe(offline.master.inputLayout)
+    expect(live.master.outputLayout).toBe(offline.master.outputLayout)
   })
 })

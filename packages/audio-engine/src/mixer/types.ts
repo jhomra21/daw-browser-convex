@@ -16,6 +16,7 @@ export type MixerTrackFx = {
 }
 
 export type ResolvedMixerSend = TrackSend
+export type ChannelLayout = 'mono' | 'stereo'
 
 export type ResolveMixerGraphOptions = {
   channels: MixerChannel[]
@@ -28,6 +29,7 @@ export type ResolveMixerGraphOptions = {
   masterFxOrder?: AudioEffectKind[]
   masterFxInstances?: AudioEffectRuntimeInstance[]
   trackFx?: Record<string, MixerTrackFx>
+  sourceChannelCounts?: Readonly<Record<string, readonly number[]>>
 }
 
 export type ResolvedMixerChannel = {
@@ -37,6 +39,9 @@ export type ResolvedMixerChannel = {
   outputTargetId?: Track['id']
   sends: ResolvedMixerSend[]
   fx?: MixerTrackFx
+  sourceLayout?: ChannelLayout
+  inputLayout: ChannelLayout
+  outputLayout: ChannelLayout
 }
 
 export type ResolvedMixerGraph = {
@@ -50,5 +55,7 @@ export type ResolvedMixerGraph = {
     reverb?: ReverbParamsLite
     order?: AudioEffectKind[]
     instances?: AudioEffectRuntimeInstance[]
+    inputLayout: ChannelLayout
+    outputLayout: ChannelLayout
   }
 }

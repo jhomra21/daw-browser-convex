@@ -9,12 +9,34 @@ import { createSaturatorChainState, type SaturatorChainState } from './effects/s
 import { applyLiveMixerGraph } from './mixer/apply-live-routing'
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
+import type { MixerTrackFx, ResolveMixerGraphOptions, ResolvedMixerGraph } from './mixer/types'
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { AutomationAudioBinding } from './automation'
 import { resolveDelayAutomationBindings, resolveEqAutomationBindings, resolveReverbAutomationBindings, resolveSaturatorAutomationBindings } from './automation-bindings'
 import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance } from './effects/runtime-instance'
 
 type RuntimeTrack = Track<AudioBuffer>
+
+type MasterMixerFx = Pick<
+  ResolveMixerGraphOptions,
+  'masterEq' | 'masterCompressor' | 'masterSaturator' | 'masterDelay' | 'masterReverb' | 'masterFxOrder' | 'masterFxInstances'
+>
+
+export function resolveLiveMixerGraph(
+  tracks: RuntimeTrack[],
+  trackFx: Record<string, MixerTrackFx>,
+  masterFx: MasterMixerFx = {},
+): ResolvedMixerGraph {
+  return resolveMixerGraph({
+    channels: createMixerChannels(tracks),
+    sourceChannelCounts: Object.fromEntries(tracks.map((track) => [
+      track.id,
+      track.clips.flatMap((clip) => clip.buffer ? [clip.buffer.numberOfChannels] : []),
+    ])),
+    trackFx,
+    ...masterFx,
+  })
+}
 
 type TrackNodeGroup = {
   input: GainNode
@@ -31,6 +53,7 @@ type LiveMixerRuntimeOptions = {
   reconnectTrackMeters: (trackId: string, output: GainNode, isCurrentOutput: () => boolean) => void
   disposeTrackMeters: (trackId: string) => void
   disposeSynthTrack: (trackId: string) => void
+  getMasterFx: () => MasterMixerFx
 }
 
 export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
@@ -56,6 +79,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const trackFxInstances = new Map<string, AudioEffectRuntimeInstance[]>()
   const pendingTrackFxInstances = new Map<string, AudioEffectRuntimeInstance[]>()
   const trackFxInstanceRevisions = new Map<string, number>()
+  const trackFx = new Map<string, MixerTrackFx>()
   const instanceEqChains = new Map<string, Map<string, BiquadFilterNode[]>>()
   const instanceEqNodesByBand = new Map<string, Map<string, Map<string, BiquadFilterNode>>>()
   const instanceEqSignatures = new Map<string, Map<string, string>>()
@@ -243,6 +267,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
   const setTrackEq = (trackId: string, params: EqParamsLite) => {
     const normalized = normalizeEqParams(params)
+    trackFx.set(trackId, { ...trackFx.get(trackId), eq: normalized })
     const ctx = options.getAudioContext()
     if (!ctx) {
       pendingEqParams.set(trackId, normalized)
@@ -252,6 +277,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   }
 
   const setTrackReverb = (trackId: string, params: ReverbParamsLite) => {
+    trackFx.set(trackId, { ...trackFx.get(trackId), reverb: params })
     const ctx = options.getAudioContext()
     if (!ctx) {
       pendingReverbParams.set(trackId, params)
@@ -272,6 +298,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
   const setTrackCompressor = async (trackId: string, params: CompressorParamsLite) => {
     const normalized = normalizeCompressorParams(params)
+    trackFx.set(trackId, { ...trackFx.get(trackId), compressor: normalized })
     const ctx = options.getAudioContext()
     if (!ctx) {
       pendingCompressorParams.set(trackId, normalized)
@@ -289,6 +316,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   }
 
   const setTrackSaturator = (trackId: string, params: SaturatorParamsLite) => {
+    trackFx.set(trackId, { ...trackFx.get(trackId), saturator: params })
     const ctx = options.getAudioContext()
     if (!ctx) {
       pendingSaturatorParams.set(trackId, params)
@@ -304,6 +332,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   }
 
   const setTrackDelay = (trackId: string, params: DelayParamsLite) => {
+    trackFx.set(trackId, { ...trackFx.get(trackId), delay: params })
     const ctx = options.getAudioContext()
     if (!ctx) {
       pendingDelayParams.set(trackId, params)
@@ -357,6 +386,8 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       previous.some((instance, index) => instance.id !== normalized[index]?.id || instance.kind !== normalized[index]?.kind)
     ))
     if (normalized.length === 0) {
+      const currentFx = trackFx.get(trackId)
+      trackFx.set(trackId, { ...currentFx, instances: undefined })
       trackFxInstances.delete(trackId)
       pendingTrackFxInstances.delete(trackId)
       closeTrackInstanceStates(trackId)
@@ -365,6 +396,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       return
     }
     const ctx = options.getAudioContext()
+    trackFx.set(trackId, { ...trackFx.get(trackId), instances: normalized })
     if (!ctx) {
       trackFxInstances.set(trackId, normalized)
       pendingTrackFxInstances.set(trackId, normalized)
@@ -483,6 +515,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     trackFxInstances.delete(trackId)
     pendingTrackFxInstances.delete(trackId)
     trackFxInstanceRevisions.delete(trackId)
+    trackFx.delete(trackId)
     closeTrackInstanceStates(trackId)
 
     options.disposeSynthTrack(trackId)
@@ -518,6 +551,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     trackFxInstances.clear()
     pendingTrackFxInstances.clear()
     trackFxInstanceRevisions.clear()
+    trackFx.clear()
     for (const trackId of Array.from(instanceEqChains.keys())) closeTrackInstanceStates(trackId)
     instanceEqChains.clear()
     instanceEqNodesByBand.clear()
@@ -537,7 +571,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       const masterInput = options.getMasterInput()
       if (!ctx || !masterInput) return
 
-      const graph = resolveMixerGraph({ channels: createMixerChannels(tracks) })
+      const graph = resolveLiveMixerGraph(tracks, Object.fromEntries(trackFx), options.getMasterFx())
       const trackNodes = new Map<string, TrackNodeGroup>()
       for (const resolvedTrack of graph.channels) {
         const channelId = resolvedTrack.channel.id
@@ -619,6 +653,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       const normalized = normalizeAudioEffectOrder(order, order)
       if (areAudioEffectOrdersEqual(trackFxOrders.get(trackId), normalized)) return
       trackFxOrders.set(trackId, normalized)
+      trackFx.set(trackId, { ...trackFx.get(trackId), order: normalized })
       const input = inputs.get(trackId)
       const gain = gains.get(trackId)
       if (input && gain) rebuildTrackRouting(trackId, { input, gain })

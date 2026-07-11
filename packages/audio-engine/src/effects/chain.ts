@@ -211,7 +211,14 @@ export async function createCompressorNodeChain(ctx: BaseAudioContext, params: C
   const processedGain = ctx.createGain()
   let workletNode: AudioWorkletNode
   try {
-    workletNode = new AudioWorkletNode(ctx, compressorWorklet.processorName, { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] })
+    workletNode = new AudioWorkletNode(ctx, compressorWorklet.processorName, {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+      channelCount: 2,
+      channelCountMode: 'explicit',
+      channelInterpretation: 'speakers',
+    })
   } catch (error) {
     disconnectAudioNodes([input, output, dryGain, processedGain])
     throw new CompressorProcessorError('construction', 'Failed to construct compressor processor.', error)

@@ -10,6 +10,7 @@ import type { SpectrumFrame } from './metering-runtime'
 import type { AutomationAudioBinding } from './automation'
 import { resolveDelayAutomationBindings, resolveEqAutomationBindings, resolveReverbAutomationBindings, resolveSaturatorAutomationBindings } from './automation-bindings'
 import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance } from './effects/runtime-instance'
+import type { ResolveMixerGraphOptions } from './mixer/types'
 
 export function createMasterFxRuntime() {
   let eqChain: BiquadFilterNode[] = []
@@ -29,6 +30,11 @@ export function createMasterFxRuntime() {
   let pendingReverbParams: ReverbParamsLite | null = null
   let pendingSaturatorParams: SaturatorParamsLite | null = null
   let pendingDelayParams: DelayParamsLite | null = null
+  let currentEqParams: EqParamsLite | undefined
+  let currentCompressorParams: CompressorParamsLite | undefined
+  let currentReverbParams: ReverbParamsLite | undefined
+  let currentSaturatorParams: SaturatorParamsLite | undefined
+  let currentDelayParams: DelayParamsLite | undefined
   let masterFxOrder: AudioEffectKind[] | undefined
   let masterFxInstances: AudioEffectRuntimeInstance[] | null = null
   let pendingFxInstances: AudioEffectRuntimeInstance[] | null = null
@@ -275,6 +281,7 @@ export function createMasterFxRuntime() {
     },
     setEq: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: EqParamsLite) => {
       const normalized = normalizeEqParams(params)
+      currentEqParams = normalized
       if (!ctx || !masterGain) {
         pendingEqParams = normalized
         return
@@ -298,6 +305,7 @@ export function createMasterFxRuntime() {
       rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
     },
     setReverb: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: ReverbParamsLite, createImpulseResponse: CreateReverbImpulseResponse) => {
+      currentReverbParams = params
       if (!ctx || !masterGain) {
         pendingReverbParams = params
         return
@@ -309,6 +317,7 @@ export function createMasterFxRuntime() {
       }
     },
     setCompressor: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: CompressorParamsLite) => {
+      currentCompressorParams = params
       if (!ctx || !masterGain) {
         pendingCompressorParams = params
         return
@@ -319,6 +328,7 @@ export function createMasterFxRuntime() {
     },
     subscribeCompressorMeter: (listener: CompressorMeterListener) => compressorState.subscribeMeter(listener),
     setSaturator: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: SaturatorParamsLite) => {
+      currentSaturatorParams = params
       if (!ctx || !masterGain) {
         pendingSaturatorParams = params
         return
@@ -327,6 +337,7 @@ export function createMasterFxRuntime() {
       if (result.changed && result.requiresRoutingRebuild) rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
     },
     setDelay: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: DelayParamsLite) => {
+      currentDelayParams = params
       if (!ctx || !masterGain) {
         pendingDelayParams = params
         return
@@ -371,6 +382,18 @@ export function createMasterFxRuntime() {
       delayState.setBpm(bpm)
       for (const state of instanceDelayChains.values()) state.setBpm(bpm)
     },
+    getMixerFx: (): Pick<
+      ResolveMixerGraphOptions,
+      'masterEq' | 'masterCompressor' | 'masterSaturator' | 'masterDelay' | 'masterReverb' | 'masterFxOrder' | 'masterFxInstances'
+    > => ({
+      masterEq: currentEqParams,
+      masterCompressor: currentCompressorParams,
+      masterSaturator: currentSaturatorParams,
+      masterDelay: currentDelayParams,
+      masterReverb: currentReverbParams,
+      masterFxOrder,
+      masterFxInstances: masterFxInstances ?? undefined,
+    }),
     resolveMasterAutomationBindings: (parameterId: string, masterGain: GainNode | null, effectInstanceId?: string): AutomationAudioBinding[] => {
       if (parameterId === 'volume') return masterGain ? [{ param: masterGain.gain, valueToAudioValue: (value) => value }] : []
       if (masterFxInstances) {

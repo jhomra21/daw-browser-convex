@@ -103,7 +103,7 @@ describe('checked-in worklet assets', () => {
       },
     })
     expect(processor.process([[Float32Array.from([0.25, -0.5])]])).toBe(true)
-    onmessage({ data: { type: 'finalize', generation: 1, sessionId: 'asset' } })
+    onmessage({ data: { type: 'finalize', generation: 1, sessionId: 'asset', stopContextFrame: 2 } })
     const message = processor.port.messages[0]
     if (typeof message !== 'object' || message === null || !('buffer' in message) || !(message.buffer instanceof ArrayBuffer)) {
       throw new Error('Recorder did not emit a transferable block.')
@@ -120,8 +120,44 @@ describe('checked-in worklet assets', () => {
       droppedFrames: 0,
       droppedBlocks: 0,
     })
-    onmessage({ data: { type: 'finalize', generation: 1, sessionId: 'asset' } })
+    onmessage({ data: { type: 'finalize', generation: 1, sessionId: 'asset', stopContextFrame: 2 } })
     expect(processor.process([[Float32Array.from([1])]])).toBe(false)
+    expect(processor.port.messages).toHaveLength(2)
+  })
+
+  test('clips the pending recorder block at the exact stop frame and captures nothing after completion', async () => {
+    const evaluated = await evaluateAsset(recorderWorklet.modulePath)
+    const Processor = evaluated.registered.get(recorderWorklet.processorName)
+    if (!Processor) throw new Error('Recorder processor was not registered.')
+    const processor = new Processor()
+    const onmessage = processor.port.onmessage
+    if (!onmessage) throw new Error('Recorder processor did not bind its message handler.')
+    onmessage({
+      data: {
+        type: 'configure',
+        generation: 4,
+        sessionId: 'bounded',
+        channelCount: 1,
+        inputChannels: [0],
+        gain: 0.5,
+        polarity: -1,
+        punchStartFrame: 0,
+        punchEndFrame: null,
+      },
+    })
+    const input = Float32Array.from([1, 2, 3, 4])
+    const output = new Float32Array(4)
+    expect(processor.process([[input]], [[output]])).toBe(true)
+    expect(Array.from(output)).toEqual([-0.5, -1, -1.5, -2])
+    onmessage({ data: { type: 'finalize', generation: 4, sessionId: 'bounded', stopContextFrame: 2 } })
+    const block = processor.port.messages[0]
+    if (typeof block !== 'object' || block === null || !('buffer' in block) || !(block.buffer instanceof ArrayBuffer)) {
+      throw new Error('Recorder did not emit its bounded block.')
+    }
+    expect(block).toMatchObject({ type: 'block', frameCount: 2 })
+    expect(Array.from(new Float32Array(block.buffer).subarray(0, 2))).toEqual([-0.5, -1])
+    expect(processor.port.messages[1]).toMatchObject({ type: 'complete', capturedFrames: 2 })
+    expect(processor.process([[Float32Array.from([5])]], [[new Float32Array(1)]])).toBe(false)
     expect(processor.port.messages).toHaveLength(2)
   })
 

@@ -806,7 +806,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
     grantClipWrite,
-    recordingPreferences: appPreferences.audio.preferences,
+    audioPreferences: appPreferences.audio.preferences,
+    recordingPreferences: appPreferences.recording.preferences,
   });
 
   const {

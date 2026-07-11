@@ -18,6 +18,7 @@ import {
   createStopPromise,
   ensureRecordingAudioContext,
   getRecordingSupport,
+  getMediaRecorderAuxiliaryCaptureOptions,
   haltRecordingPreview,
   releaseTrackRecordingLock,
   startRecordingLockHeartbeat,
@@ -35,7 +36,7 @@ import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { UploadToR2 } from '~/hooks/useClipBuffers'
 import type { Track } from '@daw-browser/timeline-core/types'
-import type { AudioPreferences } from '~/lib/preferences/app-preferences'
+import type { AudioPreferences, RecordingPreferences } from '~/lib/preferences/app-preferences'
 import { buildRecordingConstraints } from '~/lib/audio-settings-core'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
@@ -65,7 +66,8 @@ type UseTrackRecordingOptions = {
   notify: (message: string) => void
   historyPush: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
-  recordingPreferences: Accessor<AudioPreferences>
+  audioPreferences: Accessor<AudioPreferences>
+  recordingPreferences: Accessor<RecordingPreferences>
 }
 
 type StartRecordingResult = {
@@ -86,8 +88,6 @@ type UseTrackRecordingReturn = {
   stopRecording: () => Promise<void>
   toggleRecording: () => Promise<StartRecordingResult>
 }
-
-const RECORDING_PREVIEW_UPDATE_MS = 1000 / 30
 
 export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRecordingReturn {
   const {
@@ -111,7 +111,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     notify,
     historyPush,
     grantClipWrite,
-    recordingPreferences,
+    audioPreferences,
   } = options
 
   const [isRecordingInternal, setIsRecordingInternal] = createSignal(false)
@@ -124,6 +124,27 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
   let activeCtx: RecordingContext | null = null
   let lockHeartbeatTimer: number | null = null
+  let previewContextStartFrame = 0
+  let previewSampleRate = 1
+
+  const unsubscribeRecordingStatus = audioEngine.subscribeRecordingStatus((status) => {
+    if (status.state === 'failed' && activeCtx?.engineCaptureActive && status.sessionId === activeCtx.engineCaptureSessionId) {
+      void stopRecording()
+      return
+    }
+    if (status.state !== 'recording' || !activeCtx?.engineCaptureActive || status.sessionId !== activeCtx.engineCaptureSessionId) return
+    const offset = Math.max(0, (status.contextFrame - previewContextStartFrame) / previewSampleRate)
+    const cutoff = Math.max(0, offset - 5)
+    livePreviewPoints.push({ offset, amplitude: Math.min(1, status.rms) })
+    while (livePreviewStartIndex < livePreviewPoints.length && livePreviewPoints[livePreviewStartIndex].offset < cutoff) {
+      livePreviewStartIndex++
+    }
+    if (livePreviewStartIndex > 128) {
+      livePreviewPoints.splice(0, livePreviewStartIndex)
+      livePreviewStartIndex = 0
+    }
+    setPreviewPoints(livePreviewStartIndex === 0 ? livePreviewPoints : livePreviewPoints.slice(livePreviewStartIndex))
+  })
 
   const emit = (message: string) => {
     console.warn('[useTrackRecording]', message)
@@ -192,6 +213,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   const cleanupRecording = async () => {
     const ctx = activeCtx
     activeCtx = null
+    if (ctx?.engineCaptureActive) audioEngine.cancelRecordingCapture()
     await cleanupRecordingSession({
       activeCtx: ctx,
       clearLockHeartbeat: () => {
@@ -452,7 +474,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     let stream: MediaStream
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: buildRecordingConstraints(recordingPreferences(), navigator.mediaDevices.getSupportedConstraints())
+        audio: buildRecordingConstraints(audioPreferences(), navigator.mediaDevices.getSupportedConstraints())
       })
     } catch (error) {
       const missingDevice = error instanceof DOMException && (error.name === 'NotFoundError' || error.name === 'OverconstrainedError')
@@ -498,64 +520,35 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
     const startSec = Math.max(0, playheadSec())
 
-    let analyser: AnalyserNode | null = null
-    let analysisSource: MediaStreamAudioSourceNode | null = null
-    let analysisCtx: AudioContext | null = null
-    let previewFrameId: number | null = null
-    let startCtxTime = 0
-    let lastPreviewSampleMs = 0
+    let engineCaptureActive = false
+    const engineCaptureSessionId = `take-${Date.now()}`
+    ensureRecordingAudioContext(audioEngine)
     try {
-      analysisCtx = new AudioContext({ latencyHint: 'interactive' })
-      await analysisCtx.resume()
-      analysisSource = analysisCtx.createMediaStreamSource(stream)
-      analyser = analysisCtx.createAnalyser()
-      analyser.fftSize = 2048
-      startCtxTime = analysisCtx.currentTime
-      const ctxRef = analysisCtx
-      const analyserRef = analyser
-      const previewBuffer = new Float32Array(analyserRef.fftSize)
-      const sampleRecordingPreview = () => {
-        const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
-        if (nowMs - lastPreviewSampleMs < RECORDING_PREVIEW_UPDATE_MS) {
-          previewFrameId = requestAnimationFrame(sampleRecordingPreview)
-          if (activeCtx) activeCtx.previewFrameId = previewFrameId
-          return
-        }
-        lastPreviewSampleMs = nowMs
-        analyserRef.getFloatTimeDomainData(previewBuffer)
-        let sum = 0
-        for (let i = 0; i < previewBuffer.length; i++) {
-          const value = previewBuffer[i]
-          sum += value * value
-        }
-        const rms = Math.sqrt(sum / previewBuffer.length)
-        const ctxTime = ctxRef.currentTime
-        const offset = Math.max(0, ctxTime - startCtxTime)
-        const cutoff = Math.max(0, offset - 5)
-        livePreviewPoints.push({ offset, amplitude: Math.min(1, rms) })
-        while (livePreviewStartIndex < livePreviewPoints.length && livePreviewPoints[livePreviewStartIndex].offset < cutoff) {
-          livePreviewStartIndex++
-        }
-        if (livePreviewStartIndex > 128) {
-          livePreviewPoints.splice(0, livePreviewStartIndex)
-          livePreviewStartIndex = 0
-        }
-        setPreviewPoints(livePreviewStartIndex === 0 ? livePreviewPoints : livePreviewPoints.slice(livePreviewStartIndex))
-        previewFrameId = requestAnimationFrame(sampleRecordingPreview)
-        if (activeCtx) activeCtx.previewFrameId = previewFrameId
-      }
-      analysisSource.connect(analyser)
-      // Recording preview is visualization only, so sample the AnalyserNode on paint instead of using deprecated ScriptProcessorNode audio callbacks.
-      previewFrameId = requestAnimationFrame(sampleRecordingPreview)
+      await audioEngine.resume()
+      const engineContext = audioEngine.getAudioContext()
+      if (!engineContext) throw new Error('Audio engine context unavailable.')
+      previewSampleRate = engineContext.sampleRate
+      previewContextStartFrame = Math.floor(engineContext.currentTime * engineContext.sampleRate)
+      const auxiliaryCapture = getMediaRecorderAuxiliaryCaptureOptions()
+      await audioEngine.startRecordingCapture({
+        sessionId: engineCaptureSessionId,
+        stream,
+        trackId,
+        layout: auxiliaryCapture.layout,
+        inputChannel: auxiliaryCapture.inputChannel,
+        gain: auxiliaryCapture.gain,
+        polarity: auxiliaryCapture.polarity,
+        monitor: auxiliaryCapture.monitor,
+        armed: auxiliaryCapture.armed,
+        epoch: {
+          timelineFrame: Math.floor(startSec * engineContext.sampleRate),
+          contextFrame: previewContextStartFrame,
+        },
+        punchInContextFrame: previewContextStartFrame,
+      })
+      engineCaptureActive = true
     } catch (err) {
-      console.warn('[useTrackRecording] analyser setup failed', err)
-      try { analysisSource?.disconnect() } catch {}
-      try { analyser?.disconnect() } catch {}
-      try { await analysisCtx?.close() } catch {}
-      analysisCtx = null
-      analyser = null
-      analysisSource = null
-      previewFrameId = null
+      console.warn('[useTrackRecording] engine recording preview unavailable; using compressed fallback only', err)
     }
 
     activeCtx = {
@@ -571,17 +564,14 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       chunks,
       mimeType: mimeType || recorder.mimeType,
       lockedByUserId: uid ?? '',
-      analyser,
-      analysisSource,
-      analysisCtx,
-      previewFrameId,
+      engineCaptureActive,
+      engineCaptureSessionId,
       onDataAvailable,
       onStop,
       stopPromise: stopCompletion.promise,
       rejectStopPromise: stopCompletion.reject,
     }
 
-    ensureRecordingAudioContext(audioEngine)
     lockHeartbeatTimer = clearRecordingLockHeartbeat(lockHeartbeatTimer)
     if (!isLocalProject) {
       lockHeartbeatTimer = startRecordingLockHeartbeat({
@@ -624,6 +614,9 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       if (ctx.recorder.state !== 'inactive') {
         ctx.recorder.stop()
       }
+      if (ctx.engineCaptureActive) void audioEngine.stopRecordingCapture().catch((err) => {
+        console.warn('[useTrackRecording] auxiliary recording cleanup failed', err)
+      })
     } catch (err) {
       console.error('[useTrackRecording] recorder.stop failed', err)
       ctx.rejectStopPromise(err)
@@ -666,6 +659,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   }
 
   onCleanup(() => {
+    unsubscribeRecordingStatus()
     lockHeartbeatTimer = clearRecordingLockHeartbeat(lockHeartbeatTimer)
     void stopRecording()
   })

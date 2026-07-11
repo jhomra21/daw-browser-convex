@@ -8,6 +8,8 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
     this.session = null
     this.blocks = []
     this.current = null
+    this.currentStartFrame = null
+    this.pending = null
     this.writeOffset = 0
     this.sequence = 0
     this.capturedFrames = 0
@@ -64,7 +66,8 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
     if (message.type === 'finalize') {
       if (this.completed || this.fatal) return
       this.completed = true
-      this.emitCurrent()
+      const stopFrame = Number.isSafeInteger(message.stopContextFrame) ? message.stopContextFrame : currentFrame
+      this.emitThrough(stopFrame)
       this.port.postMessage({
         type: 'complete',
         generation: this.session.generation,
@@ -103,46 +106,94 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
 
   emitCurrent() {
     if (!this.current || this.writeOffset === 0) return
+    if (this.pending) this.emitBlock(this.pending)
+    this.pending = {
+      block: this.current,
+      frameCount: this.writeOffset,
+      startFrame: this.currentStartFrame,
+    }
+    this.current = null
+    this.currentStartFrame = null
+    this.writeOffset = 0
+  }
+
+  emitBlock(pending, frameCount = pending.frameCount) {
     const message = {
       type: 'block',
       generation: this.session.generation,
       sessionId: this.session.sessionId,
-      blockId: this.current.id,
+      blockId: pending.block.id,
       sequence: this.sequence,
-      frameCount: this.writeOffset,
+      frameCount,
       channelCount: this.session.channelCount,
-      buffer: this.current.buffer,
+      buffer: pending.block.buffer,
     }
-    this.current.owner = 'transport'
-    this.current = null
-    this.writeOffset = 0
+    pending.block.owner = 'transport'
     this.sequence += 1
     this.port.postMessage(message, [message.buffer])
   }
 
-  process(inputs) {
+  emitThrough(stopFrame) {
+    const candidates = []
+    if (this.pending) candidates.push(this.pending)
+    if (this.current && this.writeOffset > 0) {
+      candidates.push({
+        block: this.current,
+        frameCount: this.writeOffset,
+        startFrame: this.currentStartFrame,
+      })
+    }
+    let retainedFrames = 0
+    for (const candidate of candidates) {
+      const frameCount = Math.max(0, Math.min(candidate.frameCount, stopFrame - candidate.startFrame))
+      if (frameCount > 0) {
+        this.emitBlock(candidate, frameCount)
+        retainedFrames += frameCount
+      } else {
+        candidate.block.owner = 'available'
+      }
+    }
+    const candidateFrames = candidates.reduce((total, candidate) => total + candidate.frameCount, 0)
+    this.capturedFrames -= candidateFrames - retainedFrames
+    this.pending = null
+    this.current = null
+    this.currentStartFrame = null
+    this.writeOffset = 0
+  }
+
+  process(inputs, outputs = []) {
     if (!this.session) return true
     if (this.fatal || this.completed) return false
     const input = inputs[0] ?? []
+    const output = outputs[0] ?? []
     const quantumFrames = input[0]?.length ?? 0
     for (let frameIndex = 0; frameIndex < quantumFrames; frameIndex += 1) {
       const absoluteFrame = currentFrame + frameIndex
+      let processed0 = 0
+      let processed1 = 0
+      for (let channel = 0; channel < this.session.channelCount; channel += 1) {
+        const source = input[this.session.inputChannels[channel]]
+        const sample = source ? (source[frameIndex] ?? 0) * this.session.gain * this.session.polarity : 0
+        if (channel === 0) processed0 = sample
+        else processed1 = sample
+        if (output[channel]) output[channel][frameIndex] = sample
+      }
       if (
         absoluteFrame < this.session.punchStartFrame ||
         (this.session.punchEndFrame !== null && absoluteFrame >= this.session.punchEndFrame)
       ) continue
-      if (!this.current) this.current = this.acquire()
+      if (!this.current) {
+        this.current = this.acquire()
+        this.currentStartFrame = absoluteFrame
+      }
       if (!this.current) {
         this.droppedFrames += 1
         if (this.droppedFrames % BLOCK_FRAMES === 1) this.droppedBlocks += 1
         if (this.droppedFrames >= FATAL_DROPPED_FRAMES) this.fail('recorder-overrun')
         return false
       }
-      for (let channel = 0; channel < this.session.channelCount; channel += 1) {
-        const source = input[this.session.inputChannels[channel]]
-        this.current.view[channel * BLOCK_FRAMES + this.writeOffset] =
-          source ? (source[frameIndex] ?? 0) * this.session.gain * this.session.polarity : 0
-      }
+      this.current.view[this.writeOffset] = processed0
+      if (this.session.channelCount === 2) this.current.view[BLOCK_FRAMES + this.writeOffset] = processed1
       this.writeOffset += 1
       this.capturedFrames += 1
       if (this.writeOffset === BLOCK_FRAMES) this.emitCurrent()

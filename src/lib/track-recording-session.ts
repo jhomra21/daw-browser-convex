@@ -30,15 +30,31 @@ export type RecordingContext = {
   chunks: BlobPart[]
   mimeType: string
   lockedByUserId: string
-  analyser: AnalyserNode | null
-  analysisSource: MediaStreamAudioSourceNode | null
-  analysisCtx: AudioContext | null
-  previewFrameId: number | null
+  engineCaptureActive: boolean
+  engineCaptureSessionId: string
   onDataAvailable: (event: BlobEvent) => void
   onStop: () => void
   stopPromise: Promise<void>
   rejectStopPromise: (error?: unknown) => void
 }
+
+export const getMediaRecorderAuxiliaryCaptureOptions = (): {
+  layout: 'mono'
+  inputChannel: 0
+  gain: 1
+  polarity: 1
+  monitor: 'off'
+  armed: false
+  savedAudioSource: 'media-recorder-unprocessed'
+} => ({
+  layout: 'mono',
+  inputChannel: 0,
+  gain: 1,
+  polarity: 1,
+  monitor: 'off',
+  armed: false,
+  savedAudioSource: 'media-recorder-unprocessed',
+})
 
 export function createStopPromise(): {
   promise: Promise<void>
@@ -174,20 +190,6 @@ export function startRecordingLockHeartbeat(options: {
   }, RECORDING_LOCK_KEEPALIVE_MS)
 }
 
-async function disposeRecordingAnalysis(ctx: RecordingContext): Promise<void> {
-  const analysisCtx = ctx.analysisCtx
-  try {
-    if (ctx.previewFrameId !== null) cancelAnimationFrame(ctx.previewFrameId)
-  } catch {}
-  try { ctx.analysisSource?.disconnect() } catch {}
-  try { ctx.analyser?.disconnect() } catch {}
-  ctx.analyser = null
-  ctx.analysisSource = null
-  ctx.analysisCtx = null
-  ctx.previewFrameId = null
-  try { await analysisCtx?.close() } catch {}
-}
-
 export async function cleanupRecordingSession(options: {
   activeCtx: RecordingContext | null
   clearLockHeartbeat: () => void
@@ -211,7 +213,6 @@ export async function cleanupRecordingSession(options: {
     if (ctx.recorder.state !== 'inactive') ctx.recorder.stop()
   } catch {}
   try { ctx.stream.getTracks().forEach((track) => track.stop()) } catch {}
-  await disposeRecordingAnalysis(ctx)
 
   await options.releaseTrackLock(ctx.trackId, ctx.lockedByUserId, ctx.isLocalProject)
   options.setIsRecording(false)
@@ -231,7 +232,6 @@ export function haltRecordingPreview(options: {
   const ctx = options.activeCtx
   try {
     try { ctx.stream.getTracks().forEach((track) => track.stop()) } catch {}
-    void disposeRecordingAnalysis(ctx)
   } catch {}
   options.livePreviewPoints.length = 0
   options.setPreviewPoints(options.livePreviewPoints)

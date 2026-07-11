@@ -15,6 +15,7 @@ import { createTransportClock } from './transport-clock'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import { applyAutomationEnvelopeAtTime, scheduleAutomationEnvelope } from './automation'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
+import { createRecordingRuntime, type RecordingRuntimeStatus, type StartRecordingCaptureOptions } from './recording/recording-runtime'
 
 type RuntimeClip = Clip<AudioBuffer>
 type RuntimeTrack = Track<AudioBuffer>
@@ -27,6 +28,7 @@ export const LIVE_SCHEDULE_HORIZON_SEC = 30
 
 export { canFallbackToRepitchStretch, isStretchQualityWarning }
 export type { AudioEffectRuntimeInstance, AudioRuntimeOptions, AudioStretchRenderState, CompressorMeterFrame, DeferredStretchWindow, SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch }
+export type { RecordingEpoch, RecordingMonitorMode, RecordingRuntimeStatus, StartRecordingCaptureOptions } from './recording/recording-runtime'
 export type AudioRuntimeSnapshot = {
   state: AudioContextState | 'uninitialized'
   sampleRate: number | null
@@ -99,6 +101,10 @@ export class AudioEngine {
   private stretchCache = createAudioStretchCache({
     createBuffer: (channels, frames, sampleRate) => new AudioBuffer({ numberOfChannels: channels, length: frames, sampleRate }),
     persist: true,
+  })
+  private recording = createRecordingRuntime({
+    getContext: () => this.audioCtx,
+    connectMonitor: (trackId, source) => this.mixerRuntime.connectRecordingMonitor(trackId, source),
   })
 
   constructor(options: AudioRuntimeOptions = { latencyHint: 'interactive' }) {
@@ -185,6 +191,26 @@ export class AudioEngine {
 
   subscribeTrackStereoLevels(listener: TrackStereoLevelsListener) {
     return this.metering.subscribeTrackStereoLevels(listener)
+  }
+
+  startRecordingCapture(options: StartRecordingCaptureOptions) {
+    return this.recording.start(options)
+  }
+
+  stopRecordingCapture() {
+    return this.recording.stop()
+  }
+
+  cancelRecordingCapture() {
+    this.recording.cancel()
+  }
+
+  getRecordingStatus(): RecordingRuntimeStatus {
+    return this.recording.getStatus()
+  }
+
+  subscribeRecordingStatus(listener: (status: RecordingRuntimeStatus) => void) {
+    return this.recording.subscribe(listener)
   }
 
   // Returns a normalized 0..1 RMS level for a track's post-gain signal
@@ -543,6 +569,7 @@ export class AudioEngine {
   }
 
   close() {
+    this.recording.cancel()
     this.stopAllSources()
     this.metronome.close()
     this.impulseCache.clear()

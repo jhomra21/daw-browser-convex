@@ -565,6 +565,13 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
   return {
     ensureTrackInput: (trackId: string) => ensureTrackNodes(trackId).input,
+    connectRecordingMonitor: (trackId: string, source: AudioNode) => {
+      const input = ensureTrackNodes(trackId).input
+      source.connect(input)
+      return () => {
+        try { source.disconnect(input) } catch {}
+      }
+    },
     getTrackOutput: (trackId: string) => outputs.get(trackId),
     updateTrackGains: (tracks: RuntimeTrack[]) => {
       const ctx = options.getAudioContext()

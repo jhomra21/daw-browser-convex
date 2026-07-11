@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { loadWorkletModule } from './worklet-loader'
-import { compressorWorklet, resolveWorkletModuleUrl, trackMeterWorklet } from './worklet-manifest'
+import { compressorWorklet, recorderWorklet, resolveWorkletModuleUrl, trackMeterWorklet } from './worklet-manifest'
 
 describe('worklet loader', () => {
   test('deduplicates in-flight and completed registration per context', async () => {
@@ -49,6 +49,9 @@ describe('worklet manifest', () => {
     )
     expect(resolveWorkletModuleUrl(trackMeterWorklet.modulePath, '/studio')).toBe(
       '/studio/audio-worklets/track-meter-processor-v1.js',
+    )
+    expect(resolveWorkletModuleUrl(recorderWorklet.modulePath, '/studio/')).toBe(
+      '/studio/audio-worklets/daw-recorder-processor-v1.js',
     )
   })
 })

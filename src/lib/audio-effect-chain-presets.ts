@@ -1,6 +1,7 @@
 import {
   AUDIO_EFFECT_CONTRACTS,
   type CompressorParams,
+  type AutoFilterParamsEnvelope,
   type CompressorParamsInput,
   type DelayParams,
   type DelayParamsInput,
@@ -10,14 +11,35 @@ import {
   type ReverbParamsInput,
   type SaturatorParams,
   type SaturatorParamsInput,
+  type UtilityParamsEnvelope,
+  type GateParamsEnvelope,
+  type LimiterParamsEnvelope,
+  type LoFiParamsEnvelope,
+  type AutoPanParamsEnvelope,
+  type ChorusParamsEnvelope,
+  type EnsembleParamsEnvelope,
+  type FlangerParamsEnvelope,
+  type PhaserParamsEnvelope,
+  type TremoloParamsEnvelope,
 } from "@daw-browser/shared";
 
 export type AudioEffectChainPresetStep =
+  | { kind: "utility"; params: UtilityParamsEnvelope }
   | { kind: "eq"; params: EqParams }
+  | { kind: "autofilter"; params: AutoFilterParamsEnvelope }
+  | { kind: "gate"; params: GateParamsEnvelope }
   | { kind: "compressor"; params: CompressorParams }
   | { kind: "saturator"; params: SaturatorParams }
+  | { kind: "limiter"; params: LimiterParamsEnvelope }
+  | { kind: "lofi"; params: LoFiParamsEnvelope }
   | { kind: "delay"; params: DelayParams }
-  | { kind: "reverb"; params: ReverbParams };
+  | { kind: "reverb"; params: ReverbParams }
+  | { kind: "chorus"; params: ChorusParamsEnvelope }
+  | { kind: "flanger"; params: FlangerParamsEnvelope }
+  | { kind: "phaser"; params: PhaserParamsEnvelope }
+  | { kind: "tremolo"; params: TremoloParamsEnvelope }
+  | { kind: "autopan"; params: AutoPanParamsEnvelope }
+  | { kind: "ensemble"; params: EnsembleParamsEnvelope };
 
 export type AudioEffectChainPreset = {
   id: string;

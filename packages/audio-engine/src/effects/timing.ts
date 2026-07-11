@@ -16,6 +16,8 @@ type EffectTiming = {
 }
 
 type EffectTimingInput =
+  | Extract<AudioEffectRuntimeInstance, { kind: 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' }>
+  | Extract<AudioEffectRuntimeInstance, { kind: 'utility' | 'autofilter' | 'gate' | 'limiter' | 'lofi' }>
   | { kind: 'eq'; params: EqParamsLite }
   | { kind: 'compressor'; params: CompressorParamsLite }
   | { kind: 'saturator'; params: SaturatorParamsLite }
@@ -48,6 +50,18 @@ export const getEffectTiming = (
   bpm = 120,
 ): EffectTiming => {
   const rate = Math.max(1, sampleRate)
+  if (input.kind === 'utility' || input.kind === 'lofi') {
+    return { latencyFrames: 0, tail: finite(0) }
+  }
+  if (input.kind === 'autofilter') {
+    return { latencyFrames: 6, tail: finite(0) }
+  }
+  if (input.kind === 'limiter') {
+    return { latencyFrames: Math.ceil(5 * rate / 1000), tail: finite(0) }
+  }
+  if (input.kind === 'gate') {
+    return { latencyFrames: Math.ceil(2 * rate / 1000), tail: finite(0) }
+  }
   if (input.kind === 'compressor') {
     return {
       latencyFrames: Math.ceil(COMPRESSOR_MAX_LOOKAHEAD_MS * rate / 1000),
@@ -68,6 +82,27 @@ export const getEffectTiming = (
       latencyFrames: 0,
       tail: finite(normalized.enabled ? (normalized.preDelayMs / 1000 + normalized.decaySec) * rate : 0),
     }
+  }
+  if (input.kind === 'chorus' || input.kind === 'flanger') {
+    if (!input.params.state.enabled || input.params.state.mix === 0) return { latencyFrames: 0, tail: finite(0) }
+    const delayFrames = (input.params.state.delayMs + input.params.state.depthMs) * rate / 1000
+    const feedback = Math.abs(input.params.state.feedback)
+    const repeats = feedback > 0 ? Math.max(1, Math.ceil(Math.log(1e-4) / Math.log(feedback))) : 1
+    return { latencyFrames: 0, tail: finite(delayFrames * repeats) }
+  }
+  if (input.kind === 'ensemble') {
+    return {
+      latencyFrames: 0,
+      tail: finite(input.params.state.enabled && input.params.state.mix > 0
+        ? (input.params.state.delayMs + input.params.state.depthMs) * rate / 1000
+        : 0),
+    }
+  }
+  if (input.kind === 'phaser') {
+    if (!input.params.state.enabled || input.params.state.mix === 0) return { latencyFrames: 0, tail: finite(0) }
+    const feedback = Math.abs(input.params.state.feedback)
+    const cycles = feedback > 0 ? Math.max(1, Math.ceil(Math.log(1e-4) / Math.log(feedback))) : 1
+    return { latencyFrames: 0, tail: finite(input.params.state.stages * cycles) }
   }
   return { latencyFrames: 0, tail: finite(0) }
 }

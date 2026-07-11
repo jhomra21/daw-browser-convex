@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   AUDIO_EFFECT_ORDER,
+  AUDIO_EFFECT_CONTRACTS,
   computeCompressorStaticCurveDb,
   COMPRESSOR_RATIO_MAX,
   createDefaultCompressorParams,
@@ -189,7 +190,7 @@ describe('Compressor params', () => {
   })
 
   test('adds compressor to audio effect order', () => {
-    expect(AUDIO_EFFECT_ORDER).toEqual(['eq', 'compressor', 'saturator', 'delay', 'reverb'])
+    expect(AUDIO_EFFECT_ORDER).toEqual(['utility', 'eq', 'autofilter', 'gate', 'compressor', 'saturator', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'delay', 'reverb'])
     expect(normalizeAudioEffectOrder(['delay', 'compressor'], ['eq', 'compressor', 'delay'])).toEqual(['delay', 'compressor', 'eq'])
   })
 
@@ -236,6 +237,31 @@ describe('Compressor params', () => {
   })
 })
 
+describe('Limiter params', () => {
+  test('normalizes the fixed true-peak state envelope', () => {
+    expect(AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams({ version: 1,
+      state: {
+        enabled: false,
+        ceilingDbtp: -20,
+        releaseMs: 5,
+        lookaheadMs: 20,
+        link: 2,
+        detectorOversampling: 8,
+      },
+    })).toEqual({
+      version: 1,
+      state: {
+        enabled: false,
+        ceilingDbtp: -12,
+        releaseMs: 20,
+        lookaheadMs: 5,
+        link: 1,
+        detectorOversampling: 4,
+      },
+    })
+  })
+})
+
 describe('Audio effect order', () => {
   test('normalizes order against enabled effects', () => {
     expect(normalizeAudioEffectOrder(['delay', 'unknown', 'eq', 'delay'], ['eq', 'delay', 'reverb'])).toEqual(['delay', 'eq', 'reverb'])
@@ -263,7 +289,7 @@ describe('Audio effect order', () => {
     expect(parseSharedTimelineOperation({
       kind: 'effects.reorderAudioChain',
       payload: { trackId: 'track-1', order: ['delay', 'chorus'] },
-    })).toBeNull()
+    })?.kind).toBe('effects.reorderAudioChain')
   })
 
   test('parses shared audio effect removal operations', () => {
@@ -291,7 +317,36 @@ describe('Audio effect order', () => {
     expect(parseSharedTimelineOperation({
       kind: 'effects.removeAudioEffect',
       payload: { targetType: 'track', trackId: 'track-1', effect: 'chorus' },
-    })).toBeNull()
+    })?.kind).toBe('effects.removeAudioEffect')
+  })
+})
+
+describe('Modulation effect contracts', () => {
+  test('normalizes v1 envelopes and includes all modulation kinds in order', () => {
+    expect(AUDIO_EFFECT_ORDER).toContain('chorus')
+    expect(AUDIO_EFFECT_ORDER).toContain('ensemble')
+    expect(AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams({ delayMs: 100, feedback: -1 })).toEqual({
+      version: 1,
+      state: {
+        enabled: true,
+        delayMs: 30,
+        depthMs: 4,
+        rateHz: 0.8,
+        feedback: 0,
+        stereoPhase: 0.25,
+        mix: 0.35,
+      },
+    })
+    expect(AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams({ version: 1, state: { stages: 5, centerHz: 1 } }).state)
+      .toMatchObject({ stages: 6, centerHz: 100 })
+    expect(AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams({ waveform: 'square' }).state.waveform).toBe('sine')
+    expect(AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams({ voices: 9 }).state.voices).toBe(3)
+  })
+
+  test('serializes normalized modulation envelopes stably', () => {
+    const normalized = AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams({ feedback: 2 })
+    expect(AUDIO_EFFECT_CONTRACTS.flanger.serializeParams(normalized))
+      .toBe(AUDIO_EFFECT_CONTRACTS.flanger.serializeParams(AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams({ feedback: 0.95 })))
   })
 })
 

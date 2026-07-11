@@ -4,6 +4,7 @@ import {
   normalizeCompressorParams,
   normalizeDelayParams,
   normalizeEqParams,
+  AUDIO_EFFECT_CONTRACTS,
   normalizeReverbParams,
   normalizeSaturatorParams,
 } from '@daw-browser/shared'
@@ -28,16 +29,32 @@ const snapshotAudioEffectRow = (row: EffectRowSnapshotInput): TrackAudioEffectSn
   const instanceId = typeof row.instanceId === 'string' ? row.instanceId : undefined
   const index = typeof row.index === 'number' ? row.index : undefined
   switch (effect) {
+    case 'utility':
+      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.utility.normalizeParams(row.params) }
     case 'eq':
       return { effect, instanceId, index, params: normalizeEqParams(row.params) }
+    case 'autofilter':
+      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(row.params) }
+    case 'gate':
+      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.gate.normalizeParams(row.params) }
     case 'compressor':
       return { effect, instanceId, index, params: normalizeCompressorParams(row.params) }
     case 'saturator':
       return { effect, instanceId, index, params: normalizeSaturatorParams(row.params) }
+    case 'limiter':
+      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(row.params) }
+    case 'lofi':
+      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(row.params) }
     case 'delay':
       return { effect, instanceId, index, params: normalizeDelayParams(row.params) }
     case 'reverb':
       return { effect, instanceId, index, params: normalizeReverbParams(row.params) }
+    case 'chorus': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(row.params) }
+    case 'flanger': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(row.params) }
+    case 'phaser': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(row.params) }
+    case 'tremolo': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(row.params) }
+    case 'autopan': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(row.params) }
+    case 'ensemble': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(row.params) }
   }
 }
 

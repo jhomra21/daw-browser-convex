@@ -43,6 +43,7 @@ import { scheduleAutomationEnvelope } from './automation'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { getExportRangeBounds, type ExportRange } from './export-range'
 import { convertStereoToMonoSample } from './mixer/channel-layout'
+import { scanTruePeak } from './true-peak-scanner'
 
 export type { AudioEffectRuntimeInstance }
 export type { ExportRange } from './export-range'
@@ -112,6 +113,36 @@ type SourceIsolatedRenderOptions = {
 type SourceAutomationScope = {
   trackIds?: ReadonlySet<string>
   includeMasterFx: boolean
+}
+
+export function resolveExportLimiterCeilingDbtp(
+  graph: ResolvedMixerGraph,
+): number | undefined {
+  const ceilings: number[] = []
+  for (const instance of graph.master.instances ?? []) {
+    if (instance.kind === 'limiter' && instance.params.state.enabled) {
+      ceilings.push(instance.params.state.ceilingDbtp)
+    }
+  }
+  return ceilings.length === 0 ? undefined : Math.min(...ceilings)
+}
+
+export function assertExportTruePeakWithinLimiterCeiling(
+  buffer: {
+    numberOfChannels: number
+    length: number
+    getChannelData: (channel: number) => Float32Array<ArrayBufferLike>
+  },
+  ceilingDbtp: number | undefined,
+  signal?: AbortSignal,
+): void {
+  if (ceilingDbtp === undefined) return
+  const measured = scanTruePeak(buffer, signal)
+  if (measured.peakDbtp > ceilingDbtp + 0.1) {
+    throw new Error(
+      `Export true peak ${measured.peakDbtp.toFixed(2)} dBTP exceeds the reachable limiter ceiling ${ceilingDbtp.toFixed(2)} dBTP (+0.10 dB tolerance).`,
+    )
+  }
 }
 
 export function isAutomationEnvelopeInSourceScope(
@@ -530,11 +561,18 @@ async function renderSourceIsolatedMixdownFromPrepared(
     const rendered = await ctx.startRendering()
     mixerNodes.assertCompressorProcessorsHealthy()
     throwIfAborted(prepared.signal)
-    if (prepared.numberOfChannels !== 1 || rendered.numberOfChannels === 1) return rendered
-    return downmixStereoBufferToMono(
+    const output = prepared.numberOfChannels !== 1 || rendered.numberOfChannels === 1
+      ? rendered
+      : downmixStereoBufferToMono(
       rendered,
       (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
     )
+    assertExportTruePeakWithinLimiterCeiling(
+      output,
+      resolveExportLimiterCeilingDbtp(graph),
+      prepared.signal,
+    )
+    return output
   } finally {
     mixerNodes.dispose()
   }

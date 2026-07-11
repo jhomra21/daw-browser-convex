@@ -593,8 +593,410 @@ export function computeCompressorStaticCurveDb(inputDb: number, params: Compress
   return inputDb + ((1 / ratio - 1) * x * x) / (2 * knee)
 }
 
-export type AudioEffectKind = 'eq' | 'compressor' | 'saturator' | 'delay' | 'reverb'
-export type MasterAudioEffectKind = 'master-eq' | 'master-compressor' | 'master-saturator' | 'master-delay' | 'master-reverb'
+export type ProcessorStateEnvelope<TState> = { version: 1; state: TState }
+export type UtilityPolarity = 'normal' | 'invert'
+export type UtilityInputMode = 'stereo' | 'mono-sum'
+export type UtilityMatrix = 'stereo' | 'mid-side-encode' | 'mid-side-decode'
+export type UtilityParams = {
+  enabled: boolean
+  gainDb: number
+  polarity: UtilityPolarity
+  inputMode: UtilityInputMode
+  pan: number
+  balance: number
+  width: number
+  matrix: UtilityMatrix
+  swap: boolean
+  dcBlock: boolean
+}
+export type UtilityParamsInput = Partial<Omit<UtilityParams, 'polarity' | 'inputMode' | 'matrix'>> & {
+  polarity?: unknown
+  inputMode?: unknown
+  matrix?: unknown
+}
+export type UtilityParamsEnvelope = ProcessorStateEnvelope<UtilityParams>
+
+const isObjectRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+const readObject = (value: unknown): Record<string, unknown> => isObjectRecord(value) ? value : {}
+
+export function createDefaultUtilityParams(): UtilityParams {
+  return { enabled: true, gainDb: 0, polarity: 'normal', inputMode: 'stereo', pan: 0, balance: 0, width: 1, matrix: 'stereo', swap: false, dcBlock: true }
+}
+
+export function normalizeUtilityParams(input: UtilityParamsInput = {}): UtilityParams {
+  const defaults = createDefaultUtilityParams()
+  const gainDb = readFiniteNumber(input.gainDb)
+  const pan = readFiniteNumber(input.pan)
+  const balance = readFiniteNumber(input.balance)
+  const width = readFiniteNumber(input.width)
+  return {
+    enabled: typeof input.enabled === 'boolean' ? input.enabled : defaults.enabled,
+    gainDb: gainDb === undefined ? defaults.gainDb : clamp(gainDb, -60, 24),
+    polarity: input.polarity === 'invert' ? 'invert' : 'normal',
+    inputMode: input.inputMode === 'mono-sum' ? 'mono-sum' : 'stereo',
+    pan: pan === undefined ? defaults.pan : clamp(pan, -1, 1),
+    balance: balance === undefined ? defaults.balance : clamp(balance, -1, 1),
+    width: width === undefined ? defaults.width : clamp(width, 0, 2),
+    matrix: input.matrix === 'mid-side-encode' || input.matrix === 'mid-side-decode' ? input.matrix : 'stereo',
+    swap: typeof input.swap === 'boolean' ? input.swap : defaults.swap,
+    dcBlock: typeof input.dcBlock === 'boolean' ? input.dcBlock : defaults.dcBlock,
+  }
+}
+
+export const normalizeUtilityParamsForUpdate = (input: UtilityParamsInput, existing?: UtilityParamsInput) => normalizeUtilityParams({ ...(existing ? normalizeUtilityParams(existing) : {}), ...input })
+export const serializeUtilityParams = (params: UtilityParams) => JSON.stringify({ version: 1, state: normalizeUtilityParams(params) })
+export const normalizeUtilityParamsEnvelope = (value: unknown): UtilityParamsEnvelope => {
+  const envelope = readObject(value)
+  const state = readObject(envelope.version === 1 ? envelope.state : value)
+  return {
+    version: 1,
+    state: normalizeUtilityParams({
+      enabled: state.enabled === true || state.enabled === false ? state.enabled : undefined,
+      gainDb: typeof state.gainDb === 'number' ? state.gainDb : undefined,
+      polarity: state.polarity,
+      inputMode: state.inputMode,
+      pan: typeof state.pan === 'number' ? state.pan : undefined,
+      balance: typeof state.balance === 'number' ? state.balance : undefined,
+      width: typeof state.width === 'number' ? state.width : undefined,
+      matrix: state.matrix,
+      swap: state.swap === true || state.swap === false ? state.swap : undefined,
+      dcBlock: state.dcBlock === true || state.dcBlock === false ? state.dcBlock : undefined,
+    }),
+  }
+}
+
+export type GateMode = 'gate' | 'expander'
+export type GateDetector = 'peak' | 'rms'
+export type GateParams = {
+  enabled: boolean
+  mode: GateMode
+  thresholdDb: number
+  ratio: number
+  attackMs: number
+  holdMs: number
+  releaseMs: number
+  hysteresisDb: number
+  rangeDb: number
+  lookaheadMs: number
+  detector: GateDetector
+  link: number
+  sidechain: { enabled: boolean; filterType: 'highpass'; frequencyHz: number; q: number }
+}
+export type GateParamsInput = Partial<Omit<GateParams, 'mode' | 'detector' | 'sidechain'>> & {
+  mode?: unknown
+  detector?: unknown
+  sidechain?: Partial<GateParams['sidechain']>
+}
+export type GateParamsEnvelope = ProcessorStateEnvelope<GateParams>
+
+export function createDefaultGateParams(): GateParams {
+  return { enabled: true, mode: 'gate', thresholdDb: -40, ratio: 4, attackMs: 1, holdMs: 20, releaseMs: 120, hysteresisDb: 6, rangeDb: -80, lookaheadMs: 0, detector: 'peak', link: 1, sidechain: { enabled: false, filterType: 'highpass', frequencyHz: 80, q: 0.707 } }
+}
+
+export function normalizeGateParams(input: GateParamsInput = {}): GateParams {
+  const defaults = createDefaultGateParams()
+  const number = (value: unknown, fallback: number, min: number, max: number) => {
+    const finite = readFiniteNumber(value)
+    return finite === undefined ? fallback : clamp(finite, min, max)
+  }
+  return {
+    enabled: typeof input.enabled === 'boolean' ? input.enabled : defaults.enabled,
+    mode: input.mode === 'expander' ? 'expander' : 'gate',
+    thresholdDb: number(input.thresholdDb, defaults.thresholdDb, -80, 0),
+    ratio: number(input.ratio, defaults.ratio, 1, 20),
+    attackMs: number(input.attackMs, defaults.attackMs, 0.1, 100),
+    holdMs: number(input.holdMs, defaults.holdMs, 0, 500),
+    releaseMs: number(input.releaseMs, defaults.releaseMs, 5, 2000),
+    hysteresisDb: number(input.hysteresisDb, defaults.hysteresisDb, 0, 24),
+    rangeDb: number(input.rangeDb, defaults.rangeDb, -80, 0),
+    lookaheadMs: number(input.lookaheadMs, defaults.lookaheadMs, 0, 2),
+    detector: input.detector === 'rms' ? 'rms' : 'peak',
+    link: number(input.link, defaults.link, 0, 1),
+    sidechain: {
+      enabled: typeof input.sidechain?.enabled === 'boolean' ? input.sidechain.enabled : defaults.sidechain.enabled,
+      filterType: 'highpass',
+      frequencyHz: number(input.sidechain?.frequencyHz, defaults.sidechain.frequencyHz, 20, 20000),
+      q: number(input.sidechain?.q, defaults.sidechain.q, 0.1, 18),
+    },
+  }
+}
+
+export const normalizeGateParamsForUpdate = (input: GateParamsInput, existing?: GateParamsInput) => normalizeGateParams({ ...(existing ? normalizeGateParams(existing) : {}), ...input, sidechain: { ...(existing?.sidechain ?? {}), ...(input.sidechain ?? {}) } })
+export const serializeGateParams = (params: GateParams) => JSON.stringify({ version: 1, state: normalizeGateParams(params) })
+export const normalizeGateParamsEnvelope = (value: unknown): GateParamsEnvelope => {
+  const envelope = readObject(value)
+  const state = readObject(envelope.version === 1 ? envelope.state : value)
+  const sidechain = readObject(state.sidechain)
+  return {
+    version: 1,
+    state: normalizeGateParams({
+      enabled: state.enabled === true || state.enabled === false ? state.enabled : undefined,
+      mode: state.mode,
+      thresholdDb: typeof state.thresholdDb === 'number' ? state.thresholdDb : undefined,
+      ratio: typeof state.ratio === 'number' ? state.ratio : undefined,
+      attackMs: typeof state.attackMs === 'number' ? state.attackMs : undefined,
+      holdMs: typeof state.holdMs === 'number' ? state.holdMs : undefined,
+      releaseMs: typeof state.releaseMs === 'number' ? state.releaseMs : undefined,
+      hysteresisDb: typeof state.hysteresisDb === 'number' ? state.hysteresisDb : undefined,
+      rangeDb: typeof state.rangeDb === 'number' ? state.rangeDb : undefined,
+      lookaheadMs: typeof state.lookaheadMs === 'number' ? state.lookaheadMs : undefined,
+      detector: state.detector,
+      link: typeof state.link === 'number' ? state.link : undefined,
+      sidechain: {
+        enabled: sidechain.enabled === true || sidechain.enabled === false ? sidechain.enabled : undefined,
+        frequencyHz: typeof sidechain.frequencyHz === 'number' ? sidechain.frequencyHz : undefined,
+        q: typeof sidechain.q === 'number' ? sidechain.q : undefined,
+      },
+    }),
+  }
+}
+
+export type LimiterParams = {
+  enabled: boolean
+  ceilingDbtp: number
+  releaseMs: number
+  lookaheadMs: number
+  link: number
+  detectorOversampling: 4
+}
+export type LimiterParamsInput = Partial<Omit<LimiterParams, 'detectorOversampling'>> & {
+  detectorOversampling?: unknown
+}
+export type LimiterParamsEnvelope = ProcessorStateEnvelope<LimiterParams>
+
+export function createDefaultLimiterParams(): LimiterParams {
+  return { enabled: true, ceilingDbtp: -1, releaseMs: 100, lookaheadMs: 5, link: 1, detectorOversampling: 4 }
+}
+
+export function normalizeLimiterParams(input: LimiterParamsInput = {}): LimiterParams {
+  const defaults = createDefaultLimiterParams()
+  const ceilingDbtp = readFiniteNumber(input.ceilingDbtp)
+  const releaseMs = readFiniteNumber(input.releaseMs)
+  const lookaheadMs = readFiniteNumber(input.lookaheadMs)
+  const link = readFiniteNumber(input.link)
+  return {
+    enabled: typeof input.enabled === 'boolean' ? input.enabled : defaults.enabled,
+    ceilingDbtp: ceilingDbtp === undefined ? defaults.ceilingDbtp : clamp(ceilingDbtp, -12, 0),
+    releaseMs: releaseMs === undefined ? defaults.releaseMs : clamp(releaseMs, 20, 1000),
+    lookaheadMs: lookaheadMs === undefined ? defaults.lookaheadMs : clamp(lookaheadMs, 1, 5),
+    link: link === undefined ? defaults.link : clamp(link, 0, 1),
+    detectorOversampling: 4,
+  }
+}
+
+export const serializeLimiterParams = (params: LimiterParams) => JSON.stringify({ version: 1, state: normalizeLimiterParams(params) })
+export const normalizeLimiterParamsEnvelope = (value: unknown): LimiterParamsEnvelope => {
+  const envelope = readObject(value)
+  const state = readObject(envelope.version === 1 ? envelope.state : value)
+  return {
+    version: 1,
+    state: normalizeLimiterParams({
+      enabled: state.enabled === true || state.enabled === false ? state.enabled : undefined,
+      ceilingDbtp: typeof state.ceilingDbtp === 'number' ? state.ceilingDbtp : undefined,
+      releaseMs: typeof state.releaseMs === 'number' ? state.releaseMs : undefined,
+      lookaheadMs: typeof state.lookaheadMs === 'number' ? state.lookaheadMs : undefined,
+      link: typeof state.link === 'number' ? state.link : undefined,
+      detectorOversampling: state.detectorOversampling,
+    }),
+  }
+}
+
+export type AutoFilterMode = 'lowpass' | 'highpass' | 'bandpass' | 'notch' | 'peak'
+export type AutoFilterWaveform = 'sine' | 'triangle'
+export type AutoFilterParams = {
+  enabled: boolean
+  mode: AutoFilterMode
+  frequencyHz: number
+  resonance: number
+  driveDb: number
+  mix: number
+  envelope: { amountOctaves: number; attackMs: number; releaseMs: number }
+  lfo: { waveform: AutoFilterWaveform; rateHz: number; depthOctaves: number; phaseOffset: number; stereoPhase: number }
+  quality: '2x'
+}
+export type AutoFilterParamsInput = Partial<Omit<AutoFilterParams, 'mode' | 'envelope' | 'lfo' | 'quality'>> & {
+  mode?: unknown
+  envelope?: Partial<AutoFilterParams['envelope']>
+  lfo?: Partial<Omit<AutoFilterParams['lfo'], 'waveform'>> & { waveform?: unknown }
+  quality?: unknown
+}
+export type AutoFilterParamsEnvelope = ProcessorStateEnvelope<AutoFilterParams>
+
+export function createDefaultAutoFilterParams(): AutoFilterParams {
+  return {
+    enabled: true,
+    mode: 'lowpass',
+    frequencyHz: 1000,
+    resonance: 0.25,
+    driveDb: 0,
+    mix: 1,
+    envelope: { amountOctaves: 0, attackMs: 10, releaseMs: 100 },
+    lfo: { waveform: 'sine', rateHz: 1, depthOctaves: 0, phaseOffset: 0, stereoPhase: 0 },
+    quality: '2x',
+  }
+}
+
+export function normalizeAutoFilterParams(input: AutoFilterParamsInput = {}): AutoFilterParams {
+  const defaults = createDefaultAutoFilterParams()
+  const number = (value: unknown, fallback: number, min: number, max: number) => {
+    const finite = readFiniteNumber(value)
+    return finite === undefined ? fallback : clamp(finite, min, max)
+  }
+  const mode = input.mode
+  return {
+    enabled: typeof input.enabled === 'boolean' ? input.enabled : defaults.enabled,
+    mode: mode === 'highpass' || mode === 'bandpass' || mode === 'notch' || mode === 'peak' ? mode : 'lowpass',
+    frequencyHz: number(input.frequencyHz, defaults.frequencyHz, 20, 20000),
+    resonance: number(input.resonance, defaults.resonance, 0, 1),
+    driveDb: number(input.driveDb, defaults.driveDb, 0, 24),
+    mix: number(input.mix, defaults.mix, 0, 1),
+    envelope: {
+      amountOctaves: number(input.envelope?.amountOctaves, defaults.envelope.amountOctaves, -6, 6),
+      attackMs: number(input.envelope?.attackMs, defaults.envelope.attackMs, 0.5, 500),
+      releaseMs: number(input.envelope?.releaseMs, defaults.envelope.releaseMs, 5, 2000),
+    },
+    lfo: {
+      waveform: input.lfo?.waveform === 'triangle' ? 'triangle' : 'sine',
+      rateHz: number(input.lfo?.rateHz, defaults.lfo.rateHz, 0.01, 20),
+      depthOctaves: number(input.lfo?.depthOctaves, defaults.lfo.depthOctaves, 0, 6),
+      phaseOffset: number(input.lfo?.phaseOffset, defaults.lfo.phaseOffset, 0, 1),
+      stereoPhase: number(input.lfo?.stereoPhase, defaults.lfo.stereoPhase, -0.5, 0.5),
+    },
+    quality: '2x',
+  }
+}
+
+export const serializeAutoFilterParams = (params: AutoFilterParams) => JSON.stringify({ version: 1, state: normalizeAutoFilterParams(params) })
+export const normalizeAutoFilterParamsEnvelope = (value: unknown): AutoFilterParamsEnvelope => {
+  const envelope = readObject(value)
+  const state = readObject(envelope.version === 1 ? envelope.state : value)
+  const env = readObject(state.envelope)
+  const lfo = readObject(state.lfo)
+  return {
+    version: 1,
+    state: normalizeAutoFilterParams({
+      enabled: state.enabled === true || state.enabled === false ? state.enabled : undefined,
+      mode: state.mode,
+      frequencyHz: typeof state.frequencyHz === 'number' ? state.frequencyHz : undefined,
+      resonance: typeof state.resonance === 'number' ? state.resonance : undefined,
+      driveDb: typeof state.driveDb === 'number' ? state.driveDb : undefined,
+      mix: typeof state.mix === 'number' ? state.mix : undefined,
+      envelope: {
+        amountOctaves: typeof env.amountOctaves === 'number' ? env.amountOctaves : undefined,
+        attackMs: typeof env.attackMs === 'number' ? env.attackMs : undefined,
+        releaseMs: typeof env.releaseMs === 'number' ? env.releaseMs : undefined,
+      },
+      lfo: {
+        waveform: lfo.waveform,
+        rateHz: typeof lfo.rateHz === 'number' ? lfo.rateHz : undefined,
+        depthOctaves: typeof lfo.depthOctaves === 'number' ? lfo.depthOctaves : undefined,
+        phaseOffset: typeof lfo.phaseOffset === 'number' ? lfo.phaseOffset : undefined,
+        stereoPhase: typeof lfo.stereoPhase === 'number' ? lfo.stereoPhase : undefined,
+      },
+      quality: state.quality,
+    }),
+  }
+}
+
+export type ModulationWaveform = 'sine' | 'triangle'
+export type PhaserStages = 4 | 6 | 8 | 12
+export type ChorusParams = { enabled: boolean; delayMs: number; depthMs: number; rateHz: number; feedback: number; stereoPhase: number; mix: number }
+export type FlangerParams = ChorusParams
+export type PhaserParams = { enabled: boolean; stages: PhaserStages; centerHz: number; depthOctaves: number; rateHz: number; feedback: number; stereoPhase: number; mix: number }
+export type TremoloParams = { enabled: boolean; waveform: ModulationWaveform; rateHz: number; depth: number; shape: number; phase: number }
+export type AutoPanParams = TremoloParams
+export type EnsembleParams = { enabled: boolean; voices: 3; delayMs: number; depthMs: number; rateHz: number; spread: number; mix: number }
+export type ChorusParamsEnvelope = ProcessorStateEnvelope<ChorusParams>
+export type FlangerParamsEnvelope = ProcessorStateEnvelope<FlangerParams>
+export type PhaserParamsEnvelope = ProcessorStateEnvelope<PhaserParams>
+export type TremoloParamsEnvelope = ProcessorStateEnvelope<TremoloParams>
+export type AutoPanParamsEnvelope = ProcessorStateEnvelope<AutoPanParams>
+export type EnsembleParamsEnvelope = ProcessorStateEnvelope<EnsembleParams>
+
+const normalizeNumber = (value: unknown, fallback: number, min: number, max: number) => typeof value === 'number' && Number.isFinite(value) ? clamp(value, min, max) : fallback
+const normalizeModulationEnvelope = <T>(value: unknown, normalize: (state: Record<string, unknown>) => T): ProcessorStateEnvelope<T> => {
+  const envelope = readObject(value)
+  return { version: 1, state: normalize(readObject(envelope.version === 1 ? envelope.state : value)) }
+}
+export const createDefaultChorusParams = (): ChorusParams => ({ enabled: true, delayMs: 12, depthMs: 4, rateHz: 0.8, feedback: 0, stereoPhase: 0.25, mix: 0.35 })
+export const createDefaultFlangerParams = (): FlangerParams => ({ enabled: true, delayMs: 1.5, depthMs: 1, rateHz: 0.2, feedback: 0.35, stereoPhase: 0.5, mix: 0.5 })
+export const createDefaultPhaserParams = (): PhaserParams => ({ enabled: true, stages: 6, centerHz: 1000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5, mix: 0.5 })
+export const createDefaultTremoloParams = (): TremoloParams => ({ enabled: true, waveform: 'sine', rateHz: 4, depth: 0.5, shape: 0.5, phase: 0 })
+export const createDefaultAutoPanParams = (): AutoPanParams => ({ enabled: true, waveform: 'sine', rateHz: 1, depth: 1, shape: 0.5, phase: 0 })
+export const createDefaultEnsembleParams = (): EnsembleParams => ({ enabled: true, voices: 3, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5 })
+export const normalizeChorusParamsEnvelope = (value: unknown): ChorusParamsEnvelope => normalizeModulationEnvelope(value, (state) => {
+  const defaults = createDefaultChorusParams()
+  return { enabled: typeof state.enabled === 'boolean' ? state.enabled : true, delayMs: normalizeNumber(state.delayMs, defaults.delayMs, 5, 30), depthMs: normalizeNumber(state.depthMs, defaults.depthMs, 0, 10), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), feedback: normalizeNumber(state.feedback, defaults.feedback, 0, 0.5), stereoPhase: normalizeNumber(state.stereoPhase, defaults.stereoPhase, -0.5, 0.5), mix: normalizeNumber(state.mix, defaults.mix, 0, 1) }
+})
+export const normalizeFlangerParamsEnvelope = (value: unknown): FlangerParamsEnvelope => normalizeModulationEnvelope(value, (state) => {
+  const defaults = createDefaultFlangerParams()
+  return { enabled: typeof state.enabled === 'boolean' ? state.enabled : true, delayMs: normalizeNumber(state.delayMs, defaults.delayMs, 0.1, 10), depthMs: normalizeNumber(state.depthMs, defaults.depthMs, 0, 5), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), feedback: normalizeNumber(state.feedback, defaults.feedback, -0.95, 0.95), stereoPhase: normalizeNumber(state.stereoPhase, defaults.stereoPhase, -0.5, 0.5), mix: normalizeNumber(state.mix, defaults.mix, 0, 1) }
+})
+export const normalizePhaserParamsEnvelope = (value: unknown): PhaserParamsEnvelope => normalizeModulationEnvelope(value, (state) => {
+  const defaults = createDefaultPhaserParams()
+  return { enabled: typeof state.enabled === 'boolean' ? state.enabled : true, stages: state.stages === 4 || state.stages === 6 || state.stages === 8 || state.stages === 12 ? state.stages : defaults.stages, centerHz: normalizeNumber(state.centerHz, defaults.centerHz, 100, 8000), depthOctaves: normalizeNumber(state.depthOctaves, defaults.depthOctaves, 0, 5), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), feedback: normalizeNumber(state.feedback, defaults.feedback, -0.95, 0.95), stereoPhase: normalizeNumber(state.stereoPhase, defaults.stereoPhase, -0.5, 0.5), mix: normalizeNumber(state.mix, defaults.mix, 0, 1) }
+})
+const normalizeAmplitudeModulation = (value: unknown, defaults: TremoloParams): TremoloParamsEnvelope => normalizeModulationEnvelope(value, (state) => ({ enabled: typeof state.enabled === 'boolean' ? state.enabled : true, waveform: state.waveform === 'triangle' ? 'triangle' : 'sine', rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), depth: normalizeNumber(state.depth, defaults.depth, 0, 1), shape: normalizeNumber(state.shape, defaults.shape, 0, 1), phase: normalizeNumber(state.phase, defaults.phase, 0, 1) }))
+export const normalizeTremoloParamsEnvelope = (value: unknown): TremoloParamsEnvelope => normalizeAmplitudeModulation(value, createDefaultTremoloParams())
+export const normalizeAutoPanParamsEnvelope = (value: unknown): AutoPanParamsEnvelope => normalizeAmplitudeModulation(value, createDefaultAutoPanParams())
+export const normalizeEnsembleParamsEnvelope = (value: unknown): EnsembleParamsEnvelope => normalizeModulationEnvelope(value, (state) => {
+  const defaults = createDefaultEnsembleParams()
+  return { enabled: typeof state.enabled === 'boolean' ? state.enabled : true, voices: 3, delayMs: normalizeNumber(state.delayMs, defaults.delayMs, 10, 30), depthMs: normalizeNumber(state.depthMs, defaults.depthMs, 1, 12), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.05, 5), spread: normalizeNumber(state.spread, defaults.spread, 0, 1), mix: normalizeNumber(state.mix, defaults.mix, 0, 1) }
+})
+
+export type LoFiQuantization = 'round' | 'floor' | 'truncate'
+export type LoFiDither = 'off' | 'rectangular' | 'triangular'
+export type LoFiParams = {
+  enabled: boolean
+  bitDepth: number
+  sampleRateRatio: number
+  jitter: number
+  noiseDb: number
+  quantization: LoFiQuantization
+  dither: LoFiDither
+  mix: number
+  seed: number
+}
+export type LoFiParamsEnvelope = ProcessorStateEnvelope<LoFiParams>
+
+export const createDefaultLoFiParams = (): LoFiParams => ({
+  enabled: true,
+  bitDepth: 12,
+  sampleRateRatio: 1,
+  jitter: 0,
+  noiseDb: -80,
+  quantization: 'round',
+  dither: 'off',
+  mix: 1,
+  seed: 1,
+})
+
+export const normalizeLoFiParamsEnvelope = (value: unknown): LoFiParamsEnvelope => {
+  const envelope = readObject(value)
+  const state = readObject(envelope.version === 1 ? envelope.state : value)
+  const defaults = createDefaultLoFiParams()
+  const seed = normalizeNumber(state.seed, defaults.seed, 1, 0xffffffff)
+  return {
+    version: 1,
+    state: {
+      enabled: typeof state.enabled === 'boolean' ? state.enabled : defaults.enabled,
+      bitDepth: Math.round(normalizeNumber(state.bitDepth, defaults.bitDepth, 2, 24)),
+      sampleRateRatio: normalizeNumber(state.sampleRateRatio, defaults.sampleRateRatio, 0.01, 1),
+      jitter: normalizeNumber(state.jitter, defaults.jitter, 0, 1),
+      noiseDb: normalizeNumber(state.noiseDb, defaults.noiseDb, -120, -24),
+      quantization: state.quantization === 'floor' || state.quantization === 'truncate' ? state.quantization : 'round',
+      dither: state.dither === 'rectangular' || state.dither === 'triangular' ? state.dither : 'off',
+      mix: normalizeNumber(state.mix, defaults.mix, 0, 1),
+      seed: Math.max(1, Math.round(seed)) >>> 0,
+    },
+  }
+}
+
+export type AudioEffectKind = 'utility' | 'eq' | 'autofilter' | 'gate' | 'compressor' | 'saturator' | 'lofi' | 'limiter' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' | 'delay' | 'reverb'
+export type PlannedAudioEffectKind = AudioEffectKind
+export type MasterAudioEffectKind = `master-${AudioEffectKind}`
 export type AudioEffectInstance = {
   id: string
   kind: AudioEffectKind
@@ -641,23 +1043,106 @@ type ReverbAudioEffectContract = {
   serializeParams: (params: ReverbParams) => string
 }
 
+type UtilityAudioEffectContract = {
+  kind: 'utility'
+  masterKind: 'master-utility'
+  createDefaultParams: () => UtilityParamsEnvelope
+  normalizeParams: (params: unknown) => UtilityParamsEnvelope
+  serializeParams: (params: UtilityParamsEnvelope) => string
+}
+type AutoFilterAudioEffectContract = {
+  kind: 'autofilter'
+  masterKind: 'master-autofilter'
+  createDefaultParams: () => AutoFilterParamsEnvelope
+  normalizeParams: (params: unknown) => AutoFilterParamsEnvelope
+  serializeParams: (params: AutoFilterParamsEnvelope) => string
+}
+
+type GateAudioEffectContract = {
+  kind: 'gate'
+  masterKind: 'master-gate'
+  createDefaultParams: () => GateParamsEnvelope
+  normalizeParams: (params: unknown) => GateParamsEnvelope
+  serializeParams: (params: GateParamsEnvelope) => string
+}
+
+type LimiterAudioEffectContract = {
+  kind: 'limiter'
+  masterKind: 'master-limiter'
+  createDefaultParams: () => LimiterParamsEnvelope
+  normalizeParams: (params: unknown) => LimiterParamsEnvelope
+  serializeParams: (params: LimiterParamsEnvelope) => string
+}
+type LoFiAudioEffectContract = {
+  kind: 'lofi'
+  masterKind: 'master-lofi'
+  createDefaultParams: () => LoFiParamsEnvelope
+  normalizeParams: (params: unknown) => LoFiParamsEnvelope
+  serializeParams: (params: LoFiParamsEnvelope) => string
+}
 type AudioEffectContractByKind = {
+  utility: UtilityAudioEffectContract
   eq: EqAudioEffectContract
+  autofilter: AutoFilterAudioEffectContract
+  gate: GateAudioEffectContract
+  limiter: LimiterAudioEffectContract
+  lofi: LoFiAudioEffectContract
   compressor: CompressorAudioEffectContract
   saturator: SaturatorAudioEffectContract
   delay: DelayAudioEffectContract
   reverb: ReverbAudioEffectContract
+  chorus: any
+  flanger: any
+  phaser: any
+  tremolo: any
+  autopan: any
+  ensemble: any
 }
 
 export type AudioEffectContract = AudioEffectContractByKind[AudioEffectKind]
 
 export const AUDIO_EFFECT_CONTRACTS = {
+  utility: {
+    kind: 'utility',
+    masterKind: 'master-utility',
+    createDefaultParams: () => ({ version: 1, state: createDefaultUtilityParams() }),
+    normalizeParams: normalizeUtilityParamsEnvelope,
+    serializeParams: (params: UtilityParamsEnvelope) => serializeUtilityParams(params.state),
+  },
   eq: {
     kind: 'eq',
     masterKind: 'master-eq',
     createDefaultParams: createDefaultEqParams,
     normalizeParams: normalizeEqParams,
     serializeParams: serializeEqParams,
+  },
+  autofilter: {
+    kind: 'autofilter',
+    masterKind: 'master-autofilter',
+    createDefaultParams: () => ({ version: 1, state: createDefaultAutoFilterParams() }),
+    normalizeParams: normalizeAutoFilterParamsEnvelope,
+    serializeParams: (params: AutoFilterParamsEnvelope) => serializeAutoFilterParams(params.state),
+  },
+  gate: {
+    kind: 'gate',
+    masterKind: 'master-gate',
+    createDefaultParams: () => ({ version: 1, state: createDefaultGateParams() }),
+    normalizeParams: normalizeGateParamsEnvelope,
+    serializeParams: (params: GateParamsEnvelope) => serializeGateParams(params.state),
+  },
+  limiter: {
+    kind: 'limiter',
+    masterKind: 'master-limiter',
+    createDefaultParams: () => ({ version: 1, state: createDefaultLimiterParams() }),
+    normalizeParams: normalizeLimiterParamsEnvelope,
+    serializeParams: (params: LimiterParamsEnvelope) => serializeLimiterParams(params.state),
+  },
+  lofi: {
+    kind: 'lofi',
+    masterKind: 'master-lofi',
+    createDefaultParams: () => ({ version: 1, state: createDefaultLoFiParams() }),
+    normalizeParams: normalizeLoFiParamsEnvelope,
+    serializeParams: (params: LoFiParamsEnvelope) => JSON.stringify(normalizeLoFiParamsEnvelope(params)),
   },
   compressor: {
     kind: 'compressor',
@@ -687,12 +1172,19 @@ export const AUDIO_EFFECT_CONTRACTS = {
     normalizeParams: normalizeReverbParams,
     serializeParams: serializeReverbParams,
   },
+  chorus: { kind: 'chorus', masterKind: 'master-chorus', createDefaultParams: () => ({ version: 1, state: createDefaultChorusParams() }), normalizeParams: normalizeChorusParamsEnvelope, serializeParams: (params: ChorusParamsEnvelope) => JSON.stringify(normalizeChorusParamsEnvelope(params)) },
+  flanger: { kind: 'flanger', masterKind: 'master-flanger', createDefaultParams: () => ({ version: 1, state: createDefaultFlangerParams() }), normalizeParams: normalizeFlangerParamsEnvelope, serializeParams: (params: FlangerParamsEnvelope) => JSON.stringify(normalizeFlangerParamsEnvelope(params)) },
+  phaser: { kind: 'phaser', masterKind: 'master-phaser', createDefaultParams: () => ({ version: 1, state: createDefaultPhaserParams() }), normalizeParams: normalizePhaserParamsEnvelope, serializeParams: (params: PhaserParamsEnvelope) => JSON.stringify(normalizePhaserParamsEnvelope(params)) },
+  tremolo: { kind: 'tremolo', masterKind: 'master-tremolo', createDefaultParams: () => ({ version: 1, state: createDefaultTremoloParams() }), normalizeParams: normalizeTremoloParamsEnvelope, serializeParams: (params: TremoloParamsEnvelope) => JSON.stringify(normalizeTremoloParamsEnvelope(params)) },
+  autopan: { kind: 'autopan', masterKind: 'master-autopan', createDefaultParams: () => ({ version: 1, state: createDefaultAutoPanParams() }), normalizeParams: normalizeAutoPanParamsEnvelope, serializeParams: (params: AutoPanParamsEnvelope) => JSON.stringify(normalizeAutoPanParamsEnvelope(params)) },
+  ensemble: { kind: 'ensemble', masterKind: 'master-ensemble', createDefaultParams: () => ({ version: 1, state: createDefaultEnsembleParams() }), normalizeParams: normalizeEnsembleParamsEnvelope, serializeParams: (params: EnsembleParamsEnvelope) => JSON.stringify(normalizeEnsembleParamsEnvelope(params)) },
 } satisfies AudioEffectContractByKind
 
-export const AUDIO_EFFECT_ORDER: AudioEffectKind[] = ['eq', 'compressor', 'saturator', 'delay', 'reverb']
+const AUDIO_EFFECT_CATALOG_ORDER: PlannedAudioEffectKind[] = ['utility', 'eq', 'autofilter', 'gate', 'compressor', 'saturator', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'delay', 'reverb']
+export const AUDIO_EFFECT_ORDER: AudioEffectKind[] = AUDIO_EFFECT_CATALOG_ORDER
 
 export function isAudioEffectKind(value: unknown): value is AudioEffectKind {
-  return value === 'eq' || value === 'compressor' || value === 'saturator' || value === 'delay' || value === 'reverb'
+  return AUDIO_EFFECT_ORDER.some((kind) => value === kind)
 }
 
 export function normalizeAudioEffectOrder(order: readonly unknown[], enabled: readonly AudioEffectKind[]): AudioEffectKind[] {

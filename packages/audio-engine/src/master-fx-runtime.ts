@@ -11,6 +11,15 @@ import type { AutomationAudioBinding } from './automation'
 import { resolveDelayAutomationBindings, resolveEqAutomationBindings, resolveReverbAutomationBindings, resolveSaturatorAutomationBindings } from './automation-bindings'
 import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import type { ResolveMixerGraphOptions } from './mixer/types'
+import { applyStaticWorkletNodeParams, createStaticWorkletNodeChain, disconnectStaticWorkletNodeChain, resolveStaticWorkletAutomationBinding, subscribeStaticGateMeter, type GateMeterListener, type StaticWorkletKind, type StaticWorkletNodeChain } from './effects/static-worklet-chain'
+
+const MAX_EFFECTS_PER_CHAIN = 16
+const isStaticWorkletKind = (kind: AudioEffectKind): kind is StaticWorkletKind =>
+  kind === 'utility' || kind === 'autofilter' || kind === 'gate' || kind === 'limiter' || kind === 'lofi' ||
+  kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble'
+const isStaticWorkletInstance = (
+  instance: AudioEffectRuntimeInstance,
+): instance is Extract<AudioEffectRuntimeInstance, { kind: StaticWorkletKind }> => isStaticWorkletKind(instance.kind)
 
 export function createMasterFxRuntime() {
   let eqChain: BiquadFilterNode[] = []
@@ -47,9 +56,14 @@ export function createMasterFxRuntime() {
   const instanceReverbChains = new Map<string, ReturnType<typeof createReverbChainState>>()
   const instanceSaturatorChains = new Map<string, ReturnType<typeof createSaturatorChainState>>()
   const instanceDelayChains = new Map<string, ReturnType<typeof createDelayChainState>>()
+  const instanceStaticWorkletChains = new Map<string, StaticWorkletNodeChain>()
+  const gateMeterListeners = new Map<string, Set<GateMeterListener>>()
+  const gateMeterSubscriptions = new Map<string, () => void>()
   let currentBpm = 120
 
   const closeInstanceState = (instanceId: string) => {
+    gateMeterSubscriptions.get(instanceId)?.()
+    gateMeterSubscriptions.delete(instanceId)
     const eq = instanceEqChains.get(instanceId)
     if (eq) disconnectAudioNodes(eq)
     instanceEqChains.delete(instanceId)
@@ -64,6 +78,19 @@ export function createMasterFxRuntime() {
     instanceSaturatorChains.delete(instanceId)
     instanceDelayChains.get(instanceId)?.close()
     instanceDelayChains.delete(instanceId)
+    const staticWorklet = instanceStaticWorkletChains.get(instanceId)
+    if (staticWorklet) disconnectStaticWorkletNodeChain(staticWorklet)
+    instanceStaticWorkletChains.delete(instanceId)
+  }
+
+  const bindGateMeter = (instanceId: string, chain: StaticWorkletNodeChain) => {
+    gateMeterSubscriptions.get(instanceId)?.()
+    gateMeterSubscriptions.delete(instanceId)
+    const listeners = gateMeterListeners.get(instanceId)
+    if (chain.kind !== 'gate' && chain.kind !== 'limiter' || !listeners || listeners.size === 0) return
+    gateMeterSubscriptions.set(instanceId, subscribeStaticGateMeter(chain, (frame) => {
+      for (const listener of listeners) listener(frame)
+    }))
   }
 
   const closeAllInstanceStates = () => {
@@ -73,6 +100,7 @@ export function createMasterFxRuntime() {
     for (const id of instanceReverbChains.keys()) ids.add(id)
     for (const id of instanceSaturatorChains.keys()) ids.add(id)
     for (const id of instanceDelayChains.keys()) ids.add(id)
+    for (const id of instanceStaticWorkletChains.keys()) ids.add(id)
     for (const id of ids) closeInstanceState(id)
   }
 
@@ -84,6 +112,7 @@ export function createMasterFxRuntime() {
     saturatorChain: instance.kind === 'saturator' ? instanceSaturatorChains.get(instance.id)?.chain() : undefined,
     delayChain: instance.kind === 'delay' ? instanceDelayChains.get(instance.id)?.chain() : undefined,
     reverbChain: instance.kind === 'reverb' ? instanceReverbChains.get(instance.id)?.chain() : undefined,
+    staticWorkletChain: isStaticWorkletKind(instance.kind) ? instanceStaticWorkletChains.get(instance.id) : undefined,
   }))
 
   const rebuildRouting = (ctx: AudioContext, masterGain: GainNode, destination: AudioDestinationNode) => {
@@ -165,7 +194,13 @@ export function createMasterFxRuntime() {
   ) => {
     const revision = ++fxInstanceRevision
     const wasInstanceMode = masterFxInstances !== null
+    const inputIds = new Set<string>()
+    for (const instance of instances) {
+      if (inputIds.has(instance.id)) throw new Error(`Duplicate effect instance ID: ${instance.id}`)
+      inputIds.add(instance.id)
+    }
     const normalized = normalizeAudioEffectRuntimeInstances(instances)
+    if (normalized.length > MAX_EFFECTS_PER_CHAIN) throw new Error(`Effect chains are limited to ${MAX_EFFECTS_PER_CHAIN} instances.`)
     const previous = masterFxInstances
     const orderChanged = Boolean(previous && (
       previous.length !== normalized.length ||
@@ -186,10 +221,32 @@ export function createMasterFxRuntime() {
     for (const id of instanceReverbChains.keys()) if (!activeIds.has(id)) staleIds.add(id)
     for (const id of instanceSaturatorChains.keys()) if (!activeIds.has(id)) staleIds.add(id)
     for (const id of instanceDelayChains.keys()) if (!activeIds.has(id)) staleIds.add(id)
+    for (const id of instanceStaticWorkletChains.keys()) if (!activeIds.has(id)) staleIds.add(id)
     for (const id of staleIds) closeInstanceState(id)
 
     let requiresRoutingRebuild = !wasInstanceMode || staleIds.size > 0 || orderChanged
     for (const instance of normalized) {
+      if (isStaticWorkletInstance(instance)) {
+        const existing = instanceStaticWorkletChains.get(instance.id)
+        if (existing?.kind === instance.kind && existing.state === 'active') {
+          applyStaticWorkletNodeParams(existing, instance.params)
+        } else {
+          if (existing) disconnectStaticWorkletNodeChain(existing)
+          try {
+            const created = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params)
+            if (fxInstanceRevision !== revision) {
+              disconnectStaticWorkletNodeChain(created)
+              return
+            }
+            instanceStaticWorkletChains.set(instance.id, created)
+            bindGateMeter(instance.id, created)
+          } catch {
+            instanceStaticWorkletChains.delete(instance.id)
+          }
+          requiresRoutingRebuild = true
+        }
+        continue
+      }
       if (instance.kind === 'eq') {
         requiresRoutingRebuild = applyInstanceEq(ctx, instance.id, instance.params) || requiresRoutingRebuild
         continue
@@ -226,6 +283,7 @@ export function createMasterFxRuntime() {
         requiresRoutingRebuild = (result.changed && result.requiresRoutingRebuild) || requiresRoutingRebuild
         continue
       }
+      if (instance.kind !== 'reverb') continue
       let state = instanceReverbChains.get(instance.id)
       if (!state) {
         state = createReverbChainState()
@@ -327,6 +385,24 @@ export function createMasterFxRuntime() {
       })
     },
     subscribeCompressorMeter: (listener: CompressorMeterListener) => compressorState.subscribeMeter(listener),
+    subscribeGateMeter: (instanceId: string, listener: GateMeterListener) => {
+      let listeners = gateMeterListeners.get(instanceId)
+      if (!listeners) {
+        listeners = new Set()
+        gateMeterListeners.set(instanceId, listeners)
+      }
+      listeners.add(listener)
+      const chain = instanceStaticWorkletChains.get(instanceId)
+      if (chain && !gateMeterSubscriptions.has(instanceId)) bindGateMeter(instanceId, chain)
+      return () => {
+        listener({ gainReductionDb: 0 })
+        listeners.delete(listener)
+        if (listeners.size > 0) return
+        gateMeterSubscriptions.get(instanceId)?.()
+        gateMeterSubscriptions.delete(instanceId)
+        gateMeterListeners.delete(instanceId)
+      }
+    },
     setSaturator: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: SaturatorParamsLite) => {
       currentSaturatorParams = params
       if (!ctx || !masterGain) {
@@ -403,6 +479,7 @@ export function createMasterFxRuntime() {
             ...resolveSaturatorAutomationBindings(instanceSaturatorChains.get(effectInstanceId), parameterId),
             ...resolveDelayAutomationBindings(instanceDelayChains.get(effectInstanceId), parameterId),
             ...resolveReverbAutomationBindings(instanceReverbChains.get(effectInstanceId), parameterId),
+            ...resolveStaticWorkletAutomationBinding(instanceStaticWorkletChains.get(effectInstanceId), parameterId),
           ]
         }
         const eqNodes = new Map<string, BiquadFilterNode>()

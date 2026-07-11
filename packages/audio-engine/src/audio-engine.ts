@@ -7,6 +7,7 @@ import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
 import { createMeteringRuntime, type SpectrumFrame, type TrackStereoLevels, type TrackStereoLevelsBatch, type TrackStereoLevelsListener } from './metering-runtime'
 import type { CompressorMeterFrame, CompressorMeterListener } from './effects/compressor-worklet'
+import type { GateMeterFrame, GateMeterListener } from './effects/static-worklet-chain'
 import { createMetronomeRuntime } from './metronome-runtime'
 import { createSourceRegistry, stopAndDisconnectSource } from './source-registry'
 import { createInstrumentRuntime, type SetTrackInstrumentInput } from './instrument-runtime'
@@ -28,7 +29,7 @@ const MASTER_STOP_DELAY_SEC = 0.004
 export const LIVE_SCHEDULE_HORIZON_SEC = 30
 
 export { canFallbackToRepitchStretch, isStretchQualityWarning }
-export type { AudioEffectRuntimeInstance, AudioRuntimeOptions, AudioStretchRenderState, CompressorMeterFrame, DeferredStretchWindow, SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch }
+export type { AudioEffectRuntimeInstance, AudioRuntimeOptions, AudioStretchRenderState, CompressorMeterFrame, DeferredStretchWindow, GateMeterFrame, SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch }
 export type { RecordingEpoch, RecordingMonitorMode, RecordingRuntimeStatus, StartRecordingCaptureOptions } from './recording/recording-runtime'
 export type AudioRuntimeSnapshot = {
   state: AudioContextState | 'uninitialized'
@@ -486,6 +487,10 @@ export class AudioEngine {
     return this.mixerRuntime.subscribeTrackCompressorMeter(trackId, listener)
   }
 
+  subscribeTrackGateMeter(trackId: string, effectInstanceId: string, listener: GateMeterListener) {
+    return this.mixerRuntime.subscribeTrackGateMeter(trackId, effectInstanceId, listener)
+  }
+
   setTrackSaturator(trackId: string, params: SaturatorParamsLite) {
     this.mixerRuntime.setTrackSaturator(trackId, params)
   }
@@ -530,6 +535,10 @@ export class AudioEngine {
 
   subscribeMasterCompressorMeter(listener: CompressorMeterListener) {
     return this.masterFx.subscribeCompressorMeter(listener)
+  }
+
+  subscribeMasterGateMeter(effectInstanceId: string, listener: GateMeterListener) {
+    return this.masterFx.subscribeGateMeter(effectInstanceId, listener)
   }
 
   setMasterSaturator(params: SaturatorParamsLite) {

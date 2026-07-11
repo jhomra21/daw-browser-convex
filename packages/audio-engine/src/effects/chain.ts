@@ -3,6 +3,7 @@ import { applyDelayNodeParams, applySaturatorNodeParams } from './dsp'
 import { getReverbImpulseSignature } from './reverb-signature'
 import { ensureCompressorWorklet, postCompressorParams } from './compressor-worklet'
 import { compressorWorklet } from '../worklet-manifest'
+import type { StaticWorkletNodeChain } from './static-worklet-chain'
 
 export type CreateReverbImpulseResponse = (params: ReverbParamsLite) => AudioBuffer
 
@@ -111,6 +112,7 @@ export type FxChainStageConfig = {
   saturatorChain?: SaturatorNodeChain | null
   delayChain?: DelayNodeChain | null
   reverbChain?: ReverbNodeChain | null
+  staticWorkletChain?: StaticWorkletNodeChain | null
 }
 
 export function disconnectAudioNodes(nodes: Array<AudioNode | null | undefined>) {
@@ -412,6 +414,7 @@ export function connectFxChain(
     const saturator = stageConfig.saturatorChain?.enabled ? stageConfig.saturatorChain : null
     const delay = stageConfig.delayChain?.enabled ? stageConfig.delayChain : null
     const reverb = stageConfig.reverbChain?.enabled ? stageConfig.reverbChain : null
+    const staticWorklet = stageConfig.staticWorkletChain?.state === 'active' ? stageConfig.staticWorkletChain : null
 
     if (!compressor && stageConfig.compressorChain) disconnectAudioNodes([stageConfig.compressorChain.input])
     if (saturator) connectSaturatorInternals(saturator)
@@ -429,6 +432,14 @@ export function connectFxChain(
       return {
         connectInput: (source) => source.connect(eqNodes[0]),
         outputs: [eqNodes[eqNodes.length - 1]],
+      }
+    }
+
+    if (staticWorklet) {
+      disconnectAudioNodes([staticWorklet.node])
+      return {
+        connectInput: (source) => source.connect(staticWorklet.node),
+        outputs: [staticWorklet.node],
       }
     }
 

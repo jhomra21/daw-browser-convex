@@ -1,3 +1,5 @@
+import { isOwnedProcessorKind } from "./owned-processor-descriptors";
+
 export type ProjectManifestEntityRow = {
   kind: string;
   id: string;
@@ -43,8 +45,9 @@ export type ProjectManifest = {
   syncState: ProjectManifestStateRow[];
 };
 
-export const PROJECT_MANIFEST_SCHEMA_VERSION = 1;
+export const PROJECT_MANIFEST_SCHEMA_VERSION = 2;
 export const SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS: readonly number[] = [
+  1,
   PROJECT_MANIFEST_SCHEMA_VERSION,
 ];
 
@@ -81,6 +84,15 @@ const readEntityRow = (value: unknown): ProjectManifestEntityRow => {
     value: value.value,
     updatedAt: readNumber(value.updatedAt, "entity.updatedAt"),
   };
+};
+
+const migrateEffectEntityValue = (value: unknown) => {
+  if (!isRecord(value) || !isOwnedProcessorKind(value.effect)) return value;
+  if (!isRecord(value.params)) return value;
+  const params = (value.params.version === 1 || value.params.version === 2) && isRecord(value.params.state)
+    ? value.params
+    : { version: 1, state: value.params };
+  return { ...value, params };
 };
 
 const readProjectStateRow = (value: unknown): ProjectManifestStateRow => {
@@ -187,10 +199,18 @@ const readProjectManifestV1 = (raw: Record<string, unknown>): ProjectManifest =>
   return manifest;
 };
 
+const readProjectManifestV2 = (raw: Record<string, unknown>): ProjectManifest => {
+  const manifest = readProjectManifestV1(raw);
+  const entities = manifest.entities.map((row) => (
+    row.kind === "effect" ? { ...row, value: migrateEffectEntityValue(row.value) } : row
+  ));
+  return { ...manifest, schemaVersion: 2, entities, entityCount: entities.length };
+};
+
 export const migrateProjectManifest = (raw: unknown): ProjectManifest => {
   if (!isRecord(raw)) throw new Error("Project manifest must be an object.");
   const schemaVersion = readNumber(raw.schemaVersion, "schemaVersion");
-  if (schemaVersion === 1) return readProjectManifestV1(raw);
+  if (schemaVersion === 1 || schemaVersion === 2) return readProjectManifestV2(raw);
   throw new Error(`Unsupported project manifest schema version ${schemaVersion}.`);
 };
 

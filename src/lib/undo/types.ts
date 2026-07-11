@@ -1,5 +1,5 @@
 import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
-import type { ArpeggiatorParams, AudioEffectKind, AutomationEnvelope, CompressorParams, DelayParams, EqParams, ReverbParams, SaturatorParams, SynthParams, TrackInstrumentParams } from '@daw-browser/shared'
+import type { ArpeggiatorParams, AudioEffectKind, AutomationEnvelope, AutoPanParamsEnvelope, ChorusParamsEnvelope, CompressorParams, DelayParams, EnsembleParamsEnvelope, EqParams, FlangerParamsEnvelope, GateParamsEnvelope, LimiterParamsEnvelope, LoFiParamsEnvelope, PhaserParamsEnvelope, ReverbParams, SaturatorParams, SynthParams, TrackInstrumentParams, TremoloParamsEnvelope, UtilityParamsEnvelope } from '@daw-browser/shared'
 import type { AudioWarp, Track, TrackChannelRole, TrackSend } from '@daw-browser/timeline-core/types'
 
 export type TrackRef = string
@@ -72,23 +72,45 @@ export type TrackSnapshot = {
   routing: TrackRoutingHistorySnapshot
 }
 
-export type TrackEffect = 'eq' | 'compressor' | 'saturator' | 'delay' | 'reverb' | 'synth' | 'instrument' | 'arp'
-export type EffectType = TrackEffect | 'master-eq' | 'master-compressor' | 'master-saturator' | 'master-delay' | 'master-reverb'
+export type TrackEffect = AudioEffectKind | 'synth' | 'instrument' | 'arp'
+export type EffectType = TrackEffect | `master-${AudioEffectKind}`
 
 export type EffectParamsByEffect = {
+  utility: UtilityParamsEnvelope
   eq: EqParams
+  autofilter: import('@daw-browser/shared').AutoFilterParamsEnvelope
+  gate: GateParamsEnvelope
   compressor: CompressorParams
   saturator: SaturatorParams
+  limiter: LimiterParamsEnvelope
+  lofi: LoFiParamsEnvelope
   delay: DelayParams
   reverb: ReverbParams
+  chorus: ChorusParamsEnvelope
+  flanger: FlangerParamsEnvelope
+  phaser: PhaserParamsEnvelope
+  tremolo: TremoloParamsEnvelope
+  autopan: AutoPanParamsEnvelope
+  ensemble: EnsembleParamsEnvelope
   synth: SynthParams
   instrument: TrackInstrumentParams
   arp: ArpeggiatorParams
+  'master-utility': UtilityParamsEnvelope
   'master-eq': EqParams
+  'master-autofilter': import('@daw-browser/shared').AutoFilterParamsEnvelope
+  'master-gate': GateParamsEnvelope
   'master-compressor': CompressorParams
   'master-saturator': SaturatorParams
+  'master-limiter': LimiterParamsEnvelope
+  'master-lofi': LoFiParamsEnvelope
   'master-delay': DelayParams
   'master-reverb': ReverbParams
+  'master-chorus': ChorusParamsEnvelope
+  'master-flanger': FlangerParamsEnvelope
+  'master-phaser': PhaserParamsEnvelope
+  'master-tremolo': TremoloParamsEnvelope
+  'master-autopan': AutoPanParamsEnvelope
+  'master-ensemble': EnsembleParamsEnvelope
 }
 
 export type TrackAudioEffectSnapshot = {
@@ -106,6 +128,7 @@ export type TrackEffectSnapshot = Partial<{
   eq: EqParams
   compressor: CompressorParams
   saturator: SaturatorParams
+  limiter: LimiterParamsEnvelope
   delay: DelayParams
   reverb: ReverbParams
   audioEffects: TrackAudioEffectSnapshot[]

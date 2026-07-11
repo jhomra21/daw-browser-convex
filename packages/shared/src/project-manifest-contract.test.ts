@@ -22,22 +22,39 @@ const manifestV1: ProjectManifest = {
 
 describe('project format boundaries', () => {
   test('reports the schema version handled by migration dispatch', () => {
-    expect(SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS).toEqual([PROJECT_MANIFEST_SCHEMA_VERSION])
+    expect(SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS).toEqual([1, PROJECT_MANIFEST_SCHEMA_VERSION])
   })
 
   test('reads supported v1 manifests and is idempotent through one entry point', () => {
     const migrated = migrateProjectManifest(manifestV1)
-    expect(migrated).toEqual(manifestV1)
+    expect(migrated).toEqual({ ...manifestV1, schemaVersion: 2 })
     expect(migrateProjectManifest(migrated)).toEqual(migrated)
   })
 
   test('rejects unsupported writer versions', () => {
-    expect(() => migrateProjectManifest({ ...manifestV1, schemaVersion: 2 })).toThrow(
-      'Unsupported project manifest schema version 2.',
+    expect(() => migrateProjectManifest({ ...manifestV1, schemaVersion: 3 })).toThrow(
+      'Unsupported project manifest schema version 3.',
     )
     expect(() => migrateProjectManifest({ ...manifestV1, schemaVersion: 0 })).toThrow(
       'Unsupported project manifest schema version 0.',
     )
+  })
+
+  test('migrates utility and gate rows to versioned state envelopes without changing other rows', () => {
+    const manifest = {
+      ...manifestV1,
+      entityCount: 3,
+      entities: [
+        { kind: 'effect', id: 'utility-1', value: { effect: 'utility', params: { gainDb: 3 } }, updatedAt: 100 },
+        { kind: 'effect', id: 'gate-1', value: { effect: 'gate', params: { version: 1, state: { thresholdDb: -30 } } }, updatedAt: 100 },
+        manifestV1.entities[0],
+      ],
+    }
+    const migrated = migrateProjectManifest(manifest)
+    expect(migrated.entities[0]?.value).toEqual({ effect: 'utility', params: { version: 1, state: { gainDb: 3 } } })
+    expect(migrated.entities[1]).toEqual(manifest.entities[1])
+    expect(migrated.entities[2]).toEqual(manifestV1.entities[0])
+    expect(migrateProjectManifest(migrated)).toEqual(migrated)
   })
 
   test('roundtrips structured automation targets and opaque keys in generic entities', () => {

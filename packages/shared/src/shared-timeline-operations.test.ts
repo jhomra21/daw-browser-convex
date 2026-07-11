@@ -2,6 +2,89 @@ import { describe, expect, test } from 'bun:test'
 import { parseSharedTimelineOperation, readSharedTimelineOperationTargets, type SharedTimelineOperation } from './shared-timeline-operations'
 
 describe('shared timeline operations', () => {
+  test('roundtrips canonical utility and gate envelopes with required instance ids', () => {
+    const utility = {
+      kind: 'effects.setUtilityParams',
+      payload: { trackId: 'track-1', instanceId: 'utility-1', params: { version: 1, state: { gainDb: 3 } } },
+    }
+    expect(parseSharedTimelineOperation(utility)).toEqual({
+      kind: 'effects.setUtilityParams',
+      payload: {
+        trackId: 'track-1',
+        instanceId: 'utility-1',
+        params: {
+          version: 1,
+          state: {
+            enabled: true, gainDb: 3, polarity: 'normal', inputMode: 'stereo', pan: 0,
+            balance: 0, width: 1, matrix: 'stereo', swap: false, dcBlock: true,
+          },
+        },
+      },
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setGateParams',
+      payload: { trackId: 'track-1', instanceId: '', params: { version: 1, state: {} } },
+    })).toBeNull()
+  })
+
+  test('roundtrips normalized modulation envelopes with exact instance identities', () => {
+    const first = parseSharedTimelineOperation({
+      kind: 'effects.setModulationParams',
+      payload: {
+        trackId: 'track-1',
+        effect: 'autofilter',
+        instanceId: 'autofilter-a',
+        params: { version: 1, state: { cutoffHz: 740, envelope: { amount: 0.4 }, lfo: { rateHz: 2 } } },
+      },
+    })
+    const second = parseSharedTimelineOperation({
+      kind: 'effects.setModulationParams',
+      payload: {
+        trackId: 'track-1',
+        effect: 'autofilter',
+        instanceId: 'autofilter-b',
+        params: { version: 1, state: { cutoffHz: 2400 } },
+      },
+    })
+    expect(first?.kind === 'effects.setModulationParams' ? first.payload.instanceId : undefined).toBe('autofilter-a')
+    expect(second?.kind === 'effects.setModulationParams' ? second.payload.instanceId : undefined).toBe('autofilter-b')
+    expect(first).not.toEqual(second)
+    if (!first) throw new Error('Expected autofilter operation to parse')
+    expect(readSharedTimelineOperationTargets(first)).toEqual({
+      trackIds: new Set(['track-1']),
+      clipIds: new Set(),
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setMasterModulationParams',
+      payload: {
+        effect: 'ensemble',
+        instanceId: 'ensemble-1',
+        params: { version: 1, state: { voices: 6, spread: 0.8 } },
+      },
+    })).toMatchObject({
+      kind: 'effects.setMasterModulationParams',
+      payload: { effect: 'ensemble', instanceId: 'ensemble-1', params: { version: 1 } },
+    })
+  })
+
+  test('rejects malformed or ambiguous modulation persistence operations', () => {
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setModulationParams',
+      payload: { trackId: 'track-1', effect: 'chorus', instanceId: '', params: { version: 1, state: {} } },
+    })).toBeNull()
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setModulationParams',
+      payload: { trackId: 'track-1', effect: 'chorus', instanceId: 'fx-1', params: { state: {} } },
+    })).toBeNull()
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setModulationParams',
+      payload: { trackId: 'track-1', effect: 'unknown', instanceId: 'fx-1', params: { version: 1, state: {} } },
+    })).toBeNull()
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setModulationParams',
+      payload: { trackId: 'track-1', instanceId: 'fx-1', params: { version: 1, state: {} } },
+    })).toBeNull()
+  })
   test('roundtrips exact external sidechain routes', () => {
     const operation: SharedTimelineOperation = {
       kind: 'sidechains.setRoute',

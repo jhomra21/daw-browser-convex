@@ -336,6 +336,13 @@ function readEffectTrackId(entry: EffectParamsEntry, deps: Deps) {
 
 function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetId: string, direction: HistoryDirection) {
   try {
+    const replayParams = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+    if (entry.data.instanceId && deps.replayInstanceEffectParams?.({
+      targetId,
+      effect: entry.data.effect,
+      instanceId: entry.data.instanceId,
+      params: replayParams,
+    })) return
     switch (entry.data.effect) {
       case 'master-eq': {
         const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
@@ -419,11 +426,21 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
 }
 
 const MASTER_EFFECT_TYPES: ReadonlySet<EffectParamsEntry['data']['effect']> = new Set([
+  'master-utility',
   'master-eq',
+  'master-autofilter',
+  'master-gate',
   'master-compressor',
+  'master-limiter',
   'master-reverb',
   'master-saturator',
   'master-delay',
+  'master-chorus',
+  'master-flanger',
+  'master-phaser',
+  'master-tremolo',
+  'master-autopan',
+  'master-ensemble',
 ])
 
 async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, direction: HistoryDirection) {

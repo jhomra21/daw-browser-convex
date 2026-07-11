@@ -12,14 +12,27 @@ import {
   normalizeEqParams,
   normalizeReverbParams,
   normalizeSaturatorParams,
+  normalizeGateParamsEnvelope,
+  normalizeUtilityParamsEnvelope,
   type AudioEffectKind,
+  type AutoFilterParamsEnvelope,
+  type AutoPanParamsEnvelope,
   type AudioEffectInstance,
+  type ChorusParamsEnvelope,
   type CompressorParams,
   type DelayParams,
   type EqChannelMode,
   type EqParams,
   type ReverbParams,
   type SaturatorParams,
+  type GateParamsEnvelope,
+  type EnsembleParamsEnvelope,
+  type FlangerParamsEnvelope,
+  type LimiterParamsEnvelope,
+  type LoFiParamsEnvelope,
+  type PhaserParamsEnvelope,
+  type TremoloParamsEnvelope,
+  type UtilityParamsEnvelope,
 } from "@daw-browser/shared";
 import { isLocalId } from "@daw-browser/shared";
 import type { Track } from "@daw-browser/timeline-core/types";
@@ -31,12 +44,13 @@ import {
 } from "~/components/timeline/create-effects-panel-state";
 import { convexApi } from "~/lib/convex";
 import { compareAudioEffectOrderEntries } from "~/lib/audio-effect-order-rows";
-import { createAudioEffectInstanceId, deleteLocalEffectInstance, listLocalEffects, reorderLocalAudioEffects, setLocalEffect, setLocalEffectInstance, type LocalEffectRow } from "~/lib/local-effects";
+import { createAudioEffectInstanceId, deleteLocalEffectInstance, listLocalEffects, reorderLocalAudioEffects, setLocalEffect, setLocalEffectInstance, type LocalEffectKind, type LocalEffectRow } from "~/lib/local-effects";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import type { EffectParamsByEffect, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import type { AudioEffectChainPresetStep } from "~/lib/audio-effect-chain-presets";
+import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
 type PersistedAudioEffectDescriptor<Params> = {
@@ -66,6 +80,24 @@ type EffectsPanelAudioEffectsContext = {
 };
 
 type EffectsPanelAudioDevice = {
+  utility: {
+    changeInstance: (instanceId: string, updates: (params: UtilityParamsEnvelope) => UtilityParamsEnvelope) => void;
+  };
+  gate: {
+    changeInstance: (instanceId: string, updates: (params: GateParamsEnvelope) => GateParamsEnvelope) => void;
+    setSidechainSource: (instanceId: string, sourceTrackId?: string) => Promise<void>;
+  };
+  limiter: {
+    changeInstance: (instanceId: string, updates: (params: LimiterParamsEnvelope) => LimiterParamsEnvelope) => void;
+  };
+  lofi: { changeInstance: (instanceId: string, updates: (params: LoFiParamsEnvelope) => LoFiParamsEnvelope) => void };
+  autofilter: { changeInstance: (instanceId: string, updates: (params: AutoFilterParamsEnvelope) => AutoFilterParamsEnvelope) => void };
+  chorus: { changeInstance: (instanceId: string, updates: (params: ChorusParamsEnvelope) => ChorusParamsEnvelope) => void };
+  flanger: { changeInstance: (instanceId: string, updates: (params: FlangerParamsEnvelope) => FlangerParamsEnvelope) => void };
+  phaser: { changeInstance: (instanceId: string, updates: (params: PhaserParamsEnvelope) => PhaserParamsEnvelope) => void };
+  tremolo: { changeInstance: (instanceId: string, updates: (params: TremoloParamsEnvelope) => TremoloParamsEnvelope) => void };
+  autopan: { changeInstance: (instanceId: string, updates: (params: AutoPanParamsEnvelope) => AutoPanParamsEnvelope) => void };
+  ensemble: { changeInstance: (instanceId: string, updates: (params: EnsembleParamsEnvelope) => EnsembleParamsEnvelope) => void };
   eq: {
     add: () => void;
     changeInstance: (instanceId: string, updates: (params: EqParams) => EqParams) => void;
@@ -108,7 +140,7 @@ type EffectsPanelAudioDevice = {
   addChainToTarget: (targetId: Track["id"] | "master", effects: readonly AudioEffectChainPresetStep[], index?: number) => Promise<boolean>;
   canAddByKindToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind) => boolean;
   flushPending: () => Promise<void>;
-  paramsForInstance: (instance: AudioEffectInstance) => EqParams | CompressorParams | SaturatorParams | DelayParams | ReverbParams | undefined;
+  paramsForInstance: (instance: AudioEffectInstance) => UtilityParamsEnvelope | AutoFilterParamsEnvelope | EqParams | GateParamsEnvelope | LimiterParamsEnvelope | LoFiParamsEnvelope | CompressorParams | SaturatorParams | DelayParams | ReverbParams | ChorusParamsEnvelope | FlangerParamsEnvelope | PhaserParamsEnvelope | TremoloParamsEnvelope | AutoPanParamsEnvelope | EnsembleParamsEnvelope | undefined;
   orderedEffects: Accessor<AudioEffectInstance[]>;
   removeAllFromTarget: (targetId: Track["id"] | "master") => Promise<boolean>;
   removeByInstanceFromTarget: (targetId: Track["id"] | "master", instance: AudioEffectInstance) => Promise<boolean>;
@@ -377,7 +409,7 @@ export function createEffectsPanelAudioDevice(
     commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-delay", from: previous, to: next }, projectId),
   });
 
-  type AudioEffectParams = EqParams | CompressorParams | SaturatorParams | DelayParams | ReverbParams;
+  type AudioEffectParams = UtilityParamsEnvelope | AutoFilterParamsEnvelope | EqParams | GateParamsEnvelope | LimiterParamsEnvelope | LoFiParamsEnvelope | CompressorParams | SaturatorParams | DelayParams | ReverbParams | ChorusParamsEnvelope | FlangerParamsEnvelope | PhaserParamsEnvelope | TremoloParamsEnvelope | AutoPanParamsEnvelope | EnsembleParamsEnvelope;
   type AudioEffectPanelRow = {
     targetId: string;
     kind: AudioEffectKind;
@@ -398,55 +430,114 @@ export function createEffectsPanelAudioDevice(
 
   const normalizeParamsForKind = (kind: AudioEffectKind, params: unknown): AudioEffectParams => {
     const input = objectParamInput(params);
+    if (kind === "utility") return normalizeUtilityParamsEnvelope(input);
+    if (kind === "autofilter") return AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(input);
+    if (kind === "gate") return normalizeGateParamsEnvelope(input);
+    if (kind === "limiter") return AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(input);
     if (kind === "eq") return AUDIO_EFFECT_CONTRACTS.eq.normalizeParams(input);
     if (kind === "compressor") return AUDIO_EFFECT_CONTRACTS.compressor.normalizeParams(input);
     if (kind === "saturator") return AUDIO_EFFECT_CONTRACTS.saturator.normalizeParams(input);
     if (kind === "delay") return AUDIO_EFFECT_CONTRACTS.delay.normalizeParams(input);
-    return AUDIO_EFFECT_CONTRACTS.reverb.normalizeParams(input);
+    if (kind === "reverb") return AUDIO_EFFECT_CONTRACTS.reverb.normalizeParams(input);
+    return AUDIO_EFFECT_CONTRACTS[kind].normalizeParams(input);
   };
   const audioEffectKindForHistoryEffect = (effect: EffectType): AudioEffectKind | undefined => {
+    if (effect === "utility" || effect === "master-utility") return "utility";
+    if (effect === "autofilter" || effect === "master-autofilter") return "autofilter";
+    if (effect === "gate" || effect === "master-gate") return "gate";
+    if (effect === "limiter" || effect === "master-limiter") return "limiter";
     if (effect === "eq" || effect === "master-eq") return "eq";
     if (effect === "compressor" || effect === "master-compressor") return "compressor";
     if (effect === "saturator" || effect === "master-saturator") return "saturator";
     if (effect === "delay" || effect === "master-delay") return "delay";
     if (effect === "reverb" || effect === "master-reverb") return "reverb";
+    if (effect === "chorus" || effect === "master-chorus") return "chorus";
+    if (effect === "flanger" || effect === "master-flanger") return "flanger";
+    if (effect === "phaser" || effect === "master-phaser") return "phaser";
+    if (effect === "tremolo" || effect === "master-tremolo") return "tremolo";
+    if (effect === "autopan" || effect === "master-autopan") return "autopan";
+    if (effect === "ensemble" || effect === "master-ensemble") return "ensemble";
+    if (effect === "lofi" || effect === "master-lofi") return "lofi";
     return undefined;
   };
 
   const createDefaultParamsForKind = (kind: AudioEffectKind): AudioEffectParams => {
+    if (kind === "utility") return AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams();
+    if (kind === "autofilter") return AUDIO_EFFECT_CONTRACTS.autofilter.createDefaultParams();
+    if (kind === "gate") return AUDIO_EFFECT_CONTRACTS.gate.createDefaultParams();
+    if (kind === "limiter") return AUDIO_EFFECT_CONTRACTS.limiter.createDefaultParams();
     if (kind === "eq") return AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams();
     if (kind === "compressor") return AUDIO_EFFECT_CONTRACTS.compressor.createDefaultParams();
     if (kind === "saturator") return AUDIO_EFFECT_CONTRACTS.saturator.createDefaultParams();
     if (kind === "delay") return AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams();
-    return AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams();
+    if (kind === "reverb") return AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams();
+    if (kind === "chorus") return AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams({});
+    if (kind === "flanger") return AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams({});
+    if (kind === "phaser") return AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams({});
+    if (kind === "tremolo") return AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams({});
+    if (kind === "autopan") return AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams({});
+    if (kind === "lofi") return AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams({});
+    return AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams({});
   };
 
   const areParamsForKindEqual = (kind: AudioEffectKind, previous: AudioEffectParams, next: AudioEffectParams) => {
-    if (kind === "eq") return AUDIO_EFFECT_CONTRACTS.eq.serializeParams(normalizeEqParams(previous)) === AUDIO_EFFECT_CONTRACTS.eq.serializeParams(normalizeEqParams(next));
-    if (kind === "compressor") return AUDIO_EFFECT_CONTRACTS.compressor.serializeParams(normalizeCompressorParams(previous)) === AUDIO_EFFECT_CONTRACTS.compressor.serializeParams(normalizeCompressorParams(next));
-    if (kind === "saturator") return AUDIO_EFFECT_CONTRACTS.saturator.serializeParams(normalizeSaturatorParams(previous)) === AUDIO_EFFECT_CONTRACTS.saturator.serializeParams(normalizeSaturatorParams(next));
-    if (kind === "delay") return AUDIO_EFFECT_CONTRACTS.delay.serializeParams(normalizeDelayParams(previous)) === AUDIO_EFFECT_CONTRACTS.delay.serializeParams(normalizeDelayParams(next));
-    return AUDIO_EFFECT_CONTRACTS.reverb.serializeParams(normalizeReverbParams(previous)) === AUDIO_EFFECT_CONTRACTS.reverb.serializeParams(normalizeReverbParams(next));
+    if (kind === "utility") return AUDIO_EFFECT_CONTRACTS.utility.serializeParams(normalizeUtilityParamsEnvelope(previous)) === AUDIO_EFFECT_CONTRACTS.utility.serializeParams(normalizeUtilityParamsEnvelope(next));
+    if (kind === "autofilter") return AUDIO_EFFECT_CONTRACTS.autofilter.serializeParams(AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.autofilter.serializeParams(AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(next));
+    if (kind === "limiter") return AUDIO_EFFECT_CONTRACTS.limiter.serializeParams(AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.limiter.serializeParams(AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(next));
+    if (kind === "gate") return AUDIO_EFFECT_CONTRACTS.gate.serializeParams(normalizeGateParamsEnvelope(previous)) === AUDIO_EFFECT_CONTRACTS.gate.serializeParams(normalizeGateParamsEnvelope(next));
+    if (kind === "eq") return AUDIO_EFFECT_CONTRACTS.eq.serializeParams(normalizeEqParams(objectParamInput(previous))) === AUDIO_EFFECT_CONTRACTS.eq.serializeParams(normalizeEqParams(objectParamInput(next)));
+    if (kind === "compressor") return AUDIO_EFFECT_CONTRACTS.compressor.serializeParams(normalizeCompressorParams(objectParamInput(previous))) === AUDIO_EFFECT_CONTRACTS.compressor.serializeParams(normalizeCompressorParams(objectParamInput(next)));
+    if (kind === "saturator") return AUDIO_EFFECT_CONTRACTS.saturator.serializeParams(normalizeSaturatorParams(objectParamInput(previous))) === AUDIO_EFFECT_CONTRACTS.saturator.serializeParams(normalizeSaturatorParams(objectParamInput(next)));
+    if (kind === "delay") return AUDIO_EFFECT_CONTRACTS.delay.serializeParams(normalizeDelayParams(objectParamInput(previous))) === AUDIO_EFFECT_CONTRACTS.delay.serializeParams(normalizeDelayParams(objectParamInput(next)));
+    if (kind === "reverb") return AUDIO_EFFECT_CONTRACTS.reverb.serializeParams(normalizeReverbParams(objectParamInput(previous))) === AUDIO_EFFECT_CONTRACTS.reverb.serializeParams(normalizeReverbParams(objectParamInput(next)));
+    if (kind === "chorus") return AUDIO_EFFECT_CONTRACTS.chorus.serializeParams(AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.chorus.serializeParams(AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(next));
+    if (kind === "flanger") return AUDIO_EFFECT_CONTRACTS.flanger.serializeParams(AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.flanger.serializeParams(AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(next));
+    if (kind === "phaser") return AUDIO_EFFECT_CONTRACTS.phaser.serializeParams(AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.phaser.serializeParams(AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(next));
+    if (kind === "tremolo") return AUDIO_EFFECT_CONTRACTS.tremolo.serializeParams(AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.tremolo.serializeParams(AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(next));
+    if (kind === "autopan") return AUDIO_EFFECT_CONTRACTS.autopan.serializeParams(AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.autopan.serializeParams(AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(next));
+    if (kind === "lofi") return AUDIO_EFFECT_CONTRACTS.lofi.serializeParams(AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.lofi.serializeParams(AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(next));
+    return AUDIO_EFFECT_CONTRACTS.ensemble.serializeParams(AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.ensemble.serializeParams(AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(next));
   };
 
   const normalizePresetStepParams = (step: AudioEffectChainPresetStep): AudioEffectParams => {
+    if (step.kind === "utility") return normalizeUtilityParamsEnvelope(step.params);
+    if (step.kind === "autofilter") return AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(step.params);
+    if (step.kind === "gate") return normalizeGateParamsEnvelope(step.params);
+    if (step.kind === "limiter") return AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(step.params);
     if (step.kind === "eq") return normalizeEqParams(step.params);
     if (step.kind === "compressor") return normalizeCompressorParams(step.params);
     if (step.kind === "saturator") return normalizeSaturatorParams(step.params);
     if (step.kind === "delay") return normalizeDelayParams(step.params);
-    return normalizeReverbParams(step.params);
+    if (step.kind === "reverb") return normalizeReverbParams(step.params);
+    if (step.kind === "chorus") return AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(step.params);
+    if (step.kind === "flanger") return AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(step.params);
+    if (step.kind === "phaser") return AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(step.params);
+    if (step.kind === "tremolo") return AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(step.params);
+    if (step.kind === "autopan") return AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(step.params);
+    if (step.kind === "lofi") return AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(step.params);
+    return AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(step.params);
   };
 
   const createDefaultPresetStep = (kind: AudioEffectKind): AudioEffectChainPresetStep => {
+    if (kind === "utility") return { kind, params: AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams() };
+    if (kind === "autofilter") return { kind, params: AUDIO_EFFECT_CONTRACTS.autofilter.createDefaultParams() };
+    if (kind === "gate") return { kind, params: AUDIO_EFFECT_CONTRACTS.gate.createDefaultParams() };
+    if (kind === "limiter") return { kind, params: AUDIO_EFFECT_CONTRACTS.limiter.createDefaultParams() };
     if (kind === "eq") return { kind, params: AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams() };
     if (kind === "compressor") return { kind, params: AUDIO_EFFECT_CONTRACTS.compressor.createDefaultParams() };
     if (kind === "saturator") return { kind, params: AUDIO_EFFECT_CONTRACTS.saturator.createDefaultParams() };
     if (kind === "delay") return { kind, params: AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams() };
-    return { kind, params: AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams() };
+    if (kind === "chorus") return { kind, params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams({}) };
+    if (kind === "flanger") return { kind, params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams({}) };
+    if (kind === "phaser") return { kind, params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams({}) };
+    if (kind === "tremolo") return { kind, params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams({}) };
+    if (kind === "autopan") return { kind, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams({}) };
+    if (kind === "lofi") return { kind, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams({}) };
+    return { kind: "ensemble", params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams({}) };
   };
 
-  const localEffectForKind = (targetId: string, kind: AudioEffectKind) => (
-    targetId === "master" ? AUDIO_EFFECT_CONTRACTS[kind].masterKind : AUDIO_EFFECT_CONTRACTS[kind].kind
+  const localEffectForKind = (targetId: string, kind: AudioEffectKind): LocalEffectKind => (
+    targetId === "master" ? `master-${kind}` : kind
   );
 
   const instanceKey = (targetId: string, instanceId: string) => `${targetId}:${instanceId}`;
@@ -631,11 +722,22 @@ export function createEffectsPanelAudioDevice(
   }
 
   function runtimeInstanceForParams(instance: AudioEffectInstance, params: AudioEffectParams): AudioEffectRuntimeInstance {
-    if (instance.kind === "eq") return { id: instance.id, kind: instance.kind, params: normalizeEqParams(params) };
-    if (instance.kind === "compressor") return { id: instance.id, kind: instance.kind, params: normalizeCompressorParams(params) };
-    if (instance.kind === "saturator") return { id: instance.id, kind: instance.kind, params: normalizeSaturatorParams(params) };
-    if (instance.kind === "delay") return { id: instance.id, kind: instance.kind, params: normalizeDelayParams(params) };
-    return { id: instance.id, kind: instance.kind, params: normalizeReverbParams(params) };
+    if (instance.kind === "utility") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.utility.normalizeParams(params) };
+    if (instance.kind === "autofilter") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(params) };
+    if (instance.kind === "limiter") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(params) };
+    if (instance.kind === "gate") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.gate.normalizeParams(params) };
+    if (instance.kind === "eq") return { id: instance.id, kind: instance.kind, params: normalizeEqParams(objectParamInput(params)) };
+    if (instance.kind === "compressor") return { id: instance.id, kind: instance.kind, params: normalizeCompressorParams(objectParamInput(params)) };
+    if (instance.kind === "saturator") return { id: instance.id, kind: instance.kind, params: normalizeSaturatorParams(objectParamInput(params)) };
+    if (instance.kind === "delay") return { id: instance.id, kind: instance.kind, params: normalizeDelayParams(objectParamInput(params)) };
+    if (instance.kind === "reverb") return { id: instance.id, kind: instance.kind, params: normalizeReverbParams(objectParamInput(params)) };
+    if (instance.kind === "chorus") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(params) };
+    if (instance.kind === "flanger") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(params) };
+    if (instance.kind === "phaser") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(params) };
+    if (instance.kind === "tremolo") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(params) };
+    if (instance.kind === "autopan") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(params) };
+    if (instance.kind === "lofi") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(params) };
+    return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(params) };
   }
 
   function buildRuntimeInstancesForTarget(targetId: string, order: AudioEffectInstance[]): AudioEffectRuntimeInstance[] {
@@ -646,40 +748,98 @@ export function createEffectsPanelAudioDevice(
   }
 
   function commitInstanceParams(targetId: string, instanceId: string | undefined, kind: AudioEffectKind, previous: AudioEffectParams, next: AudioEffectParams) {
+    if (kind === "utility") {
+      const from = normalizeUtilityParamsEnvelope(previous);
+      const to = normalizeUtilityParamsEnvelope(next);
+      if (AUDIO_EFFECT_CONTRACTS.utility.serializeParams(from) === AUDIO_EFFECT_CONTRACTS.utility.serializeParams(to)) return;
+      if (targetId === "master") context.onEffectParamsCommitted?.({ targetId, effect: "master-utility", instanceId, from, to }, context.projectId());
+      else context.onEffectParamsCommitted?.({ targetId, effect: "utility", instanceId, from, to }, context.projectId());
+      return;
+    }
+    if (kind === "autofilter") {
+      const from = AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(previous);
+      const to = AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(next);
+      if (AUDIO_EFFECT_CONTRACTS.autofilter.serializeParams(from) === AUDIO_EFFECT_CONTRACTS.autofilter.serializeParams(to)) return;
+      if (targetId === "master") context.onEffectParamsCommitted?.({ targetId, effect: "master-autofilter", instanceId, from, to }, context.projectId());
+      else context.onEffectParamsCommitted?.({ targetId, effect: "autofilter", instanceId, from, to }, context.projectId());
+      return;
+    }
+    if (kind === "gate") {
+      const from = normalizeGateParamsEnvelope(previous);
+      const to = normalizeGateParamsEnvelope(next);
+      if (AUDIO_EFFECT_CONTRACTS.gate.serializeParams(from) === AUDIO_EFFECT_CONTRACTS.gate.serializeParams(to)) return;
+      if (targetId === "master") context.onEffectParamsCommitted?.({ targetId, effect: "master-gate", instanceId, from, to }, context.projectId());
+      else context.onEffectParamsCommitted?.({ targetId, effect: "gate", instanceId, from, to }, context.projectId());
+      return;
+    }
     if (kind === "eq") {
-      const from = normalizeEqParams(previous);
-      const to = normalizeEqParams(next);
+      const from = normalizeEqParams(objectParamInput(previous));
+      const to = normalizeEqParams(objectParamInput(next));
       if (AUDIO_EFFECT_CONTRACTS.eq.serializeParams(from) === AUDIO_EFFECT_CONTRACTS.eq.serializeParams(to)) return;
       if (targetId === "master") context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-eq", instanceId, from, to }, context.projectId());
       else context.onEffectParamsCommitted?.({ targetId, effect: "eq", instanceId, from, to }, context.projectId());
       return;
     }
     if (kind === "compressor") {
-      const from = normalizeCompressorParams(previous);
-      const to = normalizeCompressorParams(next);
+      const from = normalizeCompressorParams(objectParamInput(previous));
+      const to = normalizeCompressorParams(objectParamInput(next));
       if (AUDIO_EFFECT_CONTRACTS.compressor.serializeParams(from) === AUDIO_EFFECT_CONTRACTS.compressor.serializeParams(to)) return;
       if (targetId === "master") context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-compressor", instanceId, from, to }, context.projectId());
       else context.onEffectParamsCommitted?.({ targetId, effect: "compressor", instanceId, from, to }, context.projectId());
       return;
     }
     if (kind === "saturator") {
-      const from = normalizeSaturatorParams(previous);
-      const to = normalizeSaturatorParams(next);
+      const from = normalizeSaturatorParams(objectParamInput(previous));
+      const to = normalizeSaturatorParams(objectParamInput(next));
       if (AUDIO_EFFECT_CONTRACTS.saturator.serializeParams(from) === AUDIO_EFFECT_CONTRACTS.saturator.serializeParams(to)) return;
       if (targetId === "master") context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-saturator", instanceId, from, to }, context.projectId());
       else context.onEffectParamsCommitted?.({ targetId, effect: "saturator", instanceId, from, to }, context.projectId());
       return;
     }
     if (kind === "delay") {
-      const from = normalizeDelayParams(previous);
-      const to = normalizeDelayParams(next);
+      const from = normalizeDelayParams(objectParamInput(previous));
+      const to = normalizeDelayParams(objectParamInput(next));
       if (AUDIO_EFFECT_CONTRACTS.delay.serializeParams(from) === AUDIO_EFFECT_CONTRACTS.delay.serializeParams(to)) return;
       if (targetId === "master") context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-delay", instanceId, from, to }, context.projectId());
       else context.onEffectParamsCommitted?.({ targetId, effect: "delay", instanceId, from, to }, context.projectId());
       return;
     }
-    const from = normalizeReverbParams(previous);
-    const to = normalizeReverbParams(next);
+    if (kind === "chorus") {
+      const from = AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(previous); const to = AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(next);
+      if (AUDIO_EFFECT_CONTRACTS.chorus.serializeParams(from) !== AUDIO_EFFECT_CONTRACTS.chorus.serializeParams(to)) context.onEffectParamsCommitted?.(targetId === "master" ? { targetId, effect: "master-chorus", instanceId, from, to } : { targetId, effect: "chorus", instanceId, from, to }, context.projectId());
+      return;
+    }
+    if (kind === "flanger") {
+      const from = AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(previous); const to = AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(next);
+      if (AUDIO_EFFECT_CONTRACTS.flanger.serializeParams(from) !== AUDIO_EFFECT_CONTRACTS.flanger.serializeParams(to)) context.onEffectParamsCommitted?.(targetId === "master" ? { targetId, effect: "master-flanger", instanceId, from, to } : { targetId, effect: "flanger", instanceId, from, to }, context.projectId());
+      return;
+    }
+    if (kind === "phaser") {
+      const from = AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(previous); const to = AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(next);
+      if (AUDIO_EFFECT_CONTRACTS.phaser.serializeParams(from) !== AUDIO_EFFECT_CONTRACTS.phaser.serializeParams(to)) context.onEffectParamsCommitted?.(targetId === "master" ? { targetId, effect: "master-phaser", instanceId, from, to } : { targetId, effect: "phaser", instanceId, from, to }, context.projectId());
+      return;
+    }
+    if (kind === "tremolo") {
+      const from = AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(previous); const to = AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(next);
+      if (AUDIO_EFFECT_CONTRACTS.tremolo.serializeParams(from) !== AUDIO_EFFECT_CONTRACTS.tremolo.serializeParams(to)) context.onEffectParamsCommitted?.(targetId === "master" ? { targetId, effect: "master-tremolo", instanceId, from, to } : { targetId, effect: "tremolo", instanceId, from, to }, context.projectId());
+      return;
+    }
+    if (kind === "autopan") {
+      const from = AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(previous); const to = AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(next);
+      if (AUDIO_EFFECT_CONTRACTS.autopan.serializeParams(from) !== AUDIO_EFFECT_CONTRACTS.autopan.serializeParams(to)) context.onEffectParamsCommitted?.(targetId === "master" ? { targetId, effect: "master-autopan", instanceId, from, to } : { targetId, effect: "autopan", instanceId, from, to }, context.projectId());
+      return;
+    }
+    if (kind === "ensemble") {
+      const from = AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(previous); const to = AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(next);
+      if (AUDIO_EFFECT_CONTRACTS.ensemble.serializeParams(from) !== AUDIO_EFFECT_CONTRACTS.ensemble.serializeParams(to)) context.onEffectParamsCommitted?.(targetId === "master" ? { targetId, effect: "master-ensemble", instanceId, from, to } : { targetId, effect: "ensemble", instanceId, from, to }, context.projectId());
+      return;
+    }
+    if (kind === "lofi") {
+      const from = AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(previous); const to = AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(next);
+      if (AUDIO_EFFECT_CONTRACTS.lofi.serializeParams(from) !== AUDIO_EFFECT_CONTRACTS.lofi.serializeParams(to)) context.onEffectParamsCommitted?.(targetId === "master" ? { targetId, effect: "master-lofi", instanceId, from, to } : { targetId, effect: "lofi", instanceId, from, to }, context.projectId());
+    }
+    const from = normalizeReverbParams(objectParamInput(previous));
+    const to = normalizeReverbParams(objectParamInput(next));
     if (AUDIO_EFFECT_CONTRACTS.reverb.serializeParams(from) === AUDIO_EFFECT_CONTRACTS.reverb.serializeParams(to)) return;
     if (targetId === "master") context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-reverb", instanceId, from, to }, context.projectId());
     else context.onEffectParamsCommitted?.({ targetId, effect: "reverb", instanceId, from, to }, context.projectId());
@@ -696,7 +856,15 @@ export function createEffectsPanelAudioDevice(
     if (!projectId) return;
     const input = objectParamInput(params);
     if (isLocalId("project", projectId)) {
-      if (kind === "eq") {
+      if (kind === "utility") {
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalizeUtilityParamsEnvelope(input), { instanceId: instanceId ?? createAudioEffectInstanceId() });
+      } else if (kind === "autofilter") {
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(input), { instanceId: instanceId ?? createAudioEffectInstanceId() });
+      } else if (kind === "gate") {
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalizeGateParamsEnvelope(input), { instanceId: instanceId ?? createAudioEffectInstanceId() });
+      } else if (kind === "limiter") {
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(input), { instanceId: instanceId ?? createAudioEffectInstanceId() });
+      } else if (kind === "eq") {
         const normalized = normalizeEqParams(input);
         if (instanceId) await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
         else await setLocalEffect(projectId, targetId, localEffectForKind(targetId, kind), normalized);
@@ -712,30 +880,54 @@ export function createEffectsPanelAudioDevice(
         const normalized = normalizeDelayParams(input);
         if (instanceId) await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
         else await setLocalEffect(projectId, targetId, localEffectForKind(targetId, kind), normalized);
-      } else {
+      } else if (kind === "reverb") {
         const normalized = normalizeReverbParams(input);
         if (instanceId) await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
         else await setLocalEffect(projectId, targetId, localEffectForKind(targetId, kind), normalized);
+      } else {
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), AUDIO_EFFECT_CONTRACTS[kind].normalizeParams(input), { instanceId: instanceId ?? createAudioEffectInstanceId() });
       }
       return;
     }
     const userId = context.userId();
     if (!userId) return;
+    const persistModulationParams = async (trackId?: string) => {
+      const exactInstanceId = instanceId ?? createAudioEffectInstanceId();
+      const publish = (payload: Extract<SharedTimelineOperation, { kind: "effects.setMasterModulationParams" }>["payload"]) => publishEffectOperation(projectId, userId, trackId
+        ? { kind: "effects.setModulationParams", payload: { ...payload, trackId } }
+        : { kind: "effects.setMasterModulationParams", payload });
+      if (kind === "autofilter") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(input), instanceId: exactInstanceId });
+      if (kind === "chorus") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(input), instanceId: exactInstanceId });
+      if (kind === "flanger") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(input), instanceId: exactInstanceId });
+      if (kind === "phaser") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(input), instanceId: exactInstanceId });
+      if (kind === "tremolo") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(input), instanceId: exactInstanceId });
+      if (kind === "autopan") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(input), instanceId: exactInstanceId });
+      if (kind === "ensemble") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(input), instanceId: exactInstanceId });
+      if (kind === "lofi") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(input), instanceId: exactInstanceId });
+    };
     if (targetId === "master") {
-      if (kind === "eq") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterEqParams", payload: { params: normalizeEqParams(input), ...(instanceId ? { instanceId } : {}) } });
+      if (kind === "utility") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterUtilityParams", payload: { params: normalizeUtilityParamsEnvelope(input), instanceId: instanceId ?? createAudioEffectInstanceId() } });
+      else if (kind === "gate") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterGateParams", payload: { params: normalizeGateParamsEnvelope(input), instanceId: instanceId ?? createAudioEffectInstanceId() } });
+      else if (kind === "limiter") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterLimiterParams", payload: { params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(input), instanceId: instanceId ?? createAudioEffectInstanceId() } });
+      else if (kind === "eq") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterEqParams", payload: { params: normalizeEqParams(input), ...(instanceId ? { instanceId } : {}) } });
       else if (kind === "compressor") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterCompressorParams", payload: { params: normalizeCompressorParams(input), ...(instanceId ? { instanceId } : {}) } });
       else if (kind === "saturator") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterSaturatorParams", payload: { params: normalizeSaturatorParams(input), ...(instanceId ? { instanceId } : {}) } });
       else if (kind === "delay") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterDelayParams", payload: { params: normalizeDelayParams(input), ...(instanceId ? { instanceId } : {}) } });
-      else await publishEffectOperation(projectId, userId, { kind: "effects.setMasterReverbParams", payload: { params: normalizeReverbParams(input), ...(instanceId ? { instanceId } : {}) } });
+      else if (kind === "reverb") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterReverbParams", payload: { params: normalizeReverbParams(input), ...(instanceId ? { instanceId } : {}) } });
+      else await persistModulationParams();
       return;
     }
     const track = resolveTrackByTargetId(targetId);
     if (!track) return;
-    if (kind === "eq") await publishEffectOperation(projectId, userId, { kind: "effects.setEqParams", payload: { trackId: track.id, params: normalizeEqParams(input), ...(instanceId ? { instanceId } : {}) } });
+    if (kind === "utility") await publishEffectOperation(projectId, userId, { kind: "effects.setUtilityParams", payload: { trackId: track.id, params: normalizeUtilityParamsEnvelope(input), instanceId: instanceId ?? createAudioEffectInstanceId() } });
+    else if (kind === "gate") await publishEffectOperation(projectId, userId, { kind: "effects.setGateParams", payload: { trackId: track.id, params: normalizeGateParamsEnvelope(input), instanceId: instanceId ?? createAudioEffectInstanceId() } });
+    else if (kind === "limiter") await publishEffectOperation(projectId, userId, { kind: "effects.setLimiterParams", payload: { trackId: track.id, params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(input), instanceId: instanceId ?? createAudioEffectInstanceId() } });
+    else if (kind === "eq") await publishEffectOperation(projectId, userId, { kind: "effects.setEqParams", payload: { trackId: track.id, params: normalizeEqParams(input), ...(instanceId ? { instanceId } : {}) } });
     else if (kind === "compressor") await publishEffectOperation(projectId, userId, { kind: "effects.setCompressorParams", payload: { trackId: track.id, params: normalizeCompressorParams(input), ...(instanceId ? { instanceId } : {}) } });
     else if (kind === "saturator") await publishEffectOperation(projectId, userId, { kind: "effects.setSaturatorParams", payload: { trackId: track.id, params: normalizeSaturatorParams(input), ...(instanceId ? { instanceId } : {}) } });
     else if (kind === "delay") await publishEffectOperation(projectId, userId, { kind: "effects.setDelayParams", payload: { trackId: track.id, params: normalizeDelayParams(input), ...(instanceId ? { instanceId } : {}) } });
-    else await publishEffectOperation(projectId, userId, { kind: "effects.setReverbParams", payload: { trackId: track.id, params: normalizeReverbParams(input), ...(instanceId ? { instanceId } : {}) } });
+    else if (kind === "reverb") await publishEffectOperation(projectId, userId, { kind: "effects.setReverbParams", payload: { trackId: track.id, params: normalizeReverbParams(input), ...(instanceId ? { instanceId } : {}) } });
+    else await persistModulationParams(track.id);
   };
 
   const updateInstance = (instanceId: string, kind: AudioEffectKind, updater: (prev: AudioEffectParams) => AudioEffectParams) => {
@@ -751,23 +943,23 @@ export function createEffectsPanelAudioDevice(
   };
   const updateEq = (updater: (prev: EqParams) => EqParams) => {
     const instance = orderedEffects().find((entry) => entry.kind === "eq");
-    if (instance) updateInstance(instance.id, "eq", (prev) => updater(normalizeEqParams(prev)));
+    if (instance) updateInstance(instance.id, "eq", (prev) => updater(normalizeEqParams(objectParamInput(prev))));
   };
   const updateReverb = (updater: (prev: ReverbParams) => ReverbParams) => {
     const instance = orderedEffects().find((entry) => entry.kind === "reverb");
-    if (instance) updateInstance(instance.id, "reverb", (prev) => updater(normalizeReverbParams(prev)));
+    if (instance) updateInstance(instance.id, "reverb", (prev) => updater(normalizeReverbParams(objectParamInput(prev))));
   };
   const updateCompressor = (updater: (prev: CompressorParams) => CompressorParams) => {
     const instance = orderedEffects().find((entry) => entry.kind === "compressor");
-    if (instance) updateInstance(instance.id, "compressor", (prev) => updater(normalizeCompressorParams(prev)));
+    if (instance) updateInstance(instance.id, "compressor", (prev) => updater(normalizeCompressorParams(objectParamInput(prev))));
   };
   const updateSaturator = (updater: (prev: SaturatorParams) => SaturatorParams) => {
     const instance = orderedEffects().find((entry) => entry.kind === "saturator");
-    if (instance) updateInstance(instance.id, "saturator", (prev) => updater(normalizeSaturatorParams(prev)));
+    if (instance) updateInstance(instance.id, "saturator", (prev) => updater(normalizeSaturatorParams(objectParamInput(prev))));
   };
   const updateDelay = (updater: (prev: DelayParams) => DelayParams) => {
     const instance = orderedEffects().find((entry) => entry.kind === "delay");
-    if (instance) updateInstance(instance.id, "delay", (prev) => updater(normalizeDelayParams(prev)));
+    if (instance) updateInstance(instance.id, "delay", (prev) => updater(normalizeDelayParams(objectParamInput(prev))));
   };
   const addEq = () => {
     if (!context.canWriteCurrentTargetEffects()) return;
@@ -794,7 +986,7 @@ export function createEffectsPanelAudioDevice(
     effects: readonly AudioEffectChainPresetStep[],
     index?: number,
   ) => {
-    if (effects.length === 0 || !effects.every((effect) => canAddByKindToTarget(targetId, effect.kind))) return false;
+    if (effects.length === 0 || readPersistedOrderedEffectsForTarget(targetId).length + effects.length > 16) return false;
     const entries = effects.map((effect) => ({
       instance: { id: createAudioEffectInstanceId(), kind: effect.kind },
       params: normalizePresetStepParams(effect),
@@ -817,7 +1009,7 @@ export function createEffectsPanelAudioDevice(
   const addByKindToTarget = async (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => (
     await addChainToTarget(targetId, [createDefaultPresetStep(effect)], index)
   );
-  const canAddByKindToTarget = (_targetId: Track["id"] | "master", _effect: AudioEffectKind) => true;
+  const canAddByKindToTarget = (targetId: Track["id"] | "master", _effect: AudioEffectKind) => readPersistedOrderedEffectsForTarget(targetId).length < 16;
   const deleteInstanceFromTarget = async (targetId: Track["id"] | "master", instance: AudioEffectInstance, projectId: string) => {
     const instanceId = persistedInstanceIdForTarget(targetId, instance);
     if (isLocalId("project", projectId)) {
@@ -878,9 +1070,58 @@ export function createEffectsPanelAudioDevice(
     addByKindToTarget,
     addChainToTarget,
     canAddByKindToTarget,
+    utility: {
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "utility", (prev) => updater(normalizeUtilityParamsEnvelope(prev))),
+    },
+    gate: {
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "gate", (prev) => updater(normalizeGateParamsEnvelope(prev))),
+      setSidechainSource: async (instanceId, sourceTrackId) => {
+        const projectId = context.projectId();
+        const targetId = currentTargetId();
+        if (!projectId || targetId === "master") return;
+        if (isLocalId("project", projectId)) {
+          const repository = createLocalTimelineRepository(projectId);
+          if (sourceTrackId) await repository.setSidechainRoute({ sourceTrackId, targetTrackId: targetId, effectInstanceId: instanceId });
+          else await repository.removeSidechainRoute(targetId, instanceId);
+          return;
+        }
+        const userId = context.userId();
+        if (!userId) return;
+        await publishEffectOperation(projectId, userId, sourceTrackId
+          ? { kind: "sidechains.setRoute", payload: { projectId, sourceTrackId, targetTrackId: targetId, effectInstanceId: instanceId } }
+          : { kind: "sidechains.removeRoute", payload: { projectId, targetTrackId: targetId, effectInstanceId: instanceId } });
+      },
+    },
+    limiter: {
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "limiter", (prev) => updater(AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(prev))),
+    },
+    autofilter: {
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "autofilter", (prev) => updater(AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(prev))),
+    },
+    chorus: {
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "chorus", (prev) => updater(AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(prev))),
+    },
+    flanger: {
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "flanger", (prev) => updater(AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(prev))),
+    },
+    phaser: {
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "phaser", (prev) => updater(AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(prev))),
+    },
+    tremolo: {
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "tremolo", (prev) => updater(AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(prev))),
+    },
+    autopan: {
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "autopan", (prev) => updater(AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(prev))),
+    },
+    ensemble: {
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "ensemble", (prev) => updater(AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(prev))),
+    },
+    lofi: {
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "lofi", (prev) => updater(AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(prev))),
+    },
     eq: {
       add: addEq,
-      changeInstance: (instanceId, updater) => updateInstance(instanceId, "eq", (prev) => updater(normalizeEqParams(prev))),
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "eq", (prev) => updater(normalizeEqParams(objectParamInput(prev)))),
       changeBand: (bandId, updates) => updateEq((prev) => ({
         ...prev,
         bands: prev.bands.map((band) => band.id === bandId ? { ...band, ...updates } : band),
@@ -908,7 +1149,7 @@ export function createEffectsPanelAudioDevice(
     reorder,
     compressor: {
       add: addCompressor,
-      changeInstance: (instanceId, updater) => updateInstance(instanceId, "compressor", (prev) => updater(normalizeCompressorParams(prev))),
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "compressor", (prev) => updater(normalizeCompressorParams(objectParamInput(prev)))),
       change: (updates) => updateCompressor((prev) => normalizeCompressorParams({ ...prev, ...updates })),
       params: compressorState.params,
       readDraftForTarget: compressorState.readDraftForTarget,
@@ -917,7 +1158,7 @@ export function createEffectsPanelAudioDevice(
     },
     saturator: {
       add: addSaturator,
-      changeInstance: (instanceId, updater) => updateInstance(instanceId, "saturator", (prev) => updater(normalizeSaturatorParams(prev))),
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "saturator", (prev) => updater(normalizeSaturatorParams(objectParamInput(prev)))),
       change: (updates) => updateSaturator((prev) => normalizeSaturatorParams({ ...prev, ...updates })),
       params: saturatorState.params,
       readDraftForTarget: saturatorState.readDraftForTarget,
@@ -926,7 +1167,7 @@ export function createEffectsPanelAudioDevice(
     },
     delay: {
       add: addDelay,
-      changeInstance: (instanceId, updater) => updateInstance(instanceId, "delay", (prev) => updater(normalizeDelayParams(prev))),
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "delay", (prev) => updater(normalizeDelayParams(objectParamInput(prev)))),
       change: (updates) => updateDelay((prev) => normalizeDelayParams({ ...prev, ...updates })),
       params: delayState.params,
       readDraftForTarget: delayState.readDraftForTarget,
@@ -935,7 +1176,7 @@ export function createEffectsPanelAudioDevice(
     },
     reverb: {
       add: addReverb,
-      changeInstance: (instanceId, updater) => updateInstance(instanceId, "reverb", (prev) => updater(normalizeReverbParams(prev))),
+      changeInstance: (instanceId, updater) => updateInstance(instanceId, "reverb", (prev) => updater(normalizeReverbParams(objectParamInput(prev)))),
       change: (updates) => updateReverb((prev) => normalizeReverbParams({ ...prev, ...updates })),
       params: reverbState.params,
       readDraftForTarget: reverbState.readDraftForTarget,

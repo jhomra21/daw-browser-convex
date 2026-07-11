@@ -10,8 +10,10 @@ import {
   normalizeSaturatorParamsForUpdate,
   normalizeSynthParams,
   normalizeTrackInstrumentParams,
+  AUDIO_EFFECT_CONTRACTS,
   audioEffectOrderItemId,
   audioEffectOrderItemKind,
+  mergeOwnedProcessorParams,
   serializeCompressorParams,
   serializeDelayParams,
   serializeEqParams,
@@ -118,22 +120,50 @@ const trackInstrumentValidator = v.union(
   v.object({ kind: v.literal('drum-rack'), params: v.any() }),
 )
 
-const audioEffectKindValidator = v.union(v.literal("eq"), v.literal("compressor"), v.literal("saturator"), v.literal("delay"), v.literal("reverb"))
+const processorEnvelopeValidator = v.object({ version: v.literal(1), state: v.any() })
+const processorEffectValidator = v.union(v.literal("utility"), v.literal("gate"), v.literal("limiter"))
+const modulationEffectValidator = v.union(v.literal("autofilter"), v.literal("chorus"), v.literal("flanger"), v.literal("phaser"), v.literal("tremolo"), v.literal("autopan"), v.literal("ensemble"), v.literal("lofi"))
+const canonicalAudioEffectKindValidator = v.union(v.literal("utility"), v.literal("eq"), v.literal("autofilter"), v.literal("gate"), v.literal("compressor"), v.literal("saturator"), v.literal("limiter"), v.literal("lofi"), v.literal("chorus"), v.literal("flanger"), v.literal("phaser"), v.literal("tremolo"), v.literal("autopan"), v.literal("ensemble"), v.literal("delay"), v.literal("reverb"))
 const audioEffectOrderItemValidator = v.union(
-  audioEffectKindValidator,
-  v.object({ id: v.string(), kind: audioEffectKindValidator }),
+  canonicalAudioEffectKindValidator,
+  v.object({ id: v.string(), kind: canonicalAudioEffectKindValidator }),
 )
 
-type TrackAudioEffectType = 'instrument' | 'synth' | 'arpeggiator' | 'reverb' | 'eq' | 'compressor' | 'saturator' | 'delay'
-type MasterAudioEffectType = 'reverb' | 'eq' | 'compressor' | 'saturator' | 'delay'
+type AudioEffectKind = 'utility' | 'eq' | 'autofilter' | 'gate' | 'compressor' | 'saturator' | 'limiter' | 'lofi' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' | 'delay' | 'reverb'
+type TrackAudioEffectType = 'instrument' | 'synth' | 'arpeggiator' | AudioEffectKind
+type MasterAudioEffectType = AudioEffectKind
 type SharedAudioEffectType = TrackAudioEffectType | MasterAudioEffectType
-type AudioEffectKind = MasterAudioEffectType
 type AudioEffectOrderItem = AudioEffectKind | { id: string; kind: AudioEffectKind }
+const isCanonicalAudioEffectKind = (type: string): type is AudioEffectKind => (
+  type === 'utility' || type === 'eq' || type === 'autofilter' || type === 'gate' || type === 'compressor' || type === 'saturator' || type === 'limiter'
+  || type === 'lofi' || type === 'chorus' || type === 'flanger' || type === 'phaser' || type === 'tremolo' || type === 'autopan' || type === 'ensemble'
+  || type === 'delay' || type === 'reverb'
+)
 
 const audioEffectPersistenceDescriptors = {
+  utility: {
+    normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('utility', params, existing),
+    serializeParams: AUDIO_EFFECT_CONTRACTS.utility.serializeParams,
+  },
   eq: {
     normalizeParamsForUpdate: normalizeEqParamsForUpdate,
     serializeParams: serializeEqParams,
+  },
+  autofilter: {
+    normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('autofilter', params, existing),
+    serializeParams: AUDIO_EFFECT_CONTRACTS.autofilter.serializeParams,
+  },
+  gate: {
+    normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('gate', params, existing),
+    serializeParams: AUDIO_EFFECT_CONTRACTS.gate.serializeParams,
+  },
+  limiter: {
+    normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('limiter', params, existing),
+    serializeParams: AUDIO_EFFECT_CONTRACTS.limiter.serializeParams,
+  },
+  lofi: {
+    normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('lofi', params, existing),
+    serializeParams: AUDIO_EFFECT_CONTRACTS.lofi.serializeParams,
   },
   compressor: {
     normalizeParamsForUpdate: normalizeCompressorParamsForUpdate,
@@ -151,6 +181,12 @@ const audioEffectPersistenceDescriptors = {
     normalizeParamsForUpdate: normalizeReverbParamsForUpdate,
     serializeParams: serializeReverbParams,
   },
+  chorus: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('chorus', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.chorus.serializeParams },
+  flanger: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('flanger', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.flanger.serializeParams },
+  phaser: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('phaser', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.phaser.serializeParams },
+  tremolo: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('tremolo', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.tremolo.serializeParams },
+  autopan: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('autopan', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.autopan.serializeParams },
+  ensemble: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('ensemble', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.ensemble.serializeParams },
 }
 type AudioEffectPersistenceType = keyof typeof audioEffectPersistenceDescriptors
 const deletedStatus = () => ({ status: 'deleted' })
@@ -177,7 +213,7 @@ const sanitizeArpParams = (params: {
 }
 
 const isAudioEffectPersistenceType = (type: SharedAudioEffectType): type is AudioEffectPersistenceType => (
-  type === 'eq' || type === 'compressor' || type === 'saturator' || type === 'delay' || type === 'reverb'
+  type !== 'instrument' && type !== 'synth' && type !== 'arpeggiator'
 )
 
 const normalizeEffectParamsForUpdate = (
@@ -223,6 +259,12 @@ const upsertTrackEffect = async (
   const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
   if (!access || access.track.projectId !== input.projectId) return
   const existing = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
+  if (input.instanceId) {
+    if (!input.instanceId?.trim()) throw new Error('Audio effect instance id must be nonempty.')
+    const audioRows = existing.filter((entry: EffectOrderRow) => entry.targetType === 'track' && isCanonicalAudioEffectKind(entry.type))
+    if (audioRows.some((entry: EffectOrderRow) => entry.instanceId === input.instanceId && entry.type !== input.type)) throw new Error('Audio effect instance id must be unique per target.')
+    if (!audioRows.some((entry: EffectOrderRow) => entry.instanceId === input.instanceId) && audioRows.length >= 16) throw new Error('Audio effect target cannot contain more than 16 effects.')
+  }
   if (input.type === 'instrument') {
     await Promise.all(existing.flatMap((entry: any) => (
       entry.type === 'synth' && entry.targetType === 'track' ? [ctx.db.delete(entry._id)] : []
@@ -276,6 +318,12 @@ const upsertMasterEffect = async (
 ) => {
   await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
   const existing = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
+  if (input.instanceId) {
+    if (!input.instanceId?.trim()) throw new Error('Audio effect instance id must be nonempty.')
+    const audioRows = existing.filter((entry: EffectOrderRow) => isCanonicalAudioEffectKind(entry.type))
+    if (audioRows.some((entry: EffectOrderRow) => entry.instanceId === input.instanceId && entry.type !== input.type)) throw new Error('Audio effect instance id must be unique per target.')
+    if (!audioRows.some((entry: EffectOrderRow) => entry.instanceId === input.instanceId) && audioRows.length >= 16) throw new Error('Audio effect target cannot contain more than 16 effects.')
+  }
   const row = input.instanceId
     ? existing.find((entry: EffectOrderRow) => entry.instanceId === input.instanceId && entry.type === input.type && entry.targetType === 'master') ?? null
     : existing.find((entry: EffectOrderRow) => entry.type === input.type && !entry.instanceId) ?? null
@@ -332,7 +380,7 @@ type EffectOrderContext = {
 
 const reorderRows = async (ctx: EffectOrderContext, rows: EffectOrderRow[], order: AudioEffectOrderItem[]) => {
   const audioRows = rows
-    .filter((row) => row.type === 'eq' || row.type === 'compressor' || row.type === 'saturator' || row.type === 'delay' || row.type === 'reverb')
+    .filter((row) => isCanonicalAudioEffectKind(row.type))
     .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
   const requestedIds = new Set<string>()
   const requested = order.flatMap((item) => {
@@ -680,6 +728,30 @@ export const setEqParams = mutation({
   },
 });
 
+export const setUtilityParams = mutation({
+  args: { projectId: v.string(), trackId: v.id("tracks"), instanceId: v.string(), params: processorEnvelopeValidator },
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'utility', instanceId, params })
+  },
+})
+
+export const setGateParams = mutation({
+  args: { projectId: v.string(), trackId: v.id("tracks"), instanceId: v.string(), params: processorEnvelopeValidator },
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'gate', instanceId, params })
+  },
+})
+
+export const setLimiterParams = mutation({
+  args: { projectId: v.string(), trackId: v.id("tracks"), instanceId: v.string(), params: processorEnvelopeValidator },
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId, type: 'limiter', instanceId, params })
+  },
+})
+
 // Set or create the EQ params for the room master bus. We enforce that the user owns the project for this room.
 export const setMasterEqParams = mutation({
   args: {
@@ -691,6 +763,30 @@ export const setMasterEqParams = mutation({
     const userId = await requireAuthenticatedUserId(ctx)
     return await upsertMasterEffect(ctx, { projectId, userId, type: 'eq', instanceId, params })
   }
+})
+
+export const setMasterUtilityParams = mutation({
+  args: { projectId: v.string(), instanceId: v.string(), params: processorEnvelopeValidator },
+  handler: async (ctx, { projectId, instanceId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'utility', instanceId, params })
+  },
+})
+
+export const setMasterGateParams = mutation({
+  args: { projectId: v.string(), instanceId: v.string(), params: processorEnvelopeValidator },
+  handler: async (ctx, { projectId, instanceId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'gate', instanceId, params })
+  },
+})
+
+export const setMasterLimiterParams = mutation({
+  args: { projectId: v.string(), instanceId: v.string(), params: processorEnvelopeValidator },
+  handler: async (ctx, { projectId, instanceId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'limiter', instanceId, params })
+  },
 })
 
 export const setCompressorParams = mutation({
@@ -761,7 +857,7 @@ export const removeAudioEffect = mutation({
     projectId: v.string(),
     targetType: v.union(v.literal('track'), v.literal('master')),
     trackId: v.optional(v.id('tracks')),
-    effect: audioEffectKindValidator,
+    effect: canonicalAudioEffectKindValidator,
     instanceId: v.optional(v.string()),
   },
   handler: async (ctx, { projectId, targetType, trackId, effect, instanceId }) => {
@@ -858,6 +954,46 @@ export const serverSetEqParams = mutation({
   },
 })
 
+export const serverSetUtilityParams = mutation({
+  args: { projectId: v.string(), trackId: v.string(), instanceId: v.string(), params: processorEnvelopeValidator },
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
+    if (!normalizedTrackId) return
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'utility', instanceId, params })
+  },
+})
+
+export const serverSetProcessorParams = mutation({
+  args: { projectId: v.string(), trackId: v.string(), effect: processorEffectValidator, instanceId: v.string(), params: processorEnvelopeValidator },
+  handler: async (ctx, { projectId, trackId, effect, instanceId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
+    if (!normalizedTrackId) return
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: effect, instanceId, params })
+  },
+})
+
+export const serverSetModulationParams = mutation({
+  args: { projectId: v.string(), trackId: v.string(), effect: modulationEffectValidator, instanceId: v.string(), params: processorEnvelopeValidator },
+  handler: async (ctx, { projectId, trackId, effect, instanceId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
+    if (!normalizedTrackId) return
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: effect, instanceId, params })
+  },
+})
+
+export const serverSetGateParams = mutation({
+  args: { projectId: v.string(), trackId: v.string(), instanceId: v.string(), params: processorEnvelopeValidator },
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
+    if (!normalizedTrackId) return
+    return await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'gate', instanceId, params })
+  },
+})
+
 export const serverSetMasterReverbParams = mutation({
   args: {
     projectId: v.string(),
@@ -879,6 +1015,38 @@ export const serverSetMasterEqParams = mutation({
   handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     return await upsertMasterEffect(ctx, { projectId, userId, type: 'eq', instanceId, params })
+  },
+})
+
+export const serverSetMasterUtilityParams = mutation({
+  args: { projectId: v.string(), instanceId: v.string(), params: processorEnvelopeValidator },
+  handler: async (ctx, { projectId, instanceId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'utility', instanceId, params })
+  },
+})
+
+export const serverSetMasterProcessorParams = mutation({
+  args: { projectId: v.string(), effect: processorEffectValidator, instanceId: v.string(), params: processorEnvelopeValidator },
+  handler: async (ctx, { projectId, effect, instanceId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertMasterEffect(ctx, { projectId, userId, type: effect, instanceId, params })
+  },
+})
+
+export const serverSetMasterModulationParams = mutation({
+  args: { projectId: v.string(), effect: modulationEffectValidator, instanceId: v.string(), params: processorEnvelopeValidator },
+  handler: async (ctx, { projectId, effect, instanceId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertMasterEffect(ctx, { projectId, userId, type: effect, instanceId, params })
+  },
+})
+
+export const serverSetMasterGateParams = mutation({
+  args: { projectId: v.string(), instanceId: v.string(), params: processorEnvelopeValidator },
+  handler: async (ctx, { projectId, instanceId, params }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await upsertMasterEffect(ctx, { projectId, userId, type: 'gate', instanceId, params })
   },
 })
 
@@ -962,7 +1130,7 @@ export const serverRemoveAudioEffect = mutation({
     projectId: v.string(),
     targetType: v.union(v.literal('track'), v.literal('master')),
     trackId: v.optional(v.string()),
-    effect: audioEffectKindValidator,
+    effect: canonicalAudioEffectKindValidator,
     instanceId: v.optional(v.string()),
   },
   handler: async (ctx, { projectId, targetType, trackId, effect, instanceId }) => {

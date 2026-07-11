@@ -153,11 +153,22 @@ const createSyncedAudioEffectInstanceRow = (
 ): SyncedAudioEffectInstanceRow => {
   const id = instanceId ?? kind;
   const input = objectParamInput(params);
+  if (kind === "utility") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.utility.normalizeParams(input), index };
+  if (kind === "autofilter") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(input), index };
   if (kind === "eq") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.eq.normalizeParams(input), index };
+  if (kind === "gate") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.gate.normalizeParams(input), index };
   if (kind === "compressor") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.compressor.normalizeParams(input), index };
   if (kind === "saturator") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.saturator.normalizeParams(input), index };
+  if (kind === "limiter") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(input), index };
+  if (kind === "lofi") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(input), index };
   if (kind === "delay") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.delay.normalizeParams(input), index };
-  return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.reverb.normalizeParams(input), index };
+  if (kind === "reverb") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.reverb.normalizeParams(input), index };
+  if (kind === "chorus") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(input), index };
+  if (kind === "flanger") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(input), index };
+  if (kind === "phaser") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(input), index };
+  if (kind === "tremolo") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(input), index };
+  if (kind === "autopan") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(input), index };
+  return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(input), index };
 };
 
 const collectSyncedAudioEffectInstances = (effects: SyncedEffectRow[]) => {
@@ -182,10 +193,21 @@ const collectSyncedAudioEffectInstances = (effects: SyncedEffectRow[]) => {
     for (const instance of order) {
       const row = rowByKey.get(`${targetId}:${instance.id}`);
       if (!row) continue;
-      if (row.kind === "eq") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      if (row.kind === "utility") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else if (row.kind === "autofilter") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else if (row.kind === "eq") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else if (row.kind === "gate") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
       else if (row.kind === "compressor") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
       else if (row.kind === "saturator") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else if (row.kind === "limiter") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else if (row.kind === "lofi") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
       else if (row.kind === "delay") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else if (row.kind === "reverb") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else if (row.kind === "chorus") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else if (row.kind === "flanger") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else if (row.kind === "phaser") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else if (row.kind === "tremolo") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else if (row.kind === "autopan") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
       else runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
     }
     return runtimeInstances;

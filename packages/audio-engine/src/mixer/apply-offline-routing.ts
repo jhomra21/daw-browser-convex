@@ -10,6 +10,17 @@ import type { AudioEffectRuntimeInstance } from '../effects/runtime-instance'
 import { createMixerRoutingPlan } from './graph-contract'
 import { createOfflineCompressorLifecycle, type OfflineCompressorLifecycle, type OfflineProcessorTarget } from './offline-compressor-lifecycle'
 import { MASTER_ROUTE_TARGET, mixerRouteKey, resolveMixerTiming } from './resolve-timing'
+import { createStaticWorkletNodeChain, disconnectStaticWorkletNodeChain, resolveStaticWorkletAutomationBinding, type StaticWorkletKind, type StaticWorkletNodeChain } from '../effects/static-worklet-chain'
+
+const MAX_EFFECTS_PER_CHAIN = 16
+const MAX_OFFLINE_CHAINS = 32
+const MAX_OFFLINE_STATIC_WORKLETS = 256
+const isStaticWorkletKind = (kind: AudioEffectKind): kind is StaticWorkletKind =>
+  kind === 'utility' || kind === 'autofilter' || kind === 'gate' || kind === 'limiter' || kind === 'lofi' ||
+  kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble'
+const isStaticWorkletInstance = (
+  instance: AudioEffectRuntimeInstance,
+): instance is Extract<AudioEffectRuntimeInstance, { kind: StaticWorkletKind }> => isStaticWorkletKind(instance.kind)
 
 type OfflineTrackNodes = {
   input: GainNode
@@ -45,6 +56,7 @@ type OfflineFxChain = {
   saturatorByInstanceId: Map<string, SaturatorNodeChain>
   delayByInstanceId: Map<string, DelayNodeChain>
   reverbByInstanceId: Map<string, ReverbNodeChain>
+  staticWorkletByInstanceId: Map<string, StaticWorkletNodeChain>
 }
 
 async function buildOfflineFxChain(
@@ -66,8 +78,19 @@ async function buildOfflineFxChain(
     const saturatorByInstanceId = new Map<string, SaturatorNodeChain>()
     const delayByInstanceId = new Map<string, DelayNodeChain>()
     const reverbByInstanceId = new Map<string, ReverbNodeChain>()
+    const staticWorkletByInstanceId = new Map<string, StaticWorkletNodeChain>()
     const stages = []
+    if (config.instances.length > MAX_EFFECTS_PER_CHAIN) throw new Error(`Effect chains are limited to ${MAX_EFFECTS_PER_CHAIN} instances.`)
+    const seen = new Set<string>()
     for (const instance of config.instances) {
+      if (seen.has(instance.id)) throw new Error(`Duplicate effect instance ID: ${instance.id}`)
+      seen.add(instance.id)
+      if (isStaticWorkletInstance(instance)) {
+        const worklet = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params)
+        staticWorkletByInstanceId.set(instance.id, worklet)
+        stages.push({ id: instance.id, kind: instance.kind, staticWorkletChain: worklet })
+        continue
+      }
       if (instance.kind === 'eq') {
         const normalized = normalizeEqParams(instance.params)
         const eqNodes = createEqNodes(ctx, normalized, ctx.destination.channelCount || 2)
@@ -98,12 +121,13 @@ async function buildOfflineFxChain(
         stages.push({ id: instance.id, kind: instance.kind, delayChain: delay })
         continue
       }
+      if (instance.kind !== 'reverb') continue
       const reverb = createReverbNodeChain(ctx, instance.params, createImpulseResponse)
       reverbByInstanceId.set(instance.id, reverb)
       stages.push({ id: instance.id, kind: instance.kind, reverbChain: reverb })
     }
     connectFxChain(input, destination, { instances: stages })
-    return { compressorByInstanceId, eqByInstanceId, saturatorByInstanceId, delayByInstanceId, reverbByInstanceId }
+    return { compressorByInstanceId, eqByInstanceId, saturatorByInstanceId, delayByInstanceId, reverbByInstanceId, staticWorkletByInstanceId }
   }
   const normalizedEq = config.eq ? normalizeEqParams(config.eq) : undefined
   const eq = createEqNodes(ctx, normalizedEq, ctx.destination.channelCount || 2)
@@ -125,6 +149,7 @@ async function buildOfflineFxChain(
     saturatorByInstanceId: new Map(saturator ? [['legacy-saturator', saturator]] : []),
     delayByInstanceId: new Map(delay ? [['legacy-delay', delay]] : []),
     reverbByInstanceId: new Map(reverb ? [['legacy-reverb', reverb]] : []),
+    staticWorkletByInstanceId: new Map(),
   }
 }
 
@@ -136,6 +161,7 @@ const resolveFxAutomationBindings = (
   const descriptor = getAutomationParameterDescriptor(parameterId)
   if (!descriptor || descriptor.owner === 'mixer' || descriptor.owner === 'compressor') return []
   if (effectInstanceId) {
+    if (isStaticWorkletKind(descriptor.owner)) return resolveStaticWorkletAutomationBinding(nodes.staticWorkletByInstanceId.get(effectInstanceId), parameterId)
     if (descriptor.owner === 'eq') return resolveEqAutomationBindings(nodes.eqByInstanceId.get(effectInstanceId) ?? new Map(), parameterId)
     if (descriptor.owner === 'saturator') return resolveSaturatorAutomationBindings(nodes.saturatorByInstanceId.get(effectInstanceId), parameterId)
     if (descriptor.owner === 'delay') return resolveDelayAutomationBindings(nodes.delayByInstanceId.get(effectInstanceId), parameterId)
@@ -163,6 +189,11 @@ export async function createOfflineMixerNodes(
   bpm = 120,
   sidechainRoutes: readonly ExternalSidechainRoute[] = [],
 ): Promise<OfflineMixerNodes> {
+  const chains = graph.channels.length + 1
+  if (chains > MAX_OFFLINE_CHAINS) throw new Error(`Offline rendering is limited to ${MAX_OFFLINE_CHAINS} effect chains.`)
+  const staticWorkletCount = [graph.master.instances, ...graph.channels.map((entry) => entry.fx?.instances)]
+    .reduce((count, instances) => count + (instances?.filter((instance) => isStaticWorkletKind(instance.kind)).length ?? 0), 0)
+  if (staticWorkletCount > MAX_OFFLINE_STATIC_WORKLETS) throw new Error(`Offline rendering is limited to ${MAX_OFFLINE_STATIC_WORKLETS} static worklets.`)
   const routingPlan = createMixerRoutingPlan(graph)
   const timingPlan = resolveMixerTiming(graph, ctx.sampleRate, bpm)
   const impulseCache = createReverbImpulseCache()
@@ -240,15 +271,33 @@ export async function createOfflineMixerNodes(
       const source = trackNodes.get(route.sourceTrackId)
       const target = trackNodes.get(route.targetTrackId)
       const compressor = target?.fx.compressorByInstanceId.get(route.effectInstanceId)
-      assert(source && target && compressor, `Invalid offline sidechain route for compressor ${route.effectInstanceId}`)
-      source.output.connect(compressor.workletNode, 0, 1)
+      const gate = target?.fx.staticWorkletByInstanceId.get(route.effectInstanceId)
+      const targetNode = compressor?.workletNode ?? (gate?.kind === 'gate' ? gate.node : undefined)
+      assert(source && target && targetNode, `Invalid offline sidechain route for effect ${route.effectInstanceId}`)
+      source.output.connect(targetNode, 0, 1)
     }
 
     return {
       masterInput,
       trackNodes,
-      assertCompressorProcessorsHealthy: compressorLifecycle.assertHealthy,
-      dispose: compressorLifecycle.dispose,
+      assertCompressorProcessorsHealthy: () => {
+        compressorLifecycle.assertHealthy()
+        const fxChains = [masterFx, ...trackNodes.values().map((nodes) => nodes.fx)]
+        for (const fx of fxChains) {
+          for (const [instanceId, processor] of fx.staticWorkletByInstanceId) {
+            if (processor.state === 'faulted') {
+              throw new Error(`Offline ${processor.kind} processor "${instanceId}" failed: ${processor.fault?.message ?? 'unknown fault'}`)
+            }
+          }
+        }
+      },
+      dispose: () => {
+        compressorLifecycle.dispose()
+        for (const chain of masterFx.staticWorkletByInstanceId.values()) disconnectStaticWorkletNodeChain(chain)
+        for (const nodes of trackNodes.values()) {
+          for (const chain of nodes.fx.staticWorkletByInstanceId.values()) disconnectStaticWorkletNodeChain(chain)
+        }
+      },
       resolveTrackAutomationBindings: (target, parameterId) => {
         const nodes = trackNodes.get(target.trackId)
         if (!nodes) return []

@@ -14,20 +14,30 @@ export const duplicateMonoSample = (sample: number): readonly [number, number] =
 const expandsLayout = (kind: AudioEffectKind, params: { enabled?: boolean; pingPong?: boolean; stereoWidth?: number }) =>
   params.enabled === true && (
     (kind === 'delay' && params.pingPong === true) ||
-    (kind === 'reverb' && (params.stereoWidth ?? 0) > 0)
+    (kind === 'reverb' && (params.stereoWidth ?? 0) > 0) ||
+    kind === 'chorus' || kind === 'autopan' || kind === 'ensemble'
   )
 
 const propagateEffects = (input: ChannelLayout, fx: MixerTrackFx | ResolvedMixerGraph['master']): ChannelLayout => {
   let layout = input
   if (fx.instances) {
     for (const instance of fx.instances) {
-      if (expandsLayout(instance.kind, instance.params)) layout = 'stereo'
+      if (instance.kind === 'chorus' || instance.kind === 'autopan' || instance.kind === 'ensemble') {
+        if (instance.params.state.enabled) layout = 'stereo'
+      } else if (instance.kind === 'delay' || instance.kind === 'reverb') {
+        if (expandsLayout(instance.kind, instance.params)) layout = 'stereo'
+      }
     }
     return layout
   }
   const order = normalizeAudioEffectOrder(fx.order ?? AUDIO_EFFECT_ORDER, AUDIO_EFFECT_ORDER)
   for (const kind of order) {
-    const params = fx[kind]
+    const params = kind === 'eq' ? fx.eq
+      : kind === 'compressor' ? fx.compressor
+      : kind === 'saturator' ? fx.saturator
+      : kind === 'delay' ? fx.delay
+      : kind === 'reverb' ? fx.reverb
+      : undefined
     if (params && expandsLayout(kind, params)) layout = 'stereo'
   }
   return layout

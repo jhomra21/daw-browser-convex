@@ -176,6 +176,21 @@ export const executeTimelineOperation = async (
         instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })
+    case 'effects.setUtilityParams':
+    case 'effects.setGateParams':
+    case 'effects.setLimiterParams':
+      return await context.convex.mutation(convexApi.effects.serverSetProcessorParams, {
+        projectId: context.projectId,
+        trackId: operation.payload.trackId,
+        effect: operation.kind === 'effects.setUtilityParams' ? 'utility' : operation.kind === 'effects.setGateParams' ? 'gate' : 'limiter',
+        instanceId: operation.payload.instanceId,
+        params: operation.payload.params,
+      })
+    case 'effects.setModulationParams':
+      return await context.convex.mutation(convexApi.effects.serverSetModulationParams, {
+        projectId: context.projectId,
+        ...operation.payload,
+      })
     case 'effects.setReverbParams':
       return await context.convex.mutation(convexApi.effects.serverSetReverbParams, {
         projectId: context.projectId,
@@ -242,6 +257,20 @@ export const executeTimelineOperation = async (
         projectId: context.projectId,
         instanceId: operation.payload.instanceId,
         params: operation.payload.params,
+      })
+    case 'effects.setMasterUtilityParams':
+    case 'effects.setMasterGateParams':
+    case 'effects.setMasterLimiterParams':
+      return await context.convex.mutation(convexApi.effects.serverSetMasterProcessorParams, {
+        projectId: context.projectId,
+        effect: operation.kind === 'effects.setMasterUtilityParams' ? 'utility' : operation.kind === 'effects.setMasterGateParams' ? 'gate' : 'limiter',
+        instanceId: operation.payload.instanceId,
+        params: operation.payload.params,
+      })
+    case 'effects.setMasterModulationParams':
+      return await context.convex.mutation(convexApi.effects.serverSetMasterModulationParams, {
+        projectId: context.projectId,
+        ...operation.payload,
       })
     case 'effects.setMasterReverbParams':
       return await context.convex.mutation(convexApi.effects.serverSetMasterReverbParams, {

@@ -3,7 +3,7 @@ import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_ORDER, INSTRUMENT_CONTRACTS, audioEffectOrderItemId, audioEffectOrderItemKind, automationTargetMatchesEffectInstance, normalizeTrackInstrumentParams, type AudioEffectKind, type AudioEffectOrderItem, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { compareAudioEffectOrderEntries } from '~/lib/audio-effect-order-rows'
 
-export type LocalEffectKind = 'eq' | 'compressor' | 'saturator' | 'delay' | 'reverb' | 'instrument' | 'synth' | 'arp' | 'master-eq' | 'master-compressor' | 'master-saturator' | 'master-delay' | 'master-reverb'
+export type LocalEffectKind = AudioEffectKind | `master-${AudioEffectKind}` | 'instrument' | 'synth' | 'arp'
 
 export type LocalEffectRow<TParams = any> = {
   id: string
@@ -180,7 +180,7 @@ export const deleteLocalEffectInstance = async (
     return
   }
   const automationRows = await tx.store.index('by-kind').getAll('automation-envelope')
-  const sidechainRows = effect === 'compressor'
+  const sidechainRows = effect === 'compressor' || effect === 'gate'
     ? await tx.store.index('by-kind').getAll(SIDECHAIN_KIND)
     : []
   await tx.store.delete(key)

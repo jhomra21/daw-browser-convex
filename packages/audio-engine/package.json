@@ -12,6 +12,7 @@
     "./export-audio-support": "./src/export-audio-support.ts",
     "./export-range": "./src/export-range.ts",
     "./export-mixdown": "./src/export-mixdown.ts",
+    "./processor-release-contract": "./src/effects/processor-release-contract.ts",
     "./recording-encode-wav": "./src/recording/encode-wav.ts"
   },
   "scripts": {

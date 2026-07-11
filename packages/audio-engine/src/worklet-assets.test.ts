@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { normalizeCompressorParams } from '@daw-browser/shared'
 import { computeCompressorWorkletCurveDb } from './effects/compressor-worklet'
 import { createRecorderSabRingBuffers, createRecorderSabRingConsumer } from './recording/sab-ring-buffer'
-import { compressorWorklet, recorderWorklet, trackMeterWorklet } from './worklet-manifest'
+import { compressorWorklet, gateWorklet, limiterWorklet, modulationWorklet, recorderWorklet, trackMeterWorklet, utilityWorklet } from './worklet-manifest'
 
 const publicRoot = new URL('../../../public/', import.meta.url)
 
@@ -11,10 +11,10 @@ type EvaluatedProcessor = {
     onmessage: ((event: { data: unknown }) => void) | null
     messages: unknown[]
   }
-  process: (inputs: Float32Array[][], outputs?: Float32Array[][]) => boolean
+  process: (inputs: Float32Array[][], outputs?: Float32Array[][], parameters?: Record<string, Float32Array>) => boolean
 }
 
-type ProcessorConstructor = new () => EvaluatedProcessor
+type ProcessorConstructor = new (options?: { processorOptions: { processorKind: string } }) => EvaluatedProcessor
 
 const evaluateAsset = async (modulePath: string) => {
   const source = await Bun.file(new URL(modulePath, publicRoot)).text()
@@ -45,6 +45,72 @@ const evaluateAsset = async (modulePath: string) => {
 }
 
 describe('checked-in worklet assets', () => {
+  test('registers the shared modulation asset with immutable processor kind', async () => {
+    const evaluated = await evaluateAsset(modulationWorklet.modulePath)
+    const Processor = evaluated.registered.get(modulationWorklet.processorName)
+    if (!Processor) throw new Error('Modulation processor was not registered.')
+    const processor = new Processor({ processorOptions: { processorKind: 'tremolo' } })
+    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, processorKind: 'tremolo', state: { enabled: true, waveform: 'sine', rateHz: 1, depth: 1, shape: 0.5, phase: 0.25 } } })
+    const input = Float32Array.of(0.5)
+    const output = [new Float32Array(1), new Float32Array(1)]
+    expect(processor.process([[input]], [output])).toBe(true)
+    expect(output[0][0]).toBeCloseTo(0.5, 6)
+    expect(output[1][0]).toBeCloseTo(0.5, 6)
+    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 2, processorKind: 'chorus', state: {} } })
+    expect(processor.port.messages).toContainEqual({ type: 'fault', version: 1, code: 'immutable-processor-kind' })
+  })
+
+  test('registers utility and preserves stereo unity through the exact asset', async () => {
+    const evaluated = await evaluateAsset(utilityWorklet.modulePath)
+    const Processor = evaluated.registered.get(utilityWorklet.processorName)
+    if (!Processor) throw new Error('Utility processor was not registered.')
+    const processor = new Processor()
+    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: { enabled: true, polarity: 'normal', inputMode: 'stereo', matrix: 'stereo', swap: false, dcBlock: false } } })
+    const left = Float32Array.of(0.25, -0.5)
+    const right = Float32Array.of(-0.125, 0.75)
+    const output = [new Float32Array(2), new Float32Array(2)]
+    expect(processor.process([[left, right]], [output], {
+      'utility.gainDb': Float32Array.of(0),
+      'utility.pan': Float32Array.of(0),
+      'utility.balance': Float32Array.of(0),
+      'utility.width': Float32Array.of(1),
+    })).toBe(true)
+    expect(Array.from(output[0])).toEqual(Array.from(left))
+    expect(Array.from(output[1])).toEqual(Array.from(right))
+  })
+
+  test('registers gate with fixed two millisecond delayed bypass', async () => {
+    const evaluated = await evaluateAsset(gateWorklet.modulePath)
+    const Processor = evaluated.registered.get(gateWorklet.processorName)
+    if (!Processor) throw new Error('Gate processor was not registered.')
+    const processor = new Processor()
+    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: { enabled: false, mode: 'gate', detector: 'peak', sidechain: { enabled: false } } } })
+    const input = new Float32Array(98)
+    input[0] = 1
+    const output = new Float32Array(98)
+    const parameters = Object.fromEntries(namesForGateTest().map((name) => [name, Float32Array.of(name === 'gate.lookaheadMs' ? 0 : name === 'gate.rangeDb' ? -80 : name === 'gate.thresholdDb' ? -40 : name === 'gate.ratio' ? 4 : name === 'gate.attackMs' ? 1 : name === 'gate.holdMs' ? 20 : name === 'gate.releaseMs' ? 120 : name === 'gate.hysteresisDb' ? 6 : 1)]))
+    expect(processor.process([[input]], [[output]], parameters)).toBe(true)
+    expect(output[96]).toBe(1)
+  })
+
+  test('registers limiter with fixed five millisecond delayed bypass', async () => {
+    const evaluated = await evaluateAsset(limiterWorklet.modulePath)
+    const Processor = evaluated.registered.get(limiterWorklet.processorName)
+    if (!Processor) throw new Error('Limiter processor was not registered.')
+    const processor = new Processor()
+    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: { enabled: false } } })
+    const input = new Float32Array(242)
+    input[0] = 1
+    const output = new Float32Array(242)
+    expect(processor.process([[input]], [[output]], {
+      'limiter.ceiling': Float32Array.of(-1),
+      'limiter.release': Float32Array.of(100),
+      'limiter.lookaheadMs': Float32Array.of(5),
+      'limiter.link': Float32Array.of(1),
+      'limiter.detectorOversampling': Float32Array.of(4),
+    })).toBe(true)
+    expect(output[240]).toBe(1)
+  })
   test('registers and processes the exact compressor asset with curve parity', async () => {
     const evaluated = await evaluateAsset(compressorWorklet.modulePath)
     const Processor = evaluated.registered.get(compressorWorklet.processorName)
@@ -249,3 +315,5 @@ describe('checked-in worklet assets', () => {
     expect(processor.port.messages).toHaveLength(messageCount)
   })
 })
+
+const namesForGateTest = () => ['gate.thresholdDb', 'gate.ratio', 'gate.attackMs', 'gate.holdMs', 'gate.releaseMs', 'gate.hysteresisDb', 'gate.rangeDb', 'gate.lookaheadMs', 'gate.link']

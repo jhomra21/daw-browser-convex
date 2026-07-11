@@ -162,7 +162,7 @@ describe('Drum Rack params', () => {
     const normalized = INSTRUMENT_CONTRACTS['drum-rack'].normalizeParams({ pads: [{ gain: 99 }] })
 
     expect(isInstrumentKind('drum-rack')).toBe(true)
-    expect(isInstrumentKind('sampler')).toBe(false)
+    expect(isInstrumentKind('sampler')).toBe(true)
     expect(INSTRUMENT_CONTRACTS.synth.kind).toBe('synth')
     expect(INSTRUMENT_CONTRACTS['drum-rack'].serializeParams(normalized)).toBe(serializeDrumRackParams(normalized))
   })

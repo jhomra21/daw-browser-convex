@@ -1,4 +1,5 @@
 import {
+  getSpectralLatencyFrames,
   normalizeDelayParams,
   normalizeReverbParams,
   type AudioEffectKind,
@@ -17,7 +18,7 @@ type EffectTiming = {
 
 type EffectTimingInput =
   | Extract<AudioEffectRuntimeInstance, { kind: 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' }>
-  | Extract<AudioEffectRuntimeInstance, { kind: 'utility' | 'autofilter' | 'gate' | 'limiter' | 'lofi' }>
+  | Extract<AudioEffectRuntimeInstance, { kind: 'utility' | 'autofilter' | 'gate' | 'limiter' | 'lofi' | 'spectral' }>
   | { kind: 'eq'; params: EqParamsLite }
   | { kind: 'compressor'; params: CompressorParamsLite }
   | { kind: 'saturator'; params: SaturatorParamsLite }
@@ -61,6 +62,12 @@ export const getEffectTiming = (
   }
   if (input.kind === 'gate') {
     return { latencyFrames: Math.ceil(2 * rate / 1000), tail: finite(0) }
+  }
+  if (input.kind === 'spectral') {
+    return {
+      latencyFrames: getSpectralLatencyFrames(input.params.state.fftSize, input.params.state.overlap),
+      tail: finite(0),
+    }
   }
   if (input.kind === 'compressor') {
     return {

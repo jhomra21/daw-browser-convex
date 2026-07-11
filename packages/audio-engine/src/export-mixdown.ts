@@ -15,9 +15,14 @@ import {
   type SaturatorParamsLite,
   type SynthParamsInput,
   type TrackInstrumentParams,
+  parseInstrumentAutomationKey,
+  parseGranularAutomationKey,
 } from '@daw-browser/shared'
 import { createSynthVoiceOscillators, getSynthVoiceConfig, getSynthVoiceVelocity, scheduleSynthVoiceEnvelope } from './synth-voice'
 import { DRUM_RACK_CHOKE_FADE_SEC, scheduleDrumRackHit, type DrumRackResolvedBuffers } from './drum-rack-runtime'
+import { scheduleSamplerVoice, type SamplerResolvedBuffers } from './sampler-runtime'
+import { resetSamplerRoundRobin, selectSamplerZone } from './sampler-core'
+import { createGranularRuntime, type GranularInstalledBuffer } from './granular-runtime'
 import { createOfflineMixerNodes } from './mixer/apply-offline-routing'
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
@@ -43,7 +48,7 @@ export type ExportFx = {
   masterReverb?: ReverbParamsLite
   masterFxOrder?: AudioEffectKind[]
   masterFxInstances?: AudioEffectRuntimeInstance[]
-  trackFx?: Record<string, { order?: AudioEffectKind[]; instances?: AudioEffectRuntimeInstance[]; eq?: EqParamsLite; compressor?: CompressorParamsLite; saturator?: SaturatorParamsLite; delay?: DelayParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput; instrument?: TrackInstrumentParams; drumRackBuffers?: DrumRackResolvedBuffers }>
+  trackFx?: Record<string, { order?: AudioEffectKind[]; instances?: AudioEffectRuntimeInstance[]; eq?: EqParamsLite; compressor?: CompressorParamsLite; saturator?: SaturatorParamsLite; delay?: DelayParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput; instrument?: TrackInstrumentParams; drumRackBuffers?: DrumRackResolvedBuffers; samplerBuffers?: SamplerResolvedBuffers; granularBuffer?: GranularInstalledBuffer }>
 }
 
 export type ExportRequest = {
@@ -305,10 +310,132 @@ function renderOfflineDrumRackEvents(input: {
   }
 }
 
+function renderOfflineSamplerEvents(input: {
+  ctx: OfflineAudioContext
+  destination: AudioNode
+  events: ReturnType<typeof getScheduledMidiEvents>
+  rangeStartSec: number
+  instrument: Extract<TrackInstrumentParams, { kind: 'sampler' }>
+  buffers: SamplerResolvedBuffers | undefined
+  automationEnvelopes: readonly AutomationEnvelope[]
+}) {
+  if (!input.buffers) throw new Error('Sampler export requires preloaded sampler buffers.')
+  let roundRobin = resetSamplerRoundRobin()
+  for (const event of input.events) {
+    const selected = selectSamplerZone(input.instrument.params.zones, event.pitch, Math.round((event.velocity ?? 1) * 127), roundRobin)
+    roundRobin = selected.roundRobin
+    if (!selected.zone) continue
+    const buffer = input.buffers.get(selected.zone.id)
+    if (!buffer) throw new Error(`Sampler export is missing buffer for zone "${selected.zone.id}".`)
+    scheduleSamplerVoice({
+      ctx: input.ctx,
+      destination: input.destination,
+      buffer,
+      zone: selected.zone,
+      params: input.instrument.params,
+      note: event.pitch,
+      velocity: Math.round((event.velocity ?? 1) * 127),
+      when: Math.max(0, event.startSec - input.rangeStartSec),
+      durationSec: event.endSec - event.startSec,
+      timelineStartSec: event.startSec,
+      automationEnvelopes: input.automationEnvelopes.filter((envelope) => {
+        const key = parseInstrumentAutomationKey(envelope.parameterId)
+        return key?.instanceId === input.instrument.instanceId
+      }),
+      timelineToCtxTime: (timelineSec) => Math.max(0, timelineSec - input.rangeStartSec),
+    })
+  }
+}
+
+async function createOfflineGranularTrack(input: {
+  ctx: OfflineAudioContext
+  destination: AudioNode
+  instrument: Extract<TrackInstrumentParams, { kind: 'granular' }>
+  installedBuffer: GranularInstalledBuffer | undefined
+  resourceObserver?: ResourceObserver
+}) {
+  if (!input.installedBuffer) throw new Error('Granular export requires a preloaded sample.')
+  const runtime = await createGranularRuntime({
+    context: input.ctx,
+    destination: input.destination,
+    params: input.instrument.params,
+    resourceObserver: input.resourceObserver,
+  })
+  try {
+    await runtime.installSample(input.installedBuffer)
+    runtime.resetSeed(input.instrument.params.seed)
+    runtime.setFrozen(input.instrument.params.freeze)
+    return runtime
+  } catch (error) {
+    runtime.close()
+    throw error
+  }
+}
+
 function createTrackById(tracks: Track<AudioBuffer>[]): Map<string, Track<AudioBuffer>> {
   const trackById = new Map<string, Track<AudioBuffer>>()
   for (const track of tracks) trackById.set(track.id, track)
   return trackById
+}
+
+const snapshotTracks = (tracks: Track<AudioBuffer>[]): Track<AudioBuffer>[] => tracks.map((track) => ({
+  ...track,
+  sends: track.sends?.map((send) => ({ ...send })),
+  clips: track.clips.map((clip) => ({
+    ...clip,
+    audioWarp: clip.audioWarp ? { ...clip.audioWarp } : undefined,
+    midi: clip.midi ? {
+      ...clip.midi,
+      notes: clip.midi.notes.map((note) => ({ ...note })),
+    } : undefined,
+  })),
+}))
+
+const snapshotAutomation = (envelopes: readonly AutomationEnvelope[]): AutomationEnvelope[] =>
+  envelopes.map((envelope) => ({
+    ...envelope,
+    target: { ...envelope.target },
+    points: envelope.points.map((point) => ({ ...point })),
+  }))
+
+const snapshotInstrument = (instrument: TrackInstrumentParams): TrackInstrumentParams => {
+  if (instrument.kind === 'drum-rack') {
+    return { ...instrument, params: { ...instrument.params, pads: instrument.params.pads.map((pad) => ({ ...pad })) } }
+  }
+  if (instrument.kind === 'sampler') {
+    return {
+      ...instrument,
+      params: {
+        ...instrument.params,
+        zones: instrument.params.zones.map((zone) => ({ ...zone, sample: { ...zone.sample } })),
+      },
+    }
+  }
+  if (instrument.kind === 'granular') {
+    return {
+      ...instrument,
+      params: {
+        ...instrument.params,
+        zone: instrument.params.zone
+          ? { ...instrument.params.zone, sample: { ...instrument.params.zone.sample } }
+          : undefined,
+      },
+    }
+  }
+  return { ...instrument, params: { ...instrument.params } }
+}
+
+const snapshotTrackFx = (trackFx: ExportFx['trackFx']): ExportFx['trackFx'] => {
+  if (!trackFx) return undefined
+  return Object.fromEntries(Object.entries(trackFx).map(([trackId, entry]) => [
+    trackId,
+    {
+      ...entry,
+      order: entry.order ? [...entry.order] : undefined,
+      instances: entry.instances ? [...entry.instances] : undefined,
+      instrument: entry.instrument ? snapshotInstrument(entry.instrument) : undefined,
+    },
+  ]))
 }
 
 export function resolveExportMixerGraph(req: Pick<ExportRequest, 'tracks' | 'fx'>): ResolvedMixerGraph {
@@ -332,7 +459,8 @@ export function resolveExportMixerGraph(req: Pick<ExportRequest, 'tracks' | 'fx'
 }
 
 function prepareExportRender(req: ExportRequest): PreparedExportRender {
-  const { tracks, bpm, range, sampleRate = 44100, numberOfChannels = 2, fx, signal } = req
+  const { bpm, range, sampleRate = 44100, numberOfChannels = 2, fx, signal } = req
+  const tracks = snapshotTracks(req.tracks)
   throwIfAborted(signal)
   if (req.cueTrackIds && req.cueTrackIds.length > 0) {
     throw new Error('Cue routing is live-only and cannot be exported.')
@@ -347,9 +475,9 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
     numberOfChannels,
     trackById: createTrackById(tracks),
     mixerGraph: resolveExportMixerGraph({ tracks, fx }),
-    exportTrackFx: fx?.trackFx,
-    automationEnvelopes: req.automationEnvelopes ?? [],
-    sidechainRoutes: req.sidechainRoutes ?? [],
+    exportTrackFx: snapshotTrackFx(fx?.trackFx),
+    automationEnvelopes: snapshotAutomation(req.automationEnvelopes ?? []),
+    sidechainRoutes: (req.sidechainRoutes ?? []).map((route) => ({ ...route })),
     signal,
     resourceObserver: req.resourceObserver,
   }
@@ -567,6 +695,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
     throw error
   })
   const { trackNodes } = mixerNodes
+  const granularRuntimes: Array<Awaited<ReturnType<typeof createGranularRuntime>>> = []
 
   try {
     for (const envelope of prepared.automationEnvelopes) {
@@ -603,6 +732,16 @@ async function renderSourceIsolatedMixdownFromPrepared(
         ? new Map(instrument.params.pads.map((pad) => [pad.note, pad]))
         : undefined
       const activeDrumRackHitsByChokeGroup = new Map<number, OfflineDrumRackHit[]>()
+      const granularRuntime = instrument?.kind === 'granular'
+        ? await createOfflineGranularTrack({
+          ctx,
+          destination: trackInput,
+          instrument,
+          installedBuffer: exportFxCfg?.granularBuffer,
+          resourceObserver: prepared.resourceObserver,
+        })
+        : undefined
+      if (granularRuntime) granularRuntimes.push(granularRuntime)
 
       for (const clip of track.clips) {
         const midi = clip.midi
@@ -625,6 +764,31 @@ async function renderSourceIsolatedMixdownFromPrepared(
               buffers: exportFxCfg?.drumRackBuffers,
               activeHitsByChokeGroup: activeDrumRackHitsByChokeGroup,
             })
+          } else if (instrument?.kind === 'sampler') {
+            renderOfflineSamplerEvents({
+              ctx,
+              destination: trackInput,
+              events,
+              rangeStartSec: prepared.range.startSec,
+              instrument,
+              buffers: exportFxCfg?.samplerBuffers,
+              automationEnvelopes: prepared.automationEnvelopes.filter((envelope) => (
+                parseInstrumentAutomationKey(envelope.parameterId)?.trackId === track.id
+              )),
+            })
+          } else if (instrument?.kind === 'granular' && granularRuntime) {
+            const automationEnvelopes = prepared.automationEnvelopes.filter((envelope) => (
+              parseGranularAutomationKey(envelope.parameterId)?.trackId === track.id
+            ))
+            for (const event of events) {
+              granularRuntime.scheduleNote({
+                when: Math.max(0, event.startSec - prepared.range.startSec),
+                durationSec: event.endSec - event.startSec,
+                timelineStartSec: event.startSec,
+                timelineToCtxTime: (timelineSec) => Math.max(0, timelineSec - prepared.range.startSec),
+                automationEnvelopes,
+              })
+            }
           } else {
             renderOfflineSynthEvents({
               ctx,
@@ -690,6 +854,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
     )
     return output
   } finally {
+    for (const runtime of granularRuntimes) runtime.close()
     mixerNodes.dispose()
     releaseContext()
   }

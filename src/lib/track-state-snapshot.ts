@@ -49,6 +49,8 @@ const snapshotAudioEffectRow = (row: EffectRowSnapshotInput): TrackAudioEffectSn
       return { effect, instanceId, index, params: normalizeDelayParams(row.params) }
     case 'reverb':
       return { effect, instanceId, index, params: normalizeReverbParams(row.params) }
+    case 'spectral':
+      return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(row.params) }
     case 'chorus': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(row.params) }
     case 'flanger': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(row.params) }
     case 'phaser': return { effect, instanceId, index, params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(row.params) }

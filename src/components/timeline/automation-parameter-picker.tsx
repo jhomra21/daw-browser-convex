@@ -2,15 +2,15 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'so
 import {
   automationTargetKey,
   getAutomationParameterOptionsForTarget,
-  type AutomationEffectInstance,
   type AutomationParameterSelection,
+  type AutomationTargetDeviceInstance,
   type AutomationTarget,
 } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
 
 type AutomationParameterPickerProps = {
   target: AutomationTarget
-  effects: readonly AutomationEffectInstance[]
+  effects: readonly AutomationTargetDeviceInstance[]
   value: AutomationParameterSelection
   automatedTargetKeys?: ReadonlySet<string>
   onChange: (selection: AutomationParameterSelection) => void
@@ -42,7 +42,10 @@ const groupParameterOptions = (parameterOptions: ReturnType<typeof getAutomation
 export default function AutomationParameterPicker(props: AutomationParameterPickerProps) {
   const [open, setOpen] = createSignal(false)
   let rootRef: HTMLDivElement | undefined
-  const parameterOptions = createMemo(() => getAutomationParameterOptionsForTarget(props.effects))
+  const parameterOptions = createMemo(() => getAutomationParameterOptionsForTarget(
+    props.effects,
+    props.target.kind === 'track' ? props.target.trackId : undefined,
+  ))
   const groupedParameterOptions = createMemo(() => groupParameterOptions(parameterOptions()))
   const selectedTargetKey = createMemo(() => selectionKey(props.target, props.value))
   const selectedOption = createMemo(() => parameterOptions().find(

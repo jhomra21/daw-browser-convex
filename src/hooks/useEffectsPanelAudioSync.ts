@@ -26,6 +26,7 @@ import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import type { ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
 import { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
+import { createSamplerBufferSync } from "~/lib/sampler-buffer-sync";
 
 type UseEffectsPanelAudioSyncOptions = {
   isOpen: Accessor<boolean>;
@@ -168,6 +169,7 @@ const createSyncedAudioEffectInstanceRow = (
   if (kind === "phaser") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(input), index };
   if (kind === "tremolo") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(input), index };
   if (kind === "autopan") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(input), index };
+  if (kind === "spectral") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(input), index };
   return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(input), index };
 };
 
@@ -208,6 +210,7 @@ const collectSyncedAudioEffectInstances = (effects: SyncedEffectRow[]) => {
       else if (row.kind === "phaser") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
       else if (row.kind === "tremolo") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
       else if (row.kind === "autopan") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
+      else if (row.kind === "spectral") runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
       else runtimeInstances.push({ id: row.id, kind: row.kind, params: row.params });
     }
     return runtimeInstances;
@@ -293,7 +296,9 @@ export function useEffectsPanelAudioSync(
   let syncedTrackIds = new Set<Track["id"]>();
   let syncedProjectId: string | null = null;
   const drumRackBufferSync = createDrumRackBufferSync();
+  const samplerBufferSync = createSamplerBufferSync();
   onCleanup(drumRackBufferSync.dispose);
+  onCleanup(samplerBufferSync.dispose);
 
   const clearSyncedTrackState = (audioEngine: AudioEngine, trackIds: Iterable<Track["id"]>) => {
     for (const trackId of trackIds) {
@@ -306,6 +311,7 @@ export function useEffectsPanelAudioSync(
       audioEngine.clearTrackInstrument(trackId);
       audioEngine.clearTrackArpeggiator(trackId);
       drumRackBufferSync.clearTrack(trackId);
+      samplerBufferSync.clearTrack(trackId);
     }
   };
 
@@ -434,11 +440,20 @@ export function useEffectsPanelAudioSync(
         const instrument = options.localDraftEffects?.instrument?.(track.id) ?? instrumentByTrackId.get(track.id);
         if (instrument?.kind === "synth") {
           drumRackBufferSync.clearTrack(track.id);
+          samplerBufferSync.clearTrack(track.id);
           audioEngine.setTrackSynth(track.id, instrument.params);
         } else if (instrument?.kind === "drum-rack") {
+          samplerBufferSync.clearTrack(track.id);
           drumRackBufferSync.syncTrack(audioEngine, track.id, instrument.params);
+        } else if (instrument?.kind === "sampler") {
+          drumRackBufferSync.clearTrack(track.id);
+          samplerBufferSync.syncTrack(audioEngine, track.id, instrument.params, instrument.instanceId);
+        } else if (instrument?.kind === "granular") {
+          drumRackBufferSync.clearTrack(track.id);
+          samplerBufferSync.syncGranularTrack(audioEngine, track.id, instrument.params, instrument.instanceId);
         } else {
           drumRackBufferSync.clearTrack(track.id);
+          samplerBufferSync.clearTrack(track.id);
           audioEngine.clearTrackInstrument(track.id);
         }
         const arp = options.localDraftEffects?.arp?.(track.id) ?? arpByTrackId.get(track.id);
@@ -447,6 +462,7 @@ export function useEffectsPanelAudioSync(
         continue;
       }
       drumRackBufferSync.clearTrack(track.id);
+      samplerBufferSync.clearTrack(track.id);
       audioEngine.clearTrackInstrument(track.id);
       audioEngine.clearTrackArpeggiator(track.id);
     }

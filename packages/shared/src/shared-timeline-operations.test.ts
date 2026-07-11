@@ -85,6 +85,57 @@ describe('shared timeline operations', () => {
       payload: { trackId: 'track-1', instanceId: 'fx-1', params: { version: 1, state: {} } },
     })).toBeNull()
   })
+
+  test('roundtrips spectral instances while keeping topology parameters state-only', () => {
+    const operation = {
+      kind: 'effects.setSpectralParams',
+      payload: {
+        trackId: 'track-1',
+        instanceId: 'spectral-1',
+        params: {
+          version: 1,
+          state: {
+            fftSize: 4096,
+            overlap: 2,
+            mode: 'shift-blur',
+            mix: 0.4,
+          },
+        },
+      },
+    }
+    expect(parseSharedTimelineOperation(operation)).toEqual({
+      kind: 'effects.setSpectralParams',
+      payload: {
+        trackId: 'track-1',
+        instanceId: 'spectral-1',
+        params: {
+          version: 1,
+          state: {
+            enabled: true,
+            fftSize: 4096,
+            overlap: 2,
+            mode: 'shift-blur',
+            freeze: 0,
+            gateThresholdDb: -60,
+            gateAttackMs: 10,
+            gateReleaseMs: 100,
+            morph: 0,
+            binShift: 0,
+            blur: 0,
+            harmonicPercussiveBalance: 0,
+            noiseReduction: 0,
+            profileLearn: 0,
+            mix: 0.4,
+          },
+        },
+      },
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setMasterSpectralParams',
+      payload: { instanceId: '', params: { version: 1, state: {} } },
+    })).toBeNull()
+  })
+
   test('roundtrips exact external sidechain routes', () => {
     const operation: SharedTimelineOperation = {
       kind: 'sidechains.setRoute',

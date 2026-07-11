@@ -190,7 +190,7 @@ describe('Compressor params', () => {
   })
 
   test('adds compressor to audio effect order', () => {
-    expect(AUDIO_EFFECT_ORDER).toEqual(['utility', 'eq', 'autofilter', 'gate', 'compressor', 'saturator', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'delay', 'reverb'])
+    expect(AUDIO_EFFECT_ORDER).toEqual(['utility', 'eq', 'autofilter', 'gate', 'compressor', 'saturator', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'delay', 'reverb', 'spectral'])
     expect(normalizeAudioEffectOrder(['delay', 'compressor'], ['eq', 'compressor', 'delay'])).toEqual(['delay', 'compressor', 'eq'])
   })
 

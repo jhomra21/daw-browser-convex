@@ -3,7 +3,7 @@ import {
   type OwnedProcessorKind,
 } from '@daw-browser/shared'
 import { loadWorkletModule } from '../worklet-loader'
-import { autoFilterWorklet, gateWorklet, limiterWorklet, loFiWorklet, modulationWorklet, resolveWorkletModuleUrl, utilityWorklet } from '../worklet-manifest'
+import { autoFilterWorklet, gateWorklet, limiterWorklet, loFiWorklet, modulationWorklet, resolveWorkletModuleUrl, spectralWorklet, utilityWorklet } from '../worklet-manifest'
 import { disconnectAudioNodes } from './chain'
 import { normalizeOwnedProcessorAudioState, ownedProcessorAudioParamValues } from './owned-processor-audio-descriptors'
 
@@ -27,7 +27,7 @@ export type StaticWorkletNodeChain = {
 const isModulationKind = (kind: StaticWorkletKind) =>
   kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble'
 
-const manifest = (kind: StaticWorkletKind) => kind === 'utility' ? utilityWorklet : kind === 'autofilter' ? autoFilterWorklet : kind === 'gate' ? gateWorklet : kind === 'limiter' ? limiterWorklet : kind === 'lofi' ? loFiWorklet : modulationWorklet
+const manifest = (kind: StaticWorkletKind) => kind === 'utility' ? utilityWorklet : kind === 'autofilter' ? autoFilterWorklet : kind === 'gate' ? gateWorklet : kind === 'limiter' ? limiterWorklet : kind === 'lofi' ? loFiWorklet : kind === 'spectral' ? spectralWorklet : modulationWorklet
 
 type StaticWorkletParams = unknown
 
@@ -40,13 +40,20 @@ export async function createStaticWorkletNodeChain(
   const asset = manifest(kind)
   await loadWorkletModule(ctx, resolveWorkletModuleUrl(asset.modulePath))
   const node = new AudioWorkletNode(ctx, asset.processorName, {
-    numberOfInputs: kind === 'gate' ? 2 : 1,
+    numberOfInputs: kind === 'gate' || kind === 'spectral' ? 2 : 1,
     numberOfOutputs: 1,
     outputChannelCount: [2],
     channelCount: 2,
     channelCountMode: 'explicit',
     channelInterpretation: 'speakers',
-    processorOptions: isModulationKind(kind) ? { processorKind: kind } : undefined,
+    processorOptions: isModulationKind(kind)
+      ? { processorKind: kind }
+      : kind === 'spectral'
+        ? {
+            fftSize: Reflect.get(normalizeOwnedProcessorAudioState(kind, params), 'fftSize'),
+            overlap: Reflect.get(normalizeOwnedProcessorAudioState(kind, params), 'overlap'),
+          }
+        : undefined,
   })
   const chain: StaticWorkletNodeChain = {
     kind,
@@ -87,6 +94,11 @@ export function applyStaticWorkletNodeParams(
   params: StaticWorkletParams,
 ) {
   const normalizedState = normalizeOwnedProcessorAudioState(chain.kind, params)
+  if (chain.kind === 'spectral') {
+    const fftSize = Reflect.get(normalizedState, 'fftSize')
+    const overlap = Reflect.get(normalizedState, 'overlap')
+    chain.node.port.postMessage({ type: 'reconfigure', version: 1, fftSize, overlap })
+  }
   chain.revision += 1
   chain.node.port.postMessage({
     type: 'configure',
@@ -108,7 +120,7 @@ export function disconnectStaticWorkletNodeChain(chain: StaticWorkletNodeChain) 
   chain.gateMeterListeners.clear()
   chain.node.port.onmessage = null
   chain.node.onprocessorerror = null
-  try { chain.node.port.postMessage({ type: 'dispose', version: 1 }) } catch {}
+  try { chain.node.port.postMessage({ type: 'release', version: 1 }) } catch {}
   try { chain.node.port.close() } catch {}
   disconnectAudioNodes([chain.node])
 }

@@ -9,9 +9,10 @@ describe('effect row instrument params', () => {
     expect(readInstrumentParamsFromEffectRow({
       effect: 'synth',
       params,
-    })).toEqual({
+    })).toMatchObject({
       kind: 'synth',
       params,
+      instanceId: expect.stringContaining('instrument:migration:synth:'),
     })
   })
 
@@ -21,6 +22,6 @@ describe('effect row instrument params', () => {
     expect(readInstrumentParamsFromEffectRow({
       effect: 'instrument',
       params: { kind: 'drum-rack', params },
-    })).toEqual({ kind: 'drum-rack', params })
+    })).toMatchObject({ kind: 'drum-rack', params, instanceId: expect.stringContaining('instrument:migration:drum-rack:') })
   })
 })

@@ -180,7 +180,7 @@ export const deleteLocalEffectInstance = async (
     return
   }
   const automationRows = await tx.store.index('by-kind').getAll('automation-envelope')
-  const sidechainRows = effect === 'compressor' || effect === 'gate'
+  const sidechainRows = effect === 'compressor' || effect === 'gate' || effect === 'spectral'
     ? await tx.store.index('by-kind').getAll(SIDECHAIN_KIND)
     : []
   await tx.store.delete(key)

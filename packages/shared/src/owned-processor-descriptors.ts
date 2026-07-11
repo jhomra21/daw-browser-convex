@@ -11,6 +11,7 @@ import {
   normalizeTremoloParamsEnvelope,
   normalizeUtilityParamsEnvelope,
 } from './effects-params'
+import { normalizeSpectralParamsEnvelope } from './spectral-params'
 
 export const OWNED_PROCESSOR_KINDS = [
   'utility',
@@ -24,6 +25,7 @@ export const OWNED_PROCESSOR_KINDS = [
   'tremolo',
   'autopan',
   'ensemble',
+  'spectral',
 ] as const
 
 export type OwnedProcessorKind = typeof OWNED_PROCESSOR_KINDS[number]
@@ -40,6 +42,7 @@ export const OWNED_PROCESSOR_PARAMETER_IDS = {
   tremolo: ['tremolo.rateHz', 'tremolo.depth', 'tremolo.shape', 'tremolo.phase'],
   autopan: ['autopan.rateHz', 'autopan.depth', 'autopan.shape', 'autopan.phase'],
   ensemble: ['ensemble.delayMs', 'ensemble.depthMs', 'ensemble.rateHz', 'ensemble.spread', 'ensemble.mix'],
+  spectral: ['spectral.freeze', 'spectral.gateThresholdDb', 'spectral.gateAttackMs', 'spectral.gateReleaseMs', 'spectral.morph', 'spectral.binShift', 'spectral.blur', 'spectral.harmonicPercussiveBalance', 'spectral.noiseReduction', 'spectral.profileLearn', 'spectral.mix'],
 } as const satisfies Record<OwnedProcessorKind, readonly string[]>
 
 const descriptor = (
@@ -64,6 +67,7 @@ export const OWNED_PROCESSOR_DESCRIPTORS = {
   tremolo: descriptor(normalizeTremoloParamsEnvelope),
   autopan: descriptor(normalizeAutoPanParamsEnvelope),
   ensemble: descriptor(normalizeEnsembleParamsEnvelope),
+  spectral: descriptor(normalizeSpectralParamsEnvelope),
 } satisfies Record<OwnedProcessorKind, ReturnType<typeof descriptor>>
 
 export const isOwnedProcessorKind = (value: unknown): value is OwnedProcessorKind =>

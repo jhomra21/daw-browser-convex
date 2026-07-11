@@ -14,6 +14,7 @@ import { createPersistedEffectState } from "~/components/timeline/create-persist
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
 import { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
+import { createSamplerBufferSync, type GranularLoadStatus, type SamplerLoadStatus } from "~/lib/sampler-buffer-sync";
 import { assignSampleToDrumRackPad, buildClipCreatePayload, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { convexApi } from "~/lib/convex";
 import type { LocalEffectRow } from "~/lib/local-effects";
@@ -29,10 +30,14 @@ import {
   createDefaultSynthParams,
   INSTRUMENT_CONTRACTS,
   normalizeTrackInstrumentParams,
+  createInstrumentInstanceId,
   type ArpeggiatorParams,
   type DrumRackParams,
   type DrumRackSampleAssignment,
   type InstrumentKind,
+  type GranularParams,
+  type SamplerParams,
+  type SamplerZone,
   type SynthParams,
   type TrackInstrumentParams,
 } from "@daw-browser/shared";
@@ -112,6 +117,23 @@ type EffectsPanelInstrumentDevice = {
     reset: () => void;
     updatePad: (padId: string, updates: Partial<DrumRackParams["pads"][number]>) => void;
   };
+  sampler: {
+    params: Accessor<SamplerParams | undefined>;
+    status: Accessor<SamplerLoadStatus | undefined>;
+    retryZone: (zoneId: string) => void;
+    reset: () => void;
+    update: (updates: Partial<SamplerParams>) => void;
+    updateZone: (zoneId: string, updates: Partial<SamplerZone>) => void;
+    addZone: (zone: SamplerZone) => void;
+    removeZone: (zoneId: string) => void;
+  };
+  granular: {
+    params: Accessor<GranularParams | undefined>;
+    status: Accessor<GranularLoadStatus | undefined>;
+    retry: () => void;
+    reset: () => void;
+    update: (updates: Partial<GranularParams>) => void;
+  };
   activeInstrument: Accessor<TrackInstrumentParams | undefined>;
   readDraftInstrumentForTarget: (targetId: string) => TrackInstrumentParams | undefined;
   readInstrumentForTarget: (targetId: string) => TrackInstrumentParams | undefined;
@@ -145,7 +167,11 @@ export function createEffectsPanelInstrumentDevice(
     return Boolean(projectId && isLocalId("project", projectId));
   };
   const drumRackBufferSync = createDrumRackBufferSync();
+  const samplerBufferSync = createSamplerBufferSync();
+  const [samplerStatusVersion, setSamplerStatusVersion] = createSignal(0);
+  onCleanup(samplerBufferSync.subscribe(() => setSamplerStatusVersion((version) => version + 1)));
   onCleanup(drumRackBufferSync.dispose);
+  onCleanup(samplerBufferSync.dispose);
   const localArp = createLocalEffectRows<ArpeggiatorParams>({
     projectId: context.projectId,
     targetId: getTrackTargetId,
@@ -155,7 +181,7 @@ export function createEffectsPanelInstrumentDevice(
     projectId: context.projectId,
     targetId: getTrackTargetId,
     effect: "instrument",
-    normalize: (params) => normalizeTrackInstrumentParams(params) ?? { kind: "synth", params: createDefaultSynthParams() },
+    normalize: (params) => normalizeTrackInstrumentParams(params) ?? { kind: "synth", instanceId: createInstrumentInstanceId(), params: createDefaultSynthParams() },
   });
 
   function persistInstrument(trackId: Track["id"], instrument: TrackInstrumentParams, persistContext: { projectId?: string; userId?: string }) {
@@ -283,11 +309,11 @@ export function createEffectsPanelInstrumentDevice(
     readQueryParams: (row) => row ? readInstrumentParamsFromEffectRow(row) : undefined,
     readVisibleParams: (targetId) => {
       const params = readSynthDefaults(targetId);
-      return params ? { kind: "synth", params } : undefined;
+      return params ? normalizeTrackInstrumentParams({ kind: "synth", params }) : undefined;
     },
     createInitialParams: (targetId) => {
       const params = readSynthDefaults(targetId);
-      return params ? { kind: "synth", params } : undefined;
+      return params ? normalizeTrackInstrumentParams({ kind: "synth", params }) : undefined;
     },
     serializeParams: (params) => JSON.stringify(params),
     applyToEngine: (targetId, params) => {
@@ -295,10 +321,22 @@ export function createEffectsPanelInstrumentDevice(
         context.audioEngine().setTrackSynth(targetId, params.params);
         return;
       }
-      drumRackBufferSync.syncTrack(context.audioEngine(), targetId, params.params);
+      if (params.kind === "drum-rack") {
+        samplerBufferSync.clearTrack(targetId);
+        drumRackBufferSync.syncTrack(context.audioEngine(), targetId, params.params);
+        return;
+      }
+      if (params.kind === "granular") {
+        drumRackBufferSync.clearTrack(targetId);
+        samplerBufferSync.syncGranularTrack(context.audioEngine(), targetId, params.params, params.instanceId);
+        return;
+      }
+      drumRackBufferSync.clearTrack(targetId);
+      samplerBufferSync.syncTrack(context.audioEngine(), targetId, params.params, params.instanceId);
     },
     clearFromEngine: (targetId) => {
       drumRackBufferSync.clearTrack(targetId);
+      samplerBufferSync.clearTrack(targetId);
       context.audioEngine().clearTrackInstrument(targetId);
     },
     createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
@@ -333,6 +371,7 @@ export function createEffectsPanelInstrumentDevice(
   function handleSynthChange(updates: Partial<SynthParams>): void {
     instrumentState.update((prev) => ({
       kind: "synth",
+      instanceId: prev.kind === "synth" ? prev.instanceId : createInstrumentInstanceId(),
       params: { ...(prev.kind === "synth" ? prev.params : createDefaultSynthParams()), ...updates },
     }));
   }
@@ -392,6 +431,7 @@ export function createEffectsPanelInstrumentDevice(
     if (currentParams?.selectedPadId === padId && samplesEqual(currentPad?.sample, sample)) return;
     instrumentState.updateForTarget(targetId, (prev) => ({
       kind: "drum-rack",
+      instanceId: prev.kind === "drum-rack" ? prev.instanceId : createInstrumentInstanceId(),
       params: assignSampleToDrumRackPad(
         prev.kind === "drum-rack" ? prev.params : INSTRUMENT_CONTRACTS["drum-rack"].createDefaultParams(),
         padId,
@@ -407,6 +447,7 @@ export function createEffectsPanelInstrumentDevice(
       const params = prev.kind === "drum-rack" ? prev.params : INSTRUMENT_CONTRACTS["drum-rack"].createDefaultParams();
       return {
         kind: "drum-rack",
+        instanceId: prev.kind === "drum-rack" ? prev.instanceId : createInstrumentInstanceId(),
         params: {
           ...params,
           pads: params.pads.map((pad) => pad.id === padId ? { ...pad, ...updates, id: pad.id, note: pad.note } : pad),
@@ -423,9 +464,11 @@ export function createEffectsPanelInstrumentDevice(
     if (current?.kind === kind) return true;
     instrumentState.updateForTarget(targetId, (prev) => {
       if (prev.kind === kind) return prev;
-      return kind === "synth"
-        ? { kind, params: ensureSynthDefaults(targetId) }
-        : { kind, params: INSTRUMENT_CONTRACTS["drum-rack"].createDefaultParams() };
+      const instanceId = createInstrumentInstanceId();
+      if (kind === "synth") return { kind, instanceId, params: ensureSynthDefaults(targetId) };
+      if (kind === "drum-rack") return { kind, instanceId, params: INSTRUMENT_CONTRACTS["drum-rack"].createDefaultParams() };
+      if (kind === "sampler") return { kind, instanceId, params: INSTRUMENT_CONTRACTS.sampler.createDefaultParams() };
+      return { kind, instanceId, params: INSTRUMENT_CONTRACTS.granular.createDefaultParams() };
     });
     return true;
   }
@@ -540,11 +583,12 @@ export function createEffectsPanelInstrumentDevice(
       onChange: (updates) => {
         instrumentState.updateForTarget(current.targetId, (prev) => ({
           kind: "synth",
+          instanceId: prev.kind === "synth" ? prev.instanceId : createInstrumentInstanceId(),
           params: { ...(prev.kind === "synth" ? prev.params : createDefaultSynthParams()), ...updates },
         }));
       },
       onReset: () => {
-        instrumentState.updateForTarget(current.targetId, () => ({ kind: "synth", params: ensureSynthDefaults(current.targetId) }));
+        instrumentState.updateForTarget(current.targetId, (previous) => ({ kind: "synth", instanceId: previous.kind === "synth" ? previous.instanceId : createInstrumentInstanceId(), params: ensureSynthDefaults(current.targetId) }));
       },
     };
   });
@@ -594,10 +638,10 @@ export function createEffectsPanelInstrumentDevice(
       reset: () => {
         const targetId = getTrackTargetId();
         if (!targetId) return;
-        instrumentState.updateForTarget(targetId, () => ({ kind: "synth", params: ensureSynthDefaults(targetId) }));
+        instrumentState.updateForTarget(targetId, (previous) => ({ kind: "synth", instanceId: previous.kind === "synth" ? previous.instanceId : createInstrumentInstanceId(), params: ensureSynthDefaults(targetId) }));
       },
       syncRemoteForTarget: (targetId, params) => {
-        instrumentState.syncRemoteForTarget(targetId, params ? { kind: "synth", params } : undefined);
+        instrumentState.syncRemoteForTarget(targetId, params ? normalizeTrackInstrumentParams({ kind: "synth", params }) : undefined);
       },
       updateCardBounds: updateSynthCardBounds,
     },
@@ -615,9 +659,91 @@ export function createEffectsPanelInstrumentDevice(
       reset: () => {
         const targetId = getTrackTargetId();
         if (!targetId) return;
-        instrumentState.updateForTarget(targetId, () => ({ kind: "drum-rack", params: createDefaultDrumRackParams() }));
+        instrumentState.updateForTarget(targetId, (previous) => ({ kind: "drum-rack", instanceId: previous.kind === "drum-rack" ? previous.instanceId : createInstrumentInstanceId(), params: createDefaultDrumRackParams() }));
       },
       updatePad: updateCurrentDrumRackPad,
+    },
+    sampler: {
+      params: createMemo(() => {
+        const current = instrumentState.params();
+        return current?.kind === "sampler" ? current.params : undefined;
+      }),
+      status: createMemo(() => {
+        samplerStatusVersion();
+        const targetId = getTrackTargetId();
+        return targetId ? samplerBufferSync.getStatus(targetId) : undefined;
+      }),
+      retryZone: (zoneId) => {
+        const targetId = getTrackTargetId();
+        if (targetId) samplerBufferSync.retryZone(context.audioEngine(), targetId, zoneId);
+      },
+      reset: () => {
+        const targetId = getTrackTargetId();
+        if (!targetId) return;
+        instrumentState.updateForTarget(targetId, (previous) => ({ kind: "sampler", instanceId: previous.kind === "sampler" ? previous.instanceId : createInstrumentInstanceId(), params: INSTRUMENT_CONTRACTS.sampler.createDefaultParams() }));
+      },
+      update: (updates) => {
+        const targetId = getTrackTargetId();
+        if (!targetId) return;
+        instrumentState.updateForTarget(targetId, (previous) => ({
+          kind: "sampler",
+          instanceId: previous.kind === "sampler" ? previous.instanceId : createInstrumentInstanceId(),
+          params: { ...(previous.kind === "sampler" ? previous.params : INSTRUMENT_CONTRACTS.sampler.createDefaultParams()), ...updates },
+        }));
+      },
+      updateZone: (zoneId, updates) => {
+        const targetId = getTrackTargetId();
+        if (!targetId) return;
+        instrumentState.updateForTarget(targetId, (previous) => {
+          const params = previous.kind === "sampler" ? previous.params : INSTRUMENT_CONTRACTS.sampler.createDefaultParams();
+          return { kind: "sampler", instanceId: previous.kind === "sampler" ? previous.instanceId : createInstrumentInstanceId(), params: { ...params, zones: params.zones.map((zone) => zone.id === zoneId ? { ...zone, ...updates, id: zone.id } : zone) } };
+        });
+      },
+      addZone: (zone) => {
+        const targetId = getTrackTargetId();
+        if (!targetId) return;
+        instrumentState.updateForTarget(targetId, (previous) => {
+          const params = previous.kind === "sampler" ? previous.params : INSTRUMENT_CONTRACTS.sampler.createDefaultParams();
+          return { kind: "sampler", instanceId: previous.kind === "sampler" ? previous.instanceId : createInstrumentInstanceId(), params: { ...params, zones: [...params.zones, zone] } };
+        });
+      },
+      removeZone: (zoneId) => {
+        const targetId = getTrackTargetId();
+        if (!targetId) return;
+        instrumentState.updateForTarget(targetId, (previous) => {
+          const params = previous.kind === "sampler" ? previous.params : INSTRUMENT_CONTRACTS.sampler.createDefaultParams();
+          return { kind: "sampler", instanceId: previous.kind === "sampler" ? previous.instanceId : createInstrumentInstanceId(), params: { ...params, zones: params.zones.filter((zone) => zone.id !== zoneId) } };
+        });
+      },
+    },
+    granular: {
+      params: createMemo(() => {
+        const current = instrumentState.params();
+        return current?.kind === "granular" ? current.params : undefined;
+      }),
+      status: createMemo(() => {
+        samplerStatusVersion();
+        const targetId = getTrackTargetId();
+        return targetId ? samplerBufferSync.getGranularStatus(targetId) : undefined;
+      }),
+      retry: () => {
+        const targetId = getTrackTargetId();
+        if (targetId) samplerBufferSync.retryGranular(context.audioEngine(), targetId);
+      },
+      reset: () => {
+        const targetId = getTrackTargetId();
+        if (!targetId) return;
+        instrumentState.updateForTarget(targetId, (previous) => ({ kind: "granular", instanceId: previous.kind === "granular" ? previous.instanceId : createInstrumentInstanceId(), params: INSTRUMENT_CONTRACTS.granular.createDefaultParams() }));
+      },
+      update: (updates) => {
+        const targetId = getTrackTargetId();
+        if (!targetId) return;
+        instrumentState.updateForTarget(targetId, (previous) => ({
+          kind: "granular",
+          instanceId: previous.kind === "granular" ? previous.instanceId : createInstrumentInstanceId(),
+          params: { ...(previous.kind === "granular" ? previous.params : INSTRUMENT_CONTRACTS.granular.createDefaultParams()), ...updates },
+        }));
+      },
     },
     activeInstrument: instrumentState.params,
     readDraftInstrumentForTarget: instrumentState.readDraftForTarget,

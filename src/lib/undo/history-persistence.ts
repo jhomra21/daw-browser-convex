@@ -1,9 +1,9 @@
 import { buildLocalClip } from "~/lib/clip-create";
-import { AUDIO_EFFECT_CONTRACTS, assert, buildClipCreatePayload, normalizeAudioWarp, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type ClipCreateSnapshot } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, assert, buildClipCreatePayload, normalizeAudioWarp, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
-import { localEffectRowId, reorderLocalAudioEffects, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects";
+import { createAudioEffectInstanceId, localEffectRowId, reorderLocalAudioEffects, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects";
 import { deleteLocalAutomationEnvelope, setLocalAutomationEnvelope } from "~/lib/local-automation";
 import { automationTargetKey, isLocalId, isV2AutomationTargetKey } from "@daw-browser/shared";
 import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, isAppliedSharedTimelineOperationResult, publishSharedTimelineOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
@@ -399,6 +399,7 @@ export const persistHistoryTrackEffects = async (
       !hasAudioEffects && effects.saturator ? setLocalEffect(deps.projectId, trackId, "saturator", normalizeSaturatorParams(effects.saturator)) : null,
       !hasAudioEffects && effects.delay ? setLocalEffect(deps.projectId, trackId, "delay", normalizeDelayParams(effects.delay)) : null,
       !hasAudioEffects && effects.reverb ? setLocalEffect(deps.projectId, trackId, "reverb", normalizeReverbParams(effects.reverb)) : null,
+      !hasAudioEffects && effects.spectral ? setLocalEffectInstance(deps.projectId, trackId, "spectral", normalizeSpectralParamsEnvelope(effects.spectral), { instanceId: createAudioEffectInstanceId() }) : null,
       ...(effects.audioEffects ?? []).map((effect) => {
         if (effect.instanceId) {
           return setLocalEffectInstance(deps.projectId, trackId, effect.effect, effect.params, { instanceId: effect.instanceId, index: effect.index });
@@ -423,6 +424,7 @@ export const persistHistoryTrackEffects = async (
     !hasAudioEffects && effects.saturator ? publishHistoryOperation(deps, { kind: "effects.setSaturatorParams", payload: { trackId, params: normalizeSaturatorParams(effects.saturator) } }) : null,
     !hasAudioEffects && effects.delay ? publishHistoryOperation(deps, { kind: "effects.setDelayParams", payload: { trackId, params: normalizeDelayParams(effects.delay) } }) : null,
     !hasAudioEffects && effects.reverb ? publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId, params: normalizeReverbParams(effects.reverb) } }) : null,
+    !hasAudioEffects && effects.spectral ? publishHistoryOperation(deps, { kind: "effects.setSpectralParams", payload: { trackId, params: normalizeSpectralParamsEnvelope(effects.spectral), instanceId: createAudioEffectInstanceId() } }) : null,
     ...(effects.audioEffects ?? []).map((effect) => {
       switch (effect.effect) {
         case "eq":
@@ -435,6 +437,8 @@ export const persistHistoryTrackEffects = async (
           return publishHistoryOperation(deps, { kind: "effects.setDelayParams", payload: { trackId, params: normalizeDelayParams(effect.params), instanceId: effect.instanceId } });
         case "reverb":
           return publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId, params: normalizeReverbParams(effect.params), instanceId: effect.instanceId } });
+        case "spectral":
+          return publishHistoryOperation(deps, { kind: "effects.setSpectralParams", payload: { trackId, params: normalizeSpectralParamsEnvelope(effect.params), instanceId: assertInstanceId(effect.instanceId) } });
         case "lofi":
           return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "lofi", params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(effect.params), instanceId: assertInstanceId(effect.instanceId) } });
       }
@@ -500,6 +504,15 @@ export const persistHistoryEffectParams = async (
       await setLocalEffect(deps.projectId, targetId, entry.data.effect, params);
       return;
     }
+    if (entry.data.effect === "spectral" || entry.data.effect === "master-spectral") {
+      const params = normalizeSpectralParamsEnvelope(pickDirectionalValue(direction, entry.data.from, entry.data.to));
+      if (entry.data.instanceId) {
+        await setLocalEffectInstance(deps.projectId, targetId, entry.data.effect, params, { instanceId: entry.data.instanceId });
+        return;
+      }
+      await setLocalEffect(deps.projectId, targetId, entry.data.effect, params);
+      return;
+    }
     const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
     if (entry.data.instanceId) {
       await setLocalEffectInstance(
@@ -533,6 +546,11 @@ export const persistHistoryEffectParams = async (
     case "master-limiter": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setMasterLimiterParams", payload: { params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      return;
+    }
+    case "master-spectral": {
+      const params = normalizeSpectralParamsEnvelope(pickDirectionalValue(direction, entry.data.from, entry.data.to));
+      await publishHistoryOperation(deps, { kind: "effects.setMasterSpectralParams", payload: { params, instanceId: assertInstanceId(entry.data.instanceId) } });
       return;
     }
     case "master-autofilter":
@@ -598,6 +616,11 @@ export const persistHistoryEffectParams = async (
     case "limiter": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setLimiterParams", payload: { trackId: targetId, params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      return;
+    }
+    case "spectral": {
+      const params = normalizeSpectralParamsEnvelope(pickDirectionalValue(direction, entry.data.from, entry.data.to));
+      await publishHistoryOperation(deps, { kind: "effects.setSpectralParams", payload: { trackId: targetId, params, instanceId: assertInstanceId(entry.data.instanceId) } });
       return;
     }
     case "autofilter":

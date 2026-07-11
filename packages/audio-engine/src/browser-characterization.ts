@@ -9,9 +9,11 @@ import {
   createDefaultGateParams,
   createDefaultLimiterParams,
   createDefaultLoFiParams,
+  createDefaultSpectralParams,
   createDefaultUtilityParams,
   normalizeCompressorParams,
   normalizeGateParamsEnvelope,
+  normalizeSpectralParamsEnvelope,
   normalizeUtilityParamsEnvelope,
 } from '@daw-browser/shared'
 import { createCompressorNodeChain } from './effects/chain'
@@ -83,6 +85,26 @@ export type BrowserCharacterizationReport = {
   liveAlignment: BrowserCharacterizationCase
   cueRouting: BrowserCharacterizationCase
   externalSidechain: BrowserCharacterizationCase
+  productionSampler: {
+    deterministicContracts: BrowserCharacterizationCase
+    browserAudioPerformance: BrowserCharacterizationCase
+    crossfadePerformance: BrowserCharacterizationCase
+  }
+  productionGranular: {
+    deterministicContracts: BrowserCharacterizationCase
+    browserWorkletPerformance: BrowserCharacterizationCase
+    wasmCandidate: {
+      status: 'not-evaluated'
+      reason: string
+    }
+    resources: {
+      maximumGrains: number
+      maximumDecodedSampleBytes: number
+      controlMessageCadence: 'install-release-reset-freeze-only'
+      outputChannels: 2
+      declaredLatencyFrames: 0
+    }
+  }
   reliability: ReliabilityCharacterizationReport
 }
 
@@ -241,6 +263,7 @@ const staticParams = (kind: StaticWorkletKind) => {
   if (kind === 'phaser') return envelope({ ...createDefaultPhaserParams(), enabled: false })
   if (kind === 'tremolo') return envelope({ ...createDefaultTremoloParams(), enabled: false })
   if (kind === 'autopan') return envelope({ ...createDefaultAutoPanParams(), enabled: false })
+  if (kind === 'spectral') return normalizeSpectralParamsEnvelope({ ...createDefaultSpectralParams(), enabled: false })
   return envelope({ ...createDefaultEnsembleParams(), enabled: false })
 }
 
@@ -253,6 +276,8 @@ export const getStaticModuleDeclaredLatencyFrames = (
     ? Math.ceil(0.002 * sampleRate)
     : kind === 'limiter'
       ? Math.ceil(0.005 * sampleRate)
+    : kind === 'spectral'
+      ? 2048
       : 0
 
 export function isStaticModuleCharacterization(value: unknown): value is StaticModuleCharacterization {
@@ -538,6 +563,7 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
     'tremolo',
     'autopan',
     'ensemble',
+    'spectral',
   ]
   const staticModules = await Promise.all(staticKinds.flatMap((kind) =>
     [44_100, 48_000, 96_000].flatMap((sampleRate) =>
@@ -586,6 +612,41 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
     externalSidechain: {
       status: 'unsupported',
       message: 'External sidechain timing requires the live routing probe.',
+    },
+    productionSampler: {
+      deterministicContracts: {
+        status: 'pass',
+        message: 'Sampler selection, voice planning, automation descriptors, and bounded cache contracts are covered by deterministic tests.',
+      },
+      browserAudioPerformance: {
+        status: 'unsupported',
+        message: 'Pending browser AudioContext performance characterization.',
+      },
+      crossfadePerformance: {
+        status: 'unsupported',
+        message: 'Pending browser crossfade-loop performance characterization.',
+      },
+    },
+    productionGranular: {
+      deterministicContracts: {
+        status: 'pass',
+        message: 'Granular PRNG, windows, density scheduling, reverse decisions, stereo spread, transfer acknowledgement, fault, and cleanup contracts are covered by deterministic tests.',
+      },
+      browserWorkletPerformance: {
+        status: 'unsupported',
+        message: 'Pending browser route run for AudioWorklet elapsed-time and render-performance evidence.',
+      },
+      wasmCandidate: {
+        status: 'not-evaluated',
+        reason: 'No granular WASM implementation, dependency, worklet integration, or benchmark route exists in this repository.',
+      },
+      resources: {
+        maximumGrains: 128,
+        maximumDecodedSampleBytes: 256 * 1024 * 1024,
+        controlMessageCadence: 'install-release-reset-freeze-only',
+        outputChannels: 2,
+        declaredLatencyFrames: 0,
+      },
     },
     reliability: createReliabilityCharacterizationReport(),
   }

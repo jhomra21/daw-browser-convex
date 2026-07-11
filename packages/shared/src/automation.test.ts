@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { automationEnvelopeValueRange, automationTargetKey, automationTargetKeysAfterReEnable, automationTargetKeysForManualOverride, automationTargetMatchesEffectInstance, filterAutomationEnvelopesForScheduling, type AutomationEnvelope } from './automation'
+import { instrumentAutomationKey } from './sampler-automation'
 import { automationRatioToValue, automationValueToRatio, createEqBandParameterId, getAutomationParameterDescriptor, getAutomationParameterOptions, getAutomationParameterOptionsForTarget, normalizeAutomationPoints, valueAtAutomationTime, type AutomationEffectInstance } from './automation-parameters'
 
 describe('automation helpers', () => {
@@ -107,6 +108,16 @@ describe('automation helpers', () => {
     )).toBe('automation:v2:["track","track:colon","delay:first:colon","delay.feedback"]')
   })
 
+  test('publishes instance-specific sampler and granular picker options for track targets', () => {
+    const options = getAutomationParameterOptionsForTarget([
+      { id: 'sampler:one', kind: 'sampler' },
+      { id: 'granular:one', kind: 'granular' },
+    ], 'track-1')
+    expect(options.some((option) => option.parameterId === 'instrument:track-1:sampler:one:filter.frequency')).toBe(true)
+    expect(options.some((option) => option.parameterId === 'instrument:track-1:granular:one:grainSize')).toBe(true)
+    expect(options.find((option) => option.parameterId === 'instrument:track-1:granular:one:grainSize')?.effectInstanceId).toBeUndefined()
+  })
+
   test('exposes only effect parameters with supported automation bindings and UI controls', () => {
     const options = getAutomationParameterOptions()
     for (const parameterId of [
@@ -128,6 +139,25 @@ describe('automation helpers', () => {
     }
     expect(getAutomationParameterDescriptor('compressor.thresholdDb')).toBeUndefined()
     expect(getAutomationParameterDescriptor('reverb.decaySec')).toBeUndefined()
+  })
+
+  test('resolves strict sampler automation descriptors without changing legacy keys', () => {
+    const parameterId = instrumentAutomationKey('track-1', 'instrument:sampler:one', 'amp.attack')
+    expect(getAutomationParameterDescriptor(parameterId)).toMatchObject({
+      owner: 'sampler',
+      min: 0,
+      max: 60,
+      unit: 'seconds',
+      targetKinds: ['track'],
+    })
+    expect(getAutomationParameterDescriptor('instrument:track-1:instrument:sampler:one:amp.unknown')).toBeUndefined()
+    expect(getAutomationParameterDescriptor('volume')?.owner).toBe('mixer')
+  })
+
+  test('preserves granular automation units in generic descriptors', () => {
+    expect(getAutomationParameterDescriptor('instrument:track-1:instrument:granular:one:grainSize')).toMatchObject({ owner: 'granular', unit: 'milliseconds' })
+    expect(getAutomationParameterDescriptor('instrument:track-1:instrument:granular:one:pitch')).toMatchObject({ owner: 'granular', unit: 'semitones' })
+    expect(getAutomationParameterDescriptor('instrument:track-1:instrument:granular:one:position')).toMatchObject({ owner: 'granular', unit: 'percent' })
   })
 
   test('computes envelope value ranges with optional bounds', () => {

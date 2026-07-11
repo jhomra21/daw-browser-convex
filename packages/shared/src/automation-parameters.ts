@@ -32,19 +32,21 @@ import {
   SATURATOR_OUTPUT_DB_MAX,
   SATURATOR_OUTPUT_DB_MIN,
 } from './effects-params'
+import { instrumentAutomationKey, parseInstrumentAutomationKey, SAMPLER_AUTOMATION_DESCRIPTORS, SAMPLER_AUTOMATION_PARAMETER_IDS } from './sampler-automation'
+import { GRANULAR_AUTOMATION_DESCRIPTORS, GRANULAR_AUTOMATION_PARAMETER_IDS, granularAutomationKey, parseGranularAutomationKey } from './granular-automation'
 
 export type AutomationParameterDescriptor = {
   id: string
   label: string
   group: string
   device: string
-  owner: 'mixer' | AudioEffectKind
+  owner: 'mixer' | 'sampler' | 'granular' | AudioEffectKind | 'spectral'
   targetKinds: AutomationTargetKind[]
   min: number
   max: number
   defaultValue: number
   scale: 'linear' | 'log'
-  unit?: 'db' | 'hz' | 'percent' | 'seconds'
+  unit?: 'db' | 'hz' | 'percent' | 'seconds' | 'milliseconds' | 'semitones' | 'cents'
 }
 
 export type AutomationParameterOption = {
@@ -63,6 +65,13 @@ export type AutomationEffectInstance = {
   id: string
   kind: AudioEffectKind
 }
+
+export type AutomationInstrumentInstance = {
+  id: string
+  kind: 'sampler' | 'granular'
+}
+
+export type AutomationTargetDeviceInstance = AutomationEffectInstance | AutomationInstrumentInstance
 
 export type AutomationTargetParameterOption = AutomationParameterOption & AutomationParameterSelection
 
@@ -148,9 +157,20 @@ const effectDescriptors: AutomationParameterDescriptor[] = [
   { id: 'ensemble.rateHz', label: 'Ensemble Rate', group: 'Audio Effects', device: 'Ensemble', owner: 'ensemble', targetKinds: ['track', 'master'], min: 0.05, max: 5, defaultValue: 0.6, scale: 'log', unit: 'hz' },
   { id: 'ensemble.spread', label: 'Ensemble Spread', group: 'Audio Effects', device: 'Ensemble', owner: 'ensemble', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 1, scale: 'linear' },
   { id: 'ensemble.mix', label: 'Ensemble Mix', group: 'Audio Effects', device: 'Ensemble', owner: 'ensemble', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 0.5, scale: 'linear', unit: 'percent' },
+  { id: 'spectral.freeze', label: 'Spectral Freeze', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 0, scale: 'linear' },
+  { id: 'spectral.gateThresholdDb', label: 'Spectral Gate Threshold', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: -120, max: 0, defaultValue: -60, scale: 'linear', unit: 'db' },
+  { id: 'spectral.gateAttackMs', label: 'Spectral Gate Attack', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: 0.1, max: 1000, defaultValue: 10, scale: 'linear' },
+  { id: 'spectral.gateReleaseMs', label: 'Spectral Gate Release', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: 1, max: 5000, defaultValue: 100, scale: 'linear' },
+  { id: 'spectral.morph', label: 'Spectral Morph', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 0, scale: 'linear', unit: 'percent' },
+  { id: 'spectral.binShift', label: 'Spectral Bin Shift', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: -2048, max: 2048, defaultValue: 0, scale: 'linear' },
+  { id: 'spectral.blur', label: 'Spectral Blur', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 0, scale: 'linear', unit: 'percent' },
+  { id: 'spectral.harmonicPercussiveBalance', label: 'Spectral HPSS Balance', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: -1, max: 1, defaultValue: 0, scale: 'linear' },
+  { id: 'spectral.noiseReduction', label: 'Spectral Noise Reduction', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 0, scale: 'linear', unit: 'percent' },
+  { id: 'spectral.profileLearn', label: 'Spectral Profile Learn', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 0, scale: 'linear', unit: 'percent' },
+  { id: 'spectral.mix', label: 'Spectral Mix', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 1, scale: 'linear', unit: 'percent' },
 ]
 
-const descriptorsByEffectKind: Record<AudioEffectKind, AutomationParameterDescriptor[]> = {
+const descriptorsByEffectKind: Record<AudioEffectKind | 'spectral', AutomationParameterDescriptor[]> = {
   utility: effectDescriptors.filter((descriptor) => descriptor.owner === 'utility'),
   eq: [],
   autofilter: effectDescriptors.filter((descriptor) => descriptor.owner === 'autofilter'),
@@ -167,6 +187,7 @@ const descriptorsByEffectKind: Record<AudioEffectKind, AutomationParameterDescri
   tremolo: effectDescriptors.filter((descriptor) => descriptor.owner === 'tremolo'),
   autopan: effectDescriptors.filter((descriptor) => descriptor.owner === 'autopan'),
   ensemble: effectDescriptors.filter((descriptor) => descriptor.owner === 'ensemble'),
+  spectral: effectDescriptors.filter((descriptor) => descriptor.owner === 'spectral'),
 }
 
 export const getAutomationParameterOptions = (): AutomationParameterOption[] => [
@@ -194,12 +215,32 @@ const eqParameterOptions = (): AutomationParameterOption[] => (
 )
 
 export const getAutomationParameterOptionsForTarget = (
-  effects: readonly AutomationEffectInstance[],
+  effects: readonly AutomationTargetDeviceInstance[],
+  trackId?: string,
 ): AutomationTargetParameterOption[] => {
   const kindCounts = new Map<AudioEffectKind, number>()
   return [
     { id: 'volume', parameterId: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer' },
-    ...effects.flatMap((effect) => {
+    ...effects.flatMap((effect): AutomationTargetParameterOption[] => {
+      if (effect.kind === 'sampler' || effect.kind === 'granular') {
+        if (!trackId) return []
+        if (effect.kind === 'sampler') {
+          return SAMPLER_AUTOMATION_PARAMETER_IDS.map((parameterId) => ({
+            id: instrumentAutomationKey(trackId, effect.id, parameterId),
+            parameterId: instrumentAutomationKey(trackId, effect.id, parameterId),
+            label: parameterId,
+            group: 'Instrument',
+            device: 'Sampler',
+          }))
+        }
+        return GRANULAR_AUTOMATION_PARAMETER_IDS.map((parameterId) => ({
+          id: granularAutomationKey(trackId, effect.id, parameterId),
+          parameterId: granularAutomationKey(trackId, effect.id, parameterId),
+          label: parameterId,
+          group: 'Instrument',
+          device: 'Granular',
+        }))
+      }
       const ordinal = (kindCounts.get(effect.kind) ?? 0) + 1
       kindCounts.set(effect.kind, ordinal)
       const options = effect.kind === 'eq'
@@ -235,6 +276,40 @@ export const getAutomationParameterDescriptor = (
   if (staticDescriptor) return staticDescriptor
   const effectDescriptor = effectDescriptors.find((descriptor) => descriptor.id === parameterId)
   if (effectDescriptor) return effectDescriptor
+  const sampler = parseInstrumentAutomationKey(parameterId)
+  if (sampler) {
+    const descriptor = SAMPLER_AUTOMATION_DESCRIPTORS[sampler.parameterId]
+    return {
+      id: parameterId,
+      label: sampler.parameterId,
+      group: 'Instrument',
+      device: 'Sampler',
+      owner: 'sampler',
+      targetKinds: ['track'],
+      min: descriptor.min,
+      max: descriptor.max,
+      defaultValue: descriptor.defaultValue,
+      scale: descriptor.unit === 'hz' ? 'log' : 'linear',
+      unit: descriptor.unit === 'ratio' ? 'percent' : descriptor.unit,
+    }
+  }
+  const granular = parseGranularAutomationKey(parameterId)
+  if (granular) {
+    const descriptor = GRANULAR_AUTOMATION_DESCRIPTORS[granular.parameterId]
+    return {
+      id: parameterId,
+      label: granular.parameterId,
+      group: 'Instrument',
+      device: 'Granular',
+      owner: 'granular',
+      targetKinds: ['track'],
+      min: descriptor.min,
+      max: descriptor.max,
+      defaultValue: descriptor.defaultValue,
+      scale: descriptor.unit === 'hz' ? 'log' : 'linear',
+      unit: descriptor.unit === 'ratio' ? 'percent' : descriptor.unit,
+    }
+  }
   const eq = parseEqBandParameterId(parameterId)
   if (!eq) return undefined
   if (eq.property === 'frequencyHz') {
@@ -259,7 +334,9 @@ export const isAutomationParameterOwnedByTarget = (
   if (!descriptor || !descriptor.targetKinds.includes(target.kind)) return false
   return descriptor.owner === 'mixer'
     ? target.effectInstanceId === undefined
-    : target.effectInstanceId !== undefined
+    : descriptor.owner === 'sampler' || descriptor.owner === 'granular'
+      ? target.effectInstanceId === undefined
+      : target.effectInstanceId !== undefined
 }
 
 export const automationValueToRatio = (

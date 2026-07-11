@@ -3,7 +3,10 @@ import { v } from "convex/values";
 import {
   automationTargetKey,
   getAutomationParameterDescriptor,
+  normalizeTrackInstrumentParams,
   normalizeAutomationPoints,
+  parseInstrumentAutomationKey,
+  parseGranularAutomationKey,
 } from "@daw-browser/shared";
 import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
 
@@ -101,12 +104,30 @@ const normalizeEnvelopeInput = async (
     throw new Error("Mixer automation cannot reference an effect instance.");
   }
   if (descriptor.owner !== "mixer" && !input.effectInstanceId) {
-    throw new Error("Effect automation requires an effect instance.");
+    if (descriptor.owner !== "sampler" && descriptor.owner !== "granular") throw new Error("Effect automation requires an effect instance.");
   }
   const trackId = input.targetKind === "track"
     ? await normalizeTrackId(ctx, input.projectId, input.trackId)
     : undefined;
   if (input.targetKind === "track" && !trackId) throw new Error("Track automation requires a track id.");
+  const instrumentKey = parseInstrumentAutomationKey(input.parameterId);
+  const granularKey = parseGranularAutomationKey(input.parameterId);
+  const instrumentAutomation = instrumentKey ?? granularKey;
+  if (instrumentAutomation) {
+    if (input.targetKind !== "track" || input.effectInstanceId || instrumentAutomation.trackId !== String(trackId)) {
+      throw new Error("Instrument automation identity does not match its target.");
+    }
+    const instrumentRows = await ctx.db.query("effects").withIndex("by_track", (q) => q.eq("trackId", trackId)).collect();
+    const instrumentRow = instrumentRows.find((entry) => entry.type === "instrument");
+    const instrument = instrumentRow ? normalizeTrackInstrumentParams(instrumentRow.params) : undefined;
+    if (
+      !instrument
+      || instrument.instanceId !== instrumentAutomation.instanceId
+      || instrument.kind !== (granularKey ? "granular" : "sampler")
+    ) {
+      throw new Error("Instrument automation instance does not belong to this track.");
+    }
+  }
   if (input.effectInstanceId) {
     const effects = await ctx.db.query("effects").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect();
     const storedEffects = effects.filter((entry) => entry.instanceId === input.effectInstanceId);

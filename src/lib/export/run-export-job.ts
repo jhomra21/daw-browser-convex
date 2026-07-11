@@ -6,7 +6,7 @@ import { formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectK
   normalizeAutoFilterParamsEnvelope, normalizeAutoPanParamsEnvelope, normalizeChorusParamsEnvelope, normalizeDelayParams,
   normalizeEnsembleParamsEnvelope, normalizeFlangerParamsEnvelope, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope,
   normalizeLoFiParamsEnvelope, normalizePhaserParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams,
-  normalizeTremoloParamsEnvelope, normalizeUtilityParamsEnvelope } from '@daw-browser/shared'
+  normalizeSpectralParamsEnvelope, normalizeTremoloParamsEnvelope, normalizeUtilityParamsEnvelope } from '@daw-browser/shared'
 import type { FunctionReturnType } from 'convex/server'
 
 import { convexApi, convexClient } from '~/lib/convex'
@@ -106,7 +106,7 @@ const applyTrackFxPatch = (trackFx: TrackFxMap, trackId: string, patch: TrackFxP
 const createOwnedExportEffectRow = (
   targetId: string,
   id: string,
-  kind: 'utility' | 'autofilter' | 'gate' | 'limiter' | 'lofi' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble',
+  kind: 'utility' | 'autofilter' | 'gate' | 'limiter' | 'lofi' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' | 'spectral',
   params: unknown,
   index?: number,
 ): ExportEffectInstanceRow => {
@@ -120,6 +120,7 @@ const createOwnedExportEffectRow = (
   if (kind === 'phaser') return { targetId, id, kind, index, params: normalizePhaserParamsEnvelope(params) }
   if (kind === 'tremolo') return { targetId, id, kind, index, params: normalizeTremoloParamsEnvelope(params) }
   if (kind === 'autopan') return { targetId, id, kind, index, params: normalizeAutoPanParamsEnvelope(params) }
+  if (kind === 'spectral') return { targetId, id, kind, index, params: normalizeSpectralParamsEnvelope(params) }
   return { targetId, id, kind, index, params: normalizeEnsembleParamsEnvelope(params) }
 }
 
@@ -144,6 +145,7 @@ const normalizeExportEffectInstances = (rows: ExportEffectInstanceRow[]): AudioE
     else if (row.kind === 'phaser') instances.push({ id: row.id, kind: row.kind, params: row.params })
     else if (row.kind === 'tremolo') instances.push({ id: row.id, kind: row.kind, params: row.params })
     else if (row.kind === 'autopan') instances.push({ id: row.id, kind: row.kind, params: row.params })
+    else if (row.kind === 'spectral') instances.push({ id: row.id, kind: row.kind, params: row.params })
     else instances.push({ id: row.id, kind: row.kind, params: row.params })
   }
   return instances
@@ -183,7 +185,7 @@ const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
       if (kind === 'delay') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: normalizeDelayParams(row.params) })
       if (kind === 'reverb') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: normalizeReverbParams(row.params) })
       if (kind === 'utility' || kind === 'autofilter' || kind === 'gate' || kind === 'limiter' || kind === 'lofi' ||
-        kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble') {
+        kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble' || kind === 'spectral') {
         instanceRows.push(createOwnedExportEffectRow(row.targetId, id, kind, row.params, row.index))
       }
     }
@@ -242,7 +244,7 @@ const applyRoomEffectRowsToFx = (fx: ExportFx, rows: RoomEffectRow[]) => {
         if (row.type === 'delay') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeDelayParams(row.params) })
         if (row.type === 'reverb') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeReverbParams(row.params) })
         if (row.type === 'utility' || row.type === 'autofilter' || row.type === 'gate' || row.type === 'limiter' || row.type === 'lofi' ||
-          row.type === 'chorus' || row.type === 'flanger' || row.type === 'phaser' || row.type === 'tremolo' || row.type === 'autopan' || row.type === 'ensemble') {
+          row.type === 'chorus' || row.type === 'flanger' || row.type === 'phaser' || row.type === 'tremolo' || row.type === 'autopan' || row.type === 'ensemble' || row.type === 'spectral') {
           instanceRows.push(createOwnedExportEffectRow(targetId, id, row.type, row.params, row.index))
         }
       }
@@ -389,22 +391,36 @@ async function loadExportAutomation(projectId: string | undefined, userId: strin
   return []
 }
 
-async function loadDrumRackExportBuffers(fx: ExportFx, signal: AbortSignal, allowedTrackIds?: ReadonlySet<string>): Promise<void> {
+async function loadInstrumentExportBuffers(fx: ExportFx, signal: AbortSignal, allowedTrackIds?: ReadonlySet<string>): Promise<void> {
   const trackFx = fx.trackFx
   if (!trackFx) return
-  const jobs: Array<{ url: string; padId: string; buffers: Map<string, AudioBuffer> }> = []
+  const jobs: Array<{
+    url: string
+    install: (buffer: AudioBuffer) => void
+  }> = []
   for (const [trackId, entry] of Object.entries(trackFx)) {
     if (allowedTrackIds && !allowedTrackIds.has(trackId)) continue
-    if (entry.instrument?.kind !== 'drum-rack') continue
     const buffers = new Map<string, AudioBuffer>()
-    entry.drumRackBuffers = buffers
-    for (const pad of entry.instrument.params.pads) {
-      const sample = pad.sample
-      if (!sample) continue
+    if (entry.instrument?.kind === 'drum-rack') {
+      entry.drumRackBuffers = buffers
+      for (const pad of entry.instrument.params.pads) {
+        const sample = pad.sample
+        if (sample) jobs.push({ url: sample.url, install: (buffer) => buffers.set(pad.id, buffer) })
+      }
+    }
+    if (entry.instrument?.kind === 'sampler') {
+      entry.samplerBuffers = buffers
+      for (const zone of entry.instrument.params.zones) {
+        jobs.push({ url: zone.sample.url, install: (buffer) => buffers.set(zone.id, buffer) })
+      }
+    }
+    if (entry.instrument?.kind === 'granular' && entry.instrument.params.zone) {
+      const zone = entry.instrument.params.zone
       jobs.push({
-        url: sample.url,
-        padId: pad.id,
-        buffers,
+        url: zone.sample.url,
+        install: (buffer) => {
+          entry.granularBuffer = { assetKey: zone.sample.assetKey, buffer }
+        },
       })
     }
   }
@@ -415,7 +431,8 @@ async function loadDrumRackExportBuffers(fx: ExportFx, signal: AbortSignal, allo
     await runWithConcurrency(jobs, MAX_CONCURRENT_BUFFER_LOADS, async (job) => {
       throwIfExportAborted(signal)
       const buffer = await loader.load(job.url, (data) => ctx.decodeAudioData(data))
-      if (buffer) job.buffers.set(job.padId, buffer)
+      if (!buffer) throw new Error(`Failed to preload export sample ${job.url}`)
+      job.install(buffer)
     })
   } finally {
     await ctx.close().catch(() => undefined)
@@ -431,7 +448,7 @@ async function loadExportFxWithDrumRackBuffers(
   allowedTrackIds?: ReadonlySet<string>,
 ): Promise<ExportFx> {
   const fx = await loadExportFx(projectId, userId, masterVolume)
-  await loadDrumRackExportBuffers(fx, signal, allowedTrackIds)
+  await loadInstrumentExportBuffers(fx, signal, allowedTrackIds)
   return fx
 }
 
@@ -694,7 +711,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
     const preloadAssetTracks = preloadTracks.filter((track) => preloadTrackIds.has(track.id))
     await Promise.all([
       ensureBuffersForRange({ ...input, tracks: preloadAssetTracks, range: input.range }),
-      loadDrumRackExportBuffers(fx, input.signal, preloadTrackIds),
+      loadInstrumentExportBuffers(fx, input.signal, preloadTrackIds),
     ])
     throwIfExportAborted(input.signal)
     const tracks = input.getTracks()

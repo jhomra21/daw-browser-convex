@@ -13,12 +13,46 @@ import {
   type DrumRackParams,
   type DrumRackParamsInput,
 } from './drum-rack-params'
-
-export type InstrumentKind = 'synth' | 'drum-rack'
+import {
+  createDefaultSamplerParams,
+  normalizeSamplerParams,
+  serializeSamplerParams,
+  type SamplerParams,
+  type SamplerParamsInput,
+} from './sampler-params'
+import {
+  createDefaultGranularParams,
+  normalizeGranularParams,
+  serializeGranularParams,
+  type GranularParams,
+  type GranularParamsInput,
+} from './granular-params'
+export type InstrumentKind = 'synth' | 'drum-rack' | 'sampler' | 'granular'
 
 export type TrackInstrumentParams =
-  | { kind: 'synth'; params: SynthParams }
-  | { kind: 'drum-rack'; params: DrumRackParams }
+  | { kind: 'synth'; instanceId: string; params: SynthParams }
+  | { kind: 'drum-rack'; instanceId: string; params: DrumRackParams }
+  | { kind: 'sampler'; instanceId: string; params: SamplerParams }
+  | { kind: 'granular'; instanceId: string; params: GranularParams }
+
+export const createInstrumentInstanceId = () => `instrument:${crypto.randomUUID()}`
+
+export const duplicateTrackInstrumentParams = (
+  instrument: TrackInstrumentParams,
+): TrackInstrumentParams => ({
+  ...instrument,
+  instanceId: createInstrumentInstanceId(),
+})
+
+const migrationInstanceId = (kind: InstrumentKind, params: unknown) => {
+  const serialized = JSON.stringify(params)
+  let hash = 2166136261
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash ^= serialized.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `instrument:migration:${kind}:${(hash >>> 0).toString(36)}`
+}
 
 type SynthInstrumentContract = {
   kind: 'synth'
@@ -37,6 +71,18 @@ type DrumRackInstrumentContract = {
 type InstrumentContractByKind = {
   synth: SynthInstrumentContract
   'drum-rack': DrumRackInstrumentContract
+  sampler: {
+    kind: 'sampler'
+    createDefaultParams: () => SamplerParams
+    normalizeParams: (params: SamplerParamsInput) => SamplerParams
+    serializeParams: (params: SamplerParams) => string
+  }
+  granular: {
+    kind: 'granular'
+    createDefaultParams: () => GranularParams
+    normalizeParams: (params: GranularParamsInput) => GranularParams
+    serializeParams: (params: GranularParams) => string
+  }
 }
 
 export type InstrumentContract = InstrumentContractByKind[InstrumentKind]
@@ -54,10 +100,22 @@ export const INSTRUMENT_CONTRACTS = {
     normalizeParams: normalizeDrumRackParams,
     serializeParams: serializeDrumRackParams,
   },
+  sampler: {
+    kind: 'sampler',
+    createDefaultParams: createDefaultSamplerParams,
+    normalizeParams: normalizeSamplerParams,
+    serializeParams: serializeSamplerParams,
+  },
+  granular: {
+    kind: 'granular',
+    createDefaultParams: createDefaultGranularParams,
+    normalizeParams: normalizeGranularParams,
+    serializeParams: serializeGranularParams,
+  },
 } satisfies InstrumentContractByKind
 
 export function isInstrumentKind(value: unknown): value is InstrumentKind {
-  return value === 'synth' || value === 'drum-rack'
+  return value === 'synth' || value === 'drum-rack' || value === 'sampler' || value === 'granular'
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -83,11 +141,21 @@ const readSynthParamsInput = (value: unknown): SynthParamsInput => {
 
 export function normalizeTrackInstrumentParams(value: unknown): TrackInstrumentParams | undefined {
   if (!isRecord(value) || !isInstrumentKind(value.kind)) return undefined
+  const instanceId = typeof value.instanceId === 'string' && value.instanceId
+    ? value.instanceId
+    : migrationInstanceId(value.kind, value.params)
   if (value.kind === 'synth') {
-    return { kind: value.kind, params: normalizeSynthParams(readSynthParamsInput(value.params)) }
+    return { kind: value.kind, instanceId, params: normalizeSynthParams(readSynthParamsInput(value.params)) }
+  }
+  if (value.kind === 'sampler') {
+    return { kind: value.kind, instanceId, params: normalizeSamplerParams(isRecord(value.params) ? value.params : {}) }
+  }
+  if (value.kind === 'granular') {
+    return { kind: value.kind, instanceId, params: normalizeGranularParams(isRecord(value.params) ? value.params : {}) }
   }
   return {
     kind: value.kind,
+    instanceId,
     params: normalizeDrumRackParams(isRecord(value.params) ? value.params : {}),
   }
 }

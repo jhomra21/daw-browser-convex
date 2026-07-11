@@ -10,7 +10,8 @@ import {
   isAudioEffectKind,
   isLocalId,
   isV2AutomationTargetKey,
-  type AudioEffectInstance,
+  normalizeTrackInstrumentParams,
+  type AutomationTargetDeviceInstance,
   type AutomationParameterSelection,
   type AutomationEnvelope,
 } from "@daw-browser/shared";
@@ -47,6 +48,7 @@ type TimelineAutomationControllerOptions = {
     type: string;
     instanceId?: string;
     index?: number;
+    params?: unknown;
   }> | undefined>;
   audioEngine: AudioEngine;
   isPlaying: Accessor<boolean>;
@@ -65,7 +67,7 @@ export type TimelineWorkspaceAutomationModel = {
     masterHeight: number;
     selectedTargetsByOwnerKey: Record<string, AutomationParameterSelection>;
     selectionByTargetKey: Map<string, AutomationParameterSelection>;
-    effectInstancesByOwnerKey: Record<string, AudioEffectInstance[]>;
+    effectInstancesByOwnerKey: Record<string, AutomationTargetDeviceInstance[]>;
   };
   envelopes: {
     byTargetKey: Map<string, AutomationEnvelope>;
@@ -102,7 +104,7 @@ const replaceAutomationEnvelope = (
 
 export function useTimelineAutomationController(options: TimelineAutomationControllerOptions) {
   const [automationEnvelopes, setAutomationEnvelopes] = createSignal<AutomationEnvelope[]>([]);
-  const [effectInstancesByOwnerKey, setEffectInstancesByOwnerKey] = createSignal<Record<string, AudioEffectInstance[]>>({});
+  const [effectInstancesByOwnerKey, setEffectInstancesByOwnerKey] = createSignal<Record<string, AutomationTargetDeviceInstance[]>>({});
   const [overriddenAutomationTargetKeys, setOverriddenAutomationTargetKeys] = createSignal<Set<string>>(new Set());
   const visibleAutomationTracks = useProjectPersistedState<Record<string, boolean>>({
     projectId: options.projectId,
@@ -410,16 +412,24 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       setEffectInstancesByOwnerKey({});
       return;
     }
-    const collect = (rows: Array<{ targetId: string; kind: string; instanceId?: string; index?: number }>) => {
-      const grouped = new Map<string, Array<AudioEffectInstance & { index: number }>>();
+    const collect = (rows: Array<{ targetId: string; kind: string; instanceId?: string; index?: number; params?: unknown }>) => {
+      const grouped = new Map<string, Array<AutomationTargetDeviceInstance & { index: number }>>();
       for (const row of rows) {
         const normalizedKind = row.kind.startsWith("master-") ? row.kind.slice("master-".length) : row.kind;
+        if (normalizedKind === "instrument") {
+          const instrument = normalizeTrackInstrumentParams(row.params);
+          if (!instrument || (instrument.kind !== "sampler" && instrument.kind !== "granular")) continue;
+          const entries = grouped.get(row.targetId) ?? [];
+          entries.push({ id: instrument.instanceId, kind: instrument.kind, index: row.index ?? entries.length });
+          grouped.set(row.targetId, entries);
+          continue;
+        }
         if (!isAudioEffectKind(normalizedKind)) continue;
         const entries = grouped.get(row.targetId) ?? [];
         entries.push({ id: row.instanceId ?? normalizedKind, kind: normalizedKind, index: row.index ?? entries.length });
         grouped.set(row.targetId, entries);
       }
-      const next: Record<string, AudioEffectInstance[]> = {};
+      const next: Record<string, AutomationTargetDeviceInstance[]> = {};
       for (const [targetId, entries] of grouped) {
         next[targetId] = entries
           .sort((left, right) => left.index - right.index || left.id.localeCompare(right.id))
@@ -435,6 +445,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
           kind: row.effect,
           instanceId: row.instanceId,
           index: row.index,
+          params: row.params,
         })));
       });
       reload();
@@ -446,6 +457,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       kind: row.type,
       instanceId: row.instanceId,
       index: row.index,
+      params: row.params,
     })).filter((row) => row.targetId.length > 0));
   });
   const automationEnvelopesByTargetKey = createMemo(() => (
@@ -509,7 +521,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       showAutomationLane(trackId, selected);
       return;
     }
-    const nextOption = getAutomationParameterOptionsForTarget(effectInstancesByOwnerKey()[trackId] ?? [])
+    const nextOption = getAutomationParameterOptionsForTarget(effectInstancesByOwnerKey()[trackId] ?? [], trackId)
       .find((option) => !visible.has(targetKeyForTrackSelection(trackId, option)));
     if (nextOption) {
       const selection = { parameterId: nextOption.parameterId, effectInstanceId: nextOption.effectInstanceId };
@@ -551,7 +563,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
           const target = ownerKey === "master"
             ? { kind: "master" as const }
             : { kind: "track" as const, trackId: ownerKey };
-          for (const option of getAutomationParameterOptionsForTarget(effects)) {
+          for (const option of getAutomationParameterOptionsForTarget(effects, ownerKey === "master" ? undefined : ownerKey)) {
             selections.set(
               automationTargetKey({ ...target, effectInstanceId: option.effectInstanceId }, option.parameterId),
               { parameterId: option.parameterId, effectInstanceId: option.effectInstanceId },

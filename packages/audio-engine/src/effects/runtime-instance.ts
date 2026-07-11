@@ -15,6 +15,7 @@ import {
   type PhaserParamsEnvelope,
   type ReverbParamsLite,
   type SaturatorParamsLite,
+  type SpectralParamsEnvelope,
   type TremoloParamsEnvelope,
   type UtilityParamsEnvelope,
 } from '@daw-browser/shared'
@@ -47,6 +48,12 @@ export type LimiterAudioEffectRuntimeInstance = AudioEffectInstance & {
 export type LoFiAudioEffectRuntimeInstance = AudioEffectInstance & {
   kind: 'lofi'
   params: LoFiParamsEnvelope
+}
+
+export type SpectralAudioEffectRuntimeInstance = {
+  id: string
+  kind: 'spectral'
+  params: SpectralParamsEnvelope
 }
 
 export type CompressorAudioEffectRuntimeInstance = AudioEffectInstance & {
@@ -84,19 +91,23 @@ export type AudioEffectRuntimeInstance =
   | GateAudioEffectRuntimeInstance
   | LimiterAudioEffectRuntimeInstance
   | LoFiAudioEffectRuntimeInstance
+  | SpectralAudioEffectRuntimeInstance
   | CompressorAudioEffectRuntimeInstance
   | SaturatorAudioEffectRuntimeInstance
   | DelayAudioEffectRuntimeInstance
   | ReverbAudioEffectRuntimeInstance
   | ModulationAudioEffectRuntimeInstance
 
-const runtimeInstanceKey = (instance: AudioEffectInstance) => `${instance.id}\u0000${instance.kind}`
+const runtimeInstanceKey = (instance: Pick<AudioEffectRuntimeInstance, 'id' | 'kind'>) => `${instance.id}\u0000${instance.kind}`
 
 export function normalizeAudioEffectRuntimeInstances(
   instances: readonly AudioEffectRuntimeInstance[],
 ): AudioEffectRuntimeInstance[] {
   const byKey = new Map(instances.map((instance) => [runtimeInstanceKey(instance), instance]))
-  return normalizeAudioEffectInstanceOrder(instances, instances).flatMap((entry) => {
+  const regular = instances.filter((instance): instance is Exclude<AudioEffectRuntimeInstance, SpectralAudioEffectRuntimeInstance> => instance.kind !== 'spectral')
+  const normalizedRegular = normalizeAudioEffectInstanceOrder(regular, regular)
+  const ordered = [...normalizedRegular, ...instances.filter((instance) => instance.kind === 'spectral')]
+  return ordered.flatMap((entry) => {
     const instance = byKey.get(runtimeInstanceKey(entry))
     return instance ? [instance] : []
   })

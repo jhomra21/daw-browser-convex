@@ -16,6 +16,7 @@
     "./loudness-analyzer": "./src/loudness-analyzer.ts",
     "./processor-release-contract": "./src/effects/processor-release-contract.ts",
     "./reliability-characterization": "./src/reliability-characterization.ts",
+    "./spectral-core": "./src/spectral-core.ts",
     "./recording-encode-wav": "./src/recording/encode-wav.ts"
   },
   "scripts": {

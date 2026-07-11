@@ -15,9 +15,10 @@ import { createStaticWorkletNodeChain, disconnectStaticWorkletNodeChain, resolve
 const MAX_EFFECTS_PER_CHAIN = 16
 const MAX_OFFLINE_CHAINS = 32
 const MAX_OFFLINE_STATIC_WORKLETS = 256
-const isStaticWorkletKind = (kind: AudioEffectKind): kind is StaticWorkletKind =>
+const isStaticWorkletKind = (kind: AudioEffectRuntimeInstance['kind']): kind is StaticWorkletKind =>
   kind === 'utility' || kind === 'autofilter' || kind === 'gate' || kind === 'limiter' || kind === 'lofi' ||
   kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble'
+  || kind === 'spectral'
 const isStaticWorkletInstance = (
   instance: AudioEffectRuntimeInstance,
 ): instance is Extract<AudioEffectRuntimeInstance, { kind: StaticWorkletKind }> => isStaticWorkletKind(instance.kind)
@@ -159,7 +160,7 @@ const resolveFxAutomationBindings = (
   effectInstanceId?: string,
 ): AutomationAudioBinding[] => {
   const descriptor = getAutomationParameterDescriptor(parameterId)
-  if (!descriptor || descriptor.owner === 'mixer' || descriptor.owner === 'compressor') return []
+  if (!descriptor || descriptor.owner === 'mixer' || descriptor.owner === 'sampler' || descriptor.owner === 'granular' || descriptor.owner === 'compressor') return []
   if (effectInstanceId) {
     if (isStaticWorkletKind(descriptor.owner)) return resolveStaticWorkletAutomationBinding(nodes.staticWorkletByInstanceId.get(effectInstanceId), parameterId)
     if (descriptor.owner === 'eq') return resolveEqAutomationBindings(nodes.eqByInstanceId.get(effectInstanceId) ?? new Map(), parameterId)
@@ -272,8 +273,8 @@ export async function createOfflineMixerNodes(
       const source = trackNodes.get(route.sourceTrackId)
       const target = trackNodes.get(route.targetTrackId)
       const compressor = target?.fx.compressorByInstanceId.get(route.effectInstanceId)
-      const gate = target?.fx.staticWorkletByInstanceId.get(route.effectInstanceId)
-      const targetNode = compressor?.workletNode ?? (gate?.kind === 'gate' ? gate.node : undefined)
+      const owned = target?.fx.staticWorkletByInstanceId.get(route.effectInstanceId)
+      const targetNode = compressor?.workletNode ?? (owned?.kind === 'gate' || owned?.kind === 'spectral' ? owned.node : undefined)
       assert(source && target && targetNode, `Invalid offline sidechain route for effect ${route.effectInstanceId}`)
       const detectorSource = detectorOnlyTrackIds.has(route.sourceTrackId) ? source.gain : source.output
       detectorSource.connect(targetNode, 0, 1)

@@ -2,13 +2,13 @@ import { AUDIO_EFFECT_ORDER, normalizeAudioEffectInstanceOrder, normalizeAudioEf
 
 export type AudioEffectOrderEntry = {
   targetId: string
-  kind: AudioEffectKind
+  kind: AudioEffectKind | 'spectral'
   instanceId?: string
   index?: number
 }
 
 const getAudioEffectOrderSortIndex = (entry: Pick<AudioEffectOrderEntry, 'kind' | 'index'>) => (
-  entry.index ?? AUDIO_EFFECT_ORDER.indexOf(entry.kind)
+  entry.index ?? (entry.kind === 'spectral' ? AUDIO_EFFECT_ORDER.length : AUDIO_EFFECT_ORDER.indexOf(entry.kind))
 )
 
 export const compareAudioEffectOrderEntries = (
@@ -18,7 +18,7 @@ export const compareAudioEffectOrderEntries = (
   (left.index === undefined && right.index !== undefined ? 1 : 0)
   || (left.index !== undefined && right.index === undefined ? -1 : 0)
   || getAudioEffectOrderSortIndex(left) - getAudioEffectOrderSortIndex(right)
-  || AUDIO_EFFECT_ORDER.indexOf(left.kind) - AUDIO_EFFECT_ORDER.indexOf(right.kind)
+  || getAudioEffectOrderSortIndex(left) - getAudioEffectOrderSortIndex(right)
 )
 
 export const collectAudioEffectOrders = (entries: Iterable<AudioEffectOrderEntry>) => {
@@ -38,7 +38,7 @@ export const collectAudioEffectOrders = (entries: Iterable<AudioEffectOrderEntry
   const toOrder = (rows: AudioEffectOrderEntry[]) => {
     const order = rows
       .sort(compareAudioEffectOrderEntries)
-      .map((entry) => entry.kind)
+      .flatMap((entry) => entry.kind === 'spectral' ? [] : [entry.kind])
     return normalizeAudioEffectOrder(order, order)
   }
 
@@ -62,11 +62,18 @@ export const collectAudioEffectInstances = (entries: Iterable<AudioEffectOrderEn
     else trackRows.set(entry.targetId, [entry])
   }
 
-  const toInstances = (rows: AudioEffectOrderEntry[]): AudioEffectInstance[] => {
+  const toInstances = (rows: AudioEffectOrderEntry[]) => {
     const instances = rows
       .sort(compareAudioEffectOrderEntries)
       .map((entry) => ({ id: entry.instanceId ?? entry.kind, kind: entry.kind }))
-    return normalizeAudioEffectInstanceOrder(instances, instances)
+    const regular = instances.filter((instance): instance is AudioEffectInstance => instance.kind !== 'spectral')
+    const normalized = normalizeAudioEffectInstanceOrder(regular, regular)
+    const normalizedById = new Map(normalized.map((instance) => [instance.id, instance]))
+    return instances.flatMap((instance) => {
+      if (instance.kind === 'spectral') return [instance]
+      const normalizedInstance = normalizedById.get(instance.id)
+      return normalizedInstance ? [normalizedInstance] : []
+    })
   }
 
   return {

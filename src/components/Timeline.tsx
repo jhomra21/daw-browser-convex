@@ -294,6 +294,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         type: effect.type,
         instanceId: effect.instanceId,
         index: effect.index,
+        params: effect.params,
       }];
     }),
     audioEngine,

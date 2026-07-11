@@ -1,5 +1,5 @@
 import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
-import type { ArpeggiatorParams, AudioEffectKind, AutomationEnvelope, AutoPanParamsEnvelope, ChorusParamsEnvelope, CompressorParams, DelayParams, EnsembleParamsEnvelope, EqParams, FlangerParamsEnvelope, GateParamsEnvelope, LimiterParamsEnvelope, LoFiParamsEnvelope, PhaserParamsEnvelope, ReverbParams, SaturatorParams, SynthParams, TrackInstrumentParams, TremoloParamsEnvelope, UtilityParamsEnvelope } from '@daw-browser/shared'
+import type { ArpeggiatorParams, AudioEffectKind, AutomationEnvelope, AutoPanParamsEnvelope, ChorusParamsEnvelope, CompressorParams, DelayParams, EnsembleParamsEnvelope, EqParams, FlangerParamsEnvelope, GateParamsEnvelope, LimiterParamsEnvelope, LoFiParamsEnvelope, PhaserParamsEnvelope, ReverbParams, SaturatorParams, SpectralParamsEnvelope, SynthParams, TrackInstrumentParams, TremoloParamsEnvelope, UtilityParamsEnvelope } from '@daw-browser/shared'
 import type { AudioWarp, Track, TrackChannelRole, TrackSend } from '@daw-browser/timeline-core/types'
 
 export type TrackRef = string
@@ -92,6 +92,7 @@ export type EffectParamsByEffect = {
   tremolo: TremoloParamsEnvelope
   autopan: AutoPanParamsEnvelope
   ensemble: EnsembleParamsEnvelope
+  spectral: SpectralParamsEnvelope
   synth: SynthParams
   instrument: TrackInstrumentParams
   arp: ArpeggiatorParams
@@ -111,6 +112,7 @@ export type EffectParamsByEffect = {
   'master-tremolo': TremoloParamsEnvelope
   'master-autopan': AutoPanParamsEnvelope
   'master-ensemble': EnsembleParamsEnvelope
+  'master-spectral': SpectralParamsEnvelope
 }
 
 export type TrackAudioEffectSnapshot = {
@@ -131,6 +133,7 @@ export type TrackEffectSnapshot = Partial<{
   limiter: LimiterParamsEnvelope
   delay: DelayParams
   reverb: ReverbParams
+  spectral: SpectralParamsEnvelope
   audioEffects: TrackAudioEffectSnapshot[]
   synth: SynthParams
   instrument: TrackInstrumentParams

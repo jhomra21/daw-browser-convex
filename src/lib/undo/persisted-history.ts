@@ -16,6 +16,7 @@ const EFFECT_TYPES: ReadonlySet<string> = new Set([
   'saturator',
   'delay',
   'reverb',
+  'spectral',
   'synth',
   'instrument',
   'arp',
@@ -24,6 +25,7 @@ const EFFECT_TYPES: ReadonlySet<string> = new Set([
   'master-saturator',
   'master-delay',
   'master-reverb',
+  'master-spectral',
 ] satisfies EffectType[])
 
 function isPersistedHistoryEnvelope(value: unknown): value is PersistedHistoryEnvelope {
@@ -127,7 +129,7 @@ const isTrackEffectSnapshot = (value: unknown) => {
   const audioEffects = value.audioEffects
   return (audioEffects === undefined || (Array.isArray(audioEffects) && audioEffects.every((effect) => (
     isRecord(effect)
-    && (effect.effect === 'eq' || effect.effect === 'compressor' || effect.effect === 'saturator' || effect.effect === 'delay' || effect.effect === 'reverb')
+    && (effect.effect === 'eq' || effect.effect === 'compressor' || effect.effect === 'saturator' || effect.effect === 'delay' || effect.effect === 'reverb' || effect.effect === 'spectral')
     && effect.params !== undefined
     && (effect.instanceId === undefined || isString(effect.instanceId))
     && (effect.index === undefined || isNumber(effect.index))

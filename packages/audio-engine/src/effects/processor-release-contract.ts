@@ -2,7 +2,7 @@ import type { ChannelLayout } from '../mixer/types'
 
 export type ProcessorQualityTier = 'standard' | 'high'
 export type ProcessorAutomationRate = 'continuous' | 'hold'
-export type OwnedProcessorKind = 'utility' | 'autofilter' | 'gate' | 'limiter'
+export type OwnedProcessorKind = 'utility' | 'autofilter' | 'gate' | 'limiter' | 'spectral'
 
 export type ProcessorReleaseContract = {
   kind: OwnedProcessorKind
@@ -88,6 +88,29 @@ export const OWNED_PROCESSOR_RELEASE_CONTRACTS: Readonly<Record<OwnedProcessorKi
       'gate.link': 'continuous',
     },
     timing: (sampleRate) => ({ latencyFrames: Math.ceil(0.002 * Math.max(1, sampleRate)), tail: { kind: 'finite', frames: 0 } }),
+  },
+  spectral: {
+    kind: 'spectral',
+    stateVersion: 1,
+    protocolVersion: 1,
+    layouts: ['mono', 'stereo'],
+    parameterAutomation: {
+      'spectral.freeze': 'continuous',
+      'spectral.gateThresholdDb': 'continuous',
+      'spectral.gateAttackMs': 'continuous',
+      'spectral.gateReleaseMs': 'continuous',
+      'spectral.morph': 'continuous',
+      'spectral.binShift': 'continuous',
+      'spectral.blur': 'continuous',
+      'spectral.harmonicPercussiveBalance': 'continuous',
+      'spectral.noiseReduction': 'continuous',
+      'spectral.profileLearn': 'continuous',
+      'spectral.mix': 'continuous',
+      'spectral.fftSize': 'hold',
+      'spectral.overlap': 'hold',
+      'spectral.mode': 'hold',
+    },
+    timing: () => ({ latencyFrames: 1536, tail: { kind: 'finite', frames: 0 } }),
   },
 }
 

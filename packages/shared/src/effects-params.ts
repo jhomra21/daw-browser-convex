@@ -1,3 +1,10 @@
+import {
+  createDefaultSpectralParams,
+  normalizeSpectralParamsEnvelope,
+  serializeSpectralParams,
+  type SpectralParamsEnvelope,
+} from './spectral-params'
+
 export type EqBandType = 'lowpass' | 'highpass' | 'bandpass' | 'lowshelf' | 'highshelf' | 'peaking' | 'notch' | 'allpass'
 
 export type EqBandParams = {
@@ -994,7 +1001,7 @@ export const normalizeLoFiParamsEnvelope = (value: unknown): LoFiParamsEnvelope 
   }
 }
 
-export type AudioEffectKind = 'utility' | 'eq' | 'autofilter' | 'gate' | 'compressor' | 'saturator' | 'lofi' | 'limiter' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' | 'delay' | 'reverb'
+export type AudioEffectKind = 'utility' | 'eq' | 'autofilter' | 'gate' | 'compressor' | 'saturator' | 'lofi' | 'limiter' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' | 'delay' | 'reverb' | 'spectral'
 export type PlannedAudioEffectKind = AudioEffectKind
 export type MasterAudioEffectKind = `master-${AudioEffectKind}`
 export type AudioEffectInstance = {
@@ -1041,6 +1048,14 @@ type ReverbAudioEffectContract = {
   createDefaultParams: () => ReverbParams
   normalizeParams: (params: ReverbParamsInput) => ReverbParams
   serializeParams: (params: ReverbParams) => string
+}
+
+type SpectralAudioEffectContract = {
+  kind: 'spectral'
+  masterKind: 'master-spectral'
+  createDefaultParams: () => SpectralParamsEnvelope
+  normalizeParams: (params: unknown) => SpectralParamsEnvelope
+  serializeParams: (params: SpectralParamsEnvelope) => string
 }
 
 type UtilityAudioEffectContract = {
@@ -1091,6 +1106,7 @@ type AudioEffectContractByKind = {
   saturator: SaturatorAudioEffectContract
   delay: DelayAudioEffectContract
   reverb: ReverbAudioEffectContract
+  spectral: SpectralAudioEffectContract
   chorus: any
   flanger: any
   phaser: any
@@ -1178,9 +1194,16 @@ export const AUDIO_EFFECT_CONTRACTS = {
   tremolo: { kind: 'tremolo', masterKind: 'master-tremolo', createDefaultParams: () => ({ version: 1, state: createDefaultTremoloParams() }), normalizeParams: normalizeTremoloParamsEnvelope, serializeParams: (params: TremoloParamsEnvelope) => JSON.stringify(normalizeTremoloParamsEnvelope(params)) },
   autopan: { kind: 'autopan', masterKind: 'master-autopan', createDefaultParams: () => ({ version: 1, state: createDefaultAutoPanParams() }), normalizeParams: normalizeAutoPanParamsEnvelope, serializeParams: (params: AutoPanParamsEnvelope) => JSON.stringify(normalizeAutoPanParamsEnvelope(params)) },
   ensemble: { kind: 'ensemble', masterKind: 'master-ensemble', createDefaultParams: () => ({ version: 1, state: createDefaultEnsembleParams() }), normalizeParams: normalizeEnsembleParamsEnvelope, serializeParams: (params: EnsembleParamsEnvelope) => JSON.stringify(normalizeEnsembleParamsEnvelope(params)) },
+  spectral: {
+    kind: 'spectral',
+    masterKind: 'master-spectral',
+    createDefaultParams: () => ({ version: 1, state: createDefaultSpectralParams() }),
+    normalizeParams: normalizeSpectralParamsEnvelope,
+    serializeParams: serializeSpectralParams,
+  },
 } satisfies AudioEffectContractByKind
 
-const AUDIO_EFFECT_CATALOG_ORDER: PlannedAudioEffectKind[] = ['utility', 'eq', 'autofilter', 'gate', 'compressor', 'saturator', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'delay', 'reverb']
+const AUDIO_EFFECT_CATALOG_ORDER: PlannedAudioEffectKind[] = ['utility', 'eq', 'autofilter', 'gate', 'compressor', 'saturator', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'delay', 'reverb', 'spectral']
 export const AUDIO_EFFECT_ORDER: AudioEffectKind[] = AUDIO_EFFECT_CATALOG_ORDER
 
 export function isAudioEffectKind(value: unknown): value is AudioEffectKind {

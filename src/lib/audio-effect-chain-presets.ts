@@ -21,6 +21,7 @@ import {
   type FlangerParamsEnvelope,
   type PhaserParamsEnvelope,
   type TremoloParamsEnvelope,
+  type SpectralParamsEnvelope,
 } from "@daw-browser/shared";
 
 export type AudioEffectChainPresetStep =
@@ -39,7 +40,8 @@ export type AudioEffectChainPresetStep =
   | { kind: "phaser"; params: PhaserParamsEnvelope }
   | { kind: "tremolo"; params: TremoloParamsEnvelope }
   | { kind: "autopan"; params: AutoPanParamsEnvelope }
-  | { kind: "ensemble"; params: EnsembleParamsEnvelope };
+  | { kind: "ensemble"; params: EnsembleParamsEnvelope }
+  | { kind: "spectral"; params: SpectralParamsEnvelope };
 
 export type AudioEffectChainPreset = {
   id: string;

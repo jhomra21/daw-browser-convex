@@ -21,9 +21,10 @@ import { observeResource, type ResourceObserver } from './runtime-diagnostics'
 
 const MAX_EFFECTS_PER_CHAIN = 16
 const MAX_LIVE_STATIC_WORKLETS = 64
-const isStaticWorkletKind = (kind: AudioEffectKind): kind is StaticWorkletKind =>
+const isStaticWorkletKind = (kind: AudioEffectRuntimeInstance['kind']): kind is StaticWorkletKind =>
   kind === 'utility' || kind === 'autofilter' || kind === 'gate' || kind === 'limiter' || kind === 'lofi' ||
-  kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble'
+  kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble' ||
+  kind === 'spectral'
 const isStaticWorkletInstance = (
   instance: AudioEffectRuntimeInstance,
 ): instance is Extract<AudioEffectRuntimeInstance, { kind: StaticWorkletKind }> => isStaticWorkletKind(instance.kind)
@@ -144,8 +145,8 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     for (const route of sidechainRoutes) {
       const source = outputs.get(route.sourceTrackId)
       const compressor = instanceCompressorChains.get(route.targetTrackId)?.get(route.effectInstanceId)?.chain()
-      const gate = instanceStaticWorkletChains.get(route.targetTrackId)?.get(route.effectInstanceId)
-      const targetNode = compressor?.workletNode ?? (gate?.kind === 'gate' ? gate.node : undefined)
+      const owned = instanceStaticWorkletChains.get(route.targetTrackId)?.get(route.effectInstanceId)
+      const targetNode = compressor?.workletNode ?? (owned?.kind === 'gate' || owned?.kind === 'spectral' ? owned.node : undefined)
       if (!source || !targetNode) continue
       const edgeId = `sidechain:${route.effectInstanceId}`
       activeSidechains.add(edgeId)
@@ -528,6 +529,13 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       previous.length !== normalized.length ||
       previous.some((instance, index) => instance.id !== normalized[index]?.id || instance.kind !== normalized[index]?.kind)
     ))
+    const spectralTimingChanged = normalized.some((instance) => {
+      if (instance.kind !== 'spectral') return false
+      const prior = previous?.find((candidate) => candidate.id === instance.id)
+      return prior?.kind !== 'spectral' ||
+        prior.params.state.fftSize !== instance.params.state.fftSize ||
+        prior.params.state.overlap !== instance.params.state.overlap
+    })
     if (normalized.length === 0) {
       const currentFx = trackFx.get(trackId)
       trackFx.set(trackId, { ...currentFx, instances: undefined })
@@ -564,7 +572,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     }
     for (const id of staleIds) closeInstanceState(trackId, id)
 
-    let requiresRoutingRebuild = !wasInstanceMode || staleIds.size > 0 || orderChanged
+    let requiresRoutingRebuild = !wasInstanceMode || staleIds.size > 0 || orderChanged || spectralTimingChanged
     for (const instance of normalized) {
       if (isStaticWorkletInstance(instance)) {
         const stateMap = ensureNestedMap(instanceStaticWorkletChains, trackId)
@@ -643,6 +651,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     }
     if (requiresRoutingRebuild) rebuildTrackRouting(trackId, ensureTrackNodes(trackId))
     applyAuxiliaryRoutes()
+    if (spectralTimingChanged) refreshMixerRouting()
   }
 
   const setTrackFxInstances = (trackId: string, instances: AudioEffectRuntimeInstance[]) => {
@@ -757,6 +766,40 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     currentTracks = []
   }
 
+  const refreshMixerRouting = () => {
+    const ctx = options.getAudioContext()
+    const masterInput = options.getMasterInput()
+    if (!ctx || !masterInput) return
+    const graph = resolveLiveMixerGraph(currentTracks, Object.fromEntries(trackFx), options.getMasterFx())
+    publishGraphLatency()
+    const trackNodes = new Map<string, TrackNodeGroup>()
+    for (const resolvedTrack of graph.channels) trackNodes.set(resolvedTrack.channel.id, ensureTrackNodes(resolvedTrack.channel.id))
+    const activeMeterTrackIds = new Set<string>(
+      graph.channels.filter((entry) => entry.outputGain > 0 || entry.sends.length > 0).map((entry) => entry.channel.id),
+    )
+    applyLiveMixerGraph({
+      graph,
+      masterInput,
+      trackNodes,
+      edgeRuntimes,
+      createGain: () => ctx.createGain(),
+      createDelay: () => ctx.createDelay(),
+      currentTime: ctx.currentTime,
+      sampleRate: ctx.sampleRate,
+      bpm: currentBpm,
+      reconnectTrackMeters: (trackId, gain) => {
+        if (!activeMeterTrackIds.has(trackId)) {
+          options.disposeTrackMeters(trackId)
+          return
+        }
+        options.reconnectTrackMeters(trackId, gain, () => outputs.get(trackId) === gain)
+      },
+    })
+    const activeTrackIds = new Set<string>(graph.channels.map((entry) => entry.channel.id))
+    for (const id of Array.from(gains.keys())) if (!activeTrackIds.has(id)) disposeTrack(id)
+    applyAuxiliaryRoutes()
+  }
+
   return {
     publishGraphLatency,
     ensureTrackInput: (trackId: string) => ensureTrackNodes(trackId).input,
@@ -770,48 +813,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     getTrackOutput: (trackId: string) => outputs.get(trackId),
     updateTrackGains: (tracks: RuntimeTrack[]) => {
       currentTracks = tracks
-      const ctx = options.getAudioContext()
-      const masterInput = options.getMasterInput()
-      if (!ctx || !masterInput) return
-
-      const graph = resolveLiveMixerGraph(tracks, Object.fromEntries(trackFx), options.getMasterFx())
-      publishGraphLatency()
-      const trackNodes = new Map<string, TrackNodeGroup>()
-      for (const resolvedTrack of graph.channels) {
-        const channelId = resolvedTrack.channel.id
-        trackNodes.set(channelId, ensureTrackNodes(channelId))
-      }
-
-      const activeMeterTrackIds = new Set<string>(
-        graph.channels
-          .filter((entry) => entry.outputGain > 0 || entry.sends.length > 0)
-          .map((entry) => entry.channel.id),
-      )
-      applyLiveMixerGraph({
-        graph,
-        masterInput,
-        trackNodes,
-        edgeRuntimes,
-        createGain: () => ctx.createGain(),
-        createDelay: () => ctx.createDelay(),
-        currentTime: ctx.currentTime,
-        sampleRate: ctx.sampleRate,
-        bpm: currentBpm,
-        reconnectTrackMeters: (trackId, gain) => {
-          if (!activeMeterTrackIds.has(trackId)) {
-            options.disposeTrackMeters(trackId)
-            return
-          }
-          options.reconnectTrackMeters(trackId, gain, () => outputs.get(trackId) === gain)
-        },
-      })
-
-      const activeTrackIds = new Set<string>(graph.channels.map((entry) => entry.channel.id))
-      for (const id of Array.from(gains.keys())) {
-        if (activeTrackIds.has(id)) continue
-        disposeTrack(id)
-      }
-      applyAuxiliaryRoutes()
+      refreshMixerRouting()
     },
     previewTrackVolume: (trackId: string, volume: number, muted: boolean) => {
       const gain = gains.get(trackId)

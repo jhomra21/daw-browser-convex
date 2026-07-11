@@ -26,8 +26,8 @@ const masterCompressorEntry: HistoryEntry = {
   },
 }
 
-const synthInstrument: TrackInstrumentParams = { kind: 'synth', params: createDefaultSynthParams() }
-const drumRackInstrument: TrackInstrumentParams = { kind: 'drum-rack', params: createDefaultDrumRackParams() }
+const synthInstrument: TrackInstrumentParams = { kind: 'synth', instanceId: 'instrument:synth-test', params: createDefaultSynthParams() }
+const drumRackInstrument: TrackInstrumentParams = { kind: 'drum-rack', instanceId: 'instrument:drum-test', params: createDefaultDrumRackParams() }
 
 const createInstrumentEntry = (from: TrackInstrumentParams, to: TrackInstrumentParams): HistoryEntry => ({
   type: 'effect-params',

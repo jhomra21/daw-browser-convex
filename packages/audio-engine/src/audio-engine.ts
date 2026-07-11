@@ -12,6 +12,9 @@ import { createMetronomeRuntime } from './metronome-runtime'
 import { createSourceRegistry, stopAndDisconnectSource } from './source-registry'
 import { createInstrumentRuntime, type SetTrackInstrumentInput } from './instrument-runtime'
 import type { DrumRackResolvedBuffers } from './drum-rack-runtime'
+import type { SamplerNoteMiss, SamplerResolvedBuffers } from './sampler-runtime'
+import type { GranularInstalledBuffer } from './granular-runtime'
+export { createSamplerBufferCache } from './sampler-core'
 import { createTransportClock } from './transport-clock'
 import type { Clip, ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import { applyAutomationEnvelopeAtTime, scheduleAutomationEnvelope } from './automation'
@@ -73,6 +76,7 @@ export class AudioEngine {
     timelineToCtxTime: (timelineSec) => this.timelineToCtxTime(timelineSec),
     ensureTrackInput: (trackId) => this.mixerRuntime.ensureTrackInput(trackId),
     sources: this.sources,
+    getAutomationEnvelopes: () => this.automationEnvelopes,
   })
   private mixerRuntime = createLiveMixerRuntime({
     ensureAudio: () => this.ensureAudio(),
@@ -453,6 +457,25 @@ export class AudioEngine {
 
   setTrackDrumRack(trackId: string, params: Extract<SetTrackInstrumentInput['instrument'], { kind: 'drum-rack' }>['params'], buffers?: DrumRackResolvedBuffers) {
     this.instrumentRuntime.setTrackDrumRack(trackId, params, buffers)
+  }
+
+  setTrackSampler(trackId: string, params: Extract<SetTrackInstrumentInput['instrument'], { kind: 'sampler' }>['params'], buffers?: SamplerResolvedBuffers, instanceId?: string) {
+    this.instrumentRuntime.setTrackSampler(trackId, params, buffers, instanceId)
+  }
+
+  setTrackGranular(trackId: string, params: Extract<SetTrackInstrumentInput['instrument'], { kind: 'granular' }>['params'], installedBuffer?: GranularInstalledBuffer, instanceId?: string) {
+    return this.instrumentRuntime.setTrackGranular(trackId, params, installedBuffer, instanceId)
+  }
+
+  setSamplerRuntimeListeners(listeners: {
+    onNoteMiss?: (miss: SamplerNoteMiss) => void
+    onAssetUse?: (assetKey: string, active: boolean) => void
+  }) {
+    this.instrumentRuntime.setSamplerRuntimeListeners(listeners)
+  }
+
+  previewSamplerNote(trackId: string, pitch: number, velocity = 1) {
+    return this.instrumentRuntime.previewSamplerNote(trackId, pitch, velocity)
   }
 
   previewDrumRackPad(trackId: string, padId: string, velocity = 1) {

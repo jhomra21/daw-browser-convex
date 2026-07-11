@@ -106,7 +106,7 @@ export type DelayNodeChain = {
 
 export type FxChainStageConfig = {
   id: string
-  kind: AudioEffectKind
+  kind: AudioEffectKind | 'spectral'
   eqNodes?: BiquadFilterNode[]
   compressorChain?: CompressorNodeChain | null
   saturatorChain?: SaturatorNodeChain | null

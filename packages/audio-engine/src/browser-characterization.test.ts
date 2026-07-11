@@ -49,5 +49,6 @@ describe('browser characterization report schema', () => {
     expect(getStaticModuleDeclaredLatencyFrames('limiter', 96_000)).toBe(480)
     expect(getStaticModuleDeclaredLatencyFrames('lofi', 48_000)).toBe(0)
     expect(getStaticModuleDeclaredLatencyFrames('ensemble', 48_000)).toBe(0)
+    expect(getStaticModuleDeclaredLatencyFrames('spectral', 48_000)).toBe(2048)
   })
 })

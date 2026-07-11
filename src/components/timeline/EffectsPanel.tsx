@@ -6,7 +6,7 @@ import {
   createMemo,
   createSignal,
 } from "solid-js";
-import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_ORDER, automationEnvelopeValueRange, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams, normalizeUtilityParamsEnvelope, type AudioEffectInstance, type AudioEffectKind, type AutomationEnvelope, type InstrumentKind } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_ORDER, automationEnvelopeValueRange, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, normalizeUtilityParamsEnvelope, type AudioEffectInstance, type AudioEffectKind, type AutomationEnvelope, type InstrumentKind } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Delay from "~/components/effects/Delay";
 import Compressor from "~/components/effects/Compressor";
@@ -24,9 +24,12 @@ import Ensemble from "~/components/effects/Ensemble";
 import Flanger from "~/components/effects/Flanger";
 import Phaser from "~/components/effects/Phaser";
 import Tremolo from "~/components/effects/Tremolo";
+import Spectral from "~/components/effects/Spectral";
 import Synth from "~/components/effects/Synth";
 import SynthCard from "~/components/effects/SynthCard";
 import DrumRack from "~/components/effects/DrumRack";
+import Sampler from "~/components/effects/Sampler";
+import Granular from "~/components/effects/Granular";
 import type { AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
@@ -153,6 +156,33 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
         />
       )}
     </Show>
+    <Show when={props.instrument.state.sampler.params()}>
+      {(params) => (
+        <Sampler
+          params={params()}
+          status={props.instrument.state.sampler.status()}
+          canWrite={props.instrument.canWrite}
+          onAddZone={props.instrument.state.sampler.addZone}
+          onRemoveZone={props.instrument.state.sampler.removeZone}
+          onReset={props.instrument.state.sampler.reset}
+          onRetryZone={props.instrument.state.sampler.retryZone}
+          onUpdate={props.instrument.state.sampler.update}
+          onUpdateZone={props.instrument.state.sampler.updateZone}
+        />
+      )}
+    </Show>
+    <Show when={props.instrument.state.granular.params()}>
+      {(params) => (
+        <Granular
+          params={params()}
+          status={props.instrument.state.granular.status()}
+          canWrite={props.instrument.canWrite}
+          onReset={props.instrument.state.granular.reset}
+          onRetry={props.instrument.state.granular.retry}
+          onUpdate={props.instrument.state.granular.update}
+        />
+      )}
+    </Show>
 
     <Show
       when={
@@ -245,13 +275,16 @@ const audioEffectLabels: Record<AudioEffectKind, string> = {
   ensemble: "Ensemble",
   delay: "Delay",
   reverb: "Reverb",
+  spectral: "Spectral",
 };
 
 const instrumentLabels: Record<InstrumentKind, string> = {
   synth: "Synth",
   "drum-rack": "Drum Rack",
+  sampler: "Sampler",
+  granular: "Granular",
 };
-const instrumentKinds: InstrumentKind[] = ["synth", "drum-rack"];
+const instrumentKinds: InstrumentKind[] = ["synth", "drum-rack", "sampler", "granular"];
 const objectParams = (value: unknown): object => value && typeof value === "object" ? value : {};
 
 const createAudioEffectContextMenuItems = (input: {
@@ -364,6 +397,7 @@ const createAudioEffectContextMenuControls = (
   if (effect.kind === "autopan") return { label: audioEffectLabels.autopan, enabled: () => AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.autopan.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.autopan.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams({})), remove };
   if (effect.kind === "ensemble") return { label: audioEffectLabels.ensemble, enabled: () => AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.ensemble.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.ensemble.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams({})), remove };
   if (effect.kind === "lofi") return { label: audioEffectLabels.lofi, enabled: () => AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.lofi.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.lofi.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams({})), remove };
+  if (effect.kind === "spectral") return { label: audioEffectLabels.spectral, enabled: () => normalizeSpectralParamsEnvelope(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.spectral.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.spectral.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.spectral.createDefaultParams()), remove };
   return {
     label: audioEffectLabels.reverb,
     enabled: () => normalizeReverbParams(objectParams(audioEffects.paramsForInstance(effect))).enabled !== false,
@@ -437,6 +471,28 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
     return (
       <Show when={params()}>
         {(value) => <Delay params={normalizeDelayParams(objectParams(value()))} onChange={(updates) => props.audioEffects.delay.changeInstance(props.effect.id, (prev) => normalizeDelayParams({ ...prev, ...updates }))} onToggleEnabled={(enabled) => props.audioEffects.delay.changeInstance(props.effect.id, (prev) => ({ ...prev, enabled }))} onReset={() => props.audioEffects.delay.changeInstance(props.effect.id, () => normalizeDelayParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}
+      </Show>
+    );
+  }
+  if (props.effect.kind === "spectral") {
+    const sourceTrackId = () => props.sidechainRoutes?.find((route) => route.targetTrackId === props.targetId && route.effectInstanceId === props.effect.id)?.sourceTrackId;
+    return (
+      <Show when={params()}>
+        {(value) => (
+          <Spectral
+            params={normalizeSpectralParamsEnvelope(value()).state}
+            tracks={props.tracks ?? []}
+            targetId={props.targetId ?? "master"}
+            sourceTrackId={sourceTrackId()}
+            onSourceChange={(source) => void props.audioEffects.spectral.setSidechainSource(props.effect.id, source)}
+            onChange={(updates) => props.audioEffects.spectral.changeInstance(props.effect.id, (prev) => normalizeSpectralParamsEnvelope({ ...prev, state: { ...prev.state, ...updates } }))}
+            onToggleEnabled={(enabled) => props.audioEffects.spectral.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))}
+            onReset={() => props.audioEffects.spectral.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.spectral.createDefaultParams())}
+            automationRangesByParameterId={props.automationRangesByParameterId}
+            onAutomationParameterTouch={props.onSelectAutomationParameter}
+            onManualAutomationOverride={props.onManualAutomationOverride}
+          />
+        )}
       </Show>
     );
   }
@@ -559,12 +615,16 @@ const createEffectsPanelContextMenuItems = (input: {
     if (input.instrument.arp.params()) input.instrument.arp.reset();
     if (input.instrument.synth.params()) input.instrument.synth.reset();
     if (input.instrument.drumRack.params()) input.instrument.drumRack.reset();
+    if (input.instrument.sampler.params()) input.instrument.sampler.reset();
+    if (input.instrument.granular.params()) input.instrument.granular.reset();
   };
   const hasCurrentDevices = () => (
     input.audioEffects.orderedEffects().length > 0
     || Boolean(input.instrument.arp.params())
     || Boolean(input.instrument.synth.params())
     || Boolean(input.instrument.drumRack.params())
+    || Boolean(input.instrument.sampler.params())
+    || Boolean(input.instrument.granular.params())
   );
   const hasAudioEffects = () => input.audioEffects.orderedEffects().length > 0;
 

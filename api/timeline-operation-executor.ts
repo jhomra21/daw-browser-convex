@@ -212,6 +212,14 @@ export const executeTimelineOperation = async (
         instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })
+    case 'effects.setSpectralParams':
+      return await context.convex.mutation(convexApi.effects.serverSetProcessorParams, {
+        projectId: context.projectId,
+        trackId: operation.payload.trackId,
+        effect: 'spectral',
+        instanceId: operation.payload.instanceId,
+        params: operation.payload.params,
+      })
     case 'effects.setDelayParams':
       return await context.convex.mutation(convexApi.effects.serverSetDelayParams, {
         projectId: context.projectId,
@@ -293,6 +301,13 @@ export const executeTimelineOperation = async (
     case 'effects.setMasterDelayParams':
       return await context.convex.mutation(convexApi.effects.serverSetMasterDelayParams, {
         projectId: context.projectId,
+        instanceId: operation.payload.instanceId,
+        params: operation.payload.params,
+      })
+    case 'effects.setMasterSpectralParams':
+      return await context.convex.mutation(convexApi.effects.serverSetMasterProcessorParams, {
+        projectId: context.projectId,
+        effect: 'spectral',
         instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })

@@ -35,6 +35,9 @@ function mergeEntry(prev: HistoryEntry, entry: HistoryEntry): HistoryEntry {
       case 'reverb':
         if (prev.data.effect !== 'reverb' || prev.data.instanceId !== entry.data.instanceId) return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
+      case 'spectral':
+        if (prev.data.effect !== 'spectral' || prev.data.instanceId !== entry.data.instanceId) return entry
+        return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'synth':
         if (prev.data.effect !== 'synth') return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
@@ -55,6 +58,9 @@ function mergeEntry(prev: HistoryEntry, entry: HistoryEntry): HistoryEntry {
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
       case 'master-reverb':
         if (prev.data.effect !== 'master-reverb' || prev.data.instanceId !== entry.data.instanceId) return entry
+        return { ...entry, data: { ...entry.data, from: prev.data.from } }
+      case 'master-spectral':
+        if (prev.data.effect !== 'master-spectral' || prev.data.instanceId !== entry.data.instanceId) return entry
         return { ...entry, data: { ...entry.data, from: prev.data.from } }
     }
   }

@@ -1,5 +1,5 @@
 import { type Component, Show, createMemo, createSignal, onCleanup } from "solid-js";
-import { automationEnvelopeValueRange, automationTargetKey, type AutomationEffectInstance, type AutomationEnvelope, type AutomationParameterSelection } from "@daw-browser/shared";
+import { automationEnvelopeValueRange, automationTargetKey, type AutomationEnvelope, type AutomationParameterSelection, type AutomationTargetDeviceInstance } from "@daw-browser/shared";
 import { normalizeMasterVolume } from "@daw-browser/shared";
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
 import { LANE_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
@@ -29,7 +29,7 @@ type MasterSidebarRowProps = {
     visible: boolean;
     heightPx: number;
     selected: AutomationParameterSelection;
-    effects: readonly AutomationEffectInstance[];
+    effects: readonly AutomationTargetDeviceInstance[];
     automatedTargetKeys: ReadonlySet<string>;
     selectedEnvelope: AutomationEnvelope | undefined;
     onToggleVisibility: () => void;

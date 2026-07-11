@@ -1129,6 +1129,7 @@ export const serverRestoreUngroup = mutation({
         v.literal("ensemble"),
         v.literal("delay"),
         v.literal("reverb"),
+        v.literal("spectral"),
         v.literal("instrument"),
         v.literal("synth"),
         v.literal("arpeggiator"),

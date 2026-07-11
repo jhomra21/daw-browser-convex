@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { normalizeCompressorParams } from '@daw-browser/shared'
 import { computeCompressorWorkletCurveDb } from './effects/compressor-worklet'
 import { createRecorderSabRingBuffers, createRecorderSabRingConsumer } from './recording/sab-ring-buffer'
-import { compressorWorklet, gateWorklet, limiterWorklet, modulationWorklet, recorderWorklet, trackMeterWorklet, utilityWorklet } from './worklet-manifest'
+import { compressorWorklet, gateWorklet, limiterWorklet, modulationWorklet, recorderWorklet, spectralWorklet, trackMeterWorklet, utilityWorklet } from './worklet-manifest'
 
 const publicRoot = new URL('../../../public/', import.meta.url)
 
@@ -14,7 +14,7 @@ type EvaluatedProcessor = {
   process: (inputs: Float32Array[][], outputs?: Float32Array[][], parameters?: Record<string, Float32Array>) => boolean
 }
 
-type ProcessorConstructor = new (options?: { processorOptions: { processorKind: string } }) => EvaluatedProcessor
+type ProcessorConstructor = new (options?: { processorOptions: Record<string, unknown> }) => EvaluatedProcessor
 
 const evaluateAsset = async (modulePath: string) => {
   const source = await Bun.file(new URL(modulePath, publicRoot)).text()
@@ -45,6 +45,55 @@ const evaluateAsset = async (modulePath: string) => {
 }
 
 describe('checked-in worklet assets', () => {
+  test('registers spectral with two inputs, fixed-latency bypass, and allocation-free process body', async () => {
+    const source = await Bun.file(new URL(spectralWorklet.modulePath, publicRoot)).text()
+    const processBody = source.slice(source.indexOf('process(inputs'), source.indexOf('\n  }\n}', source.indexOf('process(inputs')))
+    expect(processBody).not.toContain('new ')
+    expect(processBody).not.toContain('postMessage')
+    expect(processBody).not.toContain('console.')
+    expect(processBody).not.toContain('setTimeout')
+    const evaluated = await evaluateAsset(spectralWorklet.modulePath)
+    const Processor = evaluated.registered.get(spectralWorklet.processorName)
+    if (!Processor) throw new Error('Spectral processor was not registered.')
+    const processor = new Processor({ processorOptions: { processorKind: 'spectral', fftSize: 512, overlap: 4 } })
+    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: { enabled: false, mode: 'morph' } } })
+    const input = new Float32Array(640)
+    input[0] = 1
+    const output = [new Float32Array(640), new Float32Array(640)]
+    expect(processor.process([[input]], [output], spectralParameters())).toBe(true)
+    expect(output[0][512]).toBe(1)
+    processor.port.onmessage?.({ data: { type: 'release', version: 1 } })
+    expect(processor.process([[input]], [output], spectralParameters())).toBe(false)
+  })
+  test('reconstructs a steady signal through four-times overlap-add without ring discontinuities', async () => {
+    const evaluated = await evaluateAsset(spectralWorklet.modulePath)
+    const Processor = evaluated.registered.get(spectralWorklet.processorName)
+    if (!Processor) throw new Error('Spectral processor was not registered.')
+    const processor = new Processor({ processorOptions: { processorKind: 'spectral', fftSize: 512, overlap: 4 } })
+    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: { enabled: true, mode: 'freeze' } } })
+    const samples: number[] = []
+    for (let block = 0; block < 100; block += 1) {
+      const input = new Float32Array(128).fill(0.25)
+      const output = [new Float32Array(128), new Float32Array(128)]
+      expect(processor.process([[input]], [output], spectralParameters())).toBe(true)
+      samples.push(...output[0])
+    }
+    expect(samples.slice(1024).every((sample) => Math.abs(sample - 0.25) <= 1e-6)).toBe(true)
+  })
+  test('processes HPSS history without non-finite output', async () => {
+    const evaluated = await evaluateAsset(spectralWorklet.modulePath)
+    const Processor = evaluated.registered.get(spectralWorklet.processorName)
+    if (!Processor) throw new Error('Spectral processor was not registered.')
+    const processor = new Processor({ processorOptions: { processorKind: 'spectral', fftSize: 512, overlap: 4 } })
+    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: { enabled: true, mode: 'hpss' } } })
+    for (let block = 0; block < 40; block += 1) {
+      const input = new Float32Array(128).fill(block % 2 === 0 ? 0.25 : -0.25)
+      const output = [new Float32Array(128), new Float32Array(128)]
+      expect(processor.process([[input]], [output], spectralParameters())).toBe(true)
+      expect(output[0].every(Number.isFinite)).toBe(true)
+      expect(output[1].every(Number.isFinite)).toBe(true)
+    }
+  })
   test('registers the shared modulation asset with immutable processor kind', async () => {
     const evaluated = await evaluateAsset(modulationWorklet.modulePath)
     const Processor = evaluated.registered.get(modulationWorklet.processorName)
@@ -328,3 +377,10 @@ describe('checked-in worklet assets', () => {
 })
 
 const namesForGateTest = () => ['gate.thresholdDb', 'gate.ratio', 'gate.attackMs', 'gate.holdMs', 'gate.releaseMs', 'gate.hysteresisDb', 'gate.rangeDb', 'gate.lookaheadMs', 'gate.link']
+
+const spectralParameters = () => Object.fromEntries([
+  ['spectral.freeze', 0], ['spectral.gateThresholdDb', -60], ['spectral.gateAttackMs', 10],
+  ['spectral.gateReleaseMs', 100], ['spectral.morph', 0], ['spectral.binShift', 0],
+  ['spectral.blur', 0], ['spectral.harmonicPercussiveBalance', 0], ['spectral.noiseReduction', 0],
+  ['spectral.profileLearn', 0], ['spectral.mix', 1],
+].map(([name, value]) => [name, Float32Array.of(Number(value))]))

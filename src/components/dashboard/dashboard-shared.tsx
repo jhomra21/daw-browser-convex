@@ -21,11 +21,13 @@ export function DashboardSection(props: { title: string; description?: string; c
   );
 }
 
-export function DashboardRow(props: { label: JSX.Element; value?: JSX.Element; action?: JSX.Element }) {
+export function DashboardRow(props: { label: JSX.Element; controlId?: string; value?: JSX.Element; action?: JSX.Element }) {
   return (
     <div class="flex min-h-12 items-center gap-4 border-b border-border px-4 py-3 last:border-b-0">
       <div class="min-w-0 flex-1">
-        <div class="text-sm text-foreground">{props.label}</div>
+        {props.controlId
+          ? <label for={props.controlId} class="text-sm text-foreground">{props.label}</label>
+          : <div class="text-sm text-foreground">{props.label}</div>}
         {props.value ? <div class="mt-1 text-xs text-muted-foreground">{props.value}</div> : null}
       </div>
       {props.action}

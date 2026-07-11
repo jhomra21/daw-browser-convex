@@ -21,6 +21,7 @@ export function DashboardAudioView() {
   const supportedConstraints = navigator.mediaDevices.getSupportedConstraints()
   const audioEngine = getAudioEngine()
   const audioDevices = createMemo(() => filterAudioDevices(devices()))
+  const selectedInputDeviceId = () => preferences.audio.preferences().inputDeviceId
   const [runtime, setRuntime] = createSignal(audioEngine.getRuntimeSnapshot())
   const hasPendingRuntimeChange = () => {
     const snapshot = runtime()
@@ -106,11 +107,15 @@ export function DashboardAudioView() {
       <DashboardSection title="Audio Devices" description="Device labels become available after browser permission is granted.">
         <DashboardRow
           label="Recording input"
-          value={!isSelectedDeviceAvailable(preferences.audio.preferences().inputDeviceId, audioDevices().inputs) ? "Saved device is currently unavailable." : undefined}
+          controlId="audio-recording-input"
+          value={!isSelectedDeviceAvailable(selectedInputDeviceId(), audioDevices().inputs) ? "Saved device is currently unavailable." : undefined}
           action={
-            <select class="h-8 border border-border bg-background px-2 text-sm" value={preferences.audio.preferences().inputDeviceId} onChange={(event) => preferences.audio.setInputDeviceId(event.currentTarget.value)}>
-              <option value="">System default</option>
-              <For each={audioDevices().inputs}>{(device) => <option value={device.deviceId}>{device.label || "Microphone"}</option>}</For>
+            <select id="audio-recording-input" class="h-8 border border-border bg-background px-2 text-sm" onChange={(event) => preferences.audio.setInputDeviceId(event.currentTarget.value)}>
+              <option value="" selected={!selectedInputDeviceId()}>System default</option>
+              <Show when={selectedInputDeviceId() && !isSelectedDeviceAvailable(selectedInputDeviceId(), audioDevices().inputs)}>
+                <option value={selectedInputDeviceId()} selected>Saved microphone (unavailable)</option>
+              </Show>
+              <For each={audioDevices().inputs}>{(device) => <option value={device.deviceId} selected={device.deviceId === selectedInputDeviceId()}>{device.label || "Microphone"}</option>}</For>
             </select>
           }
         />
@@ -126,27 +131,32 @@ export function DashboardAudioView() {
         <Show when={hasPendingRuntimeChange()}>
           <p class="px-4 py-2 text-xs text-muted-foreground">The requested sample rate or latency mode will apply the next time the timeline creates an audio context.</p>
         </Show>
-        <DashboardRow label="Requested sample rate" action={
-          <select class="h-8 border border-border bg-background px-2 text-sm" value={preferences.audio.preferences().sampleRate} onChange={(event) => {
+        <DashboardRow label="Requested sample rate" controlId="audio-sample-rate" action={
+          <select id="audio-sample-rate" class="h-8 border border-border bg-background px-2 text-sm" onChange={(event) => {
             preferences.audio.setSampleRate(parseAudioSampleRate(Number(event.currentTarget.value)))
           }}>
-            <option value="default">System default</option><option value="44100">44.1 kHz</option><option value="48000">48 kHz</option><option value="96000">96 kHz</option>
+            <option value="default" selected={preferences.audio.preferences().sampleRate === "default"}>System default</option>
+            <option value="44100" selected={preferences.audio.preferences().sampleRate === 44100}>44.1 kHz</option>
+            <option value="48000" selected={preferences.audio.preferences().sampleRate === 48000}>48 kHz</option>
+            <option value="96000" selected={preferences.audio.preferences().sampleRate === 96000}>96 kHz</option>
           </select>
         } />
-        <DashboardRow label="Latency mode" action={
-          <select class="h-8 border border-border bg-background px-2 text-sm" value={preferences.audio.preferences().latencyMode} onChange={(event) => {
+        <DashboardRow label="Latency mode" controlId="audio-latency-mode" action={
+          <select id="audio-latency-mode" class="h-8 border border-border bg-background px-2 text-sm" onChange={(event) => {
             preferences.audio.setLatencyMode(parseAudioLatencyMode(event.currentTarget.value))
           }}>
-            <option value="interactive">Interactive</option><option value="balanced">Balanced</option><option value="playback">Playback</option>
+            <option value="interactive" selected={preferences.audio.preferences().latencyMode === "interactive"}>Interactive</option>
+            <option value="balanced" selected={preferences.audio.preferences().latencyMode === "balanced"}>Balanced</option>
+            <option value="playback" selected={preferences.audio.preferences().latencyMode === "playback"}>Playback</option>
           </select>
         } />
         <DashboardRow label="Buffer size" value="Managed by the browser and operating system." />
       </DashboardSection>
 
       <DashboardSection title="Recording">
-        <DashboardRow label="Echo cancellation" value={supportedConstraints.echoCancellation ? undefined : "Not supported by this browser."} action={<input type="checkbox" disabled={!supportedConstraints.echoCancellation} checked={preferences.audio.preferences().echoCancellation} onChange={(event) => preferences.audio.setEchoCancellation(event.currentTarget.checked)} />} />
-        <DashboardRow label="Noise suppression" value={supportedConstraints.noiseSuppression ? undefined : "Not supported by this browser."} action={<input type="checkbox" disabled={!supportedConstraints.noiseSuppression} checked={preferences.audio.preferences().noiseSuppression} onChange={(event) => preferences.audio.setNoiseSuppression(event.currentTarget.checked)} />} />
-        <DashboardRow label="Automatic gain control" value={supportedConstraints.autoGainControl ? undefined : "Not supported by this browser."} action={<input type="checkbox" disabled={!supportedConstraints.autoGainControl} checked={preferences.audio.preferences().autoGainControl} onChange={(event) => preferences.audio.setAutoGainControl(event.currentTarget.checked)} />} />
+        <DashboardRow label="Echo cancellation" controlId="audio-echo-cancellation" value={supportedConstraints.echoCancellation ? undefined : "Not supported by this browser."} action={<input id="audio-echo-cancellation" type="checkbox" disabled={!supportedConstraints.echoCancellation} checked={preferences.audio.preferences().echoCancellation} onChange={(event) => preferences.audio.setEchoCancellation(event.currentTarget.checked)} />} />
+        <DashboardRow label="Noise suppression" controlId="audio-noise-suppression" value={supportedConstraints.noiseSuppression ? undefined : "Not supported by this browser."} action={<input id="audio-noise-suppression" type="checkbox" disabled={!supportedConstraints.noiseSuppression} checked={preferences.audio.preferences().noiseSuppression} onChange={(event) => preferences.audio.setNoiseSuppression(event.currentTarget.checked)} />} />
+        <DashboardRow label="Automatic gain control" controlId="audio-auto-gain-control" value={supportedConstraints.autoGainControl ? undefined : "Not supported by this browser."} action={<input id="audio-auto-gain-control" type="checkbox" disabled={!supportedConstraints.autoGainControl} checked={preferences.audio.preferences().autoGainControl} onChange={(event) => preferences.audio.setAutoGainControl(event.currentTarget.checked)} />} />
       </DashboardSection>
 
       <DashboardSection title="Diagnostics">

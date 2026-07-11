@@ -23,6 +23,8 @@ type AudioDeviceLists = {
   outputs: MediaDeviceInfo[]
 }
 
+const browserDeviceAliases = new Set(["default", "communications"])
+
 export const areAudioDeviceListsEqual = (
   previous: readonly MediaDeviceInfo[],
   next: readonly MediaDeviceInfo[]
@@ -37,6 +39,7 @@ export const areAudioDeviceListsEqual = (
 export const filterAudioDevices = (devices: readonly MediaDeviceInfo[]): AudioDeviceLists => {
   const seen = new Set<string>()
   const unique = devices.filter((device) => {
+    if (browserDeviceAliases.has(device.deviceId)) return false
     const key = `${device.kind}:${device.deviceId}`
     if (seen.has(key)) return false
     seen.add(key)

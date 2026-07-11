@@ -21,7 +21,7 @@ describe('mixer routing plan', () => {
           gain: 0.5,
           outputGain: 1,
           outputTargetId: 'group',
-          sends: [{ targetId: 'return', amount: 0.25 }],
+          sends: [{ targetId: 'return', amount: 0.25, tap: 'post-fader' }],
         },
         { channelId: 'group', gain: 0.75, outputGain: 1, outputTargetId: undefined, sends: [] },
         { channelId: 'return', gain: 1, outputGain: 1, outputTargetId: undefined, sends: [] },

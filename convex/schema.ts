@@ -32,6 +32,7 @@ export default defineSchema({
     sends: v.array(v.object({
       targetId: v.id("tracks"),
       amount: v.number(),
+      tap: v.optional(v.union(v.literal("pre-fx"), v.literal("pre-fader"), v.literal("post-fader"))),
     })),
   })
     .index("by_room", ["projectId"])
@@ -191,6 +192,18 @@ export default defineSchema({
     .index("by_room", ["projectId"])
     .index("by_room_target", ["projectId", "targetType"])
     .index("by_track_order", ["trackId", "index"]),
+
+  sidechainRoutes: defineTable({
+    projectId: v.string(),
+    sourceTrackId: v.id("tracks"),
+    targetTrackId: v.id("tracks"),
+    effectInstanceId: v.string(),
+  })
+    .index("by_room", ["projectId"])
+    .index("by_source", ["sourceTrackId"])
+    .index("by_target", ["targetTrackId"])
+    .index("by_room_effect", ["projectId", "effectInstanceId"])
+    .index("by_room_target_effect", ["projectId", "targetTrackId", "effectInstanceId"]),
 
   automationEnvelopes: defineTable({
     projectId: v.string(),

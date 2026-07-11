@@ -10,7 +10,7 @@ import ExportDialog from '~/components/timeline/ExportDialog'
 import type { OptimisticGrantWrite } from '~/lib/optimistic-grant-scope'
 import type { EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
 import type { BpmDetectionService } from '~/lib/bpm-detection-service'
-import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import type { Clip, ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import type { TimelineBottomPanelShellControls } from '~/components/timeline/TimelineBottomPanelShell'
 import type { TimelineDeviceInsertActions } from '~/components/timeline/timeline-device-insert-actions'
 import type { EffectsPanelAudioEffects } from '~/components/timeline/create-effects-panel-controller'
@@ -42,6 +42,7 @@ export type TimelinePanelsProps = {
     }
     selectedFXTarget: Track['id'] | 'master'
     tracks: Track[]
+    sidechainRoutes: ExternalSidechainRoute[]
     playheadSec: number
     projectId?: string
     userId?: string
@@ -87,6 +88,7 @@ export type TimelinePanelsProps = {
     loopEndSec: number
     projectId?: string
     userId?: string
+    sidechainRoutes: ExternalSidechainRoute[]
     ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
     onClose: () => void
   }
@@ -167,6 +169,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         clipTab={props.effectsPanel.clipTab}
         selectedFXTarget={props.effectsPanel.selectedFXTarget}
         tracks={props.effectsPanel.tracks}
+          sidechainRoutes={props.effectsPanel.sidechainRoutes}
         onClose={props.effectsPanel.onClose}
         onOpen={props.effectsPanel.onOpen}
         audioEngine={props.effectsPanel.audioEngine}
@@ -219,6 +222,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
           loopEndSec={props.exportDialog.loopEndSec}
           projectId={props.exportDialog.projectId}
           userId={props.exportDialog.userId}
+          sidechainRoutes={props.exportDialog.sidechainRoutes}
           ensureClipBuffer={props.exportDialog.ensureClipBuffer}
         />
       </Show>

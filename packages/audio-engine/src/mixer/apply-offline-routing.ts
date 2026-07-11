@@ -3,14 +3,17 @@ import { createEqNodes } from '../effects/dsp'
 import { connectFxChain, createCompressorNodeChain, createDelayNodeChain, createReverbNodeChain, createSaturatorNodeChain, disconnectCompressorChain, type CompressorNodeChain, type CreateReverbImpulseResponse, type DelayNodeChain, type ReverbNodeChain, type SaturatorNodeChain } from '../effects/chain'
 import { createReverbImpulseCache } from '../effects/reverb-impulse-cache'
 import type { ResolvedMixerGraph } from './types'
+import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import type { AutomationAudioBinding } from '../automation'
 import { resolveDelayAutomationBindings, resolveEqAutomationBindings, resolveReverbAutomationBindings, resolveSaturatorAutomationBindings } from '../automation-bindings'
 import type { AudioEffectRuntimeInstance } from '../effects/runtime-instance'
 import { createMixerRoutingPlan } from './graph-contract'
 import { createOfflineCompressorLifecycle, type OfflineCompressorLifecycle, type OfflineProcessorTarget } from './offline-compressor-lifecycle'
+import { MASTER_ROUTE_TARGET, mixerRouteKey, resolveMixerTiming } from './resolve-timing'
 
 type OfflineTrackNodes = {
   input: GainNode
+  postFx: GainNode
   gain: GainNode
   output: GainNode
   fx: OfflineFxChain
@@ -37,6 +40,7 @@ type OfflineFxChainConfig = {
 }
 
 type OfflineFxChain = {
+  compressorByInstanceId: Map<string, CompressorNodeChain>
   eqByInstanceId: Map<string, Map<string, BiquadFilterNode>>
   saturatorByInstanceId: Map<string, SaturatorNodeChain>
   delayByInstanceId: Map<string, DelayNodeChain>
@@ -58,6 +62,7 @@ async function buildOfflineFxChain(
 
   if (config.instances) {
     const eqByInstanceId = new Map<string, Map<string, BiquadFilterNode>>()
+    const compressorByInstanceId = new Map<string, CompressorNodeChain>()
     const saturatorByInstanceId = new Map<string, SaturatorNodeChain>()
     const delayByInstanceId = new Map<string, DelayNodeChain>()
     const reverbByInstanceId = new Map<string, ReverbNodeChain>()
@@ -77,6 +82,7 @@ async function buildOfflineFxChain(
       if (instance.kind === 'compressor') {
         const compressorParams = normalizeCompressorParams(instance.params)
         const compressor = compressorParams.enabled ? await createCompressor(compressorParams, instance.id) : null
+        if (compressor) compressorByInstanceId.set(instance.id, compressor)
         stages.push({ id: instance.id, kind: instance.kind, compressorChain: compressor })
         continue
       }
@@ -97,7 +103,7 @@ async function buildOfflineFxChain(
       stages.push({ id: instance.id, kind: instance.kind, reverbChain: reverb })
     }
     connectFxChain(input, destination, { instances: stages })
-    return { eqByInstanceId, saturatorByInstanceId, delayByInstanceId, reverbByInstanceId }
+    return { compressorByInstanceId, eqByInstanceId, saturatorByInstanceId, delayByInstanceId, reverbByInstanceId }
   }
   const normalizedEq = config.eq ? normalizeEqParams(config.eq) : undefined
   const eq = createEqNodes(ctx, normalizedEq, ctx.destination.channelCount || 2)
@@ -114,6 +120,7 @@ async function buildOfflineFxChain(
     : null
   connectFxChain(input, destination, { eqNodes: eq, compressorChain: compressor, saturatorChain: saturator, delayChain: delay, reverbChain: reverb, order: config.order })
   return {
+    compressorByInstanceId: new Map(compressor ? [['legacy-compressor', compressor]] : []),
     eqByInstanceId: new Map(eqNodesByBand.size > 0 ? [['legacy-eq', eqNodesByBand]] : []),
     saturatorByInstanceId: new Map(saturator ? [['legacy-saturator', saturator]] : []),
     delayByInstanceId: new Map(delay ? [['legacy-delay', delay]] : []),
@@ -150,8 +157,14 @@ const resolveFxAutomationBindings = (
   return compatible.length === 1 ? resolveReverbAutomationBindings(compatible[0], parameterId) : []
 }
 
-export async function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: ResolvedMixerGraph, bpm = 120): Promise<OfflineMixerNodes> {
+export async function createOfflineMixerNodes(
+  ctx: OfflineAudioContext,
+  graph: ResolvedMixerGraph,
+  bpm = 120,
+  sidechainRoutes: readonly ExternalSidechainRoute[] = [],
+): Promise<OfflineMixerNodes> {
   const routingPlan = createMixerRoutingPlan(graph)
+  const timingPlan = resolveMixerTiming(graph, ctx.sampleRate, bpm)
   const impulseCache = createReverbImpulseCache()
   const createCachedImpulseResponse = (params: ReverbParamsLite) => impulseCache.get(ctx, params)
   const masterInput = ctx.createGain()
@@ -169,10 +182,11 @@ export async function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: R
     const trackNodes = new Map<string, OfflineTrackNodes>()
     for (const resolvedTrack of graph.channels) {
       const input = ctx.createGain()
+      const postFx = ctx.createGain()
       const gain = ctx.createGain()
       const output = ctx.createGain()
-      const fx = await buildOfflineFxChain(ctx, input, gain, createCachedImpulseResponse, { eq: resolvedTrack.fx?.eq, compressor: resolvedTrack.fx?.compressor, saturator: resolvedTrack.fx?.saturator, delay: resolvedTrack.fx?.delay, reverb: resolvedTrack.fx?.reverb, order: resolvedTrack.fx?.order, instances: resolvedTrack.fx?.instances, bpm }, { kind: 'track', trackId: resolvedTrack.channel.id }, compressorLifecycle)
-      trackNodes.set(resolvedTrack.channel.id, { input, gain, output, fx })
+      const fx = await buildOfflineFxChain(ctx, input, postFx, createCachedImpulseResponse, { eq: resolvedTrack.fx?.eq, compressor: resolvedTrack.fx?.compressor, saturator: resolvedTrack.fx?.saturator, delay: resolvedTrack.fx?.delay, reverb: resolvedTrack.fx?.reverb, order: resolvedTrack.fx?.order, instances: resolvedTrack.fx?.instances, bpm }, { kind: 'track', trackId: resolvedTrack.channel.id }, compressorLifecycle)
+      trackNodes.set(resolvedTrack.channel.id, { input, postFx, gain, output, fx })
     }
 
     for (const channel of routingPlan.channels) {
@@ -188,16 +202,46 @@ export async function createOfflineMixerNodes(ctx: OfflineAudioContext, graph: R
         assert(targetNodes, `Missing offline mixer output target for track ${channel.outputTargetId}`)
       }
       const outputTarget = targetNodes?.input ?? masterInput
+      source.postFx.connect(source.gain)
       source.gain.connect(source.output)
-      source.output.connect(outputTarget)
+      const outputDelayFrames = timingPlan.routeDelayFrames.get(mixerRouteKey(channelId, channel.outputTargetId ?? MASTER_ROUTE_TARGET, 'output')) ?? 0
+      if (outputDelayFrames > 0) {
+        const outputDelay = ctx.createDelay()
+        outputDelay.delayTime.value = outputDelayFrames / ctx.sampleRate
+        source.output.connect(outputDelay)
+        outputDelay.connect(outputTarget)
+      } else {
+        source.output.connect(outputTarget)
+      }
       for (const send of channel.sends) {
         const target = trackNodes.get(send.targetId)
         assert(target, `Missing offline mixer send target for track ${send.targetId}`)
         const sendGain = ctx.createGain()
         sendGain.gain.value = send.amount
-        source.gain.connect(sendGain)
-        sendGain.connect(target.input)
+        const sendSource = send.tap === 'pre-fx'
+          ? source.input
+          : send.tap === 'pre-fader'
+            ? source.postFx
+            : source.output
+        sendSource.connect(sendGain)
+        const sendDelayFrames = timingPlan.routeDelayFrames.get(mixerRouteKey(channelId, send.targetId, 'send', send.tap)) ?? 0
+        if (sendDelayFrames > 0) {
+          const sendDelay = ctx.createDelay()
+          sendDelay.delayTime.value = sendDelayFrames / ctx.sampleRate
+          sendGain.connect(sendDelay)
+          sendDelay.connect(target.input)
+        } else {
+          sendGain.connect(target.input)
+        }
       }
+    }
+
+    for (const route of sidechainRoutes) {
+      const source = trackNodes.get(route.sourceTrackId)
+      const target = trackNodes.get(route.targetTrackId)
+      const compressor = target?.fx.compressorByInstanceId.get(route.effectInstanceId)
+      assert(source && target && compressor, `Invalid offline sidechain route for compressor ${route.effectInstanceId}`)
+      source.output.connect(compressor.workletNode, 0, 1)
     }
 
     return {

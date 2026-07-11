@@ -21,7 +21,7 @@ import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import TimelineBottomPanelShell, { type TimelineBottomPanelShellControls } from "~/components/timeline/TimelineBottomPanelShell";
 import TimelineBottomPanelFooter from "~/components/timeline/TimelineBottomPanelFooter";
-import type { Clip, Track } from "@daw-browser/timeline-core/types";
+import type { Clip, ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { BOTTOM_PANEL_EDGE_PADDING_PX } from "~/lib/bottom-panel-layout";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 import {
@@ -43,6 +43,7 @@ type EffectsPanelProps = {
   shell: TimelineBottomPanelShellControls;
   selectedFXTarget: Track["id"] | "master";
   tracks: Track[];
+  sidechainRoutes: ExternalSidechainRoute[];
   onClose: () => void;
   onOpen: () => void;
   clipTab: {
@@ -571,6 +572,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     isOpen: () => props.isOpen,
     selectedFXTarget: () => props.selectedFXTarget,
     tracks: () => props.tracks,
+    sidechainRoutes: () => props.sidechainRoutes,
     audioEngine: () => props.audioEngine,
     projectId: () => props.projectId,
     userId: () => props.userId,

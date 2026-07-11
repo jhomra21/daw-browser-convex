@@ -212,7 +212,7 @@ export async function createCompressorNodeChain(ctx: BaseAudioContext, params: C
   let workletNode: AudioWorkletNode
   try {
     workletNode = new AudioWorkletNode(ctx, compressorWorklet.processorName, {
-      numberOfInputs: 1,
+      numberOfInputs: 2,
       numberOfOutputs: 1,
       outputChannelCount: [2],
       channelCount: 2,

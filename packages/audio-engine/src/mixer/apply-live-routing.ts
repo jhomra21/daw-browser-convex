@@ -1,33 +1,54 @@
 import { assert } from '@daw-browser/shared'
 import type { ResolvedMixerGraph } from './types'
-import { createMixerRoutingPlan, type MixerRoutingPlan } from './graph-contract'
+import { createMixerRoutingPlan } from './graph-contract'
+import { MASTER_ROUTE_TARGET, mixerRouteKey, resolveMixerTiming } from './resolve-timing'
 
 type LiveTrackNodes = {
   input: GainNode
+  postFx: GainNode
   gain: GainNode
   output: GainNode
+}
+
+export type LiveMixerEdgeRuntime = {
+  source: AudioNode
+  target: AudioNode
+  delay: DelayNode
+  gain?: GainNode
 }
 
 type ApplyLiveMixerGraphOptions = {
   graph: ResolvedMixerGraph
   masterInput: GainNode
   trackNodes: Map<string, LiveTrackNodes>
-  trackSendGains: Map<string, Map<string, GainNode>>
-  trackRoutingSignatures: Map<string, string>
+  edgeRuntimes: Map<string, LiveMixerEdgeRuntime>
   createGain: () => GainNode
+  createDelay: () => DelayNode
+  currentTime: number
+  sampleRate: number
+  bpm?: number
   reconnectTrackMeters: (trackId: string, output: GainNode) => void
 }
 
-const getRoutingSignature = (channel: MixerRoutingPlan['channels'][number]) =>
-  [
-    channel.outputTargetId ?? '',
-    ...channel.sends.map((send) => send.targetId).sort(),
-  ].join('|')
+const disconnectEdge = (edge: LiveMixerEdgeRuntime) => {
+  try { edge.source.disconnect(edge.gain ?? edge.delay) } catch {}
+  try { edge.gain?.disconnect(edge.delay) } catch {}
+  try { edge.delay.disconnect(edge.target) } catch {}
+  try { edge.gain?.disconnect() } catch {}
+  try { edge.delay.disconnect() } catch {}
+}
+
+const updateDelay = (delay: DelayNode, seconds: number, currentTime: number) => {
+  delay.delayTime.cancelScheduledValues(currentTime)
+  delay.delayTime.setValueAtTime(delay.delayTime.value, currentTime)
+  delay.delayTime.linearRampToValueAtTime(seconds, currentTime + 0.01)
+}
 
 export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
   const plan = createMixerRoutingPlan(options.graph)
+  const timing = resolveMixerTiming(options.graph, options.sampleRate, options.bpm)
   options.masterInput.gain.value = plan.masterVolume
-  const activeTrackIds = new Set<string>(plan.channels.map((channel) => channel.channelId))
+  const activeEdgeIds = new Set<string>()
 
   for (const channel of plan.channels) {
     const channelId = channel.channelId
@@ -36,8 +57,8 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
 
     nodes.gain.gain.value = channel.gain
     nodes.output.gain.value = channel.outputGain
-    const routingSignature = getRoutingSignature(channel)
-    const shouldReconnect = options.trackRoutingSignatures.get(channelId) !== routingSignature
+    try { nodes.postFx.connect(nodes.gain) } catch {}
+    try { nodes.gain.connect(nodes.output) } catch {}
     const targetNodes = channel.outputTargetId
       ? options.trackNodes.get(channel.outputTargetId)
       : undefined
@@ -45,57 +66,71 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
       assert(targetNodes, `Missing output target nodes for track ${channel.outputTargetId}`)
     }
     const outputTarget = targetNodes?.input ?? options.masterInput
-    if (shouldReconnect) {
-      try { nodes.gain.disconnect() } catch {}
-      try { nodes.output.disconnect() } catch {}
-      nodes.gain.connect(nodes.output)
-      nodes.output.connect(outputTarget)
-      options.trackRoutingSignatures.set(channelId, routingSignature)
+    const outputTargetId = channel.outputTargetId ?? MASTER_ROUTE_TARGET
+    const outputEdgeId = mixerRouteKey(channelId, outputTargetId, 'output')
+    activeEdgeIds.add(outputEdgeId)
+    const outputDelaySeconds = (timing.routeDelayFrames.get(outputEdgeId) ?? 0) / options.sampleRate
+    const existingOutputEdge = options.edgeRuntimes.get(outputEdgeId)
+    if (existingOutputEdge) {
+      updateDelay(existingOutputEdge.delay, outputDelaySeconds, options.currentTime)
+    } else {
+      const delay = options.createDelay()
+      delay.delayTime.value = outputDelaySeconds
+      nodes.output.connect(delay)
+      delay.connect(outputTarget)
+      options.edgeRuntimes.set(outputEdgeId, { source: nodes.output, target: outputTarget, delay })
     }
 
-    let sendMap = options.trackSendGains.get(channelId)
-
-    const activeSends = new Set<string>()
     for (const send of channel.sends) {
       const target = options.trackNodes.get(send.targetId)
       assert(target, `Missing send target nodes for track ${send.targetId}`)
-      activeSends.add(send.targetId)
-      if (!sendMap) {
-        sendMap = new Map<string, GainNode>()
-        options.trackSendGains.set(channelId, sendMap)
+      const sendSource = send.tap === 'pre-fx'
+        ? nodes.input
+        : send.tap === 'pre-fader'
+          ? nodes.postFx
+          : nodes.output
+      const edgeId = mixerRouteKey(channelId, send.targetId, 'send', send.tap)
+      activeEdgeIds.add(edgeId)
+      const delaySeconds = (timing.routeDelayFrames.get(edgeId) ?? 0) / options.sampleRate
+      const existing = options.edgeRuntimes.get(edgeId)
+      if (existing) {
+        assert(existing.gain, `Missing live mixer send gain for edge ${edgeId}`)
+        existing.gain.gain.value = send.amount
+        updateDelay(existing.delay, delaySeconds, options.currentTime)
+      } else {
+        const sendGain = options.createGain()
+        const delay = options.createDelay()
+        sendGain.gain.value = send.amount
+        delay.delayTime.value = delaySeconds
+        sendSource.connect(sendGain)
+        sendGain.connect(delay)
+        delay.connect(target.input)
+        options.edgeRuntimes.set(edgeId, { source: sendSource, target: target.input, gain: sendGain, delay })
       }
-      let sendGain = sendMap.get(send.targetId)
-      if (!sendGain) {
-        sendGain = options.createGain()
-        sendMap.set(send.targetId, sendGain)
-        nodes.gain.connect(sendGain)
-        sendGain.connect(target.input)
-      } else if (shouldReconnect) {
-        try { sendGain.disconnect() } catch {}
-        nodes.gain.connect(sendGain)
-        sendGain.connect(target.input)
-      }
-      sendGain.gain.value = send.amount
     }
 
-    if (sendMap) {
-      for (const [targetId, sendGain] of Array.from(sendMap.entries())) {
-        if (activeSends.has(targetId)) continue
-        try { sendGain.disconnect() } catch {}
-        sendMap.delete(targetId)
-      }
-      if (sendMap.size === 0) options.trackSendGains.delete(channelId)
-    }
-
-    if (shouldReconnect) options.reconnectTrackMeters(channelId, nodes.output)
+    options.reconnectTrackMeters(channelId, nodes.output)
   }
 
-  for (const [trackId, sendMap] of Array.from(options.trackSendGains.entries())) {
-    if (activeTrackIds.has(trackId)) continue
-    for (const sendGain of sendMap.values()) {
-      try { sendGain.disconnect() } catch {}
-    }
-    options.trackSendGains.delete(trackId)
-    options.trackRoutingSignatures.delete(trackId)
+  for (const [edgeId, edge] of Array.from(options.edgeRuntimes.entries())) {
+    if (activeEdgeIds.has(edgeId)) continue
+    disconnectEdge(edge)
+    options.edgeRuntimes.delete(edgeId)
+  }
+}
+
+export const clearLiveMixerEdges = (edges: Map<string, LiveMixerEdgeRuntime>) => {
+  for (const edge of edges.values()) disconnectEdge(edge)
+  edges.clear()
+}
+
+export const removeLiveMixerEdgesForNodes = (
+  edges: Map<string, LiveMixerEdgeRuntime>,
+  nodes: ReadonlySet<AudioNode>,
+) => {
+  for (const [edgeId, edge] of Array.from(edges.entries())) {
+    if (!nodes.has(edge.source) && !nodes.has(edge.target)) continue
+    disconnectEdge(edge)
+    edges.delete(edgeId)
   }
 }

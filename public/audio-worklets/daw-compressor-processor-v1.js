@@ -33,10 +33,11 @@ class CompressorProcessor extends AudioWorkletProcessor {
       sidechain: { enabled: false, filterType: 'highpass', frequencyHz: 120, q: 0.707 },
     }
     this.envelopeDb = 0
-    this.lookaheadFrames = Math.ceil(sampleRate * 0.01) + 128
+    this.lookaheadFrames = Math.ceil(sampleRate * 0.01) + 1
     this.writeIndex = 0
     this.delayL = new Float32Array(this.lookaheadFrames)
     this.delayR = new Float32Array(this.lookaheadFrames)
+    this.detectorDelay = new Float32Array(this.lookaheadFrames)
     this.rms = 0
     this.scLow = 0
     this.scBand = 0
@@ -63,15 +64,19 @@ class CompressorProcessor extends AudioWorkletProcessor {
   }
   process(inputs, outputs) {
     const input = inputs[0]
+    const detectorInput = inputs[1] || input
     const output = outputs[0]
     const left = input[0]
     if (!left) return true
     const right = input[1] || left
+    const detectorLeft = detectorInput[0] || left
+    const detectorRight = detectorInput[1] || detectorLeft
     const outL = output[0]
     const outR = output[1] || outL
     const p = this.params
     const lookahead = clamp(Math.round(sampleRate * p.lookaheadMs / 1000), 0, this.lookaheadFrames - 1)
-    const readOffset = this.lookaheadFrames - lookahead
+    const programReadOffset = 1
+    const detectorReadOffset = lookahead + 1
     const attack = Math.exp(-1 / Math.max(1, sampleRate * p.attackMs / 1000))
     const releaseMs = p.autoRelease ? Math.max(p.releaseMs, p.releaseMs * (1 + Math.min(1, -this.envelopeDb / 24))) : p.releaseMs
     const release = Math.exp(-1 / Math.max(1, sampleRate * releaseMs / 1000))
@@ -84,12 +89,14 @@ class CompressorProcessor extends AudioWorkletProcessor {
     for (let i = 0; i < left.length; i++) {
       const inL = left[i]
       const inR = right[i]
-      const mono = (inL + inR) * 0.5
-      let detector = mono
+      const mono = (detectorLeft[i] + detectorRight[i]) * 0.5
+      const detectorReadIndex = (this.writeIndex + detectorReadOffset) % this.lookaheadFrames
+      let detector = this.detectorDelay[detectorReadIndex]
+      this.detectorDelay[this.writeIndex] = mono
       if (p.sidechain.enabled) {
-        this.scLow += filterCoeff * (mono - this.scLow)
-        this.scBand += filterCoeff * (mono - this.scLow - this.scBand / sidechainQ)
-        detector = p.sidechain.filterType === 'lowpass' ? this.scLow : p.sidechain.filterType === 'bandpass' ? this.scBand : mono - this.scLow
+        this.scLow += filterCoeff * (detector - this.scLow)
+        this.scBand += filterCoeff * (detector - this.scLow - this.scBand / sidechainQ)
+        detector = p.sidechain.filterType === 'lowpass' ? this.scLow : p.sidechain.filterType === 'bandpass' ? this.scBand : detector - this.scLow
       }
       const level = p.detectorMode === 'rms'
         ? Math.sqrt(this.rms = this.rms * 0.99 + detector * detector * 0.01)
@@ -105,13 +112,9 @@ class CompressorProcessor extends AudioWorkletProcessor {
         this.envelopeDb = targetDb + coeff * (this.envelopeDb - targetDb)
       }
       const gain = dbToGain(this.envelopeDb) * makeup
-      let delayedL = inL
-      let delayedR = inR
-      if (lookahead > 0) {
-        const readIndex = (this.writeIndex + readOffset) % this.lookaheadFrames
-        delayedL = this.delayL[readIndex]
-        delayedR = this.delayR[readIndex]
-      }
+      const readIndex = (this.writeIndex + programReadOffset) % this.lookaheadFrames
+      const delayedL = this.delayL[readIndex]
+      const delayedR = this.delayR[readIndex]
       this.delayL[this.writeIndex] = inL
       this.delayR[this.writeIndex] = inR
       this.writeIndex = (this.writeIndex + 1) % this.lookaheadFrames

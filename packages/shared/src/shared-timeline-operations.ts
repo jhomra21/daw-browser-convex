@@ -53,7 +53,7 @@ export type MoveClipInput = {
 
 export type TrackRouting = {
   outputTargetId?: string
-  sends?: Array<{ targetId: string; amount: number }>
+  sends?: Array<{ targetId: string; amount: number; tap?: 'pre-fx' | 'pre-fader' | 'post-fader' }>
 }
 
 export type SharedTimelineClipCreatePayload = {
@@ -125,6 +125,8 @@ export type SharedTimelineOperation =
   | { kind: 'clips.setGain'; payload: { clipId: string; gain: number } }
   | { kind: 'clips.setColor'; payload: { clipId: string; color: string } }
   | { kind: 'tracks.setRouting'; payload: { trackId: string; routing: TrackRouting } }
+  | { kind: 'sidechains.setRoute'; payload: { projectId: string; sourceTrackId: string; targetTrackId: string; effectInstanceId: string } }
+  | { kind: 'sidechains.removeRoute'; payload: { projectId: string; targetTrackId: string; effectInstanceId: string } }
   | { kind: 'tracks.setGroup'; payload: { trackId: string; groupId?: string | null } }
   | { kind: 'tracks.reorderAndGroup'; payload: { updates: Array<{ trackId: string; index: number; groupId?: string | null; outputTargetId?: string | null }> } }
   | { kind: 'tracks.ungroup'; payload: { groupId: string; operationId?: string } }
@@ -260,12 +262,18 @@ const readMoves = (value: unknown): MoveClipInput[] => Array.isArray(value)
     ))
   : []
 
-const readSends = (value: unknown) => Array.isArray(value)
+const readSends = (value: unknown): TrackRouting['sends'] => Array.isArray(value)
   ? value.flatMap((entry) => (
       isRecord(entry)
       && typeof entry.targetId === 'string'
       && typeof entry.amount === 'number'
-        ? [{ targetId: entry.targetId, amount: entry.amount }]
+        ? [{
+            targetId: entry.targetId,
+            amount: entry.amount,
+            ...(entry.tap === 'pre-fx' || entry.tap === 'pre-fader' || entry.tap === 'post-fader'
+              ? { tap: entry.tap }
+              : {}),
+          }]
         : []
     ))
   : undefined
@@ -643,6 +651,33 @@ const parseTrackRouting = (payload: Record<string, unknown>): SharedTimelineOper
   }
 }
 
+const parseSidechainRoute = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
+  typeof payload.projectId === 'string'
+  && typeof payload.sourceTrackId === 'string'
+  && typeof payload.targetTrackId === 'string'
+  && typeof payload.effectInstanceId === 'string'
+  && payload.effectInstanceId.length > 0
+    ? {
+        kind: 'sidechains.setRoute',
+        payload: {
+          projectId: payload.projectId,
+          sourceTrackId: payload.sourceTrackId,
+          targetTrackId: payload.targetTrackId,
+          effectInstanceId: payload.effectInstanceId,
+        },
+      }
+    : null
+)
+
+const parseSidechainRemoval = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
+  typeof payload.projectId === 'string'
+  && typeof payload.targetTrackId === 'string'
+  && typeof payload.effectInstanceId === 'string'
+  && payload.effectInstanceId.length > 0
+    ? { kind: 'sidechains.removeRoute', payload: { projectId: payload.projectId, targetTrackId: payload.targetTrackId, effectInstanceId: payload.effectInstanceId } }
+    : null
+)
+
 const parseTrackGroup = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
   typeof payload.trackId === 'string'
     ? { kind: 'tracks.setGroup', payload: { trackId: payload.trackId, groupId: readOptionalNullableString(payload.groupId) } }
@@ -779,7 +814,8 @@ const parseTrackRestoreUngroup = (payload: Record<string, unknown>): SharedTimel
   if (group.outputTargetId !== undefined && typeof group.outputTargetId !== 'string') return null
   const sends = group.sends.flatMap((send) => (
     isRecord(send) && typeof send.targetId === 'string' && typeof send.amount === 'number'
-      ? [{ targetId: send.targetId, amount: send.amount }]
+      && (send.tap === undefined || send.tap === 'pre-fx' || send.tap === 'pre-fader' || send.tap === 'post-fader')
+      ? [{ targetId: send.targetId, amount: send.amount, tap: send.tap }]
       : []
   ))
   if (sends.length !== group.sends.length) return null
@@ -1092,6 +1128,27 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   },
   { kind: 'clips.setColor', parse: parseClipColor, targets: readClipIdTargets, durableQueue: true },
   { kind: 'tracks.setRouting', parse: parseTrackRouting, targets: readRoutingTargets, durableQueue: true },
+  {
+    kind: 'sidechains.setRoute',
+    parse: parseSidechainRoute,
+    targets: (payload) => {
+      if (!isRecord(payload)) return emptyTargets()
+      const trackIds = new Set<string>()
+      if (typeof payload.sourceTrackId === 'string') trackIds.add(payload.sourceTrackId)
+      if (typeof payload.targetTrackId === 'string') trackIds.add(payload.targetTrackId)
+      return { trackIds, clipIds: new Set() }
+    },
+    durableQueue: true,
+  },
+  {
+    kind: 'sidechains.removeRoute',
+    parse: parseSidechainRemoval,
+    targets: (payload) => {
+      if (!isRecord(payload) || typeof payload.targetTrackId !== 'string') return emptyTargets()
+      return { trackIds: new Set([payload.targetTrackId]), clipIds: new Set() }
+    },
+    durableQueue: true,
+  },
   { kind: 'tracks.setGroup', parse: parseTrackGroup, targets: readTrackGroupTargets, durableQueue: true },
   { kind: 'tracks.reorderAndGroup', parse: parseTrackReorderAndGroup, targets: readReorderAndGroupTargets, durableQueue: true },
   { kind: 'tracks.ungroup', parse: parseTrackUngroup, targets: emptyTargets, durableQueue: true },

@@ -2,6 +2,38 @@ import { describe, expect, test } from 'bun:test'
 import { parseSharedTimelineOperation, readSharedTimelineOperationTargets, type SharedTimelineOperation } from './shared-timeline-operations'
 
 describe('shared timeline operations', () => {
+  test('roundtrips exact external sidechain routes', () => {
+    const operation: SharedTimelineOperation = {
+      kind: 'sidechains.setRoute',
+      payload: {
+        projectId: 'project-1',
+        sourceTrackId: 'source',
+        targetTrackId: 'target',
+        effectInstanceId: 'compressor-2',
+      },
+    }
+    expect(parseSharedTimelineOperation(operation)).toEqual(operation)
+    expect(readSharedTimelineOperationTargets(operation)).toEqual({
+      trackIds: new Set(['source', 'target']),
+      clipIds: new Set(),
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'sidechains.setRoute',
+      payload: { projectId: 'project-1', sourceTrackId: 'source', targetTrackId: 'target', effectInstanceId: '' },
+    })).toBeNull()
+    expect(parseSharedTimelineOperation({
+      kind: 'sidechains.removeRoute',
+      payload: { projectId: 'project-1', targetTrackId: 'target', effectInstanceId: 'compressor-2' },
+    })).toEqual({
+      kind: 'sidechains.removeRoute',
+      payload: { projectId: 'project-1', targetTrackId: 'target', effectInstanceId: 'compressor-2' },
+    })
+    expect(readSharedTimelineOperationTargets({
+      kind: 'sidechains.removeRoute',
+      payload: { projectId: 'project-1', targetTrackId: 'target', effectInstanceId: 'compressor-2' },
+    })).toEqual({ trackIds: new Set(['target']), clipIds: new Set() })
+  })
+
   test('preserves null group ids for clear-group operations', () => {
     expect(parseSharedTimelineOperation({
       kind: 'tracks.setGroup',

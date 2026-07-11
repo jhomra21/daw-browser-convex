@@ -24,6 +24,7 @@ export function buildTrackRoutingHistorySnapshot(routing: TrackRouting | undefin
       .map((send) => ({
         targetTrackRef: trackRefById.get(send.targetId) ?? send.targetId,
         amount: send.amount,
+        tap: send.tap,
       }))
       .filter((send) => send.targetTrackRef),
     outputTargetRef: routing?.outputTargetId ? (trackRefById.get(routing.outputTargetId) ?? routing.outputTargetId) : undefined,
@@ -31,17 +32,12 @@ export function buildTrackRoutingHistorySnapshot(routing: TrackRouting | undefin
 }
 
 export function resolveTrackRoutingSnapshot(index: HistoryRefIndex, snapshot: TrackRoutingHistorySnapshot): TrackRouting {
-  const hasTargetId = (send: { targetId?: Track['id']; amount: number }): send is { targetId: Track['id']; amount: number } => {
-    return send.targetId !== undefined
-  }
-
   return {
     sends: (snapshot.sends ?? [])
-      .map((send) => ({
-        targetId: index.trackIdByRef.get(send.targetTrackRef),
-        amount: send.amount,
-      }))
-      .filter(hasTargetId),
+      .flatMap((send) => {
+        const targetId = index.trackIdByRef.get(send.targetTrackRef)
+        return targetId ? [{ targetId, amount: send.amount, tap: send.tap }] : []
+      }),
     outputTargetId: snapshot.outputTargetRef ? index.trackIdByRef.get(snapshot.outputTargetRef) : undefined,
   }
 }

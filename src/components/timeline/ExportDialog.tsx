@@ -9,6 +9,7 @@ import { useExportContext } from '~/context/export'
 import type { ExportOutput } from '~/lib/export/run-export-job'
 import ExportProgressStatus from '~/components/export/ExportProgressStatus'
 import { createCustomExportRange, type ExportSampleRate } from '~/lib/export/export-settings'
+import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 
 type ExportSource = 'mixdown' | 'all-stems' | 'selected-stems'
 type ExportRangeMode = ExportRange['mode']
@@ -25,6 +26,7 @@ type Props = {
   loopEndSec: number
   projectId?: string
   userId?: string
+  sidechainRoutes: ExternalSidechainRoute[]
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
 }
 
@@ -247,6 +249,7 @@ const ExportDialog: Component<Props> = (props) => {
         encoding: encodingSettings(),
         projectId: props.projectId,
         userId: props.userId,
+        sidechainRoutes: props.sidechainRoutes,
         ensureClipBuffer: props.ensureClipBuffer,
       }
       const outcome = currentSource === 'mixdown'

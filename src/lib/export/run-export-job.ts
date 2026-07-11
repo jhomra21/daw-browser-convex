@@ -18,6 +18,7 @@ import { saveLocalExportMetadataBatch, type LocalExportMetadataInput } from '~/l
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
+import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import { isRenderableExportTrack, type ExportEncodingSettings, type ExportRenderSettings } from '~/lib/export/export-settings'
 
@@ -46,6 +47,7 @@ export type TimelineExportRequest = {
   encoding: ExportEncodingSettings
   projectId?: string
   userId?: string
+  sidechainRoutes: ExternalSidechainRoute[]
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
   signal: AbortSignal
   onProgress?: (progress: ExportProgress) => void
@@ -485,6 +487,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       numberOfChannels: input.render.numberOfChannels,
       fx,
       automationEnvelopes,
+      sidechainRoutes: input.sidechainRoutes,
       signal: input.signal,
     })
     throwIfExportAborted(input.signal)
@@ -588,6 +591,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
       numberOfChannels: input.render.numberOfChannels,
       fx,
       automationEnvelopes,
+      sidechainRoutes: input.sidechainRoutes,
       signal: input.signal,
     })
     for (const track of stemTracks) {

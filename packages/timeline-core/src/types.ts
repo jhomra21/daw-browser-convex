@@ -5,6 +5,7 @@ export type TrackId = string
 export type TrackSend = {
   targetId: TrackId
   amount: number
+  tap?: 'pre-fx' | 'pre-fader' | 'post-fader'
 }
 
 export type TrackChannelRole = 'track' | 'group' | 'return'
@@ -12,6 +13,12 @@ export type TrackChannelRole = 'track' | 'group' | 'return'
 export type TrackRouting = {
   outputTargetId?: TrackId
   sends?: TrackSend[]
+}
+
+export type ExternalSidechainRoute = {
+  sourceTrackId: TrackId
+  targetTrackId: TrackId
+  effectInstanceId: string
 }
 
 export type AudioWarp = AudioWarpPayload

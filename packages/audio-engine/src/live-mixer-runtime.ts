@@ -6,14 +6,15 @@ import type { CompressorMeterListener } from './effects/compressor-worklet'
 import { createDelayChainState, type DelayChainState } from './effects/delay-chain-state'
 import { createReverbChainState, type ReverbChainState } from './effects/reverb-chain-state'
 import { createSaturatorChainState, type SaturatorChainState } from './effects/saturator-chain-state'
-import { applyLiveMixerGraph } from './mixer/apply-live-routing'
+import { applyLiveMixerGraph, clearLiveMixerEdges, removeLiveMixerEdgesForNodes, type LiveMixerEdgeRuntime } from './mixer/apply-live-routing'
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
 import type { MixerTrackFx, ResolveMixerGraphOptions, ResolvedMixerGraph } from './mixer/types'
-import type { Track } from '@daw-browser/timeline-core/types'
+import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import type { AutomationAudioBinding } from './automation'
 import { resolveDelayAutomationBindings, resolveEqAutomationBindings, resolveReverbAutomationBindings, resolveSaturatorAutomationBindings } from './automation-bindings'
 import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance } from './effects/runtime-instance'
+import { createCueBus } from './mixer/cue-routing'
 
 type RuntimeTrack = Track<AudioBuffer>
 
@@ -40,6 +41,7 @@ export function resolveLiveMixerGraph(
 
 type TrackNodeGroup = {
   input: GainNode
+  postFx: GainNode
   gain: GainNode
   output: GainNode
 }
@@ -58,10 +60,16 @@ type LiveMixerRuntimeOptions = {
 
 export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const inputs = new Map<string, GainNode>()
+  const postFxOutputs = new Map<string, GainNode>()
   const gains = new Map<string, GainNode>()
   const outputs = new Map<string, GainNode>()
-  const sendGains = new Map<string, Map<string, GainNode>>()
-  const routingSignatures = new Map<string, string>()
+  const edgeRuntimes = new Map<string, LiveMixerEdgeRuntime>()
+  const sidechainEdges = new Map<string, LiveMixerEdgeRuntime>()
+  const cueEdges = new Map<string, LiveMixerEdgeRuntime>()
+  let sidechainRoutes: ExternalSidechainRoute[] = []
+  let cueTrackIds = new Set<string>()
+  let cueDestination: AudioNode | null = null
+  let cueBus: GainNode | null = null
   const eqChains = new Map<string, BiquadFilterNode[]>()
   const eqNodesByBand = new Map<string, Map<string, BiquadFilterNode>>()
   const pendingEqParams = new Map<string, EqParamsLite>()
@@ -90,11 +98,64 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const instanceDelayChains = new Map<string, Map<string, DelayChainState>>()
   let currentBpm = 120
 
-  const cleanupTrackSendGains = (trackId: string) => {
-    const sendMap = sendGains.get(trackId)
-    if (!sendMap) return
-    disconnectAudioNodes(Array.from(sendMap.values()))
-    sendGains.delete(trackId)
+  const disconnectRuntimeEdge = (edge: LiveMixerEdgeRuntime) => {
+    try { edge.source.disconnect(edge.gain ?? edge.delay) } catch {}
+    try { edge.gain?.disconnect(edge.delay) } catch {}
+    try { edge.delay.disconnect(edge.target) } catch {}
+    try { edge.gain?.disconnect() } catch {}
+    try { edge.delay.disconnect() } catch {}
+  }
+
+  const applyAuxiliaryRoutes = () => {
+    const ctx = options.getAudioContext()
+    if (!ctx) return
+    const activeSidechains = new Set<string>()
+    for (const route of sidechainRoutes) {
+      const source = outputs.get(route.sourceTrackId)
+      const compressor = instanceCompressorChains.get(route.targetTrackId)?.get(route.effectInstanceId)?.chain()
+      if (!source || !compressor) continue
+      const edgeId = `sidechain:${route.effectInstanceId}`
+      activeSidechains.add(edgeId)
+      const existing = sidechainEdges.get(edgeId)
+      if (existing?.source === source && existing.target === compressor.workletNode) continue
+      if (existing) disconnectRuntimeEdge(existing)
+      const delay = ctx.createDelay()
+      source.connect(delay)
+      delay.connect(compressor.workletNode, 0, 1)
+      sidechainEdges.set(edgeId, { source, target: compressor.workletNode, delay })
+    }
+    for (const [edgeId, edge] of sidechainEdges) {
+      if (activeSidechains.has(edgeId)) continue
+      disconnectRuntimeEdge(edge)
+      sidechainEdges.delete(edgeId)
+    }
+
+    if (cueTrackIds.size > 0 && cueDestination && !cueBus) {
+      cueBus = createCueBus(ctx, cueDestination)
+    }
+    const activeCues = new Set<string>()
+    if (cueBus) {
+      for (const trackId of cueTrackIds) {
+        const source = outputs.get(trackId)
+        if (!source) continue
+        const edgeId = `cue:${trackId}`
+        activeCues.add(edgeId)
+        if (cueEdges.has(edgeId)) continue
+        const delay = ctx.createDelay()
+        source.connect(delay)
+        delay.connect(cueBus)
+        cueEdges.set(edgeId, { source, target: cueBus, delay })
+      }
+    }
+    for (const [edgeId, edge] of cueEdges) {
+      if (activeCues.has(edgeId)) continue
+      disconnectRuntimeEdge(edge)
+      cueEdges.delete(edgeId)
+    }
+    if ((!cueDestination || cueTrackIds.size === 0) && cueBus) {
+      cueBus.disconnect()
+      cueBus = null
+    }
   }
 
   const ensureNestedMap = <Value,>(map: Map<string, Map<string, Value>>, trackId: string): Map<string, Value> => {
@@ -154,16 +215,16 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     reverbChain: instance.kind === 'reverb' ? instanceReverbChains.get(trackId)?.get(instance.id)?.chain() : undefined,
   }))
 
-  const rebuildTrackRouting = (trackId: string, nodes: Pick<TrackNodeGroup, 'input' | 'gain'>) => {
+  const rebuildTrackRouting = (trackId: string, nodes: Pick<TrackNodeGroup, 'input' | 'postFx'>) => {
     disconnectAudioNodes([nodes.input])
     const instances = trackFxInstances.get(trackId)
     if (instances) {
-      connectFxChain(nodes.input, nodes.gain, {
+      connectFxChain(nodes.input, nodes.postFx, {
         instances: createInstanceStageConfigs(trackId, instances),
       })
       return
     }
-    connectFxChain(nodes.input, nodes.gain, {
+    connectFxChain(nodes.input, nodes.postFx, {
       eqNodes: eqChains.get(trackId) || [],
       compressorChain: compressorChains.get(trackId)?.chain(),
       saturatorChain: saturatorChains.get(trackId)?.chain(),
@@ -199,9 +260,15 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       outputs.set(trackId, output)
     }
 
+    let postFx = postFxOutputs.get(trackId)
+    if (!postFx) {
+      postFx = ctx.createGain()
+      postFxOutputs.set(trackId, postFx)
+    }
+
     if (createdInput) {
       disconnectAudioNodes([input])
-      input.connect(gain)
+      input.connect(postFx)
 
       const pendingEq = pendingEqParams.get(trackId)
       if (pendingEq) {
@@ -237,7 +304,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       }
     }
 
-    return { input, gain, output }
+    return { input, postFx, gain, output }
   }
 
   const applyTrackEq = (ctx: AudioContext, trackId: string, normalized: EqParamsLite) => {
@@ -469,6 +536,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       requiresRoutingRebuild = (result.changed && result.requiresRoutingRebuild) || requiresRoutingRebuild
     }
     if (requiresRoutingRebuild) rebuildTrackRouting(trackId, ensureTrackNodes(trackId))
+    applyAuxiliaryRoutes()
   }
 
   const setTrackFxInstances = (trackId: string, instances: AudioEffectRuntimeInstance[]) => {
@@ -478,16 +546,20 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
   const disposeTrack = (trackId: string) => {
     const gain = gains.get(trackId)
+    const input = inputs.get(trackId)
+    const postFx = postFxOutputs.get(trackId)
+    const output = outputs.get(trackId)
+    const removedNodes = new Set([gain, input, postFx, output].flatMap((node) => node ? [node] : []))
+    removeLiveMixerEdgesForNodes(edgeRuntimes, removedNodes)
+    removeLiveMixerEdgesForNodes(sidechainEdges, removedNodes)
+    removeLiveMixerEdgesForNodes(cueEdges, removedNodes)
     disconnectAudioNodes([gain])
     gains.delete(trackId)
-    routingSignatures.delete(trackId)
-    cleanupTrackSendGains(trackId)
-
-    const input = inputs.get(trackId)
     disconnectAudioNodes([input])
     inputs.delete(trackId)
+    disconnectAudioNodes([postFx])
+    postFxOutputs.delete(trackId)
 
-    const output = outputs.get(trackId)
     disconnectAudioNodes([output])
     outputs.delete(trackId)
 
@@ -525,10 +597,19 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const clear = () => {
     for (const trackId of Array.from(gains.keys())) disposeTrack(trackId)
     for (const trackId of Array.from(inputs.keys())) disposeTrack(trackId)
-    sendGains.clear()
+    clearLiveMixerEdges(edgeRuntimes)
+    for (const edge of sidechainEdges.values()) disconnectRuntimeEdge(edge)
+    for (const edge of cueEdges.values()) disconnectRuntimeEdge(edge)
+    sidechainEdges.clear()
+    cueEdges.clear()
+    cueBus?.disconnect()
+    cueBus = null
+    cueDestination = null
+    sidechainRoutes = []
+    cueTrackIds.clear()
     outputs.clear()
     gains.clear()
-    routingSignatures.clear()
+    postFxOutputs.clear()
     inputs.clear()
     eqChains.clear()
     eqNodesByBand.clear()
@@ -594,9 +675,12 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
         graph,
         masterInput,
         trackNodes,
-        trackSendGains: sendGains,
-        trackRoutingSignatures: routingSignatures,
+        edgeRuntimes,
         createGain: () => ctx.createGain(),
+        createDelay: () => ctx.createDelay(),
+        currentTime: ctx.currentTime,
+        sampleRate: ctx.sampleRate,
+        bpm: currentBpm,
         reconnectTrackMeters: (trackId, gain) => {
           if (!activeMeterTrackIds.has(trackId)) {
             options.disposeTrackMeters(trackId)
@@ -611,6 +695,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
         if (activeTrackIds.has(id)) continue
         disposeTrack(id)
       }
+      applyAuxiliaryRoutes()
     },
     previewTrackVolume: (trackId: string, volume: number, muted: boolean) => {
       const gain = gains.get(trackId)
@@ -622,6 +707,33 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     setTrackSaturator,
     setTrackDelay,
     setTrackFxInstances,
+    setExternalSidechainRoutes: (routes: ExternalSidechainRoute[]) => {
+      const seen = new Set<string>()
+      for (const route of routes) {
+        if (route.sourceTrackId === route.targetTrackId) throw new Error('A compressor cannot sidechain from its own track.')
+        if (seen.has(route.effectInstanceId)) throw new Error('A compressor can have only one external sidechain route.')
+        seen.add(route.effectInstanceId)
+      }
+      sidechainRoutes = routes
+      applyAuxiliaryRoutes()
+    },
+    setCueTrackIds: (trackIds: readonly string[]) => {
+      cueTrackIds = new Set(trackIds)
+      applyAuxiliaryRoutes()
+    },
+    setCueDestination: (destination: AudioNode | null) => {
+      const ctx = options.getAudioContext()
+      if (destination && ctx && destination === ctx.destination) {
+        throw new Error('Cue destination must be distinct from the main audio destination.')
+      }
+      if (cueDestination === destination) return
+      for (const edge of cueEdges.values()) disconnectRuntimeEdge(edge)
+      cueEdges.clear()
+      cueBus?.disconnect()
+      cueBus = null
+      cueDestination = destination
+      applyAuxiliaryRoutes()
+    },
     resolveTrackAutomationBindings: (trackId: string, parameterId: string, effectInstanceId?: string): AutomationAudioBinding[] => {
       const trackNodes = ensureTrackNodes(trackId)
       if (parameterId === 'volume') return [{ param: trackNodes.gain.gain, valueToAudioValue: (value) => value }]
@@ -662,8 +774,8 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       trackFxOrders.set(trackId, normalized)
       trackFx.set(trackId, { ...trackFx.get(trackId), order: normalized })
       const input = inputs.get(trackId)
-      const gain = gains.get(trackId)
-      if (input && gain) rebuildTrackRouting(trackId, { input, gain })
+      const postFx = postFxOutputs.get(trackId)
+      if (input && postFx) rebuildTrackRouting(trackId, { input, postFx })
     },
     setTrackCompressor: (trackId: string, params: CompressorParamsLite) => { void setTrackCompressor(trackId, params) },
     subscribeTrackCompressorMeter: (trackId: string, listener: CompressorMeterListener) => {

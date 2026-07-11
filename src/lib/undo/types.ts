@@ -48,6 +48,7 @@ export type TrackRoutingHistorySnapshot = {
   sends: Array<{
     targetTrackRef: TrackRef
     amount: number
+    tap?: 'pre-fx' | 'pre-fader' | 'post-fader'
   }>
   outputTargetRef?: TrackRef
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { createSourceAutomationScope, downmixStereoBufferToMono, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
+import { createSourceAutomationScope, downmixStereoBufferToMono, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace, renderMixdown, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
 import { automationTargetKey, createDefaultDelayParams, type AutomationEnvelope } from '@daw-browser/shared'
 import type { ResolvedMixerChannel, ResolvedMixerGraph } from './mixer/types'
 import { resolveLiveMixerGraph } from './live-mixer-runtime'
@@ -78,6 +78,17 @@ describe('createSourceAutomationScope', () => {
     })
 
     expect(scope.trackIds).toEqual(new Set(['source', 'return-a', 'group', 'return-b']))
+  })
+})
+
+describe('runtime-only cue routing', () => {
+  test('is explicitly rejected by offline export', async () => {
+    await expect(renderMixdown({
+      tracks: [],
+      bpm: 120,
+      range: { mode: 'custom', startSec: 0, endSec: 1 },
+      cueTrackIds: ['track-1'],
+    })).rejects.toThrow('Cue routing is live-only and cannot be exported.')
   })
 })
 

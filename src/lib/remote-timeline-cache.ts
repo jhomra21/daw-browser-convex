@@ -13,6 +13,7 @@ type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 
 const TRACK_KIND = 'track'
 const CLIP_KIND = 'clip'
+const SIDECHAIN_KIND = 'sidechain-route'
 const REMOTE_CACHE_KEY = 'remote-timeline-cache'
 const MIME_TYPE = 'audio/*'
 
@@ -65,6 +66,7 @@ const toTrackRow = (track: FullTimelineView['tracks'][number], index: number, up
     sends: track.sends.map((send) => ({
       targetId: String(send.targetId),
       amount: send.amount,
+      tap: send.tap,
     })),
     createdAt: updatedAt,
     updatedAt,
@@ -124,6 +126,7 @@ const timelineCacheSignature = (input: {
   tracks: TimelineTrackRow[]
   clips: TimelineClipRow[]
   assets: LocalProjectAssetRow[]
+  sidechainRoutes?: Array<{ sourceTrackId: string; targetTrackId: string; effectInstanceId: string }>
 }) => JSON.stringify(input)
 
 export const cacheRemoteTimelineSnapshot = async (
@@ -136,21 +139,29 @@ export const cacheRemoteTimelineSnapshot = async (
   const trackIds = new Set(tracks.map((track) => track.id))
   const clipsWithExistingTracks = clips.filter((clip) => trackIds.has(clip.trackId))
   const assets = toAssetRows(clipsWithExistingTracks, timestamp)
+  const sidechainRoutes = data.sidechainRoutes.map((route) => ({
+    sourceTrackId: String(route.sourceTrackId),
+    targetTrackId: String(route.targetTrackId),
+    effectInstanceId: route.effectInstanceId,
+  }))
   const signatureTimestamp = 0
   const nextTracksSignature = timelineCacheSignature({
     tracks: data.tracks.map((track, index) => toTrackRow(track, index, signatureTimestamp)),
     clips: [],
     assets: [],
+    sidechainRoutes,
   })
   const nextClipsSignature = timelineCacheSignature({
     tracks: [],
     clips: data.clips.map((clip) => toClipRow(clip, signatureTimestamp)).filter((clip) => trackIds.has(clip.trackId)),
     assets: [],
+    sidechainRoutes: [],
   })
   const nextAssetsSignature = timelineCacheSignature({
     tracks: [],
     clips: [],
     assets: toAssetRows(clipsWithExistingTracks.map((clip) => ({ ...clip, createdAt: signatureTimestamp, updatedAt: signatureTimestamp })), signatureTimestamp),
+    sidechainRoutes: [],
   })
   const db = await openLocalProjectDb(projectId)
   const tx = db.transaction(['entities', 'assets', 'projectState', 'syncState'], 'readwrite')
@@ -164,11 +175,14 @@ export const cacheRemoteTimelineSnapshot = async (
     ? await Promise.all([
         tx.objectStore('entities').index('by-kind').getAll(TRACK_KIND),
         tx.objectStore('entities').index('by-kind').getAll(CLIP_KIND),
-      ]).then(([cachedTracks, cachedClips]) => [
+        tx.objectStore('entities').index('by-kind').getAll(SIDECHAIN_KIND),
+      ]).then(([cachedTracks, cachedClips, cachedSidechains]) => [
         ...cachedTracks.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
         ...cachedClips.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
+        ...cachedSidechains.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
         ...tracks.map((track) => tx.objectStore('entities').put(createLocalProjectEntityRow(TRACK_KIND, track.id, track, timestamp))),
         ...clipsWithExistingTracks.map((clip) => tx.objectStore('entities').put(createLocalProjectEntityRow(CLIP_KIND, clip.id, clip, timestamp))),
+        ...sidechainRoutes.map((route) => tx.objectStore('entities').put(createLocalProjectEntityRow(SIDECHAIN_KIND, route.effectInstanceId, route, timestamp))),
         ...assets.map((asset) => tx.objectStore('assets').put(asset)),
         ...clipsWithExistingTracks.flatMap((clip) => clip.sourceAssetKey && clip.sampleUrl
       ? [tx.objectStore('syncState').put({

@@ -1,12 +1,12 @@
 import type { ResolvedMixerGraph } from './types'
 
-export type MixerRoutingPlan = {
+type MixerRoutingPlan = {
   channels: readonly {
     channelId: string
     gain: number
     outputGain: number
     outputTargetId?: string
-    sends: readonly { targetId: string; amount: number }[]
+    sends: readonly { targetId: string; amount: number; tap: 'pre-fx' | 'pre-fader' | 'post-fader' }[]
   }[]
   masterVolume: number
 }
@@ -17,7 +17,11 @@ export const createMixerRoutingPlan = (graph: ResolvedMixerGraph): MixerRoutingP
     gain: entry.gain,
     outputGain: entry.outputGain,
     outputTargetId: entry.outputTargetId,
-    sends: entry.sends.map((send) => ({ targetId: send.targetId, amount: send.amount })),
+    sends: entry.sends.map((send) => ({
+      targetId: send.targetId,
+      amount: send.amount,
+      tap: send.tap ?? 'post-fader',
+    })),
   })),
   masterVolume: graph.master.volume,
 })

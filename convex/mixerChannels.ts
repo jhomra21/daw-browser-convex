@@ -5,6 +5,7 @@ import { assert } from "@daw-browser/shared";
 export type MixerSend = {
   targetId: Id<"tracks">;
   amount: number;
+  tap?: "pre-fx" | "pre-fader" | "post-fader";
 };
 
 export type MergedTrackDoc = Doc<"tracks"> & {

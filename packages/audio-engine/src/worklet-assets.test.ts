@@ -54,10 +54,14 @@ describe('checked-in worklet assets', () => {
     const onmessage = processor.port.onmessage
     if (!onmessage) throw new Error('Compressor processor did not bind its message handler.')
     onmessage({ data: { type: 'params', params: normalizeCompressorParams({ enabled: false, dryWet: 1 }) } })
-    const input = Float32Array.from([0.25, -0.5])
-    const output = new Float32Array(2)
+    const input = new Float32Array(482)
+    input[0] = 0.25
+    input[1] = -0.5
+    const output = new Float32Array(input.length)
     expect(processor.process([[input]], [[output]])).toBe(true)
-    expect(Array.from(output)).toEqual(Array.from(input))
+    expect(output[479]).toBe(0)
+    expect(output[480]).toBe(0.25)
+    expect(output[481]).toBe(-0.5)
 
     const params = normalizeCompressorParams({ thresholdDb: -18, ratio: 6, kneeDb: 8 })
     for (const inputDb of [-40, -20, -18, -12, 0]) {

@@ -1,6 +1,6 @@
 import type { AudioSourceKind } from '~/lib/audio-source'
 import type { AutomationEnvelope } from '@daw-browser/shared'
-import type { AudioWarp, TrackChannelRole, TrackId } from '@daw-browser/timeline-core/types'
+import type { AudioWarp, ExternalSidechainRoute, TrackChannelRole, TrackId } from '@daw-browser/timeline-core/types'
 
 export type TimelineEntityKind = 'track' | 'clip' | 'effect' | 'mixerChannel'
 
@@ -22,7 +22,7 @@ export type TimelineTrackRow = {
   collapsed?: boolean
   color?: string
   outputTargetId?: TimelineTrackId
-  sends: { targetId: TimelineTrackId; amount: number }[]
+  sends: { targetId: TimelineTrackId; amount: number; tap?: 'pre-fx' | 'pre-fader' | 'post-fader' }[]
   createdAt: number
   updatedAt: number
 }
@@ -60,6 +60,7 @@ export type TimelineSnapshot = {
   projectId: string
   tracks: TimelineTrackRow[]
   clips: TimelineClipRow[]
+  sidechainRoutes?: ExternalSidechainRoute[]
 }
 
 export type CreateTrackInput = {
@@ -76,7 +77,7 @@ export type CreateTrackInput = {
   collapsed?: boolean
   color?: string
   outputTargetId?: TimelineTrackId
-  sends?: { targetId: TimelineTrackId; amount: number }[]
+  sends?: { targetId: TimelineTrackId; amount: number; tap?: 'pre-fx' | 'pre-fader' | 'post-fader' }[]
 }
 
 export type CreateClipInput = {
@@ -140,7 +141,7 @@ export type UpdateTrackInput = {
   groupId?: TimelineTrackId | null
   collapsed?: boolean
   color?: string | null
-  sends?: { targetId: TimelineTrackId; amount: number }[]
+  sends?: { targetId: TimelineTrackId; amount: number; tap?: 'pre-fx' | 'pre-fader' | 'post-fader' }[]
 }
 
 export type ReorderAndGroupTrackInput = {
@@ -189,4 +190,6 @@ export type TimelineRepository = {
   deleteTrack: (trackId: TimelineTrackId) => Promise<void>
   deleteClip: (clipId: TimelineClipId) => Promise<void>
   deleteClips: (clipIds: TimelineClipId[]) => Promise<void>
+  setSidechainRoute: (route: ExternalSidechainRoute) => Promise<void>
+  removeSidechainRoute: (targetTrackId: string, effectInstanceId: string) => Promise<void>
 }

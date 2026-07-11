@@ -10,6 +10,7 @@ type RoutingTrackLike<TTrackId extends string = string> = {
 type RoutingSendLike<TTrackId extends string = string> = {
   targetId: TTrackId
   amount: number
+  tap?: 'pre-fx' | 'pre-fader' | 'post-fader'
 }
 
 type RoutingTrackChannelRole = 'track' | 'group' | 'return'
@@ -107,7 +108,8 @@ export function normalizeTrackRouting<TTrackId extends string>(
         normalizedSends.delete(targetId)
         continue
       }
-      normalizedSends.set(targetId, { targetId: send.targetId, amount })
+      const tap = send.tap === 'pre-fx' || send.tap === 'pre-fader' ? send.tap : undefined
+      normalizedSends.set(targetId, { targetId: send.targetId, amount, tap })
     }
   }
 

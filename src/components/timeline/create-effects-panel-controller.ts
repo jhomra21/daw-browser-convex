@@ -1,7 +1,7 @@
 import { createEffect, createMemo, onCleanup, type Accessor } from "solid-js";
 import { isLocalId, type ArpeggiatorParams, type AudioEffectKind, type TrackInstrumentParams } from "@daw-browser/shared";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
-import type { Clip, Track } from "@daw-browser/timeline-core/types";
+import type { Clip, ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { createEffectsPanelAudioDevice } from "~/components/timeline/create-effects-panel-audio-effects-state";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
 import { createEffectsPanelInstrumentDevice } from "~/components/timeline/create-effects-panel-state";
@@ -17,6 +17,7 @@ type EffectsPanelControllerOptions = {
   isOpen: Accessor<boolean>;
   selectedFXTarget: Accessor<Track["id"] | "master">;
   tracks: Accessor<Track[]>;
+  sidechainRoutes: Accessor<ExternalSidechainRoute[]>;
   audioEngine: Accessor<AudioEngine>;
   projectId: Accessor<string | undefined>;
   userId: Accessor<string | undefined>;
@@ -132,6 +133,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     projectId: options.projectId,
     currentTargetId,
     tracks: options.tracks,
+    sidechainRoutes: options.sidechainRoutes,
     audioEngine: options.audioEngine,
     roomEffects: () => roomEffectsQuery.data,
     localDraftEffects: {

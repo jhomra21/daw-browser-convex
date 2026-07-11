@@ -11,7 +11,7 @@ const readFullTimelineView = async (
   const userId = await requireAuthenticatedUserId(ctx);
   await requireProjectAccess(ctx, projectId, userId);
 
-  const [tracks, mixerSettings, clips, automationEnvelopes, effects] = await Promise.all([
+  const [tracks, mixerSettings, clips, automationEnvelopes, effects, sidechainRoutes] = await Promise.all([
     listProjectTracksWithMixerChannels(ctx, projectId),
     getProjectMixerSettings(ctx, projectId),
     ctx.db
@@ -26,9 +26,13 @@ const readFullTimelineView = async (
       .query("effects")
       .withIndex("by_room", q => q.eq("projectId", projectId))
       .collect(),
+    ctx.db
+      .query("sidechainRoutes")
+      .withIndex("by_room", q => q.eq("projectId", projectId))
+      .collect(),
   ]);
 
-  return { tracks, clips, mixerSettings, automationEnvelopes, effects };
+  return { tracks, clips, mixerSettings, automationEnvelopes, effects, sidechainRoutes };
 };
 
 export const fullView = query({

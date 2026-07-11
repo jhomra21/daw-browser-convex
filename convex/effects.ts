@@ -390,6 +390,8 @@ const removeAudioEffectForUser = async (
     for (const envelope of automationRows) {
       if (envelope.effectInstanceId === instanceId) await ctx.db.delete(envelope._id)
     }
+    const sidechainRows = await ctx.db.query('sidechainRoutes').withIndex('by_room_effect', (q: any) => q.eq('projectId', input.projectId).eq('effectInstanceId', instanceId)).collect()
+    for (const route of sidechainRows) await ctx.db.delete(route._id)
   }
   if (input.targetType === 'track') {
     const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)

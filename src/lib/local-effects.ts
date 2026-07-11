@@ -16,6 +16,7 @@ export type LocalEffectRow<TParams = any> = {
 }
 
 const EFFECT_KIND = 'effect'
+const SIDECHAIN_KIND = 'sidechain-route'
 export const localEffectRowId = (
   targetId: string,
   effect: LocalEffectKind,
@@ -179,6 +180,9 @@ export const deleteLocalEffectInstance = async (
     return
   }
   const automationRows = await tx.store.index('by-kind').getAll('automation-envelope')
+  const sidechainRows = effect === 'compressor'
+    ? await tx.store.index('by-kind').getAll(SIDECHAIN_KIND)
+    : []
   await tx.store.delete(key)
   for (const automationRow of automationRows) {
     const value = automationRow.value
@@ -189,6 +193,12 @@ export const deleteLocalEffectInstance = async (
       && automationTargetMatchesEffectInstance(Reflect.get(value, 'target'), instanceId)
     ) {
       await tx.store.delete(['automation-envelope', automationRow.id])
+    }
+  }
+  for (const sidechainRow of sidechainRows) {
+    const value = sidechainRow.value
+    if (isObject(value) && value.effectInstanceId === instanceId && value.targetTrackId === targetId) {
+      await tx.store.delete([SIDECHAIN_KIND, sidechainRow.id])
     }
   }
   await tx.done

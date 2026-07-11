@@ -23,7 +23,7 @@ import { audioEffectKindFromLocalEffect, listLocalEffects, type LocalEffectRow }
 import { collectAudioEffectInstances } from "~/lib/audio-effect-order-rows";
 import { isLocalId } from "@daw-browser/shared";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
-import type { Track } from "@daw-browser/timeline-core/types";
+import type { ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
 import { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
 
@@ -32,6 +32,7 @@ type UseEffectsPanelAudioSyncOptions = {
   projectId: Accessor<string | undefined>;
   currentTargetId: Accessor<string>;
   tracks: Accessor<Track[]>;
+  sidechainRoutes: Accessor<ExternalSidechainRoute[]>;
   audioEngine: Accessor<AudioEngine>;
   roomEffects: Accessor<RoomEffectRow[] | undefined>;
   localDraftEffects?: {
@@ -427,6 +428,7 @@ export function useEffectsPanelAudioSync(
       audioEngine.clearTrackInstrument(track.id);
       audioEngine.clearTrackArpeggiator(track.id);
     }
+    audioEngine.setExternalSidechainRoutes(options.sidechainRoutes());
 
     syncedTrackIds = new Set(currentTrackIds);
     syncedProjectId = projectId;

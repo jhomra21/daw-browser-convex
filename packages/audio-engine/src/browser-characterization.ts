@@ -16,6 +16,13 @@ export type BrowserCharacterizationReport = {
   eq: BrowserCharacterizationCase
   compressorRegistration: BrowserCharacterizationCase
   compressorProcessing: BrowserCharacterizationCase
+  timing: {
+    declared: Readonly<Record<string, number>>
+    measured: BrowserCharacterizationCase
+  }
+  liveAlignment: BrowserCharacterizationCase
+  cueRouting: BrowserCharacterizationCase
+  externalSidechain: BrowserCharacterizationCase
 }
 
 const readBuffer = (buffer: AudioBuffer) =>
@@ -173,5 +180,35 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
     }
   })
 
-  return { userAgent: navigator.userAgent, sampleRates, dryGain, stereoIsolation, eq, compressorRegistration, compressorProcessing }
+  return {
+    userAgent: navigator.userAgent,
+    sampleRates,
+    dryGain,
+    stereoIsolation,
+    eq,
+    compressorRegistration,
+    compressorProcessing,
+    timing: {
+      declared: {
+        compressorMaximumLookaheadMs: 10,
+        liveDelayRampMs: 10,
+      },
+      measured: {
+        status: 'unsupported',
+        message: 'This offline characterization cannot measure live AudioContext output timing.',
+      },
+    },
+    liveAlignment: {
+      status: 'unsupported',
+      message: 'Live graph alignment requires a running AudioContext and loopback capture.',
+    },
+    cueRouting: {
+      status: 'unsupported',
+      message: 'Cue output isolation requires a selectable live output device.',
+    },
+    externalSidechain: {
+      status: 'unsupported',
+      message: 'External sidechain timing requires the live routing probe.',
+    },
+  }
 }

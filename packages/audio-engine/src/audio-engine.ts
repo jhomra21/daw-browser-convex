@@ -12,7 +12,7 @@ import { createSourceRegistry, stopAndDisconnectSource } from './source-registry
 import { createInstrumentRuntime, type SetTrackInstrumentInput } from './instrument-runtime'
 import type { DrumRackResolvedBuffers } from './drum-rack-runtime'
 import { createTransportClock } from './transport-clock'
-import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import type { Clip, ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import { applyAutomationEnvelopeAtTime, scheduleAutomationEnvelope } from './automation'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { createRecordingRuntime, type RecordingRuntimeStatus, type StartRecordingCaptureOptions } from './recording/recording-runtime'
@@ -500,6 +500,18 @@ export class AudioEngine {
 
   setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]) {
     this.mixerRuntime.setTrackFxInstances(trackId, instances)
+  }
+
+  setExternalSidechainRoutes(routes: ExternalSidechainRoute[]) {
+    this.mixerRuntime.setExternalSidechainRoutes(routes)
+  }
+
+  setCueTrackIds(trackIds: readonly string[]) {
+    this.mixerRuntime.setCueTrackIds(trackIds)
+  }
+
+  setCueDestination(destination: AudioNode | null) {
+    this.mixerRuntime.setCueDestination(destination)
   }
 
   setMasterReverb(params: ReverbParamsLite) {

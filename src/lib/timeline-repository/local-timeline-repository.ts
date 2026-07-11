@@ -21,12 +21,14 @@ import type {
   TimelineTrackId,
   TimelineTrackRow,
 } from '~/lib/timeline-repository/types'
+import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import { buildTimelineTrackRow } from './track-row-builder'
 
 const TRACK_KIND = 'track'
 const CLIP_KIND = 'clip'
 const EFFECT_KIND = 'effect'
 const AUTOMATION_KIND = 'automation-envelope'
+const SIDECHAIN_KIND = 'sidechain-route'
 const pendingLocalTimelineFlushers = new Map<string, Set<() => Promise<void>>>()
 const pendingRepositoryWritesByProject = new Map<string, Set<Promise<unknown>>>()
 const entityWriteQueuesByProject = new Map<string, LocalEntityWriteQueue>()
@@ -81,6 +83,13 @@ const isEffectForTrack = (value: unknown, trackId: TimelineTrackId) => (
   isObject(value) && value.targetId === trackId
 )
 
+const isSidechainRoute = (value: unknown): value is ExternalSidechainRoute => (
+  isObject(value)
+  && isString(value.sourceTrackId)
+  && isString(value.targetTrackId)
+  && isString(value.effectInstanceId)
+)
+
 const requireUngroupable = (
   group: TimelineTrackRow,
   tracks: readonly TimelineTrackRow[],
@@ -115,7 +124,11 @@ const sendsEqual = (
   right: TimelineTrackRow['sends'],
 ) => (
   left.length === right.length
-  && left.every((send, index) => send.targetId === right[index]?.targetId && send.amount === right[index]?.amount)
+  && left.every((send, index) => (
+    send.targetId === right[index]?.targetId
+    && send.amount === right[index]?.amount
+    && (send.tap ?? 'post-fader') === (right[index]?.tap ?? 'post-fader')
+  ))
 )
 
 const trackPersistenceFieldsEqual = (left: TimelineTrackRow, right: TimelineTrackRow) => (
@@ -356,13 +369,15 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
   const loadSnapshot = async (): Promise<TimelineSnapshot> => {
     await flushLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
-    const [trackRows, clipRows] = await Promise.all([
+    const [trackRows, clipRows, sidechainRows] = await Promise.all([
       db.getAllFromIndex('entities', 'by-kind', TRACK_KIND),
       db.getAllFromIndex('entities', 'by-kind', CLIP_KIND),
+      db.getAllFromIndex('entities', 'by-kind', SIDECHAIN_KIND),
     ])
     const tracks = trackValues(trackRows).sort((left, right) => left.index - right.index)
     const clips = clipValues(clipRows).sort((left, right) => left.startSec - right.startSec)
-    return { projectId, tracks, clips }
+    const sidechainRoutes = sidechainRows.flatMap((row) => isSidechainRoute(row.value) ? [row.value] : [])
+    return { projectId, tracks, clips, sidechainRoutes }
   }
 
   const createTrack = async (input: CreateTrackInput): Promise<TimelineTrackRow> => {
@@ -485,11 +500,12 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
     const tx = db.transaction('entities', 'readwrite')
-    const [trackRows, clipRows, effectRows, automationRows] = await Promise.all([
+    const [trackRows, clipRows, effectRows, automationRows, sidechainRows] = await Promise.all([
       tx.store.index('by-kind').getAll(TRACK_KIND),
       tx.store.index('by-kind').getAll(CLIP_KIND),
       tx.store.index('by-kind').getAll(EFFECT_KIND),
       tx.store.index('by-kind').getAll(AUTOMATION_KIND),
+      tx.store.index('by-kind').getAll(SIDECHAIN_KIND),
     ])
     const trackRow = trackRows.find((row) => row.id === trackId && isTrackRow(row.value))
     const deletedIndex = trackRow && isTrackRow(trackRow.value) ? trackRow.value.index : null
@@ -505,6 +521,9 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
         .map((row) => tx.store.delete([row.kind, row.id])),
       ...automationRows
         .filter((row) => isAutomationEnvelopeForTrack(row.value, trackId))
+        .map((row) => tx.store.delete([row.kind, row.id])),
+      ...sidechainRows
+        .filter((row) => isSidechainRoute(row.value) && (row.value.sourceTrackId === trackId || row.value.targetTrackId === trackId))
         .map((row) => tx.store.delete([row.kind, row.id])),
       ...remainingTracks.map((row) => {
         const routing = normalizeTrackRouting({
@@ -672,11 +691,12 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
     const tx = db.transaction('entities', 'readwrite')
-    const [trackRows, clipRows, effectRows, automationRows] = await Promise.all([
+    const [trackRows, clipRows, effectRows, automationRows, sidechainRows] = await Promise.all([
       tx.store.index('by-kind').getAll(TRACK_KIND),
       tx.store.index('by-kind').getAll(CLIP_KIND),
       tx.store.index('by-kind').getAll(EFFECT_KIND),
       tx.store.index('by-kind').getAll(AUTOMATION_KIND),
+      tx.store.index('by-kind').getAll(SIDECHAIN_KIND),
     ])
     const tracks = trackValues(trackRows)
     const group = tracks.find((track) => track.id === groupId)
@@ -705,6 +725,9 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
         .map((row) => tx.store.delete([row.kind, row.id])),
       ...automationRows
         .filter((row) => isAutomationEnvelopeForTrack(row.value, groupId))
+        .map((row) => tx.store.delete([row.kind, row.id])),
+      ...sidechainRows
+        .filter((row) => isSidechainRoute(row.value) && (row.value.sourceTrackId === groupId || row.value.targetTrackId === groupId))
         .map((row) => tx.store.delete([row.kind, row.id])),
       ...changedTracks.map((track) => tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))),
     ])
@@ -791,6 +814,41 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     if (trackChanges.length > 0 || clipChanges.length > 0) markChanged()
   }
 
+  const setSidechainRoute = async (route: ExternalSidechainRoute): Promise<void> => {
+    if (route.sourceTrackId === route.targetTrackId) throw new Error('A compressor cannot sidechain from its own track.')
+    await flushScheduledLocalTimelineWrites(projectId)
+    const db = await openLocalProjectDb(projectId)
+    const tx = db.transaction('entities', 'readwrite')
+    const [trackRows, effectRows] = await Promise.all([
+      tx.store.index('by-kind').getAll(TRACK_KIND),
+      tx.store.index('by-kind').getAll(EFFECT_KIND),
+    ])
+    const tracks = trackValues(trackRows)
+    requireTrackIds([route.sourceTrackId, route.targetTrackId], tracks)
+    const matchingEffects = effectRows.filter((row) => (
+      isObject(row.value)
+      && row.value.targetId === route.targetTrackId
+      && row.value.effect === 'compressor'
+      && row.value.instanceId === route.effectInstanceId
+    ))
+    if (matchingEffects.length !== 1) {
+      await tx.done
+      throw new Error('Sidechain target must identify exactly one compressor instance.')
+    }
+    await tx.store.put(toEntityRow(SIDECHAIN_KIND, route.effectInstanceId, route, now()))
+    await tx.done
+    markChanged()
+  }
+
+  const removeSidechainRoute = async (targetTrackId: string, effectInstanceId: string): Promise<void> => {
+    await flushScheduledLocalTimelineWrites(projectId)
+    const db = await openLocalProjectDb(projectId)
+    const row = await db.get('entities', [SIDECHAIN_KIND, effectInstanceId])
+    if (!isSidechainRoute(row?.value) || row.value.targetTrackId !== targetTrackId) return
+    await db.delete('entities', [SIDECHAIN_KIND, effectInstanceId])
+    markChanged()
+  }
+
   return {
     loadSnapshot,
     createTrack: (input) => trackRepositoryWrite(projectId, createTrack(input)),
@@ -805,5 +863,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     deleteTrack: (trackId) => trackRepositoryWrite(projectId, deleteTrack(trackId)),
     deleteClip: (clipId) => trackRepositoryWrite(projectId, deleteClip(clipId)),
     deleteClips: (clipIds) => trackRepositoryWrite(projectId, deleteClips(clipIds)),
+    setSidechainRoute: (route) => trackRepositoryWrite(projectId, setSidechainRoute(route)),
+    removeSidechainRoute: (targetTrackId, effectInstanceId) => trackRepositoryWrite(projectId, removeSidechainRoute(targetTrackId, effectInstanceId)),
   }
 }

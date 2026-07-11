@@ -164,6 +164,13 @@ async function deleteTrackEntitiesFromPreflight(
   for (const envelope of automationEnvelopes) {
     await ctx.db.delete(envelope._id);
   }
+  const [sourceSidechains, targetSidechains] = await Promise.all([
+    ctx.db.query("sidechainRoutes").withIndex("by_source", (q: any) => q.eq("sourceTrackId", track._id)).collect(),
+    ctx.db.query("sidechainRoutes").withIndex("by_target", (q: any) => q.eq("targetTrackId", track._id)).collect(),
+  ]);
+  for (const route of new Map([...sourceSidechains, ...targetSidechains].map((route: any) => [String(route._id), route])).values()) {
+    await ctx.db.delete(route._id);
+  }
   await deleteMixerStateForTrack(ctx, track._id);
   await ctx.db.delete(owner._id);
   await ctx.db.delete(track._id);
@@ -527,6 +534,7 @@ export const setRouting = mutation({
     sends: v.optional(v.array(v.object({
       targetId: v.id("tracks"),
       amount: v.number(),
+      tap: v.optional(v.union(v.literal("pre-fx"), v.literal("pre-fader"), v.literal("post-fader"))),
     }))),
   },
   handler: async (ctx, { trackId, outputTargetId, sends }) => {
@@ -542,6 +550,7 @@ export const serverSetRouting = mutation({
     sends: v.optional(v.array(v.object({
       targetId: v.string(),
       amount: v.number(),
+      tap: v.optional(v.union(v.literal("pre-fx"), v.literal("pre-fader"), v.literal("post-fader"))),
     }))),
   },
   handler: async (ctx, { trackId, outputTargetId, sends }) => {
@@ -556,7 +565,7 @@ export const serverSetRouting = mutation({
     }
     const normalizedSends = sends?.flatMap((send) => {
       const targetId = ctx.db.normalizeId("tracks", send.targetId);
-      return targetId ? [{ targetId, amount: send.amount }] : [];
+      return targetId ? [{ targetId, amount: send.amount, tap: send.tap }] : [];
     });
     if (sends && normalizedSends?.length !== sends.length) {
       throw new Error("Send target track not found.");
@@ -568,6 +577,83 @@ export const serverSetRouting = mutation({
       outputTargetId: normalizedOutputTargetId,
       sends: normalizedSends,
     });
+  },
+});
+
+const setSidechainRouteForUser = async (
+  ctx: any,
+  input: { projectId?: string; sourceTrackId: any; targetTrackId: any; effectInstanceId: string; userId: string },
+) => {
+  if (String(input.sourceTrackId) === String(input.targetTrackId)) throw new Error("A compressor cannot sidechain from its own track.");
+  const [sourceAccess, targetAccess] = await Promise.all([
+    getTrackWriteAccess(ctx, input.sourceTrackId, input.userId),
+    getTrackWriteAccess(ctx, input.targetTrackId, input.userId),
+  ]);
+  if (!sourceAccess || !targetAccess || sourceAccess.track.projectId !== targetAccess.track.projectId) {
+    throw new Error("Sidechain source or target track not found.");
+  }
+  const projectId = targetAccess.track.projectId;
+  if (input.projectId && input.projectId !== projectId) throw new Error("Sidechain project does not match its tracks.");
+  const effects = await ctx.db.query("effects").withIndex("by_track", (q: any) => q.eq("trackId", input.targetTrackId)).collect();
+  const matching = effects.filter((effect: any) => effect.type === "compressor" && effect.instanceId === input.effectInstanceId);
+  if (matching.length !== 1) throw new Error("Sidechain target must identify exactly one compressor instance.");
+  const existing = await ctx.db.query("sidechainRoutes").withIndex("by_room_effect", (q: any) => q.eq("projectId", projectId).eq("effectInstanceId", input.effectInstanceId)).collect();
+  for (const route of existing) await ctx.db.delete(route._id);
+  await ctx.db.insert("sidechainRoutes", {
+    projectId,
+    sourceTrackId: input.sourceTrackId,
+    targetTrackId: input.targetTrackId,
+    effectInstanceId: input.effectInstanceId,
+  });
+};
+
+export const setSidechainRoute = mutation({
+  args: { sourceTrackId: v.id("tracks"), targetTrackId: v.id("tracks"), effectInstanceId: v.string() },
+  handler: async (ctx, input) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    await setSidechainRouteForUser(ctx, { ...input, userId });
+  },
+});
+
+export const serverSetSidechainRoute = mutation({
+  args: { projectId: v.string(), sourceTrackId: v.string(), targetTrackId: v.string(), effectInstanceId: v.string() },
+  handler: async (ctx, input) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    const sourceTrackId = ctx.db.normalizeId("tracks", input.sourceTrackId);
+    const targetTrackId = ctx.db.normalizeId("tracks", input.targetTrackId);
+    if (!sourceTrackId || !targetTrackId) throw new Error("Sidechain source or target track not found.");
+    await setSidechainRouteForUser(ctx, { ...input, sourceTrackId, targetTrackId, userId });
+  },
+});
+
+const removeSidechainRouteForUser = async (
+  ctx: any,
+  input: { projectId: string; targetTrackId: any; effectInstanceId: string; userId: string },
+) => {
+  await requireProjectRole(ctx, input.projectId, input.userId, ["owner", "editor"]);
+  const routes = await ctx.db.query("sidechainRoutes")
+    .withIndex("by_room_target_effect", (q: any) => q.eq("projectId", input.projectId).eq("targetTrackId", input.targetTrackId).eq("effectInstanceId", input.effectInstanceId))
+    .collect();
+  for (const route of routes) {
+    await ctx.db.delete(route._id);
+  }
+};
+
+export const removeSidechainRoute = mutation({
+  args: { projectId: v.string(), targetTrackId: v.id("tracks"), effectInstanceId: v.string() },
+  handler: async (ctx, input) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    await removeSidechainRouteForUser(ctx, { ...input, userId });
+  },
+});
+
+export const serverRemoveSidechainRoute = mutation({
+  args: { projectId: v.string(), targetTrackId: v.string(), effectInstanceId: v.string() },
+  handler: async (ctx, input) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    const targetTrackId = ctx.db.normalizeId("tracks", input.targetTrackId);
+    if (!targetTrackId) throw new Error("Sidechain target track not found.");
+    await removeSidechainRouteForUser(ctx, { ...input, targetTrackId, userId });
   },
 });
 
@@ -791,9 +877,10 @@ const validateRestoreUngroupRouting = (
     const projectedTrack = routingTrackById.get(child.trackId);
     if (!existingTrack || !projectedTrack) return false;
     const outputTargetId = child.outputToGroup ? restoreGroupPlaceholderId : child.outputTargetId;
-    const sends = existingTrack.sends.map((send: { targetId: any; amount: number }) => ({
+    const sends = existingTrack.sends.map((send: { targetId: any; amount: number; tap?: "pre-fx" | "pre-fader" | "post-fader" }) => ({
       targetId: String(send.targetId),
       amount: send.amount,
+      tap: send.tap,
     }));
     const routing = sanitizeTrackRouting(projectedTrack, { sends, outputTargetId }, routingTracks);
     if (!routingMatches(routing, { sends, outputTargetId })) return false;
@@ -946,9 +1033,10 @@ const ungroupTrackForUser = async (ctx: any, userId: string, projectId: string, 
       muted: group.muted,
       soloed: group.soloed,
       outputTargetId: group.outputTargetId ? String(group.outputTargetId) : undefined,
-      sends: group.sends.map((send: { targetId: Id<"tracks">; amount: number }) => ({
+      sends: group.sends.map((send: { targetId: Id<"tracks">; amount: number; tap?: "pre-fx" | "pre-fader" | "post-fader" }) => ({
         targetId: String(send.targetId),
         amount: send.amount,
+        tap: send.tap,
       })),
     },
     children: directChildren.map((child) => ({
@@ -1016,7 +1104,11 @@ export const serverRestoreUngroup = mutation({
       muted: v.optional(v.boolean()),
       soloed: v.optional(v.boolean()),
       outputTargetId: v.optional(v.string()),
-      sends: v.array(v.object({ targetId: v.string(), amount: v.number() })),
+      sends: v.array(v.object({
+        targetId: v.string(),
+        amount: v.number(),
+        tap: v.optional(v.union(v.literal("pre-fx"), v.literal("pre-fader"), v.literal("post-fader"))),
+      })),
     }),
     children: v.array(v.object({ trackId: v.string(), outputTargetId: v.optional(v.string()), outputToGroup: v.boolean() })),
     effects: v.array(v.object({
@@ -1099,7 +1191,7 @@ export const serverRestoreUngroup = mutation({
         const outputTargetId = input.group.outputTargetId ? trackById.get(input.group.outputTargetId)?._id : undefined;
         const sends = input.group.sends.flatMap((send) => {
           const target = trackById.get(send.targetId);
-          return target ? [{ targetId: target._id, amount: send.amount }] : [];
+          return target ? [{ targetId: target._id, amount: send.amount, tap: send.tap }] : [];
         });
         const groupId = await ctx.db.insert("tracks", {
           projectId: input.projectId,

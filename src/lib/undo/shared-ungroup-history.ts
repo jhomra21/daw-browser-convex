@@ -22,7 +22,7 @@ type SharedUngroupResult = {
     muted: boolean
     soloed: boolean
     outputTargetId?: string
-    sends: Array<{ targetId: string; amount: number }>
+    sends: Array<{ targetId: string; amount: number; tap?: 'pre-fx' | 'pre-fader' | 'post-fader' }>
   }
   children: Array<{ trackId: string; nextOutputTargetId?: string }>
   effects: SharedUngroupRestoreEffect[]
@@ -31,6 +31,10 @@ type SharedUngroupResult = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+
+const readSendTap = (value: unknown): 'pre-fx' | 'pre-fader' | 'post-fader' | undefined => (
+  value === 'pre-fx' || value === 'pre-fader' || value === 'post-fader' ? value : undefined
 )
 
 export const readSharedUngroupResult = (value: unknown): SharedUngroupResult | null => {
@@ -50,7 +54,8 @@ export const readSharedUngroupResult = (value: unknown): SharedUngroupResult | n
   ))
   const sends = group.sends.flatMap((send) => (
     isRecord(send) && typeof send.targetId === 'string' && typeof send.amount === 'number'
-      ? [{ targetId: send.targetId, amount: send.amount }]
+      && (send.tap === undefined || send.tap === 'pre-fx' || send.tap === 'pre-fader' || send.tap === 'post-fader')
+      ? [{ targetId: send.targetId, amount: send.amount, tap: readSendTap(send.tap) }]
       : []
   ))
   const effects = normalizeSharedUngroupRestoreEffects(value.effects)

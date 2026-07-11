@@ -6,7 +6,7 @@ import {
   createMemo,
   createSignal,
 } from "solid-js";
-import type { Clip, Track } from "@daw-browser/timeline-core/types";
+import type { Clip, ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { getAudioEngine } from "~/lib/audio-engine-singleton";
 import { timelineDurationSec } from "~/lib/timeline-utils";
 import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
@@ -184,6 +184,15 @@ const Timeline: Component<TimelineProps> = (props) => {
     localProject,
     projection,
     selection,
+  });
+  const sidechainRoutes = createMemo<ExternalSidechainRoute[]>(() => {
+    const id = projectId();
+    if (id && isLocalId("project", id)) return mediaRecovery.localTimelineSnapshot()?.sidechainRoutes ?? [];
+    return (fullView.data?.sidechainRoutes ?? []).map((route) => ({
+      sourceTrackId: String(route.sourceTrackId),
+      targetTrackId: String(route.targetTrackId),
+      effectInstanceId: route.effectInstanceId,
+    }));
   });
   const {
     writableTrackIds,
@@ -1220,6 +1229,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       },
       selectedFXTarget: selection.selectedFXTarget(),
       tracks: renderTracks(),
+      sidechainRoutes: sidechainRoutes(),
       playheadSec: playheadSec(),
       projectId: projectId(),
       userId: userId(),
@@ -1285,6 +1295,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       loopEndSec: loopEndSec(),
       projectId: projectId(),
       userId: userId(),
+      sidechainRoutes: sidechainRoutes(),
       ensureClipBuffer: clipBuffers.preload,
       onClose: () => setExportOpen(false),
     },

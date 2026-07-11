@@ -42,5 +42,6 @@ export const toLocalTimelineTrack = (row: TimelineTrackRow): Track => ({
   sends: row.sends.map((send) => ({
     targetId: send.targetId,
     amount: send.amount,
+    tap: send.tap,
   })),
 })

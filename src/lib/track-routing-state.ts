@@ -13,6 +13,7 @@ export function isTrackRoutingEqual(left: TrackRoutingSnapshot, right: TrackRout
     if (!rightSend) return false
     if (leftSend.targetId !== rightSend.targetId) return false
     if (Math.abs(leftSend.amount - rightSend.amount) > 1e-6) return false
+    if ((leftSend.tap ?? 'post-fader') !== (rightSend.tap ?? 'post-fader')) return false
   }
   return true
 }
@@ -27,6 +28,7 @@ export function buildTrackRoutingMutationInput(input: {
     sends: input.routing.sends.map(send => ({
       targetId: toCloudTrackId(send.targetId),
       amount: send.amount,
+      tap: send.tap,
     })),
   }
 }

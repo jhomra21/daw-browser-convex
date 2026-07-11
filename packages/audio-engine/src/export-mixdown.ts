@@ -37,7 +37,7 @@ import { DRUM_RACK_CHOKE_FADE_SEC, scheduleDrumRackHit, type DrumRackResolvedBuf
 import { createOfflineMixerNodes } from './mixer/apply-offline-routing'
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
-import type { Track } from '@daw-browser/timeline-core/types'
+import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import type { ResolvedMixerGraph } from './mixer/types'
 import { scheduleAutomationEnvelope } from './automation'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
@@ -68,6 +68,8 @@ export type ExportRequest = {
   signal?: AbortSignal
   fx?: ExportFx
   automationEnvelopes?: AutomationEnvelope[]
+  sidechainRoutes?: ExternalSidechainRoute[]
+  cueTrackIds?: readonly string[]
 }
 
 type StemDefinition = {
@@ -98,6 +100,7 @@ type PreparedExportRender = {
   mixerGraph: ResolvedMixerGraph
   exportTrackFx?: ExportFx['trackFx']
   automationEnvelopes: AutomationEnvelope[]
+  sidechainRoutes: ExternalSidechainRoute[]
   signal?: AbortSignal
 }
 
@@ -320,6 +323,9 @@ export function resolveExportMixerGraph(req: Pick<ExportRequest, 'tracks' | 'fx'
 function prepareExportRender(req: ExportRequest): PreparedExportRender {
   const { tracks, bpm, range, sampleRate = 44100, numberOfChannels = 2, fx, signal } = req
   throwIfAborted(signal)
+  if (req.cueTrackIds && req.cueTrackIds.length > 0) {
+    throw new Error('Cue routing is live-only and cannot be exported.')
+  }
   const { startSec, endSec } = getExportRangeBounds(tracks, range)
   const durationSec = endSec - startSec
   return {
@@ -331,6 +337,7 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
     mixerGraph: resolveExportMixerGraph({ tracks, fx }),
     exportTrackFx: fx?.trackFx,
     automationEnvelopes: req.automationEnvelopes ?? [],
+    sidechainRoutes: req.sidechainRoutes ?? [],
     signal,
   }
 }
@@ -411,7 +418,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
     },
   }
   const automationScope = createSourceAutomationScope(graph, options)
-  const mixerNodes = await createOfflineMixerNodes(ctx, graph, prepared.bpm)
+  const mixerNodes = await createOfflineMixerNodes(ctx, graph, prepared.bpm, prepared.sidechainRoutes)
   const { trackNodes } = mixerNodes
 
   try {

@@ -115,6 +115,12 @@ export const executeTimelineOperation = async (
         sends: operation.payload.routing.sends,
       })
       return { status: 'applied' }
+    case 'sidechains.setRoute':
+      await context.convex.mutation(convexApi.tracks.serverSetSidechainRoute, operation.payload)
+      return { status: 'applied' }
+    case 'sidechains.removeRoute':
+      await context.convex.mutation(convexApi.tracks.serverRemoveSidechainRoute, operation.payload)
+      return { status: 'applied' }
     case 'tracks.setGroup':
       await context.convex.mutation(convexApi.tracks.serverSetGroup, {
         trackId: operation.payload.trackId,

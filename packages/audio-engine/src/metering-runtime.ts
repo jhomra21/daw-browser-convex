@@ -1,6 +1,7 @@
 import { disconnectAudioNodes } from './effects/chain'
 import { loadWorkletModule } from './worklet-loader'
 import { resolveWorkletModuleUrl, trackMeterWorklet } from './worklet-manifest'
+import { observeResource, type ResourceObserver } from './runtime-diagnostics'
 
 export type SpectrumFrame = {
   data: Float32Array
@@ -72,7 +73,11 @@ export function readTrackStereoLevels(data: unknown): TrackStereoLevels | null {
   return { left: data.left, right: data.right }
 }
 
-export function createMeteringRuntime() {
+export function createMeteringRuntime(options: {
+  getFaultGeneration?: () => number
+  onWorkletFault?: (generation: number, trackId: string) => void
+  resourceObserver?: ResourceObserver
+} = {}) {
   const analysers = new Map<string, AnalyserNode>()
   const meterArrays = new Map<string, Float32Array<ArrayBuffer>>()
   const spectrumTmp = new Map<string, Uint8Array<ArrayBuffer>>()
@@ -87,8 +92,11 @@ export function createMeteringRuntime() {
   const pendingFrames = new Map<string, TrackMeterFrame>()
   const listeners = new Set<TrackStereoLevelsListener>()
   const frameListeners = new Set<TrackMeterFrameListener>()
+  const listenerReleases = new Map<object, () => void>()
+  const workletReleases = new Map<string, () => void>()
   const zeroTrackStereoLevels: TrackStereoLevels = { left: 0, right: 0 }
   let flushHandle: number | null = null
+  let releaseFlush: () => void = () => undefined
   let closed = false
 
   const emit = (levels: TrackStereoLevelsBatch) => {
@@ -100,6 +108,8 @@ export function createMeteringRuntime() {
     if (flushHandle !== null) return
     flushHandle = requestAnimationFrame(() => {
       flushHandle = null
+      releaseFlush()
+      releaseFlush = () => undefined
       if (pendingLevels.size === 0) return
       const batch = new Map(pendingLevels)
       pendingLevels.clear()
@@ -110,6 +120,7 @@ export function createMeteringRuntime() {
         for (const listener of frameListeners) listener(frames)
       }
     })
+    releaseFlush = observeResource(options.resourceObserver, 'animation-frames', `track-meter-flush`)
   }
 
   const updateWorkletSubscriptionState = () => {
@@ -145,6 +156,7 @@ export function createMeteringRuntime() {
         return
       }
       node.port.postMessage({ active: listeners.size > 0 || frameListeners.size > 0, truePeak: frameListeners.size > 0 })
+      const faultGeneration = options.getFaultGeneration?.() ?? 0
       node.port.onmessage = (event) => {
         const frame = readTrackMeterFrame(event.data)
         if (!frame) return
@@ -159,9 +171,12 @@ export function createMeteringRuntime() {
       }
       node.onprocessorerror = () => {
         if (workletNodes.get(trackId) !== node || workletGenerations.get(trackId) !== generation) return
+        options.onWorkletFault?.(faultGeneration, trackId)
         node.onprocessorerror = null
         node.port.onmessage = null
         disconnectAudioNodes([node])
+        workletReleases.get(trackId)?.()
+        workletReleases.delete(trackId)
         workletNodes.delete(trackId)
         workletLevels.delete(trackId)
         pendingLevels.delete(trackId)
@@ -172,6 +187,7 @@ export function createMeteringRuntime() {
       }
       try { gain.connect(node) } catch {}
       workletNodes.set(trackId, node)
+      workletReleases.set(trackId, observeResource(options.resourceObserver, 'audio-worklet-nodes', node))
     })
   }
 
@@ -201,19 +217,27 @@ export function createMeteringRuntime() {
   return {
     subscribeTrackStereoLevels: (listener: TrackStereoLevelsListener) => {
       listeners.add(listener)
+      const release = observeResource(options.resourceObserver, 'event-listeners', listener)
+      listenerReleases.set(listener, release)
       if (workletLevels.size > 0) listener(new Map(workletLevels))
       updateWorkletSubscriptionState()
       return () => {
         listeners.delete(listener)
+        release()
+        listenerReleases.delete(listener)
         updateWorkletSubscriptionState()
       }
     },
     subscribeTrackMeterFrames: (listener: TrackMeterFrameListener) => {
       frameListeners.add(listener)
+      const release = observeResource(options.resourceObserver, 'event-listeners', listener)
+      listenerReleases.set(listener, release)
       if (workletFrames.size > 0) listener(new Map(workletFrames))
       updateWorkletSubscriptionState()
       return () => {
         frameListeners.delete(listener)
+        release()
+        listenerReleases.delete(listener)
         updateWorkletSubscriptionState()
       }
     },
@@ -276,6 +300,8 @@ export function createMeteringRuntime() {
         meterNode.port.close()
       }
       workletNodes.delete(trackId)
+      workletReleases.get(trackId)?.()
+      workletReleases.delete(trackId)
       retriedWorkletGenerations.delete(trackId)
       if (workletLevels.has(trackId) || pendingLevels.has(trackId)) {
         queueLevels(trackId, zeroTrackStereoLevels)
@@ -297,6 +323,8 @@ export function createMeteringRuntime() {
       }
       disconnectAudioNodes(Array.from(analysers.values()))
       workletNodes.clear()
+      for (const release of workletReleases.values()) release()
+      workletReleases.clear()
       workletGenerations.clear()
       retriedWorkletGenerations.clear()
       workletLevels.clear()
@@ -305,9 +333,13 @@ export function createMeteringRuntime() {
       pendingFrames.clear()
       listeners.clear()
       frameListeners.clear()
+      for (const release of listenerReleases.values()) release()
+      listenerReleases.clear()
       if (flushHandle !== null) {
         cancelAnimationFrame(flushHandle)
         flushHandle = null
+        releaseFlush()
+        releaseFlush = () => undefined
       }
       analysers.clear()
       meterArrays.clear()

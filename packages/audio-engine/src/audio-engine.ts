@@ -18,6 +18,7 @@ import { applyAutomationEnvelopeAtTime, scheduleAutomationEnvelope } from './aut
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { createRecordingRuntime, type RecordingRuntimeStatus, type StartRecordingCaptureOptions } from './recording/recording-runtime'
 import { analyzeCalibrationCapture, createCalibrationStimulus, type RecordingCalibrationAnalysis } from './recording/calibration'
+import { createRuntimeFaultCounter, type RuntimeFaultSnapshot } from './runtime-diagnostics'
 
 type RuntimeClip = Clip<AudioBuffer>
 type RuntimeTrack = Track<AudioBuffer>
@@ -39,6 +40,10 @@ export type AudioRuntimeSnapshot = {
   baseLatencySec: number | null
   outputLatencySec: number | null
   totalOutputLatencySec: number | null
+  graphPdcLatencyFrames: number | null
+  workletFaultCount: number
+  runtimeFaults: RuntimeFaultSnapshot
+  inferredApplicationStallCount: number
 }
 type SinkSelectableAudioContext = AudioContext & {
   setSinkId: (sinkId: string) => Promise<void>
@@ -55,6 +60,8 @@ export class AudioEngine {
   private audioCtx: AudioContext | null = null
   private masterGain: GainNode | null = null
   private destination: AudioDestinationNode | null = null
+  private graphPdcLatencyFrames: number | null = null
+  private faultGeneration = 0
   private tracksSnapshot: RuntimeTrack[] = []
   private automationEnvelopes: AutomationEnvelope[] = []
   private masterVolume = 1
@@ -80,6 +87,17 @@ export class AudioEngine {
     disposeTrackMeters: (trackId) => this.metering.disposeTrack(trackId),
     disposeSynthTrack: (trackId) => this.disposeSynthTrack(trackId),
     getMasterFx: () => this.masterFx.getMixerFx(),
+    getFaultGeneration: () => this.faultGeneration,
+    onGraphLatencyChange: (frames) => {
+      if (this.graphPdcLatencyFrames === frames) return
+      this.graphPdcLatencyFrames = frames
+      this.publishRuntimeSnapshot()
+    },
+    onWorkletFault: (generation, kind, code, context) => {
+      if (this.runtimeFaultCounter.report(generation, { kind, code, context })) {
+        this.publishRuntimeSnapshot()
+      }
+    },
   })
   private scheduler = createClipScheduler({
     getAudioContext: () => this.audioCtx,
@@ -95,11 +113,27 @@ export class AudioEngine {
     stretchRenderAheadSec: LIVE_SCHEDULE_HORIZON_SEC,
     sources: this.sources,
   })
-  private masterFx = createMasterFxRuntime()
+  private masterFx = createMasterFxRuntime({
+    getFaultGeneration: () => this.faultGeneration,
+    onWorkletFault: (generation, kind, code, context) => {
+      if (this.runtimeFaultCounter.report(generation, { kind, code, context })) this.publishRuntimeSnapshot()
+    },
+  })
   private impulseCache = createReverbImpulseCache({ bucketSize: 0.1, limit: 48 })
   private clock = createTransportClock()
   private metronome = createMetronomeRuntime(this.clock)
-  private metering = createMeteringRuntime()
+  private runtimeFaultCounter = createRuntimeFaultCounter()
+  private inferredApplicationStallCount = 0
+  private metering = createMeteringRuntime({
+    getFaultGeneration: () => this.faultGeneration,
+    onWorkletFault: (generation, trackId) => {
+      if (this.runtimeFaultCounter.report(generation, {
+        kind: 'track-meter',
+        code: 'processor-error',
+        context: trackId,
+      })) this.publishRuntimeSnapshot()
+    },
+  })
   private stretchCache = createAudioStretchCache({
     createBuffer: (channels, frames, sampleRate) => new AudioBuffer({ numberOfChannels: channels, length: frames, sampleRate }),
     persist: true,
@@ -107,6 +141,12 @@ export class AudioEngine {
   private recording = createRecordingRuntime({
     getContext: () => this.audioCtx,
     connectMonitor: (trackId, source) => this.mixerRuntime.connectRecordingMonitor(trackId, source),
+    getFaultGeneration: () => this.faultGeneration,
+    onFault: (generation, code) => {
+      if (this.runtimeFaultCounter.report(generation, { kind: 'recorder', code, context: 'recording-capture' })) {
+        this.publishRuntimeSnapshot()
+      }
+    },
   })
   private calibrationReserved = false
   private recordingStartReserved = false
@@ -129,6 +169,10 @@ export class AudioEngine {
         baseLatencySec: null,
         outputLatencySec: null,
         totalOutputLatencySec: null,
+        graphPdcLatencyFrames: this.graphPdcLatencyFrames,
+        workletFaultCount: this.runtimeFaultCounter.snapshot().eventCount,
+        runtimeFaults: this.runtimeFaultCounter.snapshot(),
+        inferredApplicationStallCount: this.inferredApplicationStallCount,
       }
     }
     const baseLatencySec = Number.isFinite(this.audioCtx.baseLatency) ? this.audioCtx.baseLatency : null
@@ -141,12 +185,21 @@ export class AudioEngine {
       baseLatencySec,
       outputLatencySec,
       totalOutputLatencySec: baseLatencySec !== null && outputLatencySec !== null ? baseLatencySec + outputLatencySec : null,
+      graphPdcLatencyFrames: this.graphPdcLatencyFrames,
+      workletFaultCount: this.runtimeFaultCounter.snapshot().eventCount,
+      runtimeFaults: this.runtimeFaultCounter.snapshot(),
+      inferredApplicationStallCount: this.inferredApplicationStallCount,
     }
   }
 
   subscribeRuntimeSnapshot(listener: () => void) {
     this.runtimeListeners.add(listener)
     return () => this.runtimeListeners.delete(listener)
+  }
+
+  reportInferredApplicationStall() {
+    this.inferredApplicationStallCount += 1
+    this.publishRuntimeSnapshot()
   }
 
   private publishRuntimeSnapshot() {
@@ -370,6 +423,7 @@ export class AudioEngine {
   ensureAudio(opts?: { applyCachedTrackGains?: boolean }) {
     if (!this.audioCtx) {
       this.runtime = createAudioRuntime(this.runtimeOptions)
+      this.faultGeneration = this.runtimeFaultCounter.generation()
       this.activeRuntimeOptions = this.runtimeOptions
       this.audioCtx = this.runtime.ctx
       this.audioCtx.addEventListener('statechange', this.runtimeStateChangeListener)
@@ -535,10 +589,12 @@ export class AudioEngine {
       params,
       (nextParams) => this.createImpulseResponse(nextParams),
     )
+    this.mixerRuntime.publishGraphLatency()
   }
 
   setMasterCompressor(params: CompressorParamsLite) {
     this.masterFx.setCompressor(this.audioCtx, this.masterGain, this.destination, params)
+    this.mixerRuntime.publishGraphLatency()
   }
 
   subscribeMasterCompressorMeter(listener: CompressorMeterListener) {
@@ -551,14 +607,17 @@ export class AudioEngine {
 
   setMasterSaturator(params: SaturatorParamsLite) {
     this.masterFx.setSaturator(this.audioCtx, this.masterGain, this.destination, params)
+    this.mixerRuntime.publishGraphLatency()
   }
 
   setMasterDelay(params: DelayParamsLite) {
     this.masterFx.setDelay(this.audioCtx, this.masterGain, this.destination, params)
+    this.mixerRuntime.publishGraphLatency()
   }
 
   setMasterFxOrder(order: AudioEffectKind[]) {
     this.masterFx.setOrder(this.audioCtx, this.masterGain, this.destination, order)
+    this.mixerRuntime.publishGraphLatency()
   }
 
   setMasterFxInstances(instances: AudioEffectRuntimeInstance[]) {
@@ -569,6 +628,7 @@ export class AudioEngine {
       instances,
       (nextParams) => this.createImpulseResponse(nextParams),
     )
+    this.mixerRuntime.publishGraphLatency()
   }
 
   previewTrackVolume(trackId: string, volume: number, muted: boolean) {
@@ -738,11 +798,15 @@ export class AudioEngine {
     this.audioCtx = null
     this.runtime = null
     this.activeRuntimeOptions = null
+    this.graphPdcLatencyFrames = null
+    this.faultGeneration = this.runtimeFaultCounter.reset()
+    this.inferredApplicationStallCount = 0
     this.publishRuntimeSnapshot()
   }
 
   setMasterEq(params: EqParamsLite) {
     this.masterFx.setEq(this.audioCtx, this.masterGain, this.destination, params)
+    this.mixerRuntime.publishGraphLatency()
   }
 
   // --- Live spectrum sampling (Ableton-like) ---

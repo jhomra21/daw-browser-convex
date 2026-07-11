@@ -200,7 +200,11 @@ export function disconnectReverbChain(chain: ReverbNodeChain) {
   chain.impulseSignature = null
 }
 
-export async function createCompressorNodeChain(ctx: BaseAudioContext, params: CompressorParamsLite): Promise<CompressorNodeChain> {
+export async function createCompressorNodeChain(
+  ctx: BaseAudioContext,
+  params: CompressorParamsLite,
+  onFault?: (code: string) => void,
+): Promise<CompressorNodeChain> {
   const normalized = normalizeCompressorParams(params)
   try {
     await ensureCompressorWorklet(ctx)
@@ -244,6 +248,7 @@ export async function createCompressorNodeChain(ctx: BaseAudioContext, params: C
     dryGain.gain.value = 0
     processedGain.gain.value = 1
     workletNode.onprocessorerror = () => {
+      onFault?.('processor-error')
       handleCompressorProcessorError(chain, ctx.currentTime)
     }
   } catch (error) {

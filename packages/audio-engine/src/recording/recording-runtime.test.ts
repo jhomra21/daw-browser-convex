@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { createRecordingRuntime, type RecordingMonitorMode, type StartRecordingCaptureOptions } from './recording-runtime'
+import { createReliabilityResourceLedger } from '../reliability-characterization'
 
 const eventTarget = () => {
   const listeners = new Map<string, Set<() => void>>()
@@ -82,6 +83,48 @@ const startOptions = (stream: MediaStream): StartRecordingCaptureOptions => ({
 })
 
 describe('recording runtime', () => {
+  test('releases production-owned resources on complete, cancel, failure, and startup failure', async () => {
+    for (const terminal of ['complete', 'cancel', 'failure'] as const) {
+      const fake = graph()
+      const ledger = createReliabilityResourceLedger()
+      const runtime = createRecordingRuntime({
+        getContext: () => fake.context,
+        loadWorklet: async () => undefined,
+        createWorkletNode: () => fake.worklet,
+        connectMonitor: () => () => undefined,
+        resourceObserver: ledger,
+      })
+      await runtime.start(startOptions(fake.stream))
+      if (terminal === 'complete') {
+        const stopping = runtime.stop()
+        fake.port.onmessage?.({ data: {
+          type: 'complete', generation: 0, sessionId: 'take-1',
+          capturedFrames: 0, droppedFrames: 0, droppedBlocks: 0,
+        } })
+        await stopping
+      } else if (terminal === 'cancel') {
+        runtime.cancel()
+      } else {
+        fake.track.dispatch('ended')
+        await Bun.sleep(0)
+      }
+      runtime.cancel()
+      ledger.assertEmpty()
+    }
+
+    const fake = graph()
+    const ledger = createReliabilityResourceLedger()
+    const runtime = createRecordingRuntime({
+      getContext: () => fake.context,
+      loadWorklet: async () => undefined,
+      createWorkletNode: () => fake.worklet,
+      connectMonitor: () => { throw new Error('startup-failure') },
+      resourceObserver: ledger,
+    })
+    await expect(runtime.start(startOptions(fake.stream))).rejects.toThrow('startup-failure')
+    ledger.assertEmpty()
+  })
+
   test('uses the shared context, creates one source, and monitors through the mixer seam', async () => {
     const fake = graph()
     let sourceCreations = 0
@@ -264,6 +307,7 @@ describe('recording runtime', () => {
   test('uses transport frame totals and handles startup, finalize, cancel, and returned block routing', async () => {
     const success = graph()
     const routed: unknown[] = []
+    let terminations = 0
     const runtime = createRecordingRuntime({
       getContext: () => success.context,
       loadWorklet: async () => undefined,
@@ -278,7 +322,7 @@ describe('recording runtime', () => {
           ready: Promise.resolve(),
           finalize: async () => ({ capturedFrames: 321 }),
           abort: async () => undefined,
-          terminate: () => undefined,
+          terminate: () => { terminations += 1 },
         }
       },
     })
@@ -304,6 +348,7 @@ describe('recording runtime', () => {
     expect(routed).toEqual([blockMessage])
     await runtime.stop()
     expect(runtime.getStatus()).toMatchObject({ state: 'complete', capturedFrames: 321 })
+    expect(terminations).toBe(1)
     const startup = graph()
     const startupRuntime = createRecordingRuntime({
       getContext: () => startup.context,
@@ -311,15 +356,19 @@ describe('recording runtime', () => {
       createWorkletNode: () => startup.worklet,
       connectMonitor: () => () => undefined,
     })
+    let startupAborts = 0
+    let startupTerminations = 0
     await expect(startupRuntime.start({
       ...startOptions(startup.stream),
       createTransport: () => ({
         ready: Promise.reject(new Error('startup-failed')),
         finalize: async () => ({ capturedFrames: 0 }),
-        abort: async () => undefined,
-        terminate: () => undefined,
+        abort: async () => { startupAborts += 1 },
+        terminate: () => { startupTerminations += 1 },
       }),
     })).rejects.toThrow('startup-failed')
+    expect(startupAborts).toBe(1)
+    expect(startupTerminations).toBe(1)
     expect(startup.disconnections).toContain(startup.worklet)
 
     const finalize = graph()

@@ -1,5 +1,5 @@
 import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
-import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse, type FxChainStageConfig } from './effects/chain'
+import { connectFxChain, createCompressorNodeChain, disconnectAudioNodes, type CreateReverbImpulseResponse, type FxChainStageConfig } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState } from './effects/compressor-chain-state'
 import { createDelayChainState } from './effects/delay-chain-state'
@@ -12,6 +12,7 @@ import { resolveDelayAutomationBindings, resolveEqAutomationBindings, resolveRev
 import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import type { ResolveMixerGraphOptions } from './mixer/types'
 import { applyStaticWorkletNodeParams, createStaticWorkletNodeChain, disconnectStaticWorkletNodeChain, resolveStaticWorkletAutomationBinding, subscribeStaticGateMeter, type GateMeterListener, type StaticWorkletKind, type StaticWorkletNodeChain } from './effects/static-worklet-chain'
+import { observeResource, type ResourceObserver } from './runtime-diagnostics'
 
 const MAX_EFFECTS_PER_CHAIN = 16
 const isStaticWorkletKind = (kind: AudioEffectKind): kind is StaticWorkletKind =>
@@ -21,7 +22,13 @@ const isStaticWorkletInstance = (
   instance: AudioEffectRuntimeInstance,
 ): instance is Extract<AudioEffectRuntimeInstance, { kind: StaticWorkletKind }> => isStaticWorkletKind(instance.kind)
 
-export function createMasterFxRuntime() {
+type MasterFxRuntimeOptions = {
+  getFaultGeneration: () => number
+  onWorkletFault?: (generation: number, kind: 'compressor' | 'owned-processor', code: string, context: string) => void
+  resourceObserver?: ResourceObserver
+}
+
+export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   let eqChain: BiquadFilterNode[] = []
   let eqNodesByBand = new Map<string, BiquadFilterNode>()
   let eqSignature: string | null = null
@@ -30,7 +37,12 @@ export function createMasterFxRuntime() {
   let spectrumTmp: Uint8Array<ArrayBuffer> | null = null
   let spectrumLast: SpectrumFrame | null = null
   let analyserConnected = false
-  const compressorState = createCompressorChainState()
+  let releaseAnalyser: () => void = () => undefined
+  const compressorState = createCompressorChainState((ctx, params) => {
+    const faultGeneration = options.getFaultGeneration()
+    return createCompressorNodeChain(ctx, params, (code) =>
+      options.onWorkletFault?.(faultGeneration, 'compressor', code, 'master:legacy-compressor'))
+  })
   const reverbState = createReverbChainState()
   const saturatorState = createSaturatorChainState()
   const delayState = createDelayChainState()
@@ -153,6 +165,7 @@ export function createMasterFxRuntime() {
       next.fftSize = 2048
       next.smoothingTimeConstant = 0.8
       analyser = next
+      releaseAnalyser = observeResource(options.resourceObserver, 'audio-nodes', next)
     }
     if (analyser && !analyserConnected) {
       try {
@@ -233,7 +246,9 @@ export function createMasterFxRuntime() {
         } else {
           if (existing) disconnectStaticWorkletNodeChain(existing)
           try {
-            const created = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params)
+            const faultGeneration = options.getFaultGeneration()
+            const created = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params, (code) =>
+              options.onWorkletFault?.(faultGeneration, 'owned-processor', code, `master:effect:${instance.id}`))
             if (fxInstanceRevision !== revision) {
               disconnectStaticWorkletNodeChain(created)
               return
@@ -254,7 +269,10 @@ export function createMasterFxRuntime() {
       if (instance.kind === 'compressor') {
         let state = instanceCompressorChains.get(instance.id)
         if (!state) {
-          state = createCompressorChainState()
+          const faultGeneration = options.getFaultGeneration()
+          state = createCompressorChainState((ctx, params) =>
+            createCompressorNodeChain(ctx, params, (code) =>
+              options.onWorkletFault?.(faultGeneration, 'compressor', code, `master:effect:${instance.id}`)))
           instanceCompressorChains.set(instance.id, state)
         }
         const result = await state.set(ctx, normalizeCompressorParams(instance.params))
@@ -521,6 +539,8 @@ export function createMasterFxRuntime() {
       return spectrumLast
     },
     close: () => {
+      releaseAnalyser()
+      releaseAnalyser = () => undefined
       eqSignature = null
       eqTopologySignature = null
       pendingEqParams = null

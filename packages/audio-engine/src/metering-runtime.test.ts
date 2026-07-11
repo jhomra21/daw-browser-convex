@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createMeteringRuntime, readTrackMeterFrame, readTrackStereoLevels } from './metering-runtime'
+import { createReliabilityResourceLedger } from './reliability-characterization'
 
 const originalAudioWorkletNode = globalThis.AudioWorkletNode
 const originalRequestAnimationFrame = globalThis.requestAnimationFrame
@@ -41,6 +42,31 @@ describe('meter worklet messages', () => {
 })
 
 describe('meter worklet lifecycle', () => {
+  test('releases nodes, subscriptions, and scheduled flushes on idempotent close', async () => {
+    class FakeAudioWorkletNode {
+      port = { onmessage: null as ((event: { data: unknown }) => void) | null, postMessage: () => {}, close: () => {} }
+      onprocessorerror: (() => void) | null = null
+      disconnect = () => {}
+    }
+    Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: FakeAudioWorkletNode })
+    Object.defineProperty(globalThis, 'requestAnimationFrame', { configurable: true, value: () => 1 })
+    Object.defineProperty(globalThis, 'cancelAnimationFrame', { configurable: true, value: () => {} })
+    const ledger = createReliabilityResourceLedger()
+    const runtime = createMeteringRuntime({ resourceObserver: ledger })
+    const unsubscribe = runtime.subscribeTrackStereoLevels(() => undefined)
+    runtime.reconnectTrackMeters(
+      Object.assign(Object.create(null), { audioWorklet: { addModule: () => Promise.resolve() } }),
+      'track-1',
+      Object.assign(Object.create(null), { connect: () => {} }),
+      () => true,
+    )
+    await Bun.sleep(0)
+    runtime.close()
+    runtime.close()
+    unsubscribe()
+    ledger.assertEmpty()
+  })
+
   test('clears stale levels and retries a processor fault only once per generation', async () => {
     const nodes: FakeAudioWorkletNode[] = []
     let flush = () => {}

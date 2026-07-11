@@ -1,5 +1,5 @@
 import { areAudioEffectOrdersEqual, assert, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
-import { connectFxChain, disconnectAudioNodes, type CreateReverbImpulseResponse, type FxChainStageConfig } from './effects/chain'
+import { connectFxChain, createCompressorNodeChain, disconnectAudioNodes, type CreateReverbImpulseResponse, type FxChainStageConfig } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState, type CompressorChainState } from './effects/compressor-chain-state'
 import type { CompressorMeterListener } from './effects/compressor-worklet'
@@ -9,6 +9,7 @@ import { createSaturatorChainState, type SaturatorChainState } from './effects/s
 import { applyLiveMixerGraph, clearLiveMixerEdges, removeLiveMixerEdgesForNodes, type LiveMixerEdgeRuntime } from './mixer/apply-live-routing'
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
+import { resolveMixerTiming } from './mixer/resolve-timing'
 import type { MixerTrackFx, ResolveMixerGraphOptions, ResolvedMixerGraph } from './mixer/types'
 import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import type { AutomationAudioBinding } from './automation'
@@ -16,6 +17,7 @@ import { resolveDelayAutomationBindings, resolveEqAutomationBindings, resolveRev
 import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { createCueBus } from './mixer/cue-routing'
 import { applyStaticWorkletNodeParams, createStaticWorkletNodeChain, disconnectStaticWorkletNodeChain, resolveStaticWorkletAutomationBinding, subscribeStaticGateMeter, type GateMeterListener, type StaticWorkletKind, type StaticWorkletNodeChain } from './effects/static-worklet-chain'
+import { observeResource, type ResourceObserver } from './runtime-diagnostics'
 
 const MAX_EFFECTS_PER_CHAIN = 16
 const MAX_LIVE_STATIC_WORKLETS = 64
@@ -66,6 +68,10 @@ type LiveMixerRuntimeOptions = {
   disposeTrackMeters: (trackId: string) => void
   disposeSynthTrack: (trackId: string) => void
   getMasterFx: () => MasterMixerFx
+  getFaultGeneration: () => number
+  onGraphLatencyChange?: (frames: number | null) => void
+  onWorkletFault?: (generation: number, kind: 'compressor' | 'owned-processor', code: string, context: string) => void
+  resourceObserver?: ResourceObserver
 }
 
 export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
@@ -73,6 +79,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const postFxOutputs = new Map<string, GainNode>()
   const gains = new Map<string, GainNode>()
   const outputs = new Map<string, GainNode>()
+  const trackNodeReleases = new Map<string, Array<() => void>>()
   const edgeRuntimes = new Map<string, LiveMixerEdgeRuntime>()
   const sidechainEdges = new Map<string, LiveMixerEdgeRuntime>()
   const cueEdges = new Map<string, LiveMixerEdgeRuntime>()
@@ -110,6 +117,17 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const gateMeterListeners = new Map<string, Map<string, Set<GateMeterListener>>>()
   const gateMeterSubscriptions = new Map<string, Map<string, () => void>>()
   let currentBpm = 120
+  let currentTracks: RuntimeTrack[] = []
+
+  const publishGraphLatency = () => {
+    const ctx = options.getAudioContext()
+    if (!ctx) {
+      options.onGraphLatencyChange?.(null)
+      return
+    }
+    const graph = resolveLiveMixerGraph(currentTracks, Object.fromEntries(trackFx), options.getMasterFx())
+    options.onGraphLatencyChange?.(resolveMixerTiming(graph, ctx.sampleRate, currentBpm).graphLatencyFrames)
+  }
 
   const disconnectRuntimeEdge = (edge: LiveMixerEdgeRuntime) => {
     try { edge.source.disconnect(edge.gain ?? edge.delay) } catch {}
@@ -278,6 +296,9 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     if (!input) {
       input = ctx.createGain()
       inputs.set(trackId, input)
+      const releases = trackNodeReleases.get(trackId) ?? []
+      releases.push(observeResource(options.resourceObserver, 'audio-nodes', input))
+      trackNodeReleases.set(trackId, releases)
     }
 
     let gain = gains.get(trackId)
@@ -285,6 +306,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       gain = ctx.createGain()
       gain.gain.value = 1
       gains.set(trackId, gain)
+      trackNodeReleases.get(trackId)?.push(observeResource(options.resourceObserver, 'audio-nodes', gain))
     }
 
     let output = outputs.get(trackId)
@@ -292,12 +314,14 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       output = ctx.createGain()
       output.gain.value = 1
       outputs.set(trackId, output)
+      trackNodeReleases.get(trackId)?.push(observeResource(options.resourceObserver, 'audio-nodes', output))
     }
 
     let postFx = postFxOutputs.get(trackId)
     if (!postFx) {
       postFx = ctx.createGain()
       postFxOutputs.set(trackId, postFx)
+      trackNodeReleases.get(trackId)?.push(observeResource(options.resourceObserver, 'audio-nodes', postFx))
     }
 
     if (createdInput) {
@@ -369,6 +393,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const setTrackEq = (trackId: string, params: EqParamsLite) => {
     const normalized = normalizeEqParams(params)
     trackFx.set(trackId, { ...trackFx.get(trackId), eq: normalized })
+    publishGraphLatency()
     const ctx = options.getAudioContext()
     if (!ctx) {
       pendingEqParams.set(trackId, normalized)
@@ -379,6 +404,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
   const setTrackReverb = (trackId: string, params: ReverbParamsLite) => {
     trackFx.set(trackId, { ...trackFx.get(trackId), reverb: params })
+    publishGraphLatency()
     const ctx = options.getAudioContext()
     if (!ctx) {
       pendingReverbParams.set(trackId, params)
@@ -400,6 +426,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const setTrackCompressor = async (trackId: string, params: CompressorParamsLite) => {
     const normalized = normalizeCompressorParams(params)
     trackFx.set(trackId, { ...trackFx.get(trackId), compressor: normalized })
+    publishGraphLatency()
     const ctx = options.getAudioContext()
     if (!ctx) {
       pendingCompressorParams.set(trackId, normalized)
@@ -408,7 +435,9 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     let state = compressorChains.get(trackId)
     if (!state && !normalized.enabled) return
     if (!state) {
-      state = createCompressorChainState()
+      const faultGeneration = options.getFaultGeneration()
+      state = createCompressorChainState((ctx, params) =>
+        createCompressorNodeChain(ctx, params, (code) => options.onWorkletFault?.(faultGeneration, 'compressor', code, `track:${trackId}:legacy-compressor`)))
       compressorChains.set(trackId, state)
     }
     const result = await state.set(ctx, normalized)
@@ -418,6 +447,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
   const setTrackSaturator = (trackId: string, params: SaturatorParamsLite) => {
     trackFx.set(trackId, { ...trackFx.get(trackId), saturator: params })
+    publishGraphLatency()
     const ctx = options.getAudioContext()
     if (!ctx) {
       pendingSaturatorParams.set(trackId, params)
@@ -434,6 +464,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
   const setTrackDelay = (trackId: string, params: DelayParamsLite) => {
     trackFx.set(trackId, { ...trackFx.get(trackId), delay: params })
+    publishGraphLatency()
     const ctx = options.getAudioContext()
     if (!ctx) {
       pendingDelayParams.set(trackId, params)
@@ -503,12 +534,14 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       trackFxInstances.delete(trackId)
       pendingTrackFxInstances.delete(trackId)
       closeTrackInstanceStates(trackId)
+      publishGraphLatency()
       const nodes = inputs.has(trackId) && gains.has(trackId) ? ensureTrackNodes(trackId) : null
       if (wasInstanceMode && nodes) rebuildTrackRouting(trackId, nodes)
       return
     }
     const ctx = options.getAudioContext()
     trackFx.set(trackId, { ...trackFx.get(trackId), instances: normalized })
+    publishGraphLatency()
     if (!ctx) {
       trackFxInstances.set(trackId, normalized)
       pendingTrackFxInstances.set(trackId, normalized)
@@ -541,7 +574,9 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
         } else {
           if (existing) disconnectStaticWorkletNodeChain(existing)
           try {
-            const created = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params)
+            const faultGeneration = options.getFaultGeneration()
+            const created = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params, (code) =>
+              options.onWorkletFault?.(faultGeneration, 'owned-processor', code, `track:${trackId}:effect:${instance.id}`))
             if (trackFxInstanceRevisions.get(trackId) !== revision) {
               disconnectStaticWorkletNodeChain(created)
               return
@@ -563,7 +598,9 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
         const stateMap = ensureNestedMap(instanceCompressorChains, trackId)
         let state = stateMap.get(instance.id)
         if (!state) {
-          state = createCompressorChainState()
+          const faultGeneration = options.getFaultGeneration()
+          state = createCompressorChainState((ctx, params) =>
+            createCompressorNodeChain(ctx, params, (code) => options.onWorkletFault?.(faultGeneration, 'compressor', code, `track:${trackId}:effect:${instance.id}`)))
           stateMap.set(instance.id, state)
         }
         const result = await state.set(ctx, normalizeCompressorParams(instance.params))
@@ -658,6 +695,8 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     trackFxInstanceRevisions.delete(trackId)
     trackFx.delete(trackId)
     closeTrackInstanceStates(trackId)
+    for (const release of trackNodeReleases.get(trackId) ?? []) release()
+    trackNodeReleases.delete(trackId)
 
     options.disposeSynthTrack(trackId)
     options.disposeTrackMeters(trackId)
@@ -714,9 +753,12 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     instanceStaticWorkletChains.clear()
     gateMeterSubscriptions.clear()
     gateMeterListeners.clear()
+    options.onGraphLatencyChange?.(null)
+    currentTracks = []
   }
 
   return {
+    publishGraphLatency,
     ensureTrackInput: (trackId: string) => ensureTrackNodes(trackId).input,
     connectRecordingMonitor: (trackId: string, source: AudioNode) => {
       const input = ensureTrackNodes(trackId).input
@@ -727,11 +769,13 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     },
     getTrackOutput: (trackId: string) => outputs.get(trackId),
     updateTrackGains: (tracks: RuntimeTrack[]) => {
+      currentTracks = tracks
       const ctx = options.getAudioContext()
       const masterInput = options.getMasterInput()
       if (!ctx || !masterInput) return
 
       const graph = resolveLiveMixerGraph(tracks, Object.fromEntries(trackFx), options.getMasterFx())
+      publishGraphLatency()
       const trackNodes = new Map<string, TrackNodeGroup>()
       for (const resolvedTrack of graph.channels) {
         const channelId = resolvedTrack.channel.id
@@ -788,10 +832,12 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       }
       sidechainRoutes = routes
       applyAuxiliaryRoutes()
+      publishGraphLatency()
     },
     setCueTrackIds: (trackIds: readonly string[]) => {
       cueTrackIds = new Set(trackIds)
       applyAuxiliaryRoutes()
+      publishGraphLatency()
     },
     setCueDestination: (destination: AudioNode | null) => {
       const ctx = options.getAudioContext()
@@ -805,6 +851,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       cueBus = null
       cueDestination = destination
       applyAuxiliaryRoutes()
+      publishGraphLatency()
     },
     resolveTrackAutomationBindings: (trackId: string, parameterId: string, effectInstanceId?: string): AutomationAudioBinding[] => {
       const trackNodes = ensureTrackNodes(trackId)
@@ -846,6 +893,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       if (areAudioEffectOrdersEqual(trackFxOrders.get(trackId), normalized)) return
       trackFxOrders.set(trackId, normalized)
       trackFx.set(trackId, { ...trackFx.get(trackId), order: normalized })
+      publishGraphLatency()
       const input = inputs.get(trackId)
       const postFx = postFxOutputs.get(trackId)
       if (input && postFx) rebuildTrackRouting(trackId, { input, postFx })
@@ -854,7 +902,9 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     subscribeTrackCompressorMeter: (trackId: string, listener: CompressorMeterListener) => {
       let state = compressorChains.get(trackId)
       if (!state) {
-        state = createCompressorChainState()
+        const faultGeneration = options.getFaultGeneration()
+        state = createCompressorChainState((ctx, params) =>
+          createCompressorNodeChain(ctx, params, (code) => options.onWorkletFault?.(faultGeneration, 'compressor', code, `track:${trackId}:legacy-compressor`)))
         compressorChains.set(trackId, state)
       }
       const unsubscribe = state.subscribeMeter(listener)
@@ -890,6 +940,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       for (const states of instanceDelayChains.values()) {
         for (const state of states.values()) state.setBpm(bpm)
       }
+      publishGraphLatency()
     },
     disposeTrack,
     clear,

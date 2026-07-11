@@ -15,6 +15,7 @@
     "./export-mixdown": "./src/export-mixdown.ts",
     "./loudness-analyzer": "./src/loudness-analyzer.ts",
     "./processor-release-contract": "./src/effects/processor-release-contract.ts",
+    "./reliability-characterization": "./src/reliability-characterization.ts",
     "./recording-encode-wav": "./src/recording/encode-wav.ts"
   },
   "scripts": {

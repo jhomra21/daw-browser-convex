@@ -1,6 +1,7 @@
 import { loadWorkletModule } from '../worklet-loader'
 import { recorderWorklet, resolveWorkletModuleUrl } from '../worklet-manifest'
 import { readRecorderOutboundMessage, type RecorderReturnMessage } from './recording-protocol'
+import { observeResource, type ResourceObserver } from '../runtime-diagnostics'
 
 export type RecordingMonitorMode = 'off' | 'auto' | 'on'
 
@@ -40,6 +41,8 @@ type RecordingSession = {
   monitorFadePromise: Promise<void> | null
   terminal: boolean
   transport: RecordingCaptureTransport | null
+  faultGeneration: number
+  releaseResources: () => void
 }
 
 type RecordingRuntimeOptions = {
@@ -47,6 +50,9 @@ type RecordingRuntimeOptions = {
   connectMonitor: (trackId: string, source: AudioNode) => () => void
   loadWorklet?: (context: AudioContext) => Promise<void>
   createWorkletNode?: (context: AudioContext, channelCount: number) => RecordingWorkletNode
+  getFaultGeneration?: () => number
+  onFault?: (generation: number, code: string) => void
+  resourceObserver?: ResourceObserver
 }
 
 export type RecordingCaptureTransport = {
@@ -118,10 +124,12 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
     session.track.removeEventListener('unmute', session.onUnmute)
     session.context.removeEventListener('statechange', session.onContextStateChange)
     session.worklet.port.onmessage = null
+    session.transport?.terminate()
     session.disconnectMonitor?.()
     try { session.monitorGain?.disconnect() } catch {}
     try { session.source.disconnect() } catch {}
     try { session.worklet.disconnect() } catch {}
+    session.releaseResources()
   }
 
   const finishTerminal = async (
@@ -139,6 +147,7 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
   }
 
   const fail = (session: RecordingSession, reason: string) => {
+    options.onFault?.(session.faultGeneration, reason)
     const transport = session.transport
     if (!transport) {
       void finishTerminal(session, { state: 'failed', sessionId: session.sessionId, reason })
@@ -164,6 +173,10 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
     let onUnmute: (() => void) | null = null
     let onContextStateChange: (() => void) | null = null
     let context: AudioContext | null = null
+    const releases: Array<() => void> = []
+    const releaseResources = () => {
+      for (const release of releases.splice(0).reverse()) release()
+    }
     try {
     context = options.getContext()
     if (!context || context.state !== 'running') throw new Error('Recording requires an active AudioContext.')
@@ -194,7 +207,10 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
 
     await (options.loadWorklet ?? ((ctx) => loadWorkletModule(ctx, resolveWorkletModuleUrl(recorderWorklet.modulePath))))(context)
     source = context.createMediaStreamSource(input.stream)
+    releases.push(observeResource(options.resourceObserver, 'media-streams', input.stream))
+    releases.push(observeResource(options.resourceObserver, 'media-stream-sources', source))
     worklet = (options.createWorkletNode ?? defaultCreateWorkletNode)(context, inputChannels.length)
+    releases.push(observeResource(options.resourceObserver, 'audio-worklet-nodes', worklet))
     const captureContext = context
     const captureTrack = track
     const captureWorklet = worklet
@@ -238,6 +254,8 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
       monitorFadePromise: null,
       terminal: false,
       transport: null,
+      faultGeneration: options.getFaultGeneration?.() ?? 0,
+      releaseResources,
     }
     session = establishedSession
     active = establishedSession
@@ -258,6 +276,9 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
         },
       },
     }) ?? null
+    if (establishedSession.transport) {
+      releases.push(observeResource(options.resourceObserver, 'workers', establishedSession.transport))
+    }
     if (establishedSession.transport) await establishedSession.transport.ready
     captureWorklet.port.onmessage = (event) => {
       const message = readRecorderOutboundMessage(event.data)
@@ -334,6 +355,7 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
     const shouldMonitor = input.monitor === 'on' || (input.monitor === 'auto' && input.armed)
     if (shouldMonitor) {
       monitorGain = captureContext.createGain()
+      releases.push(observeResource(options.resourceObserver, 'monitor-paths', monitorGain))
       const now = captureContext.currentTime
       monitorGain.gain.setValueAtTime(0, now)
       monitorGain.gain.linearRampToValueAtTime(1, now + MONITOR_FADE_SEC)
@@ -364,6 +386,7 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
     })
     } catch (error) {
       await session?.transport?.abort().catch(() => undefined)
+      session?.transport?.terminate()
       if (track && onEnded) track.removeEventListener('ended', onEnded)
       if (track && onMute) track.removeEventListener('mute', onMute)
       if (track && onUnmute) track.removeEventListener('unmute', onUnmute)
@@ -373,6 +396,7 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
       try { monitorGain?.disconnect() } catch {}
       try { source?.disconnect() } catch {}
       try { worklet?.disconnect() } catch {}
+      releaseResources()
       if (active === session) active = null
       status = { state: 'idle' }
       throw error

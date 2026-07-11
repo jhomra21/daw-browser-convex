@@ -35,6 +35,7 @@ export async function createStaticWorkletNodeChain(
   ctx: BaseAudioContext,
   kind: StaticWorkletKind,
   params: StaticWorkletParams,
+  onFault?: (code: string) => void,
 ): Promise<StaticWorkletNodeChain> {
   const asset = manifest(kind)
   await loadWorkletModule(ctx, resolveWorkletModuleUrl(asset.modulePath))
@@ -59,6 +60,7 @@ export async function createStaticWorkletNodeChain(
     const fault = readStaticWorkletFault(event.data)
     if (fault) {
       if (chain.state === 'active') {
+        onFault?.(fault)
         chain.state = 'faulted'
         chain.fault = new Error(`${kind} processor protocol fault: ${fault}`)
         publishGateMeterReset(chain)
@@ -71,6 +73,7 @@ export async function createStaticWorkletNodeChain(
   }
   node.onprocessorerror = () => {
     if (chain.state !== 'active') return
+    onFault?.('processor-error')
     chain.state = 'faulted'
     chain.fault = new Error(`${kind} processor failed during runtime processing.`)
     publishGateMeterReset(chain)

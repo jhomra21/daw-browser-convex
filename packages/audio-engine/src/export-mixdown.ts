@@ -28,6 +28,7 @@ import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { getExportRangeBounds, type ExportRange } from './export-range'
 import { convertStereoToMonoSample } from './mixer/channel-layout'
 import { scanTruePeak } from './true-peak-scanner'
+import { observeResource, type ResourceObserver } from './runtime-diagnostics'
 export { encodeAudioBuffer, type EncodeAudioBufferOptions, type EncodeAudioBufferTarget } from './export-encoding'
 
 export type { AudioEffectRuntimeInstance }
@@ -57,6 +58,7 @@ export type ExportRequest = {
   automationEnvelopes?: AutomationEnvelope[]
   sidechainRoutes?: ExternalSidechainRoute[]
   cueTrackIds?: readonly string[]
+  resourceObserver?: ResourceObserver
 }
 
 export type StemMode =
@@ -103,6 +105,7 @@ type PreparedExportRender = {
   automationEnvelopes: AutomationEnvelope[]
   sidechainRoutes: ExternalSidechainRoute[]
   signal?: AbortSignal
+  resourceObserver?: ResourceObserver
 }
 
 type SourceIsolatedRenderOptions = {
@@ -348,6 +351,7 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
     automationEnvelopes: req.automationEnvelopes ?? [],
     sidechainRoutes: req.sidechainRoutes ?? [],
     signal,
+    resourceObserver: req.resourceObserver,
   }
 }
 
@@ -539,6 +543,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
   const length = Math.ceil(prepared.range.durationSec * prepared.sampleRate)
   const renderChannelCount = prepared.numberOfChannels === 1 ? 2 : prepared.numberOfChannels
   const ctx = new OfflineAudioContext(renderChannelCount, length, prepared.sampleRate)
+  const releaseContext = observeResource(prepared.resourceObserver, 'audio-contexts', ctx)
   const stretchCache = createAudioStretchCache({
     createBuffer: (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
   })
@@ -551,7 +556,16 @@ async function renderSourceIsolatedMixdownFromPrepared(
     },
   })
   const automationScope = createSourceAutomationScope(graph, options)
-  const mixerNodes = await createOfflineMixerNodes(ctx, graph, prepared.bpm, prepared.sidechainRoutes, options.detectorOnlyTrackIds)
+  const mixerNodes = await createOfflineMixerNodes(
+    ctx,
+    graph,
+    prepared.bpm,
+    prepared.sidechainRoutes,
+    options.detectorOnlyTrackIds,
+  ).catch((error: unknown) => {
+    releaseContext()
+    throw error
+  })
   const { trackNodes } = mixerNodes
 
   try {
@@ -677,6 +691,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
     return output
   } finally {
     mixerNodes.dispose()
+    releaseContext()
   }
 }
 

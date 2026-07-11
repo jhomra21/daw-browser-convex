@@ -31,6 +31,10 @@ import {
   type SampleRateConversionResult,
 } from './sample-rate-characterization'
 import { resolveWorkletModuleUrl, trackMeterWorklet } from './worklet-manifest'
+import {
+  createReliabilityCharacterizationReport,
+  type ReliabilityCharacterizationReport,
+} from './reliability-characterization'
 
 type BrowserCharacterizationCase = {
   status: 'pass' | 'fail' | 'unsupported'
@@ -79,6 +83,7 @@ export type BrowserCharacterizationReport = {
   liveAlignment: BrowserCharacterizationCase
   cueRouting: BrowserCharacterizationCase
   externalSidechain: BrowserCharacterizationCase
+  reliability: ReliabilityCharacterizationReport
 }
 
 const readBuffer = (buffer: AudioBuffer) =>
@@ -582,5 +587,6 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
       status: 'unsupported',
       message: 'External sidechain timing requires the live routing probe.',
     },
+    reliability: createReliabilityCharacterizationReport(),
   }
 }

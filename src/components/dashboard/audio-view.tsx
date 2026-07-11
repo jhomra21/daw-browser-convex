@@ -280,9 +280,14 @@ export function DashboardAudioView() {
       <DashboardSection title="Diagnostics">
         <DashboardRow label="Engine state" value={runtime().state} />
         <DashboardRow label="Actual sample rate" value={runtime().sampleRate === null ? "No audio context" : `${runtime().sampleRate} Hz`} />
-        <DashboardRow label="Base latency" value={formatLatency(runtime().baseLatencySec)} />
-        <DashboardRow label="Output latency" value={formatLatency(runtime().outputLatencySec)} />
-        <DashboardRow label="Total output estimate" value={formatLatency(runtime().totalOutputLatencySec)} />
+        <DashboardRow label="Browser base-latency estimate" value={formatLatency(runtime().baseLatencySec)} />
+        <DashboardRow label="Browser output-latency estimate" value={formatLatency(runtime().outputLatencySec)} />
+        <DashboardRow label="Browser total output estimate" value={formatLatency(runtime().totalOutputLatencySec)} />
+        <DashboardRow label="Graph/PDC latency" value={formatFrames(runtime().graphPdcLatencyFrames)} />
+        <DashboardRow label="Calibrated recording offset" value={exactCalibration() ? `${exactCalibration()?.recordingOffsetFrames} frames` : `${recording().manualOffsetFrames} frames (manual fallback)`} />
+        <DashboardRow label="Worklet fault event count" value={String(runtime().runtimeFaults.eventCount)} />
+        <DashboardRow label="Worklet fault unique signature count" value={String(runtime().runtimeFaults.uniqueSignatureCount)} />
+        <DashboardRow label="Inferred application stall count" value={String(runtime().inferredApplicationStallCount)} />
         <DashboardRow label="Recording format" value={`${diagnostics().activeFormat} (requested ${diagnostics().requestedFormat})`} />
         <DashboardRow label="Recording settings" value={`${diagnostics().activeChannels ?? "—"} channels at ${diagnostics().activeSampleRate ?? "—"} Hz (requested ${diagnostics().requestedLayout}, ${diagnostics().requestedSampleRate ?? "default"} Hz)`} />
         <DashboardRow label="Recording transport" value={diagnostics().transport ?? "Not active"} />

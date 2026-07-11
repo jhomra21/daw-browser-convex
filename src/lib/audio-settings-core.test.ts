@@ -1,8 +1,17 @@
 import { describe, expect, test } from "bun:test"
-import { areAudioDeviceListsEqual, buildRecordingConstraints, filterAudioDevices, isSelectedDeviceAvailable, resolveAudioRuntimeConfiguration } from "./audio-settings-core"
+import { areAudioDeviceListsEqual, buildActiveInputProbeConstraints, buildRecordingConstraints, canUseStereoRecording, filterAudioDevices, isSelectedDeviceAvailable, resolveAudioRuntimeConfiguration, resolveRecordingChannelOptions } from "./audio-settings-core"
 import { defaultAppPreferences } from "./preferences/app-preferences-core"
 
 describe("audio settings policy", () => {
+  test("disables unavailable recording channels without rewriting preferences", () => {
+    const options = resolveRecordingChannelOptions(2)
+    expect(options[0]).toEqual({ channel: 0, label: "Input 1", disabled: false })
+    expect(options[2]?.disabled).toBe(true)
+    expect(canUseStereoRecording(2, 0)).toBe(true)
+    expect(canUseStereoRecording(2, 1)).toBe(false)
+    expect(canUseStereoRecording(undefined, 31)).toBe(true)
+  })
+
   test("resolves constructor options", () => {
     expect(resolveAudioRuntimeConfiguration({ sampleRate: "default", latencyMode: "interactive" })).toEqual({ latencyHint: "interactive" })
     expect(resolveAudioRuntimeConfiguration({ sampleRate: 48000, latencyMode: "balanced" })).toEqual({ sampleRate: 48000, latencyHint: "balanced" })
@@ -17,6 +26,13 @@ describe("audio settings policy", () => {
       echoCancellation: true,
       noiseSuppression: false
     })
+  })
+
+  test("probes the explicit input device or the system default", () => {
+    expect(buildActiveInputProbeConstraints("mic")).toEqual({
+      audio: { deviceId: { exact: "mic" } },
+    })
+    expect(buildActiveInputProbeConstraints("")).toEqual({ audio: true })
   })
 
   test("deduplicates devices and preserves missing selections", () => {

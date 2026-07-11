@@ -18,6 +18,12 @@ export const buildRecordingConstraints = (
   ...(supported.autoGainControl ? { autoGainControl: preferences.autoGainControl } : {})
 })
 
+export const buildActiveInputProbeConstraints = (
+  inputDeviceId: string,
+): MediaStreamConstraints => ({
+  audio: inputDeviceId ? { deviceId: { exact: inputDeviceId } } : true,
+})
+
 type AudioDeviceLists = {
   inputs: MediaDeviceInfo[]
   outputs: MediaDeviceInfo[]
@@ -55,3 +61,19 @@ export const isSelectedDeviceAvailable = (
   deviceId: string,
   devices: readonly MediaDeviceInfo[]
 ): boolean => !deviceId || devices.some((device) => device.deviceId === deviceId)
+
+export const resolveRecordingChannelOptions = (
+  activeChannelCount: number | undefined,
+): { channel: number; label: string; disabled: boolean }[] => {
+  const available = Number.isSafeInteger(activeChannelCount) && activeChannelCount !== undefined
+    ? Math.max(1, Math.min(32, activeChannelCount))
+    : 32
+  return Array.from({ length: 32 }, (_, channel) => ({
+    channel,
+    label: `Input ${channel + 1}`,
+    disabled: channel >= available,
+  }))
+}
+
+export const canUseStereoRecording = (activeChannelCount: number | undefined, inputChannel: number): boolean =>
+  activeChannelCount === undefined || inputChannel + 1 < activeChannelCount

@@ -21,6 +21,7 @@ type RecordingTransferTransportOptions = {
   channelCount: number
   worklet: MessageEndpoint
   worker?: WorkerEndpoint
+  onDiagnostics?: (diagnostics: { queuedFrames: number }) => void
 }
 
 type Deferred<T = void> = {
@@ -42,6 +43,8 @@ const deferred = <T = void>(): Deferred<T> => {
 export const createRecordingTransferTransport = (options: RecordingTransferTransportOptions) => {
   const worker = options.worker ?? createBrowserRecordingWriter()
   let queuedBlocks = 0
+  const queuedFrameCounts: number[] = []
+  let queuedFrames = 0
   let state: 'starting' | 'open' | 'closing' | 'closed' | 'failed' = 'starting'
   const ready = deferred()
   let completion: Deferred<{ capturedFrames: number }> | null = null
@@ -130,6 +133,9 @@ export const createRecordingTransferTransport = (options: RecordingTransferTrans
       return
     }
     queuedBlocks += 1
+    queuedFrameCounts.push(message.frameCount)
+    queuedFrames += message.frameCount
+    options.onDiagnostics?.({ queuedFrames })
     if (queuedBlocks > RECORDER_MAX_QUEUED_BLOCKS) {
       fail('Recording writer queue exceeded its hard bound.')
       return
@@ -156,6 +162,8 @@ export const createRecordingTransferTransport = (options: RecordingTransferTrans
         return
       }
       queuedBlocks -= 1
+      queuedFrames -= queuedFrameCounts.shift() ?? 0
+      options.onDiagnostics?.({ queuedFrames })
       options.worklet.postMessage(message, [message.buffer])
       if (state === 'closing' && requestedTerminal === 'finalized' && workletComplete && queuedBlocks === 0) {
         worker.postMessage({

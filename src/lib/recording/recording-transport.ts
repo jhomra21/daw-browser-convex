@@ -11,6 +11,7 @@ type RecordingTransportOptions = {
   sampleRate: number
   channelCount: number
   worklet: RecordingMessageEndpoint
+  onDiagnostics?: (diagnostics: { queuedFrames: number }) => void
 }
 
 type RecordingTransportDiagnostics = {

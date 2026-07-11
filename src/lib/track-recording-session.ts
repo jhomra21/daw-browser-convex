@@ -35,7 +35,7 @@ export type RecordingContext = {
   engineCaptureSessionId: string
   savedAudioSource: 'worklet-pcm-f32' | 'media-recorder-compressed'
   sampleRate: number
-  manualOffsetFrames: number
+  recordingOffsetFrames: number
   onDataAvailable: (event: BlobEvent) => void
   onStop: () => void
   stopPromise: Promise<void>

@@ -26,6 +26,7 @@ import {
   type RecordingContext,
 } from '~/lib/track-recording-session'
 import { createRecordingTransport } from '~/lib/recording/recording-transport'
+import { resetRecordingDiagnostics, updateRecordingDiagnostics } from '~/lib/recording/recording-diagnostics'
 import { createRecordingTempStorage } from '~/lib/recording/recording-temp-storage'
 import { encodeRecordingWav } from '~/lib/recording/encode-recording-wav'
 import {
@@ -41,6 +42,7 @@ import type { UploadToR2 } from '~/hooks/useClipBuffers'
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { AudioPreferences, RecordingPreferences } from '~/lib/preferences/app-preferences'
 import { buildRecordingConstraints } from '~/lib/audio-settings-core'
+import { resolveCalibrationPlatformIdentity, resolveRecordingOffsetFrames } from '~/lib/recording/recording-calibration'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 
@@ -135,6 +137,20 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   let previewSampleRate = 1
 
   const unsubscribeRecordingStatus = audioEngine.subscribeRecordingStatus((status) => {
+    if (status.state === 'recording') {
+      updateRecordingDiagnostics({
+        capturedFrames: Math.max(0, status.contextFrame - previewContextStartFrame),
+        muted: status.muted,
+        deviceLost: false,
+      })
+    } else if (status.state === 'complete') {
+      updateRecordingDiagnostics({ capturedFrames: status.capturedFrames, queuedFrames: 0 })
+    } else if (status.state === 'failed') {
+      updateRecordingDiagnostics({
+        deviceLost: status.reason === 'recording-device-ended',
+        lastFailure: status.reason,
+      })
+    }
     if (status.state === 'failed' && activeCtx?.engineCaptureActive && status.sessionId === activeCtx.engineCaptureSessionId) {
       const failedContext = activeCtx
       void (async () => {
@@ -344,7 +360,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
     const baseDuration = sourceMetadata.durationSec
     const sourceAssetKey = createAudioAssetKey()
-    const desiredStart = Math.max(0, ctx.startSec + ctx.manualOffsetFrames / ctx.sampleRate)
+    const desiredStart = Math.max(0, ctx.startSec + ctx.recordingOffsetFrames / ctx.sampleRate)
     const nonOverlapStart = willOverlap(targetTrack.clips, null, desiredStart, baseDuration)
       ? calcNonOverlapStart(targetTrack.clips, null, desiredStart, baseDuration)
       : desiredStart
@@ -551,6 +567,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     let engineCaptureActive = false
     const engineCaptureSessionId = `take-${Date.now()}`
     const requestedSettings = recordingPreferences()
+    await resolveCalibrationPlatformIdentity(navigator)
     ensureRecordingAudioContext(audioEngine)
     const engineContext = audioEngine.getAudioContext()
     const trackSampleRate = stream.getAudioTracks()[0]?.getSettings().sampleRate
@@ -558,6 +575,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       ? trackSampleRate
       : engineContext?.sampleRate ?? 1
     if (productionSupported) try {
+      resetRecordingDiagnostics()
       await audioEngine.resume()
       const captureContext = audioEngine.getAudioContext()
       if (!captureContext) throw new Error('Audio engine context unavailable.')
@@ -579,7 +597,26 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
           contextFrame: previewContextStartFrame,
         },
         punchInContextFrame: previewContextStartFrame,
-        createTransport: (transportOptions) => createRecordingTransport(transportOptions).transport,
+        createTransport: (transportOptions) => {
+          const selected = createRecordingTransport({
+            ...transportOptions,
+            onDiagnostics: (next) => updateRecordingDiagnostics(next),
+          })
+          const requestedSampleRate = audioPreferences().sampleRate
+          updateRecordingDiagnostics({
+            requestedFormat: 'pcm',
+            activeFormat: 'pcm',
+            requestedLayout: requestedSettings.layout,
+            activeChannels: requestedSettings.layout === 'stereo' ? 2 : 1,
+            requestedSampleRate: requestedSampleRate === 'default' ? null : requestedSampleRate,
+            activeSampleRate: transportOptions.sampleRate,
+            transport: selected.diagnostics.active,
+            queuedFrames: selected.diagnostics.active === 'transferable' ? 0 : null,
+            overrunFrames: null,
+            droppedFrames: null,
+          })
+          return selected.transport
+        },
       })
       engineCaptureActive = true
     } catch (err) {
@@ -587,6 +624,16 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     }
 
     if (!engineCaptureActive) {
+      const requestedSampleRate = audioPreferences().sampleRate
+      updateRecordingDiagnostics({
+        requestedFormat: 'pcm',
+        activeFormat: 'compressed',
+        requestedLayout: requestedSettings.layout,
+        activeChannels: stream.getAudioTracks()[0]?.getSettings().channelCount ?? null,
+        requestedSampleRate: requestedSampleRate === 'default' ? null : requestedSampleRate,
+        activeSampleRate: stream.getAudioTracks()[0]?.getSettings().sampleRate ?? null,
+        transport: null,
+      })
       if (!recordingSupport.supported) {
         stream.getTracks().forEach(track => track.stop())
         await releaseTrackLock(trackId, uid, isLocalProject)
@@ -621,7 +668,18 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       engineCaptureSessionId,
       savedAudioSource: engineCaptureActive ? 'worklet-pcm-f32' : 'media-recorder-compressed',
       sampleRate,
-      manualOffsetFrames: requestedSettings.manualOffsetFrames,
+      recordingOffsetFrames: resolveRecordingOffsetFrames(
+        requestedSettings.calibrations,
+        {
+          inputDeviceId: audioPreferences().inputDeviceId,
+          outputDeviceId: audioPreferences().outputDeviceId,
+          sampleRate,
+          platform: navigator.platform,
+          userAgent: navigator.userAgent,
+          userAgentData: navigator.userAgentData,
+        },
+        requestedSettings.manualOffsetFrames,
+      ).frames,
       onDataAvailable,
       onStop,
       stopPromise: stopCompletion.promise,

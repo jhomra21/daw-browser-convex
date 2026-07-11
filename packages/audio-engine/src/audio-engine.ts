@@ -16,6 +16,7 @@ import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import { applyAutomationEnvelopeAtTime, scheduleAutomationEnvelope } from './automation'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { createRecordingRuntime, type RecordingRuntimeStatus, type StartRecordingCaptureOptions } from './recording/recording-runtime'
+import { analyzeCalibrationCapture, createCalibrationStimulus, type RecordingCalibrationAnalysis } from './recording/calibration'
 
 type RuntimeClip = Clip<AudioBuffer>
 type RuntimeTrack = Track<AudioBuffer>
@@ -106,6 +107,8 @@ export class AudioEngine {
     getContext: () => this.audioCtx,
     connectMonitor: (trackId, source) => this.mixerRuntime.connectRecordingMonitor(trackId, source),
   })
+  private calibrationReserved = false
+  private recordingStartReserved = false
 
   constructor(options: AudioRuntimeOptions = { latencyHint: 'interactive' }) {
     this.runtimeOptions = options
@@ -194,7 +197,11 @@ export class AudioEngine {
   }
 
   startRecordingCapture(options: StartRecordingCaptureOptions) {
-    return this.recording.start(options)
+    if (this.calibrationReserved) throw new Error('Wait for recording calibration to finish.')
+    this.recordingStartReserved = true
+    return this.recording.start(options).finally(() => {
+      this.recordingStartReserved = false
+    })
   }
 
   stopRecordingCapture() {
@@ -211,6 +218,122 @@ export class AudioEngine {
 
   subscribeRecordingStatus(listener: (status: RecordingRuntimeStatus) => void) {
     return this.recording.subscribe(listener)
+  }
+
+  async calibrateRecording(input: {
+    stream: MediaStream
+    inputDeviceId: string
+    outputDeviceId: string
+    signal: AbortSignal
+  }): Promise<RecordingCalibrationAnalysis> {
+    if (this.calibrationReserved) throw new Error('Recording calibration is already running.')
+    this.calibrationReserved = true
+    let aborted = input.signal.aborted
+    const onAbort = () => {
+      aborted = true
+    }
+    input.signal.addEventListener('abort', onAbort, { once: true })
+    const throwIfAborted = () => {
+      if (aborted) throw new DOMException('Calibration cancelled.', 'AbortError')
+    }
+    try {
+      throwIfAborted()
+      if (this.recordingStartReserved || this.recording.getStatus().state === 'recording') throw new Error('Stop recording before calibration.')
+      if (this.clock.isRunning()) throw new Error('Stop project playback before calibration.')
+      if (!input.inputDeviceId || !input.outputDeviceId) throw new Error('Calibration requires explicit input and output devices.')
+      this.ensureAudio()
+      if (!this.audioCtx || !this.destination) throw new Error('Audio is unavailable.')
+      throwIfAborted()
+      await this.resume()
+      throwIfAborted()
+      await this.setOutputDevice(input.outputDeviceId)
+      throwIfAborted()
+      const context = this.audioCtx
+      const track = input.stream.getAudioTracks()[0]
+      if (!track || track.readyState === 'ended') throw new Error('Calibration input is unavailable.')
+      const source = context.createMediaStreamSource(input.stream)
+      const capture = context.createScriptProcessor(2048, 1, 1)
+      const silent = context.createGain()
+      silent.gain.value = 0
+      const stimulus = createCalibrationStimulus(context.sampleRate)
+      const buffer = context.createBuffer(1, stimulus.length, context.sampleRate)
+      buffer.getChannelData(0).set(stimulus)
+      const playback = context.createBufferSource()
+      playback.buffer = buffer
+      playback.connect(this.destination)
+      source.connect(capture)
+      capture.connect(silent)
+      silent.connect(this.destination)
+      const captured: number[] = []
+      const captureFrames = stimulus.length + Math.ceil(context.sampleRate * 0.75)
+      return await new Promise<RecordingCalibrationAnalysis>((resolve, reject) => {
+      let settled = false
+      // ScriptProcessor delivery can stop without a terminal event. Bound the wait to the
+      // requested capture window plus one second of scheduling tolerance.
+      const deadline = window.setTimeout(
+        () => fail(new Error('Calibration capture timed out.')),
+        Math.ceil(captureFrames / context.sampleRate * 1000) + 1_000,
+      )
+      const onTrackEnded = () => fail(new Error('Calibration input ended.'))
+      const onContextStateChange = () => {
+        if (context.state !== 'running') fail(new Error('Audio context stopped during calibration.'))
+      }
+      const cleanup = () => {
+        window.clearTimeout(deadline)
+        input.signal.removeEventListener('abort', cancel)
+        track.removeEventListener('ended', onTrackEnded)
+        context.removeEventListener('statechange', onContextStateChange)
+        playback.onended = null
+        capture.onaudioprocess = null
+        try { playback.stop() } catch {}
+        playback.disconnect()
+        source.disconnect()
+        capture.disconnect()
+        silent.disconnect()
+      }
+      const finish = (result: RecordingCalibrationAnalysis) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        resolve(result)
+      }
+      const cancel = () => {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(new DOMException('Calibration cancelled.', 'AbortError'))
+      }
+      function fail(error: Error) {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(error)
+      }
+      if (aborted) {
+        cancel()
+        return
+      }
+      input.signal.addEventListener('abort', cancel, { once: true })
+      track.addEventListener('ended', onTrackEnded, { once: true })
+      context.addEventListener('statechange', onContextStateChange)
+      playback.onended = () => {
+        if (captured.length >= captureFrames) {
+          finish(analyzeCalibrationCapture(Float32Array.from(captured.slice(0, captureFrames)), context.sampleRate))
+        }
+      }
+      capture.onaudioprocess = (event) => {
+        const channel = event.inputBuffer.getChannelData(0)
+        for (const sample of channel) captured.push(sample)
+        if (captured.length >= captureFrames) {
+          finish(analyzeCalibrationCapture(Float32Array.from(captured.slice(0, captureFrames)), context.sampleRate))
+        }
+      }
+      playback.start()
+      })
+    } finally {
+      input.signal.removeEventListener('abort', onAbort)
+      this.calibrationReserved = false
+    }
   }
 
   // Returns a normalized 0..1 RMS level for a track's post-gain signal
@@ -322,6 +445,7 @@ export class AudioEngine {
   }
 
   onTransportStart(playheadSec: number) {
+    if (this.calibrationReserved) throw new Error('Wait for recording calibration to finish.')
     if (!this.audioCtx || !this.masterGain) return
     this.clock.start(this.audioCtx.currentTime, playheadSec)
     this.metronome.onTransportStart(this.audioCtx, this.masterGain)

@@ -21,12 +21,14 @@ describe('recording transfer transport', () => {
     const worklet = endpoint(true)
     const worker = endpoint(true)
     let terminations = 0
+    const queuedFrames: number[] = []
     const transport = createRecordingTransferTransport({
       generation: 2,
       sessionId: 'take',
       sampleRate: 48000,
       channelCount: 1,
       worklet,
+      onDiagnostics: (diagnostics) => queuedFrames.push(diagnostics.queuedFrames),
       worker: { ...worker, terminate: () => {
         terminations += 1
       } },
@@ -45,6 +47,7 @@ describe('recording transfer transport', () => {
       channelCount: 1,
       buffer,
     })
+    expect(queuedFrames).toEqual([1])
     expect(buffer.byteLength).toBe(0)
     const finishing = transport.finalize()
     expect(worklet.messages.at(-1)).toMatchObject({ type: 'finalize' })
@@ -65,6 +68,7 @@ describe('recording transfer transport', () => {
     })
     expect(worker.messages.at(-1)).not.toMatchObject({ type: 'finalize' })
     worker.receive({ type: 'return', generation: 2, sessionId: 'take', blockId: 0, buffer: transferredBlock.buffer })
+    expect(queuedFrames).toEqual([1, 0])
     expect(transferredBlock.buffer.byteLength).toBe(0)
     expect(worker.messages.at(-1)).toMatchObject({ type: 'finalize' })
     worker.receive({ type: 'finalized', generation: 2, sessionId: 'take', capturedFrames: 1 })

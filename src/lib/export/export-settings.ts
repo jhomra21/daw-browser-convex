@@ -1,4 +1,12 @@
 import type { ExportRange } from '@daw-browser/audio-engine/export-range'
+import {
+  normalizeExportNormalization,
+  normalizeExportTailPolicy,
+  normalizeWavEncodingSettings,
+  type ExportNormalization,
+  type ExportTailPolicy,
+  type WavEncodingSettings,
+} from '@daw-browser/audio-engine/export-fidelity'
 import type { LossyExportAudioFormat } from '@daw-browser/shared'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { TimelineRangeSelection } from '~/lib/timeline-range-selection'
@@ -8,11 +16,72 @@ export type ExportSampleRate = 44100 | 48000 | 96000
 export type ExportRenderSettings = {
   sampleRate: ExportSampleRate
   numberOfChannels: 1 | 2
-  normalize: boolean
+  normalization: ExportNormalization
+  tail: ExportTailPolicy
 }
 
 export type ExportEncodingSettings = {
   bitrateByFormat: Partial<Record<LossyExportAudioFormat, number>>
+  wav: WavEncodingSettings
+}
+
+type PersistedExportSettings = {
+  render: ExportRenderSettings
+  encoding: ExportEncodingSettings
+}
+
+const defaultExportSettings: PersistedExportSettings = {
+  render: {
+    sampleRate: 44100,
+    numberOfChannels: 2,
+    normalization: { mode: 'none' },
+    tail: { mode: 'none' },
+  },
+  encoding: {
+    bitrateByFormat: {},
+    wav: { codec: 'pcm-s16', dither: 'none' },
+  },
+}
+
+const normalizePersistedExportSettings = (value: unknown): PersistedExportSettings => {
+  if (!value || typeof value !== 'object') return defaultExportSettings
+  const render = Reflect.get(value, 'render')
+  const encoding = Reflect.get(value, 'encoding')
+  const legacyNormalize = render && typeof render === 'object' && Reflect.get(render, 'normalize') === true
+  const sampleRate = render && typeof render === 'object' ? Reflect.get(render, 'sampleRate') : undefined
+  const numberOfChannels = render && typeof render === 'object' ? Reflect.get(render, 'numberOfChannels') : undefined
+  const bitrateByFormat = encoding && typeof encoding === 'object' ? Reflect.get(encoding, 'bitrateByFormat') : undefined
+  return {
+    render: {
+      sampleRate: sampleRate === 48000 || sampleRate === 96000 ? sampleRate : 44100,
+      numberOfChannels: numberOfChannels === 1 ? 1 : 2,
+      normalization: legacyNormalize
+        ? { mode: 'sample-peak', targetDbfs: 0 }
+        : normalizeExportNormalization(render && typeof render === 'object' ? Reflect.get(render, 'normalization') : undefined),
+      tail: normalizeExportTailPolicy(render && typeof render === 'object' ? Reflect.get(render, 'tail') : undefined),
+    },
+    encoding: {
+      bitrateByFormat: bitrateByFormat && typeof bitrateByFormat === 'object' ? bitrateByFormat : {},
+      wav: normalizeWavEncodingSettings(encoding && typeof encoding === 'object' ? Reflect.get(encoding, 'wav') : undefined),
+    },
+  }
+}
+
+const EXPORT_SETTINGS_STORAGE_KEY = 'daw:export-settings:v2'
+
+export const loadPersistedExportSettings = (): PersistedExportSettings => {
+  if (typeof localStorage === 'undefined') return defaultExportSettings
+  try {
+    const raw = localStorage.getItem(EXPORT_SETTINGS_STORAGE_KEY)
+    return raw ? normalizePersistedExportSettings(JSON.parse(raw)) : defaultExportSettings
+  } catch {
+    return defaultExportSettings
+  }
+}
+
+export const savePersistedExportSettings = (settings: PersistedExportSettings): void => {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem(EXPORT_SETTINGS_STORAGE_KEY, JSON.stringify(settings))
 }
 
 export const createCustomExportRange = (startSec: number, lengthSec: number): ExportRange => {

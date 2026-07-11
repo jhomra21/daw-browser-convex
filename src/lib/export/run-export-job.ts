@@ -1,5 +1,6 @@
-import type { AudioEffectRuntimeInstance, ExportFx } from '@daw-browser/audio-engine/export-mixdown'
+import type { AudioEffectRuntimeInstance, ExportFx, StemMode, StemRecombinationMetadata } from '@daw-browser/audio-engine/export-mixdown'
 import { getExportRangeBounds, type ExportRange } from '@daw-browser/audio-engine/export-range'
+import { getExportTailMaximumSec, type ExportAnalysisReport } from '@daw-browser/audio-engine/export-fidelity'
 import type { ExportAudioFormat } from '@daw-browser/shared'
 import { formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectKind, isLocalId, isLossyExportAudioFormat, normalizeCompressorParams,
   normalizeAutoFilterParamsEnvelope, normalizeAutoPanParamsEnvelope, normalizeChorusParamsEnvelope, normalizeDelayParams,
@@ -24,10 +25,23 @@ import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import { isRenderableExportTrack, type ExportEncodingSettings, type ExportRenderSettings } from '~/lib/export/export-settings'
+import { processRenderedExport } from '~/lib/export/process-rendered-export'
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number]
 
-export type ExportPhase = 'preparing' | 'rendering' | 'encoding' | 'saving'
+export type ExportPhase =
+  | 'snapshot'
+  | 'source-range'
+  | 'preroll'
+  | 'tail'
+  | 'rendering'
+  | 'analyzing'
+  | 'gain'
+  | 'limiting'
+  | 'verifying'
+  | 'quantizing'
+  | 'encoding'
+  | 'saving'
 
 export type ExportProgress = {
   phase: ExportPhase
@@ -38,6 +52,7 @@ export type ExportProgress = {
   currentFormat?: ExportAudioFormat
   completedFormats?: number
   totalFormats?: number
+  analysis?: ExportAnalysisReport
 }
 
 export type TimelineExportRequest = {
@@ -57,14 +72,14 @@ export type TimelineExportRequest = {
 }
 
 export type StemExportSelection =
-  | { stemMode: 'all-tracks' }
-  | { stemMode: 'selected-tracks'; selectedTrackIds: readonly string[] }
+  | { stemSelection: 'all-tracks'; stemMode: StemMode }
+  | { stemSelection: 'selected-tracks'; stemMode: StemMode; selectedTrackIds: readonly string[] }
 
 type StemExportRequest = TimelineExportRequest & StemExportSelection
 
 export type ExportOutput =
-  | { destination: 'local'; name: string }
-  | { destination: 'cloud'; name: string; url: string }
+  | { destination: 'local'; name: string; analysis?: ExportAnalysisReport; stem?: StemRecombinationMetadata }
+  | { destination: 'cloud'; name: string; url: string; analysis?: ExportAnalysisReport; stem?: StemRecombinationMetadata }
 
 export type ExportOutcome =
   | { type: 'success'; outputs: readonly ExportOutput[] }
@@ -267,6 +282,12 @@ const throwIfExportAborted = (signal: AbortSignal) => {
 const ENCODING_PROGRESS_STEP_BYTES = 256 * 1024
 const MAX_CONCURRENT_BUFFER_LOADS = 4
 
+const createExportSeed = () => {
+  const values = new Uint32Array(1)
+  crypto.getRandomValues(values)
+  return values[0]
+}
+
 const createEncodingProgressReporter = (
   report: (sizeBytes: number) => void,
 ): ((sizeBytes: number) => void) => {
@@ -415,9 +436,12 @@ async function loadExportFxWithDrumRackBuffers(
 }
 
 const collectStemTracks = (input: StemExportSelection & { tracks: RuntimeTrack[] }): RuntimeTrack[] => {
-  if (input.stemMode === 'all-tracks') return input.tracks.filter(isRenderableExportTrack)
+  const matchesMode = (track: RuntimeTrack) => input.stemMode === 'channel-output'
+    ? track.channelRole === 'group' || track.channelRole === 'return'
+    : isRenderableExportTrack(track)
+  if (input.stemSelection === 'all-tracks') return input.tracks.filter(matchesMode)
   const selectedIds = new Set(input.selectedTrackIds)
-  return input.tracks.filter((track) => selectedIds.has(track.id) && isRenderableExportTrack(track))
+  return input.tracks.filter((track) => selectedIds.has(track.id) && matchesMode(track))
 }
 
 const createUniqueStemFileName = (
@@ -457,7 +481,7 @@ const createSaveTypes = (format: ExportAudioFormat): FilePickerAcceptType[] => {
 
 const reportFormatProgress = (
   input: Pick<TimelineExportRequest, 'onProgress'>,
-  phase: Extract<ExportPhase, 'encoding' | 'saving'>,
+  phase: Extract<ExportPhase, 'quantizing' | 'encoding' | 'saving'>,
   format: ExportAudioFormat,
   completedFormats: number,
   totalFormats: number,
@@ -499,7 +523,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     localMetadataRows.length = 0
   }
   try {
-    input.onProgress?.({ phase: 'preparing' })
+    input.onProgress?.({ phase: 'snapshot' })
     const formats = requireExportFormats(input.formats)
     const multiFormat = formats.length > 1
     const exportDate = new Date()
@@ -511,6 +535,16 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     const localDirectory = localProjectId && multiFormat ? await chooseLocalExportDirectory() : undefined
     throwIfExportAborted(input.signal)
     const preloadTracks = input.getTracks()
+    input.onProgress?.({ phase: 'source-range' })
+    const sourceBounds = getExportRangeBounds(preloadTracks, input.range)
+    input.onProgress?.({ phase: 'preroll' })
+    input.onProgress?.({ phase: 'tail' })
+    const tailMaximumSec = getExportTailMaximumSec(input.render.tail)
+    const renderRange: ExportRange = {
+      mode: 'custom',
+      startSec: sourceBounds.startSec,
+      endSec: sourceBounds.endSec + tailMaximumSec,
+    }
     const mixdownModule = import('@daw-browser/audio-engine/export-mixdown')
     const [exportMixdown, , fx, automationEnvelopes] = await Promise.all([
       mixdownModule,
@@ -524,7 +558,8 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     const rendered = await exportMixdown.renderMixdown({
       tracks,
       bpm: input.bpm,
-      range: input.range,
+      range: renderRange,
+      sourceEndSec: sourceBounds.endSec,
       sampleRate: input.render.sampleRate,
       numberOfChannels: input.render.numberOfChannels,
       fx,
@@ -533,7 +568,21 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       signal: input.signal,
     })
     throwIfExportAborted(input.signal)
-    if (input.render.normalize) exportMixdown.normalizeAudioBufferInPlace(rendered)
+    const processed = processRenderedExport({
+      rendered,
+      sourceDurationSec: sourceBounds.endSec - sourceBounds.startSec,
+      render: input.render,
+      signal: input.signal,
+    })
+    const exportBuffer = processed.buffer
+    input.onProgress?.({ phase: 'analyzing' })
+    if (input.render.normalization.mode !== 'none') input.onProgress?.({ phase: 'gain' })
+    if (input.render.normalization.mode === 'loudness' && input.render.normalization.limiting === 'true-peak') {
+      input.onProgress?.({ phase: 'limiting' })
+    }
+    const analysis = processed.analysis
+    input.onProgress?.({ phase: 'verifying', analysis })
+    const ditherSeed = createExportSeed()
     let completedFormats = 0
     for (const format of formats) {
       const fileName = createMixdownFileName(exportDate, format)
@@ -542,16 +591,19 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         : localDirectory
           ? await createLocalExportDirectoryWritable(localDirectory, fileName)
           : undefined
+      if (format === 'wav') reportFormatProgress(input, 'quantizing', format, completedFormats, formats.length)
       reportFormatProgress(input, 'encoding', format, completedFormats, formats.length)
       const reportEncodingProgress = createEncodingProgressReporter((sizeBytes) => {
         reportFormatProgress(input, 'encoding', format, completedFormats, formats.length, sizeBytes)
       })
-      const enc = await exportMixdown.encodeAudioBuffer(rendered, {
+      const enc = await exportMixdown.encodeAudioBuffer(exportBuffer, {
         format,
         bitrate: isLossyExportAudioFormat(format) ? input.encoding.bitrateByFormat[format] : undefined,
         target: localWritable ? createLocalExportTarget(localWritable) : { mode: 'buffer' },
         signal: input.signal,
         onWrite: reportEncodingProgress,
+        wav: input.encoding.wav,
+        ditherSeed,
       })
       throwIfExportAborted(input.signal)
       const savedName = localFileHandle?.name ?? fileName
@@ -571,7 +623,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
           sizeBytes: enc.sizeBytes,
         })
         throwIfExportAborted(input.signal)
-        outputs.push({ destination: 'local', name: savedName })
+        outputs.push({ destination: 'local', name: savedName, analysis })
       } else {
         if (!projectId) throw new Error('Missing room')
         if (!enc.blob) throw new Error('Export did not produce an uploadable file.')
@@ -586,7 +638,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
           signal: input.signal,
         })
         throwIfExportAborted(input.signal)
-        outputs.push({ destination: 'cloud', name: fileName, url: upload.url })
+        outputs.push({ destination: 'cloud', name: fileName, url: upload.url, analysis })
       }
       completedFormats += 1
     }
@@ -604,20 +656,45 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
 export async function runStemExport(input: StemExportRequest): Promise<ExportOutcome> {
   const outputs: ExportOutput[] = []
   try {
-    input.onProgress?.({ phase: 'preparing' })
+    input.onProgress?.({ phase: 'snapshot' })
     const formats = requireExportFormats(input.formats)
     const preloadTracks = input.getTracks()
     const preloadStemTracks = collectStemTracks({ ...input, tracks: preloadTracks })
     if (preloadStemTracks.length === 0) throw new Error('Select at least one track to export stems.')
     const exportDirectory = await chooseStemExportDirectory()
     throwIfExportAborted(input.signal)
-    const mixdownModule = import('@daw-browser/audio-engine/export-mixdown')
-    const preloadStemTrackIds = new Set(preloadStemTracks.map((track) => track.id))
-    const [exportMixdown, , fx, automationEnvelopes] = await Promise.all([
-      mixdownModule,
-      ensureBuffersForRange({ ...input, tracks: preloadStemTracks }),
-      loadExportFxWithDrumRackBuffers(input.projectId, input.userId, input.masterVolume, input.signal, preloadStemTrackIds),
+    const [exportMixdown, fx, automationEnvelopes] = await Promise.all([
+      import('@daw-browser/audio-engine/export-mixdown'),
+      loadExportFx(input.projectId, input.userId, input.masterVolume),
       loadExportAutomation(input.projectId, input.userId),
+    ])
+    const sourceBounds = getExportRangeBounds(preloadTracks, input.range)
+    const tailMaximumSec = getExportTailMaximumSec(input.render.tail)
+    const renderRange: ExportRange = {
+      mode: 'custom',
+      startSec: sourceBounds.startSec,
+      endSec: sourceBounds.endSec + tailMaximumSec,
+    }
+    const graph = exportMixdown.resolveExportMixerGraph({ tracks: preloadTracks, fx })
+    const preloadTrackIds = new Set<string>()
+    for (const track of preloadStemTracks) {
+      const plan = exportMixdown.createStemRenderPlan(
+        graph,
+        { id: track.id, name: track.name, mode: input.stemMode, targetTrackId: track.id },
+        input.sidechainRoutes,
+      )
+      for (const id of plan.sourceTrackIds) preloadTrackIds.add(id)
+      for (const id of plan.detectorOnlyTrackIds) preloadTrackIds.add(id)
+      const scope = exportMixdown.createSourceAutomationScope(plan.graph, {
+        sourceTrackIds: plan.sourceTrackIds,
+        includeMasterFx: input.stemMode === 'full-master-contribution',
+      })
+      for (const id of scope.trackIds ?? []) preloadTrackIds.add(id)
+    }
+    const preloadAssetTracks = preloadTracks.filter((track) => preloadTrackIds.has(track.id))
+    await Promise.all([
+      ensureBuffersForRange({ ...input, tracks: preloadAssetTracks, range: input.range }),
+      loadDrumRackExportBuffers(fx, input.signal, preloadTrackIds),
     ])
     throwIfExportAborted(input.signal)
     const tracks = input.getTracks()
@@ -628,7 +705,8 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
     const stemRenderSession = exportMixdown.createStemRenderSession({
       tracks,
       bpm: input.bpm,
-      range: input.range,
+      range: renderRange,
+      sourceEndSec: sourceBounds.endSec,
       sampleRate: input.render.sampleRate,
       numberOfChannels: input.render.numberOfChannels,
       fx,
@@ -643,9 +721,21 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
         completedStems,
         totalStems: stemTracks.length,
       })
-      const stemBuffer = await stemRenderSession.renderTrackStem(track)
+      const renderedStem = await stemRenderSession.renderStem({
+        id: track.id,
+        name: track.name,
+        mode: input.stemMode,
+        targetTrackId: track.id,
+      })
+      const processed = processRenderedExport({
+        rendered: renderedStem.buffer,
+        sourceDurationSec: sourceBounds.endSec - sourceBounds.startSec,
+        render: input.render,
+        signal: input.signal,
+      })
+      const stemBuffer = processed.buffer
       throwIfExportAborted(input.signal)
-      if (input.render.normalize) exportMixdown.normalizeAudioBufferInPlace(stemBuffer)
+      const analysis = processed.analysis
       let completedFormats = 0
       for (const format of formats) {
         const metadata = getExportAudioFormatMetadata(format)
@@ -661,8 +751,10 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
           target: createLocalExportTarget(localWritable),
           signal: input.signal,
           onWrite: reportEncodingProgress,
+          wav: input.encoding.wav,
+          ditherSeed: createExportSeed(),
         })
-        outputs.push({ destination: 'local', name: `stems/${fileName}` })
+        outputs.push({ destination: 'local', name: `stems/${fileName}`, analysis, stem: renderedStem.metadata })
         completedFormats += 1
         throwIfExportAborted(input.signal)
       }

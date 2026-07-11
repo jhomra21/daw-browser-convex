@@ -10,6 +10,9 @@ import type { ExportOutput } from '~/lib/export/run-export-job'
 import ExportProgressStatus from '~/components/export/ExportProgressStatus'
 import { createCustomExportRange, type ExportSampleRate } from '~/lib/export/export-settings'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
+import type { WavEncodingSettings } from '@daw-browser/audio-engine/export-fidelity'
+import { loadPersistedExportSettings, savePersistedExportSettings } from '~/lib/export/export-settings'
+import type { StemMode } from '@daw-browser/audio-engine/export-mixdown'
 
 type ExportSource = 'mixdown' | 'all-stems' | 'selected-stems'
 type ExportRangeMode = ExportRange['mode']
@@ -112,17 +115,26 @@ const ExportFormatOption: Component<{
 const roundExportTime = (value: number): number => Math.round(value * 100) / 100
 
 const ExportDialog: Component<Props> = (props) => {
+  const persisted = loadPersistedExportSettings()
   const initialDuration = () => getExportRangeDuration(props.getTracks(), { mode: 'whole' })
   const initialRangeMode: ExportRangeMode = props.loopEnabled ? 'loop' : 'whole'
   const [rangeMode, setRangeMode] = createSignal<ExportRangeMode>(initialRangeMode)
   const [source, setSource] = createSignal<ExportSource>('mixdown')
+  const [stemMode, setStemMode] = createSignal<StemMode>('reachable-routing')
   const [renderStartSec, setRenderStartSec] = createSignal(props.loopEnabled ? props.loopStartSec : 0)
   const [renderLengthSec, setRenderLengthSec] = createSignal(props.loopEnabled
     ? Math.max(0.001, props.loopEndSec - props.loopStartSec)
     : initialDuration())
-  const [sampleRate, setSampleRate] = createSignal<ExportSampleRate>(44100)
-  const [numberOfChannels, setNumberOfChannels] = createSignal<1 | 2>(2)
-  const [normalize, setNormalize] = createSignal(false)
+  const [sampleRate, setSampleRate] = createSignal<ExportSampleRate>(persisted.render.sampleRate)
+  const [numberOfChannels, setNumberOfChannels] = createSignal<1 | 2>(persisted.render.numberOfChannels)
+  const [normalizationMode, setNormalizationMode] = createSignal<'none' | 'sample-peak' | 'loudness'>(persisted.render.normalization.mode)
+  const [targetLufs, setTargetLufs] = createSignal(persisted.render.normalization.mode === 'loudness' ? persisted.render.normalization.targetLufs : -14)
+  const [truePeakCeilingDbtp, setTruePeakCeilingDbtp] = createSignal(persisted.render.normalization.mode === 'loudness' ? persisted.render.normalization.truePeakCeilingDbtp : -1)
+  const [truePeakLimiting, setTruePeakLimiting] = createSignal(persisted.render.normalization.mode === 'loudness' && persisted.render.normalization.limiting === 'true-peak')
+  const [tailMode, setTailMode] = createSignal<'none' | 'fixed' | 'automatic'>(persisted.render.tail.mode)
+  const [fixedTailSec, setFixedTailSec] = createSignal(persisted.render.tail.mode === 'fixed' ? persisted.render.tail.durationSec : 2)
+  const [wavCodec, setWavCodec] = createSignal<'pcm-s16' | 'pcm-s24' | 'pcm-f32'>(persisted.encoding.wav.codec)
+  const [wavDither, setWavDither] = createSignal<'none' | 'tpdf'>(persisted.encoding.wav.dither)
   const [mp3Bitrate, setMp3Bitrate] = createSignal(getExportAudioBitrate('mp3'))
   const [opusBitrate, setOpusBitrate] = createSignal(getExportAudioBitrate('ogg-opus'))
   const [busy, setBusy] = createSignal(false)
@@ -135,10 +147,30 @@ const ExportDialog: Component<Props> = (props) => {
   const renderSettings = () => ({
     sampleRate: sampleRate(),
     numberOfChannels: numberOfChannels(),
-    normalize: normalize(),
+    normalization: normalizationMode() === 'sample-peak'
+      ? { mode: 'sample-peak' as const, targetDbfs: 0 }
+      : normalizationMode() === 'loudness'
+        ? {
+            mode: 'loudness' as const,
+            targetLufs: targetLufs(),
+            truePeakCeilingDbtp: truePeakCeilingDbtp(),
+            limiting: truePeakLimiting() ? 'true-peak' as const : 'off' as const,
+          }
+        : { mode: 'none' as const },
+    tail: tailMode() === 'fixed'
+      ? { mode: 'fixed' as const, durationSec: fixedTailSec() }
+      : tailMode() === 'automatic'
+        ? { mode: 'automatic' as const, thresholdDbfs: -60, holdSec: 1, maximumSec: 10 }
+        : { mode: 'none' as const },
   })
+  const wavSettings = (): WavEncodingSettings => {
+    const codec = wavCodec()
+    if (codec === 'pcm-f32') return { codec, dither: 'none' }
+    return { codec, dither: wavDither() }
+  }
   const encodingSettings = () => ({
     bitrateByFormat: { mp3: mp3Bitrate(), 'ogg-opus': opusBitrate() },
+    wav: wavSettings(),
   })
   const supportRequest = createMemo(() => ({
     sampleRate: sampleRate(),
@@ -252,13 +284,15 @@ const ExportDialog: Component<Props> = (props) => {
         sidechainRoutes: props.sidechainRoutes,
         ensureClipBuffer: props.ensureClipBuffer,
       }
+      savePersistedExportSettings({ render: baseRequest.render, encoding: baseRequest.encoding })
       const outcome = currentSource === 'mixdown'
         ? await exportContext.enqueueTimelineExport(baseRequest)
         : currentSource === 'all-stems'
-          ? await exportContext.enqueueStemExport({ ...baseRequest, stemMode: 'all-tracks' })
+          ? await exportContext.enqueueStemExport({ ...baseRequest, stemSelection: 'all-tracks', stemMode: stemMode() })
           : await exportContext.enqueueStemExport({
             ...baseRequest,
-            stemMode: 'selected-tracks',
+            stemSelection: 'selected-tracks',
+            stemMode: stemMode(),
             selectedTrackIds: props.selectedTrackIds,
           })
       setOutputs(outcome.outputs)
@@ -288,6 +322,24 @@ const ExportDialog: Component<Props> = (props) => {
                 <option value="selected-stems" disabled={!selectedStemAvailable()}>Selected Tracks Only</option>
               </ExportSelect>
             </ExportField>
+            <Show when={source() !== 'mixdown'}>
+              <ExportField label="Stem Signal" labelFor="export-stem-mode">
+                <ExportSelect id="export-stem-mode" value={stemMode()} onChange={(event) => {
+                  const value = event.currentTarget.value
+                  setStemMode(
+                    value === 'dry-source' || value === 'post-track-fx' || value === 'channel-output' || value === 'full-master-contribution'
+                      ? value
+                      : 'reachable-routing',
+                  )
+                }}>
+                  <option value="dry-source">Dry Source</option>
+                  <option value="post-track-fx">Post Track FX</option>
+                  <option value="reachable-routing">Reachable Routing</option>
+                  <option value="channel-output">Group / Return Output</option>
+                  <option value="full-master-contribution">Full Master Contribution</option>
+                </ExportSelect>
+              </ExportField>
+            </Show>
             <ExportField label="Range Shortcuts">
               <div class="flex gap-2">
                 <Button
@@ -338,15 +390,61 @@ const ExportDialog: Component<Props> = (props) => {
                 <option value="1">Convert to Mono</option>
               </ExportSelect>
             </ExportField>
-            <ExportField label="Normalize">
-              <label class="flex h-7 items-center gap-2 text-xs">
-                <input type="checkbox" checked={normalize()} onChange={(event) => setNormalize(event.currentTarget.checked)} />
-                Peak level to 0 dBFS
-              </label>
+            <ExportField label="Normalization" labelFor="export-normalization">
+              <ExportSelect id="export-normalization" value={normalizationMode()} onChange={(event) => {
+                const value = event.currentTarget.value
+                setNormalizationMode(value === 'sample-peak' || value === 'loudness' ? value : 'none')
+              }}>
+                <option value="none">None</option>
+                <option value="sample-peak">Sample peak (0 dBFS)</option>
+                <option value="loudness">Loudness</option>
+              </ExportSelect>
             </ExportField>
+            <Show when={normalizationMode() === 'loudness'}>
+              <ExportField label="Target LUFS" labelFor="export-target-lufs">
+                <input id="export-target-lufs" type="number" min="-36" max="-5" step="0.1" class="h-7 w-full border border-border bg-app-surface px-2 text-xs" value={targetLufs()} onInput={(event) => setTargetLufs(event.currentTarget.valueAsNumber)} />
+              </ExportField>
+              <ExportField label="True Peak Ceiling" labelFor="export-true-peak">
+                <input id="export-true-peak" type="number" min="-12" max="0" step="0.1" class="h-7 w-full border border-border bg-app-surface px-2 text-xs" value={truePeakCeilingDbtp()} onInput={(event) => setTruePeakCeilingDbtp(event.currentTarget.valueAsNumber)} />
+              </ExportField>
+              <ExportField label="True Peak Limiter">
+                <input type="checkbox" checked={truePeakLimiting()} onChange={(event) => setTruePeakLimiting(event.currentTarget.checked)} />
+              </ExportField>
+            </Show>
+            <ExportField label="Render Tail" labelFor="export-tail">
+              <ExportSelect id="export-tail" value={tailMode()} onChange={(event) => {
+                const value = event.currentTarget.value
+                setTailMode(value === 'fixed' || value === 'automatic' ? value : 'none')
+              }}>
+                <option value="none">None</option>
+                <option value="fixed">Fixed</option>
+                <option value="automatic">Automatic</option>
+              </ExportSelect>
+            </ExportField>
+            <Show when={tailMode() === 'fixed'}>
+              <ExportField label="Tail Duration" labelFor="export-tail-duration">
+                <input id="export-tail-duration" type="number" min="0" max="60" step="0.1" class="h-7 w-full border border-border bg-app-surface px-2 text-xs" value={fixedTailSec()} onInput={(event) => setFixedTailSec(event.currentTarget.valueAsNumber)} />
+              </ExportField>
+            </Show>
           </ExportSection>
 
           <ExportSection title="Encoding Options">
+            <ExportField label="WAV Depth" labelFor="export-wav-codec">
+              <ExportSelect id="export-wav-codec" value={wavCodec()} onChange={(event) => {
+                const value = event.currentTarget.value
+                setWavCodec(value === 'pcm-s24' || value === 'pcm-f32' ? value : 'pcm-s16')
+              }}>
+                <option value="pcm-s16">16-bit PCM</option>
+                <option value="pcm-s24">24-bit PCM</option>
+                <option value="pcm-f32">32-bit Float</option>
+              </ExportSelect>
+            </ExportField>
+            <ExportField label="WAV Dither" labelFor="export-wav-dither">
+              <ExportSelect id="export-wav-dither" value={wavCodec() === 'pcm-f32' ? 'none' : wavDither()} onChange={(event) => setWavDither(event.currentTarget.value === 'tpdf' ? 'tpdf' : 'none')}>
+                <option value="none">None</option>
+                <option value="tpdf" disabled={wavCodec() === 'pcm-f32'}>TPDF</option>
+              </ExportSelect>
+            </ExportField>
             <ExportField label="Lossless">
               <div class="grid grid-cols-2 gap-x-3">
                 <ExportFormatOption
@@ -398,7 +496,7 @@ const ExportDialog: Component<Props> = (props) => {
           <div class="border-t border-border pt-3 text-xs">
             <div class="font-medium text-foreground">Export Configuration</div>
             <div class="mt-1 leading-relaxed text-muted-foreground">
-              {sourceLabel()}{source() === 'selected-stems' ? ` (${props.selectedTrackIds.length} tracks)` : ''}, {durationSec().toFixed(2)} s, {numberOfChannels() === 1 ? 'Mono' : 'Stereo'}, {sampleRate() / 1000} kHz, {normalize() ? 'Normalized' : 'Not normalized'}, {selectedFormatLabels() || 'No format selected'}
+              {sourceLabel()}{source() === 'selected-stems' ? ` (${props.selectedTrackIds.length} tracks)` : ''}, {durationSec().toFixed(2)} s, {numberOfChannels() === 1 ? 'Mono' : 'Stereo'}, {sampleRate() / 1000} kHz, {normalizationMode() === 'none' ? 'Not normalized' : normalizationMode() === 'sample-peak' ? 'Sample-peak normalized' : `${targetLufs()} LUFS`}, {selectedFormatLabels() || 'No format selected'}
             </div>
           </div>
 

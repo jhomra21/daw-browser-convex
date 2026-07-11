@@ -16,6 +16,53 @@ export type TrackStereoLevelsBatch = ReadonlyMap<string, TrackStereoLevels>
 
 export type TrackStereoLevelsListener = (levels: TrackStereoLevelsBatch) => void
 
+export type TrackMeterChannelFrame = {
+  samplePeak: number
+  rms: number
+  clipping: boolean
+  dcMean: number
+  truePeak: number | null
+}
+
+export type TrackMeterFrame = {
+  frameCount: number
+  channels: readonly [TrackMeterChannelFrame, TrackMeterChannelFrame]
+  correlation: number
+}
+
+export type TrackMeterFrameBatch = ReadonlyMap<string, TrackMeterFrame>
+export type TrackMeterFrameListener = (frames: TrackMeterFrameBatch) => void
+
+const readChannelFrame = (value: unknown): TrackMeterChannelFrame | null => {
+  if (!value || typeof value !== 'object') return null
+  if (!('samplePeak' in value) || typeof value.samplePeak !== 'number' || !Number.isFinite(value.samplePeak) || value.samplePeak < 0) return null
+  if (!('rms' in value) || typeof value.rms !== 'number' || !Number.isFinite(value.rms) || value.rms < 0) return null
+  if (!('clipping' in value) || typeof value.clipping !== 'boolean') return null
+  if (!('dcMean' in value) || typeof value.dcMean !== 'number' || !Number.isFinite(value.dcMean)) return null
+  if (!('truePeak' in value) || (value.truePeak !== null
+    && (typeof value.truePeak !== 'number' || !Number.isFinite(value.truePeak) || value.truePeak < 0))) return null
+  return {
+    samplePeak: value.samplePeak,
+    rms: value.rms,
+    clipping: value.clipping,
+    dcMean: value.dcMean,
+    truePeak: value.truePeak,
+  }
+}
+
+export function readTrackMeterFrame(data: unknown): TrackMeterFrame | null {
+  if (!data || typeof data !== 'object' || !('type' in data) || data.type !== 'meter-frame') return null
+  if (!('frameCount' in data) || typeof data.frameCount !== 'number'
+    || !Number.isInteger(data.frameCount) || data.frameCount < 0) return null
+  if (!('channels' in data) || !Array.isArray(data.channels) || data.channels.length !== 2) return null
+  if (!('correlation' in data) || typeof data.correlation !== 'number'
+    || !Number.isFinite(data.correlation) || data.correlation < -1 || data.correlation > 1) return null
+  const left = readChannelFrame(data.channels[0])
+  const right = readChannelFrame(data.channels[1])
+  if (!left || !right) return null
+  return { frameCount: data.frameCount, channels: [left, right], correlation: data.correlation }
+}
+
 export function readTrackStereoLevels(data: unknown): TrackStereoLevels | null {
   if (!data || typeof data !== 'object') return null
   if (!('type' in data) || data.type !== 'levels') return null
@@ -36,7 +83,10 @@ export function createMeteringRuntime() {
   const retriedWorkletGenerations = new Map<string, number>()
   const workletLevels = new Map<string, TrackStereoLevels>()
   const pendingLevels = new Map<string, TrackStereoLevels>()
+  const workletFrames = new Map<string, TrackMeterFrame>()
+  const pendingFrames = new Map<string, TrackMeterFrame>()
   const listeners = new Set<TrackStereoLevelsListener>()
+  const frameListeners = new Set<TrackMeterFrameListener>()
   const zeroTrackStereoLevels: TrackStereoLevels = { left: 0, right: 0 }
   let flushHandle: number | null = null
   let closed = false
@@ -54,12 +104,17 @@ export function createMeteringRuntime() {
       const batch = new Map(pendingLevels)
       pendingLevels.clear()
       emit(batch)
+      if (pendingFrames.size > 0) {
+        const frames = new Map(pendingFrames)
+        pendingFrames.clear()
+        for (const listener of frameListeners) listener(frames)
+      }
     })
   }
 
   const updateWorkletSubscriptionState = () => {
-    const active = listeners.size > 0
-    for (const node of workletNodes.values()) node.port.postMessage({ active })
+    const active = listeners.size > 0 || frameListeners.size > 0
+    for (const node of workletNodes.values()) node.port.postMessage({ active, truePeak: frameListeners.size > 0 })
   }
 
   const ensureWorkletModule = (ctx: AudioContext) => {
@@ -89,10 +144,16 @@ export function createMeteringRuntime() {
       } catch {
         return
       }
-      node.port.postMessage({ active: listeners.size > 0 })
+      node.port.postMessage({ active: listeners.size > 0 || frameListeners.size > 0, truePeak: frameListeners.size > 0 })
       node.port.onmessage = (event) => {
-        const next = readTrackStereoLevels(event.data)
-        if (!next) return
+        const frame = readTrackMeterFrame(event.data)
+        if (!frame) return
+        workletFrames.set(trackId, frame)
+        pendingFrames.set(trackId, frame)
+        const next = {
+          left: Math.min(1, Math.max(0, Math.sqrt(frame.channels[0].rms))),
+          right: Math.min(1, Math.max(0, Math.sqrt(frame.channels[1].rms))),
+        }
         workletLevels.set(trackId, next)
         queueLevels(trackId, next)
       }
@@ -146,6 +207,18 @@ export function createMeteringRuntime() {
         listeners.delete(listener)
         updateWorkletSubscriptionState()
       }
+    },
+    subscribeTrackMeterFrames: (listener: TrackMeterFrameListener) => {
+      frameListeners.add(listener)
+      if (workletFrames.size > 0) listener(new Map(workletFrames))
+      updateWorkletSubscriptionState()
+      return () => {
+        frameListeners.delete(listener)
+        updateWorkletSubscriptionState()
+      }
+    },
+    resetTrackMeters: () => {
+      for (const node of workletNodes.values()) node.port.postMessage({ type: 'reset' })
     },
     reconnectTrackMeters: (ctx: AudioContext, trackId: string, output: GainNode, isCurrentOutput: () => boolean) => {
       ensureTrackMeterWorklet(ctx, trackId, output, isCurrentOutput)
@@ -208,6 +281,8 @@ export function createMeteringRuntime() {
         queueLevels(trackId, zeroTrackStereoLevels)
       }
       workletLevels.delete(trackId)
+      workletFrames.delete(trackId)
+      pendingFrames.delete(trackId)
       spectrumTmp.delete(trackId)
       spectrumOut.delete(trackId)
       spectrumLast.delete(trackId)
@@ -225,7 +300,11 @@ export function createMeteringRuntime() {
       workletGenerations.clear()
       retriedWorkletGenerations.clear()
       workletLevels.clear()
+      workletFrames.clear()
       pendingLevels.clear()
+      pendingFrames.clear()
+      listeners.clear()
+      frameListeners.clear()
       if (flushHandle !== null) {
         cancelAnimationFrame(flushHandle)
         flushHandle = null

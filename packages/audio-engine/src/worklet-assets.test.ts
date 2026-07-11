@@ -147,9 +147,20 @@ describe('checked-in worklet assets', () => {
     const onmessage = processor.port.onmessage
     if (!onmessage) throw new Error('Meter processor did not bind its message handler.')
     onmessage({ data: { active: true } })
-    const signal = new Float32Array(4096).fill(0.25)
-    expect(processor.process([[signal, signal]])).toBe(true)
-    expect(processor.port.messages).toEqual([{ type: 'levels', left: 0.5, right: 0.5 }])
+    const left = new Float32Array(2048).fill(0.25)
+    const right = new Float32Array(2048).fill(-0.25)
+    left[0] = 1
+    expect(processor.process([[left, right]])).toBe(true)
+    expect(processor.port.messages).toHaveLength(2)
+    expect(processor.port.messages[1]).toMatchObject({
+      type: 'meter-frame',
+      frameCount: 2048,
+      correlation: expect.any(Number),
+      channels: [
+        { samplePeak: 1, clipping: true, truePeak: null },
+        { samplePeak: 0.25, clipping: false, truePeak: null },
+      ],
+    })
   })
 
   test('registers and flushes transformed PCM from the exact recorder asset', async () => {

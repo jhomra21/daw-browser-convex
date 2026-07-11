@@ -188,6 +188,7 @@ export async function createOfflineMixerNodes(
   graph: ResolvedMixerGraph,
   bpm = 120,
   sidechainRoutes: readonly ExternalSidechainRoute[] = [],
+  detectorOnlyTrackIds: ReadonlySet<string> = new Set(),
 ): Promise<OfflineMixerNodes> {
   const chains = graph.channels.length + 1
   if (chains > MAX_OFFLINE_CHAINS) throw new Error(`Offline rendering is limited to ${MAX_OFFLINE_CHAINS} effect chains.`)
@@ -274,7 +275,8 @@ export async function createOfflineMixerNodes(
       const gate = target?.fx.staticWorkletByInstanceId.get(route.effectInstanceId)
       const targetNode = compressor?.workletNode ?? (gate?.kind === 'gate' ? gate.node : undefined)
       assert(source && target && targetNode, `Invalid offline sidechain route for effect ${route.effectInstanceId}`)
-      source.output.connect(targetNode, 0, 1)
+      const detectorSource = detectorOnlyTrackIds.has(route.sourceTrackId) ? source.gain : source.output
+      detectorSource.connect(targetNode, 0, 1)
     }
 
     return {

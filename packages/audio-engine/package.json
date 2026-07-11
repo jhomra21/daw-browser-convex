@@ -10,8 +10,10 @@
     "./browser-characterization": "./src/browser-characterization.ts",
     "./audio-scheduling": "./src/audio-scheduling.ts",
     "./export-audio-support": "./src/export-audio-support.ts",
+    "./export-fidelity": "./src/export-fidelity.ts",
     "./export-range": "./src/export-range.ts",
     "./export-mixdown": "./src/export-mixdown.ts",
+    "./loudness-analyzer": "./src/loudness-analyzer.ts",
     "./processor-release-contract": "./src/effects/processor-release-contract.ts",
     "./recording-encode-wav": "./src/recording/encode-wav.ts"
   },

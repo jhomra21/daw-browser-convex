@@ -79,7 +79,7 @@ export function ExportProvider(props: ExportProviderProps) {
   )
 
   const enqueueStemExport = (request: EnqueueStemExportRequest): Promise<ExportOutcome> => (
-    enqueueExport(request, request.stemMode === 'all-tracks' ? 'All track stems' : 'Selected track stems', (signal, onProgress) => runStemExport({ ...request, signal, onProgress }))
+    enqueueExport(request, request.stemSelection === 'all-tracks' ? 'All track stems' : 'Selected track stems', (signal, onProgress) => runStemExport({ ...request, signal, onProgress }))
   )
 
   const cancelExport = (jobId: string) => {

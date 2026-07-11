@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { createMeteringRuntime, readTrackStereoLevels } from './metering-runtime'
+import { createMeteringRuntime, readTrackMeterFrame, readTrackStereoLevels } from './metering-runtime'
 
 const originalAudioWorkletNode = globalThis.AudioWorkletNode
 const originalRequestAnimationFrame = globalThis.requestAnimationFrame
@@ -17,6 +17,26 @@ describe('meter worklet messages', () => {
     expect(readTrackStereoLevels({ left: 0.25, right: 0.5 })).toBeNull()
     expect(readTrackStereoLevels({ type: 'levels', left: -1, right: 0.5 })).toBeNull()
     expect(readTrackStereoLevels({ type: 'levels', left: Number.POSITIVE_INFINITY, right: 0.5 })).toBeNull()
+  })
+
+  test('accepts typed meter frames with DC, correlation, clipping, and true peak', () => {
+    const frame = {
+      type: 'meter-frame',
+      frameCount: 2048,
+      channels: [
+        { samplePeak: 1.1, rms: 0.5, clipping: true, dcMean: 0.25, truePeak: 1.12 },
+        { samplePeak: 0.5, rms: 0.25, clipping: false, dcMean: -0.25, truePeak: null },
+      ],
+      correlation: -1,
+    }
+    expect(readTrackMeterFrame(frame)).toEqual({
+      frameCount: 2048,
+      channels: [
+        { samplePeak: 1.1, rms: 0.5, clipping: true, dcMean: 0.25, truePeak: 1.12 },
+        { samplePeak: 0.5, rms: 0.25, clipping: false, dcMean: -0.25, truePeak: null },
+      ],
+      correlation: -1,
+    })
   })
 })
 
@@ -56,7 +76,15 @@ describe('meter worklet lifecycle', () => {
     runtime.reconnectTrackMeters(context, 'track-1', gain, () => true)
     await Bun.sleep(0)
 
-    nodes[0].port.onmessage?.({ data: { type: 'levels', left: 0.8, right: 0.6 } })
+    nodes[0].port.onmessage?.({ data: {
+      type: 'meter-frame',
+      frameCount: 2048,
+      channels: [
+        { samplePeak: 0.8, rms: 0.64, clipping: false, dcMean: 0, truePeak: null },
+        { samplePeak: 0.6, rms: 0.36, clipping: false, dcMean: 0, truePeak: null },
+      ],
+      correlation: 0,
+    } })
     nodes[0].onprocessorerror?.()
     await Bun.sleep(0)
     flush()

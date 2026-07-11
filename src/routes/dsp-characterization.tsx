@@ -35,7 +35,7 @@ function DspCharacterization() {
       <div class="mx-auto max-w-4xl">
         <h1 class="text-2xl font-semibold">DSP characterization</h1>
         <p class="mt-2 text-sm text-neutral-400">
-          Browser-only baseline for OfflineAudioContext and the current compressor worklet registration path.
+          Browser-only baseline for OfflineAudioContext DSP, worklet registration, and native sample-rate conversion.
         </p>
         <button
           type="button"

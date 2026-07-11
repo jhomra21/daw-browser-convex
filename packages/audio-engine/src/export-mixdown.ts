@@ -1,17 +1,7 @@
-import {
-  Output,
-  BufferTarget,
-  StreamTarget,
-  AudioBufferSource,
-  type StreamTargetChunk,
-  type Target,
-} from 'mediabunny'
-
 import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 import { connectSourceWithClipGain, getAudioBufferPlaybackParams, getScheduledMidiEvents } from './audio-scheduling'
 import { createAudioStretchCache } from './audio-stretch-cache'
 import {
-  getExportAudioFormatMetadata,
   getAutomationParameterDescriptor,
   assert,
   type ArpParams,
@@ -21,17 +11,11 @@ import {
   type DelayParamsLite,
   type DrumRackParams,
   type EqParamsLite,
-  type ExportAudioFormat,
   type ReverbParamsLite,
   type SaturatorParamsLite,
   type SynthParamsInput,
   type TrackInstrumentParams,
 } from '@daw-browser/shared'
-import {
-  createExportAudioOutputFormat,
-  getExportAudioCodec,
-  getExportAudioDefaultBitrate,
-} from './export-audio-support'
 import { createSynthVoiceOscillators, getSynthVoiceConfig, getSynthVoiceVelocity, scheduleSynthVoiceEnvelope } from './synth-voice'
 import { DRUM_RACK_CHOKE_FADE_SEC, scheduleDrumRackHit, type DrumRackResolvedBuffers } from './drum-rack-runtime'
 import { createOfflineMixerNodes } from './mixer/apply-offline-routing'
@@ -44,6 +28,7 @@ import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { getExportRangeBounds, type ExportRange } from './export-range'
 import { convertStereoToMonoSample } from './mixer/channel-layout'
 import { scanTruePeak } from './true-peak-scanner'
+export { encodeAudioBuffer, type EncodeAudioBufferOptions, type EncodeAudioBufferTarget } from './export-encoding'
 
 export type { AudioEffectRuntimeInstance }
 export type { ExportRange } from './export-range'
@@ -64,6 +49,7 @@ export type ExportRequest = {
   tracks: Track<AudioBuffer>[]
   bpm: number
   range: ExportRange
+  sourceEndSec?: number
   sampleRate?: number
   numberOfChannels?: number
   signal?: AbortSignal
@@ -73,22 +59,36 @@ export type ExportRequest = {
   cueTrackIds?: readonly string[]
 }
 
-type StemDefinition = {
+export type StemMode =
+  | 'dry-source'
+  | 'post-track-fx'
+  | 'reachable-routing'
+  | 'channel-output'
+  | 'full-master-contribution'
+
+export type StemDefinition = {
   id: string
   name: string
-  sourceTrackIds: string[]
-  includeMasterFx: boolean
+  mode: StemMode
+  targetTrackId: string
 }
 
-type RenderedStem = {
+export type StemRecombinationMetadata = {
+  recombinesToMaster: boolean
+  conditions: readonly string[]
+}
+
+export type RenderedStem = {
   id: string
   name: string
   buffer: AudioBuffer
+  metadata: StemRecombinationMetadata
 }
 
 type PreparedExportRange = {
   startSec: number
   endSec: number
+  sourceEndSec: number
   durationSec: number
 }
 
@@ -106,8 +106,10 @@ type PreparedExportRender = {
 }
 
 type SourceIsolatedRenderOptions = {
-  sourceTrackIds?: Set<string>
+  sourceTrackIds?: ReadonlySet<string>
+  detectorOnlyTrackIds?: ReadonlySet<string>
   includeMasterFx?: boolean
+  graph?: ResolvedMixerGraph
 }
 
 type SourceAutomationScope = {
@@ -158,31 +160,6 @@ type OfflineDrumRackHit = {
   source: AudioBufferSourceNode
   gain: GainNode
   chokeGroup: number
-}
-
-type ExportResult = {
-  blob?: Blob
-  format: ExportAudioFormat
-  durationSec: number
-  sampleRate: number
-  sizeBytes: number
-}
-
-export type EncodeAudioBufferTarget =
-  | { mode: 'buffer' }
-  | {
-    mode: 'stream'
-    writable: WritableStream<StreamTargetChunk>
-    close?: () => Promise<void>
-    abort?: (reason?: unknown) => Promise<void>
-  }
-
-type EncodeAudioBufferOptions = {
-  format?: ExportAudioFormat
-  bitrate?: number
-  target?: EncodeAudioBufferTarget
-  signal?: AbortSignal
-  onWrite?: (sizeBytes: number) => void
 }
 
 type AudioSampleBuffer = Pick<AudioBuffer, 'numberOfChannels' | 'getChannelData'>
@@ -358,10 +335,11 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
     throw new Error('Cue routing is live-only and cannot be exported.')
   }
   const { startSec, endSec } = getExportRangeBounds(tracks, range)
+  const sourceEndSec = Math.min(endSec, req.sourceEndSec ?? endSec)
   const durationSec = endSec - startSec
   return {
     bpm,
-    range: { startSec, endSec, durationSec },
+    range: { startSec, endSec, sourceEndSec, durationSec },
     sampleRate,
     numberOfChannels,
     trackById: createTrackById(tracks),
@@ -428,6 +406,130 @@ export function createSourceAutomationScope(
   return { trackIds: scopedTrackIds, includeMasterFx }
 }
 
+const emptyMasterFx = (graph: ResolvedMixerGraph): ResolvedMixerGraph['master'] => ({
+  volume: 1,
+  inputLayout: graph.master.inputLayout,
+  outputLayout: graph.master.inputLayout,
+})
+
+const collectReachableChannelIds = (
+  graph: ResolvedMixerGraph,
+  sourceTrackIds: ReadonlySet<string>,
+): Set<string> => new Set(createSourceAutomationScope(graph, {
+  sourceTrackIds,
+  includeMasterFx: false,
+}).trackIds ?? [])
+
+const collectUpstreamChannelIds = (
+  graph: ResolvedMixerGraph,
+  targetTrackId: string,
+): Set<string> => {
+  const upstream = new Set([targetTrackId])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const channel of graph.channels) {
+      if (upstream.has(channel.channel.id)) continue
+      if (channel.outputTargetId && upstream.has(channel.outputTargetId)) {
+        upstream.add(channel.channel.id)
+        changed = true
+        continue
+      }
+      if (channel.sends.some((send) => upstream.has(send.targetId))) {
+        upstream.add(channel.channel.id)
+        changed = true
+      }
+    }
+  }
+  return upstream
+}
+
+export type StemRenderPlan = {
+  sourceTrackIds: Set<string>
+  detectorOnlyTrackIds: Set<string>
+  graph: ResolvedMixerGraph
+  metadata: StemRecombinationMetadata
+}
+
+export function createStemRenderPlan(
+  graph: ResolvedMixerGraph,
+  stem: StemDefinition,
+  sidechainRoutes: readonly ExternalSidechainRoute[] = [],
+): StemRenderPlan {
+  const target = graph.channels.find((channel) => channel.channel.id === stem.targetTrackId)
+  assert(target, `Missing stem target ${stem.targetTrackId}`)
+  if (stem.mode === 'channel-output') {
+    assert(target.channel.role === 'group' || target.channel.role === 'return', 'Channel-output stems require a group or return target.')
+  } else {
+    assert(target.channel.role === 'track', `${stem.mode} stems require a source track target.`)
+  }
+
+  const sourceTrackIds = stem.mode === 'channel-output'
+    ? collectUpstreamChannelIds(graph, stem.targetTrackId)
+    : new Set([stem.targetTrackId])
+  const reachableIds = collectReachableChannelIds(graph, sourceTrackIds)
+  const detectorOnlyTrackIds = new Set<string>()
+  for (const route of sidechainRoutes) {
+    if (reachableIds.has(route.targetTrackId) && !sourceTrackIds.has(route.sourceTrackId)) {
+      detectorOnlyTrackIds.add(route.sourceTrackId)
+    }
+  }
+
+  const graphForMode: ResolvedMixerGraph = {
+    channels: graph.channels.map((channel) => {
+      const id = channel.channel.id
+      if (detectorOnlyTrackIds.has(id)) {
+        return { ...channel, outputGain: 0, sends: [] }
+      }
+      if (stem.mode === 'dry-source') {
+        const audible = !channel.channel.muted && channel.outputGain > 0
+        return {
+          ...channel,
+          gain: id === stem.targetTrackId && audible ? 1 : 0,
+          outputGain: id === stem.targetTrackId && audible ? 1 : 0,
+          outputTargetId: undefined,
+          sends: [],
+          fx: undefined,
+        }
+      }
+      if (stem.mode === 'post-track-fx') {
+        return {
+          ...channel,
+          outputGain: id === stem.targetTrackId ? channel.outputGain : 0,
+          outputTargetId: id === stem.targetTrackId ? undefined : channel.outputTargetId,
+          sends: [],
+        }
+      }
+      if (stem.mode === 'channel-output') {
+        return {
+          ...channel,
+          outputGain: id === stem.targetTrackId ? channel.outputGain : channel.outputGain,
+          outputTargetId: id === stem.targetTrackId ? undefined : channel.outputTargetId,
+          sends: id === stem.targetTrackId ? [] : channel.sends,
+        }
+      }
+      return channel
+    }),
+    master: stem.mode === 'full-master-contribution' ? graph.master : emptyMasterFx(graph),
+  }
+  const nonlinearMaster = (graph.master.instances ?? []).some((instance) =>
+    instance.kind === 'compressor' || instance.kind === 'saturator' || instance.kind === 'limiter' || instance.kind === 'gate',
+  ) || !!graph.master.compressor || !!graph.master.saturator
+  return {
+    sourceTrackIds,
+    detectorOnlyTrackIds,
+    graph: graphForMode,
+    metadata: {
+      recombinesToMaster: stem.mode !== 'full-master-contribution' || !nonlinearMaster,
+      conditions: stem.mode === 'full-master-contribution'
+        ? nonlinearMaster
+          ? ['Shared nonlinear master processing prevents linear stem recombination.']
+          : ['Master processing must remain linear and stem normalization must be disabled.']
+        : ['Export every required stem over the same range with normalization disabled.'],
+    },
+  }
+}
+
 async function renderSourceIsolatedMixdownFromPrepared(
   prepared: PreparedExportRender,
   options: SourceIsolatedRenderOptions = {},
@@ -440,16 +542,16 @@ async function renderSourceIsolatedMixdownFromPrepared(
   const stretchCache = createAudioStretchCache({
     createBuffer: (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
   })
-  const graph = includeMasterFx ? prepared.mixerGraph : {
+  const graph = options.graph ?? (includeMasterFx ? prepared.mixerGraph : {
     ...prepared.mixerGraph,
     master: {
       volume: prepared.mixerGraph.master.volume,
       inputLayout: prepared.mixerGraph.master.inputLayout,
       outputLayout: prepared.mixerGraph.master.inputLayout,
     },
-  }
+  })
   const automationScope = createSourceAutomationScope(graph, options)
-  const mixerNodes = await createOfflineMixerNodes(ctx, graph, prepared.bpm, prepared.sidechainRoutes)
+  const mixerNodes = await createOfflineMixerNodes(ctx, graph, prepared.bpm, prepared.sidechainRoutes, options.detectorOnlyTrackIds)
   const { trackNodes } = mixerNodes
 
   try {
@@ -467,7 +569,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
         {
           playheadSec: prepared.range.startSec,
           startLimitSec: prepared.range.startSec,
-          endLimitSec: prepared.range.endSec,
+          endLimitSec: prepared.range.sourceEndSec,
         },
         (timeSec) => Math.max(0, timeSec - prepared.range.startSec),
         fallback,
@@ -477,7 +579,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
     for (const resolvedTrack of graph.channels) {
       const track = prepared.trackById.get(resolvedTrack.channel.id)
       assert(track, `Missing prepared export track ${resolvedTrack.channel.id}`)
-      if (sourceTrackIds && !sourceTrackIds.has(track.id)) continue
+      if (sourceTrackIds && !sourceTrackIds.has(track.id) && !options.detectorOnlyTrackIds?.has(track.id)) continue
       const trackInput = trackNodes.get(track.id)?.input
       assert(trackInput, `Missing offline track input ${track.id}`)
       const fxCfg = resolvedTrack.fx
@@ -496,7 +598,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
             bpm: prepared.bpm,
             notes: midi.notes,
             rangeStartSec: prepared.range.startSec,
-            rangeEndSec: prepared.range.endSec,
+            rangeEndSec: prepared.range.sourceEndSec,
             arp: fxCfg?.arp,
           })
           if (instrument?.kind === 'drum-rack' && drumRackPadsByNote) {
@@ -528,7 +630,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
           bufferDurationSec: clip.buffer.duration,
           projectBpm: prepared.bpm,
           rangeStartSec: prepared.range.startSec,
-          rangeEndSec: prepared.range.endSec,
+          rangeEndSec: prepared.range.sourceEndSec,
         })
         if (!map) continue
 
@@ -583,128 +685,22 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
 }
 
 export function createStemRenderSession(req: ExportRequest): {
-  renderTrackStem: (track: Pick<Track<AudioBuffer>, 'id' | 'name'>) => Promise<AudioBuffer>
+  renderStem: (stem: StemDefinition) => Promise<RenderedStem>
 } {
   const prepared = prepareExportRender(req)
   return {
-    renderTrackStem(track) {
-      return renderSourceIsolatedMixdownFromPrepared(prepared, {
-        sourceTrackIds: new Set([track.id]),
-        includeMasterFx: false,
+    async renderStem(stem) {
+      const plan = createStemRenderPlan(prepared.mixerGraph, stem, prepared.sidechainRoutes)
+      const buffer = await renderSourceIsolatedMixdownFromPrepared(prepared, {
+        sourceTrackIds: plan.sourceTrackIds,
+        detectorOnlyTrackIds: plan.detectorOnlyTrackIds,
+        graph: plan.graph,
       })
+      return { id: stem.id, name: stem.name, buffer, metadata: plan.metadata }
     },
   }
 }
 
 export async function renderStemMixdown(req: ExportRequest & { stem: StemDefinition }): Promise<RenderedStem> {
-  const buffer = await renderSourceIsolatedMixdownFromPrepared(prepareExportRender(req), {
-    sourceTrackIds: new Set(req.stem.sourceTrackIds),
-    includeMasterFx: req.stem.includeMasterFx,
-  })
-  return { id: req.stem.id, name: req.stem.name, buffer }
-}
-
-type EncodeTargetState = {
-  target: Target
-  close: () => Promise<void>
-  abort: (reason?: unknown) => Promise<void>
-}
-
-const createManagedWritable = (
-  target: Extract<EncodeAudioBufferTarget, { mode: 'stream' }>,
-  abortTarget: (reason?: unknown) => Promise<void>,
-): WritableStream<StreamTargetChunk> => {
-  if (!target.close && !target.abort) return target.writable
-  let writer: WritableStreamDefaultWriter<StreamTargetChunk> | undefined
-  return new WritableStream<StreamTargetChunk>({
-    start() {
-      writer = target.writable.getWriter()
-    },
-    write(chunk) {
-      assert(writer, 'Export stream writer was not initialized.')
-      return writer.write(chunk)
-    },
-    close() {
-      writer?.releaseLock()
-    },
-    abort(reason) {
-      writer?.releaseLock()
-      return abortTarget(reason)
-    },
-  })
-}
-
-const createEncodeTarget = (target: EncodeAudioBufferTarget | undefined): EncodeTargetState => {
-  if (target?.mode !== 'stream') {
-    return {
-      target: new BufferTarget(),
-      close: async () => {},
-      abort: async () => {},
-    }
-  }
-  let aborted = false
-  const abortTarget = async (reason?: unknown) => {
-    if (aborted) return
-    aborted = true
-    await target.abort?.(reason)
-  }
-  return {
-    target: new StreamTarget(createManagedWritable(target, abortTarget), { chunked: true }),
-    close: target.close ?? (async () => {}),
-    abort: abortTarget,
-  }
-}
-
-const getBufferTargetBlob = (target: Target, mimeType: string): Blob | undefined => {
-  if (!(target instanceof BufferTarget)) return
-  if (!target.buffer) return
-  return new Blob([target.buffer], { type: mimeType })
-}
-
-export async function encodeAudioBuffer(buffer: AudioBuffer, options: EncodeAudioBufferOptions = {}): Promise<ExportResult> {
-  const format = options.format ?? 'wav'
-  const metadata = getExportAudioFormatMetadata(format)
-  const sampleRate = buffer.sampleRate
-  const encodeTarget = createEncodeTarget(options.target)
-  const output = new Output({ format: createExportAudioOutputFormat(format), target: encodeTarget.target })
-  let sizeBytes = 0
-  encodeTarget.target.onwrite = (_start, end) => {
-    throwIfAborted(options.signal)
-    sizeBytes = Math.max(sizeBytes, end)
-    options.onWrite?.(sizeBytes)
-  }
-  const src = new AudioBufferSource({
-    codec: getExportAudioCodec(format),
-    bitrate: options.bitrate ?? getExportAudioDefaultBitrate(format),
-  })
-  try {
-    throwIfAborted(options.signal)
-    output.addAudioTrack(src)
-    await output.start()
-    throwIfAborted(options.signal)
-    await src.add(buffer)
-    throwIfAborted(options.signal)
-    src.close()
-    await output.finalize()
-    throwIfAborted(options.signal)
-    await encodeTarget.close()
-  } catch (error) {
-    if (output.state !== 'canceled' && output.state !== 'finalized') {
-      try {
-        await output.cancel()
-      } catch {}
-    }
-    try {
-      await encodeTarget.abort(error)
-    } catch {}
-    throw error
-  }
-  const blob = getBufferTargetBlob(encodeTarget.target, metadata.mimeType)
-  return {
-    blob,
-    format,
-    durationSec: buffer.duration,
-    sampleRate,
-    sizeBytes: blob?.size ?? sizeBytes,
-  }
+  return createStemRenderSession(req).renderStem(req.stem)
 }

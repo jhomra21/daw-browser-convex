@@ -18,6 +18,19 @@ import { createCompressorNodeChain } from './effects/chain'
 import { createStaticWorkletNodeChain } from './effects/static-worklet-chain'
 import type { StaticWorkletKind } from './effects/static-worklet-chain'
 import { measureAudio, measureChannelLeakageDb } from './dsp-characterization'
+import {
+  createSrcImpulseFixture,
+  createSrcStereoIsolationFixture,
+  createSrcToneFixture,
+  measureIsolationDb,
+  measureSrcImpulse,
+  measureStereoCorrelation,
+  measureToneAmplitude,
+  sampleRateConversionCandidates,
+  type SampleRateConversionCandidate,
+  type SampleRateConversionResult,
+} from './sample-rate-characterization'
+import { resolveWorkletModuleUrl, trackMeterWorklet } from './worklet-manifest'
 
 type BrowserCharacterizationCase = {
   status: 'pass' | 'fail' | 'unsupported'
@@ -39,12 +52,22 @@ export type StaticModuleCharacterization = {
 
 export type BrowserCharacterizationReport = {
   userAgent: string
+  browserIdentity: {
+    userAgent: string
+    platform: string
+  }
   sampleRates: Readonly<Record<string, BrowserCharacterizationCase>>
+  sampleRateConversion: {
+    implementation: 'native-offline-audio-context'
+    matrix: readonly SampleRateConversionResult[]
+    candidates: readonly SampleRateConversionCandidate[]
+  }
   dryGain: BrowserCharacterizationCase
   stereoIsolation: BrowserCharacterizationCase
   eq: BrowserCharacterizationCase
   compressorRegistration: BrowserCharacterizationCase
   compressorProcessing: BrowserCharacterizationCase
+  trackMeterRegistration: BrowserCharacterizationCase
   utilityWorklet: Readonly<Record<string, BrowserCharacterizationCase>>
   gateWorklet: Readonly<Record<string, BrowserCharacterizationCase>>
   modulationWorklet: Readonly<Record<string, BrowserCharacterizationCase>>
@@ -74,6 +97,113 @@ const render = async (
   await connect(context, source)
   source.start()
   return context.startRendering()
+}
+
+const renderResampled = async (
+  sourceSampleRate: number,
+  targetSampleRate: number,
+  channels: readonly Float32Array[],
+): Promise<AudioBuffer> => {
+  const outputLength = Math.ceil(channels[0].length * targetSampleRate / sourceSampleRate)
+  const context = new OfflineAudioContext(channels.length, outputLength, targetSampleRate)
+  const buffer = context.createBuffer(channels.length, channels[0].length, sourceSampleRate)
+  for (let channel = 0; channel < channels.length; channel += 1) {
+    buffer.getChannelData(channel).set(channels[channel])
+  }
+  const source = context.createBufferSource()
+  source.buffer = buffer
+  source.connect(context.destination)
+  source.start()
+  return context.startRendering()
+}
+
+const characterizeSampleRateConversion = async (
+  sourceSampleRate: number,
+  targetSampleRate: number,
+): Promise<SampleRateConversionResult> => {
+  const durationSec = 0.25
+  const inputLength = Math.ceil(durationSec * sourceSampleRate)
+  const expectedOutputLength = Math.ceil(inputLength * targetSampleRate / sourceSampleRate)
+  const startedAt = typeof performance === 'undefined' ? null : performance.now()
+  try {
+    const toneFrequencies = [1_000, Math.min(sourceSampleRate, targetSampleRate) * 0.1, Math.min(sourceSampleRate, targetSampleRate) * 0.225]
+    const amplitudes: number[] = []
+    let oneKhzAmplitude = 0
+    for (const frequency of toneFrequencies) {
+      const rendered = await renderResampled(
+        sourceSampleRate,
+        targetSampleRate,
+        [createSrcToneFixture(inputLength, frequency, sourceSampleRate)],
+      )
+      const amplitude = measureToneAmplitude(rendered.getChannelData(0), frequency, targetSampleRate, Math.ceil(targetSampleRate * 0.02))
+      amplitudes.push(amplitude)
+      if (frequency === 1_000) oneKhzAmplitude = amplitude
+    }
+    const passbandDb = amplitudes.map((amplitude) => 20 * Math.log10(Math.max(amplitude, 1e-15)))
+    const passbandRippleDb = Math.max(...passbandDb) - Math.min(...passbandDb)
+    const aliasProbeFrequency = targetSampleRate < sourceSampleRate ? targetSampleRate * 0.55 : null
+    let aliasLevelDb: number | null = null
+    if (aliasProbeFrequency !== null) {
+      const aliasRendered = await renderResampled(
+        sourceSampleRate,
+        targetSampleRate,
+        [createSrcToneFixture(inputLength, aliasProbeFrequency, sourceSampleRate)],
+      )
+      const aliasFrequency = Math.abs(aliasProbeFrequency - targetSampleRate)
+      const aliasAmplitude = measureToneAmplitude(
+        aliasRendered.getChannelData(0),
+        aliasFrequency,
+        targetSampleRate,
+        Math.ceil(targetSampleRate * 0.02),
+      )
+      aliasLevelDb = 20 * Math.log10(Math.max(aliasAmplitude, 1e-15))
+    }
+    const impulseFrame = Math.floor(inputLength / 2)
+    const impulseRendered = await renderResampled(
+      sourceSampleRate,
+      targetSampleRate,
+      [createSrcImpulseFixture(inputLength, impulseFrame)],
+    )
+    const expectedPeakFrame = Math.round(impulseFrame * targetSampleRate / sourceSampleRate)
+    const impulse = measureSrcImpulse(impulseRendered.getChannelData(0), expectedPeakFrame)
+    const stereoInput = createSrcStereoIsolationFixture(inputLength, sourceSampleRate)
+    const stereoRendered = await renderResampled(sourceSampleRate, targetSampleRate, stereoInput)
+    const left = stereoRendered.getChannelData(0)
+    const right = stereoRendered.getChannelData(1)
+    const elapsedMs = startedAt === null ? null : performance.now() - startedAt
+    const metrics = {
+      outputSampleRate: impulseRendered.sampleRate,
+      outputLength: impulseRendered.length,
+      expectedOutputLength,
+      gainErrorDb: 20 * Math.log10(Math.max(oneKhzAmplitude, 1e-15)),
+      passbandRippleDb,
+      aliasLevelDb,
+      impulsePeak: impulse.peak,
+      preRingingPeak: impulse.preRingingPeak,
+      postRingingPeak: impulse.postRingingPeak,
+      phaseDelayFrames: impulse.phaseDelayFrames,
+      stereoCorrelation: measureStereoCorrelation(left, right),
+      isolationDb: Math.max(-300, measureIsolationDb(left, right)),
+      elapsedMs,
+      inputBytes: inputLength * 2 * Float32Array.BYTES_PER_ELEMENT,
+      outputBytes: expectedOutputLength * 2 * Float32Array.BYTES_PER_ELEMENT,
+    }
+    const passed = metrics.outputSampleRate === targetSampleRate
+      && metrics.outputLength === expectedOutputLength
+      && Math.abs(metrics.gainErrorDb) <= 0.25
+      && metrics.passbandRippleDb <= 0.5
+      && (metrics.aliasLevelDb === null || metrics.aliasLevelDb <= -60)
+      && Math.abs(metrics.phaseDelayFrames) <= 1
+      && metrics.isolationDb <= -120
+    return { sourceSampleRate, targetSampleRate, status: passed ? 'pass' : 'fail', metrics }
+  } catch (error) {
+    return {
+      sourceSampleRate,
+      targetSampleRate,
+      status: error instanceof DOMException && error.name === 'NotSupportedError' ? 'unsupported' : 'fail',
+      message: error instanceof Error ? error.message : String(error),
+    }
+  }
 }
 
 const capture = async (run: () => Promise<BrowserCharacterizationCase>): Promise<BrowserCharacterizationCase> => {
@@ -201,6 +331,14 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
       }
     })
   }
+  const sampleRateConversionMatrix: SampleRateConversionResult[] = []
+  for (const sourceSampleRate of [44_100, 48_000, 96_000]) {
+    for (const targetSampleRate of [44_100, 48_000, 96_000]) {
+      if (sourceSampleRate !== targetSampleRate) {
+        sampleRateConversionMatrix.push(await characterizeSampleRateConversion(sourceSampleRate, targetSampleRate))
+      }
+    }
+  }
 
   const dryGain = await capture(async () => {
     const rendered = await render(48_000, 1, 128, (context, source) => {
@@ -309,6 +447,15 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
     }
   })
 
+  const trackMeterRegistration = await capture(async () => {
+    if (!('audioWorklet' in OfflineAudioContext.prototype)) {
+      return { status: 'unsupported', message: 'OfflineAudioContext AudioWorklet registration is unavailable.' }
+    }
+    const context = new OfflineAudioContext(2, 128, 48_000)
+    await context.audioWorklet.addModule(resolveWorkletModuleUrl(trackMeterWorklet.modulePath))
+    return { status: 'pass' }
+  })
+
   const characterizeStaticWorklet = async (kind: 'utility' | 'gate', sampleRate: number) => capture(async () => {
     if (!('audioWorklet' in OfflineAudioContext.prototype)) {
       return { status: 'unsupported', message: 'OfflineAudioContext AudioWorklet registration is unavailable.' }
@@ -393,12 +540,22 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
 
   return {
     userAgent: navigator.userAgent,
+    browserIdentity: {
+      userAgent: navigator.userAgent,
+      platform: navigator.platform,
+    },
     sampleRates,
+    sampleRateConversion: {
+      implementation: 'native-offline-audio-context',
+      matrix: sampleRateConversionMatrix,
+      candidates: sampleRateConversionCandidates,
+    },
     dryGain,
     stereoIsolation,
     eq,
     compressorRegistration,
     compressorProcessing,
+    trackMeterRegistration,
     utilityWorklet,
     gateWorklet,
     modulationWorklet,

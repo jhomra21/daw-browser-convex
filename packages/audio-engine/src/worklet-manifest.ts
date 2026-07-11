@@ -4,8 +4,8 @@ export const compressorWorklet = {
 }
 
 export const trackMeterWorklet = {
-  processorName: 'track-meter-processor',
-  modulePath: 'audio-worklets/track-meter-processor-v1.js',
+  processorName: 'track-meter-processor-v2',
+  modulePath: 'audio-worklets/track-meter-processor-v2.js',
 }
 
 export const recorderWorklet = {

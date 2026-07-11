@@ -48,7 +48,7 @@ describe('worklet manifest', () => {
       '/studio/audio-worklets/daw-compressor-processor-v1.js',
     )
     expect(resolveWorkletModuleUrl(trackMeterWorklet.modulePath, '/studio')).toBe(
-      '/studio/audio-worklets/track-meter-processor-v1.js',
+      '/studio/audio-worklets/track-meter-processor-v2.js',
     )
     expect(resolveWorkletModuleUrl(recorderWorklet.modulePath, '/studio/')).toBe(
       '/studio/audio-worklets/daw-recorder-processor-v1.js',

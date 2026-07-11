@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { createSourceAutomationScope, downmixStereoBufferToMono, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace, renderMixdown, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
-import { automationTargetKey, createDefaultDelayParams, type AutomationEnvelope } from '@daw-browser/shared'
+import { createSourceAutomationScope, createStemRenderPlan, downmixStereoBufferToMono, encodeAudioBuffer, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace, renderMixdown, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
+import { automationTargetKey, createDefaultDelayParams, createDefaultSaturatorParams, type AutomationEnvelope } from '@daw-browser/shared'
 import type { ResolvedMixerChannel, ResolvedMixerGraph } from './mixer/types'
 import { resolveLiveMixerGraph } from './live-mixer-runtime'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import type { WavEncodingSettings } from './export-fidelity'
 
 const channel = (
   id: string,
@@ -78,6 +79,105 @@ describe('createSourceAutomationScope', () => {
     })
 
     expect(scope.trackIds).toEqual(new Set(['source', 'return-a', 'group', 'return-b']))
+  })
+})
+
+describe('explicit stem render plans', () => {
+  const graph: ResolvedMixerGraph = {
+    channels: [
+      channel('source', {
+        outputTargetId: 'group-a',
+        sends: [{ targetId: 'return-a', amount: 1 }],
+      }),
+      channel('detector'),
+      channel('other', { outputTargetId: 'group-a' }),
+      channel('group-a', {
+        outputTargetId: 'group-b',
+        sends: [{ targetId: 'return-b', amount: 1 }],
+        role: 'group',
+      }),
+      channel('group-b', { role: 'group' }),
+      channel('return-a', {
+        outputTargetId: 'group-b',
+        sends: [{ targetId: 'return-b', amount: 1 }],
+        role: 'return',
+      }),
+      channel('return-b', { role: 'return' }),
+      channel('unrelated'),
+    ],
+    master,
+  }
+
+  test('distinguishes dry, post-FX, reachable, and full-master source semantics', () => {
+    const dry = createStemRenderPlan(graph, { id: 'source', name: 'Source', mode: 'dry-source', targetTrackId: 'source' })
+    expect(dry.sourceTrackIds).toEqual(new Set(['source']))
+    expect(dry.graph.channels.find((entry) => entry.channel.id === 'source')?.fx).toBeUndefined()
+    expect(dry.graph.channels.find((entry) => entry.channel.id === 'source')?.sends).toEqual([])
+    expect(dry.graph.channels.find((entry) => entry.channel.id === 'source')?.outputTargetId).toBeUndefined()
+
+    const postFx = createStemRenderPlan(graph, { id: 'source', name: 'Source', mode: 'post-track-fx', targetTrackId: 'source' })
+    expect(postFx.graph.channels.find((entry) => entry.channel.id === 'source')?.outputTargetId).toBeUndefined()
+    expect(postFx.graph.channels.find((entry) => entry.channel.id === 'source')?.sends).toEqual([])
+
+    const reachable = createStemRenderPlan(graph, { id: 'source', name: 'Source', mode: 'reachable-routing', targetTrackId: 'source' })
+    expect(reachable.sourceTrackIds).toEqual(new Set(['source']))
+    expect(reachable.graph.master.volume).toBe(1)
+
+    const full = createStemRenderPlan(graph, { id: 'source', name: 'Source', mode: 'full-master-contribution', targetTrackId: 'source' })
+    expect(full.graph.master).toBe(graph.master)
+  })
+
+  test('collects channel-output upstream sources once across nested outputs and sends', () => {
+    const plan = createStemRenderPlan(graph, {
+      id: 'group-b',
+      name: 'Group B',
+      mode: 'channel-output',
+      targetTrackId: 'group-b',
+    })
+    expect(plan.sourceTrackIds).toEqual(new Set(['source', 'other', 'group-a', 'group-b', 'return-a']))
+    expect(plan.sourceTrackIds.has('unrelated')).toBe(false)
+    expect(plan.graph.channels.find((entry) => entry.channel.id === 'group-b')?.outputTargetId).toBeUndefined()
+  })
+
+  test('adds sidechain sources as detector-only and never as audible sources', () => {
+    const plan = createStemRenderPlan(
+      graph,
+      { id: 'source', name: 'Source', mode: 'reachable-routing', targetTrackId: 'source' },
+      [{ sourceTrackId: 'detector', targetTrackId: 'group-a', effectInstanceId: 'compressor' }],
+    )
+    expect(plan.sourceTrackIds).toEqual(new Set(['source']))
+    expect(plan.detectorOnlyTrackIds).toEqual(new Set(['detector']))
+    expect(plan.graph.channels.find((entry) => entry.channel.id === 'detector')?.outputGain).toBe(0)
+    expect(plan.graph.channels.find((entry) => entry.channel.id === 'detector')?.sends).toEqual([])
+  })
+
+  test('preserves mute and solo exclusion while removing the dry-source fader', () => {
+    const mutedSource = channel('muted')
+    mutedSource.channel.muted = true
+    mutedSource.gain = 0
+    mutedSource.outputGain = 0
+    const excludedBySolo = channel('excluded')
+    excludedBySolo.outputGain = 0
+    const dryGraph: ResolvedMixerGraph = { channels: [mutedSource, excludedBySolo], master }
+
+    const muted = createStemRenderPlan(dryGraph, { id: 'muted', name: 'Muted', mode: 'dry-source', targetTrackId: 'muted' })
+    const excluded = createStemRenderPlan(dryGraph, { id: 'excluded', name: 'Excluded', mode: 'dry-source', targetTrackId: 'excluded' })
+    expect(muted.graph.channels[0]?.gain).toBe(0)
+    expect(excluded.graph.channels[1]?.gain).toBe(0)
+  })
+
+  test('marks full-master stems non-recombinable with shared nonlinear processing', () => {
+    const nonlinearGraph: ResolvedMixerGraph = {
+      ...graph,
+      master: { ...master, saturator: { ...createDefaultSaturatorParams(), enabled: true } },
+    }
+    const plan = createStemRenderPlan(nonlinearGraph, {
+      id: 'source',
+      name: 'Source',
+      mode: 'full-master-contribution',
+      targetTrackId: 'source',
+    })
+    expect(plan.metadata.recombinesToMaster).toBe(false)
   })
 })
 
@@ -240,5 +340,70 @@ describe('live and offline channel layout parity', () => {
     })))
     expect(live.master.inputLayout).toBe(offline.master.inputLayout)
     expect(live.master.outputLayout).toBe(offline.master.outputLayout)
+  })
+})
+
+describe('MediaBunny WAV encoding', () => {
+  class TestAudioBuffer {
+    readonly numberOfChannels: number
+    readonly length: number
+    readonly sampleRate: number
+    readonly duration: number
+    readonly channels: Float32Array<ArrayBuffer>[]
+
+    constructor(options: { numberOfChannels: number; length: number; sampleRate: number }) {
+      this.numberOfChannels = options.numberOfChannels
+      this.length = options.length
+      this.sampleRate = options.sampleRate
+      this.duration = options.length / options.sampleRate
+      this.channels = Array.from(
+        { length: options.numberOfChannels },
+        () => new Float32Array(new ArrayBuffer(options.length * Float32Array.BYTES_PER_ELEMENT)),
+      )
+    }
+
+    getChannelData(channel: number) {
+      const data = this.channels[channel]
+      if (!data) throw new Error('Missing channel')
+      return data
+    }
+
+    copyFromChannel(destination: Float32Array, channel: number, startInChannel = 0) {
+      destination.set(this.getChannelData(channel).subarray(startInChannel, startInChannel + destination.length))
+    }
+
+    copyToChannel(source: Float32Array, channel: number, startInChannel = 0) {
+      this.getChannelData(channel).set(source, startInChannel)
+    }
+  }
+
+  const readWavFormat = async (codec: 'pcm-s16' | 'pcm-s24' | 'pcm-f32') => {
+    Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
+    const audio = new TestAudioBuffer({ numberOfChannels: 1, length: 32, sampleRate: 48_000 })
+    audio.getChannelData(0).set([0.1, -0.1, 0.25, -0.25])
+    const wav: WavEncodingSettings = codec === 'pcm-f32'
+      ? { codec, dither: 'none' }
+      : codec === 'pcm-s24'
+        ? { codec, dither: 'tpdf' }
+        : { codec, dither: 'tpdf' }
+    const result = await encodeAudioBuffer(audio, {
+      format: 'wav',
+      wav,
+      ditherSeed: 42,
+    })
+    if (!result.blob) throw new Error('WAV buffer target produced no Blob.')
+    const bytes = new Uint8Array(await result.blob.arrayBuffer())
+    const view = new DataView(bytes.buffer)
+    return {
+      audioFormat: view.getUint16(20, true),
+      bitsPerSample: view.getUint16(34, true),
+      bytes,
+    }
+  }
+
+  test('writes actual 16-bit, 24-bit, and 32-bit float WAV fmt fields', async () => {
+    expect(await readWavFormat('pcm-s16')).toMatchObject({ audioFormat: 1, bitsPerSample: 16 })
+    expect(await readWavFormat('pcm-s24')).toMatchObject({ audioFormat: 1, bitsPerSample: 24 })
+    expect(await readWavFormat('pcm-f32')).toMatchObject({ audioFormat: 3, bitsPerSample: 32 })
   })
 })

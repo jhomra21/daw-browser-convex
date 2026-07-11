@@ -1,6 +1,6 @@
 import { disconnectAudioNodes } from './effects/chain'
-
-const TRACK_METER_PROCESSOR_NAME = 'track-meter-processor'
+import { loadWorkletModule } from './worklet-loader'
+import { resolveWorkletModuleUrl, trackMeterWorklet } from './worklet-manifest'
 
 export type SpectrumFrame = {
   data: Float32Array
@@ -16,6 +16,15 @@ export type TrackStereoLevelsBatch = ReadonlyMap<string, TrackStereoLevels>
 
 export type TrackStereoLevelsListener = (levels: TrackStereoLevelsBatch) => void
 
+export function readTrackStereoLevels(data: unknown): TrackStereoLevels | null {
+  if (!data || typeof data !== 'object') return null
+  if (!('type' in data) || data.type !== 'levels') return null
+  if (!('left' in data) || typeof data.left !== 'number' || !Number.isFinite(data.left)) return null
+  if (!('right' in data) || typeof data.right !== 'number' || !Number.isFinite(data.right)) return null
+  if (data.left < 0 || data.left > 1 || data.right < 0 || data.right > 1) return null
+  return { left: data.left, right: data.right }
+}
+
 export function createMeteringRuntime() {
   const analysers = new Map<string, AnalyserNode>()
   const meterArrays = new Map<string, Float32Array<ArrayBuffer>>()
@@ -23,12 +32,14 @@ export function createMeteringRuntime() {
   const spectrumOut = new Map<string, Float32Array>()
   const spectrumLast = new Map<string, SpectrumFrame>()
   const workletNodes = new Map<string, AudioWorkletNode>()
+  const workletGenerations = new Map<string, number>()
+  const retriedWorkletGenerations = new Map<string, number>()
   const workletLevels = new Map<string, TrackStereoLevels>()
   const pendingLevels = new Map<string, TrackStereoLevels>()
   const listeners = new Set<TrackStereoLevelsListener>()
   const zeroTrackStereoLevels: TrackStereoLevels = { left: 0, right: 0 }
-  let workletReady: Promise<boolean> | null = null
   let flushHandle: number | null = null
+  let closed = false
 
   const emit = (levels: TrackStereoLevelsBatch) => {
     for (const listener of listeners) listener(levels)
@@ -52,74 +63,55 @@ export function createMeteringRuntime() {
   }
 
   const ensureWorkletModule = (ctx: AudioContext) => {
-    if (workletReady) return workletReady
-    const source = `
-      class TrackMeterProcessor extends AudioWorkletProcessor {
-        constructor() {
-          super()
-          this.active = false
-          this.frames = 0
-          this.sumL = 0
-          this.sumR = 0
-          this.emittedSilence = false
-          this.reportEveryFrames = 4096
-          this.port.onmessage = (event) => {
-            this.active = event.data?.active === true
-            if (!this.active) {
-              this.frames = 0
-              this.sumL = 0
-              this.sumR = 0
-              this.emittedSilence = false
-            }
-          }
-        }
-        process(inputs) {
-          if (!this.active) return true
-          const input = inputs[0]
-          const left = input && input[0]
-          if (!left) {
-            this.frames += 128
-            if (this.frames >= this.reportEveryFrames) {
-              if (!this.emittedSilence) {
-                this.port.postMessage({ left: 0, right: 0 })
-                this.emittedSilence = true
-              }
-              this.frames = 0
-              this.sumL = 0
-              this.sumR = 0
-            }
-            return true
-          }
-          const right = input[1] || left
-          for (let i = 0; i < left.length; i++) {
-            const l = left[i] || 0
-            const r = right[i] || 0
-            this.sumL += l * l
-            this.sumR += r * r
-          }
-          this.frames += left.length
-          if (this.frames >= this.reportEveryFrames) {
-            const nextLeft = Math.min(1, Math.max(0, Math.sqrt(Math.sqrt(this.sumL / this.frames))))
-            const nextRight = Math.min(1, Math.max(0, Math.sqrt(Math.sqrt(this.sumR / this.frames))))
-            if (nextLeft > 0 || nextRight > 0 || !this.emittedSilence) {
-              this.port.postMessage({ left: nextLeft, right: nextRight })
-              this.emittedSilence = nextLeft === 0 && nextRight === 0
-            }
-            this.frames = 0
-            this.sumL = 0
-            this.sumR = 0
-          }
-          return true
-        }
-      }
-      registerProcessor('${TRACK_METER_PROCESSOR_NAME}', TrackMeterProcessor)
-    `
-    const url = URL.createObjectURL(new Blob([source], { type: 'application/javascript' }))
-    workletReady = ctx.audioWorklet.addModule(url)
+    return loadWorkletModule(ctx, resolveWorkletModuleUrl(trackMeterWorklet.modulePath))
       .then(() => true)
       .catch(() => false)
-      .finally(() => URL.revokeObjectURL(url))
-    return workletReady
+  }
+
+  const constructTrackMeterWorklet = (
+    ctx: AudioContext,
+    trackId: string,
+    gain: GainNode,
+    isCurrentOutput: () => boolean,
+    generation: number,
+  ) => {
+    void ensureWorkletModule(ctx).then((ready) => {
+      if (!ready || closed || workletGenerations.get(trackId) !== generation || workletNodes.has(trackId) || !isCurrentOutput()) return
+      let node: AudioWorkletNode
+      try {
+        node = new AudioWorkletNode(ctx, trackMeterWorklet.processorName, {
+          numberOfInputs: 1,
+          numberOfOutputs: 0,
+          channelCount: 2,
+          channelCountMode: 'explicit',
+          channelInterpretation: 'speakers',
+        })
+      } catch {
+        return
+      }
+      node.port.postMessage({ active: listeners.size > 0 })
+      node.port.onmessage = (event) => {
+        const next = readTrackStereoLevels(event.data)
+        if (!next) return
+        workletLevels.set(trackId, next)
+        queueLevels(trackId, next)
+      }
+      node.onprocessorerror = () => {
+        if (workletNodes.get(trackId) !== node || workletGenerations.get(trackId) !== generation) return
+        node.onprocessorerror = null
+        node.port.onmessage = null
+        disconnectAudioNodes([node])
+        workletNodes.delete(trackId)
+        workletLevels.delete(trackId)
+        pendingLevels.delete(trackId)
+        queueLevels(trackId, zeroTrackStereoLevels)
+        if (retriedWorkletGenerations.get(trackId) === generation || closed || !isCurrentOutput()) return
+        retriedWorkletGenerations.set(trackId, generation)
+        constructTrackMeterWorklet(ctx, trackId, gain, isCurrentOutput, generation)
+      }
+      try { gain.connect(node) } catch {}
+      workletNodes.set(trackId, node)
+    })
   }
 
   const ensureTrackMeterWorklet = (ctx: AudioContext, trackId: string, gain: GainNode, isCurrentOutput: () => boolean) => {
@@ -128,28 +120,9 @@ export function createMeteringRuntime() {
       try { gain.connect(existing) } catch {}
       return
     }
-    void ensureWorkletModule(ctx).then((ready) => {
-      if (!ready || workletNodes.has(trackId) || !isCurrentOutput()) return
-      const node = new AudioWorkletNode(ctx, TRACK_METER_PROCESSOR_NAME, {
-        numberOfInputs: 1,
-        numberOfOutputs: 0,
-        channelCount: 2,
-        channelCountMode: 'explicit',
-        channelInterpretation: 'speakers',
-      })
-      node.port.postMessage({ active: listeners.size > 0 })
-      node.port.onmessage = (event) => {
-        const data = event.data
-        const next = {
-          left: typeof data?.left === 'number' ? data.left : 0,
-          right: typeof data?.right === 'number' ? data.right : 0,
-        }
-        workletLevels.set(trackId, next)
-        queueLevels(trackId, next)
-      }
-      try { gain.connect(node) } catch {}
-      workletNodes.set(trackId, node)
-    })
+    const generation = (workletGenerations.get(trackId) ?? 0) + 1
+    workletGenerations.set(trackId, generation)
+    constructTrackMeterWorklet(ctx, trackId, gain, isCurrentOutput, generation)
   }
 
   const ensureTrackAnalyser = (ctx: AudioContext, trackId: string, gain: GainNode) => {
@@ -217,6 +190,7 @@ export function createMeteringRuntime() {
       return frame
     },
     disposeTrack: (trackId: string) => {
+      workletGenerations.set(trackId, (workletGenerations.get(trackId) ?? 0) + 1)
       const analyser = analysers.get(trackId)
       disconnectAudioNodes([analyser])
       analysers.delete(trackId)
@@ -225,8 +199,11 @@ export function createMeteringRuntime() {
       if (meterNode) {
         disconnectAudioNodes([meterNode])
         meterNode.port.onmessage = null
+        meterNode.onprocessorerror = null
+        meterNode.port.close()
       }
       workletNodes.delete(trackId)
+      retriedWorkletGenerations.delete(trackId)
       if (workletLevels.has(trackId) || pendingLevels.has(trackId)) {
         queueLevels(trackId, zeroTrackStereoLevels)
       }
@@ -236,19 +213,23 @@ export function createMeteringRuntime() {
       spectrumLast.delete(trackId)
     },
     close: () => {
+      closed = true
       for (const node of workletNodes.values()) {
         disconnectAudioNodes([node])
         node.port.onmessage = null
+        node.onprocessorerror = null
+        node.port.close()
       }
       disconnectAudioNodes(Array.from(analysers.values()))
       workletNodes.clear()
+      workletGenerations.clear()
+      retriedWorkletGenerations.clear()
       workletLevels.clear()
       pendingLevels.clear()
       if (flushHandle !== null) {
         cancelAnimationFrame(flushHandle)
         flushHandle = null
       }
-      workletReady = null
       analysers.clear()
       meterArrays.clear()
       spectrumTmp.clear()

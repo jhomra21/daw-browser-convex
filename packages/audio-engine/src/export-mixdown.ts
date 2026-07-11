@@ -376,114 +376,119 @@ async function renderSourceIsolatedMixdownFromPrepared(
   const mixerNodes = await createOfflineMixerNodes(ctx, graph, prepared.bpm)
   const { trackNodes } = mixerNodes
 
-  for (const envelope of prepared.automationEnvelopes) {
-    if (!envelope.enabled) continue
-    if (!isAutomationEnvelopeInSourceScope(automationScope, envelope)) continue
-    const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
-    const fallback = descriptor?.defaultValue ?? 0
-    const bindings = envelope.target.kind === 'master'
-      ? mixerNodes.resolveMasterAutomationBindings(envelope.parameterId)
-      : mixerNodes.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId)
-    scheduleAutomationEnvelope(
-      bindings,
-      envelope,
-      {
-        playheadSec: prepared.range.startSec,
-        startLimitSec: prepared.range.startSec,
-        endLimitSec: prepared.range.endSec,
-      },
-      (timeSec) => Math.max(0, timeSec - prepared.range.startSec),
-      fallback,
-    )
-  }
+  try {
+    for (const envelope of prepared.automationEnvelopes) {
+      if (!envelope.enabled) continue
+      if (!isAutomationEnvelopeInSourceScope(automationScope, envelope)) continue
+      const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
+      const fallback = descriptor?.defaultValue ?? 0
+      const bindings = envelope.target.kind === 'master'
+        ? mixerNodes.resolveMasterAutomationBindings(envelope.parameterId)
+        : mixerNodes.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId)
+      scheduleAutomationEnvelope(
+        bindings,
+        envelope,
+        {
+          playheadSec: prepared.range.startSec,
+          startLimitSec: prepared.range.startSec,
+          endLimitSec: prepared.range.endSec,
+        },
+        (timeSec) => Math.max(0, timeSec - prepared.range.startSec),
+        fallback,
+      )
+    }
 
-  for (const resolvedTrack of graph.channels) {
-    const track = prepared.trackById.get(resolvedTrack.channel.id)
-    assert(track, `Missing prepared export track ${resolvedTrack.channel.id}`)
-    if (sourceTrackIds && !sourceTrackIds.has(track.id)) continue
-    const trackInput = trackNodes.get(track.id)?.input
-    assert(trackInput, `Missing offline track input ${track.id}`)
-    const fxCfg = resolvedTrack.fx
-    const exportFxCfg = prepared.exportTrackFx?.[track.id]
-    const instrument = readTrackInstrument(exportFxCfg)
-    const drumRackPadsByNote = instrument?.kind === 'drum-rack'
-      ? new Map(instrument.params.pads.map((pad) => [pad.note, pad]))
-      : undefined
-    const activeDrumRackHitsByChokeGroup = new Map<number, OfflineDrumRackHit[]>()
+    for (const resolvedTrack of graph.channels) {
+      const track = prepared.trackById.get(resolvedTrack.channel.id)
+      assert(track, `Missing prepared export track ${resolvedTrack.channel.id}`)
+      if (sourceTrackIds && !sourceTrackIds.has(track.id)) continue
+      const trackInput = trackNodes.get(track.id)?.input
+      assert(trackInput, `Missing offline track input ${track.id}`)
+      const fxCfg = resolvedTrack.fx
+      const exportFxCfg = prepared.exportTrackFx?.[track.id]
+      const instrument = readTrackInstrument(exportFxCfg)
+      const drumRackPadsByNote = instrument?.kind === 'drum-rack'
+        ? new Map(instrument.params.pads.map((pad) => [pad.note, pad]))
+        : undefined
+      const activeDrumRackHitsByChokeGroup = new Map<number, OfflineDrumRackHit[]>()
 
-    for (const clip of track.clips) {
-      const midi = clip.midi
-      if (midi && Array.isArray(midi.notes)) {
-        const events = getScheduledMidiEvents({
+      for (const clip of track.clips) {
+        const midi = clip.midi
+        if (midi && Array.isArray(midi.notes)) {
+          const events = getScheduledMidiEvents({
+            clip,
+            bpm: prepared.bpm,
+            notes: midi.notes,
+            rangeStartSec: prepared.range.startSec,
+            rangeEndSec: prepared.range.endSec,
+            arp: fxCfg?.arp,
+          })
+          if (instrument?.kind === 'drum-rack' && drumRackPadsByNote) {
+            renderOfflineDrumRackEvents({
+              ctx,
+              destination: trackInput,
+              events,
+              padsByNote: drumRackPadsByNote,
+              rangeStartSec: prepared.range.startSec,
+              buffers: exportFxCfg?.drumRackBuffers,
+              activeHitsByChokeGroup: activeDrumRackHitsByChokeGroup,
+            })
+          } else {
+            renderOfflineSynthEvents({
+              ctx,
+              destination: trackInput,
+              events,
+              rangeStartSec: prepared.range.startSec,
+              synth: instrument?.kind === 'synth' ? instrument.params : fxCfg?.synth,
+              midi,
+            })
+          }
+          continue
+        }
+
+        if (!clip.buffer) continue
+        const map = getAudioClipTimeMap({
           clip,
-          bpm: prepared.bpm,
-          notes: midi.notes,
+          bufferDurationSec: clip.buffer.duration,
+          projectBpm: prepared.bpm,
           rangeStartSec: prepared.range.startSec,
           rangeEndSec: prepared.range.endSec,
-          arp: fxCfg?.arp,
         })
-        if (instrument?.kind === 'drum-rack' && drumRackPadsByNote) {
-          renderOfflineDrumRackEvents({
-            ctx,
-            destination: trackInput,
-            events,
-            padsByNote: drumRackPadsByNote,
-            rangeStartSec: prepared.range.startSec,
-            buffers: exportFxCfg?.drumRackBuffers,
-            activeHitsByChokeGroup: activeDrumRackHitsByChokeGroup,
+        if (!map) continue
+
+        const src = ctx.createBufferSource()
+        const stretched = map.mode === 'stretch'
+          ? await stretchCache.renderNow(clip, prepared.bpm).catch((error) => {
+            throw new Error(`Failed to render Stretch warp for clip "${clip.name}": ${error instanceof Error ? error.message : String(error)}`)
           })
-        } else {
-          renderOfflineSynthEvents({
-            ctx,
-            destination: trackInput,
-            events,
-            rangeStartSec: prepared.range.startSec,
-            synth: instrument?.kind === 'synth' ? instrument.params : fxCfg?.synth,
-            midi,
-          })
-        }
-        continue
+          : null
+        const playback = getAudioBufferPlaybackParams({
+          sourceBuffer: clip.buffer,
+          map,
+          stretched: stretched ? { ...stretched, bufferDurationSec: stretched.buffer.duration } : null,
+        })
+        if (playback.durationSec <= 0) continue
+        src.buffer = playback.buffer
+        src.playbackRate.value = playback.playbackRate
+        connectSourceWithClipGain(ctx, src, trackInput, clip.gain)
+        try {
+          src.start(
+            Math.max(0, map.timelineStartSec - prepared.range.startSec),
+            playback.offsetSec,
+            playback.durationSec,
+          )
+        } catch {}
       }
-
-      if (!clip.buffer) continue
-      const map = getAudioClipTimeMap({
-        clip,
-        bufferDurationSec: clip.buffer.duration,
-        projectBpm: prepared.bpm,
-        rangeStartSec: prepared.range.startSec,
-        rangeEndSec: prepared.range.endSec,
-      })
-      if (!map) continue
-
-      const src = ctx.createBufferSource()
-      const stretched = map.mode === 'stretch'
-        ? await stretchCache.renderNow(clip, prepared.bpm).catch((error) => {
-          throw new Error(`Failed to render Stretch warp for clip "${clip.name}": ${error instanceof Error ? error.message : String(error)}`)
-        })
-        : null
-      const playback = getAudioBufferPlaybackParams({
-        sourceBuffer: clip.buffer,
-        map,
-        stretched: stretched ? { ...stretched, bufferDurationSec: stretched.buffer.duration } : null,
-      })
-      if (playback.durationSec <= 0) continue
-      src.buffer = playback.buffer
-      src.playbackRate.value = playback.playbackRate
-      connectSourceWithClipGain(ctx, src, trackInput, clip.gain)
-      try {
-        src.start(
-          Math.max(0, map.timelineStartSec - prepared.range.startSec),
-          playback.offsetSec,
-          playback.durationSec,
-        )
-      } catch {}
     }
-  }
 
-  throwIfAborted(prepared.signal)
-  const rendered = await ctx.startRendering()
-  throwIfAborted(prepared.signal)
-  return rendered
+    throwIfAborted(prepared.signal)
+    const rendered = await ctx.startRendering()
+    mixerNodes.assertCompressorProcessorsHealthy()
+    throwIfAborted(prepared.signal)
+    return rendered
+  } finally {
+    mixerNodes.dispose()
+  }
 }
 
 export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {

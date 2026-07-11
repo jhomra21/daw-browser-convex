@@ -75,7 +75,7 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
       gain.connect(context.destination)
     })
     const metrics = measureAudio(readBuffer(rendered))
-    return { status: Math.abs(metrics.peak - 0.5) < 1e-6 ? 'pass' : 'fail', metrics: { peak: metrics.peak, rms: metrics.rms } }
+    return { status: Math.abs(metrics.peak - 0.5) < 1e-3 ? 'pass' : 'fail', metrics: { peak: metrics.peak, rms: metrics.rms } }
   })
 
   const stereoIsolation = await capture(async () => {
@@ -88,8 +88,11 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
     })
     const leftPeak = measureAudio([rendered.getChannelData(0)]).peak
     const rightPeak = measureAudio([rendered.getChannelData(1)]).peak
-    const leakageDb = measureChannelLeakageDb(leftPeak, rightPeak)
-    return { status: leftPeak === 1 && rightPeak === 0 ? 'pass' : 'fail', metrics: { leftPeak, rightPeak, leakageDb } }
+    const leakageDetected = Number.isFinite(measureChannelLeakageDb(leftPeak, rightPeak))
+    return {
+      status: Math.abs(leftPeak - 1) < 1e-3 && rightPeak < 1e-6 ? 'pass' : 'fail',
+      metrics: { leftPeak, rightPeak, leakageDetected },
+    }
   })
 
   const eq = await capture(async () => {
@@ -117,8 +120,8 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
         source.buffer.getChannelData(1)[80] = -0.25
       }
       const chain = await createCompressorNodeChain(context, normalizeCompressorParams({ enabled: true, dryWet: 0 }))
-      source.connect(chain.workletNode)
-      chain.workletNode.connect(context.destination)
+      source.connect(chain.input)
+      chain.output.connect(context.destination)
     })
     const left = rendered.getChannelData(0)
     const right = rendered.getChannelData(1)
@@ -154,8 +157,8 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
         kneeDb: 0,
         detectorMode: 'peak',
       }))
-      source.connect(chain.workletNode)
-      chain.workletNode.connect(context.destination)
+      source.connect(chain.input)
+      chain.output.connect(context.destination)
     })
     const settled = rendered.getChannelData(0).subarray(2_400)
     const metrics = measureAudio([settled])

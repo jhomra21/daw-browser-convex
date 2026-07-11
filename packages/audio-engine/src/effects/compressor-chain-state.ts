@@ -10,7 +10,9 @@ export type CompressorChainState = {
   close: () => void
 }
 
-export function createCompressorChainState(): CompressorChainState {
+export function createCompressorChainState(
+  createChain: (ctx: BaseAudioContext, params: CompressorParamsLite) => Promise<CompressorNodeChain> = createCompressorNodeChain,
+): CompressorChainState {
   let compressor: CompressorNodeChain | null = null
   let signature: string | null = null
   let enabled: boolean | null = null
@@ -36,8 +38,10 @@ export function createCompressorChainState(): CompressorChainState {
       try {
         const normalized = normalizeCompressorParams(params)
         const nextSignature = serializeCompressorParams(normalized)
-        if (signature === nextSignature) return { changed: false, requiresRoutingRebuild: false }
-        const requiresRoutingRebuild = enabled !== normalized.enabled && (enabled !== null || normalized.enabled)
+        const wasFaulted = compressor?.state === 'faulted'
+        if (!wasFaulted && signature === nextSignature) return { changed: false, requiresRoutingRebuild: false }
+        if (wasFaulted) signature = null
+        const requiresRoutingRebuild = wasFaulted || (enabled !== normalized.enabled && (enabled !== null || normalized.enabled))
         const currentToken = ++token
         if (!normalized.enabled) {
           if (compressor) {
@@ -49,16 +53,10 @@ export function createCompressorChainState(): CompressorChainState {
           enabled = false
           return { changed: true, requiresRoutingRebuild }
         }
-        if (!compressor) {
-          const next = await createCompressorNodeChain(ctx, normalized).catch(() => null)
+        if (!compressor || wasFaulted) {
+          const previous = compressor
+          const next = await createChain(ctx, normalized).catch(() => null)
           if (!next) {
-            if (currentToken === token) {
-              if (compressor) {
-                disconnectCompressorChain(compressor)
-                compressor = null
-              }
-              enabled = false
-            }
             return { changed: false, requiresRoutingRebuild: false }
           }
           if (currentToken !== token) {
@@ -67,6 +65,8 @@ export function createCompressorChainState(): CompressorChainState {
           }
           compressor = next
           bindMeterPort(compressor)
+          lastFrame = null
+          if (previous) disconnectCompressorChain(previous)
         } else {
           applyCompressorNodeChainParams(compressor, normalized)
         }

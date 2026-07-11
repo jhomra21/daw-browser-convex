@@ -1,6 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "ignoreFiles": [
+    "public/audio-worklets/*.js",
     "src/components/nav-user.tsx",
     "src/components/ui/avatar.tsx",
     "src/components/ui/badge.tsx",

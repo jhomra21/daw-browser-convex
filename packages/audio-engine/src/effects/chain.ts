@@ -2,6 +2,7 @@ import { AUDIO_EFFECT_ORDER, DELAY_MAX_DELAY_TIME_SEC, normalizeAudioEffectOrder
 import { applyDelayNodeParams, applySaturatorNodeParams } from './dsp'
 import { getReverbImpulseSignature } from './reverb-signature'
 import { ensureCompressorWorklet, postCompressorParams } from './compressor-worklet'
+import { compressorWorklet } from '../worklet-manifest'
 
 export type CreateReverbImpulseResponse = (params: ReverbParamsLite) => AudioBuffer
 
@@ -25,7 +26,52 @@ export type ReverbNodeChain = {
 
 export type CompressorNodeChain = {
   enabled: boolean
+  state: 'active' | 'faulted' | 'closed'
+  input: GainNode
+  output: GainNode
+  dryGain: GainNode
+  processedGain: GainNode
   workletNode: AudioWorkletNode
+  fault: Error | null
+}
+
+export type CompressorProcessorLifecyclePhase = 'registration' | 'construction' | 'protocol' | 'runtime'
+
+export class CompressorProcessorError extends Error {
+  readonly processor = 'daw-compressor-processor'
+  readonly phase: CompressorProcessorLifecyclePhase
+
+  constructor(phase: CompressorProcessorLifecyclePhase, message: string, cause?: unknown) {
+    super(message, { cause })
+    this.name = 'CompressorProcessorError'
+    this.phase = phase
+  }
+}
+
+export type CompressorFaultTransition = {
+  state: CompressorNodeChain['state']
+  fault: Error | null
+  dryGain: { gain: CompressorFaultAudioParam }
+  processedGain: { gain: CompressorFaultAudioParam }
+}
+
+type CompressorFaultAudioParam = {
+  value: number
+  cancelScheduledValues: (time: number) => void
+  setValueAtTime: (value: number, time: number) => void
+  linearRampToValueAtTime: (value: number, endTime: number) => void
+}
+
+export function handleCompressorProcessorError(chain: CompressorFaultTransition, currentTime: number) {
+  if (chain.state !== 'active') return
+  chain.state = 'faulted'
+  chain.fault = new Error('Compressor processor failed during runtime processing.')
+  chain.dryGain.gain.cancelScheduledValues(currentTime)
+  chain.processedGain.gain.cancelScheduledValues(currentTime)
+  chain.dryGain.gain.setValueAtTime(chain.dryGain.gain.value, currentTime)
+  chain.processedGain.gain.setValueAtTime(chain.processedGain.gain.value, currentTime)
+  chain.dryGain.gain.linearRampToValueAtTime(1, currentTime + 0.01)
+  chain.processedGain.gain.linearRampToValueAtTime(0, currentTime + 0.01)
 }
 
 export type SaturatorNodeChain = {
@@ -154,12 +200,53 @@ export function disconnectReverbChain(chain: ReverbNodeChain) {
 
 export async function createCompressorNodeChain(ctx: BaseAudioContext, params: CompressorParamsLite): Promise<CompressorNodeChain> {
   const normalized = normalizeCompressorParams(params)
-  await ensureCompressorWorklet(ctx)
+  try {
+    await ensureCompressorWorklet(ctx)
+  } catch (error) {
+    throw new CompressorProcessorError('registration', 'Failed to register compressor processor.', error)
+  }
+  const input = ctx.createGain()
+  const output = ctx.createGain()
+  const dryGain = ctx.createGain()
+  const processedGain = ctx.createGain()
+  let workletNode: AudioWorkletNode
+  try {
+    workletNode = new AudioWorkletNode(ctx, compressorWorklet.processorName, { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] })
+  } catch (error) {
+    disconnectAudioNodes([input, output, dryGain, processedGain])
+    throw new CompressorProcessorError('construction', 'Failed to construct compressor processor.', error)
+  }
   const chain: CompressorNodeChain = {
     enabled: normalized.enabled,
-    workletNode: new AudioWorkletNode(ctx, 'daw-compressor-processor', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] }),
+    state: 'active',
+    input,
+    output,
+    dryGain,
+    processedGain,
+    workletNode,
+    fault: null,
   }
-  postCompressorParams(chain.workletNode, normalized)
+  try {
+    input.connect(dryGain)
+    dryGain.connect(output)
+    input.connect(workletNode)
+    workletNode.connect(processedGain)
+    processedGain.connect(output)
+    dryGain.gain.value = 0
+    processedGain.gain.value = 1
+    workletNode.onprocessorerror = () => {
+      handleCompressorProcessorError(chain, ctx.currentTime)
+    }
+  } catch (error) {
+    disconnectCompressorChain(chain)
+    throw new CompressorProcessorError('construction', 'Failed to connect compressor processor.', error)
+  }
+  try {
+    postCompressorParams(chain.workletNode, normalized)
+  } catch (error) {
+    disconnectCompressorChain(chain)
+    throw new CompressorProcessorError('protocol', 'Failed to initialize compressor processor protocol.', error)
+  }
   return chain
 }
 
@@ -170,8 +257,10 @@ export function applyCompressorNodeChainParams(chain: CompressorNodeChain, param
 }
 
 export function disconnectCompressorChain(chain: CompressorNodeChain) {
-  disconnectAudioNodes([chain.workletNode])
-  chain.workletNode.port.close()
+  chain.state = 'closed'
+  chain.workletNode.onprocessorerror = null
+  disconnectAudioNodes([chain.input, chain.output, chain.dryGain, chain.processedGain, chain.workletNode])
+  try { chain.workletNode.port.close() } catch {}
 }
 
 export function createSaturatorNodeChain(ctx: BaseAudioContext, params: SaturatorParamsLite): SaturatorNodeChain {
@@ -317,7 +406,7 @@ export function connectFxChain(
     const delay = stageConfig.delayChain?.enabled ? stageConfig.delayChain : null
     const reverb = stageConfig.reverbChain?.enabled ? stageConfig.reverbChain : null
 
-    if (!compressor && stageConfig.compressorChain) disconnectAudioNodes([stageConfig.compressorChain.workletNode])
+    if (!compressor && stageConfig.compressorChain) disconnectAudioNodes([stageConfig.compressorChain.input])
     if (saturator) connectSaturatorInternals(saturator)
     else if (stageConfig.saturatorChain) disconnectSaturatorChain(stageConfig.saturatorChain)
     if (delay) connectDelayInternals(delay)
@@ -337,10 +426,13 @@ export function connectFxChain(
     }
 
     if (stageConfig.kind === 'compressor' && compressor) {
-      disconnectAudioNodes([compressor.workletNode])
+      disconnectAudioNodes([compressor.input, compressor.output])
+      compressor.input.connect(compressor.dryGain)
+      compressor.input.connect(compressor.workletNode)
+      compressor.output.disconnect()
       return {
-        connectInput: (source) => source.connect(compressor.workletNode),
-        outputs: [compressor.workletNode],
+        connectInput: (source) => source.connect(compressor.input),
+        outputs: [compressor.output],
       }
     }
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { computeCompressorStaticCurveDb, normalizeCompressorParams, type CompressorParamsInput } from '@daw-browser/shared'
-import { computeCompressorWorkletCurveDb } from './compressor-worklet'
+import { computeCompressorWorkletCurveDb, readCompressorMeterFrame } from './compressor-worklet'
 
 describe('compressor worklet curve', () => {
   const cases: { name: string; inputDb: number; params: CompressorParamsInput }[] = [
@@ -22,4 +22,17 @@ describe('compressor worklet curve', () => {
       expect(computeCompressorWorkletCurveDb(item.inputDb, params)).toBeCloseTo(computeCompressorStaticCurveDb(item.inputDb, params), 8)
     })
   }
+})
+
+describe('compressor worklet messages', () => {
+  test('rejects malformed and non-finite meter frames', () => {
+    expect(readCompressorMeterFrame(null)).toBeNull()
+    expect(readCompressorMeterFrame({ type: 'meter', inputDb: Number.NaN, outputDb: 0, gainReductionDb: 0, thresholdDb: -24 })).toBeNull()
+    expect(readCompressorMeterFrame({ type: 'other', inputDb: 0, outputDb: 0, gainReductionDb: 0, thresholdDb: -24 })).toBeNull()
+  })
+
+  test('accepts valid meter frames', () => {
+    expect(readCompressorMeterFrame({ type: 'meter', inputDb: -12, outputDb: -18, gainReductionDb: -6, thresholdDb: -24 }))
+      .toEqual({ inputDb: -12, outputDb: -18, gainReductionDb: -6, thresholdDb: -24 })
+  })
 })

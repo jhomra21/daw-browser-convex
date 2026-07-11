@@ -4,6 +4,10 @@ import {
   type RecorderBlockMessage,
   type WriterOutboundMessage,
 } from '../../../packages/audio-engine/src/recording/recording-protocol'
+import {
+  createRecorderSabRingConsumer,
+  type RecorderSabRingBuffers,
+} from '../../../packages/audio-engine/src/recording/sab-ring-buffer'
 
 type WriterSession = {
   append: (channels: readonly Float32Array[]) => Promise<void>
@@ -32,19 +36,25 @@ export const createRecordingWriterHandler = (
   let queuedBlocks = 0
   let expectedSequence = 0
   let operations = Promise.resolve()
+  let failureCleanup: Promise<void> | null = null
   let canonicalChannelCount = 0
   let abortScheduled = false
+  let sabConsumer: ReturnType<typeof createRecorderSabRingConsumer> | null = null
   const hasFailed = () => state === 'failed'
 
   const transitionToFailure = (reason: string) => {
     if (state === 'failed' || state === 'closed') return
     state = 'failed'
-    output({ type: 'failure', generation: Math.max(generation, 0), sessionId, reason })
     if (abortScheduled) return
     abortScheduled = true
-    operations = operations.then(async () => {
+    failureCleanup = operations.then(async () => {
       queuedBlocks = 0
-      await session?.abort()
+      try {
+        await session?.abort()
+      } catch {
+        // Preserve the originating failure after cleanup has settled.
+      }
+      output({ type: 'failure', generation: Math.max(generation, 0), sessionId, reason })
     }).catch(() => {
       queuedBlocks = 0
     })
@@ -72,13 +82,40 @@ export const createRecordingWriterHandler = (
     }, [message.buffer])
   }
 
+  const drainSab = async () => {
+    if (!sabConsumer || !session) return
+    while (true) {
+      const block = sabConsumer.pop()
+      if (!block) return
+      if (block.sequence !== expectedSequence) throw new Error('recording-block-out-of-order')
+      expectedSequence += 1
+      await session.append(block.channels)
+      if (hasFailed()) return
+    }
+  }
+
+  const scheduleSabDrain = () => {
+    operations = operations.then(drainSab).catch((error: unknown) => {
+      transitionToFailure(error instanceof Error ? error.message : 'write-failed')
+    })
+  }
+
+  const waitForSabData = async () => {
+    while (state === 'open') {
+      await sabConsumer?.waitForData()
+      if (state !== 'open') return
+      scheduleSabDrain()
+      await operations
+    }
+  }
+
   const handle = (value: unknown) => {
     const message = readWriterInboundMessage(value)
     if (!message) {
       transitionToFailure('malformed-message')
       return
     }
-    if (message.type === 'start') {
+    if (message.type === 'start' || message.type === 'start-sab') {
       if (state !== 'idle') {
         transitionToFailure('duplicate-start')
         return
@@ -86,16 +123,36 @@ export const createRecordingWriterHandler = (
       generation = message.generation
       sessionId = message.sessionId
       canonicalChannelCount = message.channelCount
+      if (message.type === 'start-sab') {
+        const buffers: RecorderSabRingBuffers = {
+          state: message.state,
+          frameCounts: message.frameCounts,
+          samples: message.samples,
+        }
+        try {
+          sabConsumer = createRecorderSabRingConsumer(buffers, message.channelCount)
+        } catch (error) {
+          transitionToFailure(error instanceof Error ? error.message : 'invalid-sab-configuration')
+          return
+        }
+      }
       state = 'closing'
       operations = storage.createSession(message).then((created) => {
         session = created
         if (hasFailed()) return
         state = 'open'
         output({ type: 'ready', generation, sessionId })
+        if (sabConsumer && typeof Atomics.waitAsync === 'function') {
+          void waitForSabData()
+        }
       }).catch((error: unknown) => transitionToFailure(error instanceof Error ? error.message : 'start-failed'))
       return
     }
     if (message.generation !== generation || message.sessionId !== sessionId) return
+    if (message.type === 'wake') {
+      if (state === 'open' && sabConsumer) scheduleSabDrain()
+      return
+    }
     if (message.type === 'block') {
       if (state !== 'open' || message.channelCount < 1) {
         transitionToFailure('recording-session-not-open')
@@ -128,11 +185,20 @@ export const createRecordingWriterHandler = (
         return
       }
       state = 'closing'
-      operations = operations.then(async () => {
+      sabConsumer?.notify()
+      operations = operations.then(drainSab).then(async () => {
         if (hasFailed()) return
         if (!session) throw new Error('recording-session-not-open')
+        const stats = sabConsumer?.stats()
+        if (stats && (stats.droppedFrames > 0 || stats.droppedBlocks > 0)) {
+          throw new Error('recorder-overrun')
+        }
         const descriptor = await session.finalize()
         if (hasFailed()) return
+        if (
+          message.capturedFrames !== undefined &&
+          descriptor.capturedFrames !== message.capturedFrames
+        ) throw new Error('Recording SAB captured frame count mismatch.')
         state = 'closed'
         output({ type: 'finalized', generation, sessionId, capturedFrames: descriptor.capturedFrames })
       }).catch((error: unknown) => transitionToFailure(error instanceof Error ? error.message : 'finalize-failed'))
@@ -152,7 +218,10 @@ export const createRecordingWriterHandler = (
   return {
     handle,
     testing: {
-      settled: () => operations,
+      settled: async () => {
+        await operations
+        await failureCleanup
+      },
       snapshot: () => ({ state, queuedBlocks }),
     },
   }

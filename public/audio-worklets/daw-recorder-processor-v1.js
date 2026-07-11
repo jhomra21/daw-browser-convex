@@ -1,6 +1,11 @@
 const BLOCK_FRAMES = 2048
 const POOL_BLOCKS = 32
 const FATAL_DROPPED_FRAMES = 1
+const SAB_READ_INDEX = 0
+const SAB_WRITE_INDEX = 1
+const SAB_NOTIFICATION = 2
+const SAB_DROPPED_FRAMES = 3
+const SAB_DROPPED_BLOCKS = 4
 
 class DawRecorderProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -17,11 +22,29 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
     this.droppedBlocks = 0
     this.fatal = false
     this.completed = false
+    this.sab = null
     this.port.onmessage = (event) => this.handleMessage(event.data)
   }
 
   handleMessage(message) {
     if (!message || typeof message !== 'object') return this.fail('malformed-message')
+    if (message.type === 'initialize-sab') {
+      if (
+        this.session ||
+        this.sab ||
+        !(message.state instanceof SharedArrayBuffer) ||
+        !(message.frameCounts instanceof SharedArrayBuffer) ||
+        !(message.samples instanceof SharedArrayBuffer)
+      ) return this.fail('invalid-sab-configuration')
+      const state = new Int32Array(message.state)
+      const frameCounts = new Int32Array(message.frameCounts)
+      const samples = new Float32Array(message.samples)
+      if (state.length !== 5 || frameCounts.length !== POOL_BLOCKS || samples.length !== POOL_BLOCKS * BLOCK_FRAMES * 2) {
+        return this.fail('invalid-sab-configuration')
+      }
+      this.sab = { state, frameCounts, samples }
+      return
+    }
     if (message.type === 'configure') {
       if (
         this.session ||
@@ -44,11 +67,13 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
           (!Number.isSafeInteger(message.punchEndFrame) || message.punchEndFrame < message.punchStartFrame))
       ) return this.fail('invalid-configuration')
       this.session = message
-      const bytes = BLOCK_FRAMES * message.channelCount * Float32Array.BYTES_PER_ELEMENT
-      this.blocks = Array.from({ length: POOL_BLOCKS }, (_, id) => {
-        const buffer = new ArrayBuffer(bytes)
-        return { id, owner: 'available', buffer, view: new Float32Array(buffer) }
-      })
+      if (!this.sab) {
+        const bytes = BLOCK_FRAMES * message.channelCount * Float32Array.BYTES_PER_ELEMENT
+        this.blocks = Array.from({ length: POOL_BLOCKS }, (_, id) => {
+          const buffer = new ArrayBuffer(bytes)
+          return { id, owner: 'available', buffer, view: new Float32Array(buffer) }
+        })
+      }
       return
     }
     if (!this.session || message.generation !== this.session.generation || message.sessionId !== this.session.sessionId) return
@@ -96,6 +121,19 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
   }
 
   acquire() {
+    if (this.sab) {
+      const reservedIndex = this.sequence + (this.pending ? 1 : 0)
+      const readIndex = Atomics.load(this.sab.state, SAB_READ_INDEX)
+      if (reservedIndex - readIndex >= POOL_BLOCKS) return null
+      const slot = reservedIndex % POOL_BLOCKS
+      const slotOffset = slot * BLOCK_FRAMES * 2
+      return {
+        id: slot,
+        owner: 'capture',
+        buffer: null,
+        view: this.sab.samples.subarray(slotOffset, slotOffset + BLOCK_FRAMES * 2),
+      }
+    }
     for (const block of this.blocks) {
       if (block.owner !== 'available') continue
       block.owner = 'capture'
@@ -118,6 +156,42 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
   }
 
   emitBlock(pending, frameCount = pending.frameCount) {
+    if (this.sab) {
+      let sum = 0
+      let peak = 0
+      const sampleCount = frameCount * this.session.channelCount
+      for (let channel = 0; channel < this.session.channelCount; channel += 1) {
+        const offset = channel * BLOCK_FRAMES
+        for (let frame = 0; frame < frameCount; frame += 1) {
+          const value = pending.block.view[offset + frame] ?? 0
+          sum += value * value
+          peak = Math.max(peak, Math.abs(value))
+        }
+      }
+      this.port.postMessage({
+        type: 'meter',
+        generation: this.session.generation,
+        sessionId: this.session.sessionId,
+        rms: sampleCount > 0 ? Math.sqrt(sum / sampleCount) : 0,
+        peak,
+      })
+    }
+    if (this.sab) {
+      const writeIndex = Atomics.load(this.sab.state, SAB_WRITE_INDEX)
+      const slot = writeIndex % POOL_BLOCKS
+      if (pending.block.id !== slot) return this.fail('invalid-sab-write-order')
+      Atomics.store(this.sab.frameCounts, slot, frameCount)
+      Atomics.store(this.sab.state, SAB_WRITE_INDEX, writeIndex + 1)
+      Atomics.add(this.sab.state, SAB_NOTIFICATION, 1)
+      Atomics.notify(this.sab.state, SAB_NOTIFICATION)
+      this.port.postMessage({
+        type: 'sab-notify',
+        generation: this.session.generation,
+        sessionId: this.session.sessionId,
+      })
+      this.sequence += 1
+      return
+    }
     const message = {
       type: 'block',
       generation: this.session.generation,
@@ -189,6 +263,10 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
       if (!this.current) {
         this.droppedFrames += 1
         if (this.droppedFrames % BLOCK_FRAMES === 1) this.droppedBlocks += 1
+        if (this.sab) {
+          Atomics.add(this.sab.state, SAB_DROPPED_FRAMES, 1)
+          if (this.droppedFrames % BLOCK_FRAMES === 1) Atomics.add(this.sab.state, SAB_DROPPED_BLOCKS, 1)
+        }
         if (this.droppedFrames >= FATAL_DROPPED_FRAMES) this.fail('recorder-overrun')
         return false
       }

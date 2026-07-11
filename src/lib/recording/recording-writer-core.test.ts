@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { createRecordingWriterHandler, type RecordingWriterStorage } from './recording-writer-core'
+import {
+  createRecorderSabRingBuffers,
+  createRecorderSabRingProducer,
+} from '../../../packages/audio-engine/src/recording/sab-ring-buffer'
 
 const block = (sequence: number, blockId = sequence) => ({
   type: 'block',
@@ -13,6 +17,48 @@ const block = (sequence: number, blockId = sequence) => ({
 })
 
 describe('recording writer handler', () => {
+  test('owns SAB consumption, planar copying, wake sequencing, and final drain', async () => {
+    const buffers = createRecorderSabRingBuffers()
+    const producer = createRecorderSabRingProducer(buffers)
+    const writes: number[][][] = []
+    const output: unknown[] = []
+    const handler = createRecordingWriterHandler({
+      createSession: async () => ({
+        append: async (channels) => {
+          writes.push(channels.map((channel) => Array.from(channel)))
+        },
+        finalize: async () => ({
+          capturedFrames: writes.reduce((total, channels) => total + (channels[0]?.length ?? 0), 0),
+        }),
+        abort: async () => undefined,
+      }),
+    }, (message) => output.push(message))
+    handler.handle({
+      type: 'start-sab',
+      generation: 1,
+      sessionId: 'take',
+      sampleRate: 48000,
+      channelCount: 2,
+      ...buffers,
+    })
+    await handler.testing.settled()
+    expect(producer.push([Float32Array.of(1, 2), Float32Array.of(3, 4)], 2)).toBe(true)
+    expect(producer.push([Float32Array.of(5), Float32Array.of(6)], 1)).toBe(true)
+    handler.handle({ type: 'wake', generation: 1, sessionId: 'take' })
+    handler.handle({
+      type: 'finalize',
+      generation: 1,
+      sessionId: 'take',
+      capturedFrames: 3,
+    })
+    await handler.testing.settled()
+    expect(writes).toEqual([
+      [[1, 2], [3, 4]],
+      [[5], [6]],
+    ])
+    expect(output.at(-1)).toMatchObject({ type: 'finalized', capturedFrames: 3 })
+  })
+
   test('writes in order, returns buffers after writes, and finalizes after queued work', async () => {
     const events: string[] = []
     let frames = 0
@@ -62,6 +108,7 @@ describe('recording writer handler', () => {
     handler.handle({ type: 'finalize', generation: 0, sessionId: 'old' })
     expect(output).toHaveLength(1)
     handler.handle({ nope: true })
+    await handler.testing.settled()
     expect(output.at(-1)).toMatchObject({ type: 'failure', reason: 'malformed-message' })
   })
 
@@ -82,10 +129,37 @@ describe('recording writer handler', () => {
     await handler.testing.settled()
     for (let sequence = 0; sequence < 9; sequence += 1) handler.handle(block(sequence))
     expect(handler.testing.snapshot().queuedBlocks).toBe(8)
-    expect(output.at(-1)).toMatchObject({ type: 'failure', reason: 'writer-queue-overflow' })
+    expect(output.at(-1)).toMatchObject({ type: 'ready' })
     release()
     await handler.testing.settled()
+    expect(output.at(-1)).toMatchObject({ type: 'failure', reason: 'writer-queue-overflow' })
     expect(handler.testing.snapshot()).toMatchObject({ state: 'failed', queuedBlocks: 0 })
+  })
+
+  test('settles storage cleanup before reporting writer failure', async () => {
+    let releaseAbort = () => {}
+    const aborting = new Promise<void>((resolve) => {
+      releaseAbort = resolve
+    })
+    const output: unknown[] = []
+    const handler = createRecordingWriterHandler({
+      createSession: async () => ({
+        append: async () => {
+          throw new Error('write-failed')
+        },
+        finalize: async () => ({ capturedFrames: 0 }),
+        abort: () => aborting,
+      }),
+    }, (message) => output.push(message))
+    handler.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
+    await handler.testing.settled()
+    handler.handle(block(0))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(output.at(-1)).toMatchObject({ type: 'ready' })
+    releaseAbort()
+    await handler.testing.settled()
+    expect(output.at(-1)).toMatchObject({ type: 'failure', reason: 'write-failed' })
   })
 
   test('aborts only after queued writes and surfaces worker storage failure', async () => {

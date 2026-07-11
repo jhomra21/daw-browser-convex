@@ -120,6 +120,7 @@ export const createRecordingTransferTransport = (options: RecordingTransferTrans
       settleCompletion()
       return
     }
+    if (message.type === 'meter') return
     if (state !== 'open' && state !== 'closing') {
       fail('Recorder emitted a block outside an open session.')
       return

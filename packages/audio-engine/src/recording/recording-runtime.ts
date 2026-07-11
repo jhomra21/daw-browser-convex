@@ -261,7 +261,22 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
     if (establishedSession.transport) await establishedSession.transport.ready
     captureWorklet.port.onmessage = (event) => {
       const message = readRecorderOutboundMessage(event.data)
-      if (!message || message.generation !== currentGeneration || message.sessionId !== input.sessionId) return
+      if (!message) {
+        transportMessageHandler?.(event.data)
+        return
+      }
+      if (message.generation !== currentGeneration || message.sessionId !== input.sessionId) return
+      if (message.type === 'meter') {
+        publish({
+          state: 'recording',
+          sessionId: input.sessionId,
+          muted: captureTrack.muted,
+          rms: message.rms,
+          peak: message.peak,
+          contextFrame: frameAtCurrentTime(captureContext),
+        })
+        return
+      }
       if (message.type === 'block') {
         const samples = new Float32Array(message.buffer)
         let sum = 0

@@ -35,8 +35,17 @@ type RecorderFailureMessage = {
   droppedBlocks: number
 }
 
+type RecorderMeterMessage = {
+  type: 'meter'
+  generation: number
+  sessionId: string
+  rms: number
+  peak: number
+}
+
 type RecorderOutboundMessage =
   | RecorderBlockMessage
+  | RecorderMeterMessage
   | RecorderCompleteMessage
   | RecorderFailureMessage
 
@@ -56,10 +65,24 @@ export type WriterStartMessage = {
   channelCount: number
 }
 
+export type WriterSabStartMessage = Omit<WriterStartMessage, 'type'> & {
+  type: 'start-sab'
+  state: SharedArrayBuffer
+  frameCounts: SharedArrayBuffer
+  samples: SharedArrayBuffer
+}
+
+export type WriterWakeMessage = {
+  type: 'wake'
+  generation: number
+  sessionId: string
+}
+
 export type WriterFinalizeMessage = {
   type: 'finalize'
   generation: number
   sessionId: string
+  capturedFrames?: number
 }
 
 export type WriterAbortMessage = {
@@ -70,6 +93,8 @@ export type WriterAbortMessage = {
 
 export type WriterInboundMessage =
   | WriterStartMessage
+  | WriterSabStartMessage
+  | WriterWakeMessage
   | RecorderBlockMessage
   | WriterFinalizeMessage
   | WriterAbortMessage
@@ -123,6 +148,26 @@ const readRecorderBlockMessage = (value: unknown): RecorderBlockMessage | null =
 export const readRecorderOutboundMessage = (value: unknown): RecorderOutboundMessage | null => {
   const block = readRecorderBlockMessage(value)
   if (block) return block
+  if (
+    isRecord(value) &&
+    value.type === 'meter' &&
+    isGeneration(value.generation) &&
+    isSessionId(value.sessionId) &&
+    typeof value.rms === 'number' &&
+    Number.isFinite(value.rms) &&
+    value.rms >= 0 &&
+    typeof value.peak === 'number' &&
+    Number.isFinite(value.peak) &&
+    value.peak >= 0
+  ) {
+    return {
+      type: 'meter',
+      generation: value.generation,
+      sessionId: value.sessionId,
+      rms: value.rms,
+      peak: value.peak,
+    }
+  }
   if (
     !isRecord(value) ||
     !isGeneration(value.generation) ||
@@ -178,13 +223,30 @@ export const readWriterInboundMessage = (value: unknown): WriterInboundMessage |
   if (block) return block
   if (!isRecord(value) || !isGeneration(value.generation) || !isSessionId(value.sessionId)) return null
   if (
-    value.type === 'start' &&
+    (value.type === 'start' || value.type === 'start-sab') &&
     isPositiveInteger(value.sampleRate) &&
     value.sampleRate >= 8000 &&
     value.sampleRate <= 384000 &&
     isPositiveInteger(value.channelCount) &&
     value.channelCount <= RECORDER_MAX_CHANNELS
   ) {
+    if (value.type === 'start-sab') {
+      if (
+        !(value.state instanceof SharedArrayBuffer) ||
+        !(value.frameCounts instanceof SharedArrayBuffer) ||
+        !(value.samples instanceof SharedArrayBuffer)
+      ) return null
+      return {
+        type: 'start-sab',
+        generation: value.generation,
+        sessionId: value.sessionId,
+        sampleRate: value.sampleRate,
+        channelCount: value.channelCount,
+        state: value.state,
+        frameCounts: value.frameCounts,
+        samples: value.samples,
+      }
+    }
     return {
       type: 'start',
       generation: value.generation,
@@ -193,8 +255,19 @@ export const readWriterInboundMessage = (value: unknown): WriterInboundMessage |
       channelCount: value.channelCount,
     }
   }
+  if (value.type === 'wake') {
+    return { type: 'wake', generation: value.generation, sessionId: value.sessionId }
+  }
   if (value.type === 'finalize') {
-    return { type: 'finalize', generation: value.generation, sessionId: value.sessionId }
+    if (value.capturedFrames !== undefined && !isGeneration(value.capturedFrames)) return null
+    return value.capturedFrames === undefined
+      ? { type: 'finalize', generation: value.generation, sessionId: value.sessionId }
+      : {
+          type: 'finalize',
+          generation: value.generation,
+          sessionId: value.sessionId,
+          capturedFrames: value.capturedFrames,
+        }
   }
   if (value.type === 'abort') {
     return { type: 'abort', generation: value.generation, sessionId: value.sessionId }

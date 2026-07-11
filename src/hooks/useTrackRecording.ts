@@ -25,7 +25,7 @@ import {
   clearRecordingLockHeartbeat,
   type RecordingContext,
 } from '~/lib/track-recording-session'
-import { createRecordingTransferTransport } from '~/lib/recording/recording-transfer-transport'
+import { createRecordingTransport } from '~/lib/recording/recording-transport'
 import { createRecordingTempStorage } from '~/lib/recording/recording-temp-storage'
 import { encodeRecordingWav } from '~/lib/recording/encode-recording-wav'
 import {
@@ -579,7 +579,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
           contextFrame: previewContextStartFrame,
         },
         punchInContextFrame: previewContextStartFrame,
-        createTransport: (transportOptions) => createRecordingTransferTransport(transportOptions),
+        createTransport: (transportOptions) => createRecordingTransport(transportOptions).transport,
       })
       engineCaptureActive = true
     } catch (err) {

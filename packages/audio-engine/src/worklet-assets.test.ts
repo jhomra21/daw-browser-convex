@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { normalizeCompressorParams } from '@daw-browser/shared'
 import { computeCompressorWorkletCurveDb } from './effects/compressor-worklet'
+import { createRecorderSabRingBuffers, createRecorderSabRingConsumer } from './recording/sab-ring-buffer'
 import { compressorWorklet, recorderWorklet, trackMeterWorklet } from './worklet-manifest'
 
 const publicRoot = new URL('../../../public/', import.meta.url)
@@ -159,6 +160,50 @@ describe('checked-in worklet assets', () => {
     expect(processor.port.messages[1]).toMatchObject({ type: 'complete', capturedFrames: 2 })
     expect(processor.process([[Float32Array.from([5])]], [[new Float32Array(1)]])).toBe(false)
     expect(processor.port.messages).toHaveLength(2)
+  })
+
+  test('writes recorder blocks into the SAB ring without transferable messages', async () => {
+    const evaluated = await evaluateAsset(recorderWorklet.modulePath)
+    const Processor = evaluated.registered.get(recorderWorklet.processorName)
+    if (!Processor) throw new Error('Recorder processor was not registered.')
+    const processor = new Processor()
+    const onmessage = processor.port.onmessage
+    if (!onmessage) throw new Error('Recorder processor did not bind its message handler.')
+    const buffers = createRecorderSabRingBuffers()
+    const consumer = createRecorderSabRingConsumer(buffers, 1)
+    onmessage({ data: { type: 'initialize-sab', ...buffers } })
+    onmessage({
+      data: {
+        type: 'configure',
+        generation: 5,
+        sessionId: 'sab',
+        channelCount: 1,
+        inputChannels: [0],
+        gain: 1,
+        polarity: 1,
+        punchStartFrame: 0,
+        punchEndFrame: null,
+      },
+    })
+    expect(processor.process([[Float32Array.of(0.25, -0.5)]])).toBe(true)
+    onmessage({ data: { type: 'finalize', generation: 5, sessionId: 'sab', stopContextFrame: 2 } })
+    expect(consumer.pop()).toMatchObject({
+      sequence: 0,
+      frameCount: 2,
+      channels: [Float32Array.of(0.25, -0.5)],
+    })
+    expect(processor.port.messages).toEqual([
+      { type: 'meter', generation: 5, sessionId: 'sab', rms: Math.sqrt(0.15625), peak: 0.5 },
+      { type: 'sab-notify', generation: 5, sessionId: 'sab' },
+      {
+        type: 'complete',
+        generation: 5,
+        sessionId: 'sab',
+        capturedFrames: 2,
+        droppedFrames: 0,
+        droppedBlocks: 0,
+      },
+    ])
   })
 
   test('fails the exact recorder asset on the first starved frame and emits no later blocks', async () => {

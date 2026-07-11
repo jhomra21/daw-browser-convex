@@ -292,6 +292,14 @@ describe('recording runtime', () => {
       channelCount: 1,
       buffer: new ArrayBuffer(2048 * Float32Array.BYTES_PER_ELEMENT),
     }
+    success.port.onmessage?.({ data: {
+      type: 'meter',
+      generation: 0,
+      sessionId: 'take-1',
+      rms: 0.25,
+      peak: 0.75,
+    } })
+    expect(runtime.getStatus()).toMatchObject({ state: 'recording', rms: 0.25, peak: 0.75 })
     success.port.onmessage?.({ data: blockMessage })
     expect(routed).toEqual([blockMessage])
     await runtime.stop()

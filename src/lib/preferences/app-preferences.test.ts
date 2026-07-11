@@ -3,10 +3,17 @@ import {
   APP_PREFERENCES_VERSION,
   defaultAppPreferences,
   normalizeAppPreferences,
+  normalizeRecordingCalibration,
+  normalizeRecordingCalibrations,
+  normalizeRecordingInputPreferences,
+  normalizeRecordingManualOffsetFrames,
   parseAppTheme,
-  timelineDefaultCreateColor
+  timelineDefaultCreateColor,
+  updateRecordingCalibrations,
+  updateRecordingInputPreferences
 } from "./app-preferences-core"
 import { themeColorInputValue } from "./theme-color-input"
+import type { RecordingInputPreferences } from "~/lib/recording/recording-preferences"
 import { DEFAULT_DAW_THEME_ID } from "~/lib/theme/theme-registry"
 import { resolveDawThemeById } from "~/lib/theme/theme-resolver"
 
@@ -32,12 +39,13 @@ describe("normalizeAppPreferences", () => {
         timeline: { defaultTrackColor: "#123456", defaultGroupColor: "#abcdef" }
       })
     ).toEqual({
-      version: 2,
+      version: 3,
       appearance: { theme: "dark", themeId: "catppuccin" },
       agent: { autoApply: true },
       sidebar: { open: false },
       timeline: { defaultTrackColor: "#123456", defaultGroupColor: "#abcdef" },
-      audio: defaultAppPreferences.audio
+      audio: defaultAppPreferences.audio,
+      recording: defaultAppPreferences.recording
     })
   })
 
@@ -50,12 +58,13 @@ describe("normalizeAppPreferences", () => {
         sidebar: { open: false }
       })
     ).toEqual({
-      version: 2,
+      version: 3,
       appearance: { theme: "light", themeId: "default" },
       agent: { autoApply: true },
       sidebar: { open: false },
       timeline: defaultAppPreferences.timeline,
-      audio: defaultAppPreferences.audio
+      audio: defaultAppPreferences.audio,
+      recording: defaultAppPreferences.recording
     })
 
     expect(
@@ -67,12 +76,13 @@ describe("normalizeAppPreferences", () => {
         timeline: { defaultTrackColor: "red", defaultGroupColor: "#fedcba" }
       })
     ).toEqual({
-      version: 2,
+      version: 3,
       appearance: { theme: "dark", themeId: "default" },
       agent: { autoApply: true },
       sidebar: { open: false },
       timeline: { defaultTrackColor: defaultAppPreferences.timeline.defaultTrackColor, defaultGroupColor: "#fedcba" },
-      audio: defaultAppPreferences.audio
+      audio: defaultAppPreferences.audio,
+      recording: defaultAppPreferences.recording
     })
   })
 
@@ -97,6 +107,144 @@ describe("normalizeAppPreferences", () => {
       noiseSuppression: false,
       autoGainControl: true
     })
+  })
+
+  test("preserves version 2 audio preferences while defaulting recording preferences", () => {
+    expect(normalizeAppPreferences({
+      version: 2,
+      audio: {
+        inputDeviceId: "mic",
+        outputDeviceId: "speakers",
+        sampleRate: 48000,
+        latencyMode: "balanced",
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    })).toEqual({
+      ...defaultAppPreferences,
+      audio: {
+        inputDeviceId: "mic",
+        outputDeviceId: "speakers",
+        sampleRate: 48000,
+        latencyMode: "balanced",
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    })
+  })
+
+  test("normalizes recording bounds and keeps the newest 32 stable calibrations", () => {
+    const calibrations = Array.from({ length: 35 }, (_, index) => ({
+      inputDeviceId: `input-${index}`,
+      outputDeviceId: `output-${index}`,
+      sampleRate: 48000,
+      measuredRoundTripFrames: 512,
+      recordingOffsetFrames: -128,
+      confidence: 0.9,
+      platformIdentity: "browser-platform",
+      createdAtMs: index
+    }))
+    const recording = normalizeAppPreferences({
+      version: APP_PREFERENCES_VERSION,
+      recording: {
+        layout: "stereo",
+        inputChannel: 99,
+        monitor: "auto",
+        gainDb: -100,
+        invertPolarity: true,
+        manualOffsetFrames: 3_000_000,
+        calibrations
+      }
+    }).recording
+
+    expect(recording.inputChannel).toBe(31)
+    expect(recording.gainDb).toBe(-60)
+    expect(recording.manualOffsetFrames).toBe(1_920_000)
+    expect(recording.calibrations).toHaveLength(32)
+    expect(recording.calibrations[0]?.createdAtMs).toBe(34)
+    expect(recording.calibrations[31]?.createdAtMs).toBe(3)
+  })
+
+  test("normalizes recording runtime updates before persistence", () => {
+    const input: RecordingInputPreferences = {
+      layout: "stereo",
+      inputChannel: Number.POSITIVE_INFINITY,
+      monitor: "auto",
+      gainDb: Number.NaN,
+      invertPolarity: true
+    }
+    expect(normalizeRecordingInputPreferences(input)).toEqual({
+      ...input,
+      inputChannel: 0,
+      gainDb: 0
+    })
+    const inputUpdated = updateRecordingInputPreferences(defaultAppPreferences.recording, input)
+    expect(inputUpdated).toEqual({
+      ...defaultAppPreferences.recording,
+      layout: "stereo",
+      monitor: "auto",
+      invertPolarity: true
+    })
+    expect(normalizeRecordingManualOffsetFrames(Number.NEGATIVE_INFINITY)).toBe(0)
+    expect(normalizeRecordingManualOffsetFrames(3_000_000)).toBe(1_920_000)
+
+    const calibrations = Array.from({ length: 35 }, (_, index) => ({
+      inputDeviceId: `input-${index}`,
+      outputDeviceId: `output-${index}`,
+      sampleRate: 48000,
+      measuredRoundTripFrames: 512,
+      recordingOffsetFrames: 0,
+      confidence: 1,
+      platformIdentity: "browser-platform",
+      createdAtMs: index
+    }))
+    expect(normalizeRecordingCalibrations(calibrations)).toHaveLength(32)
+    const calibrationUpdated = updateRecordingCalibrations(defaultAppPreferences.recording, calibrations)
+    expect(calibrationUpdated.calibrations).toHaveLength(32)
+    expect(calibrationUpdated.calibrations[0]?.createdAtMs).toBe(34)
+    expect(normalizeRecordingCalibration({ ...calibrations[0], confidence: 2 })).toBeNull()
+  })
+
+  test("keeps audio inputDeviceId as the only persisted recording device selection", () => {
+    const normalized = normalizeAppPreferences({
+      version: APP_PREFERENCES_VERSION,
+      audio: { inputDeviceId: "canonical-input" },
+      recording: { deviceId: "legacy-duplicate" }
+    })
+    expect(normalized.audio.inputDeviceId).toBe("canonical-input")
+    expect("deviceId" in normalized.recording).toBeFalse()
+  })
+
+  test("discards invalid and unstable recording calibrations", () => {
+    expect(normalizeAppPreferences({
+      version: APP_PREFERENCES_VERSION,
+      recording: {
+        calibrations: [
+          {
+            inputDeviceId: "default",
+            outputDeviceId: "speaker",
+            sampleRate: 48000,
+            measuredRoundTripFrames: 512,
+            recordingOffsetFrames: 0,
+            confidence: 1,
+            platformIdentity: "browser-platform",
+            createdAtMs: 1
+          },
+          {
+            inputDeviceId: "mic",
+            outputDeviceId: "speaker",
+            sampleRate: "48000",
+            measuredRoundTripFrames: 512,
+            recordingOffsetFrames: 0,
+            confidence: 1,
+            platformIdentity: "browser-platform",
+            createdAtMs: 2
+          }
+        ]
+      }
+    }).recording.calibrations).toEqual([])
   })
 
   test("normalizes branch-introduced row color defaults back to timeline surface", () => {

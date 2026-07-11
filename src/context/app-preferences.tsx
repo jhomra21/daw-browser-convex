@@ -3,10 +3,13 @@ import { useColorMode } from "@kobalte/core"
 import { assert } from "@daw-browser/shared"
 import {
   createPersistedAppPreferencesWithInitial,
+  normalizeRecordingManualOffsetFrames,
   parseHexColor,
   TIMELINE_DEFAULT_GROUP_COLOR,
   TIMELINE_DEFAULT_TRACK_COLOR,
   timelineDefaultCreateColor,
+  updateRecordingCalibrations,
+  updateRecordingInputPreferences,
   type AppPreferences,
   type AppTheme,
   type AudioLatencyMode,
@@ -19,6 +22,7 @@ import { applyDawTheme, resolveDawThemeById, type ResolvedThemeTokens } from "~/
 import { DEFAULT_DAW_THEME_ID, themeOptions, type DawThemeId, type DawThemeOption } from "~/lib/theme/theme-registry"
 import { resolveAudioRuntimeConfiguration } from "~/lib/audio-settings-core"
 import { configureAudioEngine, configureDesiredAudioOutputDevice } from "~/lib/audio-engine-singleton"
+import type { RecordingCalibration, RecordingInputPreferences } from "~/lib/recording/recording-preferences"
 
 type AppPreferencesContextValue = {
   appearance: {
@@ -63,6 +67,12 @@ type AppPreferencesContextValue = {
     setEchoCancellation: (enabled: boolean) => void
     setNoiseSuppression: (enabled: boolean) => void
     setAutoGainControl: (enabled: boolean) => void
+  }
+  recording: {
+    preferences: () => AppPreferences["recording"]
+    setInputConfiguration: (configuration: RecordingInputPreferences) => void
+    setManualOffsetFrames: (frames: number) => void
+    setCalibrations: (calibrations: RecordingCalibration[]) => void
   }
 }
 
@@ -237,6 +247,15 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           setEchoCancellation: (enabled) => setPreferences("audio", "echoCancellation", enabled),
           setNoiseSuppression: (enabled) => setPreferences("audio", "noiseSuppression", enabled),
           setAutoGainControl: (enabled) => setPreferences("audio", "autoGainControl", enabled)
+        },
+        recording: {
+          preferences: () => preferences.recording,
+          setInputConfiguration: (configuration) =>
+            setPreferences("recording", (recording) => updateRecordingInputPreferences(recording, configuration)),
+          setManualOffsetFrames: (frames) =>
+            setPreferences("recording", "manualOffsetFrames", normalizeRecordingManualOffsetFrames(frames)),
+          setCalibrations: (calibrations) =>
+            setPreferences("recording", (recording) => updateRecordingCalibrations(recording, calibrations))
         }
       }}
     >

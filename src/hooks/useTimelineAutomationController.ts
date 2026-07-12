@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, untrack, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, getOwner, runWithOwner, untrack, type Accessor } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Track } from "@daw-browser/timeline-core/types";
 import {
@@ -466,11 +466,26 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   const automationEnvelopesByTargetKey = createMemo(() => (
     new Map(persistedAutomation.envelopes().map((envelope) => [envelope.targetKey, envelope]))
   ));
-  const evaluatedValuesByTargetKey = createMemo(() => evaluatedAutomationValuesByTargetKey(
-    persistedAutomation.envelopes(),
-    options.playheadSec(),
-    overriddenAutomationTargetKeys(),
-  ));
+  const owner = getOwner();
+  let evaluatedValuesMemo: Accessor<ReadonlyMap<string, number>> | undefined;
+  const evaluatedValuesByTargetKey = () => {
+    const memo = evaluatedValuesMemo ?? runWithOwner(owner, () => createMemo(() => (
+      evaluatedAutomationValuesByTargetKey(
+        persistedAutomation.envelopes(),
+        options.playheadSec(),
+        overriddenAutomationTargetKeys(),
+      )
+    )));
+    if (!memo) {
+      return evaluatedAutomationValuesByTargetKey(
+        persistedAutomation.envelopes(),
+        options.playheadSec(),
+        overriddenAutomationTargetKeys(),
+      );
+    }
+    evaluatedValuesMemo = memo;
+    return memo();
+  };
   const targetKeyForTrackSelection = (trackId: Track["id"], selection: AutomationParameterSelection) => (
     automationTargetKey({ kind: "track", trackId, effectInstanceId: selection.effectInstanceId }, selection.parameterId)
   );

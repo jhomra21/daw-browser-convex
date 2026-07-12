@@ -18,6 +18,7 @@ class DawLoFiProcessor extends AudioWorkletProcessor {
     this.initialSeed = 1
     this.randomState = 1
     this.channels = []
+    this.bypass = 0
     this.faults = 0
     this.port.onmessage = (event) => this.onMessage(event.data)
     this.port.postMessage({ type: 'ready', version: 1 })
@@ -41,6 +42,7 @@ class DawLoFiProcessor extends AudioWorkletProcessor {
   reset() {
     this.randomState = this.initialSeed
     this.channels = []
+    this.bypass = this.state.enabled ? 0 : 1
   }
 
   random() {
@@ -65,19 +67,19 @@ class DawLoFiProcessor extends AudioWorkletProcessor {
     const input = inputs[0]
     const output = outputs[0]
     if (!output || output.length === 0) return true
+    const bypassStep = 1 / Math.max(1, Math.round(0.01 * sampleRate))
+    const targetBypass = this.state.enabled ? 0 : 1
+    const bypassStart = this.bypass
     for (let channelIndex = 0; channelIndex < output.length; channelIndex++) {
       const source = input && (input[channelIndex] || input[0])
       const target = output[channelIndex]
       const channel = this.channels[channelIndex] || (this.channels[channelIndex] = { phase: 1, held: 0, interval: 1 })
+      let channelBypass = bypassStart
       for (let frame = 0; frame < target.length; frame++) {
         let dry = source ? source[frame] : 0
         if (!Number.isFinite(dry)) {
           dry = 0
           this.fault('nonfinite-input')
-        }
-        if (!this.state.enabled) {
-          target[frame] = dry
-          continue
         }
         const ratio = this.parameter(parameters, 'lofi.sampleRateRatio', frame)
         channel.phase += ratio
@@ -97,10 +99,13 @@ class DawLoFiProcessor extends AudioWorkletProcessor {
           channel.held = Math.max(-1, Math.min(1, quantized / levels))
         }
         const mix = this.parameter(parameters, 'lofi.mix', frame)
-        const value = dry + (channel.held - dry) * mix
-        target[frame] = Number.isFinite(value) ? value : 0
+        const processed = dry + (channel.held - dry) * mix
+        channelBypass += Math.max(-bypassStep, Math.min(bypassStep, targetBypass - channelBypass))
+        const value = processed + (dry - processed) * channelBypass
+        target[frame] = Number.isFinite(value) ? value : dry
         if (!Number.isFinite(value)) this.fault('nonfinite-state')
       }
+      if (channelIndex === 0) this.bypass = channelBypass
     }
     return true
   }

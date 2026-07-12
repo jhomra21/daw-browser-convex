@@ -132,9 +132,9 @@ describe('modulation static worklet', () => {
   })
 
   test('bypass is transparent, reset deterministic, kind immutable, and nonfinite input faults', async () => {
-    const bypassed = await render(48_000, 'chorus', { ...createDefaultChorusParams(), enabled: false }, 257, false)
-    expect(bypassed.output[0]).toEqual(bypassed.input[0])
-    expect(bypassed.output[1]).toEqual(bypassed.input[0])
+    const bypassed = await render(48_000, 'chorus', { ...createDefaultChorusParams(), enabled: false }, 1024, false)
+    expect(bypassed.output[0][1023]).toBeCloseTo(bypassed.input[0][1023], 5)
+    expect(bypassed.output[1][1023]).toBeCloseTo(bypassed.input[0][1023], 5)
 
     const processor = await loadProcessor(48_000, 'flanger')
     const input = Float32Array.from({ length: 512 }, (_, index) => Math.sin(index * 0.1))

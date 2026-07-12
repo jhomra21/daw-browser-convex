@@ -63,6 +63,82 @@ type CompressorFaultAudioParam = {
   linearRampToValueAtTime: (value: number, endTime: number) => void
 }
 
+type GainTransitionNode = {
+  gain: CompressorFaultAudioParam
+}
+
+type GainTransitionScheduler = {
+  schedule: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>
+  clear: (timer: ReturnType<typeof setTimeout>) => void
+}
+
+const defaultGainTransitionScheduler: GainTransitionScheduler = {
+  // The bounded one-shot delay lets the fade-out render before disconnecting
+  // the old graph. Callers retain the cancel function for lifecycle cleanup.
+  schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+  clear: (timer) => clearTimeout(timer),
+}
+
+export type GainTransitionOwner = {
+  request: (reconnect: () => void) => void
+  cancel: () => void
+  dispose: () => void
+}
+
+export function createGainTransitionOwner(
+  node: GainTransitionNode,
+  getCurrentTime: () => number,
+  scheduler: GainTransitionScheduler = defaultGainTransitionScheduler,
+  fadeOutSec = 0.005,
+  fadeInSec = 0.005,
+): GainTransitionOwner {
+  let disposed = false
+  let transitionVersion = 0
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const invalidate = () => {
+    transitionVersion += 1
+    if (timer === undefined) return
+    scheduler.clear(timer)
+    timer = undefined
+  }
+
+  const cancel = () => {
+    if (disposed) return
+    invalidate()
+    const currentTime = getCurrentTime()
+    node.gain.cancelScheduledValues(currentTime)
+    node.gain.setValueAtTime(1, currentTime)
+  }
+
+  return {
+    request: (reconnect) => {
+      if (disposed) return
+      invalidate()
+      const requestVersion = transitionVersion
+      const currentTime = getCurrentTime()
+      const fadeOutEnd = currentTime + fadeOutSec
+      node.gain.cancelScheduledValues(currentTime)
+      node.gain.setValueAtTime(node.gain.value, currentTime)
+      node.gain.linearRampToValueAtTime(0, fadeOutEnd)
+      timer = scheduler.schedule(() => {
+        timer = undefined
+        if (disposed || transitionVersion !== requestVersion) return
+        reconnect()
+        const reconnectTime = Math.max(fadeOutEnd, getCurrentTime())
+        node.gain.setValueAtTime(0, reconnectTime)
+        node.gain.linearRampToValueAtTime(1, reconnectTime + fadeInSec)
+      }, fadeOutSec * 1000)
+    },
+    cancel,
+    dispose: () => {
+      if (disposed) return
+      disposed = true
+      invalidate()
+    },
+  }
+}
+
 export function handleCompressorProcessorError(chain: CompressorFaultTransition, currentTime: number) {
   if (chain.state !== 'active') return
   chain.state = 'faulted'

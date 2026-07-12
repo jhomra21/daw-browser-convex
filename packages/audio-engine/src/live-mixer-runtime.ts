@@ -1,5 +1,5 @@
 import { areAudioEffectOrdersEqual, assert, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
-import { connectFxChain, createCompressorNodeChain, disconnectAudioNodes, type CreateReverbImpulseResponse, type FxChainStageConfig } from './effects/chain'
+import { connectFxChain, createCompressorNodeChain, createGainTransitionOwner, disconnectAudioNodes, type CreateReverbImpulseResponse, type FxChainStageConfig, type GainTransitionOwner } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState, type CompressorChainState } from './effects/compressor-chain-state'
 import type { CompressorMeterListener } from './effects/compressor-worklet'
@@ -81,6 +81,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const gains = new Map<string, GainNode>()
   const outputs = new Map<string, GainNode>()
   const trackNodeReleases = new Map<string, Array<() => void>>()
+  const routingTransitionOwners = new Map<string, GainTransitionOwner>()
   const edgeRuntimes = new Map<string, LiveMixerEdgeRuntime>()
   const sidechainEdges = new Map<string, LiveMixerEdgeRuntime>()
   const cueEdges = new Map<string, LiveMixerEdgeRuntime>()
@@ -269,22 +270,36 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   }))
 
   const rebuildTrackRouting = (trackId: string, nodes: Pick<TrackNodeGroup, 'input' | 'postFx'>) => {
-    disconnectAudioNodes([nodes.input])
-    const instances = trackFxInstances.get(trackId)
-    if (instances) {
+    const reconnect = () => {
+      disconnectAudioNodes([nodes.input])
+      const instances = trackFxInstances.get(trackId)
+      if (instances) {
+        connectFxChain(nodes.input, nodes.postFx, {
+          instances: createInstanceStageConfigs(trackId, instances),
+        })
+        return
+      }
       connectFxChain(nodes.input, nodes.postFx, {
-        instances: createInstanceStageConfigs(trackId, instances),
+        eqNodes: eqChains.get(trackId) || [],
+        compressorChain: compressorChains.get(trackId)?.chain(),
+        saturatorChain: saturatorChains.get(trackId)?.chain(),
+        delayChain: delayChains.get(trackId)?.chain(),
+        reverbChain: reverbChains.get(trackId)?.chain(),
+        order: trackFxOrders.get(trackId),
       })
+    }
+    const ctx = options.getAudioContext()
+    if (!ctx) {
+      routingTransitionOwners.get(trackId)?.cancel()
+      reconnect()
       return
     }
-    connectFxChain(nodes.input, nodes.postFx, {
-      eqNodes: eqChains.get(trackId) || [],
-      compressorChain: compressorChains.get(trackId)?.chain(),
-      saturatorChain: saturatorChains.get(trackId)?.chain(),
-      delayChain: delayChains.get(trackId)?.chain(),
-      reverbChain: reverbChains.get(trackId)?.chain(),
-      order: trackFxOrders.get(trackId),
-    })
+    let transitionOwner = routingTransitionOwners.get(trackId)
+    if (!transitionOwner) {
+      transitionOwner = createGainTransitionOwner(nodes.postFx, () => ctx.currentTime)
+      routingTransitionOwners.set(trackId, transitionOwner)
+    }
+    transitionOwner.request(reconnect)
   }
 
   const ensureTrackNodes = (trackId: string): TrackNodeGroup => {
@@ -660,6 +675,8 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   }
 
   const disposeTrack = (trackId: string) => {
+    routingTransitionOwners.get(trackId)?.dispose()
+    routingTransitionOwners.delete(trackId)
     const gain = gains.get(trackId)
     const input = inputs.get(trackId)
     const postFx = postFxOutputs.get(trackId)

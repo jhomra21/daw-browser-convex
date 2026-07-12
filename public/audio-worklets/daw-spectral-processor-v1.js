@@ -27,6 +27,7 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
     super()
     this.released = false
     this.enabled = true
+    this.bypass = 0
     this.mode = 'freeze'
     this.fftSize = 2048
     this.overlap = 4
@@ -288,7 +289,10 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
     const frames = output[0]?.length || 0
     const inputMask = MAX_FFT_SIZE - 1
     const outputMask = this.outputRing[0].length - 1
+    const bypassStep = 1 / Math.max(1, Math.round(0.01 * sampleRate))
+    const targetBypass = this.enabled ? 0 : 1
     for (let frame = 0; frame < frames; frame += 1) {
+      this.bypass += Math.max(-bypassStep, Math.min(bypassStep, targetBypass - this.bypass))
       for (let channel = 0; channel < 2; channel += 1) {
         const sourceChannel = input[channel] || input[0]
         const sideChannel = sidechain[channel] || sidechain[0]
@@ -304,7 +308,8 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
         this.dryRing[channel][this.writeIndex] = 0
         const mixValues = parameters['spectral.mix']
         const mix = mixValues.length === 1 ? mixValues[0] : mixValues[frame]
-        if (output[channel]) output[channel][frame] = this.enabled ? dry * (1 - mix) + wet * mix : dry
+        const processed = dry * (1 - mix) + wet * mix
+        if (output[channel]) output[channel][frame] = processed + (dry - processed) * this.bypass
       }
       this.writeIndex = (this.writeIndex + 1) & outputMask
       this.samplesUntilFrame -= 1

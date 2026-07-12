@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from "solid-js";
 import type { FunctionReturnType } from "convex/server";
 import type { AudioEffectRuntimeInstance, AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import {
@@ -76,6 +76,7 @@ type EffectsPanelAudioEffectsContext = {
   userId: Accessor<string | undefined>;
   roomEffects: Accessor<RoomEffectRow[] | undefined>;
   canWriteCurrentTargetEffects: Accessor<boolean>;
+  persistAudioEffectOrder?: (targetId: string, order: AudioEffectInstance[]) => void | Promise<unknown>;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
   onLocalSaveFailed?: (message: string) => void;
 };
@@ -164,6 +165,18 @@ type EffectsPanelAudioDevice = {
     readDraftForTarget: (targetId: string) => ReverbParams | undefined;
     reset: () => void;
     toggleEnabled: (enabled: boolean) => void;
+  };
+};
+
+export const createAudioEffectInstanceIdentityCache = () => {
+  const cache = new Map<string, AudioEffectInstance>();
+  return (targetId: string, id: string, kind: AudioEffectKind) => {
+    const key = `${targetId}:${id}`;
+    const cached = cache.get(key);
+    if (cached?.kind === kind) return cached;
+    const instance = { id, kind };
+    cache.set(key, instance);
+    return instance;
   };
 };
 
@@ -429,7 +442,8 @@ export function createEffectsPanelAudioDevice(
     params: AudioEffectParams;
   };
   const [draftParamsByInstance, setDraftParamsByInstance] = createSignal<Record<string, AudioEffectPanelDraft | undefined>>({});
-  const [optimisticOrder, setOptimisticOrder] = createSignal<{ targetId: string; order: AudioEffectInstance[] }>();
+  const [optimisticOrder, setOptimisticOrder] = createSignal<{ targetId: string; order: AudioEffectInstance[] } | undefined>(undefined, { equals: false });
+  const optimisticOrdersByTarget = new Map<string, AudioEffectInstance[]>();
 
   const objectParamInput = (params: unknown): object => (params && typeof params === "object" ? params : {});
 
@@ -552,6 +566,7 @@ export function createEffectsPanelAudioDevice(
   );
 
   const instanceKey = (targetId: string, instanceId: string) => `${targetId}:${instanceId}`;
+  const persistedInstanceCache = createAudioEffectInstanceIdentityCache();
 
   const normalizedPersistedAudioEffectRows = createMemo<AudioEffectPanelRow[]>(() => {
     if (isLocalProject()) {
@@ -638,7 +653,7 @@ export function createEffectsPanelAudioDevice(
     const entries = rows
       .map((row) => ({ kind: row.kind, id: row.instanceId ?? row.kind, index: row.index }))
       .sort(compareAudioEffectOrderEntries)
-      .map((row) => ({ id: row.id, kind: row.kind }));
+      .map((row) => persistedInstanceCache(targetId, row.id, row.kind));
     return normalizeAudioEffectInstanceOrder(entries, entries);
   };
 
@@ -646,22 +661,29 @@ export function createEffectsPanelAudioDevice(
     return orderedInstancesForTarget(targetId);
   }
 
-  const persistedOrderedEffects = createMemo<AudioEffectInstance[]>(() => {
-    const targetId = currentTargetId();
-    return readPersistedOrderedEffectsForTarget(targetId);
-  });
+  const persistedOrderedEffects = createMemo<AudioEffectInstance[]>(
+    () => readPersistedOrderedEffectsForTarget(currentTargetId()),
+    [],
+    { equals: areAudioEffectInstanceOrdersEqual },
+  );
 
   const orderedEffects = createMemo<AudioEffectInstance[]>(() => {
     const persistedOrder = persistedOrderedEffects();
-    const optimistic = optimisticOrder();
-    if (optimistic?.targetId !== currentTargetId()) return persistedOrder;
-    return optimistic.order;
+    optimisticOrder();
+    const targetId = currentTargetId();
+    return optimisticOrdersByTarget.has(targetId)
+      ? optimisticOrdersByTarget.get(targetId) ?? []
+      : persistedOrder;
   });
 
   createEffect(() => {
+    normalizedPersistedAudioEffectRows();
     const optimistic = optimisticOrder();
-    if (!optimistic || optimistic.targetId !== currentTargetId()) return;
-    if (areAudioEffectInstanceOrdersEqual(optimistic.order, persistedOrderedEffects())) {
+    for (const [targetId, order] of optimisticOrdersByTarget) {
+      if (!areAudioEffectInstanceOrdersEqual(order, readPersistedOrderedEffectsForTarget(targetId))) continue;
+      optimisticOrdersByTarget.delete(targetId);
+    }
+    if (optimistic && !optimisticOrdersByTarget.has(optimistic.targetId)) {
       setOptimisticOrder();
     }
   });
@@ -669,10 +691,36 @@ export function createEffectsPanelAudioDevice(
   createEffect(() => {
     const order = orderedEffects();
     const targetId = currentTargetId();
-    applyInstancesToEngine(targetId, order);
+    normalizedPersistedAudioEffectRows();
+    draftParamsByInstance();
+    untrack(() => applyInstancesToEngine(targetId, order));
   });
 
+  const currentOrderForTarget = (targetId: string) => {
+    if (targetId !== currentTargetId()) return readPersistedOrderedEffectsForTarget(targetId);
+    return optimisticOrdersByTarget.has(targetId)
+      ? optimisticOrdersByTarget.get(targetId) ?? []
+      : orderedEffects();
+  };
+
+  const setOptimisticOrderForTarget = (targetId: string, order: AudioEffectInstance[]) => {
+    optimisticOrdersByTarget.set(targetId, order);
+    setOptimisticOrder({ targetId, order });
+  };
+
+  const rollbackOptimisticOrder = (targetId: string, order: AudioEffectInstance[]) => {
+    const optimistic = optimisticOrdersByTarget.get(targetId);
+    if (!optimistic || !areAudioEffectInstanceOrdersEqual(optimistic, order)) return;
+    optimisticOrdersByTarget.delete(targetId);
+    setOptimisticOrder();
+    applyInstancesToEngine(targetId, readPersistedOrderedEffectsForTarget(targetId));
+  };
+
   const persistReorder = async (targetId: string, order: AudioEffectInstance[]) => {
+    if (context.persistAudioEffectOrder) {
+      await context.persistAudioEffectOrder(targetId, order);
+      return;
+    }
     const projectId = context.projectId();
     if (!projectId) return;
     if (isLocalId("project", projectId)) {
@@ -702,7 +750,7 @@ export function createEffectsPanelAudioDevice(
   };
 
   const reorderForTarget = (targetId: string, instance: AudioEffectInstance, targetIndex: number) => {
-    const currentOrder = targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(targetId);
+    const currentOrder = currentOrderForTarget(targetId);
     const fromIndex = currentOrder.findIndex((entry) => entry.id === instance.id);
     if (fromIndex < 0) return;
     const nextOrder = currentOrder.filter((entry) => entry.id !== instance.id);
@@ -710,13 +758,10 @@ export function createEffectsPanelAudioDevice(
     nextOrder.splice(clampedIndex, 0, instance);
     const normalized = normalizeAudioEffectInstanceOrder(nextOrder, currentOrder);
     if (areAudioEffectInstanceOrdersEqual(currentOrder, normalized)) return;
-    setOptimisticOrder({ targetId, order: normalized });
+    setOptimisticOrderForTarget(targetId, normalized);
     applyInstancesToEngine(targetId, normalized);
     void persistReorder(targetId, normalized).catch(() => {
-      const optimistic = optimisticOrder();
-      if (optimistic?.targetId === targetId && areAudioEffectInstanceOrdersEqual(optimistic.order, normalized)) {
-        setOptimisticOrder();
-      }
+      rollbackOptimisticOrder(targetId, normalized);
     });
   };
 
@@ -857,6 +902,7 @@ export function createEffectsPanelAudioDevice(
     if (kind === "lofi") {
       const from = AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(previous); const to = AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(next);
       if (AUDIO_EFFECT_CONTRACTS.lofi.serializeParams(from) !== AUDIO_EFFECT_CONTRACTS.lofi.serializeParams(to)) context.onEffectParamsCommitted?.(targetId === "master" ? { targetId, effect: "master-lofi", instanceId, from, to } : { targetId, effect: "lofi", instanceId, from, to }, context.projectId());
+      return;
     }
     const from = normalizeReverbParams(objectParamInput(previous));
     const to = normalizeReverbParams(objectParamInput(next));
@@ -962,6 +1008,7 @@ export function createEffectsPanelAudioDevice(
     if (areParamsForKindEqual(kind, current, next)) return;
     const persistedInstanceId = persistedInstanceIdForTarget(targetId, { id: instanceId, kind });
     writeDraftParams(targetId, instanceId, kind, next);
+    applyInstancesToEngine(targetId, currentOrderForTarget(targetId));
     commitInstanceParams(targetId, persistedInstanceId, kind, current, next);
     void persistInstanceParams(targetId, persistedInstanceId, kind, next).catch(() => undefined);
   };
@@ -1019,10 +1066,10 @@ export function createEffectsPanelAudioDevice(
     for (const entry of entries) {
       writeDraftParams(targetId, entry.instance.id, entry.instance.kind, entry.params);
     }
-    const currentOrder = targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(targetId);
+    const currentOrder = currentOrderForTarget(targetId);
     const nextOrder = [...currentOrder];
     nextOrder.splice(index === undefined ? nextOrder.length : Math.max(0, Math.min(index, nextOrder.length)), 0, ...instances);
-    setOptimisticOrder({ targetId, order: nextOrder });
+    setOptimisticOrderForTarget(targetId, nextOrder);
     applyInstancesToEngine(targetId, nextOrder);
     for (const entry of entries) {
       await persistInstanceParams(targetId, entry.instance.id, entry.instance.kind, entry.params);
@@ -1053,14 +1100,14 @@ export function createEffectsPanelAudioDevice(
   };
   const removeByInstanceFromTarget = async (targetId: Track["id"] | "master", instance: AudioEffectInstance) => {
     if (!context.canWriteCurrentTargetEffects()) return false;
-    const currentOrder = targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(targetId);
+    const currentOrder = currentOrderForTarget(targetId);
     if (!currentOrder.some((entry) => entry.id === instance.id)) return false;
     const projectId = context.projectId();
     if (!projectId) return false;
     if (!(await deleteInstanceFromTarget(targetId, instance, projectId))) return false;
     clearDraftParams(targetId, instance.id);
     const nextOrder = currentOrder.filter((entry) => entry.id !== instance.id);
-    setOptimisticOrder({ targetId, order: nextOrder });
+    setOptimisticOrderForTarget(targetId, nextOrder);
     applyInstancesToEngine(targetId, nextOrder);
     await persistReorder(targetId, nextOrder);
     return true;
@@ -1084,7 +1131,7 @@ export function createEffectsPanelAudioDevice(
     const deleted = await Promise.all(currentOrder.map((instance) => deleteInstanceFromTarget(targetId, instance, projectId)));
     if (!deleted.every(Boolean)) return false;
     clearDraftParamsForTarget(targetId);
-    setOptimisticOrder({ targetId, order: [] });
+    setOptimisticOrderForTarget(targetId, []);
     applyInstancesToEngine(targetId, []);
     await persistReorder(targetId, []);
     return true;

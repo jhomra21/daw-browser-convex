@@ -14,6 +14,13 @@ import { convexApi, convexClient } from "~/lib/convex";
 import { BUILTIN_AUDIO_EFFECT_CHAIN_PRESETS, type AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
 import { BUILTIN_INSTRUMENT_PRESETS, type InstrumentPreset } from "~/lib/instrument-presets";
 import {
+  BROWSER_AUDIO_EFFECT_CATALOG,
+  BROWSER_DEVICE_CATALOG,
+  BROWSER_INSTRUMENT_CATALOG,
+  BROWSER_MIDI_EFFECT_CATALOG,
+  deviceCatalogSearchText,
+} from "~/lib/device-catalog";
+import {
   createLocalAssetFolder,
   deleteEmptyLocalAssetFolder,
   moveLocalAssetToFolder,
@@ -34,19 +41,6 @@ type Options = {
   currentEffectsTargetId: Accessor<Track["id"] | "master">;
   handleInsertSample: (sample: SampleDragData) => void | Promise<void>;
   onDeviceDrop: (payload: BrowserDragPayload, target: BrowserDropTarget) => void | Promise<void>;
-};
-
-const BROWSER_EFFECT_ITEM_IDS = {
-  eq: "builtin:audio-effect:eq",
-  compressor: "builtin:audio-effect:compressor",
-  saturator: "builtin:audio-effect:saturator",
-  delay: "builtin:audio-effect:delay",
-  reverb: "builtin:audio-effect:reverb",
-  arpeggiator: "builtin:midi-effect:arpeggiator",
-};
-const BROWSER_INSTRUMENT_ITEM_IDS = {
-  synth: "builtin:midi-instrument:synth",
-  drumRack: "builtin:midi-instrument:drum-rack",
 };
 
 const effectChainItemId = (preset: AudioEffectChainPreset) => `builtin:audio-effect-chain:${preset.id}`;
@@ -237,64 +231,15 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   const browserDeviceQuery = (tab: "effects" | "midi-instruments") => options.leftBrowser.searchQueryByTab()[tab].trim().toLowerCase();
   const browserEffectItems = createMemo<BrowserItem[]>(() => {
     const actions = options.deviceInsertActions();
-    const canDragDevice = actions !== undefined;
-    const items: BrowserItem[] = [
-      {
-        id: BROWSER_EFFECT_ITEM_IDS.eq,
-        source: "builtin",
-        category: "audio-effect",
-        label: "EQ",
-        subtitle: "Audio effect",
-        searchText: "eq audio effect equalizer",
-        disabled: !canDragDevice,
-      },
-      {
-        id: BROWSER_EFFECT_ITEM_IDS.compressor,
-        source: "builtin",
-        category: "audio-effect",
-        label: "Compressor",
-        subtitle: "Dynamics",
-        searchText: "compressor dynamics peak rms expand",
-        disabled: !canDragDevice,
-      },
-      {
-        id: BROWSER_EFFECT_ITEM_IDS.saturator,
-        source: "builtin",
-        category: "audio-effect",
-        label: "Saturator",
-        subtitle: "Audio effect",
-        searchText: "saturator saturation drive distortion audio effect",
-        disabled: !canDragDevice,
-      },
-      {
-        id: BROWSER_EFFECT_ITEM_IDS.delay,
-        source: "builtin",
-        category: "audio-effect",
-        label: "Delay",
-        subtitle: "Audio effect",
-        searchText: "delay echo ping pong audio effect",
-        disabled: !canDragDevice,
-      },
-      {
-        id: BROWSER_EFFECT_ITEM_IDS.reverb,
-        source: "builtin",
-        category: "audio-effect",
-        label: "Reverb",
-        subtitle: "Audio effect",
-        searchText: "reverb audio effect space",
-        disabled: !canDragDevice,
-      },
-      {
-        id: BROWSER_EFFECT_ITEM_IDS.arpeggiator,
-        source: "builtin",
-        category: "midi-effect",
-        label: "Arpeggiator",
-        subtitle: "MIDI effect",
-        searchText: "arpeggiator arp midi effect",
-        disabled: !canDragDevice,
-      },
-    ];
-    return items;
+    return [...BROWSER_AUDIO_EFFECT_CATALOG, ...BROWSER_MIDI_EFFECT_CATALOG].map((entry) => ({
+      id: entry.id,
+      source: "builtin",
+      category: entry.category,
+      label: entry.label,
+      subtitle: entry.description,
+      searchText: deviceCatalogSearchText(entry),
+      disabled: actions === undefined,
+    }));
   });
   const browserEffectChainItems = createMemo<BrowserItem[]>(() => {
     const actions = options.deviceInsertActions();
@@ -386,27 +331,15 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   });
   const browserInstrumentItems = createMemo<BrowserItem[]>(() => {
     const actions = options.deviceInsertActions();
-    const items: BrowserItem[] = [
-      {
-        id: BROWSER_INSTRUMENT_ITEM_IDS.synth,
-        source: "builtin",
-        category: "midi-instrument",
-        label: "Synth",
-        subtitle: "Create a MIDI clip on the selected instrument track",
-        searchText: "synth midi instrument clip",
-        disabled: actions === undefined,
-      },
-      {
-        id: BROWSER_INSTRUMENT_ITEM_IDS.drumRack,
-        source: "builtin",
-        category: "midi-instrument",
-        label: "Drum Rack",
-        subtitle: "Create a MIDI clip on the selected instrument track",
-        searchText: "drum rack drums sampler pads midi instrument clip",
-        disabled: actions === undefined,
-      },
-    ];
-    return items;
+    return BROWSER_INSTRUMENT_CATALOG.map((entry) => ({
+      id: entry.id,
+      source: "builtin",
+      category: entry.category,
+      label: entry.label,
+      subtitle: entry.description,
+      searchText: deviceCatalogSearchText(entry),
+      disabled: actions === undefined,
+    }));
   });
   const browserInstrumentPresetItems = createMemo<BrowserItem[]>(() => {
     const actions = options.deviceInsertActions();
@@ -628,18 +561,12 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   const resolveBrowserDevicePayload = (itemId: string): BrowserDragPayload | undefined => {
     const actions = options.deviceInsertActions();
     if (!actions) return undefined;
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.eq) return { kind: "audio-effect", effect: "eq", label: "EQ" };
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.compressor) return { kind: "audio-effect", effect: "compressor", label: "Compressor" };
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.saturator) return { kind: "audio-effect", effect: "saturator", label: "Saturator" };
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.delay) return { kind: "audio-effect", effect: "delay", label: "Delay" };
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.reverb) return { kind: "audio-effect", effect: "reverb", label: "Reverb" };
-    if (itemId === BROWSER_EFFECT_ITEM_IDS.arpeggiator) return { kind: "midi-effect", effect: "arpeggiator", label: "Arpeggiator" };
+    const device = BROWSER_DEVICE_CATALOG.find((entry) => entry.id === itemId);
+    if (device) return device.payload;
     const chain = browserEffectChainPresetByItemId().get(itemId);
     if (chain) return { kind: "audio-effect-chain", chain, label: chain.name };
     const preset = browserInstrumentPresetByItemId().get(itemId);
     if (preset) return { kind: "instrument-preset", preset, label: preset.name };
-    if (itemId === BROWSER_INSTRUMENT_ITEM_IDS.synth) return { kind: "midi-instrument", instrument: "synth", label: "Synth" };
-    if (itemId === BROWSER_INSTRUMENT_ITEM_IDS.drumRack) return { kind: "midi-instrument", instrument: "drum-rack", label: "Drum Rack" };
     return undefined;
   };
 
@@ -648,11 +575,9 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     const actions = options.deviceInsertActions();
     if (!payload || !actions?.canWrite) return;
     if (payload.kind === "audio-effect") {
-      if (payload.effect === "eq" && actions.canAddEq) actions.addEq();
-      if (payload.effect === "compressor" && actions.canAddCompressor) actions.addCompressor();
-      if (payload.effect === "saturator" && actions.canAddSaturator) actions.addSaturator();
-      if (payload.effect === "delay" && actions.canAddDelay) actions.addDelay();
-      if (payload.effect === "reverb" && actions.canAddReverb) actions.addReverb();
+      const targetId = options.currentEffectsTargetId();
+      if (!actions.canAddAudioEffectToTarget(targetId, payload.effect)) return;
+      void actions.addAudioEffectToTarget(targetId, payload.effect);
       return;
     }
     if (payload.kind === "audio-effect-chain") {
@@ -662,7 +587,11 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       }
       return;
     }
-    if (payload.kind === "midi-effect" && actions.canAddArpeggiator) actions.addArpeggiator();
+    if (payload.kind === "midi-effect") {
+      const targetId = options.currentEffectsTargetId();
+      if (targetId === "master" || !actions.canAddArpeggiatorToTarget(targetId)) return;
+      void actions.addArpeggiatorToTarget(targetId);
+    }
   };
 
   const addBrowserInstrument = (itemId: string) => {

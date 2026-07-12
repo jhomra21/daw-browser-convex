@@ -1,5 +1,5 @@
 import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
-import { connectFxChain, createCompressorNodeChain, disconnectAudioNodes, type CreateReverbImpulseResponse, type FxChainStageConfig } from './effects/chain'
+import { connectFxChain, createCompressorNodeChain, createGainTransitionOwner, disconnectAudioNodes, type CreateReverbImpulseResponse, type FxChainStageConfig, type GainTransitionOwner } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState } from './effects/compressor-chain-state'
 import { createDelayChainState } from './effects/delay-chain-state'
@@ -61,6 +61,9 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   let masterFxInstances: AudioEffectRuntimeInstance[] | null = null
   let pendingFxInstances: AudioEffectRuntimeInstance[] | null = null
   let fxInstanceRevision = 0
+  let routingGain: GainNode | null = null
+  let releaseRoutingGain: () => void = () => undefined
+  let routingTransitionOwner: GainTransitionOwner | null = null
   const instanceEqChains = new Map<string, BiquadFilterNode[]>()
   const instanceEqNodesByBand = new Map<string, Map<string, BiquadFilterNode>>()
   const instanceEqSignatures = new Map<string, string>()
@@ -129,11 +132,40 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   }))
 
   const rebuildRouting = (ctx: AudioContext, masterGain: GainNode, destination: AudioDestinationNode) => {
-    disconnectAudioNodes([masterGain])
-    if (analyserConnected) analyserConnected = false
-    if (masterFxInstances) {
-      connectFxChain(masterGain, destination, {
-        instances: createInstanceStageConfigs(masterFxInstances),
+    let nextRoutingGain = routingGain
+    if (!nextRoutingGain) {
+      nextRoutingGain = ctx.createGain()
+      nextRoutingGain.gain.value = 1
+      routingGain = nextRoutingGain
+      releaseRoutingGain = observeResource(options.resourceObserver, 'audio-nodes', nextRoutingGain)
+      masterGain.connect(nextRoutingGain)
+      routingTransitionOwner = createGainTransitionOwner(nextRoutingGain, () => ctx.currentTime)
+    }
+    if (analyserConnected && analyser) {
+      try { masterGain.disconnect(analyser) } catch {}
+    }
+    analyserConnected = false
+    const reconnect = () => {
+      disconnectAudioNodes([nextRoutingGain])
+      if (masterFxInstances) {
+        connectFxChain(nextRoutingGain, destination, {
+          instances: createInstanceStageConfigs(masterFxInstances),
+        })
+        if (analyser) {
+          try {
+            masterGain.connect(analyser)
+            analyserConnected = true
+          } catch {}
+        }
+        return
+      }
+      connectFxChain(nextRoutingGain, destination, {
+        eqNodes: eqChain,
+        compressorChain: compressorState.chain(),
+        saturatorChain: saturatorState.chain(),
+        delayChain: delayState.chain(),
+        reverbChain: reverbState.chain(),
+        order: masterFxOrder,
       })
       if (analyser) {
         try {
@@ -141,22 +173,8 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
           analyserConnected = true
         } catch {}
       }
-      return
     }
-    connectFxChain(masterGain, destination, {
-      eqNodes: eqChain,
-      compressorChain: compressorState.chain(),
-      saturatorChain: saturatorState.chain(),
-      delayChain: delayState.chain(),
-      reverbChain: reverbState.chain(),
-      order: masterFxOrder,
-    })
-    if (analyser) {
-      try {
-        masterGain.connect(analyser)
-        analyserConnected = true
-      } catch {}
-    }
+    routingTransitionOwner?.request(reconnect)
   }
 
   const ensureAnalyser = (ctx: AudioContext | null, masterGain: GainNode | null) => {
@@ -549,6 +567,12 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     close: () => {
       releaseAnalyser()
       releaseAnalyser = () => undefined
+      releaseRoutingGain()
+      releaseRoutingGain = () => undefined
+      routingTransitionOwner?.dispose()
+      routingTransitionOwner = null
+      disconnectAudioNodes([routingGain])
+      routingGain = null
       eqSignature = null
       eqTopologySignature = null
       pendingEqParams = null

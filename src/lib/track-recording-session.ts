@@ -42,24 +42,6 @@ export type RecordingContext = {
   rejectStopPromise: (error?: unknown) => void
 }
 
-export const getMediaRecorderAuxiliaryCaptureOptions = (): {
-  layout: 'mono'
-  inputChannel: 0
-  gain: 1
-  polarity: 1
-  monitor: 'off'
-  armed: false
-  savedAudioSource: 'media-recorder-unprocessed'
-} => ({
-  layout: 'mono',
-  inputChannel: 0,
-  gain: 1,
-  polarity: 1,
-  monitor: 'off',
-  armed: false,
-  savedAudioSource: 'media-recorder-unprocessed',
-})
-
 export function createStopPromise(): {
   promise: Promise<void>
   resolve: () => void

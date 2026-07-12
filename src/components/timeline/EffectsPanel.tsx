@@ -6,7 +6,7 @@ import {
   createMemo,
   createSignal,
 } from "solid-js";
-import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_ORDER, automationEnvelopeValueRange, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, normalizeUtilityParamsEnvelope, type AudioEffectInstance, type AudioEffectKind, type AutomationEnvelope, type InstrumentKind } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, automationEnvelopeValueRange, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, normalizeUtilityParamsEnvelope, type AudioEffectInstance, type AudioEffectKind, type AutomationEnvelope } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Delay from "~/components/effects/Delay";
 import Compressor from "~/components/effects/Compressor";
@@ -50,6 +50,12 @@ import {
 import TimelineContextMenu, {
   type TimelineContextMenuItem,
 } from "~/components/timeline/context-menu/timeline-context-menu";
+import {
+  CONTEXT_MENU_AUDIO_EFFECT_CATALOG,
+  CONTEXT_MENU_INSTRUMENT_CATALOG,
+  CONTEXT_MENU_MIDI_EFFECT_CATALOG,
+  getAudioEffectDeviceCatalogEntry,
+} from "~/lib/device-catalog";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -258,33 +264,7 @@ type EffectsPanelAudioEffectCardProps = {
   onManualAutomationOverride?: (parameterId: string) => void;
 };
 
-const audioEffectLabels: Record<AudioEffectKind, string> = {
-  utility: "Utility",
-  eq: "EQ",
-  autofilter: "Auto Filter",
-  gate: "Gate",
-  compressor: "Compressor",
-  saturator: "Saturator",
-  limiter: "Limiter",
-  lofi: "LoFi",
-  chorus: "Chorus",
-  flanger: "Flanger",
-  phaser: "Phaser",
-  tremolo: "Tremolo",
-  autopan: "Auto Pan",
-  ensemble: "Ensemble",
-  delay: "Delay",
-  reverb: "Reverb",
-  spectral: "Spectral",
-};
-
-const instrumentLabels: Record<InstrumentKind, string> = {
-  synth: "Synth",
-  "drum-rack": "Drum Rack",
-  sampler: "Sampler",
-  granular: "Granular",
-};
-const instrumentKinds: InstrumentKind[] = ["synth", "drum-rack", "sampler", "granular"];
+const audioEffectLabel = (kind: AudioEffectKind) => getAudioEffectDeviceCatalogEntry(kind).label;
 const objectParams = (value: unknown): object => value && typeof value === "object" ? value : {};
 
 const createAudioEffectContextMenuItems = (input: {
@@ -328,7 +308,7 @@ const createAudioEffectContextMenuControls = (
     : undefined;
   if (effect.kind === "eq") {
     return {
-      label: audioEffectLabels.eq,
+      label: audioEffectLabel("eq"),
       enabled: () => normalizeEqParams(objectParams(audioEffects.paramsForInstance(effect))).enabled !== false,
       toggleEnabled: (enabled: boolean) => audioEffects.eq.changeInstance(effect.id, (prev) => ({ ...prev, enabled })),
       reset: () => audioEffects.eq.changeInstance(effect.id, () => normalizeEqParams({})),
@@ -337,7 +317,7 @@ const createAudioEffectContextMenuControls = (
   }
   if (effect.kind === "utility") {
     return {
-      label: audioEffectLabels.utility,
+      label: audioEffectLabel("utility"),
       enabled: () => normalizeUtilityParamsEnvelope(audioEffects.paramsForInstance(effect)).state.enabled,
       toggleEnabled: (enabled: boolean) => audioEffects.utility.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })),
       reset: () => audioEffects.utility.changeInstance(effect.id, () => normalizeUtilityParamsEnvelope({})),
@@ -346,7 +326,7 @@ const createAudioEffectContextMenuControls = (
   }
   if (effect.kind === "gate") {
     return {
-      label: audioEffectLabels.gate,
+      label: audioEffectLabel("gate"),
       enabled: () => normalizeGateParamsEnvelope(audioEffects.paramsForInstance(effect)).state.enabled,
       toggleEnabled: (enabled: boolean) => audioEffects.gate.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })),
       reset: () => audioEffects.gate.changeInstance(effect.id, () => normalizeGateParamsEnvelope({})),
@@ -355,7 +335,7 @@ const createAudioEffectContextMenuControls = (
   }
   if (effect.kind === "compressor") {
     return {
-      label: audioEffectLabels.compressor,
+      label: audioEffectLabel("compressor"),
       enabled: () => normalizeCompressorParams(objectParams(audioEffects.paramsForInstance(effect))).enabled !== false,
       toggleEnabled: (enabled: boolean) => audioEffects.compressor.changeInstance(effect.id, (prev) => ({ ...prev, enabled })),
       reset: () => audioEffects.compressor.changeInstance(effect.id, () => normalizeCompressorParams({})),
@@ -364,7 +344,7 @@ const createAudioEffectContextMenuControls = (
   }
   if (effect.kind === "limiter") {
     return {
-      label: audioEffectLabels.limiter,
+      label: audioEffectLabel("limiter"),
       enabled: () => normalizeLimiterParamsEnvelope(audioEffects.paramsForInstance(effect)).state.enabled,
       toggleEnabled: (enabled: boolean) => audioEffects.limiter.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })),
       reset: () => audioEffects.limiter.changeInstance(effect.id, () => normalizeLimiterParamsEnvelope({})),
@@ -373,7 +353,7 @@ const createAudioEffectContextMenuControls = (
   }
   if (effect.kind === "saturator") {
     return {
-      label: audioEffectLabels.saturator,
+      label: audioEffectLabel("saturator"),
       enabled: () => normalizeSaturatorParams(objectParams(audioEffects.paramsForInstance(effect))).enabled !== false,
       toggleEnabled: (enabled: boolean) => audioEffects.saturator.changeInstance(effect.id, (prev) => ({ ...prev, enabled })),
       reset: () => audioEffects.saturator.changeInstance(effect.id, () => normalizeSaturatorParams({})),
@@ -382,24 +362,24 @@ const createAudioEffectContextMenuControls = (
   }
   if (effect.kind === "delay") {
     return {
-      label: audioEffectLabels.delay,
+      label: audioEffectLabel("delay"),
       enabled: () => normalizeDelayParams(objectParams(audioEffects.paramsForInstance(effect))).enabled !== false,
       toggleEnabled: (enabled: boolean) => audioEffects.delay.changeInstance(effect.id, (prev) => ({ ...prev, enabled })),
       reset: () => audioEffects.delay.changeInstance(effect.id, () => normalizeDelayParams({})),
       remove,
     };
   }
-  if (effect.kind === "autofilter") return { label: audioEffectLabels.autofilter, enabled: () => AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.autofilter.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.autofilter.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams({})), remove };
-  if (effect.kind === "chorus") return { label: audioEffectLabels.chorus, enabled: () => AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.chorus.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.chorus.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams({})), remove };
-  if (effect.kind === "flanger") return { label: audioEffectLabels.flanger, enabled: () => AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.flanger.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.flanger.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams({})), remove };
-  if (effect.kind === "phaser") return { label: audioEffectLabels.phaser, enabled: () => AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.phaser.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.phaser.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams({})), remove };
-  if (effect.kind === "tremolo") return { label: audioEffectLabels.tremolo, enabled: () => AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.tremolo.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.tremolo.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams({})), remove };
-  if (effect.kind === "autopan") return { label: audioEffectLabels.autopan, enabled: () => AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.autopan.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.autopan.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams({})), remove };
-  if (effect.kind === "ensemble") return { label: audioEffectLabels.ensemble, enabled: () => AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.ensemble.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.ensemble.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams({})), remove };
-  if (effect.kind === "lofi") return { label: audioEffectLabels.lofi, enabled: () => AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.lofi.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.lofi.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams({})), remove };
-  if (effect.kind === "spectral") return { label: audioEffectLabels.spectral, enabled: () => normalizeSpectralParamsEnvelope(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.spectral.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.spectral.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.spectral.createDefaultParams()), remove };
+  if (effect.kind === "autofilter") return { label: audioEffectLabel("autofilter"), enabled: () => AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.autofilter.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.autofilter.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams({})), remove };
+  if (effect.kind === "chorus") return { label: audioEffectLabel("chorus"), enabled: () => AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.chorus.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.chorus.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams({})), remove };
+  if (effect.kind === "flanger") return { label: audioEffectLabel("flanger"), enabled: () => AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.flanger.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.flanger.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams({})), remove };
+  if (effect.kind === "phaser") return { label: audioEffectLabel("phaser"), enabled: () => AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.phaser.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.phaser.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams({})), remove };
+  if (effect.kind === "tremolo") return { label: audioEffectLabel("tremolo"), enabled: () => AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.tremolo.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.tremolo.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams({})), remove };
+  if (effect.kind === "autopan") return { label: audioEffectLabel("autopan"), enabled: () => AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.autopan.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.autopan.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams({})), remove };
+  if (effect.kind === "ensemble") return { label: audioEffectLabel("ensemble"), enabled: () => AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.ensemble.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.ensemble.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams({})), remove };
+  if (effect.kind === "lofi") return { label: audioEffectLabel("lofi"), enabled: () => AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.lofi.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.lofi.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams({})), remove };
+  if (effect.kind === "spectral") return { label: audioEffectLabel("spectral"), enabled: () => normalizeSpectralParamsEnvelope(audioEffects.paramsForInstance(effect)).state.enabled, toggleEnabled: (enabled: boolean) => audioEffects.spectral.changeInstance(effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } })), reset: () => audioEffects.spectral.changeInstance(effect.id, () => AUDIO_EFFECT_CONTRACTS.spectral.createDefaultParams()), remove };
   return {
-    label: audioEffectLabels.reverb,
+    label: audioEffectLabel("reverb"),
     enabled: () => normalizeReverbParams(objectParams(audioEffects.paramsForInstance(effect))).enabled !== false,
     toggleEnabled: (enabled: boolean) => audioEffects.reverb.changeInstance(effect.id, (prev) => ({ ...prev, enabled })),
     reset: () => audioEffects.reverb.changeInstance(effect.id, () => normalizeReverbParams({})),
@@ -600,14 +580,24 @@ const createEffectsPanelContextMenuItems = (input: {
   instrument: EffectsPanelInstrumentDevice;
   onHide: () => void;
 }): TimelineContextMenuItem[] => {
-  const addAudioEffectItems: TimelineContextMenuItem[] = AUDIO_EFFECT_ORDER.map((effect) => ({
+  const addAudioEffectItems: TimelineContextMenuItem[] = CONTEXT_MENU_AUDIO_EFFECT_CATALOG.map((entry) => ({
     kind: "item",
-    label: `Add ${audioEffectLabels[effect]}`,
-    disabled: !input.canWrite || !input.audioEffects.canAddByKindToTarget(input.targetId, effect),
+    label: `Add ${entry.label}`,
+    disabled: !input.canWrite || !input.audioEffects.canAddByKindToTarget(input.targetId, entry.kind),
     onSelect: () => {
-      void input.audioEffects.addByKindToTarget(input.targetId, effect).catch(() => undefined);
+      void input.audioEffects.addByKindToTarget(input.targetId, entry.kind).catch(() => undefined);
     },
   }));
+  const addMidiEffectItems = (targetId: Track["id"]): TimelineContextMenuItem[] => (
+    CONTEXT_MENU_MIDI_EFFECT_CATALOG.map((entry) => ({
+      kind: "item",
+      label: `Add ${entry.label}`,
+      disabled: !input.canWrite || Boolean(input.instrument.arp.params()),
+      onSelect: () => {
+        void input.instrument.arp.addToTarget(targetId);
+      },
+    }))
+  );
   const resetCurrentDevices = () => {
     for (const effect of input.audioEffects.orderedEffects()) {
       createAudioEffectContextMenuControls(effect, input.audioEffects).reset();
@@ -637,22 +627,15 @@ const createEffectsPanelContextMenuItems = (input: {
   if (targetTrackId) {
     items.push(
       { kind: "separator" },
-      ...instrumentKinds.map((kind): TimelineContextMenuItem => ({
+      ...CONTEXT_MENU_INSTRUMENT_CATALOG.map((entry): TimelineContextMenuItem => ({
         kind: "item",
-        label: `Use ${instrumentLabels[kind]}`,
-        disabled: !input.canWrite || input.instrument.readInstrumentForTarget(targetTrackId)?.kind === kind,
+        label: `Use ${entry.label}`,
+        disabled: !input.canWrite || input.instrument.readInstrumentForTarget(targetTrackId)?.kind === entry.kind,
         onSelect: () => {
-          input.instrument.switchInstrumentForTarget(targetTrackId, kind);
+          input.instrument.switchInstrumentForTarget(targetTrackId, entry.kind);
         },
       })),
-      {
-        kind: "item",
-        label: "Add Arpeggiator",
-        disabled: !input.canWrite || Boolean(input.instrument.arp.params()),
-        onSelect: () => {
-          void input.instrument.arp.addToTarget(targetTrackId);
-        },
-      },
+      ...addMidiEffectItems(targetTrackId),
     );
   }
 

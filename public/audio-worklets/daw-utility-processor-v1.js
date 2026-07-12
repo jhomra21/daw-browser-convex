@@ -19,6 +19,7 @@ class DawUtilityProcessor extends AudioWorkletProcessor {
     this.x1R = 0
     this.y1L = 0
     this.y1R = 0
+    this.bypass = 0
     this.faults = 0
     this.port.onmessage = (event) => this.onMessage(event.data)
     this.port.postMessage({ type: 'ready', version: 1 })
@@ -29,6 +30,7 @@ class DawUtilityProcessor extends AudioWorkletProcessor {
     if (message.type === 'dispose') return this.port.close()
     if (message.type === 'reset') {
       this.x1L = this.x1R = this.y1L = this.y1R = 0
+      this.bypass = this.state.enabled ? 0 : 1
       return
     }
     if (message.type !== 'configure' || !Number.isInteger(message.revision) || message.revision <= this.revision || !message.state || typeof message.state !== 'object') return this.fault('malformed-or-stale-configure')
@@ -51,6 +53,7 @@ class DawUtilityProcessor extends AudioWorkletProcessor {
     const rightOut = output[1]
     const frames = leftOut.length
     const dcR = Math.exp(-2 * Math.PI * 10 / sampleRate)
+    const bypassStep = 1 / Math.max(1, Math.round(0.01 * sampleRate))
     for (let i = 0; i < frames; i++) {
       let l = leftIn ? leftIn[i] : 0
       let r = rightIn ? rightIn[i] : l
@@ -58,11 +61,8 @@ class DawUtilityProcessor extends AudioWorkletProcessor {
         l = r = 0
         this.fault('nonfinite-input')
       }
-      if (!this.state.enabled) {
-        leftOut[i] = l
-        if (rightOut) rightOut[i] = r
-        continue
-      }
+      const dryL = l
+      const dryR = r
       if (this.state.inputMode === 'mono-sum') l = r = 0.5 * l + 0.5 * r
       if (this.state.polarity === 'invert') { l = -l; r = -r }
       if (this.state.matrix === 'mid-side-encode') {
@@ -99,8 +99,10 @@ class DawUtilityProcessor extends AudioWorkletProcessor {
         this.x1L = this.x1R = this.y1L = this.y1R = 0
         this.fault('nonfinite-state')
       }
-      leftOut[i] = l
-      if (rightOut) rightOut[i] = r
+      const targetBypass = this.state.enabled ? 0 : 1
+      this.bypass += Math.max(-bypassStep, Math.min(bypassStep, targetBypass - this.bypass))
+      leftOut[i] = l + (dryL - l) * this.bypass
+      if (rightOut) rightOut[i] = r + (dryR - r) * this.bypass
     }
     return true
   }

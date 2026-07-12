@@ -30,6 +30,7 @@ class DawModulationProcessor extends AudioWorkletProcessor {
     this.revision = -1
     this.state = { enabled: true }
     this.phase = 0
+    this.bypass = 0
     this.delayL = new Float32Array(MAX_DELAY_FRAMES)
     this.delayR = new Float32Array(MAX_DELAY_FRAMES)
     this.write = 0
@@ -50,6 +51,7 @@ class DawModulationProcessor extends AudioWorkletProcessor {
     if (message.type === 'dispose') return this.port.close()
     if (message.type === 'reset') {
       this.phase = 0
+      this.bypass = this.state.enabled ? 0 : 1
       this.delayL.fill(0); this.delayR.fill(0); this.write = 0
       this.feedbackL = this.feedbackR = 0
       this.allpassXL.fill(0); this.allpassXR.fill(0)
@@ -123,6 +125,7 @@ class DawModulationProcessor extends AudioWorkletProcessor {
     const inL = input[0]
     const inR = input[1] || inL
     const kind = this.processorKind
+    const bypassStep = 1 / Math.max(1, Math.round(0.01 * sampleRate))
     for (let i = 0; i < outL.length; i++) {
       if (this.parameterProperties) {
         for (let bindingIndex = 0; bindingIndex < this.parameterProperties.length; bindingIndex++) {
@@ -136,9 +139,11 @@ class DawModulationProcessor extends AudioWorkletProcessor {
       let l = inL ? inL[i] : 0
       let r = inR ? inR[i] : l
       if (!Number.isFinite(l) || !Number.isFinite(r)) { l = r = 0; this.fault('nonfinite-input') }
+      const dryL = l
+      const dryR = r
       let processedL = l
       let processedR = r
-      if (this.state.enabled && kind) {
+      if (kind) {
         const phaseL = this.phase + (this.state.phase || 0)
         const phaseR = phaseL + (this.state.stereoPhase || 0)
         if (kind === 'chorus' || kind === 'flanger') {
@@ -183,8 +188,10 @@ class DawModulationProcessor extends AudioWorkletProcessor {
         this.feedbackL = this.feedbackR = 0
         this.fault('nonfinite-state')
       }
-      outL[i] = processedL
-      if (outR) outR[i] = processedR
+      const targetBypass = this.state.enabled ? 0 : 1
+      this.bypass += Math.max(-bypassStep, Math.min(bypassStep, targetBypass - this.bypass))
+      outL[i] = processedL + (dryL - processedL) * this.bypass
+      if (outR) outR[i] = processedR + (dryR - processedR) * this.bypass
     }
     return true
   }

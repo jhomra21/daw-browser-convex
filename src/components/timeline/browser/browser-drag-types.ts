@@ -1,4 +1,4 @@
-import type { AudioEffectKind } from "@daw-browser/shared";
+import type { AudioEffectKind, InstrumentKind } from "@daw-browser/shared";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
 import type { InstrumentPreset } from "~/lib/instrument-presets";
@@ -7,7 +7,7 @@ export type BrowserDragPayload =
   | { kind: "audio-effect"; effect: AudioEffectKind; label: string }
   | { kind: "audio-effect-chain"; chain: AudioEffectChainPreset; label: string }
   | { kind: "midi-effect"; effect: "arpeggiator"; label: string }
-  | { kind: "midi-instrument"; instrument: "synth" | "drum-rack"; label: string }
+  | { kind: "midi-instrument"; instrument: InstrumentKind; label: string }
   | { kind: "instrument-preset"; preset: InstrumentPreset; label: string };
 
 export type BrowserDropTarget =

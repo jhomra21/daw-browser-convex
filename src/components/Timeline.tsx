@@ -1262,6 +1262,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       onEffectChainElementChange: (element: HTMLElement | undefined) => {
         effectsChainElement = element;
       },
+      evaluatedValuesByTargetKey: automation.evaluatedValuesByTargetKey(),
     },
     sampleDetailPanel: {
       isOpen: bottomPanel.open() && bottomPanel.mode() === "sample-detail",

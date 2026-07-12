@@ -32,9 +32,11 @@ type MasterSidebarRowProps = {
     effects: readonly AutomationTargetDeviceInstance[];
     automatedTargetKeys: ReadonlySet<string>;
     selectedEnvelope: AutomationEnvelope | undefined;
+    evaluatedValuesByTargetKey: ReadonlyMap<string, number>;
     onToggleVisibility: () => void;
     onResizeLane: (heightPx: number) => void;
     onSelectParameter: (selection: AutomationParameterSelection) => void;
+    onManualAutomationOverride: () => void;
   };
 };
 
@@ -42,7 +44,9 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   const master = () => props.master;
   const [activeVolume, setActiveVolume] = createSignal<number | undefined>();
   const committedVolume = () => normalizeMasterVolume(master().volume);
-  const displayMasterVolume = () => activeVolume() ?? committedVolume();
+  const displayMasterVolume = () => activeVolume()
+    ?? props.automation.evaluatedValuesByTargetKey.get(automationTargetKey({ kind: "master" }, "volume"))
+    ?? committedVolume();
   const previewVolume = (volume: number) => {
     if (!master().canEditVolume) return;
     const nextVolume = normalizeMasterVolume(volume);
@@ -191,7 +195,10 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
                       "--track-volume-automation-end": `${(volumeRange()?.max ?? 0) * 100}%`,
                     }}
                     onClick={(event) => event.stopPropagation()}
-                    onPointerDown={() => props.automation.onSelectParameter({ parameterId: "volume" })}
+                    onPointerDown={() => {
+                      props.automation.onSelectParameter({ parameterId: "volume" });
+                      props.automation.onManualAutomationOverride();
+                    }}
                     onInput={(event) => {
                       event.stopPropagation();
                       previewVolume(parseFloat(event.currentTarget.value));

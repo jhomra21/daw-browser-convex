@@ -1,4 +1,4 @@
-import type { AutomationPoint, AutomationTarget, AutomationTargetKind } from './automation'
+import type { AutomationEnvelope, AutomationPoint, AutomationTarget, AutomationTargetKind } from './automation'
 import { isAutomationInterpolation } from './automation'
 import {
   createDefaultDelayParams,
@@ -384,23 +384,57 @@ export const normalizeAutomationPoints = (
 }
 
 export const valueAtAutomationTime = (
-  points: AutomationPoint[],
+  points: readonly AutomationPoint[],
   timeSec: number,
   fallbackValue: number,
 ): number => {
   if (points.length === 0) return fallbackValue
-  const ordered = [...points].sort((a, b) => a.timeSec - b.timeSec)
-  const first = ordered[0]
+  // Automation points are normalized at persistence and editing boundaries.
+  // Keep evaluation allocation-free because this runs for every active envelope
+  // on each bounded playhead publication.
+  const first = points[0]
   if (!first || timeSec <= first.timeSec) return first?.value ?? fallbackValue
-  for (let index = 1; index < ordered.length; index += 1) {
-    const previous = ordered[index - 1]
-    const next = ordered[index]
-    if (!previous || !next || timeSec > next.timeSec) continue
-    if (previous.interpolation === 'hold') return previous.value
-    const span = next.timeSec - previous.timeSec
-    if (span <= 0) return next.value
-    const progress = (timeSec - previous.timeSec) / span
-    return previous.value + ((next.value - previous.value) * progress)
+  let low = 1
+  let high = points.length - 1
+  let nextIndex = points.length
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2)
+    const point = points[middle]
+    if (!point) {
+      high = middle - 1
+      continue
+    }
+    if (timeSec <= point.timeSec) {
+      nextIndex = middle
+      high = middle - 1
+    } else {
+      low = middle + 1
+    }
   }
-  return ordered[ordered.length - 1]?.value ?? fallbackValue
+  if (nextIndex >= points.length) return points[points.length - 1]?.value ?? fallbackValue
+  const previous = points[nextIndex - 1]
+  const next = points[nextIndex]
+  if (!previous || !next) return fallbackValue
+  if (previous.interpolation === 'hold') return previous.value
+  const span = next.timeSec - previous.timeSec
+  if (span <= 0) return next.value
+  const progress = (timeSec - previous.timeSec) / span
+  return previous.value + ((next.value - previous.value) * progress)
+}
+
+export const evaluatedAutomationValuesByTargetKey = (
+  envelopes: readonly AutomationEnvelope[],
+  timeSec: number,
+  overriddenTargetKeys: ReadonlySet<string> = new Set(),
+): Map<string, number> => {
+  const values = new Map<string, number>()
+  for (const envelope of envelopes) {
+    if (!envelope.enabled || overriddenTargetKeys.has(envelope.targetKey)) continue
+    const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
+    values.set(
+      envelope.targetKey,
+      valueAtAutomationTime(envelope.points, timeSec, descriptor?.defaultValue ?? 0),
+    )
+  }
+  return values
 }

@@ -542,8 +542,13 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   const displayVolume = (track: Track) => {
     const active = activeVolumeDrag();
-    return active?.trackId === track.id ? active.value : (track.volume ?? 0.8);
+    if (active?.trackId === track.id) return active.value;
+    return props.automation.evaluatedValuesByTargetKey().get(
+      automationTargetKey({ kind: "track", trackId: track.id }, "volume"),
+    ) ?? (track.volume ?? 0.8);
   };
+  const trackVolumeAutomationTargetKey = (trackId: Track["id"]) =>
+    automationTargetKey({ kind: "track", trackId }, "volume");
 
   const previewTrackVolume = (track: Track, volume: number) => {
     const nextVolume = quantizeVolume(volume);
@@ -1319,8 +1324,9 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                               );
                               if (volumeDisabled) return;
                               event.preventDefault();
-                              const startValue = quantizeVolume(
-                                track.volume ?? 0.8,
+                              const startValue = quantizeVolume(volume());
+                              props.automation.actions.overrideTarget(
+                                trackVolumeAutomationTargetKey(track.id),
                               );
                               setActiveVolumeDrag({
                                 pointerId: event.pointerId,
@@ -1565,10 +1571,15 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             effects: props.automation.lanes.effectInstancesByOwnerKey.master ?? [],
             automatedTargetKeys: masterAutomationMeta().automatedTargetKeys,
             selectedEnvelope: masterAutomationMeta().selectedEnvelope,
+            evaluatedValuesByTargetKey: props.automation.evaluatedValuesByTargetKey(),
             onToggleVisibility: props.automation.actions.toggleMasterVisibility,
             onResizeLane: props.automation.actions.resizeMasterLane,
             onSelectParameter: (selection) =>
               props.automation.actions.selectParameter("master", selection),
+            onManualAutomationOverride: () =>
+              props.automation.actions.overrideTarget(
+                automationTargetKey({ kind: "master" }, "volume"),
+              ),
           }}
         />
       </div>

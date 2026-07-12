@@ -7,6 +7,7 @@ import {
   automationTargetKeysForManualOverride,
   filterAutomationEnvelopesForScheduling,
   getAutomationParameterOptionsForTarget,
+  evaluatedAutomationValuesByTargetKey,
   isAudioEffectKind,
   isLocalId,
   isV2AutomationTargetKey,
@@ -69,6 +70,7 @@ export type TimelineWorkspaceAutomationModel = {
     selectionByTargetKey: Map<string, AutomationParameterSelection>;
     effectInstancesByOwnerKey: Record<string, AutomationTargetDeviceInstance[]>;
   };
+  evaluatedValuesByTargetKey: Accessor<ReadonlyMap<string, number>>;
   envelopes: {
     byTargetKey: Map<string, AutomationEnvelope>;
     preview: (envelope: AutomationEnvelope | undefined) => void;
@@ -84,6 +86,7 @@ export type TimelineWorkspaceAutomationModel = {
     resizeMasterLane: (height: number) => void;
     resizeTrackLane: (trackId: Track["id"], height: number) => void;
     selectParameter: (targetKey: string, selection: AutomationParameterSelection) => void;
+    overrideTarget: (targetKey: string) => void;
   };
 };
 
@@ -463,6 +466,11 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   const automationEnvelopesByTargetKey = createMemo(() => (
     new Map(persistedAutomation.envelopes().map((envelope) => [envelope.targetKey, envelope]))
   ));
+  const evaluatedValuesByTargetKey = createMemo(() => evaluatedAutomationValuesByTargetKey(
+    persistedAutomation.envelopes(),
+    options.playheadSec(),
+    overriddenAutomationTargetKeys(),
+  ));
   const targetKeyForTrackSelection = (trackId: Track["id"], selection: AutomationParameterSelection) => (
     automationTargetKey({ kind: "track", trackId, effectInstanceId: selection.effectInstanceId }, selection.parameterId)
   );
@@ -580,6 +588,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       })(),
       effectInstancesByOwnerKey: effectInstancesByOwnerKey(),
     },
+    evaluatedValuesByTargetKey,
     envelopes: {
       byTargetKey: automationEnvelopesByTargetKey(),
       preview: persistedAutomation.previewEnvelope,
@@ -598,6 +607,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       hideTrackLane: hideAutomationLane,
       resizeMasterLane: (height) => resizeLane("master", height),
       resizeTrackLane: resizeLane,
+      overrideTarget: overrideAutomationTarget,
       selectParameter: (targetKey, selection) => {
         selectedAutomationParameters.setValue((current) => (
           { ...current, [targetKey]: selection }
@@ -609,6 +619,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   return {
     envelopes: persistedAutomation.envelopes,
     envelopesByTargetKey: automationEnvelopesByTargetKey,
+    evaluatedValuesByTargetKey,
     applyEnvelope: applyAutomationEnvelopeState,
     overrideTarget: overrideAutomationTarget,
     reEnable: reEnableAutomation,

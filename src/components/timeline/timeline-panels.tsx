@@ -59,6 +59,7 @@ export type TimelinePanelsProps = {
     onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void
     onEffectChainElementChange?: (element: HTMLElement | undefined) => void
     automationEnvelopes?: AutomationEnvelope[]
+    evaluatedValuesByTargetKey?: ReadonlyMap<string, number>
     onSelectAutomationParameter?: (targetKey: Track['id'] | 'master', parameterId: string, effectInstanceId?: string) => void
     onManualAutomationOverride?: (targetKey: Track['id'] | 'master', parameterId: string, effectInstanceId?: string) => void
   }
@@ -186,6 +187,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         onDeviceInsertActionsChange={props.effectsPanel.onDeviceInsertActionsChange}
         onEffectChainElementChange={props.effectsPanel.onEffectChainElementChange}
         automationEnvelopes={props.effectsPanel.automationEnvelopes}
+        evaluatedValuesByTargetKey={props.effectsPanel.evaluatedValuesByTargetKey}
         onSelectAutomationParameter={props.effectsPanel.onSelectAutomationParameter}
         onManualAutomationOverride={props.effectsPanel.onManualAutomationOverride}
       />

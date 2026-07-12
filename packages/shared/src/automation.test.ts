@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { automationEnvelopeValueRange, automationTargetKey, automationTargetKeysAfterReEnable, automationTargetKeysForManualOverride, automationTargetMatchesEffectInstance, filterAutomationEnvelopesForScheduling, type AutomationEnvelope } from './automation'
 import { instrumentAutomationKey } from './sampler-automation'
-import { automationRatioToValue, automationValueToRatio, createEqBandParameterId, getAutomationParameterDescriptor, getAutomationParameterOptions, getAutomationParameterOptionsForTarget, normalizeAutomationPoints, valueAtAutomationTime, type AutomationEffectInstance } from './automation-parameters'
+import { automationRatioToValue, automationValueToRatio, createEqBandParameterId, evaluatedAutomationValuesByTargetKey, getAutomationParameterDescriptor, getAutomationParameterOptions, getAutomationParameterOptionsForTarget, normalizeAutomationPoints, valueAtAutomationTime, type AutomationEffectInstance } from './automation-parameters'
 
 describe('automation helpers', () => {
   test('builds stable target keys', () => {
@@ -50,6 +50,71 @@ describe('automation helpers', () => {
       { id: 'a', timeSec: 0, value: 0, interpolation: 'hold' },
       { id: 'b', timeSec: 10, value: 10, interpolation: 'linear' },
     ], 5, 1)).toBe(0)
+  })
+
+  test('evaluates enabled envelopes without mutating or sorting points', () => {
+    const envelopes: AutomationEnvelope[] = [{
+      id: 'env-1',
+      projectId: 'project-1',
+      target: { kind: 'track', trackId: 'track-1' },
+      targetKey: automationTargetKey({ kind: 'track', trackId: 'track-1' }, 'volume'),
+      parameterId: 'volume',
+      enabled: true,
+      points: [
+        { id: 'a', timeSec: 0, value: 0, interpolation: 'linear' },
+        { id: 'b', timeSec: 10, value: 1, interpolation: 'hold' },
+      ],
+      updatedAt: 1,
+    }, {
+      id: 'env-2',
+      projectId: 'project-1',
+      target: { kind: 'track', trackId: 'track-2' },
+      targetKey: automationTargetKey({ kind: 'track', trackId: 'track-2' }, 'volume'),
+      parameterId: 'volume',
+      enabled: true,
+      points: [{ id: 'a', timeSec: 0, value: 0.5, interpolation: 'linear' }],
+      updatedAt: 1,
+    }]
+    const values = evaluatedAutomationValuesByTargetKey(envelopes, 5)
+    expect(values.get(envelopes[0].targetKey)).toBe(0.5)
+    expect(values.get(envelopes[1].targetKey)).toBe(0.5)
+    expect(evaluatedAutomationValuesByTargetKey(envelopes, 2).get(envelopes[0].targetKey)).toBe(0.2)
+    expect(evaluatedAutomationValuesByTargetKey(envelopes, 8).get(envelopes[0].targetKey)).toBe(0.8)
+    expect(envelopes[0].points.map((point) => point.id)).toEqual(['a', 'b'])
+    const overridden = evaluatedAutomationValuesByTargetKey(envelopes, 5, new Set([envelopes[0].targetKey]))
+    expect(overridden.size).toBe(1)
+    expect(overridden.has(envelopes[0].targetKey)).toBe(false)
+  })
+
+  test('isolates effect instances by stable target key', () => {
+    const firstTarget = { kind: 'track' as const, trackId: 'track-1', effectInstanceId: 'delay:first' }
+    const secondTarget = { kind: 'track' as const, trackId: 'track-1', effectInstanceId: 'delay:second' }
+    const firstKey = automationTargetKey(firstTarget, 'delay.feedback')
+    const secondKey = automationTargetKey(secondTarget, 'delay.feedback')
+    const values = evaluatedAutomationValuesByTargetKey([
+      {
+        id: 'env-1',
+        projectId: 'project-1',
+        target: firstTarget,
+        targetKey: firstKey,
+        parameterId: 'delay.feedback',
+        enabled: true,
+        points: [{ id: 'a', timeSec: 0, value: 0.1, interpolation: 'linear' }],
+        updatedAt: 1,
+      },
+      {
+        id: 'env-2',
+        projectId: 'project-1',
+        target: secondTarget,
+        targetKey: secondKey,
+        parameterId: 'delay.feedback',
+        enabled: true,
+        points: [{ id: 'a', timeSec: 0, value: 0.8, interpolation: 'linear' }],
+        updatedAt: 1,
+      },
+    ], 0)
+    expect(values.get(firstKey)).toBe(0.1)
+    expect(values.get(secondKey)).toBe(0.8)
   })
 
   test('maps linear automation values to ratios and back', () => {

@@ -245,7 +245,7 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
 type EffectsPanelEffectCardsProps = {
   audioEffects: EffectsPanelAudioEffects;
   canWrite: boolean;
-  onElementChange?: (element: HTMLElement) => void;
+  onElementChange?: (element: HTMLElement | undefined) => void;
   spectrum: SpectrumFrame | null;
   audioEngine: AudioEngine;
   targetId: Track["id"] | "master";
@@ -538,6 +538,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
     window.addEventListener("pointerdown", handlePointerDown, { capture: true });
     onCleanup(() => window.removeEventListener("pointerdown", handlePointerDown, { capture: true }));
   });
+  onCleanup(() => props.onElementChange?.(undefined));
   const handleKeyDown = (event: KeyboardEvent) => {
     if ((event.key !== "Delete" && event.key !== "Backspace") || isEditableKeyboardTarget(event.target)) return;
     const effect = selectedEffect();

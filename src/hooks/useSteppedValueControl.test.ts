@@ -50,7 +50,7 @@ const pointerEvent = (clientY: number, shiftKey = false) => ({
 })
 
 describe('useSteppedValueControl pointer lifecycle', () => {
-  test('keeps a drag alive across owner replacement and cleans up on pointerup', () => {
+  test('continues emitting pointer moves while the parent value updates', () => {
     const previousWindow = globalThis.window
     const previousDocument = globalThis.document
     const capturedWindow = new CapturedPointerWindow()
@@ -67,24 +67,18 @@ describe('useSteppedValueControl pointer lifecycle', () => {
 
     try {
       createRoot((disposeParent) => {
-        let disposeControl: (() => void) | undefined
         let control: ReturnType<typeof useSteppedValueControl> | undefined
         const values: number[] = []
-        let replaceControl: (state: { bitDepth: number }) => void
-
-        replaceControl = (state) => {
-          disposeControl?.()
-          let nextControl: ReturnType<typeof useSteppedValueControl> | undefined
-          disposeControl = createRoot((dispose) => {
-            nextControl = useSteppedValueControl({
-              value: () => state.bitDepth,
+        let bitDepth = 12
+        control = useSteppedValueControl({
+              value: () => bitDepth,
               min: () => 2,
               max: () => 24,
               step: () => 1,
               disabled: () => false,
               onValueChange: (value) => {
                 values.push(value)
-                replaceControl({ bitDepth: value })
+                bitDepth = value
               },
               valueFromDrag: ({ startValue, startPosition, currentPosition, fine }) => knobValueFromDrag(
                 startValue,
@@ -95,11 +89,6 @@ describe('useSteppedValueControl pointer lifecycle', () => {
                 fine,
               ),
             })
-            return dispose
-          })
-          control = nextControl
-        }
-        replaceControl({ bitDepth: 12 })
 
         const initialControl = control
         if (!initialControl) throw new Error('Expected the initial control owner.')
@@ -108,7 +97,6 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         capturedWindow.dispatch('pointermove', pointerEvent(192))
 
         expect(values).toEqual([16])
-        expect(control).not.toBe(initialControl)
         expect(capturedWindow.listenerCount('pointermove')).toBe(1)
         expect(capturedWindow.listenerCount('pointerup')).toBe(1)
         expect(capturedWindow.listenerCount('pointercancel')).toBe(1)
@@ -126,7 +114,6 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         capturedWindow.dispatch('pointermove', pointerEvent(96))
         expect(values).toEqual([16, 21])
 
-        disposeControl?.()
         disposeParent()
       })
     } finally {
@@ -134,7 +121,7 @@ describe('useSteppedValueControl pointer lifecycle', () => {
       Reflect.set(globalThis, 'document', previousDocument)
     }
   })
-  test('cleans up listeners and body state on pointercancel after owner replacement', () => {
+  test('cleans up listeners and body state when disposed during an active drag', () => {
     const previousWindow = globalThis.window
     const previousDocument = globalThis.document
     const capturedWindow = new CapturedPointerWindow()
@@ -151,24 +138,18 @@ describe('useSteppedValueControl pointer lifecycle', () => {
 
     try {
       createRoot((disposeParent) => {
-        let disposeControl: (() => void) | undefined
         let control: ReturnType<typeof useSteppedValueControl> | undefined
         const values: number[] = []
-        let replaceControl: (state: { bitDepth: number }) => void
-
-        replaceControl = (state) => {
-          disposeControl?.()
-          let nextControl: ReturnType<typeof useSteppedValueControl> | undefined
-          disposeControl = createRoot((dispose) => {
-            nextControl = useSteppedValueControl({
-              value: () => state.bitDepth,
+        let bitDepth = 12
+        control = useSteppedValueControl({
+              value: () => bitDepth,
               min: () => 2,
               max: () => 24,
               step: () => 1,
               disabled: () => false,
               onValueChange: (value) => {
                 values.push(value)
-                replaceControl({ bitDepth: value })
+                bitDepth = value
               },
               valueFromDrag: ({ startValue, startPosition, currentPosition, fine }) => knobValueFromDrag(
                 startValue,
@@ -179,27 +160,19 @@ describe('useSteppedValueControl pointer lifecycle', () => {
                 fine,
               ),
             })
-            return dispose
-          })
-          control = nextControl
-        }
-        replaceControl({ bitDepth: 12 })
 
         const initialControl = control
         if (!initialControl) throw new Error('Expected the initial control owner.')
 
         Reflect.apply(initialControl.onPointerDown, undefined, [pointerEvent(240)])
         capturedWindow.dispatch('pointermove', pointerEvent(192))
-        capturedWindow.dispatch('pointercancel', pointerEvent(192))
+        disposeParent()
 
         expect(values).toEqual([16])
         expect(capturedWindow.listenerCount('pointermove')).toBe(0)
         expect(capturedWindow.listenerCount('pointerup')).toBe(0)
         expect(capturedWindow.listenerCount('pointercancel')).toBe(0)
         expect(bodyClasses.has('select-none')).toBe(false)
-
-        disposeControl?.()
-        disposeParent()
       })
     } finally {
       Reflect.set(globalThis, 'window', previousWindow)

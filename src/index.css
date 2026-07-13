@@ -277,6 +277,55 @@
 }
 
 @layer utilities {
+  .device-lofi {
+    width: 400px;
+    min-width: 400px;
+  }
+
+  .device-lofi-grid {
+    grid-template-columns: 1fr 8rem;
+  }
+
+  .device-autofilter,
+  .device-gate {
+    width: 520px;
+    min-width: 520px;
+  }
+
+  .device-autofilter-grid {
+    grid-template-columns: 7rem 1fr;
+  }
+
+  .device-gate-grid {
+    grid-template-columns: 1fr 9rem;
+  }
+
+  .device-phaser {
+    width: 280px;
+    min-width: 280px;
+  }
+
+  .device-phaser-grid {
+    grid-template-columns: 1fr 3rem;
+  }
+
+  .device-spectral {
+    width: 620px;
+    min-width: 620px;
+  }
+
+  .device-spectral-header-grid {
+    grid-template-columns: 7rem 6rem minmax(0, 1fr) 7rem;
+  }
+
+  .device-controls-with-footer {
+    grid-template-rows: 1fr auto;
+  }
+
+  .device-spectral-grid {
+    grid-template-rows: auto 1fr auto;
+  }
+
   .track-row-divider {
     box-shadow: inset 0 -1px 0 rgb(38 38 38);
   }

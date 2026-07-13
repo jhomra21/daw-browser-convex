@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
+import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { useAppPreferences } from "~/context/app-preferences"
 import { areAudioDeviceListsEqual, buildActiveInputProbeConstraints, canUseStereoRecording, filterAudioDevices, isSelectedDeviceAvailable, resolveAudioRuntimeConfiguration, resolveRecordingChannelOptions } from "~/lib/audio-settings-core"
 import { getAudioEngine, getAudioSinkStatus, playAudioOutputTestTone, subscribeAudioSinkStatus } from "~/lib/audio-engine-singleton"
@@ -195,20 +195,13 @@ export function DashboardAudioView() {
     const unsubscribeDiagnostics = subscribeRecordingDiagnostics(() => setDiagnostics(getRecordingDiagnostics()))
     onCleanup(() => {
       deviceRequestId += 1
+      inputProbeRequestId += 1
+      setActiveInputSettings(null)
       navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange)
       unsubscribe()
       unsubscribeRuntime()
       unsubscribeDiagnostics()
       calibrationController?.abort()
-    })
-  })
-
-  createEffect(() => {
-    const inputDeviceId = selectedInputDeviceId()
-    void refreshActiveInputSettings(inputDeviceId)
-    onCleanup(() => {
-      inputProbeRequestId += 1
-      setActiveInputSettings(null)
     })
   })
 

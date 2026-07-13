@@ -29,17 +29,14 @@ export default function Limiter(props: LimiterProps) {
       : props.audioEngine.subscribeTrackGateMeter(props.targetId, props.effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
     onCleanup(unsubscribe)
   })
-  const knob = (label: string, id: string, value: number, resetValue: number, min: number, max: number, step: number, valueLabel: string, update: (value: number) => Partial<LimiterParams>, logarithmic = false) => (
-    <Knob label={label} value={value} valueLabel={valueLabel} resetValue={resetValue} min={min} max={max} step={step} logarithmic={logarithmic} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get(id)} automated={props.automationRangesByParameterId?.has(id)} onAutomationSelect={() => props.onAutomationParameterTouch?.(id)} onValueChange={(next) => { props.onManualAutomationOverride?.(id); props.onChange(update(next)) }} />
-  )
   return (
     <EffectShell title="Limiter" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="w-56 min-w-56">
-      <div class="grid min-h-0 flex-1 grid-rows-[1fr_auto] gap-3 px-3 py-3">
+      <div class="device-controls-with-footer grid min-h-0 flex-1 gap-3 px-3 py-3">
         <div class="grid grid-cols-2 place-content-center gap-x-5 gap-y-4">
-          {knob('Ceiling', 'limiter.ceiling', props.params.ceilingDbtp, defaults.ceilingDbtp, -12, 0, 0.1, `${props.params.ceilingDbtp.toFixed(1)} dBTP`, (ceilingDbtp) => ({ ceilingDbtp }))}
-          {knob('Release', 'limiter.release', props.params.releaseMs, defaults.releaseMs, 20, 1000, 1, `${Math.round(props.params.releaseMs)} ms`, (releaseMs) => ({ releaseMs }), true)}
+          <Knob label="Ceiling" value={props.params.ceilingDbtp} valueLabel={`${props.params.ceilingDbtp.toFixed(1)} dBTP`} resetValue={defaults.ceilingDbtp} min={-12} max={0} step={0.1} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get("limiter.ceiling")} automated={props.automationRangesByParameterId?.has("limiter.ceiling")} onAutomationSelect={() => props.onAutomationParameterTouch?.("limiter.ceiling")} onValueChange={(ceilingDbtp) => { props.onManualAutomationOverride?.("limiter.ceiling"); props.onChange({ ceilingDbtp }) }} />
+          <Knob label="Release" value={props.params.releaseMs} valueLabel={`${Math.round(props.params.releaseMs)} ms`} resetValue={defaults.releaseMs} min={20} max={1000} step={1} logarithmic disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get("limiter.release")} automated={props.automationRangesByParameterId?.has("limiter.release")} onAutomationSelect={() => props.onAutomationParameterTouch?.("limiter.release")} onValueChange={(releaseMs) => { props.onManualAutomationOverride?.("limiter.release"); props.onChange({ releaseMs }) }} />
           <div class="col-span-2 flex justify-center">
-            {knob('Link', 'limiter.link', props.params.link, defaults.link, 0, 1, 0.01, `${Math.round(props.params.link * 100)}%`, (link) => ({ link }))}
+            <Knob label="Link" value={props.params.link} valueLabel={`${Math.round(props.params.link * 100)}%`} resetValue={defaults.link} min={0} max={1} step={0.01} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get("limiter.link")} automated={props.automationRangesByParameterId?.has("limiter.link")} onAutomationSelect={() => props.onAutomationParameterTouch?.("limiter.link")} onValueChange={(link) => { props.onManualAutomationOverride?.("limiter.link"); props.onChange({ link }) }} />
           </div>
         </div>
         <div class="grid divide-y divide-border border border-border bg-background/80 text-center text-2xs text-muted-foreground">

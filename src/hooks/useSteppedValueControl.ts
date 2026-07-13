@@ -48,7 +48,6 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
   }
   const drag = useDrag({
     disabled: options.disabled,
-    preserveActiveDragOnCleanup: true,
     onDragStart: (position, event) => {
       event.stopPropagation()
       startPosition = position

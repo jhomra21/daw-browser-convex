@@ -67,10 +67,10 @@ export async function createStaticWorkletNodeChain(
     const fault = readStaticWorkletFault(event.data)
     if (fault) {
       if (chain.state === 'active') {
-        onFault?.(fault)
         chain.state = 'faulted'
         chain.fault = new Error(`${kind} processor protocol fault: ${fault}`)
         publishGateMeterReset(chain)
+        onFault?.(fault)
       }
       return
     }
@@ -80,10 +80,10 @@ export async function createStaticWorkletNodeChain(
   }
   node.onprocessorerror = () => {
     if (chain.state !== 'active') return
-    onFault?.('processor-error')
     chain.state = 'faulted'
     chain.fault = new Error(`${kind} processor failed during runtime processing.`)
     publishGateMeterReset(chain)
+    onFault?.('processor-error')
   }
   applyStaticWorkletNodeParams(chain, params)
   return chain

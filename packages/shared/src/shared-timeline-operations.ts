@@ -51,7 +51,7 @@ import {
   normalizeTrackInstrumentParams,
   type TrackInstrumentParams,
 } from './instrument-params'
-import type { AutomationPoint } from './automation'
+import { automationTargetKey, type AutomationPoint } from './automation'
 import {
   getAutomationParameterDescriptor,
   isAutomationParameterSupportedForTarget,
@@ -118,6 +118,7 @@ export type SharedUngroupRestoreEffect = {
 }
 
 export type SharedUngroupRestoreAutomation = {
+  effectInstanceId?: string
   parameterId: string
   enabled: boolean
   points: AutomationPoint[]
@@ -204,7 +205,7 @@ export type SharedTimelineOperation =
   | { kind: 'effects.reorderAudioChain'; payload: { trackId: string; order: AudioEffectOrderItem[] } }
   | { kind: 'effects.removeAudioEffect'; payload: { targetType: 'track'; trackId: string; effect: AudioEffectKind; instanceId: string } | { targetType: 'master'; effect: AudioEffectKind; instanceId: string } }
   | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: SharedReverbParams; instanceId: string } }
-  | { kind: 'effects.setSynthParams'; payload: { trackId: string; params: SharedSynthParams } }
+  | { kind: 'effects.setSynthParams'; payload: { trackId: string; params: SharedSynthParams; instanceId: string } }
   | { kind: 'instruments.setTrackInstrument'; payload: { trackId: string; instrument: TrackInstrumentParams } }
   | { kind: 'effects.setArpeggiatorParams'; payload: { trackId: string; params: ArpeggiatorParams } }
   | { kind: 'effects.setMasterEqParams'; payload: { params: EqParams; instanceId: string } }
@@ -837,6 +838,8 @@ export const normalizeSharedUngroupRestoreEffects = (value: unknown): SharedUngr
           return readModulationEnvelope(effect.type, effect.params)?.params ?? null
         case 'gate':
           return readProcessorEnvelope('gate', effect.params)
+        case 'limiter':
+          return readProcessorEnvelope('limiter', effect.params)
         case 'compressor':
           return readCompressorParams(effect.params)
         case 'saturator':
@@ -845,6 +848,8 @@ export const normalizeSharedUngroupRestoreEffects = (value: unknown): SharedUngr
           return readDelayParams(effect.params)
         case 'reverb':
           return readReverbParams(effect.params)
+        case 'spectral':
+          return parseSpectralParams(effect.params)
         case 'instrument':
           return readTrackInstrumentParams(effect.params)
         case 'synth':
@@ -870,15 +875,18 @@ export const normalizeSharedUngroupRestoreEffects = (value: unknown): SharedUngr
 export const normalizeSharedUngroupRestoreAutomation = (value: unknown): SharedUngroupRestoreAutomation[] | null => {
   if (!Array.isArray(value)) return null
   const automation: SharedUngroupRestoreAutomation[] = []
-  const parameterIds = new Set<string>()
+  const targetKeys = new Set<string>()
   for (const envelope of value) {
     if (!isRecord(envelope) || typeof envelope.parameterId !== 'string' || typeof envelope.enabled !== 'boolean' || typeof envelope.updatedAt !== 'number' || !Array.isArray(envelope.points)) return null
     if (!isAutomationParameterSupportedForTarget(envelope.parameterId, 'track')) return null
+    if (envelope.effectInstanceId !== undefined && (typeof envelope.effectInstanceId !== 'string' || envelope.effectInstanceId.length === 0)) return null
     const points = readAutomationPoints(envelope.parameterId, envelope.points)
     if (!points) return null
-    if (parameterIds.has(envelope.parameterId)) return null
-    parameterIds.add(envelope.parameterId)
-    automation.push({ parameterId: envelope.parameterId, enabled: envelope.enabled, points, updatedAt: envelope.updatedAt })
+    const effectInstanceId = typeof envelope.effectInstanceId === 'string' ? envelope.effectInstanceId : undefined
+    const targetKey = automationTargetKey({ kind: 'track', trackId: 'restore-group', effectInstanceId }, envelope.parameterId)
+    if (targetKeys.has(targetKey)) return null
+    targetKeys.add(targetKey)
+    automation.push({ effectInstanceId, parameterId: envelope.parameterId, enabled: envelope.enabled, points, updatedAt: envelope.updatedAt })
   }
   return automation
 }
@@ -1113,7 +1121,10 @@ const parseRemoveAudioEffect = (payload: Record<string, unknown>): SharedTimelin
 
 const parseTrackSynth = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readSynthParams(payload.params)
-  return typeof payload.trackId === 'string' && params ? { kind: 'effects.setSynthParams', payload: { trackId: payload.trackId, params } } : null
+  const instanceId = readRequiredInstanceId(payload.instanceId)
+  return typeof payload.trackId === 'string' && params && instanceId
+    ? { kind: 'effects.setSynthParams', payload: { trackId: payload.trackId, params, instanceId } }
+    : null
 }
 
 const readTrackInstrumentParams = (value: unknown): TrackInstrumentParams | null => {

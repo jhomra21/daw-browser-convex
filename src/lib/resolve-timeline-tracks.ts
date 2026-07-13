@@ -130,7 +130,10 @@ const trackSendsEqual = (
   if (leftSends.length !== rightSends.length) return false
   return leftSends.every((send, index) => {
     const other = rightSends[index]
-    return !!other && optionalIdEqual(send.targetId, other.targetId) && nearlyEqual(send.amount, other.amount)
+    return !!other
+      && optionalIdEqual(send.targetId, other.targetId)
+      && nearlyEqual(send.amount, other.amount)
+      && (send.tap ?? "post-fader") === (other.tap ?? "post-fader")
   })
 }
 

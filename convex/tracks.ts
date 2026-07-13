@@ -353,11 +353,15 @@ const setTrackMixForUser = async (
 }
 
 const mixerSendsEqual = (
-  left: Array<{ targetId: string; amount: number }>,
-  right: Array<{ targetId: string; amount: number }>,
+  left: Array<{ targetId: string; amount: number; tap?: "pre-fx" | "pre-fader" | "post-fader" }>,
+  right: Array<{ targetId: string; amount: number; tap?: "pre-fx" | "pre-fader" | "post-fader" }>,
 ) => (
   left.length === right.length
-  && left.every((send, index) => send.targetId === right[index]?.targetId && send.amount === right[index]?.amount)
+  && left.every((send, index) => (
+    send.targetId === right[index]?.targetId
+    && send.amount === right[index]?.amount
+    && (send.tap ?? "post-fader") === (right[index]?.tap ?? "post-fader")
+  ))
 )
 
 const setTrackRoutingForUser = async (
@@ -828,14 +832,15 @@ const hasRoutingReferenceTo = (track: any, targetTrackId: string) => (
 const restoreGroupPlaceholderId = "restored-group";
 
 const routingMatches = (
-  left: { outputTargetId?: string; sends: Array<{ targetId: string; amount: number }> },
-  right: { outputTargetId?: string; sends: Array<{ targetId: string; amount: number }> },
+  left: { outputTargetId?: string; sends: Array<{ targetId: string; amount: number; tap?: "pre-fx" | "pre-fader" | "post-fader" }> },
+  right: { outputTargetId?: string; sends: Array<{ targetId: string; amount: number; tap?: "pre-fx" | "pre-fader" | "post-fader" }> },
 ) => (
   left.outputTargetId === right.outputTargetId
   && left.sends.length === right.sends.length
   && left.sends.every((send, index) => (
     send.targetId === right.sends[index]?.targetId
     && send.amount === right.sends[index]?.amount
+    && (send.tap ?? "post-fader") === (right.sends[index]?.tap ?? "post-fader")
   ))
 );
 
@@ -1061,7 +1066,8 @@ const ungroupTrackForUser = async (ctx: any, userId: string, projectId: string, 
       index: effect.index,
       params: effect.params,
     })),
-    automation: automation.map((envelope: { parameterId: string; enabled: boolean; points: unknown[]; updatedAt: number }) => ({
+    automation: automation.map((envelope: { effectInstanceId?: string; parameterId: string; enabled: boolean; points: unknown[]; updatedAt: number }) => ({
+      effectInstanceId: envelope.effectInstanceId,
       parameterId: envelope.parameterId,
       enabled: envelope.enabled,
       points: envelope.points,
@@ -1148,6 +1154,7 @@ export const serverRestoreUngroup = mutation({
       params: v.any(),
     })),
     automation: v.array(v.object({
+      effectInstanceId: v.optional(v.string()),
       parameterId: v.string(),
       enabled: v.boolean(),
       points: v.array(v.object({
@@ -1180,6 +1187,10 @@ export const serverRestoreUngroup = mutation({
         const effects = normalizeSharedUngroupRestoreEffects(input.effects);
         const automation = normalizeSharedUngroupRestoreAutomation(input.automation);
         if (!effects || !automation) return { status: "rejected" as const };
+        const effectInstanceIds = new Set(effects.flatMap((effect) => effect.instanceId ? [effect.instanceId] : []));
+        if (automation.some((envelope) => envelope.effectInstanceId && !effectInstanceIds.has(envelope.effectInstanceId))) {
+          return { status: "rejected" as const };
+        }
         const tracks = await listProjectTracksWithMixerChannels(ctx, input.projectId);
         const trackById = new Map(tracks.map((track) => [String(track._id), track]));
         const requiredTrackIds = new Set<string>(input.children.map((child) => child.trackId));
@@ -1259,7 +1270,8 @@ export const serverRestoreUngroup = mutation({
             projectId: input.projectId,
             targetKind: "track",
             trackId: groupId,
-            targetKey: automationTargetKey({ kind: "track", trackId: String(groupId) }, envelope.parameterId),
+            effectInstanceId: envelope.effectInstanceId,
+            targetKey: automationTargetKey({ kind: "track", trackId: String(groupId), effectInstanceId: envelope.effectInstanceId }, envelope.parameterId),
             parameterId: envelope.parameterId,
             enabled: envelope.enabled,
             points: envelope.points,

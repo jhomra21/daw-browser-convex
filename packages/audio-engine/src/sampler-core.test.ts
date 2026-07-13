@@ -66,6 +66,20 @@ describe('sampler core', () => {
     expect(plan.segments[1]?.fadeInSec).toBe(0.25)
   })
 
+  test('advances the first crossfade in playback time at every playback rate', () => {
+    for (const [note, expectedAdvance] of [[48, 2], [60, 1], [72, 0.5]]) {
+      const plan = createSamplerVoicePlan({
+        zone: zone('a', 0),
+        params: createDefaultSamplerParams(),
+        note,
+        velocity: 127,
+        when: 1,
+        durationSec: 4,
+      })
+      expect((plan.segments[1]?.startTime ?? 0) - plan.startTime).toBeCloseTo(expectedAdvance, 12)
+    }
+  })
+
   test('keeps forward-loop sources alive through the note envelope', () => {
     const forwardLoop: SamplerZone = { ...zone('forward', 0), playbackMode: 'forward-loop' }
     const plan = createSamplerVoicePlan({

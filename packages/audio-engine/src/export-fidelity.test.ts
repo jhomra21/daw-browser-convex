@@ -118,6 +118,16 @@ describe('offline true-peak limiter', () => {
     expect(report.truePeakDbtp ?? 0).toBeLessThanOrEqual(-5.9)
   })
 
+  test('reports measured peaks without enforcing a true-peak ceiling when limiting is disabled', () => {
+    const audio = audioBuffer([new Array(48_000).fill(1)])
+    expect(() => applyExportNormalization(audio, {
+      mode: 'loudness',
+      targetLufs: -36,
+      truePeakCeilingDbtp: -12,
+      limiting: 'off',
+    })).not.toThrow()
+  })
+
   test('supports mono and cancellation', () => {
     const audio = audioBuffer([[0, 1, 0]])
     expect(() => limitTruePeakInPlace(audio, -1)).not.toThrow()

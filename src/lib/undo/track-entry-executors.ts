@@ -1,6 +1,6 @@
 import { buildLocalClip } from '~/lib/clip-create'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
-import { assert, assertDefined, automationTargetKey, collectTrackDescendantIds } from '@daw-browser/shared'
+import { assert, assertDefined, automationTargetKey, collectTrackDescendantIds, type AutomationEnvelope } from '@daw-browser/shared'
 import { createLocalTrack } from '~/lib/tracks'
 import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 
@@ -138,7 +138,7 @@ export async function applyTrackDeleteEntry(
       }
     }
     for (const envelope of entry.data.automation ?? []) {
-      deps.actions.applyAutomationEnvelope(undefined, automationTargetKey({ kind: 'track', trackId }, envelope.parameterId))
+      deps.actions.applyAutomationEnvelope(undefined, automationTargetKey({ kind: 'track', trackId, effectInstanceId: envelope.target.effectInstanceId }, envelope.parameterId))
     }
     deps.actions.removeLocalTrack(trackId)
     entry.data.recreatedTrackId = undefined
@@ -206,10 +206,11 @@ export async function applyTrackDeleteEntry(
     await persistHistoryTrackEffects(deps, newTrackId, entry.data.effects)
     await persistHistoryTrackAutomation(deps, entry.data.automation, newTrackId)
     for (const envelope of entry.data.automation ?? []) {
-      const targetKey = automationTargetKey({ kind: 'track', trackId: newTrackId }, envelope.parameterId)
+      const target: AutomationEnvelope['target'] = { kind: 'track', trackId: newTrackId, effectInstanceId: envelope.target.effectInstanceId }
+      const targetKey = automationTargetKey(target, envelope.parameterId)
       deps.actions.applyAutomationEnvelope({
         ...envelope,
-        target: { kind: 'track', trackId: newTrackId },
+        target,
         targetKey,
       }, targetKey)
     }

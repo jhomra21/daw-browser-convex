@@ -2,6 +2,29 @@ import { describe, expect, test } from 'bun:test'
 import { parseSharedTimelineOperation, readSharedTimelineOperationTargets, type SharedTimelineOperation } from './shared-timeline-operations'
 
 describe('shared timeline operations', () => {
+  test('roundtrips synth parameters only with a durable instance identity', () => {
+    const operation = {
+      kind: 'effects.setSynthParams',
+      payload: {
+        trackId: 'track-1',
+        instanceId: 'instrument:synth-1',
+        params: { wave1: 'sine', wave2: 'square' },
+      },
+    }
+    expect(parseSharedTimelineOperation(operation)).toEqual({
+      kind: 'effects.setSynthParams',
+      payload: {
+        trackId: 'track-1',
+        instanceId: 'instrument:synth-1',
+        params: { wave1: 'sine', wave2: 'square' },
+      },
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setSynthParams',
+      payload: { trackId: 'track-1', params: operation.payload.params },
+    })).toBeNull()
+  })
+
   test('roundtrips canonical utility and gate envelopes with required instance ids', () => {
     const utility = {
       kind: 'effects.setUtilityParams',

@@ -1,4 +1,5 @@
 import { normalizeAudioWarp } from '@daw-browser/shared'
+import { AUDIO_EFFECT_ORDER, type AudioEffectKind } from '@daw-browser/shared'
 import type { EffectType, HistoryEntry, PersistedHistory } from '~/lib/undo/types'
 
 const PERSISTED_HISTORY_VERSION = 3 as const
@@ -11,22 +12,17 @@ type PersistedHistoryEnvelope = {
 }
 
 const EFFECT_TYPES: ReadonlySet<string> = new Set([
-  'eq',
-  'compressor',
-  'saturator',
-  'delay',
-  'reverb',
-  'spectral',
+  ...AUDIO_EFFECT_ORDER,
   'synth',
   'instrument',
   'arp',
-  'master-eq',
-  'master-compressor',
-  'master-saturator',
-  'master-delay',
-  'master-reverb',
-  'master-spectral',
-] satisfies EffectType[])
+  ...AUDIO_EFFECT_ORDER.map((effect): EffectType => `master-${effect}`),
+])
+
+const isEffectType = (value: unknown): value is EffectType => typeof value === 'string' && EFFECT_TYPES.has(value)
+
+const isAudioEffectKind = (value: unknown): value is AudioEffectKind =>
+  typeof value === 'string' && AUDIO_EFFECT_ORDER.some((effect) => effect === value)
 
 function isPersistedHistoryEnvelope(value: unknown): value is PersistedHistoryEnvelope {
   return isRecord(value)
@@ -129,7 +125,7 @@ const isTrackEffectSnapshot = (value: unknown) => {
   const audioEffects = value.audioEffects
   return (audioEffects === undefined || (Array.isArray(audioEffects) && audioEffects.every((effect) => (
     isRecord(effect)
-    && (effect.effect === 'eq' || effect.effect === 'compressor' || effect.effect === 'saturator' || effect.effect === 'delay' || effect.effect === 'reverb' || effect.effect === 'spectral')
+    && isAudioEffectKind(effect.effect)
     && effect.params !== undefined
     && (effect.instanceId === undefined || isString(effect.instanceId))
     && (effect.index === undefined || isNumber(effect.index))
@@ -233,8 +229,7 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSe
     case 'effect-params':
       return (data.trackRef === undefined || isString(data.trackRef))
         && (data.instanceId === undefined || isString(data.instanceId))
-        && isString(data.effect)
-        && EFFECT_TYPES.has(data.effect)
+        && isEffectType(data.effect)
         && isRecord(data.from)
         && isRecord(data.to)
     case 'automation-envelope-change':

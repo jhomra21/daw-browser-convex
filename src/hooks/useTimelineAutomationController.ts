@@ -3,6 +3,7 @@ import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Track } from "@daw-browser/timeline-core/types";
 import {
   automationTargetKey,
+  automationEnvelopeFromRow,
   automationTargetKeysAfterReEnable,
   automationTargetKeysForManualOverride,
   filterAutomationEnvelopesForScheduling,
@@ -374,33 +375,10 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       });
       return;
     }
-    const next: AutomationEnvelope[] = [];
-    for (const row of options.remoteRows() ?? []) {
-      if (row.targetKind === "master") {
-        next.push({
-          id: row._id,
-          projectId: row.projectId,
-          target: { kind: "master", effectInstanceId: row.effectInstanceId },
-          targetKey: row.targetKey,
-          parameterId: row.parameterId,
-          enabled: row.enabled,
-          points: row.points,
-          updatedAt: row.updatedAt,
-        });
-        continue;
-      }
-      if (!row.trackId) continue;
-      next.push({
-        id: row._id,
-        projectId: row.projectId,
-        target: { kind: "track", trackId: row.trackId, effectInstanceId: row.effectInstanceId },
-        targetKey: row.targetKey,
-        parameterId: row.parameterId,
-        enabled: row.enabled,
-        points: row.points,
-        updatedAt: row.updatedAt,
-      });
-    }
+    const next = (options.remoteRows() ?? []).flatMap((row) => {
+      const envelope = automationEnvelopeFromRow(row);
+      return envelope ? [envelope] : [];
+    });
     setAutomationEnvelopes(next);
     untrack(persistedAutomation.syncRemote);
   });

@@ -1095,6 +1095,48 @@ type LoFiAudioEffectContract = {
   normalizeParams: (params: unknown) => LoFiParamsEnvelope
   serializeParams: (params: LoFiParamsEnvelope) => string
 }
+type ChorusAudioEffectContract = {
+  kind: 'chorus'
+  masterKind: 'master-chorus'
+  createDefaultParams: () => ChorusParamsEnvelope
+  normalizeParams: (params: unknown) => ChorusParamsEnvelope
+  serializeParams: (params: ChorusParamsEnvelope) => string
+}
+type FlangerAudioEffectContract = {
+  kind: 'flanger'
+  masterKind: 'master-flanger'
+  createDefaultParams: () => FlangerParamsEnvelope
+  normalizeParams: (params: unknown) => FlangerParamsEnvelope
+  serializeParams: (params: FlangerParamsEnvelope) => string
+}
+type PhaserAudioEffectContract = {
+  kind: 'phaser'
+  masterKind: 'master-phaser'
+  createDefaultParams: () => PhaserParamsEnvelope
+  normalizeParams: (params: unknown) => PhaserParamsEnvelope
+  serializeParams: (params: PhaserParamsEnvelope) => string
+}
+type TremoloAudioEffectContract = {
+  kind: 'tremolo'
+  masterKind: 'master-tremolo'
+  createDefaultParams: () => TremoloParamsEnvelope
+  normalizeParams: (params: unknown) => TremoloParamsEnvelope
+  serializeParams: (params: TremoloParamsEnvelope) => string
+}
+type AutoPanAudioEffectContract = {
+  kind: 'autopan'
+  masterKind: 'master-autopan'
+  createDefaultParams: () => AutoPanParamsEnvelope
+  normalizeParams: (params: unknown) => AutoPanParamsEnvelope
+  serializeParams: (params: AutoPanParamsEnvelope) => string
+}
+type EnsembleAudioEffectContract = {
+  kind: 'ensemble'
+  masterKind: 'master-ensemble'
+  createDefaultParams: () => EnsembleParamsEnvelope
+  normalizeParams: (params: unknown) => EnsembleParamsEnvelope
+  serializeParams: (params: EnsembleParamsEnvelope) => string
+}
 type AudioEffectContractByKind = {
   utility: UtilityAudioEffectContract
   eq: EqAudioEffectContract
@@ -1107,12 +1149,12 @@ type AudioEffectContractByKind = {
   delay: DelayAudioEffectContract
   reverb: ReverbAudioEffectContract
   spectral: SpectralAudioEffectContract
-  chorus: any
-  flanger: any
-  phaser: any
-  tremolo: any
-  autopan: any
-  ensemble: any
+  chorus: ChorusAudioEffectContract
+  flanger: FlangerAudioEffectContract
+  phaser: PhaserAudioEffectContract
+  tremolo: TremoloAudioEffectContract
+  autopan: AutoPanAudioEffectContract
+  ensemble: EnsembleAudioEffectContract
 }
 
 export type AudioEffectContract = AudioEffectContractByKind[AudioEffectKind]

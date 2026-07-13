@@ -3,7 +3,7 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { assert, assertDefined, automationTargetKey, type AutomationEnvelope } from '@daw-browser/shared'
+import { AUDIO_EFFECT_ORDER, assert, assertDefined, automationTargetKey, type AutomationEnvelope } from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
@@ -234,10 +234,11 @@ async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'trac
       })
     }
     for (const envelope of entry.data.automation ?? []) {
-      const targetKey = automationTargetKey({ kind: 'track', trackId: groupTrackId }, envelope.parameterId)
+      const target: AutomationEnvelope['target'] = { kind: 'track', trackId: groupTrackId, effectInstanceId: envelope.target.effectInstanceId }
+      const targetKey = automationTargetKey(target, envelope.parameterId)
       deps.actions.applyAutomationEnvelope({
         ...envelope,
-        target: { kind: 'track', trackId: groupTrackId },
+        target,
         targetKey,
       }, targetKey)
     }
@@ -253,7 +254,7 @@ async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'trac
   for (const envelope of entry.data.automation ?? []) {
     deps.actions.applyAutomationEnvelope(
       undefined,
-      automationTargetKey({ kind: 'track', trackId: groupTrackId }, envelope.parameterId),
+      automationTargetKey({ kind: 'track', trackId: groupTrackId, effectInstanceId: envelope.target.effectInstanceId }, envelope.parameterId),
     )
   }
   const parentGroupId = resolveTrackId(index, entry.data.groupTrack?.groupRef)
@@ -387,24 +388,9 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
   } catch {}
 }
 
-const MASTER_EFFECT_TYPES: ReadonlySet<EffectParamsEntry['data']['effect']> = new Set([
-  'master-utility',
-  'master-eq',
-  'master-autofilter',
-  'master-gate',
-  'master-compressor',
-  'master-limiter',
-  'master-reverb',
-  'master-saturator',
-  'master-delay',
-  'master-chorus',
-  'master-flanger',
-  'master-phaser',
-  'master-tremolo',
-  'master-autopan',
-  'master-ensemble',
-  'master-spectral',
-])
+const MASTER_EFFECT_TYPES: ReadonlySet<EffectType> = new Set(
+  AUDIO_EFFECT_ORDER.map((effect): EffectType => `master-${effect}`),
+)
 
 async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, direction: HistoryDirection) {
   const targetId = MASTER_EFFECT_TYPES.has(entry.data.effect)

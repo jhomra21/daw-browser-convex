@@ -26,7 +26,7 @@ import {
 import { buildClipCreatePayload } from '@daw-browser/shared'
 import { getPersistableAudioSourceMetadata } from '@daw-browser/shared'
 import { sanitizeAudioSourceKind } from '@daw-browser/shared'
-import { normalizeEqParams, normalizeSynthParams } from '@daw-browser/shared'
+import { createInstrumentInstanceId, normalizeEqParams, normalizeSynthParams } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import { getClipKindFromClip, getClipTargetError } from './clip-targets'
 import { listSortedClipsForTrack, resolveTrackClip, selectTrackClips, trackAtIndex as trackAtIndexImpl } from './indexing'
@@ -494,6 +494,7 @@ export function createAgentActions(context: AgentActionContext) {
       const result = await context.convex.mutation(context.convexApi.effects.setSynthParams, {
         projectId: context.projectId,
         trackId: track._id,
+        instanceId: row?.instanceId ?? createInstrumentInstanceId(),
         params,
       })
       return result ? { ok: true } : { error: 'Effect update did not apply' }

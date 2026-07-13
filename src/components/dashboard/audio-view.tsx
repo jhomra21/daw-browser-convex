@@ -188,7 +188,11 @@ export function DashboardAudioView() {
   onMount(() => {
     void refreshDevices()
     void resolveCalibrationPlatformIdentity(navigator).then(setPlatformIdentity)
-    const onDeviceChange = () => void refreshDevices()
+    const onDeviceChange = () => {
+      inputProbeRequestId += 1
+      setActiveInputSettings(null)
+      void refreshDevices()
+    }
     navigator.mediaDevices.addEventListener("devicechange", onDeviceChange)
     const unsubscribe = subscribeAudioSinkStatus(() => setSinkStatus(getAudioSinkStatus()))
     const unsubscribeRuntime = audioEngine.subscribeRuntimeSnapshot(() => setRuntime(audioEngine.getRuntimeSnapshot()))
@@ -213,7 +217,11 @@ export function DashboardAudioView() {
           controlId="audio-recording-input"
           value={!isSelectedDeviceAvailable(selectedInputDeviceId(), audioDevices().inputs) ? "Saved device is currently unavailable." : undefined}
           action={
-            <select id="audio-recording-input" class="h-8 border border-border bg-background px-2 text-sm" onChange={(event) => preferences.audio.setInputDeviceId(event.currentTarget.value)}>
+            <select id="audio-recording-input" class="h-8 border border-border bg-background px-2 text-sm" onChange={(event) => {
+              inputProbeRequestId += 1
+              setActiveInputSettings(null)
+              preferences.audio.setInputDeviceId(event.currentTarget.value)
+            }}>
               <option value="" selected={!selectedInputDeviceId()}>System default</option>
               <Show when={selectedInputDeviceId() && !isSelectedDeviceAvailable(selectedInputDeviceId(), audioDevices().inputs)}>
                 <option value={selectedInputDeviceId()} selected>Saved microphone (unavailable)</option>

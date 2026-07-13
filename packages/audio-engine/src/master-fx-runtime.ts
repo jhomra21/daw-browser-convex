@@ -187,6 +187,19 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     return true
   }
 
+  const bypassStaticWorklet = (
+    ctx: AudioContext,
+    masterGain: GainNode,
+    destination: AudioDestinationNode,
+    instanceId: string,
+    chain: StaticWorkletNodeChain,
+    revision: number,
+  ) => {
+    if (fxInstanceRevision !== revision || instanceStaticWorkletChains.get(instanceId) !== chain) return
+    closeInstanceState(instanceId)
+    rebuildRouting(ctx, masterGain, destination)
+  }
+
   const applyFxInstances = async (
     ctx: AudioContext,
     masterGain: GainNode,
@@ -242,8 +255,12 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
           if (existing) disconnectStaticWorkletNodeChain(existing)
           try {
             const faultGeneration = options.getFaultGeneration()
-            const created = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params, (code) =>
-              options.onWorkletFault?.(faultGeneration, 'owned-processor', code, `master:effect:${instance.id}`))
+            let created: StaticWorkletNodeChain | undefined
+            created = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params, (code) => {
+              if (!created) return
+              bypassStaticWorklet(ctx, masterGain, destination, instance.id, created, revision)
+              options.onWorkletFault?.(faultGeneration, 'owned-processor', code, `master:effect:${instance.id}`)
+            })
             if (fxInstanceRevision !== revision) {
               disconnectStaticWorkletNodeChain(created)
               return

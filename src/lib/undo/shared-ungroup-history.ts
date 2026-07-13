@@ -1,9 +1,11 @@
 import type { Track } from '@daw-browser/timeline-core/types'
 import {
+  automationTargetKey,
   normalizeSharedUngroupRestoreAutomation,
   normalizeSharedUngroupRestoreEffects,
   type SharedUngroupRestoreAutomation,
   type SharedUngroupRestoreEffect,
+  type AutomationEnvelope,
 } from '@daw-browser/shared'
 
 import { buildTrackUngroupHistoryEntry } from './builders'
@@ -108,10 +110,31 @@ export const buildCommittedSharedUngroupHistoryEntry = (input: {
     synth: input.result.effects.some((effect) => effect.type === 'synth') ? input.effects.synth : undefined,
     arp: input.result.effects.some((effect) => effect.type === 'arpeggiator') ? input.effects.arp : undefined,
   }
-  const automationByParameterId = new Map(input.automation.map((envelope) => [envelope.parameterId, envelope]))
+  const automationByTargetKey = new Map(input.automation.map((envelope) => [
+    automationTargetKey(
+      { kind: 'track', trackId: input.groupTrack.id, effectInstanceId: envelope.target.effectInstanceId },
+      envelope.parameterId,
+    ),
+    envelope,
+  ]))
   const automation = input.result.automation.flatMap((committed) => {
-    const local = automationByParameterId.get(committed.parameterId)
-    return local ? [{ ...local, enabled: committed.enabled, points: committed.points, updatedAt: committed.updatedAt }] : []
+    const local = automationByTargetKey.get(automationTargetKey(
+      { kind: 'track', trackId: input.groupTrack.id, effectInstanceId: committed.effectInstanceId },
+      committed.parameterId,
+    ))
+    const target: AutomationEnvelope['target'] = {
+      kind: 'track',
+      trackId: input.groupTrack.id,
+      effectInstanceId: committed.effectInstanceId,
+    }
+    return local ? [{
+      ...local,
+      target,
+      targetKey: automationTargetKey(target, committed.parameterId),
+      enabled: committed.enabled,
+      points: committed.points,
+      updatedAt: committed.updatedAt,
+    }] : []
   })
   const groupTrack: Track = {
     ...input.groupTrack,

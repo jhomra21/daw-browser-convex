@@ -95,6 +95,7 @@ export function createMeteringRuntime(options: {
   const levelListenerReleases = new Map<TrackStereoLevelsListener, Set<() => void>>()
   const frameListenerReleases = new Map<TrackMeterFrameListener, Set<() => void>>()
   const workletReleases = new Map<string, () => void>()
+  const workletGains = new Map<string, GainNode>()
   const zeroTrackStereoLevels: TrackStereoLevels = { left: 0, right: 0 }
   let flushHandle: number | null = null
   let releaseFlush: () => void = () => undefined
@@ -135,6 +136,21 @@ export function createMeteringRuntime(options: {
       .catch(() => false)
   }
 
+  const releaseTrackMeterWorklet = (trackId: string, expected?: AudioWorkletNode) => {
+    const node = workletNodes.get(trackId)
+    if (!node || (expected && node !== expected)) return
+    const gain = workletGains.get(trackId)
+    try { gain?.disconnect(node) } catch {}
+    node.port.onmessage = null
+    node.onprocessorerror = null
+    try { node.port.close() } catch {}
+    disconnectAudioNodes([node])
+    workletNodes.delete(trackId)
+    workletGains.delete(trackId)
+    workletReleases.get(trackId)?.()
+    workletReleases.delete(trackId)
+  }
+
   const constructTrackMeterWorklet = (
     ctx: AudioContext,
     trackId: string,
@@ -172,22 +188,18 @@ export function createMeteringRuntime(options: {
       }
       node.onprocessorerror = () => {
         if (workletNodes.get(trackId) !== node || workletGenerations.get(trackId) !== generation) return
-        options.onWorkletFault?.(faultGeneration, trackId)
-        node.onprocessorerror = null
-        node.port.onmessage = null
-        disconnectAudioNodes([node])
-        workletReleases.get(trackId)?.()
-        workletReleases.delete(trackId)
-        workletNodes.delete(trackId)
+        releaseTrackMeterWorklet(trackId, node)
         workletLevels.delete(trackId)
         pendingLevels.delete(trackId)
         queueLevels(trackId, zeroTrackStereoLevels)
+        options.onWorkletFault?.(faultGeneration, trackId)
         if (retriedWorkletGenerations.get(trackId) === generation || closed || !isCurrentOutput()) return
         retriedWorkletGenerations.set(trackId, generation)
         constructTrackMeterWorklet(ctx, trackId, gain, isCurrentOutput, generation)
       }
       gain.connect(node)
       workletNodes.set(trackId, node)
+      workletGains.set(trackId, gain)
       workletReleases.set(trackId, observeResource(options.resourceObserver, 'audio-worklet-nodes', node))
     })
   }
@@ -309,16 +321,7 @@ export function createMeteringRuntime(options: {
       disconnectAudioNodes([analyser])
       analysers.delete(trackId)
       meterArrays.delete(trackId)
-      const meterNode = workletNodes.get(trackId)
-      if (meterNode) {
-        disconnectAudioNodes([meterNode])
-        meterNode.port.onmessage = null
-        meterNode.onprocessorerror = null
-        meterNode.port.close()
-      }
-      workletNodes.delete(trackId)
-      workletReleases.get(trackId)?.()
-      workletReleases.delete(trackId)
+      releaseTrackMeterWorklet(trackId)
       retriedWorkletGenerations.delete(trackId)
       if (workletLevels.has(trackId) || pendingLevels.has(trackId)) {
         queueLevels(trackId, zeroTrackStereoLevels)
@@ -332,16 +335,8 @@ export function createMeteringRuntime(options: {
     },
     close: () => {
       closed = true
-      for (const node of workletNodes.values()) {
-        disconnectAudioNodes([node])
-        node.port.onmessage = null
-        node.onprocessorerror = null
-        node.port.close()
-      }
+      for (const trackId of Array.from(workletNodes.keys())) releaseTrackMeterWorklet(trackId)
       disconnectAudioNodes(Array.from(analysers.values()))
-      workletNodes.clear()
-      for (const release of workletReleases.values()) release()
-      workletReleases.clear()
       workletGenerations.clear()
       retriedWorkletGenerations.clear()
       workletLevels.clear()

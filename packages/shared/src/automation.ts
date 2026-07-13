@@ -24,6 +24,19 @@ export type AutomationEnvelope = {
   updatedAt: number
 }
 
+export type AutomationEnvelopeRow = {
+  _id: string
+  projectId: string
+  targetKind: AutomationTargetKind
+  trackId?: string
+  effectInstanceId?: string
+  targetKey?: string
+  parameterId: string
+  enabled: boolean
+  points: AutomationPoint[]
+  updatedAt: number
+}
+
 export const AUTOMATION_TARGET_KEY_V2_PREFIX = 'automation:v2:'
 
 export const automationTargetKey = (target: AutomationTarget, parameterId: string): string => (
@@ -34,6 +47,29 @@ export const automationTargetKey = (target: AutomationTarget, parameterId: strin
     parameterId,
   ])}`
 )
+
+export const automationEnvelopeFromRow = (
+  row: AutomationEnvelopeRow,
+): AutomationEnvelope | null => {
+  const effectInstanceId = row.effectInstanceId
+  if (effectInstanceId !== undefined && effectInstanceId.length === 0) return null
+  const target: AutomationTarget | null = row.targetKind === 'master'
+    ? { kind: 'master', effectInstanceId }
+    : row.trackId
+      ? { kind: 'track', trackId: row.trackId, effectInstanceId }
+      : null
+  if (!target) return null
+  return {
+    id: row._id,
+    projectId: row.projectId,
+    target,
+    targetKey: automationTargetKey(target, row.parameterId),
+    parameterId: row.parameterId,
+    enabled: row.enabled,
+    points: row.points,
+    updatedAt: row.updatedAt,
+  }
+}
 
 export const automationTargetMatchesEffectInstance = (
   target: unknown,

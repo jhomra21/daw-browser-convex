@@ -262,7 +262,7 @@ export const applyExportNormalization = (
     if (after.integratedLufs === null) {
       throw new Error(`Loudness normalization achieved no measurable LUFS, outside the 0.20 LU tolerance for ${settings.targetLufs.toFixed(2)} LUFS.`)
     }
-    if (after.truePeakDbtp !== null && after.truePeakDbtp > settings.truePeakCeilingDbtp + 0.1) {
+    if (settings.limiting === 'true-peak' && after.truePeakDbtp !== null && after.truePeakDbtp > settings.truePeakCeilingDbtp + 0.1) {
       throw new Error(`Loudness normalization achieved ${after.truePeakDbtp.toFixed(2)} dBTP, above the ${settings.truePeakCeilingDbtp.toFixed(2)} dBTP ceiling (+0.10 dB tolerance).`)
     }
   }

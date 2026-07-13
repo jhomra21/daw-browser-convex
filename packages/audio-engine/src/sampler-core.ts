@@ -98,7 +98,7 @@ export function createSamplerVoicePlan(input: {
         fadeInSec: first ? 0 : Math.min(crossfadeDuration, durationSec),
         fadeOutSec: Math.min(crossfadeDuration, durationSec),
       })
-      startTime += first ? Math.max(0.001, introDuration - loop.crossfadeSec) : Math.max(0.001, step)
+      startTime += first ? Math.max(0.001, introDuration - crossfadeDuration) : Math.max(0.001, step)
       offsetSec = loop.startSec
       first = false
     }

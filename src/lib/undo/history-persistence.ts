@@ -306,8 +306,8 @@ export const persistHistoryRestoreUngroup = async (deps: Deps, input: RestoreUng
       effects: localRestoreEffectRows(groupId, input.effects),
       automation: (input.automation ?? []).map((envelope) => ({
         ...envelope,
-        target: { kind: "track", trackId: groupId },
-        targetKey: automationTargetKey({ kind: "track", trackId: groupId }, envelope.parameterId),
+        target: { kind: "track", trackId: groupId, effectInstanceId: envelope.target.effectInstanceId },
+        targetKey: automationTargetKey({ kind: "track", trackId: groupId, effectInstanceId: envelope.target.effectInstanceId }, envelope.parameterId),
       })),
     })
     return groupId
@@ -333,6 +333,7 @@ export const persistHistoryRestoreUngroup = async (deps: Deps, input: RestoreUng
         children: input.children,
         effects: sharedRestoreEffects(input.effects),
         automation: (input.automation ?? []).map((envelope) => ({
+          effectInstanceId: envelope.target.effectInstanceId,
           parameterId: envelope.parameterId,
           enabled: envelope.enabled,
           points: envelope.points,
@@ -375,11 +376,6 @@ function pickDirectionalValue<T>(direction: HistoryDirection, from: T, to: T) {
   return direction === "undo" ? from : to;
 }
 
-function assertInstanceId(instanceId: string | undefined) {
-  assert(instanceId, "Effect history entry requires an exact instance id.");
-  return instanceId;
-}
-
 const publishHistoryOperation = async (deps: Deps, operation: SharedTimelineOperation) => {
   const result = await publishSharedTimelineOperation(deps.projectId, operation);
   assert(isAppliedSharedTimelineOperationResult(result), "Shared timeline operation was not applied.");
@@ -415,20 +411,40 @@ export const persistHistoryTrackEffects = async (
     ...(effects.audioEffects ?? []).map((effect) => {
       if (!effect.instanceId) return null;
       switch (effect.effect) {
+        case "utility":
+          return publishHistoryOperation(deps, { kind: "effects.setUtilityParams", payload: { trackId, params: AUDIO_EFFECT_CONTRACTS.utility.normalizeParams(effect.params), instanceId: effect.instanceId } });
         case "eq":
           return publishHistoryOperation(deps, { kind: "effects.setEqParams", payload: { trackId, params: effect.params, instanceId: effect.instanceId } });
+        case "autofilter":
+          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "autofilter", params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(effect.params), instanceId: effect.instanceId } });
+        case "chorus":
+          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "chorus", params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(effect.params), instanceId: effect.instanceId } });
+        case "flanger":
+          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "flanger", params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(effect.params), instanceId: effect.instanceId } });
+        case "phaser":
+          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "phaser", params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(effect.params), instanceId: effect.instanceId } });
+        case "tremolo":
+          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "tremolo", params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(effect.params), instanceId: effect.instanceId } });
+        case "autopan":
+          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "autopan", params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(effect.params), instanceId: effect.instanceId } });
+        case "ensemble":
+          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "ensemble", params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(effect.params), instanceId: effect.instanceId } });
+        case "lofi":
+          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "lofi", params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(effect.params), instanceId: effect.instanceId } });
+        case "gate":
+          return publishHistoryOperation(deps, { kind: "effects.setGateParams", payload: { trackId, params: AUDIO_EFFECT_CONTRACTS.gate.normalizeParams(effect.params), instanceId: effect.instanceId } });
         case "compressor":
           return publishHistoryOperation(deps, { kind: "effects.setCompressorParams", payload: { trackId, params: normalizeCompressorParams(effect.params), instanceId: effect.instanceId } });
         case "saturator":
           return publishHistoryOperation(deps, { kind: "effects.setSaturatorParams", payload: { trackId, params: normalizeSaturatorParams(effect.params), instanceId: effect.instanceId } });
+        case "limiter":
+          return publishHistoryOperation(deps, { kind: "effects.setLimiterParams", payload: { trackId, params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(effect.params), instanceId: effect.instanceId } });
         case "delay":
           return publishHistoryOperation(deps, { kind: "effects.setDelayParams", payload: { trackId, params: normalizeDelayParams(effect.params), instanceId: effect.instanceId } });
         case "reverb":
           return publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId, params: normalizeReverbParams(effect.params), instanceId: effect.instanceId } });
         case "spectral":
-          return publishHistoryOperation(deps, { kind: "effects.setSpectralParams", payload: { trackId, params: normalizeSpectralParamsEnvelope(effect.params), instanceId: assertInstanceId(effect.instanceId) } });
-        case "lofi":
-          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "lofi", params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(effect.params), instanceId: assertInstanceId(effect.instanceId) } });
+          return publishHistoryOperation(deps, { kind: "effects.setSpectralParams", payload: { trackId, params: normalizeSpectralParamsEnvelope(effect.params), instanceId: effect.instanceId } });
       }
     }),
     effects.instrument ? publishHistoryOperation(deps, { kind: "instruments.setTrackInstrument", payload: { trackId, instrument: effects.instrument } }) : null,
@@ -455,8 +471,8 @@ export const persistHistoryTrackAutomation = async (
   if (isLocalHistoryProject(deps)) {
     await Promise.all(envelopes.map((envelope) => setLocalAutomationEnvelope(deps.projectId, {
       ...envelope,
-      target: { kind: "track", trackId },
-      targetKey: automationTargetKey({ kind: "track", trackId }, envelope.parameterId),
+      target: { kind: "track", trackId, effectInstanceId: envelope.target.effectInstanceId },
+      targetKey: automationTargetKey({ kind: "track", trackId, effectInstanceId: envelope.target.effectInstanceId }, envelope.parameterId),
     })));
     return;
   }
@@ -465,6 +481,7 @@ export const persistHistoryTrackAutomation = async (
     payload: {
       targetKind: "track",
       trackId,
+      effectInstanceId: envelope.target.effectInstanceId,
       parameterId: envelope.parameterId,
       enabled: envelope.enabled,
       points: envelope.points,
@@ -504,22 +521,22 @@ export const persistHistoryEffectParams = async (
   switch (entry.data.effect) {
     case "master-utility": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setMasterUtilityParams", payload: { params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterUtilityParams", payload: { params, instanceId: entry.data.instanceId } });
       return;
     }
     case "master-gate": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setMasterGateParams", payload: { params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterGateParams", payload: { params, instanceId: entry.data.instanceId } });
       return;
     }
     case "master-limiter": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setMasterLimiterParams", payload: { params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterLimiterParams", payload: { params, instanceId: entry.data.instanceId } });
       return;
     }
     case "master-spectral": {
       const params = normalizeSpectralParamsEnvelope(pickDirectionalValue(direction, entry.data.from, entry.data.to));
-      await publishHistoryOperation(deps, { kind: "effects.setMasterSpectralParams", payload: { params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterSpectralParams", payload: { params, instanceId: entry.data.instanceId } });
       return;
     }
     case "master-autofilter":
@@ -532,64 +549,64 @@ export const persistHistoryEffectParams = async (
     case "master-lofi": {
       const effect = entry.data.effect.slice(7);
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      if (effect === "autofilter") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(params), instanceId: assertInstanceId(entry.data.instanceId) } });
-      else if (effect === "chorus") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(params), instanceId: assertInstanceId(entry.data.instanceId) } });
-      else if (effect === "flanger") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(params), instanceId: assertInstanceId(entry.data.instanceId) } });
-      else if (effect === "phaser") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(params), instanceId: assertInstanceId(entry.data.instanceId) } });
-      else if (effect === "tremolo") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(params), instanceId: assertInstanceId(entry.data.instanceId) } });
-      else if (effect === "autopan") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(params), instanceId: assertInstanceId(entry.data.instanceId) } });
-      else if (effect === "ensemble") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(params), instanceId: assertInstanceId(entry.data.instanceId) } });
-      else if (effect === "lofi") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(params), instanceId: assertInstanceId(entry.data.instanceId) } });
+      if (effect === "autofilter") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(params), instanceId: entry.data.instanceId } });
+      else if (effect === "chorus") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(params), instanceId: entry.data.instanceId } });
+      else if (effect === "flanger") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(params), instanceId: entry.data.instanceId } });
+      else if (effect === "phaser") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(params), instanceId: entry.data.instanceId } });
+      else if (effect === "tremolo") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(params), instanceId: entry.data.instanceId } });
+      else if (effect === "autopan") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(params), instanceId: entry.data.instanceId } });
+      else if (effect === "ensemble") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(params), instanceId: entry.data.instanceId } });
+      else if (effect === "lofi") await publishHistoryOperation(deps, { kind: "effects.setMasterModulationParams", payload: { effect, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(params), instanceId: entry.data.instanceId } });
       return;
     }
     case "master-eq": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setMasterEqParams", payload: { params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterEqParams", payload: { params, instanceId: entry.data.instanceId } });
       return;
     }
     case "master-compressor": {
       const params = normalizeCompressorParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
-      await publishHistoryOperation(deps, { kind: "effects.setMasterCompressorParams", payload: { params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterCompressorParams", payload: { params, instanceId: entry.data.instanceId } });
       return;
     }
     case "master-reverb": {
       const params = normalizeReverbParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
-      await publishHistoryOperation(deps, { kind: "effects.setMasterReverbParams", payload: { params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterReverbParams", payload: { params, instanceId: entry.data.instanceId } });
       return;
     }
     case "master-saturator": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setMasterSaturatorParams", payload: { params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterSaturatorParams", payload: { params, instanceId: entry.data.instanceId } });
       return;
     }
     case "master-delay": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setMasterDelayParams", payload: { params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setMasterDelayParams", payload: { params, instanceId: entry.data.instanceId } });
       return;
     }
     case "eq": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setEqParams", payload: { trackId: targetId, params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setEqParams", payload: { trackId: targetId, params, instanceId: entry.data.instanceId } });
       return;
     }
     case "utility": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setUtilityParams", payload: { trackId: targetId, params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setUtilityParams", payload: { trackId: targetId, params, instanceId: entry.data.instanceId } });
       return;
     }
     case "gate": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setGateParams", payload: { trackId: targetId, params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setGateParams", payload: { trackId: targetId, params, instanceId: entry.data.instanceId } });
       return;
     }
     case "limiter": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setLimiterParams", payload: { trackId: targetId, params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setLimiterParams", payload: { trackId: targetId, params, instanceId: entry.data.instanceId } });
       return;
     }
     case "spectral": {
       const params = normalizeSpectralParamsEnvelope(pickDirectionalValue(direction, entry.data.from, entry.data.to));
-      await publishHistoryOperation(deps, { kind: "effects.setSpectralParams", payload: { trackId: targetId, params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setSpectralParams", payload: { trackId: targetId, params, instanceId: entry.data.instanceId } });
       return;
     }
     case "autofilter":
@@ -601,7 +618,7 @@ export const persistHistoryEffectParams = async (
     case "ensemble":
     case "lofi": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      const instanceId = assertInstanceId(entry.data.instanceId);
+      const instanceId = entry.data.instanceId;
       if (entry.data.effect === "autofilter") await publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "autofilter", params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(params), instanceId } });
       else if (entry.data.effect === "chorus") await publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "chorus", params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(params), instanceId } });
       else if (entry.data.effect === "flanger") await publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "flanger", params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(params), instanceId } });
@@ -614,27 +631,27 @@ export const persistHistoryEffectParams = async (
     }
     case "compressor": {
       const params = normalizeCompressorParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
-      await publishHistoryOperation(deps, { kind: "effects.setCompressorParams", payload: { trackId: targetId, params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setCompressorParams", payload: { trackId: targetId, params, instanceId: entry.data.instanceId } });
       return;
     }
     case "reverb": {
       const params = normalizeReverbParams(pickDirectionalValue(direction, entry.data.from, entry.data.to));
-      await publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId: targetId, params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId: targetId, params, instanceId: entry.data.instanceId } });
       return;
     }
     case "saturator": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setSaturatorParams", payload: { trackId: targetId, params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setSaturatorParams", payload: { trackId: targetId, params, instanceId: entry.data.instanceId } });
       return;
     }
     case "delay": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setDelayParams", payload: { trackId: targetId, params, instanceId: assertInstanceId(entry.data.instanceId) } });
+      await publishHistoryOperation(deps, { kind: "effects.setDelayParams", payload: { trackId: targetId, params, instanceId: entry.data.instanceId } });
       return;
     }
     case "synth": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "effects.setSynthParams", payload: { trackId: targetId, params } });
+      await publishHistoryOperation(deps, { kind: "effects.setSynthParams", payload: { trackId: targetId, params, instanceId: entry.data.instanceId } });
       return;
     }
     case "instrument": {

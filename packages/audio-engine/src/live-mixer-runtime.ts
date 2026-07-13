@@ -375,6 +375,21 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     return true
   }
 
+  const bypassStaticWorklet = (
+    trackId: string,
+    instanceId: string,
+    chain: StaticWorkletNodeChain,
+    revision: number,
+  ) => {
+    if (trackFxInstanceRevisions.get(trackId) !== revision) return
+    if (instanceStaticWorkletChains.get(trackId)?.get(instanceId) !== chain) return
+    closeInstanceState(trackId, instanceId)
+    const nodes = inputs.has(trackId) && gains.has(trackId) ? ensureTrackNodes(trackId) : null
+    if (nodes) rebuildTrackRouting(trackId, nodes)
+    applyAuxiliaryRoutes()
+    if (chain.kind === 'spectral') refreshMixerRouting()
+  }
+
   const applyTrackFxInstances = async (trackId: string, instances: AudioEffectRuntimeInstance[]) => {
     const revision = (trackFxInstanceRevisions.get(trackId) ?? 0) + 1
     trackFxInstanceRevisions.set(trackId, revision)
@@ -449,8 +464,12 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
           if (existing) disconnectStaticWorkletNodeChain(existing)
           try {
             const faultGeneration = options.getFaultGeneration()
-            const created = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params, (code) =>
-              options.onWorkletFault?.(faultGeneration, 'owned-processor', code, `track:${trackId}:effect:${instance.id}`))
+            let created: StaticWorkletNodeChain | undefined
+            created = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params, (code) => {
+              if (!created) return
+              bypassStaticWorklet(trackId, instance.id, created, revision)
+              options.onWorkletFault?.(faultGeneration, 'owned-processor', code, `track:${trackId}:effect:${instance.id}`)
+            })
             if (trackFxInstanceRevisions.get(trackId) !== revision) {
               disconnectStaticWorkletNodeChain(created)
               return

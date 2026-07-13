@@ -10,7 +10,6 @@ import {
   normalizeSaturatorParamsForUpdate,
   normalizeSynthParams,
   normalizeTrackInstrumentParams,
-  createInstrumentInstanceId,
   AUDIO_EFFECT_CONTRACTS,
   audioEffectOrderItemId,
   audioEffectOrderItemKind,
@@ -591,6 +590,7 @@ export const setSynthParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.id('tracks'),
+    instanceId: v.string(),
     params: v.object({
       wave1: v.union(
         v.literal('sine'),
@@ -609,10 +609,22 @@ export const setSynthParams = mutation({
       releaseMs: v.optional(v.number()),
     }),
   },
-  handler: async (ctx, { projectId, trackId, params }) => {
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const sanitized = normalizeSynthParams(params)
-    return await upsertTrackInstrument(ctx, { projectId, userId, trackId, instrument: { kind: 'synth', params: sanitized } })
+    const existing = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', trackId)).collect()
+    const existingInstrument = existing.find((row: any) => row.type === 'instrument' && row.targetType === 'track')
+      ?? existing.find((row: any) => row.type === 'synth' && row.targetType === 'track')
+    return await upsertTrackInstrument(ctx, {
+      projectId,
+      userId,
+      trackId,
+      instrument: {
+        kind: 'synth',
+        instanceId: existingInstrument?.instanceId ?? instanceId,
+        params: sanitized,
+      },
+    })
   },
 })
 
@@ -801,6 +813,7 @@ export const serverSetSynthParams = mutation({
   args: {
     projectId: v.string(),
     trackId: v.string(),
+    instanceId: v.string(),
     params: v.object({
       wave1: v.union(v.literal('sine'), v.literal('square'), v.literal('sawtooth'), v.literal('triangle')),
       wave2: v.union(v.literal('sine'), v.literal('square'), v.literal('sawtooth'), v.literal('triangle')),
@@ -809,20 +822,21 @@ export const serverSetSynthParams = mutation({
       releaseMs: v.optional(v.number()),
     }),
   },
-  handler: async (ctx, { projectId, trackId, params }) => {
+  handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
     if (!normalizedTrackId) return
     const sanitized = normalizeSynthParams(params)
     const existing = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', normalizedTrackId)).collect()
     const existingInstrument = existing.find((row: any) => row.type === 'instrument' && row.targetType === 'track')
+      ?? existing.find((row: any) => row.type === 'synth' && row.targetType === 'track')
     return await upsertTrackInstrument(ctx, {
       projectId,
       userId,
       trackId: normalizedTrackId,
       instrument: {
         kind: 'synth',
-        instanceId: existingInstrument?.instanceId ?? createInstrumentInstanceId(),
+        instanceId: existingInstrument?.instanceId ?? instanceId,
         params: sanitized,
       },
     })

@@ -54,8 +54,6 @@ type SyncedAudioEffectInstanceRow = AudioEffectRuntimeInstance & {
   index?: number;
 };
 
-const objectParamInput = (params: unknown): object => (params && typeof params === "object" ? params : {});
-
 const createSyncedAudioEffectInstanceRow = (
   targetId: string,
   kind: AudioEffectKind,
@@ -65,7 +63,7 @@ const createSyncedAudioEffectInstanceRow = (
 ): SyncedAudioEffectInstanceRow => {
   if (!instanceId) throw new Error(`Audio effect "${kind}" is missing an instance ID.`)
   const id = instanceId;
-  const input = objectParamInput(params);
+  const input = params && typeof params === "object" ? params : {};
   if (kind === "utility") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.utility.normalizeParams(input), index };
   if (kind === "autofilter") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(input), index };
   if (kind === "eq") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.eq.normalizeParams(input), index };

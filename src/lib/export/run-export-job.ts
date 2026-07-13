@@ -23,7 +23,7 @@ import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
-import type { AutomationEnvelope } from '@daw-browser/shared'
+import { automationEnvelopeFromRow, type AutomationEnvelope } from '@daw-browser/shared'
 import { isRenderableExportTrack, type ExportEncodingSettings, type ExportRenderSettings } from '~/lib/export/export-settings'
 import { processRenderedExport } from '~/lib/export/process-rendered-export'
 
@@ -301,34 +301,10 @@ async function loadExportAutomation(projectId: string | undefined, userId: strin
   }
   if (!localOnly && projectId && userId) {
     const rows = await convexClient.query(convexApi.automation.listByProject, { projectId })
-    const envelopes: AutomationEnvelope[] = []
-    for (const row of rows) {
-        if (row.targetKind === 'master') {
-          envelopes.push({
-            id: row._id,
-            projectId: row.projectId,
-            target: { kind: 'master' },
-            targetKey: row.targetKey,
-            parameterId: row.parameterId,
-            enabled: row.enabled,
-            points: row.points,
-            updatedAt: row.updatedAt,
-          })
-          continue
-        }
-        if (!row.trackId) continue
-        envelopes.push({
-          id: row._id,
-          projectId: row.projectId,
-          target: { kind: 'track', trackId: row.trackId },
-          targetKey: row.targetKey,
-          parameterId: row.parameterId,
-          enabled: row.enabled,
-          points: row.points,
-          updatedAt: row.updatedAt,
-        })
-    }
-    return envelopes
+    return rows.flatMap((row) => {
+      const envelope = automationEnvelopeFromRow(row)
+      return envelope ? [envelope] : []
+    })
   }
   return []
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { Track } from '@daw-browser/timeline-core/types'
-import { createDefaultEqParams } from '@daw-browser/shared'
+import { createDefaultDelayParams, createDefaultEqParams } from '@daw-browser/shared'
 
 import { buildCommittedSharedUngroupHistoryEntry, readSharedUngroupResult } from './shared-ungroup-history'
 
@@ -67,5 +67,35 @@ describe('durable shared ungroup history', () => {
 
   test('rejects a replay rejection instead of creating history', () => {
     expect(readSharedUngroupResult({ status: 'rejected' })).toBeNull()
+  })
+
+  test('preserves duplicate effect automation by exact instance identity', () => {
+    const group = track('group', { channelRole: 'group' })
+    const result = readSharedUngroupResult({
+      status: 'applied',
+      group: { index: 0, volume: 1, muted: false, soloed: false, sends: [] },
+      children: [],
+      effects: [
+        { type: 'delay', instanceId: 'delay-a', index: 0, params: createDefaultDelayParams() },
+        { type: 'delay', instanceId: 'delay-b', index: 1, params: createDefaultDelayParams() },
+      ],
+      automation: [
+        { effectInstanceId: 'delay-a', parameterId: 'delay.feedback', enabled: true, points: [], updatedAt: 1 },
+        { effectInstanceId: 'delay-b', parameterId: 'delay.feedback', enabled: true, points: [], updatedAt: 2 },
+      ],
+    })
+    if (!result) throw new Error('Expected valid ungroup result')
+    const entry = buildCommittedSharedUngroupHistoryEntry({
+      projectId: 'project',
+      tracks: [group],
+      groupTrack: group,
+      effects: { audioEffects: [] },
+      automation: [
+        { id: 'a', projectId: 'project', target: { kind: 'track', trackId: 'group', effectInstanceId: 'delay-a' }, targetKey: 'a', parameterId: 'delay.feedback', enabled: true, points: [], updatedAt: 1 },
+        { id: 'b', projectId: 'project', target: { kind: 'track', trackId: 'group', effectInstanceId: 'delay-b' }, targetKey: 'b', parameterId: 'delay.feedback', enabled: true, points: [], updatedAt: 2 },
+      ],
+      result,
+    })
+    expect(entry.data.automation?.map((envelope) => envelope.target.effectInstanceId)).toEqual(['delay-a', 'delay-b'])
   })
 })

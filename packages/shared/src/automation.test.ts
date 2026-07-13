@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { automationEnvelopeValueRange, automationTargetKey, automationTargetKeysAfterReEnable, automationTargetKeysForManualOverride, automationTargetMatchesEffectInstance, filterAutomationEnvelopesForScheduling, type AutomationEnvelope } from './automation'
+import { automationEnvelopeFromRow, automationEnvelopeValueRange, automationTargetKey, automationTargetKeysAfterReEnable, automationTargetKeysForManualOverride, automationTargetMatchesEffectInstance, filterAutomationEnvelopesForScheduling, type AutomationEnvelope } from './automation'
 import { instrumentAutomationKey } from './sampler-automation'
 import { automationRatioToValue, automationValueToRatio, createEqBandParameterId, evaluatedAutomationValuesByTargetKey, getAutomationParameterDescriptor, getAutomationParameterOptions, getAutomationParameterOptionsForTarget, normalizeAutomationPoints, valueAtAutomationTime, type AutomationEffectInstance } from './automation-parameters'
 
@@ -11,6 +11,34 @@ describe('automation helpers', () => {
       { kind: 'track', trackId: 'track:1', effectInstanceId: 'compressor:a:b' },
       'compressor.thresholdDb',
     )).toBe('automation:v2:["track","track:1","compressor:a:b","compressor.thresholdDb"]')
+  })
+
+  test('derives canonical cloud rows without losing processor identity', () => {
+    const first = automationEnvelopeFromRow({
+      _id: 'first',
+      projectId: 'project',
+      targetKind: 'track',
+      trackId: 'track',
+      effectInstanceId: 'delay-one',
+      targetKey: 'stale',
+      parameterId: 'delay.feedback',
+      enabled: true,
+      points: [],
+      updatedAt: 1,
+    })
+    const second = automationEnvelopeFromRow({
+      _id: 'second',
+      projectId: 'project',
+      targetKind: 'track',
+      trackId: 'track',
+      effectInstanceId: 'delay-two',
+      parameterId: 'delay.feedback',
+      enabled: true,
+      points: [],
+      updatedAt: 1,
+    })
+    expect(first?.targetKey).not.toBe(second?.targetKey)
+    expect(first?.target.effectInstanceId).toBe('delay-one')
   })
 
   test('matches effect cleanup from structured identity without parsing target keys', () => {

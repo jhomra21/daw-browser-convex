@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, type Accessor } from "solid-js";
-import { deleteLocalEffect, getLocalEffect, setLocalEffect, type LocalEffectKind, type LocalEffectRow } from "~/lib/local-effects";
+import { deleteLocalEffect, deleteLocalEffectInstance, getLocalEffect, setLocalEffect, setLocalEffectInstance, type LocalEffectKind, type LocalEffectRow } from "~/lib/local-effects";
 import { isLocalId } from "@daw-browser/shared";
 
 type LocalEffectSelector = LocalEffectKind | ((targetId: string) => LocalEffectKind);
@@ -7,8 +7,8 @@ type LocalEffectSelector = LocalEffectKind | ((targetId: string) => LocalEffectK
 type LocalEffectRows<TParams> = {
   fetchRow: (projectId: string, targetId: string) => Promise<LocalEffectRow<TParams> | undefined>;
   isLocalProject: Accessor<boolean>;
-  persist: (projectId: string, targetId: string, params: TParams) => Promise<void>;
-  remove: (projectId: string, targetId: string) => Promise<void>;
+  persist: (projectId: string, targetId: string, params: TParams, instanceId?: string) => Promise<void>;
+  remove: (projectId: string, targetId: string, instanceId?: string) => Promise<void>;
   row: (targetId: string | undefined) => LocalEffectRow<TParams> | undefined;
 };
 
@@ -52,15 +52,12 @@ export function createLocalEffectRows<TParams>(input: {
     });
   });
 
-  const persist = async (projectId: string, targetId: string, params: TParams) => {
+  const persist = async (projectId: string, targetId: string, params: TParams, instanceId?: string) => {
     if (!projectId || !isLocalId("project", projectId)) return;
     const effect = resolveEffect(input.effect, targetId);
-    const row = await setLocalEffect(
-      projectId,
-      targetId,
-      effect,
-      input.normalize ? input.normalize(params) : params,
-    );
+    const row = instanceId
+      ? await setLocalEffectInstance(projectId, targetId, effect, input.normalize ? input.normalize(params) : params, { instanceId })
+      : await setLocalEffect(projectId, targetId, effect, input.normalize ? input.normalize(params) : params);
     if (input.projectId() !== projectId) return;
     setRows((prev) => ({ ...prev, [scopeKey(projectId, targetId, effect)]: row }));
   };
@@ -77,10 +74,11 @@ export function createLocalEffectRows<TParams>(input: {
     return row;
   };
 
-  const remove = async (projectId: string, targetId: string) => {
+  const remove = async (projectId: string, targetId: string, instanceId?: string) => {
     if (!isLocalId("project", projectId)) return;
     const effect = resolveEffect(input.effect, targetId);
-    await deleteLocalEffect(projectId, targetId, effect);
+    if (instanceId) await deleteLocalEffectInstance(projectId, targetId, effect, instanceId);
+    else await deleteLocalEffect(projectId, targetId, effect);
     if (input.projectId() !== projectId) return;
     setRows((prev) => ({ ...prev, [scopeKey(projectId, targetId, effect)]: undefined }));
   };

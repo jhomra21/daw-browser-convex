@@ -5,6 +5,8 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  onCleanup,
+  onMount,
 } from "solid-js";
 import { AUDIO_EFFECT_CONTRACTS, automationEnvelopeValueRange, automationTargetKey, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, normalizeUtilityParamsEnvelope, type AudioEffectInstance, type AudioEffectKind, type AutomationEnvelope } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
@@ -57,6 +59,7 @@ import {
   CONTEXT_MENU_MIDI_EFFECT_CATALOG,
   getAudioEffectDeviceCatalogEntry,
 } from "~/lib/device-catalog";
+import { isEditableKeyboardTarget } from "~/lib/keyboard-event-target";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -468,7 +471,7 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
   if (props.effect.kind === "compressor") {
     return (
       <Show when={displayedParams()}>
-        {(value) => <Compressor params={normalizeCompressorParams(objectParams(value()))} audioEngine={props.audioEngine} targetId={props.targetId} onChange={(updates) => props.audioEffects.compressor.changeInstance(props.effect.id, (prev) => normalizeCompressorParams({ ...prev, ...updates }))} onToggleEnabled={(enabled) => props.audioEffects.compressor.changeInstance(props.effect.id, (prev) => ({ ...prev, enabled }))} onReset={() => props.audioEffects.compressor.changeInstance(props.effect.id, () => normalizeCompressorParams({}))} />}
+        {(value) => <Compressor params={normalizeCompressorParams(objectParams(value()))} audioEngine={props.audioEngine} targetId={props.targetId} effectInstanceId={props.effect.id} onChange={(updates) => props.audioEffects.compressor.changeInstance(props.effect.id, (prev) => normalizeCompressorParams({ ...prev, ...updates }))} onToggleEnabled={(enabled) => props.audioEffects.compressor.changeInstance(props.effect.id, (prev) => ({ ...prev, enabled }))} onReset={() => props.audioEffects.compressor.changeInstance(props.effect.id, () => normalizeCompressorParams({}))} />}
       </Show>
     );
   }
@@ -510,11 +513,39 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
 
 const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props) => {
   const [reorderPreview, setReorderPreview] = createSignal<EffectCardReorderPreview>();
+  const [selection, setSelection] = createSignal<{ targetId: string; effectId: string }>();
+  let effectCardsElement: HTMLDivElement | undefined;
   const contextMenuItems = (effect: AudioEffectInstance): TimelineContextMenuItem[] => {
     return createAudioEffectContextMenuItems({
       ...createAudioEffectContextMenuControls(effect, props.audioEffects, props.targetId),
       canWrite: props.canWrite,
     });
+  };
+  const selectedEffect = createMemo(() => {
+    const current = selection();
+    if (!current || current.targetId !== props.targetId) return;
+    return props.audioEffects.orderedEffects().find((effect) => effect.id === current.effectId);
+  });
+  createEffect(() => {
+    if (selection() && !selectedEffect()) setSelection();
+  });
+  onMount(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!effectCardsElement?.contains(event.target instanceof Node ? event.target : null)) {
+        setSelection();
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown, { capture: true });
+    onCleanup(() => window.removeEventListener("pointerdown", handlePointerDown, { capture: true }));
+  });
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if ((event.key !== "Delete" && event.key !== "Backspace") || isEditableKeyboardTarget(event.target)) return;
+    const effect = selectedEffect();
+    if (!effect || !props.canWrite) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSelection();
+    void props.audioEffects.removeByInstanceFromTarget(props.targetId, effect).catch(() => undefined);
   };
 
   return (
@@ -522,10 +553,16 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
       <div
         class="flex h-full min-w-16 shrink-0 items-stretch gap-3"
         classList={{ "pointer-events-none opacity-60": !props.canWrite }}
-        ref={(element) => props.onElementChange?.(element)}
+        data-timeline-keyboard-local="true"
+        onKeyDown={handleKeyDown}
+        ref={(element) => {
+          effectCardsElement = element;
+          props.onElementChange?.(element);
+        }}
       >
         <For each={props.audioEffects.orderedEffects()}>
           {(effect) => {
+            let element: HTMLDivElement | undefined;
             const drag = createEffectCardReorderDrag({
               effect,
               orderedEffects: props.audioEffects.orderedEffects,
@@ -537,9 +574,18 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
               <div
                 data-effect-kind={effect.kind}
                 data-effect-id={effect.id}
-                class="touch-none transition-opacity"
-                classList={{ "opacity-30": reorderPreview()?.effect === effect }}
-                onPointerDown={drag.onPointerDown}
+                class="touch-none transition-opacity focus:outline-none"
+                classList={{
+                  "opacity-30": reorderPreview()?.effect === effect,
+                  "[&_.effect-shell]:bg-timeline-surface-muted": selectedEffect()?.id === effect.id,
+                }}
+                ref={element}
+                tabIndex={-1}
+                onPointerDown={(event) => {
+                  setSelection({ targetId: props.targetId, effectId: effect.id });
+                  element?.focus({ preventScroll: true });
+                  drag.onPointerDown(event);
+                }}
               >
                 <TimelineContextMenu items={() => contextMenuItems(effect)}>
                   <EffectsPanelAudioEffectCard

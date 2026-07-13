@@ -2,7 +2,6 @@ import {
   getSpectralLatencyFrames,
   normalizeDelayParams,
   normalizeReverbParams,
-  type AudioEffectKind,
   type CompressorParamsLite,
   type DelayParamsLite,
   type EqParamsLite,
@@ -123,37 +122,6 @@ export const getEffectChainTiming = (
   let tailFrames = 0
   for (const instance of instances) {
     const timing = getEffectTiming(instance, sampleRate, bpm)
-    latencyFrames += timing.latencyFrames
-    if (timing.tail.kind === 'unbounded') return { latencyFrames, tail: timing.tail }
-    tailFrames += timing.tail.frames
-  }
-  return { latencyFrames, tail: finite(tailFrames) }
-}
-
-export const getLegacyEffectChainTiming = (
-  effects: {
-    eq?: EqParamsLite
-    compressor?: CompressorParamsLite
-    saturator?: SaturatorParamsLite
-    delay?: DelayParamsLite
-    reverb?: ReverbParamsLite
-  },
-  order: readonly AudioEffectKind[],
-  sampleRate: number,
-  bpm = 120,
-): EffectTiming => {
-  let latencyFrames = 0
-  let tailFrames = 0
-  for (const kind of order) {
-    const timing = (() => {
-      if (kind === 'eq' && effects.eq) return getEffectTiming({ kind, params: effects.eq }, sampleRate, bpm)
-      if (kind === 'compressor' && effects.compressor) return getEffectTiming({ kind, params: effects.compressor }, sampleRate, bpm)
-      if (kind === 'saturator' && effects.saturator) return getEffectTiming({ kind, params: effects.saturator }, sampleRate, bpm)
-      if (kind === 'delay' && effects.delay) return getEffectTiming({ kind, params: effects.delay }, sampleRate, bpm)
-      if (kind === 'reverb' && effects.reverb) return getEffectTiming({ kind, params: effects.reverb }, sampleRate, bpm)
-      return null
-    })()
-    if (!timing) continue
     latencyFrames += timing.latencyFrames
     if (timing.tail.kind === 'unbounded') return { latencyFrames, tail: timing.tail }
     tailFrames += timing.tail.frames

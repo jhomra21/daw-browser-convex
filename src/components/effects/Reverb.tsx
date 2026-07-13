@@ -406,6 +406,7 @@ function EarlyReflectionsPanel(props: {
           min={REVERB_REFLECTION_MOD_RATE_HZ_MIN}
           max={REVERB_REFLECTION_MOD_RATE_HZ_MAX}
           step={0.01}
+          logarithmic
           unit="Hz"
           disabled={props.disabled}
           onValueChange={props.onModRateChange}

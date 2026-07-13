@@ -44,7 +44,7 @@ const Sampler: Component<SamplerProps> = (props) => {
     });
   };
   return (
-    <EffectShell title="Sampler" typeLabel="Instrument" onReset={props.onReset} disabled={!props.canWrite} class="w-176 min-w-176">
+    <EffectShell title="Sampler" typeLabel="Instrument" onReset={props.onReset} disabled={!props.canWrite}  class="w-176 min-w-176">
       <div class="flex h-full flex-col gap-2 p-3 text-xs text-muted-foreground">
         <div class="flex items-center gap-3">
           <label>Voices <input class="w-14 bg-app-surface px-1 text-foreground" type="number" min="1" max="128" value={props.params.polyphony} onChange={(event) => props.onUpdate({ polyphony: Number(event.currentTarget.value) })} /></label>

@@ -64,7 +64,7 @@ const normalizeLocalAutomationEnvelope = (value: unknown): AutomationEnvelope | 
     id: value.id,
     projectId: value.projectId,
     target,
-    targetKey: typeof value.targetKey === 'string' ? value.targetKey : automationTargetKey(target, value.parameterId),
+    targetKey: automationTargetKey(target, value.parameterId),
     parameterId: value.parameterId,
     enabled: value.enabled,
     points: normalizeAutomationPoints(points, descriptor),
@@ -105,52 +105,22 @@ export const normalizeLocalAutomationEnvelopes = (
   values: readonly unknown[],
 ): AutomationEnvelope[] => {
   const byLogicalKey = new Map<string, AutomationEnvelope>()
-  const opaque: AutomationEnvelope[] = []
   for (const value of values) {
-    const envelope = normalizeLocalAutomationEnvelope(value)
-    if (!envelope) continue
     const recognized = recognizeLocalAutomationEnvelope(value)
-    if (!recognized) {
-      opaque.push(envelope)
-      continue
-    }
+    if (!recognized) continue
     const current = byLogicalKey.get(recognized.logicalKey)
     byLogicalKey.set(
       recognized.logicalKey,
       current ? preferAutomationEnvelope(current, recognized.envelope) : recognized.envelope,
     )
   }
-  return [...byLogicalKey.values(), ...opaque]
+  return [...byLogicalKey.values()]
 }
 
 export const loadLocalAutomationEnvelopes = async (projectId: string): Promise<AutomationEnvelope[]> => {
   const db = await openLocalProjectDb(projectId)
-  const tx = db.transaction('entities', 'readwrite')
-  const rows = await tx.store.index('by-kind').getAll(AUTOMATION_KIND)
-  const recognizedByLogicalKey = new Map<string, Array<{ rowId: string; envelope: AutomationEnvelope }>>()
-  const opaque: AutomationEnvelope[] = []
-  for (const row of rows) {
-    const recognized = recognizeLocalAutomationEnvelope(row.value)
-    if (!recognized) {
-      const envelope = normalizeLocalAutomationEnvelope(row.value)
-      if (envelope) opaque.push(envelope)
-      continue
-    }
-    const matches = recognizedByLogicalKey.get(recognized.logicalKey) ?? []
-    matches.push({ rowId: row.id, envelope: recognized.envelope })
-    recognizedByLogicalKey.set(recognized.logicalKey, matches)
-  }
-  const recognized: AutomationEnvelope[] = []
-  for (const [logicalKey, matches] of recognizedByLogicalKey) {
-    const winner = matches.reduce((current, candidate) => (
-      preferAutomationEnvelope(current.envelope, candidate.envelope) === candidate.envelope ? candidate : current
-    ))
-    recognized.push(winner.envelope)
-    for (const match of matches) await tx.store.delete([AUTOMATION_KIND, match.rowId])
-    await tx.store.put(createLocalProjectEntityRow(AUTOMATION_KIND, logicalKey, winner.envelope, winner.envelope.updatedAt))
-  }
-  await tx.done
-  return [...recognized, ...opaque]
+  const rows = await db.getAllFromIndex('entities', 'by-kind', AUTOMATION_KIND)
+  return normalizeLocalAutomationEnvelopes(rows.map((row) => row.value))
 }
 
 export const setLocalAutomationEnvelope = async (
@@ -162,18 +132,8 @@ export const setLocalAutomationEnvelope = async (
   }
   const db = await openLocalProjectDb(projectId)
   const tx = db.transaction('entities', 'readwrite')
-  const rows = await tx.store.index('by-kind').getAll(AUTOMATION_KIND)
   const incoming = recognizeLocalAutomationEnvelope(envelope)
   if (!incoming) throw new Error('Automation envelope does not have a recognized logical identity.')
-  const matches = rows.flatMap((row) => {
-    const recognized = recognizeLocalAutomationEnvelope(row.value)
-    return recognized?.logicalKey === incoming.logicalKey
-      ? [{ rowId: row.id, envelope: recognized.envelope }]
-      : []
-  })
-  for (const match of matches) {
-    await tx.store.delete([AUTOMATION_KIND, match.rowId])
-  }
   await tx.store.put(createLocalProjectEntityRow(
     AUTOMATION_KIND,
     incoming.logicalKey,
@@ -190,15 +150,7 @@ export const deleteLocalAutomationEnvelope = async (
   targetKey: string,
 ): Promise<void> => {
   const db = await openLocalProjectDb(projectId)
-  const tx = db.transaction('entities', 'readwrite')
-  const rows = await tx.store.index('by-kind').getAll(AUTOMATION_KIND)
-  for (const row of rows) {
-    const envelope = normalizeLocalAutomationEnvelope(row.value)
-    if (row.id === targetKey || envelope?.targetKey === targetKey) {
-      await tx.store.delete([AUTOMATION_KIND, row.id])
-    }
-  }
-  await tx.done
+  await db.delete('entities', [AUTOMATION_KIND, targetKey])
   notifyLocalProjectChanged(projectId)
 }
 

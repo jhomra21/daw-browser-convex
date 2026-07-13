@@ -126,6 +126,7 @@ describe('EQ params', () => {
     expect(parseSharedTimelineOperation({
       kind: 'effects.setMasterEqParams',
       payload: {
+        instanceId: 'master-eq-1',
         params: {
           enabled: true,
           channelMode: 'stereo',
@@ -142,6 +143,7 @@ describe('EQ params', () => {
     })).toEqual({
       kind: 'effects.setMasterEqParams',
       payload: {
+        instanceId: 'master-eq-1',
         params: {
           enabled: true,
           channelMode: 'stereo',
@@ -219,9 +221,9 @@ describe('Compressor params', () => {
 
   test('parses shared track and master compressor operations', () => {
     const params = normalizeCompressorParams({})
-    expect(parseSharedTimelineOperation({ kind: 'effects.setCompressorParams', payload: { trackId: 'track-1', params } })?.kind)
+    expect(parseSharedTimelineOperation({ kind: 'effects.setCompressorParams', payload: { trackId: 'track-1', instanceId: 'compressor-1', params } })?.kind)
       .toBe('effects.setCompressorParams')
-    expect(parseSharedTimelineOperation({ kind: 'effects.setMasterCompressorParams', payload: { params } })?.kind)
+    expect(parseSharedTimelineOperation({ kind: 'effects.setMasterCompressorParams', payload: { instanceId: 'master-compressor-1', params } })?.kind)
       .toBe('effects.setMasterCompressorParams')
   })
 
@@ -295,17 +297,17 @@ describe('Audio effect order', () => {
   test('parses shared audio effect removal operations', () => {
     expect(parseSharedTimelineOperation({
       kind: 'effects.removeAudioEffect',
-      payload: { targetType: 'track', trackId: 'track-1', effect: 'delay' },
+      payload: { targetType: 'track', trackId: 'track-1', effect: 'delay', instanceId: 'delay-1' },
     })).toEqual({
       kind: 'effects.removeAudioEffect',
-      payload: { targetType: 'track', trackId: 'track-1', effect: 'delay' },
+      payload: { targetType: 'track', trackId: 'track-1', effect: 'delay', instanceId: 'delay-1' },
     })
     expect(parseSharedTimelineOperation({
       kind: 'effects.removeAudioEffect',
-      payload: { targetType: 'master', effect: 'reverb' },
+      payload: { targetType: 'master', effect: 'reverb', instanceId: 'master-reverb-1' },
     })).toEqual({
       kind: 'effects.removeAudioEffect',
-      payload: { targetType: 'master', effect: 'reverb' },
+      payload: { targetType: 'master', effect: 'reverb', instanceId: 'master-reverb-1' },
     })
     expect(parseSharedTimelineOperation({
       kind: 'effects.removeAudioEffect',
@@ -316,7 +318,7 @@ describe('Audio effect order', () => {
     })
     expect(parseSharedTimelineOperation({
       kind: 'effects.removeAudioEffect',
-      payload: { targetType: 'track', trackId: 'track-1', effect: 'chorus' },
+      payload: { targetType: 'track', trackId: 'track-1', effect: 'chorus', instanceId: 'chorus-1' },
     })?.kind).toBe('effects.removeAudioEffect')
   })
 })
@@ -387,9 +389,9 @@ describe('Delay params', () => {
 
   test('parses shared track and master delay operations', () => {
     const params = normalizeDelayParams({})
-    expect(parseSharedTimelineOperation({ kind: 'effects.setDelayParams', payload: { trackId: 'track-1', params } })?.kind)
+    expect(parseSharedTimelineOperation({ kind: 'effects.setDelayParams', payload: { trackId: 'track-1', instanceId: 'delay-1', params } })?.kind)
       .toBe('effects.setDelayParams')
-    expect(parseSharedTimelineOperation({ kind: 'effects.setMasterDelayParams', payload: { params } })?.kind)
+    expect(parseSharedTimelineOperation({ kind: 'effects.setMasterDelayParams', payload: { instanceId: 'master-delay-1', params } })?.kind)
       .toBe('effects.setMasterDelayParams')
   })
 
@@ -408,9 +410,9 @@ describe('Delay params', () => {
 describe('Saturator shared operations', () => {
   test('parses shared track and master saturator operations', () => {
     const params = normalizeSaturatorParams({})
-    expect(parseSharedTimelineOperation({ kind: 'effects.setSaturatorParams', payload: { trackId: 'track-1', params } })?.kind)
+    expect(parseSharedTimelineOperation({ kind: 'effects.setSaturatorParams', payload: { trackId: 'track-1', instanceId: 'saturator-1', params } })?.kind)
       .toBe('effects.setSaturatorParams')
-    expect(parseSharedTimelineOperation({ kind: 'effects.setMasterSaturatorParams', payload: { params } })?.kind)
+    expect(parseSharedTimelineOperation({ kind: 'effects.setMasterSaturatorParams', payload: { instanceId: 'master-saturator-1', params } })?.kind)
       .toBe('effects.setMasterSaturatorParams')
   })
 })
@@ -461,6 +463,7 @@ describe('Reverb params', () => {
     expect(parseSharedTimelineOperation({
       kind: 'effects.setMasterReverbParams',
       payload: {
+        instanceId: 'master-reverb-1',
         params: {
           enabled: true,
           wet: 0.4,
@@ -471,6 +474,7 @@ describe('Reverb params', () => {
     })).toEqual({
       kind: 'effects.setMasterReverbParams',
       payload: {
+        instanceId: 'master-reverb-1',
         params: {
           enabled: true,
           wet: 0.4,

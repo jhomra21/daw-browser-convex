@@ -45,7 +45,7 @@ import {
 } from "~/components/timeline/create-effects-panel-state";
 import { convexApi } from "~/lib/convex";
 import { compareAudioEffectOrderEntries } from "~/lib/audio-effect-order-rows";
-import { createAudioEffectInstanceId, deleteLocalEffectInstance, listLocalEffects, reorderLocalAudioEffects, setLocalEffect, setLocalEffectInstance, type LocalEffectKind, type LocalEffectRow } from "~/lib/local-effects";
+import { createAudioEffectInstanceId, deleteLocalEffectInstance, listLocalEffects, reorderLocalAudioEffects, setLocalEffectInstance, type LocalEffectKind, type LocalEffectRow } from "~/lib/local-effects";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
@@ -59,13 +59,12 @@ type PersistedAudioEffectDescriptor<Params> = {
   createDefaultParams: () => Params;
   normalizeParams: (params: Params) => Params;
   serializeParams: (params: Params) => string;
-  setTrackEngineParams: (audioEngine: AudioEngine, trackId: string, params: Params) => void;
-  setMasterEngineParams: (audioEngine: AudioEngine, params: Params) => void;
   row: (targetId: string) => LocalEffectRow<Params> | undefined;
-  persistLocal: (projectId: string, targetId: string, params: Params) => Promise<void>;
-  removeLocal: (projectId: string, targetId: string) => Promise<void>;
-  publishTrackParams: (projectId: string, userId: string, trackId: string, params: Params) => Promise<unknown>;
-  publishMasterParams: (projectId: string, userId: string, params: Params) => Promise<unknown>;
+  instanceId: (targetId: string) => string | undefined;
+  persistLocal: (projectId: string, targetId: string, params: Params, instanceId: string) => Promise<void>;
+  removeLocal: (projectId: string, targetId: string, instanceId: string) => Promise<void>;
+  publishTrackParams: (projectId: string, userId: string, trackId: string, params: Params, instanceId: string) => Promise<unknown>;
+  publishMasterParams: (projectId: string, userId: string, params: Params, instanceId: string) => Promise<unknown>;
   commitTrackParams: (trackId: string, previous: Params, next: Params, projectId?: string) => void;
   commitMasterParams: (previous: Params, next: Params, projectId?: string) => void;
 };
@@ -170,13 +169,20 @@ type EffectsPanelAudioDevice = {
 
 export const createAudioEffectInstanceIdentityCache = () => {
   const cache = new Map<string, AudioEffectInstance>();
-  return (targetId: string, id: string, kind: AudioEffectKind) => {
-    const key = `${targetId}:${id}`;
-    const cached = cache.get(key);
-    if (cached?.kind === kind) return cached;
-    const instance = { id, kind };
-    cache.set(key, instance);
-    return instance;
+  return {
+    get: (targetId: string, id: string, kind: AudioEffectKind) => {
+      const key = `${targetId}:${id}`;
+      const cached = cache.get(key);
+      if (cached?.kind === kind) return cached;
+      const instance = { id, kind };
+      cache.set(key, instance);
+      return instance;
+    },
+    prune: (reachableKeys: ReadonlySet<string>) => {
+      for (const key of cache.keys()) {
+        if (!reachableKeys.has(key)) cache.delete(key);
+      }
+    },
   };
 };
 
@@ -256,44 +262,42 @@ export function createEffectsPanelAudioDevice(
     targetId: currentTargetId,
     scopeId: context.projectId,
     row: () => isLocalProject() ? descriptor.row(currentTargetId()) : remoteEffectForTarget(currentTargetId(), descriptor.kind),
+    applyToEngine: () => undefined,
     readQueryParams: (row) => row?.params ? descriptor.normalizeParams(row.params) : undefined,
     createInitialParams: () => descriptor.createDefaultParams(),
     serializeParams: descriptor.serializeParams,
-    applyToEngine: (targetId, params) => {
-      if (targetId === "master") {
-        descriptor.setMasterEngineParams(context.audioEngine(), params);
-      } else {
-        descriptor.setTrackEngineParams(context.audioEngine(), targetId, params);
-      }
-    },
     createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
     persistParams: (targetId, params, persistContext) => {
       if (!persistContext.projectId) return Promise.resolve();
-      if (isLocalId("project", persistContext.projectId)) return descriptor.persistLocal(persistContext.projectId, targetId, params);
+      const instanceId = descriptor.instanceId(targetId);
+      if (!instanceId) return Promise.resolve();
+      if (isLocalId("project", persistContext.projectId)) return descriptor.persistLocal(persistContext.projectId, targetId, params, instanceId);
       if (!persistContext.userId) return Promise.resolve();
       const normalizedParams = descriptor.normalizeParams(params);
       if (targetId === "master") {
-        return descriptor.publishMasterParams(persistContext.projectId, persistContext.userId, normalizedParams);
+        return descriptor.publishMasterParams(persistContext.projectId, persistContext.userId, normalizedParams, instanceId);
       }
       const track = resolveTrackByTargetId(targetId);
       if (!track) return Promise.resolve();
-      return descriptor.publishTrackParams(persistContext.projectId, persistContext.userId, track.id, normalizedParams);
+      return descriptor.publishTrackParams(persistContext.projectId, persistContext.userId, track.id, normalizedParams, instanceId);
     },
     persistRemove: (targetId, persistContext) => {
       if (!persistContext.projectId) return Promise.resolve();
-      if (isLocalId("project", persistContext.projectId)) return descriptor.removeLocal(persistContext.projectId, targetId);
+      const instanceId = descriptor.instanceId(targetId);
+      if (!instanceId) return Promise.resolve();
+      if (isLocalId("project", persistContext.projectId)) return descriptor.removeLocal(persistContext.projectId, targetId, instanceId);
       if (!persistContext.userId) return Promise.resolve();
       if (targetId === "master") {
         return publishEffectOperation(persistContext.projectId, persistContext.userId, {
           kind: "effects.removeAudioEffect",
-          payload: { targetType: "master", effect: descriptor.kind },
+          payload: { targetType: "master", effect: descriptor.kind, instanceId },
         });
       }
       const track = resolveTrackByTargetId(targetId);
       if (!track) return Promise.resolve();
       return publishEffectOperation(persistContext.projectId, persistContext.userId, {
         kind: "effects.removeAudioEffect",
-        payload: { targetType: "track", trackId: track.id, effect: descriptor.kind },
+        payload: { targetType: "track", trackId: track.id, effect: descriptor.kind, instanceId },
       });
     },
     clearAfterPersistRemove: (persistContext) => Boolean(persistContext.projectId && isLocalId("project", persistContext.projectId)),
@@ -322,18 +326,17 @@ export function createEffectsPanelAudioDevice(
     createDefaultParams: AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams,
     normalizeParams: AUDIO_EFFECT_CONTRACTS.eq.normalizeParams,
     serializeParams: AUDIO_EFFECT_CONTRACTS.eq.serializeParams,
-    setTrackEngineParams: (audioEngine, trackId, params) => audioEngine.setTrackEq(trackId, params),
-    setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterEq(params),
     row: localEq.row,
+    instanceId: (targetId) => isLocalProject() ? localEq.row(targetId)?.instanceId : remoteEffectForTarget(targetId, "eq")?.instanceId,
     persistLocal: localEq.persist,
     removeLocal: localEq.remove,
-    publishTrackParams: (projectId, userId, trackId, params) => publishEffectOperation(projectId, userId, {
+    publishTrackParams: (projectId, userId, trackId, params, instanceId) => publishEffectOperation(projectId, userId, {
       kind: "effects.setEqParams",
-      payload: { trackId, params },
+      payload: { trackId, params, instanceId },
     }),
-    publishMasterParams: (projectId, userId, params) => publishEffectOperation(projectId, userId, {
+    publishMasterParams: (projectId, userId, params, instanceId) => publishEffectOperation(projectId, userId, {
       kind: "effects.setMasterEqParams",
-      payload: { params },
+      payload: { params, instanceId },
     }),
     commitTrackParams: (trackId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "eq", from: previous, to: next }, projectId),
     commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-eq", from: previous, to: next }, projectId),
@@ -344,18 +347,17 @@ export function createEffectsPanelAudioDevice(
     createDefaultParams: AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams,
     normalizeParams: AUDIO_EFFECT_CONTRACTS.reverb.normalizeParams,
     serializeParams: AUDIO_EFFECT_CONTRACTS.reverb.serializeParams,
-    setTrackEngineParams: (audioEngine, trackId, params) => audioEngine.setTrackReverb(trackId, params),
-    setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterReverb(params),
     row: localReverb.row,
+    instanceId: (targetId) => isLocalProject() ? localReverb.row(targetId)?.instanceId : remoteEffectForTarget(targetId, "reverb")?.instanceId,
     persistLocal: localReverb.persist,
     removeLocal: localReverb.remove,
-    publishTrackParams: (projectId, userId, trackId, params) => publishEffectOperation(projectId, userId, {
+    publishTrackParams: (projectId, userId, trackId, params, instanceId) => publishEffectOperation(projectId, userId, {
       kind: "effects.setReverbParams",
-      payload: { trackId, params },
+      payload: { trackId, params, instanceId },
     }),
-    publishMasterParams: (projectId, userId, params) => publishEffectOperation(projectId, userId, {
+    publishMasterParams: (projectId, userId, params, instanceId) => publishEffectOperation(projectId, userId, {
       kind: "effects.setMasterReverbParams",
-      payload: { params },
+      payload: { params, instanceId },
     }),
     commitTrackParams: (trackId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "reverb", from: previous, to: next }, projectId),
     commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-reverb", from: previous, to: next }, projectId),
@@ -366,18 +368,17 @@ export function createEffectsPanelAudioDevice(
     createDefaultParams: AUDIO_EFFECT_CONTRACTS.compressor.createDefaultParams,
     normalizeParams: AUDIO_EFFECT_CONTRACTS.compressor.normalizeParams,
     serializeParams: AUDIO_EFFECT_CONTRACTS.compressor.serializeParams,
-    setTrackEngineParams: (audioEngine, trackId, params) => audioEngine.setTrackCompressor(trackId, params),
-    setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterCompressor(params),
     row: localCompressor.row,
+    instanceId: (targetId) => isLocalProject() ? localCompressor.row(targetId)?.instanceId : remoteEffectForTarget(targetId, "compressor")?.instanceId,
     persistLocal: localCompressor.persist,
     removeLocal: localCompressor.remove,
-    publishTrackParams: (projectId, userId, trackId, params) => publishEffectOperation(projectId, userId, {
+    publishTrackParams: (projectId, userId, trackId, params, instanceId) => publishEffectOperation(projectId, userId, {
       kind: "effects.setCompressorParams",
-      payload: { trackId, params },
+      payload: { trackId, params, instanceId },
     }),
-    publishMasterParams: (projectId, userId, params) => publishEffectOperation(projectId, userId, {
+    publishMasterParams: (projectId, userId, params, instanceId) => publishEffectOperation(projectId, userId, {
       kind: "effects.setMasterCompressorParams",
-      payload: { params },
+      payload: { params, instanceId },
     }),
     commitTrackParams: (trackId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "compressor", from: previous, to: next }, projectId),
     commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-compressor", from: previous, to: next }, projectId),
@@ -388,18 +389,17 @@ export function createEffectsPanelAudioDevice(
     createDefaultParams: AUDIO_EFFECT_CONTRACTS.saturator.createDefaultParams,
     normalizeParams: AUDIO_EFFECT_CONTRACTS.saturator.normalizeParams,
     serializeParams: AUDIO_EFFECT_CONTRACTS.saturator.serializeParams,
-    setTrackEngineParams: (audioEngine, trackId, params) => audioEngine.setTrackSaturator(trackId, params),
-    setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterSaturator(params),
     row: localSaturator.row,
+    instanceId: (targetId) => isLocalProject() ? localSaturator.row(targetId)?.instanceId : remoteEffectForTarget(targetId, "saturator")?.instanceId,
     persistLocal: localSaturator.persist,
     removeLocal: localSaturator.remove,
-    publishTrackParams: (projectId, userId, trackId, params) => publishEffectOperation(projectId, userId, {
+    publishTrackParams: (projectId, userId, trackId, params, instanceId) => publishEffectOperation(projectId, userId, {
       kind: "effects.setSaturatorParams",
-      payload: { trackId, params },
+      payload: { trackId, params, instanceId },
     }),
-    publishMasterParams: (projectId, userId, params) => publishEffectOperation(projectId, userId, {
+    publishMasterParams: (projectId, userId, params, instanceId) => publishEffectOperation(projectId, userId, {
       kind: "effects.setMasterSaturatorParams",
-      payload: { params },
+      payload: { params, instanceId },
     }),
     commitTrackParams: (trackId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "saturator", from: previous, to: next }, projectId),
     commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-saturator", from: previous, to: next }, projectId),
@@ -410,18 +410,17 @@ export function createEffectsPanelAudioDevice(
     createDefaultParams: AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams,
     normalizeParams: AUDIO_EFFECT_CONTRACTS.delay.normalizeParams,
     serializeParams: AUDIO_EFFECT_CONTRACTS.delay.serializeParams,
-    setTrackEngineParams: (audioEngine, trackId, params) => audioEngine.setTrackDelay(trackId, params),
-    setMasterEngineParams: (audioEngine, params) => audioEngine.setMasterDelay(params),
     row: localDelay.row,
+    instanceId: (targetId) => isLocalProject() ? localDelay.row(targetId)?.instanceId : remoteEffectForTarget(targetId, "delay")?.instanceId,
     persistLocal: localDelay.persist,
     removeLocal: localDelay.remove,
-    publishTrackParams: (projectId, userId, trackId, params) => publishEffectOperation(projectId, userId, {
+    publishTrackParams: (projectId, userId, trackId, params, instanceId) => publishEffectOperation(projectId, userId, {
       kind: "effects.setDelayParams",
-      payload: { trackId, params },
+      payload: { trackId, params, instanceId },
     }),
-    publishMasterParams: (projectId, userId, params) => publishEffectOperation(projectId, userId, {
+    publishMasterParams: (projectId, userId, params, instanceId) => publishEffectOperation(projectId, userId, {
       kind: "effects.setMasterDelayParams",
-      payload: { params },
+      payload: { params, instanceId },
     }),
     commitTrackParams: (trackId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "delay", from: previous, to: next }, projectId),
     commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-delay", from: previous, to: next }, projectId),
@@ -566,13 +565,17 @@ export function createEffectsPanelAudioDevice(
   );
 
   const instanceKey = (targetId: string, instanceId: string) => `${targetId}:${instanceId}`;
+  const requiredInstanceId = (instanceId: string | undefined, kind: AudioEffectKind) => {
+    if (!instanceId) throw new Error(`Audio effect "${kind}" is missing an instance ID.`);
+    return instanceId;
+  };
   const persistedInstanceCache = createAudioEffectInstanceIdentityCache();
 
   const normalizedPersistedAudioEffectRows = createMemo<AudioEffectPanelRow[]>(() => {
     if (isLocalProject()) {
       return (localAllEffects() ?? []).flatMap((row) => {
         const kind = AUDIO_EFFECT_ORDER.find((entry) => row.effect === entry || row.effect === AUDIO_EFFECT_CONTRACTS[entry].masterKind);
-        return kind && row.params ? [{
+        return kind && row.params && row.instanceId ? [{
           targetId: row.targetId,
           kind,
           instanceId: row.instanceId,
@@ -585,7 +588,7 @@ export function createEffectsPanelAudioDevice(
       const targetId = row.targetType === "master" ? "master" : row.trackId;
       if (!targetId) return [];
       const kind = AUDIO_EFFECT_ORDER.find((entry) => row.type === entry);
-      return kind && row.params ? [{
+      return kind && row.params && row.instanceId ? [{
         targetId,
         kind,
         instanceId: row.instanceId,
@@ -631,7 +634,7 @@ export function createEffectsPanelAudioDevice(
 
   createEffect(() => {
     const persistedRowsByInstance = new Map(normalizedPersistedAudioEffectRows().map((row) => [
-      instanceKey(row.targetId, row.instanceId ?? row.kind),
+      instanceKey(row.targetId, requiredInstanceId(row.instanceId, row.kind)),
       row,
     ]));
     const drafts = draftParamsByInstance();
@@ -651,9 +654,9 @@ export function createEffectsPanelAudioDevice(
   const orderedInstancesForTarget = (targetId: string): AudioEffectInstance[] => {
     const rows = persistedRowsForTarget(targetId);
     const entries = rows
-      .map((row) => ({ kind: row.kind, id: row.instanceId ?? row.kind, index: row.index }))
+      .map((row) => ({ kind: row.kind, id: requiredInstanceId(row.instanceId, row.kind), index: row.index }))
       .sort(compareAudioEffectOrderEntries)
-      .map((row) => persistedInstanceCache(targetId, row.id, row.kind));
+      .map((row) => persistedInstanceCache.get(targetId, row.id, row.kind));
     return normalizeAudioEffectInstanceOrder(entries, entries);
   };
 
@@ -677,7 +680,8 @@ export function createEffectsPanelAudioDevice(
   });
 
   createEffect(() => {
-    normalizedPersistedAudioEffectRows();
+    const rows = normalizedPersistedAudioEffectRows();
+    persistedInstanceCache.prune(new Set(rows.flatMap((row) => row.instanceId ? [instanceKey(row.targetId, row.instanceId)] : [])));
     const optimistic = optimisticOrder();
     for (const [targetId, order] of optimisticOrdersByTarget) {
       if (!areAudioEffectInstanceOrdersEqual(order, readPersistedOrderedEffectsForTarget(targetId))) continue;
@@ -693,14 +697,15 @@ export function createEffectsPanelAudioDevice(
     const targetId = currentTargetId();
     normalizedPersistedAudioEffectRows();
     draftParamsByInstance();
-    untrack(() => applyInstancesToEngine(targetId, order));
+    untrack(() => void applyInstancesToEngine(targetId, order).catch(() => undefined));
   });
 
   const currentOrderForTarget = (targetId: string) => {
-    if (targetId !== currentTargetId()) return readPersistedOrderedEffectsForTarget(targetId);
     return optimisticOrdersByTarget.has(targetId)
       ? optimisticOrdersByTarget.get(targetId) ?? []
-      : orderedEffects();
+      : targetId === currentTargetId()
+        ? orderedEffects()
+        : readPersistedOrderedEffectsForTarget(targetId);
   };
 
   const setOptimisticOrderForTarget = (targetId: string, order: AudioEffectInstance[]) => {
@@ -713,7 +718,7 @@ export function createEffectsPanelAudioDevice(
     if (!optimistic || !areAudioEffectInstanceOrdersEqual(optimistic, order)) return;
     optimisticOrdersByTarget.delete(targetId);
     setOptimisticOrder();
-    applyInstancesToEngine(targetId, readPersistedOrderedEffectsForTarget(targetId));
+    void applyInstancesToEngine(targetId, readPersistedOrderedEffectsForTarget(targetId)).catch(() => undefined);
   };
 
   const persistReorder = async (targetId: string, order: AudioEffectInstance[]) => {
@@ -759,7 +764,7 @@ export function createEffectsPanelAudioDevice(
     const normalized = normalizeAudioEffectInstanceOrder(nextOrder, currentOrder);
     if (areAudioEffectInstanceOrdersEqual(currentOrder, normalized)) return;
     setOptimisticOrderForTarget(targetId, normalized);
-    applyInstancesToEngine(targetId, normalized);
+    void applyInstancesToEngine(targetId, normalized).catch(() => undefined);
     void persistReorder(targetId, normalized).catch(() => {
       rollbackOptimisticOrder(targetId, normalized);
     });
@@ -767,14 +772,14 @@ export function createEffectsPanelAudioDevice(
 
   function paramsForInstanceForTarget(targetId: string, instance: AudioEffectInstance) {
     return draftParamsByInstance()[instanceKey(targetId, instance.id)]?.params
-      ?? persistedRowsForTarget(targetId).find((row) => (row.instanceId ?? row.kind) === instance.id && row.kind === instance.kind)?.params;
+      ?? persistedRowsForTarget(targetId).find((row) => requiredInstanceId(row.instanceId, row.kind) === instance.id && row.kind === instance.kind)?.params;
   }
 
   const paramsForInstance = (instance: AudioEffectInstance) => paramsForInstanceForTarget(currentTargetId(), instance);
 
   function persistedInstanceIdForTarget(targetId: string, instance: AudioEffectInstance) {
-    const row = persistedRowsForTarget(targetId).find((entry) => (entry.instanceId ?? entry.kind) === instance.id && entry.kind === instance.kind);
-    return row?.instanceId ?? (instance.id === instance.kind ? undefined : instance.id);
+    const row = persistedRowsForTarget(targetId).find((entry) => entry.instanceId === instance.id && entry.kind === instance.kind);
+    return row?.instanceId ?? instance.id;
   }
 
   function runtimeInstanceForParams(instance: AudioEffectInstance, params: AudioEffectParams): AudioEffectRuntimeInstance {
@@ -913,54 +918,50 @@ export function createEffectsPanelAudioDevice(
 
   function applyInstancesToEngine(targetId: string, order: AudioEffectInstance[]) {
     const instances = buildRuntimeInstancesForTarget(targetId, order);
-    if (targetId === "master") context.audioEngine().setMasterFxInstances(instances);
-    else context.audioEngine().setTrackFxInstances(targetId, instances);
+    return targetId === "master"
+      ? context.audioEngine().setMasterFxInstances(instances)
+      : context.audioEngine().setTrackFxInstances(targetId, instances);
   }
 
-  const persistInstanceParams = async (targetId: string, instanceId: string | undefined, kind: AudioEffectKind, params: unknown) => {
+  const persistInstanceParams = async (targetId: string, instanceId: string, kind: AudioEffectKind, params: unknown) => {
     const projectId = context.projectId();
     if (!projectId) return;
     const input = objectParamInput(params);
     if (isLocalId("project", projectId)) {
       if (kind === "utility") {
-        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalizeUtilityParamsEnvelope(input), { instanceId: instanceId ?? createAudioEffectInstanceId() });
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalizeUtilityParamsEnvelope(input), { instanceId });
       } else if (kind === "autofilter") {
-        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(input), { instanceId: instanceId ?? createAudioEffectInstanceId() });
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(input), { instanceId });
       } else if (kind === "gate") {
-        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalizeGateParamsEnvelope(input), { instanceId: instanceId ?? createAudioEffectInstanceId() });
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalizeGateParamsEnvelope(input), { instanceId });
       } else if (kind === "limiter") {
-        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(input), { instanceId: instanceId ?? createAudioEffectInstanceId() });
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(input), { instanceId });
       } else if (kind === "eq") {
         const normalized = normalizeEqParams(input);
-        if (instanceId) await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
-        else await setLocalEffect(projectId, targetId, localEffectForKind(targetId, kind), normalized);
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
       } else if (kind === "compressor") {
         const normalized = normalizeCompressorParams(input);
-        if (instanceId) await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
-        else await setLocalEffect(projectId, targetId, localEffectForKind(targetId, kind), normalized);
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
       } else if (kind === "saturator") {
         const normalized = normalizeSaturatorParams(input);
-        if (instanceId) await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
-        else await setLocalEffect(projectId, targetId, localEffectForKind(targetId, kind), normalized);
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
       } else if (kind === "delay") {
         const normalized = normalizeDelayParams(input);
-        if (instanceId) await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
-        else await setLocalEffect(projectId, targetId, localEffectForKind(targetId, kind), normalized);
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
       } else if (kind === "reverb") {
         const normalized = normalizeReverbParams(input);
-        if (instanceId) await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
-        else await setLocalEffect(projectId, targetId, localEffectForKind(targetId, kind), normalized);
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalized, { instanceId });
       } else if (kind === "spectral") {
-        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(input), { instanceId: instanceId ?? createAudioEffectInstanceId() });
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(input), { instanceId });
       } else {
-        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), AUDIO_EFFECT_CONTRACTS[kind].normalizeParams(input), { instanceId: instanceId ?? createAudioEffectInstanceId() });
+        await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), AUDIO_EFFECT_CONTRACTS[kind].normalizeParams(input), { instanceId });
       }
       return;
     }
     const userId = context.userId();
     if (!userId) return;
     const persistModulationParams = async (trackId?: string) => {
-      const exactInstanceId = instanceId ?? createAudioEffectInstanceId();
+      const exactInstanceId = instanceId;
       const publish = (payload: Extract<SharedTimelineOperation, { kind: "effects.setMasterModulationParams" }>["payload"]) => publishEffectOperation(projectId, userId, trackId
         ? { kind: "effects.setModulationParams", payload: { ...payload, trackId } }
         : { kind: "effects.setMasterModulationParams", payload });
@@ -974,29 +975,29 @@ export function createEffectsPanelAudioDevice(
       if (kind === "lofi") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(input), instanceId: exactInstanceId });
     };
     if (targetId === "master") {
-      if (kind === "utility") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterUtilityParams", payload: { params: normalizeUtilityParamsEnvelope(input), instanceId: instanceId ?? createAudioEffectInstanceId() } });
-      else if (kind === "gate") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterGateParams", payload: { params: normalizeGateParamsEnvelope(input), instanceId: instanceId ?? createAudioEffectInstanceId() } });
-      else if (kind === "limiter") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterLimiterParams", payload: { params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(input), instanceId: instanceId ?? createAudioEffectInstanceId() } });
-      else if (kind === "eq") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterEqParams", payload: { params: normalizeEqParams(input), ...(instanceId ? { instanceId } : {}) } });
-      else if (kind === "compressor") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterCompressorParams", payload: { params: normalizeCompressorParams(input), ...(instanceId ? { instanceId } : {}) } });
-      else if (kind === "saturator") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterSaturatorParams", payload: { params: normalizeSaturatorParams(input), ...(instanceId ? { instanceId } : {}) } });
-      else if (kind === "delay") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterDelayParams", payload: { params: normalizeDelayParams(input), ...(instanceId ? { instanceId } : {}) } });
-      else if (kind === "reverb") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterReverbParams", payload: { params: normalizeReverbParams(input), ...(instanceId ? { instanceId } : {}) } });
-      else if (kind === "spectral") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterSpectralParams", payload: { params: AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(input), instanceId: instanceId ?? createAudioEffectInstanceId() } });
+      if (kind === "utility") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterUtilityParams", payload: { params: normalizeUtilityParamsEnvelope(input), instanceId } });
+      else if (kind === "gate") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterGateParams", payload: { params: normalizeGateParamsEnvelope(input), instanceId } });
+      else if (kind === "limiter") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterLimiterParams", payload: { params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(input), instanceId } });
+      else if (kind === "eq") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterEqParams", payload: { params: normalizeEqParams(input), instanceId } });
+      else if (kind === "compressor") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterCompressorParams", payload: { params: normalizeCompressorParams(input), instanceId } });
+      else if (kind === "saturator") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterSaturatorParams", payload: { params: normalizeSaturatorParams(input), instanceId } });
+      else if (kind === "delay") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterDelayParams", payload: { params: normalizeDelayParams(input), instanceId } });
+      else if (kind === "reverb") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterReverbParams", payload: { params: normalizeReverbParams(input), instanceId } });
+      else if (kind === "spectral") await publishEffectOperation(projectId, userId, { kind: "effects.setMasterSpectralParams", payload: { params: AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(input), instanceId } });
       else await persistModulationParams();
       return;
     }
     const track = resolveTrackByTargetId(targetId);
     if (!track) return;
-    if (kind === "utility") await publishEffectOperation(projectId, userId, { kind: "effects.setUtilityParams", payload: { trackId: track.id, params: normalizeUtilityParamsEnvelope(input), instanceId: instanceId ?? createAudioEffectInstanceId() } });
-    else if (kind === "gate") await publishEffectOperation(projectId, userId, { kind: "effects.setGateParams", payload: { trackId: track.id, params: normalizeGateParamsEnvelope(input), instanceId: instanceId ?? createAudioEffectInstanceId() } });
-    else if (kind === "limiter") await publishEffectOperation(projectId, userId, { kind: "effects.setLimiterParams", payload: { trackId: track.id, params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(input), instanceId: instanceId ?? createAudioEffectInstanceId() } });
-    else if (kind === "eq") await publishEffectOperation(projectId, userId, { kind: "effects.setEqParams", payload: { trackId: track.id, params: normalizeEqParams(input), ...(instanceId ? { instanceId } : {}) } });
-    else if (kind === "compressor") await publishEffectOperation(projectId, userId, { kind: "effects.setCompressorParams", payload: { trackId: track.id, params: normalizeCompressorParams(input), ...(instanceId ? { instanceId } : {}) } });
-    else if (kind === "saturator") await publishEffectOperation(projectId, userId, { kind: "effects.setSaturatorParams", payload: { trackId: track.id, params: normalizeSaturatorParams(input), ...(instanceId ? { instanceId } : {}) } });
-    else if (kind === "delay") await publishEffectOperation(projectId, userId, { kind: "effects.setDelayParams", payload: { trackId: track.id, params: normalizeDelayParams(input), ...(instanceId ? { instanceId } : {}) } });
-    else if (kind === "reverb") await publishEffectOperation(projectId, userId, { kind: "effects.setReverbParams", payload: { trackId: track.id, params: normalizeReverbParams(input), ...(instanceId ? { instanceId } : {}) } });
-    else if (kind === "spectral") await publishEffectOperation(projectId, userId, { kind: "effects.setSpectralParams", payload: { trackId: track.id, params: AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(input), instanceId: instanceId ?? createAudioEffectInstanceId() } });
+    if (kind === "utility") await publishEffectOperation(projectId, userId, { kind: "effects.setUtilityParams", payload: { trackId: track.id, params: normalizeUtilityParamsEnvelope(input), instanceId } });
+    else if (kind === "gate") await publishEffectOperation(projectId, userId, { kind: "effects.setGateParams", payload: { trackId: track.id, params: normalizeGateParamsEnvelope(input), instanceId } });
+    else if (kind === "limiter") await publishEffectOperation(projectId, userId, { kind: "effects.setLimiterParams", payload: { trackId: track.id, params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(input), instanceId } });
+    else if (kind === "eq") await publishEffectOperation(projectId, userId, { kind: "effects.setEqParams", payload: { trackId: track.id, params: normalizeEqParams(input), instanceId } });
+    else if (kind === "compressor") await publishEffectOperation(projectId, userId, { kind: "effects.setCompressorParams", payload: { trackId: track.id, params: normalizeCompressorParams(input), instanceId } });
+    else if (kind === "saturator") await publishEffectOperation(projectId, userId, { kind: "effects.setSaturatorParams", payload: { trackId: track.id, params: normalizeSaturatorParams(input), instanceId } });
+    else if (kind === "delay") await publishEffectOperation(projectId, userId, { kind: "effects.setDelayParams", payload: { trackId: track.id, params: normalizeDelayParams(input), instanceId } });
+    else if (kind === "reverb") await publishEffectOperation(projectId, userId, { kind: "effects.setReverbParams", payload: { trackId: track.id, params: normalizeReverbParams(input), instanceId } });
+    else if (kind === "spectral") await publishEffectOperation(projectId, userId, { kind: "effects.setSpectralParams", payload: { trackId: track.id, params: AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(input), instanceId } });
     else await persistModulationParams(track.id);
   };
 
@@ -1008,7 +1009,7 @@ export function createEffectsPanelAudioDevice(
     if (areParamsForKindEqual(kind, current, next)) return;
     const persistedInstanceId = persistedInstanceIdForTarget(targetId, { id: instanceId, kind });
     writeDraftParams(targetId, instanceId, kind, next);
-    applyInstancesToEngine(targetId, currentOrderForTarget(targetId));
+    void applyInstancesToEngine(targetId, currentOrderForTarget(targetId)).catch(() => undefined);
     commitInstanceParams(targetId, persistedInstanceId, kind, current, next);
     void persistInstanceParams(targetId, persistedInstanceId, kind, next).catch(() => undefined);
   };
@@ -1057,7 +1058,8 @@ export function createEffectsPanelAudioDevice(
     effects: readonly AudioEffectChainPresetStep[],
     index?: number,
   ) => {
-    if (effects.length === 0 || readPersistedOrderedEffectsForTarget(targetId).length + effects.length > 16) return false;
+    const previousOrder = currentOrderForTarget(targetId);
+    if (effects.length === 0 || previousOrder.length + effects.length > 16) return false;
     const entries = effects.map((effect) => ({
       instance: { id: createAudioEffectInstanceId(), kind: effect.kind },
       params: normalizePresetStepParams(effect),
@@ -1066,21 +1068,34 @@ export function createEffectsPanelAudioDevice(
     for (const entry of entries) {
       writeDraftParams(targetId, entry.instance.id, entry.instance.kind, entry.params);
     }
-    const currentOrder = currentOrderForTarget(targetId);
-    const nextOrder = [...currentOrder];
+    const nextOrder = [...previousOrder];
     nextOrder.splice(index === undefined ? nextOrder.length : Math.max(0, Math.min(index, nextOrder.length)), 0, ...instances);
     setOptimisticOrderForTarget(targetId, nextOrder);
-    applyInstancesToEngine(targetId, nextOrder);
-    for (const entry of entries) {
-      await persistInstanceParams(targetId, entry.instance.id, entry.instance.kind, entry.params);
+    const persisted: AudioEffectInstance[] = [];
+    try {
+      await applyInstancesToEngine(targetId, nextOrder);
+      for (const entry of entries) {
+        await persistInstanceParams(targetId, entry.instance.id, entry.instance.kind, entry.params);
+        persisted.push(entry.instance);
+      }
+      await persistReorder(targetId, nextOrder);
+      return true;
+    } catch {
+      const projectId = context.projectId();
+      if (projectId) {
+        await Promise.allSettled(persisted.map((instance) => deleteInstanceFromTarget(targetId, instance, projectId)));
+        await persistReorder(targetId, previousOrder).catch(() => undefined);
+      }
+      for (const entry of entries) clearDraftParams(targetId, entry.instance.id);
+      setOptimisticOrderForTarget(targetId, previousOrder);
+      await applyInstancesToEngine(targetId, previousOrder).catch(() => undefined);
+      return false;
     }
-    await persistReorder(targetId, nextOrder);
-    return true;
   };
   const addByKindToTarget = async (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => (
     await addChainToTarget(targetId, [createDefaultPresetStep(effect)], index)
   );
-  const canAddByKindToTarget = (targetId: Track["id"] | "master", _effect: AudioEffectKind) => readPersistedOrderedEffectsForTarget(targetId).length < 16;
+  const canAddByKindToTarget = (targetId: Track["id"] | "master", _effect: AudioEffectKind) => currentOrderForTarget(targetId).length < 16;
   const deleteInstanceFromTarget = async (targetId: Track["id"] | "master", instance: AudioEffectInstance, projectId: string) => {
     const instanceId = persistedInstanceIdForTarget(targetId, instance);
     if (isLocalId("project", projectId)) {
@@ -1090,12 +1105,12 @@ export function createEffectsPanelAudioDevice(
     const userId = context.userId();
     if (!userId) return false;
     if (targetId === "master") {
-      await publishEffectOperation(projectId, userId, { kind: "effects.removeAudioEffect", payload: { targetType: "master", effect: instance.kind, ...(instanceId ? { instanceId } : {}) } });
+      await publishEffectOperation(projectId, userId, { kind: "effects.removeAudioEffect", payload: { targetType: "master", effect: instance.kind, instanceId } });
       return true;
     }
     const track = resolveTrackByTargetId(targetId);
     if (!track) return false;
-    await publishEffectOperation(projectId, userId, { kind: "effects.removeAudioEffect", payload: { targetType: "track", trackId: track.id, effect: instance.kind, ...(instanceId ? { instanceId } : {}) } });
+    await publishEffectOperation(projectId, userId, { kind: "effects.removeAudioEffect", payload: { targetType: "track", trackId: track.id, effect: instance.kind, instanceId } });
     return true;
   };
   const removeByInstanceFromTarget = async (targetId: Track["id"] | "master", instance: AudioEffectInstance) => {
@@ -1108,7 +1123,7 @@ export function createEffectsPanelAudioDevice(
     clearDraftParams(targetId, instance.id);
     const nextOrder = currentOrder.filter((entry) => entry.id !== instance.id);
     setOptimisticOrderForTarget(targetId, nextOrder);
-    applyInstancesToEngine(targetId, nextOrder);
+    await applyInstancesToEngine(targetId, nextOrder);
     await persistReorder(targetId, nextOrder);
     return true;
   };
@@ -1119,7 +1134,7 @@ export function createEffectsPanelAudioDevice(
     if (!order.some((entry) => entry.id === payload.instanceId && entry.kind === kind)) return false;
     const params = normalizeParamsForKind(kind, payload.params);
     writeDraftParams(payload.targetId, payload.instanceId, kind, params);
-    applyInstancesToEngine(payload.targetId, order);
+    void applyInstancesToEngine(payload.targetId, order).catch(() => undefined);
     return true;
   };
   const removeAllFromTarget = async (targetId: Track["id"] | "master") => {
@@ -1132,7 +1147,7 @@ export function createEffectsPanelAudioDevice(
     if (!deleted.every(Boolean)) return false;
     clearDraftParamsForTarget(targetId);
     setOptimisticOrderForTarget(targetId, []);
-    applyInstancesToEngine(targetId, []);
+    await applyInstancesToEngine(targetId, []);
     await persistReorder(targetId, []);
     return true;
   };

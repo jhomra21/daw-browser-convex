@@ -247,6 +247,14 @@ export function createEffectsPanelInstrumentDevice(
   }
 
   const synthDefaultsByTarget = new Map<string, SynthParams>();
+  const synthInstanceIdsByTarget = new Map<string, string>();
+  const ensureSynthInstanceId = (targetId: string) => {
+    const current = synthInstanceIdsByTarget.get(targetId);
+    if (current) return current;
+    const next = createInstrumentInstanceId();
+    synthInstanceIdsByTarget.set(targetId, next);
+    return next;
+  };
   const ensureSynthDefaults = (targetId: string) => {
     const current = synthDefaultsByTarget.get(targetId);
     if (current) return current;
@@ -309,11 +317,11 @@ export function createEffectsPanelInstrumentDevice(
     readQueryParams: (row) => row ? readInstrumentParamsFromEffectRow(row) : undefined,
     readVisibleParams: (targetId) => {
       const params = readSynthDefaults(targetId);
-      return params ? normalizeTrackInstrumentParams({ kind: "synth", params }) : undefined;
+      return params ? normalizeTrackInstrumentParams({ kind: "synth", instanceId: ensureSynthInstanceId(targetId), params }) : undefined;
     },
     createInitialParams: (targetId) => {
       const params = readSynthDefaults(targetId);
-      return params ? normalizeTrackInstrumentParams({ kind: "synth", params }) : undefined;
+      return params ? normalizeTrackInstrumentParams({ kind: "synth", instanceId: ensureSynthInstanceId(targetId), params }) : undefined;
     },
     serializeParams: (params) => JSON.stringify(params),
     applyToEngine: (targetId, params) => {
@@ -641,7 +649,9 @@ export function createEffectsPanelInstrumentDevice(
         instrumentState.updateForTarget(targetId, (previous) => ({ kind: "synth", instanceId: previous.kind === "synth" ? previous.instanceId : createInstrumentInstanceId(), params: ensureSynthDefaults(targetId) }));
       },
       syncRemoteForTarget: (targetId, params) => {
-        instrumentState.syncRemoteForTarget(targetId, params ? normalizeTrackInstrumentParams({ kind: "synth", params }) : undefined);
+        const instanceId = synthInstanceIdsByTarget.get(targetId) ?? createInstrumentInstanceId();
+        synthInstanceIdsByTarget.set(targetId, instanceId);
+        instrumentState.syncRemoteForTarget(targetId, params ? normalizeTrackInstrumentParams({ kind: "synth", instanceId, params }) : undefined);
       },
       updateCardBounds: updateSynthCardBounds,
     },

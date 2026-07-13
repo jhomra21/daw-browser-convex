@@ -5,14 +5,8 @@ import {
   getAutomationParameterDescriptor,
   assert,
   type ArpParams,
-  type AudioEffectKind,
   type AutomationEnvelope,
-  type CompressorParamsLite,
-  type DelayParamsLite,
   type DrumRackParams,
-  type EqParamsLite,
-  type ReverbParamsLite,
-  type SaturatorParamsLite,
   type SynthParamsInput,
   type TrackInstrumentParams,
   parseInstrumentAutomationKey,
@@ -41,14 +35,8 @@ export type { ExportRange } from './export-range'
 
 export type ExportFx = {
   masterVolume?: number
-  masterEq?: EqParamsLite
-  masterCompressor?: CompressorParamsLite
-  masterSaturator?: SaturatorParamsLite
-  masterDelay?: DelayParamsLite
-  masterReverb?: ReverbParamsLite
-  masterFxOrder?: AudioEffectKind[]
-  masterFxInstances?: AudioEffectRuntimeInstance[]
-  trackFx?: Record<string, { order?: AudioEffectKind[]; instances?: AudioEffectRuntimeInstance[]; eq?: EqParamsLite; compressor?: CompressorParamsLite; saturator?: SaturatorParamsLite; delay?: DelayParamsLite; reverb?: ReverbParamsLite; arp?: ArpParams; synth?: SynthParamsInput; instrument?: TrackInstrumentParams; drumRackBuffers?: DrumRackResolvedBuffers; samplerBuffers?: SamplerResolvedBuffers; granularBuffer?: GranularInstalledBuffer }>
+  masterFxInstances: AudioEffectRuntimeInstance[]
+  trackFx?: Record<string, { instances: AudioEffectRuntimeInstance[]; arp?: ArpParams; synth?: SynthParamsInput; instrument?: TrackInstrumentParams; drumRackBuffers?: DrumRackResolvedBuffers; samplerBuffers?: SamplerResolvedBuffers; granularBuffer?: GranularInstalledBuffer }>
 }
 
 export type ExportRequest = {
@@ -129,7 +117,7 @@ export function resolveExportLimiterCeilingDbtp(
   graph: ResolvedMixerGraph,
 ): number | undefined {
   const ceilings: number[] = []
-  for (const instance of graph.master.instances ?? []) {
+  for (const instance of graph.master.instances) {
     if (instance.kind === 'limiter' && instance.params.state.enabled) {
       ceilings.push(instance.params.state.ceilingDbtp)
     }
@@ -431,8 +419,7 @@ const snapshotTrackFx = (trackFx: ExportFx['trackFx']): ExportFx['trackFx'] => {
     trackId,
     {
       ...entry,
-      order: entry.order ? [...entry.order] : undefined,
-      instances: entry.instances ? [...entry.instances] : undefined,
+      instances: [...entry.instances],
       instrument: entry.instrument ? snapshotInstrument(entry.instrument) : undefined,
     },
   ]))
@@ -446,14 +433,7 @@ export function resolveExportMixerGraph(req: Pick<ExportRequest, 'tracks' | 'fx'
       track.id,
       track.clips.flatMap((clip) => clip.buffer ? [clip.buffer.numberOfChannels] : []),
     ])),
-    masterEq: fx?.masterEq,
-    masterCompressor: fx?.masterCompressor,
-    masterSaturator: fx?.masterSaturator,
-    masterDelay: fx?.masterDelay,
-    masterReverb: fx?.masterReverb,
-    masterVolume: fx?.masterVolume,
-    masterFxOrder: fx?.masterFxOrder,
-    masterFxInstances: fx?.masterFxInstances,
+    masterFxInstances: fx?.masterFxInstances ?? [],
     trackFx: fx?.trackFx,
   })
 }
@@ -540,6 +520,7 @@ export function createSourceAutomationScope(
 
 const emptyMasterFx = (graph: ResolvedMixerGraph): ResolvedMixerGraph['master'] => ({
   volume: 1,
+  instances: [],
   inputLayout: graph.master.inputLayout,
   outputLayout: graph.master.inputLayout,
 })
@@ -644,9 +625,9 @@ export function createStemRenderPlan(
     }),
     master: stem.mode === 'full-master-contribution' ? graph.master : emptyMasterFx(graph),
   }
-  const nonlinearMaster = (graph.master.instances ?? []).some((instance) =>
+  const nonlinearMaster = graph.master.instances.some((instance) =>
     instance.kind === 'compressor' || instance.kind === 'saturator' || instance.kind === 'limiter' || instance.kind === 'gate',
-  ) || !!graph.master.compressor || !!graph.master.saturator
+  )
   return {
     sourceTrackIds,
     detectorOnlyTrackIds,
@@ -679,6 +660,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
     ...prepared.mixerGraph,
     master: {
       volume: prepared.mixerGraph.master.volume,
+      instances: [],
       inputLayout: prepared.mixerGraph.master.inputLayout,
       outputLayout: prepared.mixerGraph.master.inputLayout,
     },

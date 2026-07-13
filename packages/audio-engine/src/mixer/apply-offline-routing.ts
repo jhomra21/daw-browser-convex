@@ -1,4 +1,4 @@
-import { assert, getAutomationParameterDescriptor, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { assert, getAutomationParameterDescriptor, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams, type CompressorParamsLite, type ReverbParamsLite } from '@daw-browser/shared'
 import { createEqNodes } from '../effects/dsp'
 import { connectFxChain, createCompressorNodeChain, createDelayNodeChain, createReverbNodeChain, createSaturatorNodeChain, disconnectCompressorChain, type CompressorNodeChain, type CreateReverbImpulseResponse, type DelayNodeChain, type ReverbNodeChain, type SaturatorNodeChain } from '../effects/chain'
 import { createReverbImpulseCache } from '../effects/reverb-impulse-cache'
@@ -41,13 +41,7 @@ type OfflineMixerNodes = {
 }
 
 type OfflineFxChainConfig = {
-  eq?: EqParamsLite
-  compressor?: CompressorParamsLite
-  saturator?: SaturatorParamsLite
-  delay?: DelayParamsLite
-  reverb?: ReverbParamsLite
-  order?: AudioEffectKind[]
-  instances?: AudioEffectRuntimeInstance[]
+  instances: AudioEffectRuntimeInstance[]
   bpm?: number
 }
 
@@ -73,85 +67,64 @@ async function buildOfflineFxChain(
     return compressorLifecycle.create(target, instanceId, () => createCompressorNodeChain(ctx, params))
   }
 
-  if (config.instances) {
-    const eqByInstanceId = new Map<string, Map<string, BiquadFilterNode>>()
-    const compressorByInstanceId = new Map<string, CompressorNodeChain>()
-    const saturatorByInstanceId = new Map<string, SaturatorNodeChain>()
-    const delayByInstanceId = new Map<string, DelayNodeChain>()
-    const reverbByInstanceId = new Map<string, ReverbNodeChain>()
-    const staticWorkletByInstanceId = new Map<string, StaticWorkletNodeChain>()
-    const stages = []
-    if (config.instances.length > MAX_EFFECTS_PER_CHAIN) throw new Error(`Effect chains are limited to ${MAX_EFFECTS_PER_CHAIN} instances.`)
-    const seen = new Set<string>()
-    for (const instance of config.instances) {
-      if (seen.has(instance.id)) throw new Error(`Duplicate effect instance ID: ${instance.id}`)
-      seen.add(instance.id)
-      if (isStaticWorkletInstance(instance)) {
-        const worklet = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params)
-        staticWorkletByInstanceId.set(instance.id, worklet)
-        stages.push({ id: instance.id, kind: instance.kind, staticWorkletChain: worklet })
-        continue
-      }
-      if (instance.kind === 'eq') {
-        const normalized = normalizeEqParams(instance.params)
-        const eqNodes = createEqNodes(ctx, normalized, ctx.destination.channelCount || 2)
-        const nodesByBand = new Map(normalized.bands.filter((band) => band.enabled).flatMap((band, index) => {
-          const eqNode = eqNodes[index]
-          return eqNode ? [[band.id, eqNode]] : []
-        }))
-        eqByInstanceId.set(instance.id, nodesByBand)
-        stages.push({ id: instance.id, kind: instance.kind, eqNodes })
-        continue
-      }
-      if (instance.kind === 'compressor') {
-        const compressorParams = normalizeCompressorParams(instance.params)
-        const compressor = compressorParams.enabled ? await createCompressor(compressorParams, instance.id) : null
-        if (compressor) compressorByInstanceId.set(instance.id, compressor)
-        stages.push({ id: instance.id, kind: instance.kind, compressorChain: compressor })
-        continue
-      }
-      if (instance.kind === 'saturator') {
-        const saturator = createSaturatorNodeChain(ctx, normalizeSaturatorParams(instance.params))
-        saturatorByInstanceId.set(instance.id, saturator)
-        stages.push({ id: instance.id, kind: instance.kind, saturatorChain: saturator })
-        continue
-      }
-      if (instance.kind === 'delay') {
-        const delay = createDelayNodeChain(ctx, normalizeDelayParams(instance.params), config.bpm ?? 120)
-        delayByInstanceId.set(instance.id, delay)
-        stages.push({ id: instance.id, kind: instance.kind, delayChain: delay })
-        continue
-      }
-      if (instance.kind !== 'reverb') continue
+  const eqByInstanceId = new Map<string, Map<string, BiquadFilterNode>>()
+  const compressorByInstanceId = new Map<string, CompressorNodeChain>()
+  const saturatorByInstanceId = new Map<string, SaturatorNodeChain>()
+  const delayByInstanceId = new Map<string, DelayNodeChain>()
+  const reverbByInstanceId = new Map<string, ReverbNodeChain>()
+  const staticWorkletByInstanceId = new Map<string, StaticWorkletNodeChain>()
+  const stages = []
+  if (config.instances.length > MAX_EFFECTS_PER_CHAIN) throw new Error(`Effect chains are limited to ${MAX_EFFECTS_PER_CHAIN} instances.`)
+  const seen = new Set<string>()
+  for (const instance of config.instances) {
+    if (seen.has(instance.id)) throw new Error(`Duplicate effect instance ID: ${instance.id}`)
+    seen.add(instance.id)
+    if (isStaticWorkletInstance(instance)) {
+      const worklet = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params)
+      staticWorkletByInstanceId.set(instance.id, worklet)
+      stages.push({ id: instance.id, kind: instance.kind, staticWorkletChain: worklet })
+      continue
+    }
+    if (instance.kind === 'eq') {
+      const normalized = normalizeEqParams(instance.params)
+      const eqNodes = createEqNodes(ctx, normalized, ctx.destination.channelCount || 2)
+      const nodesByBand = new Map(normalized.bands.filter((band) => band.enabled).flatMap((band, index) => {
+        const eqNode = eqNodes[index]
+        return eqNode ? [[band.id, eqNode]] : []
+      }))
+      eqByInstanceId.set(instance.id, nodesByBand)
+      stages.push({ id: instance.id, kind: instance.kind, eqNodes })
+      continue
+    }
+    if (instance.kind === 'compressor') {
+      const compressorParams = normalizeCompressorParams(instance.params)
+      const compressor = compressorParams.enabled ? await createCompressor(compressorParams, instance.id) : null
+      if (compressor) compressorByInstanceId.set(instance.id, compressor)
+      stages.push({ id: instance.id, kind: instance.kind, compressorChain: compressor })
+      continue
+    }
+    if (instance.kind === 'saturator') {
+      const saturator = createSaturatorNodeChain(ctx, normalizeSaturatorParams(instance.params))
+      saturatorByInstanceId.set(instance.id, saturator)
+      stages.push({ id: instance.id, kind: instance.kind, saturatorChain: saturator })
+      continue
+    }
+    if (instance.kind === 'delay') {
+      const delay = createDelayNodeChain(ctx, normalizeDelayParams(instance.params), config.bpm ?? 120)
+      delayByInstanceId.set(instance.id, delay)
+      stages.push({ id: instance.id, kind: instance.kind, delayChain: delay })
+      continue
+    }
+    if (instance.kind === 'reverb') {
       const reverb = createReverbNodeChain(ctx, instance.params, createImpulseResponse)
       reverbByInstanceId.set(instance.id, reverb)
       stages.push({ id: instance.id, kind: instance.kind, reverbChain: reverb })
+      continue
     }
-    connectFxChain(input, destination, { instances: stages })
-    return { compressorByInstanceId, eqByInstanceId, saturatorByInstanceId, delayByInstanceId, reverbByInstanceId, staticWorkletByInstanceId }
+    throw new Error('Unsupported audio effect kind.')
   }
-  const normalizedEq = config.eq ? normalizeEqParams(config.eq) : undefined
-  const eq = createEqNodes(ctx, normalizedEq, ctx.destination.channelCount || 2)
-  const eqNodesByBand = new Map((normalizedEq?.bands ?? []).filter((band) => band.enabled).flatMap((band, index) => {
-    const node = eq[index]
-    return node ? [[band.id, node]] : []
-  }))
-  const compressorParams = config.compressor ? normalizeCompressorParams(config.compressor) : null
-  const compressor = compressorParams?.enabled ? await createCompressor(compressorParams, 'legacy-compressor') : null
-  const saturator = config.saturator ? createSaturatorNodeChain(ctx, normalizeSaturatorParams(config.saturator)) : null
-  const delay = config.delay ? createDelayNodeChain(ctx, normalizeDelayParams(config.delay), config.bpm ?? 120) : null
-  const reverb = config.reverb
-    ? createReverbNodeChain(ctx, config.reverb, createImpulseResponse)
-    : null
-  connectFxChain(input, destination, { eqNodes: eq, compressorChain: compressor, saturatorChain: saturator, delayChain: delay, reverbChain: reverb, order: config.order })
-  return {
-    compressorByInstanceId: new Map(compressor ? [['legacy-compressor', compressor]] : []),
-    eqByInstanceId: new Map(eqNodesByBand.size > 0 ? [['legacy-eq', eqNodesByBand]] : []),
-    saturatorByInstanceId: new Map(saturator ? [['legacy-saturator', saturator]] : []),
-    delayByInstanceId: new Map(delay ? [['legacy-delay', delay]] : []),
-    reverbByInstanceId: new Map(reverb ? [['legacy-reverb', reverb]] : []),
-    staticWorkletByInstanceId: new Map(),
-  }
+  connectFxChain(input, destination, { instances: stages })
+  return { compressorByInstanceId, eqByInstanceId, saturatorByInstanceId, delayByInstanceId, reverbByInstanceId, staticWorkletByInstanceId }
 }
 
 const resolveFxAutomationBindings = (
@@ -210,7 +183,7 @@ export async function createOfflineMixerNodes(
   )
 
   try {
-    const masterFx = await buildOfflineFxChain(ctx, masterInput, ctx.destination, createCachedImpulseResponse, { eq: graph.master.eq, compressor: graph.master.compressor, saturator: graph.master.saturator, delay: graph.master.delay, reverb: graph.master.reverb, order: graph.master.order, instances: graph.master.instances, bpm }, { kind: 'master' }, compressorLifecycle)
+    const masterFx = await buildOfflineFxChain(ctx, masterInput, ctx.destination, createCachedImpulseResponse, { instances: graph.master.instances, bpm }, { kind: 'master' }, compressorLifecycle)
 
     const trackNodes = new Map<string, OfflineTrackNodes>()
     for (const resolvedTrack of graph.channels) {
@@ -218,7 +191,7 @@ export async function createOfflineMixerNodes(
       const postFx = ctx.createGain()
       const gain = ctx.createGain()
       const output = ctx.createGain()
-      const fx = await buildOfflineFxChain(ctx, input, postFx, createCachedImpulseResponse, { eq: resolvedTrack.fx?.eq, compressor: resolvedTrack.fx?.compressor, saturator: resolvedTrack.fx?.saturator, delay: resolvedTrack.fx?.delay, reverb: resolvedTrack.fx?.reverb, order: resolvedTrack.fx?.order, instances: resolvedTrack.fx?.instances, bpm }, { kind: 'track', trackId: resolvedTrack.channel.id }, compressorLifecycle)
+      const fx = await buildOfflineFxChain(ctx, input, postFx, createCachedImpulseResponse, { instances: resolvedTrack.fx?.instances ?? [], bpm }, { kind: 'track', trackId: resolvedTrack.channel.id }, compressorLifecycle)
       trackNodes.set(resolvedTrack.channel.id, { input, postFx, gain, output, fx })
     }
 

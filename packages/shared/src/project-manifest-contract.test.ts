@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  migrateProjectManifest,
+  normalizeProjectManifest,
+  parseProjectManifest,
   PROJECT_MANIFEST_SCHEMA_VERSION,
   SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS,
   type ProjectManifest,
@@ -21,28 +22,32 @@ const manifestV1: ProjectManifest = {
 }
 
 describe('project format boundaries', () => {
-  test('reports the schema version handled by migration dispatch', () => {
-    expect(SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS).toEqual([1, PROJECT_MANIFEST_SCHEMA_VERSION])
+  test('reports the current manifest schema version', () => {
+    expect(SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS).toEqual([PROJECT_MANIFEST_SCHEMA_VERSION])
   })
 
-  test('reads supported v1 manifests and is idempotent through one entry point', () => {
-    const migrated = migrateProjectManifest(manifestV1)
-    expect(migrated).toEqual({ ...manifestV1, schemaVersion: 2 })
-    expect(migrateProjectManifest(migrated)).toEqual(migrated)
+  test('reads the current manifest schema without migration', () => {
+    const manifest = { ...manifestV1, schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION }
+    expect(normalizeProjectManifest(manifest)).toEqual(manifest)
+    expect(parseProjectManifest(JSON.stringify(manifest))).toEqual(manifest)
   })
 
   test('rejects unsupported writer versions', () => {
-    expect(() => migrateProjectManifest({ ...manifestV1, schemaVersion: 3 })).toThrow(
+    expect(() => normalizeProjectManifest({ ...manifestV1, schemaVersion: 1 })).toThrow(
+      'Unsupported project manifest schema version 1.',
+    )
+    expect(() => normalizeProjectManifest({ ...manifestV1, schemaVersion: 3 })).toThrow(
       'Unsupported project manifest schema version 3.',
     )
-    expect(() => migrateProjectManifest({ ...manifestV1, schemaVersion: 0 })).toThrow(
+    expect(() => normalizeProjectManifest({ ...manifestV1, schemaVersion: 0 })).toThrow(
       'Unsupported project manifest schema version 0.',
     )
   })
 
-  test('migrates utility and gate rows to versioned state envelopes without changing other rows', () => {
+  test('preserves current effect entity values without migration', () => {
     const manifest = {
       ...manifestV1,
+      schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION,
       entityCount: 3,
       entities: [
         { kind: 'effect', id: 'utility-1', value: { effect: 'utility', params: { gainDb: 3 } }, updatedAt: 100 },
@@ -50,17 +55,17 @@ describe('project format boundaries', () => {
         manifestV1.entities[0],
       ],
     }
-    const migrated = migrateProjectManifest(manifest)
-    expect(migrated.entities[0]?.value).toEqual({ effect: 'utility', params: { version: 1, state: { gainDb: 3 } } })
-    expect(migrated.entities[1]).toEqual(manifest.entities[1])
-    expect(migrated.entities[2]).toEqual(manifestV1.entities[0])
-    expect(migrateProjectManifest(migrated)).toEqual(migrated)
+    const normalized = normalizeProjectManifest(manifest)
+    expect(normalized.entities[0]?.value).toEqual(manifest.entities[0]?.value)
+    expect(normalized.entities[1]).toEqual(manifest.entities[1])
+    expect(normalized.entities[2]).toEqual(manifestV1.entities[0])
   })
 
   test('roundtrips structured automation targets and opaque keys in generic entities', () => {
     const targetKey = 'automation:v2:["track","track:colon","delay:instance:colon","delay.feedback"]'
     const manifest: ProjectManifest = {
       ...manifestV1,
+      schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION,
       entities: [{
         kind: 'automation-envelope',
         id: targetKey,
@@ -77,7 +82,7 @@ describe('project format boundaries', () => {
       }],
     }
 
-    const roundtripped = migrateProjectManifest(JSON.parse(JSON.stringify(manifest)))
+    const roundtripped = normalizeProjectManifest(JSON.parse(JSON.stringify(manifest)))
     expect(roundtripped.entities[0]).toEqual(manifest.entities[0])
   })
 })

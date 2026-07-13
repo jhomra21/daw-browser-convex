@@ -88,7 +88,7 @@ describe('reachable limiter ceiling', () => {
     outputGain: options.outputGain ?? 1,
     outputTargetId: options.outputTargetId,
     sends: options.sends ?? [],
-    fx: { instances: options.instances },
+    fx: { instances: options.instances ?? [] },
     inputLayout: 'stereo',
     outputLayout: 'stereo',
   })

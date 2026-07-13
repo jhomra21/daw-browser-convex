@@ -3,16 +3,17 @@ import { createDefaultDrumRackParams, createDefaultSynthParams } from '@daw-brow
 import { readInstrumentParamsFromEffectRow } from './effect-row-instrument-params'
 
 describe('effect row instrument params', () => {
-  test('reads legacy Synth rows as active Synth instruments', () => {
+  test('reads Synth rows with durable instrument identity', () => {
     const params = { ...createDefaultSynthParams(), gain: 0.25 }
 
     expect(readInstrumentParamsFromEffectRow({
       effect: 'synth',
+      instanceId: 'instrument:synth:1',
       params,
     })).toMatchObject({
       kind: 'synth',
       params,
-      instanceId: expect.stringContaining('instrument:migration:synth:'),
+      instanceId: 'instrument:synth:1',
     })
   })
 
@@ -21,7 +22,7 @@ describe('effect row instrument params', () => {
 
     expect(readInstrumentParamsFromEffectRow({
       effect: 'instrument',
-      params: { kind: 'drum-rack', params },
-    })).toMatchObject({ kind: 'drum-rack', params, instanceId: expect.stringContaining('instrument:migration:drum-rack:') })
+      params: { kind: 'drum-rack', instanceId: 'instrument:drum-rack:1', params },
+    })).toMatchObject({ kind: 'drum-rack', params, instanceId: 'instrument:drum-rack:1' })
   })
 })

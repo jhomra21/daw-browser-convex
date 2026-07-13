@@ -28,6 +28,35 @@ const KNOB_ARC_SWEEP_DEGREES = 260
 const KNOB_ARC_START_DEGREES = -130
 const KNOB_POINTER_END_Y = 18
 const KNOB_CENTER_VALUE = 0
+const DEFAULT_DRAG_TRAVERSAL_PIXELS = 240
+const FINE_DRAG_MULTIPLIER = 0.1
+
+export function valueToKnobFraction(value: number, min: number, max: number, logarithmic: boolean) {
+  if (max === min) return 0
+  if (logarithmic && min > 0 && max > 0 && value > 0) {
+    const logMin = Math.log(min)
+    const logMax = Math.log(max)
+    return Math.max(0, Math.min(1, (Math.log(value) - logMin) / (logMax - logMin)))
+  }
+  return Math.max(0, Math.min(1, (value - min) / (max - min)))
+}
+
+export function knobValueFromDrag(
+  startValue: number,
+  deltaY: number,
+  min: number,
+  max: number,
+  logarithmic: boolean,
+  fine: boolean,
+) {
+  const deltaFraction = deltaY / DEFAULT_DRAG_TRAVERSAL_PIXELS * (fine ? FINE_DRAG_MULTIPLIER : 1)
+  if (logarithmic && min > 0 && max > 0 && startValue > 0) {
+    const startFraction = valueToKnobFraction(startValue, min, max, true)
+    const fraction = Math.max(0, Math.min(1, startFraction + deltaFraction))
+    return Math.exp(Math.log(min) + fraction * (Math.log(max) - Math.log(min)))
+  }
+  return startValue + deltaFraction * (max - min)
+}
 
 export default function Knob(props: KnobProps) {
   const size = () => props.size ?? 36
@@ -40,19 +69,9 @@ export default function Knob(props: KnobProps) {
     step,
     disabled: () => props.disabled ?? false,
     onValueChange: (value) => props.onValueChange(value),
-    valueFromDrag: ({ startValue, startPosition, currentPosition }) => {
+    valueFromDrag: ({ startValue, startPosition, currentPosition, fine }) => {
       const deltaY = startPosition.y - currentPosition.y
-      const sensitivity = props.logarithmic ? 1.0 : 1.5
-
-      if (props.logarithmic) {
-        const normalizedStart = (startValue - props.min) / (props.max - props.min)
-        const logMin = Math.log10(props.min)
-        const logMax = Math.log10(props.max)
-        const logStart = logMin + normalizedStart * (logMax - logMin)
-        return Math.pow(10, Math.max(logMin, Math.min(logMax, logStart + (deltaY * sensitivity * 0.005))))
-      }
-
-      return startValue + (deltaY * sensitivity * (props.max - props.min)) / 150
+      return knobValueFromDrag(startValue, deltaY, props.min, props.max, props.logarithmic ?? false, fine)
     },
   })
   const visualValue = control.visualValue
@@ -63,8 +82,7 @@ export default function Knob(props: KnobProps) {
   }
 
   const valueToArcFraction = (value: number) => {
-    if (props.max === props.min) return 0
-    return Math.max(0, Math.min(1, (value - props.min) / (props.max - props.min)))
+    return valueToKnobFraction(value, props.min, props.max, props.logarithmic ?? false)
   }
   const centerArcFraction = () => bipolar() ? valueToArcFraction(KNOB_CENTER_VALUE) : 0
   const fillArcFraction = () => valueToArcFraction(visualValue())
@@ -150,6 +168,7 @@ export default function Knob(props: KnobProps) {
           control.onPointerDown(event)
         }}
         onKeyDown={control.handleKeyDown}
+        onWheel={control.handleWheel}
         onDblClick={handleDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
         onDragStart={(e) => e.preventDefault()}

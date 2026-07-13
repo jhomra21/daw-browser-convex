@@ -57,8 +57,8 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
 
     nodes.gain.gain.value = channel.gain
     nodes.output.gain.value = channel.outputGain
-    try { nodes.postFx.connect(nodes.gain) } catch {}
-    try { nodes.gain.connect(nodes.output) } catch {}
+    nodes.postFx.connect(nodes.gain)
+    nodes.gain.connect(nodes.output)
     const targetNodes = channel.outputTargetId
       ? options.trackNodes.get(channel.outputTargetId)
       : undefined

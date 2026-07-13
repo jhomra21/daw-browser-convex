@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { createSourceAutomationScope, createStemRenderPlan, downmixStereoBufferToMono, encodeAudioBuffer, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace, renderMixdown, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
 import { automationTargetKey, createDefaultDelayParams, createDefaultSaturatorParams, type AutomationEnvelope } from '@daw-browser/shared'
 import type { ResolvedMixerChannel, ResolvedMixerGraph } from './mixer/types'
+import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { resolveLiveMixerGraph } from './live-mixer-runtime'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { WavEncodingSettings } from './export-fidelity'
@@ -32,7 +33,7 @@ const channel = (
   outputLayout: 'stereo',
 })
 
-const master: ResolvedMixerGraph['master'] = { volume: 1, inputLayout: 'stereo', outputLayout: 'stereo' }
+const master: ResolvedMixerGraph['master'] = { volume: 1, instances: [], inputLayout: 'stereo', outputLayout: 'stereo' }
 
 describe('createSourceAutomationScope', () => {
   test('includes sends reachable through output ancestors', () => {
@@ -169,7 +170,7 @@ describe('explicit stem render plans', () => {
   test('marks full-master stems non-recombinable with shared nonlinear processing', () => {
     const nonlinearGraph: ResolvedMixerGraph = {
       ...graph,
-      master: { ...master, saturator: { ...createDefaultSaturatorParams(), enabled: true } },
+      master: { ...master, instances: [{ id: 'master-saturator', kind: 'saturator', params: { ...createDefaultSaturatorParams(), enabled: true } }] },
     }
     const plan = createStemRenderPlan(nonlinearGraph, {
       id: 'source',
@@ -323,9 +324,9 @@ describe('live and offline channel layout parity', () => {
         ],
       },
     }
-    const masterDelay = { ...createDefaultDelayParams(), enabled: true, pingPong: true }
-    const offline = resolveExportMixerGraph({ tracks, fx: { trackFx, masterDelay } })
-    const live = resolveLiveMixerGraph(tracks, trackFx, { masterDelay })
+    const masterFxInstances: AudioEffectRuntimeInstance[] = [{ id: 'master-delay', kind: 'delay', params: { ...createDefaultDelayParams(), enabled: true, pingPong: true } }]
+    const offline = resolveExportMixerGraph({ tracks, fx: { trackFx, masterFxInstances } })
+    const live = resolveLiveMixerGraph(tracks, trackFx, { masterFxInstances })
 
     expect(live.channels.map((entry) => ({
       id: entry.channel.id,

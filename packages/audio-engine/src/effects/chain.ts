@@ -1,4 +1,4 @@
-import { AUDIO_EFFECT_ORDER, DELAY_MAX_DELAY_TIME_SEC, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { DELAY_MAX_DELAY_TIME_SEC, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { applyDelayNodeParams, applySaturatorNodeParams } from './dsp'
 import { getReverbImpulseSignature } from './reverb-signature'
 import { ensureCompressorWorklet, postCompressorParams } from './compressor-worklet'
@@ -475,13 +475,7 @@ export function connectFxChain(
   input: AudioNode,
   destination: AudioNode,
   config: {
-    eqNodes?: BiquadFilterNode[]
-    compressorChain?: CompressorNodeChain | null
-    saturatorChain?: SaturatorNodeChain | null
-    delayChain?: DelayNodeChain | null
-    reverbChain?: ReverbNodeChain | null
-    order?: AudioEffectKind[]
-    instances?: FxChainStageConfig[]
+    instances: FxChainStageConfig[]
   },
 ) {
   type FxStage = {
@@ -497,7 +491,6 @@ export function connectFxChain(
     const reverb = stageConfig.reverbChain?.enabled ? stageConfig.reverbChain : null
     const staticWorklet = stageConfig.staticWorkletChain?.state === 'active' ? stageConfig.staticWorkletChain : null
 
-    if (!compressor && stageConfig.compressorChain) disconnectAudioNodes([stageConfig.compressorChain.input])
     if (saturator) connectSaturatorInternals(saturator)
     else if (stageConfig.saturatorChain) disconnectSaturatorChain(stageConfig.saturatorChain)
     if (delay) connectDelayInternals(delay)
@@ -505,7 +498,8 @@ export function connectFxChain(
     if (reverb) connectReverbInternals(reverb)
     else if (stageConfig.reverbChain) disconnectReverbChain(stageConfig.reverbChain)
 
-    if (stageConfig.kind === 'eq' && eqNodes.length > 0) {
+    if (stageConfig.kind === 'eq') {
+      if (eqNodes.length === 0) return null
       disconnectAudioNodes(eqNodes)
       for (let index = 0; index < eqNodes.length; index++) {
         if (index < eqNodes.length - 1) eqNodes[index].connect(eqNodes[index + 1])
@@ -516,7 +510,11 @@ export function connectFxChain(
       }
     }
 
-    if (staticWorklet) {
+    if (stageConfig.kind === 'utility' || stageConfig.kind === 'autofilter' || stageConfig.kind === 'gate' ||
+      stageConfig.kind === 'limiter' || stageConfig.kind === 'lofi' || stageConfig.kind === 'chorus' ||
+      stageConfig.kind === 'flanger' || stageConfig.kind === 'phaser' || stageConfig.kind === 'tremolo' ||
+      stageConfig.kind === 'autopan' || stageConfig.kind === 'ensemble' || stageConfig.kind === 'spectral') {
+      if (!staticWorklet) return null
       disconnectAudioNodes([staticWorklet.node])
       return {
         connectInput: (source) => source.connect(staticWorklet.node),
@@ -524,7 +522,8 @@ export function connectFxChain(
       }
     }
 
-    if (stageConfig.kind === 'compressor' && compressor) {
+    if (stageConfig.kind === 'compressor') {
+      if (!compressor) return null
       disconnectAudioNodes([compressor.input, compressor.output])
       compressor.input.connect(compressor.dryGain)
       compressor.input.connect(compressor.workletNode)
@@ -535,7 +534,8 @@ export function connectFxChain(
       }
     }
 
-    if (stageConfig.kind === 'saturator' && saturator) {
+    if (stageConfig.kind === 'saturator') {
+      if (!saturator) return null
       disconnectAudioNodes([saturator.outputGain])
       return {
         connectInput: (source) => {
@@ -546,7 +546,8 @@ export function connectFxChain(
       }
     }
 
-    if (stageConfig.kind === 'delay' && delay) {
+    if (stageConfig.kind === 'delay') {
+      if (!delay) return null
       disconnectAudioNodes([delay.dryGain, delay.wetGain])
       return {
         connectInput: (source) => {
@@ -557,7 +558,8 @@ export function connectFxChain(
       }
     }
 
-    if (stageConfig.kind === 'reverb' && reverb) {
+    if (stageConfig.kind === 'reverb') {
+      if (!reverb) return null
       disconnectAudioNodes([reverb.dryGain, reverb.widthMerger])
       return {
         connectInput: (source) => {
@@ -568,40 +570,14 @@ export function connectFxChain(
       }
     }
 
-    return null
+    throw new Error(`Unsupported audio effect kind "${stageConfig.kind}".`)
   }
 
-  const createLegacyStages = () => {
-    const stagesByKind = new Map<AudioEffectKind, FxStage>()
-    const eqNodes = config.eqNodes ?? []
-    if (eqNodes.length > 0) {
-      const stage = createStage({ id: 'eq', kind: 'eq', eqNodes })
-      if (stage) stagesByKind.set('eq', stage)
-    }
-
-    const compressorStage = createStage({ id: 'compressor', kind: 'compressor', compressorChain: config.compressorChain })
-    if (compressorStage) stagesByKind.set('compressor', compressorStage)
-    const saturatorStage = createStage({ id: 'saturator', kind: 'saturator', saturatorChain: config.saturatorChain })
-    if (saturatorStage) stagesByKind.set('saturator', saturatorStage)
-    const delayStage = createStage({ id: 'delay', kind: 'delay', delayChain: config.delayChain })
-    if (delayStage) stagesByKind.set('delay', delayStage)
-    const reverbStage = createStage({ id: 'reverb', kind: 'reverb', reverbChain: config.reverbChain })
-    if (reverbStage) stagesByKind.set('reverb', reverbStage)
-
-    return normalizeAudioEffectOrder(config.order ?? AUDIO_EFFECT_ORDER, AUDIO_EFFECT_ORDER)
-      .flatMap((kind) => {
-        const stage = stagesByKind.get(kind)
-        return stage ? [stage] : []
-      })
-  }
-
-  try { input.disconnect() } catch {}
-  const stages = config.instances
-    ? config.instances.flatMap((stageConfig) => {
-      const stage = createStage(stageConfig)
-      return stage ? [stage] : []
-    })
-    : createLegacyStages()
+  input.disconnect()
+  const stages = config.instances.flatMap((stageConfig) => {
+    const stage = createStage(stageConfig)
+    return stage ? [stage] : []
+  })
   if (stages.length === 0) {
     input.connect(destination)
     return

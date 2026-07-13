@@ -1,6 +1,7 @@
 import {
   AUDIO_EFFECT_CONTRACTS,
   INSTRUMENT_CONTRACTS,
+  createInstrumentInstanceId,
   normalizeTrackInstrumentParams,
   type ArpeggiatorParams,
   type DrumRackParamsInput,
@@ -25,12 +26,12 @@ export type InstrumentPreset = {
 };
 
 const synth = (params: SynthParamsInput): TrackInstrumentParams => (
-  normalizeTrackInstrumentParams({ kind: "synth", params: INSTRUMENT_CONTRACTS.synth.normalizeParams(params) })
+  normalizeTrackInstrumentParams({ kind: "synth", instanceId: createInstrumentInstanceId(), params: INSTRUMENT_CONTRACTS.synth.normalizeParams(params) })
   ?? (() => { throw new Error("Invalid synth preset") })()
 );
 
 const drumRack = (params: DrumRackParamsInput): TrackInstrumentParams => (
-  normalizeTrackInstrumentParams({ kind: "drum-rack", params: INSTRUMENT_CONTRACTS["drum-rack"].normalizeParams(params) })
+  normalizeTrackInstrumentParams({ kind: "drum-rack", instanceId: createInstrumentInstanceId(), params: INSTRUMENT_CONTRACTS["drum-rack"].normalizeParams(params) })
   ?? (() => { throw new Error("Invalid drum rack preset") })()
 );
 

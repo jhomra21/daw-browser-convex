@@ -4,16 +4,9 @@ This document explains what the `production-dsp-platform` branch adds, how the m
 
 ## Branch scope
 
-Compared with `origin/master`, the branch changes **216 files** and adds approximately **24,566 lines**.
+Compared with `origin/master`, the branch currently changes **227 files**, with **26,326 additions** and **2,734 deletions**.
 
-| Category | Added lines |
-| --- | ---: |
-| Application, runtime, and support code | 15,081 |
-| Tests and characterization | 6,476 |
-| Static AudioWorklet processors | 1,950 |
-| Implementation tracker | 1,059 |
-
-The branch is not 20,000 lines of DSP algorithms. A substantial portion covers tests, migration, persistence, collaboration, recording ownership, export fidelity, and browser characterization.
+The branch is not 20,000 lines of DSP algorithms. A substantial portion covers tests, persistence, collaboration, recording ownership, export fidelity, and browser characterization.
 
 ## System overview
 
@@ -189,7 +182,7 @@ packages/shared/src/automation-parameters.ts
 src/hooks/useTimelineAutomationController.ts
 ```
 
-Legacy automation remains readable when its ownership is unambiguous.
+Automation is instance-only. An automation target without an effect instance ID is not accepted by the runtime.
 
 ### Live editing contract
 
@@ -502,7 +495,7 @@ Their canonical defaults, ranges, persistence versions, automation descriptors, 
 ```text
 Shared descriptor
   ├── persistence defaults
-  ├── validation and migration
+  ├── validation
   ├── UI ranges
   ├── automation descriptor
   ├── live parameter binding
@@ -636,6 +629,30 @@ This avoids presenting synthetic tests as proof of real-browser performance.
 
 ### Replaced
 
+| Deleted old path | Canonical replacement | Status |
+| --- | --- | --- |
+| Fixed `eq`, `compressor`, `saturator`, `delay`, and `reverb` graph fields | Required ordered `instances` arrays on track and master graphs | Deleted |
+| `AudioEngine.setTrackEq`, `setTrackCompressor`, and other per-kind setters | `setTrackFxInstances(trackId, instances)` | Deleted |
+| Per-kind master setters and master effect-order state | `setMasterFxInstances(instances)` | Deleted |
+| Fixed-kind live and master node maps, pending params, and pending order | Instance-keyed live and master chain state | Deleted |
+| `createLegacyStages` and instance-or-legacy chain construction | Instance-only chain construction | Deleted |
+| Fixed-kind offline routing configuration | Required instance chains passed into offline routing | Deleted |
+| `getLegacyEffectChainTiming` and fixed-kind PDC fallback | Timing derived from the same ordered instances used by the graph | Deleted |
+| Synthetic `legacy-*` processor and meter IDs | Stable persisted effect instance IDs | Deleted |
+| Kind-only automation lookup and old automation identity conversion | Target plus exact effect or instrument instance ID | Deleted |
+| Legacy project and manifest normalization | Current schemas with required durable instance IDs | Deleted |
+
+The canonical flow is now singular: persistence and the effects panel produce ordered instances, `AudioEngine` forwards those arrays, live and master runtimes own nodes by instance ID, automation resolves against the same ID, mixer timing derives PDC from the same order, and export constructs the offline graph from the same instance contracts.
+
+- **Fixed-kind effect engine paths**
+  Replaced by one canonical `instances` array per track and master chain.
+
+- **Per-kind setters and fixed-kind ordering**
+  Replaced by `setTrackFxInstances` and `setMasterFxInstances`, with ordering represented by array position.
+
+- **Synthetic legacy node identities**
+  Replaced by the persisted effect instance ID for every live and offline node.
+
 - **Generated Blob compressor worklet**
   Replaced by static, versioned worklet assets.
 
@@ -666,15 +683,14 @@ This avoids presenting synthetic tests as proof of real-browser performance.
 - Local and Convex project models remain.
 - The timeline, clips, and transport architecture remain.
 - Undo and history remain, but support the new state.
-- Existing effects remain backward-readable.
-- Existing post-fader sends remain the migration default.
+- Existing effect kinds remain supported through their instance contracts.
+- Existing post-fader sends remain the routing default.
 
 ### Retained fallbacks
 
 - `MediaRecorder` remains available if PCM capture fails to initialize.
 - Transferable recording remains available when SAB is unavailable.
-- Legacy effect fields and automation remain readable.
-- Existing projects migrate at normalization boundaries rather than through eager destructive rewrites.
+- Browser capability fallbacks remain separate from the effect engine model. No legacy effect schema, fixed-kind setter, or legacy automation path is retained.
 
 ## 10. End-to-end production flows
 
@@ -722,7 +738,7 @@ A processor is not complete when its DSP exists. It usually requires:
 
 ```text
 Shared state type
-Validation and migration
+Validation
 Convex schema and operation
 Local persistence
 Undo and history
@@ -762,16 +778,18 @@ The engine must handle:
 
 Much of the code prevents rare but severe leaks, hangs, or corrupted output.
 
-### Backward compatibility remains supported
+### Current schemas are required
 
-This is not a clean-slate rewrite. New instance-based systems coexist with old project formats so existing projects remain readable.
+This branch intentionally has no legacy effect-engine, automation-identity, project-manifest, or local-preference migration layer. Persisted effects and instruments require durable instance IDs and current schemas. Invalid or incomplete state fails visibly instead of selecting an older engine or silently rendering without DSP.
+
+Capability fallbacks are different from compatibility engines. `MediaRecorder` can take over when PCM capture cannot initialize, transferable recording works when `SharedArrayBuffer` is unavailable, repitch playback remains active while a stretch render is pending, and browser-specific defaults cover unavailable platform capabilities. Each fallback preserves the current data and engine model; none interprets an obsolete schema or runs a parallel DSP implementation.
 
 ### The branch includes proof code
 
-Approximately **6,476 added lines** are tests. They cover:
+The branch includes extensive tests covering:
 
 - DSP numerical behavior.
-- Persistence and migration.
+- Persistence and current-schema validation.
 - Timing and routing.
 - Worker lifecycle.
 - Cancellation.
@@ -794,4 +812,4 @@ It replaces fragile assumptions beneath them:
 - Live-only behavior becomes live/offline behavior.
 - Weak ownership becomes explicit lifecycle and resource ownership.
 
-The codebase is larger because it now addresses production concerns across persistence, collaboration, playback, recording, export, diagnostics, browser compatibility, and backward compatibility rather than only implementing audible DSP algorithms.
+The codebase is larger because it now addresses production concerns across persistence, collaboration, playback, recording, export, diagnostics, and browser capability differences rather than only implementing audible DSP algorithms.

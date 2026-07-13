@@ -595,9 +595,18 @@ const setSidechainRouteForUser = async (
   const projectId = targetAccess.track.projectId;
   if (input.projectId && input.projectId !== projectId) throw new Error("Sidechain project does not match its tracks.");
   const effects = await ctx.db.query("effects").withIndex("by_track", (q: any) => q.eq("trackId", input.targetTrackId)).collect();
-  const matching = effects.filter((effect: any) => (effect.type === "compressor" || effect.type === "gate") && effect.instanceId === input.effectInstanceId);
-  if (matching.length !== 1) throw new Error("Sidechain target must identify exactly one compressor or gate instance.");
-  const existing = await ctx.db.query("sidechainRoutes").withIndex("by_room_effect", (q: any) => q.eq("projectId", projectId).eq("effectInstanceId", input.effectInstanceId)).collect();
+  const matching = effects.filter((effect: any) => (
+    (effect.type === "compressor" || effect.type === "gate" || effect.type === "spectral")
+    && effect.instanceId === input.effectInstanceId
+  ));
+  if (matching.length !== 1) throw new Error("Sidechain target must identify exactly one compressor, gate, or spectral instance.");
+  const existing = await ctx.db.query("sidechainRoutes")
+    .withIndex("by_room_target_effect", (q: any) => (
+      q.eq("projectId", projectId)
+        .eq("targetTrackId", input.targetTrackId)
+        .eq("effectInstanceId", input.effectInstanceId)
+    ))
+    .collect();
   for (const route of existing) await ctx.db.delete(route._id);
   await ctx.db.insert("sidechainRoutes", {
     projectId,

@@ -44,16 +44,6 @@ export const duplicateTrackInstrumentParams = (
   instanceId: createInstrumentInstanceId(),
 })
 
-const migrationInstanceId = (kind: InstrumentKind, params: unknown) => {
-  const serialized = JSON.stringify(params)
-  let hash = 2166136261
-  for (let index = 0; index < serialized.length; index += 1) {
-    hash ^= serialized.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
-  }
-  return `instrument:migration:${kind}:${(hash >>> 0).toString(36)}`
-}
-
 type SynthInstrumentContract = {
   kind: 'synth'
   createDefaultParams: () => SynthParams
@@ -141,9 +131,8 @@ const readSynthParamsInput = (value: unknown): SynthParamsInput => {
 
 export function normalizeTrackInstrumentParams(value: unknown): TrackInstrumentParams | undefined {
   if (!isRecord(value) || !isInstrumentKind(value.kind)) return undefined
-  const instanceId = typeof value.instanceId === 'string' && value.instanceId
-    ? value.instanceId
-    : migrationInstanceId(value.kind, value.params)
+  const instanceId = typeof value.instanceId === 'string' && value.instanceId ? value.instanceId : undefined
+  if (!instanceId) return undefined
   if (value.kind === 'synth') {
     return { kind: value.kind, instanceId, params: normalizeSynthParams(readSynthParamsInput(value.params)) }
   }

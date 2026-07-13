@@ -7,6 +7,7 @@ type DragValueContext = {
   startValue: number
   startPosition: Point
   currentPosition: Point
+  fine: boolean
 }
 
 type UseSteppedValueControlOptions = {
@@ -19,17 +20,20 @@ type UseSteppedValueControlOptions = {
   valueFromDrag: (context: DragValueContext) => number
 }
 
+export function quantizeSteppedValue(value: number, min: number, max: number, step: number) {
+  const clamped = Math.max(min, Math.min(max, value))
+  const stepped = min + Math.round((clamped - min) / step) * step
+  return Math.max(min, Math.min(max, Number(stepped.toFixed(6))))
+}
+
 export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
   const [dragValue, setDragValue] = createSignal<number | null>(null)
   let startPosition: Point = { x: 0, y: 0 }
   let startValue = options.value()
+  let fineDrag = false
   let lastEmittedValue = options.value()
   const visualValue = () => dragValue() ?? options.value()
-  const normalizeValue = (value: number) => {
-    const clamped = Math.max(options.min(), Math.min(options.max(), value))
-    const stepped = Math.round(clamped / options.step()) * options.step()
-    return Math.max(options.min(), Math.min(options.max(), Number(stepped.toFixed(6))))
-  }
+  const normalizeValue = (value: number) => quantizeSteppedValue(value, options.min(), options.max(), options.step())
   const emitValue = (value: number) => {
     if (value === lastEmittedValue) return
     lastEmittedValue = value
@@ -44,19 +48,27 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
   }
   const drag = useDrag({
     disabled: options.disabled,
+    preserveActiveDragOnCleanup: true,
     onDragStart: (position, event) => {
       event.stopPropagation()
       startPosition = position
-      startValue = options.value()
-      lastEmittedValue = options.value()
-      setDragValue(options.value())
+      startValue = visualValue()
+      fineDrag = event.shiftKey
+      lastEmittedValue = startValue
+      setDragValue(startValue)
     },
     onDragMove: (currentPosition, event) => {
       event.preventDefault()
+      if (event.shiftKey !== fineDrag) {
+        startPosition = currentPosition
+        startValue = visualValue()
+        fineDrag = event.shiftKey
+      }
       const finalValue = normalizeValue(options.valueFromDrag({
         startValue,
         startPosition,
         currentPosition,
+        fine: fineDrag,
       }))
       setDragValue(finalValue)
       emitValue(finalValue)
@@ -102,8 +114,14 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
     event.preventDefault()
     setVisualValue(nextValue)
   }
+  const handleWheel = (event: WheelEvent) => {
+    if (options.disabled() || event.deltaY === 0) return
+    event.preventDefault()
+    setVisualValue(visualValue() + (event.deltaY < 0 ? options.step() : -options.step()))
+  }
 
   return {
+    handleWheel,
     isDragging: drag.isDragging,
     handleKeyDown,
     onPointerDown: drag.onPointerDown,

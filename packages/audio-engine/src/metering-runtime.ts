@@ -92,7 +92,8 @@ export function createMeteringRuntime(options: {
   const pendingFrames = new Map<string, TrackMeterFrame>()
   const listeners = new Set<TrackStereoLevelsListener>()
   const frameListeners = new Set<TrackMeterFrameListener>()
-  const listenerReleases = new Map<object, () => void>()
+  const levelListenerReleases = new Map<TrackStereoLevelsListener, Set<() => void>>()
+  const frameListenerReleases = new Map<TrackMeterFrameListener, Set<() => void>>()
   const workletReleases = new Map<string, () => void>()
   const zeroTrackStereoLevels: TrackStereoLevels = { left: 0, right: 0 }
   let flushHandle: number | null = null
@@ -185,7 +186,7 @@ export function createMeteringRuntime(options: {
         retriedWorkletGenerations.set(trackId, generation)
         constructTrackMeterWorklet(ctx, trackId, gain, isCurrentOutput, generation)
       }
-      try { gain.connect(node) } catch {}
+      gain.connect(node)
       workletNodes.set(trackId, node)
       workletReleases.set(trackId, observeResource(options.resourceObserver, 'audio-worklet-nodes', node))
     })
@@ -194,7 +195,7 @@ export function createMeteringRuntime(options: {
   const ensureTrackMeterWorklet = (ctx: AudioContext, trackId: string, gain: GainNode, isCurrentOutput: () => boolean) => {
     const existing = workletNodes.get(trackId)
     if (existing) {
-      try { gain.connect(existing) } catch {}
+      gain.connect(existing)
       return
     }
     const generation = (workletGenerations.get(trackId) ?? 0) + 1
@@ -210,7 +211,7 @@ export function createMeteringRuntime(options: {
       analyser.smoothingTimeConstant = 0.7
       analysers.set(trackId, analyser)
     }
-    try { gain.connect(analyser) } catch {}
+    gain.connect(analyser)
     return analyser
   }
 
@@ -218,26 +219,42 @@ export function createMeteringRuntime(options: {
     subscribeTrackStereoLevels: (listener: TrackStereoLevelsListener) => {
       listeners.add(listener)
       const release = observeResource(options.resourceObserver, 'event-listeners', listener)
-      listenerReleases.set(listener, release)
+      const releases = levelListenerReleases.get(listener) ?? new Set<() => void>()
+      releases.add(release)
+      levelListenerReleases.set(listener, releases)
       if (workletLevels.size > 0) listener(new Map(workletLevels))
       updateWorkletSubscriptionState()
+      let released = false
       return () => {
-        listeners.delete(listener)
+        if (released) return
+        released = true
         release()
-        listenerReleases.delete(listener)
+        releases.delete(release)
+        if (releases.size === 0) {
+          levelListenerReleases.delete(listener)
+          listeners.delete(listener)
+        }
         updateWorkletSubscriptionState()
       }
     },
     subscribeTrackMeterFrames: (listener: TrackMeterFrameListener) => {
       frameListeners.add(listener)
       const release = observeResource(options.resourceObserver, 'event-listeners', listener)
-      listenerReleases.set(listener, release)
+      const releases = frameListenerReleases.get(listener) ?? new Set<() => void>()
+      releases.add(release)
+      frameListenerReleases.set(listener, releases)
       if (workletFrames.size > 0) listener(new Map(workletFrames))
       updateWorkletSubscriptionState()
+      let released = false
       return () => {
-        frameListeners.delete(listener)
+        if (released) return
+        released = true
         release()
-        listenerReleases.delete(listener)
+        releases.delete(release)
+        if (releases.size === 0) {
+          frameListenerReleases.delete(listener)
+          frameListeners.delete(listener)
+        }
         updateWorkletSubscriptionState()
       }
     },
@@ -333,8 +350,14 @@ export function createMeteringRuntime(options: {
       pendingFrames.clear()
       listeners.clear()
       frameListeners.clear()
-      for (const release of listenerReleases.values()) release()
-      listenerReleases.clear()
+      for (const releases of levelListenerReleases.values()) {
+        for (const release of releases) release()
+      }
+      for (const releases of frameListenerReleases.values()) {
+        for (const release of releases) release()
+      }
+      levelListenerReleases.clear()
+      frameListenerReleases.clear()
       if (flushHandle !== null) {
         cancelAnimationFrame(flushHandle)
         flushHandle = null

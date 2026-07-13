@@ -12,7 +12,7 @@ type PersistOrder = (targetId: string, order: AudioEffectInstance[]) => void | P
 class SpyAudioEngine extends AudioEngine {
   readonly trackFxCalls: Array<{ trackId: string; instances: AudioEffectRuntimeInstance[] }> = [];
 
-  override setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]) {
+  override async setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]) {
     this.trackFxCalls.push({ trackId, instances });
   }
 }
@@ -182,13 +182,48 @@ describe("effects panel instance engine synchronization", () => {
     });
   });
 
+  test("counts rapid optimistic additions against the 16-device limit", async () => {
+    await createRoot(async (dispose) => {
+      const engine = new SpyAudioEngine();
+      const { device } = createDevice(engine);
+      const results = await Promise.all(Array.from({ length: 17 }, () => (
+        device.addByKindToTarget("track-1", "delay")
+      )));
+
+      expect(results.filter(Boolean)).toHaveLength(16);
+      expect(engine.trackFxCalls.at(-1)?.instances).toHaveLength(16);
+      dispose();
+    });
+  });
+
+  test("rolls back drafts, order, and engine state when an inserted chain reorder fails", async () => {
+    await createRoot(async (dispose) => {
+      const engine = new SpyAudioEngine();
+      const { device } = createDevice(engine, {
+        persistAudioEffectOrder: () => Promise.reject(new Error("reorder failed")),
+      });
+
+      const added = await device.addChainToTarget("track-1", [
+        { kind: "delay", params: AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams() },
+        { kind: "chorus", params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams({}) },
+      ], 0);
+
+      expect(added).toBe(false);
+      expect(device.orderedEffects()).toEqual([]);
+      expect(engine.trackFxCalls.at(-1)?.instances).toEqual([]);
+      dispose();
+    });
+  });
+
   test("keeps persisted effect instance identity stable across row refreshes", () => {
     const cache = createAudioEffectInstanceIdentityCache();
-    const initial = cache("track-1", "delay-1", "delay");
-    const refreshed = cache("track-1", "delay-1", "delay");
-    const changedKind = cache("track-1", "delay-1", "reverb");
+    const initial = cache.get("track-1", "delay-1", "delay");
+    const refreshed = cache.get("track-1", "delay-1", "delay");
+    const changedKind = cache.get("track-1", "delay-1", "reverb");
 
     expect(refreshed).toBe(initial);
     expect(changedKind).not.toBe(initial);
+    cache.prune(new Set(["track-1:delay-1"]));
+    expect(cache.get("track-1", "delay-1", "delay")).not.toBe(initial);
   });
 });

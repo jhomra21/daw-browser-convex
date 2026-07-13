@@ -189,14 +189,20 @@ export function createAgentActions(context: AgentActionContext) {
     params: AgentEffectParams
   }) => {
     if (input.target === 'master') {
+      const effects = await context.convex.query(context.convexApi.effects.listByRoom, { projectId: context.projectId })
+      const effectType = 'bands' in input.params ? 'eq' : 'reverb'
+      const existing = effects.find((effect) => effect.targetType === 'master' && effect.type === effectType)
+      const instanceId = existing?.instanceId ?? `audio-effect:${crypto.randomUUID()}`
       if ('bands' in input.params) {
         await context.convex.mutation(context.convexApi.effects.setMasterEqParams, {
           projectId: context.projectId,
+          instanceId,
           params: input.params,
         })
       } else {
         await context.convex.mutation(context.convexApi.effects.setMasterReverbParams, {
           projectId: context.projectId,
+          instanceId,
           params: input.params,
         })
       }
@@ -205,15 +211,24 @@ export function createAgentActions(context: AgentActionContext) {
 
     const track = await trackAtIndex(input.target)
     if (!track) return { error: `No track at index ${input.target}` } as const
+    const effects = await context.convex.query(context.convexApi.effects.listByTrack, {
+      projectId: context.projectId,
+      trackId: track._id,
+    })
+    const effectType = 'bands' in input.params ? 'eq' : 'reverb'
+    const existing = effects.find((effect) => effect.type === effectType)
+    const instanceId = existing?.instanceId ?? `audio-effect:${crypto.randomUUID()}`
     const result = 'bands' in input.params
       ? await context.convex.mutation(context.convexApi.effects.setEqParams, {
           projectId: context.projectId,
           trackId: track._id,
+          instanceId,
           params: input.params,
         })
       : await context.convex.mutation(context.convexApi.effects.setReverbParams, {
           projectId: context.projectId,
           trackId: track._id,
+          instanceId,
           params: input.params,
         })
     return result ? { ok: true } as const : { error: 'Effect update did not apply' } as const

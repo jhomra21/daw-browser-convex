@@ -82,12 +82,12 @@ export default function Spectral(props: SpectralProps) {
       enabled={props.params.enabled}
       onToggleEnabled={props.onToggleEnabled}
       onReset={props.onReset}
-      class="w-[720px] min-w-[720px]"
+      class="w-[620px] min-w-[620px]"
     >
-      <div class="flex min-h-0 flex-1 flex-col gap-3 px-3 py-3">
-        <div class="grid grid-cols-[8rem_8rem_minmax(0,1fr)_8rem] gap-2">
-          <div class="flex flex-col gap-1">
-            <span class="text-2xs text-muted-foreground">FFT size</span>
+      <div class="grid min-h-0 flex-1 grid-rows-[auto_1fr_auto] gap-2 px-3 py-2">
+        <div class="grid grid-cols-[7rem_6rem_minmax(0,1fr)_7rem] gap-2 border-b border-border pb-2">
+          <div class="grid grid-cols-2 content-start gap-1">
+            <span class="col-span-2 text-2xs text-muted-foreground">FFT size</span>
             <For each={SPECTRAL_FFT_SIZES}>
               {(fftSize) => (
                 <DeviceToggleButton
@@ -99,8 +99,8 @@ export default function Spectral(props: SpectralProps) {
               )}
             </For>
           </div>
-          <div class="flex flex-col gap-1">
-            <span class="text-2xs text-muted-foreground">Overlap</span>
+          <div class="grid grid-cols-2 content-start gap-1">
+            <span class="col-span-2 text-2xs text-muted-foreground">Overlap</span>
             <For each={SPECTRAL_OVERLAPS}>
               {(overlap) => (
                 <DeviceToggleButton
@@ -141,9 +141,9 @@ export default function Spectral(props: SpectralProps) {
           </div>
         </div>
 
-        <div class="grid grid-cols-6 gap-2">
+        <div class="grid grid-cols-6 place-content-center gap-x-3 gap-y-2">
           {knob('Freeze', 'spectral.freeze', props.params.freeze, defaults.freeze, 0, 1, 0.01, percent(props.params.freeze), (freeze) => ({ freeze }))}
-          {knob('Gate', 'spectral.gateThresholdDb', props.params.gateThresholdDb, defaults.gateThresholdDb, -120, 0, 1, `${Math.round(props.params.gateThresholdDb)} dB`, (gateThresholdDb) => ({ gateThresholdDb }))}
+          {knob('Gate', 'spectral.gateThresholdDb', props.params.gateThresholdDb, defaults.gateThresholdDb, -120, 0, 0.1, `${props.params.gateThresholdDb.toFixed(1)} dB`, (gateThresholdDb) => ({ gateThresholdDb }))}
           {knob('Gate Attack', 'spectral.gateAttackMs', props.params.gateAttackMs, defaults.gateAttackMs, 0.1, 1000, 0.1, `${props.params.gateAttackMs.toFixed(1)} ms`, (gateAttackMs) => ({ gateAttackMs }), true)}
           {knob('Gate Release', 'spectral.gateReleaseMs', props.params.gateReleaseMs, defaults.gateReleaseMs, 1, 5000, 1, `${Math.round(props.params.gateReleaseMs)} ms`, (gateReleaseMs) => ({ gateReleaseMs }), true)}
           {knob('Morph', 'spectral.morph', props.params.morph, defaults.morph, 0, 1, 0.01, percent(props.params.morph), (morph) => ({ morph }))}
@@ -154,7 +154,7 @@ export default function Spectral(props: SpectralProps) {
           {knob('Learn', 'spectral.profileLearn', props.params.profileLearn, defaults.profileLearn, 0, 1, 0.01, percent(props.params.profileLearn), (profileLearn) => ({ profileLearn }))}
           {knob('Mix', 'spectral.mix', props.params.mix, defaults.mix, 0, 1, 0.01, percent(props.params.mix), (mix) => ({ mix }))}
         </div>
-        <div class="mt-auto flex items-center justify-between border-t border-border pt-2 text-2xs text-muted-foreground">
+        <div class="flex items-center justify-between border-t border-border pt-2 text-2xs text-muted-foreground">
           <span>HPSS kernel {31} bins, history {31} frames max</span>
           <span>Latency {formatLatency(getSpectralLatencyFrames(props.params.fftSize, props.params.overlap))}</span>
         </div>

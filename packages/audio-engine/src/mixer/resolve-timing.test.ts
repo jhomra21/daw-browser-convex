@@ -12,7 +12,7 @@ describe('mixer timing resolution', () => {
         { id: 'slow', name: 'Slow', clips: [], volume: 1 },
       ]),
       trackFx: {
-        slow: { compressor: normalizeCompressorParams({ enabled: true, lookaheadMs: 10 }) },
+        slow: { instances: [{ id: 'slow-compressor', kind: 'compressor', params: normalizeCompressorParams({ enabled: true, lookaheadMs: 10 }) }] },
       },
     })
     const timing = resolveMixerTiming(graph, 48_000)
@@ -28,7 +28,7 @@ describe('mixer timing resolution', () => {
         { id: 'postfx-return', name: 'Post FX', channelRole: 'return', clips: [], volume: 1 },
       ]),
       trackFx: {
-        source: { compressor: normalizeCompressorParams({ enabled: true, lookaheadMs: 10 }) },
+        source: { instances: [{ id: 'source-compressor', kind: 'compressor', params: normalizeCompressorParams({ enabled: true, lookaheadMs: 10 }) }] },
       },
     })
     const timing = resolveMixerTiming(graph, 48_000)

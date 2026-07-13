@@ -1,5 +1,5 @@
 import { AUDIO_EFFECT_ORDER, normalizeAudioEffectOrder } from '@daw-browser/shared'
-import { getEffectChainTiming, getLegacyEffectChainTiming } from '../effects/timing'
+import { getEffectChainTiming } from '../effects/timing'
 import type { ResolvedMixerGraph } from './types'
 
 type MixerTimingPlan = {
@@ -25,8 +25,7 @@ const getChannelLatency = (
 ) => {
   const fx = channel.fx
   if (!fx) return 0
-  if (fx.instances) return getEffectChainTiming(fx.instances, sampleRate, bpm).latencyFrames
-  return getLegacyEffectChainTiming(fx, normalizeAudioEffectOrder(fx.order ?? AUDIO_EFFECT_ORDER, AUDIO_EFFECT_ORDER), sampleRate, bpm).latencyFrames
+  return getEffectChainTiming(fx.instances, sampleRate, bpm).latencyFrames
 }
 
 export const resolveMixerTiming = (
@@ -98,15 +97,7 @@ export const resolveMixerTiming = (
   for (const sourceId of masterSources) {
     routeDelayFrames.set(mixerRouteKey(sourceId, MASTER_ROUTE_TARGET, 'output'), masterInputLatency - (pathLatency.get(sourceId) ?? 0))
   }
-  const masterLatency = graph.master.instances
-    ? getEffectChainTiming(graph.master.instances, sampleRate, bpm).latencyFrames
-    : getLegacyEffectChainTiming({
-      eq: graph.master.eq,
-      compressor: graph.master.compressor,
-      saturator: graph.master.saturator,
-      delay: graph.master.delay,
-      reverb: graph.master.reverb,
-    }, normalizeAudioEffectOrder(graph.master.order ?? AUDIO_EFFECT_ORDER, AUDIO_EFFECT_ORDER), sampleRate, bpm).latencyFrames
+  const masterLatency = getEffectChainTiming(graph.master.instances, sampleRate, bpm).latencyFrames
 
   return { routeDelayFrames, graphLatencyFrames: masterInputLatency + masterLatency }
 }

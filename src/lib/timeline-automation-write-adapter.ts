@@ -1,4 +1,4 @@
-import { isLocalId, isV2AutomationTargetKey, type AutomationEnvelope } from '@daw-browser/shared'
+import { isLocalId, type AutomationEnvelope } from '@daw-browser/shared'
 import { deleteLocalAutomationEnvelope, setLocalAutomationEnvelope } from '~/lib/local-automation'
 import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 
@@ -23,8 +23,6 @@ export const createTimelineAutomationWriteAdapter = (context: {
           targetKind: envelope.target.kind,
           trackId: envelope.target.kind === 'track' ? envelope.target.trackId : undefined,
           effectInstanceId: envelope.target.effectInstanceId,
-          existingEnvelopeId: isV2AutomationTargetKey(envelope.targetKey) ? undefined : envelope.id,
-          existingOpaqueIdentity: isV2AutomationTargetKey(envelope.targetKey) ? undefined : envelope.targetKey,
           parameterId: envelope.parameterId,
           enabled: envelope.enabled,
           points: envelope.points,
@@ -53,8 +51,6 @@ export const createTimelineAutomationWriteAdapter = (context: {
           targetKind: envelope.target.kind,
           trackId: envelope.target.kind === 'track' ? envelope.target.trackId : undefined,
           effectInstanceId: envelope.target.effectInstanceId,
-          existingEnvelopeId: isV2AutomationTargetKey(envelope.targetKey) ? undefined : envelope.id,
-          existingOpaqueIdentity: isV2AutomationTargetKey(envelope.targetKey) ? undefined : envelope.targetKey,
           parameterId: envelope.parameterId,
         },
       },

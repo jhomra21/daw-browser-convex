@@ -37,6 +37,7 @@ type CompressorProps = {
   class?: string
   audioEngine?: AudioEngine
   targetId?: string
+  effectInstanceId?: string
 }
 
 type ViewMode = 'transfer' | 'gain-reduction' | 'output'
@@ -122,13 +123,13 @@ export default function Compressor(props: CompressorProps) {
       setMeter(null)
       setHistory([])
     })
-    if (!audioEngine || !targetId) return
+    if (!audioEngine || !targetId || !props.effectInstanceId) return
     const unsubscribe = targetId === 'master'
-      ? audioEngine.subscribeMasterCompressorMeter((frame) => {
+      ? audioEngine.subscribeMasterCompressorMeter(props.effectInstanceId, (frame) => {
         setMeter(frame)
         setHistory((frames) => [...frames.slice(1 - HISTORY_SIZE), frame])
       })
-      : audioEngine.subscribeTrackCompressorMeter(targetId, (frame) => {
+      : audioEngine.subscribeTrackCompressorMeter(targetId, props.effectInstanceId, (frame) => {
         setMeter(frame)
         setHistory((frames) => [...frames.slice(1 - HISTORY_SIZE), frame])
       })
@@ -136,7 +137,7 @@ export default function Compressor(props: CompressorProps) {
   })
 
   return (
-    <EffectShell title="Compressor" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class={cn('w-[560px] min-w-[560px]', props.class)}>
+    <EffectShell title="Compressor" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset}  class={cn('w-[560px] min-w-[560px]', props.class)}>
       <div class={cn('grid min-h-0 flex-1 grid-cols-[84px_1fr_96px] gap-2 px-3 py-2', !props.params.enabled && 'opacity-70')}>
         <div class="flex min-h-0 flex-col items-stretch gap-2">
           <Knob label="Ratio" valueLabel={formatRatio(props.params.ratio)} value={props.params.ratio} resetValue={DEFAULT_PARAMS.ratio} min={COMPRESSOR_RATIO_MIN} max={COMPRESSOR_RATIO_MAX} step={0.1} disabled={!props.params.enabled} onValueChange={(ratio) => props.onChange({ ratio })} />

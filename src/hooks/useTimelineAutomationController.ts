@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, getOwner, runWithOwner, untrack, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, getOwner, onCleanup, runWithOwner, untrack, type Accessor } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Track } from "@daw-browser/timeline-core/types";
 import {
@@ -10,7 +10,6 @@ import {
   evaluatedAutomationValuesByTargetKey,
   isAudioEffectKind,
   isLocalId,
-  isV2AutomationTargetKey,
   normalizeTrackInstrumentParams,
   type AutomationTargetDeviceInstance,
   type AutomationParameterSelection,
@@ -307,8 +306,6 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
             targetKind: envelope.target.kind,
             trackId: envelope.target.kind === "track" ? envelope.target.trackId : undefined,
             effectInstanceId: envelope.target.effectInstanceId,
-            existingEnvelopeId: isV2AutomationTargetKey(envelope.targetKey) ? undefined : envelope.id,
-            existingOpaqueIdentity: isV2AutomationTargetKey(envelope.targetKey) ? undefined : envelope.targetKey,
             parameterId: envelope.parameterId,
             enabled: envelope.enabled,
             points: envelope.points,
@@ -339,8 +336,6 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
             targetKind: envelope.target.kind,
             trackId: envelope.target.kind === "track" ? envelope.target.trackId : undefined,
             effectInstanceId: envelope.target.effectInstanceId,
-            existingEnvelopeId: isV2AutomationTargetKey(envelope.targetKey) ? undefined : envelope.id,
-            existingOpaqueIdentity: isV2AutomationTargetKey(envelope.targetKey) ? undefined : envelope.targetKey,
             parameterId: envelope.parameterId,
           },
         },
@@ -453,7 +448,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       });
       reload();
       const unsubscribe = subscribeToLocalProjectChanges(rid, reload);
-      return unsubscribe;
+      onCleanup(unsubscribe);
     }
     collect((options.remoteEffects() ?? []).map((row) => ({
       targetId: row.targetType === "master" ? "master" : row.trackId ?? "",

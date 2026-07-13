@@ -1,4 +1,4 @@
-import { areAudioEffectOrdersEqual, normalizeAudioEffectOrder, normalizeCompressorParams, normalizeEqParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, serializeNormalizedEqParams, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { normalizeCompressorParams, normalizeEqParams, serializeNormalizedEqParams, type EqParamsLite } from '@daw-browser/shared'
 import { connectFxChain, createCompressorNodeChain, createGainTransitionOwner, disconnectAudioNodes, type CreateReverbImpulseResponse, type FxChainStageConfig, type GainTransitionOwner } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState } from './effects/compressor-chain-state'
@@ -30,35 +30,12 @@ type MasterFxRuntimeOptions = {
 }
 
 export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
-  let eqChain: BiquadFilterNode[] = []
-  let eqNodesByBand = new Map<string, BiquadFilterNode>()
-  let eqSignature: string | null = null
-  let eqTopologySignature: string | null = null
   let analyser: AnalyserNode | null = null
   let spectrumTmp: Uint8Array<ArrayBuffer> | null = null
   let spectrumLast: SpectrumFrame | null = null
   let analyserConnected = false
   let releaseAnalyser: () => void = () => undefined
-  const compressorState = createCompressorChainState((ctx, params) => {
-    const faultGeneration = options.getFaultGeneration()
-    return createCompressorNodeChain(ctx, params, (code) =>
-      options.onWorkletFault?.(faultGeneration, 'compressor', code, 'master:legacy-compressor'))
-  })
-  const reverbState = createReverbChainState()
-  const saturatorState = createSaturatorChainState()
-  const delayState = createDelayChainState()
-  let pendingEqParams: EqParamsLite | null = null
-  let pendingCompressorParams: CompressorParamsLite | null = null
-  let pendingReverbParams: ReverbParamsLite | null = null
-  let pendingSaturatorParams: SaturatorParamsLite | null = null
-  let pendingDelayParams: DelayParamsLite | null = null
-  let currentEqParams: EqParamsLite | undefined
-  let currentCompressorParams: CompressorParamsLite | undefined
-  let currentReverbParams: ReverbParamsLite | undefined
-  let currentSaturatorParams: SaturatorParamsLite | undefined
-  let currentDelayParams: DelayParamsLite | undefined
-  let masterFxOrder: AudioEffectKind[] | undefined
-  let masterFxInstances: AudioEffectRuntimeInstance[] | null = null
+  let masterFxInstances: AudioEffectRuntimeInstance[] = []
   let pendingFxInstances: AudioEffectRuntimeInstance[] | null = null
   let fxInstanceRevision = 0
   let routingGain: GainNode | null = null
@@ -73,11 +50,15 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   const instanceSaturatorChains = new Map<string, ReturnType<typeof createSaturatorChainState>>()
   const instanceDelayChains = new Map<string, ReturnType<typeof createDelayChainState>>()
   const instanceStaticWorkletChains = new Map<string, StaticWorkletNodeChain>()
+  const compressorMeterListeners = new Map<string, Set<CompressorMeterListener>>()
+  const compressorMeterSubscriptions = new Map<string, () => void>()
   const gateMeterListeners = new Map<string, Set<GateMeterListener>>()
   const gateMeterSubscriptions = new Map<string, () => void>()
   let currentBpm = 120
 
   const closeInstanceState = (instanceId: string) => {
+    compressorMeterSubscriptions.get(instanceId)?.()
+    compressorMeterSubscriptions.delete(instanceId)
     gateMeterSubscriptions.get(instanceId)?.()
     gateMeterSubscriptions.delete(instanceId)
     const eq = instanceEqChains.get(instanceId)
@@ -105,6 +86,16 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     const listeners = gateMeterListeners.get(instanceId)
     if (chain.kind !== 'gate' && chain.kind !== 'limiter' || !listeners || listeners.size === 0) return
     gateMeterSubscriptions.set(instanceId, subscribeStaticGateMeter(chain, (frame) => {
+      for (const listener of listeners) listener(frame)
+    }))
+  }
+
+  const bindCompressorMeter = (instanceId: string, state: ReturnType<typeof createCompressorChainState>) => {
+    compressorMeterSubscriptions.get(instanceId)?.()
+    compressorMeterSubscriptions.delete(instanceId)
+    const listeners = compressorMeterListeners.get(instanceId)
+    if (!listeners || listeners.size === 0) return
+    compressorMeterSubscriptions.set(instanceId, state.subscribeMeter((frame) => {
       for (const listener of listeners) listener(frame)
     }))
   }
@@ -147,31 +138,12 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     analyserConnected = false
     const reconnect = () => {
       disconnectAudioNodes([nextRoutingGain])
-      if (masterFxInstances) {
-        connectFxChain(nextRoutingGain, destination, {
-          instances: createInstanceStageConfigs(masterFxInstances),
-        })
-        if (analyser) {
-          try {
-            masterGain.connect(analyser)
-            analyserConnected = true
-          } catch {}
-        }
-        return
-      }
       connectFxChain(nextRoutingGain, destination, {
-        eqNodes: eqChain,
-        compressorChain: compressorState.chain(),
-        saturatorChain: saturatorState.chain(),
-        delayChain: delayState.chain(),
-        reverbChain: reverbState.chain(),
-        order: masterFxOrder,
+        instances: createInstanceStageConfigs(masterFxInstances),
       })
       if (analyser) {
-        try {
-          masterGain.connect(analyser)
-          analyserConnected = true
-        } catch {}
+        masterGain.connect(analyser)
+        analyserConnected = true
       }
     }
     routingTransitionOwner?.request(reconnect)
@@ -187,10 +159,8 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       releaseAnalyser = observeResource(options.resourceObserver, 'audio-nodes', next)
     }
     if (analyser && !analyserConnected) {
-      try {
-        masterGain.connect(analyser)
-        analyserConnected = true
-      } catch {}
+      masterGain.connect(analyser)
+      analyserConnected = true
     }
   }
 
@@ -225,7 +195,6 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     instances: AudioEffectRuntimeInstance[],
   ) => {
     const revision = ++fxInstanceRevision
-    const wasInstanceMode = masterFxInstances !== null
     const inputIds = new Set<string>()
     for (const instance of instances) {
       if (inputIds.has(instance.id)) throw new Error(`Duplicate effect instance ID: ${instance.id}`)
@@ -240,16 +209,16 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     ))
     const spectralTimingChanged = normalized.some((instance) => {
       if (instance.kind !== 'spectral') return false
-      const prior = previous?.find((candidate) => candidate.id === instance.id)
+      const prior = previous.find((candidate) => candidate.id === instance.id)
       return prior?.kind !== 'spectral' ||
         prior.params.state.fftSize !== instance.params.state.fftSize ||
         prior.params.state.overlap !== instance.params.state.overlap
     })
     if (normalized.length === 0) {
-      masterFxInstances = null
+      masterFxInstances = []
       pendingFxInstances = null
       closeAllInstanceStates()
-      if (wasInstanceMode) rebuildRouting(ctx, masterGain, destination)
+      rebuildRouting(ctx, masterGain, destination)
       return
     }
     masterFxInstances = normalized
@@ -263,7 +232,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     for (const id of instanceStaticWorkletChains.keys()) if (!activeIds.has(id)) staleIds.add(id)
     for (const id of staleIds) closeInstanceState(id)
 
-    let requiresRoutingRebuild = !wasInstanceMode || staleIds.size > 0 || orderChanged || spectralTimingChanged
+    let requiresRoutingRebuild = staleIds.size > 0 || orderChanged || spectralTimingChanged
     for (const instance of normalized) {
       if (isStaticWorkletInstance(instance)) {
         const existing = instanceStaticWorkletChains.get(instance.id)
@@ -281,8 +250,9 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
             }
             instanceStaticWorkletChains.set(instance.id, created)
             bindGateMeter(instance.id, created)
-          } catch {
+          } catch (error) {
             instanceStaticWorkletChains.delete(instance.id)
+            throw error
           }
           requiresRoutingRebuild = true
         }
@@ -300,6 +270,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
             createCompressorNodeChain(ctx, params, (code) =>
               options.onWorkletFault?.(faultGeneration, 'compressor', code, `master:effect:${instance.id}`)))
           instanceCompressorChains.set(instance.id, state)
+          bindCompressorMeter(instance.id, state)
         }
         const result = await state.set(ctx, normalizeCompressorParams(instance.params))
         if (fxInstanceRevision !== revision) return
@@ -327,7 +298,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
         requiresRoutingRebuild = (result.changed && result.requiresRoutingRebuild) || requiresRoutingRebuild
         continue
       }
-      if (instance.kind !== 'reverb') continue
+      if (instance.kind !== 'reverb') throw new Error('Unsupported audio effect kind.')
       let state = instanceReverbChains.get(instance.id)
       if (!state) {
         state = createReverbChainState()
@@ -341,94 +312,37 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
 
   return {
     applyPending: (ctx: AudioContext, masterGain: GainNode, destination: AudioDestinationNode, createImpulseResponse: CreateReverbImpulseResponse) => {
-      if (pendingEqParams) {
-        const params = pendingEqParams
-        pendingEqParams = null
-        const signature = serializeNormalizedEqParams(params)
-        const topologySignature = getEqTopologySignature(params)
-        eqChain = createEqNodes(ctx, params, ctx.destination.maxChannelCount || 2)
-        eqNodesByBand = new Map(params.bands.filter((band) => band.enabled).flatMap((band, index) => {
-          const node = eqChain[index]
-          return node ? [[band.id, node]] : []
-        }))
-        eqSignature = signature
-        eqTopologySignature = topologySignature
-      }
-      if (pendingCompressorParams) {
-        const params = pendingCompressorParams
-        pendingCompressorParams = null
-        void compressorState.set(ctx, params).then((result) => { if (result.changed && result.requiresRoutingRebuild) rebuildRouting(ctx, masterGain, destination) })
-      }
-      if (pendingReverbParams) {
-        const params = pendingReverbParams
-        pendingReverbParams = null
-        reverbState.set(ctx, params, createImpulseResponse)
-      }
-      if (pendingSaturatorParams) {
-        const params = pendingSaturatorParams
-        pendingSaturatorParams = null
-        saturatorState.set(ctx, params)
-      }
-      if (pendingDelayParams) {
-        const params = pendingDelayParams
-        pendingDelayParams = null
-        delayState.set(ctx, params, currentBpm)
-      }
       if (pendingFxInstances) {
         const instances = pendingFxInstances
         pendingFxInstances = null
-        void applyFxInstances(ctx, masterGain, destination, createImpulseResponse, instances)
+        void applyFxInstances(ctx, masterGain, destination, createImpulseResponse, instances).catch((error) => {
+          options.onWorkletFault?.(
+            options.getFaultGeneration(),
+            'owned-processor',
+            'effect-chain-construction-failed',
+            `master:${error instanceof Error ? error.message : String(error)}`,
+          )
+        })
       }
       rebuildRouting(ctx, masterGain, destination)
     },
-    setEq: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: EqParamsLite) => {
-      const normalized = normalizeEqParams(params)
-      currentEqParams = normalized
-      if (!ctx || !masterGain) {
-        pendingEqParams = normalized
-        return
+    subscribeCompressorMeter: (instanceId: string, listener: CompressorMeterListener) => {
+      let listeners = compressorMeterListeners.get(instanceId)
+      if (!listeners) {
+        listeners = new Set()
+        compressorMeterListeners.set(instanceId, listeners)
       }
-      const signature = serializeNormalizedEqParams(normalized)
-      if (eqSignature === signature) return
-      const topologySignature = getEqTopologySignature(normalized)
-      if (eqTopologySignature === topologySignature) {
-        applyEqNodeParams(eqChain, normalized)
-        eqSignature = signature
-        return
-      }
-      disconnectAudioNodes(eqChain)
-      eqChain = createEqNodes(ctx, normalized, ctx.destination.maxChannelCount || 2)
-      eqNodesByBand = new Map(normalized.bands.filter((band) => band.enabled).flatMap((band, index) => {
-        const node = eqChain[index]
-        return node ? [[band.id, node]] : []
-      }))
-      eqSignature = signature
-      eqTopologySignature = topologySignature
-      rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
-    },
-    setReverb: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: ReverbParamsLite, createImpulseResponse: CreateReverbImpulseResponse) => {
-      currentReverbParams = params
-      if (!ctx || !masterGain) {
-        pendingReverbParams = params
-        return
-      }
-      const result = reverbState.set(ctx, params, createImpulseResponse)
-      if (!result.changed) return
-      if (result.requiresRoutingRebuild) {
-        rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
+      listeners.add(listener)
+      const state = instanceCompressorChains.get(instanceId)
+      if (state && !compressorMeterSubscriptions.has(instanceId)) bindCompressorMeter(instanceId, state)
+      return () => {
+        listeners.delete(listener)
+        if (listeners.size > 0) return
+        compressorMeterSubscriptions.get(instanceId)?.()
+        compressorMeterSubscriptions.delete(instanceId)
+        compressorMeterListeners.delete(instanceId)
       }
     },
-    setCompressor: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: CompressorParamsLite) => {
-      currentCompressorParams = params
-      if (!ctx || !masterGain) {
-        pendingCompressorParams = params
-        return
-      }
-      void compressorState.set(ctx, params).then((result) => {
-        if (result.changed && result.requiresRoutingRebuild) rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
-      })
-    },
-    subscribeCompressorMeter: (listener: CompressorMeterListener) => compressorState.subscribeMeter(listener),
     subscribeGateMeter: (instanceId: string, listener: GateMeterListener) => {
       let listeners = gateMeterListeners.get(instanceId)
       if (!listeners) {
@@ -447,32 +361,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
         gateMeterListeners.delete(instanceId)
       }
     },
-    setSaturator: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: SaturatorParamsLite) => {
-      currentSaturatorParams = params
-      if (!ctx || !masterGain) {
-        pendingSaturatorParams = params
-        return
-      }
-      const result = saturatorState.set(ctx, params)
-      if (result.changed && result.requiresRoutingRebuild) rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
-    },
-    setDelay: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, params: DelayParamsLite) => {
-      currentDelayParams = params
-      if (!ctx || !masterGain) {
-        pendingDelayParams = params
-        return
-      }
-      const result = delayState.set(ctx, params, currentBpm)
-      if (result.changed && result.requiresRoutingRebuild) rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
-    },
-    setOrder: (ctx: AudioContext | null, masterGain: GainNode | null, destination: AudioDestinationNode | null, order: AudioEffectKind[]) => {
-      const normalized = normalizeAudioEffectOrder(order, order)
-      if (areAudioEffectOrdersEqual(masterFxOrder, normalized)) return
-      masterFxOrder = normalized
-      if (!ctx || !masterGain) return
-      rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
-    },
-    setFxInstances: (
+    setFxInstances: async (
       ctx: AudioContext | null,
       masterGain: GainNode | null,
       destination: AudioDestinationNode | null,
@@ -481,10 +370,8 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     ) => {
       const normalized = normalizeAudioEffectRuntimeInstances(instances)
       if (normalized.length === 0) {
-        const wasInstanceMode = masterFxInstances !== null || pendingFxInstances !== null
-        if (!wasInstanceMode) return
         fxInstanceRevision += 1
-        masterFxInstances = null
+        masterFxInstances = []
         pendingFxInstances = null
         closeAllInstanceStates()
         if (ctx && masterGain) rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
@@ -495,53 +382,48 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
         pendingFxInstances = normalized
         return
       }
-      void applyFxInstances(ctx, masterGain, destination ?? ctx.destination, createImpulseResponse, normalized)
+      try {
+        await applyFxInstances(ctx, masterGain, destination ?? ctx.destination, createImpulseResponse, normalized)
+      } catch (error) {
+        options.onWorkletFault?.(
+          options.getFaultGeneration(),
+          'owned-processor',
+          'effect-chain-construction-failed',
+          `master:${error instanceof Error ? error.message : String(error)}`,
+        )
+        throw error
+      }
     },
     setBpm: (bpm: number) => {
       currentBpm = bpm
-      delayState.setBpm(bpm)
       for (const state of instanceDelayChains.values()) state.setBpm(bpm)
     },
     getMixerFx: (): Pick<
       ResolveMixerGraphOptions,
-      'masterEq' | 'masterCompressor' | 'masterSaturator' | 'masterDelay' | 'masterReverb' | 'masterFxOrder' | 'masterFxInstances'
+      'masterFxInstances'
     > => ({
-      masterEq: currentEqParams,
-      masterCompressor: currentCompressorParams,
-      masterSaturator: currentSaturatorParams,
-      masterDelay: currentDelayParams,
-      masterReverb: currentReverbParams,
-      masterFxOrder,
-      masterFxInstances: masterFxInstances ?? undefined,
+      masterFxInstances,
     }),
     resolveMasterAutomationBindings: (parameterId: string, masterGain: GainNode | null, effectInstanceId?: string): AutomationAudioBinding[] => {
       if (parameterId === 'volume') return masterGain ? [{ param: masterGain.gain, valueToAudioValue: (value) => value }] : []
-      if (masterFxInstances) {
-        if (effectInstanceId) {
-          return [
-            ...resolveEqAutomationBindings(instanceEqNodesByBand.get(effectInstanceId) ?? new Map(), parameterId),
-            ...resolveSaturatorAutomationBindings(instanceSaturatorChains.get(effectInstanceId), parameterId),
-            ...resolveDelayAutomationBindings(instanceDelayChains.get(effectInstanceId), parameterId),
-            ...resolveReverbAutomationBindings(instanceReverbChains.get(effectInstanceId), parameterId),
-            ...resolveStaticWorkletAutomationBinding(instanceStaticWorkletChains.get(effectInstanceId), parameterId),
-          ]
-        }
-        const eqNodes = new Map<string, BiquadFilterNode>()
-        for (const nodesByBand of instanceEqNodesByBand.size === 1 ? instanceEqNodesByBand.values() : []) {
-          for (const [bandId, node] of nodesByBand) eqNodes.set(bandId, node)
-        }
+      if (effectInstanceId) {
         return [
-          ...resolveEqAutomationBindings(eqNodes, parameterId),
-          ...Array.from(instanceSaturatorChains.size === 1 ? instanceSaturatorChains.values() : []).flatMap((state) => resolveSaturatorAutomationBindings(state, parameterId)),
-          ...Array.from(instanceDelayChains.size === 1 ? instanceDelayChains.values() : []).flatMap((state) => resolveDelayAutomationBindings(state, parameterId)),
-          ...Array.from(instanceReverbChains.size === 1 ? instanceReverbChains.values() : []).flatMap((state) => resolveReverbAutomationBindings(state, parameterId)),
+          ...resolveEqAutomationBindings(instanceEqNodesByBand.get(effectInstanceId) ?? new Map(), parameterId),
+          ...resolveSaturatorAutomationBindings(instanceSaturatorChains.get(effectInstanceId), parameterId),
+          ...resolveDelayAutomationBindings(instanceDelayChains.get(effectInstanceId), parameterId),
+          ...resolveReverbAutomationBindings(instanceReverbChains.get(effectInstanceId), parameterId),
+          ...resolveStaticWorkletAutomationBinding(instanceStaticWorkletChains.get(effectInstanceId), parameterId),
         ]
       }
+      const eqNodes = new Map<string, BiquadFilterNode>()
+      for (const nodesByBand of instanceEqNodesByBand.size === 1 ? instanceEqNodesByBand.values() : []) {
+        for (const [bandId, node] of nodesByBand) eqNodes.set(bandId, node)
+      }
       return [
-        ...resolveEqAutomationBindings(eqNodesByBand, parameterId),
-        ...resolveSaturatorAutomationBindings(saturatorState, parameterId),
-        ...resolveDelayAutomationBindings(delayState, parameterId),
-        ...resolveReverbAutomationBindings(reverbState, parameterId),
+        ...resolveEqAutomationBindings(eqNodes, parameterId),
+        ...Array.from(instanceSaturatorChains.size === 1 ? instanceSaturatorChains.values() : []).flatMap((state) => resolveSaturatorAutomationBindings(state, parameterId)),
+        ...Array.from(instanceDelayChains.size === 1 ? instanceDelayChains.values() : []).flatMap((state) => resolveDelayAutomationBindings(state, parameterId)),
+        ...Array.from(instanceReverbChains.size === 1 ? instanceReverbChains.values() : []).flatMap((state) => resolveReverbAutomationBindings(state, parameterId)),
       ]
     },
     rebuildRouting,
@@ -573,25 +455,12 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       routingTransitionOwner = null
       disconnectAudioNodes([routingGain])
       routingGain = null
-      eqSignature = null
-      eqTopologySignature = null
-      pendingEqParams = null
-      pendingCompressorParams = null
-      pendingReverbParams = null
-      pendingSaturatorParams = null
-      pendingDelayParams = null
-      masterFxOrder = undefined
-      masterFxInstances = null
+      masterFxInstances = []
       pendingFxInstances = null
       fxInstanceRevision += 1
       closeAllInstanceStates()
-      disconnectAudioNodes(eqChain)
-      eqChain = []
-      eqNodesByBand = new Map()
-      compressorState.close()
-      reverbState.close()
-      saturatorState.close()
-      delayState.close()
+      compressorMeterSubscriptions.clear()
+      compressorMeterListeners.clear()
       disconnectAudioNodes([analyser])
       analyser = null
       spectrumTmp = null

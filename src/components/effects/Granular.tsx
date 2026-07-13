@@ -28,7 +28,7 @@ const Granular: Component<GranularProps> = (props) => {
     props.onUpdate({ zone });
   };
   return (
-    <EffectShell title="Granular" typeLabel="Instrument" onReset={props.onReset} disabled={!props.canWrite} class="w-176 min-w-176">
+    <EffectShell title="Granular" typeLabel="Instrument" onReset={props.onReset} disabled={!props.canWrite}  class="w-176 min-w-176">
       <div class="flex h-full flex-col gap-3 p-3 text-xs text-muted-foreground">
         <div class="flex items-center gap-3">
           <span class="max-w-48 truncate text-foreground">{props.params.zone?.sample.name ?? props.params.zone?.sample.assetKey ?? "No sample"}</span>

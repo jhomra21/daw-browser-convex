@@ -1,6 +1,6 @@
 import { createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_ORDER, INSTRUMENT_CONTRACTS, audioEffectOrderItemId, audioEffectOrderItemKind, automationTargetMatchesEffectInstance, normalizeTrackInstrumentParams, type AudioEffectKind, type AudioEffectOrderItem, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
+import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_ORDER, INSTRUMENT_CONTRACTS, audioEffectOrderItemId, audioEffectOrderItemKind, automationTargetMatchesEffectInstance, createInstrumentInstanceId, normalizeTrackInstrumentParams, type AudioEffectKind, type AudioEffectOrderItem, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { compareAudioEffectOrderEntries } from '~/lib/audio-effect-order-rows'
 
 export type LocalEffectKind = AudioEffectKind | `master-${AudioEffectKind}` | 'instrument' | 'synth' | 'arp'
@@ -17,6 +17,7 @@ export type LocalEffectRow<TParams = any> = {
 
 const EFFECT_KIND = 'effect'
 const SIDECHAIN_KIND = 'sidechain-route'
+export const localSidechainRouteRowId = (targetTrackId: string, effectInstanceId: string) => `${targetTrackId}:sidechain:${effectInstanceId}`
 export const localEffectRowId = (
   targetId: string,
   effect: LocalEffectKind,
@@ -77,6 +78,7 @@ export async function getLocalEffect<TParams>(
       effect: 'instrument',
       params: {
         kind: 'synth',
+          instanceId: createInstrumentInstanceId(),
         params: INSTRUMENT_CONTRACTS.synth.normalizeParams(synthRow.value.params),
       },
     }
@@ -123,12 +125,12 @@ export const setLocalEffectInstance = async <TParams>(
   targetId: string,
   effect: LocalEffectKind,
   params: TParams,
-  input?: {
-    instanceId?: string
+  input: {
+    instanceId: string
     index?: number
   },
 ): Promise<LocalEffectRow<TParams>> => {
-  const instanceId = input?.instanceId ?? createAudioEffectInstanceId()
+  const instanceId = input.instanceId
   const db = await openLocalProjectDb(projectId)
   const id = localEffectRowId(targetId, effect, instanceId)
   const existing = await db.get('entities', [EFFECT_KIND, id])
@@ -221,22 +223,28 @@ export const reorderLocalAudioEffects = async (
     .filter((row) => row.targetId === targetId)
     .flatMap((row) => {
       const kind = audioEffectKindFromLocalEffect(row.effect)
-      return kind ? [{ row, kind }] : []
+      if (!kind) return []
+      if (!row.instanceId) throw new Error(`Audio effect "${kind}" is missing an instance ID.`)
+      return [{ row, kind }]
     })
     .sort((a, b) => compareAudioEffectOrderEntries(
       { kind: a.kind, index: a.row.index },
       { kind: b.kind, index: b.row.index },
     ))
   const requestedIds = new Set<string>()
+  const requireInstanceId = (row: LocalEffectRow) => {
+    if (!row.instanceId) throw new Error(`Audio effect "${row.effect}" is missing an instance ID.`)
+    return row.instanceId
+  }
   const requested = order.flatMap((item) => {
     const id = audioEffectOrderItemId(item)
     if (requestedIds.has(id)) return []
     const kind = audioEffectOrderItemKind(item)
     const row = typeof item === 'string'
-      ? rows.find((entry) => entry.kind === kind && !requestedIds.has(entry.row.instanceId ?? entry.kind))
+      ? rows.find((entry) => entry.kind === kind && !requestedIds.has(requireInstanceId(entry.row)))
       : rows.find((entry) => entry.row.instanceId === item.id && entry.kind === item.kind)
     if (!row) return []
-    requestedIds.add(row.row.instanceId ?? row.kind)
+    requestedIds.add(requireInstanceId(row.row))
     return [row]
   })
   const requestedRowIds = new Set(requested.map((entry) => entry.row.id))

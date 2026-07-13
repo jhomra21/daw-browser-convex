@@ -36,24 +36,24 @@ export default function Gate(props: GateProps) {
       : props.audioEngine.subscribeTrackGateMeter(props.targetId, props.effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
     onCleanup(unsubscribe)
   })
-  const knob = (label: string, id: string, value: number, resetValue: number, min: number, max: number, step: number, valueLabel: string, update: (value: number) => Partial<GateParams>) => (
-    <Knob label={label} value={value} valueLabel={valueLabel} resetValue={resetValue} min={min} max={max} step={step} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get(id)} automated={props.automationRangesByParameterId?.has(id)} onAutomationSelect={() => props.onAutomationParameterTouch?.(id)} onValueChange={(next) => { props.onManualAutomationOverride?.(id); props.onChange(update(next)) }} />
+  const knob = (label: string, id: string, value: number, resetValue: number, min: number, max: number, step: number, valueLabel: string, update: (value: number) => Partial<GateParams>, logarithmic = false) => (
+    <Knob label={label} value={value} valueLabel={valueLabel} resetValue={resetValue} min={min} max={max} step={step} logarithmic={logarithmic} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get(id)} automated={props.automationRangesByParameterId?.has(id)} onAutomationSelect={() => props.onAutomationParameterTouch?.(id)} onValueChange={(next) => { props.onManualAutomationOverride?.(id); props.onChange(update(next)) }} />
   )
   return (
-    <EffectShell title="Gate" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="w-[620px] min-w-[620px]">
-      <div class="flex flex-1 gap-3 px-3 py-2">
-        <div class="grid grid-cols-5 gap-2">
+    <EffectShell title="Gate" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="w-[520px] min-w-[520px]">
+      <div class="grid min-h-0 flex-1 grid-cols-[1fr_9rem] gap-3 px-3 py-3">
+        <div class="grid grid-cols-3 place-content-center gap-x-4 gap-y-3 border-r border-border pr-3">
           {knob('Thresh', 'gate.thresholdDb', props.params.thresholdDb, defaults.thresholdDb, -80, 0, 0.1, formatDb(props.params.thresholdDb), (thresholdDb) => ({ thresholdDb }))}
           {knob('Ratio', 'gate.ratio', props.params.ratio, defaults.ratio, 1, 20, 0.1, `${props.params.ratio.toFixed(1)}:1`, (ratio) => ({ ratio }))}
           {knob('Attack', 'gate.attackMs', props.params.attackMs, defaults.attackMs, 0.1, 100, 0.1, formatMs(props.params.attackMs), (attackMs) => ({ attackMs }))}
           {knob('Hold', 'gate.holdMs', props.params.holdMs, defaults.holdMs, 0, 500, 1, formatMs(props.params.holdMs), (holdMs) => ({ holdMs }))}
-          {knob('Release', 'gate.releaseMs', props.params.releaseMs, defaults.releaseMs, 5, 2000, 1, formatMs(props.params.releaseMs), (releaseMs) => ({ releaseMs }))}
+          {knob('Release', 'gate.releaseMs', props.params.releaseMs, defaults.releaseMs, 5, 2000, 1, formatMs(props.params.releaseMs), (releaseMs) => ({ releaseMs }), true)}
           {knob('Hysteresis', 'gate.hysteresisDb', props.params.hysteresisDb, defaults.hysteresisDb, 0, 24, 0.1, formatDb(props.params.hysteresisDb), (hysteresisDb) => ({ hysteresisDb }))}
           {knob('Range', 'gate.rangeDb', props.params.rangeDb, defaults.rangeDb, -80, 0, 0.1, formatDb(props.params.rangeDb), (rangeDb) => ({ rangeDb }))}
           {knob('Lookahead', 'gate.lookaheadMs', props.params.lookaheadMs, defaults.lookaheadMs, 0, 2, 0.1, formatMs(props.params.lookaheadMs), (lookaheadMs) => ({ lookaheadMs }))}
           {knob('Link', 'gate.link', props.params.link, defaults.link, 0, 1, 0.01, `${Math.round(props.params.link * 100)}%`, (link) => ({ link }))}
         </div>
-        <div class="flex w-36 flex-col gap-1">
+        <div class="grid content-center gap-1">
           <div class="border border-border bg-background/80 px-1.5 py-1">
             <div class="text-3xs uppercase leading-none text-muted-foreground">Gain reduction</div>
             <div class="font-mono text-2xs leading-tight text-yellow-300">{formatDb(-gainReductionDb())}</div>
@@ -69,10 +69,12 @@ export default function Gate(props: GateProps) {
             <option value="">Internal</option>
             <For each={props.tracks.filter((track) => track.id !== props.targetId)}>{(track) => <option value={track.id}>{track.name}</option>}</For>
           </select>
-          <DeviceToggleButton label="Filter" active={props.params.sidechain.enabled} onClick={() => props.onChange({ sidechain: { ...props.params.sidechain, enabled: !props.params.sidechain.enabled } })} />
-          <DeviceToggleButton label="Highpass" active onClick={() => props.onChange({ sidechain: { ...props.params.sidechain, filterType: 'highpass' } })} />
-          <Knob size={28} label="Freq" value={props.params.sidechain.frequencyHz} valueLabel={`${Math.round(props.params.sidechain.frequencyHz)} Hz`} resetValue={defaults.sidechain.frequencyHz} min={20} max={20000} step={1} logarithmic disabled={!props.params.sidechain.enabled} onValueChange={(frequencyHz) => props.onChange({ sidechain: { ...props.params.sidechain, frequencyHz } })} />
-          <Knob size={28} label="Q" value={props.params.sidechain.q} resetValue={defaults.sidechain.q} min={0.1} max={18} step={0.01} disabled={!props.params.sidechain.enabled} onValueChange={(q) => props.onChange({ sidechain: { ...props.params.sidechain, q } })} />
+          <div class="grid grid-cols-2 gap-1">
+            <DeviceToggleButton label="Filter" active={props.params.sidechain.enabled} onClick={() => props.onChange({ sidechain: { ...props.params.sidechain, enabled: !props.params.sidechain.enabled } })} />
+            <DeviceToggleButton label="Highpass" active onClick={() => props.onChange({ sidechain: { ...props.params.sidechain, filterType: 'highpass' } })} />
+            <Knob size={28} label="Freq" value={props.params.sidechain.frequencyHz} valueLabel={`${Math.round(props.params.sidechain.frequencyHz)} Hz`} resetValue={defaults.sidechain.frequencyHz} min={20} max={20000} step={1} logarithmic disabled={!props.params.sidechain.enabled} onValueChange={(frequencyHz) => props.onChange({ sidechain: { ...props.params.sidechain, frequencyHz } })} />
+            <Knob size={28} label="Q" value={props.params.sidechain.q} resetValue={defaults.sidechain.q} min={0.1} max={18} step={0.01} disabled={!props.params.sidechain.enabled} onValueChange={(q) => props.onChange({ sidechain: { ...props.params.sidechain, q } })} />
+          </div>
         </div>
       </div>
     </EffectShell>

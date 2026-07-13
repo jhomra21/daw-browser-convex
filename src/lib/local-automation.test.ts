@@ -23,33 +23,7 @@ describe('normalizeLocalAutomationEnvelopes', () => {
     expect(rows[0]?.id).toBe('a')
   })
 
-  test('keeps ambiguous legacy effect envelopes opaque and unresolved', () => {
-    const target: AutomationTarget = { kind: 'track', trackId: 'track:one' }
-    const rows = normalizeLocalAutomationEnvelopes([
-      envelope({
-        id: 'legacy-a',
-        target,
-        targetKey: 'track:track:one:delay.feedback',
-        parameterId: 'delay.feedback',
-        updatedAt: 1,
-      }),
-      envelope({
-        id: 'legacy-b',
-        target,
-        targetKey: 'another:opaque:key',
-        parameterId: 'delay.feedback',
-        updatedAt: 2,
-      }),
-    ])
-
-    expect(rows.map((row) => row.targetKey)).toEqual([
-      'track:track:one:delay.feedback',
-      'another:opaque:key',
-    ])
-    expect(rows.every((row) => row.target.effectInstanceId === undefined)).toBe(true)
-  })
-
-  test('deduplicates legacy mixer rows from structured fields without parsing colon keys', () => {
+  test('normalizes mixer rows to the canonical target key', () => {
     const target: AutomationTarget = { kind: 'track', trackId: 'track:one' }
     const rows = normalizeLocalAutomationEnvelopes([
       envelope({ id: 'old', target, targetKey: 'opaque:a', parameterId: 'volume', updatedAt: 1 }),
@@ -61,7 +35,7 @@ describe('normalizeLocalAutomationEnvelopes', () => {
     expect(rows[0]?.targetKey).toBe(automationTargetKey(target, 'volume'))
   })
 
-  test('leaves malformed and newer-version rows outside recognized normalization', () => {
+  test('drops malformed and unsupported effect rows', () => {
     const rows = normalizeLocalAutomationEnvelopes([
       { schemaVersion: 3, targetKey: 'future:key', payload: { untouched: true } },
       envelope({
@@ -73,14 +47,7 @@ describe('normalizeLocalAutomationEnvelopes', () => {
       }),
     ])
 
-    expect(rows).toEqual([
-      envelope({
-        id: 'known',
-        target: { kind: 'master' },
-        targetKey: automationTargetKey({ kind: 'master' }, 'volume'),
-        parameterId: 'volume',
-        updatedAt: 1,
-      }),
-    ])
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.targetKey).toBe(automationTargetKey({ kind: 'master' }, 'volume'))
   })
 })

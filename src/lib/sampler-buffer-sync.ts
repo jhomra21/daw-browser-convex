@@ -22,7 +22,7 @@ export function createSamplerBufferSync() {
   const versions = new Map<Track['id'], number>()
   const configs = new Map<Track['id'], { params: SamplerParams; instanceId?: string }>()
   const enginesByTrack = new Map<Track['id'], AudioEngine>()
-  const pending = new Map<string, Promise<void>>()
+  const pending = new Map<string, Promise<AudioBuffer | null>>()
   const engines = new Set<AudioEngine>()
   const states = new Map<Track['id'], Map<string, SamplerZoneLoadState>>()
   const misses = new Map<Track['id'], number>()
@@ -79,11 +79,15 @@ export function createSamplerBufferSync() {
     const zone = params?.zones.find((candidate) => candidate.id === zoneId)
     if (!params || !zone) return
     const requestKey = `${trackId}\u0000${zone.id}\u0000${zone.sample.assetKey}`
-    if (force) loader.invalidate(zone.sample.url)
-    if (pending.has(requestKey)) return
+    if (force) {
+      loader.invalidate(zone.sample.url)
+      pending.delete(requestKey)
+    }
     setZoneState(trackId, zoneId, 'loading')
     const version = versions.get(trackId)
-    const request = loader.load(zone.sample.url, (data) => audioEngine.decodeAudioData(data)).then((buffer) => {
+    const request = pending.get(requestKey) ?? loader.load(zone.sample.url, (data) => audioEngine.decodeAudioData(data))
+    pending.set(requestKey, request)
+    void request.then((buffer) => {
       if (disposed || versions.get(trackId) !== version || !buffer) return
       cache.set(zone.sample.assetKey, buffer, bufferBytes(buffer))
       setZoneState(trackId, zoneId, 'ready')
@@ -91,10 +95,9 @@ export function createSamplerBufferSync() {
     }).catch(() => {
       if (!disposed && versions.get(trackId) === version) setZoneState(trackId, zoneId, 'error')
     }).finally(() => {
-      pending.delete(requestKey)
+      if (pending.get(requestKey) === request) pending.delete(requestKey)
       notify()
     })
-    pending.set(requestKey, request)
   }
 
   const clearTrack = (trackId: Track['id']) => {
@@ -168,8 +171,9 @@ export function createSamplerBufferSync() {
         return
       }
       const requestKey = `${trackId}\u0000granular\u0000${zone.sample.assetKey}`
-      if (pending.has(requestKey)) return
-      const request = loader.load(zone.sample.url, (data) => audioEngine.decodeAudioData(data)).then(async (buffer) => {
+      const request = pending.get(requestKey) ?? loader.load(zone.sample.url, (data) => audioEngine.decodeAudioData(data))
+      pending.set(requestKey, request)
+      void request.then(async (buffer) => {
         if (disposed || versions.get(trackId) !== version || !buffer) return
         cache.set(zone.sample.assetKey, buffer, bufferBytes(buffer))
         if (cache.pin(zone.sample.assetKey)) granularPinnedAssets.set(trackId, zone.sample.assetKey)
@@ -178,10 +182,9 @@ export function createSamplerBufferSync() {
       }).catch(() => {
         if (!disposed && versions.get(trackId) === version) granularStates.set(trackId, 'error')
       }).finally(() => {
-        pending.delete(requestKey)
+        if (pending.get(requestKey) === request) pending.delete(requestKey)
         notify()
       })
-      pending.set(requestKey, request)
       notify()
     },
     retryGranular: (audioEngine: AudioEngine, trackId: Track['id']) => {
@@ -199,7 +202,9 @@ export function createSamplerBufferSync() {
       versions.set(trackId, version)
       granularConfigs.set(trackId, { params: next, instanceId })
       const requestKey = `${trackId}\u0000granular\u0000${zone.sample.assetKey}`
-      const request = loader.load(zone.sample.url, (data) => audioEngine.decodeAudioData(data)).then(async (buffer) => {
+      const request = loader.load(zone.sample.url, (data) => audioEngine.decodeAudioData(data))
+      pending.set(requestKey, request)
+      void request.then(async (buffer) => {
         if (disposed || versions.get(trackId) !== version || !buffer) return
         cache.set(zone.sample.assetKey, buffer, bufferBytes(buffer))
         if (cache.pin(zone.sample.assetKey)) granularPinnedAssets.set(trackId, zone.sample.assetKey)
@@ -208,10 +213,9 @@ export function createSamplerBufferSync() {
       }).catch(() => {
         if (!disposed && versions.get(trackId) === version) granularStates.set(trackId, 'error')
       }).finally(() => {
-        pending.delete(requestKey)
+        if (pending.get(requestKey) === request) pending.delete(requestKey)
         notify()
       })
-      pending.set(requestKey, request)
       notify()
     },
     getGranularStatus: (trackId: Track['id']): GranularLoadStatus => ({

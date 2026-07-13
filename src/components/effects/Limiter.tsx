@@ -29,19 +29,25 @@ export default function Limiter(props: LimiterProps) {
       : props.audioEngine.subscribeTrackGateMeter(props.targetId, props.effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
     onCleanup(unsubscribe)
   })
-  const knob = (label: string, id: string, value: number, resetValue: number, min: number, max: number, step: number, valueLabel: string, update: (value: number) => Partial<LimiterParams>) => (
-    <Knob label={label} value={value} valueLabel={valueLabel} resetValue={resetValue} min={min} max={max} step={step} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get(id)} automated={props.automationRangesByParameterId?.has(id)} onAutomationSelect={() => props.onAutomationParameterTouch?.(id)} onValueChange={(next) => { props.onManualAutomationOverride?.(id); props.onChange(update(next)) }} />
+  const knob = (label: string, id: string, value: number, resetValue: number, min: number, max: number, step: number, valueLabel: string, update: (value: number) => Partial<LimiterParams>, logarithmic = false) => (
+    <Knob label={label} value={value} valueLabel={valueLabel} resetValue={resetValue} min={min} max={max} step={step} logarithmic={logarithmic} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get(id)} automated={props.automationRangesByParameterId?.has(id)} onAutomationSelect={() => props.onAutomationParameterTouch?.(id)} onValueChange={(next) => { props.onManualAutomationOverride?.(id); props.onChange(update(next)) }} />
   )
   return (
-    <EffectShell title="Limiter" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="w-80 min-w-80">
-      <div class="flex flex-1 items-center gap-3 px-3 py-2">
-        {knob('Ceiling', 'limiter.ceiling', props.params.ceilingDbtp, defaults.ceilingDbtp, -12, 0, 0.1, `${props.params.ceilingDbtp.toFixed(1)} dBTP`, (ceilingDbtp) => ({ ceilingDbtp }))}
-        {knob('Release', 'limiter.release', props.params.releaseMs, defaults.releaseMs, 20, 1000, 1, `${Math.round(props.params.releaseMs)} ms`, (releaseMs) => ({ releaseMs }))}
-        {knob('Link', 'limiter.link', props.params.link, defaults.link, 0, 1, 0.01, `${Math.round(props.params.link * 100)}%`, (link) => ({ link }))}
-        <div class="flex flex-col gap-1 text-2xs text-muted-foreground">
-          <span>GR {gainReductionDb().toFixed(1)} dB</span>
-          <span>5 ms latency</span>
-          <span>4x true peak</span>
+    <EffectShell title="Limiter" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="w-56 min-w-56">
+      <div class="grid min-h-0 flex-1 grid-rows-[1fr_auto] gap-3 px-3 py-3">
+        <div class="grid grid-cols-2 place-content-center gap-x-5 gap-y-4">
+          {knob('Ceiling', 'limiter.ceiling', props.params.ceilingDbtp, defaults.ceilingDbtp, -12, 0, 0.1, `${props.params.ceilingDbtp.toFixed(1)} dBTP`, (ceilingDbtp) => ({ ceilingDbtp }))}
+          {knob('Release', 'limiter.release', props.params.releaseMs, defaults.releaseMs, 20, 1000, 1, `${Math.round(props.params.releaseMs)} ms`, (releaseMs) => ({ releaseMs }), true)}
+          <div class="col-span-2 flex justify-center">
+            {knob('Link', 'limiter.link', props.params.link, defaults.link, 0, 1, 0.01, `${Math.round(props.params.link * 100)}%`, (link) => ({ link }))}
+          </div>
+        </div>
+        <div class="grid divide-y divide-border border border-border bg-background/80 text-center text-2xs text-muted-foreground">
+          <span class="px-1 py-1.5">Gain reduction <span class="text-yellow-300">{gainReductionDb().toFixed(1)} dB</span></span>
+          <div class="grid grid-cols-2 divide-x divide-border">
+            <span class="px-1 py-1.5">5 ms latency</span>
+            <span class="px-1 py-1.5">4x true peak</span>
+          </div>
         </div>
       </div>
     </EffectShell>

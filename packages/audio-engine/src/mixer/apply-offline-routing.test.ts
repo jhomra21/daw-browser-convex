@@ -22,16 +22,16 @@ describe('offline compressor failure contract', () => {
       const lifecycle = createOfflineCompressorLifecycle(() => {}, () => {})
       const result = lifecycle.create(
         { kind: 'master' },
-        'legacy-compressor',
+        'master-compressor-1',
         () => Promise.reject(new CompressorProcessorError(phase, 'failed')),
       )
       await expect(result).rejects.toMatchObject({
         processor: 'daw-compressor-processor',
         target: { kind: 'master' },
-        instanceId: 'legacy-compressor',
+        instanceId: 'master-compressor-1',
         phase,
       })
-      await expect(result).rejects.toThrow(`instance=legacy-compressor, phase=${phase}`)
+      await expect(result).rejects.toThrow(`instance=master-compressor-1, phase=${phase}`)
     }
   })
 

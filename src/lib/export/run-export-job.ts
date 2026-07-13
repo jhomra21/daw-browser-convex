@@ -17,7 +17,7 @@ import { chooseStemExportDirectory, createStemExportWritable, sanitizeStemFileNa
 import { audioEffectKindFromLocalEffect, listLocalEffects, type LocalEffectRow } from '~/lib/local-effects'
 import { loadLocalAutomationEnvelopes } from '~/lib/local-automation'
 import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
-import { collectAudioEffectOrders, type AudioEffectOrderEntry, compareAudioEffectOrderEntries } from '~/lib/audio-effect-order-rows'
+import { compareAudioEffectOrderEntries } from '~/lib/audio-effect-order-rows'
 import { saveLocalExportMetadataBatch, type LocalExportMetadataInput } from '~/lib/local-export-metadata'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
@@ -87,7 +87,7 @@ export type ExportOutcome =
   | { type: 'error'; message: string; outputs: readonly ExportOutput[] }
 
 type TrackFxMap = NonNullable<ExportFx['trackFx']>
-type TrackFxPatch = TrackFxMap[string]
+type TrackFxPatch = Partial<TrackFxMap[string]>
 type ExportEffectInstanceRow = AudioEffectRuntimeInstance & {
   targetId: string
   index?: number
@@ -100,7 +100,7 @@ const ensureTrackFxMap = (fx: ExportFx): TrackFxMap => {
 }
 
 const applyTrackFxPatch = (trackFx: TrackFxMap, trackId: string, patch: TrackFxPatch) => {
-  trackFx[trackId] = { ...(trackFx[trackId] ?? {}), ...patch }
+  trackFx[trackId] = { ...(trackFx[trackId] ?? { instances: [] }), ...patch }
 }
 
 const createOwnedExportEffectRow = (
@@ -172,13 +172,12 @@ const applyExportEffectInstances = (fx: ExportFx, rows: ExportEffectInstanceRow[
 
 const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
   const trackFx = ensureTrackFxMap(fx)
-  const orderEntries: AudioEffectOrderEntry[] = []
   const instanceRows: ExportEffectInstanceRow[] = []
   for (const row of rows) {
     const kind = audioEffectKindFromLocalEffect(row.effect)
     if (kind) {
-      orderEntries.push({ targetId: row.targetId, kind, instanceId: row.instanceId, index: row.index })
-      const id = row.instanceId ?? kind
+      if (!row.instanceId) throw new Error(`Audio effect "${kind}" is missing an instance ID.`)
+      const id = row.instanceId
       if (kind === 'eq') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: row.params })
       if (kind === 'compressor') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: normalizeCompressorParams(row.params) })
       if (kind === 'saturator') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: normalizeSaturatorParams(row.params) })
@@ -189,31 +188,6 @@ const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
         instanceRows.push(createOwnedExportEffectRow(row.targetId, id, kind, row.params, row.index))
       }
     }
-    if (row.effect === 'master-eq') {
-      fx.masterEq = row.params
-      continue
-    }
-    if (row.effect === 'master-reverb') {
-      fx.masterReverb = normalizeReverbParams(row.params)
-      continue
-    }
-    if (row.effect === 'master-compressor') {
-      fx.masterCompressor = normalizeCompressorParams(row.params)
-      continue
-    }
-    if (row.effect === 'master-saturator') {
-      fx.masterSaturator = normalizeSaturatorParams(row.params)
-      continue
-    }
-    if (row.effect === 'master-delay') {
-      fx.masterDelay = normalizeDelayParams(row.params)
-      continue
-    }
-    if (row.effect === 'eq') applyTrackFxPatch(trackFx, row.targetId, { eq: row.params })
-    if (row.effect === 'compressor') applyTrackFxPatch(trackFx, row.targetId, { compressor: normalizeCompressorParams(row.params) })
-    if (row.effect === 'saturator') applyTrackFxPatch(trackFx, row.targetId, { saturator: normalizeSaturatorParams(row.params) })
-    if (row.effect === 'delay') applyTrackFxPatch(trackFx, row.targetId, { delay: normalizeDelayParams(row.params) })
-    if (row.effect === 'reverb') applyTrackFxPatch(trackFx, row.targetId, { reverb: normalizeReverbParams(row.params) })
     if (row.effect === 'arp') applyTrackFxPatch(trackFx, row.targetId, { arp: row.params })
     if (row.effect === 'synth') applyTrackFxPatch(trackFx, row.targetId, { synth: row.params })
     if (row.effect === 'instrument') {
@@ -221,23 +195,18 @@ const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
       if (instrument) applyTrackFxPatch(trackFx, row.targetId, { instrument })
     }
   }
-  const orders = collectAudioEffectOrders(orderEntries)
-  fx.masterFxOrder = orders.master
-  for (const [trackId, order] of orders.tracks) applyTrackFxPatch(trackFx, trackId, { order })
   applyExportEffectInstances(fx, instanceRows)
 }
 
 const applyRoomEffectRowsToFx = (fx: ExportFx, rows: RoomEffectRow[]) => {
   const trackFx = ensureTrackFxMap(fx)
-  const orderEntries: AudioEffectOrderEntry[] = []
   const instanceRows: ExportEffectInstanceRow[] = []
   for (const row of rows) {
     if (isAudioEffectKind(row.type)) {
-      if (row.targetType === 'master') orderEntries.push({ targetId: 'master', kind: row.type, instanceId: row.instanceId, index: row.index })
-      else if (row.trackId) orderEntries.push({ targetId: row.trackId, kind: row.type, instanceId: row.instanceId, index: row.index })
       const targetId = row.targetType === 'master' ? 'master' : row.trackId
       if (targetId && row.params) {
-        const id = row.instanceId ?? row.type
+        if (!row.instanceId) throw new Error(`Audio effect "${row.type}" is missing an instance ID.`)
+        const id = row.instanceId
         if (row.type === 'eq') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: row.params })
         if (row.type === 'compressor') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeCompressorParams(row.params) })
         if (row.type === 'saturator') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeSaturatorParams(row.params) })
@@ -249,21 +218,9 @@ const applyRoomEffectRowsToFx = (fx: ExportFx, rows: RoomEffectRow[]) => {
         }
       }
     }
-    if (row.targetType === 'master') {
-      if (row.type === 'eq' && row.params) fx.masterEq = row.params
-      if (row.type === 'compressor' && row.params) fx.masterCompressor = normalizeCompressorParams(row.params)
-      if (row.type === 'saturator' && row.params) fx.masterSaturator = normalizeSaturatorParams(row.params)
-      if (row.type === 'delay' && row.params) fx.masterDelay = normalizeDelayParams(row.params)
-      if (row.type === 'reverb' && row.params) fx.masterReverb = normalizeReverbParams(row.params)
-      continue
-    }
+    if (row.targetType === 'master') continue
     const trackId = row.trackId
     if (!trackId || !row.params) continue
-    if (row.type === 'eq') applyTrackFxPatch(trackFx, trackId, { eq: row.params })
-    if (row.type === 'compressor') applyTrackFxPatch(trackFx, trackId, { compressor: normalizeCompressorParams(row.params) })
-    if (row.type === 'saturator') applyTrackFxPatch(trackFx, trackId, { saturator: normalizeSaturatorParams(row.params) })
-    if (row.type === 'delay') applyTrackFxPatch(trackFx, trackId, { delay: normalizeDelayParams(row.params) })
-    if (row.type === 'reverb') applyTrackFxPatch(trackFx, trackId, { reverb: normalizeReverbParams(row.params) })
     if (row.type === 'arpeggiator') applyTrackFxPatch(trackFx, trackId, { arp: row.params })
     if (row.type === 'synth') applyTrackFxPatch(trackFx, trackId, { synth: row.params })
     if (row.type === 'instrument') {
@@ -271,9 +228,6 @@ const applyRoomEffectRowsToFx = (fx: ExportFx, rows: RoomEffectRow[]) => {
       if (instrument) applyTrackFxPatch(trackFx, trackId, { instrument })
     }
   }
-  const orders = collectAudioEffectOrders(orderEntries)
-  fx.masterFxOrder = orders.master
-  for (const [trackId, order] of orders.tracks) applyTrackFxPatch(trackFx, trackId, { order })
   applyExportEffectInstances(fx, instanceRows)
 }
 
@@ -328,18 +282,14 @@ async function ensureBuffersForRange(input: ExportTrackSnapshotInput) {
 }
 
 async function loadExportFx(projectId: string | undefined, userId: string | undefined, masterVolume: number): Promise<ExportFx> {
-  const fx: ExportFx = { trackFx: {}, masterVolume }
+  const fx: ExportFx = { trackFx: {}, masterFxInstances: [], masterVolume }
   const localOnly = projectId ? isLocalId('project', projectId) : false
   if (localOnly && projectId) {
-    try {
-      applyLocalEffectRowsToFx(fx, await listLocalEffects(projectId))
-    } catch {}
+    applyLocalEffectRowsToFx(fx, await listLocalEffects(projectId))
   }
   if (!localOnly && projectId && userId) {
-    try {
-      const rows = await convexClient.query(convexApi.effects.listByRoom, { projectId })
-      applyRoomEffectRowsToFx(fx, rows)
-    } catch {}
+    const rows = await convexClient.query(convexApi.effects.listByRoom, { projectId })
+    applyRoomEffectRowsToFx(fx, rows)
   }
   return fx
 }
@@ -347,17 +297,12 @@ async function loadExportFx(projectId: string | undefined, userId: string | unde
 async function loadExportAutomation(projectId: string | undefined, userId: string | undefined): Promise<AutomationEnvelope[]> {
   const localOnly = projectId ? isLocalId('project', projectId) : false
   if (localOnly && projectId) {
-    try {
-      return await loadLocalAutomationEnvelopes(projectId)
-    } catch {
-      return []
-    }
+    return loadLocalAutomationEnvelopes(projectId)
   }
   if (!localOnly && projectId && userId) {
-    try {
-      const rows = await convexClient.query(convexApi.automation.listByProject, { projectId })
-      const envelopes: AutomationEnvelope[] = []
-      for (const row of rows) {
+    const rows = await convexClient.query(convexApi.automation.listByProject, { projectId })
+    const envelopes: AutomationEnvelope[] = []
+    for (const row of rows) {
         if (row.targetKind === 'master') {
           envelopes.push({
             id: row._id,
@@ -382,11 +327,8 @@ async function loadExportAutomation(projectId: string | undefined, userId: strin
           points: row.points,
           updatedAt: row.updatedAt,
         })
-      }
-      return envelopes
-    } catch {
-      return []
     }
+    return envelopes
   }
   return []
 }

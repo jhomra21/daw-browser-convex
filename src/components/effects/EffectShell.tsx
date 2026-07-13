@@ -18,7 +18,12 @@ export default function EffectShell(props: EffectShellProps) {
   const hasActions = () => props.actionsBeforeReset || props.onReset || props.onToggleEnabled
 
   return (
-    <div class={cn('flex h-full flex-col border border-border bg-app-surface text-foreground', props.class)}>
+    <div
+      class={cn(
+        'effect-shell flex h-full self-stretch flex-col border border-border bg-app-surface text-foreground',
+        props.class,
+      )}
+    >
       <div data-effect-shell-header="true" class="flex items-stretch justify-between border-b border-border px-2 py-1">
         <div class="flex min-w-0 items-center gap-2">
           <span class="truncate text-xs font-semibold">{props.title}</span>

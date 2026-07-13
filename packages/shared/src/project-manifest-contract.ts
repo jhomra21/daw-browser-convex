@@ -1,5 +1,3 @@
-import { isOwnedProcessorKind } from "./owned-processor-descriptors";
-
 export type ProjectManifestEntityRow = {
   kind: string;
   id: string;
@@ -47,7 +45,6 @@ export type ProjectManifest = {
 
 export const PROJECT_MANIFEST_SCHEMA_VERSION = 2;
 export const SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS: readonly number[] = [
-  1,
   PROJECT_MANIFEST_SCHEMA_VERSION,
 ];
 
@@ -84,15 +81,6 @@ const readEntityRow = (value: unknown): ProjectManifestEntityRow => {
     value: value.value,
     updatedAt: readNumber(value.updatedAt, "entity.updatedAt"),
   };
-};
-
-const migrateEffectEntityValue = (value: unknown) => {
-  if (!isRecord(value) || !isOwnedProcessorKind(value.effect)) return value;
-  if (!isRecord(value.params)) return value;
-  const params = (value.params.version === 1 || value.params.version === 2) && isRecord(value.params.state)
-    ? value.params
-    : { version: 1, state: value.params };
-  return { ...value, params };
 };
 
 const readProjectStateRow = (value: unknown): ProjectManifestStateRow => {
@@ -155,8 +143,11 @@ export const assertProjectManifestPublishIntegrity = (manifest: ProjectManifest)
   }
 };
 
-const readProjectManifestV1 = (raw: Record<string, unknown>): ProjectManifest => {
+const readProjectManifest = (raw: Record<string, unknown>): ProjectManifest => {
   const schemaVersion = readNumber(raw.schemaVersion, "schemaVersion");
+  if (schemaVersion !== PROJECT_MANIFEST_SCHEMA_VERSION) {
+    throw new Error(`Unsupported project manifest schema version ${schemaVersion}.`);
+  }
   if (raw.mode !== "backup" && raw.mode !== "shared") {
     throw new Error("Project manifest has invalid mode.");
   }
@@ -199,24 +190,12 @@ const readProjectManifestV1 = (raw: Record<string, unknown>): ProjectManifest =>
   return manifest;
 };
 
-const readProjectManifestV2 = (raw: Record<string, unknown>): ProjectManifest => {
-  const manifest = readProjectManifestV1(raw);
-  const entities = manifest.entities.map((row) => (
-    row.kind === "effect" ? { ...row, value: migrateEffectEntityValue(row.value) } : row
-  ));
-  return { ...manifest, schemaVersion: 2, entities, entityCount: entities.length };
-};
-
-export const migrateProjectManifest = (raw: unknown): ProjectManifest => {
+export const normalizeProjectManifest = (raw: unknown): ProjectManifest => {
   if (!isRecord(raw)) throw new Error("Project manifest must be an object.");
-  const schemaVersion = readNumber(raw.schemaVersion, "schemaVersion");
-  if (schemaVersion === 1 || schemaVersion === 2) return readProjectManifestV2(raw);
-  throw new Error(`Unsupported project manifest schema version ${schemaVersion}.`);
+  return readProjectManifest(raw);
 };
 
-export const normalizeProjectManifest = (raw: unknown) => migrateProjectManifest(raw);
-
-export const parseProjectManifest = (json: string) => migrateProjectManifest(JSON.parse(json));
+export const parseProjectManifest = (json: string) => normalizeProjectManifest(JSON.parse(json));
 
 export const readProjectManifestCloudKeys = (
   projectId: string,

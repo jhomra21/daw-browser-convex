@@ -1,6 +1,6 @@
 import { AUDIO_EFFECT_ORDER, normalizeAudioEffectInstanceOrder, normalizeAudioEffectOrder, type AudioEffectInstance, type AudioEffectKind } from '@daw-browser/shared'
 
-export type AudioEffectOrderEntry = {
+type AudioEffectOrderEntry = {
   targetId: string
   kind: AudioEffectKind | 'spectral'
   instanceId?: string

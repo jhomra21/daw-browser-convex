@@ -8,6 +8,7 @@ import { normalizeTrackChannelRole } from '@daw-browser/shared'
 import { normalizeProjectMixState } from '~/lib/project-mix-state'
 import type { TimelineClipRow, TimelineTrackRow } from '~/lib/timeline-repository/types'
 import { getDefaultClipColor } from '~/lib/clip-color'
+import { localSidechainRouteRowId } from '~/lib/local-effects'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 
@@ -182,7 +183,7 @@ export const cacheRemoteTimelineSnapshot = async (
         ...cachedSidechains.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
         ...tracks.map((track) => tx.objectStore('entities').put(createLocalProjectEntityRow(TRACK_KIND, track.id, track, timestamp))),
         ...clipsWithExistingTracks.map((clip) => tx.objectStore('entities').put(createLocalProjectEntityRow(CLIP_KIND, clip.id, clip, timestamp))),
-        ...sidechainRoutes.map((route) => tx.objectStore('entities').put(createLocalProjectEntityRow(SIDECHAIN_KIND, route.effectInstanceId, route, timestamp))),
+        ...sidechainRoutes.map((route) => tx.objectStore('entities').put(createLocalProjectEntityRow(SIDECHAIN_KIND, localSidechainRouteRowId(route.targetTrackId, route.effectInstanceId), route, timestamp))),
         ...assets.map((asset) => tx.objectStore('assets').put(asset)),
         ...clipsWithExistingTracks.flatMap((clip) => clip.sourceAssetKey && clip.sampleUrl
       ? [tx.objectStore('syncState').put({

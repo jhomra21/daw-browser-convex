@@ -23,6 +23,7 @@ import type {
 } from '~/lib/timeline-repository/types'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import { buildTimelineTrackRow } from './track-row-builder'
+import { localSidechainRouteRowId } from '~/lib/local-effects'
 
 const TRACK_KIND = 'track'
 const CLIP_KIND = 'clip'
@@ -828,14 +829,14 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     const matchingEffects = effectRows.filter((row) => (
       isObject(row.value)
       && row.value.targetId === route.targetTrackId
-      && row.value.effect === 'compressor'
+      && (row.value.effect === 'compressor' || row.value.effect === 'gate' || row.value.effect === 'spectral')
       && row.value.instanceId === route.effectInstanceId
     ))
     if (matchingEffects.length !== 1) {
       await tx.done
-      throw new Error('Sidechain target must identify exactly one compressor instance.')
+      throw new Error('Sidechain target must identify exactly one compressor, gate, or spectral instance.')
     }
-    await tx.store.put(toEntityRow(SIDECHAIN_KIND, route.effectInstanceId, route, now()))
+    await tx.store.put(toEntityRow(SIDECHAIN_KIND, localSidechainRouteRowId(route.targetTrackId, route.effectInstanceId), route, now()))
     await tx.done
     markChanged()
   }
@@ -843,9 +844,9 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
   const removeSidechainRoute = async (targetTrackId: string, effectInstanceId: string): Promise<void> => {
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
-    const row = await db.get('entities', [SIDECHAIN_KIND, effectInstanceId])
+    const row = await db.get('entities', [SIDECHAIN_KIND, localSidechainRouteRowId(targetTrackId, effectInstanceId)])
     if (!isSidechainRoute(row?.value) || row.value.targetTrackId !== targetTrackId) return
-    await db.delete('entities', [SIDECHAIN_KIND, effectInstanceId])
+    await db.delete('entities', [SIDECHAIN_KIND, localSidechainRouteRowId(targetTrackId, effectInstanceId)])
     markChanged()
   }
 

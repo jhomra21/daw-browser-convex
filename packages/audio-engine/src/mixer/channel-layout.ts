@@ -1,4 +1,4 @@
-import { assert, normalizeAudioEffectOrder, AUDIO_EFFECT_ORDER, type AudioEffectKind } from '@daw-browser/shared'
+import { assert } from '@daw-browser/shared'
 import type { ChannelLayout, MixerTrackFx, ResolvedMixerGraph } from './types'
 
 export const getSourceChannelLayout = (channelCounts: readonly number[] | undefined): ChannelLayout | undefined => {
@@ -11,34 +11,20 @@ export const convertStereoToMonoSample = (left: number, right: number) => (0.5 *
 
 export const duplicateMonoSample = (sample: number): readonly [number, number] => [sample, sample]
 
-const expandsLayout = (kind: AudioEffectKind, params: { enabled?: boolean; pingPong?: boolean; stereoWidth?: number }) =>
+const expandsLayout = (kind: 'delay' | 'reverb', params: { enabled?: boolean; pingPong?: boolean; stereoWidth?: number }) =>
   params.enabled === true && (
     (kind === 'delay' && params.pingPong === true) ||
-    (kind === 'reverb' && (params.stereoWidth ?? 0) > 0) ||
-    kind === 'chorus' || kind === 'autopan' || kind === 'ensemble'
+    (kind === 'reverb' && (params.stereoWidth ?? 0) > 0)
   )
 
 const propagateEffects = (input: ChannelLayout, fx: MixerTrackFx | ResolvedMixerGraph['master']): ChannelLayout => {
   let layout = input
-  if (fx.instances) {
-    for (const instance of fx.instances) {
-      if (instance.kind === 'chorus' || instance.kind === 'autopan' || instance.kind === 'ensemble') {
-        if (instance.params.state.enabled) layout = 'stereo'
-      } else if (instance.kind === 'delay' || instance.kind === 'reverb') {
-        if (expandsLayout(instance.kind, instance.params)) layout = 'stereo'
-      }
+  for (const instance of fx.instances) {
+    if (instance.kind === 'chorus' || instance.kind === 'autopan' || instance.kind === 'ensemble') {
+      if (instance.params.state.enabled) layout = 'stereo'
+    } else if ((instance.kind === 'delay' || instance.kind === 'reverb') && expandsLayout(instance.kind, instance.params)) {
+      layout = 'stereo'
     }
-    return layout
-  }
-  const order = normalizeAudioEffectOrder(fx.order ?? AUDIO_EFFECT_ORDER, AUDIO_EFFECT_ORDER)
-  for (const kind of order) {
-    const params = kind === 'eq' ? fx.eq
-      : kind === 'compressor' ? fx.compressor
-      : kind === 'saturator' ? fx.saturator
-      : kind === 'delay' ? fx.delay
-      : kind === 'reverb' ? fx.reverb
-      : undefined
-    if (params && expandsLayout(kind, params)) layout = 'stereo'
   }
   return layout
 }
@@ -71,7 +57,7 @@ export function propagateMixerGraphLayouts(graph: ResolvedMixerGraph): ResolvedM
     assert(entry, `Missing mixer channel ${channelId}`)
     const upstream = (incoming.get(channelId) ?? []).map((sourceId) => visit(sourceId).output)
     const input = upstream.length > 0 ? mergeLayouts(upstream) : entry.sourceLayout ?? 'stereo'
-    const output = propagateEffects(input, entry.fx ?? {})
+    const output = propagateEffects(input, entry.fx ?? { instances: [] })
     const result = { input, output }
     resolved.set(channelId, result)
     visiting.delete(channelId)

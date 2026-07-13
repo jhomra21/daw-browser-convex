@@ -10,6 +10,7 @@ type UseDragOptions = {
   disabled?: () => boolean
   dragCursorClass?: string
   preventDefaultOnPointerDown?: boolean
+  preserveActiveDragOnCleanup?: boolean
 }
 
 export function useDrag(options: UseDragOptions = {}) {
@@ -66,7 +67,10 @@ export function useDrag(options: UseDragOptions = {}) {
     void options.onDragStart?.(getPointerPos(event), event)
   }
 
-  onCleanup(cancelDrag)
+  onCleanup(() => {
+    if (options.preserveActiveDragOnCleanup && activePointerId !== null) return
+    cancelDrag()
+  })
 
   return {
     isDragging,

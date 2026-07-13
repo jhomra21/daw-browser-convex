@@ -35,10 +35,6 @@ export const automationTargetKey = (target: AutomationTarget, parameterId: strin
   ])}`
 )
 
-export const isV2AutomationTargetKey = (targetKey: string): boolean => (
-  targetKey.startsWith(AUTOMATION_TARGET_KEY_V2_PREFIX)
-)
-
 export const automationTargetMatchesEffectInstance = (
   target: unknown,
   effectInstanceId: string,

@@ -323,8 +323,6 @@ export const executeTimelineOperation = async (
         targetKind: operation.payload.targetKind,
         trackId: operation.payload.trackId,
         effectInstanceId: operation.payload.effectInstanceId,
-        existingEnvelopeId: operation.payload.existingEnvelopeId,
-        existingOpaqueIdentity: operation.payload.existingOpaqueIdentity,
         parameterId: operation.payload.parameterId,
         enabled: operation.payload.enabled,
         points: operation.payload.points,
@@ -336,8 +334,6 @@ export const executeTimelineOperation = async (
         targetKind: operation.payload.targetKind,
         trackId: operation.payload.trackId,
         effectInstanceId: operation.payload.effectInstanceId,
-        existingEnvelopeId: operation.payload.existingEnvelopeId,
-        existingOpaqueIdentity: operation.payload.existingOpaqueIdentity,
         parameterId: operation.payload.parameterId,
       })
   }

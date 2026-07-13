@@ -1,7 +1,7 @@
 import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime, type AudioRuntimeOptions } from './audio-runtime'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
-import { assert, getAutomationParameterDescriptor, normalizeMasterVolume, type ArpParams, type AudioEffectKind, type AutomationEnvelope, type CompressorParamsLite, type DelayParamsLite, type EqParamsLite, type ReverbParamsLite, type SaturatorParamsLite, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
+import { assert, getAutomationParameterDescriptor, normalizeMasterVolume, type ArpParams, type AutomationEnvelope, type ReverbParamsLite, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { createReverbImpulseCache } from './effects/reverb-impulse-cache'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
@@ -560,36 +560,16 @@ export class AudioEngine {
     return this.impulseCache.get(ctx, params)
   }
 
-  setTrackReverb(trackId: string, params: ReverbParamsLite) {
-    this.mixerRuntime.setTrackReverb(trackId, params)
-  }
-
-  setTrackCompressor(trackId: string, params: CompressorParamsLite) {
-    this.mixerRuntime.setTrackCompressor(trackId, params)
-  }
-
-  subscribeTrackCompressorMeter(trackId: string, listener: CompressorMeterListener) {
-    return this.mixerRuntime.subscribeTrackCompressorMeter(trackId, listener)
+  subscribeTrackCompressorMeter(trackId: string, effectInstanceId: string, listener: CompressorMeterListener) {
+    return this.mixerRuntime.subscribeTrackCompressorMeter(trackId, effectInstanceId, listener)
   }
 
   subscribeTrackGateMeter(trackId: string, effectInstanceId: string, listener: GateMeterListener) {
     return this.mixerRuntime.subscribeTrackGateMeter(trackId, effectInstanceId, listener)
   }
 
-  setTrackSaturator(trackId: string, params: SaturatorParamsLite) {
-    this.mixerRuntime.setTrackSaturator(trackId, params)
-  }
-
-  setTrackDelay(trackId: string, params: DelayParamsLite) {
-    this.mixerRuntime.setTrackDelay(trackId, params)
-  }
-
-  setTrackFxOrder(trackId: string, order: AudioEffectKind[]) {
-    this.mixerRuntime.setTrackFxOrder(trackId, order)
-  }
-
-  setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]) {
-    this.mixerRuntime.setTrackFxInstances(trackId, instances)
+  async setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]) {
+    await this.mixerRuntime.setTrackFxInstances(trackId, instances)
   }
 
   setExternalSidechainRoutes(routes: ExternalSidechainRoute[]) {
@@ -604,47 +584,16 @@ export class AudioEngine {
     this.mixerRuntime.setCueDestination(destination)
   }
 
-  setMasterReverb(params: ReverbParamsLite) {
-    this.masterFx.setReverb(
-      this.audioCtx,
-      this.masterGain,
-      this.destination,
-      params,
-      (nextParams) => this.createImpulseResponse(nextParams),
-    )
-    this.mixerRuntime.publishGraphLatency()
-  }
-
-  setMasterCompressor(params: CompressorParamsLite) {
-    this.masterFx.setCompressor(this.audioCtx, this.masterGain, this.destination, params)
-    this.mixerRuntime.publishGraphLatency()
-  }
-
-  subscribeMasterCompressorMeter(listener: CompressorMeterListener) {
-    return this.masterFx.subscribeCompressorMeter(listener)
+  subscribeMasterCompressorMeter(effectInstanceId: string, listener: CompressorMeterListener) {
+    return this.masterFx.subscribeCompressorMeter(effectInstanceId, listener)
   }
 
   subscribeMasterGateMeter(effectInstanceId: string, listener: GateMeterListener) {
     return this.masterFx.subscribeGateMeter(effectInstanceId, listener)
   }
 
-  setMasterSaturator(params: SaturatorParamsLite) {
-    this.masterFx.setSaturator(this.audioCtx, this.masterGain, this.destination, params)
-    this.mixerRuntime.publishGraphLatency()
-  }
-
-  setMasterDelay(params: DelayParamsLite) {
-    this.masterFx.setDelay(this.audioCtx, this.masterGain, this.destination, params)
-    this.mixerRuntime.publishGraphLatency()
-  }
-
-  setMasterFxOrder(order: AudioEffectKind[]) {
-    this.masterFx.setOrder(this.audioCtx, this.masterGain, this.destination, order)
-    this.mixerRuntime.publishGraphLatency()
-  }
-
-  setMasterFxInstances(instances: AudioEffectRuntimeInstance[]) {
-    this.masterFx.setFxInstances(
+  async setMasterFxInstances(instances: AudioEffectRuntimeInstance[]) {
+    await this.masterFx.setFxInstances(
       this.audioCtx,
       this.masterGain,
       this.destination,
@@ -664,10 +613,6 @@ export class AudioEngine {
     this.masterVolume = nextVolume
     if (!this.masterGain) return
     this.masterGain.gain.value = nextVolume
-  }
-
-  setTrackEq(trackId: string, params: EqParamsLite) {
-    this.mixerRuntime.setTrackEq(trackId, params)
   }
 
   updateTrackGains(tracks: RuntimeTrack[]) {
@@ -825,11 +770,6 @@ export class AudioEngine {
     this.faultGeneration = this.runtimeFaultCounter.reset()
     this.inferredApplicationStallCount = 0
     this.publishRuntimeSnapshot()
-  }
-
-  setMasterEq(params: EqParamsLite) {
-    this.masterFx.setEq(this.audioCtx, this.masterGain, this.destination, params)
-    this.mixerRuntime.publishGraphLatency()
   }
 
   // --- Live spectrum sampling (Ableton-like) ---

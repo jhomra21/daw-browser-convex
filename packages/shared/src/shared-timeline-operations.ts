@@ -192,34 +192,34 @@ export type SharedTimelineOperation =
   | { kind: 'tracks.setVolume'; payload: { trackId: string; volume: number } }
   | { kind: 'tracks.setMix'; payload: { trackId: string; muted?: boolean; soloed?: boolean } }
   | { kind: 'mixer.setMasterVolume'; payload: { volume: number } }
-  | { kind: 'effects.setEqParams'; payload: { trackId: string; params: EqParams; instanceId?: string } }
+  | { kind: 'effects.setEqParams'; payload: { trackId: string; params: EqParams; instanceId: string } }
   | { kind: 'effects.setUtilityParams'; payload: { trackId: string; params: UtilityParamsEnvelope; instanceId: string } }
   | { kind: 'effects.setGateParams'; payload: { trackId: string; params: GateParamsEnvelope; instanceId: string } }
   | { kind: 'effects.setLimiterParams'; payload: { trackId: string; params: LimiterParamsEnvelope; instanceId: string } }
   | { kind: 'effects.setModulationParams'; payload: SharedModulationEffectPayload & { trackId: string } }
-  | { kind: 'effects.setCompressorParams'; payload: { trackId: string; params: CompressorParams; instanceId?: string } }
-  | { kind: 'effects.setSaturatorParams'; payload: { trackId: string; params: SaturatorParams; instanceId?: string } }
-  | { kind: 'effects.setDelayParams'; payload: { trackId: string; params: DelayParams; instanceId?: string } }
+  | { kind: 'effects.setCompressorParams'; payload: { trackId: string; params: CompressorParams; instanceId: string } }
+  | { kind: 'effects.setSaturatorParams'; payload: { trackId: string; params: SaturatorParams; instanceId: string } }
+  | { kind: 'effects.setDelayParams'; payload: { trackId: string; params: DelayParams; instanceId: string } }
   | { kind: 'effects.setSpectralParams'; payload: { trackId: string; params: SpectralParamsEnvelope; instanceId: string } }
   | { kind: 'effects.reorderAudioChain'; payload: { trackId: string; order: AudioEffectOrderItem[] } }
-  | { kind: 'effects.removeAudioEffect'; payload: { targetType: 'track'; trackId: string; effect: AudioEffectKind; instanceId?: string } | { targetType: 'master'; effect: AudioEffectKind; instanceId?: string } }
-  | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: SharedReverbParams; instanceId?: string } }
+  | { kind: 'effects.removeAudioEffect'; payload: { targetType: 'track'; trackId: string; effect: AudioEffectKind; instanceId: string } | { targetType: 'master'; effect: AudioEffectKind; instanceId: string } }
+  | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: SharedReverbParams; instanceId: string } }
   | { kind: 'effects.setSynthParams'; payload: { trackId: string; params: SharedSynthParams } }
   | { kind: 'instruments.setTrackInstrument'; payload: { trackId: string; instrument: TrackInstrumentParams } }
   | { kind: 'effects.setArpeggiatorParams'; payload: { trackId: string; params: ArpeggiatorParams } }
-  | { kind: 'effects.setMasterEqParams'; payload: { params: EqParams; instanceId?: string } }
+  | { kind: 'effects.setMasterEqParams'; payload: { params: EqParams; instanceId: string } }
   | { kind: 'effects.setMasterUtilityParams'; payload: { params: UtilityParamsEnvelope; instanceId: string } }
   | { kind: 'effects.setMasterGateParams'; payload: { params: GateParamsEnvelope; instanceId: string } }
   | { kind: 'effects.setMasterLimiterParams'; payload: { params: LimiterParamsEnvelope; instanceId: string } }
   | { kind: 'effects.setMasterModulationParams'; payload: SharedModulationEffectPayload }
-  | { kind: 'effects.setMasterCompressorParams'; payload: { params: CompressorParams; instanceId?: string } }
-  | { kind: 'effects.setMasterSaturatorParams'; payload: { params: SaturatorParams; instanceId?: string } }
-  | { kind: 'effects.setMasterDelayParams'; payload: { params: DelayParams; instanceId?: string } }
+  | { kind: 'effects.setMasterCompressorParams'; payload: { params: CompressorParams; instanceId: string } }
+  | { kind: 'effects.setMasterSaturatorParams'; payload: { params: SaturatorParams; instanceId: string } }
+  | { kind: 'effects.setMasterDelayParams'; payload: { params: DelayParams; instanceId: string } }
   | { kind: 'effects.setMasterSpectralParams'; payload: { params: SpectralParamsEnvelope; instanceId: string } }
-  | { kind: 'effects.setMasterReverbParams'; payload: { params: SharedReverbParams; instanceId?: string } }
+  | { kind: 'effects.setMasterReverbParams'; payload: { params: SharedReverbParams; instanceId: string } }
   | { kind: 'effects.reorderMasterAudioChain'; payload: { order: AudioEffectOrderItem[] } }
-  | { kind: 'automation.setEnvelope'; payload: { targetKind: 'track' | 'master'; trackId?: string; effectInstanceId?: string; existingEnvelopeId?: string; existingOpaqueIdentity?: string; parameterId: string; enabled: boolean; points: AutomationPoint[]; updatedAt: number } }
-  | { kind: 'automation.deleteEnvelope'; payload: { targetKind: 'track' | 'master'; trackId?: string; effectInstanceId?: string; existingEnvelopeId?: string; existingOpaqueIdentity?: string; parameterId: string } }
+  | { kind: 'automation.setEnvelope'; payload: { targetKind: 'track' | 'master'; trackId?: string; effectInstanceId?: string; parameterId: string; enabled: boolean; points: AutomationPoint[]; updatedAt: number } }
+  | { kind: 'automation.deleteEnvelope'; payload: { targetKind: 'track' | 'master'; trackId?: string; effectInstanceId?: string; parameterId: string } }
 
 export type SharedTimelineOperationKind = SharedTimelineOperation['kind']
 
@@ -282,10 +282,6 @@ const readAudioEffectOrder = (value: unknown): AudioEffectOrderItem[] | null => 
   return order
 }
 
-const readOptionalInstanceId = (value: unknown): string | undefined => (
-  typeof value === 'string' && value.length > 0 ? value : undefined
-)
-
 const readRequiredInstanceId = (value: unknown): string | null => (
   typeof value === 'string' && value.length > 0 ? value : null
 )
@@ -318,9 +314,9 @@ const readModulationEnvelope = (effect: unknown, value: unknown): SharedModulati
 const effectPayload = <Params>(
   params: Params,
   payload: Record<string, unknown>,
-): { params: Params; instanceId?: string } => {
-  const instanceId = readOptionalInstanceId(payload.instanceId)
-  return instanceId ? { params, instanceId } : { params }
+): { params: Params; instanceId: string } | null => {
+  const instanceId = readRequiredInstanceId(payload.instanceId)
+  return instanceId ? { params, instanceId } : null
 }
 
 const readMoves = (value: unknown): MoveClipInput[] => Array.isArray(value)
@@ -1014,7 +1010,8 @@ const parseMasterVolume = (payload: Record<string, unknown>): SharedTimelineOper
 
 const parseTrackEq = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readEqParams(payload.params)
-  return typeof payload.trackId === 'string' && params ? { kind: 'effects.setEqParams', payload: { trackId: payload.trackId, ...effectPayload(params, payload) } } : null
+  const identity = params ? effectPayload(params, payload) : null
+  return typeof payload.trackId === 'string' && identity ? { kind: 'effects.setEqParams', payload: { trackId: payload.trackId, ...identity } } : null
 }
 
 const parseTrackProcessor = (
@@ -1060,22 +1057,26 @@ const parseModulationEffect = (
 
 const parseTrackReverb = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readReverbParams(payload.params)
-  return typeof payload.trackId === 'string' && params ? { kind: 'effects.setReverbParams', payload: { trackId: payload.trackId, ...effectPayload(params, payload) } } : null
+  const identity = params ? effectPayload(params, payload) : null
+  return typeof payload.trackId === 'string' && identity ? { kind: 'effects.setReverbParams', payload: { trackId: payload.trackId, ...identity } } : null
 }
 
 const parseTrackCompressor = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readCompressorParams(payload.params)
-  return typeof payload.trackId === 'string' && params ? { kind: 'effects.setCompressorParams', payload: { trackId: payload.trackId, ...effectPayload(params, payload) } } : null
+  const identity = params ? effectPayload(params, payload) : null
+  return typeof payload.trackId === 'string' && identity ? { kind: 'effects.setCompressorParams', payload: { trackId: payload.trackId, ...identity } } : null
 }
 
 const parseTrackSaturator = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readSaturatorParams(payload.params)
-  return typeof payload.trackId === 'string' && params ? { kind: 'effects.setSaturatorParams', payload: { trackId: payload.trackId, ...effectPayload(params, payload) } } : null
+  const identity = params ? effectPayload(params, payload) : null
+  return typeof payload.trackId === 'string' && identity ? { kind: 'effects.setSaturatorParams', payload: { trackId: payload.trackId, ...identity } } : null
 }
 
 const parseTrackDelay = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readDelayParams(payload.params)
-  return typeof payload.trackId === 'string' && params ? { kind: 'effects.setDelayParams', payload: { trackId: payload.trackId, ...effectPayload(params, payload) } } : null
+  const identity = params ? effectPayload(params, payload) : null
+  return typeof payload.trackId === 'string' && identity ? { kind: 'effects.setDelayParams', payload: { trackId: payload.trackId, ...identity } } : null
 }
 
 const parseSpectralParams = (value: unknown): SpectralParamsEnvelope | null => {
@@ -1099,12 +1100,13 @@ const parseTrackAudioChainReorder = (payload: Record<string, unknown>): SharedTi
 
 const parseRemoveAudioEffect = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   if (!isAudioEffectKind(payload.effect)) return null
-  const instanceId = readOptionalInstanceId(payload.instanceId)
+  const instanceId = readRequiredInstanceId(payload.instanceId)
+  if (!instanceId) return null
   if (payload.targetType === 'master') {
-    return { kind: 'effects.removeAudioEffect', payload: instanceId ? { targetType: 'master', effect: payload.effect, instanceId } : { targetType: 'master', effect: payload.effect } }
+    return { kind: 'effects.removeAudioEffect', payload: { targetType: 'master', effect: payload.effect, instanceId } }
   }
   if (payload.targetType === 'track' && typeof payload.trackId === 'string') {
-    return { kind: 'effects.removeAudioEffect', payload: instanceId ? { targetType: 'track', trackId: payload.trackId, effect: payload.effect, instanceId } : { targetType: 'track', trackId: payload.trackId, effect: payload.effect } }
+    return { kind: 'effects.removeAudioEffect', payload: { targetType: 'track', trackId: payload.trackId, effect: payload.effect, instanceId } }
   }
   return null
 }
@@ -1132,7 +1134,8 @@ const parseTrackArpeggiator = (payload: Record<string, unknown>): SharedTimeline
 
 const parseMasterEq = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readEqParams(payload.params)
-  return params ? { kind: 'effects.setMasterEqParams', payload: effectPayload(params, payload) } : null
+  const identity = params ? effectPayload(params, payload) : null
+  return identity ? { kind: 'effects.setMasterEqParams', payload: identity } : null
 }
 
 const parseMasterProcessor = (
@@ -1152,22 +1155,26 @@ const parseMasterProcessor = (
 
 const parseMasterReverb = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readReverbParams(payload.params)
-  return params ? { kind: 'effects.setMasterReverbParams', payload: effectPayload(params, payload) } : null
+  const identity = params ? effectPayload(params, payload) : null
+  return identity ? { kind: 'effects.setMasterReverbParams', payload: identity } : null
 }
 
 const parseMasterCompressor = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readCompressorParams(payload.params)
-  return params ? { kind: 'effects.setMasterCompressorParams', payload: effectPayload(params, payload) } : null
+  const identity = params ? effectPayload(params, payload) : null
+  return identity ? { kind: 'effects.setMasterCompressorParams', payload: identity } : null
 }
 
 const parseMasterSaturator = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readSaturatorParams(payload.params)
-  return params ? { kind: 'effects.setMasterSaturatorParams', payload: effectPayload(params, payload) } : null
+  const identity = params ? effectPayload(params, payload) : null
+  return identity ? { kind: 'effects.setMasterSaturatorParams', payload: identity } : null
 }
 
 const parseMasterDelay = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readDelayParams(payload.params)
-  return params ? { kind: 'effects.setMasterDelayParams', payload: effectPayload(params, payload) } : null
+  const identity = params ? effectPayload(params, payload) : null
+  return identity ? { kind: 'effects.setMasterDelayParams', payload: identity } : null
 }
 
 const parseMasterSpectral = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
@@ -1193,8 +1200,6 @@ const parseAutomationSetEnvelope = (payload: Record<string, unknown>): SharedTim
   if (targetKind === 'track' && typeof payload.trackId !== 'string') return null
   const trackId = targetKind === 'track' && typeof payload.trackId === 'string' ? payload.trackId : undefined
   const effectInstanceId = typeof payload.effectInstanceId === 'string' ? payload.effectInstanceId : undefined
-  const existingEnvelopeId = typeof payload.existingEnvelopeId === 'string' ? payload.existingEnvelopeId : undefined
-  const existingOpaqueIdentity = typeof payload.existingOpaqueIdentity === 'string' ? payload.existingOpaqueIdentity : undefined
   if (!isAutomationParameterSupportedForTarget(payload.parameterId, targetKind)) return null
   const points = readAutomationPoints(payload.parameterId, payload.points)
   return points ? {
@@ -1203,8 +1208,6 @@ const parseAutomationSetEnvelope = (payload: Record<string, unknown>): SharedTim
       targetKind,
       trackId,
       effectInstanceId,
-      existingEnvelopeId,
-      existingOpaqueIdentity,
       parameterId: payload.parameterId,
       enabled: payload.enabled,
       points,
@@ -1219,8 +1222,6 @@ const parseAutomationDeleteEnvelope = (payload: Record<string, unknown>): Shared
   if (targetKind === 'track' && typeof payload.trackId !== 'string') return null
   const trackId = targetKind === 'track' && typeof payload.trackId === 'string' ? payload.trackId : undefined
   const effectInstanceId = typeof payload.effectInstanceId === 'string' ? payload.effectInstanceId : undefined
-  const existingEnvelopeId = typeof payload.existingEnvelopeId === 'string' ? payload.existingEnvelopeId : undefined
-  const existingOpaqueIdentity = typeof payload.existingOpaqueIdentity === 'string' ? payload.existingOpaqueIdentity : undefined
   if (!isAutomationParameterSupportedForTarget(payload.parameterId, targetKind)) return null
   return {
     kind: 'automation.deleteEnvelope',
@@ -1228,8 +1229,6 @@ const parseAutomationDeleteEnvelope = (payload: Record<string, unknown>): Shared
       targetKind,
       trackId,
       effectInstanceId,
-      existingEnvelopeId,
-      existingOpaqueIdentity,
       parameterId: payload.parameterId,
     },
   }

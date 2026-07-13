@@ -7,13 +7,9 @@ import {
 } from './index'
 
 describe('instrument identity', () => {
-  test('legacy normalization is deterministic across reload and reorder', () => {
+  test('normalization requires a durable instance id', () => {
     const value = { kind: 'sampler', params: createDefaultSamplerParams() }
-    const first = normalizeTrackInstrumentParams(value)
-    const second = normalizeTrackInstrumentParams({ params: value.params, kind: value.kind })
-
-    expect(first?.instanceId).toBe(second?.instanceId)
-    expect(first?.instanceId).toStartWith('instrument:migration:sampler:')
+    expect(normalizeTrackInstrumentParams(value)).toBeUndefined()
   })
 
   test('normalization preserves identity and duplication creates a new identity', () => {
@@ -30,7 +26,7 @@ describe('instrument identity', () => {
     expect(duplicate.params).toBe(original.params)
   })
 
-  test('granular state migrates with stable identity and preserves versioned asset state', () => {
+  test('granular state preserves its durable identity and versioned asset state', () => {
     const params = {
       ...createDefaultGranularParams(),
       zone: {
@@ -38,10 +34,10 @@ describe('instrument identity', () => {
         sample: { assetKey: 'asset:granular', url: '/sample.wav' },
       },
     }
-    const first = normalizeTrackInstrumentParams({ kind: 'granular', params })
-    const second = normalizeTrackInstrumentParams({ kind: 'granular', params })
+    const first = normalizeTrackInstrumentParams({ kind: 'granular', instanceId: 'instrument:granular', params })
+    const second = normalizeTrackInstrumentParams({ kind: 'granular', instanceId: 'instrument:granular', params })
     expect(first).toEqual(second)
-    expect(first?.instanceId).toStartWith('instrument:migration:granular:')
+    expect(first?.instanceId).toBe('instrument:granular')
     expect(first?.params).toMatchObject({ version: 1, zone: params.zone })
   })
 })

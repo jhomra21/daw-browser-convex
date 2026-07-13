@@ -21,6 +21,29 @@ const createFakeChain = (onDisconnect: () => void = () => {}): CompressorNodeCha
 }
 
 describe('compressor chain state recovery', () => {
+  test('binds listeners registered before async construction and keeps them across replacement', async () => {
+    const created: CompressorNodeChain[] = []
+    const state = createCompressorChainState(async () => {
+      const chain = createFakeChain()
+      created.push(chain)
+      return chain
+    })
+    const frames: number[] = []
+    const unsubscribe = state.subscribeMeter((frame) => frames.push(frame.gainReductionDb))
+    const context = Object.assign(Object.create(null), {})
+    const params = normalizeCompressorParams({ enabled: true, thresholdDb: -18 })
+
+    await state.set(context, params)
+    created[0].workletNode.port.onmessage?.({ data: { type: 'meter', inputDb: -12, outputDb: -15, gainReductionDb: -3, thresholdDb: -18 } } as MessageEvent)
+    created[0].state = 'faulted'
+    await state.set(context, params)
+    created[1].workletNode.port.onmessage?.({ data: { type: 'meter', inputDb: -12, outputDb: -18, gainReductionDb: -6, thresholdDb: -18 } } as MessageEvent)
+    unsubscribe()
+    created[1].workletNode.port.onmessage?.({ data: { type: 'meter', inputDb: -12, outputDb: -21, gainReductionDb: -9, thresholdDb: -18 } } as MessageEvent)
+
+    expect(frames).toEqual([-3, -6])
+  })
+
   test('rebuilds a faulted chain even when the parameter signature is unchanged', async () => {
     let oldDisconnects = 0
     const created: CompressorNodeChain[] = []

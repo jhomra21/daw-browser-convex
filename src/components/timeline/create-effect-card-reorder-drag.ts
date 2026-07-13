@@ -1,6 +1,5 @@
 import type { AudioEffectInstance } from "@daw-browser/shared";
 import { onCleanup } from "solid-js";
-import { useDrag } from "~/hooks/useDrag";
 
 type EffectCardReorderDragOptions = {
   effect: AudioEffectInstance;
@@ -35,6 +34,10 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
   let sourceLeft = 0;
   let ghostOffset: { x: number; y: number } | undefined;
   let ghostSize: { width: number; height: number } | undefined;
+  let pointerStart: { x: number; y: number } | undefined;
+  let pointerId: number | undefined;
+  let sourceElement: HTMLElement | undefined;
+  let dragActivated = false;
 
   const targetIndexForPoint = (clientX: number) => {
     for (let index = 0; index < cardRects.length; index++) {
@@ -73,51 +76,83 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
     sourceLeft = 0;
     ghostOffset = undefined;
     ghostSize = undefined;
+    pointerStart = undefined;
+    pointerId = undefined;
+    sourceElement = undefined;
+    dragActivated = false;
     options.onPreviewChange(undefined);
   };
 
-  const drag = useDrag({
-    disabled: () => !options.canWrite(),
-    dragCursorClass: "cursor-grabbing",
-    onDragStart: (position, event) => {
-      cardRects = [];
-      if (!(event.currentTarget instanceof HTMLElement)) return;
-      const sourceRect = event.currentTarget.getBoundingClientRect();
+  const removePointerListeners = () => {
+    window.removeEventListener('pointermove', handlePointerMove)
+    window.removeEventListener('pointerup', handlePointerUp, { capture: true })
+    window.removeEventListener('pointercancel', handlePointerCancel, { capture: true })
+    document.body.classList.remove('select-none', 'cursor-grabbing')
+  }
+
+  const activateDrag = (position: { x: number; y: number }) => {
+      if (!sourceElement) return;
+      const sourceRect = sourceElement.getBoundingClientRect();
       sourceLeft = sourceRect.left;
       ghostOffset = { x: position.x - sourceRect.left, y: position.y - sourceRect.top };
       ghostSize = { width: sourceRect.width, height: sourceRect.height };
-      const parentRect = event.currentTarget.parentElement?.getBoundingClientRect();
+      const parentRect = sourceElement.parentElement?.getBoundingClientRect();
       chainRect = parentRect ? { top: parentRect.top, height: parentRect.height } : undefined;
-      for (const element of event.currentTarget.parentElement?.children ?? []) {
+      for (const element of sourceElement.parentElement?.children ?? []) {
         if (!(element instanceof HTMLElement)) continue;
         const effectId = element.dataset.effectId;
         if (!effectId || effectId === options.effect.id) continue;
         const rect = element.getBoundingClientRect();
         cardRects.push({ left: rect.left, right: rect.right, centerX: rect.left + rect.width / 2 });
       }
+      dragActivated = true;
+      document.body.classList.add('select-none', 'cursor-grabbing')
       updatePreview(position);
-    },
-    onDragMove: (position) => {
-      updatePreview(position);
-    },
-    onDragEnd: (position) => {
-      const order = options.orderedEffects();
-      const currentIndex = order.findIndex((entry) => entry.id === options.effect.id);
-      const targetIndex = targetIndexForPoint(position.x);
-      const canReorder = cardRects.length > 0;
-      clearPreview();
-      if (currentIndex < 0 || !canReorder || targetIndex === currentIndex) return;
-      options.onReorder(options.effect, targetIndex);
-    },
-    onDragCancel: clearPreview,
-  });
+  }
 
-  onCleanup(clearPreview);
+  const handlePointerMove = (event: PointerEvent) => {
+    if (event.pointerId !== pointerId || !pointerStart) return
+    const position = { x: event.clientX, y: event.clientY }
+    if (!dragActivated) {
+      if (Math.hypot(position.x - pointerStart.x, position.y - pointerStart.y) < 4) return
+      activateDrag(position)
+      return
+    }
+    updatePreview(position)
+  }
+
+  const finishPointer = (event: PointerEvent, cancelled: boolean) => {
+    if (event.pointerId !== pointerId) return
+    const position = { x: event.clientX, y: event.clientY }
+    const order = options.orderedEffects()
+    const currentIndex = order.findIndex((entry) => entry.id === options.effect.id)
+    const targetIndex = targetIndexForPoint(position.x)
+    const canReorder = !cancelled && dragActivated && cardRects.length > 0
+    removePointerListeners()
+    clearPreview()
+    if (currentIndex < 0 || !canReorder || targetIndex === currentIndex) return
+    options.onReorder(options.effect, targetIndex)
+  }
+
+  const handlePointerUp = (event: PointerEvent) => finishPointer(event, false)
+  const handlePointerCancel = (event: PointerEvent) => finishPointer(event, true)
+
+  onCleanup(() => {
+    removePointerListeners()
+    clearPreview()
+  });
 
   return {
     onPointerDown: (event: PointerEvent) => {
       if (!options.canWrite() || event.button !== 0 || !shouldStartReorderDrag(event)) return;
-      drag.onPointerDown(event);
+      pointerId = event.pointerId
+      pointerStart = { x: event.clientX, y: event.clientY }
+      sourceElement = event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined
+      dragActivated = false
+      cardRects = []
+      window.addEventListener('pointermove', handlePointerMove)
+      window.addEventListener('pointerup', handlePointerUp, { capture: true })
+      window.addEventListener('pointercancel', handlePointerCancel, { capture: true })
     },
   };
 }

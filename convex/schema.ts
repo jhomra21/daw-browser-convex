@@ -202,7 +202,6 @@ export default defineSchema({
     .index("by_room", ["projectId"])
     .index("by_source", ["sourceTrackId"])
     .index("by_target", ["targetTrackId"])
-    .index("by_room_effect", ["projectId", "effectInstanceId"])
     .index("by_room_target_effect", ["projectId", "targetTrackId", "effectInstanceId"]),
 
   automationEnvelopes: defineTable({

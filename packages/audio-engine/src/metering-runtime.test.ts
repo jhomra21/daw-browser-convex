@@ -67,6 +67,19 @@ describe('meter worklet lifecycle', () => {
     ledger.assertEmpty()
   })
 
+  test('keeps duplicate callback subscriptions alive until each handle is released', () => {
+    const ledger = createReliabilityResourceLedger()
+    const runtime = createMeteringRuntime({ resourceObserver: ledger })
+    const listener = () => undefined
+    const first = runtime.subscribeTrackStereoLevels(listener)
+    const second = runtime.subscribeTrackStereoLevels(listener)
+
+    first()
+    runtime.close()
+    second()
+    ledger.assertEmpty()
+  })
+
   test('clears stale levels and retries a processor fault only once per generation', async () => {
     const nodes: FakeAudioWorkletNode[] = []
     let flush = () => {}

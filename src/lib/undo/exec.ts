@@ -3,7 +3,7 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { assert, assertDefined, automationTargetKey, normalizeCompressorParams, normalizeReverbParams, type AutomationEnvelope } from '@daw-browser/shared'
+import { assert, assertDefined, automationTargetKey, type AutomationEnvelope } from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
@@ -344,67 +344,24 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
       params: replayParams,
     })) return
     switch (entry.data.effect) {
-      case 'master-eq': {
-        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-        if (entry.data.instanceId && deps.replayInstanceEffectParams?.({ targetId, effect: entry.data.effect, instanceId: entry.data.instanceId, params })) return
-        deps.audioEngine.setMasterEq(params)
-        return
-      }
-      case 'master-reverb': {
-        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-        if (entry.data.instanceId && deps.replayInstanceEffectParams?.({ targetId, effect: entry.data.effect, instanceId: entry.data.instanceId, params })) return
-        deps.audioEngine.setMasterReverb(normalizeReverbParams(params))
-        return
-      }
-      case 'master-compressor': {
-        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-        if (entry.data.instanceId && deps.replayInstanceEffectParams?.({ targetId, effect: entry.data.effect, instanceId: entry.data.instanceId, params })) return
-        deps.audioEngine.setMasterCompressor(normalizeCompressorParams(params))
-        return
-      }
-      case 'master-saturator': {
-        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-        if (entry.data.instanceId && deps.replayInstanceEffectParams?.({ targetId, effect: entry.data.effect, instanceId: entry.data.instanceId, params })) return
-        deps.audioEngine.setMasterSaturator(params)
-        return
-      }
-      case 'master-delay': {
-        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-        if (entry.data.instanceId && deps.replayInstanceEffectParams?.({ targetId, effect: entry.data.effect, instanceId: entry.data.instanceId, params })) return
-        deps.audioEngine.setMasterDelay(params)
-        return
-      }
+      case 'master-eq':
+      case 'master-reverb':
+      case 'master-compressor':
+      case 'master-saturator':
+      case 'master-delay':
       case 'master-spectral':
-      case 'spectral':
-        return
-      case 'eq': {
+      case 'eq':
+      case 'reverb':
+      case 'compressor':
+      case 'saturator':
+      case 'delay':
+      case 'spectral': {
+        const instanceId = entry.data.instanceId
+        if (!instanceId) throw new Error(`Missing effect instance ID for ${entry.data.effect} history entry.`)
         const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-        if (entry.data.instanceId && deps.replayInstanceEffectParams?.({ targetId, effect: entry.data.effect, instanceId: entry.data.instanceId, params })) return
-        deps.audioEngine.setTrackEq(targetId, params)
-        return
-      }
-      case 'reverb': {
-        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-        if (entry.data.instanceId && deps.replayInstanceEffectParams?.({ targetId, effect: entry.data.effect, instanceId: entry.data.instanceId, params })) return
-        deps.audioEngine.setTrackReverb(targetId, normalizeReverbParams(params))
-        return
-      }
-      case 'compressor': {
-        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-        if (entry.data.instanceId && deps.replayInstanceEffectParams?.({ targetId, effect: entry.data.effect, instanceId: entry.data.instanceId, params })) return
-        deps.audioEngine.setTrackCompressor(targetId, normalizeCompressorParams(params))
-        return
-      }
-      case 'saturator': {
-        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-        if (entry.data.instanceId && deps.replayInstanceEffectParams?.({ targetId, effect: entry.data.effect, instanceId: entry.data.instanceId, params })) return
-        deps.audioEngine.setTrackSaturator(targetId, params)
-        return
-      }
-      case 'delay': {
-        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-        if (entry.data.instanceId && deps.replayInstanceEffectParams?.({ targetId, effect: entry.data.effect, instanceId: entry.data.instanceId, params })) return
-        deps.audioEngine.setTrackDelay(targetId, params)
+        if (!deps.replayInstanceEffectParams?.({ targetId, effect: entry.data.effect, instanceId, params })) {
+          throw new Error(`Unable to replay effect instance ${instanceId}.`)
+        }
         return
       }
       case 'synth': {

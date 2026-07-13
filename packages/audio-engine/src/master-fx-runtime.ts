@@ -13,8 +13,8 @@ import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance }
 import type { ResolveMixerGraphOptions } from './mixer/types'
 import { applyStaticWorkletNodeParams, createStaticWorkletNodeChain, disconnectStaticWorkletNodeChain, resolveStaticWorkletAutomationBinding, subscribeStaticGateMeter, type GateMeterListener, type StaticWorkletKind, type StaticWorkletNodeChain } from './effects/static-worklet-chain'
 import { observeResource, type ResourceObserver } from './runtime-diagnostics'
+import { PROCESSOR_RESOURCE_LIMITS } from './effects/processor-release-contract'
 
-const MAX_EFFECTS_PER_CHAIN = 16
 const isStaticWorkletKind = (kind: AudioEffectRuntimeInstance['kind']): kind is StaticWorkletKind =>
   kind === 'utility' || kind === 'autofilter' || kind === 'gate' || kind === 'limiter' || kind === 'lofi' ||
   kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble' ||
@@ -214,7 +214,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       inputIds.add(instance.id)
     }
     const normalized = normalizeAudioEffectRuntimeInstances(instances)
-    if (normalized.length > MAX_EFFECTS_PER_CHAIN) throw new Error(`Effect chains are limited to ${MAX_EFFECTS_PER_CHAIN} instances.`)
+    if (normalized.length > PROCESSOR_RESOURCE_LIMITS.effectsPerChain) throw new Error(`Effect chains are limited to ${PROCESSOR_RESOURCE_LIMITS.effectsPerChain} instances.`)
     const previous = masterFxInstances
     const orderChanged = Boolean(previous && (
       previous.length !== normalized.length ||

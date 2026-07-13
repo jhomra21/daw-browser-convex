@@ -18,9 +18,8 @@ import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance }
 import { createCueBus } from './mixer/cue-routing'
 import { applyStaticWorkletNodeParams, createStaticWorkletNodeChain, disconnectStaticWorkletNodeChain, resolveStaticWorkletAutomationBinding, subscribeStaticGateMeter, type GateMeterListener, type StaticWorkletKind, type StaticWorkletNodeChain } from './effects/static-worklet-chain'
 import { observeResource, type ResourceObserver } from './runtime-diagnostics'
+import { PROCESSOR_RESOURCE_LIMITS } from './effects/processor-release-contract'
 
-const MAX_EFFECTS_PER_CHAIN = 16
-const MAX_LIVE_STATIC_WORKLETS = 64
 const isStaticWorkletKind = (kind: AudioEffectRuntimeInstance['kind']): kind is StaticWorkletKind =>
   kind === 'utility' || kind === 'autofilter' || kind === 'gate' || kind === 'limiter' || kind === 'lofi' ||
   kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble' ||
@@ -400,12 +399,12 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       inputIds.add(instance.id)
     }
     const normalized = normalizeAudioEffectRuntimeInstances(instances)
-    if (normalized.length > MAX_EFFECTS_PER_CHAIN) throw new Error(`Effect chains are limited to ${MAX_EFFECTS_PER_CHAIN} instances.`)
+    if (normalized.length > PROCESSOR_RESOURCE_LIMITS.effectsPerChain) throw new Error(`Effect chains are limited to ${PROCESSOR_RESOURCE_LIMITS.effectsPerChain} instances.`)
     const otherWorklets = [...trackFxInstances.entries()].reduce((count, [id, values]) => (
       id === trackId ? count : count + values.filter((instance) => isStaticWorkletKind(instance.kind)).length
     ), 0)
     const requestedWorklets = normalized.filter((instance) => isStaticWorkletKind(instance.kind)).length
-    if (otherWorklets + requestedWorklets > MAX_LIVE_STATIC_WORKLETS) throw new Error(`Live processing is limited to ${MAX_LIVE_STATIC_WORKLETS} static worklets.`)
+    if (otherWorklets + requestedWorklets > PROCESSOR_RESOURCE_LIMITS.liveOwnedWorklets) throw new Error(`Live processing is limited to ${PROCESSOR_RESOURCE_LIMITS.liveOwnedWorklets} static worklets.`)
     const previous = trackFxInstances.get(trackId)
     const orderChanged = Boolean(previous && (
       previous.length !== normalized.length ||

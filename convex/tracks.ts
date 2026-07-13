@@ -611,6 +611,7 @@ const setSidechainRouteForUser = async (
         .eq("effectInstanceId", input.effectInstanceId)
     ))
     .collect();
+  if (existing.length === 1 && existing[0]?.sourceTrackId === input.sourceTrackId) return;
   for (const route of existing) await ctx.db.delete(route._id);
   await ctx.db.insert("sidechainRoutes", {
     projectId,

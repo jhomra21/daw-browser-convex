@@ -144,7 +144,7 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
 
   return {
     onPointerDown: (event: PointerEvent) => {
-      if (!options.canWrite() || event.button !== 0 || !shouldStartReorderDrag(event)) return;
+      if (pointerId !== undefined || !options.canWrite() || event.button !== 0 || !shouldStartReorderDrag(event)) return;
       pointerId = event.pointerId
       pointerStart = { x: event.clientX, y: event.clientY }
       sourceElement = event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined

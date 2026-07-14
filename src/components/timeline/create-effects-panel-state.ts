@@ -68,6 +68,7 @@ type EffectsPanelContext = {
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
   onLocalSaveFailed?: (message: string) => void;
+  samplerBufferSync: ReturnType<typeof createSamplerBufferSync>;
 };
 
 type ExpandedSynthBounds = SynthCardBounds & {
@@ -167,11 +168,10 @@ export function createEffectsPanelInstrumentDevice(
     return Boolean(projectId && isLocalId("project", projectId));
   };
   const drumRackBufferSync = createDrumRackBufferSync();
-  const samplerBufferSync = createSamplerBufferSync();
+  const samplerBufferSync = context.samplerBufferSync;
   const [samplerStatusVersion, setSamplerStatusVersion] = createSignal(0);
   onCleanup(samplerBufferSync.subscribe(() => setSamplerStatusVersion((version) => version + 1)));
   onCleanup(drumRackBufferSync.dispose);
-  onCleanup(samplerBufferSync.dispose);
   const localArp = createLocalEffectRows<ArpeggiatorParams>({
     projectId: context.projectId,
     targetId: getTrackTargetId,

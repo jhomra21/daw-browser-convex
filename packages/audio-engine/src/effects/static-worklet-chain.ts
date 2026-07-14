@@ -89,7 +89,7 @@ export async function createStaticWorkletNodeChain(
   return chain
 }
 
-export function applyStaticWorkletNodeParams(
+function applyStaticWorkletNodeParams(
   chain: StaticWorkletNodeChain,
   params: StaticWorkletParams,
 ) {

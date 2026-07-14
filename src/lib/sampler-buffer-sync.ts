@@ -24,6 +24,7 @@ export function createSamplerBufferSync() {
   const enginesByTrack = new Map<Track['id'], AudioEngine>()
   const pending = new Map<string, Promise<AudioBuffer | null>>()
   const engines = new Set<AudioEngine>()
+  const listenerEngines = new Set<AudioEngine>()
   const states = new Map<Track['id'], Map<string, SamplerZoneLoadState>>()
   const misses = new Map<Track['id'], number>()
   const granularConfigs = new Map<Track['id'], { params: GranularParams; instanceId?: string }>()
@@ -113,10 +114,29 @@ export function createSamplerBufferSync() {
     notify()
   }
 
+  const installRuntimeListeners = (audioEngine: AudioEngine) => {
+    if (listenerEngines.has(audioEngine)) return
+    listenerEngines.add(audioEngine)
+    audioEngine.setSamplerRuntimeListeners({
+      onNoteMiss: (miss) => {
+        const configuredEngine = enginesByTrack.get(miss.trackId)
+        if (configuredEngine !== audioEngine) return
+        misses.set(miss.trackId, (misses.get(miss.trackId) ?? 0) + 1)
+        setZoneState(miss.trackId, miss.zoneId, 'engine-miss')
+        loadZone(audioEngine, miss.trackId, miss.zoneId)
+      },
+      onAssetUse: (assetKey, active) => {
+        if (active) cache.pin(assetKey)
+        else cache.unpin(assetKey)
+      },
+    })
+  }
+
   const syncTrack = (audioEngine: AudioEngine, trackId: Track['id'], params: SamplerParams, instanceId?: string) => {
     const version = (versions.get(trackId) ?? 0) + 1
     versions.set(trackId, version)
     engines.add(audioEngine)
+    installRuntimeListeners(audioEngine)
     enginesByTrack.set(trackId, audioEngine)
     granularConfigs.delete(trackId)
     granularEnginesByTrack.delete(trackId)
@@ -127,17 +147,6 @@ export function createSamplerBufferSync() {
       cache.get(zone.sample.assetKey) ? 'ready' : 'missing',
     ])))
     installTrackBuffers(audioEngine, trackId, params, instanceId)
-    audioEngine.setSamplerRuntimeListeners({
-      onNoteMiss: (miss) => {
-        misses.set(miss.trackId, (misses.get(miss.trackId) ?? 0) + 1)
-        setZoneState(miss.trackId, miss.zoneId, 'engine-miss')
-        loadZone(audioEngine, miss.trackId, miss.zoneId)
-      },
-      onAssetUse: (assetKey, active) => {
-        if (active) cache.pin(assetKey)
-        else cache.unpin(assetKey)
-      },
-    })
     if (params.cachePolicy === 'preload') for (const zone of params.zones) loadZone(audioEngine, trackId, zone.id)
     notify()
   }
@@ -150,6 +159,7 @@ export function createSamplerBufferSync() {
       const version = (versions.get(trackId) ?? 0) + 1
       versions.set(trackId, version)
       engines.add(audioEngine)
+      installRuntimeListeners(audioEngine)
       configs.delete(trackId)
       enginesByTrack.delete(trackId)
       releaseGranularPin(trackId)
@@ -249,6 +259,7 @@ export function createSamplerBufferSync() {
       loader.clear()
       for (const audioEngine of engines) audioEngine.setSamplerRuntimeListeners({})
       engines.clear()
+      listenerEngines.clear()
       notify()
       listeners.clear()
     },

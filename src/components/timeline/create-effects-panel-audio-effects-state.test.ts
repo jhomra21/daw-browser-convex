@@ -196,6 +196,20 @@ describe("effects panel instance engine synchronization", () => {
     });
   });
 
+  test("creates canonical reverb defaults for a reverb insertion", async () => {
+    await createRoot(async (dispose) => {
+      const engine = new SpyAudioEngine();
+      const { device } = createDevice(engine);
+
+      await device.addByKindToTarget("track-1", "reverb");
+
+      const reverb = engine.trackFxCalls.at(-1)?.instances[0];
+      expect(reverb?.kind).toBe("reverb");
+      expect(reverb?.params).toEqual(AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams());
+      dispose();
+    });
+  });
+
   test("rolls back drafts, order, and engine state when an inserted chain reorder fails", async () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();

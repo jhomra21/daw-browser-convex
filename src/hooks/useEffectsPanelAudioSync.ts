@@ -40,6 +40,7 @@ type UseEffectsPanelAudioSyncOptions = {
     instrument?: (targetId: string) => TrackInstrumentParams | undefined;
     arp?: (targetId: string) => ArpeggiatorParams | undefined;
   };
+  samplerBufferSync: ReturnType<typeof createSamplerBufferSync>;
 };
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
@@ -161,9 +162,8 @@ export function useEffectsPanelAudioSync(
   let syncedTrackIds = new Set<Track["id"]>();
   let syncedProjectId: string | null = null;
   const drumRackBufferSync = createDrumRackBufferSync();
-  const samplerBufferSync = createSamplerBufferSync();
+  const samplerBufferSync = options.samplerBufferSync;
   onCleanup(drumRackBufferSync.dispose);
-  onCleanup(samplerBufferSync.dispose);
 
   const clearSyncedTrackState = (audioEngine: AudioEngine, trackIds: Iterable<Track["id"]>) => {
     for (const trackId of trackIds) {

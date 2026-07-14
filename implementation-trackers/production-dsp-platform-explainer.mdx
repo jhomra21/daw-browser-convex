@@ -128,19 +128,23 @@ flowchart LR
 
 ## Branch scope
 
-Compared with `origin/master`, the branch currently changes **227 files**, with **26,326 additions** and **2,734 deletions**.
+At the merge-readiness review, the committed `origin/master...HEAD` branch changes **258 files**, with **29,241 additions** and **3,004 deletions**. The separate current uncommitted review fixes change **21 tracked files**, with **961 additions** and **459 deletions**.
 
 The branch is not 20,000 lines of DSP algorithms. A substantial portion covers tests, persistence, collaboration, recording ownership, export fidelity, and browser characterization.
 
 ## Table of contents
 
-- [Branch scope](#branch-scope)
 - [Start here: what this product is](#start-here-what-this-product-is)
+  - [A studio mental model](#a-studio-mental-model)
 - [The story of the system on one page](#the-story-of-the-system-on-one-page)
+  - [The beginner reading lane](#the-beginner-reading-lane)
+  - [The optional engineering deep-dive lane](#the-optional-engineering-deep-dive-lane)
 - [Guided tour by role](#guided-tour-by-role)
 - [Everyday studio scenarios](#everyday-studio-scenarios)
+- [Branch scope](#branch-scope)
 - [System overview](#system-overview)
 - [Visual glossary](#visual-glossary)
+  - [Shared timeline contracts](#shared-timeline-contracts)
 - [Before and after: small actions](#before-and-after-small-actions)
 - [What the user sees across longer jobs](#what-the-user-sees-across-longer-jobs)
 - [Core architecture change](#1-core-architecture-change)
@@ -151,12 +155,12 @@ The branch is not 20,000 lines of DSP algorithms. A substantial portion covers t
 - [Mixer, routing, and delay compensation](#3-mixer-routing-and-delay-compensation)
 - [Production recording](#4-production-recording)
 - [Export pipeline](#5-export-pipeline)
-- [New DSP processors](#7-new-dsp-processors)
 - [Automation identity and scheduling](#6-automation-identity-and-scheduling)
+- [New DSP processors](#7-new-dsp-processors)
+- [Advanced sound design](#8-advanced-sound-design)
 - [Undo, selection, and reactive ownership](#9-undo-selection-and-reactive-ownership)
 - [Complexity and resource limits](#10-complexity-and-resource-limits)
 - [Failure states and recovery](#11-failure-states-and-recovery)
-- [Shared timeline contracts](#shared-timeline-contracts)
 - [Diagnostics and reliability](#12-diagnostics-and-reliability)
 - [What is replaced?](#13-what-is-replaced)
 - [End-to-end production flows](#14-end-to-end-production-flows)
@@ -303,8 +307,9 @@ flowchart LR
 flowchart LR
   Before["Drums<br/>no detector route"] --> Route["sidechains.setRoute"]
   Route --> Source["Drums track<br/>sourceTrackId"]
-  Source --> Detector["Compressor on bass<br/>effectInstanceId"]
-  Detector --> Target["Bass track audio<br/>targetTrackId"]
+  Source -. detector control only .-> Detector["Compressor on bass<br/>effectInstanceId"]
+  Bass["Bass track audio<br/>targetTrackId"] --> Detector
+  Detector --> Target["Bass output"]
 ```
 
 **What to notice:** the route names a source track, target track, and exact effect instance. Invalid or missing identities are rejected rather than guessed.
@@ -1256,7 +1261,7 @@ The following are the intended asymptotic shapes of the inspected paths. `T` is 
 | Path | Typical complexity | Space behavior | Practical limit or guard |
 | --- | --- | --- | --- |
 | Knob move | `O(1)` per emitted value | `O(1)` temporary drag state | Values are clamped and quantized; global listeners are removed on end/cancel |
-| Effect draft update | `O(E)` for ordered chain application | `O(E)` chain snapshot | Each track/master chain is capped at 16 instances |
+| Effect draft update | `O(E)` for ordered chain application | `O(E)` chain snapshot | Cloud persistence accepts more than 16 uniquely identified instances |
 | Live chain reconciliation | `O(E)` for identity/topology comparison, plus graph rebuild work | `O(E)` live node state | Duplicate IDs are rejected; stale nodes are released |
 | Worklet module lookup | Amortized `O(1)` per context after load | `O(W)` weak registry entries | Modules load once per `AudioContext`; faults transition the instance to bypass/closed state |
 | Routing resolution | `O(T + R)` for indexed graph traversal | `O(T + R)` | Cycles and invalid targets are rejected |
@@ -1269,6 +1274,20 @@ The following are the intended asymptotic shapes of the inspected paths. `T` is 
 | Undo snapshot restore | `O(S)` over snapshot entities | `O(S)` for the snapshot | Stable references and ownership validation precede restore |
 
 These are architecture-level bounds, not claims that browser scheduling or Web Audio graph construction has zero hidden cost. The implementation uses `Map`/`Set` identity indexes and bounded queues where the hot paths require them. A full graph rebuild is deliberately more expensive than a parameter-only update and is used for topology, order, or identity changes.
+
+### Live worklet ownership and chain replacement
+
+Track and master chains share one AudioEngine-owned budget of 64 live static AudioWorklets. Native-node effects do not consume this budget, and offline rendering has its separate 256-processor limit. A chain rebuild first reserves only newly constructed worklets. The reservation includes both committed owners and every pending candidate build, so competing rebuilds are rejected synchronously before they exceed the aggregate limit. A successful current revision commits its new count; failed, stale, cleared, or disposed revisions release only their own pending reservation.
+
+The live chain remains committed until all asynchronous candidate resources finish building. Candidate meters, automation bindings, sidechain targets, and routing are isolated until commit. The routing transition then switches to the candidate chain before replaced resources are closed. This prevents a failed second worklet or a stale completion from publishing a partial chain.
+
+### Samplers, sends, sidechains, and history restore
+
+The effects-panel controller owns one sampler buffer cache and synchronization service for both the active instrument and inactive instrument tracks. It installs one runtime listener pair per owned audio engine, keeps lazy sampler configurations available for note-miss loading, pins assets while they are used, and ignores pending loads after disposal.
+
+Sends are ordinary track-to-Return-track routes, with pre-FX, pre-fader, or post-fader taps. Return tracks are named `Return N`; output routing is separate from sends. Invalid or stale sends to non-Return tracks are normalized away and local reload preserves valid sends. Durable sidechain validation is strict. During live hydration an unresolved endpoint is temporarily skipped, then the exact track and effect identities reconnect when available.
+
+Undo restores an effect chain, plus its optional instrument and arpeggiator, in one local IndexedDB transaction or one shared durable operation. The wider track recreation sequence remains ordered rather than becoming one all-encompassing transaction. `restoreUngroup` retains its own explicitly scoped atomic behavior.
 
 ## 11. Failure states and recovery
 

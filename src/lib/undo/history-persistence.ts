@@ -3,7 +3,7 @@ import { AUDIO_EFFECT_CONTRACTS, assert, buildClipCreatePayload, normalizeAudioW
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
-import { localEffectRowId, reorderLocalAudioEffects, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects";
+import { localEffectRowId, restoreLocalTrackEffectChain, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects";
 import { deleteLocalAutomationEnvelope, setLocalAutomationEnvelope } from "~/lib/local-automation";
 import { automationTargetKey, granularAutomationKey, instrumentAutomationKey, isLocalId, parseGranularAutomationKey, parseInstrumentAutomationKey } from "@daw-browser/shared";
 import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, isAppliedSharedTimelineOperationResult, publishSharedTimelineOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
@@ -414,79 +414,31 @@ export const persistHistoryTrackEffects = async (
   effects: TrackDeleteEffects | undefined,
 ) => {
   if (!effects) return;
-  const hasAudioEffects = !!effects.audioEffects?.length;
+  const audioEffects = effects.audioEffects ?? [];
+  const restoredAudioEffects = audioEffects.flatMap((effect) => (
+    effect.instanceId ? [{ id: effect.instanceId, kind: effect.effect, params: effect.params }] : []
+  ));
+  if (restoredAudioEffects.length !== audioEffects.length) {
+    throw new Error("History effect restore is missing an audio effect instance ID.");
+  }
   if (isLocalHistoryProject(deps)) {
-    await Promise.all([
-      ...(effects.audioEffects ?? []).map((effect) => {
-        if (effect.instanceId) {
-          return setLocalEffectInstance(deps.projectId, trackId, effect.effect, effect.params, { instanceId: effect.instanceId, index: effect.index });
-        }
-        return null;
-      }),
-      effects.instrument ? setLocalEffect(deps.projectId, trackId, "instrument", effects.instrument) : null,
-      effects.arp ? setLocalEffect(deps.projectId, trackId, "arp", effects.arp) : null,
-    ]);
-    if (hasAudioEffects) {
-      const audioEffects = effects.audioEffects ?? [];
-      await reorderLocalAudioEffects(deps.projectId, trackId, audioEffects.flatMap((effect) => (
-        effect.instanceId ? [{ kind: effect.effect, id: effect.instanceId }] : []
-      )));
-    }
+    await restoreLocalTrackEffectChain(deps.projectId, trackId, {
+      audioEffects: restoredAudioEffects,
+      instrument: effects.instrument,
+      arp: effects.arp,
+    });
     return;
   }
-  await Promise.all([
-    ...(effects.audioEffects ?? []).map((effect) => {
-      if (!effect.instanceId) return null;
-      switch (effect.effect) {
-        case "utility":
-          return publishHistoryOperation(deps, { kind: "effects.setUtilityParams", payload: { trackId, params: AUDIO_EFFECT_CONTRACTS.utility.normalizeParams(effect.params), instanceId: effect.instanceId } });
-        case "eq":
-          return publishHistoryOperation(deps, { kind: "effects.setEqParams", payload: { trackId, params: effect.params, instanceId: effect.instanceId } });
-        case "autofilter":
-          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "autofilter", params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(effect.params), instanceId: effect.instanceId } });
-        case "chorus":
-          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "chorus", params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(effect.params), instanceId: effect.instanceId } });
-        case "flanger":
-          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "flanger", params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(effect.params), instanceId: effect.instanceId } });
-        case "phaser":
-          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "phaser", params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(effect.params), instanceId: effect.instanceId } });
-        case "tremolo":
-          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "tremolo", params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(effect.params), instanceId: effect.instanceId } });
-        case "autopan":
-          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "autopan", params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(effect.params), instanceId: effect.instanceId } });
-        case "ensemble":
-          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "ensemble", params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(effect.params), instanceId: effect.instanceId } });
-        case "lofi":
-          return publishHistoryOperation(deps, { kind: "effects.setModulationParams", payload: { trackId, effect: "lofi", params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(effect.params), instanceId: effect.instanceId } });
-        case "gate":
-          return publishHistoryOperation(deps, { kind: "effects.setGateParams", payload: { trackId, params: AUDIO_EFFECT_CONTRACTS.gate.normalizeParams(effect.params), instanceId: effect.instanceId } });
-        case "compressor":
-          return publishHistoryOperation(deps, { kind: "effects.setCompressorParams", payload: { trackId, params: normalizeCompressorParams(effect.params), instanceId: effect.instanceId } });
-        case "saturator":
-          return publishHistoryOperation(deps, { kind: "effects.setSaturatorParams", payload: { trackId, params: normalizeSaturatorParams(effect.params), instanceId: effect.instanceId } });
-        case "limiter":
-          return publishHistoryOperation(deps, { kind: "effects.setLimiterParams", payload: { trackId, params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(effect.params), instanceId: effect.instanceId } });
-        case "delay":
-          return publishHistoryOperation(deps, { kind: "effects.setDelayParams", payload: { trackId, params: normalizeDelayParams(effect.params), instanceId: effect.instanceId } });
-        case "reverb":
-          return publishHistoryOperation(deps, { kind: "effects.setReverbParams", payload: { trackId, params: normalizeReverbParams(effect.params), instanceId: effect.instanceId } });
-        case "spectral":
-          return publishHistoryOperation(deps, { kind: "effects.setSpectralParams", payload: { trackId, params: normalizeSpectralParamsEnvelope(effect.params), instanceId: effect.instanceId } });
-      }
-    }),
-    effects.instrument ? publishHistoryOperation(deps, { kind: "instruments.setTrackInstrument", payload: { trackId, instrument: effects.instrument } }) : null,
-    effects.arp ? publishHistoryOperation(deps, { kind: "effects.setArpeggiatorParams", payload: { trackId, params: effects.arp } }) : null,
-  ]);
-  if (hasAudioEffects) {
-    const audioEffects = effects.audioEffects ?? [];
-    await publishHistoryOperation(deps, {
-      kind: "effects.reorderAudioChain",
-      payload: {
-        trackId,
-        order: audioEffects.flatMap((effect) => effect.instanceId ? [{ kind: effect.effect, id: effect.instanceId }] : []),
-      },
-    });
-  }
+  await publishHistoryOperation(deps, {
+    kind: "effects.restoreChain",
+    payload: {
+      trackId,
+      audioEffects: restoredAudioEffects,
+      instrument: effects.instrument,
+      arpeggiator: effects.arp,
+      operationId: crypto.randomUUID(),
+    },
+  });
 };
 
 export const persistHistoryTrackAutomation = async (

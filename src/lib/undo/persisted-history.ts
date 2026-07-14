@@ -1,5 +1,5 @@
 import { normalizeAudioWarp } from '@daw-browser/shared'
-import { AUDIO_EFFECT_ORDER, type AudioEffectKind } from '@daw-browser/shared'
+import { AUDIO_EFFECT_ORDER, isAudioEffectKind, type AudioEffectKind } from '@daw-browser/shared'
 import type { EffectType, HistoryEntry, PersistedHistory } from '~/lib/undo/types'
 
 const PERSISTED_HISTORY_VERSION = 3 as const
@@ -20,9 +20,6 @@ const EFFECT_TYPES: ReadonlySet<string> = new Set([
 ])
 
 const isEffectType = (value: unknown): value is EffectType => typeof value === 'string' && EFFECT_TYPES.has(value)
-
-const isAudioEffectKind = (value: unknown): value is AudioEffectKind =>
-  typeof value === 'string' && AUDIO_EFFECT_ORDER.some((effect) => effect === value)
 
 function isPersistedHistoryEnvelope(value: unknown): value is PersistedHistoryEnvelope {
   return isRecord(value)

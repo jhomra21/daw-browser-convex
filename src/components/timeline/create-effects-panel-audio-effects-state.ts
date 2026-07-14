@@ -550,6 +550,7 @@ export function createEffectsPanelAudioDevice(
     if (kind === "compressor") return { kind, params: AUDIO_EFFECT_CONTRACTS.compressor.createDefaultParams() };
     if (kind === "saturator") return { kind, params: AUDIO_EFFECT_CONTRACTS.saturator.createDefaultParams() };
     if (kind === "delay") return { kind, params: AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams() };
+    if (kind === "reverb") return { kind, params: AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams() };
     if (kind === "spectral") return { kind, params: AUDIO_EFFECT_CONTRACTS.spectral.createDefaultParams() };
     if (kind === "chorus") return { kind, params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams({}) };
     if (kind === "flanger") return { kind, params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams({}) };

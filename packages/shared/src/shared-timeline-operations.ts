@@ -204,6 +204,16 @@ export type SharedTimelineOperation =
   | { kind: 'effects.setDelayParams'; payload: { trackId: string; params: DelayParams; instanceId: string } }
   | { kind: 'effects.setSpectralParams'; payload: { trackId: string; params: SpectralParamsEnvelope; instanceId: string } }
   | { kind: 'effects.reorderAudioChain'; payload: { trackId: string; order: AudioEffectOrderItem[] } }
+  | {
+      kind: 'effects.restoreChain'
+      payload: {
+        trackId: string
+        audioEffects: Array<{ id: string; kind: AudioEffectKind; params: unknown }>
+        instrument?: TrackInstrumentParams
+        arpeggiator?: ArpeggiatorParams
+        operationId: string
+      }
+    }
   | { kind: 'effects.removeAudioEffect'; payload: { targetType: 'track'; trackId: string; effect: AudioEffectKind; instanceId: string } | { targetType: 'master'; effect: AudioEffectKind; instanceId: string } }
   | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: SharedReverbParams; instanceId: string } }
   | { kind: 'effects.setSynthParams'; payload: { trackId: string; params: SharedSynthParams; instanceId: string } }
@@ -771,20 +781,7 @@ const parseTrackReorderAndGroup = (payload: Record<string, unknown>): SharedTime
 }
 
 const isUngroupRestoreEffectType = (value: unknown): value is SharedUngroupRestoreEffect['type'] => (
-  value === 'utility'
-  || value === 'eq'
-  || value === 'autofilter'
-  || value === 'gate'
-  || value === 'compressor'
-  || value === 'saturator'
-  || value === 'delay'
-  || value === 'reverb'
-  || value === 'chorus'
-  || value === 'flanger'
-  || value === 'phaser'
-  || value === 'tremolo'
-  || value === 'autopan'
-  || value === 'ensemble'
+  isAudioEffectKind(value)
   || value === 'instrument'
   || value === 'synth'
   || value === 'arpeggiator'
@@ -830,6 +827,7 @@ export const normalizeSharedUngroupRestoreEffects = (value: unknown): SharedUngr
         case 'eq':
           return readEqParams(effect.params)
         case 'autofilter':
+        case 'lofi':
         case 'chorus':
         case 'flanger':
         case 'phaser':
@@ -1123,6 +1121,33 @@ const parseTrackAudioChainReorder = (payload: Record<string, unknown>): SharedTi
   return typeof payload.trackId === 'string' && order ? { kind: 'effects.reorderAudioChain', payload: { trackId: payload.trackId, order } } : null
 }
 
+const parseRestoreEffectChain = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  if (typeof payload.trackId !== 'string' || typeof payload.operationId !== 'string' || payload.operationId.length === 0 || !Array.isArray(payload.audioEffects)) return null
+  const restored = normalizeSharedUngroupRestoreEffects(payload.audioEffects.map((effect) => (
+    isRecord(effect) ? { type: effect.kind, instanceId: effect.id, params: effect.params } : effect
+  )))
+  if (!restored || restored.length !== payload.audioEffects.length) return null
+  const audioEffects = restored.flatMap((effect) => (
+    isAudioEffectKind(effect.type) && effect.instanceId
+      ? [{ id: effect.instanceId, kind: effect.type, params: effect.params }]
+      : []
+  ))
+  if (audioEffects.length !== restored.length) return null
+  const instrument = payload.instrument === undefined ? undefined : readTrackInstrumentParams(payload.instrument)
+  const arpeggiator = payload.arpeggiator === undefined ? undefined : readArpeggiatorParams(payload.arpeggiator)
+  if ((payload.instrument !== undefined && !instrument) || (payload.arpeggiator !== undefined && !arpeggiator)) return null
+  return {
+    kind: 'effects.restoreChain',
+    payload: {
+      trackId: payload.trackId,
+      audioEffects,
+      ...(instrument ? { instrument } : {}),
+      ...(arpeggiator ? { arpeggiator } : {}),
+      operationId: payload.operationId,
+    },
+  }
+}
+
 const parseRemoveAudioEffect = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   if (!isAudioEffectKind(payload.effect)) return null
   const instanceId = readRequiredInstanceId(payload.instanceId)
@@ -1392,6 +1417,7 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   { kind: 'effects.setDelayParams', parse: parseTrackDelay, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setSpectralParams', parse: parseTrackSpectral, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.reorderAudioChain', parse: parseTrackAudioChainReorder, targets: readTrackIdTargets, durableQueue: true },
+  { kind: 'effects.restoreChain', parse: parseRestoreEffectChain, targets: readTrackIdTargets, durableQueue: true },
   {
     kind: 'effects.removeAudioEffect',
     parse: parseRemoveAudioEffect,

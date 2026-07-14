@@ -9,6 +9,14 @@ type TimelineOperationContext = {
   projectId: string
 }
 
+export const buildRestoreChainMutationArgs = (
+  projectId: string,
+  payload: Extract<SharedTimelineOperation, { kind: 'effects.restoreChain' }>['payload'],
+) => ({
+  projectId,
+  ...payload,
+})
+
 export class TimelineOperationTargetError extends Error {
   constructor(message: string) {
     super(message)
@@ -234,6 +242,11 @@ export const executeTimelineOperation = async (
         trackId: operation.payload.trackId,
         order: operation.payload.order,
       })
+    case 'effects.restoreChain':
+      return await context.convex.mutation(
+        convexApi.effects.serverRestoreChain,
+        buildRestoreChainMutationArgs(context.projectId, operation.payload),
+      )
     case 'effects.removeAudioEffect':
       return await context.convex.mutation(convexApi.effects.serverRemoveAudioEffect, {
         projectId: context.projectId,

@@ -263,3 +263,63 @@ export const reorderLocalAudioEffects = async (
   await tx.done
   notifyLocalProjectChanged(projectId)
 }
+
+export const restoreLocalTrackEffectChain = async (
+  projectId: string,
+  targetId: string,
+  input: {
+    audioEffects: Array<{ id: string; kind: AudioEffectKind; params: unknown }>
+    instrument?: TrackInstrumentParams
+    arp?: unknown
+  },
+): Promise<void> => {
+  const audioIds = new Set<string>()
+  for (const effect of input.audioEffects) {
+    if (!effect.id || audioIds.has(effect.id)) throw new Error('Audio effect instance IDs must be unique.')
+    audioIds.add(effect.id)
+  }
+  const db = await openLocalProjectDb(projectId)
+  const tx = db.transaction('entities', 'readwrite')
+  const timestamp = now()
+  const effectRows = await tx.store.index('by-kind').getAll(EFFECT_KIND)
+  for (const entity of effectRows) {
+    if (!isLocalEffectRow(entity.value) || entity.value.targetId !== targetId) continue
+    if (audioEffectKindFromLocalEffect(entity.value.effect) || entity.value.effect === 'instrument' || entity.value.effect === 'synth' || entity.value.effect === 'arp') {
+      await tx.store.delete([EFFECT_KIND, entity.id])
+    }
+  }
+  for (const [index, effect] of input.audioEffects.entries()) {
+    const row: LocalEffectRow = {
+      id: localEffectRowId(targetId, effect.kind, effect.id),
+      targetId,
+      effect: effect.kind,
+      instanceId: effect.id,
+      params: effect.params,
+      index,
+      updatedAt: timestamp,
+    }
+    await tx.store.put(createLocalProjectEntityRow(EFFECT_KIND, row.id, row, timestamp))
+  }
+  if (input.instrument) {
+    const row: LocalEffectRow<TrackInstrumentParams> = {
+      id: localEffectRowId(targetId, 'instrument'),
+      targetId,
+      effect: 'instrument',
+      params: input.instrument,
+      updatedAt: timestamp,
+    }
+    await tx.store.put(createLocalProjectEntityRow(EFFECT_KIND, row.id, row, timestamp))
+  }
+  if (input.arp !== undefined) {
+    const row: LocalEffectRow = {
+      id: localEffectRowId(targetId, 'arp'),
+      targetId,
+      effect: 'arp',
+      params: input.arp,
+      updatedAt: timestamp,
+    }
+    await tx.store.put(createLocalProjectEntityRow(EFFECT_KIND, row.id, row, timestamp))
+  }
+  await tx.done
+  notifyLocalProjectChanged(projectId)
+}

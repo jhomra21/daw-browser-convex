@@ -2,6 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProjectAccess } from "./projectAccess";
 import { getTrackWriteAccess } from "./trackWrites";
+import { runSharedOperationOnce } from "./sharedOperationResults";
 import {
   normalizeEqParamsForUpdate,
   normalizeCompressorParamsForUpdate,
@@ -1084,6 +1085,74 @@ export const serverReorderAudioEffects = mutation({
     }
     await reorderAudioEffectsForUser(ctx, { projectId, userId, targetType, order })
     return { status: 'applied' }
+  },
+})
+
+export const restoreChainArgsValidator = {
+  projectId: v.string(),
+  trackId: v.string(),
+  audioEffects: v.array(v.object({
+    id: v.string(),
+    kind: canonicalAudioEffectKindValidator,
+    params: v.any(),
+  })),
+  instrument: v.optional(trackInstrumentValidator),
+  arpeggiator: v.optional(v.object({
+    enabled: v.boolean(),
+    pattern: v.union(v.literal('up'), v.literal('down'), v.literal('updown'), v.literal('random')),
+    rate: v.union(v.literal('1/4'), v.literal('1/8'), v.literal('1/16'), v.literal('1/32')),
+    octaves: v.number(),
+    gate: v.number(),
+    hold: v.boolean(),
+  })),
+  operationId: v.string(),
+}
+
+export const serverRestoreChain = mutation({
+  args: restoreChainArgsValidator,
+  handler: async (ctx, { projectId, trackId, audioEffects, instrument, arpeggiator, operationId }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
+    if (!normalizedTrackId) return notFoundStatus()
+    const instanceIds = new Set<string>()
+    for (const effect of audioEffects) {
+      if (!effect.id || instanceIds.has(effect.id)) throw new Error('Audio effect instance IDs must be unique.')
+      instanceIds.add(effect.id)
+    }
+    return await runSharedOperationOnce(ctx, {
+      projectId,
+      userId,
+      operationId,
+      isResult: (value): value is { status: 'applied' } => (
+        typeof value === 'object' && value !== null && Reflect.get(value, 'status') === 'applied'
+      ),
+      run: async () => {
+        const access = await getTrackWriteAccess(ctx, normalizedTrackId, userId)
+        if (!access || access.track.projectId !== projectId) return notFoundStatus()
+        const existing = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', normalizedTrackId)).collect()
+        for (const effect of existing) {
+          if (effect.targetType === 'track' && (isCanonicalAudioEffectKind(effect.type) || effect.type === 'instrument' || effect.type === 'synth' || effect.type === 'arpeggiator')) {
+            await ctx.db.delete(effect._id)
+          }
+        }
+        for (const [index, effect] of audioEffects.entries()) {
+          const params = normalizeEffectParamsForUpdate(effect.kind, effect.params)
+          await ctx.db.insert('effects', {
+            projectId,
+            targetType: 'track',
+            trackId: normalizedTrackId,
+            index,
+            type: effect.kind,
+            instanceId: effect.id,
+            params,
+            createdAt: Date.now(),
+          })
+        }
+        if (instrument) await upsertTrackInstrument(ctx, { projectId, userId, trackId: normalizedTrackId, instrument })
+        if (arpeggiator) await upsertTrackEffect(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'arpeggiator', params: sanitizeArpParams(arpeggiator) })
+        return { status: 'applied' }
+      },
+    })
   },
 })
 

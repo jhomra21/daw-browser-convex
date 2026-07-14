@@ -153,7 +153,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     rememberClipHistoryRef: identity.rememberClipHistoryRef,
   });
   let renderTracks: Accessor<Track[]> = () => [];
-  const [mixerTracks, setMixerTracks] = createSignal<Accessor<Track[]>>(() => []);
   const selection = useTimelineSelectionState({
     projectId,
     tracks: () => renderTracks(),
@@ -324,7 +323,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     userId,
     syncMix,
-    tracks: () => mixerTracks()(),
+    tracks: () => renderTracks(),
     localMix,
     optimisticTrackIds,
     canWriteTrack,
@@ -371,7 +370,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     bufferVersion,
   });
   renderTracks = resolvedRenderTracks;
-  setMixerTracks(() => resolvedRenderTracks);
   const pendingDeleteTrackClipCount = createMemo(() => {
     const trackId = pendingDeleteTrackId();
     if (!trackId) return 0;

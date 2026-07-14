@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { parseSharedTimelineOperation, readSharedTimelineOperationTargets, type SharedTimelineOperation } from './shared-timeline-operations'
+import { createDefaultLimiterParams, createDefaultLoFiParams } from './effects-params'
+import { createDefaultSpectralParams } from './spectral-params'
 
 describe('shared timeline operations', () => {
   test('roundtrips synth parameters only with a durable instance identity', () => {
@@ -336,5 +338,67 @@ describe('shared timeline operations', () => {
     })
     if (!operation) throw new Error('Expected tracks.ungroup operation to parse')
     expect(readSharedTimelineOperationTargets(operation).trackIds.size).toBe(0)
+  })
+
+  test('restores every canonical audio effect kind through ungroup and chain payloads', () => {
+    const limiter = { version: 1, state: createDefaultLimiterParams() }
+    const lofi = { version: 1, state: createDefaultLoFiParams() }
+    const spectral = { version: 1, state: createDefaultSpectralParams() }
+    const ungroup = parseSharedTimelineOperation({
+      kind: 'tracks.restoreUngroup',
+      payload: {
+        group: { index: 1, volume: 1, sends: [] },
+        children: [],
+        effects: [
+          { type: 'limiter', instanceId: 'limiter-1', index: 0, params: limiter },
+          { type: 'lofi', instanceId: 'lofi-1', index: 1, params: lofi },
+          { type: 'spectral', instanceId: 'spectral-1', index: 2, params: spectral },
+        ],
+        automation: [],
+      },
+    })
+    expect(ungroup?.kind).toBe('tracks.restoreUngroup')
+
+    const restored = parseSharedTimelineOperation({
+      kind: 'effects.restoreChain',
+      payload: {
+        trackId: 'track-1',
+        operationId: 'restore-1',
+        audioEffects: [
+          { id: 'limiter-1', kind: 'limiter', params: limiter },
+          { id: 'lofi-1', kind: 'lofi', params: lofi },
+          { id: 'spectral-1', kind: 'spectral', params: spectral },
+        ],
+      },
+    })
+    expect(restored).toEqual({
+      kind: 'effects.restoreChain',
+      payload: {
+        trackId: 'track-1',
+        operationId: 'restore-1',
+        audioEffects: [
+          { id: 'limiter-1', kind: 'limiter', params: limiter },
+          { id: 'lofi-1', kind: 'lofi', params: lofi },
+          { id: 'spectral-1', kind: 'spectral', params: spectral },
+        ],
+      },
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.restoreChain',
+      payload: {
+        trackId: 'track-1',
+        operationId: 'restore-1',
+        audioEffects: [{ id: 'unknown-1', kind: 'unknown', params: limiter }],
+      },
+    })).toBeNull()
+    expect(parseSharedTimelineOperation({
+      kind: 'tracks.restoreUngroup',
+      payload: {
+        group: { index: 1, volume: 1, sends: [] },
+        children: [],
+        effects: [{ type: 'limiter', instanceId: 'limiter-1', index: 0, params: { version: 2, state: {} } }],
+        automation: [],
+      },
+    })).toBeNull()
   })
 })

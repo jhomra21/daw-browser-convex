@@ -8,6 +8,7 @@ import { createEffectsPanelInstrumentDevice } from "~/components/timeline/create
 import type { AddMidiClipOptions, TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 import { useEffectsPanelAudioSync } from "~/hooks/useEffectsPanelAudioSync";
 import { useEffectsPanelTarget } from "~/hooks/useEffectsPanelTarget";
+import { createSamplerBufferSync } from "~/lib/sampler-buffer-sync";
 import { convexApi, useConvexQuery } from "~/lib/convex";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
 import type { EffectParamsByEffect, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
@@ -68,6 +69,8 @@ const deviceInsertActionsEqual = (
 );
 
 export function createEffectsPanelController(options: EffectsPanelControllerOptions) {
+  const samplerBufferSync = createSamplerBufferSync();
+  onCleanup(samplerBufferSync.dispose);
   const target = useEffectsPanelTarget({
     selectedFXTarget: options.selectedFXTarget,
     tracks: options.tracks,
@@ -103,6 +106,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       insertLocalClip: options.insertLocalClip,
       onEffectParamsCommitted: options.onEffectParamsCommitted,
       onLocalSaveFailed: options.onLocalSaveFailed,
+      samplerBufferSync,
     },
     currentTargetId,
     currentTrack,
@@ -145,6 +149,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       instrument: instrument.readDraftInstrumentForTarget,
       arp: instrument.arp.readDraftForTarget,
     },
+    samplerBufferSync,
   });
 
   createEffect(() => {

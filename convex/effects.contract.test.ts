@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { validateAudioEffectInstanceId } from './effects'
+import { restoreChainArgsValidator, validateAudioEffectInstanceId } from './effects'
 
 describe('audio effect persistence instance contract', () => {
   test('accepts a seventeenth unique track or master effect instance', () => {
@@ -18,5 +18,13 @@ describe('audio effect persistence instance contract', () => {
     expect(() => validateAudioEffectInstanceId(rows, ' ', 'utility')).toThrow('nonempty')
     expect(() => validateAudioEffectInstanceId(rows, 'shared-instance', 'gate')).toThrow('unique per target')
     expect(() => validateAudioEffectInstanceId(rows, 'shared-instance', 'utility')).not.toThrow()
+  })
+
+  test('accepts only canonical restore-chain audio effect fields', () => {
+    const audioEffects = restoreChainArgsValidator.audioEffects
+
+    expect(audioEffects.kind).toBe('array')
+    expect(audioEffects.element.kind).toBe('object')
+    expect(Object.keys(audioEffects.element.fields)).toEqual(['id', 'kind', 'params'])
   })
 })

@@ -576,15 +576,12 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     if (!payload || !actions?.canWrite) return;
     if (payload.kind === "audio-effect") {
       const targetId = options.currentEffectsTargetId();
-      if (!actions.canAddAudioEffectToTarget(targetId, payload.effect)) return;
       void actions.addAudioEffectToTarget(targetId, payload.effect);
       return;
     }
     if (payload.kind === "audio-effect-chain") {
       const targetId = options.currentEffectsTargetId();
-      if (actions.canAddAudioEffectChainToTarget(targetId, payload.chain)) {
-        void actions.addAudioEffectChainToTarget(targetId, payload.chain);
-      }
+      void actions.addAudioEffectChainToTarget(targetId, payload.chain);
       return;
     }
     if (payload.kind === "midi-effect") {

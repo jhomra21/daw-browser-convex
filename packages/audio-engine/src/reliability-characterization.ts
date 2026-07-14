@@ -93,7 +93,6 @@ export type ReliabilityCharacterizationReport = {
       }[]
     }
     boundedResources: {
-      effectsPerChain: number
       liveOwnedWorklets: number
       offlineOwnedWorklets: number
       recorderPoolBlocks: number
@@ -134,7 +133,6 @@ export const createReliabilityCharacterizationReport = (): ReliabilityCharacteri
       })),
     },
     boundedResources: {
-      effectsPerChain: PROCESSOR_RESOURCE_LIMITS.effectsPerChain,
       liveOwnedWorklets: PROCESSOR_RESOURCE_LIMITS.liveOwnedWorklets,
       offlineOwnedWorklets: PROCESSOR_RESOURCE_LIMITS.offlineOwnedWorklets,
       recorderPoolBlocks: RECORDER_POOL_BLOCKS,

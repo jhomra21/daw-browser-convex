@@ -92,7 +92,10 @@ export function useTimelineLocalMix(
     },
   })
 
-  createEffect(on(options.writableTrackIds, (writableTrackIds) => {
+  createEffect(on(() => ({
+    writableTrackIds: options.writableTrackIds(),
+    localMix: persistedState.value(),
+  }), ({ writableTrackIds }) => {
     persistedState.setValue((current) => stripSharedTrackLocalOverrides(current, writableTrackIds))
   }))
 

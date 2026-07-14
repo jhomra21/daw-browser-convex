@@ -235,7 +235,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
   );
 
   const addAudioEffectToTarget = async (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => {
-    if (!canAddAudioEffectToTarget(targetId, effect)) return false;
+    if (!canWriteEffectsTarget(targetId)) return false;
     return await audioEffects.addByKindToTarget(targetId, effect, index);
   };
 
@@ -246,7 +246,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
   );
 
   const addAudioEffectChainToTarget = async (targetId: Track["id"] | "master", chain: AudioEffectChainPreset, index?: number) => {
-    if (!canAddAudioEffectChainToTarget(targetId, chain)) return false;
+    if (!canWriteEffectsTarget(targetId) || chain.effects.length === 0) return false;
     return await audioEffects.addChainToTarget(targetId, chain.effects, index);
   };
 

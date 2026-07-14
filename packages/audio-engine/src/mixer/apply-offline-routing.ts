@@ -73,7 +73,6 @@ async function buildOfflineFxChain(
   const reverbByInstanceId = new Map<string, ReverbNodeChain>()
   const staticWorkletByInstanceId = new Map<string, StaticWorkletNodeChain>()
   const stages = []
-  if (config.instances.length > PROCESSOR_RESOURCE_LIMITS.effectsPerChain) throw new Error(`Effect chains are limited to ${PROCESSOR_RESOURCE_LIMITS.effectsPerChain} instances.`)
   const seen = new Set<string>()
   for (const instance of config.instances) {
     if (seen.has(instance.id)) throw new Error(`Duplicate effect instance ID: ${instance.id}`)

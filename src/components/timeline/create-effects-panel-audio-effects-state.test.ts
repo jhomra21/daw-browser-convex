@@ -182,7 +182,7 @@ describe("effects panel instance engine synchronization", () => {
     });
   });
 
-  test("counts rapid optimistic additions against the 16-device limit", async () => {
+  test("allows chains longer than the former per-chain limit", async () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();
       const { device } = createDevice(engine);
@@ -190,8 +190,8 @@ describe("effects panel instance engine synchronization", () => {
         device.addByKindToTarget("track-1", "delay")
       )));
 
-      expect(results.filter(Boolean)).toHaveLength(16);
-      expect(engine.trackFxCalls.at(-1)?.instances).toHaveLength(16);
+      expect(results.filter(Boolean)).toHaveLength(17);
+      expect(engine.trackFxCalls.at(-1)?.instances).toHaveLength(17);
       dispose();
     });
   });

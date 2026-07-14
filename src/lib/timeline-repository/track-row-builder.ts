@@ -21,7 +21,7 @@ type BuildTimelineTrackRowInput = {
 export const buildTimelineTrackRow = (input: BuildTimelineTrackRowInput): TimelineTrackRow => ({
   id: input.id,
   historyRef: input.historyRef ?? input.id,
-  name: input.name?.trim() || `Track ${input.index + 1}`,
+  name: input.name?.trim() || `${input.channelRole === "return" ? "Return" : "Track"} ${input.index + 1}`,
   index: input.index,
   volume: input.volume ?? 0.8,
   muted: input.muted ?? false,

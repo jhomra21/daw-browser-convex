@@ -18,12 +18,8 @@ import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance }
 import { createCueBus } from './mixer/cue-routing'
 import { applyStaticWorkletNodeParams, createStaticWorkletNodeChain, disconnectStaticWorkletNodeChain, resolveStaticWorkletAutomationBinding, subscribeStaticGateMeter, type GateMeterListener, type StaticWorkletKind, type StaticWorkletNodeChain } from './effects/static-worklet-chain'
 import { observeResource, type ResourceObserver } from './runtime-diagnostics'
-import { PROCESSOR_RESOURCE_LIMITS } from './effects/processor-release-contract'
+import { countStaticWorklets, isStaticWorkletKind, type LiveWorkletReservation } from './effects/live-worklet-budget'
 
-const isStaticWorkletKind = (kind: AudioEffectRuntimeInstance['kind']): kind is StaticWorkletKind =>
-  kind === 'utility' || kind === 'autofilter' || kind === 'gate' || kind === 'limiter' || kind === 'lofi' ||
-  kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble' ||
-  kind === 'spectral'
 const isStaticWorkletInstance = (
   instance: AudioEffectRuntimeInstance,
 ): instance is Extract<AudioEffectRuntimeInstance, { kind: StaticWorkletKind }> => isStaticWorkletKind(instance.kind)
@@ -31,6 +27,16 @@ const isStaticWorkletInstance = (
 export const sidechainRouteIdentity = (targetTrackId: string, effectInstanceId: string) => (
   JSON.stringify([targetTrackId, effectInstanceId])
 )
+
+export const findExternalSidechainTarget = (
+  instances: readonly AudioEffectRuntimeInstance[] | undefined,
+  effectInstanceId: string,
+) => {
+  const instance = instances?.find((candidate) => candidate.id === effectInstanceId)
+  return instance?.kind === 'compressor' || instance?.kind === 'gate' || instance?.kind === 'spectral'
+    ? instance
+    : undefined
+}
 
 type RuntimeTrack = Track<AudioBuffer>
 
@@ -69,6 +75,11 @@ type LiveMixerRuntimeOptions = {
   disposeTrackMeters: (trackId: string) => void
   disposeSynthTrack: (trackId: string) => void
   getMasterFx: () => MasterMixerFx
+  workletBudget: {
+    reserve: (owner: string, count: number) => LiveWorkletReservation
+    rollback: (reservation: LiveWorkletReservation) => void
+    releaseOwner: (owner: string) => void
+  }
   getFaultGeneration: () => number
   onGraphLatencyChange?: (frames: number | null) => void
   onWorkletFault?: (generation: number, kind: 'compressor' | 'owned-processor', code: string, context: string) => void
@@ -133,18 +144,15 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     const activeSidechains = new Set<string>()
     for (const route of sidechainRoutes) {
       const source = outputs.get(route.sourceTrackId)
-      const targetInstance = trackFxInstances.get(route.targetTrackId)
-        ?.find((instance) => instance.id === route.effectInstanceId)
-      if (!currentTracks.some((track) => track.id === route.sourceTrackId)) {
-        throw new Error(`Sidechain source track does not exist: ${route.sourceTrackId}`)
-      }
-      if (!targetInstance || (targetInstance.kind !== 'compressor' && targetInstance.kind !== 'gate' && targetInstance.kind !== 'spectral')) {
-        throw new Error(`Sidechain target effect does not exist: ${route.targetTrackId}:${route.effectInstanceId}`)
-      }
+      const targetInstance = findExternalSidechainTarget(
+        trackFxInstances.get(route.targetTrackId),
+        route.effectInstanceId,
+      )
+      if (!source || !targetInstance) continue
       const compressor = instanceCompressorChains.get(route.targetTrackId)?.get(route.effectInstanceId)?.chain()
       const owned = instanceStaticWorkletChains.get(route.targetTrackId)?.get(route.effectInstanceId)
       const targetNode = compressor?.workletNode ?? (owned?.kind === 'gate' || owned?.kind === 'spectral' ? owned.node : undefined)
-      if (!source || !targetNode) continue
+      if (!targetNode) continue
       const edgeId = `sidechain:${sidechainRouteIdentity(route.targetTrackId, route.effectInstanceId)}`
       activeSidechains.add(edgeId)
       const existing = sidechainEdges.get(edgeId)
@@ -343,7 +351,13 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       const pendingInstances = pendingTrackFxInstances.get(trackId)
       if (pendingInstances) {
         pendingTrackFxInstances.delete(trackId)
-        void setTrackFxInstances(trackId, pendingInstances).catch(() => undefined)
+        const pendingRevision = trackFxInstanceRevisions.get(trackId)
+        void setTrackFxInstances(trackId, pendingInstances).catch(() => {
+          if (trackFxInstanceRevisions.get(trackId) !== pendingRevision) return
+          trackFxInstances.set(trackId, [])
+          trackFx.set(trackId, { instances: [] })
+          options.workletBudget.releaseOwner(`track:${trackId}`)
+        })
       }
     }
 
@@ -387,6 +401,10 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     if (trackFxInstanceRevisions.get(trackId) !== revision) return
     if (instanceStaticWorkletChains.get(trackId)?.get(instanceId) !== chain) return
     closeInstanceState(trackId, instanceId)
+    const instances = (trackFxInstances.get(trackId) ?? []).filter((instance) => instance.id !== instanceId)
+    trackFxInstances.set(trackId, instances)
+    trackFx.set(trackId, { instances })
+    options.workletBudget.reserve(`track:${trackId}`, countStaticWorklets(instances))
     const nodes = inputs.has(trackId) && gains.has(trackId) ? ensureTrackNodes(trackId) : null
     if (nodes) rebuildTrackRouting(trackId, nodes)
     applyAuxiliaryRoutes()
@@ -403,12 +421,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       inputIds.add(instance.id)
     }
     const normalized = normalizeAudioEffectRuntimeInstances(instances)
-    if (normalized.length > PROCESSOR_RESOURCE_LIMITS.effectsPerChain) throw new Error(`Effect chains are limited to ${PROCESSOR_RESOURCE_LIMITS.effectsPerChain} instances.`)
-    const otherWorklets = [...trackFxInstances.entries()].reduce((count, [id, values]) => (
-      id === trackId ? count : count + values.filter((instance) => isStaticWorkletKind(instance.kind)).length
-    ), 0)
-    const requestedWorklets = normalized.filter((instance) => isStaticWorkletKind(instance.kind)).length
-    if (otherWorklets + requestedWorklets > PROCESSOR_RESOURCE_LIMITS.liveOwnedWorklets) throw new Error(`Live processing is limited to ${PROCESSOR_RESOURCE_LIMITS.liveOwnedWorklets} static worklets.`)
+    const reservation = options.workletBudget.reserve(`track:${trackId}`, countStaticWorklets(normalized))
     const previous = trackFxInstances.get(trackId)
     const orderChanged = Boolean(previous && (
       previous.length !== normalized.length ||
@@ -457,7 +470,8 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     for (const id of staleIds) closeInstanceState(trackId, id)
 
     let requiresRoutingRebuild = !wasInstanceMode || staleIds.size > 0 || orderChanged || spectralTimingChanged
-    for (const instance of normalized) {
+    try {
+      for (const instance of normalized) {
       if (isStaticWorkletInstance(instance)) {
         const stateMap = ensureNestedMap(instanceStaticWorkletChains, trackId)
         const existing = stateMap.get(instance.id)
@@ -538,6 +552,10 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       }
       const result = state.set(ctx, instance.params, options.createImpulseResponse)
       requiresRoutingRebuild = (result.changed && result.requiresRoutingRebuild) || requiresRoutingRebuild
+      }
+    } catch (error) {
+      options.workletBudget.rollback(reservation)
+      throw error
     }
     if (requiresRoutingRebuild) rebuildTrackRouting(trackId, ensureTrackNodes(trackId))
     applyAuxiliaryRoutes()
@@ -584,6 +602,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     pendingTrackFxInstances.delete(trackId)
     trackFxInstanceRevisions.delete(trackId)
     trackFx.delete(trackId)
+    options.workletBudget.releaseOwner(`track:${trackId}`)
     closeTrackInstanceStates(trackId)
     for (const release of trackNodeReleases.get(trackId) ?? []) release()
     trackNodeReleases.delete(trackId)
@@ -609,6 +628,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     gains.clear()
     postFxOutputs.clear()
     inputs.clear()
+    for (const trackId of trackFxInstances.keys()) options.workletBudget.releaseOwner(`track:${trackId}`)
     trackFxInstances.clear()
     pendingTrackFxInstances.clear()
     trackFxInstanceRevisions.clear()

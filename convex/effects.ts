@@ -263,10 +263,8 @@ const upsertTrackEffect = async (
   if (!access || access.track.projectId !== input.projectId) return
   const existing = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
   if (input.instanceId) {
-    if (!input.instanceId?.trim()) throw new Error('Audio effect instance id must be nonempty.')
     const audioRows = existing.filter((entry: EffectOrderRow) => entry.targetType === 'track' && isCanonicalAudioEffectKind(entry.type))
-    if (audioRows.some((entry: EffectOrderRow) => entry.instanceId === input.instanceId && entry.type !== input.type)) throw new Error('Audio effect instance id must be unique per target.')
-    if (!audioRows.some((entry: EffectOrderRow) => entry.instanceId === input.instanceId) && audioRows.length >= 16) throw new Error('Audio effect target cannot contain more than 16 effects.')
+    validateAudioEffectInstanceId(audioRows, input.instanceId, input.type)
   }
   const row = input.type === 'instrument'
     ? existing.find((entry: EffectOrderRow) => entry.type === 'instrument' && entry.targetType === 'track')
@@ -334,10 +332,8 @@ const upsertMasterEffect = async (
   await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
   const existing = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
   if (input.instanceId) {
-    if (!input.instanceId?.trim()) throw new Error('Audio effect instance id must be nonempty.')
     const audioRows = existing.filter((entry: EffectOrderRow) => isCanonicalAudioEffectKind(entry.type))
-    if (audioRows.some((entry: EffectOrderRow) => entry.instanceId === input.instanceId && entry.type !== input.type)) throw new Error('Audio effect instance id must be unique per target.')
-    if (!audioRows.some((entry: EffectOrderRow) => entry.instanceId === input.instanceId) && audioRows.length >= 16) throw new Error('Audio effect target cannot contain more than 16 effects.')
+    validateAudioEffectInstanceId(audioRows, input.instanceId, input.type)
   }
   const row = input.instanceId
     ? existing.find((entry: EffectOrderRow) => entry.instanceId === input.instanceId && entry.type === input.type && entry.targetType === 'master') ?? null
@@ -385,6 +381,17 @@ type EffectOrderRow = {
   targetType?: string
   instanceId?: string
   index?: number
+}
+
+export const validateAudioEffectInstanceId = (
+  rows: readonly EffectOrderRow[],
+  instanceId: string,
+  type: SharedAudioEffectType,
+) => {
+  if (!instanceId.trim()) throw new Error('Audio effect instance id must be nonempty.')
+  if (rows.some((entry) => entry.instanceId === instanceId && entry.type !== type)) {
+    throw new Error('Audio effect instance id must be unique per target.')
+  }
 }
 
 type EffectOrderContext = {

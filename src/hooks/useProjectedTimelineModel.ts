@@ -259,7 +259,7 @@ export function useProjectedTimelineModel(
           assert(send?.targetId, `Missing mixer send target for track ${String(track._id)}`)
           const amount = Number(send.amount)
           assert(Number.isFinite(amount), `Invalid mixer send amount for track ${String(track._id)}`)
-          return { targetId: send.targetId, amount }
+          return { targetId: send.targetId, amount, tap: send.tap }
         }),
       })
     }

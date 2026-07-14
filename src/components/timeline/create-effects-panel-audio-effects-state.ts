@@ -1059,7 +1059,7 @@ export function createEffectsPanelAudioDevice(
     index?: number,
   ) => {
     const previousOrder = currentOrderForTarget(targetId);
-    if (effects.length === 0 || previousOrder.length + effects.length > 16) return false;
+    if (effects.length === 0) return false;
     const entries = effects.map((effect) => ({
       instance: { id: createAudioEffectInstanceId(), kind: effect.kind },
       params: normalizePresetStepParams(effect),
@@ -1095,7 +1095,7 @@ export function createEffectsPanelAudioDevice(
   const addByKindToTarget = async (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => (
     await addChainToTarget(targetId, [createDefaultPresetStep(effect)], index)
   );
-  const canAddByKindToTarget = (targetId: Track["id"] | "master", _effect: AudioEffectKind) => currentOrderForTarget(targetId).length < 16;
+  const canAddByKindToTarget = (_targetId: Track["id"] | "master", _effect: AudioEffectKind) => true;
   const deleteInstanceFromTarget = async (targetId: Track["id"] | "master", instance: AudioEffectInstance, projectId: string) => {
     const instanceId = persistedInstanceIdForTarget(targetId, instance);
     if (isLocalId("project", projectId)) {

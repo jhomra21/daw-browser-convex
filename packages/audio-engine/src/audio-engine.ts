@@ -22,6 +22,7 @@ import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { createRecordingRuntime, type RecordingRuntimeStatus, type StartRecordingCaptureOptions } from './recording/recording-runtime'
 import { analyzeCalibrationCapture, createCalibrationStimulus, type RecordingCalibrationAnalysis } from './recording/calibration'
 import { createRuntimeFaultCounter, type RuntimeFaultSnapshot } from './runtime-diagnostics'
+import { createLiveWorkletBudget } from './effects/live-worklet-budget'
 
 type RuntimeClip = Clip<AudioBuffer>
 type RuntimeTrack = Track<AudioBuffer>
@@ -69,6 +70,7 @@ export class AudioEngine {
   private automationEnvelopes: AutomationEnvelope[] = []
   private masterVolume = 1
   private sources = createSourceRegistry()
+  private workletBudget = createLiveWorkletBudget()
   private instrumentRuntime = createInstrumentRuntime({
     ensureAudio: () => this.ensureAudio(),
     getAudioContext: () => this.audioCtx,
@@ -91,6 +93,7 @@ export class AudioEngine {
     disposeTrackMeters: (trackId) => this.metering.disposeTrack(trackId),
     disposeSynthTrack: (trackId) => this.disposeSynthTrack(trackId),
     getMasterFx: () => this.masterFx.getMixerFx(),
+    workletBudget: this.workletBudget,
     getFaultGeneration: () => this.faultGeneration,
     onGraphLatencyChange: (frames) => {
       if (this.graphPdcLatencyFrames === frames) return
@@ -119,6 +122,7 @@ export class AudioEngine {
   })
   private masterFx = createMasterFxRuntime({
     getFaultGeneration: () => this.faultGeneration,
+    workletBudget: this.workletBudget,
     onWorkletFault: (generation, kind, code, context) => {
       if (this.runtimeFaultCounter.report(generation, { kind, code, context })) this.publishRuntimeSnapshot()
     },

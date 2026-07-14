@@ -56,6 +56,10 @@ import {
   TIMELINE_DEFAULT_TRACK_COLOR,
 } from "~/lib/preferences/app-preferences";
 import { trackColorForClip } from "~/lib/clip-color";
+import {
+  getReturnSendTargets,
+  resolveSendTargetId,
+} from "./track-send-targets";
 
 type TrackSidebarProps = {
   sidebar: {
@@ -242,11 +246,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     }
     return bandsByTrackId;
   });
-  const returnTracks = createMemo(() =>
-    sidebar().allTracks.filter(
-      (track) => getTrackChannelRole(track) === "return",
-    ),
-  );
+  const returnTracks = createMemo(() => getReturnSendTargets(sidebar().allTracks));
   const returnTrackNames = createMemo(
     () =>
       new Map<string, string>(
@@ -332,10 +332,16 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     selectedOutputTargets().get(track.id) ?? actualOutputTargetId(track);
   const outputTargetName = (track: Track) =>
     groupTrackNames().get(selectedOutputTargetId(track)) ?? "Master";
-  const actualSendTargetId = (track: Track) =>
-    track.sends?.find((send) => send.amount > 0.0001)?.targetId ?? "";
+  const actualSendTargetId = (track: Track) => {
+    const targetId = track.sends?.find((send) => send.amount > 0.0001)?.targetId ?? "";
+    return resolveSendTargetId(targetId, undefined, returnTracks());
+  };
   const selectedSendTargetId = (track: Track) =>
-    selectedSendTargets().get(track.id) ?? actualSendTargetId(track);
+    resolveSendTargetId(
+      actualSendTargetId(track),
+      selectedSendTargets().get(track.id),
+      returnTracks(),
+    );
   const sendTargetName = (track: Track) => {
     const targetId = selectedSendTargetId(track);
     if (!targetId) return "None";
@@ -497,15 +503,25 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   const handleSendTargetChange = (track: Track, targetId: string) => {
     if (!canWriteTrackRouting(track)) return;
-    setSelectedSendTargets((current) =>
-      current.get(track.id) === targetId
-        ? current
-        : new Map(current).set(track.id, targetId),
-    );
-    const existingSends = track.sends ?? [];
     const returnTrack = returnTracks().find(
       (candidate) => candidate.id === targetId,
     );
+    if (targetId && !returnTrack) {
+      setSelectedSendTargets((current) => {
+        if (!current.has(track.id)) return current;
+        const next = new Map(current);
+        next.delete(track.id);
+        return next;
+      });
+      return;
+    }
+    const nextTargetId = returnTrack?.id ?? "";
+    setSelectedSendTargets((current) =>
+      current.get(track.id) === nextTargetId
+        ? current
+        : new Map(current).set(track.id, nextTargetId),
+    );
+    const existingSends = track.sends ?? [];
     if (!returnTrack) {
       sidebar().onTrackSendsChange(track.id, []);
       return;
@@ -1115,7 +1131,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                               )
                             }
                             class="absolute inset-0 h-7 w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
-                            title="Track send"
+                            title={
+                              returnTracks().length === 0
+                                ? "Add a Return track to create sends"
+                                : "Track send"
+                            }
                           >
                             <option value="">None</option>
                             <For each={returnTracks()}>

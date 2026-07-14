@@ -13,18 +13,18 @@ import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance }
 import type { ResolveMixerGraphOptions } from './mixer/types'
 import { applyStaticWorkletNodeParams, createStaticWorkletNodeChain, disconnectStaticWorkletNodeChain, resolveStaticWorkletAutomationBinding, subscribeStaticGateMeter, type GateMeterListener, type StaticWorkletKind, type StaticWorkletNodeChain } from './effects/static-worklet-chain'
 import { observeResource, type ResourceObserver } from './runtime-diagnostics'
-import { PROCESSOR_RESOURCE_LIMITS } from './effects/processor-release-contract'
-
-const isStaticWorkletKind = (kind: AudioEffectRuntimeInstance['kind']): kind is StaticWorkletKind =>
-  kind === 'utility' || kind === 'autofilter' || kind === 'gate' || kind === 'limiter' || kind === 'lofi' ||
-  kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble' ||
-  kind === 'spectral'
+import { countStaticWorklets, isStaticWorkletKind, type LiveWorkletReservation } from './effects/live-worklet-budget'
 const isStaticWorkletInstance = (
   instance: AudioEffectRuntimeInstance,
 ): instance is Extract<AudioEffectRuntimeInstance, { kind: StaticWorkletKind }> => isStaticWorkletKind(instance.kind)
 
 type MasterFxRuntimeOptions = {
   getFaultGeneration: () => number
+  workletBudget: {
+    reserve: (owner: string, count: number) => LiveWorkletReservation
+    rollback: (reservation: LiveWorkletReservation) => void
+    releaseOwner: (owner: string) => void
+  }
   onWorkletFault?: (generation: number, kind: 'compressor' | 'owned-processor', code: string, context: string) => void
   resourceObserver?: ResourceObserver
 }
@@ -197,6 +197,8 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   ) => {
     if (fxInstanceRevision !== revision || instanceStaticWorkletChains.get(instanceId) !== chain) return
     closeInstanceState(instanceId)
+    masterFxInstances = masterFxInstances.filter((instance) => instance.id !== instanceId)
+    options.workletBudget.reserve('master', countStaticWorklets(masterFxInstances))
     rebuildRouting(ctx, masterGain, destination)
   }
 
@@ -214,7 +216,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       inputIds.add(instance.id)
     }
     const normalized = normalizeAudioEffectRuntimeInstances(instances)
-    if (normalized.length > PROCESSOR_RESOURCE_LIMITS.effectsPerChain) throw new Error(`Effect chains are limited to ${PROCESSOR_RESOURCE_LIMITS.effectsPerChain} instances.`)
+    const reservation = options.workletBudget.reserve('master', countStaticWorklets(normalized))
     const previous = masterFxInstances
     const orderChanged = Boolean(previous && (
       previous.length !== normalized.length ||
@@ -231,6 +233,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       masterFxInstances = []
       pendingFxInstances = null
       closeAllInstanceStates()
+      options.workletBudget.releaseOwner('master')
       rebuildRouting(ctx, masterGain, destination)
       return
     }
@@ -246,7 +249,8 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     for (const id of staleIds) closeInstanceState(id)
 
     let requiresRoutingRebuild = staleIds.size > 0 || orderChanged || spectralTimingChanged
-    for (const instance of normalized) {
+    try {
+      for (const instance of normalized) {
       if (isStaticWorkletInstance(instance)) {
         const existing = instanceStaticWorkletChains.get(instance.id)
         if (existing?.kind === instance.kind && existing.state === 'active') {
@@ -323,6 +327,10 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       }
       const result = state.set(ctx, instance.params, createImpulseResponse)
       requiresRoutingRebuild = (result.changed && result.requiresRoutingRebuild) || requiresRoutingRebuild
+      }
+    } catch (error) {
+      options.workletBudget.rollback(reservation)
+      throw error
     }
     if (requiresRoutingRebuild) rebuildRouting(ctx, masterGain, destination)
   }
@@ -333,6 +341,8 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
         const instances = pendingFxInstances
         pendingFxInstances = null
         void applyFxInstances(ctx, masterGain, destination, createImpulseResponse, instances).catch((error) => {
+          masterFxInstances = []
+          options.workletBudget.releaseOwner('master')
           options.onWorkletFault?.(
             options.getFaultGeneration(),
             'owned-processor',
@@ -391,10 +401,12 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
         masterFxInstances = []
         pendingFxInstances = null
         closeAllInstanceStates()
+        options.workletBudget.releaseOwner('master')
         if (ctx && masterGain) rebuildRouting(ctx, masterGain, destination ?? ctx.destination)
         return
       }
       if (!ctx || !masterGain) {
+        options.workletBudget.reserve('master', countStaticWorklets(normalized))
         masterFxInstances = normalized
         pendingFxInstances = normalized
         return
@@ -476,6 +488,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       pendingFxInstances = null
       fxInstanceRevision += 1
       closeAllInstanceStates()
+      options.workletBudget.releaseOwner('master')
       compressorMeterSubscriptions.clear()
       compressorMeterListeners.clear()
       disconnectAudioNodes([analyser])

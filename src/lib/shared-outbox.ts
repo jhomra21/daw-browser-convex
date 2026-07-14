@@ -141,7 +141,15 @@ const readEntry = (value: unknown): SharedOutboxEntry | null => {
     projectId: value.projectId,
     userId: value.userId,
     payload: value.payload,
-    completion: isSharedOutboxCompletion(value.completion) ? value.completion : undefined,
+    completion: isSharedOutboxCompletion(value.completion)
+      ? {
+          kind: value.completion.kind,
+          tracks: value.completion.tracks,
+          groupTrack: value.completion.groupTrack,
+          effects: value.completion.effects,
+          automation: value.completion.automation,
+        }
+      : undefined,
     status: value.status,
     attempts: value.attempts,
     nextAttemptAt: value.nextAttemptAt,

@@ -180,8 +180,8 @@ export function createMeteringRuntime(options: {
         workletFrames.set(trackId, frame)
         pendingFrames.set(trackId, frame)
         const next = {
-          left: Math.min(1, Math.max(0, Math.sqrt(frame.channels[0].rms))),
-          right: Math.min(1, Math.max(0, Math.sqrt(frame.channels[1].rms))),
+          left: Math.min(1, Math.max(0, frame.channels[0].rms)),
+          right: Math.min(1, Math.max(0, frame.channels[1].rms)),
         }
         workletLevels.set(trackId, next)
         queueLevels(trackId, next)

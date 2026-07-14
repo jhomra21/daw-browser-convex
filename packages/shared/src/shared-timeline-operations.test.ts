@@ -289,6 +289,42 @@ describe('shared timeline operations', () => {
     })).toBeNull()
   })
 
+  test('parses restored sidechain endpoints and rejects malformed routes', () => {
+    const payload: Extract<SharedTimelineOperation, { kind: 'tracks.restoreUngroup' }>['payload'] = {
+      group: { index: 1, volume: 0.8, sends: [] },
+      children: [{ trackId: 'track-1', outputToGroup: true }],
+      effects: [],
+      automation: [],
+      sidechainRoutes: [{
+        sourceTrackId: 'track-1',
+        effectInstanceId: 'compressor-restored-group',
+      }],
+    }
+    expect(parseSharedTimelineOperation({
+      kind: 'tracks.restoreUngroup',
+      payload,
+    })).toEqual({ kind: 'tracks.restoreUngroup', payload })
+    expect(parseSharedTimelineOperation({
+      kind: 'tracks.restoreUngroup',
+      payload: {
+        ...payload,
+        sidechainRoutes: [{
+          sourceTrackId: 'track-1',
+          effectInstanceId: 42,
+        }],
+      },
+    })).toBeNull()
+    expect(parseSharedTimelineOperation({
+      kind: 'tracks.restoreUngroup',
+      payload: {
+        ...payload,
+        sidechainRoutes: [{
+          effectInstanceId: 'self-route',
+        }],
+      },
+    })).toBeNull()
+  })
+
   test('preserves ungroup operation identities for durable retries', () => {
     const operation = parseSharedTimelineOperation({
       kind: 'tracks.ungroup',

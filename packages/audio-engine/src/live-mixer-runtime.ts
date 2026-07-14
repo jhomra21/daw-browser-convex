@@ -28,6 +28,10 @@ const isStaticWorkletInstance = (
   instance: AudioEffectRuntimeInstance,
 ): instance is Extract<AudioEffectRuntimeInstance, { kind: StaticWorkletKind }> => isStaticWorkletKind(instance.kind)
 
+export const sidechainRouteIdentity = (targetTrackId: string, effectInstanceId: string) => (
+  JSON.stringify([targetTrackId, effectInstanceId])
+)
+
 type RuntimeTrack = Track<AudioBuffer>
 
 type MasterMixerFx = Pick<ResolveMixerGraphOptions, 'masterFxInstances'>
@@ -141,7 +145,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       const owned = instanceStaticWorkletChains.get(route.targetTrackId)?.get(route.effectInstanceId)
       const targetNode = compressor?.workletNode ?? (owned?.kind === 'gate' || owned?.kind === 'spectral' ? owned.node : undefined)
       if (!source || !targetNode) continue
-      const edgeId = `sidechain:${route.effectInstanceId}`
+      const edgeId = `sidechain:${sidechainRouteIdentity(route.targetTrackId, route.effectInstanceId)}`
       activeSidechains.add(edgeId)
       const existing = sidechainEdges.get(edgeId)
       if (existing?.source === source && existing.target === targetNode) continue
@@ -687,8 +691,9 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       const seen = new Set<string>()
       for (const route of routes) {
         if (route.sourceTrackId === route.targetTrackId) throw new Error('An effect cannot sidechain from its own track.')
-        if (seen.has(route.effectInstanceId)) throw new Error('An effect can have only one external sidechain route.')
-        seen.add(route.effectInstanceId)
+        const identity = sidechainRouteIdentity(route.targetTrackId, route.effectInstanceId)
+        if (seen.has(identity)) throw new Error('An effect can have only one external sidechain route.')
+        seen.add(identity)
       }
       sidechainRoutes = routes
       applyAuxiliaryRoutes()

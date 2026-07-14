@@ -594,6 +594,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       group: appPreferences.timeline.defaultGroupCreateColor,
     },
     automationEnvelopes: automation.envelopes,
+    sidechainRoutes,
     applyAutomationEnvelope: automation.applyEnvelope,
     navigation: {
       trackLookup,
@@ -770,6 +771,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     gridDenominator,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
     automationEnvelopes: automation.envelopes,
+    sidechainRoutes,
     applyAutomationEnvelope: automation.applyEnvelope,
     grantClipWrites,
     notify,

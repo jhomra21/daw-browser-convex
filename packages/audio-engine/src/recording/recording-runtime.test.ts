@@ -38,6 +38,7 @@ const graph = () => {
     disconnect: () => disconnections.push(gain),
   })
   const messages: unknown[] = []
+  let processorError: (() => void) | null = null
   const port = Object.assign(Object.create(null), {
     onmessage: null,
     messages,
@@ -47,6 +48,12 @@ const graph = () => {
   })
   const worklet = Object.assign(Object.create(null), {
     port,
+    get onprocessorerror() {
+      return processorError
+    },
+    set onprocessorerror(handler: (() => void) | null) {
+      processorError = handler
+    },
     connect: (target: unknown) => connections.push(target),
     disconnect: () => disconnections.push(worklet),
   })
@@ -411,5 +418,47 @@ describe('recording runtime', () => {
     await Promise.resolve()
     expect(aborts).toBe(1)
     expect(cancelRuntime.getStatus()).toMatchObject({ state: 'cancelled' })
+  })
+
+  test('fails and releases resources when the processor faults', async () => {
+    const fake = graph()
+    const ledger = createReliabilityResourceLedger()
+    const runtime = createRecordingRuntime({
+      getContext: () => fake.context,
+      loadWorklet: async () => undefined,
+      createWorkletNode: () => fake.worklet,
+      connectMonitor: () => () => undefined,
+      resourceObserver: ledger,
+    })
+    await runtime.start(startOptions(fake.stream))
+    fake.worklet.onprocessorerror?.()
+    await Promise.resolve()
+    expect(runtime.getStatus()).toEqual({
+      state: 'failed',
+      sessionId: 'take-1',
+      reason: 'recording-processor-error',
+    })
+    ledger.assertEmpty()
+  })
+
+  test('bounds worklet finalization and releases resources after timeout', async () => {
+    const fake = graph()
+    const ledger = createReliabilityResourceLedger()
+    const runtime = createRecordingRuntime({
+      getContext: () => fake.context,
+      loadWorklet: async () => undefined,
+      createWorkletNode: () => fake.worklet,
+      connectMonitor: () => () => undefined,
+      finalizeTimeoutMs: 1,
+      resourceObserver: ledger,
+    })
+    await runtime.start(startOptions(fake.stream))
+    await runtime.stop()
+    expect(runtime.getStatus()).toEqual({
+      state: 'failed',
+      sessionId: 'take-1',
+      reason: 'recording-finalize-timeout',
+    })
+    ledger.assertEmpty()
   })
 })

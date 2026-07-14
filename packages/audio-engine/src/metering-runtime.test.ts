@@ -124,6 +124,8 @@ describe('meter worklet lifecycle', () => {
       ],
       correlation: 0,
     } })
+    flush()
+    expect(batches.at(-1)?.get('track-1')).toEqual({ left: 0.64, right: 0.36 })
     nodes[0].onprocessorerror?.()
     await Bun.sleep(0)
     flush()

@@ -183,6 +183,7 @@ export type SharedTimelineOperation =
         children: Array<{ trackId: string; outputTargetId?: string; outputToGroup: boolean }>
         effects: SharedUngroupRestoreEffect[]
         automation: SharedUngroupRestoreAutomation[]
+        sidechainRoutes?: Array<{ sourceTrackId?: string; targetTrackId?: string; effectInstanceId: string }>
         operationId?: string
       }
     }
@@ -924,7 +925,22 @@ const parseTrackRestoreUngroup = (payload: Record<string, unknown>): SharedTimel
   if (children.length !== payload.children.length) return null
   const effects = normalizeSharedUngroupRestoreEffects(payload.effects)
   const automation = normalizeSharedUngroupRestoreAutomation(payload.automation)
-  if (!effects || !automation) return null
+  if (!effects || !automation || (payload.sidechainRoutes !== undefined && !Array.isArray(payload.sidechainRoutes))) return null
+  const sidechainRouteInput = Array.isArray(payload.sidechainRoutes) ? payload.sidechainRoutes : []
+  const sidechainRoutes = sidechainRouteInput.flatMap((route) => (
+    isRecord(route)
+    && (route.sourceTrackId === undefined || typeof route.sourceTrackId === 'string')
+    && (route.targetTrackId === undefined || typeof route.targetTrackId === 'string')
+    && typeof route.effectInstanceId === 'string'
+    && route.sourceTrackId !== route.targetTrackId
+      ? [{
+          sourceTrackId: typeof route.sourceTrackId === 'string' ? route.sourceTrackId : undefined,
+          targetTrackId: typeof route.targetTrackId === 'string' ? route.targetTrackId : undefined,
+          effectInstanceId: route.effectInstanceId,
+        }]
+      : []
+  ))
+  if (sidechainRoutes.length !== sidechainRouteInput.length) return null
   return {
     kind: 'tracks.restoreUngroup',
     payload: {
@@ -944,6 +960,7 @@ const parseTrackRestoreUngroup = (payload: Record<string, unknown>): SharedTimel
       children,
       effects,
       automation,
+      ...(payload.sidechainRoutes === undefined ? {} : { sidechainRoutes }),
       operationId: readOptionalString(payload.operationId),
     },
   }
@@ -1344,6 +1361,11 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
       if (!isRecord(child)) continue
       if (typeof child.trackId === 'string') targets.trackIds.add(child.trackId)
       if (typeof child.outputTargetId === 'string') targets.trackIds.add(child.outputTargetId)
+    }
+    if (Array.isArray(payload.sidechainRoutes)) for (const route of payload.sidechainRoutes) {
+      if (!isRecord(route)) continue
+      if (typeof route.sourceTrackId === 'string') targets.trackIds.add(route.sourceTrackId)
+      if (typeof route.targetTrackId === 'string') targets.trackIds.add(route.targetTrackId)
     }
     return targets
   }, durableQueue: true },

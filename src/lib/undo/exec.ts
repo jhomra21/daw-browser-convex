@@ -3,7 +3,7 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { AUDIO_EFFECT_ORDER, assert, assertDefined, automationTargetKey, type AutomationEnvelope } from '@daw-browser/shared'
+import { AUDIO_EFFECT_ORDER, assert, assertDefined, type AutomationEnvelope } from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
@@ -31,6 +31,7 @@ import {
   persistHistoryRestoreUngroup,
   persistHistoryTrackRouting,
   persistHistoryTrackVolume,
+  rebaseTrackAutomationEnvelope,
   removeHistoryClipIdsOrThrow,
   removeHistoryTrackOrThrow,
   syncHistoryClipCreateEntryIds,
@@ -188,6 +189,19 @@ async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'trac
       outputTargetId: resolveTrackId(index, child.previousOutputTargetRef),
       outputToGroup: child.previousOutputTargetRef === entry.data.groupTrackRef,
     }))
+    const sidechainRoutes = (entry.data.sidechainRoutes ?? []).flatMap((route) => {
+      const sourceTrackId = route.sourceTrackRef === entry.data.groupTrackRef
+        ? undefined
+        : resolveTrackId(index, route.sourceTrackRef)
+      const targetTrackId = route.targetTrackRef === entry.data.groupTrackRef
+        ? undefined
+        : resolveTrackId(index, route.targetTrackRef)
+      if (
+        (route.sourceTrackRef !== entry.data.groupTrackRef && !sourceTrackId)
+        || (route.targetTrackRef !== entry.data.groupTrackRef && !targetTrackId)
+      ) return []
+      return [{ sourceTrackId, targetTrackId, effectInstanceId: route.effectInstanceId }]
+    })
     const groupTrackId = await persistHistoryRestoreUngroup(deps, {
       groupId: sourceGroupTrackId,
       operationId: entry.data.restoreOperationId,
@@ -208,6 +222,7 @@ async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'trac
       children,
       effects: entry.data.effects,
       automation: entry.data.automation,
+      sidechainRoutes,
     })
     entry.data.currentGroupTrackId = groupTrackId
     deps.grantTrackWrite(groupTrackId, { projectId: deps.projectId, userId: deps.userId })
@@ -234,13 +249,8 @@ async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'trac
       })
     }
     for (const envelope of entry.data.automation ?? []) {
-      const target: AutomationEnvelope['target'] = { kind: 'track', trackId: groupTrackId, effectInstanceId: envelope.target.effectInstanceId }
-      const targetKey = automationTargetKey(target, envelope.parameterId)
-      deps.actions.applyAutomationEnvelope({
-        ...envelope,
-        target,
-        targetKey,
-      }, targetKey)
+      const rebased = rebaseTrackAutomationEnvelope(envelope, groupTrackId)
+      deps.actions.applyAutomationEnvelope(rebased, rebased.targetKey)
     }
     return
   }
@@ -252,10 +262,8 @@ async function applyTrackUngroupEntry(entry: Extract<HistoryEntry, { type: 'trac
   await persistHistoryUngroup(deps, groupTrackId)
   entry.data.restoreOperationId = crypto.randomUUID()
   for (const envelope of entry.data.automation ?? []) {
-    deps.actions.applyAutomationEnvelope(
-      undefined,
-      automationTargetKey({ kind: 'track', trackId: groupTrackId, effectInstanceId: envelope.target.effectInstanceId }, envelope.parameterId),
-    )
+    const rebased = rebaseTrackAutomationEnvelope(envelope, groupTrackId)
+    deps.actions.applyAutomationEnvelope(undefined, rebased.targetKey)
   }
   const parentGroupId = resolveTrackId(index, entry.data.groupTrack?.groupRef)
   for (const child of entry.data.childSnapshots) {

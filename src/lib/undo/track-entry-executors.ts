@@ -1,6 +1,6 @@
 import { buildLocalClip } from '~/lib/clip-create'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
-import { assert, assertDefined, automationTargetKey, collectTrackDescendantIds, type AutomationEnvelope } from '@daw-browser/shared'
+import { assert, assertDefined, collectTrackDescendantIds } from '@daw-browser/shared'
 import { createLocalTrack } from '~/lib/tracks'
 import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 
@@ -17,7 +17,9 @@ import {
   persistHistoryTrackColor,
   persistHistoryTrackGroup,
   persistHistoryTrackRouting,
+  persistHistorySidechainRoutes,
   persistHistoryTrackVolume,
+  rebaseTrackAutomationEnvelope,
   removeHistoryTrackOrThrow,
   syncHistoryClipCreateEntryIds,
   syncHistoryTrackCreateEntryId,
@@ -138,7 +140,8 @@ export async function applyTrackDeleteEntry(
       }
     }
     for (const envelope of entry.data.automation ?? []) {
-      deps.actions.applyAutomationEnvelope(undefined, automationTargetKey({ kind: 'track', trackId, effectInstanceId: envelope.target.effectInstanceId }, envelope.parameterId))
+      const rebased = rebaseTrackAutomationEnvelope(envelope, trackId)
+      deps.actions.applyAutomationEnvelope(undefined, rebased.targetKey)
     }
     deps.actions.removeLocalTrack(trackId)
     entry.data.recreatedTrackId = undefined
@@ -206,13 +209,10 @@ export async function applyTrackDeleteEntry(
     await persistHistoryTrackEffects(deps, newTrackId, entry.data.effects)
     await persistHistoryTrackAutomation(deps, entry.data.automation, newTrackId)
     for (const envelope of entry.data.automation ?? []) {
-      const target: AutomationEnvelope['target'] = { kind: 'track', trackId: newTrackId, effectInstanceId: envelope.target.effectInstanceId }
-      const targetKey = automationTargetKey(target, envelope.parameterId)
+      const rebased = rebaseTrackAutomationEnvelope(envelope, newTrackId)
       deps.actions.applyAutomationEnvelope({
-        ...envelope,
-        target,
-        targetKey,
-      }, targetKey)
+        ...rebased,
+      }, rebased.targetKey)
     }
 
     const recreatedClipIdsByRef = new Map((entry.data.recreatedClips ?? []).map((item) => [item.clipRef, item.clipId]))
@@ -257,6 +257,7 @@ export async function applyTrackDeleteEntry(
       await persistHistoryTrackRouting(deps, sourceTrackId, normalized)
       deps.actions.applyTrackRouting(sourceTrackId, normalized)
     }
+    await persistHistorySidechainRoutes(deps, entry.data.sidechainRoutes)
   } catch (error) {
     if (createdTrack) {
       await removeHistoryTrackOrThrow(deps, newTrackId, 'Failed to roll back track during track-delete undo')

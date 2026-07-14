@@ -18,7 +18,7 @@ import { getTrackWriteAccess, requireTrackOwnerForWrite } from "./trackWrites";
 import { getClipWriteAccess } from "./clipWrites";
 import { requireAuthenticatedUserId, requireProjectAccess, requireProjectRole } from "./projectAccess";
 import { runSharedOperationOnce } from "./sharedOperationResults";
-import { automationTargetKey, collectTrackDescendantIds, hasTrackGroupCycle, isHexColor, normalizeClipColor, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects } from "@daw-browser/shared";
+import { automationTargetKey, collectTrackDescendantIds, granularAutomationKey, hasTrackGroupCycle, instrumentAutomationKey, isHexColor, normalizeClipColor, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, parseGranularAutomationKey, parseInstrumentAutomationKey } from "@daw-browser/shared";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -30,6 +30,14 @@ const trackDeleteConflictReason = v.union(
   v.literal("not-empty"),
   v.literal("locked"),
 )
+
+const rebaseRestoredAutomationParameter = (trackId: string, parameterId: string) => {
+  const samplerKey = parseInstrumentAutomationKey(parameterId);
+  if (samplerKey) return instrumentAutomationKey(trackId, samplerKey.instanceId, samplerKey.parameterId);
+  const granularKey = parseGranularAutomationKey(parameterId);
+  if (granularKey) return granularAutomationKey(trackId, granularKey.instanceId, granularKey.parameterId);
+  return parameterId;
+};
 
 const trackDeleteResult = v.union(
   v.object({
@@ -1034,6 +1042,11 @@ const ungroupTrackForUser = async (ctx: any, userId: string, projectId: string, 
     .withIndex("by_project_track", (q: any) => q.eq("projectId", group.projectId).eq("trackId", normalizedGroupId))
     .collect();
   const effects = await ctx.db.query("effects").withIndex("by_track", (q: any) => q.eq("trackId", normalizedGroupId)).collect();
+  const [sourceSidechains, targetSidechains] = await Promise.all([
+    ctx.db.query("sidechainRoutes").withIndex("by_source", (q: any) => q.eq("sourceTrackId", normalizedGroupId)).collect(),
+    ctx.db.query("sidechainRoutes").withIndex("by_target", (q: any) => q.eq("targetTrackId", normalizedGroupId)).collect(),
+  ]);
+  const deletedSidechains = new Map([...sourceSidechains, ...targetSidechains].map((route: any) => [String(route._id), route]));
   const result = {
     status: "applied" as const,
     group: {
@@ -1074,9 +1087,17 @@ const ungroupTrackForUser = async (ctx: any, userId: string, projectId: string, 
       points: envelope.points,
       updatedAt: envelope.updatedAt,
     })),
+    sidechainRoutes: Array.from(deletedSidechains.values(), (route: { sourceTrackId: Id<"tracks">; targetTrackId: Id<"tracks">; effectInstanceId: string }) => ({
+      sourceTrackId: String(route.sourceTrackId),
+      targetTrackId: String(route.targetTrackId),
+      effectInstanceId: route.effectInstanceId,
+    })),
   };
   for (const envelope of automation) await ctx.db.delete(envelope._id);
   for (const effect of effects) await ctx.db.delete(effect._id);
+  for (const route of deletedSidechains.values()) {
+    await ctx.db.delete(route._id);
+  }
   await deleteMixerStateForTrack(ctx, normalizedGroupId);
   await ctx.db.delete(groupAccess.owner._id);
   await ctx.db.delete(normalizedGroupId);
@@ -1166,6 +1187,11 @@ export const serverRestoreUngroup = mutation({
       })),
       updatedAt: v.number(),
     })),
+    sidechainRoutes: v.optional(v.array(v.object({
+      sourceTrackId: v.optional(v.string()),
+      targetTrackId: v.optional(v.string()),
+      effectInstanceId: v.string(),
+    }))),
     operationId: v.optional(v.string()),
   },
   handler: async (ctx, input) => {
@@ -1199,6 +1225,10 @@ export const serverRestoreUngroup = mutation({
         if (input.group.outputTargetId) requiredTrackIds.add(input.group.outputTargetId);
         for (const send of input.group.sends) requiredTrackIds.add(send.targetId);
         for (const child of input.children) if (!child.outputToGroup && child.outputTargetId) requiredTrackIds.add(child.outputTargetId);
+        for (const route of input.sidechainRoutes ?? []) {
+          if (route.sourceTrackId) requiredTrackIds.add(route.sourceTrackId);
+          if (route.targetTrackId) requiredTrackIds.add(route.targetTrackId);
+        }
         if (Array.from(requiredTrackIds).some((trackId) => !trackById.has(trackId))) return { status: "rejected" as const };
         const parent = input.group.parentGroupId ? trackById.get(input.group.parentGroupId) : undefined;
         if (parent && parent.channelRole !== "group") return { status: "rejected" as const };
@@ -1215,6 +1245,29 @@ export const serverRestoreUngroup = mutation({
         }));
         if (childLocks.some(Boolean)) return { status: "rejected" as const };
         if (!validateRestoreUngroupRouting(input, tracks)) return { status: "rejected" as const };
+        const sidechainTargetKeys = new Set<string>();
+        for (const route of input.sidechainRoutes ?? []) {
+          if (route.sourceTrackId === route.targetTrackId) return { status: "rejected" as const };
+          const targetKey = `${route.targetTrackId ?? restoreGroupPlaceholderId}:${route.effectInstanceId}`;
+          if (sidechainTargetKeys.has(targetKey)) return { status: "rejected" as const };
+          sidechainTargetKeys.add(targetKey);
+          if (!route.targetTrackId) {
+            const matchingEffects = effects.filter((effect) => (
+              (effect.type === "compressor" || effect.type === "gate" || effect.type === "spectral")
+              && effect.instanceId === route.effectInstanceId
+            ));
+            if (matchingEffects.length !== 1) return { status: "rejected" as const };
+            continue;
+          }
+          const targetTrack = trackById.get(route.targetTrackId);
+          if (!targetTrack) return { status: "rejected" as const };
+          const targetEffects = await ctx.db.query("effects").withIndex("by_track", (q: any) => q.eq("trackId", targetTrack._id)).collect();
+          const matchingEffects = targetEffects.filter((effect: any) => (
+            (effect.type === "compressor" || effect.type === "gate" || effect.type === "spectral")
+            && effect.instanceId === route.effectInstanceId
+          ));
+          if (matchingEffects.length !== 1) return { status: "rejected" as const };
+        }
 
         const index = Math.max(0, Math.min(Math.round(input.group.index), tracks.length));
         for (const track of tracks) {
@@ -1267,16 +1320,28 @@ export const serverRestoreUngroup = mutation({
           });
         }
         for (const envelope of automation) {
+          const parameterId = rebaseRestoredAutomationParameter(String(groupId), envelope.parameterId);
           await ctx.db.insert("automationEnvelopes", {
             projectId: input.projectId,
             targetKind: "track",
             trackId: groupId,
             effectInstanceId: envelope.effectInstanceId,
-            targetKey: automationTargetKey({ kind: "track", trackId: String(groupId), effectInstanceId: envelope.effectInstanceId }, envelope.parameterId),
-            parameterId: envelope.parameterId,
+            targetKey: automationTargetKey({ kind: "track", trackId: String(groupId), effectInstanceId: envelope.effectInstanceId }, parameterId),
+            parameterId,
             enabled: envelope.enabled,
             points: envelope.points,
             updatedAt: envelope.updatedAt,
+          });
+        }
+        for (const route of input.sidechainRoutes ?? []) {
+          const sourceTrackId = route.sourceTrackId ? trackById.get(route.sourceTrackId)?._id : groupId;
+          const targetTrackId = route.targetTrackId ? trackById.get(route.targetTrackId)?._id : groupId;
+          if (!sourceTrackId || !targetTrackId) throw new Error("Restore group sidechain preflight became invalid.");
+          await ctx.db.insert("sidechainRoutes", {
+            projectId: input.projectId,
+            sourceTrackId,
+            targetTrackId,
+            effectInstanceId: route.effectInstanceId,
           });
         }
         return { status: "applied" as const, groupId: String(groupId) };

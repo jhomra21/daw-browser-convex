@@ -1,11 +1,11 @@
 import { buildLocalClip } from "~/lib/clip-create";
-import { AUDIO_EFFECT_CONTRACTS, assert, buildClipCreatePayload, normalizeAudioWarp, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, type ClipCreateSnapshot } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, assert, buildClipCreatePayload, normalizeAudioWarp, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, type AutomationEnvelope, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
 import { localEffectRowId, reorderLocalAudioEffects, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects";
 import { deleteLocalAutomationEnvelope, setLocalAutomationEnvelope } from "~/lib/local-automation";
-import { automationTargetKey, isLocalId } from "@daw-browser/shared";
+import { automationTargetKey, granularAutomationKey, instrumentAutomationKey, isLocalId, parseGranularAutomationKey, parseInstrumentAutomationKey } from "@daw-browser/shared";
 import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, isAppliedSharedTimelineOperationResult, publishSharedTimelineOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { buildTrackCreateMutationInput, buildTrackDeleteMutationInput, buildTrackMixMutationInput, buildTrackVolumeMutationInput } from "~/lib/track-mutation-args";
@@ -14,6 +14,7 @@ import type { LocalMixPatch } from "~/lib/timeline-storage";
 import type { Track, TrackRouting } from "@daw-browser/timeline-core/types";
 import type { Deps } from "./exec";
 import type { HistoryEntry, TrackAudioEffectSnapshot, TrackAutomationSnapshot, TrackEffectSnapshot } from "./types";
+import { buildHistoryRefIndex, resolveTrackId } from "./refs";
 
 type ClipMove = { clipId: string; trackId: Track["id"]; startSec: number };
 
@@ -30,6 +31,30 @@ type ClipTimingPatch = {
 export const isLocalHistoryProject = (deps: Pick<Deps, "projectId">) => (
   isLocalId("project", deps.projectId)
 );
+
+export const rebaseTrackAutomationEnvelope = (
+  envelope: TrackAutomationSnapshot[number],
+  trackId: Track["id"],
+) => {
+  const samplerKey = parseInstrumentAutomationKey(envelope.parameterId);
+  const granularKey = parseGranularAutomationKey(envelope.parameterId);
+  const parameterId = samplerKey
+    ? instrumentAutomationKey(trackId, samplerKey.instanceId, samplerKey.parameterId)
+    : granularKey
+      ? granularAutomationKey(trackId, granularKey.instanceId, granularKey.parameterId)
+      : envelope.parameterId;
+  const target: AutomationEnvelope["target"] = {
+    kind: "track",
+    trackId,
+    effectInstanceId: envelope.target.effectInstanceId,
+  };
+  return {
+    ...envelope,
+    target,
+    parameterId,
+    targetKey: automationTargetKey(target, parameterId),
+  };
+};
 
 const toHistoryCreateClipInput = (trackId: Track["id"], clip: Track["clips"][number]) => ({
   id: clip.id,
@@ -228,6 +253,7 @@ type RestoreUngroupInput = {
   children: Array<{ trackId: Track["id"]; outputTargetId?: Track["id"]; outputToGroup: boolean }>
   effects?: TrackEffectSnapshot
   automation?: TrackAutomationSnapshot
+  sidechainRoutes: Array<{ sourceTrackId?: Track["id"]; targetTrackId?: Track["id"]; effectInstanceId: string }>
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -304,11 +330,8 @@ export const persistHistoryRestoreUngroup = async (deps: Deps, input: RestoreUng
       },
       children: input.children,
       effects: localRestoreEffectRows(groupId, input.effects),
-      automation: (input.automation ?? []).map((envelope) => ({
-        ...envelope,
-        target: { kind: "track", trackId: groupId, effectInstanceId: envelope.target.effectInstanceId },
-        targetKey: automationTargetKey({ kind: "track", trackId: groupId, effectInstanceId: envelope.target.effectInstanceId }, envelope.parameterId),
-      })),
+      automation: (input.automation ?? []).map((envelope) => rebaseTrackAutomationEnvelope(envelope, groupId)),
+      sidechainRoutes: input.sidechainRoutes,
     })
     return groupId
   }
@@ -332,13 +355,17 @@ export const persistHistoryRestoreUngroup = async (deps: Deps, input: RestoreUng
         },
         children: input.children,
         effects: sharedRestoreEffects(input.effects),
-        automation: (input.automation ?? []).map((envelope) => ({
-          effectInstanceId: envelope.target.effectInstanceId,
-          parameterId: envelope.parameterId,
-          enabled: envelope.enabled,
-          points: envelope.points,
-          updatedAt: envelope.updatedAt,
-        })),
+        automation: (input.automation ?? []).map((envelope) => {
+          const rebased = rebaseTrackAutomationEnvelope(envelope, groupId)
+          return {
+            effectInstanceId: rebased.target.effectInstanceId,
+            parameterId: rebased.parameterId,
+            enabled: envelope.enabled,
+            points: envelope.points,
+            updatedAt: envelope.updatedAt,
+          }
+        }),
+        sidechainRoutes: input.sidechainRoutes,
         operationId: input.operationId ?? crypto.randomUUID(),
       },
     },
@@ -468,15 +495,12 @@ export const persistHistoryTrackAutomation = async (
   trackId: Track["id"],
 ) => {
   if (!envelopes || envelopes.length === 0) return;
+  const rebased = envelopes.map((envelope) => rebaseTrackAutomationEnvelope(envelope, trackId));
   if (isLocalHistoryProject(deps)) {
-    await Promise.all(envelopes.map((envelope) => setLocalAutomationEnvelope(deps.projectId, {
-      ...envelope,
-      target: { kind: "track", trackId, effectInstanceId: envelope.target.effectInstanceId },
-      targetKey: automationTargetKey({ kind: "track", trackId, effectInstanceId: envelope.target.effectInstanceId }, envelope.parameterId),
-    })));
+    await Promise.all(rebased.map((envelope) => setLocalAutomationEnvelope(deps.projectId, envelope)));
     return;
   }
-  await Promise.all(envelopes.map((envelope) => publishHistoryOperation(deps, {
+  await Promise.all(rebased.map((envelope) => publishHistoryOperation(deps, {
     kind: "automation.setEnvelope",
     payload: {
       targetKind: "track",
@@ -488,6 +512,37 @@ export const persistHistoryTrackAutomation = async (
       updatedAt: envelope.updatedAt,
     },
   })));
+};
+
+export const persistHistorySidechainRoutes = async (
+  deps: Deps,
+  routes: Extract<HistoryEntry, { type: "track-delete" }>["data"]["sidechainRoutes"]
+    | Extract<HistoryEntry, { type: "track-ungroup" }>["data"]["sidechainRoutes"],
+) => {
+  if (!routes || routes.length === 0) return;
+  const index = buildHistoryRefIndex(deps.getHistoryEntries(), deps.getTracks());
+  for (const route of routes) {
+    const sourceTrackId = resolveTrackId(index, route.sourceTrackRef);
+    const targetTrackId = resolveTrackId(index, route.targetTrackRef);
+    if (!sourceTrackId || !targetTrackId || sourceTrackId === targetTrackId) continue;
+    if (isLocalHistoryProject(deps)) {
+      await createLocalTimelineRepository(deps.projectId).setSidechainRoute({
+        sourceTrackId,
+        targetTrackId,
+        effectInstanceId: route.effectInstanceId,
+      });
+    } else {
+      await publishHistoryOperation(deps, {
+        kind: "sidechains.setRoute",
+        payload: {
+          projectId: deps.projectId,
+          sourceTrackId,
+          targetTrackId,
+          effectInstanceId: route.effectInstanceId,
+        },
+      });
+    }
+  }
 };
 
 export const persistHistoryEffectParams = async (

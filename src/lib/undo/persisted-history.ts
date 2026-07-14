@@ -56,6 +56,11 @@ const isRoutingSnapshot = (value: unknown) => isRecord(value)
   && value.sends.every((send) => isRecord(send) && isString(send.targetTrackRef) && isNumber(send.amount))
   && (value.outputTargetRef === undefined || isString(value.outputTargetRef))
 
+const isSidechainRouteSnapshot = (value: unknown) => isRecord(value)
+  && isString(value.sourceTrackRef)
+  && isString(value.targetTrackRef)
+  && isString(value.effectInstanceId)
+
 const isClipSnapshot = (value: unknown) => isRecord(value)
   && isString(value.clipRef)
   && isNumber(value.startSec)
@@ -174,6 +179,7 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSe
         && Array.isArray(data.clips)
         && data.clips.every(isClipSnapshot)
         && (data.automation === undefined || (Array.isArray(data.automation) && data.automation.every(isAutomationEnvelope)))
+        && (data.sidechainRoutes === undefined || (Array.isArray(data.sidechainRoutes) && data.sidechainRoutes.every(isSidechainRouteSnapshot)))
         && (data.recreatedTrackId === undefined || isString(data.recreatedTrackId))
     case 'track-volume':
       return isString(data.trackRef) && isScope(data.scope) && isNumber(data.from) && isNumber(data.to)
@@ -199,6 +205,7 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSe
         && (isTrackSnapshot(data.groupTrack) || (version === PERSISTED_HISTORY_VERSION && data.groupTrack === undefined))
         && (data.effects === undefined || isTrackEffectSnapshot(data.effects))
         && (data.automation === undefined || isTrackAutomationSnapshot(data.automation))
+        && (data.sidechainRoutes === undefined || (Array.isArray(data.sidechainRoutes) && data.sidechainRoutes.every(isSidechainRouteSnapshot)))
         && Array.isArray(data.childSnapshots)
         && data.childSnapshots.every(isTrackUngroupChildSnapshot)
     case 'track-color':

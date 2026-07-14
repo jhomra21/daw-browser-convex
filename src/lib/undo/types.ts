@@ -57,6 +57,12 @@ export type InboundTrackRoutingSnapshot = TrackRoutingHistorySnapshot & {
   sourceTrackRef: TrackRef
 }
 
+export type SidechainRouteHistorySnapshot = {
+  sourceTrackRef: TrackRef
+  targetTrackRef: TrackRef
+  effectInstanceId: string
+}
+
 export type TrackSnapshot = {
   trackRef?: TrackRef
   index: number
@@ -272,6 +278,7 @@ export type HistoryEntry =
         effects?: TrackEffectSnapshot
         automation?: TrackAutomationSnapshot
         inboundRouting?: InboundTrackRoutingSnapshot[]
+        sidechainRoutes?: SidechainRouteHistorySnapshot[]
         recreatedTrackId?: string
         recreatedClips?: Array<{ clipRef: ClipRef; clipId: string }>
       }
@@ -322,6 +329,7 @@ export type HistoryEntry =
         groupTrack?: TrackSnapshot
         effects?: TrackEffectSnapshot
         automation?: TrackAutomationSnapshot
+        sidechainRoutes?: SidechainRouteHistorySnapshot[]
         childSnapshots: Array<{
           trackRef: TrackRef
           previousGroupRef: TrackRef

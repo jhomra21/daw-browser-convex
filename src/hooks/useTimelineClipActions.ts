@@ -28,7 +28,7 @@ import { calcNonOverlapStart, calcNonOverlapStartGridAligned } from '~/lib/timel
 import { buildAutomationEnvelopeHistoryEntry, buildClipDeleteHistoryEntry, buildClipTimingHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
-import type { Clip, SelectedClip, Track } from '@daw-browser/timeline-core/types'
+import type { Clip, ExternalSidechainRoute, SelectedClip, Track } from '@daw-browser/timeline-core/types'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
@@ -60,6 +60,7 @@ type TimelineClipActionsOptions = {
   gridDenominator: Accessor<number>
   historyPush: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   automationEnvelopes: Accessor<AutomationEnvelope[]>
+  sidechainRoutes: Accessor<ExternalSidechainRoute[]>
   applyAutomationEnvelope: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
   grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void
   notify: (title: string, message: string) => void
@@ -104,6 +105,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     gridDenominator,
     historyPush,
     automationEnvelopes,
+    sidechainRoutes,
     applyAutomationEnvelope,
     grantClipWrites,
     notify,
@@ -575,6 +577,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
             tracks: snapshot,
             effects: await loadTrackEffectSnapshot(rid, deletedTrack.id),
             automation: trackAutomation.filter((envelope) => envelope.target.kind === 'track' && envelope.target.trackId === deletedTrack.id),
+            sidechainRoutes: sidechainRoutes(),
           }))
         }
       } catch {
@@ -601,6 +604,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
             tracks: snapshot,
             effects: await loadTrackEffectSnapshot(rid, deletedTrack.id),
             automation: trackAutomation.filter((envelope) => envelope.target.kind === 'track' && envelope.target.trackId === deletedTrack.id),
+            sidechainRoutes: sidechainRoutes(),
           }))
         }
       }

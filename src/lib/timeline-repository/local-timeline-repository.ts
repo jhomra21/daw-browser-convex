@@ -740,7 +740,10 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
     const tx = db.transaction('entities', 'readwrite')
-    const trackRows = await tx.store.index('by-kind').getAll(TRACK_KIND)
+    const [trackRows, effectRows] = await Promise.all([
+      tx.store.index('by-kind').getAll(TRACK_KIND),
+      tx.store.index('by-kind').getAll(EFFECT_KIND),
+    ])
     const tracks = trackValues(trackRows)
     if (tracks.some((track) => track.id === input.group.id)) {
       await tx.done
@@ -752,6 +755,42 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     requireTrackIds(input.group.sends.map((send) => send.targetId), tracks)
     if (input.group.outputTargetId) requireTrackIds([input.group.outputTargetId], tracks)
     requireValidRestoreUngroup(input, tracks)
+    const sidechainRoutes = input.sidechainRoutes.map((route) => ({
+      sourceTrackId: route.sourceTrackId ?? input.group.id,
+      targetTrackId: route.targetTrackId ?? input.group.id,
+      effectInstanceId: route.effectInstanceId,
+    }))
+    requireTrackIds(sidechainRoutes.flatMap((route) => (
+      [route.sourceTrackId, route.targetTrackId].filter((trackId) => trackId !== input.group.id)
+    )), tracks)
+    const sidechainTargetKeys = new Set<string>()
+    for (const route of sidechainRoutes) {
+      if (route.sourceTrackId === route.targetTrackId) {
+        await tx.done
+        throw new Error('An effect cannot sidechain from its own track.')
+      }
+      const targetKey = `${route.targetTrackId}:${route.effectInstanceId}`
+      if (sidechainTargetKeys.has(targetKey)) {
+        await tx.done
+        throw new Error('A sidechain target effect cannot have multiple restored routes.')
+      }
+      sidechainTargetKeys.add(targetKey)
+      const matchingEffects = route.targetTrackId === input.group.id
+        ? input.effects.filter((effect) => (
+            (effect.effect === 'compressor' || effect.effect === 'gate' || effect.effect === 'spectral')
+            && effect.instanceId === route.effectInstanceId
+          ))
+        : effectRows.filter((row) => (
+            isObject(row.value)
+            && row.value.targetId === route.targetTrackId
+            && (row.value.effect === 'compressor' || row.value.effect === 'gate' || row.value.effect === 'spectral')
+            && row.value.instanceId === route.effectInstanceId
+          ))
+      if (matchingEffects.length !== 1) {
+        await tx.done
+        throw new Error('Sidechain target must identify exactly one compressor, gate, or spectral instance.')
+      }
+    }
     const childById = new Map(input.children.map((child) => [child.trackId, child]))
     const timestamp = now()
     const restoredGroup = { ...input.group, createdAt: timestamp, updatedAt: timestamp }
@@ -769,6 +808,12 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       ...changedTracks.map((track) => tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))),
       ...input.effects.map((effect) => tx.store.put(toEntityRow(EFFECT_KIND, effect.id, effect, timestamp))),
       ...input.automation.map((envelope) => tx.store.put(toEntityRow(AUTOMATION_KIND, envelope.targetKey, envelope, timestamp))),
+      ...sidechainRoutes.map((route) => tx.store.put(toEntityRow(
+        SIDECHAIN_KIND,
+        localSidechainRouteRowId(route.targetTrackId, route.effectInstanceId),
+        route,
+        timestamp,
+      ))),
     ])
     await tx.done
     markChanged()

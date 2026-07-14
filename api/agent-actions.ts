@@ -81,6 +81,25 @@ type AgentEffectParams =
   | Pick<AgentEqParams, 'enabled' | 'bands'>
   | AgentReverbParams
 
+type AgentEffectCandidate = {
+  targetType?: string
+  type?: string
+  instanceId?: string
+}
+
+export const resolveUniqueEffectInstance = (
+  effects: readonly AgentEffectCandidate[],
+  targetType: 'track' | 'master',
+  effectType: 'eq' | 'reverb',
+  targetLabel: string,
+) => {
+  const matches = effects.filter((effect) => effect.targetType === targetType && effect.type === effectType)
+  if (matches.length > 1) {
+    return { error: `Ambiguous ${effectType} effect target for ${targetLabel}: found ${matches.length} instances.` }
+  }
+  return { instanceId: matches[0]?.instanceId }
+}
+
 type AgentActionContext = {
   convex: ConvexClientLike
   convexApi: ConvexApi
@@ -191,8 +210,9 @@ export function createAgentActions(context: AgentActionContext) {
     if (input.target === 'master') {
       const effects = await context.convex.query(context.convexApi.effects.listByRoom, { projectId: context.projectId })
       const effectType = 'bands' in input.params ? 'eq' : 'reverb'
-      const existing = effects.find((effect) => effect.targetType === 'master' && effect.type === effectType)
-      const instanceId = existing?.instanceId ?? `audio-effect:${crypto.randomUUID()}`
+      const resolution = resolveUniqueEffectInstance(effects, 'master', effectType, 'master')
+      if (resolution.error) return resolution
+      const instanceId = resolution.instanceId ?? `audio-effect:${crypto.randomUUID()}`
       if ('bands' in input.params) {
         await context.convex.mutation(context.convexApi.effects.setMasterEqParams, {
           projectId: context.projectId,
@@ -216,8 +236,9 @@ export function createAgentActions(context: AgentActionContext) {
       trackId: track._id,
     })
     const effectType = 'bands' in input.params ? 'eq' : 'reverb'
-    const existing = effects.find((effect) => effect.type === effectType)
-    const instanceId = existing?.instanceId ?? `audio-effect:${crypto.randomUUID()}`
+    const resolution = resolveUniqueEffectInstance(effects, 'track', effectType, `track ${input.target}`)
+    if (resolution.error) return resolution
+    const instanceId = resolution.instanceId ?? `audio-effect:${crypto.randomUUID()}`
     const result = 'bands' in input.params
       ? await context.convex.mutation(context.convexApi.effects.setEqParams, {
           projectId: context.projectId,

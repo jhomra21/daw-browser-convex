@@ -1,4 +1,4 @@
-import type { Track } from '@daw-browser/timeline-core/types'
+import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import {
   automationTargetKey,
   normalizeSharedUngroupRestoreAutomation,
@@ -29,6 +29,7 @@ type SharedUngroupResult = {
   children: Array<{ trackId: string; nextOutputTargetId?: string }>
   effects: SharedUngroupRestoreEffect[]
   automation: SharedUngroupRestoreAutomation[]
+  sidechainRoutes: ExternalSidechainRoute[]
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -62,11 +63,30 @@ export const readSharedUngroupResult = (value: unknown): SharedUngroupResult | n
   ))
   const effects = normalizeSharedUngroupRestoreEffects(value.effects)
   const automation = normalizeSharedUngroupRestoreAutomation(value.automation)
+  const sidechainRouteInput = value.sidechainRoutes === undefined ? [] : value.sidechainRoutes
+  if (!Array.isArray(sidechainRouteInput)) return null
+  const sidechainRoutes = sidechainRouteInput.flatMap((route) => (
+    isRecord(route)
+    && typeof route.sourceTrackId === 'string'
+    && typeof route.targetTrackId === 'string'
+    && typeof route.effectInstanceId === 'string'
+    && route.sourceTrackId.length > 0
+    && route.targetTrackId.length > 0
+    && route.effectInstanceId.length > 0
+    && route.sourceTrackId !== route.targetTrackId
+      ? [{
+          sourceTrackId: route.sourceTrackId,
+          targetTrackId: route.targetTrackId,
+          effectInstanceId: route.effectInstanceId,
+        }]
+      : []
+  ))
   if (
     children.length !== value.children.length
     || sends.length !== group.sends.length
     || !effects
     || !automation
+    || sidechainRoutes.length !== sidechainRouteInput.length
   ) return null
   return {
     status: 'applied',
@@ -86,6 +106,7 @@ export const readSharedUngroupResult = (value: unknown): SharedUngroupResult | n
     children,
     effects,
     automation,
+    sidechainRoutes,
   }
 }
 
@@ -157,5 +178,6 @@ export const buildCommittedSharedUngroupHistoryEntry = (input: {
     nextOutputTargetIdsByTrackId: new Map(input.result.children.map((child) => [child.trackId, child.nextOutputTargetId])),
     effects,
     automation,
+    sidechainRoutes: input.result.sidechainRoutes,
   })
 }

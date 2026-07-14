@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { createDefaultDelayParams, createDefaultEqParams } from '@daw-browser/shared'
 
+import { buildTrackDeleteHistoryEntry, buildTrackUngroupHistoryEntry } from './builders'
 import { buildCommittedSharedUngroupHistoryEntry, readSharedUngroupResult } from './shared-ungroup-history'
 
 const track = (id: string, patch: Partial<Track> = {}): Track => ({
@@ -34,6 +35,7 @@ describe('durable shared ungroup history', () => {
         points: [{ id: 'point', timeSec: 0, value: 0.5, interpolation: 'linear' }],
         updatedAt: 2,
       }],
+      sidechainRoutes: [],
     })
     if (!result) throw new Error('Expected valid ungroup result')
     const entry = buildCommittedSharedUngroupHistoryEntry({
@@ -69,6 +71,41 @@ describe('durable shared ungroup history', () => {
     expect(readSharedUngroupResult({ status: 'rejected' })).toBeNull()
   })
 
+  test('strictly parses committed sidechain routes and preserves legacy results without them', () => {
+    const result = readSharedUngroupResult({
+      status: 'applied',
+      group: { index: 0, volume: 1, muted: false, soloed: false, sends: [] },
+      children: [],
+      effects: [],
+      automation: [],
+      sidechainRoutes: [{
+        sourceTrackId: 'group',
+        targetTrackId: 'bass',
+        effectInstanceId: 'compressor:bass',
+      }],
+    })
+    expect(result?.sidechainRoutes).toEqual([{
+      sourceTrackId: 'group',
+      targetTrackId: 'bass',
+      effectInstanceId: 'compressor:bass',
+    }])
+    expect(readSharedUngroupResult({
+      status: 'applied',
+      group: { index: 0, volume: 1, muted: false, soloed: false, sends: [] },
+      children: [],
+      effects: [],
+      automation: [],
+      sidechainRoutes: [{ sourceTrackId: 'group', effectInstanceId: 42 }],
+    })).toBeNull()
+    expect(readSharedUngroupResult({
+      status: 'applied',
+      group: { index: 0, volume: 1, muted: false, soloed: false, sends: [] },
+      children: [],
+      effects: [],
+      automation: [],
+    })?.sidechainRoutes).toEqual([])
+  })
+
   test('preserves duplicate effect automation by exact instance identity', () => {
     const group = track('group', { channelRole: 'group' })
     const result = readSharedUngroupResult({
@@ -97,5 +134,70 @@ describe('durable shared ungroup history', () => {
       result,
     })
     expect(entry.data.automation?.map((envelope) => envelope.target.effectInstanceId)).toEqual(['delay-a', 'delay-b'])
+  })
+
+  test('snapshots sidechain routes by track history references', () => {
+    const group = track('group', { historyRef: 'group-ref', channelRole: 'group' })
+    const source = track('source', { historyRef: 'source-ref' })
+    const route = { sourceTrackId: 'source', targetTrackId: 'group', effectInstanceId: 'compressor:group' }
+
+    expect(buildTrackDeleteHistoryEntry({
+      projectId: 'project',
+      track: group,
+      tracks: [source, group],
+      sidechainRoutes: [route],
+    }).data.sidechainRoutes).toEqual([{
+      sourceTrackRef: 'source-ref',
+      targetTrackRef: 'group-ref',
+      effectInstanceId: 'compressor:group',
+    }])
+    expect(buildTrackUngroupHistoryEntry({
+      projectId: 'project',
+      tracks: [source, group],
+      groupTrack: group,
+      childTrackIds: [],
+      sidechainRoutes: [route],
+    }).data.sidechainRoutes).toEqual([{
+      sourceTrackRef: 'source-ref',
+      targetTrackRef: 'group-ref',
+      effectInstanceId: 'compressor:group',
+    }])
+  })
+
+  test('uses committed sidechain routes for both group endpoints', () => {
+    const group = track('group', { historyRef: 'group-ref', channelRole: 'group' })
+    const source = track('source', { historyRef: 'source-ref' })
+    const target = track('target', { historyRef: 'target-ref' })
+    const result = readSharedUngroupResult({
+      status: 'applied',
+      group: { index: 0, volume: 1, muted: false, soloed: false, sends: [] },
+      children: [],
+      effects: [],
+      automation: [],
+      sidechainRoutes: [
+        { sourceTrackId: 'group', targetTrackId: 'target', effectInstanceId: 'compressor:target' },
+        { sourceTrackId: 'source', targetTrackId: 'group', effectInstanceId: 'compressor:group' },
+      ],
+    })
+    if (!result) throw new Error('Expected valid ungroup result')
+
+    const entry = buildCommittedSharedUngroupHistoryEntry({
+      projectId: 'project',
+      tracks: [source, group, target],
+      groupTrack: group,
+      effects: {},
+      automation: [],
+      result,
+    })
+
+    expect(entry.data.sidechainRoutes).toEqual([{
+      sourceTrackRef: 'group-ref',
+      targetTrackRef: 'target-ref',
+      effectInstanceId: 'compressor:target',
+    }, {
+      sourceTrackRef: 'source-ref',
+      targetTrackRef: 'group-ref',
+      effectInstanceId: 'compressor:group',
+    }])
   })
 })

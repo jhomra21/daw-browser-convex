@@ -2,7 +2,7 @@ import { buildClipHistorySnapshot } from '~/lib/clip-create'
 import type { ClipCreateSnapshot } from '@daw-browser/shared'
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
-import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
+import type { ExternalSidechainRoute, Track, TrackRouting } from '@daw-browser/timeline-core/types'
 
 import { buildTrackRoutingHistorySnapshot, getClipHistoryRef, getTrackHistoryRef } from './refs'
 import type {
@@ -12,6 +12,7 @@ import type {
   HistoryScope,
   TrackAutomationSnapshot,
   TrackEffectSnapshot,
+  SidechainRouteHistorySnapshot,
 } from './types'
 
 export function buildTrackCreateHistoryEntry(input: {
@@ -71,9 +72,11 @@ export function buildTrackDeleteHistoryEntry(input: {
   tracks: Track[]
   effects?: TrackEffectSnapshot
   automation?: TrackAutomationSnapshot
+  sidechainRoutes?: ExternalSidechainRoute[]
 }): Extract<HistoryEntry, { type: 'track-delete' }> {
   const { projectId, track, tracks, effects, automation } = input
   const trackRef = getTrackHistoryRef(track)
+  const trackRefById = new Map(tracks.map((entry) => [entry.id, getTrackHistoryRef(entry)]))
   const trackIndex = tracks.findIndex((entry) => entry.id === track.id)
   const inboundRouting = tracks
     .filter((entry) => entry.id !== track.id)
@@ -86,6 +89,14 @@ export function buildTrackDeleteHistoryEntry(input: {
         ...buildTrackRoutingHistorySnapshot({ sends, outputTargetId }, tracks),
       }]
     })
+  const sidechainRoutes: SidechainRouteHistorySnapshot[] = (input.sidechainRoutes ?? [])
+    .filter((route) => route.sourceTrackId === track.id || route.targetTrackId === track.id)
+    .map((route) => ({
+      sourceTrackRef: trackRefById.get(route.sourceTrackId) ?? '',
+      targetTrackRef: trackRefById.get(route.targetTrackId) ?? '',
+      effectInstanceId: route.effectInstanceId,
+    }))
+    .filter((route) => route.sourceTrackRef && route.targetTrackRef)
 
   return {
     type: 'track-delete',
@@ -109,6 +120,7 @@ export function buildTrackDeleteHistoryEntry(input: {
       effects,
       automation,
       inboundRouting,
+      sidechainRoutes,
     },
   }
 }
@@ -160,6 +172,7 @@ export function buildTrackUngroupHistoryEntry(input: {
   nextOutputTargetIdsByTrackId?: ReadonlyMap<Track['id'], Track['id'] | undefined>
   effects?: TrackEffectSnapshot
   automation?: TrackAutomationSnapshot
+  sidechainRoutes?: ExternalSidechainRoute[]
 }): Extract<HistoryEntry, { type: 'track-ungroup' }> {
   const childIds = new Set(input.childTrackIds)
   const trackRefById = new Map(input.tracks.map((track) => [track.id, getTrackHistoryRef(track)]))
@@ -186,6 +199,14 @@ export function buildTrackUngroupHistoryEntry(input: {
       },
       effects: input.effects,
       automation: input.automation,
+      sidechainRoutes: (input.sidechainRoutes ?? [])
+        .filter((route) => route.sourceTrackId === input.groupTrack.id || route.targetTrackId === input.groupTrack.id)
+        .map((route) => ({
+          sourceTrackRef: trackRefById.get(route.sourceTrackId) ?? '',
+          targetTrackRef: trackRefById.get(route.targetTrackId) ?? '',
+          effectInstanceId: route.effectInstanceId,
+        }))
+        .filter((route) => route.sourceTrackRef && route.targetTrackRef),
       childSnapshots: input.tracks
         .filter((track) => childIds.has(track.id))
         .map((track) => {

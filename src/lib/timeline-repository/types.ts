@@ -174,6 +174,11 @@ export type RestoreUngroupInput = {
     updatedAt: number
   }>
   automation: AutomationEnvelope[]
+  sidechainRoutes: Array<{
+    sourceTrackId?: TimelineTrackId
+    targetTrackId?: TimelineTrackId
+    effectInstanceId: string
+  }>
 }
 
 export type TimelineRepository = {

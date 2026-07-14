@@ -19,6 +19,7 @@ export type RecordingRuntimeStatus =
 
 type RecordingWorkletNode = AudioNode & {
   port: MessagePort
+  onprocessorerror?: ((event: ErrorEvent) => void) | null
 }
 
 type RecordingSession = {
@@ -39,6 +40,7 @@ type RecordingSession = {
   resolveStop: (() => void) | null
   monitorFadeTimer: ReturnType<typeof setTimeout> | null
   monitorFadePromise: Promise<void> | null
+  finalizeTimer: ReturnType<typeof setTimeout> | null
   terminal: boolean
   transport: RecordingCaptureTransport | null
   faultGeneration: number
@@ -52,6 +54,7 @@ type RecordingRuntimeOptions = {
   createWorkletNode?: (context: AudioContext, channelCount: number) => RecordingWorkletNode
   getFaultGeneration?: () => number
   onFault?: (generation: number, code: string) => void
+  finalizeTimeoutMs?: number
   resourceObserver?: ResourceObserver
 }
 
@@ -90,6 +93,7 @@ export type StartRecordingCaptureOptions = {
 }
 
 const MONITOR_FADE_SEC = 0.005
+const FINALIZE_TIMEOUT_MS = 5_000
 
 const defaultCreateWorkletNode = (context: AudioContext, channelCount: number): RecordingWorkletNode =>
   new AudioWorkletNode(context, recorderWorklet.processorName, {
@@ -119,11 +123,16 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
       clearTimeout(session.monitorFadeTimer)
       session.monitorFadeTimer = null
     }
+    if (session.finalizeTimer !== null) {
+      clearTimeout(session.finalizeTimer)
+      session.finalizeTimer = null
+    }
     session.track.removeEventListener('ended', session.onEnded)
     session.track.removeEventListener('mute', session.onMute)
     session.track.removeEventListener('unmute', session.onUnmute)
     session.context.removeEventListener('statechange', session.onContextStateChange)
     session.worklet.port.onmessage = null
+    session.worklet.onprocessorerror = null
     session.transport?.terminate()
     session.disconnectMonitor?.()
     try { session.monitorGain?.disconnect() } catch {}
@@ -146,10 +155,11 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
     session.resolveStop?.()
   }
 
-  const fail = (session: RecordingSession, reason: string) => {
+  const fail = (session: RecordingSession, reason: string, releaseImmediately = false) => {
     options.onFault?.(session.faultGeneration, reason)
     const transport = session.transport
-    if (!transport) {
+    if (!transport || releaseImmediately) {
+      if (transport) void transport.abort().catch(() => undefined)
       void finishTerminal(session, { state: 'failed', sessionId: session.sessionId, reason })
       return
     }
@@ -252,6 +262,7 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
       resolveStop: null,
       monitorFadeTimer: null,
       monitorFadePromise: null,
+      finalizeTimer: null,
       terminal: false,
       transport: null,
       faultGeneration: options.getFaultGeneration?.() ?? 0,
@@ -280,6 +291,10 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
       releases.push(observeResource(options.resourceObserver, 'workers', establishedSession.transport))
     }
     if (establishedSession.transport) await establishedSession.transport.ready
+    captureWorklet.onprocessorerror = () => {
+      if (active !== establishedSession || establishedSession.terminal) return
+      fail(establishedSession, 'recording-processor-error', true)
+    }
     captureWorklet.port.onmessage = (event) => {
       const message = readRecorderOutboundMessage(event.data)
       if (!message) {
@@ -426,6 +441,9 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
     session.stopPromise = new Promise<void>((resolve) => {
       session.resolveStop = resolve
     })
+    session.finalizeTimer = setTimeout(() => {
+      fail(session, 'recording-finalize-timeout', true)
+    }, options.finalizeTimeoutMs ?? FINALIZE_TIMEOUT_MS)
     if (session.transport) {
       void session.transport.finalize().then((descriptor) => finishTerminal(session, {
         state: 'complete',
@@ -435,6 +453,7 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
       }, true)).catch((error: unknown) => fail(
         session,
         error instanceof Error ? error.message : 'recording-transport-failed',
+        true,
       ))
       return session.stopPromise
     }

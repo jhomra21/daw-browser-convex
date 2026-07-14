@@ -16,7 +16,7 @@ import { TIMELINE_DEFAULT_GROUP_COLOR, TIMELINE_DEFAULT_TRACK_COLOR } from '~/li
 import { createTimelineTrackIndex, type TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { AutomationEnvelope } from '@daw-browser/shared'
-import type { Track } from '@daw-browser/timeline-core/types'
+import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { TrackEffectSnapshot } from '~/lib/undo/types'
 import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
@@ -60,6 +60,7 @@ type UseTimelineActionsOptions = {
   }
   defaultColors?: TimelineTrackDefaultColors
   automationEnvelopes: Accessor<AutomationEnvelope[]>
+  sidechainRoutes: Accessor<ExternalSidechainRoute[]>
   applyAutomationEnvelope: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
   navigation: {
     trackLookup: Accessor<TimelineTrackIndex<AudioBuffer>>
@@ -391,7 +392,14 @@ export function useTimelineActions(
       })
       const committed = readSharedUngroupResult(result)
       assert(committed, 'Invalid shared ungroup result')
-      const historyEntry = buildCommittedSharedUngroupHistoryEntry({ projectId, tracks, groupTrack, effects, automation, result: committed })
+      const historyEntry = buildCommittedSharedUngroupHistoryEntry({
+        projectId,
+        tracks,
+        groupTrack,
+        effects,
+        automation,
+        result: committed,
+      })
       options.creation.pushHistory(historyEntry)
       for (const envelope of historyEntry.data.automation ?? []) {
         options.applyAutomationEnvelope(undefined, envelope.targetKey)
@@ -412,6 +420,7 @@ export function useTimelineActions(
       nextOutputTargetIdsByTrackId: new Map(plan.childUpdates.map((update) => [update.trackId, update.outputTargetId])),
       effects,
       automation,
+      sidechainRoutes: options.sidechainRoutes(),
     }))
     for (const envelope of automation) {
       options.applyAutomationEnvelope(undefined, envelope.targetKey)

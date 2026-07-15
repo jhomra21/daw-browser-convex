@@ -21,6 +21,11 @@ export type MasterSidebarModel = {
 const MASTER_ROW_HEIGHT = Math.round(LANE_HEIGHT / 2);
 export const masterRowHeight = (collapsed: boolean) =>
   collapsed ? MASTER_ROW_HEIGHT : LANE_HEIGHT;
+export const masterAreaHeight = (
+  collapsed: boolean,
+  automationVisible: boolean,
+  automationHeight: number,
+) => masterRowHeight(collapsed) + (!collapsed && automationVisible ? automationHeight : 0);
 
 type MasterSidebarRowProps = {
   master: MasterSidebarModel;
@@ -75,8 +80,11 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   };
   const automationHeight = () => props.automation.heightPx;
   const baseRowHeight = () => masterRowHeight(master().collapsed);
-  const rowHeight = () => baseRowHeight()
-    + (!master().collapsed && props.automation.visible ? automationHeight() : 0);
+  const rowHeight = () => masterAreaHeight(
+    master().collapsed,
+    props.automation.visible,
+    automationHeight(),
+  );
   const volumeAutomated = () => props.automation.automatedTargetKeys.has(
     automationTargetKey({ kind: "master" }, "volume"),
   );

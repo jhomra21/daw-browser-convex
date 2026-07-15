@@ -3,7 +3,7 @@ import GridOverlay from "~/components/timeline/GridOverlay";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
 import type { ClipContextMenuActions } from "~/components/timeline/ClipComponent";
-import { masterRowHeight, type MasterSidebarModel } from "~/components/timeline/MasterSidebarRow";
+import { masterAreaHeight, masterRowHeight, type MasterSidebarModel } from "~/components/timeline/MasterSidebarRow";
 import TrackSidebar from "~/components/timeline/TrackSidebar";
 import AutomationLane from "~/components/timeline/automation-lane";
 import { TimelineLeftBrowser } from "~/components/timeline/browser/timeline-left-browser";
@@ -169,9 +169,12 @@ export default function TimelineWorkspace(props: Props) {
   };
   const masterAutomationVisible = () => !props.sidebar.master.collapsed && props.automation.lanes.masterVisible;
   const masterBaseHeight = () => masterRowHeight(props.sidebar.master.collapsed);
-  const masterAreaHeight = () => masterBaseHeight()
-    + (masterAutomationVisible() ? props.automation.lanes.masterHeight : 0);
-  const fullHeight = () => RULER_HEIGHT + trackAreaHeight() + masterAreaHeight();
+  const masterTotalHeight = () => masterAreaHeight(
+    props.sidebar.master.collapsed,
+    props.automation.lanes.masterVisible,
+    props.automation.lanes.masterHeight,
+  );
+  const fullHeight = () => RULER_HEIGHT + trackAreaHeight() + masterTotalHeight();
   const scrollContentHeight = () => fullHeight() + props.bottomPanelOffsetPx;
   const masterSelection = () => props.automation.lanes.selectedTargetsByOwnerKey.master ?? { parameterId: "volume" };
   const masterTarget = () => ({ kind: "master" as const, effectInstanceId: masterSelection().effectInstanceId });
@@ -331,7 +334,7 @@ export default function TimelineWorkspace(props: Props) {
               class="sticky z-30 shrink-0 border-t border-neutral-800 bg-timeline-background"
               style={{
                 width: `${props.durationSec * PPS}px`,
-                height: `${masterAreaHeight()}px`,
+                height: `${masterTotalHeight()}px`,
                 bottom: `${props.bottomPanelOffsetPx}px`,
               }}
             >

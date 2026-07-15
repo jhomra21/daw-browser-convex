@@ -42,7 +42,7 @@ import {
   type TimelineTrackLayoutRow,
 } from "~/lib/timeline-track-layout";
 import MasterSidebarRow, {
-  masterRowHeight,
+  masterAreaHeight,
   type MasterSidebarModel,
 } from "~/components/timeline/MasterSidebarRow";
 import AutomationParameterPicker from "./automation-parameter-picker";
@@ -323,10 +323,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     return meta;
   });
   const masterRowReservedHeight = () =>
-    masterRowHeight(sidebar().master.collapsed) +
-    (!sidebar().master.collapsed && props.automation.lanes.masterVisible
-      ? props.automation.lanes.masterHeight
-      : 0);
+    masterAreaHeight(
+      sidebar().master.collapsed,
+      props.automation.lanes.masterVisible,
+      props.automation.lanes.masterHeight,
+    );
   const actualOutputTargetId = (track: Track) => track.outputTargetId ?? "";
   const selectedOutputTargetId = (track: Track) =>
     selectedOutputTargets().get(track.id) ?? actualOutputTargetId(track);

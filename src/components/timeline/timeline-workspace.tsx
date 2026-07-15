@@ -3,7 +3,7 @@ import GridOverlay from "~/components/timeline/GridOverlay";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
 import type { ClipContextMenuActions } from "~/components/timeline/ClipComponent";
-import { MASTER_ROW_HEIGHT, type MasterSidebarModel } from "~/components/timeline/MasterSidebarRow";
+import { masterRowHeight, type MasterSidebarModel } from "~/components/timeline/MasterSidebarRow";
 import TrackSidebar from "~/components/timeline/TrackSidebar";
 import AutomationLane from "~/components/timeline/automation-lane";
 import { TimelineLeftBrowser } from "~/components/timeline/browser/timeline-left-browser";
@@ -73,6 +73,7 @@ type Props = {
   playheadSec: number;
   onSetLoopRegion: (startSec: number, endSec: number) => void;
   onLanePointerDown: JSX.EventHandler<HTMLDivElement, PointerEvent>;
+  onMasterPointerDown: JSX.EventHandler<HTMLDivElement, PointerEvent>;
   onRulerPointerDown: (event: PointerEvent) => void;
   selection: TimelineSelectionController;
   onClipPointerDown: (trackId: Track["id"], clipId: string, event: PointerEvent) => void;
@@ -167,7 +168,9 @@ export default function TimelineWorkspace(props: Props) {
     return tracksHeight + (props.dropAtNewTrack ? LANE_HEIGHT : 0);
   };
   const masterAutomationVisible = () => !props.sidebar.master.collapsed && props.automation.lanes.masterVisible;
-  const masterAreaHeight = () => MASTER_ROW_HEIGHT + (masterAutomationVisible() ? props.automation.lanes.masterHeight : 0);
+  const masterBaseHeight = () => masterRowHeight(props.sidebar.master.collapsed);
+  const masterAreaHeight = () => masterBaseHeight()
+    + (masterAutomationVisible() ? props.automation.lanes.masterHeight : 0);
   const fullHeight = () => RULER_HEIGHT + trackAreaHeight() + masterAreaHeight();
   const scrollContentHeight = () => fullHeight() + props.bottomPanelOffsetPx;
   const masterSelection = () => props.automation.lanes.selectedTargetsByOwnerKey.master ?? { parameterId: "volume" };
@@ -207,7 +210,7 @@ export default function TimelineWorkspace(props: Props) {
           }}
         >
           <div
-            class="relative shrink-0"
+            class="relative flex shrink-0 flex-col"
             style={{
               width: `${props.durationSec * PPS}px`,
               height: "100%",
@@ -319,44 +322,55 @@ export default function TimelineWorkspace(props: Props) {
                 recording={props.recording}
                 midi={props.midi}
               />
-              <div
-                class="sticky z-30 border-t border-neutral-800 bg-timeline-background"
-                style={{
-                  width: `${props.durationSec * PPS}px`,
-                  height: `${masterAreaHeight()}px`,
-                  bottom: `${props.bottomPanelOffsetPx}px`,
-                  "margin-top": `${RULER_HEIGHT + trackAreaHeight()}px`,
-                }}
-              >
-                <div class="relative overflow-hidden bg-timeline-background" style={{ height: `${MASTER_ROW_HEIGHT}px` }}>
-                  <GridOverlay
-                    durationSec={props.durationSec}
-                    bpm={props.bpm}
-                    denom={props.gridDenominator}
-                    enabled={props.gridEnabled}
-                  />
-                  <div class="absolute left-0 right-0 bottom-0 h-px bg-timeline-surface-muted" />
-                </div>
-                <Show when={masterAutomationVisible()}>
-                  <div
-                    class="border-t border-automation/30 bg-timeline-background/95"
-                    style={{ height: `${props.automation.lanes.masterHeight}px` }}
-                  >
-                    <AutomationLane
-                      projectId={props.automation.projectId}
-                      target={masterTarget()}
-                      parameterId={masterSelection().parameterId}
-                      envelope={props.automation.envelopes.byTargetKey.get(masterTargetKey())}
-                      durationSec={props.durationSec}
-                      heightPx={props.automation.lanes.masterHeight}
-                      onPreview={props.automation.envelopes.preview}
-                      onCommit={props.automation.envelopes.commit}
-                      onCancelPreview={props.automation.envelopes.cancelPreview}
-                    />
-                  </div>
-                </Show>
-              </div>
             </div>
+            <div
+              class="min-h-0 grow shrink-0"
+              style={{ "min-height": `${trackAreaHeight()}px` }}
+            />
+            <div
+              class="sticky z-30 shrink-0 border-t border-neutral-800 bg-timeline-background"
+              style={{
+                width: `${props.durationSec * PPS}px`,
+                height: `${masterAreaHeight()}px`,
+                bottom: `${props.bottomPanelOffsetPx}px`,
+              }}
+            >
+              <div
+                class="relative overflow-hidden bg-timeline-background"
+                style={{ height: `${masterBaseHeight()}px` }}
+                onPointerDown={props.onMasterPointerDown}
+              >
+                <GridOverlay
+                  durationSec={props.durationSec}
+                  bpm={props.bpm}
+                  denom={props.gridDenominator}
+                  enabled={props.gridEnabled}
+                />
+                <div class="absolute left-0 right-0 bottom-0 h-px bg-timeline-surface-muted" />
+              </div>
+              <Show when={masterAutomationVisible()}>
+                <div
+                  class="border-t border-automation/30 bg-timeline-background/95"
+                  style={{ height: `${props.automation.lanes.masterHeight}px` }}
+                >
+                  <AutomationLane
+                    projectId={props.automation.projectId}
+                    target={masterTarget()}
+                    parameterId={masterSelection().parameterId}
+                    envelope={props.automation.envelopes.byTargetKey.get(masterTargetKey())}
+                    durationSec={props.durationSec}
+                    heightPx={props.automation.lanes.masterHeight}
+                    onPreview={props.automation.envelopes.preview}
+                    onCommit={props.automation.envelopes.commit}
+                    onCancelPreview={props.automation.envelopes.cancelPreview}
+                  />
+                </div>
+              </Show>
+            </div>
+            <div
+              class="shrink-0"
+              style={{ height: `${props.bottomPanelOffsetPx}px` }}
+            />
           </div>
 
           <div class="sticky right-0 z-40 flex h-full shrink-0" style={{ width: `${props.sidebarWidth}px` }}>

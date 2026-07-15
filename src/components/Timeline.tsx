@@ -926,6 +926,16 @@ const Timeline: Component<TimelineProps> = (props) => {
     bottomPanel.setMode("effects");
     onLanePointerDown(event, scrollRef);
   };
+  const handleMasterPointerDown: JSX.EventHandler<
+    HTMLDivElement,
+    PointerEvent
+  > = (event) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    bottomPanel.setMode("effects");
+    selection.selectMasterTarget();
+    startScrub(event.clientX);
+  };
   const addFourBarMidiClipToTrack = (trackId: Track["id"]) => {
     const actions = deviceInsertActions();
     if (!actions?.canAddMidiClipToTarget(trackId)) return;
@@ -1375,6 +1385,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         playheadSec={playheadSec()}
         onSetLoopRegion={(s, e) => setLoopRegion(s, e)}
         onLanePointerDown={handleLanePointerDown}
+        onMasterPointerDown={handleMasterPointerDown}
         onRulerPointerDown={onRulerPointerDown}
         selection={selection}
         onClipPointerDown={onClipPointerDown}

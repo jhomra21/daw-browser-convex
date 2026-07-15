@@ -1,7 +1,6 @@
 import { type Component, Show, createMemo, createSignal, onCleanup } from "solid-js";
 import { automationEnvelopeValueRange, automationTargetKey, type AutomationEnvelope, type AutomationParameterSelection, type AutomationTargetDeviceInstance } from "@daw-browser/shared";
 import { normalizeMasterVolume } from "@daw-browser/shared";
-import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
 import { LANE_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import AutomationParameterPicker from "./automation-parameter-picker";
@@ -20,10 +19,11 @@ export type MasterSidebarModel = {
 };
 
 export const MASTER_ROW_HEIGHT = Math.round(LANE_HEIGHT / 2);
+export const masterRowHeight = (collapsed: boolean) =>
+  collapsed ? MASTER_ROW_HEIGHT : LANE_HEIGHT;
 
 type MasterSidebarRowProps = {
   master: MasterSidebarModel;
-  sidebarWidth: number;
   bottomOffsetPx: number;
   automation: {
     visible: boolean;
@@ -65,8 +65,18 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
     setActiveVolume(undefined);
     master().onVolumePreview(committedVolume());
   };
+  const toggleAutomationVisibility = () => {
+    if (master().collapsed) {
+      master().onToggleCollapsed();
+      if (!props.automation.visible) props.automation.onToggleVisibility();
+      return;
+    }
+    props.automation.onToggleVisibility();
+  };
   const automationHeight = () => props.automation.heightPx;
-  const rowHeight = () => MASTER_ROW_HEIGHT + (!master().collapsed && props.automation.visible ? automationHeight() : 0);
+  const baseRowHeight = () => masterRowHeight(master().collapsed);
+  const rowHeight = () => baseRowHeight()
+    + (!master().collapsed && props.automation.visible ? automationHeight() : 0);
   const volumeAutomated = () => props.automation.automatedTargetKeys.has(
     automationTargetKey({ kind: "master" }, "volume"),
   );
@@ -120,29 +130,21 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
       style={{
         bottom: `${props.bottomOffsetPx}px`,
         height: `${rowHeight()}px`,
-        width: `${props.sidebarWidth}px`,
-        "min-width": `${TIMELINE_SIDEBAR_MIN_WIDTH}px`,
+        width: "100%",
       }}
       onClick={master().onClick}
     >
       <div
-        class={cn(
-          "grid items-center gap-x-4",
-          master().collapsed ? "px-2 py-0.5" : "p-2",
-        )}
+        class="grid items-center gap-x-4 py-2 pr-2"
         style={{
-          height: `${MASTER_ROW_HEIGHT}px`,
-          "grid-template-columns": master().collapsed
-            ? "minmax(0,1fr)"
-            : "minmax(72px,96px) minmax(96px,1fr) 92px",
+          height: `${baseRowHeight()}px`,
+          "padding-left": "4px",
+          "grid-template-columns": "minmax(72px,96px) minmax(96px,1fr) 92px",
         }}
       >
         <div class="flex min-w-0 items-center gap-1 overflow-hidden">
           <button
-            class={cn(
-              "flex w-4 shrink-0 items-center justify-center text-xs text-muted-foreground hover:text-foreground",
-              master().collapsed ? "h-6" : "h-7",
-            )}
+            class="flex h-7 w-4 shrink-0 items-center justify-center text-xs text-muted-foreground hover:text-foreground"
             onClick={(event) => {
               event.stopPropagation();
               master().onToggleCollapsed();
@@ -153,8 +155,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
           </button>
           <button
             class={cn(
-              "flex flex-1 items-center justify-center border px-2 text-center text-sm font-semibold",
-              master().collapsed ? "h-6" : "h-7",
+              "flex h-7 flex-1 items-center justify-center border px-2 text-center text-sm font-semibold",
               master().selected
                 ? "border-border bg-muted"
                 : "border-border hover:border-border",
@@ -169,70 +170,110 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
             Master
           </button>
         </div>
-        <Show when={!master().collapsed}>
-          <div class="flex h-7 items-center border border-border bg-timeline-background px-2 text-xs text-foreground">
-            Master Out
-          </div>
-        </Show>
-        <Show when={!master().collapsed}>
-          <div class="flex w-[92px] items-center gap-2">
-            <div class="flex h-7 w-[72px] shrink-0 items-center gap-1 px-0.5">
+        <div class="flex h-7 items-center border border-border bg-timeline-background px-2 text-xs text-foreground">
+          Master Out
+        </div>
+        <div class="track-row-control-panel flex items-center gap-2">
+          <div
+            class={cn(
+              "track-row-control-stack flex shrink-0",
+              master().collapsed ? "h-7 items-center gap-1" : "flex-col gap-1",
+            )}
+          >
+            <Show when={!master().collapsed}>
+              <div class="grid grid-cols-2 gap-1">
+                <button
+                  class={cn(
+                    "h-7 border text-xs font-semibold transition-colors",
+                    props.automation.visible
+                      ? "border-red-400 bg-red-500/90 text-black"
+                      : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
+                  )}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleAutomationVisibility();
+                  }}
+                  title={props.automation.visible ? "Hide master automation lane" : "Show master automation lane"}
+                >
+                  A
+                </button>
+                <button
+                  class="h-7 cursor-not-allowed border border-border bg-timeline-surface text-xs font-semibold text-muted-foreground"
+                  disabled
+                  onClick={(event) => event.stopPropagation()}
+                  title="Master supports one automation lane"
+                >
+                  +
+                </button>
+              </div>
+            </Show>
+            <div class="relative flex h-7 flex-1 items-center px-0.5">
               <Show when={master().ready}>
-                <div class="relative flex flex-1 items-center">
-                  <Show when={volumeAutomated()}>
-                    <span class="absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.75)]" />
-                  </Show>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={displayMasterVolume()}
-                    disabled={!master().canEditVolume}
-                    style={{
-                      "--track-volume-percent": `${displayMasterVolume() * 100}%`,
-                      "--track-volume-automation-start": `${(volumeRange()?.min ?? 0) * 100}%`,
-                      "--track-volume-automation-end": `${(volumeRange()?.max ?? 0) * 100}%`,
-                    }}
-                    onClick={(event) => event.stopPropagation()}
-                    onPointerDown={() => {
-                      props.automation.onSelectParameter({ parameterId: "volume" });
-                      props.automation.onManualAutomationOverride();
-                    }}
-                    onInput={(event) => {
-                      event.stopPropagation();
-                      previewVolume(parseFloat(event.currentTarget.value));
-                    }}
-                    onChange={commitVolume}
-                    onPointerUp={commitVolume}
-                    onPointerCancel={cancelVolume}
-                    class={cn(
-                      "track-volume-slider w-full cursor-pointer disabled:cursor-not-allowed",
-                      volumeEnvelope() && "track-volume-slider-automated",
-                    )}
-                    title="Master volume"
-                  />
-                </div>
+                <Show when={volumeAutomated()}>
+                  <span class="track-automation-indicator absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500" />
+                </Show>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={displayMasterVolume()}
+                  disabled={!master().canEditVolume}
+                  style={{
+                    "--track-volume-percent": `${displayMasterVolume() * 100}%`,
+                    "--track-volume-automation-start": `${(volumeRange()?.min ?? 0) * 100}%`,
+                    "--track-volume-automation-end": `${(volumeRange()?.max ?? 0) * 100}%`,
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                  onPointerDown={() => {
+                    props.automation.onSelectParameter({ parameterId: "volume" });
+                    props.automation.onManualAutomationOverride();
+                  }}
+                  onInput={(event) => {
+                    event.stopPropagation();
+                    previewVolume(parseFloat(event.currentTarget.value));
+                  }}
+                  onChange={commitVolume}
+                  onPointerUp={commitVolume}
+                  onPointerCancel={cancelVolume}
+                  class={cn(
+                    "track-volume-slider w-full cursor-pointer disabled:cursor-not-allowed",
+                    volumeEnvelope() && "track-volume-slider-automated",
+                  )}
+                  title="Master volume"
+                />
               </Show>
+            </div>
+            <Show when={master().collapsed}>
               <button
                 class={cn(
-                  "h-7 w-7 shrink-0 border text-xs font-semibold transition-colors",
+                  "h-7 w-5 shrink-0 border text-xs font-semibold transition-colors",
                   props.automation.visible
                     ? "border-red-400 bg-red-500/90 text-black"
                     : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
                 )}
                 onClick={(event) => {
                   event.stopPropagation();
-                  props.automation.onToggleVisibility();
+                  toggleAutomationVisibility();
                 }}
-                title={props.automation.visible ? "Hide master automation lane" : "Show master automation lane"}
+                title="Expand master and show automation"
               >
                 A
               </button>
-            </div>
-            <div class="h-8 w-[12px] shrink-0 bg-timeline-background/70" />
+            </Show>
           </div>
-        </Show>
+          <div
+            class={cn(
+              "track-meter-strip relative shrink-0",
+              master().collapsed ? "h-8" : "h-16",
+            )}
+          >
+            <div class="absolute inset-0 flex items-end justify-center gap-1">
+              <div class="relative h-full w-1 overflow-hidden bg-border/60" />
+              <div class="relative h-full w-1 overflow-hidden bg-border/60" />
+            </div>
+          </div>
+        </div>
       </div>
       <Show when={!master().collapsed && props.automation.visible}>
         <div

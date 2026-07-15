@@ -42,7 +42,7 @@ import {
   type TimelineTrackLayoutRow,
 } from "~/lib/timeline-track-layout";
 import MasterSidebarRow, {
-  MASTER_ROW_HEIGHT,
+  masterRowHeight,
   type MasterSidebarModel,
 } from "~/components/timeline/MasterSidebarRow";
 import AutomationParameterPicker from "./automation-parameter-picker";
@@ -323,7 +323,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     return meta;
   });
   const masterRowReservedHeight = () =>
-    MASTER_ROW_HEIGHT +
+    masterRowHeight(sidebar().master.collapsed) +
     (!sidebar().master.collapsed && props.automation.lanes.masterVisible
       ? props.automation.lanes.masterHeight
       : 0);
@@ -754,7 +754,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   Math.max(1, visibleAutomationTargetKeys().length)
                 : 0);
             const canAddAutomationLane = () => {
-              if (!displayedAutomationVisible()) return false;
+              if (!automationVisible()) return false;
               const visible = new Set(visibleAutomationTargetKeys());
               if (!visible.has(selectedAutomationTargetKey())) return true;
               return getAutomationParameterOptionsForTarget(
@@ -969,14 +969,14 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 <div
                   class={cn(
                     "grid items-center gap-x-4",
-                    track.collapsed ? "px-2 py-0.5" : "p-2",
+                    track.collapsed
+                      ? "pb-[4.5px] pt-[3.5px] pr-2"
+                      : "p-2",
                   )}
                   style={{
                     height: `${clipLaneHeightPx()}px`,
                     "padding-left": `${4 + depth() * GROUP_INDENT_PX}px`,
-                    "grid-template-columns": track.collapsed
-                      ? "minmax(0, 1fr) auto"
-                      : "minmax(72px, 96px) minmax(96px, 1fr) 92px",
+                    "grid-template-columns": "minmax(72px, 96px) minmax(96px, 1fr) 92px",
                   }}
                 >
                   <div class="flex min-w-0 items-center gap-1 overflow-hidden">
@@ -998,7 +998,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     <button
                       class={cn(
                         "flex flex-1 items-center justify-center border px-2 text-center text-sm font-semibold",
-                        track.collapsed ? "h-6" : "h-7",
+                        track.collapsed ? "h-6 leading-none" : "h-7",
                         isGroupTrack
                           ? "border-transparent bg-timeline-background text-foreground hover:bg-timeline-surface-muted"
                           : muteDisabled
@@ -1151,13 +1151,11 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     </div>
                   </Show>
 
-                  <Show
-                    when={!track.collapsed}
-                    fallback={
-                      <div class="grid grid-cols-2 gap-1">
+                  <Show when={track.collapsed}>
+                    <div class="grid w-full grid-cols-4 gap-1">
                         <button
                           class={cn(
-                            "h-6 w-6 border text-xs font-bold transition-colors",
+                            "h-6 min-w-0 border text-xs font-bold transition-colors",
                             recordDisabled
                               ? "cursor-not-allowed border-red-900 bg-timeline-surface-muted text-red-900"
                               : isRecordArmed()
@@ -1188,7 +1186,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                         </button>
                         <button
                           class={cn(
-                            "h-6 w-6 border text-xs font-semibold",
+                            "h-6 min-w-0 border text-xs font-semibold",
                             soloDisabled
                               ? "cursor-not-allowed border-border bg-muted/40 text-muted-foreground"
                               : soloed()
@@ -1211,11 +1209,44 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                         >
                           S
                         </button>
-                      </div>
-                    }
-                  >
-                    <div class="track-row-control-panel flex items-center gap-2">
-                      <div class="track-row-control-stack flex shrink-0 flex-col gap-1">
+                        <button
+                          class={cn(
+                            "h-6 min-w-0 border text-xs font-semibold transition-colors",
+                            automationVisible()
+                              ? "border-red-400 bg-red-500/90 text-black"
+                              : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
+                          )}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            props.automation.actions.toggleTrackVisibility(track.id);
+                          }}
+                          title={automationVisible() ? "Hide automation lane" : "Show automation lane"}
+                        >
+                          A
+                        </button>
+                        <button
+                          class={cn(
+                            "h-6 min-w-0 border text-xs font-semibold transition-colors",
+                            canAddAutomationLane()
+                              ? "border-border bg-timeline-surface-muted text-red-200 hover:bg-red-500/20"
+                              : "cursor-not-allowed border-border bg-timeline-surface text-muted-foreground",
+                          )}
+                          disabled={!canAddAutomationLane()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (!canAddAutomationLane()) return;
+                            props.automation.actions.addTrackLane(track.id);
+                          }}
+                          title={automationVisible() ? "Add another automation lane" : "Show automation with A before adding lanes"}
+                        >
+                          +
+                        </button>
+                    </div>
+                  </Show>
+
+                  <div class="track-row-control-panel flex items-center gap-2">
+                    <div class="track-row-control-stack flex shrink-0 flex-col gap-1">
+                      <Show when={!track.collapsed}>
                         <div class="grid grid-cols-4 gap-1">
                           <button
                             class={cn(
@@ -1318,8 +1349,14 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             +
                           </button>
                         </div>
+                      </Show>
 
-                        <div class="relative flex h-7 items-center px-0.5">
+                      <div
+                        class={cn(
+                          "relative flex items-center px-0.5",
+                          track.collapsed ? "h-6" : "h-7",
+                        )}
+                      >
                           <Show when={automationMeta()?.volumeEnvelope}>
                             <span class="track-automation-indicator absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500" />
                           </Show>
@@ -1431,10 +1468,15 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                                 : "Track volume"
                             }
                           />
-                        </div>
                       </div>
+                    </div>
 
-                      <div class="track-meter-strip relative h-16 shrink-0">
+                    <div
+                      class={cn(
+                        "track-meter-strip relative shrink-0",
+                        track.collapsed ? "h-6" : "h-16",
+                      )}
+                    >
                         <div class="absolute inset-0 flex items-end justify-center gap-1">
                           {(() => {
                             const meter = meters[track.id];
@@ -1468,9 +1510,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             );
                           })()}
                         </div>
-                      </div>
                     </div>
-                  </Show>
+                  </div>
                 </div>
                 {displayedAutomationVisible() ? (
                   <div
@@ -1582,7 +1623,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         />
         <MasterSidebarRow
           master={sidebar().master}
-          sidebarWidth={sidebar().sidebarWidth}
           bottomOffsetPx={sidebar().bottomOffsetPx}
           automation={{
             visible: props.automation.lanes.masterVisible,

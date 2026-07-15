@@ -91,6 +91,7 @@ type Props = {
   scrollRef: (el: HTMLDivElement) => void;
   returnSectionRef: (el: HTMLDivElement) => void;
   masterTimelineRef: (el: HTMLDivElement) => void;
+  timelineSurfaceRef: (el: HTMLDivElement) => void;
   bottomPanelOffsetPx: number;
   leftBrowser: TimelineLeftBrowserModel;
   durationSec: number;
@@ -382,6 +383,7 @@ export default function TimelineWorkspace(props: Props) {
           >
             <div
               class="relative flex shrink-0 flex-col"
+              ref={props.timelineSurfaceRef}
               style={{
                 width: `${props.durationSec * PPS}px`,
               }}

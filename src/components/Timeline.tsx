@@ -552,6 +552,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   let containerRef: HTMLDivElement | undefined;
   let returnSectionRef: HTMLDivElement | undefined;
   let masterTimelineRef: HTMLDivElement | undefined;
+  let timelineSurfaceRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
   let effectsChainElement: HTMLElement | undefined;
 
@@ -1240,6 +1241,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     returnTrackLayout: () => trackLayoutModel().returnRows,
     returnSectionElement: () => returnSectionRef,
     masterTimelineElement: () => masterTimelineRef,
+    timelineSurfaceElement: () => timelineSurfaceRef,
     scrollElement: () => scrollRef,
     effectsChainElement: () => effectsChainElement,
     currentEffectsTargetId: () => selection.selectedFXTarget(),
@@ -1559,6 +1561,9 @@ const Timeline: Component<TimelineProps> = (props) => {
         }}
         masterTimelineRef={(el) => {
           masterTimelineRef = el;
+        }}
+        timelineSurfaceRef={(el) => {
+          timelineSurfaceRef = el;
         }}
         scrollRef={(el) => {
           scrollRef = el;

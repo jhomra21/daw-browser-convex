@@ -867,9 +867,10 @@ const routingMatches = (
   ))
 );
 
-const validateRestoreUngroupRouting = (
+export const validateRestoreUngroupRouting = (
   input: {
     group: {
+      index: number;
       parentGroupId?: string;
       outputTargetId?: string;
       sends: Array<{ targetId: string; amount: number }>;
@@ -882,14 +883,17 @@ const validateRestoreUngroupRouting = (
   if (input.group.parentGroupId && childIds.has(input.group.parentGroupId)) return false;
   const trackById = new Map(tracks.map((track) => [String(track._id), track]));
   const childrenByTrackId = new Map(input.children.map((child) => [child.trackId, child]));
+  const groupIndex = Math.max(0, Math.min(Math.round(input.group.index), tracks.length));
   const restoredGroupTrack = {
     _id: restoreGroupPlaceholderId,
+    index: groupIndex,
     channelRole: "group",
     groupId: input.group.parentGroupId,
   };
   const routingTracks = [
     ...tracks.map((track) => ({
       _id: String(track._id),
+      index: track.index >= groupIndex ? track.index + 1 : track.index,
       channelRole: track.channelRole,
       groupId: childrenByTrackId.has(String(track._id))
         ? restoreGroupPlaceholderId
@@ -898,6 +902,7 @@ const validateRestoreUngroupRouting = (
     restoredGroupTrack,
   ];
   const routingTrackById = new Map(routingTracks.map((track) => [track._id, track]));
+  if (!hasValidReturnTrackPartition(routingTracks)) return false;
   if (hasTrackGroupCycle(routingTracks.map((track) => ({ id: track._id, groupId: track.groupId })))) return false;
 
   const groupRouting = sanitizeTrackRouting(restoredGroupTrack, {

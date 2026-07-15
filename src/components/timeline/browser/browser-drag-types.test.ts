@@ -5,7 +5,10 @@ import {
   type BrowserDragPayload,
   type BrowserDropTarget,
 } from "./browser-drag-types";
-import { resolveBrowserDeviceDropTarget } from "./create-browser-device-drag";
+import {
+  resolveBrowserDeviceDropTarget,
+  resolveTimelineTrackTarget,
+} from "./create-browser-device-drag";
 
 describe("browserDropTargetTrackId", () => {
   test("keeps a Return track identity independent of its local lane index", () => {
@@ -70,5 +73,55 @@ describe("resolveBrowserDeviceDropTarget", () => {
       isOverMasterTimeline: true,
       timelineTarget: { kind: "track", trackId: "obscured-track", laneIndex: 0 },
     }, canDrop)).toEqual({ kind: "effect-chain", targetId: "master", index: 1 });
+  });
+});
+
+describe("resolveTimelineTrackTarget", () => {
+  const scrollingSurface = {
+    getBoundingClientRect: () => ({
+      top: 0,
+      right: 800,
+      bottom: 600,
+      left: 0,
+    }),
+  };
+  const scrollElement = {
+    scrollTop: 0,
+    getBoundingClientRect: () => ({
+      top: 0,
+      right: 1000,
+      bottom: 600,
+      left: 0,
+    }),
+  };
+  const rows = [{
+    trackId: "scrolling-track",
+    topPx: 0,
+    heightPx: 200,
+    clipLaneHeightPx: 200,
+    automationHeightPx: 0,
+    depth: 0,
+  }];
+
+  test("rejects a pointer over the sidebar outside the timeline canvas", () => {
+    expect(resolveTimelineTrackTarget(
+      { x: 900, y: 100 },
+      scrollElement,
+      scrollingSurface,
+      rows,
+    )).toEqual({ kind: "none" });
+  });
+
+  test("preserves scrolling lane targeting inside the timeline canvas", () => {
+    expect(resolveTimelineTrackTarget(
+      { x: 400, y: 100 },
+      scrollElement,
+      scrollingSurface,
+      rows,
+    )).toEqual({
+      kind: "track",
+      trackId: "scrolling-track",
+      laneIndex: 0,
+    });
   });
 });

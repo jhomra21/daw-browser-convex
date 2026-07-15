@@ -148,14 +148,17 @@ async function applyTrackGroupEntry(entry: Extract<HistoryEntry, { type: 'track-
   }
 
   let groupTrackId = resolveTrackId(index, entry.data.groupTrackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.currentGroupTrackId)
+  let groupTrackIndex = entry.data.groupTrack.index
   if (!groupTrackId) {
-    groupTrackId = await createHistoryTrack(deps, {
+    const createdTrack = await createHistoryTrack(deps, {
       trackRef: entry.data.groupTrackRef,
       index: entry.data.groupTrack.index,
       name: entry.data.groupTrack.name,
       channelRole: 'group',
       color: entry.data.groupTrack.color,
     })
+    groupTrackId = createdTrack.trackId
+    groupTrackIndex = createdTrack.index
   }
   assert(groupTrackId, 'Failed to recreate group track')
   entry.data.currentGroupTrackId = groupTrackId
@@ -163,11 +166,11 @@ async function applyTrackGroupEntry(entry: Extract<HistoryEntry, { type: 'track-
   deps.actions.insertLocalTrack(createLocalTrack({
     id: groupTrackId,
     historyRef: entry.data.groupTrackRef,
-    index: entry.data.groupTrack.index,
+    index: groupTrackIndex,
     name: entry.data.groupTrack.name,
     channelRole: 'group',
     color: entry.data.groupTrack.color,
-  }), entry.data.groupTrack.index)
+  }), groupTrackIndex)
   const childRefIndex = buildRefIndex(deps)
   for (const child of entry.data.childUpdates) {
     const trackId = requireResolved(resolveTrackId(childRefIndex, child.trackRef), 'Child track not found for track-group redo')
@@ -611,8 +614,9 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
 
       let newId = resolveStoredTrackId(deps.getTracks(), entry.data.currentTrackId)
       const collapsed = entry.data.collapsed ?? entry.data.channelRole === 'return'
+      let index = entry.data.index
       if (!newId) {
-        newId = await createHistoryTrack(deps, {
+        const createdTrack = await createHistoryTrack(deps, {
           trackRef: entry.data.trackRef,
           index: entry.data.index,
           kind: entry.data.kind,
@@ -620,6 +624,8 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
           collapsed,
           color: entry.data.color,
         })
+        newId = createdTrack.trackId
+        index = createdTrack.index
       }
       assert(newId, 'Failed to recreate track')
       entry.data.currentTrackId = newId
@@ -627,12 +633,12 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       deps.actions.insertLocalTrack(createLocalTrack({
         id: newId,
         historyRef: entry.data.trackRef,
-        index: entry.data.index,
+        index,
         kind: entry.data.kind ?? 'audio',
         channelRole: entry.data.channelRole ?? 'track',
         collapsed,
         color: entry.data.color,
-      }), entry.data.index)
+      }), index)
       return
     }
 

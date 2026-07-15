@@ -119,3 +119,60 @@ test('allows ungrouping a legacy Return track and unrelated updates', async () =
     color: 'track-red',
   })
 })
+
+test('restores a group immediately before the Return partition', async () => {
+  const projectId = 'project:local-return-restore-before-return'
+  const repository = createLocalTimelineRepository(projectId)
+  await repository.createTrack({ id: 'normal' })
+  await repository.createTrack({ id: 'return', channelRole: 'return' })
+  const group = buildTimelineTrackRow({
+    id: 'restored-group',
+    index: 1,
+    channelRole: 'group',
+    timestamp: 1,
+  })
+
+  await repository.restoreUngroup({
+    group,
+    children: [],
+    effects: [],
+    automation: [],
+    sidechainRoutes: [],
+  })
+
+  expect((await repository.loadSnapshot()).tracks.map((track) => ({
+    id: track.id,
+    index: track.index,
+  }))).toEqual([
+    { id: 'normal', index: 0 },
+    { id: 'restored-group', index: 1 },
+    { id: 'return', index: 2 },
+  ])
+})
+
+test('rejects restoring a group with a Return child without writing any tracks', async () => {
+  const projectId = 'project:local-return-restore-ungroup'
+  const repository = createLocalTimelineRepository(projectId)
+  await repository.createTrack({ id: 'return', channelRole: 'return' })
+  const before = await repository.loadSnapshot()
+  const group = buildTimelineTrackRow({
+    id: 'restored-group',
+    index: 0,
+    channelRole: 'group',
+    timestamp: 1,
+  })
+
+  await expect(repository.restoreUngroup({
+    group,
+    children: [{
+      trackId: 'return',
+      outputTargetId: 'restored-group',
+      outputToGroup: true,
+    }],
+    effects: [],
+    automation: [],
+    sidechainRoutes: [],
+  })).rejects.toThrow('Return tracks must remain ungrouped at the end.')
+
+  expect(await repository.loadSnapshot()).toEqual(before)
+})

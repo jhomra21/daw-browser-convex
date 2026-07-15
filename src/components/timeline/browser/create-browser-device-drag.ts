@@ -1,7 +1,7 @@
 import { createSignal, onCleanup, type Accessor } from "solid-js";
 import type { Track } from "@daw-browser/timeline-core/types";
 import { useDrag } from "~/hooks/useDrag";
-import { trackLayoutDropIndexAtClientY, type TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
+import { trackLayoutDropIndexAtClientY, trackLayoutRowAtY, trackLayoutRowIndexAtY, type TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
 import type { BrowserDragPayload, BrowserDragSession, BrowserDropTarget } from "./browser-drag-types";
 
 const DRAG_THRESHOLD_PX = 4;
@@ -55,12 +55,10 @@ const resolveReturnTrackTarget = (
   if (!section) return { kind: "none" };
   const rect = section.getBoundingClientRect();
   if (!isInsideRect(pointer, rect)) return { kind: "none" };
-  const row = rows.find((candidate) => (
-    pointer.y >= rect.top + candidate.topPx
-    && pointer.y < rect.top + candidate.topPx + candidate.heightPx
-  ));
+  const row = trackLayoutRowAtY(rows, pointer.y - rect.top);
   if (!row) return { kind: "none" };
-  return { kind: "track", trackId: row.trackId, laneIndex: rows.indexOf(row) };
+  const laneIndex = trackLayoutRowIndexAtY(rows, pointer.y - rect.top);
+  return { kind: "track", trackId: row.trackId, laneIndex };
 };
 
 const resolveEffectChainPreview = (

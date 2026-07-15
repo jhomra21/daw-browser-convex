@@ -1,14 +1,13 @@
 import type { Accessor } from 'solid-js'
 
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
-import { assert, isLocalId } from '@daw-browser/shared'
+import { assert, isLocalId, trackCreationCollapsed, trackCreationIndex } from '@daw-browser/shared'
 import { ensureRoomShareLink, getInviteShareUrl } from '~/lib/timeline-share'
 import { PPS } from '~/lib/timeline-utils'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
 import { loadTrackEffectSnapshot } from '~/lib/track-state-snapshot'
 import { createOptimisticTrack, pushTrackCreateHistory } from '~/lib/tracks'
-import { trackCreationIndex } from '~/lib/track-creation'
 import { planAssignTrackColorToClips, planGroupTracks, planMoveTrackToGroup, planResetClipColors, planSetTrackColor, planTrackReorder, planUngroupTracks, type ClipColorUpdate } from '~/lib/track-group-ops'
 import { assertAppliedSharedTimelineOperationResult, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
@@ -106,7 +105,7 @@ export function useTimelineActions(
 
     const channelRole = trackOptions.channelRole ?? 'track'
     const color = trackOptions.color ?? (channelRole === 'group' ? options.defaultColors?.group() : options.defaultColors?.track())
-    const collapsed = trackOptions.collapsed ?? channelRole === 'return'
+    const collapsed = trackCreationCollapsed(channelRole, trackOptions.collapsed)
     const index = trackCreationIndex(options.tracks(), channelRole, trackOptions.index)
     if (isLocalId('project', projectId)) {
       const row = await createLocalTimelineRepository(projectId).createTrack({

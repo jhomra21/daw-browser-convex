@@ -1,10 +1,24 @@
-import { type Component, Show, createMemo, createSignal, onCleanup } from "solid-js";
-import { automationEnvelopeValueRange, automationTargetKey, type AutomationEnvelope, type AutomationParameterSelection, type AutomationTargetDeviceInstance } from "@daw-browser/shared";
+import {
+  type Component,
+  Show,
+  createMemo,
+  createSignal,
+  onCleanup,
+} from "solid-js";
+import {
+  automationEnvelopeValueRange,
+  automationTargetKey,
+  type AutomationEnvelope,
+  type AutomationParameterSelection,
+  type AutomationTargetDeviceInstance,
+} from "@daw-browser/shared";
 import { normalizeMasterVolume } from "@daw-browser/shared";
 import { LANE_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import AutomationParameterPicker from "./automation-parameter-picker";
-import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
+import TimelineContextMenu, {
+  type TimelineContextMenuItem,
+} from "./context-menu/timeline-context-menu";
 
 export type MasterSidebarModel = {
   selected: boolean;
@@ -25,7 +39,9 @@ export const masterAreaHeight = (
   collapsed: boolean,
   automationVisible: boolean,
   automationHeight: number,
-) => masterRowHeight(collapsed) + (!collapsed && automationVisible ? automationHeight : 0);
+) =>
+  masterRowHeight(collapsed) +
+  (!collapsed && automationVisible ? automationHeight : 0);
 
 type MasterSidebarRowProps = {
   master: MasterSidebarModel;
@@ -48,13 +64,18 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   const master = () => props.master;
   const [activeVolume, setActiveVolume] = createSignal<number | undefined>();
   const committedVolume = () => normalizeMasterVolume(master().volume);
-  const displayMasterVolume = () => activeVolume()
-    ?? props.automation.evaluatedValuesByTargetKey.get(automationTargetKey({ kind: "master" }, "volume"))
-    ?? committedVolume();
+  const displayMasterVolume = () =>
+    activeVolume() ??
+    props.automation.evaluatedValuesByTargetKey.get(
+      automationTargetKey({ kind: "master" }, "volume"),
+    ) ??
+    committedVolume();
   const previewVolume = (volume: number) => {
     if (!master().canEditVolume) return;
     const nextVolume = normalizeMasterVolume(volume);
-    setActiveVolume((current) => current === nextVolume ? current : nextVolume);
+    setActiveVolume((current) =>
+      current === nextVolume ? current : nextVolume,
+    );
     master().onVolumePreview(nextVolume);
   };
   const commitVolume = () => {
@@ -79,20 +100,26 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   };
   const automationHeight = () => props.automation.heightPx;
   const baseRowHeight = () => masterRowHeight(master().collapsed);
-  const rowHeight = () => masterAreaHeight(
-    master().collapsed,
-    props.automation.visible,
-    automationHeight(),
-  );
-  const volumeAutomated = () => props.automation.automatedTargetKeys.has(
-    automationTargetKey({ kind: "master" }, "volume"),
-  );
-  const volumeEnvelope = createMemo(() => (
-    props.automation.selected.parameterId === "volume" && props.automation.selected.effectInstanceId === undefined
+  const rowHeight = () =>
+    masterAreaHeight(
+      master().collapsed,
+      props.automation.visible,
+      automationHeight(),
+    );
+  const volumeAutomated = () =>
+    props.automation.automatedTargetKeys.has(
+      automationTargetKey({ kind: "master" }, "volume"),
+    );
+  const volumeEnvelope = createMemo(() =>
+    props.automation.selected.parameterId === "volume" &&
+    props.automation.selected.effectInstanceId === undefined
       ? props.automation.selectedEnvelope
-      : undefined
-  ));
-  const volumeRange = () => volumeEnvelope() ? automationEnvelopeValueRange(volumeEnvelope(), { min: 0, max: 1 }) : undefined;
+      : undefined,
+  );
+  const volumeRange = () =>
+    volumeEnvelope()
+      ? automationEnvelopeValueRange(volumeEnvelope(), { min: 0, max: 1 })
+      : undefined;
   let cleanupAutomationResize: (() => void) | undefined;
   const startAutomationResize = (event: PointerEvent) => {
     event.preventDefault();
@@ -100,13 +127,16 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
     const startY = event.clientY;
     const startHeight = automationHeight();
     const move = (moveEvent: PointerEvent) => {
-      props.automation.onResizeLane(clampAutomationLaneHeight(startHeight + moveEvent.clientY - startY));
+      props.automation.onResizeLane(
+        clampAutomationLaneHeight(startHeight + moveEvent.clientY - startY),
+      );
     };
     const cleanup = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", cleanup);
       window.removeEventListener("pointercancel", cleanup);
-      if (cleanupAutomationResize === cleanup) cleanupAutomationResize = undefined;
+      if (cleanupAutomationResize === cleanup)
+        cleanupAutomationResize = undefined;
     };
     cleanupAutomationResize?.();
     cleanupAutomationResize = cleanup;
@@ -119,10 +149,16 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   const contextMenuItems = (): TimelineContextMenuItem[] => [
     { kind: "label", label: "Master" },
     { kind: "item", label: "Open effects", onSelect: master().onClick },
-    { kind: "item", label: master().collapsed ? "Expand master" : "Collapse master", onSelect: master().onToggleCollapsed },
     {
       kind: "item",
-      label: props.automation.visible ? "Hide master automation lane" : "Show master automation lane",
+      label: master().collapsed ? "Expand master" : "Collapse master",
+      onSelect: master().onToggleCollapsed,
+    },
+    {
+      kind: "item",
+      label: props.automation.visible
+        ? "Hide master automation lane"
+        : "Show master automation lane",
       disabled: master().collapsed,
       onSelect: props.automation.onToggleVisibility,
     },
@@ -131,7 +167,6 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   const row = (
     <div
       class={cn(
-        "[box-shadow:inset_0_1px_0_rgb(38_38_38)]",
         master().selected ? "bg-timeline-surface-muted" : "bg-timeline-surface",
       )}
       style={{
@@ -143,9 +178,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
       <div
         class={cn(
           "grid items-center gap-x-4 pr-2",
-          master().collapsed
-            ? "pb-[11.5px] pt-[12.5px]"
-            : "py-2",
+          master().collapsed ? "py-3" : "py-2",
         )}
         style={{
           height: `${baseRowHeight()}px`,
@@ -231,7 +264,11 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
                     event.stopPropagation();
                     toggleAutomationVisibility();
                   }}
-                  title={props.automation.visible ? "Hide master automation lane" : "Show master automation lane"}
+                  title={
+                    props.automation.visible
+                      ? "Hide master automation lane"
+                      : "Show master automation lane"
+                  }
                 >
                   A
                 </button>
@@ -269,7 +306,9 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
                   }}
                   onClick={(event) => event.stopPropagation()}
                   onPointerDown={() => {
-                    props.automation.onSelectParameter({ parameterId: "volume" });
+                    props.automation.onSelectParameter({
+                      parameterId: "volume",
+                    });
                     props.automation.onManualAutomationOverride();
                   }}
                   onInput={(event) => {
@@ -303,7 +342,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
       </div>
       <Show when={!master().collapsed && props.automation.visible}>
         <div
-          class="relative grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_92px] items-center gap-x-4 border-t border-automation/30 bg-timeline-background/95 px-2 text-[11px] text-error-foreground"
+          class="relative grid grid-cols-[minmax(72px,96px)_minmax(96px,1fr)_101px] items-center gap-x-4 border-t border-automation/30 bg-timeline-background/95 px-2 text-[11px] text-error-foreground"
           style={{ height: `${automationHeight()}px` }}
           onClick={(event) => event.stopPropagation()}
         >
@@ -312,7 +351,10 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
             onPointerDown={startAutomationResize}
           />
           <div class="flex items-center gap-1 overflow-hidden">
-            <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" classList={{ "opacity-30": !props.automation.selectedEnvelope }} />
+            <span
+              class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
+              classList={{ "opacity-30": !props.automation.selectedEnvelope }}
+            />
             <span class="truncate">Automation</span>
           </div>
           <AutomationParameterPicker
@@ -331,9 +373,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   );
 
   return (
-    <TimelineContextMenu items={contextMenuItems}>
-      {row}
-    </TimelineContextMenu>
+    <TimelineContextMenu items={contextMenuItems}>{row}</TimelineContextMenu>
   );
 };
 

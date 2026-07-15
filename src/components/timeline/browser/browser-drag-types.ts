@@ -16,6 +16,10 @@ export type BrowserDropTarget =
   | { kind: "effect-chain"; targetId: Track["id"] | "master"; index: number }
   | { kind: "none" };
 
+export const browserDropTargetTrackId = (
+  target: BrowserDropTarget | undefined,
+) => (target?.kind === "track" ? target.trackId : null);
+
 export type BrowserDragSession = {
   payload: BrowserDragPayload;
   pointer: { x: number; y: number };

@@ -18,7 +18,7 @@ import { getTrackWriteAccess, requireTrackOwnerForWrite } from "./trackWrites";
 import { getClipWriteAccess } from "./clipWrites";
 import { requireAuthenticatedUserId, requireProjectAccess, requireProjectRole } from "./projectAccess";
 import { runSharedOperationOnce } from "./sharedOperationResults";
-import { automationTargetKey, collectTrackDescendantIds, granularAutomationKey, hasTrackGroupCycle, instrumentAutomationKey, isHexColor, normalizeClipColor, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, parseGranularAutomationKey, parseInstrumentAutomationKey } from "@daw-browser/shared";
+import { automationTargetKey, canonicalTrackCreation, collectTrackDescendantIds, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isHexColor, normalizeClipColor, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, parseGranularAutomationKey, parseInstrumentAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -304,25 +304,25 @@ const createTrackForUser = async (
       await requireProjectRole(ctx, input.projectId, input.userId, ["owner", "editor"]);
       const existing = await listProjectTracksWithMixerChannels(ctx, input.projectId);
       const channelRole = sanitizeChannelRole(input.channelRole);
-      const firstReturnIndex = existing.findIndex((track) => track.channelRole === "return");
-      const nonReturnEnd = firstReturnIndex < 0 ? existing.length : firstReturnIndex;
-      const partitionStart = channelRole === "return"
-        ? nonReturnEnd
-        : 0;
-      const partitionEnd = channelRole === "return" ? existing.length : nonReturnEnd;
-      const nextIndex = input.index === undefined
-        ? partitionEnd
-        : Math.max(partitionStart, Math.min(input.index, partitionEnd));
-      for (let existingIndex = existing.length - 1; existingIndex >= 0; existingIndex -= 1) {
-        const track = existing[existingIndex];
-        if (track.index < nextIndex) break;
-        await ctx.db.patch(track._id, { index: track.index + 1 });
+      const creation = canonicalTrackCreation(existing, channelRole, input.index);
+      const existingById = new Map(existing.map((track) => [String(track._id), track]));
+      for (const track of creation.existingTracks) {
+        const previous = existingById.get(String(track._id));
+        if (
+          !previous
+          || previous.index === track.index
+          && previous.groupId === track.groupId
+        ) continue;
+        await ctx.db.patch(track._id, {
+          index: track.index,
+          groupId: track.groupId,
+        });
       }
       const trackId = await ctx.db.insert("tracks", {
         projectId: input.projectId,
-        index: nextIndex,
+        index: creation.creationIndex,
         kind: input.kind,
-        collapsed: input.collapsed ?? channelRole === "return",
+        collapsed: trackCreationCollapsed(channelRole, input.collapsed),
         color: input.color,
       });
       await ctx.db.insert(
@@ -739,6 +739,7 @@ export const serverReorderAndGroup = mutation({
     if (updates.length !== tracks.length) return { status: "rejected" };
     const trackById = new Map(tracks.map((track) => [String(track._id), track]));
     if (normalizedUpdates.some((update) => !trackById.has(String(update.trackId)))) return { status: "rejected" };
+    if (new Set(normalizedUpdates.map((update) => String(update.trackId))).size !== tracks.length) return { status: "rejected" };
     const sortedIndexes = normalizedUpdates.map((update) => update.index).sort((left, right) => left - right);
     if (sortedIndexes.some((index, offset) => index !== offset)) return { status: "rejected" };
 
@@ -763,8 +764,11 @@ export const serverReorderAndGroup = mutation({
     const normalizedUpdateById = new Map(normalizedUpdates.map((update) => [String(update.trackId), update]));
     const proposedTracks = tracks.map((track) => {
       const update = normalizedUpdateById.get(String(track._id));
-      return update ? { ...track, groupId: update.groupId ?? undefined } : track;
+      return update
+        ? { ...track, index: update.index, groupId: update.groupId ?? undefined }
+        : track;
     });
+    if (!hasValidReturnTrackPartition(proposedTracks)) return { status: "rejected" };
 
     await Promise.all(normalizedUpdates.map(async (update) => {
       const track = trackById.get(String(update.trackId));

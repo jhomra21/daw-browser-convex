@@ -1,5 +1,5 @@
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectEntityRow } from '~/lib/local-project-db'
-import { audioWarpEqual, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, normalizeAudioWarp } from '@daw-browser/shared'
+import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, normalizeAudioWarp } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { flushRegisteredLocalProjectWrites } from '~/lib/local-project-write-flushers'
 import { LocalEntityWriteQueue } from '~/lib/local-write-queue'
@@ -23,7 +23,6 @@ import type {
 } from '~/lib/timeline-repository/types'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import { buildTimelineTrackRow } from './track-row-builder'
-import { trackCreationIndex } from '~/lib/track-creation'
 import { localSidechainRouteRowId } from '~/lib/local-effects'
 
 const TRACK_KIND = 'track'
@@ -386,33 +385,38 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
     const tracks = trackValues(await db.getAllFromIndex('entities', 'by-kind', TRACK_KIND))
+      .sort((left, right) => left.index - right.index)
     const timestamp = now()
-    const index = trackCreationIndex(tracks, input.channelRole ?? 'track', input.index)
+    const channelRole = input.channelRole ?? 'track'
+    const creation = canonicalTrackCreation(tracks, channelRole, input.index)
     const id = input.id ?? createLocalTrackId()
     const track = buildTimelineTrackRow({
       id,
       historyRef: input.historyRef,
       name: input.name,
-      index,
+      index: creation.creationIndex,
       volume: input.volume,
       muted: input.muted,
       soloed: input.soloed,
       kind: input.kind,
-      channelRole: input.channelRole,
-      groupId: input.groupId,
+      channelRole,
+      groupId: channelRole === 'return' ? undefined : input.groupId,
       collapsed: input.collapsed,
       color: input.color,
       outputTargetId: input.outputTargetId,
       sends: input.sends,
       timestamp,
     })
+    const trackById = new Map(tracks.map((row) => [row.id, row]))
     const tx = db.transaction('entities', 'readwrite')
     await Promise.all([
-      ...tracks
-        .filter((row) => row.id !== track.id && row.index >= index)
+      ...creation.existingTracks
+        .filter((row) => {
+          const previous = trackById.get(row.id)
+          return previous?.index !== row.index || previous.groupId !== row.groupId
+        })
         .map((row) => tx.store.put(toEntityRow(TRACK_KIND, row.id, {
           ...row,
-          index: row.index + 1,
           updatedAt: timestamp,
         }, timestamp))),
       tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp)),
@@ -645,6 +649,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     const tx = db.transaction('entities', 'readwrite')
     const rows = await tx.store.index('by-kind').getAll(TRACK_KIND)
     const tracks = trackValues(rows)
+      .sort((left, right) => left.index - right.index)
     const trackById = new Map(tracks.map((track) => [track.id, track]))
     const updateById = new Map(updates.map((update) => [update.trackId, update]))
     requireTrackIds(updates.map((update) => update.trackId), tracks)
@@ -675,6 +680,9 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
         ? track
         : { ...track, outputTargetId: routing.outputTargetId, sends: routing.sends }
     })
+    if (!hasValidReturnTrackPartition(nextTracks)) {
+      throw new Error('Failed to reorder local timeline because Return tracks must remain ungrouped at the end.')
+    }
     const changedTracks = nextTracks.flatMap((track) => {
       const previous = trackById.get(track.id)
       if (!previous || trackPersistenceFieldsEqual(previous, track)) return []

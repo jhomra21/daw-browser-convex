@@ -45,6 +45,7 @@ import TimelineContextMenu, {
 } from "./context-menu/timeline-context-menu";
 import {
   buildGroupClipOverview,
+  type TimelineTrackLayout,
   type TimelineTrackLayoutRow,
 } from "~/lib/timeline-track-layout";
 import type { TrackDropTarget } from "~/lib/track-group-ops";
@@ -96,6 +97,7 @@ type Props = {
   tracks: RuntimeTrack[];
   dropAtNewTrack: boolean;
   dropTargetLane: number | null;
+  browserDropTargetTrackId: Track["id"] | null;
   bpm: number;
   gridDenominator: number;
   gridEnabled: boolean;
@@ -141,6 +143,7 @@ type Props = {
   openMidiEditorFor: (clipId: string) => void;
   openSampleDetailFor: (clipId: string) => void;
   marqueeRect: { x: number; y: number; width: number; height: number } | null;
+  marqueeRows: readonly TimelineTrackLayoutRow[] | null;
   recording: {
     isRecording: boolean;
     previewStartSec: number | null;
@@ -201,18 +204,22 @@ type Props = {
     onSelectAllClipsInGroup: (groupId: Track["id"]) => void;
   };
   automation: TimelineWorkspaceAutomationModel;
-  scrollingTrackLayout: TimelineTrackLayoutRow[];
-  returnTrackLayout: TimelineTrackLayoutRow[];
+  trackLayout: TimelineTrackLayout;
 };
 
 export default function TimelineWorkspace(props: Props) {
   let scrollElement: HTMLDivElement | undefined;
   const viewportRedrawVersion = createViewportRedrawVersion();
   const trackById = createMemo(() => props.trackLookup.trackById);
-  const visibleTracks = createMemo(() => [...props.scrollingTrackLayout, ...props.returnTrackLayout].flatMap((row) => {
-    const track = trackById().get(row.trackId);
-    return track ? [track] : [];
-  }));
+  const visibleTracks = createMemo(() =>
+    [
+      ...props.trackLayout.scrollingRows,
+      ...props.trackLayout.returnRows,
+    ].flatMap((row) => {
+      const track = trackById().get(row.trackId);
+      return track ? [track] : [];
+    }),
+  );
   const selectedTrackIds = createMemo(() => {
     const range = props.selection.rangeSelection();
     if (range) return range.trackIds;
@@ -230,27 +237,35 @@ export default function TimelineWorkspace(props: Props) {
     }
     return overviews;
   });
-  const trackAreaHeight = () => {
-    const layout = props.scrollingTrackLayout;
-    const tracksHeight = layout.length === 0 ? 0 : layout[layout.length - 1].topPx + layout[layout.length - 1].heightPx;
-    return tracksHeight + (props.dropAtNewTrack ? LANE_HEIGHT : 0);
-  };
-  const masterAutomationVisible = () => !props.sidebar.master.collapsed && props.automation.lanes.masterVisible;
-  const masterBaseHeight = () => masterRowHeight(props.sidebar.master.collapsed);
-  const masterTotalHeight = () => masterAreaHeight(
-    props.sidebar.master.collapsed,
-    props.automation.lanes.masterVisible,
-    props.automation.lanes.masterHeight,
-  );
-  const returnAreaHeight = () => {
-    const last = props.returnTrackLayout.at(-1);
-    return last ? last.topPx + last.heightPx : 0;
-  };
-  const fullHeight = () => RULER_HEIGHT + trackAreaHeight() + returnAreaHeight() + masterTotalHeight();
+  const trackAreaHeight = () =>
+    props.trackLayout.scrollingHeightPx +
+    (props.dropAtNewTrack ? LANE_HEIGHT : 0);
+  const masterAutomationVisible = () =>
+    !props.sidebar.master.collapsed && props.automation.lanes.masterVisible;
+  const masterBaseHeight = () =>
+    masterRowHeight(props.sidebar.master.collapsed);
+  const masterTotalHeight = () =>
+    masterAreaHeight(
+      props.sidebar.master.collapsed,
+      props.automation.lanes.masterVisible,
+      props.automation.lanes.masterHeight,
+    );
+  const returnAreaHeight = () => props.trackLayout.returnHeightPx;
+  const stickyFooterHeight = () =>
+    returnAreaHeight() + masterTotalHeight();
+  const fullHeight = () =>
+    RULER_HEIGHT + trackAreaHeight() + stickyFooterHeight();
   const scrollContentHeight = () => fullHeight() + props.bottomPanelOffsetPx;
-  const masterSelection = () => props.automation.lanes.selectedTargetsByOwnerKey.master ?? { parameterId: "volume" };
-  const masterTarget = () => ({ kind: "master" as const, effectInstanceId: masterSelection().effectInstanceId });
-  const masterTargetKey = () => automationTargetKey(masterTarget(), masterSelection().parameterId);
+  const masterSelection = () =>
+    props.automation.lanes.selectedTargetsByOwnerKey.master ?? {
+      parameterId: "volume",
+    };
+  const masterTarget = () => ({
+    kind: "master" as const,
+    effectInstanceId: masterSelection().effectInstanceId,
+  });
+  const masterTargetKey = () =>
+    automationTargetKey(masterTarget(), masterSelection().parameterId);
   const fallbackMenuItems = (): TimelineContextMenuItem[] => [
     { kind: "label", label: "Timeline" },
     {
@@ -276,7 +291,9 @@ export default function TimelineWorkspace(props: Props) {
         {(visibleTrack) => (
           <TrackLane
             track={visibleTrack()}
-            groupClipOverview={groupClipOverviewByTrackId().get(row.trackId) ?? []}
+            groupClipOverview={
+              groupClipOverviewByTrackId().get(row.trackId) ?? []
+            }
             layout={layout}
             isDropTarget={isDropTarget}
             selectedClipIds={props.selection.selectedClipIds()}
@@ -301,7 +318,8 @@ export default function TimelineWorkspace(props: Props) {
             viewportRedrawVersion={viewportRedrawVersion()}
             automation={{
               projectId: props.automation.projectId,
-              visible: props.automation.lanes.visibleByTrackId[row.trackId] === true,
+              visible:
+                props.automation.lanes.visibleByTrackId[row.trackId] === true,
               selections: visibleTargetKeys().flatMap((targetKey) => {
                 const selection =
                   props.automation.lanes.selectionByTargetKey.get(targetKey);
@@ -353,176 +371,211 @@ export default function TimelineWorkspace(props: Props) {
             props.scrollRef(element);
           }}
         >
-        <div
-          class="relative flex select-none"
-          style={{
-            width: `${props.durationSec * PPS + props.sidebarWidth}px`,
-            height: `${scrollContentHeight()}px`,
-            "min-height": "100%",
-          }}
-        >
           <div
-            class="relative flex shrink-0 flex-col"
+            class="relative flex select-none"
             style={{
-              width: `${props.durationSec * PPS}px`,
-              height: "100%",
+              width: `${props.durationSec * PPS + props.sidebarWidth}px`,
+              height: `${scrollContentHeight()}px`,
+              "min-height": "100%",
             }}
-            onPointerDown={props.onLanePointerDown}
           >
-            <TimelineRuler
-              durationSec={props.durationSec}
-              bpm={props.bpm}
-              denom={props.gridDenominator}
-              gridEnabled={props.gridEnabled}
-              onPointerDown={props.onRulerPointerDown}
-              loopEnabled={props.loopEnabled}
-              loopStartSec={props.loopStartSec}
-              loopEndSec={props.loopEndSec}
-              onSetLoopRegion={props.onSetLoopRegion}
-            />
-
             <div
-              class="absolute left-0 right-0 bg-timeline-background"
-              style={{
-                top: `${RULER_HEIGHT}px`,
-                bottom: `${props.bottomPanelOffsetPx}px`,
-              }}
-            >
-              <For each={props.scrollingTrackLayout}>
-                {(row, i) => renderTrackLane(row, row, props.dropTargetLane === i())}
-              </For>
-              <TimelineOverlays
-                timeline={{
-                  tracks: props.tracks,
-                  trackLookup: props.trackLookup,
-                  durationSec: props.durationSec,
-                  bpm: props.bpm,
-                  gridDenominator: props.gridDenominator,
-                  gridEnabled: props.gridEnabled,
-                  loopEnabled: props.loopEnabled,
-                  loopStartSec: props.loopStartSec,
-                  loopEndSec: props.loopEndSec,
-                  playheadSec: props.playheadSec,
-                  dropAtNewTrack: props.dropAtNewTrack,
-                  marqueeRect: props.marqueeRect,
-                  rowLayouts: props.scrollingTrackLayout,
-                  trackAreaHeight: trackAreaHeight(),
-                  range: props.selection.rangeSelection(),
-                }}
-                recording={props.recording}
-                midi={props.midi}
-              />
-            </div>
-            <div
-              class="min-h-0 grow shrink-0"
-              style={{ "min-height": `${trackAreaHeight()}px` }}
-            />
-            <div
-              class="sticky z-30 shrink-0 border-t border-neutral-800 bg-timeline-background"
+              class="relative flex shrink-0 flex-col"
               style={{
                 width: `${props.durationSec * PPS}px`,
-                height: `${returnAreaHeight() + masterTotalHeight()}px`,
-                bottom: `${props.bottomPanelOffsetPx}px`,
               }}
+              onPointerDown={props.onLanePointerDown}
             >
+              <TimelineRuler
+                durationSec={props.durationSec}
+                bpm={props.bpm}
+                denom={props.gridDenominator}
+                gridEnabled={props.gridEnabled}
+                onPointerDown={props.onRulerPointerDown}
+                loopEnabled={props.loopEnabled}
+                loopStartSec={props.loopStartSec}
+                loopEndSec={props.loopEndSec}
+                onSetLoopRegion={props.onSetLoopRegion}
+              />
+
               <div
-                class="relative overflow-hidden bg-timeline-background"
-                ref={(element) => {
-                  props.returnSectionRef(element);
+                class="absolute left-0 right-0 bg-timeline-background"
+                style={{
+                  top: `${RULER_HEIGHT}px`,
+                  bottom: `${props.bottomPanelOffsetPx}px`,
                 }}
-                style={{ height: `${returnAreaHeight()}px` }}
               >
-                <For each={props.returnTrackLayout}>
-                  {(row) => (
-                    <div
-                      class="absolute left-0 right-0"
-                      data-track-id={row.trackId}
-                      style={{ top: `${row.topPx}px`, height: `${row.heightPx}px` }}
-                      onPointerDown={props.onReturnPointerDown}
-                    >
-                      {renderTrackLane(row, { ...row, topPx: 0 })}
-                    </div>
-                  )}
+                <For each={props.trackLayout.scrollingRows}>
+                  {(row, i) =>
+                    renderTrackLane(
+                      row,
+                      row,
+                      props.browserDropTargetTrackId === row.trackId ||
+                        (props.browserDropTargetTrackId === null &&
+                          props.dropTargetLane === i()),
+                    )
+                  }
                 </For>
-                <GridOverlay
-                  durationSec={props.durationSec}
-                  bpm={props.bpm}
-                  denom={props.gridDenominator}
-                  enabled={props.gridEnabled}
+                <TimelineOverlays
+                  timeline={{
+                    tracks: props.tracks,
+                    trackLookup: props.trackLookup,
+                    durationSec: props.durationSec,
+                    bpm: props.bpm,
+                    gridDenominator: props.gridDenominator,
+                    gridEnabled: props.gridEnabled,
+                    loopEnabled: props.loopEnabled,
+                    loopStartSec: props.loopStartSec,
+                    loopEndSec: props.loopEndSec,
+                    playheadSec: props.playheadSec,
+                    dropAtNewTrack: props.dropAtNewTrack,
+                    marqueeRect:
+                      props.marqueeRows === props.trackLayout.scrollingRows
+                        ? props.marqueeRect
+                        : null,
+                    rowLayouts: props.trackLayout.scrollingRows,
+                    trackAreaHeight: trackAreaHeight(),
+                    range: props.selection.rangeSelection(),
+                  }}
+                  recording={props.recording}
+                  midi={props.midi}
                 />
-                <Show when={props.selection.rangeSelection()}>
-                  {(range) => (
-                    <For
-                      each={props.returnTrackLayout.filter((row) =>
-                        range().trackIds.includes(row.trackId),
+              </div>
+              <div
+                class="min-h-0 grow shrink-0"
+                style={{ "min-height": `${trackAreaHeight()}px` }}
+              />
+              <div
+                class="sticky z-30 box-border shrink-0 border-t border-neutral-800 bg-timeline-background"
+                style={{
+                  width: `${props.durationSec * PPS}px`,
+                  height: `${stickyFooterHeight()}px`,
+                  bottom: `${props.bottomPanelOffsetPx}px`,
+                }}
+              >
+                <div
+                  class="relative overflow-hidden bg-timeline-background"
+                  ref={(element) => {
+                    props.returnSectionRef(element);
+                  }}
+                  style={{ height: `${returnAreaHeight()}px` }}
+                  onPointerDown={props.onReturnPointerDown}
+                >
+                  <For each={props.trackLayout.returnRows}>
+                    {(row) => (
+                      <div
+                        class="absolute left-0 right-0"
+                        data-track-id={row.trackId}
+                        style={{
+                          top: `${row.topPx}px`,
+                          height: `${row.heightPx}px`,
+                        }}
+                      >
+                        {renderTrackLane(row, { ...row, topPx: 0 })}
+                      </div>
+                    )}
+                  </For>
+                  <GridOverlay
+                    durationSec={props.durationSec}
+                    bpm={props.bpm}
+                    denom={props.gridDenominator}
+                    enabled={props.gridEnabled}
+                  />
+                  <Show
+                    when={
+                      props.marqueeRows === props.trackLayout.returnRows
+                        ? props.marqueeRect
+                        : null
+                    }
+                  >
+                    {(marquee) => (
+                      <div
+                        class="pointer-events-none absolute z-20 border border-blue-300/60 bg-blue-400/12"
+                        style={{
+                          left: `${marquee().x}px`,
+                          top: `${marquee().y}px`,
+                          width: `${marquee().width}px`,
+                          height: `${marquee().height}px`,
+                        }}
+                      />
+                    )}
+                  </Show>
+                  <Show when={props.selection.rangeSelection()}>
+                    {(range) => (
+                      <For
+                        each={props.trackLayout.returnRows.filter((row) =>
+                          range().trackIds.includes(row.trackId),
+                        )}
+                      >
+                        {(row) => (
+                          <div
+                            class="absolute z-10 pointer-events-none bg-blue-400/12 border-x border-blue-300/30"
+                            style={{
+                              left: `${range().startSec * PPS}px`,
+                              top: `${row.topPx}px`,
+                              width: `${(range().endSec - range().startSec) * PPS}px`,
+                              height: `${row.heightPx}px`,
+                            }}
+                          />
+                        )}
+                      </For>
+                    )}
+                  </Show>
+                </div>
+                <div
+                  class="relative overflow-hidden bg-timeline-background"
+                  style={{ height: `${masterBaseHeight()}px` }}
+                  onPointerDown={props.onMasterPointerDown}
+                >
+                  <GridOverlay
+                    durationSec={props.durationSec}
+                    bpm={props.bpm}
+                    denom={props.gridDenominator}
+                    enabled={props.gridEnabled}
+                  />
+                  <div class="absolute left-0 right-0 bottom-0 h-px bg-timeline-surface-muted" />
+                </div>
+                <Show when={masterAutomationVisible()}>
+                  <div
+                    class="border-t border-automation/30 bg-timeline-background/95"
+                    style={{
+                      height: `${props.automation.lanes.masterHeight}px`,
+                    }}
+                  >
+                    <AutomationLane
+                      projectId={props.automation.projectId}
+                      target={masterTarget()}
+                      parameterId={masterSelection().parameterId}
+                      envelope={props.automation.envelopes.byTargetKey.get(
+                        masterTargetKey(),
                       )}
-                    >
-                      {(row) => (
-                        <div
-                          class="absolute z-10 pointer-events-none bg-blue-400/12 border-x border-blue-300/30"
-                          style={{
-                            left: `${range().startSec * PPS}px`,
-                            top: `${row.topPx}px`,
-                            width: `${(range().endSec - range().startSec) * PPS}px`,
-                            height: `${row.heightPx}px`,
-                          }}
-                        />
-                      )}
-                    </For>
-                  )}
+                      durationSec={props.durationSec}
+                      heightPx={props.automation.lanes.masterHeight}
+                      onPreview={props.automation.envelopes.preview}
+                      onCommit={props.automation.envelopes.commit}
+                      onCancelPreview={props.automation.envelopes.cancelPreview}
+                    />
+                  </div>
                 </Show>
               </div>
               <div
-                class="relative overflow-hidden bg-timeline-background"
-                style={{ height: `${masterBaseHeight()}px` }}
-                onPointerDown={props.onMasterPointerDown}
-              >
-                <GridOverlay
-                  durationSec={props.durationSec}
-                  bpm={props.bpm}
-                  denom={props.gridDenominator}
-                  enabled={props.gridEnabled}
-                />
-                <div class="absolute left-0 right-0 bottom-0 h-px bg-timeline-surface-muted" />
-              </div>
-              <Show when={masterAutomationVisible()}>
-                <div
-                  class="border-t border-automation/30 bg-timeline-background/95"
-                  style={{ height: `${props.automation.lanes.masterHeight}px` }}
-                >
-                  <AutomationLane
-                    projectId={props.automation.projectId}
-                    target={masterTarget()}
-                    parameterId={masterSelection().parameterId}
-                    envelope={props.automation.envelopes.byTargetKey.get(masterTargetKey())}
-                    durationSec={props.durationSec}
-                    heightPx={props.automation.lanes.masterHeight}
-                    onPreview={props.automation.envelopes.preview}
-                    onCommit={props.automation.envelopes.commit}
-                    onCancelPreview={props.automation.envelopes.cancelPreview}
-                  />
-                </div>
-              </Show>
+                class="shrink-0"
+                style={{ height: `${props.bottomPanelOffsetPx}px` }}
+              />
             </div>
-            <div
-              class="shrink-0"
-              style={{ height: `${props.bottomPanelOffsetPx}px` }}
-            />
-          </div>
 
-          <div class="sticky right-0 z-40 flex h-full shrink-0" style={{ width: `${props.sidebarWidth}px` }}>
             <TrackSidebar
               sidebar={{
                 tracks: visibleTracks(),
                 allTracks: props.tracks,
                 trackById: trackById(),
-                scrollingTrackLayout: props.scrollingTrackLayout,
-                returnTrackLayout: props.returnTrackLayout,
+                trackLayout: props.trackLayout,
                 scrollElement: () => scrollElement,
                 selectedTrackId: props.selection.selectedTrackId(),
                 selectedTrackIds: selectedTrackIds(),
                 sidebarWidth: props.sidebarWidth,
                 bottomOffsetPx: props.bottomPanelOffsetPx,
+                stickyFooterHeightPx: stickyFooterHeight(),
                 master: props.sidebar.master,
                 recordArmTrackId: props.recording.recordArmTrackId,
                 currentUserId: props.sidebar.currentUserId,
@@ -530,7 +583,8 @@ export default function TimelineWorkspace(props: Props) {
                 onTrackClick: props.sidebar.onTrackClick,
                 canWriteTrackRouting: props.sidebar.canWriteTrackRouting,
                 onTrackSendsChange: props.sidebar.onTrackSendsChange,
-                onTrackOutputTargetChange: props.sidebar.onTrackOutputTargetChange,
+                onTrackOutputTargetChange:
+                  props.sidebar.onTrackOutputTargetChange,
                 onVolumePreview: props.sidebar.onVolumePreview,
                 onVolumeChange: props.sidebar.onVolumeChange,
                 onToggleMute: props.sidebar.onToggleMute,
@@ -546,14 +600,15 @@ export default function TimelineWorkspace(props: Props) {
                 onReorderTracks: props.sidebar.onReorderTracks,
                 onSetTrackColor: props.sidebar.onSetTrackColor,
                 onResetTrackColor: props.sidebar.onResetTrackColor,
-                onAssignTrackColorToClips: props.sidebar.onAssignTrackColorToClips,
+                onAssignTrackColorToClips:
+                  props.sidebar.onAssignTrackColorToClips,
                 onResetClipColors: props.sidebar.onResetClipColors,
-                onSelectAllClipsInGroup: props.sidebar.onSelectAllClipsInGroup,
+                onSelectAllClipsInGroup:
+                  props.sidebar.onSelectAllClipsInGroup,
               }}
               automation={props.automation}
             />
           </div>
-        </div>
         </div>
       </TimelineContextMenu>
     </div>

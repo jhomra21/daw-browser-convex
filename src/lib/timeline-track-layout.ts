@@ -12,7 +12,7 @@ export type TimelineTrackLayoutRow = {
   groupId?: Track['id']
 }
 
-type TimelineTrackLayout = {
+export type TimelineTrackLayout = {
   scrollingRows: TimelineTrackLayoutRow[]
   returnRows: TimelineTrackLayoutRow[]
   displayTrackIds: Track['id'][]
@@ -212,7 +212,7 @@ export const trackIndexAtY = (
   return trackLayoutRowIndexAtY(rows, y)
 }
 
-const trackLayoutRowIndexAtY = (
+export const trackLayoutRowIndexAtY = (
   rows: readonly Pick<TimelineTrackLayoutRow, 'topPx' | 'heightPx'>[],
   y: number,
 ): number => {

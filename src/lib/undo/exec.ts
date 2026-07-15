@@ -3,7 +3,7 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { AUDIO_EFFECT_ORDER, assert, assertDefined, type AutomationEnvelope } from '@daw-browser/shared'
+import { AUDIO_EFFECT_ORDER, assert, assertDefined, trackCreationCollapsed, type AutomationEnvelope } from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
@@ -613,7 +613,7 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       }
 
       let newId = resolveStoredTrackId(deps.getTracks(), entry.data.currentTrackId)
-      const collapsed = entry.data.collapsed ?? entry.data.channelRole === 'return'
+      const collapsed = trackCreationCollapsed(entry.data.channelRole, entry.data.collapsed)
       let index = entry.data.index
       if (!newId) {
         const createdTrack = await createHistoryTrack(deps, {

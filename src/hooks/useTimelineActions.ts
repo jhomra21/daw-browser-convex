@@ -136,7 +136,8 @@ export function useTimelineActions(
     const collapsed = trackCreationCollapsed(channelRole, trackOptions.collapsed)
     const index = trackCreationIndex(options.tracks(), channelRole, trackOptions.index)
     if (isLocalId('project', projectId)) {
-      const row = await createLocalTimelineRepository(projectId).createTrack({
+      const repository = createLocalTimelineRepository(projectId)
+      const row = await repository.createTrack({
         index,
         kind: trackOptions.kind,
         channelRole,
@@ -144,13 +145,13 @@ export function useTimelineActions(
         color,
       })
       if (options.room.projectId() !== projectId) {
-        await createLocalTimelineRepository(projectId).deleteTrack(row.id)
+        await repository.deleteTrack(row.id)
         return null
       }
       const track = toLocalTimelineTrack(row)
-      const snapshot = await createLocalTimelineRepository(projectId).loadSnapshot()
+      const snapshot = await repository.loadSnapshot()
       if (options.room.projectId() !== projectId) {
-        await createLocalTimelineRepository(projectId).deleteTrack(row.id)
+        await repository.deleteTrack(row.id)
         return null
       }
       projectLocalTrackCreation(

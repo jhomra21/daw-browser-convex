@@ -473,6 +473,9 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
         : Promise.resolve([]),
     ])
     if (!row || !isTrackRow(row.value)) return null
+    if (row.value.channelRole === 'return' && input.groupId !== undefined && input.groupId !== null) {
+      throw new Error('Return tracks cannot belong to a group.')
+    }
     const timestamp = now()
     const routing = input.sends !== undefined || input.outputTargetId !== undefined
       ? normalizeTrackRouting({

@@ -123,29 +123,25 @@ export const buildGroupClipOverview = (
   return merged
 }
 
-export const buildTimelineTrackLayoutRows = (input: {
-  tracks: readonly Pick<Track, 'id' | 'groupId' | 'channelRole' | 'collapsed'>[]
-  visibleTrackIds?: readonly Track['id'][]
+type TrackLayoutRowOptions = {
   depthByTrackId?: ReadonlyMap<string, number>
   visibleByTrackId: Record<string, boolean | undefined>
   heightsByLaneOwnerKey: Record<string, number | undefined>
   visibleParameterIdsByTrackId: Record<string, readonly string[] | undefined>
-}): TimelineTrackLayoutRow[] => {
+}
+
+const buildRowsForOrderedTracks = (
+  tracks: readonly Pick<Track, 'id' | 'groupId' | 'channelRole' | 'collapsed'>[],
+  options: TrackLayoutRowOptions,
+): TimelineTrackLayoutRow[] => {
   let topPx = 0
-  const trackById = new Map(input.tracks.map((track) => [track.id, track]))
-  const orderedTracks = input.visibleTrackIds
-    ? input.visibleTrackIds.flatMap((trackId) => {
-        const track = trackById.get(trackId)
-        return track ? [track] : []
-      })
-    : input.tracks
-  return orderedTracks.map((track) => {
+  return tracks.map((track) => {
     const clipLaneHeightPx = trackClipLaneHeight(track)
     const automationHeightPx = track.collapsed === true
       ? 0
-      : input.visibleByTrackId[track.id] === true
-      ? (input.heightsByLaneOwnerKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT)
-        * (input.visibleParameterIdsByTrackId[track.id]?.length || 1)
+      : options.visibleByTrackId[track.id] === true
+      ? (options.heightsByLaneOwnerKey[track.id] ?? DEFAULT_AUTOMATION_LANE_HEIGHT)
+        * (options.visibleParameterIdsByTrackId[track.id]?.length || 1)
       : 0
     const row = {
       trackId: track.id,
@@ -153,12 +149,26 @@ export const buildTimelineTrackLayoutRows = (input: {
       heightPx: clipLaneHeightPx + automationHeightPx,
       clipLaneHeightPx,
       automationHeightPx,
-      depth: input.depthByTrackId?.get(track.id) ?? 0,
+      depth: options.depthByTrackId?.get(track.id) ?? 0,
       groupId: track.groupId,
     }
     topPx += row.heightPx
     return row
   })
+}
+
+export const buildTimelineTrackLayoutRows = (input: {
+  tracks: readonly Pick<Track, 'id' | 'groupId' | 'channelRole' | 'collapsed'>[]
+  visibleTrackIds?: readonly Track['id'][]
+} & TrackLayoutRowOptions): TimelineTrackLayoutRow[] => {
+  const trackById = new Map(input.tracks.map((track) => [track.id, track]))
+  const orderedTracks = input.visibleTrackIds
+    ? input.visibleTrackIds.flatMap((trackId) => {
+        const track = trackById.get(trackId)
+        return track ? [track] : []
+      })
+    : input.tracks
+  return buildRowsForOrderedTracks(orderedTracks, input)
 }
 
 const layoutHeight = (rows: readonly TimelineTrackLayoutRow[]) => {
@@ -175,27 +185,26 @@ export const buildTimelineTrackLayout = (input: {
   visibleParameterIdsByTrackId: Record<string, readonly string[] | undefined>
 }): TimelineTrackLayout => {
   const trackById = new Map(input.tracks.map((track) => [track.id, track]))
-  const scrollingTrackIds: Track['id'][] = []
-  const returnTrackIds: Track['id'][] = []
+  const scrollingTracks: Pick<Track, 'id' | 'groupId' | 'channelRole' | 'collapsed'>[] = []
+  const returnTracks: Pick<Track, 'id' | 'groupId' | 'channelRole' | 'collapsed'>[] = []
   for (const trackId of input.visibleTrackIds) {
     const track = trackById.get(trackId)
     if (!track) continue
-    if (track.channelRole === 'return') returnTrackIds.push(trackId)
-    else scrollingTrackIds.push(trackId)
+    if (track.channelRole === 'return') returnTracks.push(track)
+    else scrollingTracks.push(track)
   }
-  const shared = {
-    tracks: input.tracks,
+  const shared: TrackLayoutRowOptions = {
     depthByTrackId: input.depthByTrackId,
     visibleByTrackId: input.visibleByTrackId,
     heightsByLaneOwnerKey: input.heightsByLaneOwnerKey,
     visibleParameterIdsByTrackId: input.visibleParameterIdsByTrackId,
   }
-  const scrollingRows = buildTimelineTrackLayoutRows({ ...shared, visibleTrackIds: scrollingTrackIds })
-  const returnRows = buildTimelineTrackLayoutRows({ ...shared, visibleTrackIds: returnTrackIds })
+  const scrollingRows = buildRowsForOrderedTracks(scrollingTracks, shared)
+  const returnRows = buildRowsForOrderedTracks(returnTracks, shared)
   return {
     scrollingRows,
     returnRows,
-    displayTrackIds: [...scrollingTrackIds, ...returnTrackIds],
+    displayTrackIds: [...scrollingTracks, ...returnTracks].map((track) => track.id),
     scrollingHeightPx: layoutHeight(scrollingRows),
     returnHeightPx: layoutHeight(returnRows),
   }
@@ -233,7 +242,7 @@ export const trackLayoutRowIndexAtY = (
   return -1
 }
 
-const trackLayoutDropIndexAtY = (
+export const trackLayoutDropIndexAtY = (
   rows: readonly Pick<TimelineTrackLayoutRow, 'topPx' | 'heightPx'>[],
   y: number,
 ): number => {

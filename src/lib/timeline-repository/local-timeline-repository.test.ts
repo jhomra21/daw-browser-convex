@@ -77,3 +77,45 @@ test('creation repairs interleaved legacy Return indexes atomically', async () =
     { id: 'return-b', index: 5, channelRole: 'return', groupId: undefined },
   ])
 })
+
+test('rejects assigning a Return track to a group', async () => {
+  const projectId = 'project:local-return-group-update'
+  const repository = createLocalTimelineRepository(projectId)
+  await repository.createTrack({ id: 'group', channelRole: 'group' })
+  await repository.createTrack({ id: 'return', channelRole: 'return' })
+
+  await expect(repository.updateTrack({
+    trackId: 'return',
+    groupId: 'group',
+  })).rejects.toThrow('Return tracks cannot belong to a group.')
+
+  const snapshot = await repository.loadSnapshot()
+  expect(snapshot.tracks.find((track) => track.id === 'return')?.groupId).toBeUndefined()
+})
+
+test('allows ungrouping a legacy Return track and unrelated updates', async () => {
+  const projectId = 'project:local-return-ungroup-update'
+  const db = await openLocalProjectDb(projectId)
+  const legacyReturn = buildTimelineTrackRow({
+    id: 'return',
+    index: 0,
+    channelRole: 'return',
+    groupId: 'legacy-group',
+    timestamp: 1,
+  })
+  await db.put(
+    'entities',
+    createLocalProjectEntityRow('track', legacyReturn.id, legacyReturn, 1),
+  )
+
+  const repository = createLocalTimelineRepository(projectId)
+  const ungrouped = await repository.updateTrack({ trackId: 'return', groupId: null })
+  const renamedByColor = await repository.updateTrack({ trackId: 'return', color: 'track-red' })
+
+  expect(ungrouped?.groupId).toBeUndefined()
+  expect(renamedByColor).toMatchObject({
+    id: 'return',
+    groupId: undefined,
+    color: 'track-red',
+  })
+})

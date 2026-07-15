@@ -90,3 +90,36 @@ test('projects local creation repairs immediately so canonical tracks can reorde
     target: { trackId: 'normal-b', zone: 'above' },
   })).not.toBeNull()
 })
+
+test('projects only repaired local tracks before inserting the created track', () => {
+  const tracks = [
+    localTrack('unchanged', 0),
+    localTrack('repaired', 1, { groupId: 'legacy-group' }),
+  ]
+  const created = localTrack('created', 2)
+  const updates: Array<{ trackId: string; index: number; groupId?: string }> = []
+  const inserts: Array<{ trackId: string; index: number }> = []
+
+  projectLocalTrackCreation(
+    tracks,
+    created,
+    2,
+    [
+      buildTimelineTrackRow({ id: 'unchanged', index: 0, timestamp: 1 }),
+      buildTimelineTrackRow({ id: 'repaired', index: 3, timestamp: 1 }),
+      buildTimelineTrackRow({ id: 'created', index: 2, timestamp: 1 }),
+      buildTimelineTrackRow({ id: 'missing', index: 4, timestamp: 1 }),
+    ],
+    (track, index, patch) => {
+      updates.push({ trackId: track.id, index, groupId: patch.groupId })
+    },
+    (track, index) => {
+      inserts.push({ trackId: track.id, index })
+    },
+  )
+
+  expect(updates).toEqual([
+    { trackId: 'repaired', index: 1, groupId: undefined },
+  ])
+  expect(inserts).toEqual([{ trackId: 'created', index: 2 }])
+})

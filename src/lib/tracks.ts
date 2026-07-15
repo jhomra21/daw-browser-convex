@@ -5,6 +5,7 @@ import {
 } from '~/lib/shared-timeline-operations-api'
 import { buildTrackCreateHistoryEntry } from '~/lib/undo/builders'
 import type { HistoryEntry } from '~/lib/undo/types'
+import { trackCreationCollapsed } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 type CreateLocalTrackOptions = {
@@ -95,7 +96,7 @@ function ensureLocalTrack(options: EnsureLocalTrackOptions): Track {
 export async function createOptimisticTrack(options: CreateOptimisticTrackOptions): Promise<Track | null> {
   const channelRole = options.channelRole ?? 'track'
   const index = options.index
-  const collapsed = options.collapsed ?? channelRole === 'return'
+  const collapsed = trackCreationCollapsed(channelRole, options.collapsed)
   const operation = buildSharedTrackCreateOperation({
     index,
     kind: options.kind,

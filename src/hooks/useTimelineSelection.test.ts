@@ -55,6 +55,20 @@ describe("rangeTrackIdsThroughDisplayOrder", () => {
 });
 
 describe("timelinePointerCoordinates", () => {
+  test("uses scrolling coordinates with the supplied ruler offset", () => {
+    const coordinates = timelinePointerCoordinates(
+      { clientX: 140, clientY: 260 },
+      {
+        scrollLeft: 10,
+        scrollTop: 20,
+        getBoundingClientRect: () => ({ left: 100, top: 200 }),
+      },
+      32,
+    );
+
+    expect(coordinates).toEqual({ x: 50, y: 48 });
+  });
+
   test("uses Return section-local coordinates with no ruler offset", () => {
     const coordinates = timelinePointerCoordinates(
       { clientX: 140, clientY: 228 },

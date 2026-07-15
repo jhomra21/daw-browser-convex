@@ -1,7 +1,8 @@
 import { createSignal, onCleanup, type Accessor } from "solid-js";
 import type { Track } from "@daw-browser/timeline-core/types";
 import { useDrag } from "~/hooks/useDrag";
-import { trackLayoutDropIndexAtClientY, trackLayoutRowAtY, trackLayoutRowIndexAtY, type TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
+import { trackLayoutDropIndexAtY, trackLayoutRowAtY, trackLayoutRowIndexAtY, type TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
+import { RULER_HEIGHT } from "~/lib/timeline-utils";
 import type { BrowserDragPayload, BrowserDragSession, BrowserDropTarget } from "./browser-drag-types";
 
 const DRAG_THRESHOLD_PX = 4;
@@ -40,8 +41,10 @@ const resolveTimelineTrackTarget = (
   trackLayout: TimelineTrackLayoutRow[],
 ): BrowserDropTarget => {
   if (!scrollElement) return { kind: "none" };
-  if (!isInsideRect(pointer, scrollElement.getBoundingClientRect())) return { kind: "none" };
-  const laneIndex = trackLayoutDropIndexAtClientY(trackLayout, pointer.y, scrollElement);
+  const rect = scrollElement.getBoundingClientRect();
+  if (!isInsideRect(pointer, rect)) return { kind: "none" };
+  const timelineY = pointer.y - rect.top + (scrollElement.scrollTop || 0) - RULER_HEIGHT;
+  const laneIndex = trackLayoutDropIndexAtY(trackLayout, timelineY);
   const row = laneIndex >= 0 ? trackLayout[laneIndex] : undefined;
   if (row) return { kind: "track", trackId: row.trackId, laneIndex };
   if (laneIndex >= trackLayout.length) return { kind: "new-track" };

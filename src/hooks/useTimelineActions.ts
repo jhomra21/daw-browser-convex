@@ -98,14 +98,20 @@ export const projectLocalTrackCreation = (
   updateLocalTrack: UseTimelineActionsOptions['creation']['updateLocalTrack'],
   insertLocalTrack: UseTimelineActionsOptions['creation']['insertLocalTrack'],
 ) => {
+  const trackEntryById = new Map(tracks.map((track, index) => [
+    track.id,
+    { track, index },
+  ]))
   for (const repairedRow of canonicalRows) {
     if (repairedRow.id === createdTrack.id) continue
-    const repairedTrack = tracks.find((entry) => entry.id === repairedRow.id)
-    if (!repairedTrack) continue
+    const entry = trackEntryById.get(repairedRow.id)
+    if (!entry) continue
+    const groupId = repairedRow.groupId ?? undefined
+    if (entry.index === repairedRow.index && entry.track.groupId === groupId) continue
     updateLocalTrack(
-      repairedTrack,
-      tracks.findIndex((entry) => entry.id === repairedTrack.id),
-      { index: repairedRow.index, groupId: repairedRow.groupId },
+      entry.track,
+      entry.index,
+      { index: repairedRow.index, groupId },
     )
   }
   insertLocalTrack(createdTrack, creationIndex)

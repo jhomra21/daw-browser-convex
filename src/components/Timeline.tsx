@@ -12,7 +12,7 @@ import type {
   Track,
 } from "@daw-browser/timeline-core/types";
 import { getAudioEngine } from "~/lib/audio-engine-singleton";
-import { timelineDurationSec } from "~/lib/timeline-utils";
+import { RULER_HEIGHT, timelineDurationSec } from "~/lib/timeline-utils";
 import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
 import { useTimelineClipImport } from "~/hooks/useTimelineClipImport";
 import { useTimelineClipActions } from "~/hooks/useTimelineClipActions";
@@ -735,8 +735,10 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   let extendRangeSelectionToPointer: (
     event: PointerEvent,
-    scrollEl: HTMLDivElement | undefined,
-    trackId?: Track["id"],
+    options: {
+      element: HTMLDivElement | undefined;
+      trackId?: Track["id"];
+    },
   ) => boolean = () => false;
 
   const { onClipPointerDown } = useClipDrag({
@@ -770,7 +772,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     grantWrite: grantTrackWrite,
     grantClipWrites,
     onRangeSelectionPointerDown: (trackId, event) =>
-      extendRangeSelectionToPointer(event, scrollRef, trackId),
+      extendRangeSelectionToPointer(event, { element: scrollRef, trackId }),
   });
 
   const { onClipResizeStart } = useClipResize({
@@ -841,8 +843,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     stopScrub,
   });
   const marqueeRect = timelineSelection.marqueeRect;
-  const marqueeRows = timelineSelection.marqueeRows;
-  const onLanePointerDown = timelineSelection.onLanePointerDown;
+  const marqueeSurface = timelineSelection.marqueeSurface;
   extendRangeSelectionToPointer =
     timelineSelection.extendRangeSelectionToPointer;
   const handleReturnPointerDown: JSX.EventHandler<
@@ -853,12 +854,12 @@ const Timeline: Component<TimelineProps> = (props) => {
     event.stopPropagation();
     bottomPanel.setMode("effects");
     bottomPanel.setOpen(true);
-    timelineSelection.onLanePointerDown(
-      event,
-      returnSectionRef,
-      trackLayoutModel().returnRows,
-      0,
-    );
+    timelineSelection.onLanePointerDown(event, {
+      kind: "return",
+      element: returnSectionRef,
+      rows: trackLayoutModel().returnRows,
+      rulerOffsetPx: 0,
+    });
   };
 
   const recordingControls = useTrackRecording({
@@ -1001,7 +1002,12 @@ const Timeline: Component<TimelineProps> = (props) => {
     )
       return;
     bottomPanel.setMode("effects");
-    onLanePointerDown(event, scrollRef);
+    timelineSelection.onLanePointerDown(event, {
+      kind: "scrolling",
+      element: scrollRef,
+      rows: trackLayoutModel().scrollingRows,
+      rulerOffsetPx: RULER_HEIGHT,
+    });
   };
   const handleMasterPointerDown: JSX.EventHandler<
     HTMLDivElement,
@@ -1615,7 +1621,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           bottomPanel.setOpen(true);
         }}
         marqueeRect={marqueeRect()}
-        marqueeRows={marqueeRows()}
+        marqueeSurface={marqueeSurface()}
         recording={{
           isRecording: isRecording(),
           previewStartSec: previewStartSec(),

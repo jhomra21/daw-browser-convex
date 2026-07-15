@@ -69,20 +69,29 @@ type TimelineSelection = {
     width: number;
     height: number;
   } | null>;
-  marqueeRows: Accessor<readonly TimelineTrackLayoutRow[] | null>;
+  marqueeSurface: Accessor<"scrolling" | "return" | null>;
   onLanePointerDown: (
     event: PointerEvent,
-    scrollEl: HTMLDivElement | undefined,
-    rows?: readonly TimelineTrackLayoutRow[],
-    rulerOffsetPx?: number,
+    surface: TimelineLanePointerSurface,
   ) => void;
   extendRangeSelectionToPointer: (
     event: PointerEvent,
-    scrollEl: HTMLDivElement | undefined,
-    trackId?: Track["id"],
-    rows?: readonly TimelineTrackLayoutRow[],
-    rulerOffsetPx?: number,
+    options: TimelineRangePointerOptions,
   ) => boolean;
+};
+
+type TimelineLanePointerSurface = {
+  kind: "scrolling" | "return";
+  element: HTMLDivElement | undefined;
+  rows: readonly TimelineTrackLayoutRow[];
+  rulerOffsetPx: number;
+};
+
+type TimelineRangePointerOptions = {
+  element: HTMLDivElement | undefined;
+  trackId?: Track["id"];
+  rows?: readonly TimelineTrackLayoutRow[];
+  rulerOffsetPx?: number;
 };
 
 export function useTimelineSelection(
@@ -106,8 +115,8 @@ export function useTimelineSelection(
     width: number;
     height: number;
   } | null>(null);
-  const [marqueeRows, setMarqueeRows] = createSignal<
-    readonly TimelineTrackLayoutRow[] | null
+  const [marqueeSurface, setMarqueeSurface] = createSignal<
+    "scrolling" | "return" | null
   >(null);
 
   let marqueeActive = false;
@@ -116,11 +125,12 @@ export function useTimelineSelection(
 
   const extendRangeSelectionToPointer = (
     event: PointerEvent,
-    scrollEl: HTMLDivElement | undefined,
-    clickedTrackId?: Track["id"],
-    rows: readonly TimelineTrackLayoutRow[] = trackLayout(),
-    rulerOffsetPx = RULER_HEIGHT,
+    pointerOptions: TimelineRangePointerOptions,
   ) => {
+    const scrollEl = pointerOptions.element;
+    const clickedTrackId = pointerOptions.trackId;
+    const rows = pointerOptions.rows ?? trackLayout();
+    const rulerOffsetPx = pointerOptions.rulerOffsetPx ?? RULER_HEIGHT;
     const currentRange = selection.rangeSelection();
     if (!event.shiftKey || !currentRange || !scrollEl) return false;
     const { x, y } = timelinePointerCoordinates(event, scrollEl, rulerOffsetPx);
@@ -145,10 +155,9 @@ export function useTimelineSelection(
 
   const startLaneDrag = (
     event: PointerEvent,
-    scrollEl: HTMLDivElement | undefined,
-    rows: readonly TimelineTrackLayoutRow[],
-    rulerOffsetPx: number,
+    surface: TimelineLanePointerSurface,
   ) => {
+    const { element: scrollEl, rows, rulerOffsetPx } = surface;
     const ts = tracks();
     if (ts.length === 0 || !scrollEl) return false;
     const trackById = new Map(ts.map((track) => [track.id, track]));
@@ -191,29 +200,24 @@ export function useTimelineSelection(
 
   const onLanePointerDown = (
     event: PointerEvent,
-    scrollEl: HTMLDivElement | undefined,
-    rows: readonly TimelineTrackLayoutRow[] = trackLayout(),
-    rulerOffsetPx = RULER_HEIGHT,
+    surface: TimelineLanePointerSurface,
   ) => {
     if (
       extendRangeSelectionToPointer(
         event,
-        scrollEl,
-        undefined,
-        rows,
-        rulerOffsetPx,
+        surface,
       )
     ) {
       return;
     }
-    if (!startLaneDrag(event, scrollEl, rows, rulerOffsetPx)) return;
-    currentRows = rows;
-    currentRulerOffsetPx = rulerOffsetPx;
-    setMarqueeRows(rows);
+    if (!startLaneDrag(event, surface)) return;
+    currentRows = surface.rows;
+    currentRulerOffsetPx = surface.rulerOffsetPx;
+    setMarqueeSurface(surface.kind);
     laneDrag.onPointerDown(event);
   };
 
-  let currentScrollEl: HTMLDivElement;
+  let currentScrollEl: HTMLDivElement | undefined;
   let currentRows: readonly TimelineTrackLayoutRow[] = [];
   let currentRulerOffsetPx = RULER_HEIGHT;
   const onLaneDragMove = (event: PointerEvent, scrollEl: HTMLDivElement) => {
@@ -281,13 +285,16 @@ export function useTimelineSelection(
   const onLaneDragUp = () => {
     stopScrub();
     setMarqueeRect(null);
-    setMarqueeRows(null);
+    setMarqueeSurface(null);
     marqueeActive = false;
+    currentScrollEl = undefined;
+    currentRows = [];
+    currentRulerOffsetPx = RULER_HEIGHT;
   };
 
   const laneDrag = useDrag({
     onDragMove: (_, event) => {
-      onLaneDragMove(event, currentScrollEl);
+      if (currentScrollEl) onLaneDragMove(event, currentScrollEl);
     },
     onDragEnd: onLaneDragUp,
     onDragCancel: onLaneDragUp,
@@ -299,7 +306,7 @@ export function useTimelineSelection(
 
   return {
     marqueeRect,
-    marqueeRows,
+    marqueeSurface,
     onLanePointerDown,
     extendRangeSelectionToPointer,
   };

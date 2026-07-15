@@ -144,7 +144,7 @@ type Props = {
   openMidiEditorFor: (clipId: string) => void;
   openSampleDetailFor: (clipId: string) => void;
   marqueeRect: { x: number; y: number; width: number; height: number } | null;
-  marqueeRows: readonly TimelineTrackLayoutRow[] | null;
+  marqueeSurface: "scrolling" | "return" | null;
   recording: {
     isRecording: boolean;
     previewStartSec: number | null;
@@ -431,7 +431,7 @@ export default function TimelineWorkspace(props: Props) {
                     playheadSec: props.playheadSec,
                     dropAtNewTrack: props.dropAtNewTrack,
                     marqueeRect:
-                      props.marqueeRows === props.trackLayout.scrollingRows
+                      props.marqueeSurface === "scrolling"
                         ? props.marqueeRect
                         : null,
                     rowLayouts: props.trackLayout.scrollingRows,
@@ -488,7 +488,7 @@ export default function TimelineWorkspace(props: Props) {
                   />
                   <Show
                     when={
-                      props.marqueeRows === props.trackLayout.returnRows
+                      props.marqueeSurface === "return"
                         ? props.marqueeRect
                         : null
                     }

@@ -11,6 +11,7 @@ import type {
   ExternalSidechainRoute,
   Track,
 } from "@daw-browser/timeline-core/types";
+import { clipFadesEqual, type ClipFades } from "@daw-browser/timeline-core/clip-fades";
 import { getAudioEngine } from "~/lib/audio-engine-singleton";
 import { RULER_HEIGHT, timelineDurationSec } from "~/lib/timeline-utils";
 import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
@@ -33,7 +34,7 @@ import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
 import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
 import { useTrackRecording } from "~/hooks/useTrackRecording";
-import { buildEffectParamsHistoryEntry } from "~/lib/undo/builders";
+import { buildClipFadesHistoryEntry, buildEffectParamsHistoryEntry } from "~/lib/undo/builders";
 import type { EffectParamsCommitPayload } from "~/lib/undo/types";
 import type { EffectsPanelAudioEffects } from "~/components/timeline/create-effects-panel-controller";
 import { useTimelinePreferences } from "~/hooks/useTimelinePreferences";
@@ -92,6 +93,7 @@ import {
 } from "~/lib/timeline-track-layout";
 import { useAppPreferences } from "~/context/app-preferences";
 import { deriveSelectedExportTrackIds } from "~/lib/export/export-settings";
+import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
 
 type AgentMixOp = {
   type: "setMute" | "setSolo";
@@ -289,6 +291,8 @@ const Timeline: Component<TimelineProps> = (props) => {
         projection.commitClipTiming(clipId, patch),
       commitClipAudioWarp: (clipId, audioWarp) =>
         projection.commitClipAudioWarp(clipId, audioWarp),
+      commitClipFades: (clipId, fades) =>
+        projection.commitClipFades(clipId, fades),
       rescheduleChangedClips,
       cancelTrackVolumeWrite: (trackId) => cancelTrackVolumeWrite(trackId),
       cancelTrackRoutingWrite: (trackId) => cancelTrackRoutingWrite(trackId),
@@ -793,6 +797,32 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
   });
+
+  const commitClipFades = (clipId: string, fades: ClipFades, baseline: ClipFades) => {
+    const clip = trackLookup().clipById.get(clipId);
+    const rid = projectId();
+    if (!clip || clip.midi || !rid || !canWriteClip(clipId)) {
+      return;
+    }
+    projection.commitClipFades(clipId, fades);
+    const rollback = () => {
+      const currentClip = trackLookup().clipById.get(clipId);
+      if (!currentClip || !clipFadesEqual(currentClip.fades, fades, currentClip.duration)) return;
+      projection.commitClipFades(clipId, baseline);
+      rescheduleChangedClips([clipId]);
+    };
+    void createTimelineClipWriteAdapter({
+      projectId: rid,
+      userId: userId(),
+    }).setFades(clipId, clip.duration, fades).then((applied) => {
+      if (!applied) {
+        rollback();
+        return;
+      }
+      pushHistory(buildClipFadesHistoryEntry({ projectId: rid, clip, from: baseline, to: fades }));
+      rescheduleChangedClips([clipId]);
+    }).catch(rollback);
+  };
 
   const {
     onClipPointerUp,
@@ -1593,6 +1623,8 @@ const Timeline: Component<TimelineProps> = (props) => {
         onClipPointerDown={onClipPointerDown}
         onClipPointerUp={onClipPointerUp}
         onClipResizeStart={onClipResizeStart}
+        canEditClipFades={canWriteClip}
+        onCommitClipFades={commitClipFades}
         onAddMidiClipToTrack={addFourBarMidiClipToTrack}
         onDeleteTrack={requestDeleteTrack}
         clipContextMenu={{

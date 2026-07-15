@@ -14,6 +14,7 @@ import type { LocalMixMap } from '~/lib/timeline-storage'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { normalizeTrackChannelRole } from '@daw-browser/shared'
 import type { Track, Clip, TrackRouting, TrackSend } from '@daw-browser/timeline-core/types'
+import { clipFadesEqual, normalizeClipFades, type ClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
@@ -39,7 +40,7 @@ export type TimelineViewTrackLike<TTrackId extends string = Track['id']> = {
 
 export type TimelineViewLike<TTrackId extends string = Track['id']> = {
   tracks: Array<TimelineViewTrackLike<TTrackId>>
-  clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; color?: string; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number; audioWarp?: Clip['audioWarp']; gain?: number }>
+  clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; color?: string; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number; audioWarp?: Clip['audioWarp']; gain?: number; fades?: Partial<ClipFades> }>
 }
 
 export type ClipTimelinePatch<TTrackId extends string = Track['id']> = {
@@ -50,6 +51,7 @@ export type ClipTimelinePatch<TTrackId extends string = Track['id']> = {
   bufferOffsetSec?: number
   audioWarp?: Clip['audioWarp']
   gain?: number
+  fades?: ClipFades
   midiOffsetBeats?: number
 }
 
@@ -104,7 +106,7 @@ type ServerTimelineIndex<TTrackId extends string = Track['id']> = {
   trackIds: Set<TTrackId>
   trackRowsById: Map<TTrackId, TimelineViewTrackLike<TTrackId>>
   clipIds: Set<string>
-  clipRowsById: Map<string, { trackId: TTrackId; startSec: number; duration: number; color?: string; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; gain?: number; midiOffsetBeats: number }>
+  clipRowsById: Map<string, { trackId: TTrackId; startSec: number; duration: number; color?: string; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; gain?: number; fades?: ClipFades; midiOffsetBeats: number }>
   trackLocksById: Map<TTrackId, string | null>
 }
 
@@ -205,6 +207,7 @@ const applyClipPatch = (clip: RuntimeClip, patch: ClipTimelinePatch | undefined)
     bufferOffsetSec: patch.bufferOffsetSec ?? clip.bufferOffsetSec,
     audioWarp: patch.audioWarp === undefined ? clip.audioWarp : normalizeAudioWarp(patch.audioWarp),
     gain: patch.gain ?? clip.gain,
+    fades: patch.fades === undefined ? clip.fades : normalizeClipFades(patch.fades, patch.duration ?? clip.duration),
     midiOffsetBeats: patch.midiOffsetBeats ?? clip.midiOffsetBeats,
   }
 }
@@ -281,7 +284,7 @@ export function buildServerTimelineIndex<TTrackId extends string>(data: Timeline
   const trackIds = new Set<TTrackId>()
   const trackRowsById = new Map<TTrackId, TimelineViewTrackLike<TTrackId>>()
   const clipIds = new Set<string>()
-  const clipRowsById = new Map<string, { trackId: TTrackId; startSec: number; duration: number; color?: string; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; gain?: number; midiOffsetBeats: number }>()
+  const clipRowsById = new Map<string, { trackId: TTrackId; startSec: number; duration: number; color?: string; leftPadSec: number; bufferOffsetSec: number; audioWarp?: Clip['audioWarp']; gain?: number; fades?: ClipFades; midiOffsetBeats: number }>()
   const trackLocksById = new Map<TTrackId, string | null>()
 
   for (const track of data.tracks) {
@@ -303,6 +306,7 @@ export function buildServerTimelineIndex<TTrackId extends string>(data: Timeline
       bufferOffsetSec: clip.bufferOffsetSec ?? 0,
       audioWarp: normalizeAudioWarp(clip.audioWarp),
       gain: clip.gain,
+      fades: clip.fades ? normalizeClipFades(clip.fades, clip.duration) : undefined,
       midiOffsetBeats: clip.midiOffsetBeats ?? 0,
     })
   }
@@ -342,6 +346,7 @@ export function isClipPatchReflected<TTrackId extends string>(
   if (patch.bufferOffsetSec !== undefined && !nearlyEqual(patch.bufferOffsetSec, serverClip.bufferOffsetSec)) return false
   if (patch.audioWarp !== undefined && !audioWarpEqual(normalizeAudioWarp(patch.audioWarp), serverClip.audioWarp)) return false
   if (patch.gain !== undefined && !nearlyEqual(patch.gain, serverClip.gain)) return false
+  if (patch.fades !== undefined && !clipFadesEqual(patch.fades, serverClip.fades, serverClip.duration)) return false
   if (patch.midiOffsetBeats !== undefined && !nearlyEqual(patch.midiOffsetBeats, serverClip.midiOffsetBeats)) return false
   return true
 }
@@ -458,6 +463,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
       bufferOffsetSec: clipRow.bufferOffsetSec ?? 0,
       audioWarp: normalizeAudioWarp(clipRow.audioWarp),
       gain: clipRow.gain,
+      fades: clipRow.fades ? normalizeClipFades(clipRow.fades, clipRow.duration) : undefined,
       color: clipRow.color ?? getDefaultClipColor({ sourceKind, midi }),
       sampleUrl: clipRow.sampleUrl,
       midi,

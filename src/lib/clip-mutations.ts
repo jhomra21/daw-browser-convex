@@ -1,6 +1,7 @@
 import { normalizeClipTimingPatch } from '@daw-browser/shared'
 import { toCloudClipId } from '~/lib/cloud-id-args'
 import type { AudioWarp } from '@daw-browser/timeline-core/types'
+import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 
 type ConvexClientType = typeof import('~/lib/convex').convexClient
 
@@ -13,6 +14,7 @@ type PersistClipTimingInput = {
   leftPadSec?: number
   bufferOffsetSec?: number
   midiOffsetBeats?: number
+  fades?: ClipFades
 }
 
 type PersistClipTimingAndAudioWarpInput = PersistClipTimingInput & {
@@ -32,6 +34,7 @@ export async function persistClipTiming(
     leftPadSec: timing.leftPadSec,
     bufferOffsetSec: timing.bufferOffsetSec,
     midiOffsetBeats: timing.midiOffsetBeats,
+    fades: input.fades,
   })
   return result?.status === 'applied'
 }
@@ -62,6 +65,7 @@ export async function persistClipTimingAndAudioWarp(
     bufferOffsetSec: timing.bufferOffsetSec,
     midiOffsetBeats: timing.midiOffsetBeats,
     audioWarp: input.audioWarp,
+    fades: input.fades,
   })
   return result?.status === 'applied'
 }

@@ -808,7 +808,14 @@ async function renderSourceIsolatedMixdownFromPrepared(
         if (playback.durationSec <= 0) continue
         src.buffer = playback.buffer
         src.playbackRate.value = playback.playbackRate
-        connectSourceWithClipGain(ctx, src, trackInput, clip.gain)
+        connectSourceWithClipGain(ctx, src, trackInput, clip.gain, {
+          fades: clip.fades,
+          clipStartSec: clip.startSec,
+          clipDurationSec: clip.duration,
+          timelineStartSec: map.timelineStartSec,
+          timelineEndSec: map.timelineEndSec,
+          contextStartTime: Math.max(0, map.timelineStartSec - prepared.range.startSec),
+        })
         try {
           src.start(
             Math.max(0, map.timelineStartSec - prepared.range.startSec),

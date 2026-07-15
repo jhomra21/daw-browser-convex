@@ -12,6 +12,7 @@ import { buildTrackCreateMutationInput, buildTrackDeleteMutationInput, buildTrac
 import { buildTrackRoutingMutationInput } from "~/lib/track-routing-state";
 import type { LocalMixPatch } from "~/lib/timeline-storage";
 import type { Track, TrackRouting } from "@daw-browser/timeline-core/types";
+import { normalizeClipFades, type ClipFades } from "@daw-browser/timeline-core/clip-fades";
 import type { Deps } from "./exec";
 import type { HistoryEntry, TrackAudioEffectSnapshot, TrackAutomationSnapshot, TrackEffectSnapshot } from "./types";
 import { buildHistoryRefIndex, resolveTrackId } from "./refs";
@@ -26,6 +27,7 @@ type ClipTimingPatch = {
   midiOffsetBeats?: number;
   audioWarp?: Track["clips"][number]["audioWarp"];
   gain?: number;
+  fades?: ClipFades;
 };
 
 export const isLocalHistoryProject = (deps: Pick<Deps, "projectId">) => (
@@ -764,6 +766,7 @@ export const persistHistoryClipTimingOrThrow = async (
       midiOffsetBeats: timing.midiOffsetBeats,
       audioWarp: timing.audioWarp,
       gain: timing.gain,
+      fades: timing.fades,
     });
     assert(applied, message);
     return;
@@ -777,6 +780,7 @@ export const persistHistoryClipTimingOrThrow = async (
       leftPadSec: timing.leftPadSec ?? 0,
       bufferOffsetSec: timing.bufferOffsetSec ?? 0,
       midiOffsetBeats: timing.midiOffsetBeats ?? 0,
+      fades: timing.fades,
       audioWarp,
     })
     : await persistClipTiming(deps.convexClient, deps.convexApi, {
@@ -786,6 +790,7 @@ export const persistHistoryClipTimingOrThrow = async (
       leftPadSec: timing.leftPadSec ?? 0,
       bufferOffsetSec: timing.bufferOffsetSec ?? 0,
       midiOffsetBeats: timing.midiOffsetBeats ?? 0,
+      fades: timing.fades,
     });
   assert(applied, message);
   if (timing.gain !== undefined) {
@@ -818,6 +823,27 @@ export const persistHistoryClipAudioWarpOrThrow = async (
     audioWarp: normalizedAudioWarp,
   });
   assert(applied, message);
+};
+
+export const persistHistoryClipFadesOrThrow = async (
+  deps: Deps,
+  clipId: string,
+  fades: ClipFades,
+  message: string,
+) => {
+  const clip = deps.getTracks().flatMap((track) => track.clips).find((entry) => entry.id === clipId);
+  if (!clip) throw new Error(message);
+  const normalizedFades = normalizeClipFades(fades, clip.duration);
+  if (isLocalHistoryProject(deps)) {
+    const applied = await createLocalTimelineRepository(deps.projectId).updateClip({ clipId, fades: normalizedFades });
+    assert(applied, message);
+    return;
+  }
+  const result = await publishSharedTimelineOperation(
+    deps.projectId,
+    { kind: "clips.setFades", payload: { clipId, fades: normalizedFades } },
+  );
+  assert(isAppliedSharedTimelineOperationResult(result), message);
 };
 
 export const persistHistoryClipColorOrThrow = async (

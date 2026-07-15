@@ -142,7 +142,14 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
     if (playback.durationSec <= 0) return null
     source.buffer = playback.buffer
     source.playbackRate.value = playback.playbackRate
-    connectSourceWithClipGain(ctx, source, input, clip.gain)
+    connectSourceWithClipGain(ctx, source, input, clip.gain, {
+      fades: clip.fades,
+      clipStartSec: clip.startSec,
+      clipDurationSec: clip.duration,
+      timelineStartSec: map.timelineStartSec,
+      timelineEndSec: map.timelineEndSec,
+      contextStartTime: nowCtx + Math.max(0, map.timelineStartSec - playheadSec),
+    })
     source.start(
       nowCtx + Math.max(0, map.timelineStartSec - playheadSec),
       playback.offsetSec,

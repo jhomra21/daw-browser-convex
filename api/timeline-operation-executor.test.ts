@@ -1,6 +1,6 @@
 import { parseSharedTimelineOperation } from '@daw-browser/shared'
 
-import { buildRestoreChainMutationArgs, buildTrackCreateMutationArgs } from './timeline-operation-executor'
+import { buildClipFadesMutationArgs, buildRestoreChainMutationArgs, buildTrackCreateMutationArgs } from './timeline-operation-executor'
 
 declare function test(name: string, run: () => void): void
 declare function expect(value: unknown): {
@@ -71,4 +71,38 @@ test('forwards collapsed state when creating a track', () => {
     color: '#22c55e',
     operationId: 'create-1',
   })
+})
+
+test('forwards a parsed fade operation to the clips.setFades mutation', () => {
+  const operation = parseSharedTimelineOperation({
+    kind: 'clips.setFades',
+    payload: {
+      clipId: 'clip-1',
+      fades: {
+        fadeInSec: 1,
+        fadeOutSec: 2,
+        fadeInCurve: 0.5,
+        fadeOutCurve: -0.5,
+      },
+    },
+  })
+  if (!operation || operation.kind !== 'clips.setFades') {
+    throw new Error('Expected clip-fades operation to parse')
+  }
+
+  const expected: ReturnType<typeof buildClipFadesMutationArgs> = {
+    clipId: 'clip-1',
+    fades: {
+      fadeInStartSec: 0,
+      fadeInSec: 1,
+      fadeOutSec: 2,
+      fadeOutEndSec: 0,
+      fadeInCurve: 0.5,
+      fadeOutCurve: -0.5,
+      fadeInCurvePosition: 0.5,
+      fadeOutCurvePosition: 0.5,
+    },
+  }
+
+  expect(buildClipFadesMutationArgs(operation.payload)).toEqual(expected)
 })

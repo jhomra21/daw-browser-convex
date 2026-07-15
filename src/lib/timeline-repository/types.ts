@@ -1,6 +1,7 @@
 import type { AudioSourceKind } from '~/lib/audio-source'
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import type { AudioWarp, ExternalSidechainRoute, TrackChannelRole, TrackId } from '@daw-browser/timeline-core/types'
+import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 
 export type TimelineEntityKind = 'track' | 'clip' | 'effect' | 'mixerChannel'
 
@@ -45,6 +46,7 @@ export type TimelineClipRow = {
   bufferOffsetSec?: number
   audioWarp?: AudioWarp
   gain?: number
+  fades?: ClipFades
   sampleUrl?: string
   midi?: {
     wave: 'sine' | 'square' | 'sawtooth' | 'triangle'
@@ -98,6 +100,7 @@ export type CreateClipInput = {
   bufferOffsetSec?: number
   audioWarp?: AudioWarp
   gain?: number
+  fades?: ClipFades
   sampleUrl?: string
   midi?: TimelineClipRow['midi']
   midiOffsetBeats?: number
@@ -113,6 +116,7 @@ export type UpdateClipInput = {
   bufferOffsetSec?: number
   audioWarp?: AudioWarp
   gain?: number
+  fades?: ClipFades
   color?: string
   sourceAssetId?: TimelineAssetId
   sourceAssetKey?: string

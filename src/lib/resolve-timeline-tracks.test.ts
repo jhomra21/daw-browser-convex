@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { buildTrackTree, flattenVisibleTracks } from './timeline-track-layout'
-import { resolveTimelineTracks } from './resolve-timeline-tracks'
+import { isClipPatchReflected, resolveTimelineTracks } from './resolve-timeline-tracks'
 import type { TimelineSnapshot, TimelineTrackRow } from './timeline-repository/types'
 import type { Track } from '@daw-browser/timeline-core/types'
 
@@ -147,6 +147,79 @@ describe('resolveTimelineTracks', () => {
     })
 
     expect(tracks[0]?.clips[0]?.color).toBe('#f97316')
+  })
+
+  test('applies a committed fade patch before the server reflects it', () => {
+    const snapshot: TimelineSnapshot = {
+      projectId: 'project:local',
+      tracks: [trackRow({ id: 'a', index: 0 })],
+      clips: [{
+        id: 'clip-1',
+        trackId: 'a',
+        historyRef: 'clip-1',
+        name: 'Clip',
+        startSec: 0,
+        duration: 4,
+        color: '#f97316',
+        createdAt: 0,
+        updatedAt: 0,
+      }],
+    }
+    const fades = { fadeInSec: 1, fadeOutSec: 2, fadeInCurve: 0.5, fadeOutCurve: -0.5 }
+
+    const tracks = resolveTimelineTracks({
+      projectId: snapshot.projectId,
+      server: { localSnapshot: snapshot },
+      client: {
+        mix: {
+          syncMix: true,
+          writableTrackIds: new Set(),
+          localByTrackId: {},
+          pendingSharedTrackVolumes: new Map(),
+          pendingSharedTrackRouting: new Map(),
+          pendingSharedMixByTrackId: new Map(),
+        },
+        tracks: {
+          pendingEntriesById: new Map(),
+          removedIds: new Set(),
+          pendingLocksById: new Map(),
+          historyRefsById: new Map(),
+          namesByHistoryRef: new Map(),
+        },
+        clips: {
+          pendingCreatesById: new Map(),
+          removedIds: new Set(),
+          committedEditsById: new Map([['clip-1', { fades }]]),
+          draftEditsById: new Map(),
+          previewByTrackId: new Map(),
+          historyRefsById: new Map(),
+        },
+      },
+      buffers: {
+        getBuffer: () => undefined,
+        getMediaStatus: () => undefined,
+      },
+    })
+
+    expect(tracks[0]?.clips[0]?.fades).toMatchObject(fades)
+  })
+
+  test('requires every fade value to match before clearing a committed patch', () => {
+    const fades = { fadeInSec: 1, fadeOutSec: 2, fadeInCurve: 0.5, fadeOutCurve: -0.5 }
+    const serverClip = {
+      trackId: 'a',
+      startSec: 0,
+      duration: 4,
+      leftPadSec: 0,
+      bufferOffsetSec: 0,
+      fades,
+      midiOffsetBeats: 0,
+    }
+
+    expect(isClipPatchReflected({ fades }, serverClip)).toBe(true)
+    expect(isClipPatchReflected({
+      fades: { ...fades, fadeOutCurve: 0 },
+    }, serverClip)).toBe(false)
   })
 
   test('applies pending grouping fields for existing tracks before server echo', () => {

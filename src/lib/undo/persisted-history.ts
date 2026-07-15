@@ -2,8 +2,8 @@ import { normalizeAudioWarp } from '@daw-browser/shared'
 import { AUDIO_EFFECT_ORDER, isAudioEffectKind, type AudioEffectKind } from '@daw-browser/shared'
 import type { EffectType, HistoryEntry, PersistedHistory } from '~/lib/undo/types'
 
-const PERSISTED_HISTORY_VERSION = 3 as const
-const READABLE_PERSISTED_HISTORY_VERSIONS: ReadonlySet<number> = new Set([2, PERSISTED_HISTORY_VERSION])
+const PERSISTED_HISTORY_VERSION = 4 as const
+const READABLE_PERSISTED_HISTORY_VERSIONS: ReadonlySet<number> = new Set([2, 3, PERSISTED_HISTORY_VERSION])
 
 type PersistedHistoryEnvelope = {
   version: number
@@ -38,6 +38,11 @@ const isNumber = (value: unknown): value is number => typeof value === 'number' 
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean'
 const isScope = (value: unknown) => value === 'shared' || value === 'local'
 const isAudioWarp = (value: unknown) => normalizeAudioWarp(value) !== undefined
+const isClipFades = (value: unknown) => isRecord(value)
+  && isNumber(value.fadeInSec)
+  && isNumber(value.fadeOutSec)
+  && isNumber(value.fadeInCurve)
+  && isNumber(value.fadeOutCurve)
 
 const isClipTiming = (value: unknown) => isRecord(value)
   && isNumber(value.startSec)
@@ -46,6 +51,7 @@ const isClipTiming = (value: unknown) => isRecord(value)
   && (value.bufferOffsetSec === undefined || isNumber(value.bufferOffsetSec))
   && (value.audioWarp === undefined || isAudioWarp(value.audioWarp))
   && (value.gain === undefined || isNumber(value.gain))
+  && (value.fades === undefined || isClipFades(value.fades))
   && (value.midiOffsetBeats === undefined || isNumber(value.midiOffsetBeats))
 
 const isRoutingSnapshot = (value: unknown) => isRecord(value)
@@ -67,6 +73,8 @@ const isClipSnapshot = (value: unknown) => isRecord(value)
   && (value.sampleUrl === undefined || isString(value.sampleUrl))
   && (value.sourceAssetKey === undefined || isString(value.sourceAssetKey))
   && (value.sourceKind === undefined || isString(value.sourceKind))
+  && (value.gain === undefined || isNumber(value.gain))
+  && (value.fades === undefined || isClipFades(value.fades))
   && (value.timing === undefined || isClipTiming({ startSec: 0, duration: 0, ...value.timing }))
 
 const isTrackCreateData = (value: unknown) => isRecord(value)
@@ -164,6 +172,8 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSe
         && isAudioWarp(data.from.audioWarp)
         && isRecord(data.to)
         && isAudioWarp(data.to.audioWarp)
+    case 'clip-fades':
+      return isString(data.clipRef) && isClipFades(data.from) && isClipFades(data.to)
     case 'clip-color':
       return isString(data.clipRef)
         && (data.from === undefined || isString(data.from))
@@ -200,7 +210,7 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSe
         && (data.sourceGroupTrackId === undefined || isString(data.sourceGroupTrackId))
         && (data.currentGroupTrackId === undefined || isString(data.currentGroupTrackId))
         && (data.restoreOperationId === undefined || isString(data.restoreOperationId))
-        && (isTrackSnapshot(data.groupTrack) || (version === PERSISTED_HISTORY_VERSION && data.groupTrack === undefined))
+        && (isTrackSnapshot(data.groupTrack) || (version >= 3 && data.groupTrack === undefined))
         && (data.effects === undefined || isTrackEffectSnapshot(data.effects))
         && (data.automation === undefined || isTrackAutomationSnapshot(data.automation))
         && (data.sidechainRoutes === undefined || (Array.isArray(data.sidechainRoutes) && data.sidechainRoutes.every(isSidechainRouteSnapshot)))

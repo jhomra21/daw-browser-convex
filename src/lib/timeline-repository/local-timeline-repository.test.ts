@@ -93,6 +93,27 @@ test('rejects assigning a Return track to a group', async () => {
   expect(snapshot.tracks.find((track) => track.id === 'return')?.groupId).toBeUndefined()
 })
 
+test('persists fades with clip creation and atomically clamps them on duration updates', async () => {
+  const projectId = 'project:local-clip-fades'
+  const repository = createLocalTimelineRepository(projectId)
+  await repository.createTrack({ id: 'track' })
+  await repository.createClip({
+    id: 'clip',
+    trackId: 'track',
+    startSec: 0,
+    duration: 8,
+    fades: { fadeInSec: 2, fadeOutSec: 3, fadeInCurve: 0, fadeOutCurve: 0 },
+  })
+  const updated = await repository.updateClip({ clipId: 'clip', duration: 4 })
+  expect(updated?.fades).toMatchObject({
+    fadeInSec: 2,
+    fadeOutSec: 2,
+    fadeInCurve: 0,
+    fadeOutCurve: 0,
+  })
+  expect((await repository.loadSnapshot()).clips[0]?.fades).toEqual(updated?.fades)
+})
+
 test('allows ungrouping a legacy Return track and unrelated updates', async () => {
   const projectId = 'project:local-return-ungroup-update'
   const db = await openLocalProjectDb(projectId)

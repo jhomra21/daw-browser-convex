@@ -17,6 +17,7 @@ import {
   persistHistoryEffectParams,
   persistHistoryAutomationEnvelope,
   persistHistoryClipAudioWarpOrThrow,
+  persistHistoryClipFadesOrThrow,
   persistHistoryClipColorOrThrow,
   persistHistoryClipMovesOrThrow,
   persistHistoryClipTimingOrThrow,
@@ -66,6 +67,7 @@ export type Deps = {
     commitClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
     commitClipTiming: (clipId: string, patch: Omit<Extract<HistoryEntry, { type: 'clip-timing' }>['data']['to'], 'audioWarp'>) => void
     commitClipAudioWarp: (clipId: string, audioWarp: Track['clips'][number]['audioWarp']) => void
+    commitClipFades: (clipId: string, fades: NonNullable<Track['clips'][number]['fades']>) => void
     rescheduleChangedClips: (clipIds: string[]) => void
     cancelTrackVolumeWrite: (trackId: Track['id']) => void
     cancelTrackRoutingWrite: (trackId: Track['id']) => void
@@ -437,6 +439,15 @@ async function applyClipAudioWarpEntry(entry: Extract<HistoryEntry, { type: 'cli
   deps.actions.rescheduleChangedClips([clipId])
 }
 
+async function applyClipFadesEntry(entry: Extract<HistoryEntry, { type: 'clip-fades' }>, deps: Deps, direction: HistoryDirection) {
+  const index = buildRefIndex(deps)
+  const clipId = requireResolved(resolveClipId(index, entry.data.clipRef), 'Clip not found for clip-fades history entry')
+  const fades = pickDirectionalValue(direction, entry.data.from, entry.data.to)
+  await persistHistoryClipFadesOrThrow(deps, clipId, fades, 'Failed to apply clip fades during history replay')
+  deps.actions.commitClipFades(clipId, fades)
+  deps.actions.rescheduleChangedClips([clipId])
+}
+
 async function applyClipColorEntry(entry: Extract<HistoryEntry, { type: 'clip-color' }>, deps: Deps, direction: HistoryDirection) {
   const index = buildRefIndex(deps)
   const clipId = requireResolved(resolveClipId(index, entry.data.clipRef), 'Clip not found for clip-color history entry')
@@ -593,6 +604,10 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
 
     case 'clip-audio-warp':
       await applyClipAudioWarpEntry(entry, deps, direction)
+      return
+
+    case 'clip-fades':
+      await applyClipFadesEntry(entry, deps, direction)
       return
 
     case 'clip-color':

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
-import { getAudioBufferPlaybackDurationSec } from './audio-scheduling'
+import { getAudioBufferPlaybackDurationSec, getClipFadeSchedulePlan } from './audio-scheduling'
 import { clipSchedulerTestInternals } from './clip-scheduler'
 
 describe('audio clip playback duration', () => {
@@ -192,5 +192,69 @@ describe('clip scheduler stretch horizon', () => {
       timelineStartSec: 20,
       timelineDurationSec: 4,
     })).toBe(false)
+  })
+})
+
+describe('clip fade scheduling', () => {
+  test('uses timeline positions for a clipped playback window', () => {
+    const plan = getClipFadeSchedulePlan({
+      fades: { fadeInSec: 4, fadeOutSec: 2, fadeInCurve: 0, fadeOutCurve: 0 },
+      clipStartSec: 10,
+      clipDurationSec: 10,
+      timelineStartSec: 12,
+      timelineEndSec: 19,
+      contextStartTime: 3,
+      gain: 0.5,
+    })
+    expect(plan[0]).toEqual({ time: 3, gain: 0.25 })
+    expect(plan.at(-1)).toEqual({ time: 10, gain: 0.25 })
+    expect(plan.some((point) => point.time === 5 && point.gain === 0.5)).toBe(true)
+  })
+
+  test('starts inside a fade at the evaluated gain and skips empty windows', () => {
+    const plan = getClipFadeSchedulePlan({
+      fades: { fadeInSec: 4, fadeOutSec: 0, fadeInCurve: 0, fadeOutCurve: 0 },
+      clipStartSec: 10,
+      clipDurationSec: 8,
+      timelineStartSec: 12,
+      timelineEndSec: 14,
+      contextStartTime: 1,
+      gain: 0.5,
+    })
+    expect(plan[0]).toEqual({ time: 1, gain: 0.25 })
+    expect(getClipFadeSchedulePlan({
+      fades: undefined,
+      clipStartSec: 10,
+      clipDurationSec: 2,
+      timelineStartSec: 20,
+      timelineEndSec: 21,
+      contextStartTime: 0,
+      gain: 1,
+    })).toEqual([])
+  })
+
+  test('holds silence outside moved fade endpoints', () => {
+    const plan = getClipFadeSchedulePlan({
+      fades: {
+        fadeInStartSec: 2,
+        fadeInSec: 4,
+        fadeOutSec: 3,
+        fadeOutEndSec: 1,
+        fadeInCurve: 0,
+        fadeOutCurve: 0,
+        fadeInCurvePosition: 0.5,
+        fadeOutCurvePosition: 0.5,
+      },
+      clipStartSec: 10,
+      clipDurationSec: 10,
+      timelineStartSec: 10,
+      timelineEndSec: 20,
+      contextStartTime: 0,
+      gain: 1,
+    })
+    expect(plan.find((point) => point.time === 2)?.gain).toBe(0)
+    expect(plan.find((point) => point.time === 4)?.gain).toBe(1)
+    expect(plan.find((point) => point.time === 7)?.gain).toBe(1)
+    expect(plan.find((point) => point.time === 9)?.gain).toBe(0)
   })
 })

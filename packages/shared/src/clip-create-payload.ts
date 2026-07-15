@@ -3,7 +3,7 @@ import { resolveClipSampleUrl } from './audio-source-rules'
 import type { AudioSourceMetadata } from './audio-source-metadata'
 import { normalizeAudioWarp, type AudioWarpPayload } from './audio-warp'
 import { normalizeClipColor } from './clip-color'
-import type { SharedTimelineClipCreatePayload } from './shared-timeline-operations'
+import type { SharedClipFadesInput, SharedTimelineClipCreatePayload } from './shared-timeline-operations'
 import type { SynthWave } from './effects-params'
 
 export type ClipTimingSnapshot = {
@@ -18,6 +18,7 @@ export type ClipCreateSnapshot = {
   duration: number
   name?: string
   gain?: number
+  fades?: SharedClipFadesInput
   sampleUrl?: string
   source?: AudioSourceMetadata
   sourceAssetKey?: string
@@ -88,6 +89,7 @@ const buildAudioClipMetadataPayloadFields = <TTrackId extends string>(
     bufferOffsetSec: clip.timing?.bufferOffsetSec,
     audioWarp: normalizeAudioWarp(clip.audioWarp),
     gain: clip.gain,
+    fades: clip.fades,
     midiOffsetBeats: clip.timing?.midiOffsetBeats,
     color: normalizeClipColor(clip.color),
   }
@@ -134,6 +136,7 @@ export function buildClipCreatePayload<TTrackId extends string>(
     clipKind: 'midi',
     midi: clip.midi,
     gain: clip.gain,
+    fades: clip.fades,
     leftPadSec: clip.timing?.leftPadSec,
     bufferOffsetSec: clip.timing?.bufferOffsetSec,
     audioWarp: normalizeAudioWarp(clip.audioWarp),

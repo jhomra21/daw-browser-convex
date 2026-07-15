@@ -4,6 +4,38 @@ import { createDefaultLimiterParams, createDefaultLoFiParams } from './effects-p
 import { createDefaultSpectralParams } from './spectral-params'
 
 describe('shared timeline operations', () => {
+  test('parses fade operations and reports their clip target', () => {
+    const operation = parseSharedTimelineOperation({
+      kind: 'clips.setFades',
+      payload: {
+        clipId: 'clip-1',
+        fades: { fadeInSec: 1, fadeOutSec: 2, fadeInCurve: 0.2, fadeOutCurve: -0.2 },
+      },
+    })
+    expect(operation).toEqual({
+      kind: 'clips.setFades',
+      payload: {
+        clipId: 'clip-1',
+        fades: {
+          fadeInStartSec: 0,
+          fadeInSec: 1,
+          fadeOutSec: 2,
+          fadeOutEndSec: 0,
+          fadeInCurve: 0.2,
+          fadeOutCurve: -0.2,
+          fadeInCurvePosition: 0.5,
+          fadeOutCurvePosition: 0.5,
+        },
+      },
+    })
+    if (!operation) throw new Error('Expected fade operation to parse')
+    expect(readSharedTimelineOperationTargets(operation).clipIds).toEqual(new Set(['clip-1']))
+    expect(parseSharedTimelineOperation({
+      kind: 'clips.setFades',
+      payload: { clipId: 'clip-1', fades: { fadeInSec: 1 } },
+    })).toBeNull()
+  })
+
   test('roundtrips synth parameters only with a durable instance identity', () => {
     const operation = {
       kind: 'effects.setSynthParams',

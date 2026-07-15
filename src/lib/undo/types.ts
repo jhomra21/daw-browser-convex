@@ -1,6 +1,7 @@
 import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
 import type { ArpeggiatorParams, AudioEffectKind, AutomationEnvelope, AutoPanParamsEnvelope, ChorusParamsEnvelope, CompressorParams, DelayParams, EnsembleParamsEnvelope, EqParams, FlangerParamsEnvelope, GateParamsEnvelope, LimiterParamsEnvelope, LoFiParamsEnvelope, PhaserParamsEnvelope, ReverbParams, SaturatorParams, SpectralParamsEnvelope, SynthParams, TrackInstrumentParams, TremoloParamsEnvelope, UtilityParamsEnvelope } from '@daw-browser/shared'
 import type { AudioWarp, Track, TrackChannelRole, TrackSend } from '@daw-browser/timeline-core/types'
+import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 
 export type TrackRef = string
 export type ClipRef = string
@@ -15,6 +16,7 @@ export type ClipTiming = {
   audioWarp?: AudioWarp
   gain?: number
   midiOffsetBeats?: number
+  fades?: ClipFades
 }
 
 export type ClipAudioWarpSnapshot = {
@@ -33,6 +35,8 @@ export type ClipSnapshot = {
   sourceKind?: AudioSourceKind
   midi?: any
   timing?: ClipOffsets
+  gain?: number
+  fades?: ClipFades
 }
 
 export type HistoryClipSnapshot = ClipSnapshot & {
@@ -232,6 +236,15 @@ export type HistoryEntry =
         clipRef: ClipRef
         from: ClipTiming
         to: ClipTiming
+      }
+    }
+  | {
+      type: 'clip-fades'
+      projectId: string
+      data: {
+        clipRef: ClipRef
+        from: ClipFades
+        to: ClipFades
       }
     }
   | {

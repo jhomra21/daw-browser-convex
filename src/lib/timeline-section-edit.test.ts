@@ -23,6 +23,7 @@ const clip = (input: Partial<Clip> & { id: string; startSec: number; duration: n
   midiOffsetBeats: input.midiOffsetBeats,
   sourceDurationSec: input.sourceDurationSec,
   audioWarp: input.audioWarp,
+  fades: input.fades,
   sampleUrl: input.sampleUrl,
   midi: input.midi,
 })
@@ -281,6 +282,38 @@ describe('timeline section edit helpers', () => {
     expect(patch.updateClips[0]?.timing.duration).toBe(2)
     expect(patch.createClips[0]?.clip.startSec).toBe(6)
     expect(patch.createClips[0]?.clip.duration).toBe(2)
+  })
+
+  test('section copy clears fade endpoints at trimmed boundaries and preserves full copies', () => {
+    const fades = { fadeInSec: 1, fadeOutSec: 1, fadeInCurve: 0, fadeOutCurve: 0 }
+    const [trimmed] = buildSectionClipFragments({
+      tracks: [track([clip({ id: 'clip-1', startSec: 0, duration: 8, fades })])],
+      section: { range: { startSec: 2, endSec: 6 }, trackIds: ['track-1'] },
+      bpm: 120,
+    })
+    expect(trimmed?.clip.fades).toMatchObject({ fadeInSec: 0, fadeOutSec: 0, fadeInCurve: 0, fadeOutCurve: 0 })
+
+    const [whole] = buildSectionClipFragments({
+      tracks: [track([clip({ id: 'clip-1', startSec: 2, duration: 4, fades })])],
+      section: { range: { startSec: 1, endSec: 7 }, trackIds: ['track-1'] },
+      bpm: 120,
+    })
+    expect(whole?.clip.fades).toMatchObject(fades)
+  })
+
+  test('middle deletion keeps only outer fades on each fragment', () => {
+    const patch = buildClipRangeDeletePatch({
+      tracks: [track([clip({
+        id: 'clip-1',
+        startSec: 0,
+        duration: 8,
+        fades: { fadeInSec: 1, fadeOutSec: 1, fadeInCurve: 0, fadeOutCurve: 0 },
+      })])],
+      section: { range: { startSec: 2, endSec: 6 }, trackIds: ['track-1'] },
+      bpm: 120,
+    })
+    expect(patch.updateClips[0]?.timing.fades).toMatchObject({ fadeInSec: 1, fadeOutSec: 0, fadeInCurve: 0, fadeOutCurve: 0 })
+    expect(patch.createClips[0]?.clip.fades).toMatchObject({ fadeInSec: 0, fadeOutSec: 1, fadeInCurve: 0, fadeOutCurve: 0 })
   })
 
   test('automation fragment includes start boundary, interior points, and end boundary', () => {

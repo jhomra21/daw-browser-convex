@@ -30,6 +30,13 @@ export const buildTrackCreateMutationArgs = (
   operationId: payload.operationId,
 })
 
+export const buildClipFadesMutationArgs = (
+  payload: Extract<SharedTimelineOperation, { kind: 'clips.setFades' }>['payload'],
+) => ({
+  clipId: payload.clipId,
+  fades: payload.fades,
+})
+
 export class TimelineOperationTargetError extends Error {
   constructor(message: string) {
     super(message)
@@ -123,6 +130,11 @@ export const executeTimelineOperation = async (
         clipId: operation.payload.clipId,
         gain: operation.payload.gain,
       })
+    case 'clips.setFades':
+      return await context.convex.mutation(
+        convexApi.clips.serverSetFades,
+        buildClipFadesMutationArgs(operation.payload),
+      )
     case 'clips.setColor':
       return await context.convex.mutation(convexApi.clips.serverSetColor, operation.payload)
     case 'tracks.setRouting':

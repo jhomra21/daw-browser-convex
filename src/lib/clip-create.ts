@@ -92,6 +92,7 @@ function buildClipSnapshotFields(clip: Clip) {
     duration: clip.duration,
     name: clip.name,
     gain: clip.gain,
+    fades: clip.fades,
     sampleUrl: resolveClipSampleUrl(clip),
     source: getPersistableAudioSourceMetadata({
       sourceDurationSec: clip.sourceDurationSec,
@@ -132,6 +133,7 @@ export function buildLocalClip(input: BuildLocalClipInput): RuntimeClip {
     bufferOffsetSec: clip.timing?.bufferOffsetSec,
     audioWarp: normalizeAudioWarp(clip.audioWarp),
     gain: clip.gain,
+    fades: clip.fades,
     midiOffsetBeats: clip.timing?.midiOffsetBeats,
   }
 }

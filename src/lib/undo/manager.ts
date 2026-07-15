@@ -6,6 +6,9 @@ function mergeEntry(prev: HistoryEntry, entry: HistoryEntry): HistoryEntry {
   if (prev.type === 'clip-timing' && entry.type === 'clip-timing') {
     return { ...entry, data: { ...entry.data, from: prev.data.from } }
   }
+  if (prev.type === 'clip-fades' && entry.type === 'clip-fades') {
+    return { ...entry, data: { ...entry.data, from: prev.data.from } }
+  }
   if (prev.type === 'track-volume' && entry.type === 'track-volume') {
     return { ...entry, data: { ...entry.data, from: prev.data.from } }
   }

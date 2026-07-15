@@ -11,6 +11,7 @@ type BrowserDeviceDragOptions = {
   trackLayout: Accessor<TimelineTrackLayoutRow[]>;
   returnTrackLayout: Accessor<TimelineTrackLayoutRow[]>;
   returnSectionElement: () => HTMLDivElement | undefined;
+  masterTimelineElement: () => HTMLDivElement | undefined;
   scrollElement: () => HTMLDivElement | undefined;
   effectsChainElement: () => HTMLElement | undefined;
   currentEffectsTargetId: Accessor<Track["id"] | "master">;
@@ -87,28 +88,63 @@ const resolveEffectChainPreview = (
   };
 };
 
+export const resolveBrowserDeviceDropTarget = (
+  payload: BrowserDragPayload,
+  candidates: {
+    effectChainTarget?: BrowserDropTarget;
+    returnTarget: BrowserDropTarget;
+    isOverMasterTimeline: boolean;
+    timelineTarget: BrowserDropTarget;
+  },
+  canDrop: (payload: BrowserDragPayload, target: BrowserDropTarget) => boolean,
+): BrowserDropTarget => {
+  const target = candidates.effectChainTarget
+    ?? (candidates.returnTarget.kind === "track"
+      ? candidates.returnTarget
+      : candidates.isOverMasterTimeline
+      ? { kind: "none" }
+      : candidates.timelineTarget);
+  if (target.kind === "track" || target.kind === "effect-chain") {
+    return canDrop(payload, target) ? target : { kind: "none" };
+  }
+  if (target.kind === "new-track" && !canDrop(payload, target)) {
+    return { kind: "none" };
+  }
+  return target;
+};
+
 const resolveCompatibleTarget = (
   payload: BrowserDragPayload,
   pointer: { x: number; y: number },
   options: BrowserDeviceDragOptions,
 ): Pick<BrowserDragSession, "target" | "effectChainPreview"> => {
+  let effectChain: Pick<BrowserDragSession, "target" | "effectChainPreview"> | undefined;
   if (payload.kind === "audio-effect" || payload.kind === "audio-effect-chain") {
-    const chain = resolveEffectChainPreview(pointer, options.effectsChainElement(), options.currentEffectsTargetId());
-    if (chain) return options.canDrop(payload, chain.target) ? chain : { target: { kind: "none" } };
+    effectChain = resolveEffectChainPreview(pointer, options.effectsChainElement(), options.currentEffectsTargetId());
   }
   const returnTarget = resolveReturnTrackTarget(
     pointer,
     options.returnSectionElement(),
     options.returnTrackLayout(),
   );
-  const target = returnTarget.kind === "track"
-    ? returnTarget
+  const masterTimelineElement = options.masterTimelineElement();
+  const isOverMasterTimeline = masterTimelineElement
+    && isInsideRect(pointer, masterTimelineElement.getBoundingClientRect());
+  const timelineTarget: BrowserDropTarget = returnTarget.kind === "track" || isOverMasterTimeline
+    ? { kind: "none" }
     : resolveTimelineTrackTarget(pointer, options.scrollElement(), options.trackLayout());
-  if (target.kind === "track") {
-    return { target: options.canDrop(payload, target) ? target : { kind: "none" } };
-  }
-  if (target.kind === "new-track" && !options.canDrop(payload, target)) return { target: { kind: "none" } };
-  return { target };
+  const target = resolveBrowserDeviceDropTarget(payload, {
+    effectChainTarget: effectChain?.target,
+    returnTarget,
+    isOverMasterTimeline: isOverMasterTimeline === true,
+    timelineTarget,
+  }, options.canDrop);
+  return {
+    target,
+    effectChainPreview: target.kind === "effect-chain"
+      ? effectChain?.effectChainPreview
+      : undefined,
+  };
 };
 
 export function createBrowserDeviceDrag(options: BrowserDeviceDragOptions): {

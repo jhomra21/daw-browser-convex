@@ -6,6 +6,7 @@ import { ensureRoomShareLink, getInviteShareUrl } from '~/lib/timeline-share'
 import { PPS } from '~/lib/timeline-utils'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
+import type { TimelineTrackRow } from '~/lib/timeline-repository/types'
 import { loadTrackEffectSnapshot } from '~/lib/track-state-snapshot'
 import { createOptimisticTrack, pushTrackCreateHistory } from '~/lib/tracks'
 import { planAssignTrackColorToClips, planGroupTracks, planMoveTrackToGroup, planResetClipColors, planSetTrackColor, planTrackReorder, planUngroupTracks, type ClipColorUpdate } from '~/lib/track-group-ops'
@@ -89,6 +90,27 @@ type UseTimelineActionsReturn = {
   resetClipColors: (trackId: Track['id']) => Promise<void>
 }
 
+export const projectLocalTrackCreation = (
+  tracks: readonly Track[],
+  createdTrack: Track,
+  creationIndex: number,
+  canonicalRows: readonly TimelineTrackRow[],
+  updateLocalTrack: UseTimelineActionsOptions['creation']['updateLocalTrack'],
+  insertLocalTrack: UseTimelineActionsOptions['creation']['insertLocalTrack'],
+) => {
+  for (const repairedRow of canonicalRows) {
+    if (repairedRow.id === createdTrack.id) continue
+    const repairedTrack = tracks.find((entry) => entry.id === repairedRow.id)
+    if (!repairedTrack) continue
+    updateLocalTrack(
+      repairedTrack,
+      tracks.findIndex((entry) => entry.id === repairedTrack.id),
+      { index: repairedRow.index, groupId: repairedRow.groupId },
+    )
+  }
+  insertLocalTrack(createdTrack, creationIndex)
+}
+
 export function useTimelineActions(
   options: UseTimelineActionsOptions,
 ): UseTimelineActionsReturn {
@@ -120,7 +142,19 @@ export function useTimelineActions(
         return null
       }
       const track = toLocalTimelineTrack(row)
-      options.creation.insertLocalTrack(track, index)
+      const snapshot = await createLocalTimelineRepository(projectId).loadSnapshot()
+      if (options.room.projectId() !== projectId) {
+        await createLocalTimelineRepository(projectId).deleteTrack(row.id)
+        return null
+      }
+      projectLocalTrackCreation(
+        options.tracks(),
+        track,
+        row.index,
+        snapshot.tracks,
+        options.creation.updateLocalTrack,
+        options.creation.insertLocalTrack,
+      )
       options.creation.grantTrackWrite(track.id, { projectId, userId: options.room.userId() })
       if (behavior.pushHistory !== false) {
         pushTrackCreateHistory(options.creation.pushHistory, projectId, options.tracks(), track)

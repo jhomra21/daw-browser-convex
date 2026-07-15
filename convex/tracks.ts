@@ -426,6 +426,10 @@ const setTrackGroupForUser = async (
   const { track } = await requireTrackOwnerForWrite(ctx, input.trackId, input.userId);
   if (input.groupId === undefined) return;
   const groupId = input.groupId ?? undefined;
+  const channel = await ensureMixerChannelForTrack(ctx, track);
+  if (channel.channelRole === "return" && groupId) {
+    throw new Error("Return tracks cannot belong to a group.");
+  }
   if (groupId) {
     const group = await ctx.db.get(groupId);
     if (!group || group.projectId !== track.projectId) throw new Error("Group track not found.");

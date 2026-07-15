@@ -90,6 +90,7 @@ type Props = {
   containerRef: (el: HTMLDivElement) => void;
   scrollRef: (el: HTMLDivElement) => void;
   returnSectionRef: (el: HTMLDivElement) => void;
+  masterTimelineRef: (el: HTMLDivElement) => void;
   bottomPanelOffsetPx: number;
   leftBrowser: TimelineLeftBrowserModel;
   durationSec: number;
@@ -471,7 +472,11 @@ export default function TimelineWorkspace(props: Props) {
                           height: `${row.heightPx}px`,
                         }}
                       >
-                        {renderTrackLane(row, { ...row, topPx: 0 })}
+                        {renderTrackLane(
+                          row,
+                          { ...row, topPx: 0 },
+                          props.browserDropTargetTrackId === row.trackId,
+                        )}
                       </div>
                     )}
                   </For>
@@ -522,41 +527,43 @@ export default function TimelineWorkspace(props: Props) {
                     )}
                   </Show>
                 </div>
-                <div
-                  class="relative overflow-hidden bg-timeline-background"
-                  style={{ height: `${masterBaseHeight()}px` }}
-                  onPointerDown={props.onMasterPointerDown}
-                >
-                  <GridOverlay
-                    durationSec={props.durationSec}
-                    bpm={props.bpm}
-                    denom={props.gridDenominator}
-                    enabled={props.gridEnabled}
-                  />
-                  <div class="absolute left-0 right-0 bottom-0 h-px bg-timeline-surface-muted" />
-                </div>
-                <Show when={masterAutomationVisible()}>
+                <div ref={props.masterTimelineRef}>
                   <div
-                    class="border-t border-automation/30 bg-timeline-background/95"
-                    style={{
-                      height: `${props.automation.lanes.masterHeight}px`,
-                    }}
+                    class="relative overflow-hidden bg-timeline-background"
+                    style={{ height: `${masterBaseHeight()}px` }}
+                    onPointerDown={props.onMasterPointerDown}
                   >
-                    <AutomationLane
-                      projectId={props.automation.projectId}
-                      target={masterTarget()}
-                      parameterId={masterSelection().parameterId}
-                      envelope={props.automation.envelopes.byTargetKey.get(
-                        masterTargetKey(),
-                      )}
+                    <GridOverlay
                       durationSec={props.durationSec}
-                      heightPx={props.automation.lanes.masterHeight}
-                      onPreview={props.automation.envelopes.preview}
-                      onCommit={props.automation.envelopes.commit}
-                      onCancelPreview={props.automation.envelopes.cancelPreview}
+                      bpm={props.bpm}
+                      denom={props.gridDenominator}
+                      enabled={props.gridEnabled}
                     />
+                    <div class="absolute left-0 right-0 bottom-0 h-px bg-timeline-surface-muted" />
                   </div>
-                </Show>
+                  <Show when={masterAutomationVisible()}>
+                    <div
+                      class="border-t border-automation/30 bg-timeline-background/95"
+                      style={{
+                        height: `${props.automation.lanes.masterHeight}px`,
+                      }}
+                    >
+                      <AutomationLane
+                        projectId={props.automation.projectId}
+                        target={masterTarget()}
+                        parameterId={masterSelection().parameterId}
+                        envelope={props.automation.envelopes.byTargetKey.get(
+                          masterTargetKey(),
+                        )}
+                        durationSec={props.durationSec}
+                        heightPx={props.automation.lanes.masterHeight}
+                        onPreview={props.automation.envelopes.preview}
+                        onCommit={props.automation.envelopes.commit}
+                        onCancelPreview={props.automation.envelopes.cancelPreview}
+                      />
+                    </div>
+                  </Show>
+                </div>
               </div>
               <div
                 class="shrink-0"

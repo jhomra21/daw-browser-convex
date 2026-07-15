@@ -38,7 +38,8 @@ export const rangeTrackIdsThroughDisplayOrder = (
   const selectedIndexes = rangeTrackIds
     .map((trackId) => displayTrackIds.indexOf(trackId))
     .filter((index) => index >= 0);
-  if (targetIndex < 0 || selectedIndexes.length === 0) return rangeTrackIds;
+  if (targetIndex < 0) return rangeTrackIds;
+  if (selectedIndexes.length === 0) return [targetTrackId];
   return displayTrackIds.slice(
     Math.min(targetIndex, ...selectedIndexes),
     Math.max(targetIndex, ...selectedIndexes) + 1,

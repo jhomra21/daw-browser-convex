@@ -24,6 +24,34 @@ describe("rangeTrackIdsThroughDisplayOrder", () => {
       ),
     ).toEqual(["group", "normal-b", "return-a"]);
   });
+
+  test("anchors a visible range on the Shift target after hidden selection", () => {
+    expect(
+      rangeTrackIdsThroughDisplayOrder(
+        ["group", "normal-target", "return-target"],
+        ["hidden-child"],
+        "normal-target",
+      ),
+    ).toEqual(["normal-target"]);
+
+    expect(
+      rangeTrackIdsThroughDisplayOrder(
+        ["group", "normal-target", "return-target"],
+        ["hidden-child"],
+        "return-target",
+      ),
+    ).toEqual(["return-target"]);
+  });
+
+  test("keeps the prior range when the Shift target is absent", () => {
+    expect(
+      rangeTrackIdsThroughDisplayOrder(
+        ["group", "normal-target"],
+        ["hidden-child"],
+        "missing",
+      ),
+    ).toEqual(["hidden-child"]);
+  });
 });
 
 describe("timelinePointerCoordinates", () => {

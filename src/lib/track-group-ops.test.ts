@@ -1,6 +1,6 @@
-import { describe, expect, test } from 'bun:test'
-import { hasTrackGroupCycle } from '@daw-browser/shared'
-import type { Track } from '@daw-browser/timeline-core/types'
+import { describe, expect, test } from "bun:test";
+import { hasTrackGroupCycle } from "@daw-browser/shared";
+import type { Track } from "@daw-browser/timeline-core/types";
 import {
   normalizeDragMoveSet,
   planAssignTrackColorToClips,
@@ -201,7 +201,7 @@ describe('track group operations', () => {
     })).toBeNull()
   })
 
-  test('planTrackReorder allows return tracks to be reordered', () => {
+  test('planTrackReorder rejects moving Returns into normal tracks', () => {
     expect(planTrackReorder({
       tracks: [
         reorderTrack({ id: 'a', index: 0 }),
@@ -209,10 +209,52 @@ describe('track group operations', () => {
       ],
       moveRootIds: ['r'],
       target: { trackId: 'a', zone: 'above' },
+    })).toBeNull()
+  })
+
+  test('planTrackReorder keeps Returns in their own canonical partition', () => {
+    expect(planTrackReorder({
+      tracks: [
+        reorderTrack({ id: 'a', index: 0 }),
+        reorderTrack({ id: 'r1', index: 1, channelRole: 'return' }),
+        reorderTrack({ id: 'r2', index: 2, channelRole: 'return' }),
+      ],
+      moveRootIds: ['r2'],
+      target: { trackId: 'r1', zone: 'above' },
     })?.patches).toEqual([
-      { trackId: 'r', index: 0, groupId: undefined, outputTargetId: undefined },
-      { trackId: 'a', index: 1, groupId: undefined, outputTargetId: undefined },
+      { trackId: 'r2', index: 1, groupId: undefined, outputTargetId: undefined },
+      { trackId: 'r1', index: 2, groupId: undefined, outputTargetId: undefined },
     ])
+    expect(planTrackReorder({
+      tracks: [
+        reorderTrack({ id: 'a', index: 0 }),
+        reorderTrack({ id: 'r', index: 1, channelRole: 'return' }),
+      ],
+      moveRootIds: ['a'],
+      target: { trackId: 'r', zone: 'above' },
+    })).toBeNull()
+  })
+
+  test('planTrackReorder rejects empty, mixed, and missing move roots', () => {
+    const tracks = [
+      reorderTrack({ id: 'a', index: 0 }),
+      reorderTrack({ id: 'r', index: 1, channelRole: 'return' }),
+    ]
+    expect(planTrackReorder({
+      tracks,
+      moveRootIds: [],
+      target: { trackId: 'a', zone: 'above' },
+    })).toBeNull()
+    expect(planTrackReorder({
+      tracks,
+      moveRootIds: ['a', 'r'],
+      target: { trackId: 'a', zone: 'above' },
+    })).toBeNull()
+    expect(planTrackReorder({
+      tracks,
+      moveRootIds: ['missing'],
+      target: { trackId: 'a', zone: 'above' },
+    })).toBeNull()
   })
 
   test('planTrackReorder rejects drops targeting moved subtree descendants', () => {

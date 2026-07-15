@@ -1,7 +1,8 @@
 import { createSignal, onCleanup, type Accessor } from "solid-js";
 import type { Track } from "@daw-browser/timeline-core/types";
 import { useDrag } from "~/hooks/useDrag";
-import { trackLayoutDropIndexAtClientY, type TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
+import { trackLayoutDropIndexAtY, trackLayoutRowAtY, trackLayoutRowIndexAtY, type TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
+import { RULER_HEIGHT } from "~/lib/timeline-utils";
 import type { BrowserDragPayload, BrowserDragSession, BrowserDropTarget } from "./browser-drag-types";
 
 const DRAG_THRESHOLD_PX = 4;
@@ -9,6 +10,10 @@ const DRAG_THRESHOLD_PX = 4;
 type BrowserDeviceDragOptions = {
   resolvePayload: (itemId: string) => BrowserDragPayload | undefined;
   trackLayout: Accessor<TimelineTrackLayoutRow[]>;
+  returnTrackLayout: Accessor<TimelineTrackLayoutRow[]>;
+  returnSectionElement: () => HTMLDivElement | undefined;
+  masterTimelineElement: () => HTMLDivElement | undefined;
+  timelineSurfaceElement: () => HTMLDivElement | undefined;
   scrollElement: () => HTMLDivElement | undefined;
   effectsChainElement: () => HTMLElement | undefined;
   currentEffectsTargetId: Accessor<Track["id"] | "master">;
@@ -24,25 +29,61 @@ const pointerPosition = (event: PointerEvent) => ({
 const distanceFromStart = (start: { x: number; y: number }, pointer: { x: number; y: number }) =>
   Math.hypot(pointer.x - start.x, pointer.y - start.y);
 
-const isInsideRect = (pointer: { x: number; y: number }, rect: DOMRect) => (
+type TimelineRect = {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+};
+
+type TimelineScrollElement = {
+  scrollTop: number;
+  getBoundingClientRect: () => TimelineRect;
+};
+
+type TimelineSurfaceElement = {
+  getBoundingClientRect: () => TimelineRect;
+};
+
+const isInsideRect = (pointer: { x: number; y: number }, rect: TimelineRect) => (
   pointer.x >= rect.left &&
   pointer.x <= rect.right &&
   pointer.y >= rect.top &&
   pointer.y <= rect.bottom
 );
 
-const resolveTimelineTrackTarget = (
+export const resolveTimelineTrackTarget = (
   pointer: { x: number; y: number },
-  scrollElement: HTMLDivElement | undefined,
+  scrollElement: TimelineScrollElement | undefined,
+  timelineSurfaceElement: TimelineSurfaceElement | undefined,
   trackLayout: TimelineTrackLayoutRow[],
 ): BrowserDropTarget => {
-  if (!scrollElement) return { kind: "none" };
-  if (!isInsideRect(pointer, scrollElement.getBoundingClientRect())) return { kind: "none" };
-  const laneIndex = trackLayoutDropIndexAtClientY(trackLayout, pointer.y, scrollElement);
+  if (!scrollElement || !timelineSurfaceElement) return { kind: "none" };
+  const rect = scrollElement.getBoundingClientRect();
+  const surfaceRect = timelineSurfaceElement.getBoundingClientRect();
+  if (!isInsideRect(pointer, rect) || pointer.x < surfaceRect.left || pointer.x > surfaceRect.right) {
+    return { kind: "none" };
+  }
+  const timelineY = pointer.y - rect.top + (scrollElement.scrollTop || 0) - RULER_HEIGHT;
+  const laneIndex = trackLayoutDropIndexAtY(trackLayout, timelineY);
   const row = laneIndex >= 0 ? trackLayout[laneIndex] : undefined;
   if (row) return { kind: "track", trackId: row.trackId, laneIndex };
   if (laneIndex >= trackLayout.length) return { kind: "new-track" };
   return { kind: "none" };
+};
+
+const resolveReturnTrackTarget = (
+  pointer: { x: number; y: number },
+  section: HTMLDivElement | undefined,
+  rows: TimelineTrackLayoutRow[],
+): BrowserDropTarget => {
+  if (!section) return { kind: "none" };
+  const rect = section.getBoundingClientRect();
+  if (!isInsideRect(pointer, rect)) return { kind: "none" };
+  const row = trackLayoutRowAtY(rows, pointer.y - rect.top);
+  if (!row) return { kind: "none" };
+  const laneIndex = trackLayoutRowIndexAtY(rows, pointer.y - rect.top);
+  return { kind: "track", trackId: row.trackId, laneIndex };
 };
 
 const resolveEffectChainPreview = (
@@ -71,21 +112,68 @@ const resolveEffectChainPreview = (
   };
 };
 
+export const resolveBrowserDeviceDropTarget = (
+  payload: BrowserDragPayload,
+  candidates: {
+    effectChainTarget?: BrowserDropTarget;
+    returnTarget: BrowserDropTarget;
+    isOverMasterTimeline: boolean;
+    timelineTarget: BrowserDropTarget;
+  },
+  canDrop: (payload: BrowserDragPayload, target: BrowserDropTarget) => boolean,
+): BrowserDropTarget => {
+  const target = candidates.effectChainTarget
+    ?? (candidates.returnTarget.kind === "track"
+      ? candidates.returnTarget
+      : candidates.isOverMasterTimeline
+      ? { kind: "none" }
+      : candidates.timelineTarget);
+  if (target.kind === "track" || target.kind === "effect-chain") {
+    return canDrop(payload, target) ? target : { kind: "none" };
+  }
+  if (target.kind === "new-track" && !canDrop(payload, target)) {
+    return { kind: "none" };
+  }
+  return target;
+};
+
 const resolveCompatibleTarget = (
   payload: BrowserDragPayload,
   pointer: { x: number; y: number },
   options: BrowserDeviceDragOptions,
 ): Pick<BrowserDragSession, "target" | "effectChainPreview"> => {
+  let effectChain: Pick<BrowserDragSession, "target" | "effectChainPreview"> | undefined;
   if (payload.kind === "audio-effect" || payload.kind === "audio-effect-chain") {
-    const chain = resolveEffectChainPreview(pointer, options.effectsChainElement(), options.currentEffectsTargetId());
-    if (chain) return options.canDrop(payload, chain.target) ? chain : { target: { kind: "none" } };
+    effectChain = resolveEffectChainPreview(pointer, options.effectsChainElement(), options.currentEffectsTargetId());
   }
-  const target = resolveTimelineTrackTarget(pointer, options.scrollElement(), options.trackLayout());
-  if (target.kind === "track") {
-    return { target: options.canDrop(payload, target) ? target : { kind: "none" } };
-  }
-  if (target.kind === "new-track" && !options.canDrop(payload, target)) return { target: { kind: "none" } };
-  return { target };
+  const returnTarget = resolveReturnTrackTarget(
+    pointer,
+    options.returnSectionElement(),
+    options.returnTrackLayout(),
+  );
+  const masterTimelineElement = options.masterTimelineElement();
+  const isOverMasterTimeline = masterTimelineElement
+    && isInsideRect(pointer, masterTimelineElement.getBoundingClientRect());
+  const timelineTarget: BrowserDropTarget = returnTarget.kind === "track" || isOverMasterTimeline
+    ? { kind: "none" }
+    : resolveTimelineTrackTarget(
+      pointer,
+      options.scrollElement(),
+      options.timelineSurfaceElement(),
+      options.trackLayout(),
+    );
+  const target = resolveBrowserDeviceDropTarget(payload, {
+    effectChainTarget: effectChain?.target,
+    returnTarget,
+    isOverMasterTimeline: isOverMasterTimeline === true,
+    timelineTarget,
+  }, options.canDrop);
+  return {
+    target,
+    effectChainPreview: target.kind === "effect-chain"
+      ? effectChain?.effectChainPreview
+      : undefined,
+  };
 };
 
 export function createBrowserDeviceDrag(options: BrowserDeviceDragOptions): {

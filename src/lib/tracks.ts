@@ -5,6 +5,7 @@ import {
 } from '~/lib/shared-timeline-operations-api'
 import { buildTrackCreateHistoryEntry } from '~/lib/undo/builders'
 import type { HistoryEntry } from '~/lib/undo/types'
+import { trackCreationCollapsed } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 type CreateLocalTrackOptions = {
@@ -39,6 +40,7 @@ type CreateOptimisticTrackOptions = {
   grantScope?: OptimisticGrantScope
   kind?: Track['kind']
   channelRole?: Track['channelRole']
+  collapsed?: boolean
   color?: string
 }
 
@@ -92,10 +94,14 @@ function ensureLocalTrack(options: EnsureLocalTrackOptions): Track {
 }
 
 export async function createOptimisticTrack(options: CreateOptimisticTrackOptions): Promise<Track | null> {
+  const channelRole = options.channelRole ?? 'track'
+  const index = options.index
+  const collapsed = trackCreationCollapsed(channelRole, options.collapsed)
   const operation = buildSharedTrackCreateOperation({
-    index: options.index,
+    index,
     kind: options.kind,
-    channelRole: options.channelRole,
+    channelRole,
+    collapsed,
     color: options.color,
   })
   const result = await publishSharedTimelineOperation(options.projectId, operation)
@@ -106,9 +112,10 @@ export async function createOptimisticTrack(options: CreateOptimisticTrackOption
 
   return ensureLocalTrack({
     id: trackId,
-    index: options.index,
+    index,
     kind: options.kind,
-    channelRole: options.channelRole,
+    channelRole,
+    collapsed,
     color: options.color,
     insertLocalTrack: options.insertLocalTrack,
   })
@@ -118,7 +125,7 @@ export function pushTrackCreateHistory(
   historyPush: HistoryPush | undefined,
   projectId: string | undefined,
   tracks: Track[],
-  track: Pick<Track, 'id' | 'kind' | 'channelRole' | 'color'> | null | undefined,
+  track: Pick<Track, 'id' | 'kind' | 'channelRole' | 'collapsed' | 'color'> | null | undefined,
 ) {
   if (!track || !projectId || typeof historyPush !== 'function') return
   const index = tracks.findIndex((entry) => entry.id === track.id)
@@ -129,6 +136,7 @@ export function pushTrackCreateHistory(
     index,
     kind: track.kind,
     channelRole: track.channelRole,
+    collapsed: track.collapsed,
     color: track.color,
   }))
 }

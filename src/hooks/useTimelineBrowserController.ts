@@ -36,6 +36,10 @@ type Options = {
   canCreateTrack: Accessor<boolean>;
   tracks: Accessor<Track[]>;
   trackLayout: Accessor<TimelineTrackLayoutRow[]>;
+  returnTrackLayout: Accessor<TimelineTrackLayoutRow[]>;
+  returnSectionElement: () => HTMLDivElement | undefined;
+  masterTimelineElement: () => HTMLDivElement | undefined;
+  timelineSurfaceElement: () => HTMLDivElement | undefined;
   scrollElement: () => HTMLDivElement | undefined;
   effectsChainElement: () => HTMLElement | undefined;
   currentEffectsTargetId: Accessor<Track["id"] | "master">;
@@ -607,6 +611,10 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   const browserDeviceDrag = createBrowserDeviceDrag({
     resolvePayload: resolveBrowserDevicePayload,
     trackLayout: options.trackLayout,
+    returnTrackLayout: options.returnTrackLayout,
+    returnSectionElement: options.returnSectionElement,
+    masterTimelineElement: options.masterTimelineElement,
+    timelineSurfaceElement: options.timelineSurfaceElement,
     scrollElement: options.scrollElement,
     effectsChainElement: options.effectsChainElement,
     currentEffectsTargetId: options.currentEffectsTargetId,

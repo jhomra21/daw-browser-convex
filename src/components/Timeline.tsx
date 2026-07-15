@@ -6,9 +6,13 @@ import {
   createMemo,
   createSignal,
 } from "solid-js";
-import type { Clip, ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
+import type {
+  Clip,
+  ExternalSidechainRoute,
+  Track,
+} from "@daw-browser/timeline-core/types";
 import { getAudioEngine } from "~/lib/audio-engine-singleton";
-import { timelineDurationSec } from "~/lib/timeline-utils";
+import { RULER_HEIGHT, timelineDurationSec } from "~/lib/timeline-utils";
 import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
 import { useTimelineClipImport } from "~/hooks/useTimelineClipImport";
 import { useTimelineClipActions } from "~/hooks/useTimelineClipActions";
@@ -19,7 +23,11 @@ import { useClipDrag } from "~/hooks/useClipDrag";
 import { useClipResize } from "~/hooks/useClipResize";
 import { useTimelineSelection } from "~/hooks/useTimelineSelection";
 import { useClipBuffers } from "~/hooks/useClipBuffers";
-import { collectTrackDescendantIds, isLocalId, normalizeCommandTrackIndices } from "@daw-browser/shared";
+import {
+  collectTrackDescendantIds,
+  isLocalId,
+  normalizeCommandTrackIndices,
+} from "@daw-browser/shared";
 import { automationTargetKey } from "@daw-browser/shared";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
@@ -49,22 +57,39 @@ import { useTimelineLeftBrowserState } from "~/hooks/useTimelineLeftBrowserState
 import { useTimelineBrowserController } from "~/hooks/useTimelineBrowserController";
 import { useTimelineAutomationController } from "~/hooks/useTimelineAutomationController";
 import { BrowserDragOverlay } from "./timeline/browser/browser-drag-overlay";
-import type { BrowserDragPayload, BrowserDropTarget } from "./timeline/browser/browser-drag-types";
+import {
+  browserDropTargetTrackId as getBrowserDropTargetTrackId,
+  type BrowserDragPayload,
+  type BrowserDropTarget,
+} from "./timeline/browser/browser-drag-types";
 import type { TimelineDeviceInsertActions } from "./timeline/timeline-device-insert-actions";
 import type { AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
 import type { InstrumentPreset } from "~/lib/instrument-presets";
-import { isTimelineSampleDetailClip, useTimelineSampleDetailController } from "~/hooks/useTimelineSampleDetailController";
+import {
+  isTimelineSampleDetailClip,
+  useTimelineSampleDetailController,
+} from "~/hooks/useTimelineSampleDetailController";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
 import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
 import TimelineChrome from "./timeline/timeline-chrome";
-import AppMessageDialog, { type AppMessageDialogState } from "./timeline/app-message-dialog";
+import AppMessageDialog, {
+  type AppMessageDialogState,
+} from "./timeline/app-message-dialog";
 import CloudBackupDialog from "./timeline/cloud-backup-dialog";
 import DeleteTrackDialog from "./timeline/delete-track-dialog";
 import TimelineWorkspace from "./timeline/timeline-workspace";
 import { Dashboard } from "~/components/dashboard/dashboard";
-import type { DashboardTimelineModel, DashboardView } from "~/components/dashboard/types";
-import { buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks } from "~/lib/timeline-track-layout";
+import type {
+  DashboardTimelineModel,
+  DashboardView,
+} from "~/components/dashboard/types";
+import {
+  buildTimelineTrackLayout,
+  buildTrackTree,
+  computeDepthMap,
+  flattenVisibleTracks,
+} from "~/lib/timeline-track-layout";
 import { useAppPreferences } from "~/context/app-preferences";
 import { deriveSelectedExportTrackIds } from "~/lib/export/export-settings";
 
@@ -85,7 +110,8 @@ type TimelineProps = {
 
 const Timeline: Component<TimelineProps> = (props) => {
   const [confirmOpen, setConfirmOpen] = createSignal(false);
-  const [appMessage, setAppMessage] = createSignal<AppMessageDialogState | null>(null);
+  const [appMessage, setAppMessage] =
+    createSignal<AppMessageDialogState | null>(null);
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<
     Track["id"] | null
   >(null);
@@ -167,7 +193,9 @@ const Timeline: Component<TimelineProps> = (props) => {
     tracks: () => resolvedTracks(),
     onBufferChange: () => setBufferVersion((current) => current + 1),
   });
-  const currentLocalProjectMode = createMemo(() => projects().find((project) => project.projectId === projectId())?.mode);
+  const currentLocalProjectMode = createMemo(
+    () => projects().find((project) => project.projectId === projectId())?.mode,
+  );
   const canCreateTrack = createMemo(() => {
     if (isLocalId("project", projectId())) return true;
     const role = currentProjectRole();
@@ -187,7 +215,8 @@ const Timeline: Component<TimelineProps> = (props) => {
   });
   const sidechainRoutes = createMemo<ExternalSidechainRoute[]>(() => {
     const id = projectId();
-    if (id && isLocalId("project", id)) return mediaRecovery.localTimelineSnapshot()?.sidechainRoutes ?? [];
+    if (id && isLocalId("project", id))
+      return mediaRecovery.localTimelineSnapshot()?.sidechainRoutes ?? [];
     return (fullView.data?.sidechainRoutes ?? []).map((route) => ({
       sourceTrackId: String(route.sourceTrackId),
       targetTrackId: String(route.targetTrackId),
@@ -230,7 +259,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     audioEngine,
     projectMix,
   });
-  const [replayEffectInstanceParams, setReplayEffectInstanceParams] = createSignal<EffectsPanelAudioEffects["replayInstanceParams"]>();
+  const [replayEffectInstanceParams, setReplayEffectInstanceParams] =
+    createSignal<EffectsPanelAudioEffects["replayInstanceParams"]>();
   const { pushHistory, handleUndo, handleRedo } = useTimelineHistory({
     projectId,
     userId,
@@ -238,7 +268,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     convexClient,
     convexApi,
     audioEngine,
-    replayInstanceEffectParams: (payload) => replayEffectInstanceParams()?.(payload) ?? false,
+    replayInstanceEffectParams: (payload) =>
+      replayEffectInstanceParams()?.(payload) ?? false,
     ensureClipBuffer: clipBuffers.preload,
     grantTrackWrite,
     grantClipWrite,
@@ -272,11 +303,11 @@ const Timeline: Component<TimelineProps> = (props) => {
           outputTargetId: routing.outputTargetId,
         }),
       applyTrackPatch: (trackId, patch) => {
-        const currentTracks = renderTracks()
-        const track = currentTracks.find((entry) => entry.id === trackId)
-        const index = currentTracks.findIndex((entry) => entry.id === trackId)
-        if (!track || index < 0) return
-        projection.updateLocalTrack(track, index, patch)
+        const currentTracks = renderTracks();
+        const track = currentTracks.find((entry) => entry.id === trackId);
+        const index = currentTracks.findIndex((entry) => entry.id === trackId);
+        if (!track || index < 0) return;
+        projection.updateLocalTrack(track, index, patch);
       },
       applyAutomationEnvelope: (envelope, targetKey) =>
         automation.applyEnvelope(envelope, targetKey),
@@ -286,17 +317,21 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     userId,
     remoteRows: () => fullView.data?.automationEnvelopes,
-    remoteEffects: () => fullView.data?.effects.flatMap((effect) => {
-      if (effect.targetType !== "track" && effect.targetType !== "master") return [];
-      return [{
-        targetType: effect.targetType,
-        trackId: effect.trackId,
-        type: effect.type,
-        instanceId: effect.instanceId,
-        index: effect.index,
-        params: effect.params,
-      }];
-    }),
+    remoteEffects: () =>
+      fullView.data?.effects.flatMap((effect) => {
+        if (effect.targetType !== "track" && effect.targetType !== "master")
+          return [];
+        return [
+          {
+            targetType: effect.targetType,
+            trackId: effect.trackId,
+            type: effect.type,
+            instanceId: effect.instanceId,
+            index: effect.index,
+            params: effect.params,
+          },
+        ];
+      }),
     audioEngine,
     isPlaying: () => isPlaying(),
     playheadSec: () => playheadSec(),
@@ -443,7 +478,6 @@ const Timeline: Component<TimelineProps> = (props) => {
           );
         }
       }
-
     } catch {}
   };
 
@@ -456,7 +490,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     });
   };
 
-  const pushEffectParamsHistory = (payload: EffectParamsCommitPayload, committedProjectId?: string) => {
+  const pushEffectParamsHistory = (
+    payload: EffectParamsCommitPayload,
+    committedProjectId?: string,
+  ) => {
     const rid = committedProjectId ?? projectId();
     if (!rid) return;
     if (rid !== projectId()) return;
@@ -513,6 +550,9 @@ const Timeline: Component<TimelineProps> = (props) => {
   let fileInputRef: HTMLInputElement | undefined;
   let archiveInputRef: HTMLInputElement | undefined;
   let containerRef: HTMLDivElement | undefined;
+  let returnSectionRef: HTMLDivElement | undefined;
+  let masterTimelineRef: HTMLDivElement | undefined;
+  let timelineSurfaceRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
   let effectsChainElement: HTMLElement | undefined;
 
@@ -528,7 +568,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     getContainerElement: () => containerRef,
     rightSidebarWidthPx: sidebarWidth,
   });
-  const [deviceInsertActions, setDeviceInsertActions] = createSignal<TimelineDeviceInsertActions>();
+  const [deviceInsertActions, setDeviceInsertActions] =
+    createSignal<TimelineDeviceInsertActions>();
   const appPreferences = useAppPreferences();
 
   createEffect(() => {
@@ -550,13 +591,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     selection,
   });
-  const removeCreatedCloudTrack = (track: Track | undefined) => removeAutoCreatedCloudTrack({
-    convexClient,
-    convexApi,
-    userId: userId(),
-    track,
-    removeLocalTrack: projection.removeLocalTrack,
-  });
+  const removeCreatedCloudTrack = (track: Track | undefined) =>
+    removeAutoCreatedCloudTrack({
+      convexClient,
+      convexApi,
+      userId: userId(),
+      track,
+      removeLocalTrack: projection.removeLocalTrack,
+    });
 
   const {
     createTimelineTrack,
@@ -606,13 +648,15 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
   });
 
-  const trackLayout = createMemo(() => {
+  const trackLayoutModel = createMemo(() => {
     const lanes = automation.workspace().lanes;
     const tracks = renderTracks();
     const tree = buildTrackTree(tracks);
-    const collapsedById = new Map(tracks.map((track) => [track.id, track.collapsed === true]));
+    const collapsedById = new Map(
+      tracks.map((track) => [track.id, track.collapsed === true]),
+    );
     const visibleTrackIds = flattenVisibleTracks(tree, collapsedById);
-    return buildTimelineTrackLayoutRows({
+    return buildTimelineTrackLayout({
       tracks,
       visibleTrackIds,
       depthByTrackId: computeDepthMap(tree),
@@ -621,12 +665,15 @@ const Timeline: Component<TimelineProps> = (props) => {
       visibleParameterIdsByTrackId: lanes.visibleTargetKeysByTrackId,
     });
   });
+  const trackLayout = createMemo(() => trackLayoutModel().scrollingRows);
 
   const selectAllClipsInGroup = (groupId: Track["id"]) => {
     const descendantIds = collectTrackDescendantIds(renderTracks(), groupId);
     const clips = renderTracks()
       .filter((track) => descendantIds.has(track.id))
-      .flatMap((track) => track.clips.map((clip) => ({ trackId: track.id, clipId: clip.id })));
+      .flatMap((track) =>
+        track.clips.map((clip) => ({ trackId: track.id, clipId: clip.id })),
+      );
     const first = clips[0];
     if (!first) return;
     selection.selectClipGroup({
@@ -668,7 +715,8 @@ const Timeline: Component<TimelineProps> = (props) => {
       void audioWarpController.bpmDetection.analyzeClip({
         clip,
         canWrite: canWriteClip(clip.id),
-        autoApply: (audioWarp) => audioWarpController.changeAudioWarp(clip, audioWarp),
+        autoApply: (audioWarp) =>
+          audioWarpController.changeAudioWarp(clip, audioWarp),
       });
     },
   });
@@ -686,7 +734,13 @@ const Timeline: Component<TimelineProps> = (props) => {
     onDrop,
   });
 
-  let extendRangeSelectionToPointer: (event: PointerEvent, scrollEl: HTMLDivElement | undefined, trackId?: Track["id"]) => boolean = () => false;
+  let extendRangeSelectionToPointer: (
+    event: PointerEvent,
+    options: {
+      element: HTMLDivElement | undefined;
+      trackId?: Track["id"];
+    },
+  ) => boolean = () => false;
 
   const { onClipPointerDown } = useClipDrag({
     placementTracks: () => placementTracks(),
@@ -718,7 +772,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
     grantWrite: grantTrackWrite,
     grantClipWrites,
-    onRangeSelectionPointerDown: (trackId, event) => extendRangeSelectionToPointer(event, scrollRef, trackId),
+    onRangeSelectionPointerDown: (trackId, event) =>
+      extendRangeSelectionToPointer(event, { element: scrollRef, trackId }),
   });
 
   const { onClipResizeStart } = useClipResize({
@@ -780,6 +835,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const timelineSelection = useTimelineSelection({
     tracks: () => renderTracks(),
     trackLayout,
+    displayTrackIds: () => trackLayoutModel().displayTrackIds,
     selection,
     bpm,
     gridDenominator,
@@ -788,8 +844,24 @@ const Timeline: Component<TimelineProps> = (props) => {
     stopScrub,
   });
   const marqueeRect = timelineSelection.marqueeRect;
-  const onLanePointerDown = timelineSelection.onLanePointerDown;
-  extendRangeSelectionToPointer = timelineSelection.extendRangeSelectionToPointer;
+  const marqueeSurface = timelineSelection.marqueeSurface;
+  extendRangeSelectionToPointer =
+    timelineSelection.extendRangeSelectionToPointer;
+  const handleReturnPointerDown: JSX.EventHandler<
+    HTMLDivElement,
+    PointerEvent
+  > = (event) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    bottomPanel.setMode("effects");
+    bottomPanel.setOpen(true);
+    timelineSelection.onLanePointerDown(event, {
+      kind: "return",
+      element: returnSectionRef,
+      rows: trackLayoutModel().returnRows,
+      rulerOffsetPx: 0,
+    });
+  };
 
   const recordingControls = useTrackRecording({
     audioEngine,
@@ -886,12 +958,19 @@ const Timeline: Component<TimelineProps> = (props) => {
     onGroupSelectedTracks: () => {
       const rangeTrackIds = selection.rangeSelection()?.trackIds ?? [];
       const selectedTrackId = selection.selectedTrackId();
-      const trackIds = rangeTrackIds.length > 0 ? rangeTrackIds : selectedTrackId ? [selectedTrackId] : [];
+      const trackIds =
+        rangeTrackIds.length > 0
+          ? rangeTrackIds
+          : selectedTrackId
+            ? [selectedTrackId]
+            : [];
       if (trackIds.length > 0) void groupSelectedTracks(trackIds);
     },
     onUngroupSelectedTrack: () => {
       const trackId = selection.selectedTrackId();
-      const track = renderTracks().find((candidate) => candidate.id === trackId);
+      const track = renderTracks().find(
+        (candidate) => candidate.id === trackId,
+      );
       if (track?.channelRole === "group") void ungroupTrack(track.id);
     },
     onUndo: () => {
@@ -924,7 +1003,12 @@ const Timeline: Component<TimelineProps> = (props) => {
     )
       return;
     bottomPanel.setMode("effects");
-    onLanePointerDown(event, scrollRef);
+    timelineSelection.onLanePointerDown(event, {
+      kind: "scrolling",
+      element: scrollRef,
+      rows: trackLayoutModel().scrollingRows,
+      rulerOffsetPx: RULER_HEIGHT,
+    });
   };
   const handleMasterPointerDown: JSX.EventHandler<
     HTMLDivElement,
@@ -969,12 +1053,18 @@ const Timeline: Component<TimelineProps> = (props) => {
     options?: { preserveClipSelection?: boolean },
   ) => {
     if (targetId === "master") selection.selectMasterTarget();
-    else selection.selectTrackTarget(targetId, { clearClipSelection: !options?.preserveClipSelection });
+    else
+      selection.selectTrackTarget(targetId, {
+        clearClipSelection: !options?.preserveClipSelection,
+      });
     bottomPanel.setMode("effects");
     bottomPanel.setOpen(true);
   };
-  const audioEffectChainFromInstrumentPreset = (preset: InstrumentPreset): AudioEffectChainPreset | undefined => {
-    if (!preset.audioEffects || preset.audioEffects.length === 0) return undefined;
+  const audioEffectChainFromInstrumentPreset = (
+    preset: InstrumentPreset,
+  ): AudioEffectChainPreset | undefined => {
+    if (!preset.audioEffects || preset.audioEffects.length === 0)
+      return undefined;
     return {
       id: `instrument-preset:${preset.id}:audio-effects`,
       name: preset.name,
@@ -988,12 +1078,25 @@ const Timeline: Component<TimelineProps> = (props) => {
   ) => {
     const audioEffectChain = audioEffectChainFromInstrumentPreset(preset);
     if (!actions.canSetInstrumentForTarget(targetId)) return false;
-    if (audioEffectChain && !actions.canAddAudioEffectChainToTarget(targetId, audioEffectChain)) return false;
-    if (!actions.setInstrumentForTarget(targetId, preset.instrument)) return false;
+    if (
+      audioEffectChain &&
+      !actions.canAddAudioEffectChainToTarget(targetId, audioEffectChain)
+    )
+      return false;
+    if (!actions.setInstrumentForTarget(targetId, preset.instrument))
+      return false;
     for (const effect of preset.midiEffects ?? []) {
-      if (effect.kind === "arpeggiator" && !actions.setArpeggiatorForTarget(targetId, effect.params)) return false;
+      if (
+        effect.kind === "arpeggiator" &&
+        !actions.setArpeggiatorForTarget(targetId, effect.params)
+      )
+        return false;
     }
-    if (audioEffectChain && !await actions.addAudioEffectChainToTarget(targetId, audioEffectChain)) return false;
+    if (
+      audioEffectChain &&
+      !(await actions.addAudioEffectChainToTarget(targetId, audioEffectChain))
+    )
+      return false;
     return true;
   };
   const handleBrowserDeviceDrop = async (
@@ -1003,78 +1106,127 @@ const Timeline: Component<TimelineProps> = (props) => {
     const actions = deviceInsertActions();
     if (!actions) return;
     if (payload.kind === "audio-effect" && target.kind === "effect-chain") {
-      if (!await actions.addAudioEffectToTarget(target.targetId, payload.effect, target.index)) return;
+      if (
+        !(await actions.addAudioEffectToTarget(
+          target.targetId,
+          payload.effect,
+          target.index,
+        ))
+      )
+        return;
       openEffectsForTarget(target.targetId);
       return;
     }
     if (payload.kind === "audio-effect" && target.kind === "track") {
-      if (!await actions.addAudioEffectToTarget(target.trackId, payload.effect)) return;
+      if (
+        !(await actions.addAudioEffectToTarget(target.trackId, payload.effect))
+      )
+        return;
       openEffectsForTarget(target.trackId);
       return;
     }
     if (payload.kind === "audio-effect" && target.kind === "new-track") {
       const track = await createTimelineTrack();
       if (!track) return;
-      if (!await actions.addAudioEffectToTarget(track.id, payload.effect)) return;
+      if (!(await actions.addAudioEffectToTarget(track.id, payload.effect)))
+        return;
       openEffectsForTarget(track.id);
       return;
     }
-    if (payload.kind === "audio-effect-chain" && target.kind === "effect-chain") {
-      if (!await actions.addAudioEffectChainToTarget(target.targetId, payload.chain, target.index)) return;
+    if (
+      payload.kind === "audio-effect-chain" &&
+      target.kind === "effect-chain"
+    ) {
+      if (
+        !(await actions.addAudioEffectChainToTarget(
+          target.targetId,
+          payload.chain,
+          target.index,
+        ))
+      )
+        return;
       openEffectsForTarget(target.targetId);
       return;
     }
     if (payload.kind === "audio-effect-chain" && target.kind === "track") {
-      if (!await actions.addAudioEffectChainToTarget(target.trackId, payload.chain)) return;
+      if (
+        !(await actions.addAudioEffectChainToTarget(
+          target.trackId,
+          payload.chain,
+        ))
+      )
+        return;
       openEffectsForTarget(target.trackId);
       return;
     }
     if (payload.kind === "audio-effect-chain" && target.kind === "new-track") {
       const track = await createTimelineTrack();
       if (!track) return;
-      if (!await actions.addAudioEffectChainToTarget(track.id, payload.chain)) return;
+      if (!(await actions.addAudioEffectChainToTarget(track.id, payload.chain)))
+        return;
       openEffectsForTarget(track.id);
       return;
     }
     if (payload.kind === "midi-effect" && target.kind === "track") {
-      if (!await actions.addArpeggiatorToTarget(target.trackId)) return;
+      if (!(await actions.addArpeggiatorToTarget(target.trackId))) return;
       openEffectsForTarget(target.trackId);
       return;
     }
     if (payload.kind === "midi-effect" && target.kind === "new-track") {
       const track = await createTimelineTrack({ kind: "instrument" });
       if (!track) return;
-      if (!await actions.addArpeggiatorToTarget(track.id)) return;
+      if (!(await actions.addArpeggiatorToTarget(track.id))) return;
       openEffectsForTarget(track.id);
       return;
     }
     if (payload.kind === "midi-instrument" && target.kind === "track") {
-      if (!actions.switchInstrumentForTarget(target.trackId, payload.instrument)) return;
-      if (!await actions.addMidiClipToTarget(target.trackId)) return;
+      if (
+        !actions.switchInstrumentForTarget(target.trackId, payload.instrument)
+      )
+        return;
+      if (!(await actions.addMidiClipToTarget(target.trackId))) return;
       openEffectsForTarget(target.trackId, { preserveClipSelection: true });
-      if (payload.instrument === "synth") actions.openSynthForTarget(target.trackId);
+      if (payload.instrument === "synth")
+        actions.openSynthForTarget(target.trackId);
       return;
     }
     if (payload.kind === "midi-instrument" && target.kind === "new-track") {
       const track = await createTimelineTrack({ kind: "instrument" });
       if (!track) return;
-      if (!actions.switchInstrumentForTarget(track.id, payload.instrument)) return;
-      if (!await actions.addMidiClipToTarget(track.id)) return;
+      if (!actions.switchInstrumentForTarget(track.id, payload.instrument))
+        return;
+      if (!(await actions.addMidiClipToTarget(track.id))) return;
       openEffectsForTarget(track.id, { preserveClipSelection: true });
       if (payload.instrument === "synth") actions.openSynthForTarget(track.id);
     }
     if (payload.kind === "instrument-preset" && target.kind === "track") {
-      if (!await applyInstrumentPresetToTarget(actions, target.trackId, payload.preset)) return;
+      if (
+        !(await applyInstrumentPresetToTarget(
+          actions,
+          target.trackId,
+          payload.preset,
+        ))
+      )
+        return;
       openEffectsForTarget(target.trackId);
-      if (payload.preset.instrument.kind === "synth") actions.openSynthForTarget(target.trackId);
+      if (payload.preset.instrument.kind === "synth")
+        actions.openSynthForTarget(target.trackId);
       return;
     }
     if (payload.kind === "instrument-preset" && target.kind === "new-track") {
       const track = await createTimelineTrack({ kind: "instrument" });
       if (!track) return;
-      if (!await applyInstrumentPresetToTarget(actions, track.id, payload.preset)) return;
+      if (
+        !(await applyInstrumentPresetToTarget(
+          actions,
+          track.id,
+          payload.preset,
+        ))
+      )
+        return;
       openEffectsForTarget(track.id);
-      if (payload.preset.instrument.kind === "synth") actions.openSynthForTarget(track.id);
+      if (payload.preset.instrument.kind === "synth")
+        actions.openSynthForTarget(track.id);
     }
   };
   const timelineBrowser = useTimelineBrowserController({
@@ -1086,6 +1238,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     canCreateTrack,
     tracks: () => renderTracks(),
     trackLayout,
+    returnTrackLayout: () => trackLayoutModel().returnRows,
+    returnSectionElement: () => returnSectionRef,
+    masterTimelineElement: () => masterTimelineRef,
+    timelineSurfaceElement: () => timelineSurfaceRef,
     scrollElement: () => scrollRef,
     effectsChainElement: () => effectsChainElement,
     currentEffectsTargetId: () => selection.selectedFXTarget(),
@@ -1097,7 +1253,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     if (target?.kind !== "track") return null;
     return target.laneIndex;
   });
-  const browserDropAtNewTrack = createMemo(() => timelineBrowser().devices.dragSession()?.target.kind === "new-track");
+  const browserDropTargetTrackId = createMemo(() => {
+    return getBrowserDropTargetTrackId(
+      timelineBrowser().devices.dragSession()?.target,
+    );
+  });
+  const browserDropAtNewTrack = createMemo(
+    () => timelineBrowser().devices.dragSession()?.target.kind === "new-track",
+  );
   useTimelineAudioLifecycle({
     audioEngine,
     tracks: () => renderTracks(),
@@ -1180,7 +1343,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     onDuplicateSelection: () => {
       void duplicateTimelineSelection();
     },
-    onJumpToClip: (clipId: string, trackId: string, startSec: number) => jumpToClip(trackId, clipId, startSec),
+    onJumpToClip: (clipId: string, trackId: string, startSec: number) =>
+      jumpToClip(trackId, clipId, startSec),
     onInsertSample: (payload: Parameters<typeof handleInsertSample>[0]) => {
       void handleInsertSample(payload);
     },
@@ -1202,13 +1366,15 @@ const Timeline: Component<TimelineProps> = (props) => {
     toggleLoop: () => setLoopEnabled((prev) => !prev),
   }));
 
-  const selectedExportTrackIds = createMemo(() => deriveSelectedExportTrackIds({
-    tracks: renderTracks(),
-    clipTrackIdById: trackLookup().clipTrackIdById,
-    rangeSelection: selection.rangeSelection(),
-    selectedClipIds: selection.selectedClipIds(),
-    primaryTrackId: selection.selectedTrackId() || undefined,
-  }));
+  const selectedExportTrackIds = createMemo(() =>
+    deriveSelectedExportTrackIds({
+      tracks: renderTracks(),
+      clipTrackIdById: trackLookup().clipTrackIdById,
+      rangeSelection: selection.rangeSelection(),
+      selectedClipIds: selection.selectedClipIds(),
+      primaryTrackId: selection.selectedTrackId() || undefined,
+    }),
+  );
 
   const panelsProps = () => ({
     chat: {
@@ -1257,18 +1423,37 @@ const Timeline: Component<TimelineProps> = (props) => {
         bottomPanel.setOpen(true);
       },
       onEffectParamsCommitted: pushEffectParamsHistory,
-      onEffectInstanceParamsReplayChange: (replay: EffectsPanelAudioEffects["replayInstanceParams"] | undefined) => setReplayEffectInstanceParams(() => replay),
+      onEffectInstanceParamsReplayChange: (
+        replay: EffectsPanelAudioEffects["replayInstanceParams"] | undefined,
+      ) => setReplayEffectInstanceParams(() => replay),
       onLocalSaveFailed: localProject.setLocalSaveFailure,
       onDeviceInsertActionsChange: setDeviceInsertActions,
       automationEnvelopes: automation.envelopes(),
-      onSelectAutomationParameter: (targetKey: Track["id"] | "master", parameterId: string, effectInstanceId?: string) => {
-        automation.effectsPanel.selectParameter(targetKey, { parameterId, effectInstanceId });
+      onSelectAutomationParameter: (
+        targetKey: Track["id"] | "master",
+        parameterId: string,
+        effectInstanceId?: string,
+      ) => {
+        automation.effectsPanel.selectParameter(targetKey, {
+          parameterId,
+          effectInstanceId,
+        });
       },
-      onManualAutomationOverride: (targetKey: Track["id"] | "master", parameterId: string, effectInstanceId?: string) => {
+      onManualAutomationOverride: (
+        targetKey: Track["id"] | "master",
+        parameterId: string,
+        effectInstanceId?: string,
+      ) => {
         automation.overrideTarget(
           targetKey === "master"
-            ? automationTargetKey({ kind: "master", effectInstanceId }, parameterId)
-            : automationTargetKey({ kind: "track", trackId: targetKey, effectInstanceId }, parameterId),
+            ? automationTargetKey(
+                { kind: "master", effectInstanceId },
+                parameterId,
+              )
+            : automationTargetKey(
+                { kind: "track", trackId: targetKey, effectInstanceId },
+                parameterId,
+              ),
         );
       },
       onEffectChainElementChange: (element: HTMLElement | undefined) => {
@@ -1352,7 +1537,9 @@ const Timeline: Component<TimelineProps> = (props) => {
       <CloudBackupDialog
         state={localProject.cloudBackupDialog()}
         busy={localProject.cloudBackupBusy()}
-        onOpenChange={(open) => { if (!open) localProject.setCloudBackupDialog(null); }}
+        onOpenChange={(open) => {
+          if (!open) localProject.setCloudBackupDialog(null);
+        }}
         onOverwriteCloud={localProject.overwriteCloudBackup}
         onRestoreCloud={localProject.confirmRestoreCloudBackup}
         onDuplicateCloud={localProject.duplicateCloudBackup}
@@ -1360,11 +1547,24 @@ const Timeline: Component<TimelineProps> = (props) => {
 
       <AppMessageDialog
         state={appMessage()}
-        onOpenChange={(open) => { if (!open) setAppMessage(null); }}
+        onOpenChange={(open) => {
+          if (!open) setAppMessage(null);
+        }}
       />
 
       <TimelineWorkspace
-        containerRef={(el) => { containerRef = el; }}
+        containerRef={(el) => {
+          containerRef = el;
+        }}
+        returnSectionRef={(el) => {
+          returnSectionRef = el;
+        }}
+        masterTimelineRef={(el) => {
+          masterTimelineRef = el;
+        }}
+        timelineSurfaceRef={(el) => {
+          timelineSurfaceRef = el;
+        }}
         scrollRef={(el) => {
           scrollRef = el;
           setScrollElement(el);
@@ -1376,6 +1576,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         tracks={renderTracks()}
         dropAtNewTrack={dropAtNewTrack() || browserDropAtNewTrack()}
         dropTargetLane={browserDropTargetLane() ?? dropTargetLane()}
+        browserDropTargetTrackId={browserDropTargetTrackId()}
         bpm={bpm()}
         gridDenominator={gridDenominator()}
         gridEnabled={gridEnabled()}
@@ -1385,6 +1586,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         playheadSec={playheadSec()}
         onSetLoopRegion={(s, e) => setLoopRegion(s, e)}
         onLanePointerDown={handleLanePointerDown}
+        onReturnPointerDown={handleReturnPointerDown}
         onMasterPointerDown={handleMasterPointerDown}
         onRulerPointerDown={onRulerPointerDown}
         selection={selection}
@@ -1394,7 +1596,8 @@ const Timeline: Component<TimelineProps> = (props) => {
         onAddMidiClipToTrack={addFourBarMidiClipToTrack}
         onDeleteTrack={requestDeleteTrack}
         clipContextMenu={{
-          selectClip: (trackId, clipId) => selection.selectPrimaryClip({ trackId, clipId }),
+          selectClip: (trackId, clipId) =>
+            selection.selectPrimaryClip({ trackId, clipId }),
           duplicateSelectedClips: () => {
             void duplicateSelectedClips();
           },
@@ -1416,12 +1619,14 @@ const Timeline: Component<TimelineProps> = (props) => {
             selectedClip.trackId === match.trackId &&
             bottomPanel.open() &&
             bottomPanel.mode() === "sample-detail"
-          ) return;
+          )
+            return;
           selection.selectPrimaryClip({ trackId: match.trackId, clipId });
           bottomPanel.setMode("sample-detail");
           bottomPanel.setOpen(true);
         }}
         marqueeRect={marqueeRect()}
+        marqueeSurface={marqueeSurface()}
         recording={{
           isRecording: isRecording(),
           previewStartSec: previewStartSec(),
@@ -1455,13 +1660,18 @@ const Timeline: Component<TimelineProps> = (props) => {
               bottomPanel.setOpen(true);
               selection.selectMasterTarget();
             },
-            onToggleCollapsed: () => setMasterCollapsed((collapsed) => !collapsed),
+            onToggleCollapsed: () =>
+              setMasterCollapsed((collapsed) => !collapsed),
             onVolumePreview: (volume) => {
-              automation.overrideTarget(automationTargetKey({ kind: "master" }, "volume"));
+              automation.overrideTarget(
+                automationTargetKey({ kind: "master" }, "volume"),
+              );
               masterVolume.previewVolume(volume);
             },
             onVolumeChange: (volume) => {
-              automation.overrideTarget(automationTargetKey({ kind: "master" }, "volume"));
+              automation.overrideTarget(
+                automationTargetKey({ kind: "master" }, "volume"),
+              );
               masterVolume.commitVolume(volume);
             },
           },
@@ -1476,11 +1686,15 @@ const Timeline: Component<TimelineProps> = (props) => {
           onTrackSendsChange: updateTrackSends,
           onTrackOutputTargetChange: updateTrackOutputTargetId,
           onVolumePreview: (trackId, volume, muted) => {
-            automation.overrideTarget(automationTargetKey({ kind: "track", trackId }, "volume"));
+            automation.overrideTarget(
+              automationTargetKey({ kind: "track", trackId }, "volume"),
+            );
             audioEngine.previewTrackVolume(trackId, volume, muted);
           },
           onVolumeChange: (trackId, volume) => {
-            automation.overrideTarget(automationTargetKey({ kind: "track", trackId }, "volume"));
+            automation.overrideTarget(
+              automationTargetKey({ kind: "track", trackId }, "volume"),
+            );
             setTrackVolume(trackId, volume);
           },
           onToggleMute: handleToggleTrackMute,
@@ -1501,7 +1715,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           onSelectAllClipsInGroup: selectAllClipsInGroup,
         }}
         automation={automation.workspace()}
-        trackLayout={trackLayout()}
+        trackLayout={trackLayoutModel()}
       />
 
       <BrowserDragOverlay session={timelineBrowser().devices.dragSession} />

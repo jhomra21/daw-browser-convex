@@ -1,6 +1,6 @@
 import { parseSharedTimelineOperation } from '@daw-browser/shared'
 
-import { buildRestoreChainMutationArgs } from './timeline-operation-executor'
+import { buildRestoreChainMutationArgs, buildTrackCreateMutationArgs } from './timeline-operation-executor'
 
 declare function test(name: string, run: () => void): void
 declare function expect(value: unknown): {
@@ -43,5 +43,32 @@ test('forwards a parsed restore-chain payload without transport-only fields', ()
         },
       },
     }],
+  })
+})
+
+test('forwards collapsed state when creating a track', () => {
+  const operation = parseSharedTimelineOperation({
+    kind: 'tracks.create',
+    payload: {
+      index: 2,
+      kind: 'audio',
+      channelRole: 'return',
+      collapsed: false,
+      color: '#22c55e',
+      operationId: 'create-1',
+    },
+  })
+  if (!operation || operation.kind !== 'tracks.create') {
+    throw new Error('Expected track-create operation to parse')
+  }
+
+  expect(buildTrackCreateMutationArgs('project-1', operation.payload)).toEqual({
+    projectId: 'project-1',
+    index: 2,
+    kind: 'audio',
+    channelRole: 'return',
+    collapsed: false,
+    color: '#22c55e',
+    operationId: 'create-1',
   })
 })

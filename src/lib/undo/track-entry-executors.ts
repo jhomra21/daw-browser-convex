@@ -75,13 +75,16 @@ export async function applyTrackClipCreateEntry(
 
   let trackId = resolveStoredTrackId(deps.getTracks(), entry.data.track.currentTrackId)
   let createdTrack = false
+  let trackIndex = entry.data.track.index
   if (!trackId) {
-    trackId = await createHistoryTrack(deps, {
+    const createdTrackResult = await createHistoryTrack(deps, {
       trackRef: entry.data.track.trackRef,
       index: entry.data.track.index,
       kind: entry.data.track.kind,
       channelRole: entry.data.track.channelRole,
     })
+    trackId = createdTrackResult.trackId
+    trackIndex = createdTrackResult.index
     createdTrack = true
   }
   assert(trackId, 'Failed to recreate track')
@@ -90,10 +93,10 @@ export async function applyTrackClipCreateEntry(
   deps.actions.insertLocalTrack(createLocalTrack({
     id: trackId,
     historyRef: entry.data.track.trackRef,
-    index: entry.data.track.index,
+    index: trackIndex,
     kind: entry.data.track.kind ?? 'audio',
     channelRole: entry.data.track.channelRole ?? 'track',
-  }), entry.data.track.index)
+  }), trackIndex)
 
   try {
     const clipSnapshot = entry.data.clip
@@ -151,8 +154,9 @@ export async function applyTrackDeleteEntry(
 
   let newTrackId = resolveStoredTrackId(deps.getTracks(), entry.data.recreatedTrackId)
   let createdTrack = false
+  let trackIndex = entry.data.track.index
   if (!newTrackId) {
-    newTrackId = await createHistoryTrack(deps, {
+    const createdTrackResult = await createHistoryTrack(deps, {
       trackRef: entry.data.track.trackRef,
       name: entry.data.track.name,
       index: entry.data.track.index,
@@ -166,6 +170,8 @@ export async function applyTrackDeleteEntry(
       color: entry.data.track.color,
       sends: [],
     })
+    newTrackId = createdTrackResult.trackId
+    trackIndex = createdTrackResult.index
     createdTrack = true
   }
   assert(newTrackId, 'Failed to recreate deleted track')
@@ -190,7 +196,7 @@ export async function applyTrackDeleteEntry(
   deps.actions.insertLocalTrack(createLocalTrack({
     id: newTrackId,
     historyRef: entry.data.track.trackRef,
-    index: entry.data.track.index,
+    index: trackIndex,
     name: entry.data.track.name,
     volume: entry.data.track.volume,
     clips: [],
@@ -203,7 +209,7 @@ export async function applyTrackDeleteEntry(
     color: entry.data.track.color,
     sends: [],
     outputTargetId: undefined,
-  }), entry.data.track.index)
+  }), trackIndex)
 
   try {
     await persistHistoryTrackEffects(deps, newTrackId, entry.data.effects)

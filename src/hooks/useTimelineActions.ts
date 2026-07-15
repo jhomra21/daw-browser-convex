@@ -1,11 +1,12 @@
 import type { Accessor } from 'solid-js'
 
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
-import { assert, isLocalId } from '@daw-browser/shared'
+import { assert, isLocalId, trackCreationCollapsed, trackCreationIndex } from '@daw-browser/shared'
 import { ensureRoomShareLink, getInviteShareUrl } from '~/lib/timeline-share'
 import { PPS } from '~/lib/timeline-utils'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
+import type { TimelineTrackRow } from '~/lib/timeline-repository/types'
 import { loadTrackEffectSnapshot } from '~/lib/track-state-snapshot'
 import { createOptimisticTrack, pushTrackCreateHistory } from '~/lib/tracks'
 import { planAssignTrackColorToClips, planGroupTracks, planMoveTrackToGroup, planResetClipColors, planSetTrackColor, planTrackReorder, planUngroupTracks, type ClipColorUpdate } from '~/lib/track-group-ops'
@@ -29,6 +30,7 @@ type TimelineTrackCreateOptions = {
   channelRole?: 'track' | 'return' | 'group'
   color?: string
   index?: number
+  collapsed?: boolean
 }
 
 type TimelineTrackDefaultColors = {
@@ -88,6 +90,33 @@ type UseTimelineActionsReturn = {
   resetClipColors: (trackId: Track['id']) => Promise<void>
 }
 
+export const projectLocalTrackCreation = (
+  tracks: readonly Track[],
+  createdTrack: Track,
+  creationIndex: number,
+  canonicalRows: readonly TimelineTrackRow[],
+  updateLocalTrack: UseTimelineActionsOptions['creation']['updateLocalTrack'],
+  insertLocalTrack: UseTimelineActionsOptions['creation']['insertLocalTrack'],
+) => {
+  const trackEntryById = new Map(tracks.map((track, index) => [
+    track.id,
+    { track, index },
+  ]))
+  for (const repairedRow of canonicalRows) {
+    if (repairedRow.id === createdTrack.id) continue
+    const entry = trackEntryById.get(repairedRow.id)
+    if (!entry) continue
+    const groupId = repairedRow.groupId ?? undefined
+    if (entry.index === repairedRow.index && entry.track.groupId === groupId) continue
+    updateLocalTrack(
+      entry.track,
+      entry.index,
+      { index: repairedRow.index, groupId },
+    )
+  }
+  insertLocalTrack(createdTrack, creationIndex)
+}
+
 export function useTimelineActions(
   options: UseTimelineActionsOptions,
 ): UseTimelineActionsReturn {
@@ -104,20 +133,35 @@ export function useTimelineActions(
 
     const channelRole = trackOptions.channelRole ?? 'track'
     const color = trackOptions.color ?? (channelRole === 'group' ? options.defaultColors?.group() : options.defaultColors?.track())
-    const index = trackOptions.index ?? options.tracks().length
+    const collapsed = trackCreationCollapsed(channelRole, trackOptions.collapsed)
+    const index = trackCreationIndex(options.tracks(), channelRole, trackOptions.index)
     if (isLocalId('project', projectId)) {
-      const row = await createLocalTimelineRepository(projectId).createTrack({
+      const repository = createLocalTimelineRepository(projectId)
+      const row = await repository.createTrack({
         index,
         kind: trackOptions.kind,
         channelRole,
+        collapsed,
         color,
       })
       if (options.room.projectId() !== projectId) {
-        await createLocalTimelineRepository(projectId).deleteTrack(row.id)
+        await repository.deleteTrack(row.id)
         return null
       }
       const track = toLocalTimelineTrack(row)
-      options.creation.insertLocalTrack(track, index)
+      const snapshot = await repository.loadSnapshot()
+      if (options.room.projectId() !== projectId) {
+        await repository.deleteTrack(row.id)
+        return null
+      }
+      projectLocalTrackCreation(
+        options.tracks(),
+        track,
+        row.index,
+        snapshot.tracks,
+        options.creation.updateLocalTrack,
+        options.creation.insertLocalTrack,
+      )
       options.creation.grantTrackWrite(track.id, { projectId, userId: options.room.userId() })
       if (behavior.pushHistory !== false) {
         pushTrackCreateHistory(options.creation.pushHistory, projectId, options.tracks(), track)
@@ -146,6 +190,7 @@ export function useTimelineActions(
       grantScope: { projectId, userId },
       kind: trackOptions.kind,
       channelRole,
+      collapsed,
       color,
     })
     if (!track) return null

@@ -29,7 +29,8 @@ export const buildTimelineTrackRow = (input: BuildTimelineTrackRowInput): Timeli
   kind: input.kind ?? "audio",
   channelRole: input.channelRole ?? "track",
   groupId: input.groupId,
-  collapsed: input.collapsed,
+  collapsed:
+    input.collapsed ?? (input.channelRole === "return" ? true : undefined),
   color: input.color,
   outputTargetId: input.outputTargetId,
   sends: input.sends ?? [],

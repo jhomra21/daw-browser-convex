@@ -1,5 +1,5 @@
 import { buildLocalClip } from "~/lib/clip-create";
-import { AUDIO_EFFECT_CONTRACTS, assert, buildClipCreatePayload, normalizeAudioWarp, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, type AutomationEnvelope, type ClipCreateSnapshot } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, assert, buildClipCreatePayload, normalizeAudioWarp, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, trackCreationIndex, type AutomationEnvelope, type ClipCreateSnapshot } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
@@ -138,23 +138,26 @@ export const createHistoryTrack = async (
       color: track.color,
       sends: track.sends,
     });
-    return row.id;
+    return { trackId: row.id, index: row.index };
   }
+  const index = trackCreationIndex(deps.getTracks(), track.channelRole, track.index);
   const payload = buildTrackCreateMutationInput({
     projectId: deps.projectId,
-    index: track.index,
+    index,
     kind: track.kind,
     channelRole: track.channelRole,
+    collapsed: track.collapsed,
   });
   const operation = buildSharedTrackCreateOperation({
     index: payload.index,
     kind: payload.kind,
     channelRole: payload.channelRole,
+    collapsed: track.collapsed,
     color: track.color,
   });
   const result = await publishSharedTimelineOperation(deps.projectId, operation);
   assert(typeof result === "string", "Failed to create history track");
-  return result;
+  return { trackId: result, index };
 };
 
 export const persistHistoryTrackGroup = async (

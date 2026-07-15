@@ -17,6 +17,19 @@ export const buildRestoreChainMutationArgs = (
   ...payload,
 })
 
+export const buildTrackCreateMutationArgs = (
+  projectId: string,
+  payload: Extract<SharedTimelineOperation, { kind: 'tracks.create' }>['payload'],
+) => ({
+  projectId,
+  index: payload.index,
+  kind: payload.kind,
+  channelRole: payload.channelRole,
+  collapsed: payload.collapsed,
+  color: payload.color,
+  operationId: payload.operationId,
+})
+
 export class TimelineOperationTargetError extends Error {
   constructor(message: string) {
     super(message)
@@ -59,14 +72,10 @@ export const executeTimelineOperation = async (
 
   switch (operation.kind) {
     case 'tracks.create':
-      return await context.convex.mutation(convexApi.tracks.serverCreate, {
-        projectId: context.projectId,
-        index: operation.payload.index,
-        kind: operation.payload.kind,
-        channelRole: operation.payload.channelRole,
-        color: operation.payload.color,
-        operationId: operation.payload.operationId,
-      })
+      return await context.convex.mutation(
+        convexApi.tracks.serverCreate,
+        buildTrackCreateMutationArgs(context.projectId, operation.payload),
+      )
     case 'tracks.lock':
       return await context.convex.mutation(convexApi.tracks.serverLock, {
         trackId: operation.payload.trackId,

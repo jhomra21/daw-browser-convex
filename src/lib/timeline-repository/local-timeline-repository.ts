@@ -1,5 +1,5 @@
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectEntityRow } from '~/lib/local-project-db'
-import { audioWarpEqual, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, normalizeAudioWarp } from '@daw-browser/shared'
+import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, normalizeAudioWarp } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { flushRegisteredLocalProjectWrites } from '~/lib/local-project-write-flushers'
 import { LocalEntityWriteQueue } from '~/lib/local-write-queue'
@@ -179,43 +179,68 @@ const requireTrackIds = (trackIds: Iterable<TimelineTrackId>, tracks: readonly T
   }
 }
 
+const restoredUngroupGroup = (
+  group: TimelineTrackRow,
+  tracks: readonly TimelineTrackRow[],
+) => ({
+  ...group,
+  index: Math.max(0, Math.min(Math.round(group.index), tracks.length)),
+})
+
+const restoredUngroupTracks = (
+  input: RestoreUngroupInput,
+  tracks: readonly TimelineTrackRow[],
+  group: TimelineTrackRow,
+) => {
+  const childById = new Map(input.children.map((child) => [child.trackId, child]))
+  return [
+    ...tracks.map((track) => {
+      const child = childById.get(track.id)
+      return {
+        ...track,
+        index: track.index >= group.index ? track.index + 1 : track.index,
+        groupId: child ? group.id : track.groupId,
+        outputTargetId: child ? (child.outputToGroup ? group.id : child.outputTargetId) : track.outputTargetId,
+      }
+    }),
+    group,
+  ]
+}
+
 const requireValidRestoreUngroup = (
   input: RestoreUngroupInput,
   tracks: readonly TimelineTrackRow[],
+  group: TimelineTrackRow,
 ) => {
-  if (input.group.channelRole !== 'group') {
+  if (group.channelRole !== 'group') {
     throw new Error('Failed to restore local group because the restored track is not a group.')
   }
   const childIds = new Set(input.children.map((child) => child.trackId))
   if (childIds.size !== input.children.length) {
     throw new Error('Failed to restore local group because a child track was repeated.')
   }
-  if (input.group.groupId && childIds.has(input.group.groupId)) {
+  if (group.groupId && childIds.has(group.groupId)) {
     throw new Error('Failed to restore local group because its parent cannot be one of its children.')
   }
 
-  const childById = new Map(input.children.map((child) => [child.trackId, child]))
-  const restoredTracks = tracks.map((track) => {
-    const child = childById.get(track.id)
-    return child
-      ? { ...track, groupId: input.group.id, outputTargetId: child.outputToGroup ? input.group.id : child.outputTargetId }
-      : track
-  })
-  const projectedTracks = [...restoredTracks, input.group]
+  const projectedTracks = restoredUngroupTracks(input, tracks, group)
   const projectedTrackById = new Map(projectedTracks.map((track) => [track.id, track]))
+  if (!hasValidReturnTrackPartition(projectedTracks)) {
+    throw new Error('Failed to restore local group because Return tracks must remain ungrouped at the end.')
+  }
   if (hasTrackGroupCycle(projectedTracks)) {
     throw new Error('Failed to restore local group because its hierarchy contains a cycle.')
   }
 
   const groupRouting = normalizeTrackRouting({
-    track: input.group,
-    sends: input.group.sends,
-    outputTargetId: input.group.outputTargetId,
+    track: group,
+    sends: group.sends,
+    outputTargetId: group.outputTargetId,
     tracks: projectedTracks,
   })
   if (
-    groupRouting.outputTargetId !== input.group.outputTargetId
-    || !sendsEqual(groupRouting.sends, input.group.sends)
+    groupRouting.outputTargetId !== group.outputTargetId
+    || !sendsEqual(groupRouting.sends, group.sends)
   ) {
     throw new Error('Failed to restore local group because its routing is invalid.')
   }
@@ -224,7 +249,7 @@ const requireValidRestoreUngroup = (
     if (!track) {
       throw new Error('Failed to restore local group because a child track was not found.')
     }
-    const expectedOutputTargetId = child.outputToGroup ? input.group.id : child.outputTargetId
+    const expectedOutputTargetId = child.outputToGroup ? group.id : child.outputTargetId
     const routing = normalizeTrackRouting({
       track,
       sends: track.sends,
@@ -385,33 +410,38 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
     const tracks = trackValues(await db.getAllFromIndex('entities', 'by-kind', TRACK_KIND))
+      .sort((left, right) => left.index - right.index)
     const timestamp = now()
-    const index = input.index ?? tracks.length
+    const channelRole = input.channelRole ?? 'track'
+    const creation = canonicalTrackCreation(tracks, channelRole, input.index)
     const id = input.id ?? createLocalTrackId()
     const track = buildTimelineTrackRow({
       id,
       historyRef: input.historyRef,
       name: input.name,
-      index,
+      index: creation.creationIndex,
       volume: input.volume,
       muted: input.muted,
       soloed: input.soloed,
       kind: input.kind,
-      channelRole: input.channelRole,
-      groupId: input.groupId,
+      channelRole,
+      groupId: channelRole === 'return' ? undefined : input.groupId,
       collapsed: input.collapsed,
       color: input.color,
       outputTargetId: input.outputTargetId,
       sends: input.sends,
       timestamp,
     })
+    const trackById = new Map(tracks.map((row) => [row.id, row]))
     const tx = db.transaction('entities', 'readwrite')
     await Promise.all([
-      ...tracks
-        .filter((row) => row.id !== track.id && row.index >= index)
+      ...creation.existingTracks
+        .filter((row) => {
+          const previous = trackById.get(row.id)
+          return previous?.index !== row.index || previous.groupId !== row.groupId
+        })
         .map((row) => tx.store.put(toEntityRow(TRACK_KIND, row.id, {
           ...row,
-          index: row.index + 1,
           updatedAt: timestamp,
         }, timestamp))),
       tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp)),
@@ -468,6 +498,9 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
         : Promise.resolve([]),
     ])
     if (!row || !isTrackRow(row.value)) return null
+    if (row.value.channelRole === 'return' && input.groupId !== undefined && input.groupId !== null) {
+      throw new Error('Return tracks cannot belong to a group.')
+    }
     const timestamp = now()
     const routing = input.sends !== undefined || input.outputTargetId !== undefined
       ? normalizeTrackRouting({
@@ -644,6 +677,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     const tx = db.transaction('entities', 'readwrite')
     const rows = await tx.store.index('by-kind').getAll(TRACK_KIND)
     const tracks = trackValues(rows)
+      .sort((left, right) => left.index - right.index)
     const trackById = new Map(tracks.map((track) => [track.id, track]))
     const updateById = new Map(updates.map((update) => [update.trackId, update]))
     requireTrackIds(updates.map((update) => update.trackId), tracks)
@@ -674,6 +708,9 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
         ? track
         : { ...track, outputTargetId: routing.outputTargetId, sends: routing.sends }
     })
+    if (!hasValidReturnTrackPartition(nextTracks)) {
+      throw new Error('Failed to reorder local timeline because Return tracks must remain ungrouped at the end.')
+    }
     const changedTracks = nextTracks.flatMap((track) => {
       const previous = trackById.get(track.id)
       if (!previous || trackPersistenceFieldsEqual(previous, track)) return []
@@ -754,7 +791,8 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     if (input.group.groupId) requireTrackIds([input.group.groupId], tracks)
     requireTrackIds(input.group.sends.map((send) => send.targetId), tracks)
     if (input.group.outputTargetId) requireTrackIds([input.group.outputTargetId], tracks)
-    requireValidRestoreUngroup(input, tracks)
+    const restoredGroup = restoredUngroupGroup(input.group, tracks)
+    requireValidRestoreUngroup(input, tracks, restoredGroup)
     const sidechainRoutes = input.sidechainRoutes.map((route) => ({
       sourceTrackId: route.sourceTrackId ?? input.group.id,
       targetTrackId: route.targetTrackId ?? input.group.id,
@@ -791,20 +829,22 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
         throw new Error('Sidechain target must identify exactly one compressor, gate, or spectral instance.')
       }
     }
-    const childById = new Map(input.children.map((child) => [child.trackId, child]))
     const timestamp = now()
-    const restoredGroup = { ...input.group, createdAt: timestamp, updatedAt: timestamp }
-    const changedTracks = tracks.flatMap((track) => {
-      const child = childById.get(track.id)
-      const index = track.index >= restoredGroup.index ? track.index + 1 : track.index
-      const groupId = child ? restoredGroup.id : track.groupId
-      const outputTargetId = child ? (child.outputToGroup ? restoredGroup.id : child.outputTargetId) : track.outputTargetId
-      return index === track.index && groupId === track.groupId && outputTargetId === track.outputTargetId
-        ? []
-        : [{ ...track, index, groupId, outputTargetId, updatedAt: timestamp }]
-    })
+    const persistedGroup = { ...restoredGroup, createdAt: timestamp, updatedAt: timestamp }
+    const existingTrackById = new Map(tracks.map((track) => [track.id, track]))
+    const changedTracks = restoredUngroupTracks(input, tracks, restoredGroup)
+      .flatMap((track) => {
+        if (track.id === restoredGroup.id) return []
+        const previous = existingTrackById.get(track.id)
+        return previous
+          && track.index === previous.index
+          && track.groupId === previous.groupId
+          && track.outputTargetId === previous.outputTargetId
+          ? []
+          : [{ ...track, updatedAt: timestamp }]
+      })
     await Promise.all([
-      tx.store.put(toEntityRow(TRACK_KIND, restoredGroup.id, restoredGroup, timestamp)),
+      tx.store.put(toEntityRow(TRACK_KIND, persistedGroup.id, persistedGroup, timestamp)),
       ...changedTracks.map((track) => tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))),
       ...input.effects.map((effect) => tx.store.put(toEntityRow(EFFECT_KIND, effect.id, effect, timestamp))),
       ...input.automation.map((envelope) => tx.store.put(toEntityRow(AUTOMATION_KIND, envelope.targetKey, envelope, timestamp))),

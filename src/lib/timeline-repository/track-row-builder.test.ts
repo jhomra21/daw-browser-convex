@@ -24,4 +24,26 @@ describe('buildTimelineTrackRow', () => {
       channelRole: 'return',
     })
   })
+
+  test('defaults returns to collapsed without changing normal track defaults', () => {
+    expect(buildTimelineTrackRow({
+      id: 'return',
+      index: 0,
+      channelRole: 'return',
+      timestamp: 1,
+    }).collapsed).toBe(true)
+    expect(buildTimelineTrackRow({
+      id: 'expanded-return',
+      index: 1,
+      channelRole: 'return',
+      collapsed: false,
+      timestamp: 1,
+    }).collapsed).toBe(false)
+    expect(buildTimelineTrackRow({
+      id: 'normal',
+      index: 2,
+      channelRole: 'track',
+      timestamp: 1,
+    }).collapsed).toBeUndefined()
+  })
 })

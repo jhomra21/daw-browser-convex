@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildGroupClipOverview, buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks, trackIdsInYRange, trackIndexAtY, trackLayoutRowAtY, wouldCreateCycle } from './timeline-track-layout'
+import { buildGroupClipOverview, buildTimelineTrackLayout, buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks, trackIdsInYRange, trackIndexAtY, trackLayoutRowAtY, wouldCreateCycle } from './timeline-track-layout'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { COLLAPSED_LANE_HEIGHT, LANE_HEIGHT } from '~/lib/timeline-utils'
 
@@ -81,6 +81,44 @@ describe('timeline track layout grouping', () => {
     expect(rows[0]?.automationHeightPx).toBe(0)
     expect(rows[1]?.topPx).toBe(COLLAPSED_LANE_HEIGHT)
     expect(rows[1]?.heightPx).toBe(LANE_HEIGHT + 48)
+  })
+
+  test('partitions Return tracks into an independent zero-based layout', () => {
+    const normal = track('normal')
+    const returnTrack: Track = { ...track('return', undefined, true), channelRole: 'return' }
+    const layout = buildTimelineTrackLayout({
+      tracks: [returnTrack, normal],
+      visibleTrackIds: ['return', 'normal'],
+      visibleByTrackId: { return: true },
+      heightsByLaneOwnerKey: { return: 48 },
+      visibleParameterIdsByTrackId: { return: ['volume'] },
+    })
+
+    expect(layout.displayTrackIds).toEqual(['normal', 'return'])
+    expect(layout.scrollingRows[0]?.topPx).toBe(0)
+    expect(layout.returnRows[0]?.topPx).toBe(0)
+    expect(layout.returnRows[0]?.automationHeightPx).toBe(0)
+    expect(layout.returnHeightPx).toBe(COLLAPSED_LANE_HEIGHT)
+  })
+
+  test('keeps expanded Return automation in the sticky layout', () => {
+    const normal = track('normal')
+    const returnTrack: Track = { ...track('return'), channelRole: 'return', collapsed: false }
+    const layout = buildTimelineTrackLayout({
+      tracks: [returnTrack, normal],
+      visibleTrackIds: ['return', 'normal'],
+      visibleByTrackId: { return: true },
+      heightsByLaneOwnerKey: { return: 48 },
+      visibleParameterIdsByTrackId: { return: ['volume', 'pan'] },
+    })
+
+    expect(layout.returnRows[0]).toMatchObject({
+      trackId: 'return',
+      topPx: 0,
+      automationHeightPx: 96,
+      heightPx: LANE_HEIGHT + 96,
+    })
+    expect(layout.returnHeightPx).toBe(LANE_HEIGHT + 96)
   })
 
   test('trackLayoutRowAtY finds rows by y position', () => {

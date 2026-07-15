@@ -146,7 +146,7 @@ type SharedModulationEffectEnvelope =
   | { effect: 'lofi'; params: LoFiParamsEnvelope }
 
 export type SharedTimelineOperation =
-  | { kind: 'tracks.create'; payload: { index?: number; kind?: string; channelRole?: string; color?: string; operationId?: string } }
+  | { kind: 'tracks.create'; payload: { index?: number; kind?: string; channelRole?: string; collapsed?: boolean; color?: string; operationId?: string } }
   | { kind: 'tracks.lock'; payload: { trackId: string } }
   | { kind: 'tracks.unlock'; payload: { trackId: string } }
   | { kind: 'clips.create'; payload: SharedTimelineClipCreatePayload }
@@ -625,6 +625,7 @@ const parseTrackCreate = (payload: Record<string, unknown>): SharedTimelineOpera
     index: readOptionalNumber(payload.index),
     kind: readOptionalString(payload.kind),
     channelRole: readOptionalString(payload.channelRole),
+    collapsed: readOptionalBoolean(payload.collapsed),
     color: readOptionalString(payload.color),
     operationId: readOptionalString(payload.operationId),
   },

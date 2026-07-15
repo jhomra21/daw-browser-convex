@@ -3,7 +3,7 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { AUDIO_EFFECT_ORDER, assert, assertDefined, type AutomationEnvelope } from '@daw-browser/shared'
+import { AUDIO_EFFECT_ORDER, assert, assertDefined, trackCreationCollapsed, type AutomationEnvelope } from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
@@ -148,14 +148,17 @@ async function applyTrackGroupEntry(entry: Extract<HistoryEntry, { type: 'track-
   }
 
   let groupTrackId = resolveTrackId(index, entry.data.groupTrackRef) ?? resolveStoredTrackId(deps.getTracks(), entry.data.currentGroupTrackId)
+  let groupTrackIndex = entry.data.groupTrack.index
   if (!groupTrackId) {
-    groupTrackId = await createHistoryTrack(deps, {
+    const createdTrack = await createHistoryTrack(deps, {
       trackRef: entry.data.groupTrackRef,
       index: entry.data.groupTrack.index,
       name: entry.data.groupTrack.name,
       channelRole: 'group',
       color: entry.data.groupTrack.color,
     })
+    groupTrackId = createdTrack.trackId
+    groupTrackIndex = createdTrack.index
   }
   assert(groupTrackId, 'Failed to recreate group track')
   entry.data.currentGroupTrackId = groupTrackId
@@ -163,11 +166,11 @@ async function applyTrackGroupEntry(entry: Extract<HistoryEntry, { type: 'track-
   deps.actions.insertLocalTrack(createLocalTrack({
     id: groupTrackId,
     historyRef: entry.data.groupTrackRef,
-    index: entry.data.groupTrack.index,
+    index: groupTrackIndex,
     name: entry.data.groupTrack.name,
     channelRole: 'group',
     color: entry.data.groupTrack.color,
-  }), entry.data.groupTrack.index)
+  }), groupTrackIndex)
   const childRefIndex = buildRefIndex(deps)
   for (const child of entry.data.childUpdates) {
     const trackId = requireResolved(resolveTrackId(childRefIndex, child.trackRef), 'Child track not found for track-group redo')
@@ -610,14 +613,19 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       }
 
       let newId = resolveStoredTrackId(deps.getTracks(), entry.data.currentTrackId)
+      const collapsed = trackCreationCollapsed(entry.data.channelRole, entry.data.collapsed)
+      let index = entry.data.index
       if (!newId) {
-        newId = await createHistoryTrack(deps, {
+        const createdTrack = await createHistoryTrack(deps, {
           trackRef: entry.data.trackRef,
           index: entry.data.index,
           kind: entry.data.kind,
           channelRole: entry.data.channelRole,
+          collapsed,
           color: entry.data.color,
         })
+        newId = createdTrack.trackId
+        index = createdTrack.index
       }
       assert(newId, 'Failed to recreate track')
       entry.data.currentTrackId = newId
@@ -625,11 +633,12 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       deps.actions.insertLocalTrack(createLocalTrack({
         id: newId,
         historyRef: entry.data.trackRef,
-        index: entry.data.index,
+        index,
         kind: entry.data.kind ?? 'audio',
         channelRole: entry.data.channelRole ?? 'track',
+        collapsed,
         color: entry.data.color,
-      }), entry.data.index)
+      }), index)
       return
     }
 

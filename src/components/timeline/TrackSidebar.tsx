@@ -976,7 +976,9 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                   style={{
                     height: `${clipLaneHeightPx()}px`,
                     "padding-left": `${4 + depth() * GROUP_INDENT_PX}px`,
-                    "grid-template-columns": "minmax(72px, 96px) minmax(96px, 1fr) 92px",
+                    "grid-template-columns": track.collapsed
+                      ? "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)"
+                      : "minmax(72px, 96px) minmax(96px, 1fr) 92px",
                   }}
                 >
                   <div class="flex min-w-0 items-center gap-1 overflow-hidden">
@@ -1244,8 +1246,20 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     </div>
                   </Show>
 
-                  <div class="track-row-control-panel flex items-center gap-2">
-                    <div class="track-row-control-stack flex shrink-0 flex-col gap-1">
+                  <div
+                    class={cn(
+                      "track-row-control-panel flex items-center",
+                      track.collapsed ? "min-w-0 w-full gap-1" : "gap-2",
+                    )}
+                    style={track.collapsed ? { width: "100%" } : {}}
+                  >
+                    <div
+                      class={cn(
+                        "track-row-control-stack flex flex-col gap-1",
+                        track.collapsed ? "min-w-0 flex-1" : "shrink-0",
+                      )}
+                      style={track.collapsed ? { width: "auto" } : {}}
+                    >
                       <Show when={!track.collapsed}>
                         <div class="grid grid-cols-4 gap-1">
                           <button

@@ -18,7 +18,7 @@ export type MasterSidebarModel = {
   onVolumeChange: (volume: number) => void;
 };
 
-export const MASTER_ROW_HEIGHT = Math.round(LANE_HEIGHT / 2);
+const MASTER_ROW_HEIGHT = Math.round(LANE_HEIGHT / 2);
 export const masterRowHeight = (collapsed: boolean) =>
   collapsed ? MASTER_ROW_HEIGHT : LANE_HEIGHT;
 

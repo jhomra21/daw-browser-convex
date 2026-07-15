@@ -290,6 +290,7 @@ const createTrackForUser = async (
     index?: number
     kind?: string
     channelRole?: string
+    collapsed?: boolean
     color?: string
     operationId?: string
   },
@@ -301,14 +302,17 @@ const createTrackForUser = async (
     isResult: (value): value is string => typeof value === "string",
     run: async () => {
       await requireProjectRole(ctx, input.projectId, input.userId, ["owner", "editor"]);
-      const existing = await ctx.db
-        .query("tracks")
-        .withIndex("by_room_index", (q: any) => q.eq("projectId", input.projectId))
-        .collect();
-      let nextIndex = existing.length;
-      if (input.index !== undefined) {
-        nextIndex = Math.max(0, Math.min(input.index, existing.length));
-      }
+      const existing = await listProjectTracksWithMixerChannels(ctx, input.projectId);
+      const channelRole = sanitizeChannelRole(input.channelRole);
+      const firstReturnIndex = existing.findIndex((track) => track.channelRole === "return");
+      const nonReturnEnd = firstReturnIndex < 0 ? existing.length : firstReturnIndex;
+      const partitionStart = channelRole === "return"
+        ? nonReturnEnd
+        : 0;
+      const partitionEnd = channelRole === "return" ? existing.length : nonReturnEnd;
+      const nextIndex = input.index === undefined
+        ? partitionEnd
+        : Math.max(partitionStart, Math.min(input.index, partitionEnd));
       for (let existingIndex = existing.length - 1; existingIndex >= 0; existingIndex -= 1) {
         const track = existing[existingIndex];
         if (track.index < nextIndex) break;
@@ -318,12 +322,13 @@ const createTrackForUser = async (
         projectId: input.projectId,
         index: nextIndex,
         kind: input.kind,
+        collapsed: input.collapsed ?? channelRole === "return",
         color: input.color,
       });
       await ctx.db.insert(
         "mixerChannels",
         buildMixerChannelInsert(input.projectId, trackId, {
-          channelRole: sanitizeChannelRole(input.channelRole),
+          channelRole,
         }),
       );
       await ctx.db.insert("ownerships", {
@@ -479,10 +484,10 @@ const unlockTrackForUser = async (ctx: any, trackId: any, userId: string) => {
 }
 
 export const create = mutation({
-  args: { projectId: v.string(), index: v.optional(v.number()), kind: v.optional(v.string()), channelRole: v.optional(v.string()), color: v.optional(v.string()), operationId: v.optional(v.string()) },
-  handler: async (ctx, { projectId, index, kind, channelRole, color, operationId }) => {
+  args: { projectId: v.string(), index: v.optional(v.number()), kind: v.optional(v.string()), channelRole: v.optional(v.string()), collapsed: v.optional(v.boolean()), color: v.optional(v.string()), operationId: v.optional(v.string()) },
+  handler: async (ctx, { projectId, index, kind, channelRole, collapsed, color, operationId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    return await createTrackForUser(ctx, { projectId, userId, index, kind, channelRole, color, operationId });
+    return await createTrackForUser(ctx, { projectId, userId, index, kind, channelRole, collapsed, color, operationId });
   },
 });
 
@@ -492,12 +497,13 @@ export const serverCreate = mutation({
     index: v.optional(v.number()),
     kind: v.optional(v.string()),
     channelRole: v.optional(v.string()),
+    collapsed: v.optional(v.boolean()),
     color: v.optional(v.string()),
     operationId: v.optional(v.string()),
   },
-  handler: async (ctx, { projectId, index, kind, channelRole, color, operationId }) => {
+  handler: async (ctx, { projectId, index, kind, channelRole, collapsed, color, operationId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    return await createTrackForUser(ctx, { projectId, userId, index, kind, channelRole, color, operationId });
+    return await createTrackForUser(ctx, { projectId, userId, index, kind, channelRole, collapsed, color, operationId });
   },
 });
 

@@ -64,7 +64,7 @@ import DeleteTrackDialog from "./timeline/delete-track-dialog";
 import TimelineWorkspace from "./timeline/timeline-workspace";
 import { Dashboard } from "~/components/dashboard/dashboard";
 import type { DashboardTimelineModel, DashboardView } from "~/components/dashboard/types";
-import { buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks } from "~/lib/timeline-track-layout";
+import { buildTimelineTrackLayout, buildTrackTree, computeDepthMap, flattenVisibleTracks } from "~/lib/timeline-track-layout";
 import { useAppPreferences } from "~/context/app-preferences";
 import { deriveSelectedExportTrackIds } from "~/lib/export/export-settings";
 
@@ -513,6 +513,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   let fileInputRef: HTMLInputElement | undefined;
   let archiveInputRef: HTMLInputElement | undefined;
   let containerRef: HTMLDivElement | undefined;
+  let returnSectionRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
   let effectsChainElement: HTMLElement | undefined;
 
@@ -606,13 +607,13 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
   });
 
-  const trackLayout = createMemo(() => {
+  const trackLayoutModel = createMemo(() => {
     const lanes = automation.workspace().lanes;
     const tracks = renderTracks();
     const tree = buildTrackTree(tracks);
     const collapsedById = new Map(tracks.map((track) => [track.id, track.collapsed === true]));
     const visibleTrackIds = flattenVisibleTracks(tree, collapsedById);
-    return buildTimelineTrackLayoutRows({
+    return buildTimelineTrackLayout({
       tracks,
       visibleTrackIds,
       depthByTrackId: computeDepthMap(tree),
@@ -621,6 +622,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       visibleParameterIdsByTrackId: lanes.visibleTargetKeysByTrackId,
     });
   });
+  const trackLayout = createMemo(() => trackLayoutModel().scrollingRows);
 
   const selectAllClipsInGroup = (groupId: Track["id"]) => {
     const descendantIds = collectTrackDescendantIds(renderTracks(), groupId);
@@ -780,6 +782,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const timelineSelection = useTimelineSelection({
     tracks: () => renderTracks(),
     trackLayout,
+    displayTrackIds: () => trackLayoutModel().displayTrackIds,
     selection,
     bpm,
     gridDenominator,
@@ -790,6 +793,17 @@ const Timeline: Component<TimelineProps> = (props) => {
   const marqueeRect = timelineSelection.marqueeRect;
   const onLanePointerDown = timelineSelection.onLanePointerDown;
   extendRangeSelectionToPointer = timelineSelection.extendRangeSelectionToPointer;
+  const handleReturnPointerDown: JSX.EventHandler<HTMLDivElement, PointerEvent> = (event) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    bottomPanel.setMode("effects");
+    bottomPanel.setOpen(true);
+    const trackId = event.currentTarget.dataset.trackId;
+    if (!trackId) return;
+    if (extendRangeSelectionToPointer(event, scrollRef, trackId)) return;
+    selection.selectTrackTarget(trackId, { clearClipSelection: true });
+    startScrub(event.clientX);
+  };
 
   const recordingControls = useTrackRecording({
     audioEngine,
@@ -1086,6 +1100,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     canCreateTrack,
     tracks: () => renderTracks(),
     trackLayout,
+    returnTrackLayout: () => trackLayoutModel().returnRows,
+    returnSectionElement: () => returnSectionRef,
     scrollElement: () => scrollRef,
     effectsChainElement: () => effectsChainElement,
     currentEffectsTargetId: () => selection.selectedFXTarget(),
@@ -1365,6 +1381,7 @@ const Timeline: Component<TimelineProps> = (props) => {
 
       <TimelineWorkspace
         containerRef={(el) => { containerRef = el; }}
+        returnSectionRef={(el) => { returnSectionRef = el; }}
         scrollRef={(el) => {
           scrollRef = el;
           setScrollElement(el);
@@ -1385,6 +1402,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         playheadSec={playheadSec()}
         onSetLoopRegion={(s, e) => setLoopRegion(s, e)}
         onLanePointerDown={handleLanePointerDown}
+        onReturnPointerDown={handleReturnPointerDown}
         onMasterPointerDown={handleMasterPointerDown}
         onRulerPointerDown={onRulerPointerDown}
         selection={selection}
@@ -1501,7 +1519,8 @@ const Timeline: Component<TimelineProps> = (props) => {
           onSelectAllClipsInGroup: selectAllClipsInGroup,
         }}
         automation={automation.workspace()}
-        trackLayout={trackLayout()}
+        scrollingTrackLayout={trackLayout()}
+        returnTrackLayout={trackLayoutModel().returnRows}
       />
 
       <BrowserDragOverlay session={timelineBrowser().devices.dragSession} />

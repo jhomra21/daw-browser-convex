@@ -66,7 +66,8 @@ type TrackSidebarProps = {
     tracks: Track[];
     allTracks: Track[];
     trackById: ReadonlyMap<string, Track>;
-    trackLayout: TimelineTrackLayoutRow[];
+    scrollingTrackLayout: TimelineTrackLayoutRow[];
+    returnTrackLayout: TimelineTrackLayoutRow[];
     scrollElement: () => HTMLDivElement | undefined;
     selectedTrackId: Track["id"] | "";
     selectedTrackIds: readonly Track["id"][];
@@ -152,6 +153,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const [suppressTrackClickId, setSuppressTrackClickId] =
     createSignal<Track["id"]>();
   let cleanupAutomationResize: (() => void) | undefined;
+  let returnSectionElement: HTMLDivElement | undefined;
 
   createEffect(() => {
     const unsubscribe = sidebar().subscribeTrackLevels((levelsByTrackId) => {
@@ -200,14 +202,27 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         ]),
       ),
   );
+  const allTrackLayout = createMemo(() => [
+    ...sidebar().scrollingTrackLayout,
+    ...sidebar().returnTrackLayout,
+  ]);
   const depthByTrackId = createMemo(
-    () => new Map(sidebar().trackLayout.map((row) => [row.trackId, row.depth])),
+    () => new Map(allTrackLayout().map((row) => [row.trackId, row.depth])),
   );
   const layoutByTrackId = createMemo(
-    () => new Map(sidebar().trackLayout.map((row) => [row.trackId, row])),
+    () => new Map(allTrackLayout().map((row) => [row.trackId, row])),
   );
   const visibleTrackIds = createMemo(
-    () => new Set(sidebar().trackLayout.map((row) => row.trackId)),
+    () => new Set(allTrackLayout().map((row) => row.trackId)),
+  );
+  const scrollingTracks = createMemo(() =>
+    sidebar().tracks.filter((track) => getTrackChannelRole(track) !== "return"),
+  );
+  const visibleReturnTracks = createMemo(() =>
+    sidebar().returnTrackLayout.flatMap((row) => {
+      const track = sidebar().trackById.get(row.trackId);
+      return track ? [track] : [];
+    }),
   );
   const defaultGroupColor = () => appPreferences.timeline.defaultGroupColor();
   const resolveGroupColor = (color: string | undefined) => {
@@ -246,7 +261,9 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     }
     return bandsByTrackId;
   });
-  const returnTracks = createMemo(() => getReturnSendTargets(sidebar().allTracks));
+  const returnTracks = createMemo(() =>
+    getReturnSendTargets(sidebar().allTracks),
+  );
   const returnTrackNames = createMemo(
     () =>
       new Map<string, string>(
@@ -283,7 +300,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         automatedTargetKeys: new Set<string>(),
       };
       existing.automatedTargetKeys.add(envelope.targetKey);
-      if (envelope.parameterId === "volume" && envelope.target.effectInstanceId === undefined) {
+      if (
+        envelope.parameterId === "volume" &&
+        envelope.target.effectInstanceId === undefined
+      ) {
         existing.volumeEnvelope = envelope;
         existing.volumeRange = automationEnvelopeValueRange(envelope, {
           min: 0,
@@ -308,8 +328,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       automatedTargetKeys: new Set<string>(),
       selectedEnvelope: undefined,
     };
-    const selected =
-      props.automation.lanes.selectedTargetsByOwnerKey.master ?? { parameterId: "volume" };
+    const selected = props.automation.lanes.selectedTargetsByOwnerKey
+      .master ?? { parameterId: "volume" };
     const selectedTargetKey = automationTargetKey(
       { kind: "master", effectInstanceId: selected.effectInstanceId },
       selected.parameterId,
@@ -328,13 +348,36 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       props.automation.lanes.masterVisible,
       props.automation.lanes.masterHeight,
     );
+  const returnAreaHeight = () => {
+    const last = sidebar().returnTrackLayout.at(-1);
+    return last ? last.topPx + last.heightPx : 0;
+  };
+  const scrollingDragTarget = () => {
+    const drag = trackDrag();
+    if (!drag?.dragging || !drag.target) return undefined;
+    const targetTrack = sidebar().trackById.get(drag.target.trackId);
+    if (!targetTrack) return undefined;
+    return getTrackChannelRole(targetTrack) === "return"
+      ? undefined
+      : drag.target;
+  };
+  const returnDragTarget = () => {
+    const drag = trackDrag();
+    if (!drag?.dragging || !drag.target) return undefined;
+    const targetTrack = sidebar().trackById.get(drag.target.trackId);
+    if (!targetTrack) return undefined;
+    return getTrackChannelRole(targetTrack) === "return"
+      ? drag.target
+      : undefined;
+  };
   const actualOutputTargetId = (track: Track) => track.outputTargetId ?? "";
   const selectedOutputTargetId = (track: Track) =>
     selectedOutputTargets().get(track.id) ?? actualOutputTargetId(track);
   const outputTargetName = (track: Track) =>
     groupTrackNames().get(selectedOutputTargetId(track)) ?? "Master";
   const actualSendTargetId = (track: Track) => {
-    const targetId = track.sends?.find((send) => send.amount > 0.0001)?.targetId ?? "";
+    const targetId =
+      track.sends?.find((send) => send.amount > 0.0001)?.targetId ?? "";
     return resolveSendTargetId(targetId, undefined, returnTracks());
   };
   const selectedSendTargetId = (track: Track) =>
@@ -397,16 +440,43 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     );
   };
 
-  const dropTargetAt = (clientY: number): TrackDropTarget | undefined => {
+  const dropTargetAt = (
+    clientY: number,
+    movingReturns: boolean,
+  ): TrackDropTarget | undefined => {
+    const returnSection = returnSectionElement;
+    if (returnSection) {
+      const rect = returnSection.getBoundingClientRect();
+      if (clientY >= rect.top && clientY < rect.bottom) {
+        if (!movingReturns) return undefined;
+        const row = trackLayoutRowAtY(
+          sidebar().returnTrackLayout,
+          clientY - rect.top,
+        );
+        if (!row) return undefined;
+        return {
+          trackId: row.trackId,
+          zone: resolveTrackDropZone({
+            localY: clientY - rect.top - row.topPx,
+            rowHeightPx: row.heightPx,
+            targetIsGroup: false,
+          }),
+        };
+      }
+    }
+    if (movingReturns) return undefined;
     const scrollElement = sidebar().scrollElement();
     if (!scrollElement) return undefined;
     const rect = scrollElement.getBoundingClientRect();
     const localY =
       clientY - rect.top + (scrollElement.scrollTop || 0) - RULER_HEIGHT;
-    const row = trackLayoutRowAtY(sidebar().trackLayout, localY);
+    const row = trackLayoutRowAtY(sidebar().scrollingTrackLayout, localY);
     if (!row) return undefined;
     const track = sidebar().trackById.get(row.trackId);
-    assert(track, `Timeline layout row references missing track ${row.trackId}`);
+    assert(
+      track,
+      `Timeline layout row references missing track ${row.trackId}`,
+    );
     return {
       trackId: row.trackId,
       zone: resolveTrackDropZone({
@@ -429,9 +499,15 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     if (event.button !== 0) return;
     const selectedTrackIds = sidebar().selectedTrackIds;
     const trackAlreadySelected = selectedTrackIds.includes(trackId);
+    const movingReturns =
+      sidebar().trackById.get(trackId)?.channelRole === "return";
     const activeSelection = trackAlreadySelected
-      ? selectedTrackIds.filter((selectedTrackId) =>
-          visibleTrackIds().has(selectedTrackId),
+      ? selectedTrackIds.filter(
+          (selectedTrackId) =>
+            visibleTrackIds().has(selectedTrackId) &&
+            (sidebar().trackById.get(selectedTrackId)?.channelRole ===
+              "return") ===
+              movingReturns,
         )
       : [trackId];
     if (!trackAlreadySelected) {
@@ -459,7 +535,14 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     const dragging =
       drag.dragging ||
       Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4;
-    const target = dragging ? dropTargetAt(event.clientY) : undefined;
+    const movingTrack = sidebar().trackById.get(drag.trackId);
+    const target =
+      dragging && movingTrack
+        ? dropTargetAt(
+            event.clientY,
+            getTrackChannelRole(movingTrack) === "return",
+          )
+        : undefined;
     if (
       drag.dragging === dragging &&
       drag.target?.trackId === target?.trackId &&
@@ -653,7 +736,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
           class="sticky top-0 z-40 border-b border-border bg-timeline-surface"
           style={{ height: `${RULER_HEIGHT}px` }}
         />
-        <Show when={trackDrag()?.dragging && trackDrag()?.target}>
+        <Show when={scrollingDragTarget()}>
           {(target) => {
             const row = () => layoutByTrackId().get(target().trackId);
             const top = () => {
@@ -683,8 +766,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             );
           }}
         </Show>
-        <For each={sidebar().tracks}>
-          {(track) => {
+        {(() => {
+          const renderTrackRow = (track: Track) => {
             const lockedByOther =
               !!track.lockedBy && track.lockedBy !== sidebar().currentUserId;
             const isRecordArmed = () => sidebar().recordArmTrackId === track.id;
@@ -991,8 +1074,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     height: `${clipLaneHeightPx()}px`,
                     "padding-left": `${4 + depth() * GROUP_INDENT_PX}px`,
                     "grid-template-columns": track.collapsed
-                      ? "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)"
-                      : "minmax(72px, 96px) minmax(96px, 1fr) 92px",
+                      ? "minmax(0, 1fr) minmax(0, 1fr) 101px"
+                      : "minmax(72px, 96px) minmax(96px, 1fr) 101px",
                   }}
                 >
                   <div class="flex min-w-0 items-center gap-1 overflow-hidden">
@@ -1259,20 +1342,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                     </div>
                   </Show>
 
-                  <div
-                    class={cn(
-                      "track-row-control-panel flex items-center",
-                      track.collapsed ? "min-w-0 w-full gap-1" : "gap-2",
-                    )}
-                    style={track.collapsed ? { width: "100%" } : {}}
-                  >
-                    <div
-                      class={cn(
-                        "track-row-control-stack flex flex-col gap-1",
-                        track.collapsed ? "min-w-0 flex-1" : "shrink-0",
-                      )}
-                      style={track.collapsed ? { width: "auto" } : {}}
-                    >
+                  <div class="track-row-control-panel flex items-center gap-2">
+                    <div class="track-row-control-stack flex shrink-0 flex-col gap-1">
                       <Show when={!track.collapsed}>
                         <div class="grid grid-cols-4 gap-1">
                           <button
@@ -1377,7 +1448,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
                       <div
                         class={cn(
-                          "relative flex items-center px-0.5",
+                          "relative flex items-center",
                           track.collapsed ? "h-6" : "h-7",
                         )}
                       >
@@ -1639,15 +1710,62 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 {row}
               </TimelineContextMenu>
             );
-          }}
-        </For>
+          };
+          return (
+            <>
+        <For each={scrollingTracks()}>{renderTrackRow}</For>
+        <div class="min-h-6 flex-1 shrink-0" />
         <div
-          class="min-h-6 flex-1 shrink-0"
-          style={{ "padding-bottom": `${masterRowReservedHeight()}px` }}
-        />
-        <MasterSidebarRow
+          class="sticky z-40 shrink-0 border-t border-border bg-timeline-surface"
+          ref={(element) => {
+            returnSectionElement = element;
+          }}
+          style={{
+            bottom: `${sidebar().bottomOffsetPx}px`,
+            height: `${returnAreaHeight() + masterRowReservedHeight()}px`,
+          }}
+        >
+          <div
+            class="relative overflow-hidden"
+            style={{
+              height: `${returnAreaHeight()}px`,
+            }}
+          >
+            <For each={visibleReturnTracks()}>{renderTrackRow}</For>
+            <Show when={returnDragTarget()}>
+              {(target) => {
+                const row = () =>
+                  layoutByTrackId().get(target().trackId);
+                const top = () => {
+                  const current = row();
+                  if (!current) return 0;
+                  return target().zone === "below"
+                    ? current.topPx + current.heightPx
+                    : current.topPx;
+                };
+                return (
+                  <div
+                    class={cn(
+                      "pointer-events-none absolute z-50 border-primary",
+                      target().zone === "inside"
+                        ? "h-8 rounded border"
+                        : "h-0 border-t-2",
+                    )}
+                    style={{
+                      top:
+                        target().zone === "inside"
+                          ? `${top() + 12}px`
+                          : `${top()}px`,
+                      left: "8px",
+                      right: "8px",
+                    }}
+                  />
+                );
+              }}
+            </Show>
+          </div>
+          <MasterSidebarRow
           master={sidebar().master}
-          bottomOffsetPx={sidebar().bottomOffsetPx}
           automation={{
             visible: props.automation.lanes.masterVisible,
             heightPx: props.automation.lanes.masterHeight,
@@ -1666,6 +1784,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
               ),
           }}
         />
+        </div>
+            </>
+          );
+        })()}
       </div>
     </>
   );

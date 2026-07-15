@@ -9,6 +9,8 @@ const DRAG_THRESHOLD_PX = 4;
 type BrowserDeviceDragOptions = {
   resolvePayload: (itemId: string) => BrowserDragPayload | undefined;
   trackLayout: Accessor<TimelineTrackLayoutRow[]>;
+  returnTrackLayout: Accessor<TimelineTrackLayoutRow[]>;
+  returnSectionElement: () => HTMLDivElement | undefined;
   scrollElement: () => HTMLDivElement | undefined;
   effectsChainElement: () => HTMLElement | undefined;
   currentEffectsTargetId: Accessor<Track["id"] | "master">;
@@ -43,6 +45,22 @@ const resolveTimelineTrackTarget = (
   if (row) return { kind: "track", trackId: row.trackId, laneIndex };
   if (laneIndex >= trackLayout.length) return { kind: "new-track" };
   return { kind: "none" };
+};
+
+const resolveReturnTrackTarget = (
+  pointer: { x: number; y: number },
+  section: HTMLDivElement | undefined,
+  rows: TimelineTrackLayoutRow[],
+): BrowserDropTarget => {
+  if (!section) return { kind: "none" };
+  const rect = section.getBoundingClientRect();
+  if (!isInsideRect(pointer, rect)) return { kind: "none" };
+  const row = rows.find((candidate) => (
+    pointer.y >= rect.top + candidate.topPx
+    && pointer.y < rect.top + candidate.topPx + candidate.heightPx
+  ));
+  if (!row) return { kind: "none" };
+  return { kind: "track", trackId: row.trackId, laneIndex: rows.indexOf(row) };
 };
 
 const resolveEffectChainPreview = (
@@ -80,7 +98,14 @@ const resolveCompatibleTarget = (
     const chain = resolveEffectChainPreview(pointer, options.effectsChainElement(), options.currentEffectsTargetId());
     if (chain) return options.canDrop(payload, chain.target) ? chain : { target: { kind: "none" } };
   }
-  const target = resolveTimelineTrackTarget(pointer, options.scrollElement(), options.trackLayout());
+  const returnTarget = resolveReturnTrackTarget(
+    pointer,
+    options.returnSectionElement(),
+    options.returnTrackLayout(),
+  );
+  const target = returnTarget.kind === "track"
+    ? returnTarget
+    : resolveTimelineTrackTarget(pointer, options.scrollElement(), options.trackLayout());
   if (target.kind === "track") {
     return { target: options.canDrop(payload, target) ? target : { kind: "none" } };
   }

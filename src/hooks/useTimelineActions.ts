@@ -8,6 +8,7 @@ import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-t
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
 import { loadTrackEffectSnapshot } from '~/lib/track-state-snapshot'
 import { createOptimisticTrack, pushTrackCreateHistory } from '~/lib/tracks'
+import { trackCreationIndex } from '~/lib/track-creation'
 import { planAssignTrackColorToClips, planGroupTracks, planMoveTrackToGroup, planResetClipColors, planSetTrackColor, planTrackReorder, planUngroupTracks, type ClipColorUpdate } from '~/lib/track-group-ops'
 import { assertAppliedSharedTimelineOperationResult, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
@@ -29,6 +30,7 @@ type TimelineTrackCreateOptions = {
   channelRole?: 'track' | 'return' | 'group'
   color?: string
   index?: number
+  collapsed?: boolean
 }
 
 type TimelineTrackDefaultColors = {
@@ -104,12 +106,14 @@ export function useTimelineActions(
 
     const channelRole = trackOptions.channelRole ?? 'track'
     const color = trackOptions.color ?? (channelRole === 'group' ? options.defaultColors?.group() : options.defaultColors?.track())
-    const index = trackOptions.index ?? options.tracks().length
+    const collapsed = trackOptions.collapsed ?? channelRole === 'return'
+    const index = trackCreationIndex(options.tracks(), channelRole, trackOptions.index)
     if (isLocalId('project', projectId)) {
       const row = await createLocalTimelineRepository(projectId).createTrack({
         index,
         kind: trackOptions.kind,
         channelRole,
+        collapsed,
         color,
       })
       if (options.room.projectId() !== projectId) {
@@ -146,6 +150,7 @@ export function useTimelineActions(
       grantScope: { projectId, userId },
       kind: trackOptions.kind,
       channelRole,
+      collapsed,
       color,
     })
     if (!track) return null

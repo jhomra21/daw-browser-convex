@@ -1,25 +1,52 @@
-import { createMemo, createSignal, For, Show, onCleanup, onMount, type JSX } from "solid-js";
+import {
+  createMemo,
+  createSignal,
+  For,
+  Show,
+  onCleanup,
+  onMount,
+  type JSX,
+} from "solid-js";
 import GridOverlay from "~/components/timeline/GridOverlay";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import TrackLane from "~/components/timeline/TrackLane";
 import type { ClipContextMenuActions } from "~/components/timeline/ClipComponent";
-import { masterAreaHeight, masterRowHeight, type MasterSidebarModel } from "~/components/timeline/MasterSidebarRow";
+import {
+  masterAreaHeight,
+  masterRowHeight,
+  type MasterSidebarModel,
+} from "~/components/timeline/MasterSidebarRow";
 import TrackSidebar from "~/components/timeline/TrackSidebar";
 import AutomationLane from "~/components/timeline/automation-lane";
 import { TimelineLeftBrowser } from "~/components/timeline/browser/timeline-left-browser";
 import type { TimelineLeftBrowserModel } from "~/components/timeline/browser/browser-types";
 import TimelineOverlays from "~/components/timeline/timeline-overlays";
 import type { TimelineMidiBounds } from "~/lib/timeline-midi-bounds";
-import { DEFAULT_AUTOMATION_LANE_HEIGHT, LANE_HEIGHT, PPS, RULER_HEIGHT } from "~/lib/timeline-utils";
+import {
+  DEFAULT_AUTOMATION_LANE_HEIGHT,
+  LANE_HEIGHT,
+  PPS,
+  RULER_HEIGHT,
+} from "~/lib/timeline-utils";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionState";
-import type { Clip, Track, TrackId, TrackSend } from "@daw-browser/timeline-core/types";
+import type {
+  Clip,
+  Track,
+  TrackId,
+  TrackSend,
+} from "@daw-browser/timeline-core/types";
 import type { TimelineTrackIndex } from "@daw-browser/timeline-core/track-index";
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types";
 import { automationTargetKey } from "@daw-browser/shared";
 import type { TimelineWorkspaceAutomationModel } from "~/hooks/useTimelineAutomationController";
-import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
-import { buildGroupClipOverview, type TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
+import TimelineContextMenu, {
+  type TimelineContextMenuItem,
+} from "./context-menu/timeline-context-menu";
+import {
+  buildGroupClipOverview,
+  type TimelineTrackLayoutRow,
+} from "~/lib/timeline-track-layout";
 import type { TrackDropTarget } from "~/lib/track-group-ops";
 
 const createViewportRedrawVersion = () => {
@@ -34,8 +61,11 @@ const createViewportRedrawVersion = () => {
     let dprQuery: MediaQueryList | undefined;
     let dprListener: (() => void) | undefined;
     const bindDprListener = () => {
-      if (dprQuery && dprListener) dprQuery.removeEventListener("change", dprListener);
-      dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      if (dprQuery && dprListener)
+        dprQuery.removeEventListener("change", dprListener);
+      dprQuery = window.matchMedia(
+        `(resolution: ${window.devicePixelRatio}dppx)`,
+      );
       dprListener = () => {
         requestRedraw();
         bindDprListener();
@@ -47,7 +77,8 @@ const createViewportRedrawVersion = () => {
     onCleanup(() => {
       window.removeEventListener("resize", requestRedraw);
       window.visualViewport?.removeEventListener("resize", requestRedraw);
-      if (dprQuery && dprListener) dprQuery.removeEventListener("change", dprListener);
+      if (dprQuery && dprListener)
+        dprQuery.removeEventListener("change", dprListener);
     });
   });
 
@@ -57,6 +88,7 @@ const createViewportRedrawVersion = () => {
 type Props = {
   containerRef: (el: HTMLDivElement) => void;
   scrollRef: (el: HTMLDivElement) => void;
+  returnSectionRef: (el: HTMLDivElement) => void;
   bottomPanelOffsetPx: number;
   leftBrowser: TimelineLeftBrowserModel;
   durationSec: number;
@@ -73,18 +105,38 @@ type Props = {
   playheadSec: number;
   onSetLoopRegion: (startSec: number, endSec: number) => void;
   onLanePointerDown: JSX.EventHandler<HTMLDivElement, PointerEvent>;
+  onReturnPointerDown: JSX.EventHandler<HTMLDivElement, PointerEvent>;
   onMasterPointerDown: JSX.EventHandler<HTMLDivElement, PointerEvent>;
   onRulerPointerDown: (event: PointerEvent) => void;
   selection: TimelineSelectionController;
-  onClipPointerDown: (trackId: Track["id"], clipId: string, event: PointerEvent) => void;
-  onClipPointerUp: (trackId: Track["id"], clipId: string, event: PointerEvent) => void;
-  onClipResizeStart: (trackId: Track["id"], clipId: string, edge: "left" | "right", event: PointerEvent) => void;
+  onClipPointerDown: (
+    trackId: Track["id"],
+    clipId: string,
+    event: PointerEvent,
+  ) => void;
+  onClipPointerUp: (
+    trackId: Track["id"],
+    clipId: string,
+    event: PointerEvent,
+  ) => void;
+  onClipResizeStart: (
+    trackId: Track["id"],
+    clipId: string,
+    edge: "left" | "right",
+    event: PointerEvent,
+  ) => void;
   onAddMidiClipToTrack?: (trackId: Track["id"]) => void;
   onDeleteTrack: (trackId: Track["id"]) => void;
   clipContextMenu: ClipContextMenuActions;
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>;
-  replaceMissingMediaClip: (trackId: Track["id"], clipId: string) => Promise<void>;
-  removeMissingMediaClip: (trackId: Track["id"], clipId: string) => Promise<void>;
+  replaceMissingMediaClip: (
+    trackId: Track["id"],
+    clipId: string,
+  ) => Promise<void>;
+  removeMissingMediaClip: (
+    trackId: Track["id"],
+    clipId: string,
+  ) => Promise<void>;
   trackLookup: TimelineTrackIndex<AudioBuffer>;
   openMidiEditorFor: (clipId: string) => void;
   openSampleDetailFor: (clipId: string) => void;
@@ -116,8 +168,15 @@ type Props = {
     canWriteTrackRouting: (trackId: Track["id"]) => boolean;
     onTrackClick: (trackId: Track["id"]) => void;
     onTrackSendsChange: (trackId: Track["id"], sends: TrackSend[]) => void;
-    onTrackOutputTargetChange: (trackId: Track["id"], outputTargetId?: Track["id"]) => void;
-    onVolumePreview: (trackId: Track["id"], volume: number, muted: boolean) => void;
+    onTrackOutputTargetChange: (
+      trackId: Track["id"],
+      outputTargetId?: Track["id"],
+    ) => void;
+    onVolumePreview: (
+      trackId: Track["id"],
+      volume: number,
+      muted: boolean,
+    ) => void;
     onVolumeChange: (trackId: Track["id"], volume: number) => void;
     onToggleMute: (trackId: Track["id"]) => void;
     onToggleSolo: (trackId: Track["id"]) => void;
@@ -125,10 +184,15 @@ type Props = {
     onToggleRecordArm: (trackId: Track["id"]) => void;
     onDeleteTrack: (trackId: Track["id"]) => void;
     onToggleTrackCollapsed: (trackId: Track["id"]) => void;
-    onSetTracksCollapsed: (updates: Array<{ trackId: Track["id"]; collapsed: boolean }>) => void;
+    onSetTracksCollapsed: (
+      updates: Array<{ trackId: Track["id"]; collapsed: boolean }>,
+    ) => void;
     onGroupTracks: (trackIds: Track["id"][]) => void;
     onUngroupTrack: (groupId: Track["id"]) => void;
-    onMoveTrackToGroup: (trackId: Track["id"], groupId: Track["id"] | undefined) => void;
+    onMoveTrackToGroup: (
+      trackId: Track["id"],
+      groupId: Track["id"] | undefined,
+    ) => void;
     onReorderTracks: (trackIds: Track["id"][], target: TrackDropTarget) => void;
     onSetTrackColor: (trackId: Track["id"], color: string | undefined) => void;
     onResetTrackColor: (trackId: Track["id"]) => void;
@@ -137,14 +201,15 @@ type Props = {
     onSelectAllClipsInGroup: (groupId: Track["id"]) => void;
   };
   automation: TimelineWorkspaceAutomationModel;
-  trackLayout: TimelineTrackLayoutRow[];
+  scrollingTrackLayout: TimelineTrackLayoutRow[];
+  returnTrackLayout: TimelineTrackLayoutRow[];
 };
 
 export default function TimelineWorkspace(props: Props) {
   let scrollElement: HTMLDivElement | undefined;
   const viewportRedrawVersion = createViewportRedrawVersion();
   const trackById = createMemo(() => props.trackLookup.trackById);
-  const visibleTracks = createMemo(() => props.trackLayout.flatMap((row) => {
+  const visibleTracks = createMemo(() => [...props.scrollingTrackLayout, ...props.returnTrackLayout].flatMap((row) => {
     const track = trackById().get(row.trackId);
     return track ? [track] : [];
   }));
@@ -155,7 +220,10 @@ export default function TimelineWorkspace(props: Props) {
     return selectedTrackId ? [selectedTrackId] : [];
   });
   const groupClipOverviewByTrackId = createMemo(() => {
-    const overviews = new Map<Track["id"], ReturnType<typeof buildGroupClipOverview>>();
+    const overviews = new Map<
+      Track["id"],
+      ReturnType<typeof buildGroupClipOverview>
+    >();
     for (const track of props.tracks) {
       if (track.channelRole !== "group" || track.collapsed !== true) continue;
       overviews.set(track.id, buildGroupClipOverview(track.id, props.tracks));
@@ -163,7 +231,7 @@ export default function TimelineWorkspace(props: Props) {
     return overviews;
   });
   const trackAreaHeight = () => {
-    const layout = props.trackLayout;
+    const layout = props.scrollingTrackLayout;
     const tracksHeight = layout.length === 0 ? 0 : layout[layout.length - 1].topPx + layout[layout.length - 1].heightPx;
     return tracksHeight + (props.dropAtNewTrack ? LANE_HEIGHT : 0);
   };
@@ -174,7 +242,11 @@ export default function TimelineWorkspace(props: Props) {
     props.automation.lanes.masterVisible,
     props.automation.lanes.masterHeight,
   );
-  const fullHeight = () => RULER_HEIGHT + trackAreaHeight() + masterTotalHeight();
+  const returnAreaHeight = () => {
+    const last = props.returnTrackLayout.at(-1);
+    return last ? last.topPx + last.heightPx : 0;
+  };
+  const fullHeight = () => RULER_HEIGHT + trackAreaHeight() + returnAreaHeight() + masterTotalHeight();
   const scrollContentHeight = () => fullHeight() + props.bottomPanelOffsetPx;
   const masterSelection = () => props.automation.lanes.selectedTargetsByOwnerKey.master ?? { parameterId: "volume" };
   const masterTarget = () => ({ kind: "master" as const, effectInstanceId: masterSelection().effectInstanceId });
@@ -188,6 +260,83 @@ export default function TimelineWorkspace(props: Props) {
       onSelect: props.automation.actions.toggleMasterVisibility,
     },
   ];
+  const renderTrackLane = (
+    row: TimelineTrackLayoutRow,
+    layout: TimelineTrackLayoutRow,
+    isDropTarget = false,
+  ) => {
+    const track = () => trackById().get(row.trackId);
+    const visibleTargetKeys = () =>
+      props.automation.lanes.visibleTargetKeysByTrackId[row.trackId] ?? [];
+    const laneHeight = () =>
+      props.automation.lanes.heightsByLaneOwnerKey[row.trackId] ??
+      DEFAULT_AUTOMATION_LANE_HEIGHT;
+    return (
+      <Show when={track()}>
+        {(visibleTrack) => (
+          <TrackLane
+            track={visibleTrack()}
+            groupClipOverview={groupClipOverviewByTrackId().get(row.trackId) ?? []}
+            layout={layout}
+            isDropTarget={isDropTarget}
+            selectedClipIds={props.selection.selectedClipIds()}
+            rangeSelection={props.selection.rangeSelection()}
+            onClipPointerDown={props.onClipPointerDown}
+            onClipPointerUp={props.onClipPointerUp}
+            onClipResizeStart={props.onClipResizeStart}
+            onAddMidiClip={props.onAddMidiClipToTrack}
+            onDeleteTrack={props.onDeleteTrack}
+            clipContextMenu={props.clipContextMenu}
+            onRetryMedia={(clipId) => {
+              void props.ensureClipBuffer(clipId);
+            }}
+            onReplaceMedia={(trackId, clipId) => {
+              void props.replaceMissingMediaClip(trackId, clipId);
+            }}
+            onRemoveMissingMedia={(trackId, clipId) => {
+              void props.removeMissingMediaClip(trackId, clipId);
+            }}
+            ensureClipBuffer={props.ensureClipBuffer}
+            bpm={props.bpm}
+            viewportRedrawVersion={viewportRedrawVersion()}
+            automation={{
+              projectId: props.automation.projectId,
+              visible: props.automation.lanes.visibleByTrackId[row.trackId] === true,
+              selections: visibleTargetKeys().flatMap((targetKey) => {
+                const selection =
+                  props.automation.lanes.selectionByTargetKey.get(targetKey);
+                return selection ? [selection] : [];
+              }),
+              laneHeightPx: laneHeight(),
+              envelopeForSelection: (selection) =>
+                props.automation.envelopes.byTargetKey.get(
+                  automationTargetKey(
+                    {
+                      kind: "track",
+                      trackId: row.trackId,
+                      effectInstanceId: selection.effectInstanceId,
+                    },
+                    selection.parameterId,
+                  ),
+                ),
+              durationSec: props.durationSec,
+              onPreview: props.automation.envelopes.preview,
+              onCommit: props.automation.envelopes.commit,
+              onCancelPreview: props.automation.envelopes.cancelPreview,
+            }}
+            onClipDblClick={(_, clipId) => {
+              const match = props.trackLookup.clipEntryById.get(clipId);
+              if (match?.clip.midi) {
+                props.openMidiEditorFor(clipId);
+                return;
+              }
+              props.openSampleDetailFor(clipId);
+            }}
+          />
+        )}
+      </Show>
+    );
+  };
   return (
     <div class="flex-1 flex min-h-0" ref={props.containerRef}>
       <div
@@ -239,70 +388,8 @@ export default function TimelineWorkspace(props: Props) {
                 bottom: `${props.bottomPanelOffsetPx}px`,
               }}
             >
-              <For each={props.trackLayout}>
-                {(row, i) => (
-                  (() => {
-                    const track = () => trackById().get(row.trackId);
-                    const visibleTargetKeys = () => props.automation.lanes.visibleTargetKeysByTrackId[row.trackId] ?? [];
-                    const laneHeight = () => props.automation.lanes.heightsByLaneOwnerKey[row.trackId] ?? DEFAULT_AUTOMATION_LANE_HEIGHT;
-                    return (
-                      <Show when={track()}>
-                        {(visibleTrack) => (
-                          <TrackLane
-                            track={visibleTrack()}
-                            groupClipOverview={groupClipOverviewByTrackId().get(visibleTrack().id) ?? []}
-                            layout={row}
-                            isDropTarget={props.dropTargetLane === i()}
-                            selectedClipIds={props.selection.selectedClipIds()}
-                            rangeSelection={props.selection.rangeSelection()}
-                            onClipPointerDown={props.onClipPointerDown}
-                            onClipPointerUp={props.onClipPointerUp}
-                            onClipResizeStart={props.onClipResizeStart}
-                            onAddMidiClip={props.onAddMidiClipToTrack}
-                            onDeleteTrack={props.onDeleteTrack}
-                            clipContextMenu={props.clipContextMenu}
-                            onRetryMedia={(clipId) => {
-                              void props.ensureClipBuffer(clipId);
-                            }}
-                            onReplaceMedia={(trackId, clipId) => {
-                              void props.replaceMissingMediaClip(trackId, clipId);
-                            }}
-                            onRemoveMissingMedia={(trackId, clipId) => {
-                              void props.removeMissingMediaClip(trackId, clipId);
-                            }}
-                            ensureClipBuffer={props.ensureClipBuffer}
-                            bpm={props.bpm}
-                            viewportRedrawVersion={viewportRedrawVersion()}
-                            automation={{
-                              projectId: props.automation.projectId,
-                              visible: props.automation.lanes.visibleByTrackId[row.trackId] === true,
-                              selections: visibleTargetKeys().flatMap((targetKey) => {
-                                const selection = props.automation.lanes.selectionByTargetKey.get(targetKey);
-                                return selection ? [selection] : [];
-                              }),
-                              laneHeightPx: laneHeight(),
-                              envelopeForSelection: (selection) => props.automation.envelopes.byTargetKey.get(
-                                automationTargetKey({ kind: "track", trackId: row.trackId, effectInstanceId: selection.effectInstanceId }, selection.parameterId),
-                              ),
-                              durationSec: props.durationSec,
-                              onPreview: props.automation.envelopes.preview,
-                              onCommit: props.automation.envelopes.commit,
-                              onCancelPreview: props.automation.envelopes.cancelPreview,
-                            }}
-                            onClipDblClick={(_, clipId) => {
-                              const match = props.trackLookup.clipEntryById.get(clipId);
-                              if (match?.clip.midi) {
-                                props.openMidiEditorFor(clipId);
-                                return;
-                              }
-                              props.openSampleDetailFor(clipId);
-                            }}
-                          />
-                        )}
-                      </Show>
-                    );
-                  })()
-                )}
+              <For each={props.scrollingTrackLayout}>
+                {(row, i) => renderTrackLane(row, row, props.dropTargetLane === i())}
               </For>
               <TimelineOverlays
                 timeline={{
@@ -318,7 +405,7 @@ export default function TimelineWorkspace(props: Props) {
                   playheadSec: props.playheadSec,
                   dropAtNewTrack: props.dropAtNewTrack,
                   marqueeRect: props.marqueeRect,
-                  rowLayouts: props.trackLayout,
+                  rowLayouts: props.scrollingTrackLayout,
                   trackAreaHeight: trackAreaHeight(),
                   range: props.selection.rangeSelection(),
                 }}
@@ -334,10 +421,57 @@ export default function TimelineWorkspace(props: Props) {
               class="sticky z-30 shrink-0 border-t border-neutral-800 bg-timeline-background"
               style={{
                 width: `${props.durationSec * PPS}px`,
-                height: `${masterTotalHeight()}px`,
+                height: `${returnAreaHeight() + masterTotalHeight()}px`,
                 bottom: `${props.bottomPanelOffsetPx}px`,
               }}
             >
+              <div
+                class="relative overflow-hidden bg-timeline-background"
+                ref={(element) => {
+                  props.returnSectionRef(element);
+                }}
+                style={{ height: `${returnAreaHeight()}px` }}
+              >
+                <For each={props.returnTrackLayout}>
+                  {(row) => (
+                    <div
+                      class="absolute left-0 right-0"
+                      data-track-id={row.trackId}
+                      style={{ top: `${row.topPx}px`, height: `${row.heightPx}px` }}
+                      onPointerDown={props.onReturnPointerDown}
+                    >
+                      {renderTrackLane(row, { ...row, topPx: 0 })}
+                    </div>
+                  )}
+                </For>
+                <GridOverlay
+                  durationSec={props.durationSec}
+                  bpm={props.bpm}
+                  denom={props.gridDenominator}
+                  enabled={props.gridEnabled}
+                />
+                <Show when={props.selection.rangeSelection()}>
+                  {(range) => (
+                    <For
+                      each={props.returnTrackLayout.filter((row) =>
+                        range().trackIds.includes(row.trackId),
+                      )}
+                    >
+                      {(row) => (
+                        <div
+                          class="absolute z-10 pointer-events-none bg-blue-400/12 border-x border-blue-300/30"
+                          style={{
+                            left: `${range().startSec * PPS}px`,
+                            top: `${row.topPx}px`,
+                            width: `${(range().endSec - range().startSec) * PPS}px`,
+                            height: `${row.heightPx}px`,
+                          }}
+                        />
+                      )}
+                    </For>
+                  )}
+                </Show>
+              </div>
               <div
                 class="relative overflow-hidden bg-timeline-background"
                 style={{ height: `${masterBaseHeight()}px` }}
@@ -382,7 +516,8 @@ export default function TimelineWorkspace(props: Props) {
                 tracks: visibleTracks(),
                 allTracks: props.tracks,
                 trackById: trackById(),
-                trackLayout: props.trackLayout,
+                scrollingTrackLayout: props.scrollingTrackLayout,
+                returnTrackLayout: props.returnTrackLayout,
                 scrollElement: () => scrollElement,
                 selectedTrackId: props.selection.selectedTrackId(),
                 selectedTrackIds: selectedTrackIds(),

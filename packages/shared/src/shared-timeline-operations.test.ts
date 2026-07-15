@@ -203,14 +203,19 @@ describe('shared timeline operations', () => {
     })
   })
 
-  test('preserves color on track create operations', () => {
+  test('preserves color and collapsed state on track create operations', () => {
     expect(parseSharedTimelineOperation({
       kind: 'tracks.create',
-      payload: { index: 2, kind: 'audio', channelRole: 'group', color: '#22c55e', operationId: 'op-1' },
+      payload: { index: 2, kind: 'audio', channelRole: 'group', collapsed: true, color: '#22c55e', operationId: 'op-1' },
     })).toEqual({
       kind: 'tracks.create',
-      payload: { index: 2, kind: 'audio', channelRole: 'group', color: '#22c55e', operationId: 'op-1' },
+      payload: { index: 2, kind: 'audio', channelRole: 'group', collapsed: true, color: '#22c55e', operationId: 'op-1' },
     })
+    const expanded = parseSharedTimelineOperation({
+      kind: 'tracks.create',
+      payload: { index: 2, kind: 'audio', channelRole: 'track', collapsed: false, operationId: 'op-2' },
+    })
+    expect(expanded?.kind === 'tracks.create' ? expanded.payload.collapsed : undefined).toBe(false)
   })
 
   test('accepts only valid clip colors', () => {

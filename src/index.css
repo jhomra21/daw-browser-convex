@@ -337,15 +337,15 @@
   }
 
   .track-expanded-row-grid {
-    grid-template-columns: minmax(72px, 96px) minmax(96px, 1fr) 92px;
+    grid-template-columns: minmax(72px, 96px) minmax(96px, 1fr) 101px;
   }
 
   .track-row-control-panel {
-    width: 92px;
+    width: 101px;
   }
 
   .track-row-control-stack {
-    width: 72px;
+    width: 81px;
   }
 
   .track-meter-strip {

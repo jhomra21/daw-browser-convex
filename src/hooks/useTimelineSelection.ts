@@ -11,12 +11,30 @@ import type { TimelineSelectionController } from './useTimelineSelectionState'
 type TimelineSelectionOptions = {
   tracks: Accessor<Track[]>
   trackLayout: Accessor<TimelineTrackLayoutRow[]>
+  displayTrackIds: Accessor<Track['id'][]>
   selection: TimelineSelectionController
   bpm: Accessor<number>
   gridDenominator: Accessor<number>
   startScrub: (clientX: number, options?: { listen?: boolean }) => void
   moveScrub: (clientX: number) => void
   stopScrub: () => void
+}
+
+export const rangeTrackIdsThroughDisplayOrder = (
+  displayTrackIds: readonly Track['id'][],
+  rangeTrackIds: readonly Track['id'][],
+  targetTrackId: Track['id'] | undefined,
+) => {
+  if (!targetTrackId) return rangeTrackIds
+  const targetIndex = displayTrackIds.indexOf(targetTrackId)
+  const selectedIndexes = rangeTrackIds
+    .map((trackId) => displayTrackIds.indexOf(trackId))
+    .filter((index) => index >= 0)
+  if (targetIndex < 0 || selectedIndexes.length === 0) return rangeTrackIds
+  return displayTrackIds.slice(
+    Math.min(targetIndex, ...selectedIndexes),
+    Math.max(targetIndex, ...selectedIndexes) + 1,
+  )
 }
 
 type TimelineSelection = {
@@ -35,6 +53,7 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
     startScrub,
     moveScrub,
     stopScrub,
+    displayTrackIds,
   } = options
 
   const [marqueeRect, setMarqueeRect] = createSignal<{ x: number; y: number; width: number; height: number } | null>(null)
@@ -42,22 +61,6 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
   let marqueeActive = false
   let startX = 0
   let startY = 0
-
-  const rangeTrackIdsThroughRow = (
-    rows: readonly TimelineTrackLayoutRow[],
-    rangeTrackIds: readonly Track['id'][],
-    targetTrackId: Track['id'] | undefined,
-  ) => {
-    if (!targetTrackId) return rangeTrackIds
-    const indexes = rangeTrackIds
-      .map((trackId) => rows.findIndex((row) => row.trackId === trackId))
-      .filter((index) => index >= 0)
-    const targetIndex = rows.findIndex((row) => row.trackId === targetTrackId)
-    if (targetIndex < 0) return rangeTrackIds
-    const startIndex = Math.min(targetIndex, ...indexes)
-    const endIndex = Math.max(targetIndex, ...indexes)
-    return rows.slice(startIndex, endIndex + 1).map((row) => row.trackId)
-  }
 
   const extendRangeSelectionToPointer = (
     event: PointerEvent,
@@ -74,7 +77,11 @@ export function useTimelineSelection(options: TimelineSelectionOptions): Timelin
     const trackId = clickedTrackId ?? (trackIndex >= 0 ? rows[trackIndex]?.trackId : undefined)
     const nextRange = extendTimelineRangeSelectionToPoint(currentRange, {
       timeSec: quantizeSecToGrid(x / PPS, bpm(), gridDenominator()),
-      trackIds: rangeTrackIdsThroughRow(rows, currentRange.trackIds, trackId),
+      trackIds: rangeTrackIdsThroughDisplayOrder(
+        displayTrackIds(),
+        currentRange.trackIds,
+        trackId,
+      ),
       primaryTrackId: trackId ?? currentRange.primaryTrackId,
     })
     if (nextRange) selection.selectTimeRange(nextRange)

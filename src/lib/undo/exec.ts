@@ -610,12 +610,14 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       }
 
       let newId = resolveStoredTrackId(deps.getTracks(), entry.data.currentTrackId)
+      const collapsed = entry.data.collapsed ?? entry.data.channelRole === 'return'
       if (!newId) {
         newId = await createHistoryTrack(deps, {
           trackRef: entry.data.trackRef,
           index: entry.data.index,
           kind: entry.data.kind,
           channelRole: entry.data.channelRole,
+          collapsed,
           color: entry.data.color,
         })
       }
@@ -628,6 +630,7 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
         index: entry.data.index,
         kind: entry.data.kind ?? 'audio',
         channelRole: entry.data.channelRole ?? 'track',
+        collapsed,
         color: entry.data.color,
       }), entry.data.index)
       return

@@ -29,7 +29,6 @@ export const masterAreaHeight = (
 
 type MasterSidebarRowProps = {
   master: MasterSidebarModel;
-  bottomOffsetPx: number;
   automation: {
     visible: boolean;
     heightPx: number;
@@ -132,27 +131,36 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   const row = (
     <div
       class={cn(
-        "sticky z-30 [box-shadow:inset_0_1px_0_rgb(38_38_38)]",
+        "[box-shadow:inset_0_1px_0_rgb(38_38_38)]",
         master().selected ? "bg-timeline-surface-muted" : "bg-timeline-surface",
       )}
       style={{
-        bottom: `${props.bottomOffsetPx}px`,
         height: `${rowHeight()}px`,
         width: "100%",
       }}
       onClick={master().onClick}
     >
       <div
-        class="grid items-center gap-x-4 py-2 pr-2"
+        class={cn(
+          "grid items-center gap-x-4 pr-2",
+          master().collapsed
+            ? "pb-[11.5px] pt-[12.5px]"
+            : "py-2",
+        )}
         style={{
           height: `${baseRowHeight()}px`,
           "padding-left": "4px",
-          "grid-template-columns": "minmax(72px,96px) minmax(96px,1fr) 92px",
+          "grid-template-columns": master().collapsed
+            ? "minmax(0,1fr) minmax(0,1fr) 101px"
+            : "minmax(72px,96px) minmax(96px,1fr) 101px",
         }}
       >
         <div class="flex min-w-0 items-center gap-1 overflow-hidden">
           <button
-            class="flex h-7 w-4 shrink-0 items-center justify-center text-xs text-muted-foreground hover:text-foreground"
+            class={cn(
+              "flex w-4 shrink-0 items-center justify-center text-xs text-muted-foreground hover:text-foreground",
+              master().collapsed ? "h-6" : "h-7",
+            )}
             onClick={(event) => {
               event.stopPropagation();
               master().onToggleCollapsed();
@@ -163,7 +171,8 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
           </button>
           <button
             class={cn(
-              "flex h-7 flex-1 items-center justify-center border px-2 text-center text-sm font-semibold",
+              "flex flex-1 items-center justify-center border px-2 text-center text-sm font-semibold",
+              master().collapsed ? "h-6 leading-none" : "h-7",
               master().selected
                 ? "border-border bg-muted"
                 : "border-border hover:border-border",
@@ -178,16 +187,37 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
             Master
           </button>
         </div>
-        <div class="flex h-7 items-center border border-border bg-timeline-background px-2 text-xs text-foreground">
-          Master Out
-        </div>
+        <Show
+          when={master().collapsed}
+          fallback={
+            <div class="flex h-7 items-center border border-border bg-timeline-background px-2 text-xs text-foreground">
+              Master Out
+            </div>
+          }
+        >
+          <div class="grid w-full grid-cols-[minmax(0,1fr)_20px] gap-1">
+            <div class="flex h-6 min-w-0 items-center justify-center border border-border bg-timeline-background px-0.5 text-xs text-foreground">
+              <span class="truncate">Master Out</span>
+            </div>
+            <button
+              class={cn(
+                "h-6 min-w-0 border text-xs font-semibold transition-colors",
+                props.automation.visible
+                  ? "border-red-400 bg-red-500/90 text-black"
+                  : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
+              )}
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleAutomationVisibility();
+              }}
+              title="Expand master and show automation"
+            >
+              A
+            </button>
+          </div>
+        </Show>
         <div class="track-row-control-panel flex items-center gap-2">
-          <div
-            class={cn(
-              "track-row-control-stack flex shrink-0",
-              master().collapsed ? "h-7 items-center gap-1" : "flex-col gap-1",
-            )}
-          >
+          <div class="track-row-control-stack flex shrink-0 flex-col gap-1">
             <Show when={!master().collapsed}>
               <div class="grid grid-cols-2 gap-1">
                 <button
@@ -215,7 +245,12 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
                 </button>
               </div>
             </Show>
-            <div class="relative flex h-7 flex-1 items-center px-0.5">
+            <div
+              class={cn(
+                "relative flex flex-1 items-center",
+                master().collapsed ? "h-6" : "h-7",
+              )}
+            >
               <Show when={master().ready}>
                 <Show when={volumeAutomated()}>
                   <span class="track-automation-indicator absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500" />
@@ -252,28 +287,11 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
                 />
               </Show>
             </div>
-            <Show when={master().collapsed}>
-              <button
-                class={cn(
-                  "h-7 w-5 shrink-0 border text-xs font-semibold transition-colors",
-                  props.automation.visible
-                    ? "border-red-400 bg-red-500/90 text-black"
-                    : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
-                )}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  toggleAutomationVisibility();
-                }}
-                title="Expand master and show automation"
-              >
-                A
-              </button>
-            </Show>
           </div>
           <div
             class={cn(
               "track-meter-strip relative shrink-0",
-              master().collapsed ? "h-8" : "h-16",
+              master().collapsed ? "h-6" : "h-16",
             )}
           >
             <div class="absolute inset-0 flex items-end justify-center gap-1">

@@ -145,11 +145,13 @@ export const createHistoryTrack = async (
     index: track.index,
     kind: track.kind,
     channelRole: track.channelRole,
+    collapsed: track.collapsed,
   });
   const operation = buildSharedTrackCreateOperation({
     index: payload.index,
     kind: payload.kind,
     channelRole: payload.channelRole,
+    collapsed: track.collapsed,
     color: track.color,
   });
   const result = await publishSharedTimelineOperation(deps.projectId, operation);

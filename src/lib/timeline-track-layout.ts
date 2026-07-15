@@ -12,6 +12,14 @@ export type TimelineTrackLayoutRow = {
   groupId?: Track['id']
 }
 
+type TimelineTrackLayout = {
+  scrollingRows: TimelineTrackLayoutRow[]
+  returnRows: TimelineTrackLayoutRow[]
+  displayTrackIds: Track['id'][]
+  scrollingHeightPx: number
+  returnHeightPx: number
+}
+
 type TrackTreeNode = {
   trackId: Track['id']
   children: TrackTreeNode[]
@@ -151,6 +159,46 @@ export const buildTimelineTrackLayoutRows = (input: {
     topPx += row.heightPx
     return row
   })
+}
+
+const layoutHeight = (rows: readonly TimelineTrackLayoutRow[]) => {
+  const last = rows.at(-1)
+  return last ? last.topPx + last.heightPx : 0
+}
+
+export const buildTimelineTrackLayout = (input: {
+  tracks: readonly Pick<Track, 'id' | 'groupId' | 'channelRole' | 'collapsed'>[]
+  visibleTrackIds: readonly Track['id'][]
+  depthByTrackId?: ReadonlyMap<string, number>
+  visibleByTrackId: Record<string, boolean | undefined>
+  heightsByLaneOwnerKey: Record<string, number | undefined>
+  visibleParameterIdsByTrackId: Record<string, readonly string[] | undefined>
+}): TimelineTrackLayout => {
+  const trackById = new Map(input.tracks.map((track) => [track.id, track]))
+  const scrollingTrackIds: Track['id'][] = []
+  const returnTrackIds: Track['id'][] = []
+  for (const trackId of input.visibleTrackIds) {
+    const track = trackById.get(trackId)
+    if (!track) continue
+    if (track.channelRole === 'return') returnTrackIds.push(trackId)
+    else scrollingTrackIds.push(trackId)
+  }
+  const shared = {
+    tracks: input.tracks,
+    depthByTrackId: input.depthByTrackId,
+    visibleByTrackId: input.visibleByTrackId,
+    heightsByLaneOwnerKey: input.heightsByLaneOwnerKey,
+    visibleParameterIdsByTrackId: input.visibleParameterIdsByTrackId,
+  }
+  const scrollingRows = buildTimelineTrackLayoutRows({ ...shared, visibleTrackIds: scrollingTrackIds })
+  const returnRows = buildTimelineTrackLayoutRows({ ...shared, visibleTrackIds: returnTrackIds })
+  return {
+    scrollingRows,
+    returnRows,
+    displayTrackIds: [...scrollingTrackIds, ...returnTrackIds],
+    scrollingHeightPx: layoutHeight(scrollingRows),
+    returnHeightPx: layoutHeight(returnRows),
+  }
 }
 
 const trackClipLaneHeight = (

@@ -9,12 +9,14 @@ export function buildTrackCreateMutationInput(input: {
   index?: number
   kind?: 'audio' | 'instrument'
   channelRole?: 'track' | 'group' | 'return'
+  collapsed?: boolean
 }): FunctionArgs<typeof convexApi.tracks.create> {
   return {
     projectId: input.projectId,
     index: input.index,
     kind: input.kind,
     channelRole: input.channelRole,
+    collapsed: input.collapsed,
   }
 }
 

@@ -173,6 +173,26 @@ describe('persisted undo history', () => {
     })
   })
 
+  test('keeps collapsed state on track-create entries', () => {
+    const entry: HistoryEntry = {
+      type: 'track-create',
+      projectId: 'project-1',
+      data: {
+        trackRef: 'return-ref',
+        index: 2,
+        channelRole: 'return',
+        collapsed: true,
+      },
+    }
+    expect(normalizePersistedHistory(serializePersistedHistory({
+      undo: [entry],
+      redo: [],
+    }))).toEqual({
+      undo: [entry],
+      redo: [],
+    })
+  })
+
   test('keeps track group and ungroup entries', () => {
     const groupEntry: HistoryEntry = {
       type: 'track-group',

@@ -23,6 +23,7 @@ import type {
 } from '~/lib/timeline-repository/types'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import { buildTimelineTrackRow } from './track-row-builder'
+import { trackCreationIndex } from '~/lib/track-creation'
 import { localSidechainRouteRowId } from '~/lib/local-effects'
 
 const TRACK_KIND = 'track'
@@ -386,7 +387,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     const db = await openLocalProjectDb(projectId)
     const tracks = trackValues(await db.getAllFromIndex('entities', 'by-kind', TRACK_KIND))
     const timestamp = now()
-    const index = input.index ?? tracks.length
+    const index = trackCreationIndex(tracks, input.channelRole ?? 'track', input.index)
     const id = input.id ?? createLocalTrackId()
     const track = buildTimelineTrackRow({
       id,

@@ -205,10 +205,17 @@ export const planTrackReorder = (input: {
   moveRootIds: readonly TrackId[]
   target: TrackDropTarget
 }): TrackReorderPlan | null => {
+  if (input.moveRootIds.length === 0) return null
   const moveRoots = new Set(input.moveRootIds)
   const trackById = new Map(input.tracks.map((track) => [track.id, track]))
+  if (moveRoots.size !== input.moveRootIds.length || [...moveRoots].some((trackId) => !trackById.has(trackId))) return null
   const targetTrack = trackById.get(input.target.trackId)
   if (!targetTrack) return null
+  const moveReturns = new Set([...moveRoots].map((trackId) => trackById.get(trackId)?.channelRole === 'return'))
+  if (moveReturns.size !== 1) return null
+  const movingReturns = moveReturns.has(true)
+  if (movingReturns !== (targetTrack.channelRole === 'return')) return null
+  if (movingReturns && input.target.zone === 'inside') return null
   if (input.target.zone === 'inside' && targetTrack.channelRole !== 'group') return null
 
   const movedSubtree = new Set<TrackId>()
@@ -246,10 +253,14 @@ export const planTrackReorder = (input: {
   })()
 
   const movedInOrder = displayOrder.filter((id) => movedSubtree.has(id))
-  const finalOrder = [
+  const reordered = [
     ...rest.slice(0, insertAt),
     ...movedInOrder,
     ...rest.slice(insertAt),
+  ]
+  const finalOrder = [
+    ...reordered.filter((trackId) => trackById.get(trackId)?.channelRole !== 'return'),
+    ...reordered.filter((trackId) => trackById.get(trackId)?.channelRole === 'return'),
   ]
 
   const patches: TrackReorderPatch[] = []

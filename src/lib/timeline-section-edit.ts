@@ -1,5 +1,6 @@
 import { automationTargetKey, valueAtAutomationTime, type AutomationEnvelope, type AutomationInterpolation, type AutomationTarget, type ClipCreateSnapshot } from '@daw-browser/shared'
 import type { AudioWarp, Clip, Track } from '@daw-browser/timeline-core/types'
+import { clipFadesForFragment, transformClipFadesForDuration, type ClipFades } from '@daw-browser/timeline-core/clip-fades'
 import { calculateAudioTimelineTrimOffsets } from '~/lib/audio-left-resize-timing'
 import { buildClipCreateSnapshot, type BatchClipCreateItem } from '~/lib/clip-create'
 import { secondsToBeats, type TimelineTimeRange } from '~/lib/timeline-range-selection'
@@ -43,6 +44,7 @@ type ClipRangeDeletePatch = {
       bufferOffsetSec?: number
       midiOffsetBeats?: number
       audioWarp?: AudioWarp
+      fades?: ClipFades
     }
   }>
   createClips: BatchClipCreateItem[]
@@ -101,10 +103,20 @@ const buildTrimmedClipCreateSnapshot = (
   const trimEnd = Math.min(clipEndSec(clip), input.endSec)
   const sourceOffsetSec = Math.max(0, trimStart - clip.startSec)
   const offsets = shiftClipOffsets(clip, sourceOffsetSec, input.bpm)
+  const duration = Math.max(0, trimEnd - trimStart)
   return {
     ...buildClipCreateSnapshot(clip, { preserveHistoryRef: input.preserveHistoryRef ?? false }),
     startSec: trimStart,
-    duration: Math.max(0, trimEnd - trimStart),
+    duration,
+    fades: clip.fades
+      ? clipFadesForFragment(
+        clip.fades,
+        clip.duration,
+        duration,
+        trimStart > clip.startSec,
+        trimEnd < clipEndSec(clip),
+      )
+      : undefined,
     timing: {
       leftPadSec: offsets.leftPadSec,
       bufferOffsetSec: offsets.bufferOffsetSec,
@@ -161,7 +173,13 @@ export const buildClipRangeDeletePatch = (input: {
       if (clip.startSec < input.section.range.startSec && endSec > input.section.range.endSec) {
         updateClips.push({
           clipId: clip.id,
-          timing: { startSec: clip.startSec, duration: input.section.range.startSec - clip.startSec },
+          timing: {
+            startSec: clip.startSec,
+            duration: input.section.range.startSec - clip.startSec,
+            ...(clip.fades ? {
+              fades: clipFadesForFragment(clip.fades, clip.duration, input.section.range.startSec - clip.startSec, false, true),
+            } : {}),
+          },
         })
         createClips.push({
           trackId: track.id,
@@ -173,7 +191,13 @@ export const buildClipRangeDeletePatch = (input: {
       if (clip.startSec < input.section.range.startSec) {
         updateClips.push({
           clipId: clip.id,
-          timing: { startSec: clip.startSec, duration: input.section.range.startSec - clip.startSec },
+          timing: {
+            startSec: clip.startSec,
+            duration: input.section.range.startSec - clip.startSec,
+            ...(clip.fades ? {
+              fades: clipFadesForFragment(clip.fades, clip.duration, input.section.range.startSec - clip.startSec, false, true),
+            } : {}),
+          },
         })
         continue
       }
@@ -187,6 +211,14 @@ export const buildClipRangeDeletePatch = (input: {
           bufferOffsetSec: offsets.bufferOffsetSec,
           midiOffsetBeats: offsets.midiOffsetBeats,
           audioWarp: offsets.audioWarp,
+          ...(clip.fades ? {
+            fades: transformClipFadesForDuration(
+              clip.fades,
+              clip.duration,
+              endSec - input.section.range.endSec,
+              input.section.range.endSec - clip.startSec,
+            ),
+          } : {}),
         },
       })
     }

@@ -9,6 +9,7 @@ import AutomationLane from './automation-lane'
 import type { AutomationEnvelope, AutomationParameterSelection } from '@daw-browser/shared'
 import TimelineContextMenu, { type TimelineContextMenuItem } from './context-menu/timeline-context-menu'
 import type { GroupClipOverviewSegment, TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
+import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 
 type TrackLaneProps = {
   track: Track
@@ -30,6 +31,8 @@ type TrackLaneProps = {
   onDeleteTrack?: (trackId: Track['id']) => void
   bpm: number
   viewportRedrawVersion: number
+  canEditClipFades: (clipId: string) => boolean
+  onCommitClipFades: (clipId: string, fades: ClipFades, baseline: ClipFades) => void
   automation: {
     projectId: string
     visible: boolean
@@ -156,6 +159,8 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
               ensureClipBuffer={props.ensureClipBuffer}
               bpm={props.bpm}
               viewportRedrawVersion={props.viewportRedrawVersion}
+              canEditFades={() => props.canEditClipFades(clip.id)}
+              onCommitFades={props.onCommitClipFades}
             />
           )}
         </For>

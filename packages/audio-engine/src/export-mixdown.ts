@@ -21,6 +21,7 @@ import { createOfflineMixerNodes } from './mixer/apply-offline-routing'
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
 import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
+import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { ResolvedMixerGraph } from './mixer/types'
 import { scheduleAutomationEnvelope } from './automation'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
@@ -808,7 +809,14 @@ async function renderSourceIsolatedMixdownFromPrepared(
         if (playback.durationSec <= 0) continue
         src.buffer = playback.buffer
         src.playbackRate.value = playback.playbackRate
-        connectSourceWithClipGain(ctx, src, trackInput, clip.gain)
+        connectSourceWithClipGain(ctx, src, trackInput, clip.gain, {
+          fades: normalizeClipFades(clip.fades, clip.duration),
+          clipStartSec: clip.startSec,
+          clipDurationSec: clip.duration,
+          timelineStartSec: map.timelineStartSec,
+          timelineEndSec: map.timelineEndSec,
+          contextStartTime: Math.max(0, map.timelineStartSec - prepared.range.startSec),
+        })
         try {
           src.start(
             Math.max(0, map.timelineStartSec - prepared.range.startSec),

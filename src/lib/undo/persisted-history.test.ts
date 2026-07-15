@@ -71,6 +71,22 @@ describe('persisted undo history', () => {
     })
   })
 
+  test('round-trips clip fade history entries', () => {
+    const entry: HistoryEntry = {
+      type: 'clip-fades',
+      projectId: 'project-1',
+      data: {
+        clipRef: 'clip-ref-1',
+        from: { fadeInSec: 0, fadeOutSec: 1, fadeInCurve: 0, fadeOutCurve: 0 },
+        to: { fadeInSec: 2, fadeOutSec: 1, fadeInCurve: 0.5, fadeOutCurve: -0.5 },
+      },
+    }
+    expect(normalizePersistedHistory(serializePersistedHistory({
+      undo: [entry],
+      redo: [],
+    }))).toEqual({ undo: [entry], redo: [] })
+  })
+
   test('keeps effect instance ids on parameter entries', () => {
     const entry: HistoryEntry = {
       type: 'effect-params',

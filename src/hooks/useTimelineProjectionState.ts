@@ -11,6 +11,7 @@ import {
   type TimelineViewLike,
 } from '~/lib/resolve-timeline-tracks'
 import type { Track } from '@daw-browser/timeline-core/types'
+import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 
@@ -51,6 +52,7 @@ type UseTimelineProjectionStateReturn = {
   commitClipTiming: (clipId: string, patch: ClipTimelinePatch) => void
   commitClipAudioWarp: (clipId: string, audioWarp: Track['clips'][number]['audioWarp']) => void
   commitClipGain: (clipId: string, gain: number) => void
+  commitClipFades: (clipId: string, fades: ClipFades) => void
   replaceDraftClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
   clearDraftClipMoves: (clipIds: Iterable<string>) => void
   commitClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
@@ -59,7 +61,7 @@ type UseTimelineProjectionStateReturn = {
   clearTrackLock: (trackId: Track['id']) => void
 }
 
-function reconcileTimelineProjectionSnapshot<TTrackId extends string>(
+export function reconcileTimelineProjectionSnapshot<TTrackId extends string>(
   current: TimelineProjectionSnapshot<TTrackId>,
   data: TimelineViewLike<TTrackId>,
 ): TimelineProjectionSnapshot<TTrackId> {
@@ -180,8 +182,16 @@ const hasClipTimelinePatchFields = (patch: ClipTimelinePatch) => (
   || patch.bufferOffsetSec !== undefined
   || patch.audioWarp !== undefined
   || patch.gain !== undefined
+  || patch.fades !== undefined
   || patch.midiOffsetBeats !== undefined
 )
+
+export const clearClipMovePatch = (patch: ClipTimelinePatch): ClipTimelinePatch | null => {
+  const remaining: ClipTimelinePatch = { ...patch }
+  delete remaining.trackId
+  delete remaining.startSec
+  return hasClipTimelinePatchFields(remaining) ? remaining : null
+}
 
 export function useTimelineProjectionState(
   options: UseTimelineProjectionStateOptions,
@@ -232,11 +242,9 @@ export function useTimelineProjectionState(
       for (const clipId of targetIds) {
         const patch = current.get(clipId)
         if (!patch) continue
-        const remaining: ClipTimelinePatch = { ...patch }
-        delete remaining.trackId
-        delete remaining.startSec
+        const remaining = clearClipMovePatch(patch)
         if (!next) next = new Map(current)
-        if (hasClipTimelinePatchFields(remaining)) {
+        if (remaining) {
           next.set(clipId, remaining)
         } else {
           next.delete(clipId)
@@ -264,6 +272,13 @@ export function useTimelineProjectionState(
 
   const commitClipGain = (clipId: string, gain: number) => {
     setCommittedClipEditsById((current) => new Map(current).set(clipId, { ...(current.get(clipId) ?? {}), gain }))
+  }
+
+  const commitClipFades = (clipId: string, fades: ClipFades) => {
+    setCommittedClipEditsById((current) => new Map(current).set(clipId, {
+      ...current.get(clipId),
+      fades,
+    }))
   }
 
   const removeLocalClips = (clipIds: Iterable<string>) => {
@@ -420,6 +435,7 @@ export function useTimelineProjectionState(
       })
     },
     commitClipGain,
+    commitClipFades,
     replaceDraftClipMoves: (moves) => {
       const moveIds = new Set(moves.map((move) => move.clipId))
       setDraftClipEditsById((current) => {

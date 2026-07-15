@@ -4,6 +4,7 @@ import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { flushRegisteredLocalProjectWrites } from '~/lib/local-project-write-flushers'
 import { LocalEntityWriteQueue } from '~/lib/local-write-queue'
 import { normalizeTrackRouting } from '@daw-browser/shared'
+import { normalizeClipFades, clipFadesEqual, transformClipFadesForDuration } from '@daw-browser/timeline-core/clip-fades'
 import type {
   CreateClipInput,
   CreateTrackInput,
@@ -160,6 +161,7 @@ const clipPersistenceFieldsEqual = (left: TimelineClipRow, right: TimelineClipRo
   && left.bufferOffsetSec === right.bufferOffsetSec
   && audioWarpEqual(left.audioWarp, right.audioWarp)
   && left.gain === right.gain
+  && clipFadesEqual(left.fades, right.fades, left.duration)
   && left.color === right.color
   && left.midi === right.midi
   && left.midiOffsetBeats === right.midiOffsetBeats
@@ -478,6 +480,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       bufferOffsetSec: input.bufferOffsetSec,
       audioWarp: normalizeAudioWarp(input.audioWarp),
       gain: input.gain,
+      fades: input.fades ? normalizeClipFades(input.fades, input.duration) : undefined,
       sampleUrl: input.sampleUrl,
       midi: input.midi,
       midiOffsetBeats: input.midiOffsetBeats,
@@ -658,6 +661,13 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       bufferOffsetSec: input.bufferOffsetSec ?? row.value.bufferOffsetSec,
       audioWarp: input.audioWarp === undefined ? row.value.audioWarp : normalizeAudioWarp(input.audioWarp),
       gain: input.gain ?? row.value.gain,
+      fades: input.fades
+        ? normalizeClipFades(input.fades, input.duration ?? row.value.duration)
+        : input.duration === undefined
+          ? row.value.fades
+          : row.value.fades
+            ? transformClipFadesForDuration(row.value.fades, row.value.duration, input.duration)
+            : undefined,
       color: input.color ?? row.value.color,
       midi: input.midi ?? row.value.midi,
       midiOffsetBeats: input.midiOffsetBeats ?? row.value.midiOffsetBeats,

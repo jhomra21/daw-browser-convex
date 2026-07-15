@@ -38,6 +38,7 @@ import type {
 } from "@daw-browser/timeline-core/types";
 import type { TimelineTrackIndex } from "@daw-browser/timeline-core/track-index";
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types";
+import type { ClipFades } from "@daw-browser/timeline-core/clip-fades";
 import { automationTargetKey } from "@daw-browser/shared";
 import type { TimelineWorkspaceAutomationModel } from "~/hooks/useTimelineAutomationController";
 import TimelineContextMenu, {
@@ -129,6 +130,8 @@ type Props = {
     edge: "left" | "right",
     event: PointerEvent,
   ) => void;
+  canEditClipFades: (clipId: string) => boolean;
+  onCommitClipFades: (clipId: string, fades: ClipFades, baseline: ClipFades) => void;
   onAddMidiClipToTrack?: (trackId: Track["id"]) => void;
   onDeleteTrack: (trackId: Track["id"]) => void;
   clipContextMenu: ClipContextMenuActions;
@@ -303,6 +306,8 @@ export default function TimelineWorkspace(props: Props) {
             onClipPointerDown={props.onClipPointerDown}
             onClipPointerUp={props.onClipPointerUp}
             onClipResizeStart={props.onClipResizeStart}
+            canEditClipFades={props.canEditClipFades}
+            onCommitClipFades={props.onCommitClipFades}
             onAddMidiClip={props.onAddMidiClipToTrack}
             onDeleteTrack={props.onDeleteTrack}
             clipContextMenu={props.clipContextMenu}

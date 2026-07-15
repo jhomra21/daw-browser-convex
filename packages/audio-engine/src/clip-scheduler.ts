@@ -3,6 +3,7 @@ import { connectSourceWithClipGain, getAudioBufferPlaybackParams } from './audio
 import type { StretchedAudioRender } from './audio-stretch-cache'
 import type { SourceRegistry } from './source-registry'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
 
 type RuntimeClip = Clip<AudioBuffer>
 type RuntimeTrack = Track<AudioBuffer>
@@ -142,7 +143,14 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
     if (playback.durationSec <= 0) return null
     source.buffer = playback.buffer
     source.playbackRate.value = playback.playbackRate
-    connectSourceWithClipGain(ctx, source, input, clip.gain)
+    connectSourceWithClipGain(ctx, source, input, clip.gain, {
+      fades: normalizeClipFades(clip.fades, clip.duration),
+      clipStartSec: clip.startSec,
+      clipDurationSec: clip.duration,
+      timelineStartSec: map.timelineStartSec,
+      timelineEndSec: map.timelineEndSec,
+      contextStartTime: nowCtx + Math.max(0, map.timelineStartSec - playheadSec),
+    })
     source.start(
       nowCtx + Math.max(0, map.timelineStartSec - playheadSec),
       playback.offsetSec,

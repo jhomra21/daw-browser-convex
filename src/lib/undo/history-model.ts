@@ -74,7 +74,7 @@ export const commitClipMovesInHistoryModel = (
 export const commitClipTimingInHistoryModel = (
   tracks: Track[],
   clipId: string,
-  patch: Pick<Clip, 'startSec' | 'duration' | 'leftPadSec' | 'bufferOffsetSec' | 'midiOffsetBeats' | 'gain'>,
+  patch: Pick<Clip, 'startSec' | 'duration' | 'leftPadSec' | 'bufferOffsetSec' | 'midiOffsetBeats' | 'gain' | 'fades'>,
 ) => {
   for (const track of tracks) {
     const clip = track.clips.find((entry) => entry.id === clipId)
@@ -85,6 +85,7 @@ export const commitClipTimingInHistoryModel = (
     clip.bufferOffsetSec = patch.bufferOffsetSec
     clip.midiOffsetBeats = patch.midiOffsetBeats
     clip.gain = patch.gain
+    clip.fades = patch.fades ? { ...patch.fades } : undefined
     return
   }
 }
@@ -98,6 +99,19 @@ export const commitClipAudioWarpInHistoryModel = (
     const clip = track.clips.find((entry) => entry.id === clipId)
     if (!clip) continue
     clip.audioWarp = audioWarp
+    return
+  }
+}
+
+export const commitClipFadesInHistoryModel = (
+  tracks: Track[],
+  clipId: string,
+  fades: Clip['fades'],
+) => {
+  for (const track of tracks) {
+    const clip = track.clips.find((entry) => entry.id === clipId)
+    if (!clip) continue
+    clip.fades = fades ? { ...fades } : undefined
     return
   }
 }

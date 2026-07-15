@@ -13,6 +13,7 @@ import type * as audioWarpValidator from "../audioWarpValidator.js";
 import type * as authIdentity from "../authIdentity.js";
 import type * as automation from "../automation.js";
 import type * as chat from "../chat.js";
+import type * as clipFadesValidator from "../clipFadesValidator.js";
 import type * as clipWrites from "../clipWrites.js";
 import type * as clips from "../clips.js";
 import type * as cloudBackups from "../cloudBackups.js";
@@ -48,6 +49,7 @@ declare const fullApi: ApiFromModules<{
   authIdentity: typeof authIdentity;
   automation: typeof automation;
   chat: typeof chat;
+  clipFadesValidator: typeof clipFadesValidator;
   clipWrites: typeof clipWrites;
   clips: typeof clips;
   cloudBackups: typeof cloudBackups;

@@ -3,6 +3,7 @@ import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { MoveClipInput } from '~/lib/timeline-repository/types'
 import type { AudioWarp } from '@daw-browser/timeline-core/types'
+import { normalizeClipFades, type ClipFades } from '@daw-browser/timeline-core/clip-fades'
 
 type ClipWriteContext = {
   projectId: string
@@ -12,6 +13,17 @@ type ClipWriteContext = {
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
 )
+
+const toSharedClipFades = (fades: ClipFades) => ({
+  fadeInStartSec: fades.fadeInStartSec ?? 0,
+  fadeInSec: fades.fadeInSec,
+  fadeOutSec: fades.fadeOutSec,
+  fadeOutEndSec: fades.fadeOutEndSec ?? 0,
+  fadeInCurve: fades.fadeInCurve,
+  fadeOutCurve: fades.fadeOutCurve,
+  fadeInCurvePosition: fades.fadeInCurvePosition ?? 0.5,
+  fadeOutCurvePosition: fades.fadeOutCurvePosition ?? 0.5,
+})
 
 export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
   deleteClips: async (clipIds: string[]) => {
@@ -83,6 +95,20 @@ export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
     })
     return isRecord(result) && result.status === 'applied'
   },
+  setFades: async (clipId: string, fades: ClipFades) => {
+    if (isLocalId('project', context.projectId)) {
+      const row = await createLocalTimelineRepository(context.projectId).updateClip({ clipId, fades })
+      return Boolean(row)
+    }
+    if (!context.userId) return false
+    const result = await publishDurableSharedTimelineOperation({
+      projectId: context.projectId,
+      userId: context.userId,
+      operation: { kind: 'clips.setFades', payload: { clipId, fades: toSharedClipFades(fades) } },
+      queuedResult: { status: 'applied' },
+    })
+    return isRecord(result) && result.status === 'applied'
+  },
   updateClipTiming: async (input: {
     clipId: string
     startSec: number
@@ -91,6 +117,7 @@ export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
     bufferOffsetSec?: number
     midiOffsetBeats?: number
     audioWarp?: AudioWarp
+    fades?: ClipFades
   }) => {
     if (isLocalId('project', context.projectId)) {
       const row = await createLocalTimelineRepository(context.projectId).updateClip(input)
@@ -108,6 +135,7 @@ export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
             clipId: input.clipId,
             ...normalizeClipTimingPatch(input),
             ...(normalizedAudioWarp ? { audioWarp: normalizedAudioWarp } : {}),
+            ...(input.fades ? { fades: normalizeClipFades(input.fades, input.duration) } : {}),
           },
         },
         queuedResult: { status: 'applied' },
@@ -117,7 +145,14 @@ export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
     const result = await publishDurableSharedTimelineOperation({
       projectId: context.projectId,
       userId: context.userId,
-      operation: { kind: 'clips.setTiming', payload: { clipId: input.clipId, ...normalizeClipTimingPatch(input) } },
+      operation: {
+        kind: 'clips.setTiming',
+        payload: {
+          clipId: input.clipId,
+          ...normalizeClipTimingPatch(input),
+          ...(input.fades ? { fades: normalizeClipFades(input.fades, input.duration) } : {}),
+        },
+      },
       queuedResult: { status: 'applied' },
     })
     return isRecord(result) && result.status === 'applied'

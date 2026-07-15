@@ -9,6 +9,7 @@ import { normalizeProjectMixState } from '~/lib/project-mix-state'
 import type { TimelineClipRow, TimelineTrackRow } from '~/lib/timeline-repository/types'
 import { getDefaultClipColor } from '~/lib/clip-color'
 import { localSidechainRouteRowId } from '~/lib/local-effects'
+import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 
@@ -95,6 +96,7 @@ const toClipRow = (clip: FullTimelineView['clips'][number], updatedAt: number): 
     bufferOffsetSec: clip.bufferOffsetSec ?? 0,
     audioWarp: normalizeAudioWarp(clip.audioWarp),
     gain: clip.gain,
+    fades: clip.fades ? normalizeClipFades(clip.fades, clip.duration) : undefined,
     sampleUrl: clip.sampleUrl,
     midi,
     midiOffsetBeats: clip.midiOffsetBeats ?? 0,

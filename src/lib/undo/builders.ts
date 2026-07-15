@@ -3,6 +3,7 @@ import type { ClipCreateSnapshot } from '@daw-browser/shared'
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { ExternalSidechainRoute, Track, TrackRouting } from '@daw-browser/timeline-core/types'
+import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 
 import { buildTrackRoutingHistorySnapshot, getClipHistoryRef, getTrackHistoryRef } from './refs'
 import type {
@@ -441,6 +442,23 @@ export function buildClipTimingHistoryEntry(input: {
 }): Extract<HistoryEntry, { type: 'clip-timing' }> {
   return {
     type: 'clip-timing',
+    projectId: input.projectId,
+    data: {
+      clipRef: getClipHistoryRef(input.clip),
+      from: input.from,
+      to: input.to,
+    },
+  }
+}
+
+export function buildClipFadesHistoryEntry(input: {
+  projectId: string
+  clip: Track['clips'][number]
+  from: ClipFades
+  to: ClipFades
+}): Extract<HistoryEntry, { type: 'clip-fades' }> {
+  return {
+    type: 'clip-fades',
     projectId: input.projectId,
     data: {
       clipRef: getClipHistoryRef(input.clip),

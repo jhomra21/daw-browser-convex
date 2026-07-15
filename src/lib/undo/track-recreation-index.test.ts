@@ -68,6 +68,7 @@ test('redo recreates a Return track at the current canonical index', async () =>
       commitClipMoves: () => {},
       commitClipTiming: () => {},
       commitClipAudioWarp: () => {},
+      commitClipFades: () => {},
       rescheduleChangedClips: () => {},
       cancelTrackVolumeWrite: () => {},
       cancelTrackRoutingWrite: () => {},

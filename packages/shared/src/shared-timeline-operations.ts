@@ -64,6 +64,20 @@ export type MoveClipInput = {
   startSec: number
 }
 
+export type SharedClipFades = {
+  fadeInStartSec: number
+  fadeInSec: number
+  fadeOutSec: number
+  fadeOutEndSec: number
+  fadeInCurve: number
+  fadeOutCurve: number
+  fadeInCurvePosition: number
+  fadeOutCurvePosition: number
+}
+
+export type SharedClipFadesInput = Omit<SharedClipFades, 'fadeInStartSec' | 'fadeOutEndSec' | 'fadeInCurvePosition' | 'fadeOutCurvePosition'>
+  & Partial<Pick<SharedClipFades, 'fadeInStartSec' | 'fadeOutEndSec' | 'fadeInCurvePosition' | 'fadeOutCurvePosition'>>
+
 export type TrackRouting = {
   outputTargetId?: string
   sends?: Array<{ targetId: string; amount: number; tap?: 'pre-fx' | 'pre-fader' | 'post-fader' }>
@@ -84,6 +98,7 @@ export type SharedTimelineClipCreatePayload = {
   bufferOffsetSec?: number
   audioWarp?: AudioWarpPayload
   gain?: number
+  fades?: SharedClipFadesInput
   midiOffsetBeats?: number
   color?: string
   midi?: {
@@ -153,10 +168,11 @@ export type SharedTimelineOperation =
   | { kind: 'clips.createMany'; payload: { items: SharedTimelineClipCreatePayload[]; operationId?: string } }
   | { kind: 'clips.removeMany'; payload: { clipIds: string[] } }
   | { kind: 'clips.moveMany'; payload: { moves: MoveClipInput[] } }
-  | { kind: 'clips.setTiming'; payload: { clipId: string; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number } }
-  | { kind: 'clips.setTimingAndAudioWarp'; payload: { clipId: string; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number; audioWarp?: AudioWarpPayload } }
+  | { kind: 'clips.setTiming'; payload: { clipId: string; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number; fades?: SharedClipFades } }
+  | { kind: 'clips.setTimingAndAudioWarp'; payload: { clipId: string; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number; audioWarp?: AudioWarpPayload; fades?: SharedClipFades } }
   | { kind: 'clips.setAudioWarp'; payload: { clipId: string; audioWarp: AudioWarpPayload } }
   | { kind: 'clips.setGain'; payload: { clipId: string; gain: number } }
+  | { kind: 'clips.setFades'; payload: { clipId: string; fades: SharedClipFades } }
   | { kind: 'clips.setColor'; payload: { clipId: string; color: string } }
   | { kind: 'tracks.setRouting'; payload: { trackId: string; routing: TrackRouting } }
   | { kind: 'sidechains.setRoute'; payload: { projectId: string; sourceTrackId: string; targetTrackId: string; effectInstanceId: string } }
@@ -275,6 +291,26 @@ const readOptionalString = (value: unknown) => typeof value === 'string' ? value
 const readOptionalNullableString = (value: unknown) => typeof value === 'string' || value === null ? value : undefined
 
 const readAudioWarp = (value: unknown) => normalizeAudioWarp(value)
+
+const readClipFades = (value: unknown) => {
+  if (!isRecord(value)) return undefined
+  if (
+    typeof value.fadeInSec !== 'number'
+    || typeof value.fadeOutSec !== 'number'
+    || typeof value.fadeInCurve !== 'number'
+    || typeof value.fadeOutCurve !== 'number'
+  ) return undefined
+  return {
+    fadeInStartSec: typeof value.fadeInStartSec === 'number' ? value.fadeInStartSec : 0,
+    fadeInSec: value.fadeInSec,
+    fadeOutSec: value.fadeOutSec,
+    fadeOutEndSec: typeof value.fadeOutEndSec === 'number' ? value.fadeOutEndSec : 0,
+    fadeInCurve: value.fadeInCurve,
+    fadeOutCurve: value.fadeOutCurve,
+    fadeInCurvePosition: typeof value.fadeInCurvePosition === 'number' ? value.fadeInCurvePosition : 0.5,
+    fadeOutCurvePosition: typeof value.fadeOutCurvePosition === 'number' ? value.fadeOutCurvePosition : 0.5,
+  }
+}
 
 const readStringArray = (value: unknown) => Array.isArray(value)
   ? value.flatMap((entry) => typeof entry === 'string' ? [entry] : [])
@@ -406,6 +442,7 @@ export const readSharedTimelineClipCreatePayload = (
     bufferOffsetSec: readOptionalNumber(value.bufferOffsetSec),
     audioWarp: readAudioWarp(value.audioWarp),
     gain: readOptionalNumber(value.gain),
+    fades: readClipFades(value.fades),
     midiOffsetBeats: readOptionalNumber(value.midiOffsetBeats),
     color: normalizeClipColor(readOptionalString(value.color)),
     midi,
@@ -680,6 +717,7 @@ const readClipTimingPayload = (payload: Record<string, unknown>) => {
       bufferOffsetSec: readOptionalNumber(payload.bufferOffsetSec),
       midiOffsetBeats: readOptionalNumber(payload.midiOffsetBeats),
     }),
+    fades: readClipFades(payload.fades),
   }
 }
 
@@ -710,6 +748,13 @@ const parseClipGain = (payload: Record<string, unknown>): SharedTimelineOperatio
     ? { kind: 'clips.setGain', payload: { clipId: payload.clipId, gain: normalizeClipGain(payload.gain) } }
     : null
 )
+
+const parseClipFades = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  const fades = readClipFades(payload.fades)
+  return typeof payload.clipId === 'string' && fades
+    ? { kind: 'clips.setFades', payload: { clipId: payload.clipId, fades } }
+    : null
+}
 
 const parseClipColor = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const color = normalizeClipColor(readOptionalString(payload.color))
@@ -1347,6 +1392,12 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   {
     kind: 'clips.setGain',
     parse: parseClipGain,
+    targets: readClipIdTargets,
+    durableQueue: true,
+  },
+  {
+    kind: 'clips.setFades',
+    parse: parseClipFades,
     targets: readClipIdTargets,
     durableQueue: true,
   },

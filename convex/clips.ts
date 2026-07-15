@@ -12,6 +12,8 @@ import { normalizeClipColor, normalizeClipGain, normalizeClipStartSec, normalize
 import { buildClipAudioSourceFields, normalizeAudioSourceMetadataPatch, sanitizePositiveNumber, type AudioSourceKind } from '@daw-browser/shared'
 import { runSharedOperationOnce } from './sharedOperationResults'
 import { audioWarpValidator } from './audioWarpValidator'
+import { clipFadesValidator } from './clipFadesValidator'
+import { normalizeClipFades, type ClipFades } from '@daw-browser/timeline-core/clip-fades'
 
 type ClipKind = 'audio' | 'midi'
 
@@ -60,6 +62,7 @@ type ClipCreateInput = {
     mode: 'repitch' | 'stretch'
   }
   gain?: number
+  fades?: Partial<ClipFades>
   midiOffsetBeats?: number
   color?: string
   midi?: {
@@ -95,6 +98,7 @@ type ClipCreatePatch = {
   bufferOffsetSec?: number
   audioWarp?: ClipCreateInput['audioWarp']
   gain?: number
+  fades?: ClipFades
   midiOffsetBeats?: number
   color?: string
 }
@@ -159,6 +163,7 @@ const buildClipCreatePatch = (
     bufferOffsetSec: item.bufferOffsetSec,
     audioWarp: item.audioWarp,
     gain: item.gain,
+    fades: item.fades ? normalizeClipFades(item.fades, item.duration) : undefined,
     midiOffsetBeats: item.midiOffsetBeats,
     color: normalizeClipColor(item.color),
   }
@@ -192,6 +197,7 @@ type ClipTimingMutationInput = {
   bufferOffsetSec?: number
   midiOffsetBeats?: number
   audioWarp?: AudioWarpPayload
+  fades?: Partial<ClipFades>
 }
 
 const applyClipTimingPatch = async (
@@ -205,6 +211,8 @@ const applyClipTimingPatch = async (
   if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
 
   const patch = buildClipTimingPatch(input)
+  if (input.fades && !access.clip.midi) patch.fades = normalizeClipFades(input.fades, input.duration)
+  else if (access.clip.fades) patch.fades = normalizeClipFades(access.clip.fades, input.duration)
   if (input.audioWarp !== undefined) patch.audioWarp = input.audioWarp
   await ctx.db.patch(clipId, patch)
   return { status: 'applied' as const }
@@ -316,6 +324,7 @@ export const create = mutation({
     bufferOffsetSec: v.optional(v.number()),
     audioWarp: v.optional(audioWarpValidator),
     gain: v.optional(v.number()),
+    fades: v.optional(clipFadesValidator),
     midiOffsetBeats: v.optional(v.number()),
     color: v.optional(v.string()),
     midi: v.optional(v.object({
@@ -360,6 +369,7 @@ export const serverCreate = mutation({
     bufferOffsetSec: v.optional(v.number()),
     audioWarp: v.optional(audioWarpValidator),
     gain: v.optional(v.number()),
+    fades: v.optional(clipFadesValidator),
     midiOffsetBeats: v.optional(v.number()),
     color: v.optional(v.string()),
     midi: v.optional(v.object({
@@ -535,14 +545,16 @@ export const setTiming = mutation({
     leftPadSec: v.optional(v.number()),
     bufferOffsetSec: v.optional(v.number()),
     midiOffsetBeats: v.optional(v.number()),
+    fades: v.optional(clipFadesValidator),
   },
-  handler: async (ctx, { clipId, startSec, duration, leftPadSec, bufferOffsetSec, midiOffsetBeats }) => {
+  handler: async (ctx, { clipId, startSec, duration, leftPadSec, bufferOffsetSec, midiOffsetBeats, fades }) => {
     return await applyClipTimingPatch(ctx, clipId, {
       startSec,
       duration,
       leftPadSec,
       bufferOffsetSec,
       midiOffsetBeats,
+      fades,
     })
   },
 })
@@ -562,6 +574,18 @@ export const setAudioWarp = mutation({
   },
 })
 
+export const setFades = mutation({
+  args: { clipId: v.id('clips'), fades: clipFadesValidator },
+  handler: async (ctx, { clipId, fades }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const access = await getClipWriteAccess(ctx, clipId, userId)
+    if (!access || access.clip.midi) return { status: 'rejected' as const }
+    if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
+    await ctx.db.patch(clipId, { fades: normalizeClipFades(fades, access.clip.duration) })
+    return { status: 'applied' as const }
+  },
+})
+
 export const setTimingAndAudioWarp = mutation({
   args: {
     clipId: v.id('clips'),
@@ -571,8 +595,9 @@ export const setTimingAndAudioWarp = mutation({
     bufferOffsetSec: v.optional(v.number()),
     midiOffsetBeats: v.optional(v.number()),
     audioWarp: v.optional(audioWarpValidator),
+    fades: v.optional(clipFadesValidator),
   },
-  handler: async (ctx, { clipId, startSec, duration, leftPadSec, bufferOffsetSec, midiOffsetBeats, audioWarp }) => {
+  handler: async (ctx, { clipId, startSec, duration, leftPadSec, bufferOffsetSec, midiOffsetBeats, audioWarp, fades }) => {
     return await applyClipTimingPatch(ctx, clipId, {
       startSec,
       duration,
@@ -580,6 +605,7 @@ export const setTimingAndAudioWarp = mutation({
       bufferOffsetSec,
       midiOffsetBeats,
       audioWarp,
+      fades,
     })
   },
 })
@@ -618,6 +644,20 @@ export const serverSetGain = mutation({
   },
 })
 
+export const serverSetFades = mutation({
+  args: { clipId: v.string(), fades: clipFadesValidator },
+  handler: async (ctx, { clipId, fades }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const normalizedClipId = ctx.db.normalizeId('clips', clipId)
+    if (!normalizedClipId) return { status: 'rejected' as const }
+    const access = await getClipWriteAccess(ctx, normalizedClipId, userId)
+    if (!access || access.clip.midi) return { status: 'rejected' as const }
+    if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
+    await ctx.db.patch(normalizedClipId, { fades: normalizeClipFades(fades, access.clip.duration) })
+    return { status: 'applied' as const }
+  },
+})
+
 export const serverSetColor = mutation({
   args: {
     clipId: v.string(),
@@ -645,8 +685,9 @@ export const serverSetTiming = mutation({
     leftPadSec: v.optional(v.number()),
     bufferOffsetSec: v.optional(v.number()),
     midiOffsetBeats: v.optional(v.number()),
+    fades: v.optional(clipFadesValidator),
   },
-  handler: async (ctx, { clipId, startSec, duration, leftPadSec, bufferOffsetSec, midiOffsetBeats }) => {
+  handler: async (ctx, { clipId, startSec, duration, leftPadSec, bufferOffsetSec, midiOffsetBeats, fades }) => {
     const normalizedClipId = ctx.db.normalizeId('clips', clipId)
     if (!normalizedClipId) return { status: 'rejected' as const }
     return await applyClipTimingPatch(ctx, normalizedClipId, {
@@ -655,6 +696,7 @@ export const serverSetTiming = mutation({
       leftPadSec,
       bufferOffsetSec,
       midiOffsetBeats,
+      fades,
     })
   },
 })
@@ -668,8 +710,9 @@ export const serverSetTimingAndAudioWarp = mutation({
     bufferOffsetSec: v.optional(v.number()),
     midiOffsetBeats: v.optional(v.number()),
     audioWarp: v.optional(audioWarpValidator),
+    fades: v.optional(clipFadesValidator),
   },
-  handler: async (ctx, { clipId, startSec, duration, leftPadSec, bufferOffsetSec, midiOffsetBeats, audioWarp }) => {
+  handler: async (ctx, { clipId, startSec, duration, leftPadSec, bufferOffsetSec, midiOffsetBeats, audioWarp, fades }) => {
     const normalizedClipId = ctx.db.normalizeId('clips', clipId)
     if (!normalizedClipId) return { status: 'rejected' as const }
     return await applyClipTimingPatch(ctx, normalizedClipId, {
@@ -679,6 +722,7 @@ export const serverSetTimingAndAudioWarp = mutation({
       bufferOffsetSec,
       midiOffsetBeats,
       audioWarp,
+      fades,
     })
   },
 })
@@ -737,6 +781,7 @@ export const createMany = mutation({
       bufferOffsetSec: v.optional(v.number()),
       audioWarp: v.optional(audioWarpValidator),
       gain: v.optional(v.number()),
+      fades: v.optional(clipFadesValidator),
       midiOffsetBeats: v.optional(v.number()),
       color: v.optional(v.string()),
       clipKind: v.optional(v.string()),
@@ -791,6 +836,7 @@ export const serverCreateMany = mutation({
       bufferOffsetSec: v.optional(v.number()),
       audioWarp: v.optional(audioWarpValidator),
       gain: v.optional(v.number()),
+      fades: v.optional(clipFadesValidator),
       midiOffsetBeats: v.optional(v.number()),
       color: v.optional(v.string()),
       clipKind: v.optional(v.string()),

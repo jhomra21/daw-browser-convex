@@ -12,6 +12,8 @@ import { LANE_HEIGHT, PPS } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import type { RuntimeClip } from "~/lib/timeline-runtime-types";
+import type { ClipFades } from "@daw-browser/timeline-core/clip-fades";
+import ClipFadeOverlay from "./ClipFadeOverlay";
 import type { ClipRangeOverlap } from "~/lib/timeline-range-selection";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
 
@@ -46,6 +48,8 @@ type ClipComponentProps = {
   bpm: number;
   viewportRedrawVersion: number;
   rangeOverlap: ClipRangeOverlap | null;
+  canEditFades: () => boolean;
+  onCommitFades: (clipId: string, fades: ClipFades, baseline: ClipFades) => void;
 };
 
 // these values center waveform in clips container
@@ -460,6 +464,11 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       <canvas
         ref={(el) => (canvasRef = el || undefined)}
         class="absolute inset-0 pointer-events-none z-10"
+      />
+      <ClipFadeOverlay
+        clip={props.clip}
+        canEdit={() => props.canEditFades()}
+        onCommit={(fades, baseline) => props.onCommitFades(props.clip.id, fades, baseline)}
       />
       {!props.isSelected && props.rangeOverlap && (
         <>

@@ -1,4 +1,5 @@
 import type { AudioSourceKind, AudioWarpPayload } from '@daw-browser/shared'
+import type { ClipFades } from './clip-fades'
 export type { AudioWarpMode } from '@daw-browser/shared'
 export type TrackId = string
 
@@ -44,6 +45,7 @@ export type Clip<TBuffer = never> = {
   bufferOffsetSec?: number
   audioWarp?: AudioWarp
   gain?: number
+  fades?: ClipFades
   color: string
   sampleUrl?: string
   midi?: {

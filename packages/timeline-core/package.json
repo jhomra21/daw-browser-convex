@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./audio-clip-time-map": "./src/audio-clip-time-map.ts",
+    "./clip-fades": "./src/clip-fades.ts",
     "./clip-placement": "./src/clip-placement.ts",
     "./track-index": "./src/track-index.ts",
     "./track-routing": "./src/track-routing.ts",

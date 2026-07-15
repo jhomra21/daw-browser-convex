@@ -766,6 +766,20 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 )),
               );
             };
+            const handleAutomationVisibility = () => {
+              if (track.collapsed) {
+                sidebar().onToggleTrackCollapsed(track.id);
+                if (!automationVisible())
+                  props.automation.actions.toggleTrackVisibility(track.id);
+                return;
+              }
+              props.automation.actions.toggleTrackVisibility(track.id);
+            };
+            const handleAddAutomationLane = () => {
+              if (!canAddAutomationLane()) return;
+              if (track.collapsed) sidebar().onToggleTrackCollapsed(track.id);
+              props.automation.actions.addTrackLane(track.id);
+            };
             const contextMenuColor = () =>
               parseHexColor(
                 track.color,
@@ -869,14 +883,13 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 label: displayedAutomationVisible()
                   ? "Hide automation lane"
                   : "Show automation lane",
-                onSelect: () =>
-                  props.automation.actions.toggleTrackVisibility(track.id),
+                onSelect: handleAutomationVisibility,
               },
               {
                 kind: "item",
                 label: "Add automation lane",
                 disabled: !canAddAutomationLane(),
-                onSelect: () => props.automation.actions.addTrackLane(track.id),
+                onSelect: handleAddAutomationLane,
               },
               { kind: "separator" },
               {
@@ -1220,7 +1233,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           )}
                           onClick={(event) => {
                             event.stopPropagation();
-                            props.automation.actions.toggleTrackVisibility(track.id);
+                            handleAutomationVisibility();
                           }}
                           title={automationVisible() ? "Hide automation lane" : "Show automation lane"}
                         >
@@ -1236,8 +1249,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                           disabled={!canAddAutomationLane()}
                           onClick={(event) => {
                             event.stopPropagation();
-                            if (!canAddAutomationLane()) return;
-                            props.automation.actions.addTrackLane(track.id);
+                            handleAddAutomationLane();
                           }}
                           title={automationVisible() ? "Add another automation lane" : "Show automation with A before adding lanes"}
                         >
@@ -1329,9 +1341,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             )}
                             onClick={(event) => {
                               event.stopPropagation();
-                              props.automation.actions.toggleTrackVisibility(
-                                track.id,
-                              );
+                              handleAutomationVisibility();
                             }}
                             title={
                               displayedAutomationVisible()
@@ -1351,8 +1361,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                             disabled={!canAddAutomationLane()}
                             onClick={(event) => {
                               event.stopPropagation();
-                              if (!canAddAutomationLane()) return;
-                              props.automation.actions.addTrackLane(track.id);
+                              handleAddAutomationLane();
                             }}
                             title={
                               displayedAutomationVisible()

@@ -804,6 +804,9 @@ const Timeline: Component<TimelineProps> = (props) => {
     if (!clip || clip.midi || !rid || !canWriteClip(clipId)) {
       return;
     }
+    if (clipFadesEqual(clip.fades, fades, clip.duration)) {
+      return;
+    }
     projection.commitClipFades(clipId, fades);
     const rollback = () => {
       const currentClip = trackLookup().clipById.get(clipId);
@@ -814,7 +817,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     void createTimelineClipWriteAdapter({
       projectId: rid,
       userId: userId(),
-    }).setFades(clipId, clip.duration, fades).then((applied) => {
+    }).setFades(clipId, fades).then((applied) => {
       if (!applied) {
         rollback();
         return;

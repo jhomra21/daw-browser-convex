@@ -281,15 +281,6 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
 
     if (clip) {
       setDraftClipTiming(clip.id, null)
-      commitClipTiming(clip.id, {
-        startSec: clip.startSec,
-        duration: clip.duration,
-        leftPadSec: clip.leftPadSec,
-        bufferOffsetSec: clip.bufferOffsetSec,
-        audioWarp: clip.audioWarp,
-        fades: clip.fades,
-        midiOffsetBeats: clip.midiOffsetBeats,
-      })
       const rid = options.projectId()
       const from = {
         startSec: resizeOrigStart,
@@ -353,11 +344,21 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           midiOffsetBeats: from.midiOffsetBeats,
           fades: from.fades,
         })
-        queueMicrotask(() => options.rescheduleChangedClips([clip.id]))
+        options.rescheduleChangedClips([clip.id])
       }
       if (sameTiming) {
         return
       }
+      commitClipTiming(clip.id, {
+        startSec: clip.startSec,
+        duration: clip.duration,
+        leftPadSec: clip.leftPadSec,
+        bufferOffsetSec: clip.bufferOffsetSec,
+        audioWarp: clip.audioWarp,
+        fades: clip.fades,
+        midiOffsetBeats: clip.midiOffsetBeats,
+      })
+      options.rescheduleChangedClips([clip.id])
       if (rid && isLocalId('project', rid)) {
         void createLocalTimelineRepository(rid).updateClip({
           clipId: clip.id,
@@ -370,7 +371,6 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           fades: clip.fades,
         }).then(() => {
           pushHistory()
-          options.rescheduleChangedClips([clip.id])
         }).catch(rollbackTiming)
       } else {
         const uid = userId()
@@ -387,7 +387,6 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           }).then((applied) => {
             if (applied) {
               pushHistory()
-              options.rescheduleChangedClips([clip.id])
               return
             }
             rollbackTiming()

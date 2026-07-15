@@ -503,6 +503,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
               bufferOffsetSec: match.bufferOffsetSec,
               midiOffsetBeats: match.midiOffsetBeats,
               audioWarp: match.audioWarp,
+              fades: match.fades,
             },
             to: update.timing,
           }),

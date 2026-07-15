@@ -2,8 +2,12 @@ import { expect, test } from 'bun:test'
 
 import {
   canStartFadeInteraction,
+  clipFadeControlValueText,
+  curveFadeControlValueText,
+  pointerPositionInFadeOverlay,
   relatedTargetStaysWithinFadeHoverRegion,
   updateFadeDraft,
+  updateFadeDraftForKeyboard,
 } from './clip-fade-interaction'
 
 const baseline = {
@@ -22,7 +26,6 @@ test('accepts editable fade controls only with usable overlay dimensions', () =>
     canEdit: true,
     isMidi: false,
     button: 0,
-    mode: 'fadeInStart',
     overlayWidth: 160,
     overlayHeight: 40,
   })).toBe(true)
@@ -30,7 +33,6 @@ test('accepts editable fade controls only with usable overlay dimensions', () =>
     canEdit: true,
     isMidi: false,
     button: 0,
-    mode: 'fadeInStart',
     overlayWidth: 0,
     overlayHeight: 40,
   })).toBe(false)
@@ -38,7 +40,6 @@ test('accepts editable fade controls only with usable overlay dimensions', () =>
     canEdit: false,
     isMidi: false,
     button: 0,
-    mode: 'fadeInStart',
     overlayWidth: 160,
     overlayHeight: 40,
   })).toBe(false)
@@ -61,7 +62,6 @@ test('updates all endpoint and curve controls from a local baseline', () => {
     canEdit: true,
     isMidi: false,
     button: 0,
-    mode: 'curve',
     overlayWidth: 160,
     overlayHeight: 40,
   })).toBe(true)
@@ -98,4 +98,22 @@ test('updates all endpoint and curve controls from a local baseline', () => {
   })
   expect(curve.fadeInCurvePosition).toBeCloseTo(0.5)
   expect(curve.fadeInCurve).toBe(1)
+})
+
+test('uses deterministic keyboard adjustments and accessible values', () => {
+  expect(updateFadeDraftForKeyboard(baseline, 'fadeIn', 'fadeInEnd', 8, 'ArrowRight')?.fadeInSec).toBe(1.05)
+  expect(updateFadeDraftForKeyboard(baseline, 'fadeIn', 'fadeInEnd', 8, 'PageUp')?.fadeInSec).toBe(1.5)
+  expect(updateFadeDraftForKeyboard(baseline, 'fadeIn', 'fadeInEnd', 8, 'Home')?.fadeInSec).toBe(0)
+  expect(updateFadeDraftForKeyboard(baseline, 'fadeIn', 'fadeInEnd', 8, 'End')?.fadeInSec).toBe(6)
+  const curve = updateFadeDraftForKeyboard(baseline, 'fadeIn', 'curve', 8, 'ArrowUp')
+  expect(curve?.fadeInCurve).toBe(0.05)
+  expect(updateFadeDraftForKeyboard(curve ?? baseline, 'fadeIn', 'curve', 8, 'ArrowRight')?.fadeInCurvePosition).toBe(0.55)
+  expect(clipFadeControlValueText(baseline, 'fadeInEnd')).toBe('1.00 seconds')
+  expect(curveFadeControlValueText({ x: 0.25, y: 0.8 })).toBe('Curve position 25%, gain 80%')
+})
+
+test('maps pointer movement against the initial overlay geometry', () => {
+  const snapshot = { left: 100, top: 50 }
+  expect(pointerPositionInFadeOverlay(snapshot, { clientX: 140, clientY: 70 })).toEqual({ x: 40, y: 20 })
+  expect(pointerPositionInFadeOverlay(snapshot, { clientX: 140, clientY: 70 })).toEqual({ x: 40, y: 20 })
 })

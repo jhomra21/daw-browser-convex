@@ -78,6 +78,7 @@ const toHistoryCreateClipInput = (trackId: Track["id"], clip: Track["clips"][num
   sampleUrl: clip.sampleUrl,
   midi: clip.midi,
   midiOffsetBeats: clip.midiOffsetBeats,
+  fades: clip.fades,
 });
 
 export const syncHistoryTrackCreateEntryId = (

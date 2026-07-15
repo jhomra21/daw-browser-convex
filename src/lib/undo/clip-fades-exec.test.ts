@@ -171,3 +171,128 @@ test('timing history persists transformed fades atomically', async () => {
   })
   expect(timingCommits).toEqual([entry.data.from])
 })
+
+test('undo recreates deleted faded clips in the local repository', async () => {
+  const projectId = 'project:history-recreated-faded-clip'
+  const repository = createLocalTimelineRepository(projectId)
+  await repository.createTrack({ id: 'track-1' })
+  const entry: HistoryEntry = {
+    type: 'clip-delete',
+    projectId,
+    data: {
+      items: [{
+        trackRef: 'track-1',
+        clip: {
+          clipRef: 'clip-ref-1',
+          startSec: 1,
+          duration: 4,
+          fades: to,
+        },
+      }],
+    },
+  }
+  const recreated = createTrack()
+  const deps: Parameters<typeof execUndo>[1] = {
+    convexClient,
+    convexApi,
+    getTracks: () => [recreated],
+    getHistoryEntries: () => [entry],
+    projectId,
+    userId: 'user',
+    persistLocalMix: () => {},
+    audioEngine: new AudioEngine(),
+    grantTrackWrite: () => {},
+    grantClipWrite: () => {},
+    actions: {
+      insertLocalTrack: () => {},
+      removeLocalTrack: () => {},
+      insertLocalClip: () => {},
+      replaceLocalClip: () => {},
+      removeLocalClips: () => {},
+      commitClipMoves: () => {},
+      commitClipTiming: () => {},
+      commitClipAudioWarp: () => {},
+      commitClipFades: () => {},
+      rescheduleChangedClips: () => {},
+      cancelTrackVolumeWrite: () => {},
+      cancelTrackRoutingWrite: () => {},
+      cancelTrackMixWrite: () => {},
+      applyTrackVolume: () => {},
+      applyTrackMixState: () => {},
+      applyTrackRouting: () => {},
+      applyTrackPatch: () => {},
+      applyAutomationEnvelope: () => {},
+    },
+  }
+
+  await execUndo(entry, deps)
+
+  expect((await repository.loadSnapshot()).clips[0]).toMatchObject({
+    startSec: 1,
+    duration: 4,
+    fades: to,
+  })
+})
+
+test('undo recreates faded clips inside deleted local tracks', async () => {
+  const projectId = 'project:history-recreated-faded-track-clip'
+  const repository = createLocalTimelineRepository(projectId)
+  const entry: HistoryEntry = {
+    type: 'track-delete',
+    projectId,
+    data: {
+      track: {
+        trackRef: 'track-ref-1',
+        index: 0,
+        name: 'Track 1',
+        volume: 1,
+        routing: { sends: [] },
+      },
+      clips: [{
+        clipRef: 'clip-ref-1',
+        startSec: 0,
+        duration: 4,
+        fades: to,
+      }],
+    },
+  }
+  let tracks: Track[] = []
+  const deps: Parameters<typeof execUndo>[1] = {
+    convexClient,
+    convexApi,
+    getTracks: () => tracks,
+    getHistoryEntries: () => [entry],
+    projectId,
+    userId: 'user',
+    persistLocalMix: () => {},
+    audioEngine: new AudioEngine(),
+    grantTrackWrite: () => {},
+    grantClipWrite: () => {},
+    actions: {
+      insertLocalTrack: (track) => { tracks = [...tracks, track] },
+      removeLocalTrack: () => {},
+      insertLocalClip: (trackId, clip) => {
+        tracks = tracks.map((track) => track.id === trackId ? { ...track, clips: [...track.clips, clip] } : track)
+      },
+      replaceLocalClip: () => {},
+      removeLocalClips: () => {},
+      commitClipMoves: () => {},
+      commitClipTiming: () => {},
+      commitClipAudioWarp: () => {},
+      commitClipFades: () => {},
+      rescheduleChangedClips: () => {},
+      cancelTrackVolumeWrite: () => {},
+      cancelTrackRoutingWrite: () => {},
+      cancelTrackMixWrite: () => {},
+      applyTrackVolume: () => {},
+      applyTrackMixState: () => {},
+      applyTrackRouting: () => {},
+      applyTrackPatch: () => {},
+      applyAutomationEnvelope: () => {},
+    },
+  }
+
+  await execUndo(entry, deps)
+
+  expect((await repository.loadSnapshot()).clips[0]?.fades).toMatchObject(to)
+})

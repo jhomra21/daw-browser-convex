@@ -34,6 +34,32 @@ describe('shared timeline operations', () => {
       kind: 'clips.setFades',
       payload: { clipId: 'clip-1', fades: { fadeInSec: 1 } },
     })).toBeNull()
+    const full = parseSharedTimelineOperation({
+      kind: 'clips.setFades',
+      payload: {
+        clipId: 'clip-1',
+        fades: {
+          fadeInStartSec: 0.2,
+          fadeInSec: 1,
+          fadeOutSec: 2,
+          fadeOutEndSec: 0.3,
+          fadeInCurve: 0.2,
+          fadeOutCurve: -0.2,
+          fadeInCurvePosition: 0.25,
+          fadeOutCurvePosition: 0.75,
+        },
+      },
+    })
+    expect(full?.kind === 'clips.setFades' ? full.payload.fades : undefined).toEqual({
+      fadeInStartSec: 0.2,
+      fadeInSec: 1,
+      fadeOutSec: 2,
+      fadeOutEndSec: 0.3,
+      fadeInCurve: 0.2,
+      fadeOutCurve: -0.2,
+      fadeInCurvePosition: 0.25,
+      fadeOutCurvePosition: 0.75,
+    })
   })
 
   test('roundtrips synth parameters only with a durable instance identity', () => {

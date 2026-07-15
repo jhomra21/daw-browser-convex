@@ -14,6 +14,17 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
 )
 
+const toSharedClipFades = (fades: ClipFades) => ({
+  fadeInStartSec: fades.fadeInStartSec ?? 0,
+  fadeInSec: fades.fadeInSec,
+  fadeOutSec: fades.fadeOutSec,
+  fadeOutEndSec: fades.fadeOutEndSec ?? 0,
+  fadeInCurve: fades.fadeInCurve,
+  fadeOutCurve: fades.fadeOutCurve,
+  fadeInCurvePosition: fades.fadeInCurvePosition ?? 0.5,
+  fadeOutCurvePosition: fades.fadeOutCurvePosition ?? 0.5,
+})
+
 export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
   deleteClips: async (clipIds: string[]) => {
     if (clipIds.length === 0) return new Set<string>()
@@ -84,17 +95,16 @@ export const createTimelineClipWriteAdapter = (context: ClipWriteContext) => ({
     })
     return isRecord(result) && result.status === 'applied'
   },
-  setFades: async (clipId: string, duration: number, fades: ClipFades) => {
-    const normalizedFades = normalizeClipFades(fades, duration)
+  setFades: async (clipId: string, fades: ClipFades) => {
     if (isLocalId('project', context.projectId)) {
-      const row = await createLocalTimelineRepository(context.projectId).updateClip({ clipId, fades: normalizedFades })
+      const row = await createLocalTimelineRepository(context.projectId).updateClip({ clipId, fades })
       return Boolean(row)
     }
     if (!context.userId) return false
     const result = await publishDurableSharedTimelineOperation({
       projectId: context.projectId,
       userId: context.userId,
-      operation: { kind: 'clips.setFades', payload: { clipId, fades: normalizedFades } },
+      operation: { kind: 'clips.setFades', payload: { clipId, fades: toSharedClipFades(fades) } },
       queuedResult: { status: 'applied' },
     })
     return isRecord(result) && result.status === 'applied'

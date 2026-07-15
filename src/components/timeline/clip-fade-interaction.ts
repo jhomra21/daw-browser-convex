@@ -1,4 +1,4 @@
-import { normalizeClipFades, type ClipFadeSide, type NormalizedClipFades } from '@daw-browser/timeline-core/clip-fades'
+import { normalizeClipFades, type ClipFadeSide, type FadePoint, type NormalizedClipFades } from '@daw-browser/timeline-core/clip-fades'
 
 export type FadeInteractionMode = 'fadeInStart' | 'fadeInEnd' | 'fadeOutStart' | 'fadeOutEnd' | 'curve'
 
@@ -6,12 +6,11 @@ type FadeInteractionStart = {
   canEdit: boolean
   isMidi: boolean
   button: number
-  mode: FadeInteractionMode
   overlayWidth: number
   overlayHeight: number
 }
 
-type FadeDraftUpdate = {
+export type FadeDraftUpdate = {
   baseline: NormalizedClipFades
   side: ClipFadeSide
   mode: FadeInteractionMode
@@ -21,6 +20,15 @@ type FadeDraftUpdate = {
   currentX: number
   currentY: number
 }
+
+export const fadeKeyboardStepSec = 0.05
+export const fadeKeyboardLargeStepSec = 0.5
+export const fadeCurveKeyboardStep = 0.05
+export const fadeCurveKeyboardLargeStep = 0.2
+
+const clamp = (value: number, minimum: number, maximum: number) => (
+  Math.min(maximum, Math.max(minimum, value))
+)
 
 type FadeHoverRegionTarget = {
   closest: (selector: string) => {
@@ -39,9 +47,7 @@ export const canStartFadeInteraction = (start: FadeInteractionStart) => (
   start.canEdit
   && !start.isMidi
   && start.button === 0
-  && Number.isFinite(start.overlayWidth)
   && start.overlayWidth > 0
-  && Number.isFinite(start.overlayHeight)
   && start.overlayHeight > 0
 )
 
@@ -92,3 +98,80 @@ export const updateFadeDraft = (update: FadeDraftUpdate): NormalizedClipFades =>
     ...patch,
   }, update.duration, update.side)
 }
+
+export const updateFadeDraftForKeyboard = (
+  baseline: NormalizedClipFades,
+  side: ClipFadeSide,
+  mode: FadeInteractionMode,
+  duration: number,
+  key: string,
+): NormalizedClipFades | null => {
+  if (mode === 'curve') {
+    const positionKey = side === 'fadeIn' ? 'fadeInCurvePosition' : 'fadeOutCurvePosition'
+    const curveKey = side === 'fadeIn' ? 'fadeInCurve' : 'fadeOutCurve'
+    const isLarge = key === 'PageUp' || key === 'PageDown'
+    const positionStep = isLarge ? fadeCurveKeyboardLargeStep : fadeCurveKeyboardStep
+    const curveStep = isLarge ? fadeCurveKeyboardLargeStep : fadeCurveKeyboardStep
+    if (key === 'ArrowLeft' || key === 'PageDown') {
+      return normalizeClipFades({ ...baseline, [positionKey]: baseline[positionKey] - positionStep }, duration, side)
+    }
+    if (key === 'ArrowRight' || key === 'PageUp') {
+      return normalizeClipFades({ ...baseline, [positionKey]: baseline[positionKey] + positionStep }, duration, side)
+    }
+    if (key === 'ArrowDown') {
+      return normalizeClipFades({ ...baseline, [curveKey]: baseline[curveKey] - curveStep }, duration, side)
+    }
+    if (key === 'ArrowUp') {
+      return normalizeClipFades({ ...baseline, [curveKey]: baseline[curveKey] + curveStep }, duration, side)
+    }
+    if (key === 'Home') return normalizeClipFades({ ...baseline, [positionKey]: 0 }, duration, side)
+    if (key === 'End') return normalizeClipFades({ ...baseline, [positionKey]: 1 }, duration, side)
+    return null
+  }
+
+  const field = mode === 'fadeInStart'
+    ? 'fadeInStartSec'
+    : mode === 'fadeInEnd'
+      ? 'fadeInSec'
+      : mode === 'fadeOutStart'
+        ? 'fadeOutSec'
+        : 'fadeOutEndSec'
+  const direction = key === 'ArrowRight' || key === 'ArrowUp' || key === 'PageUp' ? 1
+    : key === 'ArrowLeft' || key === 'ArrowDown' || key === 'PageDown' ? -1
+      : 0
+  const step = key === 'PageUp' || key === 'PageDown' ? fadeKeyboardLargeStepSec : fadeKeyboardStepSec
+  const next = key === 'Home' ? 0
+    : key === 'End' ? duration
+      : direction === 0 ? null
+        : clamp(baseline[field] + direction * step, 0, duration)
+  return next === null
+    ? null
+    : normalizeClipFades({ ...baseline, [field]: next }, duration, side)
+}
+
+export const clipFadeControlValueText = (
+  fades: NormalizedClipFades,
+  mode: FadeInteractionMode,
+): string => {
+  if (mode === 'curve') return ''
+  const value = mode === 'fadeInStart'
+    ? fades.fadeInStartSec
+    : mode === 'fadeInEnd'
+      ? fades.fadeInSec
+      : mode === 'fadeOutStart'
+        ? fades.fadeOutSec
+        : fades.fadeOutEndSec
+  return `${value.toFixed(2)} seconds`
+}
+
+export const curveFadeControlValueText = (point: FadePoint): string => (
+  `Curve position ${(point.x * 100).toFixed(0)}%, gain ${(point.y * 100).toFixed(0)}%`
+)
+
+export const pointerPositionInFadeOverlay = (
+  snapshot: { left: number; top: number },
+  pointer: { clientX: number; clientY: number },
+) => ({
+  x: pointer.clientX - snapshot.left,
+  y: pointer.clientY - snapshot.top,
+})

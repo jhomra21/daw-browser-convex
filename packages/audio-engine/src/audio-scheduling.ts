@@ -1,7 +1,7 @@
 import { applyArpeggiatorToNotes } from './effects/dsp'
 import { normalizeClipGain, type ArpParams } from '@daw-browser/shared'
 import type { AudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
-import { fadeGainAtClipTime, normalizeClipFades, type ClipFades } from '@daw-browser/timeline-core/clip-fades'
+import { normalizeClipFades, normalizedFadeGainAtClipTime, type ClipFades, type NormalizedClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { Clip } from '@daw-browser/timeline-core/types'
 
 type MidiNote = {
@@ -111,7 +111,7 @@ export function connectSourceWithClipGain(
   destination: AudioNode,
   gain: number | undefined,
   fade?: {
-    fades: Partial<ClipFades> | undefined
+    fades: NormalizedClipFades
     clipStartSec: number
     clipDurationSec: number
     timelineStartSec: number
@@ -120,9 +120,7 @@ export function connectSourceWithClipGain(
   },
 ) {
   const normalizedGain = normalizeClipGain(gain ?? 1)
-  const normalizedFades = fade
-    ? normalizeClipFades(fade.fades, fade.clipDurationSec)
-    : normalizeClipFades(undefined, 0)
+  const normalizedFades = fade?.fades ?? normalizeClipFades(undefined, 0)
   if (normalizedGain === 1 && normalizedFades.fadeInSec === 0 && normalizedFades.fadeOutSec === 0) {
     source.connect(destination)
     return
@@ -149,8 +147,21 @@ export const getClipFadeSchedulePlan = (input: {
   timelineEndSec: number
   contextStartTime: number
   gain: number
+}) => getNormalizedClipFadeSchedulePlan({
+  ...input,
+  fades: normalizeClipFades(input.fades, input.clipDurationSec),
+})
+
+export const getNormalizedClipFadeSchedulePlan = (input: {
+  fades: NormalizedClipFades
+  clipStartSec: number
+  clipDurationSec: number
+  timelineStartSec: number
+  timelineEndSec: number
+  contextStartTime: number
+  gain: number
 }) => {
-  const fades = normalizeClipFades(input.fades, input.clipDurationSec)
+  const fades = input.fades
   const start = Math.max(input.clipStartSec, input.timelineStartSec)
   const end = Math.min(input.clipStartSec + input.clipDurationSec, input.timelineEndSec)
   if (end <= start) return []
@@ -172,7 +183,7 @@ export const getClipFadeSchedulePlan = (input: {
   sampleFade(fadeOutStart, fadeOutEnd)
   return Array.from(points).sort((left, right) => left - right).map((timelineSec) => ({
     time: input.contextStartTime + Math.max(0, timelineSec - input.timelineStartSec),
-    gain: input.gain * fadeGainAtClipTime(
+    gain: input.gain * normalizedFadeGainAtClipTime(
       fades,
       input.clipDurationSec,
       timelineSec - input.clipStartSec,
@@ -183,7 +194,7 @@ export const getClipFadeSchedulePlan = (input: {
 const scheduleClipFadeGain = (
   parameter: AudioParam,
   input: {
-    fades: ClipFades
+    fades: NormalizedClipFades
     clipStartSec: number
     clipDurationSec: number
     timelineStartSec: number
@@ -192,7 +203,7 @@ const scheduleClipFadeGain = (
     gain: number
   },
 ) => {
-  const plan = getClipFadeSchedulePlan(input)
+  const plan = getNormalizedClipFadeSchedulePlan(input)
   const first = plan[0]
   if (!first) return
   parameter.setValueAtTime(first.gain, first.time)

@@ -1,5 +1,5 @@
 export const DEFAULT_PIXELS_PER_SECOND = 100
-export const MIN_PIXELS_PER_SECOND = 0.25
+export const MIN_PIXELS_PER_SECOND = Number.EPSILON
 export const MAX_PIXELS_PER_SECOND = 800
 export const ZOOM_STEP_FACTOR = 1.25
 

@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, type Accessor } from 'solid-js'
+import { createEffect, createSignal, on, onCleanup, type Accessor } from 'solid-js'
 
 import {
   minimumVisibleDuration,
@@ -13,6 +13,7 @@ import {
 } from '~/lib/timeline-view'
 
 type UseTimelineViewportOptions = {
+  persistenceScope: Accessor<string>
   pixelsPerSecond: Accessor<number>
   previewPixelsPerSecond: (value: number) => void
   commitPixelsPerSecond: (value: number) => void
@@ -28,6 +29,14 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
   let observer: ResizeObserver | undefined
   let wheelCommitTimeout: ReturnType<typeof setTimeout> | undefined
 
+  const clearWheelCommit = () => {
+    if (!wheelCommitTimeout) return
+    clearTimeout(wheelCommitTimeout)
+    wheelCommitTimeout = undefined
+  }
+
+  createEffect(on(options.persistenceScope, clearWheelCommit))
+
   const measureWidth = () => {
     if (!element) return
     setViewportWidth(Math.max(0, element.clientWidth - options.rightSidebarWidth()))
@@ -40,6 +49,7 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
 
   const bind = (next: HTMLDivElement) => {
     if (element === next) return
+    clearWheelCommit()
     if (element) element.removeEventListener('scroll', updateScrollLeft)
     observer?.disconnect()
     element = next
@@ -62,8 +72,9 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     options.durationSec(),
   )
 
-  const applyVisibleRange = (range: TimelineRange, commit: boolean) => {
+  const applyVisibleRange = (range: TimelineRange, commit: boolean, isWheelPreview = false) => {
     if (!element) return
+    if (!isWheelPreview) clearWheelCommit()
     const width = viewportWidth()
     const minimumDuration = minimumVisibleDuration(width)
     const normalizedRange = normalizeTimelineRange(range, options.durationSec(), minimumDuration)
@@ -72,9 +83,11 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     else options.previewPixelsPerSecond(nextScale)
     element.scrollLeft = scrollLeftForTimelineRange(normalizedRange, width, nextScale, options.durationSec())
     updateScrollLeft()
+    return nextScale
   }
 
-  const zoomAtPointer = (viewportX: number, factor: number, commit: boolean) => {
+  const zoomAtPointer = (viewportX: number, factor: number, commit: boolean, isWheelPreview = false) => {
+    if (!isWheelPreview) clearWheelCommit()
     if (!element || !options.canZoom()) return
     const width = viewportWidth()
     const range = visibleRange()
@@ -85,7 +98,7 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
       options.durationSec(),
       width / 800,
     )
-    applyVisibleRange(next, commit)
+    return applyVisibleRange(next, commit, isWheelPreview)
   }
 
   const zoomIn = () => zoomAtPointer(viewportWidth() / 2, ZOOM_STEP_FACTOR, true)
@@ -93,31 +106,34 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
   const zoomOut = () => zoomAtPointer(viewportWidth() / 2, 1 / ZOOM_STEP_FACTOR, true)
 
   const zoomToFit = () => {
+    clearWheelCommit()
     if (!element || !options.canZoom()) return
     applyVisibleRange({ startSec: 0, endSec: options.durationSec() }, true)
   }
 
   const onWheel = (event: WheelEvent) => {
     if (!event.ctrlKey && !event.metaKey) return
-    event.preventDefault()
     const rect = element?.getBoundingClientRect()
-    zoomAtPointer(
+    const previewedScale = zoomAtPointer(
       rect ? event.clientX - rect.left : viewportWidth() / 2,
       normalizeWheelZoomFactor(event.deltaY, event.deltaMode),
       false,
+      true,
     )
-    if (wheelCommitTimeout) clearTimeout(wheelCommitTimeout)
+    if (previewedScale === undefined) return
+    event.preventDefault()
+    clearWheelCommit()
     // Wheel events have no terminal event, so this coalesces persistence after the gesture settles.
     wheelCommitTimeout = setTimeout(() => {
       wheelCommitTimeout = undefined
-      options.commitPixelsPerSecond(options.pixelsPerSecond())
+      options.commitPixelsPerSecond(previewedScale)
     }, 150)
   }
 
   onCleanup(() => {
     if (element) element.removeEventListener('scroll', updateScrollLeft)
     observer?.disconnect()
-    if (wheelCommitTimeout) clearTimeout(wheelCommitTimeout)
+    clearWheelCommit()
   })
 
   return {

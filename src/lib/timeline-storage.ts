@@ -1,6 +1,7 @@
 import { normalizePersistedHistory, serializePersistedHistory } from '~/lib/undo/persisted-history'
 import type { PersistedHistory } from '~/lib/undo/types'
 import type { TrackId, TrackSend } from '@daw-browser/timeline-core/types'
+import { clampPixelsPerSecond, DEFAULT_PIXELS_PER_SECOND } from '~/lib/timeline-view'
 
 const MIX_KEY_PREFIX = 'mb:mix:'
 const MIX_SYNC_KEY_PREFIX = 'mb:mix-sync:'
@@ -193,12 +194,13 @@ export const saveLoopSettings = (rid: string | undefined, value: LoopSettings) =
 }
 
 export const loadTimelineScale = (rid?: string): number => {
-  if (!rid || !canUseLocalStorage()) return 100
+  if (!rid || !canUseLocalStorage()) return DEFAULT_PIXELS_PER_SECOND
   try {
-    const value = Number(localStorage.getItem(`${TIMELINE_SCALE_KEY_PREFIX}${rid}`))
-    return Number.isFinite(value) ? Math.min(800, Math.max(0.25, value)) : 100
+    const raw = localStorage.getItem(`${TIMELINE_SCALE_KEY_PREFIX}${rid}`)
+    if (raw === null) return DEFAULT_PIXELS_PER_SECOND
+    return clampPixelsPerSecond(Number(raw))
   } catch {
-    return 100
+    return DEFAULT_PIXELS_PER_SECOND
   }
 }
 
@@ -207,7 +209,7 @@ export const saveTimelineScale = (rid: string | undefined, value: number) => {
   try {
     localStorage.setItem(
       `${TIMELINE_SCALE_KEY_PREFIX}${rid}`,
-      String(Math.min(800, Math.max(0.25, value))),
+      String(clampPixelsPerSecond(value)),
     )
   } catch {}
 }

@@ -44,7 +44,6 @@ type UseTimelinePreferencesReturn = {
   pixelsPerSecond: Accessor<number>
   previewPixelsPerSecond: (value: number) => void
   commitPixelsPerSecond: (value: number) => void
-  setPixelsPerSecond: (value: number) => void
 }
 
 export function useTimelinePreferences(
@@ -180,8 +179,6 @@ export function useTimelinePreferences(
     scaleState.commitValue(clampPixelsPerSecond(value))
   }
 
-  const setPixelsPerSecond = commitPixelsPerSecond
-
   return {
     sidebarWidth,
     setSidebarWidth,
@@ -202,6 +199,5 @@ export function useTimelinePreferences(
     pixelsPerSecond,
     previewPixelsPerSecond,
     commitPixelsPerSecond,
-    setPixelsPerSecond,
   }
 }

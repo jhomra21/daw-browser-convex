@@ -89,6 +89,17 @@ export function useProjectPersistedState<TValue>(
     return setCurrentValue(next)
   }
 
+  const persistValue = (projectId: string, value: TValue) => {
+    options.save(projectId, value)
+    if (!options.saveAsync) return
+    ensureProjectFlusher(projectId)
+    const save = options.saveAsync(projectId, value)
+    void save.catch((error) => {
+      options.onSaveAsyncError?.(error)
+    })
+    trackAsyncSave(projectId, save)
+  }
+
   const setPersistedValue: RoomPersistedSetter<TValue> = (next) => {
     syncHydratedValue()
     const previous = currentValue()
@@ -97,15 +108,7 @@ export function useProjectPersistedState<TValue>(
     const projectId = options.projectId()
     if (projectId && resolved !== previous) {
       valueRevision += 1
-      options.save(projectId, resolved)
-      if (options.saveAsync) {
-        ensureProjectFlusher(projectId)
-        const save = options.saveAsync(projectId, resolved)
-        void save.catch((error) => {
-          options.onSaveAsyncError?.(error)
-        })
-        trackAsyncSave(projectId, save)
-      }
+      persistValue(projectId, resolved)
     }
     return resolved
   }
@@ -117,14 +120,7 @@ export function useProjectPersistedState<TValue>(
     valueRevision += 1
     setAsyncHydrated(true)
     setCurrentValue(() => value)
-    options.save(projectId, value)
-    if (!options.saveAsync) return
-    ensureProjectFlusher(projectId)
-    const save = options.saveAsync(projectId, value)
-    void save.catch((error) => {
-      options.onSaveAsyncError?.(error)
-    })
-    trackAsyncSave(projectId, save)
+    persistValue(projectId, value)
   }
 
   onCleanup(() => {

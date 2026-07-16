@@ -47,6 +47,15 @@ describe('timeline view contracts', () => {
     expect(pixelsPerSecondForRange({ startSec: 2, endSec: 2 }, 0)).toBe(MIN_PIXELS_PER_SECOND)
   })
 
+  test('fits long arrangements within the viewport', () => {
+    const durationSec = 100_000
+    const viewportWidth = 1000
+    const scale = pixelsPerSecondForRange({ startSec: 0, endSec: durationSec }, viewportWidth)
+
+    expect(scale).toBe(0.01)
+    expect(scale * durationSec).toBe(viewportWidth)
+  })
+
   test('normalizes inverted and collapsed ranges to the minimum zoom duration', () => {
     expect(normalizeTimelineRange({ startSec: 12, endSec: 4 }, 20, 2)).toEqual({
       startSec: 4,

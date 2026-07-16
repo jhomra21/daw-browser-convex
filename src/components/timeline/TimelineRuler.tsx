@@ -22,7 +22,7 @@ type Marker = {
 }
 
 const TimelineRuler: Component<TimelineRulerProps> = (props) => {
-  const intervals = () => selectTimelineGridIntervals(props.pixelsPerSecond, props.bpm, props.denom, props.gridEnabled)
+  const intervals = createMemo(() => selectTimelineGridIntervals(props.pixelsPerSecond, props.bpm, props.denom, props.gridEnabled))
   const barStepPx = () => Math.max(0.5, intervals().majorSec * props.pixelsPerSecond)
 
   const rulerWidthPx = () => Math.max(0, props.durationSec * props.pixelsPerSecond)

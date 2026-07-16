@@ -12,6 +12,10 @@ export const GROUP_RAIL_WIDTH = 4
 export const DEFAULT_AUTOMATION_LANE_HEIGHT = 48
 const MIN_AUTOMATION_LANE_HEIGHT = 32
 const MAX_AUTOMATION_LANE_HEIGHT = 160
+type TimelineTrackScrollElement = {
+  scrollTop: number
+  getBoundingClientRect: () => Pick<DOMRect, 'top'>
+}
 // Shared Effects panel layout constants
 export const FX_PANEL_HEIGHT_PX = 360
 
@@ -33,9 +37,12 @@ export function clientXToSec(clientX: number, scrollRef: HTMLDivElement, pixelsP
   return Math.max(0, x / pixelsPerSecond)
 }
 
-export function clientYToTimelineTrackY(clientY: number, scrollRef: HTMLDivElement, headerHeight = TIMELINE_HEADER_HEIGHT) {
+export function clientYToTimelineTrackY(
+  clientY: number,
+  scrollRef: TimelineTrackScrollElement,
+) {
   const rect = scrollRef.getBoundingClientRect()
-  return clientY - rect.top + (scrollRef.scrollTop || 0) - headerHeight
+  return clientY - rect.top + (scrollRef.scrollTop || 0) - TIMELINE_HEADER_HEIGHT
 }
 
 export function willOverlap(clips: Clip[], excludeId: string | null, start: number, duration: number) {

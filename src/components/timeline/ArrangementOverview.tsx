@@ -28,6 +28,7 @@ const ArrangementOverview: Component<ArrangementOverviewProps> = (props) => {
   let dragMode: DragMode = null
   let baseline: TimelineRange | undefined
   let startX = 0
+  let rootLeft = 0
   const rows = createMemo(() => props.tracks.filter((track) => track.channelRole !== 'return'))
   const duration = () => Math.max(1, props.durationSec)
   const overviewPaths = createMemo<OverviewPath[]>(() => {
@@ -41,17 +42,19 @@ const ArrangementOverview: Component<ArrangementOverviewProps> = (props) => {
       const track = trackRows[index]
       const y = 2 + index * 36 / rowCount
       const height = Math.max(1, 32 / rowCount)
-      const pathByColor = new Map<string, string>()
+      const pathByColor = new Map<string, string[]>()
 
       for (const clip of track.clips) {
         const x = clip.startSec / durationSec * 100
         const width = Math.max(0, clip.duration / durationSec * 100)
         const color = resolveClipColor(clip.color, tokens)
         const rectangle = `M${x} ${y}h${width}v${height}h-${width}z`
-        pathByColor.set(color, `${pathByColor.get(color) ?? ''}${rectangle}`)
+        const rectangles = pathByColor.get(color) ?? []
+        rectangles.push(rectangle)
+        pathByColor.set(color, rectangles)
       }
 
-      for (const [color, d] of pathByColor) paths.push({ color, d })
+      for (const [color, rectangles] of pathByColor) paths.push({ color, d: rectangles.join('') })
     }
 
     return paths
@@ -59,20 +62,24 @@ const ArrangementOverview: Component<ArrangementOverviewProps> = (props) => {
   const rangeX = () => props.visibleRange.startSec / duration() * props.width
   const rangeWidth = () => Math.max(4, (props.visibleRange.endSec - props.visibleRange.startSec) / duration() * props.width)
   const pointToTime = (clientX: number) => {
-    const rect = root?.getBoundingClientRect()
-    if (!rect || props.width <= 0) return 0
-    return Math.min(duration(), Math.max(0, (clientX - rect.left) / props.width * duration()))
+    if (props.width <= 0) return 0
+    return Math.min(duration(), Math.max(0, (clientX - rootLeft) / props.width * duration()))
   }
   const finish = () => {
-    if (root && pointerId !== undefined && root.hasPointerCapture(pointerId)) root.releasePointerCapture(pointerId)
+    const capturedPointerId = pointerId
     pointerId = undefined
     dragMode = null
     baseline = undefined
+    rootLeft = 0
+    if (root && capturedPointerId !== undefined && root.hasPointerCapture(capturedPointerId)) {
+      root.releasePointerCapture(capturedPointerId)
+    }
   }
   const onPointerDown = (event: PointerEvent) => {
     event.stopPropagation()
     if (pointerId !== undefined || event.button !== 0 || !root) return
-    const x = event.clientX - root.getBoundingClientRect().left
+    rootLeft = root.getBoundingClientRect().left
+    const x = event.clientX - rootLeft
     const left = rangeX()
     const right = left + rangeWidth()
     const edge = 6
@@ -94,22 +101,28 @@ const ArrangementOverview: Component<ArrangementOverviewProps> = (props) => {
   const onPointerMove = (event: PointerEvent) => {
     event.stopPropagation()
     if (event.pointerId !== pointerId || !baseline || !dragMode || props.width <= 0) return
-    const deltaSec = (event.clientX - (root?.getBoundingClientRect().left ?? 0) - startX) / props.width * duration()
+    const deltaSec = (event.clientX - rootLeft - startX) / props.width * duration()
     if (dragMode === 'pan') props.onPreviewVisibleRange({ startSec: baseline.startSec + deltaSec, endSec: baseline.endSec + deltaSec })
     if (dragMode === 'start') props.onPreviewVisibleRange({ startSec: baseline.startSec + deltaSec, endSec: baseline.endSec })
     if (dragMode === 'end') props.onPreviewVisibleRange({ startSec: baseline.startSec, endSec: baseline.endSec + deltaSec })
   }
-  const onPointerFinish = (event: PointerEvent) => {
+  const onPointerUp = (event: PointerEvent) => {
     event.stopPropagation()
     if (event.pointerId !== pointerId) return
     if (baseline) props.onCommitVisibleRange(props.visibleRange)
+    finish()
+  }
+  const onPointerCancel = (event: PointerEvent) => {
+    event.stopPropagation()
+    if (event.pointerId !== pointerId) return
+    if (baseline) props.onPreviewVisibleRange(baseline)
     finish()
   }
   onCleanup(() => {
     finish()
   })
   return (
-    <div ref={(element) => { root = element }} class="sticky top-0 left-0 z-40 shrink-0 cursor-pointer border-b border-border bg-timeline-surface" style={{ width: `${props.width}px`, height: `${ARRANGEMENT_OVERVIEW_HEIGHT}px` }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerFinish} onPointerCancel={onPointerFinish} onLostPointerCapture={onPointerFinish}>
+    <div ref={(element) => { root = element }} class="sticky top-0 left-0 z-40 shrink-0 cursor-pointer border-b border-border bg-timeline-surface" style={{ width: `${props.width}px`, height: `${ARRANGEMENT_OVERVIEW_HEIGHT}px` }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onLostPointerCapture={onPointerCancel}>
       <svg class="absolute inset-0 h-full w-full" viewBox="0 0 100 40" preserveAspectRatio="none">
         <For each={overviewPaths()}>{(path) => (
           <path d={path.d} fill={path.color} />

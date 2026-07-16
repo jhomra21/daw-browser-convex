@@ -569,17 +569,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   let timelineSurfaceRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
   let effectsChainElement: HTMLElement | undefined;
-  let isClipDragging = () => false;
-  let isClipResizing = () => false;
   const duration = () => timelineDurationSec(renderTracks());
-  const timelineViewport = useTimelineViewport({
-    pixelsPerSecond,
-    previewPixelsPerSecond,
-    commitPixelsPerSecond,
-    durationSec: duration,
-    rightSidebarWidth: sidebarWidth,
-    canZoom: () => !isClipDragging() && !isClipResizing(),
-  });
 
   const leftBrowser = useTimelineLeftBrowserState({
     projectId,
@@ -804,7 +794,6 @@ const Timeline: Component<TimelineProps> = (props) => {
       extendRangeSelectionToPointer(event, { element: scrollRef, trackId }),
   });
   const onClipPointerDown = clipDrag.onClipPointerDown;
-  isClipDragging = clipDrag.isDragging;
 
   const clipResize = useClipResize({
     tracks: renderTracks,
@@ -825,7 +814,15 @@ const Timeline: Component<TimelineProps> = (props) => {
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
   });
   const onClipResizeStart = clipResize.onClipResizeStart;
-  isClipResizing = clipResize.isResizing;
+  const timelineViewport = useTimelineViewport({
+    persistenceScope: projectId,
+    pixelsPerSecond,
+    previewPixelsPerSecond,
+    commitPixelsPerSecond,
+    durationSec: duration,
+    rightSidebarWidth: sidebarWidth,
+    canZoom: () => !clipDrag.isDragging() && !clipResize.isResizing(),
+  });
 
   const commitClipFades = async (
     clipId: string,

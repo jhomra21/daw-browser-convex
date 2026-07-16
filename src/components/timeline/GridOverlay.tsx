@@ -1,4 +1,4 @@
-import { type Component, Show } from 'solid-js'
+import { createMemo, type Component, Show } from 'solid-js'
 import { selectTimelineGridIntervals } from '~/lib/timeline-view'
 
 type GridOverlayProps = {
@@ -10,7 +10,7 @@ type GridOverlayProps = {
 }
 
 const GridOverlay: Component<GridOverlayProps> = (props) => {
-  const intervals = () => selectTimelineGridIntervals(props.pixelsPerSecond, props.bpm, props.denom, props.enabled)
+  const intervals = createMemo(() => selectTimelineGridIntervals(props.pixelsPerSecond, props.bpm, props.denom, props.enabled))
   const gridStepPx = () => Math.max(0.5, intervals().minorSec * props.pixelsPerSecond)
   const barStepPx = () => Math.max(0.5, intervals().majorSec * props.pixelsPerSecond)
 

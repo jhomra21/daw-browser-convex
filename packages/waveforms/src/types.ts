@@ -41,7 +41,10 @@ export type WaveformSliceRequest = EnsureWaveformAssetOptions & {
 }
 
 export type WaveformDrawOptions = {
-  ctx: CanvasRenderingContext2D
+  ctx: Pick<
+    CanvasRenderingContext2D,
+    'fillStyle' | 'strokeStyle' | 'lineWidth' | 'beginPath' | 'moveTo' | 'lineTo' | 'stroke' | 'fillRect'
+  >
   peaks: Uint8Array
   drawCols: number
   padPx: number
@@ -51,4 +54,6 @@ export type WaveformDrawOptions = {
   cssH: number
   fillStyle?: string
   boundaryStyle?: string
+  maxHeightFraction?: number
+  amplitudeScaleAtColumn?: (column: number) => number
 }

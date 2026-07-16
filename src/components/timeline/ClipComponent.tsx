@@ -348,7 +348,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       fillStyle: contentColor,
       boundaryStyle: timelineGridMajor,
       maxHeightFraction: AUDIO_WAVEFORM_MAX_HEIGHT_FRACTION,
-      amplitudeScaleAtColumn: hasEffectiveFade && duration > 0
+      amplitudeScaleAtColumn: hasEffectiveFade
         ? (column) => normalizedFadeGainAtClipTime(
           fades,
           duration,

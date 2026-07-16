@@ -10,7 +10,7 @@ type FadeInteractionStart = {
   overlayHeight: number
 }
 
-export type FadeDraftUpdate = {
+type FadeDraftUpdate = {
   baseline: NormalizedClipFades
   side: ClipFadeSide
   mode: FadeInteractionMode
@@ -21,10 +21,10 @@ export type FadeDraftUpdate = {
   currentY: number
 }
 
-export const fadeKeyboardStepSec = 0.05
-export const fadeKeyboardLargeStepSec = 0.5
-export const fadeCurveKeyboardStep = 0.05
-export const fadeCurveKeyboardLargeStep = 0.2
+const fadeKeyboardStepSec = 0.05
+const fadeKeyboardLargeStepSec = 0.5
+const fadeCurveKeyboardStep = 0.05
+const fadeCurveKeyboardLargeStep = 0.2
 
 const clamp = (value: number, minimum: number, maximum: number) => (
   Math.min(maximum, Math.max(minimum, value))

@@ -188,6 +188,7 @@ function OscillatorPanel(props: {
   const oscillatorLabel = () => `Oscillator ${props.index + 1}`
   const levelParameterId = (): SynthAutomationParameterId => isFirst() ? 'osc1.level' : 'osc2.level'
   const detuneParameterId = (): SynthAutomationParameterId => isFirst() ? 'osc1.detune' : 'osc2.detune'
+  let waveformChangedByPointer = false
 
   return (
     <SynthPanel
@@ -199,9 +200,14 @@ function OscillatorPanel(props: {
             aria-label={`${oscillatorLabel()} waveform`}
             disabled={props.disabled || !oscillator().enabled}
             value={oscillator().wave}
+            onPointerDown={() => { waveformChangedByPointer = true }}
+            onKeyDown={() => { waveformChangedByPointer = false }}
+            onBlur={() => { waveformChangedByPointer = false }}
             onChange={(event) => {
               const { value } = event.currentTarget
               if (isSynthWave(value)) update({ wave: value })
+              if (waveformChangedByPointer) event.currentTarget.blur()
+              waveformChangedByPointer = false
             }}
           >
             <option value="sine">Sin</option>
@@ -233,6 +239,7 @@ function FilterPanel(props: {
   disabled?: boolean
 } & AutomationProps) {
   const filterDisabled = () => props.disabled || !props.params.filter.enabled
+  let modeChangedByPointer = false
   return (
     <SynthPanel
       title="Filter"
@@ -243,9 +250,14 @@ function FilterPanel(props: {
             aria-label="Filter mode"
             disabled={props.disabled}
             value={props.params.filter.mode}
+            onPointerDown={() => { modeChangedByPointer = true }}
+            onKeyDown={() => { modeChangedByPointer = false }}
+            onBlur={() => { modeChangedByPointer = false }}
             onChange={(event) => {
               const { value } = event.currentTarget
               if (isSynthFilterMode(value)) props.onChange({ filter: { mode: value } })
+              if (modeChangedByPointer) event.currentTarget.blur()
+              modeChangedByPointer = false
             }}
           >
             <option value="lowpass">Low</option>

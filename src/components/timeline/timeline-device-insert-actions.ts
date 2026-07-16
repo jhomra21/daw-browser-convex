@@ -24,7 +24,6 @@ export type TimelineDeviceInsertActions = {
   addSaturator: () => void;
   addDelay: () => void;
   addReverb: () => void;
-  openSynthForTarget: (targetId: Track["id"]) => void;
   switchInstrumentForTarget: (targetId: Track["id"], kind: InstrumentKind) => boolean;
   setInstrumentForTarget: (targetId: Track["id"], instrument: TrackInstrumentParams) => boolean;
   canSetInstrumentForTarget: (targetId: Track["id"]) => boolean;

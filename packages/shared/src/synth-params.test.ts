@@ -4,6 +4,7 @@ import {
   createDefaultSynthParams,
   mergeSynthParams,
   normalizeSynthParams,
+  parseStrictSynthParams,
   serializeSynthParams,
 } from './synth-params'
 
@@ -31,8 +32,8 @@ describe('synth parameter contract', () => {
     })).toEqual({
       version: SYNTH_STATE_VERSION,
       oscillators: [
-        { wave: 'sawtooth', octave: 3, semitone: -12, detuneCents: -7, level: 0 },
-        { wave: 'sawtooth', octave: 0, semitone: 0, detuneCents: 7, level: 0.45 },
+        { enabled: true, wave: 'sawtooth', octave: 3, semitone: -12, detuneCents: -7, level: 0 },
+        { enabled: true, wave: 'sawtooth', octave: 0, semitone: 0, detuneCents: 7, level: 0.45 },
       ],
       ampEnvelope: { attackSec: 0.005, decaySec: 60, sustain: 0, releaseSec: 0.12 },
       filter: {
@@ -72,5 +73,35 @@ describe('synth parameter contract', () => {
     expect(next.oscillators[1]).toEqual(current.oscillators[1])
     expect(next.filter.envelope).toEqual({ ...current.filter.envelope, releaseSec: 2 })
     expect(next.lfo).toEqual({ ...current.lfo, frequencyHz: 7 })
+  })
+
+  test('defaults missing v2 oscillator enabled state and persists disabled oscillators', () => {
+    const defaults = createDefaultSynthParams()
+    const oldV2State = {
+      ...defaults,
+      oscillators: [
+        {
+          wave: defaults.oscillators[0].wave,
+          octave: defaults.oscillators[0].octave,
+          semitone: defaults.oscillators[0].semitone,
+          detuneCents: defaults.oscillators[0].detuneCents,
+          level: defaults.oscillators[0].level,
+        },
+        {
+          wave: defaults.oscillators[1].wave,
+          octave: defaults.oscillators[1].octave,
+          semitone: defaults.oscillators[1].semitone,
+          detuneCents: defaults.oscillators[1].detuneCents,
+          level: defaults.oscillators[1].level,
+        },
+      ],
+    }
+    const normalized = parseStrictSynthParams(oldV2State)
+    const next = mergeSynthParams(defaults, { oscillators: [{ enabled: false }] })
+
+    expect(normalized?.oscillators.map((oscillator) => oscillator.enabled)).toEqual([true, true])
+    expect(next.oscillators[0].enabled).toBe(false)
+    expect(next.oscillators[0].level).toBe(defaults.oscillators[0].level)
+    expect(JSON.parse(serializeSynthParams(next)).oscillators[0].enabled).toBe(false)
   })
 })

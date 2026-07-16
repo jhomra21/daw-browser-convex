@@ -24,6 +24,7 @@ export type SynthWave = 'sine' | 'square' | 'sawtooth' | 'triangle'
 export type SynthFilterMode = 'lowpass' | 'highpass' | 'bandpass' | 'notch'
 
 export type SynthOscillatorParams = {
+  enabled: boolean
   wave: SynthWave
   octave: number
   semitone: number
@@ -127,8 +128,8 @@ export const isSynthFilterMode = (value: unknown): value is SynthFilterMode => (
 export const createDefaultSynthParams = (): SynthParams => ({
   version: SYNTH_STATE_VERSION,
   oscillators: [
-    { wave: 'sawtooth', octave: 0, semitone: 0, detuneCents: -7, level: 0.7 },
-    { wave: 'sawtooth', octave: 0, semitone: 0, detuneCents: 7, level: 0.45 },
+    { enabled: true, wave: 'sawtooth', octave: 0, semitone: 0, detuneCents: -7, level: 0.7 },
+    { enabled: true, wave: 'sawtooth', octave: 0, semitone: 0, detuneCents: 7, level: 0.45 },
   ],
   ampEnvelope: { attackSec: 0.005, decaySec: 0.1, sustain: 0.8, releaseSec: 0.12 },
   filter: {
@@ -160,6 +161,7 @@ const normalizeEnvelope = (input: unknown, defaults: SynthEnvelopeParams): Synth
 const normalizeOscillator = (input: unknown, defaults: SynthOscillatorParams): SynthOscillatorParams => {
   const value = isRecord(input) ? input : {}
   return {
+    enabled: typeof value.enabled === 'boolean' ? value.enabled : defaults.enabled,
     wave: isSynthWave(value.wave) ? value.wave : defaults.wave,
     octave: integer(value.octave, defaults.octave, SYNTH_PARAMETER_LIMITS.oscillatorOctave.min, SYNTH_PARAMETER_LIMITS.oscillatorOctave.max),
     semitone: integer(value.semitone, defaults.semitone, SYNTH_PARAMETER_LIMITS.oscillatorSemitone.min, SYNTH_PARAMETER_LIMITS.oscillatorSemitone.max),
@@ -219,6 +221,7 @@ const isCompleteSynthEnvelope = (value: unknown): boolean => (
 
 const isCompleteSynthOscillator = (value: unknown): boolean => (
   isRecord(value)
+  && (value.enabled === undefined || typeof value.enabled === 'boolean')
   && isSynthWave(value.wave)
   && isFiniteNumber(value.octave)
   && isFiniteNumber(value.semitone)

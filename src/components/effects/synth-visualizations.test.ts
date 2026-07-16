@@ -23,6 +23,24 @@ describe('synth visualizations', () => {
     )).toBe('M6.00,46.00 L24.91,6.00 L62.73,30.00 L157.27,30.00 L214.00,46.00')
   })
 
+  test('keeps zero and extreme envelope coordinates within the inset drawing area', () => {
+    const coordinates = (path: string) => Array.from(
+      path.matchAll(/[ML](\d+\.\d+),(\d+\.\d+)/g),
+      (match) => [Number(match[1]), Number(match[2])],
+    )
+    for (const envelope of [
+      { attackSec: 0, decaySec: 0, sustain: 0, releaseSec: 0 },
+      { attackSec: 60, decaySec: 60, sustain: 1, releaseSec: 60 },
+    ]) {
+      for (const [x, y] of coordinates(createSynthEnvelopePath(envelope, 220, 64))) {
+        expect(x).toBeGreaterThanOrEqual(6)
+        expect(x).toBeLessThanOrEqual(214)
+        expect(y).toBeGreaterThanOrEqual(6)
+        expect(y).toBeLessThanOrEqual(58)
+      }
+    }
+  })
+
   test('changes the static filter response with filter mode and cutoff', () => {
     const lowpass = createSynthFilterResponsePath('lowpass', 1000, 0.7, 240, 60)
     const highpass = createSynthFilterResponsePath('highpass', 1000, 0.7, 240, 60)

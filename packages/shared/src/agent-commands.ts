@@ -42,6 +42,7 @@ const SynthEnvelopeUpdateSchema = z.object({
   releaseSec: z.number().min(SYNTH_PARAMETER_LIMITS.envelopeSeconds.min).max(SYNTH_PARAMETER_LIMITS.envelopeSeconds.max).optional(),
 })
 const SynthOscillatorUpdateSchema = z.object({
+  enabled: z.boolean().optional(),
   wave: SynthWaveSchema.optional(),
   octave: z.number().int().min(SYNTH_PARAMETER_LIMITS.oscillatorOctave.min).max(SYNTH_PARAMETER_LIMITS.oscillatorOctave.max).optional(),
   semitone: z.number().int().min(SYNTH_PARAMETER_LIMITS.oscillatorSemitone.min).max(SYNTH_PARAMETER_LIMITS.oscillatorSemitone.max).optional(),

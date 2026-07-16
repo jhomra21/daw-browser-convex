@@ -31,6 +31,7 @@ type EnvelopeParam = {
 
 export type SynthVoiceBindings = {
   oscillatorLevels: readonly [AudioParam | undefined, AudioParam | undefined]
+  oscillatorGates: readonly [AudioParam | undefined, AudioParam | undefined]
   oscillatorDetunes: readonly [AudioParam | undefined, AudioParam | undefined]
   filterFrequency: AudioParam
   filterDetune: AudioParam
@@ -373,28 +374,35 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
   const sources: OscillatorNode[] = []
   const oscillatorSources: [OscillatorNode | undefined, OscillatorNode | undefined] = [undefined, undefined]
   const oscillatorLevelNodes: GainNode[] = []
+  const oscillatorGateNodes: GainNode[] = []
   const oscillatorLevels: [AudioParam | undefined, AudioParam | undefined] = [undefined, undefined]
+  const oscillatorGates: [AudioParam | undefined, AudioParam | undefined] = [undefined, undefined]
   const oscillatorDetunes: [AudioParam | undefined, AudioParam | undefined] = [undefined, undefined]
   for (const [index, oscillator] of params.oscillators.entries()) {
     const source = ctx.createOscillator()
     const level = ctx.createGain()
+    const gate = ctx.createGain()
     source.type = oscillator.wave
     source.frequency.setValueAtTime(transposeFrequency(baseFrequency, oscillator.octave, oscillator.semitone, 0), when)
     source.detune.setValueAtTime(oscillator.detuneCents, when)
     level.gain.setValueAtTime(oscillator.level, when)
+    gate.gain.setValueAtTime(oscillator.enabled ? 1 : 0, when)
     source.connect(level)
-    level.connect(filter)
+    level.connect(gate)
+    gate.connect(filter)
     source.start(when)
     source.stop(ampPlan.releaseEndTime)
     sources.push(source)
     oscillatorSources[index] = source
     oscillatorLevelNodes.push(level)
+    oscillatorGateNodes.push(gate)
     oscillatorLevels[index] = level.gain
+    oscillatorGates[index] = gate.gain
     oscillatorDetunes[index] = source.detune
   }
   const lfo = scheduleLfo(ctx, params.lfo, when, sources, filter, amplitudeModulation, pan)
   lfo.node.stop(ampPlan.releaseEndTime)
-  const nodes: AudioNode[] = [filter, amplitude, amplitudeModulation, pan, output, ...sources, ...oscillatorLevelNodes, ...lfo.nodes]
+  const nodes: AudioNode[] = [filter, amplitude, amplitudeModulation, pan, output, ...sources, ...oscillatorLevelNodes, ...oscillatorGateNodes, ...lfo.nodes]
   nodes.push(lfo.node)
   const endableSources = [...sources, lfo.node]
   let endedSources = 0
@@ -427,6 +435,7 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
     output,
     bindings: {
       oscillatorLevels,
+      oscillatorGates,
       oscillatorDetunes,
       filterFrequency: filter.frequency,
       filterDetune: filter.detune,

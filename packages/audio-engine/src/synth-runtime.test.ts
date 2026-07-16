@@ -296,6 +296,48 @@ describe('synth runtime characterization', () => {
     expect(oscillators[2]?.frequency.events.some((event) => event.kind === 'ramp' && event.value === 7)).toBe(true)
   })
 
+  test('gates oscillators independently without recreating held voices', () => {
+    const { ctx, filters, gains, oscillators, runtime } = createRuntime()
+    const initial = createDefaultSynthParams()
+    const disabledFirstOscillator = {
+      ...initial,
+      oscillators: [
+        { ...initial.oscillators[0], enabled: false },
+        initial.oscillators[1],
+      ],
+    }
+    runtime.setTrackSynth('track-1', disabledFirstOscillator)
+    runtime.startPreviewNote('track-1', 60)
+
+    const voiceFilter = filters.at(-1)
+    const oscillatorGates = gains.filter((gain) => gain.connections.includes(voiceFilter))
+    const firstGate = oscillatorGates.find((gate) => (
+      gate.gain.events.some((event) => event.kind === 'set' && event.value === 0 && event.time === 0)
+    ))
+    const secondGate = oscillatorGates.find((gate) => (
+      gate.gain.events.some((event) => event.kind === 'set' && event.value === 1 && event.time === 0)
+    ))
+
+    expect(oscillators).toHaveLength(3)
+    expect(oscillatorGates).toHaveLength(2)
+    expect(firstGate).toBeDefined()
+    expect(secondGate).toBeDefined()
+
+    ctx.currentTime = 0.1
+    runtime.setTrackSynth('track-1', {
+      ...disabledFirstOscillator,
+      oscillators: [
+        { ...disabledFirstOscillator.oscillators[0], enabled: true },
+        disabledFirstOscillator.oscillators[1],
+      ],
+    })
+
+    expect(oscillators).toHaveLength(3)
+    expect(firstGate?.gain.events).toContainEqual({ kind: 'cancel', time: 0.1 })
+    expect(firstGate?.gain.events).toContainEqual({ kind: 'ramp', value: 1, time: 0.1 })
+    expect(secondGate?.gain.events).toEqual([{ kind: 'set', value: 1, time: 0 }])
+  })
+
   test('cancels a future voice before its start without scheduling an audible steal fade', () => {
     const { filters, oscillators, runtime } = createRuntime()
     const clip = { ...createMidiClip('clip-1'), startSec: 1 }

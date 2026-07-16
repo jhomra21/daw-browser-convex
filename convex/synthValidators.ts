@@ -15,6 +15,7 @@ const synthEnvelopeValidator = v.object({
 });
 
 const synthOscillatorValidator = v.object({
+  enabled: v.optional(v.boolean()),
   wave: synthWaveValidator,
   octave: v.number(),
   semitone: v.number(),

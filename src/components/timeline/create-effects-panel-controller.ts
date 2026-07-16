@@ -54,7 +54,6 @@ const deviceInsertActionsEqual = (
   a.addSaturator === b.addSaturator &&
   a.addDelay === b.addDelay &&
   a.addReverb === b.addReverb &&
-  a.openSynthForTarget === b.openSynthForTarget &&
   a.switchInstrumentForTarget === b.switchInstrumentForTarget &&
   a.setInstrumentForTarget === b.setInstrumentForTarget &&
   a.canSetInstrumentForTarget === b.canSetInstrumentForTarget &&
@@ -184,11 +183,6 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     ]);
   };
 
-  createEffect(() => {
-    if (!isCurrentTargetReadOnly()) return;
-    instrument.synth.close();
-  });
-
   const close = () => {
     void flushPending();
     options.onClose();
@@ -274,7 +268,6 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       addSaturator: audioEffects.saturator.add,
       addDelay: audioEffects.delay.add,
       addReverb: audioEffects.reverb.add,
-      openSynthForTarget: instrument.synth.openForTarget,
       switchInstrumentForTarget: instrument.switchInstrumentForTarget,
       setInstrumentForTarget,
       canSetInstrumentForTarget,

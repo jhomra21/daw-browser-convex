@@ -1256,8 +1256,6 @@ const Timeline: Component<TimelineProps> = (props) => {
         return;
       if (!(await actions.addMidiClipToTarget(target.trackId))) return;
       openEffectsForTarget(target.trackId, { preserveClipSelection: true });
-      if (payload.instrument === "synth")
-        actions.openSynthForTarget(target.trackId);
       return;
     }
     if (payload.kind === "midi-instrument" && target.kind === "new-track") {
@@ -1267,7 +1265,6 @@ const Timeline: Component<TimelineProps> = (props) => {
         return;
       if (!(await actions.addMidiClipToTarget(track.id))) return;
       openEffectsForTarget(track.id, { preserveClipSelection: true });
-      if (payload.instrument === "synth") actions.openSynthForTarget(track.id);
     }
     if (payload.kind === "instrument-preset" && target.kind === "track") {
       if (
@@ -1279,8 +1276,6 @@ const Timeline: Component<TimelineProps> = (props) => {
       )
         return;
       openEffectsForTarget(target.trackId);
-      if (payload.preset.instrument.kind === "synth")
-        actions.openSynthForTarget(target.trackId);
       return;
     }
     if (payload.kind === "instrument-preset" && target.kind === "new-track") {
@@ -1295,8 +1290,6 @@ const Timeline: Component<TimelineProps> = (props) => {
       )
         return;
       openEffectsForTarget(track.id);
-      if (payload.preset.instrument.kind === "synth")
-        actions.openSynthForTarget(track.id);
     }
   };
   const timelineBrowser = useTimelineBrowserController({

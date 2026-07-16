@@ -9,6 +9,8 @@ type KnobProps = {
   step?: number
   size?: number
   label?: string
+  visibleLabel?: string
+  ariaLabel?: string
   valueLabel?: string
   resetValue?: number
   unit?: string
@@ -189,13 +191,13 @@ export default function Knob(props: KnobProps) {
   return (
     <div class={cn('flex flex-col items-center gap-0.5', props.class)}>
       <Show when={props.label}>
-        <div class="text-xs font-medium leading-none text-muted-foreground">{props.label}</div>
+        <div class="text-xs font-medium leading-none text-muted-foreground">{props.visibleLabel ?? props.label}</div>
       </Show>
       
       <div
         role="slider"
         tabIndex={props.disabled ? undefined : 0}
-        aria-label={props.label ?? 'Knob'}
+        aria-label={props.ariaLabel ?? props.label ?? 'Knob'}
         aria-disabled={props.disabled}
         aria-valuemin={props.min}
         aria-valuemax={props.max}

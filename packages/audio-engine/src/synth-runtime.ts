@@ -43,8 +43,10 @@ const synthParamsEqual = (left: SynthParams, right: SynthParams) => left === rig
   left.gain === right.gain
   && left.pan === right.pan
   && left.oscillators[0].level === right.oscillators[0].level
+  && left.oscillators[0].enabled === right.oscillators[0].enabled
   && left.oscillators[0].detuneCents === right.oscillators[0].detuneCents
   && left.oscillators[1].level === right.oscillators[1].level
+  && left.oscillators[1].enabled === right.oscillators[1].enabled
   && left.oscillators[1].detuneCents === right.oscillators[1].detuneCents
   && left.filter.enabled === right.filter.enabled
   && left.filter.mode === right.filter.mode
@@ -267,6 +269,9 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
           smooth(voice.bindings.filterQ, filterEnabled ? nextParams.filter.q : 0.0001, now)
         }
         for (const index of [0, 1] as const) {
+          if (previousParams.oscillators[index].enabled !== nextParams.oscillators[index].enabled) {
+            smooth(voice.bindings.oscillatorGates[index], nextParams.oscillators[index].enabled ? 1 : 0, now)
+          }
           if (previousParams.oscillators[index].level !== nextParams.oscillators[index].level) {
             smooth(voice.bindings.oscillatorLevels[index], nextParams.oscillators[index].level, now)
           }

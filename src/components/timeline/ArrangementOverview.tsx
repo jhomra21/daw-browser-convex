@@ -1,5 +1,8 @@
 import { createMemo, type Component, For, onCleanup } from 'solid-js'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { useAppPreferences } from '~/context/app-preferences'
+import { resolveClipColor } from '~/lib/clip-color'
+import { ARRANGEMENT_OVERVIEW_HEIGHT } from '~/lib/timeline-utils'
 import type { TimelineRange } from '~/lib/timeline-view'
 
 type ArrangementOverviewProps = {
@@ -13,7 +16,13 @@ type ArrangementOverviewProps = {
 
 type DragMode = 'pan' | 'start' | 'end' | null
 
+type OverviewPath = {
+  color: string
+  d: string
+}
+
 const ArrangementOverview: Component<ArrangementOverviewProps> = (props) => {
+  const appPreferences = useAppPreferences()
   let root: HTMLDivElement | undefined
   let pointerId: number | undefined
   let dragMode: DragMode = null
@@ -21,6 +30,32 @@ const ArrangementOverview: Component<ArrangementOverviewProps> = (props) => {
   let startX = 0
   const rows = createMemo(() => props.tracks.filter((track) => track.channelRole !== 'return'))
   const duration = () => Math.max(1, props.durationSec)
+  const overviewPaths = createMemo<OverviewPath[]>(() => {
+    const trackRows = rows()
+    const rowCount = Math.max(1, trackRows.length)
+    const durationSec = duration()
+    const tokens = appPreferences.appearance.themeTokens()
+    const paths: OverviewPath[] = []
+
+    for (let index = 0; index < trackRows.length; index++) {
+      const track = trackRows[index]
+      const y = 2 + index * 36 / rowCount
+      const height = Math.max(1, 32 / rowCount)
+      const pathByColor = new Map<string, string>()
+
+      for (const clip of track.clips) {
+        const x = clip.startSec / durationSec * 100
+        const width = Math.max(0, clip.duration / durationSec * 100)
+        const color = resolveClipColor(clip.color, tokens)
+        const rectangle = `M${x} ${y}h${width}v${height}h-${width}z`
+        pathByColor.set(color, `${pathByColor.get(color) ?? ''}${rectangle}`)
+      }
+
+      for (const [color, d] of pathByColor) paths.push({ color, d })
+    }
+
+    return paths
+  })
   const rangeX = () => props.visibleRange.startSec / duration() * props.width
   const rangeWidth = () => Math.max(4, (props.visibleRange.endSec - props.visibleRange.startSec) / duration() * props.width)
   const pointToTime = (clientX: number) => {
@@ -74,23 +109,13 @@ const ArrangementOverview: Component<ArrangementOverviewProps> = (props) => {
     finish()
   })
   return (
-    <div ref={(element) => { root = element }} class="sticky top-0 left-0 z-40 shrink-0 border-b border-border bg-timeline-surface" style={{ width: `${props.width}px`, height: '48px' }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerFinish} onPointerCancel={onPointerFinish} onLostPointerCapture={onPointerFinish}>
+    <div ref={(element) => { root = element }} class="sticky top-0 left-0 z-40 shrink-0 border-b border-border bg-timeline-surface" style={{ width: `${props.width}px`, height: `${ARRANGEMENT_OVERVIEW_HEIGHT}px` }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerFinish} onPointerCancel={onPointerFinish} onLostPointerCapture={onPointerFinish}>
       <svg class="absolute inset-0 h-full w-full" viewBox="0 0 100 40" preserveAspectRatio="none">
-        <For each={rows()}>{(track, index) => (
-          <path
-            d={track.clips.map((clip) => {
-              const y = 2 + index() * 36 / Math.max(1, rows().length)
-              const height = Math.max(1, 32 / Math.max(1, rows().length))
-              const x = clip.startSec / duration() * 100
-              const width = Math.max(0, clip.duration / duration() * 100)
-              return `M${x} ${y}h${width}v${height}h-${width}z`
-            }).join(' ')}
-            fill={track.color ?? 'var(--timeline-clip)'}
-            opacity="0.8"
-          />
+        <For each={overviewPaths()}>{(path) => (
+          <path d={path.d} fill={path.color} />
         )}</For>
       </svg>
-      <div class="absolute top-0 bottom-0 z-10 border-2 border-neutral-100/80 bg-neutral-100/10" style={{ left: `${rangeX()}px`, width: `${rangeWidth()}px` }} />
+      <div class="absolute top-0 bottom-0 z-10 rounded-sm border-2 border-black/80" style={{ left: `${rangeX()}px`, width: `${rangeWidth()}px` }} />
     </div>
   )
 }

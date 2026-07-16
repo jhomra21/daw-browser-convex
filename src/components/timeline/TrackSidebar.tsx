@@ -25,6 +25,7 @@ import {
   type TrackDropTarget,
 } from "~/lib/track-group-ops";
 import {
+  ARRANGEMENT_OVERVIEW_HEIGHT,
   GROUP_INDENT_PX,
   TIMELINE_HEADER_HEIGHT,
   clientYToTimelineTrackY,
@@ -720,10 +721,18 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         <div class="pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-muted" />
       </div>
 
-      <div
-        class="sticky top-0 z-40 border-b border-border bg-timeline-surface"
-        style={{ height: `${TIMELINE_HEADER_HEIGHT}px` }}
-      />
+      <div class="sticky top-0 z-40 bg-timeline-surface">
+        <div
+          class="pointer-events-none border-b border-border"
+          style={{ height: `${ARRANGEMENT_OVERVIEW_HEIGHT}px` }}
+        />
+        <div
+          class="border-b border-border"
+          style={{
+            height: `${TIMELINE_HEADER_HEIGHT - ARRANGEMENT_OVERVIEW_HEIGHT}px`,
+          }}
+        />
+      </div>
       <Show when={scrollingDragTarget()}>
           {(target) => {
             const row = () => layoutByTrackId().get(target().trackId);

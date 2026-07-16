@@ -2,7 +2,7 @@ import { calcNonOverlappingStart, willClipsOverlap } from '@daw-browser/timeline
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 // Timeline constants
-export const ARRANGEMENT_OVERVIEW_HEIGHT = 48 // px
+export const ARRANGEMENT_OVERVIEW_HEIGHT = 24 // px
 export const RULER_HEIGHT = 32 // px
 export const TIMELINE_HEADER_HEIGHT = ARRANGEMENT_OVERVIEW_HEIGHT + RULER_HEIGHT
 export const LANE_HEIGHT = 96 // px per track lane

@@ -1,6 +1,7 @@
 import { onCleanup, type Accessor } from 'solid-js'
 import { assert } from '@daw-browser/shared'
 
+import type { convexApi, convexClient } from '~/lib/convex'
 import { commitDuplicatedClipDrag, commitMovedClipDrag } from '~/lib/clip-drag-commit'
 import { createClipDragPersistence } from '~/lib/clip-drag-persistence'
 import {
@@ -52,8 +53,8 @@ type ClipDragOptions = {
   selection: TimelineSelectionController
   projectId: Accessor<string>
   userId: () => string
-  convexClient: typeof import('~/lib/convex').convexClient
-  convexApi: typeof import('~/lib/convex').convexApi
+  convexClient: typeof convexClient
+  convexApi: typeof convexApi
   getScrollElement: () => HTMLDivElement | undefined
   // snapping
   bpm: Accessor<number>
@@ -433,7 +434,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       return
     }
 
-    let { desiredStart, laneIdx } = readDragPointer({
+    const { desiredStart, laneIdx: initialLaneIdx } = readDragPointer({
       event,
       scroll,
       dragDeltaX,
@@ -442,6 +443,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       bpm: options.bpm(),
       gridDenominator: options.gridDenominator(),
     })
+    let laneIdx = initialLaneIdx
 
     // If we are in duplication mode, handle commit or cancel here and exit.
     if (duplicationActive) {

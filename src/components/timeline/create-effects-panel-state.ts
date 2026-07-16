@@ -1,5 +1,4 @@
 import {
-  createEffect,
   createMemo,
   createSignal,
   onCleanup,
@@ -14,17 +13,8 @@ import { createPersistedEffectState } from "~/components/timeline/create-persist
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
 import { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
-import { createSamplerBufferSync, type GranularLoadStatus, type SamplerLoadStatus } from "~/lib/sampler-buffer-sync";
-import { assignSampleToDrumRackPad, buildClipCreatePayload, type ClipCreateSnapshot } from "@daw-browser/shared";
-import { convexApi } from "~/lib/convex";
-import type { LocalEffectRow } from "~/lib/local-effects";
-import { isLocalId } from "@daw-browser/shared";
-import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
-import { buildSharedClipCreateOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
-import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
-import { toLocalTimelineClip } from "~/lib/timeline-repository/track-row-adapter";
-import { trackColorForClip } from "~/lib/clip-color";
-import {
+import type { createSamplerBufferSync, GranularLoadStatus, SamplerLoadStatus } from "~/lib/sampler-buffer-sync";
+import { assignSampleToDrumRackPad, buildClipCreatePayload, type ClipCreateSnapshot, isLocalId,
   createDefaultArpeggiatorParams,
   createDefaultDrumRackParams,
   createDefaultSynthParams,
@@ -39,8 +29,14 @@ import {
   type SamplerParams,
   type SamplerZone,
   type SynthParams,
-  type TrackInstrumentParams,
-} from "@daw-browser/shared";
+  type TrackInstrumentParams } from "@daw-browser/shared";
+import type { convexApi } from "~/lib/convex";
+import type { LocalEffectRow } from "~/lib/local-effects";
+import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
+import { buildSharedClipCreateOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
+import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
+import { toLocalTimelineClip } from "~/lib/timeline-repository/track-row-adapter";
+import { trackColorForClip } from "~/lib/clip-color";
 import {
   didOptimisticGrantScopeChange,
   readOptimisticGrantScope,
@@ -604,6 +600,32 @@ export function createEffectsPanelInstrumentDevice(
   const isSynthExpandedForCurrentTarget = createMemo(
     () => expandedSynth()?.targetId === currentTargetId(),
   );
+  const synthParams = createMemo(() => {
+    const current = instrumentState.params();
+    return current?.kind === "synth" ? current.params : undefined;
+  });
+  const drumRackParams = createMemo(() => {
+    const current = instrumentState.params();
+    return current?.kind === "drum-rack" ? current.params : undefined;
+  });
+  const samplerParams = createMemo(() => {
+    const current = instrumentState.params();
+    return current?.kind === "sampler" ? current.params : undefined;
+  });
+  const samplerStatus = createMemo(() => {
+    samplerStatusVersion();
+    const targetId = getTrackTargetId();
+    return targetId ? samplerBufferSync.getStatus(targetId) : undefined;
+  });
+  const granularParams = createMemo(() => {
+    const current = instrumentState.params();
+    return current?.kind === "granular" ? current.params : undefined;
+  });
+  const granularStatus = createMemo(() => {
+    samplerStatusVersion();
+    const targetId = getTrackTargetId();
+    return targetId ? samplerBufferSync.getGranularStatus(targetId) : undefined;
+  });
 
   const flushPending = async () => {
     await Promise.all([
@@ -635,10 +657,7 @@ export function createEffectsPanelInstrumentDevice(
       isExpandedForCurrentTarget: isSynthExpandedForCurrentTarget,
       open: openSynthCard,
       openForTarget: openSynthForTarget,
-      params: createMemo(() => {
-        const current = instrumentState.params();
-        return current?.kind === "synth" ? current.params : undefined;
-      }),
+      params: synthParams,
       readDraftForTarget: (targetId) => {
         const current = instrumentState.readDraftForTarget(targetId);
         return current?.kind === "synth" ? current.params : undefined;
@@ -657,10 +676,7 @@ export function createEffectsPanelInstrumentDevice(
     },
     drumRack: {
       assignSampleToPad: assignSampleToCurrentDrumRackPad,
-      params: createMemo(() => {
-        const current = instrumentState.params();
-        return current?.kind === "drum-rack" ? current.params : undefined;
-      }),
+      params: drumRackParams,
       readDraftForTarget: (targetId) => {
         const current = instrumentState.readDraftForTarget(targetId);
         return current?.kind === "drum-rack" ? current.params : undefined;
@@ -674,15 +690,8 @@ export function createEffectsPanelInstrumentDevice(
       updatePad: updateCurrentDrumRackPad,
     },
     sampler: {
-      params: createMemo(() => {
-        const current = instrumentState.params();
-        return current?.kind === "sampler" ? current.params : undefined;
-      }),
-      status: createMemo(() => {
-        samplerStatusVersion();
-        const targetId = getTrackTargetId();
-        return targetId ? samplerBufferSync.getStatus(targetId) : undefined;
-      }),
+      params: samplerParams,
+      status: samplerStatus,
       retryZone: (zoneId) => {
         const targetId = getTrackTargetId();
         if (targetId) samplerBufferSync.retryZone(context.audioEngine(), targetId, zoneId);
@@ -727,15 +736,8 @@ export function createEffectsPanelInstrumentDevice(
       },
     },
     granular: {
-      params: createMemo(() => {
-        const current = instrumentState.params();
-        return current?.kind === "granular" ? current.params : undefined;
-      }),
-      status: createMemo(() => {
-        samplerStatusVersion();
-        const targetId = getTrackTargetId();
-        return targetId ? samplerBufferSync.getGranularStatus(targetId) : undefined;
-      }),
+      params: granularParams,
+      status: granularStatus,
       retry: () => {
         const targetId = getTrackTargetId();
         if (targetId) samplerBufferSync.retryGranular(context.audioEngine(), targetId);

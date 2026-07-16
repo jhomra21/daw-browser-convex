@@ -1,4 +1,4 @@
-import { type Accessor } from 'solid-js'
+import type { Accessor } from 'solid-js'
 import { normalizeMasterVolume } from '@daw-browser/shared'
 import { loadLocalProjectState, saveLocalProjectState } from '~/lib/local-project-state'
 import {

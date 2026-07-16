@@ -30,12 +30,13 @@ import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Clip, ExternalSidechainRoute, SelectedClip, Track } from '@daw-browser/timeline-core/types'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
+import type { convexApi, convexClient } from '~/lib/convex'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 
-type ConvexClientType = typeof import('~/lib/convex').convexClient
+type ConvexClientType = typeof convexClient
 
-type ConvexApiType = typeof import('~/lib/convex').convexApi
+type ConvexApiType = typeof convexApi
 type TrackDeleteResult = FunctionReturnType<ConvexApiType['tracks']['remove']>
 
 type TimelineClipActionsOptions = {
@@ -569,7 +570,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     }
 
     if (rid && isLocalId('project', rid)) {
-      let historyEntries: ReturnType<typeof buildTrackDeleteHistoryEntry>[] = []
+      const historyEntries: ReturnType<typeof buildTrackDeleteHistoryEntry>[] = []
       try {
         for (const deletedTrack of snapshot.filter((entry) => deletedTrackIds.has(entry.id))) {
           historyEntries.push(buildTrackDeleteHistoryEntry({
@@ -595,7 +596,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     const uid = userId()
     if (!uid) return
 
-    let historyEntries: ReturnType<typeof buildTrackDeleteHistoryEntry>[] = []
+    const historyEntries: ReturnType<typeof buildTrackDeleteHistoryEntry>[] = []
     try {
       if (rid) {
         for (const deletedTrack of snapshot.filter((entry) => deletedTrackIds.has(entry.id))) {

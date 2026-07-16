@@ -442,6 +442,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   const owner = getOwner();
   let evaluatedValuesMemo: Accessor<ReadonlyMap<string, number>> | undefined;
   const evaluatedValuesByTargetKey = () => {
+// oxlint-disable-next-line solid/reactivity -- The memo is created under the preserved Solid owner for deferred controller use.
     const memo = evaluatedValuesMemo ?? runWithOwner(owner, () => createMemo(() => (
       evaluatedAutomationValuesByTargetKey(
         persistedAutomation.envelopes(),
@@ -614,6 +615,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     overrideCount: () => overriddenAutomationTargetKeys().size,
     workspace,
     effectsPanel: {
+// oxlint-disable-next-line solid/reactivity -- The memo is created under the preserved Solid owner for deferred controller use.
       selectParameter: workspace().actions.selectParameter,
       overrideTarget: overrideAutomationTarget,
     },

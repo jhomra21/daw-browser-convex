@@ -1,10 +1,9 @@
 import { type Accessor, untrack } from 'solid-js'
 
 import { clearWaveformAssetCache } from '@daw-browser/waveforms/asset-store'
-import { resolveClipSampleUrl } from '@daw-browser/shared'
+import { isLocalId, resolveClipSampleUrl } from '@daw-browser/shared'
 import { createClipBufferCache, type ClipBuffers, type ClipBufferWriter, type EnsureClipBuffer } from '~/lib/clip-buffer-cache'
 import { readLocalOrCloudAssetFile } from '~/lib/cloud-asset-cache'
-import { isLocalId } from '@daw-browser/shared'
 import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
 
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'

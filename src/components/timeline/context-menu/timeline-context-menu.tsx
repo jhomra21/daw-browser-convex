@@ -52,46 +52,43 @@ const shouldPreserveNativeContextMenu = (target: EventTarget | null) => (
   Boolean(target.closest("input, textarea, select, [contenteditable='true'], [contenteditable='']"))
 );
 
-const TimelineContextMenuEntry: Component<{ item: TimelineContextMenuItem }> = (props) => {
+const renderTimelineContextMenuEntry = (current: TimelineContextMenuItem) => {
+  if (current.kind === "label") return <ContextMenuLabel>{current.label}</ContextMenuLabel>;
+  if (current.kind === "separator") return <ContextMenuSeparator />;
+  if (current.kind === "color") {
+    return (
+        <div class="flex min-h-6 items-center gap-2 px-2 py-0.5 leading-5 text-foreground">
+          <span class="min-w-0 flex-1 truncate">{current.label}</span>
+          <input
+            type="color"
+            value={colorInputValue(current.value, "#000000")}
+            class="h-5 w-8 cursor-pointer border border-border bg-app-surface p-0"
+            onClick={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.stopPropagation()}
+            onChange={(event) => current.onChange(event.currentTarget.value)}
+          />
+        </div>
+    );
+  }
   return (
-    <>
-      {(() => {
-        const current = props.item;
-        if (current.kind === "label") return <ContextMenuLabel>{current.label}</ContextMenuLabel>;
-        if (current.kind === "separator") return <ContextMenuSeparator />;
-        if (current.kind === "color") {
-          return (
-            <div class="flex min-h-6 items-center gap-2 px-2 py-0.5 leading-5 text-foreground">
-              <span class="min-w-0 flex-1 truncate">{current.label}</span>
-              <input
-                type="color"
-                value={colorInputValue(current.value, "#000000")}
-                class="h-5 w-8 cursor-pointer border border-border bg-app-surface p-0"
-                onClick={(event) => event.stopPropagation()}
-                onContextMenu={(event) => event.stopPropagation()}
-                onChange={(event) => current.onChange(event.currentTarget.value)}
-              />
-            </div>
-          );
-        }
-        return (
-          <ContextMenuItem
-            disabled={current.disabled}
-            onSelect={() => {
-              const action = current.onSelect;
-              queueMicrotask(() => action?.());
-            }}
-          >
-            <span class="min-w-0 flex-1 truncate">{current.label}</span>
-            <Show when={current.shortcut}>
-              {(shortcut) => <ContextMenuShortcut>{shortcut()}</ContextMenuShortcut>}
-            </Show>
-          </ContextMenuItem>
-        );
-      })()}
-    </>
+    <ContextMenuItem
+      disabled={current.disabled}
+      onSelect={() => {
+        const action = current.onSelect;
+        queueMicrotask(() => action?.());
+      }}
+    >
+      <span class="min-w-0 flex-1 truncate">{current.label}</span>
+      <Show when={current.shortcut}>
+        {(shortcut) => <ContextMenuShortcut>{shortcut()}</ContextMenuShortcut>}
+      </Show>
+    </ContextMenuItem>
   );
 };
+
+const TimelineContextMenuEntry: Component<{ item: TimelineContextMenuItem }> = (props) => (
+  <>{renderTimelineContextMenuEntry(props.item)}</>
+);
 
 const TimelineContextMenu: Component<TimelineContextMenuProps> = (props) => {
   return (

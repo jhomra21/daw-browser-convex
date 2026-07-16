@@ -5,7 +5,6 @@ import {
   AUDIO_EFFECT_CONTRACTS,
   AUDIO_EFFECT_ORDER,
   areAudioEffectInstanceOrdersEqual,
-  audioEffectOrderItemKind,
   normalizeAudioEffectInstanceOrder,
   normalizeCompressorParams,
   normalizeDelayParams,
@@ -33,9 +32,8 @@ import {
   type LoFiParamsEnvelope,
   type PhaserParamsEnvelope,
   type TremoloParamsEnvelope,
-  type UtilityParamsEnvelope,
+  type UtilityParamsEnvelope,isLocalId
 } from "@daw-browser/shared";
-import { isLocalId } from "@daw-browser/shared";
 import type { Track } from "@daw-browser/timeline-core/types";
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
@@ -43,7 +41,7 @@ import {
   EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
   EFFECT_PANEL_SAVE_DEBOUNCE_MS,
 } from "~/components/timeline/create-effects-panel-state";
-import { convexApi } from "~/lib/convex";
+import type { convexApi } from "~/lib/convex";
 import { compareAudioEffectOrderEntries } from "~/lib/audio-effect-order-rows";
 import { createAudioEffectInstanceId, deleteLocalEffectInstance, listLocalEffects, reorderLocalAudioEffects, setLocalEffectInstance, type LocalEffectKind, type LocalEffectRow } from "~/lib/local-effects";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
@@ -766,6 +764,7 @@ export function createEffectsPanelAudioDevice(
     if (areAudioEffectInstanceOrdersEqual(currentOrder, normalized)) return;
     setOptimisticOrderForTarget(targetId, normalized);
     void applyInstancesToEngine(targetId, normalized).catch(() => undefined);
+    // oxlint-disable-next-line solid/reactivity -- Promise rejection verifies the current reactive order before rolling back this asynchronous write.
     void persistReorder(targetId, normalized).catch(() => {
       rollbackOptimisticOrder(targetId, normalized);
     });

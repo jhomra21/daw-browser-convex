@@ -1,4 +1,4 @@
-import { For, createSignal, createMemo, onMount, onCleanup, createEffect } from 'solid-js'
+import { For, createSignal, createMemo, onMount, onCleanup, createEffect, untrack } from 'solid-js'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import EffectShell from '~/components/effects/EffectShell'
 import EqFilterTypeSelect from '~/components/effects/eq-filter-type-select'
@@ -120,7 +120,7 @@ function applyEqResponseBandParams(filter: BiquadFilterNode, band: EqBandParams)
 
 export default function Eq(props: EqProps) {
   const appPreferences = useAppPreferences()
-  const [selectedId, setSelectedId] = createSignal<string>(props.bands[0]?.id ?? '')
+  const [selectedId, setSelectedId] = createSignal<string>(untrack(() => props.bands[0]?.id ?? ''))
   const [draggedId, setDraggedId] = createSignal<string | null>(null)
   const [canvasSize, setCanvasSize] = createSignal({ width: 640, height: 160 })
   const [spectrumTick, setSpectrumTick] = createSignal(0)
@@ -155,7 +155,7 @@ export default function Eq(props: EqProps) {
     }
     update()
     resizeObs = new ResizeObserver(() => update())
-    containerRef && resizeObs.observe(containerRef)
+    if (containerRef) resizeObs.observe(containerRef)
     const responseContext = new OfflineAudioContext(1, 1, 44100)
     responseFilter = responseContext.createBiquadFilter()
     initialDrawFrame = requestAnimationFrame(() => {
@@ -658,7 +658,12 @@ export default function Eq(props: EqProps) {
           />
         </div>
 
-        <div ref={containerRef} class="relative min-w-0 overflow-hidden bg-background">
+        <div
+          ref={(element) => {
+            containerRef = element
+          }}
+          class="relative min-w-0 overflow-hidden bg-background"
+        >
           <canvas
             ref={(el) => (canvasRef = el || undefined)}
             width={canvasSize().width}

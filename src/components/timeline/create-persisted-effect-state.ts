@@ -149,6 +149,7 @@ export function createPersistedEffectState<TRow, TParams>(
     const write = Promise.resolve()
       .then(() => options.persistParams(targetId, params, context))
       .then(
+        // oxlint-disable-next-line solid/reactivity -- Promise completion must compare the latest pending reactive draft before committing persistence state.
         () => {
           if (persistAttemptByTarget.get(key) !== attempt) return
           const pendingCommit = pendingCommitByTarget.get(key)
@@ -161,6 +162,7 @@ export function createPersistedEffectState<TRow, TParams>(
             persistContextByTarget.delete(key)
           }
         },
+        // oxlint-disable-next-line solid/reactivity -- Promise rejection must inspect the latest reactive draft before reporting this persistence failure.
         (error) => {
           if (persistAttemptByTarget.get(key) !== attempt) return
           const current = draftByTarget()[key]

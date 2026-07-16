@@ -2,7 +2,7 @@ import type { FunctionArgs } from 'convex/server'
 
 import { normalizeClipStartSec } from '@daw-browser/shared'
 import { toCloudClipId, toCloudTrackIdOptional } from '~/lib/cloud-id-args'
-import { convexApi } from '~/lib/convex'
+import type { convexApi } from '~/lib/convex'
 
 export function buildClipMoveMutationInput(input: {
   clipId: string

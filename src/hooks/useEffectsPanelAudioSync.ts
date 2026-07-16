@@ -10,18 +10,17 @@ import {
   type EqParams,
   type ReverbParams,
   type SaturatorParams,
-  type TrackInstrumentParams,
+  type TrackInstrumentParams,isLocalId
 } from "@daw-browser/shared";
 import type { AudioEffectRuntimeInstance, AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
-import { convexApi } from "~/lib/convex";
+import type { convexApi } from "~/lib/convex";
 import { audioEffectKindFromLocalEffect, listLocalEffects, type LocalEffectRow } from "~/lib/local-effects";
 import { collectAudioEffectInstances } from "~/lib/audio-effect-order-rows";
-import { isLocalId } from "@daw-browser/shared";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import type { ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
 import { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
-import { createSamplerBufferSync } from "~/lib/sampler-buffer-sync";
+import type { createSamplerBufferSync } from "~/lib/sampler-buffer-sync";
 
 type UseEffectsPanelAudioSyncOptions = {
   isOpen: Accessor<boolean>;

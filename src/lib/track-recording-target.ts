@@ -5,10 +5,11 @@ import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
 import { canTrackReceiveAudioClip } from '@daw-browser/timeline-core/track-routing'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Track } from '@daw-browser/timeline-core/types'
+import type { convexApi, convexClient } from '~/lib/convex'
 
-type ConvexClientType = typeof import('~/lib/convex').convexClient
+type ConvexClientType = typeof convexClient
 
-type ConvexApiType = typeof import('~/lib/convex').convexApi
+type ConvexApiType = typeof convexApi
 
 type HistoryPush = (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
 

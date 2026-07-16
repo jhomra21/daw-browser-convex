@@ -2,7 +2,7 @@ import { For } from "solid-js";
 import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard-shared";
 import { Button } from "~/components/ui/button";
 import { useAppPreferences } from "~/context/app-preferences";
-import { type AppTheme } from "~/lib/preferences/app-preferences";
+import type { AppTheme } from "~/lib/preferences/app-preferences";
 import { DEFAULT_DAW_THEME_ID, type DawThemeId } from "~/lib/theme/theme-registry";
 
 type ThemeSelectionId = AppTheme | DawThemeId;
@@ -28,7 +28,7 @@ function PreviewButtonGroup(props: PreviewButtonGroupProps) {
   return (
     <div
       class="flex flex-wrap gap-1"
-      onMouseLeave={props.cancel}
+      onMouseLeave={() => props.cancel()}
       onFocusOut={(event) => {
         const nextTarget = event.relatedTarget;
         if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {

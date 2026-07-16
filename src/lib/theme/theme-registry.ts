@@ -153,9 +153,7 @@ const builtInThemes: readonly DawTheme[] = [
   }
 ]
 
-export const themeOptions: readonly DawThemeOption[] = [
-  ...builtInThemes.map((theme) => ({ id: theme.id, name: theme.name }))
-]
+export const themeOptions: readonly DawThemeOption[] = builtInThemes.map((theme) => ({ id: theme.id, name: theme.name }))
 
 const isThemeId = (value: unknown): value is DawThemeId =>
   builtInThemes.some((theme) => theme.id === value)

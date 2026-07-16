@@ -29,8 +29,15 @@ function DspCharacterization() {
   onMount(() => {
     if (diagnosticEnabled && searchParams.get('autorun') === '1') void run()
   })
-
-  return diagnosticEnabled ? (
+  return (
+    <Show
+      when={diagnosticEnabled}
+      fallback={
+        <main class="flex min-h-screen items-center justify-center bg-neutral-950 text-neutral-400">
+          <p>Diagnostic route unavailable.</p>
+        </main>
+      }
+    >
     <main class="min-h-screen bg-neutral-950 p-6 text-neutral-100">
       <div class="mx-auto max-w-4xl">
         <h1 class="text-2xl font-semibold">DSP characterization</h1>
@@ -61,9 +68,6 @@ function DspCharacterization() {
         </Show>
       </div>
     </main>
-  ) : (
-    <main class="flex min-h-screen items-center justify-center bg-neutral-950 text-neutral-400">
-      <p>Diagnostic route unavailable.</p>
-    </main>
+    </Show>
   )
 }

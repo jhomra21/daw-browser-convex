@@ -3,7 +3,7 @@ import { createEffect, createMemo, createSignal, type Accessor } from 'solid-js'
 
 import { isLocalId, normalizeMasterVolume, type ProjectRole } from '@daw-browser/shared'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { convexApi } from '~/lib/convex'
+import type { convexApi } from '~/lib/convex'
 import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import type { ProjectMixState } from '~/lib/project-mix-state'
 
@@ -86,6 +86,7 @@ export function useTimelineMasterVolume(options: UseTimelineMasterVolumeOptions)
       userId,
       operation: { kind: 'mixer.setMasterVolume', payload: { volume: nextVolume } },
       queuedResult: { status: 'applied' },
+// oxlint-disable-next-line solid/reactivity -- The asynchronous persistence rejection deliberately checks the latest pending volume before rollback.
     }).catch(() => {
       if (pendingMasterVolume() !== nextVolume) return
       setPendingMasterVolume(undefined)

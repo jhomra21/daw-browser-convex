@@ -1,7 +1,7 @@
 import type { FunctionArgs } from 'convex/server'
 
 import { toCloudTrackId } from '~/lib/cloud-id-args'
-import { convexApi } from '~/lib/convex'
+import type { convexApi } from '~/lib/convex'
 import type { TrackId } from '@daw-browser/timeline-core/types'
 
 export function buildTrackCreateMutationInput(input: {

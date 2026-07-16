@@ -25,6 +25,7 @@ const router = createRouter({
 
 // Register the router type for full type-safety
 declare module '@tanstack/solid-router' {
+  // oxlint-disable-next-line typescript/consistent-type-definitions -- TanStack Router requires interface declaration merging.
   interface Register {
     router: typeof router
   }

@@ -1,11 +1,10 @@
 import type { z } from 'zod'
-import { api as generatedConvexApi } from '../convex/_generated/api'
+import type { api as generatedConvexApi } from '../convex/_generated/api'
 import type { Id } from '../convex/_generated/dataModel'
 import type { ApiConvexClient } from './convex-auth'
-import {
+import type {
   AddMidiClipCommandSchema,
   AddSampleClipsCommandSchema,
-  type AgentCommand,
   CopyClipsCommandSchema,
   CreateTrackCommandSchema,
   DeleteTrackCommandSchema,
@@ -22,15 +21,11 @@ import {
   SetTimingCommandSchema,
   SetTrackRoutingCommandSchema,
   SetTrackVolumeCommandSchema,
-} from '@daw-browser/shared'
-import { buildClipCreatePayload } from '@daw-browser/shared'
-import { getPersistableAudioSourceMetadata } from '@daw-browser/shared'
-import { sanitizeAudioSourceKind } from '@daw-browser/shared'
-import { createInstrumentInstanceId, normalizeEqParams, normalizeSynthParams } from '@daw-browser/shared'
-import type { Clip, Track } from '@daw-browser/timeline-core/types'
+  AgentCommand} from '@daw-browser/shared';
+import { buildClipCreatePayload, createInstrumentInstanceId, getPersistableAudioSourceMetadata, normalizeEqParams, normalizeSynthParams, resolveAgentMixTargetIndices, sanitizeAudioSourceKind } from '@daw-browser/shared'
+import type { Clip } from '@daw-browser/timeline-core/types'
 import { getClipKindFromClip, getClipTargetError } from './clip-targets'
 import { listSortedClipsForTrack, resolveTrackClip, selectTrackClips, trackAtIndex as trackAtIndexImpl } from './indexing'
-import { resolveAgentMixTargetIndices } from '@daw-browser/shared'
 
 type CreateTrackInput = z.infer<typeof CreateTrackCommandSchema>
 type SetTrackRoutingInput = z.infer<typeof SetTrackRoutingCommandSchema>
@@ -503,7 +498,7 @@ export function createAgentActions(context: AgentActionContext) {
       const track = await trackAtIndex(input.trackIndex)
       if (!track) return { error: `No track at index ${input.trackIndex}` }
       if ((track.kind ?? 'audio') !== 'instrument') return { error: 'Target track is not an instrument track' }
-      const { trackIndex, ...updates } = input
+      const { ...updates } = input
       const row = await context.convex.query(context.convexApi.effects.getSynthForTrack, {
         projectId: context.projectId,
         trackId: track._id,

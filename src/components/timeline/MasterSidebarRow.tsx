@@ -10,9 +10,8 @@ import {
   automationTargetKey,
   type AutomationEnvelope,
   type AutomationParameterSelection,
-  type AutomationTargetDeviceInstance,
+  type AutomationTargetDeviceInstance,normalizeMasterVolume
 } from "@daw-browser/shared";
-import { normalizeMasterVolume } from "@daw-browser/shared";
 import { LANE_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import AutomationParameterPicker from "./automation-parameter-picker";
@@ -173,7 +172,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
         height: `${rowHeight()}px`,
         width: "100%",
       }}
-      onClick={master().onClick}
+      onClick={() => master().onClick()}
     >
       <div
         class={cn(

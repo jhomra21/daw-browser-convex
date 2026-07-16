@@ -5,6 +5,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  untrack,
 } from "solid-js";
 import type {
   Clip,
@@ -27,9 +28,8 @@ import { useClipBuffers } from "~/hooks/useClipBuffers";
 import {
   collectTrackDescendantIds,
   isLocalId,
-  normalizeCommandTrackIndices,
+  normalizeCommandTrackIndices,automationTargetKey
 } from "@daw-browser/shared";
-import { automationTargetKey } from "@daw-browser/shared";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
 import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
@@ -141,7 +141,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     deleteProject,
   } = useTimelineData({
     notify,
-    bootstrapIfEmpty: props.bootstrapIfEmpty,
+    bootstrapIfEmpty: untrack(() => props.bootstrapIfEmpty),
   });
   const localProject = useLocalProjectActions({
     projectId,
@@ -968,7 +968,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       if (isRecording()) {
         handleTransportPause();
       } else {
-        isPlaying() ? handlePause() : requestPlay();
+        if (isPlaying()) {
+          handlePause();
+        } else {
+          requestPlay();
+        }
       }
     },
     onDelete: () => {

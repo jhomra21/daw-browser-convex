@@ -1,4 +1,5 @@
 import { isLocalId } from "@daw-browser/shared";
+import type { convexApi, convexClient } from "~/lib/convex";
 import type { OptimisticGrantScope } from "~/lib/optimistic-grant-scope";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { toLocalTimelineTrack } from "~/lib/timeline-repository/track-row-adapter";
@@ -8,8 +9,8 @@ import { createOptimisticTrack } from "~/lib/tracks";
 import type { Track } from "@daw-browser/timeline-core/types";
 
 type ClipMove = { clipId: string; trackId: Track["id"]; startSec: number };
-type ConvexClient = typeof import("~/lib/convex").convexClient;
-type ConvexApi = typeof import("~/lib/convex").convexApi;
+type ConvexClient = typeof convexClient;
+type ConvexApi = typeof convexApi;
 
 type Input = {
   projectId: () => string;

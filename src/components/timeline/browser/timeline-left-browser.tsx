@@ -38,7 +38,7 @@ const BrowserFolderRenameInput: Component<{
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
       onInput={(event) => props.onInput(event.currentTarget.value)}
-      onBlur={props.onConfirm}
+      onBlur={() => props.onConfirm()}
       onKeyDown={(event) => {
         if (event.key === "Enter") {
           event.preventDefault();
@@ -232,9 +232,9 @@ const BrowserItemRow: Component<{
       draggable={props.draggable}
       disabled={props.item.disabled}
       class="group flex h-6 w-full items-center px-5 text-left text-xs hover:bg-app-surface disabled:cursor-not-allowed disabled:opacity-50"
-      onClick={props.onClick}
-      onDragStart={props.onDragStart}
-      onPointerDown={props.onPointerDown}
+      onClick={() => props.onClick()}
+      onDragStart={(event) => props.onDragStart?.(event)}
+      onPointerDown={(event) => props.onPointerDown?.(event)}
     >
       <span class="min-w-0 flex-1 truncate text-foreground group-hover:text-foreground">{props.item.label}</span>
     </button>
@@ -462,7 +462,7 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
         type="button"
         aria-label="Resize browser"
         class="absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-transparent hover:bg-sky-500/20"
-        onPointerDown={props.browser.onResizePointerDown}
+        onPointerDown={(event) => props.browser.onResizePointerDown(event)}
       />
     </aside>
   );

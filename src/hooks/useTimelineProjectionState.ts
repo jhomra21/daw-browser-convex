@@ -1,7 +1,7 @@
 import type { FunctionReturnType } from 'convex/server'
 import { createEffect, createSignal, on, type Accessor } from 'solid-js'
 
-import { convexApi } from '~/lib/convex'
+import type { convexApi } from '~/lib/convex'
 import {
   buildServerTimelineIndex,
   isClipPatchReflected,
@@ -271,7 +271,7 @@ export function useTimelineProjectionState(
   }
 
   const commitClipGain = (clipId: string, gain: number) => {
-    setCommittedClipEditsById((current) => new Map(current).set(clipId, { ...(current.get(clipId) ?? {}), gain }))
+    setCommittedClipEditsById((current) => new Map(current).set(clipId, { ...current.get(clipId), gain }))
   }
 
   const commitClipFades = (clipId: string, fades: ClipFades) => {

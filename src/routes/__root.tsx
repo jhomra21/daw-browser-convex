@@ -11,6 +11,7 @@ const isChunkLoadError = (error: unknown) => {
 }
 
 const AppErrorFallback = (props: { error: unknown }) => {
+// oxlint-disable-next-line solid/reactivity -- Error boundary fallbacks are invoked per error event, so this reads the supplied event snapshot intentionally.
   const chunkLoadError = isChunkLoadError(props.error)
 
   return (

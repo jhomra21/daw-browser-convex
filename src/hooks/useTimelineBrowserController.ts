@@ -1,7 +1,6 @@
 import { createEffect, createMemo, createSignal, type Accessor } from "solid-js";
 import { useProjectAssetFolders, useProjectSamples, type ProjectAssetFolder } from "~/hooks/useProjectSamples";
-import type { TimelineLeftBrowserState } from "~/components/timeline/browser/browser-types";
-import type { BrowserFolderRow, BrowserItem, BrowserItemSource, BrowserSection, TimelineLeftBrowserModel, BrowserTreeRow } from "~/components/timeline/browser/browser-types";
+import type { BrowserFolderRow, BrowserItem, BrowserItemSource, BrowserSection, BrowserTreeRow, TimelineLeftBrowserModel, TimelineLeftBrowserState } from "~/components/timeline/browser/browser-types";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData, type SampleDragData } from "~/lib/sample-drag-data";
 import { createBrowserDeviceDrag } from "~/components/timeline/browser/create-browser-device-drag";
@@ -514,6 +513,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       return;
     }
     setRenameFolderBusy(true);
+// oxlint-disable-next-line solid/reactivity -- This deferred folder action intentionally reads current reactive controller state when it executes.
     runAssetFolderAction(async () => {
       try {
         if (isLocalId("project", projectId)) {
@@ -530,6 +530,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   };
 
   const deleteAssetFolder = (folderId: string) => {
+// oxlint-disable-next-line solid/reactivity -- This deferred folder action intentionally reads current reactive controller state when it executes.
     runAssetFolderAction(async () => {
       const projectId = currentProjectId();
       if (!projectId || folderSampleCountById().get(folderId)) return;
@@ -649,7 +650,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     },
     onDrop: options.onDeviceDrop,
   });
-
+// oxlint-disable-next-line solid/reactivity -- This deferred folder action intentionally reads current reactive controller state when it executes.
   return createMemo(() => ({
     open: options.leftBrowser.open(),
     widthPx: options.leftBrowser.widthPx(),

@@ -1,9 +1,6 @@
-import type { AudioSourceKind } from '@daw-browser/shared'
-import { createLocalAssetId } from '@daw-browser/shared'
-import {
+import { type AudioSourceKind,
   getPersistableAudioSourceMetadata as getPersistableAudioSourceMetadataFromFields,
-  type AudioSourceMetadata,
-} from '@daw-browser/shared'
+  type AudioSourceMetadata,createLocalAssetId } from '@daw-browser/shared'
 
 export type { AudioSourceKind } from '@daw-browser/shared'
 export type { AudioSourceMetadata } from '@daw-browser/shared'

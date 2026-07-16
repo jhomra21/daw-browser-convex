@@ -392,7 +392,7 @@ export default function TimelineWorkspace(props: Props) {
               style={{
                 width: `${props.durationSec * PPS}px`,
               }}
-              onPointerDown={props.onLanePointerDown}
+               onPointerDown={(event) => props.onLanePointerDown(event)}
             >
               <TimelineRuler
                 durationSec={props.durationSec}
@@ -420,6 +420,7 @@ export default function TimelineWorkspace(props: Props) {
                       row,
                       props.browserDropTargetTrackId === row.trackId ||
                         (props.browserDropTargetTrackId === null &&
+// oxlint-disable-next-line solid/reactivity -- The keyed For index accessor is consumed by this JSX classList expression.
                           props.dropTargetLane === i()),
                     )
                   }
@@ -467,7 +468,7 @@ export default function TimelineWorkspace(props: Props) {
                     props.returnSectionRef(element);
                   }}
                   style={{ height: `${returnAreaHeight()}px` }}
-                  onPointerDown={props.onReturnPointerDown}
+                   onPointerDown={(event) => props.onReturnPointerDown(event)}
                 >
                   <For each={props.trackLayout.returnRows}>
                     {(row) => (
@@ -538,7 +539,7 @@ export default function TimelineWorkspace(props: Props) {
                   <div
                     class="relative overflow-hidden bg-timeline-background"
                     style={{ height: `${masterBaseHeight()}px` }}
-                    onPointerDown={props.onMasterPointerDown}
+                     onPointerDown={(event) => props.onMasterPointerDown(event)}
                   >
                     <GridOverlay
                       durationSec={props.durationSec}

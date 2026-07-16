@@ -1,4 +1,4 @@
-export type ScheduledTrackWrite<TTrackId extends string> = {
+export type ScheduledTrackWrite = {
   timer: number
   write: () => Promise<unknown>
   afterWrite?: () => void
@@ -10,9 +10,9 @@ export const createTimelineMixerWriteQueue = <TTrackId extends string>(
   const runningWrites = new Set<Promise<void>>()
 
   const runScheduledWrite = (
-    timers: Map<TTrackId, ScheduledTrackWrite<TTrackId>>,
+    timers: Map<TTrackId, ScheduledTrackWrite>,
     trackId: TTrackId,
-    scheduled: ScheduledTrackWrite<TTrackId>,
+    scheduled: ScheduledTrackWrite,
   ) => (
     scheduled.write()
       .then(() => {
@@ -29,9 +29,9 @@ export const createTimelineMixerWriteQueue = <TTrackId extends string>(
   )
 
   const trackScheduledWrite = (
-    timers: Map<TTrackId, ScheduledTrackWrite<TTrackId>>,
+    timers: Map<TTrackId, ScheduledTrackWrite>,
     trackId: TTrackId,
-    scheduled: ScheduledTrackWrite<TTrackId>,
+    scheduled: ScheduledTrackWrite,
   ) => {
     const promise = runScheduledWrite(timers, trackId, scheduled)
       .finally(() => {
@@ -42,7 +42,7 @@ export const createTimelineMixerWriteQueue = <TTrackId extends string>(
   }
 
   const scheduleTrackWrite = (
-    timers: Map<TTrackId, ScheduledTrackWrite<TTrackId>>,
+    timers: Map<TTrackId, ScheduledTrackWrite>,
     trackId: TTrackId,
     write: () => Promise<unknown>,
     afterWrite?: () => void,
@@ -59,7 +59,7 @@ export const createTimelineMixerWriteQueue = <TTrackId extends string>(
   }
 
   const clearScheduledWrite = (
-    timers: Map<TTrackId, ScheduledTrackWrite<TTrackId>>,
+    timers: Map<TTrackId, ScheduledTrackWrite>,
     trackId: TTrackId,
   ) => {
     const timer = timers.get(trackId)
@@ -68,7 +68,7 @@ export const createTimelineMixerWriteQueue = <TTrackId extends string>(
     timers.delete(trackId)
   }
 
-  const flushTimers = async (timers: Map<TTrackId, ScheduledTrackWrite<TTrackId>>) => {
+  const flushTimers = async (timers: Map<TTrackId, ScheduledTrackWrite>) => {
     const writes: Promise<void>[] = Array.from(runningWrites)
     for (const [trackId, scheduled] of timers) {
       clearTimeout(scheduled.timer)

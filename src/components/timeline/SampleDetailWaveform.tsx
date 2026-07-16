@@ -42,7 +42,9 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     clip: () => props.clip,
     cssWidthPx: () => WAVEFORM_WIDTH_PX,
     projectBpm: () => props.projectBpm,
-    ensureClipBuffer: props.ensureClipBuffer,
+    ensureClipBuffer: async (clipId, sampleUrl) => {
+      await props.ensureClipBuffer?.(clipId, sampleUrl);
+    },
   });
   const [dragPreviewOffset, setDragPreviewOffset] = createSignal<number | undefined>();
   const [isDraggingMarker, setIsDraggingMarker] = createSignal(false);

@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onCleanup, Show, type Component } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, Show, type Component, untrack } from "solid-js";
 import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
 import { getWaveformSlice } from "@daw-browser/waveforms/select-waveform-window";
 import {
@@ -192,7 +192,9 @@ const SampleWaveform: Component<{
 
   return (
     <canvas
-      ref={canvasRef}
+    ref={(element) => {
+      canvasRef = element
+    }}
       class="h-16 w-full opacity-80"
       aria-label={`${props.sample.name} waveform`}
     />
@@ -200,9 +202,9 @@ const SampleWaveform: Component<{
 };
 
 const DrumRack: Component<DrumRackProps> = (props) => {
-  const [selectedPadId, setSelectedPadId] = createSignal(props.params.selectedPadId ?? props.params.pads[0]?.id);
+  const [selectedPadId, setSelectedPadId] = createSignal(untrack(() => props.params.selectedPadId ?? props.params.pads[0]?.id));
   const [loadingPadId, setLoadingPadId] = createSignal<string>();
-  const [bufferState, setBufferState] = createSignal<DrumRackBufferState>(createEmptyBufferState(props.targetId));
+  const [bufferState, setBufferState] = createSignal<DrumRackBufferState>(untrack(() => createEmptyBufferState(props.targetId)));
 
   createEffect(() => {
     setSelectedPadId(props.params.selectedPadId ?? props.params.pads[0]?.id);
@@ -227,6 +229,7 @@ const DrumRack: Component<DrumRackProps> = (props) => {
     const sample = pad.sample;
     if (!sample) return undefined;
     setLoadingPadId(pad.id);
+// oxlint-disable-next-line solid/reactivity -- The asynchronous sample decode callback deliberately verifies current reactive state after it resolves.
     const buffer = await loader.load(sample.url, (data) => props.audioEngine.decodeAudioData(data));
     if (loadingPadId() === pad.id) setLoadingPadId(undefined);
     if (props.targetId !== targetId) return undefined;
@@ -271,6 +274,7 @@ const DrumRack: Component<DrumRackProps> = (props) => {
     const targetId = props.targetId;
     const assignment = sampleToAssignment(sample);
     props.onAssignSampleToPad(pad.id, assignment);
+// oxlint-disable-next-line solid/reactivity -- The asynchronous sample decode callback deliberately verifies current reactive state after it resolves.
     const buffer = await loader.load(assignment.url, (data) => props.audioEngine.decodeAudioData(data));
     if (!buffer || props.targetId !== targetId) return;
     const key = drumRackSampleKey(assignment);

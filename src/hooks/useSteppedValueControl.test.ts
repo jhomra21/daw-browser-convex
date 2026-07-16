@@ -67,11 +67,10 @@ describe('useSteppedValueControl pointer lifecycle', () => {
 
     try {
       createRoot((disposeParent) => {
-        let control: ReturnType<typeof useSteppedValueControl> | undefined
         const values: number[] = []
         let bitDepth = 12
-        control = useSteppedValueControl({
-              value: () => bitDepth,
+        const control: ReturnType<typeof useSteppedValueControl> | undefined = useSteppedValueControl({
+          value: () => bitDepth,
               min: () => 2,
               max: () => 24,
               step: () => 1,
@@ -88,7 +87,7 @@ describe('useSteppedValueControl pointer lifecycle', () => {
                 false,
                 fine,
               ),
-            })
+        })
 
         const initialControl = control
         if (!initialControl) throw new Error('Expected the initial control owner.')
@@ -138,11 +137,10 @@ describe('useSteppedValueControl pointer lifecycle', () => {
 
     try {
       createRoot((disposeParent) => {
-        let control: ReturnType<typeof useSteppedValueControl> | undefined
         const values: number[] = []
         let bitDepth = 12
-        control = useSteppedValueControl({
-              value: () => bitDepth,
+        const control: ReturnType<typeof useSteppedValueControl> | undefined = useSteppedValueControl({
+          value: () => bitDepth,
               min: () => 2,
               max: () => 24,
               step: () => 1,
@@ -159,7 +157,7 @@ describe('useSteppedValueControl pointer lifecycle', () => {
                 false,
                 fine,
               ),
-            })
+        })
 
         const initialControl = control
         if (!initialControl) throw new Error('Expected the initial control owner.')

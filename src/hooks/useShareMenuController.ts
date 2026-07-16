@@ -66,8 +66,9 @@ export function useShareMenuController(options: UseShareMenuControllerOptions) {
       setMembers([]);
       setMembersError("Members could not be loaded.");
     } finally {
-      if (options.projectId() !== projectId) return;
-      setMembersLoading(false);
+      if (options.projectId() === projectId) {
+        setMembersLoading(false);
+      }
     }
   };
 
@@ -99,8 +100,9 @@ export function useShareMenuController(options: UseShareMenuControllerOptions) {
       if (!isCurrentProject()) return;
       setMembersError("Member could not be removed.");
     } finally {
-      if (!isCurrentProject() || revokingMemberId() !== targetUserId) return;
-      setRevokingMemberId("");
+      if (isCurrentProject() && revokingMemberId() === targetUserId) {
+        setRevokingMemberId("");
+      }
     }
   };
 

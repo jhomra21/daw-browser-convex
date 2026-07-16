@@ -540,6 +540,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       removeTrackCandidateResources(candidate.resources, instance.id)
       if (isStaticWorkletInstance(instance)) {
         const faultGeneration = options.getFaultGeneration()
+        // oxlint-disable-next-line eslint/prefer-const -- the fault callback can run before the awaited chain is assigned.
         let created: StaticWorkletNodeChain | undefined
         created = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params, (code) => {
           if (!created) return

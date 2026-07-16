@@ -1,0 +1,77 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "warn"
+  },
+  "plugins": [
+    "eslint",
+    "typescript",
+    "unicorn",
+    "oxc",
+    "import"
+  ],
+  "jsPlugins": [
+    "eslint-plugin-solid"
+  ],
+  "ignorePatterns": [
+    "dist/**",
+    "node_modules/**",
+    "src/routeTree.gen.ts",
+    "convex/_generated/**",
+    "api/worker-configuration.d.ts"
+  ],
+  "options": {
+    "reportUnusedDisableDirectives": "warn"
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/types/file-system-access.d.ts",
+        "src/types/user-agent-data.d.ts"
+      ],
+      "rules": {
+        "typescript/consistent-type-definitions": "off"
+      }
+    }
+  ],
+  "rules": {
+    "eslint/no-debugger": "error",
+    "eslint/no-unsafe-finally": "warn",
+    "import/no-self-import": "error",
+    "eslint/eqeqeq": [
+      "warn",
+      "smart"
+    ],
+    "eslint/prefer-const": "warn",
+    "typescript/consistent-type-definitions": [
+      "warn",
+      "type"
+    ],
+    "typescript/consistent-type-imports": "warn",
+    "typescript/no-import-type-side-effects": "warn",
+    "typescript/prefer-as-const": "warn",
+    "import/no-duplicates": "warn",
+    "import/no-cycle": "warn",
+    "unicorn/no-abusive-eslint-disable": "warn",
+    "solid/jsx-no-duplicate-props": "error",
+    "solid/jsx-no-undef": [
+      "error",
+      {
+        "typescriptEnabled": true
+      }
+    ],
+    "solid/jsx-uses-vars": "error",
+    "solid/no-innerhtml": "error",
+    "solid/jsx-no-script-url": "error",
+    "solid/no-destructure": "warn",
+    "solid/prefer-for": "warn",
+    "solid/reactivity": "warn",
+    "solid/components-return-once": "warn",
+    "solid/event-handlers": "warn",
+    "solid/imports": "warn",
+    "solid/style-prop": "warn",
+    "solid/no-react-deps": "warn",
+    "solid/no-react-specific-props": "warn",
+    "solid/self-closing-comp": "warn"
+  }
+}

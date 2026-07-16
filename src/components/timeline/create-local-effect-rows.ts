@@ -43,9 +43,11 @@ export function createLocalEffectRows<TParams>(input: {
       && input.targetId() === targetId
       && isLocalProject()
     );
+    // oxlint-disable-next-line solid/reactivity -- Asynchronous reads intentionally verify the latest target scope before applying their result.
     void getLocalEffect<TParams>(projectId, targetId, effect).then((row) => {
       if (!isCurrentScope()) return;
       setRows((prev) => ({ ...prev, [key]: row }));
+    // oxlint-disable-next-line solid/reactivity -- Asynchronous failures intentionally verify the latest target scope before applying their result.
     }).catch(() => {
       if (!isCurrentScope()) return;
       setRows((prev) => ({ ...prev, [key]: undefined }));

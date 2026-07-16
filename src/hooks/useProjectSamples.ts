@@ -3,12 +3,11 @@ import { createEffect, createMemo, createSignal, on, type Accessor } from 'solid
 import { useConvexQuery, convexApi } from '~/lib/convex'
 import { useQuery } from '@tanstack/solid-query'
 import { getPersistedAudioSource, type AudioSourceKind, type AudioSourceMetadata } from '~/lib/audio-source'
-import { sanitizeAudioSourceKind } from '@daw-browser/shared'
+import { isLocalId, sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { ensureDefaultSampleMetadata, loadCachedDefaultSampleMetadata } from '~/lib/default-sample-cache'
 import { listLocalAssets } from '~/lib/local-assets'
 import { listLocalAssetFolders } from '~/lib/local-asset-folders'
 import { getProjectDirectoryHandle } from '~/lib/local-project-db'
-import { isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 
 type SampleRow = FunctionReturnType<typeof convexApi.samples.listByRoom>[number]

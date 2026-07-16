@@ -1,4 +1,4 @@
-import { type Component } from "solid-js";
+import type { Component } from "solid-js";
 import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator, MenubarShortcut } from "~/components/ui/menubar";
 import { NativeMenuTrigger } from "../toolbar-context";
 import type { TransportControlsProps } from "../transport-types";

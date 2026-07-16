@@ -1,8 +1,7 @@
-import { normalizeGranularParams, type GranularParams } from '@daw-browser/shared'
+import { GRANULAR_AUTOMATION_DESCRIPTORS, normalizeGranularParams, parseGranularAutomationKey, type AutomationEnvelope, type GranularParams } from '@daw-browser/shared'
 import { observeResource, type ResourceObserver } from './runtime-diagnostics'
 import { loadWorkletModule } from './worklet-loader'
 import { granularWorklet, resolveWorkletModuleUrl } from './worklet-manifest'
-import { GRANULAR_AUTOMATION_DESCRIPTORS, parseGranularAutomationKey, type AutomationEnvelope } from '@daw-browser/shared'
 import { scheduleAutomationEnvelope } from './automation'
 
 export type GranularInstalledBuffer = {

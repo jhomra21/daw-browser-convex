@@ -132,7 +132,7 @@ const SynthCard: Component<SynthCardProps> = (props) => {
         <button
           class="text-muted-foreground hover:text-foreground px-2 py-0.5 text-sm"
           onPointerDown={(e) => { e.stopPropagation() }}
-          onClick={props.onClose}
+          onClick={() => props.onClose()}
           aria-label="Close Synth editor"
         >
           X

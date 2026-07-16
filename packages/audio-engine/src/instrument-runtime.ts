@@ -3,7 +3,7 @@ import { createSynthRuntime } from './synth-runtime'
 import { createSamplerRuntime, type SamplerNoteMiss, type SamplerResolvedBuffers } from './sampler-runtime'
 import { createGranularRuntime, type GranularInstalledBuffer } from './granular-runtime'
 import type { SourceRegistry } from './source-registry'
-import type { ArpParams, SynthParamsInput, TrackInstrumentParams } from '@daw-browser/shared'
+import type { ArpParams, AutomationEnvelope, SynthParamsInput, TrackInstrumentParams } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import { parseGranularAutomationKey } from '@daw-browser/shared'
 import { getScheduledMidiEvents } from './audio-scheduling'
@@ -18,7 +18,7 @@ type InstrumentRuntimeOptions = {
   timelineToCtxTime: (timelineSec: number) => number
   ensureTrackInput: (trackId: string) => GainNode
   sources: SourceRegistry
-  getAutomationEnvelopes?: () => readonly import('@daw-browser/shared').AutomationEnvelope[]
+  getAutomationEnvelopes?: () => readonly AutomationEnvelope[]
 }
 
 export type SetTrackInstrumentInput =
@@ -237,6 +237,7 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       synthRuntime.clear()
       drumRackRuntime.clear()
       samplerRuntime.clear()
+      // oxlint-disable-next-line unicorn/no-useless-spread -- disposing each runtime removes it from the map.
       for (const trackId of [...granularRuntimes.keys()]) disposeGranular(trackId)
       granularRevisions.clear()
     },

@@ -180,7 +180,7 @@ describe('local send reload path', () => {
           }
           setRenderTracks([sourceTrack, returnTrack, regularTrack])
           setMixerTracks(() => renderTracks)
-
+// oxlint-disable-next-line solid/reactivity -- This integration test assertion intentionally reads the signal after its deterministic test update.
           expect(getReturnSendTargets(mixerTracks()()).map((track) => track.id)).toEqual([returnTrackId])
           controller.updateTrackSends(sourceTrackId, [{
             targetId: returnTrackId,

@@ -90,7 +90,7 @@ function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }):
       // Extract sample query
       let sampleQuery = (() => {
         // Quoted explicit sample name has highest priority
-        const q = text.match(/\"([^\"]+)\"/)
+        const q = text.match(/"([^"]+)"/)
         if (q) return q[1]
         // Prefer phrases like "with <sample>" or "using <sample>"
         const w = text.match(/\b(?:with|using)\b\s+(.+?)(?:\s+(?:in|to|onto|on)\s+track|\s+pattern|\s+at\s+|$)/)
@@ -197,7 +197,7 @@ function inferCommandsFromText(textRaw: string, opts?: { guessTrack?: number }):
     return ok.success ? ok.data : null
   }
   // delete/remove/clear all clips in track X
-  let m2 = text.match(/\b(delete|remove|clear)\b[\s\S]*?\b(all|every)?\b[\s\S]*?clips?[\s\S]*?track\s+(\d+)/)
+  const m2 = text.match(/\b(delete|remove|clear)\b[\s\S]*?\b(all|every)?\b[\s\S]*?clips?[\s\S]*?track\s+(\d+)/)
   if (m2) {
     const t = Number(m2[3])
     const env = { commands: [{ type: 'removeMany', trackIndex: t, rangeStartSec: 0, rangeEndSec: 1e9 }] }
@@ -287,7 +287,7 @@ function stripArtifacts(text: string): string {
 // Remove a trailing ```json ...``` or ``` ...``` block from assistant text
 function stripCommandJSON(text: string): string {
   // Remove any trailing fenced code block (```json ...``` or ``` ...```), allowing inline or newline
-  let cleaned = text.replace(/```(?:json)?[\s\S]*?```\s*$/i, '')
+  const cleaned = text.replace(/```(?:json)?[\s\S]*?```\s*$/i, '')
   return cleaned.trim()
 }
 
@@ -723,7 +723,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
       }
       // Try to parse commands from the last assistant message
       tryExtractCommands()
-    } catch (err) {
+    } catch  {
       setMessages(prev => {
         const arr = prev.slice()
         const idx = arr.length - 1
@@ -764,7 +764,7 @@ const AgentChat: Component<AgentChatProps> = (props) => {
               onClick={appPreferences.agent.toggleAutoApply}
               title="Auto-apply detected commands"
             >Auto: {autoApply() ? 'On' : 'Off'}</button>
-            <button class="text-muted-foreground hover:text-foreground" onClick={props.onClose}>✕</button>
+            <button class="text-muted-foreground hover:text-foreground" onClick={() => props.onClose()}>✕</button>
           </div>
         </div>
         <div class="flex-1 overflow-y-auto px-3 py-2" ref={el => { messagesRef = el; if (props.isOpen) scrollToBottomSoon() }}>

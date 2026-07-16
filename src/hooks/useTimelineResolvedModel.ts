@@ -2,7 +2,7 @@ import { createEffect, createMemo, type Accessor } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
 
 import type { ClipMediaCache } from '~/lib/clip-buffer-cache'
-import { convexApi } from '~/lib/convex'
+import type { convexApi } from '~/lib/convex'
 import {
   resolveTimelineTracks,
   type ClipTimelinePatch,
@@ -12,7 +12,7 @@ import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
 import { createTimelineTrackIndex, type TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
 import type { LocalMixMap } from '~/lib/timeline-storage'
-import type { Clip, Track, TrackRouting, TrackSend } from '@daw-browser/timeline-core/types'
+import type { Track, TrackRouting, TrackSend } from '@daw-browser/timeline-core/types'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>

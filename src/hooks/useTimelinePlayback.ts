@@ -279,7 +279,7 @@ export function useTimelinePlayback(audioEngine: TimelinePlaybackAudioEngine, lo
       audioEngine.applyAutomationAtTimelineSec(sec)
     }
   }
-
+// oxlint-disable-next-line solid/reactivity -- The external audio subscription callback deliberately reads current playback state when notified.
   const unsubscribeStretchRenderState = audioEngine.subscribeStretchRenderState(() => {
     if (isPlaying()) retryDeferredStretchWindows(audioEngine.currentTimelineSec, { includeNonImminent: true })
   })

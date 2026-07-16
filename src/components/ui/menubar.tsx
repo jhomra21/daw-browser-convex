@@ -8,9 +8,11 @@ import type {
 import {
   createContext,
   createEffect,
+  createMemo,
   createSignal,
   mergeProps,
   splitProps,
+  untrack,
   useContext,
 } from "solid-js";
 
@@ -30,7 +32,7 @@ type MenubarAnimationContextValue = {
 };
 
 const MenubarAnimationContext = createContext<MenubarAnimationContextValue>();
-const MenubarMenuValueContext = createContext<string>();
+const MenubarMenuValueContext = createContext<Accessor<string | undefined>>();
 
 const useMenubarAnimation = () => {
   const context = useContext(MenubarAnimationContext);
@@ -50,7 +52,7 @@ type MenubarProps = MenubarPrimitive.MenubarRootProps & {
 };
 
 const Menubar: Component<MenubarProps> = (props) => {
-  const initialValue = props.value ?? props.defaultValue;
+  const initialValue = untrack(() => props.value ?? props.defaultValue);
   const [animation, setAnimation] = createSignal<MenubarAnimationState>({
     animate: true,
     value: initialValue,
@@ -85,8 +87,9 @@ const MenubarPortal = MenubarPrimitive.Portal;
 
 const MenubarMenu: Component<MenubarPrimitive.MenubarMenuProps> = (props) => {
   const mergedProps = mergeProps({ gutter: 8, shift: -4 }, props);
+  const value = createMemo(() => props.value);
   return (
-    <MenubarMenuValueContext.Provider value={props.value}>
+    <MenubarMenuValueContext.Provider value={value}>
       <MenubarPrimitive.Menu {...mergedProps} />
     </MenubarMenuValueContext.Provider>
   );
@@ -131,7 +134,7 @@ const MenubarContent = <T extends ValidComponent = "div">(
   const menuValue = useMenubarMenuValue();
   const shouldAnimate = () =>
     animation.animation().animate !== false &&
-    menuValue === animation.animation().value;
+    menuValue() === animation.animation().value;
   return (
     <MenubarPrimitive.Portal>
       <MenubarPrimitive.Content

@@ -31,7 +31,7 @@ const RecordingPreview: Component<RecordingPreviewProps> = (props) => {
     const midY = INNER_PADDING_TOP + innerHeight / 2
     const gain = innerHeight / 2
     const vertexCount = pts.length
-    const combined = new Array<string>(vertexCount * 2 + 2)
+    const combined = Array.from({length: vertexCount * 2 + 2})
     for (let i = 0; i < vertexCount; i++) {
       const point = pts[i]
       const x = Math.max(0, point.offset * PPS)

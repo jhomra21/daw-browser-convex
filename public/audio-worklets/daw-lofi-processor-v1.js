@@ -11,7 +11,7 @@ class DawLoFiProcessor extends AudioWorkletProcessor {
     return PARAMS.map(([name, defaultValue, minValue, maxValue]) => ({ name, defaultValue, minValue, maxValue, automationRate: 'a-rate' }))
   }
 
-  constructor(options) {
+  constructor(_options) {
     super()
     this.revision = -1
     this.state = { enabled: true, quantization: 'round', dither: 'off', seed: 1 }

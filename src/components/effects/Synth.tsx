@@ -1,9 +1,9 @@
 import { For, createMemo } from 'solid-js'
 import EffectShell from '~/components/effects/EffectShell'
 import Knob from '~/components/ui/knob'
-import {
-  type SynthParams,
-  type SynthWave,
+import type {
+  SynthParams,
+  SynthWave,
 } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
 
@@ -158,13 +158,15 @@ export default function Synth(props: SynthProps) {
 }
 
 function WavePreview(props: { wave: SynthWave; width?: number; height?: number }) {
-  const w = props.width ?? 180
-  const h = props.height ?? 36
+  const w = () => props.width ?? 180
+  const h = () => props.height ?? 36
   const pad = 4
-  const mid = h / 2
-  const amp = (h - pad * 2) / 2
   const N = 80
   const makePath = (phase: number) => {
+    const width = w()
+    const height = h()
+    const mid = height / 2
+    const amp = (height - pad * 2) / 2
     const points: Array<[number, number]> = []
     for (let i = 0; i <= N; i++) {
       let t = i / N
@@ -176,7 +178,7 @@ function WavePreview(props: { wave: SynthWave; width?: number; height?: number }
         case 'sawtooth': yNorm = 2 * t - 1; break
         default: yNorm = 1 - 4 * Math.abs(t - 0.5) // triangle
       }
-      const x = pad + (i / N) * (w - pad * 2)
+      const x = pad + (i / N) * (width - pad * 2)
       const y = mid - yNorm * amp
       points.push([x, y])
     }
@@ -184,16 +186,16 @@ function WavePreview(props: { wave: SynthWave; width?: number; height?: number }
   }
   const d1 = createMemo(() => makePath(0))
   return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+    <svg width={w()} height={h()} viewBox={`0 0 ${w()} ${h()}`}>
       <path d={d1()} stroke="#60a5fa" stroke-opacity="0.9" stroke-width="2" fill="none" />
-      <line x1="0" y1={mid} x2={w} y2={mid} stroke="rgba(255,255,255,0.25)" stroke-width="1" />
+      <line x1="0" y1={h() / 2} x2={w()} y2={h() / 2} stroke="rgba(255,255,255,0.25)" stroke-width="1" />
     </svg>
   )
 }
 
 function EnvelopePreview(props: { attackMs: number; releaseMs: number; holdMs?: number; width?: number; height?: number }) {
-  const w = props.width ?? 220
-  const h = props.height ?? 48
+  const w = () => props.width ?? 220
+  const h = () => props.height ?? 48
   const pad = 6
   const computed = createMemo(() => {
     const attack = Math.max(0, props.attackMs || 0)
@@ -202,8 +204,8 @@ function EnvelopePreview(props: { attackMs: number; releaseMs: number; holdMs?: 
     const baseHold = typeof props.holdMs === 'number' ? Math.max(0, props.holdMs) : totalTarget
     const hold = Math.max(0, (baseHold > 0 ? baseHold : totalTarget) - attack - release)
     const total = Math.max(1, attack + hold + release)
-    const x = (ms: number) => pad + (ms / total) * (w - pad * 2)
-    const y = (amp: number) => pad + (1 - Math.max(0, Math.min(1, amp))) * (h - pad * 2)
+    const x = (ms: number) => pad + (ms / total) * (w() - pad * 2)
+    const y = (amp: number) => pad + (1 - Math.max(0, Math.min(1, amp))) * (h() - pad * 2)
     const pts: Array<[number, number]> = []
     const A_STEPS = 24
     for (let i = 0; i <= A_STEPS; i++) {
@@ -222,11 +224,11 @@ function EnvelopePreview(props: { attackMs: number; releaseMs: number; holdMs?: 
     return { d, y0: y(0), y1: y(1) }
   })
   return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
-      <rect x={0} y={0} width={w} height={h} fill="none" />
+    <svg width={w()} height={h()} viewBox={`0 0 ${w()} ${h()}`}>
+      <rect x={0} y={0} width={w()} height={h()} fill="none" />
       <path d={computed().d} stroke="#a3e635" stroke-width="2" fill="none" />
-      <line x1={pad} y1={computed().y0} x2={w - pad} y2={computed().y0} stroke="rgba(255,255,255,0.25)" stroke-width="1" />
-      <line x1={pad} y1={computed().y1} x2={w - pad} y2={computed().y1} stroke="rgba(255,255,255,0.15)" stroke-width="1" />
+      <line x1={pad} y1={computed().y0} x2={w() - pad} y2={computed().y0} stroke="rgba(255,255,255,0.25)" stroke-width="1" />
+      <line x1={pad} y1={computed().y1} x2={w() - pad} y2={computed().y1} stroke="rgba(255,255,255,0.15)" stroke-width="1" />
     </svg>
   )
 }

@@ -38,8 +38,9 @@ export const createPersistedAppPreferencesWithInitial = (
   Store<AppPreferences>,
   SetStoreFunction<AppPreferences>
 ] => {
+// oxlint-disable-next-line solid/reactivity -- makePersisted consumes and returns the Solid store tuple; its tuple shape is opaque to the analyzer.
   if (!canUseLocalStorage()) return createStore(initialPreferences)
-
+// oxlint-disable-next-line solid/reactivity -- makePersisted consumes and returns the Solid store tuple; its tuple shape is opaque to the analyzer.
   const [preferences, setPreferences] = makePersisted(createStore(initialPreferences), {
     name: APP_PREFERENCES_STORAGE_KEY,
     storage: localStorage,

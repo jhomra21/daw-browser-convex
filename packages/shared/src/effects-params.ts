@@ -569,7 +569,7 @@ export function normalizeCompressorParams(input: CompressorParamsInput = {}): Co
 }
 
 export function normalizeCompressorParamsForUpdate(input: CompressorParamsInput, existing?: CompressorParamsInput): CompressorParams {
-  return normalizeCompressorParams({ ...(existing === undefined ? {} : normalizeCompressorParams(existing)), ...input, sidechain: { ...(existing?.sidechain ?? {}), ...(input.sidechain ?? {}) } })
+  return normalizeCompressorParams({ ...(existing === undefined ? {} : normalizeCompressorParams(existing)), ...input, sidechain: { ...existing?.sidechain, ...input.sidechain } })
 }
 
 export function serializeCompressorParams(params: CompressorParams): string {
@@ -730,7 +730,7 @@ export function normalizeGateParams(input: GateParamsInput = {}): GateParams {
   }
 }
 
-export const normalizeGateParamsForUpdate = (input: GateParamsInput, existing?: GateParamsInput) => normalizeGateParams({ ...(existing ? normalizeGateParams(existing) : {}), ...input, sidechain: { ...(existing?.sidechain ?? {}), ...(input.sidechain ?? {}) } })
+export const normalizeGateParamsForUpdate = (input: GateParamsInput, existing?: GateParamsInput) => normalizeGateParams({ ...(existing ? normalizeGateParams(existing) : {}), ...input, sidechain: { ...existing?.sidechain, ...input.sidechain } })
 export const serializeGateParams = (params: GateParams) => JSON.stringify({ version: 1, state: normalizeGateParams(params) })
 export const normalizeGateParamsEnvelope = (value: unknown): GateParamsEnvelope => {
   const envelope = readObject(value)

@@ -1,5 +1,5 @@
 const MAX_GRAINS = 128
-const MAX_CHANNELS = 2
+
 const EMPTY = new Float32Array(0)
 
 class DawGranularProcessor extends AudioWorkletProcessor {

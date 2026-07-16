@@ -58,7 +58,7 @@ export async function getLocalEffect<TParams>(
   targetId: string,
   effect: LocalEffectKind,
 ): Promise<LocalEffectRow<TParams> | undefined>
-export async function getLocalEffect<TParams>(
+export async function getLocalEffect(
   projectId: string,
   targetId: string,
   effect: LocalEffectKind,

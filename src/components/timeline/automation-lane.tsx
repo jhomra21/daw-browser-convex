@@ -259,6 +259,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
         kind: 'item',
         label: 'Add point',
         disabled: !position,
+// oxlint-disable-next-line solid/reactivity -- This callback is invoked later by an external menu or keyboard event and intentionally reads current state.
         onSelect: position ? () => addPointAtPosition(position) : undefined,
       },
       { kind: 'separator' },
@@ -300,6 +301,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       event.preventDefault()
       const direction = event.key === 'ArrowLeft' ? -1 : 1
+// oxlint-disable-next-line solid/reactivity -- This callback is invoked later by an external menu or keyboard event and intentionally reads current state.
       updateSelectedPoint((point) => ({
         ...point,
         timeSec: Math.max(0, Math.min(props.durationSec, point.timeSec + direction * timeDelta)),
@@ -323,7 +325,9 @@ export default function AutomationLane(props: AutomationLaneProps) {
 
   const laneElement = (
     <div
-      ref={root}
+      ref={(element) => {
+        root = element
+      }}
       tabIndex={0}
       data-timeline-keyboard-local="true"
       class="absolute inset-0 z-20 touch-none"

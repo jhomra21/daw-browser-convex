@@ -63,6 +63,7 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
   })
 
   createEffect(() => {
+// oxlint-disable-next-line solid/reactivity -- External audio callbacks run after their owner and deliberately read the latest reactive clip state.
     const unsubscribe = props.audioEngine.subscribeStretchRenderState(() => {
       setRenderState(props.audioEngine.getStretchRenderState(props.sample.clip))
     })
@@ -191,6 +192,7 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
             type="button"
             disabled={bpmState().status === 'analyzing'}
             onClick={() => {
+// oxlint-disable-next-line solid/reactivity -- External audio callbacks run after their owner and deliberately read the latest reactive clip state.
               void props.sample.ensureClipBuffer(props.sample.clip.id, props.sample.clip.sampleUrl).then(() => props.sample.bpmDetection.analyzeClip({
                 clip: props.sample.clip,
                 canWrite: props.sample.canWrite,
@@ -222,6 +224,7 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
                 onClick={() => {
                   const state = bpmState()
                   if (state.status !== 'suggested') return
+// oxlint-disable-next-line solid/reactivity -- External audio callbacks run after their owner and deliberately read the latest reactive clip state.
                   void Promise.resolve(commit({ enabled: true, sourceBpm: state.result.bpm, mode: 'stretch' })).then((value) => {
                     if (value !== false) props.sample.bpmDetection.markApplied(props.sample.clip.id)
                   })
